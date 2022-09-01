@@ -61,6 +61,7 @@ func sandboxDevices() []specs.LinuxDeviceCgroup {
 		"/dev/zero",
 		"/dev/urandom",
 		"/dev/console",
+		"/dev/ptmx",
 	}
 
 	// Processes running in a device-cgroup are constrained, they have acccess
