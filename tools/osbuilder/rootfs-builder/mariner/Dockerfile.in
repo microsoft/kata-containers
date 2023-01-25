@@ -1,0 +1,26 @@
+# Copyright (c) 2022 Dallas Delaney, 2022 Microsoft Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+ARG IMAGE_REGISTRY=mcr.microsoft.com
+# NOTE: OS_VERSION is set according to config.sh
+FROM ${IMAGE_REGISTRY}/cbl-mariner/base/core:@OS_VERSION@
+
+RUN tdnf -y install \
+    ca-certificates \
+    curl \
+    g++ \
+    gcc \
+    git \
+    make \
+    pkg-config \
+    protobuf-compiler \
+    openssl-devel \
+    build-essential \
+    chrony \
+    kmod \
+    systemd \
+    dnf \
+    tar
+
+@INSTALL_RUST@

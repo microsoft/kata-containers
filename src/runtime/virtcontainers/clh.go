@@ -652,7 +652,9 @@ func (clh *cloudHypervisor) StartVM(ctx context.Context, timeout int) error {
 	span, _ := katatrace.Trace(ctx, clh.Logger(), "StartVM", clhTracingTags, map[string]string{"sandbox_id": clh.id})
 	defer span.End()
 
-	ctx, cancel := context.WithTimeout(context.Background(), clh.getClhAPITimeout()*time.Second)
+        // FIXME - for now allow 10 seconds instead of 1 to create and start the VM.
+	//ctx, cancel := context.WithTimeout(context.Background(), clh.getClhAPITimeout()*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	clh.Logger().WithField("function", "StartVM").Info("starting Sandbox")
