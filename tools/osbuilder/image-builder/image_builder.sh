@@ -49,6 +49,26 @@ readonly dax_header_sz=2
 # [2] - https://nvdimm.wiki.kernel.org/2mib_fs_dax
 readonly dax_alignment=2
 
+# The list of systemd units and files that are not needed in Kata Containers
+readonly -a systemd_units=(
+	"systemd-coredump@"
+	"systemd-journald"
+	"systemd-journald-dev-log"
+	"systemd-journal-flush"
+	"systemd-random-seed"
+	"systemd-timesyncd"
+	"systemd-tmpfiles-setup"
+	"systemd-update-utmp"
+)
+
+readonly -a systemd_files=(
+	"systemd-bless-boot-generator"
+	"systemd-fstab-generator"
+	"systemd-getty-generator"
+	"systemd-gpt-auto-generator"
+	"systemd-tmpfiles-cleanup.timer"
+)
+
 # Set a default value
 AGENT_INIT=${AGENT_INIT:-no}
 SELINUX=${SELINUX:-no}
