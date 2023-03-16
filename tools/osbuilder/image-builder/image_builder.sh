@@ -59,10 +59,6 @@ readonly -a systemd_units=(
 	"systemd-random-seed"
 	"systemd-timesyncd"
 	"systemd-tmpfiles-setup"
-	"systemd-udevd"
-	"systemd-udevd-control"
-	"systemd-udevd-kernel"
-	"systemd-udev-trigger"
 	"systemd-update-utmp"
 )
 
