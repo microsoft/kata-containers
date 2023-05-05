@@ -182,7 +182,7 @@ block_device_driver = "virtio-blk"
 # to enable debug output where available.
 #
 # Default false
-#enable_debug = true
+enable_debug = true
 
 # Path to OCI hook binaries in the *guest rootfs*.
 # This does not affect host-side hooks which must instead be added to
@@ -276,7 +276,7 @@ block_device_driver = "virtio-blk"
 [agent.@PROJECT_TYPE@]
 # If enabled, make the agent display debug-level messages.
 # (default: disabled)
-#enable_debug = true
+enable_debug = true
 
 # Enable agent tracing.
 #
@@ -307,7 +307,7 @@ block_device_driver = "virtio-blk"
 # If enabled, the runtime will log additional debug messages to the
 # system log
 # (default: disabled)
-#enable_debug = true
+enable_debug = true
 #
 # Internetworking model
 # Determines how the VM should be connected to the
