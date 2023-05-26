@@ -228,38 +228,58 @@ pub fn append_tree<T: Digest + Clone>(
     traverse_file(file, 0, true, verity)
 }
 
+/// Writes an entire buffer into a file on Unix *without updating the file cursor*.
 #[cfg(target_family = "unix")]
 fn write_all_to_file(file: &File, buf: &[u8], offset: u64) -> io::Result<()> {
     file.write_all_at(buf, offset)
 }
 
+/// Writes an entire buffer into a file on Windows *and updates the file cursor*.
 #[cfg(target_family = "windows")]
-fn write_all_to_file(file: &File, buf: &[u8], offset: u64) -> io::Result<()> {
-    let mut bytes = 0;
-    loop {
-        bytes += file.seek_write(buf, offset)?;
-        assert!(bytes <= buf.len());
-        if bytes >= buf.len() {
-            break;
+fn write_all_to_file(file: &File, mut buf: &[u8], mut offset: u64) -> io::Result<()> {
+    while !buf.is_empty() {
+        match file.seek_write(buf, offset) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "failed to write whole buffer",
+                ));
+            }
+            Ok(n) => {
+                buf = &buf[n..];
+                offset += n as u64
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
         }
     }
     Ok(())
 }
 
+/// Reads an entire buffer from a file on Unix *without updating the file cursor*.
 #[cfg(target_family = "unix")]
 fn read_all_from_file(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
     file.read_exact_at(buf, offset)
 }
 
+/// Reads an entire buffer from a file on Windows *and updates the file cursor*.
 #[cfg(target_family = "windows")]
-fn read_all_from_file(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
-    let mut bytes = 0;
-    loop {
-        bytes += file.seek_read(buf, offset)?;
-        assert!(bytes <= buf.len());
-        if bytes >= buf.len() {
-            break;
+fn read_all_from_file(file: &File, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
+    while !buf.is_empty() {
+        match file.seek_read(buf, offset) {
+            Ok(0) => break,
+            Ok(n) => {
+                let tmp = buf;
+                buf = &mut tmp[n..];
+                offset += n as u64;
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
         }
     }
-    Ok(())
+    if !buf.is_empty() {
+        Err(io::Error::new(io::ErrorKind::UnexpectedEof, "failed to fill whole buffer", ))
+    } else {
+        Ok(())
+    }
 }
