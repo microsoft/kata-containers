@@ -1,8 +1,14 @@
 use generic_array::{typenum::Unsigned, GenericArray};
 use sha2::{digest::OutputSizeUser, Digest};
-use std::{fs::File, io, io::Seek, os::unix::fs::FileExt};
+use std::{fs::File, io, io::Seek};
 use zerocopy::byteorder::{LE, U32, U64};
 use zerocopy::AsBytes;
+
+#[cfg(target_family = "unix")]
+use std::os::unix::fs::FileExt;
+
+#[cfg(target_family = "windows")]
+use std::os::windows::fs::FileExt;
 
 #[derive(Default, zerocopy::AsBytes, zerocopy::FromBytes, zerocopy::Unaligned)]
 #[repr(C)]
@@ -125,7 +131,7 @@ impl<'a, T: Digest + Clone> Verity<'a, T> {
     fn uplevel(&mut self, l: usize) -> io::Result<bool> {
         self.finalize_level(l);
         if let Some(w) = self.writer {
-            w.write_all_at(&self.levels[l].data, self.levels[l].file_offset)?;
+            write_all_to_file(w, &self.levels[l].data, self.levels[l].file_offset)?;
         }
         self.levels[l].file_offset += self.hash_block_size as u64;
         let h = self.digest(&self.levels[l].data);
@@ -175,18 +181,19 @@ impl<'a, T: Digest + Clone> Verity<'a, T> {
 
         self.finalize_level(0);
         if let Some(w) = self.writer {
-            w.write_all_at(&self.levels[0].data, self.levels[0].file_offset)?;
+            write_all_to_file(w, &self.levels[0].data, self.levels[0].file_offset)?;
             self.levels[0].file_offset += self.hash_block_size as u64;
 
             if write_superblock {
-                w.write_all_at(
+                write_all_to_file(
+                    w,
                     self.super_block.as_bytes(),
                     self.levels[len - 1].file_offset + 4096 - 512,
                 )?;
 
                 // TODO: Align to the hash_block_size...
                 // Align to 4096 bytes.
-                w.write_all_at(&[0u8], self.levels[len - 1].file_offset + 4095)?;
+                write_all_to_file(w, &[0u8], self.levels[len - 1].file_offset + 4095)?;
             }
         }
 
@@ -203,7 +210,7 @@ pub fn traverse_file<T: Digest + Clone>(
     let mut buf = Vec::new();
     buf.resize(verity.data_block_size, 0);
     while verity.more_blocks() {
-        reader.read_exact_at(&mut buf, read_offset)?;
+        read_all_from_file(reader, &mut buf, read_offset)?;
         verity.add_block(&buf)?;
         read_offset += verity.data_block_size as u64;
     }
@@ -219,4 +226,40 @@ pub fn append_tree<T: Digest + Clone>(
     salt.resize(<T as OutputSizeUser>::OutputSize::USIZE, 0);
     let verity = Verity::<T>::new(file_size, 4096, 4096, &salt, Some((file, file_size)))?;
     traverse_file(file, 0, true, verity)
+}
+
+#[cfg(target_family = "unix")]
+fn write_all_to_file(file: &File, buf: &[u8], offset: u64) -> io::Result<()> {
+    file.write_all_at(buf, offset)
+}
+
+#[cfg(target_family = "windows")]
+fn write_all_to_file(file: &File, buf: &[u8], offset: u64) -> io::Result<()> {
+    let mut bytes = 0;
+    loop {
+        bytes += file.seek_write(buf, offset)?;
+        assert!(bytes <= buf.len());
+        if bytes >= buf.len() {
+            break;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_family = "unix")]
+fn read_all_from_file(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
+    file.read_exact_at(buf, offset)
+}
+
+#[cfg(target_family = "windows")]
+fn read_all_from_file(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
+    let mut bytes = 0;
+    loop {
+        bytes += file.seek_read(buf, offset)?;
+        assert!(bytes <= buf.len());
+        if bytes >= buf.len() {
+            break;
+        }
+    }
+    Ok(())
 }
