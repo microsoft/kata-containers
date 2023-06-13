@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader};
 use std::ops::Deref;
 use std::path::Path;
 
@@ -308,10 +308,43 @@ pub fn cgroups_mount(logger: &Logger, unified_cgroup_hierarchy: bool) -> Result<
     Ok(())
 }
 
+pub fn find_dm_name(mount_point: &str) -> io::Result<Option<String>> {
+    let mapper = Path::new("/dev/mapper");
+    let target = Path::new(mount_point);
+
+    for mount in proc_mounts::MountIter::new()? {
+        if let Ok(m) = mount {
+            if m.dest != target {
+                continue;
+            }
+
+            if let Some(p) = m.source.parent() {
+                if p == mapper {
+                    if let Some(f) = m.source.file_name() {
+                        return Ok(Some(f.to_string_lossy().into()));
+                    }
+                }
+            }
+
+            break;
+        }
+    }
+    Ok(None)
+}
+
 #[instrument]
-pub fn remove_mounts<P: AsRef<str> + std::fmt::Debug>(mounts: &[P]) -> Result<()> {
+pub fn remove_mounts(mounts: &[String]) -> Result<()> {
     for m in mounts.iter() {
-        nix::mount::umount(m.as_ref()).context(format!("failed to umount {:?}", m.as_ref()))?;
+        let dm_target = find_dm_name(&m);
+        nix::mount::umount(m.as_str()).context(format!("failed to umount {:?}", m))?;
+        if let Some(dm_name) = dm_target? {
+            let dm = devicemapper::DM::new()?;
+            let name = devicemapper::DmName::new(&dm_name)?;
+            dm.device_remove(
+                &devicemapper::DevId::Name(&name),
+                devicemapper::DmOptions::default(),
+            )?;
+        }
     }
     Ok(())
 }
