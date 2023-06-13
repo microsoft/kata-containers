@@ -215,6 +215,15 @@ async-compression = { version = "0.4.22", features = [
     "gzip",
 ] }
 
+#dm-verity
+bzip2 = "0.4.4"
+h2 = "0.3.17"
+simple_asn1 = "0.6.1"
+verity = { path = "../tardev-snapshotter/verity" }
+zerocopy = "0.6.1"
+devicemapper = "0.33.1"
+proc-mounts = "0.3.0"
+
 [dev-dependencies]
 tempfile.workspace = true
 which.workspace = true
