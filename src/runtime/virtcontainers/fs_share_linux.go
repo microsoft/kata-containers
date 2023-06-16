@@ -526,16 +526,18 @@ func (f *FilesystemShare) ShareRootFilesystem(ctx context.Context, c *Container)
 	rootfsGuestPath := filepath.Join(kataGuestSharedDir(), c.id, c.rootfsSuffix)
 
 	if HasOptionPrefix(c.rootFs.Options, annotations.FileSystemLayer) {
-		path := filepath.Join("/run/kata-containers", c.id, "rootfs")
+		if err := os.MkdirAll(filepath.Join(getMountPath(f.sandbox.ID()), c.id, c.rootfsSuffix), DirMode); err != nil {
+			return nil, err
+		}
 		return &SharedFile{
-			containerStorages: []*grpc.Storage{{
-				MountPoint: path,
+			storage: &grpc.Storage{
+				MountPoint: rootfsGuestPath,
 				Source:     "none",
 				Fstype:     c.rootFs.Type,
 				Driver:     kataOverlayDevType,
 				Options:    c.rootFs.Options,
-			}},
-			guestPath: path,
+			},
+			guestPath: rootfsGuestPath,
 		}, nil
 	}
 
