@@ -51,7 +51,10 @@ impl StorageHandler for OverlayfsHandler {
                 .push(format!("workdir={}", work.to_string_lossy()));
         }
 
+        let saved = std::env::current_dir()?;
+        std::env::set_current_dir(Path::new("/run/kata-containers/sandbox/layers"))?;
         let path = common_storage_handler(ctx.logger, &storage)?;
+        std::env::set_current_dir(saved)?;
         new_device(path)
     }
 }
