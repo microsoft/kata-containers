@@ -1839,7 +1839,10 @@ async fn remove_container_resources(sandbox: &mut Sandbox, cid: &str) -> Result<
         }
     }
 
-    for m in cmounts.iter() {
+    // Unmount in reverse order so that if the i-th mount depends on the j-th mount (with j < i),
+    // then the i-th mount is unmounted first. This way there won't be any references to the j-th
+    // mount anymore when it's unmounted.
+    for m in cmounts.iter().rev() {
         if let Err(err) = sandbox.remove_sandbox_storage(m).await {
             error!(
                 sl(),
