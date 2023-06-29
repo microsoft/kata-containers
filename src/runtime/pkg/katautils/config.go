@@ -78,6 +78,7 @@ type factory struct {
 }
 
 type hypervisor struct {
+	Igvm                           string   `toml:"igvm"`
 	Path                           string   `toml:"path"`
 	JailerPath                     string   `toml:"jailer_path"`
 	Kernel                         string   `toml:"kernel"`
@@ -244,11 +245,25 @@ func (h hypervisor) jailerPath() (string, error) {
 	return ResolvePath(p)
 }
 
+func (h hypervisor) igvm() (string, error) {
+	p := h.Igvm
+
+	if p == "" {
+		return "", nil
+	}
+
+	return ResolvePath(p)
+}
+
 func (h hypervisor) kernel() (string, error) {
 	p := h.Kernel
 
 	if p == "" {
-		p = defaultKernelPath
+		if h.Igvm == "" {
+			p = defaultKernelPath
+		} else {
+			return "", nil
+		}
 	}
 
 	return ResolvePath(p)
@@ -987,14 +1002,19 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		return vc.HypervisorConfig{}, err
 	}
 
-	if image == "" && initrd == "" {
-		return vc.HypervisorConfig{},
-			errors.New("image or initrd must be defined in the configuration file")
+	igvm, err := h.igvm()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
 	}
 
 	rootfsType, err := h.rootfsType()
 	if err != nil {
 		return vc.HypervisorConfig{}, err
+	}
+
+	if image == "" && initrd == "" && igvm == "" {
+		return vc.HypervisorConfig{},
+			errors.New("image, initrd, or igvm must be defined in the configuration file")
 	}
 
 	firmware, err := h.firmware()
@@ -1031,6 +1051,7 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		KernelPath:                     kernel,
 		InitrdPath:                     initrd,
 		ImagePath:                      image,
+		IgvmPath:                       igvm,
 		RootfsType:                     rootfsType,
 		FirmwarePath:                   firmware,
 		MachineAccelerators:            machineAccelerators,
@@ -1163,6 +1184,8 @@ func updateRuntimeConfigHypervisor(configPath string, tomlConf tomlConfig, confi
 		case clhHypervisorTableType:
 			config.HypervisorType = vc.ClhHypervisor
 			hConfig, err = newClhHypervisorConfig(hypervisor)
+
+
 		case dragonballHypervisorTableType:
 			config.HypervisorType = vc.DragonballHypervisor
 			hConfig, err = newDragonballHypervisorConfig(hypervisor)
@@ -1206,6 +1229,10 @@ func SetKernelParams(runtimeConfig *oci.RuntimeConfig) error {
 		formatted := strings.Join(strParams, " ")
 		kataUtilsLogger.WithField("default-kernel-parameters", formatted).Debug()
 	}
+
+	strParams := vc.SerializeParams(defaultKernelParams, "=")
+	formatted := strings.Join(strParams, " ")
+	kataUtilsLogger.WithField("default-kernel-parameters", formatted).Debug()
 
 	// retrieve the parameters specified in the config file
 	userKernelParams := runtimeConfig.HypervisorConfig.KernelParams
