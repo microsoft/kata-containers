@@ -1230,10 +1230,6 @@ func SetKernelParams(runtimeConfig *oci.RuntimeConfig) error {
 		kataUtilsLogger.WithField("default-kernel-parameters", formatted).Debug()
 	}
 
-	strParams := vc.SerializeParams(defaultKernelParams, "=")
-	formatted := strings.Join(strParams, " ")
-	kataUtilsLogger.WithField("default-kernel-parameters", formatted).Debug()
-
 	// retrieve the parameters specified in the config file
 	userKernelParams := runtimeConfig.HypervisorConfig.KernelParams
 
