@@ -534,7 +534,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Followed by extra kernel parameters defined in the configuration file
 	params = append(params, clh.config.KernelParams...)
 
-	// Set kernel cmdline if no IGVM file set
+	// The kernel cmdline is already embedded inside the IGVM file
 	if igvmPath == "" {
 		clh.vmconfig.Payload.SetCmdline(kernelParamsToString(params))
 	}
@@ -1331,7 +1331,6 @@ func (clh *cloudHypervisor) launchClh() (int, error) {
 	}
 
 	args := []string{cscAPIsocket, clh.state.apiSocket}
-
 	if clh.config.Debug {
 		// Cloud hypervisor log levels
 		// 'v' occurrences increase the level
@@ -1363,9 +1362,8 @@ func (clh *cloudHypervisor) launchClh() (int, error) {
 	}
 
 	clh.Logger().WithField("path", clhPath).Info()
-
+	clh.Logger().WithField("args", strings.Join(args, " ")).Info()
 	cmdHypervisor := exec.Command(clhPath, args...)
-
 	if clh.config.Debug {
 		cmdHypervisor.Env = os.Environ()
 		cmdHypervisor.Env = append(cmdHypervisor.Env, "RUST_BACKTRACE=full")

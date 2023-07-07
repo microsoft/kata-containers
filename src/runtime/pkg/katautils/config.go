@@ -1184,8 +1184,6 @@ func updateRuntimeConfigHypervisor(configPath string, tomlConf tomlConfig, confi
 		case clhHypervisorTableType:
 			config.HypervisorType = vc.ClhHypervisor
 			hConfig, err = newClhHypervisorConfig(hypervisor)
-
-
 		case dragonballHypervisorTableType:
 			config.HypervisorType = vc.DragonballHypervisor
 			hConfig, err = newDragonballHypervisorConfig(hypervisor)
