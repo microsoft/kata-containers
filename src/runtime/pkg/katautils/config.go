@@ -87,6 +87,7 @@ type hypervisor struct {
 	Kernel                         string                    `toml:"kernel"`
 	Initrd                         string                    `toml:"initrd"`
 	Image                          string                    `toml:"image"`
+	Igvm                           string                    `toml:"igvm"`
 	RootfsType                     string                    `toml:"rootfs_type"`
 	Firmware                       string                    `toml:"firmware"`
 	FirmwareVolume                 string                    `toml:"firmware_volume"`
@@ -235,11 +236,25 @@ func (h hypervisor) jailerPath() (string, error) {
 	return ResolvePath(p)
 }
 
+func (h hypervisor) igvm() (string, error) {
+	p := h.Igvm
+
+	if p == "" {
+		return "", nil
+	}
+
+	return ResolvePath(p)
+}
+
 func (h hypervisor) kernel() (string, error) {
 	p := h.Kernel
 
 	if p == "" {
-		p = defaultKernelPath
+		if h.Igvm == "" {
+			p = defaultKernelPath
+		} else {
+			return "", nil
+		}
 	}
 
 	return ResolvePath(p)
@@ -1008,14 +1023,19 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		return vc.HypervisorConfig{}, err
 	}
 
-	if image == "" && initrd == "" {
-		return vc.HypervisorConfig{},
-			errors.New("image or initrd must be defined in the configuration file")
+	igvm, err := h.igvm()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
 	}
 
 	rootfsType, err := h.rootfsType()
 	if err != nil {
 		return vc.HypervisorConfig{}, err
+	}
+
+	if image == "" && initrd == "" && igvm == "" {
+		return vc.HypervisorConfig{},
+			errors.New("image, initrd, or igvm must be defined in the configuration file")
 	}
 
 	firmware, err := h.firmware()
@@ -1053,6 +1073,7 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		KernelPath:                     kernel,
 		InitrdPath:                     initrd,
 		ImagePath:                      image,
+		IgvmPath:                       igvm,
 		RootfsType:                     rootfsType,
 		FirmwarePath:                   firmware,
 		MachineAccelerators:            machineAccelerators,
