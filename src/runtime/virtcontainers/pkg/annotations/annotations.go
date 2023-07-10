@@ -6,10 +6,12 @@
 package annotations
 
 const (
-	kataAnnotationsPrefix     = "io.katacontainers."
-	kataConfAnnotationsPrefix = kataAnnotationsPrefix + "config."
-	kataAnnotHypervisorPrefix = kataConfAnnotationsPrefix + "hypervisor."
-	kataAnnotContainerPrefix  = kataAnnotationsPrefix + "container."
+	kataAnnotationsPrefix         = "io.katacontainers."
+	kataConfAnnotationsPrefix     = kataAnnotationsPrefix + "config."
+	kataAnnotHypervisorPrefix     = kataConfAnnotationsPrefix + "hypervisor."
+	kataAnnotPreAttestationPrefix = kataConfAnnotationsPrefix + "pre_attestation."
+	kataAnnotSevPrefix            = kataConfAnnotationsPrefix + "sev."
+	kataAnnotContainerPrefix      = kataAnnotationsPrefix + "container."
 
 	//
 	// OCI
@@ -22,6 +24,21 @@ const (
 	ContainerTypeKey = kataAnnotationsPrefix + "pkg.oci.container_type"
 
 	SandboxConfigPathKey = kataAnnotationsPrefix + "config_path"
+)
+
+// Annotations related to Confidential Containers (CoCo)
+const (
+	//
+	// Assets
+	//
+	// GuestPreAttestation toggled pre_attestation functionality on/off
+	GuestPreAttestation = kataAnnotPreAttestationPrefix + "enabled"
+
+	// GuestPreAttestationURI set the remote URL for online-kbs
+	GuestPreAttestationURI = kataAnnotPreAttestationPrefix + "uri"
+
+	// SEVGuestPolicy set the AMD SEV guest policy
+	SEVGuestPolicy = kataAnnotSevPrefix + "policy"
 )
 
 // Annotations related to Hypervisor configuration
@@ -316,6 +333,24 @@ const (
 
 	// ContainerResourcesSwapInBytes is a container annotation to specify the Resources.Memory.Swap
 	ContainerResourcesSwapInBytes = kataAnnotContainerResourcePrefix + "swap_in_bytes"
+)
+
+// Annotations related to file system options.
+const (
+	kataAnnotFsOptPrefix = kataAnnotationsPrefix + "fs-opt."
+
+	// FileSystemLayer describes a layer of an overlay filesystem.
+	FileSystemLayer = kataAnnotFsOptPrefix + "layer="
+
+	// FileSystemLayerSourcePrefix determines the prefix path of the source files of the subquent layers.
+	FileSystemLayerSourcePrefix = kataAnnotFsOptPrefix + "layer-src-prefix="
+
+	// IsFileSystemLayer indicates that the annotated filesystem is a layer of an overlay fs.
+	IsFileSystemLayer = kataAnnotFsOptPrefix + "is-layer"
+
+	// IsFileBlockDevice indicates that the annotated filesystem is mounted on a block device
+	// backed by a host file.
+	IsFileBlockDevice = kataAnnotFsOptPrefix + "block_device=file"
 )
 
 const (

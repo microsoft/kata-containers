@@ -69,9 +69,17 @@ type FilesystemSharer interface {
 	// ShareRootFilesystem shares a container bundle rootfs with
 	// the Kata guest, allowing the kata agent to eventually start
 	// the container from that shared rootfs.
-	ShareRootFilesystem(context.Context, *Container) ([]*SharedFile, error)
+	ShareRootFilesystem(context.Context, *Container) (*SharedFile, error)
 
 	// UnshareRootFilesystem stops sharing a container bundle
 	// rootfs.
 	UnshareRootFilesystem(context.Context, *Container) error
+
+	// startFileEventWatcher is the event loop to detect changes in
+	// specific volumes - configmap, secrets, downward-api, projected-volumes
+	// and copy the changes to the guest
+	StartFileEventWatcher(context.Context) error
+
+	// Stops the event loop for file watcher
+	StopFileEventWatcher(context.Context)
 }

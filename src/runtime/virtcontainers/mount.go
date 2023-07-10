@@ -44,6 +44,7 @@ func mountLogger() *logrus.Entry {
 }
 
 func isSystemMount(m string) bool {
+	m = filepath.Clean(m)
 	for _, p := range systemMountPrefixes {
 		if m == p || strings.HasPrefix(m, p+"/") {
 			return true
@@ -54,6 +55,7 @@ func isSystemMount(m string) bool {
 }
 
 func isHostDevice(m string) bool {
+	m = filepath.Clean(m)
 	if m == "/dev" {
 		return true
 	}
@@ -403,5 +405,23 @@ func isWatchableMount(path string) bool {
 		}
 	}
 
+	return false
+}
+
+func HasOption(options []string, option string) bool {
+	for _, o := range options {
+		if o == option {
+			return true
+		}
+	}
+	return false
+}
+
+func HasOptionPrefix(options []string, prefix string) bool {
+	for _, o := range options {
+		if strings.HasPrefix(o, prefix) {
+			return true
+		}
+	}
 	return false
 }

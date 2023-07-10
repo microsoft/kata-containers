@@ -7,24 +7,20 @@
 #![allow(non_snake_case)]
 
 use crate::config_map;
-use crate::infra;
 use crate::obj_meta;
-use crate::pause_container;
 use crate::policy;
 use crate::registry;
-use crate::utils;
+use crate::secret;
 use crate::volume;
 use crate::yaml;
 
-use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use base64::{engine::general_purpose, Engine as _};
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Pod {
     apiVersion: String,
     kind: String,
@@ -32,13 +28,14 @@ pub struct Pod {
     pub spec: PodSpec,
 
     #[serde(skip)]
-    registry_containers: Vec<registry::Container>,
+    doc_mapping: serde_yaml::Value,
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PodSpec {
+    pub containers: Vec<Container>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     nodeSelector: Option<BTreeMap<String, String>>,
 
@@ -48,18 +45,39 @@ pub struct PodSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     runtimeClassName: Option<String>,
 
-    pub containers: Vec<Container>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initContainers: Option<Vec<Container>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imagePullSecrets: Option<Vec<LocalObjectReference>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub affinity: Option<Affinity>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volumes: Option<Vec<volume::Volume>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serviceAccountName: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub serviceAccount: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminationGracePeriodSeconds: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tolerations: Option<Vec<Toleration>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hostNetwork: Option<bool>,
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Container {
     pub name: String,
     pub image: String,
@@ -87,11 +105,137 @@ pub struct Container {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<Lifecycle>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub livenessProbe: Option<Probe>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readinessProbe: Option<Probe>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub startupProbe: Option<Probe>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub serviceAccountName: Option<String>,
+
+    #[serde(skip)]
+    pub registry: registry::Container,
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+pub struct Affinity {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub podAntiAffinity: Option<PodAntiAffinity>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub podAffinity: Option<PodAffinity>,
+    // TODO: additional fields.
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PodAffinity {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    requiredDuringSchedulingIgnoredDuringExecution: Option<Vec<PodAffinityTerm>>,
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PodAntiAffinity {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferredDuringSchedulingIgnoredDuringExecution: Option<Vec<WeightedPodAffinityTerm>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requiredDuringSchedulingIgnoredDuringExecution: Option<Vec<PodAffinityTerm>>,
+    // TODO: additional fields.
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WeightedPodAffinityTerm {
+    pub weight: i32,
+    pub podAffinityTerm: PodAffinityTerm,
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PodAffinityTerm {
+    topologyKey: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    labelSelector: Option<yaml::LabelSelector>,
+    // TODO: additional fields.
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Probe {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exec: Option<ExecAction>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initialDelaySeconds: Option<i32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeoutSeconds: Option<i32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub periodSeconds: Option<i32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failureThreshold: Option<i32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub successThreshold: Option<i32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub httpGet: Option<HTTPGetAction>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcpSocket: Option<TCPSocketAction>,
+    // TODO: additional fiels.
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TCPSocketAction {
+    pub port: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HTTPGetAction {
+    pub port: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheme: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub httpHeaders: Option<Vec<HTTPHeader>>,
+    // TODO: additional fiels.
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HTTPHeader {
+    name: String,
+    value: String,
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SecurityContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub readOnlyRootFilesystem: Option<bool>,
@@ -101,11 +245,50 @@ pub struct SecurityContext {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub privileged: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Capabilities>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runAsUser: Option<i64>,
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+pub struct Lifecycle {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub postStart: Option<LifecycleHandler>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preStop: Option<LifecycleHandler>,
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LifecycleHandler {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exec: Option<ExecAction>,
+    // TODO: additional fiels.
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ExecAction {
+    pub command: Vec<String>,
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Capabilities {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drop: Option<Vec<String>>,
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ContainerPort {
     containerPort: i32,
 
@@ -124,7 +307,6 @@ pub struct ContainerPort {
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct EnvVar {
     pub name: String,
 
@@ -137,18 +319,34 @@ pub struct EnvVar {
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct EnvVarSource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub configMapKeyRef: Option<ConfigMapKeySelector>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fieldRef: Option<ObjectFieldSelector>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secretKeyRef: Option<SecretKeySelector>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resourceFieldRef: Option<ResourceFieldSelector>,
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+pub struct SecretKeySelector {
+    pub key: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub optional: Option<bool>,
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConfigMapKeySelector {
     pub key: String,
 
@@ -161,7 +359,13 @@ pub struct ConfigMapKeySelector {
 
 /// See Reference / Kubernetes API / Common Definitions / ObjectFieldSelector.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+pub struct ResourceFieldSelector {
+    pub resource: String,
+    // TODO: additional fields.
+}
+
+/// See Reference / Kubernetes API / Common Definitions / ObjectFieldSelector.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ObjectFieldSelector {
     pub fieldPath: String,
 
@@ -170,18 +374,21 @@ pub struct ObjectFieldSelector {
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
-/// See VolumeMount in the Kubernetes API reference.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct VolumeMount {
     pub mountPath: String,
     pub name: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mountPropagation: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subPathExpr: Option<String>,
     // TODO: additional fields.
 }
 
-/// See ResourceRequirements in the Kubernetes API reference.
+/// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ResourceRequirements {
     #[serde(skip_serializing_if = "Option::is_none")]
     requests: Option<BTreeMap<String, String>>,
@@ -191,23 +398,53 @@ pub struct ResourceRequirements {
     // TODO: claims field.
 }
 
+/// See Reference / Kubernetes API / Workload Resources / Pod.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Toleration {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operator: Option<String>,
+    // TODO: additional fields.
+}
+
+/// See Reference / Kubernetes API / Common Definitions / LocalObjectReference.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LocalObjectReference {
+    pub name: String,
+}
+
 impl Container {
+    pub async fn init(&mut self, use_cache: bool) {
+        self.registry = registry::get_container(use_cache, &self.image)
+            .await
+            .unwrap();
+    }
+
     pub fn get_env_variables(
         &self,
         dest_env: &mut Vec<String>,
         config_maps: &Vec<config_map::ConfigMap>,
+        secrets: &Vec<secret::Secret>,
         namespace: &str,
-    ) -> Result<()> {
+        annotations: &Option<BTreeMap<String, String>>,
+        service_account_name: &str,
+    ) {
         if let Some(source_env) = &self.env {
             for env_variable in source_env {
                 let mut src_string = env_variable.name.clone() + "=";
-                src_string += &env_variable.get_value(config_maps, namespace)?;
+
+                src_string += &env_variable.get_value(
+                    config_maps,
+                    secrets,
+                    namespace,
+                    annotations,
+                    service_account_name,
+                );
+
                 if !dest_env.contains(&src_string) {
                     dest_env.push(src_string.clone());
                 }
             }
         }
-        Ok(())
     }
 
     pub fn allow_privilege_escalation(&self) -> bool {
@@ -259,67 +496,140 @@ impl Container {
         }
         false
     }
+
+    pub fn get_exec_commands(&self) -> Vec<String> {
+        let mut commands = Vec::new();
+
+        if let Some(probe) = &self.livenessProbe {
+            if let Some(exec) = &probe.exec {
+                commands.push(exec.command.join(" "));
+            }
+        }
+
+        if let Some(probe) = &self.readinessProbe {
+            if let Some(exec) = &probe.exec {
+                commands.push(exec.command.join(" "));
+            }
+        }
+
+        if let Some(probe) = &self.startupProbe {
+            if let Some(exec) = &probe.exec {
+                commands.push(exec.command.join(" "));
+            }
+        }
+
+        if let Some(lifecycle) = &self.lifecycle {
+            if let Some(preStop) = &lifecycle.preStop {
+                if let Some(exec) = &preStop.exec {
+                    commands.push(exec.command.join(" "));
+                }
+            }
+        }
+
+        commands
+    }
 }
 
 impl EnvVar {
     pub fn get_value(
         &self,
         config_maps: &Vec<config_map::ConfigMap>,
+        secrets: &Vec<secret::Secret>,
         namespace: &str,
-    ) -> Result<String> {
+        annotations: &Option<BTreeMap<String, String>>,
+        service_account_name: &str,
+    ) -> String {
         if let Some(value) = &self.value {
-            return Ok(value.clone());
+            return value.clone();
         } else if let Some(value_from) = &self.valueFrom {
             if let Some(value) = config_map::get_value(value_from, config_maps) {
-                return Ok(value.clone());
+                return value.clone();
+            } else if let Some(value) = secret::get_value(value_from, secrets) {
+                return value.clone();
             } else if let Some(field_ref) = &value_from.fieldRef {
                 let path: &str = &field_ref.fieldPath;
                 match path {
-                    "metadata.namespace" => return Ok(namespace.to_string()),
-                    "status.podIP" => return Ok("$(pod-ip)".to_string()),
+                    "metadata.name" => return "$(sandbox-name)".to_string(),
+                    "metadata.namespace" => return namespace.to_string(),
+                    "metadata.uid" => return "$(pod-uid)".to_string(),
+                    "status.hostIP" => return "$(host-ip)".to_string(),
+                    "status.podIP" => return "$(pod-ip)".to_string(),
+                    "spec.nodeName" => return "$(node-name)".to_string(),
+                    "spec.serviceAccountName" => return service_account_name.to_string(),
                     _ => {
-                        return Err(anyhow!(
-                            "Unsupported field reference {}",
-                            &field_ref.fieldPath
-                        ))
+                        if let Some(value) = self.get_annotation_value(path, annotations) {
+                            return value;
+                        } else {
+                            panic!(
+                                "Env var: unsupported field reference: {}",
+                                &field_ref.fieldPath
+                            )
+                        }
                     }
                 }
+            } else if value_from.resourceFieldRef.is_some() {
+                // TODO: should resource fields such as "limits.cpu" or "limits.memory"
+                // be handled in a different way?
+                return "$(resource-field)".to_string();
             }
         } else {
             panic!("Environment variable without value or valueFrom!");
         }
 
-        Err(anyhow!("Unknown EnvVar value - {}", &self.name))
+        panic!("Couldn't get the value of env var: {}", &self.name);
+    }
+
+    fn get_annotation_value(
+        &self,
+        reference: &str,
+        anno: &Option<BTreeMap<String, String>>,
+    ) -> Option<String> {
+        let prefix = "metadata.annotations['";
+        let suffix = "']";
+        if reference.starts_with(prefix) && reference.ends_with(suffix) {
+            if let Some(annotations) = anno {
+                let start = prefix.len();
+                let end = reference.len() - 2;
+                let annotation = reference[start..end].to_string();
+
+                if let Some(value) = annotations.get(&annotation) {
+                    return Some(value.clone());
+                } else {
+                    warn!(
+                        "Can't find the value of annotation {}. Allowing any value.",
+                        &annotation
+                    );
+                }
+            }
+
+            // TODO: should missing annotations be handled differently?
+            return Some("$(todo-annotation)".to_string());
+        }
+        None
     }
 }
 
 #[async_trait]
-impl yaml::K8sObject for Pod {
-    async fn initialize(&mut self, use_cached_files: bool) -> Result<()> {
-        pause_container::add_pause_container(&mut self.spec.containers);
-        self.registry_containers =
-            registry::get_registry_containers(use_cached_files, &self.spec.containers).await?;
-        Ok(())
+impl yaml::K8sResource for Pod {
+    async fn init(
+        &mut self,
+        use_cache: bool,
+        doc_mapping: &serde_yaml::Value,
+        _silent_unsupported_fields: bool,
+    ) {
+        yaml::k8s_resource_init(&mut self.spec, use_cache).await;
+        self.doc_mapping = doc_mapping.clone();
     }
 
-    fn requires_policy(&self) -> bool {
-        true
+    fn get_sandbox_name(&self) -> Option<String> {
+        let name = self.metadata.get_name();
+        if !name.is_empty() {
+            return Some(name);
+        }
+        panic!("No pod name.");
     }
 
-    fn get_metadata_name(&self) -> Result<String> {
-        self.metadata.get_name()
-    }
-
-    fn get_host_name(&self) -> Result<String> {
-        // Example: "hostname": "^busybox-cc$",
-        Ok("^".to_string() + &self.get_metadata_name()? + "$")
-    }
-
-    fn get_sandbox_name(&self) -> Result<Option<String>> {
-        Ok(Some(self.get_metadata_name()?))
-    }
-
-    fn get_namespace(&self) -> Result<String> {
+    fn get_namespace(&self) -> String {
         self.metadata.get_namespace()
     }
 
@@ -328,66 +638,82 @@ impl yaml::K8sObject for Pod {
         policy_mounts: &mut Vec<oci::Mount>,
         storages: &mut Vec<policy::SerializedStorage>,
         container: &Container,
-        infra_policy: &infra::InfraPolicy,
-    ) -> Result<()> {
+        agent_policy: &policy::AgentPolicy,
+    ) {
         if let Some(volumes) = &self.spec.volumes {
-            for volume in volumes {
-                policy::get_container_mounts_and_storages(
-                    policy_mounts,
-                    storages,
-                    container,
-                    infra_policy,
-                    &volume,
-                )?;
+            yaml::get_container_mounts_and_storages(
+                policy_mounts,
+                storages,
+                container,
+                agent_policy,
+                volumes,
+            );
+        }
+    }
+
+    fn generate_policy(&self, agent_policy: &policy::AgentPolicy) -> String {
+        agent_policy.generate_policy(self)
+    }
+
+    fn serialize(&mut self, policy: &str) -> String {
+        yaml::add_policy_annotation(&mut self.doc_mapping, "metadata", policy);
+        serde_yaml::to_string(&self.doc_mapping).unwrap()
+    }
+
+    fn get_containers(&self) -> &Vec<Container> {
+        &self.spec.containers
+    }
+
+    fn get_annotations(&self) -> Option<BTreeMap<String, String>> {
+        if let Some(annotations) = &self.metadata.annotations {
+            return Some(annotations.clone());
+        }
+        None
+    }
+
+    fn use_host_network(&self) -> bool {
+        if let Some(host_network) = self.spec.hostNetwork {
+            return host_network;
+        }
+        false
+    }
+}
+
+impl Container {
+    pub fn apply_capabilities(&self, capabilities: &mut oci::LinuxCapabilities) {
+        if let Some(securityContext) = &self.securityContext {
+            if let Some(yaml_capabilities) = &securityContext.capabilities {
+                if let Some(drop) = &yaml_capabilities.drop {
+                    for c in drop {
+                        if c == "ALL" {
+                            capabilities.bounding.clear();
+                            capabilities.permitted.clear();
+                            capabilities.effective.clear();
+                        } else {
+                            let cap = "CAP_".to_string() + &c;
+
+                            capabilities.bounding.retain(|x| !x.eq(&cap));
+                            capabilities.permitted.retain(|x| !x.eq(&cap));
+                            capabilities.effective.retain(|x| !x.eq(&cap));
+                        }
+                    }
+                }
+                if let Some(add) = &yaml_capabilities.add {
+                    for c in add {
+                        let cap = "CAP_".to_string() + &c;
+
+                        if !capabilities.bounding.contains(&cap) {
+                            capabilities.bounding.push(cap.clone());
+                        }
+                        if !capabilities.permitted.contains(&cap) {
+                            capabilities.permitted.push(cap.clone());
+                        }
+                        if !capabilities.effective.contains(&cap) {
+                            capabilities.effective.push(cap.clone());
+                        }
+                    }
+                }
             }
         }
-
-        Ok(())
-    }
-
-    fn generate_policy(
-        &mut self,
-        rules: &str,
-        infra_policy: &infra::InfraPolicy,
-        config_maps: &Vec<config_map::ConfigMap>,
-        in_out_files: &utils::InOutFiles,
-    ) -> Result<()> {
-        let mut policy_containers = Vec::new();
-
-        for i in 0..self.spec.containers.len() {
-            policy_containers.push(policy::get_container_policy(
-                self,
-                infra_policy,
-                config_maps,
-                &self.spec.containers[i],
-                i == 0,
-                &self.registry_containers[i],
-            )?);
-        }
-
-        let policy_data = policy::PolicyData {
-            containers: policy_containers,
-        };
-
-        let json_data = serde_json::to_string_pretty(&policy_data)
-            .map_err(|e| anyhow!(e))
-            .unwrap();
-
-        let policy = rules.to_string() + "\npolicy_data := " + &json_data;
-
-        if let Some(file_name) = &in_out_files.output_policy_file {
-            policy::export_decoded_policy(&policy, &file_name)?;
-        }
-
-        let encoded_policy = general_purpose::STANDARD.encode(policy.as_bytes());
-        self.metadata.add_policy_annotation(&encoded_policy);
-
-        // Remove the pause container before serializing.
-        self.spec.containers.remove(0);
-        Ok(())
-    }
-
-    fn serialize(&mut self) -> Result<String> {
-        Ok(serde_yaml::to_string(&self)?)
     }
 }
