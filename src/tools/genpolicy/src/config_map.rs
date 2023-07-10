@@ -6,15 +6,11 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
-use crate::config_map;
-use crate::infra;
 use crate::obj_meta;
 use crate::pod;
 use crate::policy;
-use crate::utils;
 use crate::yaml;
 
-use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -23,7 +19,6 @@ use std::fs::File;
 
 /// See Reference / Kubernetes API / Config and Storage Resources / ConfigMap.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ConfigMap {
     apiVersion: String,
     kind: String,
@@ -37,10 +32,13 @@ pub struct ConfigMap {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     immutable: Option<bool>,
+
+    #[serde(skip)]
+    doc_mapping: serde_yaml::Value,
 }
 
 impl ConfigMap {
-    pub fn new(file: &str) -> Result<Self> {
+    pub fn new(file: &str) -> anyhow::Result<Self> {
         debug!("Reading ConfigMap...");
         let config_map: ConfigMap = serde_yaml::from_reader(File::open(file)?)?;
         debug!("\nRead ConfigMap => {:#?}", config_map);
@@ -78,29 +76,22 @@ pub fn get_value(value_from: &pod::EnvVarSource, config_maps: &Vec<ConfigMap>) -
 }
 
 #[async_trait]
-impl yaml::K8sObject for ConfigMap {
-    async fn initialize(&mut self, _use_cached_files: bool) -> Result<()> {
-        Ok(())
+impl yaml::K8sResource for ConfigMap {
+    async fn init(
+        &mut self,
+        _use_cache: bool,
+        doc_mapping: &serde_yaml::Value,
+        _silent_unsupported_fields: bool,
+    ) {
+        self.doc_mapping = doc_mapping.clone();
     }
 
-    fn requires_policy(&self) -> bool {
-        false
+    fn get_sandbox_name(&self) -> Option<String> {
+        panic!("Unsupported");
     }
 
-    fn get_metadata_name(&self) -> Result<String> {
-        Err(anyhow!("Unsupported"))?
-    }
-
-    fn get_host_name(&self) -> Result<String> {
-        Err(anyhow!("Unsupported"))?
-    }
-
-    fn get_sandbox_name(&self) -> Result<Option<String>> {
-        Err(anyhow!("Unsupported"))?
-    }
-
-    fn get_namespace(&self) -> Result<String> {
-        Err(anyhow!("Unsupported"))?
+    fn get_namespace(&self) -> String {
+        panic!("Unsupported");
     }
 
     fn get_container_mounts_and_storages(
@@ -108,22 +99,31 @@ impl yaml::K8sObject for ConfigMap {
         _policy_mounts: &mut Vec<oci::Mount>,
         _storages: &mut Vec<policy::SerializedStorage>,
         _container: &pod::Container,
-        _infra_policy: &infra::InfraPolicy,
-    ) -> Result<()> {
-        Err(anyhow!("Unsupported"))?
+        _agent_policy: &policy::AgentPolicy,
+    ) {
+        panic!("Unsupported");
     }
 
-    fn generate_policy(
-        &mut self,
-        _rules: &str,
-        _infra_policy: &infra::InfraPolicy,
-        _config_map: &Vec<config_map::ConfigMap>,
-        _in_out_files: &utils::InOutFiles,
-    ) -> Result<()> {
-        Err(anyhow!("Unsupported"))
+    fn generate_policy(&self, _agent_policy: &policy::AgentPolicy) -> String {
+        "".to_string()
     }
 
-    fn serialize(&mut self) -> Result<String> {
-        Ok(serde_yaml::to_string(&self)?)
+    fn serialize(&mut self, _policy: &str) -> String {
+        serde_yaml::to_string(&self.doc_mapping).unwrap()
+    }
+
+    fn get_containers(&self) -> &Vec<pod::Container> {
+        panic!("Unsupported");
+    }
+
+    fn get_annotations(&self) -> Option<BTreeMap<String, String>> {
+        if let Some(annotations) = &self.metadata.annotations {
+            return Some(annotations.clone());
+        }
+        None
+    }
+
+    fn use_host_network(&self) -> bool {
+        panic!("Unsupported");
     }
 }

@@ -11,24 +11,24 @@ use crate::pod;
 use log::debug;
 
 /// Adds a K8s pause container to a vector.
-pub fn add_pause_container(containers: &mut Vec<pod::Container>) {
+pub async fn add_pause_container(containers: &mut Vec<pod::Container>, use_cache: bool) {
     debug!("Adding pause container...");
-    let pause_container = pod::Container {
+    let mut pause_container = pod::Container {
+        // TODO: load this path from data.json.
         image: "mcr.microsoft.com/oss/kubernetes/pause:3.6".to_string(),
+
         name: String::new(),
         imagePullPolicy: None,
         securityContext: Some(pod::SecurityContext {
             readOnlyRootFilesystem: Some(true),
             allowPrivilegeEscalation: Some(false),
             privileged: None,
+            capabilities: None,
+            runAsUser: None,
         }),
-        volumeMounts: None,
-        env: None,
-        resources: None,
-        ports: None,
-        command: None,
-        args: None,
+        ..Default::default()
     };
+    pause_container.init(use_cache).await;
     containers.insert(0, pause_container);
     debug!("pause container added.");
 }

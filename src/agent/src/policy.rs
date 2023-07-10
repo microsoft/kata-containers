@@ -59,7 +59,7 @@ struct SerializedFsGroup {
     group_change_policy: u32,
 }
 
-// OPA input data for CreateSandboxRequest.
+/// OPA input data for CreateSandboxRequest.
 #[derive(Debug, Serialize, Deserialize)]
 struct CreateSandboxRequestInput {
     input: CreateSandboxRequestData,
@@ -70,7 +70,21 @@ struct CreateSandboxRequestData {
     storages: Vec<SerializedStorage>,
 }
 
-// OPA input data for PullImageRequest.
+/// OPA input data for ExecProcessRequest.
+#[derive(Debug, Serialize)]
+struct ExecProcessRequestInput {
+    input: ExecProcessRequestData,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ExecProcessRequestData {
+	// container_id: String,
+	// exec_id: String,
+	// user: oci::User,
+	process: oci::Process,
+}
+
+/// OPA input data for PullImageRequest.
 #[derive(Debug, Serialize, Deserialize)]
 struct PullImageRequestInput {
     input: PullImageRequestData,
@@ -189,6 +203,29 @@ impl AgentPolicy {
         self.post_query(ep, &post_input).await.unwrap_or(false)
     }
 
+    // Post ExecProcessRequest input to OPA.
+    pub async fn is_allowed_exec_process(
+        &mut self,
+        ep: &str,
+        req: &protocols::agent::ExecProcessRequest,
+    ) -> bool {
+        let grpc_process = req.process.clone();
+        if grpc_process.is_none() {
+            error!(sl!(), "failed to convert process for ExecProcess request!");
+            return false;
+        }
+
+        let opa_input = ExecProcessRequestInput {
+            input: ExecProcessRequestData {
+                // TODO: should other fields of grpc_process be validated as well?
+                process: rustjail::process_grpc_to_oci(&grpc_process.unwrap()),
+            },
+        };
+
+        let post_input = serde_json::to_string(&opa_input).unwrap();
+        self.post_query(ep, &post_input).await.unwrap_or(false)
+    }
+
     // Post query with PullImageRequest input data to OPA.
     pub async fn is_allowed_pull_image_endpoint(
         &mut self,
@@ -297,7 +334,7 @@ impl AgentPolicy {
         serialized_storages: &mut Vec<SerializedStorage>,
     ) {
         for grpc_storage in grpc_storages {
-            let protocol_fsgroup = grpc_storage.get_fs_group();
+            let protocol_fsgroup = grpc_storage.fs_group();
 
             serialized_storages.push(SerializedStorage {
                 driver: grpc_storage.driver.clone(),
@@ -308,7 +345,7 @@ impl AgentPolicy {
                 mount_point: grpc_storage.mount_point.clone(),
                 fs_group: SerializedFsGroup {
                     group_id: protocol_fsgroup.group_id,
-                    group_change_policy: protocol_fsgroup.group_change_policy as u32,
+                    group_change_policy: protocol_fsgroup.group_change_policy.value() as u32,
                 },
             });
         }

@@ -6,7 +6,6 @@
 // Allow Docker image config field names.
 #![allow(non_snake_case)]
 
-use crate::pod;
 use crate::policy;
 
 use anyhow::{anyhow, Result};
@@ -19,20 +18,20 @@ use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::{io, io::Seek, io::Write, path::Path};
 use tokio::{fs, io::AsyncWriteExt};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Container {
     config_layer: DockerConfigLayer,
     image_layers: Vec<ImageLayer>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct DockerConfigLayer {
     architecture: String,
     config: DockerImageConfig,
     rootfs: DockerRootfs,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct DockerImageConfig {
     User: Option<String>,
     Tty: Option<bool>,
@@ -42,7 +41,7 @@ struct DockerImageConfig {
     Entrypoint: Option<Vec<String>>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct DockerRootfs {
     r#type: String,
     diff_ids: Vec<String>,
@@ -105,7 +104,7 @@ impl Container {
         process: &mut policy::OciProcess,
         yaml_has_command: bool,
         yaml_has_args: bool,
-    ) -> Result<()> {
+    ) {
         debug!("Getting process field from docker config layer...");
         let docker_config = &self.config_layer.config;
 
@@ -130,7 +129,7 @@ impl Container {
                 }
                 if user.len() > 1 {
                     debug!("Parsing gid from user[1] = {:?}", user[1]);
-                    process.user.gid = user[1].parse()?;
+                    process.user.gid = user[1].parse().unwrap();
                 }
             }
         }
@@ -191,7 +190,6 @@ impl Container {
         }
 
         debug!("get_process succeeded.");
-        Ok(())
     }
 
     pub fn get_image_layers(&self) -> Vec<ImageLayer> {
@@ -387,15 +385,6 @@ fn do_create_verity_hash_file(path: &Path, verity_path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub async fn get_registry_containers(
-    use_cached_files: bool,
-    yaml_containers: &Vec<pod::Container>,
-) -> Result<Vec<Container>> {
-    let mut registry_containers = Vec::new();
-
-    for yaml_container in yaml_containers {
-        registry_containers.push(Container::new(use_cached_files, &yaml_container.image).await?);
-    }
-
-    Ok(registry_containers)
+pub async fn get_container(use_cache: bool, image: &str) -> Result<Container> {
+    Container::new(use_cache, image).await
 }

@@ -14,6 +14,7 @@ import input
 
 # More detailed policy rules are below.
 default CreateContainerRequest := false
+default ExecProcessRequest := false
 
 # Requests that are always allowed.
 default CreateSandboxRequest := true
@@ -24,11 +25,13 @@ default OnlineCPUMemRequest := true
 default PullImageRequest := true
 default ReadStreamRequest := true
 default RemoveContainerRequest := true
+default RemoveStaleVirtiofsShareMountsRequest := true
 default SetPolicyRequest := true
 default SignalProcessRequest := true
 default StartContainerRequest := true
 default StatsContainerRequest := true
 default TtyWinResizeRequest := true
+default UpdateEphemeralMountsRequest := true
 default UpdateInterfaceRequest := true
 default UpdateRoutesRequest := true
 default WaitProcessRequest := true
@@ -42,7 +45,8 @@ default WriteStreamRequest := true
 
 ######################################################################
 CreateContainerRequest {
-    policy_container := policy_data.containers[_]
+    some policy_container in policy_data.containers
+
     policy_oci := policy_container.oci
     policy_storages := policy_container.storages
 
@@ -86,7 +90,7 @@ allow_by_annotations(policy_oci, input_oci, policy_storages, input_storages) {
     input_sandbox_name := input_oci.annotations["io.kubernetes.cri.sandbox-name"]
 
     print("allow_by_annotations 2: input sandbox =", input_sandbox_name, "policy sandbox =", policy_sandbox_name)
-    policy_sandbox_name == input_sandbox_name
+    allow_sandbox_name(policy_sandbox_name, input_sandbox_name)
 
     print("allow_by_annotations 2: allow_by_sandbox_name", input_sandbox_name)
     allow_by_sandbox_name(policy_oci, input_oci, policy_storages, input_storages, input_sandbox_name)
@@ -114,6 +118,19 @@ allow_by_sandbox_name(policy_oci, input_oci, policy_storages, input_storages, sa
     print("allow_by_sandbox_name: success")
 }
 
+allow_sandbox_name(policy_sandbox_name, input_sandbox_name) {
+    print("allow_sandbox_name 1: same name")
+    policy_sandbox_name == input_sandbox_name
+    print("allow_sandbox_name 1: success")
+}
+allow_sandbox_name(policy_sandbox_name, input_sandbox_name) {
+    print("allow_sandbox_name 2: generated name")
+
+    # TODO: should generated names be handled differently?
+    contains(policy_sandbox_name, "$(generated-name)")
+
+    print("allow_sandbox_name 2: success")
+}
 ######################################################################
 # - Check that the "io.kubernetes.cri.container-type" and
 #   "io.katacontainers.pkg.oci.container_type" annotations
@@ -125,8 +142,13 @@ allow_by_sandbox_name(policy_oci, input_oci, policy_storages, input_storages, sa
 
 allow_by_container_types(policy_oci, input_oci, sandbox_name, sandbox_namespace) {
     print("allow_by_container_types: checking io.kubernetes.cri.container-type")
+    
     policy_cri_type := policy_oci.annotations["io.kubernetes.cri.container-type"]
+    print("allow_by_container_types: policy type =", policy_cri_type)
+    
     input_cri_type := input_oci.annotations["io.kubernetes.cri.container-type"]
+    print("allow_by_container_types: input type =", input_cri_type)
+    
     policy_cri_type == input_cri_type
 
     print("allow_by_container_types: allow_by_container_type")
@@ -139,9 +161,6 @@ allow_by_container_types(policy_oci, input_oci, sandbox_name, sandbox_namespace)
 allow_by_container_type(input_cri_type, policy_oci, input_oci, sandbox_name, sandbox_namespace) {
     print("allow_by_container_type 1: input_cri_type =", input_cri_type)
     input_cri_type == "sandbox"
-
-    print("allow_by_container_type 1: input hostname =", input_oci.hostname, "policy hostname =", policy_oci.hostname)
-    regex.match(policy_oci.hostname, input_oci.hostname)
 
     input_kata_type := input_oci.annotations["io.katacontainers.pkg.oci.container_type"]
     print("allow_by_container_type 1: input container type", input_kata_type)
@@ -220,8 +239,12 @@ allow_container_annotation(policy_oci, input_oci, annotation_key) {
 
 allow_sandbox_net_namespace(policy_oci, input_oci) {
     print("allow_sandbox_net_namespace: start")
+
     policy_namespace := policy_oci.annotations["nerdctl/network-namespace"]
+    print("allow_sandbox_net_namespace: policy_namespace =", policy_namespace)
+
     input_namespace := input_oci.annotations["nerdctl/network-namespace"]
+    print("allow_sandbox_net_namespace: input_namespace =", input_namespace)
 
     regex.match(policy_namespace, input_namespace)
     print("allow_sandbox_net_namespace: success")
@@ -264,7 +287,8 @@ allow_log_directory(policy_oci, input_oci) {
 # Validate the linux fields from config.json.
 
 allow_linux(policy_oci, input_oci) {
-    print("allow_linux: policy namespaces =", policy_oci.linux.namespaces, "input namespaces =", input_oci.linux.namespaces)
+    print("allow_linux: policy namespaces =", policy_oci.linux.namespaces)
+    print("allow_linux: input namespaces =", input_oci.linux.namespaces)
     policy_oci.linux.namespaces     == input_oci.linux.namespaces
 
     print("allow_linux: allow_masked_paths")
@@ -278,13 +302,16 @@ allow_linux(policy_oci, input_oci) {
 
 ######################################################################
 allow_masked_paths(policy_oci, input_oci) {
-    print("allow_masked_paths 1: policy maskedPaths =", policy_oci.linux.maskedPaths, "input maskedPaths =", input_oci.linux.maskedPaths)
+    print("allow_masked_paths 1: policy maskedPaths =", policy_oci.linux.maskedPaths)
+    print("allow_masked_paths 1: input maskedPaths =", input_oci.linux.maskedPaths)
+
     allow_array(policy_oci.linux.maskedPaths, input_oci.linux.maskedPaths)
 
     print("allow_masked_paths 1: success")
 }
 allow_masked_paths(policy_oci, input_oci) {
     print("allow_masked_paths 2: no maskedPaths")
+
     not policy_oci.linux.maskedPaths
     not input_oci.linux.maskedPaths
 
@@ -293,13 +320,16 @@ allow_masked_paths(policy_oci, input_oci) {
 
 ######################################################################
 allow_readonly_paths(policy_oci, input_oci) {
-    print("allow_readonly_paths 1: policy readonlyPaths =", policy_oci.linux.readonlyPaths, "input readonlyPaths =", input_oci.linux.readonlyPaths)
+    print("allow_readonly_paths 1: policy readonlyPaths =", policy_oci.linux.readonlyPaths)
+    print("allow_readonly_paths 1: input readonlyPaths =", input_oci.linux.readonlyPaths)
+
     allow_array(policy_oci.linux.readonlyPaths, input_oci.linux.readonlyPaths)
 
     print("allow_readonly_paths 1: success")
 }
 allow_readonly_paths(policy_oci, input_oci) {
     print("allow_readonly_paths 2: no readonlyPaths")
+
     not policy_oci.linux.readonlyPaths
     not input_oci.linux.readonlyPaths
 
@@ -308,10 +338,18 @@ allow_readonly_paths(policy_oci, input_oci) {
 
 ######################################################################
 allow_array(policy_array, input_array) {
-    policy_element := policy_array[_]
-    input_element := input_array[_]
+    every input_element in input_array {
+        allow_array_element(policy_array, input_element)
+    }
+}
 
+allow_array_element(policy_array, input_element) {
+    print("allow_array_element: input_element =", input_element)
+
+    some policy_element in policy_array
     policy_element == input_element
+
+    print("allow_array_element: success")
 }
 
 ######################################################################
@@ -360,7 +398,8 @@ allow_process(policy_oci, input_oci, sandbox_name) {
     print("allow_process: input cwd =", input_process.cwd, "policy cwd =", policy_process.cwd)
     policy_process.cwd              == input_process.cwd
 
-    print("allow_process: input capabilities =", input_process.capabilities, "policy capabilities =", policy_process.capabilities)
+    print("allow_process: input capabilities =", input_process.capabilities)
+    print("allow_process: policy capabilities =", policy_process.capabilities)
     policy_process.capabilities     == input_process.capabilities
 
     print("allow_process: input noNewPrivileges =", input_process.noNewPrivileges, "policy noNewPrivileges =", policy_process.noNewPrivileges)
@@ -405,7 +444,7 @@ allow_user(policy_process, input_process) {
 # OCI process.args field
 
 allow_args(policy_process, input_process) {
-    print("allow_args 1: no policy or input args")
+    print("allow_args 1: no args")
 
     not policy_process.args
     not input_process.args
@@ -413,19 +452,40 @@ allow_args(policy_process, input_process) {
     print("allow_args 1: success")
 }
 allow_args(policy_process, input_process) {
-    print("allow_args 2: policy args =", policy_process.args, "input args =", input_process.arg)
+    print("allow_args 2: policy args =", policy_process.args)
+    print("allow_args 2: input args =", input_process.args)
 
-    policy_process.args == input_process.args
+    count(policy_process.args) == count(input_process.args)
+
+    every i, input_arg in input_process.args {
+        allow_arg(i, input_arg, policy_process)
+    }
 
     print("allow_args 2: success")
+}
+
+allow_arg(i, input_arg, policy_process) {
+    print("allow_arg 1: i =", i, "input_arg =", input_arg, "policy_arg =", policy_process.args[i])
+    input_arg == policy_process.args[i]
+    print("allow_arg 1: success")
+}
+allow_arg(i, input_arg, policy_process) {
+    print("allow_arg 2: i =", i, "input_arg =", input_arg, "policy_arg =", policy_process.args[i])
+
+    # TODO: can $(node-name) be handled better?
+    contains(policy_process.args[i], "$(node-name)")
+
+    print("allow_arg 2: success")
 }
 
 ######################################################################
 # OCI process.env field
 
 allow_env(policy_process, input_process, sandbox_name) {
+    print("allow_env: policy env =", policy_process.env)
+
     every env_var in input_process.env {
-        print("allow_env =>", env_var)
+        print("allow_env => allow_env_var:", env_var)
         allow_env_var(policy_process, input_process, env_var, sandbox_name)
     }
 
@@ -434,18 +494,23 @@ allow_env(policy_process, input_process, sandbox_name) {
 
 # Allow input env variables that are present in the policy data too.
 allow_env_var(policy_process, input_process, env_var, sandbox_name) {
-    print("allow_env_var 1: policy_process.env[_] == env_var")
-    policy_process.env[_] == env_var
+    print("allow_env_var 1: some policy_env_var == env_var")
+
+    some policy_env_var in policy_process.env
+    policy_env_var == env_var
+
     print("allow_env_var 1: success")
 }
 
-# Allow "HOSTNAME=<sandbox_name>".
+# Match input with one of the policy variables, after substituting $(sandbox-name).
 allow_env_var(policy_process, input_process, env_var, sandbox_name) {
-    print("allow_env_var 2: HOSTNAME")
-    host_name_env_var := concat("", ["HOSTNAME=", sandbox_name])
+    print("allow_env_var 2: replace $(sandbox-name)")
 
-    print(host_name_env_var, env_var)
-    host_name_env_var == env_var
+    some policy_env_var in policy_process.env
+    policy_var = replace(policy_env_var, "$(sandbox-name)", sandbox_name)
+
+    print("allow_env_var 2: input =", env_var, "policy =", policy_var)
+    policy_var == env_var
 
     print("allow_env_var 2: success")
 }
@@ -624,6 +689,63 @@ allow_env_var(policy_process, input_process, env_var, sandbox_name) {
     print("allow_env_var 11: success")
 }
 
+# Allow common fieldRef variables.
+allow_env_var(policy_process, input_process, env_var, sandbox_name) {
+    print("allow_env_var 12: fieldRef")
+
+    name_value := split(env_var, "=")
+    count(name_value) == 2
+
+    some policy_env_var in policy_process.env
+    policy_name_value := split(policy_env_var, "=")
+    count(policy_name_value) == 2
+
+    policy_name_value[0] == name_value[0]
+
+    # TODO: should these be handled in a different way?
+    always_allowed := ["$(host-name)", "$(node-name)", "$(pod-uid)"]
+    some allowed in always_allowed
+    contains(policy_name_value[1], allowed)
+
+    print("allow_env_var 12: success")
+}
+
+# Allow fieldRef "fieldPath: status.hostIP" values.
+allow_env_var(policy_process, input_process, env_var, sandbox_name) {
+    print("allow_env_var 13: fieldPath: status.hostIP")
+
+    name_value := split(env_var, "=")
+    count(name_value) == 2
+    is_ip(name_value[1])
+
+    some policy_env_var in policy_process.env
+    allow_host_ip_var(name_value[0], policy_env_var)
+
+    print("allow_env_var 13: success")
+}
+
+# Allow resourceFieldRef values (e.g., "limits.cpu").
+allow_env_var(policy_process, input_process, env_var, sandbox_name) {
+    print("allow_env_var 14: resourceFieldRef")
+
+    name_value := split(env_var, "=")
+    count(name_value) == 2
+
+    some policy_env_var in policy_process.env
+    policy_name_value := split(policy_env_var, "=")
+    count(policy_name_value) == 2
+
+    policy_name_value[0] == name_value[0]
+
+    # TODO: should these be handled in a different way?
+    always_allowed = ["$(resource-field)", "$(todo-annotation)"]
+    some allowed in always_allowed
+    contains(policy_name_value[1], allowed)
+
+    print("allow_env_var 14: success")
+}
+
+
 allow_pod_ip_var(var_name, policy_env_var) {
     print("allow_pod_ip_var: var_name =", var_name, "policy_env_var =", policy_env_var)
 
@@ -634,6 +756,18 @@ allow_pod_ip_var(var_name, policy_env_var) {
     policy_name_value[1] == "$(pod-ip)"
 
     print("allow_pod_ip_var: success")
+}
+
+allow_host_ip_var(var_name, policy_env_var) {
+    print("allow_host_ip_var: var_name =", var_name, "policy_env_var =", policy_env_var)
+
+    policy_name_value := split(policy_env_var, "=")
+    count(policy_name_value) == 2
+
+    policy_name_value[0] == var_name
+    policy_name_value[1] == "$(host-ip)"
+
+    print("allow_host_ip_var: success")
 }
 
 is_ip(value) {
@@ -696,8 +830,11 @@ allow_mount(policy_oci, input_mount, bundle_id, sandbox_id) {
 }
 
 policy_mount_allows(policy_mount, input_mount, bundle_id, sandbox_id) {
-    print("policy_mount_allows 1: input_mount.destination =", input_mount.destination, "policy_mount.destination =", policy_mount.destination)
+    print("policy_mount_allows 1: policy_mount =", policy_mount)
+    print("policy_mount_allows 1: input_mount =", input_mount)
+
     policy_mount == input_mount
+
     print("policy_mount_allows 1 success")
 }
 policy_mount_allows(policy_mount, input_mount, bundle_id, sandbox_id) {
@@ -818,4 +955,20 @@ allow_mount_point(policy_storage, input_storage, bundle_id, sandbox_id) {
     regex.match(mount_point_regex, input_storage.mount_point)
 
     print("allow_mount_point 4: success")
+}
+
+######################################################################
+ExecProcessRequest {
+    print("==============================================")
+    input_command = concat(" ", input.process.args)
+    print("ExecProcessRequest: input_command =", input_command)
+
+    some container in policy_data.containers
+    some policy_command in container.exec_commands
+    print("ExecProcessRequest: policy_command =", policy_command)
+
+    # TODO: should other input data fields be validated as well?
+    policy_command == input_command
+
+    print("ExecProcessRequest: success")
 }
