@@ -496,6 +496,9 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 		if err := clh.enableProtection(); err != nil {
 			return err
 		}
+		if igvmPath == "" {
+			return errors.New("igvm must be set with confidential_guest")
+		}
 	}
 
 	// Create the VM memory config via the constructor to ensure default values are properly assigned
