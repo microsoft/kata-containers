@@ -85,7 +85,7 @@ type hypervisor struct {
 	CtlPath                        string      `toml:"ctlpath"`
 	Initrd                         string      `toml:"initrd"`
 	Image                          string      `toml:"image"`
-  Igvm                           string      `toml:"igvm"`
+        Igvm                           string      `toml:"igvm"`
 	RootfsType                     string      `toml:"rootfs_type"`
 	Firmware                       string      `toml:"firmware"`
 	FirmwareVolume                 string      `toml:"firmware_volume"`
