@@ -491,12 +491,21 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Create the VM config via the constructor to ensure default values are properly assigned
 	clh.vmconfig = *chclient.NewVmConfig(*chclient.NewPayloadConfig())
 
-	// Make sure the kernel path is valid
-	kernelPath, err := clh.config.KernelAssetPath()
+	// Make sure the igvm path is valid
+	igvmPath, err := clh.config.IgvmAssetPath()
 	if err != nil {
 		return err
 	}
-	clh.vmconfig.Payload.SetKernel(kernelPath)
+	clh.vmconfig.Payload.SetIgvm(igvmPath)
+
+	// Make sure the kernel path is valid if no igvm set
+	if igvmPath == "" {
+		kernelPath, err := clh.config.KernelAssetPath()
+		if err != nil {
+			return err
+		}
+		clh.vmconfig.Payload.SetKernel(kernelPath)
+	}
 
 	clh.vmconfig.Platform = chclient.NewPlatformConfig()
 	platform := clh.vmconfig.Platform
@@ -509,6 +518,9 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 		if err := clh.enableProtection(); err != nil {
 			return err
 		}
+		if igvmPath == "" {
+			return errors.New("igvm must be set with confidential_guest")
+		}
 	}
 
 	// Create the VM memory config via the constructor to ensure default values are properly assigned
@@ -517,7 +529,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.vmconfig.Memory.Shared = func(b bool) *bool { return &b }(true)
 	// Enable hugepages if needed
 	clh.vmconfig.Memory.Hugepages = func(b bool) *bool { return &b }(clh.config.HugePages)
-	if !clh.config.ConfidentialGuest {
+	if !clh.config.ConfidentialGuest && igvmPath == "" {
 		hotplugSize := clh.config.DefaultMaxMemorySize
 		// OpenAPI only supports int64 values
 		clh.vmconfig.Memory.HotplugSize = func(i int64) *int64 { return &i }(int64((utils.MemUnit(hotplugSize) * utils.MiB).ToBytes()))
@@ -552,7 +564,10 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Followed by extra kernel parameters defined in the configuration file
 	params = append(params, clh.config.KernelParams...)
 
-	clh.vmconfig.Payload.SetCmdline(kernelParamsToString(params))
+	// The kernel cmdline is already embedded inside the IGVM file
+	if igvmPath == "" {
+		clh.vmconfig.Payload.SetCmdline(kernelParamsToString(params))
+	}
 
 	// set random device generator to hypervisor
 	clh.vmconfig.Rng = chclient.NewRngConfig(clh.config.EntropySource)
@@ -590,9 +605,15 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 				clh.vmconfig.Pmem = &[]chclient.PmemConfig{*pmem}
 			}
 		}
-	} else {
-		// assetType == types.InitrdAsset
-		clh.vmconfig.Payload.SetInitramfs(assetPath)
+	} 
+	
+	initrdPath, err := clh.config.InitrdAssetPath()
+	if err != nil {
+		return err
+	}
+
+	if initrdPath != "" {
+		clh.vmconfig.Payload.SetInitramfs(initrdPath)
 	}
 
 	if clh.config.ConfidentialGuest {
@@ -1387,7 +1408,6 @@ func (clh *cloudHypervisor) launchClh() error {
 
 	clh.Logger().WithField("path", clhPath).Info()
 	clh.Logger().WithField("args", strings.Join(args, " ")).Info()
-
 	cmdHypervisor := exec.Command(clhPath, args...)
 	if clh.config.Debug {
 		cmdHypervisor.Env = os.Environ()
