@@ -894,6 +894,7 @@ components:
         kernel: kernel
         host_data: host_data
         initramfs: initramfs
+        igvm: igvm
         firmware: firmware
       properties:
         firmware:
