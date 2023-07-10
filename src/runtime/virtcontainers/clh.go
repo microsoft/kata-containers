@@ -74,7 +74,7 @@ const (
 	// Values based on:
 	clhTimeout                     = 10
 	clhAPITimeout                  = 1
-	clhAPITimeoutConfidentialGuest = 20
+	clhAPITimeoutConfidentialGuest = 40
 	// Minimum timout for calling CreateVM followed by BootVM. Executing these two APIs
 	// might take longer than the value returned by getClhAPITimeout().
 	clhCreateAndBootVMMinimumTimeout = 10

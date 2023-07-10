@@ -53,7 +53,7 @@ oci-spec = { version = "0.6.8", features = ["runtime"] }
 
 # Kata Agent protocol.
 protocols = { path = "../../libs/protocols", features = ["with-serde"] }
-protobuf = "3.2.0"
+protobuf = "=3.5.1"
 
 # dm-verity root hash support
 generic-array = "0.14.6"
