@@ -6,10 +6,12 @@
 package annotations
 
 const (
-	kataAnnotationsPrefix     = "io.katacontainers."
-	kataConfAnnotationsPrefix = kataAnnotationsPrefix + "config."
-	kataAnnotHypervisorPrefix = kataConfAnnotationsPrefix + "hypervisor."
-	kataAnnotContainerPrefix  = kataAnnotationsPrefix + "container."
+	kataAnnotationsPrefix         = "io.katacontainers."
+	kataConfAnnotationsPrefix     = kataAnnotationsPrefix + "config."
+	kataAnnotHypervisorPrefix     = kataConfAnnotationsPrefix + "hypervisor."
+	kataAnnotPreAttestationPrefix = kataConfAnnotationsPrefix + "pre_attestation."
+	kataAnnotSevPrefix            = kataConfAnnotationsPrefix + "sev."
+	kataAnnotContainerPrefix      = kataAnnotationsPrefix + "container."
 
 	//
 	// OCI
@@ -24,6 +26,21 @@ const (
 	SandboxConfigPathKey = kataAnnotationsPrefix + "config_path"
 )
 
+// Annotations related to Confidential Containers (CoCo)
+const (
+	//
+	// Assets
+	//
+	// GuestPreAttestation toggled pre_attestation functionality on/off
+	GuestPreAttestation = kataAnnotPreAttestationPrefix + "enabled"
+
+	// GuestPreAttestationURI set the remote URL for online-kbs
+	GuestPreAttestationURI = kataAnnotPreAttestationPrefix + "uri"
+
+	// SEVGuestPolicy set the AMD SEV guest policy
+	SEVGuestPolicy = kataAnnotSevPrefix + "policy"
+)
+
 // Annotations related to Hypervisor configuration
 const (
 	//
@@ -36,6 +53,9 @@ const (
 
 	// ImagePath is a sandbox annotation for passing a per container path pointing at the guest image that will run in the container VM.
 	ImagePath = kataAnnotHypervisorPrefix + "image"
+
+	// IgvmPath is a sandbox annotation for passing a per container path pointing at the guest image and kernel that will run in the container VM.
+	IgvmPath = kataAnnotHypervisorPrefix + "igvm"
 
 	// InitrdPath is a sandbox annotation for passing a per container path pointing at the guest initrd image that will run in the container VM.
 	InitrdPath = kataAnnotHypervisorPrefix + "initrd"
@@ -64,6 +84,9 @@ const (
 
 	// ImageHash is an sandbox annotation for passing a container guest image SHA-512 hash value.
 	ImageHash = kataAnnotHypervisorPrefix + "image_hash"
+
+	// IgvmHash is an sandbox annotation for passing a container guest image and kernel SHA-512 hash value.
+	IgvmHash = kataAnnotHypervisorPrefix + "igvm_hash"
 
 	// InitrdHash is an sandbox annotation for passing a container guest initrd SHA-512 hash value.
 	InitrdHash = kataAnnotHypervisorPrefix + "initrd_hash"

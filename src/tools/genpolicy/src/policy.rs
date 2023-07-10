@@ -11,12 +11,15 @@ use crate::containerd;
 use crate::infra;
 use crate::kata;
 use crate::pod;
+use crate::policy;
 use crate::registry;
+use crate::secret;
 use crate::utils;
 use crate::volume;
 use crate::yaml;
 
 use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose, Engine as _};
 use log::debug;
 use oci::*;
 use serde::{Deserialize, Serialize};
@@ -28,10 +31,12 @@ use std::fs::read_to_string;
 use std::io::Write;
 
 pub struct AgentPolicy {
-    k8s_objects: Vec<boxed::Box<dyn yaml::K8sResource + Send + Sync>>,
+    resources: Vec<boxed::Box<dyn yaml::K8sResource + Send + Sync>>,
     config_maps: Vec<config_map::ConfigMap>,
-    rules_input_file: String,
-    infra_policy: infra::InfraPolicy,
+    secrets: Vec<secret::Secret>,
+    pub rules: String,
+    pub infra_policy: infra::InfraPolicy,
+    pub config: utils::Config,
 }
 
 // Example:
@@ -57,9 +62,6 @@ pub struct OciSpec {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root: Option<Root>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hostname: Option<String>,
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mounts: Vec<Mount>,
@@ -146,27 +148,32 @@ pub struct PersistentVolumeClaimVolume {
 impl AgentPolicy {
     pub async fn from_files(config: &utils::Config) -> Result<AgentPolicy> {
         let mut config_maps = Vec::new();
-        let mut k8s_objects = Vec::new();
+        let mut secrets = Vec::new();
+        let mut resources = Vec::new();
         let yaml_contents = yaml::get_input_yaml(&config.yaml_file)?;
 
         for document in serde_yaml::Deserializer::from_str(&yaml_contents) {
             let doc_mapping = Value::deserialize(document)?;
             let yaml_string = serde_yaml::to_string(&doc_mapping)?;
-            let (mut k8s_object, kind) =
+            let (mut resource, kind) =
                 yaml::new_k8s_resource(&yaml_string, config.silent_unsupported_fields)?;
-            k8s_object
+            resource
                 .init(
                     config.use_cache,
                     &doc_mapping,
                     config.silent_unsupported_fields,
                 )
-                .await?;
-            k8s_objects.push(k8s_object);
+                .await;
+            resources.push(resource);
 
             if kind.eq("ConfigMap") {
                 let config_map: config_map::ConfigMap = serde_yaml::from_str(&yaml_string)?;
                 debug!("{:#?}", &config_map);
                 config_maps.push(config_map);
+            } else if kind.eq("Secret") {
+                let secret: secret::Secret = serde_yaml::from_str(&yaml_string)?;
+                debug!("{:#?}", &secret);
+                secrets.push(secret);
             }
         }
 
@@ -178,48 +185,221 @@ impl AgentPolicy {
             }
         }
 
-        Ok(AgentPolicy {
-            k8s_objects,
-            rules_input_file: config.rules_file.to_string(),
-            infra_policy,
-            config_maps,
-        })
+        if let Ok(rules) = read_to_string(&config.rules_file) {
+            Ok(AgentPolicy {
+                resources,
+                rules,
+                infra_policy,
+                config_maps,
+                secrets,
+                config: config.clone(),
+            })
+        } else {
+            panic!("Cannot open file {}. Please copy it to the current directory or specify the path to it using the -i parameter.",
+                &config.rules_file);
+        }
     }
 
-    pub fn export_policy(&mut self, config: &utils::Config) -> Result<()> {
+    pub fn export_policy(&mut self) {
         let mut yaml_string = String::new();
-
-        for k8s_object in &mut self.k8s_objects {
-            if k8s_object.requires_policy() {
-                if let Ok(rules) = read_to_string(&self.rules_input_file) {
-                    k8s_object.generate_policy(
-                        &rules,
-                        &self.infra_policy,
-                        &self.config_maps,
-                        config,
-                    )?;
-                } else {
-                    panic!("Cannot open file {}. Please copy it to the current directory or specify the path to it using the -i parameter.", 
-                        &self.rules_input_file);
-                }
-            }
-
-            yaml_string += &k8s_object.serialize()?;
+        for i in 0..self.resources.len() {
+            let policy = self.resources[i].generate_policy(self);
+            yaml_string += &self.resources[i].serialize(&policy);
         }
 
-        if let Some(yaml_file) = &config.yaml_file {
+        if let Some(yaml_file) = &self.config.yaml_file {
             std::fs::OpenOptions::new()
                 .write(true)
                 .truncate(true)
                 .create(true)
                 .open(yaml_file)
-                .map_err(|e| anyhow!(e))?
+                .unwrap()
                 .write_all(&yaml_string.as_bytes())
-                .map_err(|e| anyhow!(e))
+                .unwrap();
         } else {
             std::io::stdout()
                 .write_all(&yaml_string.as_bytes())
-                .map_err(|e| anyhow!(e))
+                .unwrap();
+        }
+    }
+
+    pub fn generate_policy(&self, resource: &dyn yaml::K8sResource) -> String {
+        let yaml_containers = resource.get_containers();
+        let mut policy_containers = Vec::new();
+
+        for i in 0..yaml_containers.len() {
+            policy_containers.push(self.get_container_policy(
+                resource,
+                &yaml_containers[i],
+                i == 0,
+                resource.use_host_network(),
+            ));
+        }
+
+        let policy_data = policy::PolicyData {
+            containers: policy_containers,
+        };
+
+        let json_data = serde_json::to_string_pretty(&policy_data).unwrap();
+        let policy = self.rules.clone() + "\npolicy_data := " + &json_data;
+        if let Some(file_name) = &self.config.output_policy_file {
+            policy::export_decoded_policy(&policy, &file_name);
+        }
+        general_purpose::STANDARD.encode(policy.as_bytes())
+    }
+
+    pub fn get_container_policy(
+        &self,
+        resource: &dyn yaml::K8sResource,
+        yaml_container: &pod::Container,
+        is_pause_container: bool,
+        use_host_network: bool,
+    ) -> ContainerPolicy {
+        let infra_container = if is_pause_container {
+            &self.infra_policy.pause_container
+        } else {
+            &self.infra_policy.other_container
+        };
+
+        let mut root: Option<Root> = None;
+        if let Some(infra_root) = &infra_container.root {
+            let mut policy_root = infra_root.clone();
+            policy_root.readonly = yaml_container.read_only_root_filesystem();
+            root = Some(policy_root);
+        }
+
+        let mut annotations = BTreeMap::new();
+        infra::get_annotations(&mut annotations, infra_container);
+        if let Some(name) = resource.get_sandbox_name() {
+            annotations.insert("io.kubernetes.cri.sandbox-name".to_string(), name);
+        }
+
+        if !is_pause_container {
+            let mut image_name = yaml_container.image.to_string();
+            if image_name.find(':').is_none() {
+                image_name += ":latest";
+            }
+            annotations.insert("io.kubernetes.cri.image-name".to_string(), image_name);
+        }
+
+        let namespace = resource.get_namespace();
+        annotations.insert(
+            "io.kubernetes.cri.sandbox-namespace".to_string(),
+            namespace.clone(),
+        );
+
+        if !yaml_container.name.is_empty() {
+            annotations.insert(
+                "io.kubernetes.cri.container-name".to_string(),
+                yaml_container.name.to_string(),
+            );
+        }
+
+        if is_pause_container {
+            let mut network_namespace = "^/var/run/netns/cni".to_string();
+            if use_host_network {
+                network_namespace += "test";
+            }
+            network_namespace += "-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
+            annotations.insert("nerdctl/network-namespace".to_string(), network_namespace);
+        }
+
+        // Start with the Default Unix Spec from
+        // https://github.com/containerd/containerd/blob/release/1.6/oci/spec.go#L132
+        let is_privileged = yaml_container.is_privileged();
+        let mut process = containerd::get_process(is_privileged);
+
+        if let Some(capabilities) = &mut process.capabilities {
+            yaml_container.apply_capabilities(capabilities);
+        }
+
+        let (yaml_has_command, yaml_has_args) = yaml_container.get_process_args(&mut process.args);
+        yaml_container
+            .registry
+            .get_process(&mut process, yaml_has_command, yaml_has_args);
+
+        if !is_pause_container {
+            process.env.push("HOSTNAME=".to_string() + "$(host-name)");
+        }
+
+        let service_account_name = if let Some(s) = &yaml_container.serviceAccountName {
+            s.clone()
+        } else {
+            "default".to_string()
+        };
+
+        yaml_container.get_env_variables(
+            &mut process.env,
+            &self.config_maps,
+            &self.secrets,
+            &namespace,
+            &resource.get_annotations(),
+            &service_account_name,
+        );
+
+        substitute_env_variables(&mut process.env);
+        substitute_args_env_variables(&mut process.args, &process.env);
+
+        infra::get_process(&mut process, &infra_container);
+        process.noNewPrivileges = !yaml_container.allow_privilege_escalation();
+
+        let mut mounts = containerd::get_mounts(is_pause_container, is_privileged);
+        self.infra_policy.get_policy_mounts(
+            &mut mounts,
+            &infra_container.mounts,
+            yaml_container,
+            is_pause_container,
+        );
+
+        let image_layers = yaml_container.registry.get_image_layers();
+        let mut storages = Default::default();
+        get_image_layer_storages(&mut storages, &image_layers, &root);
+        resource.get_container_mounts_and_storages(
+            &mut mounts,
+            &mut storages,
+            yaml_container,
+            self,
+        );
+
+        let mut linux = containerd::get_linux(is_privileged);
+        linux.namespaces = kata::get_namespaces(is_pause_container, use_host_network);
+        infra::get_linux(&mut linux, &infra_container.linux);
+
+        let exec_commands = yaml_container.get_exec_commands();
+
+        ContainerPolicy {
+            oci: OciSpec {
+                ociVersion: Some("1.1.0-rc.1".to_string()),
+                process: Some(process),
+                root,
+                mounts,
+                hooks: None,
+                annotations: Some(annotations),
+                linux: Some(linux),
+            },
+            storages,
+            exec_commands,
+        }
+    }
+
+    pub fn get_container_mounts_and_storages(
+        &self,
+        policy_mounts: &mut Vec<oci::Mount>,
+        storages: &mut Vec<SerializedStorage>,
+        container: &pod::Container,
+        volume: &volume::Volume,
+    ) {
+        if let Some(volume_mounts) = &container.volumeMounts {
+            for volume_mount in volume_mounts {
+                if volume_mount.name.eq(&volume.name) {
+                    self.infra_policy.get_mount_and_storage(
+                        policy_mounts,
+                        storages,
+                        volume,
+                        volume_mount,
+                    );
+                }
+            }
         }
     }
 }
@@ -228,7 +408,7 @@ fn get_image_layer_storages(
     storages: &mut Vec<SerializedStorage>,
     image_layers: &Vec<registry::ImageLayer>,
     root: &Option<Root>,
-) -> Result<()> {
+) {
     if let Some(root_mount) = root {
         let mut new_storages: Vec<SerializedStorage> = Vec::new();
 
@@ -316,8 +496,6 @@ fn get_image_layer_storages(
 
         storages.push(overlay_storage);
     }
-
-    Ok(())
 }
 
 // TODO: avoid copying this code from snapshotter.rs
@@ -329,151 +507,16 @@ fn name_to_hash(name: &str) -> String {
 }
 
 /// Creates a text file including the Rego rules and data.
-pub fn export_decoded_policy(policy: &str, file_name: &str) -> Result<()> {
+pub fn export_decoded_policy(policy: &str, file_name: &str) {
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .truncate(true)
         .create(true)
         .open(file_name)
-        .map_err(|e| anyhow!(e))?;
-    f.write_all(policy.as_bytes()).map_err(|e| anyhow!(e))?;
-    f.flush().map_err(|e| anyhow!(e))?;
-    Ok(())
-}
-
-pub fn get_container_policy(
-    k8s_object: &dyn yaml::K8sResource,
-    infra_policy: &infra::InfraPolicy,
-    config_maps: &Vec<config_map::ConfigMap>,
-    yaml_container: &pod::Container,
-    is_pause_container: bool,
-    registry_container: &registry::Container,
-) -> Result<ContainerPolicy> {
-    let pod_name = k8s_object.get_metadata_name()?;
-    let hostname = k8s_object.get_host_name()?;
-
-    let mut infra_container = &infra_policy.pause_container;
-    if !is_pause_container {
-        infra_container = &infra_policy.other_container;
-    }
-
-    let mut root: Option<Root> = None;
-    if let Some(infra_root) = &infra_container.root {
-        let mut policy_root = infra_root.clone();
-        policy_root.readonly = yaml_container.read_only_root_filesystem();
-        root = Some(policy_root);
-    }
-
-    let mut annotations = BTreeMap::new();
-    infra::get_annotations(&mut annotations, infra_container)?;
-    if let Some(name) = k8s_object.get_sandbox_name()? {
-        annotations.insert("io.kubernetes.cri.sandbox-name".to_string(), name);
-    }
-
-    if !is_pause_container {
-        let mut image_name = yaml_container.image.to_string();
-        if image_name.find(':').is_none() {
-            image_name += ":latest";
-        }
-        annotations.insert("io.kubernetes.cri.image-name".to_string(), image_name);
-    }
-
-    let namespace = k8s_object.get_namespace()?;
-    annotations.insert(
-        "io.kubernetes.cri.sandbox-namespace".to_string(),
-        namespace.clone(),
-    );
-
-    if !yaml_container.name.is_empty() {
-        annotations.insert(
-            "io.kubernetes.cri.container-name".to_string(),
-            yaml_container.name.to_string(),
-        );
-    }
-
-    // Start with the Default Unix Spec from
-    // https://github.com/containerd/containerd/blob/release/1.6/oci/spec.go#L132
-    let is_privileged = yaml_container.is_privileged();
-    let mut process = containerd::get_process(is_privileged);
-
-    if let Some(capabilities) = &mut process.capabilities {
-        yaml_container.apply_capabilities(capabilities)?;
-    }
-
-    let (yaml_has_command, yaml_has_args) = yaml_container.get_process_args(&mut process.args);
-    registry_container.get_process(&mut process, yaml_has_command, yaml_has_args)?;
-
-    if !is_pause_container {
-        process.env.push("HOSTNAME=".to_string() + &pod_name);
-    }
-
-    yaml_container.get_env_variables(&mut process.env, config_maps, &namespace)?;
-    substitute_env_variables(&mut process.env);
-
-    infra::get_process(&mut process, &infra_container)?;
-    process.noNewPrivileges = !yaml_container.allow_privilege_escalation();
-
-    let mut mounts = containerd::get_mounts(is_pause_container, is_privileged);
-    infra_policy.get_policy_mounts(
-        &mut mounts,
-        &infra_container.mounts,
-        &yaml_container,
-        is_pause_container,
-    )?;
-
-    let image_layers = registry_container.get_image_layers();
-    let mut storages = Default::default();
-    get_image_layer_storages(&mut storages, &image_layers, &root)?;
-
-    k8s_object.get_container_mounts_and_storages(
-        &mut mounts,
-        &mut storages,
-        &yaml_container,
-        infra_policy,
-    )?;
-
-    let mut linux = containerd::get_linux(is_privileged);
-    linux.namespaces = kata::get_namespaces();
-    infra::get_linux(&mut linux, &infra_container.linux)?;
-
-    let exec_commands = yaml_container.get_exec_commands();
-
-    Ok(ContainerPolicy {
-        oci: OciSpec {
-            ociVersion: Some("1.1.0-rc.1".to_string()),
-            process: Some(process),
-            root,
-            hostname: Some(hostname),
-            mounts,
-            hooks: None,
-            annotations: Some(annotations),
-            linux: Some(linux),
-        },
-        storages,
-        exec_commands,
-    })
-}
-
-pub fn get_container_mounts_and_storages(
-    policy_mounts: &mut Vec<oci::Mount>,
-    storages: &mut Vec<SerializedStorage>,
-    container: &pod::Container,
-    infra_policy: &infra::InfraPolicy,
-    volume: &volume::Volume,
-) -> Result<()> {
-    if let Some(volume_mounts) = &container.volumeMounts {
-        for volume_mount in volume_mounts {
-            if volume_mount.name.eq(&volume.name) {
-                infra_policy.get_mount_and_storage(
-                    policy_mounts,
-                    storages,
-                    volume,
-                    volume_mount,
-                )?;
-            }
-        }
-    }
-    Ok(())
+        .map_err(|e| anyhow!(e))
+        .unwrap();
+    f.write_all(policy.as_bytes()).unwrap();
+    f.flush().map_err(|e| anyhow!(e)).unwrap();
 }
 
 fn substitute_env_variables(env: &mut Vec<String>) {
@@ -520,6 +563,17 @@ fn substitute_variable(
     name_end: usize,
     env: &Vec<String>,
 ) -> Option<String> {
+    let internal_vars = vec![
+        "bundle-id",
+        "host-ip",
+        "node-name",
+        "pod-ip",
+        "pod-uid",
+        "sandbox-id",
+        "sandbox-name",
+        "sandbox-namespace",
+    ];
+
     assert!(name_start < name_end);
     assert!(name_end < env_var.len());
     let name = env_var[name_start..name_end].to_string();
@@ -530,15 +584,56 @@ fn substitute_variable(
         if components[0].eq(&name) {
             debug!("Found {} in <{}>", &name, &other_var);
             if components.len() == 2 {
-                // Don't substitute if the value includes variable to be substituted,
-                // to avoid recursive substitutions.
-                if find_subst_target(&components[1]).is_none() {
+                let mut replace = true;
+                let value = &components[1];
+
+                if let Some((start, end)) = find_subst_target(value) {
+                    if internal_vars.contains(&&value[start..end]) {
+                        // Variables used internally for Policy don't get expanded
+                        // in the current design, so it's OK to use them as replacement
+                        // in other env variables or command arguments.
+                    } else {
+                        // Don't substitute if the value includes variables to be
+                        // substituted, to avoid circular substitutions.
+                        replace = false;
+                    }
+                }
+
+                if replace {
                     let from = "$(".to_string() + &name + ")";
-                    return Some(env_var.replace(&from, &components[1]));
+                    return Some(env_var.replace(&from, value));
                 }
             }
         }
     }
 
     None
+}
+
+fn substitute_args_env_variables(args: &mut Vec<String>, env: &Vec<String>) {
+    for arg in args {
+        substitute_arg_env_variables(arg, env);
+    }
+}
+
+fn substitute_arg_env_variables(arg: &mut String, env: &Vec<String>) {
+    loop {
+        let mut substituted = false;
+
+        if let Some((start, end)) = find_subst_target(arg) {
+            if let Some(new_value) = substitute_variable(arg, start, end, env) {
+                debug!(
+                    "substitute_arg_env_variables: replacing {} with {}",
+                    &arg[start..end],
+                    &new_value
+                );
+                *arg = new_value;
+                substituted = true;
+            }
+        }
+
+        if !substituted {
+            break;
+        }
+    }
 }

@@ -6,12 +6,9 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
-use crate::config_map;
-use crate::infra;
 use crate::obj_meta;
 use crate::pod;
 use crate::policy;
-use crate::utils;
 use crate::yaml;
 
 use async_trait::async_trait;
@@ -35,6 +32,9 @@ pub struct ConfigMap {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     immutable: Option<bool>,
+
+    #[serde(skip)]
+    doc_mapping: serde_yaml::Value,
 }
 
 impl ConfigMap {
@@ -80,29 +80,17 @@ impl yaml::K8sResource for ConfigMap {
     async fn init(
         &mut self,
         _use_cache: bool,
-        _doc_mapping: &serde_yaml::Value,
+        doc_mapping: &serde_yaml::Value,
         _silent_unsupported_fields: bool,
-    ) -> anyhow::Result<()> {
-        Ok(())
+    ) {
+        self.doc_mapping = doc_mapping.clone();
     }
 
-    fn requires_policy(&self) -> bool {
-        false
-    }
-
-    fn get_metadata_name(&self) -> anyhow::Result<String> {
+    fn get_sandbox_name(&self) -> Option<String> {
         panic!("Unsupported");
     }
 
-    fn get_host_name(&self) -> anyhow::Result<String> {
-        panic!("Unsupported");
-    }
-
-    fn get_sandbox_name(&self) -> anyhow::Result<Option<String>> {
-        panic!("Unsupported");
-    }
-
-    fn get_namespace(&self) -> anyhow::Result<String> {
+    fn get_namespace(&self) -> String {
         panic!("Unsupported");
     }
 
@@ -111,22 +99,31 @@ impl yaml::K8sResource for ConfigMap {
         _policy_mounts: &mut Vec<oci::Mount>,
         _storages: &mut Vec<policy::SerializedStorage>,
         _container: &pod::Container,
-        _infra_policy: &infra::InfraPolicy,
-    ) -> anyhow::Result<()> {
+        _agent_policy: &policy::AgentPolicy,
+    ) {
         panic!("Unsupported");
     }
 
-    fn generate_policy(
-        &mut self,
-        _rules: &str,
-        _infra_policy: &infra::InfraPolicy,
-        _config_map: &Vec<config_map::ConfigMap>,
-        _config: &utils::Config,
-    ) -> anyhow::Result<()> {
+    fn generate_policy(&self, _agent_policy: &policy::AgentPolicy) -> String {
+        "".to_string()
+    }
+
+    fn serialize(&mut self, _policy: &str) -> String {
+        serde_yaml::to_string(&self.doc_mapping).unwrap()
+    }
+
+    fn get_containers(&self) -> &Vec<pod::Container> {
         panic!("Unsupported");
     }
 
-    fn serialize(&mut self) -> anyhow::Result<String> {
-        Ok(serde_yaml::to_string(&self)?)
+    fn get_annotations(&self) -> Option<BTreeMap<String, String>> {
+        if let Some(annotations) = &self.metadata.annotations {
+            return Some(annotations.clone());
+        }
+        None
+    }
+
+    fn use_host_network(&self) -> bool {
+        panic!("Unsupported");
     }
 }

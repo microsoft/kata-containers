@@ -6,14 +6,12 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
-use crate::config_map;
-use crate::infra;
 use crate::pod;
 use crate::policy;
-use crate::utils;
 use crate::yaml;
 
 use async_trait::async_trait;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub struct NoPolicyResource {
@@ -27,27 +25,14 @@ impl yaml::K8sResource for NoPolicyResource {
         _use_cache: bool,
         _doc_mapping: &serde_yaml::Value,
         _silent_unsupported_fields: bool,
-    ) -> anyhow::Result<()> {
-        Ok(())
+    ) {
     }
 
-    fn requires_policy(&self) -> bool {
-        false
-    }
-
-    fn get_metadata_name(&self) -> anyhow::Result<String> {
+    fn get_sandbox_name(&self) -> Option<String> {
         panic!("Unsupported");
     }
 
-    fn get_host_name(&self) -> anyhow::Result<String> {
-        panic!("Unsupported");
-    }
-
-    fn get_sandbox_name(&self) -> anyhow::Result<Option<String>> {
-        panic!("Unsupported");
-    }
-
-    fn get_namespace(&self) -> anyhow::Result<String> {
+    fn get_namespace(&self) -> String {
         panic!("Unsupported");
     }
 
@@ -56,22 +41,28 @@ impl yaml::K8sResource for NoPolicyResource {
         _policy_mounts: &mut Vec<oci::Mount>,
         _storages: &mut Vec<policy::SerializedStorage>,
         _container: &pod::Container,
-        _infra_policy: &infra::InfraPolicy,
-    ) -> anyhow::Result<()> {
+        _agent_policy: &policy::AgentPolicy,
+    ) {
         panic!("Unsupported");
     }
 
-    fn generate_policy(
-        &mut self,
-        _rules: &str,
-        _infra_policy: &infra::InfraPolicy,
-        _config_maps: &Vec<config_map::ConfigMap>,
-        _config: &utils::Config,
-    ) -> anyhow::Result<()> {
+    fn generate_policy(&self, _agent_policy: &policy::AgentPolicy) -> String {
+        return "".to_string();
+    }
+
+    fn serialize(&mut self, _policy: &str) -> String {
+        self.yaml.clone()
+    }
+
+    fn get_containers(&self) -> &Vec<pod::Container> {
         panic!("Unsupported");
     }
 
-    fn serialize(&mut self) -> anyhow::Result<String> {
-        Ok(self.yaml.clone())
+    fn get_annotations(&self) -> Option<BTreeMap<String, String>> {
+        panic!("Unsupported");
+    }
+
+    fn use_host_network(&self) -> bool {
+        panic!("Unsupported");
     }
 }

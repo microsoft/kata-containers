@@ -19,6 +19,7 @@ import (
 	"net/http/httputil"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -37,6 +38,8 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/config"
 	hv "github.com/kata-containers/kata-containers/src/runtime/pkg/hypervisors"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/katautils/katatrace"
+	pkgUtils "github.com/kata-containers/kata-containers/src/runtime/pkg/utils"
+	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/rootless"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
 )
@@ -70,7 +73,7 @@ const (
 	// Values based on:
 	clhTimeout                     = 10
 	clhAPITimeout                  = 1
-	clhAPITimeoutConfidentialGuest = 20
+	clhAPITimeoutConfidentialGuest = 40
 	// Timeout for hot-plug - hotplug devices can take more time, than usual API calls
 	// Use longer time timeout for it.
 	clhHotPlugAPITimeout                   = 5
@@ -433,7 +436,8 @@ func (clh *cloudHypervisor) enableProtection() error {
 		return errors.New("SEV-SNP protection is not supported by Cloud Hypervisor")
 
 	default:
-		return errors.New("This system doesn't support Confidential Computing (Guest Protection)")
+		return nil
+		//return errors.New("This system doesn't support Confidential Computing (Guest Protection)")
 	}
 }
 
@@ -476,16 +480,28 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Create the VM config via the constructor to ensure default values are properly assigned
 	clh.vmconfig = *chclient.NewVmConfig(*chclient.NewPayloadConfig())
 
-	// Make sure the kernel path is valid
-	kernelPath, err := clh.config.KernelAssetPath()
+	// Make sure the igvm path is valid
+	igvmPath, err := clh.config.IgvmAssetPath()
 	if err != nil {
 		return err
 	}
-	clh.vmconfig.Payload.SetKernel(kernelPath)
+	clh.vmconfig.Payload.SetIgvm(igvmPath)
+
+	// Make sure the kernel path is valid if no igvm set
+	if igvmPath == "" {
+		kernelPath, err := clh.config.KernelAssetPath()
+		if err != nil {
+			return err
+		}
+		clh.vmconfig.Payload.SetKernel(kernelPath)
+	}
 
 	if clh.config.ConfidentialGuest {
 		if err := clh.enableProtection(); err != nil {
 			return err
+		}
+		if igvmPath == "" {
+			return errors.New("igvm must be set with confidential_guest")
 		}
 	}
 
@@ -495,7 +511,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.vmconfig.Memory.Shared = func(b bool) *bool { return &b }(true)
 	// Enable hugepages if needed
 	clh.vmconfig.Memory.Hugepages = func(b bool) *bool { return &b }(clh.config.HugePages)
-	if !clh.config.ConfidentialGuest {
+	if !clh.config.ConfidentialGuest && igvmPath == "" {
 		hotplugSize := clh.config.DefaultMaxMemorySize
 		// OpenAPI only supports int64 values
 		clh.vmconfig.Memory.HotplugSize = func(i int64) *int64 { return &i }(int64((utils.MemUnit(hotplugSize) * utils.MiB).ToBytes()))
@@ -525,7 +541,10 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Followed by extra kernel parameters defined in the configuration file
 	params = append(params, clh.config.KernelParams...)
 
-	clh.vmconfig.Payload.SetCmdline(kernelParamsToString(params))
+	// The kernel cmdline is already embedded inside the IGVM file
+	if igvmPath == "" {
+		clh.vmconfig.Payload.SetCmdline(kernelParamsToString(params))
+	}
 
 	// set random device generator to hypervisor
 	clh.vmconfig.Rng = chclient.NewRngConfig(clh.config.EntropySource)
@@ -561,12 +580,14 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 				clh.vmconfig.Pmem = &[]chclient.PmemConfig{*pmem}
 			}
 		}
-	} else {
-		initrdPath, err := clh.config.InitrdAssetPath()
-		if err != nil {
-			return err
-		}
+	} 
+	
+	initrdPath, err := clh.config.InitrdAssetPath()
+	if err != nil {
+		return err
+	}
 
+	if initrdPath != "" {
 		clh.vmconfig.Payload.SetInitramfs(initrdPath)
 	}
 
@@ -653,7 +674,7 @@ func (clh *cloudHypervisor) StartVM(ctx context.Context, timeout int) error {
 	clh.Logger().WithField("function", "StartVM").Info("starting Sandbox")
 
 	vmPath := filepath.Join(clh.config.VMStorePath, clh.id)
-	err := os.MkdirAll(vmPath, DirMode)
+	err := utils.MkdirAllWithInheritedOwner(vmPath, DirMode)
 	if err != nil {
 		return err
 	}
@@ -688,9 +709,7 @@ func (clh *cloudHypervisor) StartVM(ctx context.Context, timeout int) error {
 	}
 	clh.state.PID = pid
 
-	// TODO: revisit the value of this timeout. It currently allows a slower guest VM startup.
-	// ctx, cancel := context.WithTimeout(context.Background(), clh.getClhAPITimeout()*time.Second)
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), clh.getClhAPITimeout()*time.Second)
 	defer cancel()
 
 	if err := clh.bootVM(ctx); err != nil {
@@ -859,12 +878,12 @@ func (clh *cloudHypervisor) hotPlugVFIODevice(device *config.VFIODev) error {
 	defer cancel()
 
 	// Create the clh device config via the constructor to ensure default values are properly assigned
-	clhDevice := *chclient.NewDeviceConfig(device.SysfsDev)
+	clhDevice := *chclient.NewDeviceConfig(*(*device).GetSysfsDev())
 	pciInfo, _, err := cl.VmAddDevicePut(ctx, clhDevice)
 	if err != nil {
 		return fmt.Errorf("Failed to hotplug device %+v %s", device, openAPIClientError(err))
 	}
-	clh.devicesIds[device.ID] = pciInfo.GetId()
+	clh.devicesIds[*(*device).GetID()] = pciInfo.GetId()
 
 	// clh doesn't use bridges, so the PCI path is simply the slot
 	// number of the device.  This will break if clh starts using
@@ -881,7 +900,14 @@ func (clh *cloudHypervisor) hotPlugVFIODevice(device *config.VFIODev) error {
 		return fmt.Errorf("Unexpected PCI address %q from clh hotplug", pciInfo.Bdf)
 	}
 
-	device.GuestPciPath, err = types.PciPathFromString(tokens[0])
+	guestPciPath, err := types.PciPathFromString(tokens[0])
+
+	pciDevice, ok := (*device).(config.VFIOPCIDev)
+	if !ok {
+		return fmt.Errorf("VFIO device %+v is not PCI, only PCI is supported in Cloud Hypervisor", device)
+	}
+	pciDevice.GuestPciPath = guestPciPath
+	*device = pciDevice
 
 	return err
 }
@@ -925,7 +951,7 @@ func (clh *cloudHypervisor) HotplugRemoveDevice(ctx context.Context, devInfo int
 	case BlockDev:
 		deviceID = clhDriveIndexToID(devInfo.(*config.BlockDrive).Index)
 	case VfioDev:
-		deviceID = devInfo.(*config.VFIODev).ID
+		deviceID = *devInfo.(config.VFIODev).GetID()
 	default:
 		clh.Logger().WithFields(log.Fields{"devInfo": devInfo,
 			"deviceType": devType}).Error("HotplugRemoveDevice: unsupported device")
@@ -1202,7 +1228,9 @@ func (clh *cloudHypervisor) Capabilities(ctx context.Context) types.Capabilities
 
 	clh.Logger().WithField("function", "Capabilities").Info("get Capabilities")
 	var caps types.Capabilities
-	caps.SetFsSharingSupport()
+	if !clh.config.ConfidentialGuest {
+		caps.SetFsSharingSupport()
+	}
 	caps.SetBlockDeviceHotplugSupport()
 	return caps
 }
@@ -1349,7 +1377,6 @@ func (clh *cloudHypervisor) launchClh() (int, error) {
 
 	clh.Logger().WithField("path", clhPath).Info()
 	clh.Logger().WithField("args", strings.Join(args, " ")).Info()
-
 	cmdHypervisor := exec.Command(clhPath, args...)
 	if clh.config.Debug {
 		cmdHypervisor.Env = os.Environ()
@@ -1359,8 +1386,15 @@ func (clh *cloudHypervisor) launchClh() (int, error) {
 			cmdHypervisor.Stdout = clh.console
 		}
 	}
-
 	cmdHypervisor.Stderr = cmdHypervisor.Stdout
+
+	attr := syscall.SysProcAttr{}
+	attr.Credential = &syscall.Credential{
+		Uid:    clh.config.Uid,
+		Gid:    clh.config.Gid,
+		Groups: clh.config.Groups,
+	}
+	cmdHypervisor.SysProcAttr = &attr
 
 	err = utils.StartCmd(cmdHypervisor)
 	if err != nil {
@@ -1685,6 +1719,30 @@ func (clh *cloudHypervisor) cleanupVM(force bool) error {
 			}
 			clh.Logger().WithError(err).WithField("path", dir).Warnf("failed to remove vm path")
 		}
+	}
+	if rootless.IsRootless() {
+		if _, err := user.Lookup(clh.config.User); err != nil {
+			clh.Logger().WithError(err).WithFields(
+				log.Fields{
+					"user": clh.config.User,
+					"uid":  clh.config.Uid,
+				}).Warn("failed to find the user, it might have been removed")
+			return nil
+		}
+
+		if err := pkgUtils.RemoveVmmUser(clh.config.User); err != nil {
+			clh.Logger().WithError(err).WithFields(
+				log.Fields{
+					"user": clh.config.User,
+					"uid":  clh.config.Uid,
+				}).Warn("failed to delete the user")
+			return nil
+		}
+		clh.Logger().WithFields(
+			log.Fields{
+				"user": clh.config.User,
+				"uid":  clh.config.Uid,
+			}).Debug("successfully removed the non root user")
 	}
 
 	clh.reset()

@@ -6,11 +6,8 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
-use crate::config_map;
-use crate::infra;
 use crate::pod;
 use crate::policy;
-use crate::utils;
 use crate::yaml;
 
 use async_trait::async_trait;
@@ -18,6 +15,7 @@ use core::fmt::Debug;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::boxed;
+use std::collections::BTreeMap;
 use std::marker::{Send, Sync};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,43 +42,23 @@ impl yaml::K8sResource for List {
         use_cache: bool,
         _doc_mapping: &serde_yaml::Value,
         silent_unsupported_fields: bool,
-    ) -> anyhow::Result<()> {
+    ) {
         for item in &self.items {
-            let yaml_string = serde_yaml::to_string(&item)?;
+            let yaml_string = serde_yaml::to_string(&item).unwrap();
             let (mut resource, _kind) =
-                yaml::new_k8s_resource(&yaml_string, silent_unsupported_fields)?;
+                yaml::new_k8s_resource(&yaml_string, silent_unsupported_fields).unwrap();
             resource
                 .init(use_cache, item, silent_unsupported_fields)
-                .await?;
+                .await;
             self.resources.push(resource);
         }
-
-        Ok(())
     }
 
-    fn requires_policy(&self) -> bool {
-        for resource in &self.resources {
-            if resource.requires_policy() {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn get_metadata_name(&self) -> anyhow::Result<String> {
+    fn get_sandbox_name(&self) -> Option<String> {
         panic!("Unsupported");
     }
 
-    fn get_host_name(&self) -> anyhow::Result<String> {
-        panic!("Unsupported");
-    }
-
-    fn get_sandbox_name(&self) -> anyhow::Result<Option<String>> {
-        panic!("Unsupported");
-    }
-
-    fn get_namespace(&self) -> anyhow::Result<String> {
+    fn get_namespace(&self) -> String {
         panic!("Unsupported");
     }
 
@@ -89,35 +67,42 @@ impl yaml::K8sResource for List {
         _policy_mounts: &mut Vec<oci::Mount>,
         _storages: &mut Vec<policy::SerializedStorage>,
         _container: &pod::Container,
-        _infra_policy: &infra::InfraPolicy,
-    ) -> anyhow::Result<()> {
-        Ok(())
+        _agent_policy: &policy::AgentPolicy,
+    ) {
     }
 
-    fn generate_policy(
-        &mut self,
-        rules: &str,
-        infra_policy: &infra::InfraPolicy,
-        config_maps: &Vec<config_map::ConfigMap>,
-        config: &utils::Config,
-    ) -> anyhow::Result<()> {
-        for resource in &mut self.resources {
-            if resource.requires_policy() {
-                resource.generate_policy(rules, infra_policy, config_maps, config)?;
-            }
+    fn generate_policy(&self, agent_policy: &policy::AgentPolicy) -> String {
+        let mut policies: Vec<String> = Vec::new();
+        for resource in &self.resources {
+            policies.push(resource.generate_policy(agent_policy));
         }
-
-        Ok(())
+        policies.join(":")
     }
 
-    fn serialize(&mut self) -> anyhow::Result<String> {
+    fn serialize(&mut self, policy: &str) -> String {
+        let policies: Vec<&str> = policy.split(":").collect();
+        let len = policies.len();
+        assert!(len == self.resources.len());
+
         self.items.clear();
-        for resource in &mut self.resources {
-            let yaml = resource.serialize()?;
+        for i in 0..len {
+            let yaml = self.resources[i].serialize(policies[i]);
             let document = serde_yaml::Deserializer::from_str(&yaml);
-            let doc_value = Value::deserialize(document)?;
+            let doc_value = Value::deserialize(document).unwrap();
             self.items.push(doc_value.clone());
         }
-        Ok(serde_yaml::to_string(&self)?)
+        serde_yaml::to_string(&self).unwrap()
+    }
+
+    fn get_containers(&self) -> &Vec<pod::Container> {
+        panic!("Unsupported");
+    }
+
+    fn get_annotations(&self) -> Option<BTreeMap<String, String>> {
+        panic!("Unsupported");
+    }
+
+    fn use_host_network(&self) -> bool {
+        panic!("Unsupported");
     }
 }
