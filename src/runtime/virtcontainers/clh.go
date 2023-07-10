@@ -74,7 +74,7 @@ const (
 	// Values based on:
 	clhTimeout                     = 10
 	clhAPITimeout                  = 1
-	clhAPITimeoutConfidentialGuest = 20
+	clhAPITimeoutConfidentialGuest = 40
 	// Minimum timout for calling CreateVM followed by BootVM. Executing these two APIs
 	// might take longer than the value returned by getClhAPITimeout().
 	clhCreateAndBootVMMinimumTimeout = 10
@@ -605,8 +605,8 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 				clh.vmconfig.Pmem = &[]chclient.PmemConfig{*pmem}
 			}
 		}
-	} 
-	
+	}
+
 	initrdPath, err := clh.config.InitrdAssetPath()
 	if err != nil {
 		return err
@@ -738,7 +738,7 @@ func (clh *cloudHypervisor) StartVM(ctx context.Context, timeout int) error {
 	if bootTimeout < clhCreateAndBootVMMinimumTimeout {
 		bootTimeout = clhCreateAndBootVMMinimumTimeout
 	}
-	ctx, cancel := context.WithTimeout(ctx, bootTimeout*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), bootTimeout*time.Second)
 	defer cancel()
 
 	if err := clh.bootVM(ctx); err != nil {
