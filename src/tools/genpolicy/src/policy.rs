@@ -50,7 +50,7 @@ pub struct AgentPolicy {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PolicyData {
     pub containers: Vec<ContainerPolicy>,
-    pub request_defaults: RequestDefaults,
+    pub rules_settings: RulesSettings,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -146,19 +146,71 @@ pub struct PersistentVolumeClaimVolume {
     pub mount_source: String,
 }
 
+/// The field values of this struct get loaded from data.json.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RequestDefaults {
+pub struct RulesSettings {
+    /// AllowRequestsFailingPolicy *allows all requests - even those that
+    /// are causing a policy failure*. This is an unsecure configuration
+    /// but is useful for allowing unsecure pods to start, then connect to
+    /// them and inspect Policy logs for the root cause of a failure.
+    AllowRequestsFailingPolicy: bool,
+
     /// Guest file paths matching these regular expressions can be copied by the Host.
-    pub CopyFileRequest: Vec<String>,
+    CopyFileRequest: Vec<String>,
+
+    /// Allow CreateSandboxRequest.
+    CreateSandboxRequest: bool,
+
+    /// Allow DestroySandboxRequest.
+    DestroySandboxRequest: bool,
+
+    /// Allow DestroySandboxRequest.
+    GetOOMEventRequest: bool,
+
+    /// Allow GuestDetailsRequest.
+    GuestDetailsRequest: bool,
+
+    /// Allow OnlineCPUMemRequest.
+    OnlineCPUMemRequest: bool,
 
     /// Array of commands allowed to be executed by the Host in all Guest containers.
-    pub ExecProcessRequest: Vec<String>,
+    ExecProcessRequest: Vec<String>,
 
-    /// Allow Host reading from Guest containers stdout and stderr.
-    pub ReadStreamRequest: bool,
+    /// Allow the Host to read from Guest containers' stdout and stderr.
+    ReadStreamRequest: bool,
 
-    /// Allow Host writing to Guest containers stdin.
-    pub WriteStreamRequest: bool,
+    /// Allow RemoveContainerRequest.
+    RemoveContainerRequest: bool,
+
+    /// Allow RemoveStaleVirtiofsShareMountsRequest.
+    RemoveStaleVirtiofsShareMountsRequest: bool,
+
+    /// Allow SignalProcessRequest.
+    SignalProcessRequest: bool,
+
+    /// Allow StartContainerRequest.
+    StartContainerRequest: bool,
+
+    /// Allow StatsContainerRequest.
+    StatsContainerRequest: bool,
+
+    /// Allow TtyWinResizeRequest.
+    TtyWinResizeRequest: bool,
+
+    /// Allow UpdateEphemeralMountsRequest.
+    UpdateEphemeralMountsRequest: bool,
+
+    /// Allow UpdateInterfaceRequest.
+    UpdateInterfaceRequest: bool,
+
+    /// Allow UpdateRoutesRequest.
+    UpdateRoutesRequest: bool,
+
+    /// Allow the Host to write to Guest containers' stdin.
+    WriteStreamRequest: bool,
+
+    /// Allow WaitProcessRequest.
+    WaitProcessRequest: bool,
 }
 
 impl AgentPolicy {
@@ -257,7 +309,7 @@ impl AgentPolicy {
 
         let policy_data = policy::PolicyData {
             containers: policy_containers,
-            request_defaults: self.infra_policy.request_defaults.clone(),
+            rules_settings: self.infra_policy.rules_settings.clone(),
         };
 
         let json_data = serde_json::to_string_pretty(&policy_data).unwrap();

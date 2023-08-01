@@ -127,12 +127,57 @@
     "kata_config": {
         "confidential_guest": true
     },
-    "request_defaults": {
+    "rules_settings": {
+        "ATTENTION 1": [
+            "Setting the value of AllowRequestsFailingPolicy to true",
+            "allows all requests to be executed - even those requests",
+            "that are causing a policy failure! This is an insecure",
+            "configuration but can be useful for allowing insecure pods",
+            "to start, then connect to them and inspect Policy logs for",
+            "the root cause of a failure."
+        ],
+        "AllowRequestsFailingPolicy": false,
+
+
+        "ATTENTION 2": [
+            "Guest files matching the path regular expressions below",
+            "can be copied by the Host."
+        ],
         "CopyFileRequest": [
             "^/run/kata-containers/shared/containers/"
         ],
+
+
+        "ATTENTION 3": [
+            "This field can be used to allow the Host to execute some",
+            "commands on the Guest. For example, adding:",
+
+            "/bin/sh",
+
+            "to this array will allow the following command to be",
+            "executed successfully:",
+
+            "kubectl exec pod_name -- /bin/sh"
+        ],
         "ExecProcessRequest": [],
+
+
+        "CreateSandboxRequest": true,
+        "DestroySandboxRequest": true,
+        "GetOOMEventRequest": true,
+        "GuestDetailsRequest": true,
+        "OnlineCPUMemRequest": true,
         "ReadStreamRequest": false,
-        "WriteStreamRequest": false
+        "RemoveContainerRequest": true,
+        "RemoveStaleVirtiofsShareMountsRequest": true,
+        "SignalProcessRequest": true,
+        "StartContainerRequest": true,
+        "StatsContainerRequest": true,
+        "TtyWinResizeRequest": true,
+        "UpdateEphemeralMountsRequest": true,
+        "UpdateInterfaceRequest": true,
+        "UpdateRoutesRequest": true,
+        "WriteStreamRequest": false,
+        "WaitProcessRequest": true
     }
 }

@@ -5,31 +5,31 @@ import future.keywords.every
 
 import input
 
-# Requests that are always allowed.
-default CreateSandboxRequest := true
-default DestroySandboxRequest := true
-default GetOOMEventRequest := true
-default GuestDetailsRequest := true
-default OnlineCPUMemRequest := true
-default PullImageRequest := true
-default RemoveContainerRequest := true
-default RemoveStaleVirtiofsShareMountsRequest := true
-default SignalProcessRequest := true
-default StartContainerRequest := true
-default StatsContainerRequest := true
-default TtyWinResizeRequest := true
-default UpdateEphemeralMountsRequest := true
-default UpdateInterfaceRequest := true
-default UpdateRoutesRequest := true
-default WaitProcessRequest := true
+# It is recommended to change data.json for customizing the behavior
+# of the rules from this file, rather than making changes in this file.
 
-# Configure the Agent to *allow any requests causing a policy failure*.
-# This is an unsecure configuration but is useful for allowing unsecure
-# pods to start, then connect to them and inspect OPA logs for the root
-# cause of a failure.
-# default AllowRequestsFailingPolicy := true
+default AllowRequestsFailingPolicy              := false
+default CopyFileRequest                         := false
+default CreateContainerRequest                  := false
+default CreateSandboxRequest                    := false
+default DestroySandboxRequest                   := false
+default ExecProcessRequest                      := false
+default GetOOMEventRequest                      := false
+default GuestDetailsRequest                     := false
+default OnlineCPUMemRequest                     := false
+default ReadStreamRequest                       := false
+default RemoveContainerRequest                  := false
+default RemoveStaleVirtiofsShareMountsRequest   := false
+default SignalProcessRequest                    := false
+default StartContainerRequest                   := false
+default StatsContainerRequest                   := false
+default TtyWinResizeRequest                     := false
+default UpdateEphemeralMountsRequest            := false
+default UpdateInterfaceRequest                  := false
+default UpdateRoutesRequest                     := false
+default WaitProcessRequest                      := false
+default WriteStreamRequest                      := false
 
-######################################################################
 CreateContainerRequest {
     some policy_container in policy_data.containers
 
@@ -1007,20 +1007,32 @@ allow_mount_point(policy_storage, input_storage, bundle_id, sandbox_id) {
 }
 
 ######################################################################
+AllowRequestsFailingPolicy {
+    policy_data.rules_settings.AllowRequestsFailingPolicy == true
+}
+
 CopyFileRequest {
     print("CopyFileRequest:", input)
 
-    some policy_regex in policy_data.request_defaults.CopyFileRequest
+    some policy_regex in policy_data.rules_settings.CopyFileRequest
     regex.match(policy_regex, input.path)
 
     print("CopyFileRequest: success")
+}
+
+CreateSandboxRequest {
+    policy_data.rules_settings.CreateSandboxRequest == true
+}
+
+DestroySandboxRequest {
+    policy_data.rules_settings.DestroySandboxRequest == true
 }
 
 ExecProcessRequest {
     input_command = concat(" ", input.process.Args)
     print("ExecProcessRequest: input_command =", input_command)
 
-    some policy_command in policy_data.request_defaults.ExecProcessRequest
+    some policy_command in policy_data.rules_settings.ExecProcessRequest
     policy_command == input_command
 
     print("ExecProcessRequest: success")
@@ -1040,10 +1052,62 @@ ExecProcessRequest {
     print("ExecProcessRequest: success")
 }
 
+GetOOMEventRequest {
+    policy_data.rules_settings.GetOOMEventRequest == true
+}
+
+GuestDetailsRequest {
+    policy_data.rules_settings.GuestDetailsRequest == true
+}
+
+OnlineCPUMemRequest {
+    policy_data.rules_settings.OnlineCPUMemRequest == true
+}
+
 ReadStreamRequest {
-    policy_data.request_defaults.ReadStreamRequest == true
+    policy_data.rules_settings.ReadStreamRequest == true
+}
+
+RemoveContainerRequest {
+    policy_data.rules_settings.RemoveContainerRequest == true
+}
+
+RemoveStaleVirtiofsShareMountsRequest {
+    policy_data.rules_settings.RemoveStaleVirtiofsShareMountsRequest == true
+}
+
+SignalProcessRequest {
+    policy_data.rules_settings.SignalProcessRequest == true
+}
+
+StartContainerRequest {
+    policy_data.rules_settings.StartContainerRequest == true
+}
+
+StatsContainerRequest {
+    policy_data.rules_settings.StatsContainerRequest == true
+}
+
+TtyWinResizeRequest {
+    policy_data.rules_settings.TtyWinResizeRequest == true
+}
+
+UpdateEphemeralMountsRequest {
+    policy_data.rules_settings.UpdateEphemeralMountsRequest == true
+}
+
+UpdateInterfaceRequest {
+    policy_data.rules_settings.UpdateInterfaceRequest == true
+}
+
+UpdateRoutesRequest {
+    policy_data.rules_settings.UpdateRoutesRequest == true
 }
 
 WriteStreamRequest {
-    policy_data.request_defaults.WriteStreamRequest == true
+    policy_data.rules_settings.WriteStreamRequest == true
+}
+
+WaitProcessRequest {
+    policy_data.rules_settings.WaitProcessRequest == true
 }
