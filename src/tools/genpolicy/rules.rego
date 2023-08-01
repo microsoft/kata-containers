@@ -932,22 +932,16 @@ allow_storages(policy_storages, input_storages, bundle_id, sandbox_id) {
     print("allow_storages: policy_count =", policy_count, "input_count =", input_count)
     policy_count == input_count
 
-    some i, input_storage in input_storages
-    allow_input_storage(i, input_storage, policy_storages, policy_count, bundle_id, sandbox_id)
+    every i, input_storage in input_storages {
+        print("allow_storages: i =", i, "input_storage =", input_storage)
+
+        policy_storage := policy_storages[i]
+        print("allow_storages: i =", i, "policy_storage =", policy_storage)
+
+        storages_match(policy_storage, input_storage, bundle_id, sandbox_id)
+    }
 
     print("allow_storages: success")
-}
-
-allow_input_storage(i, input_storage, policy_storages, count, bundle_id, sandbox_id) {
-    print("allow_input_storage: i =", i, "input_storage =", input_storage)
-
-    policy_storage := policy_storages[i]
-    print("allow_input_storage: i =", i, "policy_storage =", policy_storage)
-
-    storages_match(policy_storage, input_storage, bundle_id, sandbox_id)
-
-    # Stop when reaching the last element of the storages array.
-    i == count - 1
 }
 
 storages_match(policy_storage, input_storage, bundle_id, sandbox_id) {
