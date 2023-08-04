@@ -182,20 +182,6 @@ macro_rules! is_allowed {
         }
     };
 }
-macro_rules! is_allowed_create_container {
-    ($req:ident) => {
-        config_allows!($req);
-        #[cfg(feature = "security-policy")]
-        {
-            let opa_input = CreateContainerRequestData {
-                oci: rustjail::grpc_to_oci(&$req.OCI),
-                storages: $req.storages.clone(),
-            };
-            let request = serde_json::to_string(&opa_input).unwrap();
-            policy_allows!($req, request);
-        }
-    };
-}
 
 /// OPA input data for CreateContainerRequest. The "OCI" field of
 /// the input request is converted into the "oci" field below.
@@ -829,7 +815,7 @@ impl agent_ttrpc::AgentService for AgentService {
         req: protocols::agent::CreateContainerRequest,
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "create_container", req);
-        is_allowed_create_container!(req);
+        is_allowed!(req);
         match self.do_create_container(req).await {
             Err(e) => Err(ttrpc_error!(ttrpc::Code::INTERNAL, e)),
             Ok(_) => Ok(Empty::new()),
