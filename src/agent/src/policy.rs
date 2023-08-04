@@ -179,7 +179,7 @@ impl AgentPolicy {
         }
     }
 
-    async fn log_opa_input(&mut self, ep: &str, opa_input: &str) {
+    async fn log_opa_input(&mut self, ep: &str, input: &str) {
         // TODO: disable this log by default and allow it to be enabled
         // through Policy.
 
@@ -187,7 +187,7 @@ impl AgentPolicy {
             match ep {
                 "StatsContainerRequest" | "ReadStreamRequest" | "SetPolicyRequest" => {}
                 _ => {
-                    let log_entry = "# ".to_string() + ep + "\n\n" + opa_input + "\n\n";
+                    let log_entry = format!("[\"ep\":\"{}\",{}],\n\n", ep, input);
                     log_file.write_all(log_entry.as_bytes()).await.unwrap();
                     log_file.flush().await.unwrap();
                 }
