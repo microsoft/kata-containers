@@ -16,7 +16,7 @@ AGENT_VERSION=${AGENT_VERSION:-}
 RUST_VERSION="null"
 AGENT_BIN=${AGENT_BIN:-kata-agent}
 AGENT_INIT=${AGENT_INIT:-no}
-MEASURED_ROOTFS=${MEASURED_ROOTFS:-no}
+KATA_BUILD_CC=${KATA_BUILD_CC:-no}
 KERNEL_MODULES_DIR=${KERNEL_MODULES_DIR:-""}
 OSBUILDER_VERSION="unknown"
 DOCKER_RUNTIME=${DOCKER_RUNTIME:-runc}
@@ -27,7 +27,6 @@ LIBC=${LIBC:-musl}
 # However, it is not enforced by default: you need to enable that in the main configuration file.
 SECCOMP=${SECCOMP:-"yes"}
 SELINUX=${SELINUX:-"no"}
-SECURITY_POLICY=${SECURITY_POLICY:-no}
 
 lib_file="${script_dir}/../scripts/lib.sh"
 source "$lib_file"
@@ -158,6 +157,12 @@ USE_PODMAN          If set and USE_DOCKER not set, then build the rootfs inside
                     a podman container (requires podman).
                     Default value: <not set>
 
+AA_KBC              Key broker client module for attestation-agent. This is
+                    required for confidential containers.
+                    See https://github.com/containers/attestation-agent
+                    for more information on available modules.
+                    Default value: <not set>
+
 Refer to the Platform-OS Compatibility Matrix for more details on the supported
 architectures:
 https://github.com/kata-containers/kata-containers/tree/main/tools/osbuilder#platform-distro-compatibility-matrix
@@ -209,11 +214,11 @@ docker_extra_args()
 		args+=" -v ${gentoo_local_portage_dir}:/usr/portage/packages"
 		args+=" --volumes-from ${gentoo_portage_container}"
 		;;
-	debian | ubuntu | suse)
+        debian | ubuntu | suse)
 		source /etc/os-release
 
 		case "$ID" in
-		fedora | centos | rhel)
+                fedora | centos | rhel)
 			# Depending on the podman version, we'll face issues when passing
 		        # `--security-opt apparmor=unconfined` on a system where not apparmor is not installed.
 			# Because of this, let's just avoid adding this option when the host OS comes from Red Hat.
@@ -260,6 +265,8 @@ copy_kernel_modules()
 	info "Copy kernel modules from ${KERNEL_MODULES_DIR}"
 	mkdir -p "${dest_dir}"
 	cp -a "${KERNEL_MODULES_DIR}" "${dest_dir}/"
+	local KERNEL_VER=$(ls ${dest_dir})
+	depmod -b "${rootfs_dir}" ${KERNEL_VER}
 	OK "Kernel modules copied"
 }
 
@@ -305,9 +312,6 @@ check_env_variables()
 	GOPATH_LOCAL="${GOPATH%%:*}"
 
 	[ "$AGENT_INIT" == "yes" -o "$AGENT_INIT" == "no" ] || die "AGENT_INIT($AGENT_INIT) is invalid (must be yes or no)"
-
-	[ "$SECURITY_POLICY" == "yes" -o "$SECURITY_POLICY" == "no" ] || die "SECURITY_POLICY($SECURITY_POLICY) is invalid (must be yes or no)"
-	[ "$SECURITY_POLICY" == "no" -o "$AGENT_INIT" == "no" ] || die "SECURITY_POLICY($SECURITY_POLICY) and AGENT_INIT($AGENT_INIT) is an invalid combination (at least one must be no)"
 
 	[ -n "${KERNEL_MODULES_DIR}" ] && [ ! -d "${KERNEL_MODULES_DIR}" ] && die "KERNEL_MODULES_DIR defined but is not an existing directory"
 
@@ -384,10 +388,13 @@ build_rootfs_distro()
 			engine_build_args+=" --build-arg IMAGE_REGISTRY=${IMAGE_REGISTRY}"
 		fi
 
+		skopeo_version="$(get_package_version_from_kata_yaml externals.skopeo.version)"
+
 		# setup to install rust here
 		generate_dockerfile "${distro_config_dir}"
 		"$container_engine" build  \
 			${engine_build_args} \
+			--build-arg SKOPEO_VERSION="${skopeo_version}" \
 			--build-arg http_proxy="${http_proxy}" \
 			--build-arg https_proxy="${https_proxy}" \
 			-t "${image_name}" "${distro_config_dir}"
@@ -437,20 +444,20 @@ build_rootfs_distro()
 			--env ROOTFS_DIR="/rootfs" \
 			--env AGENT_BIN="${AGENT_BIN}" \
 			--env AGENT_INIT="${AGENT_INIT}" \
+			--env KATA_BUILD_CC="${KATA_BUILD_CC}" \
 			--env ARCH="${ARCH}" \
 			--env CI="${CI}" \
-			--env MEASURED_ROOTFS="${MEASURED_ROOTFS}" \
 			--env KERNEL_MODULES_DIR="${KERNEL_MODULES_DIR}" \
 			--env LIBC="${LIBC}" \
 			--env EXTRA_PKGS="${EXTRA_PKGS}" \
 			--env OSBUILDER_VERSION="${OSBUILDER_VERSION}" \
 			--env OS_VERSION="${OS_VERSION}" \
 			--env INSIDE_CONTAINER=1 \
+			--env AA_KBC="${AA_KBC}" \
 			--env SECCOMP="${SECCOMP}" \
 			--env SELINUX="${SELINUX}" \
 			--env DEBUG="${DEBUG}" \
 			--env HOME="/root" \
-			--env SECURITY_POLICY="${SECURITY_POLICY}" \
 			-v "${repo_dir}":"/kata-containers" \
 			-v "${ROOTFS_DIR}":"/rootfs" \
 			-v "${script_dir}/../scripts":"/scripts" \
@@ -479,6 +486,9 @@ prepare_overlay()
 		ln -sf  /init ./sbin/init
 	fi
 
+	# Kata systemd unit file
+	mkdir -p ./etc/systemd/system/basic.target.wants/
+	ln -sf /usr/lib/systemd/system/kata-containers.target ./etc/systemd/system/basic.target.wants/kata-containers.target
 	popd  > /dev/null
 }
 
@@ -627,41 +637,9 @@ EOF
 	if [ "${AGENT_INIT}" == "yes" ]; then
 		setup_agent_init "${AGENT_DEST}" "${init}"
 	else
-		# Setup systemd-based environment for kata-agent
+		# Setup systemd service for kata-agent
 		mkdir -p "${ROOTFS_DIR}/etc/systemd/system/basic.target.wants"
 		ln -sf "/usr/lib/systemd/system/kata-containers.target" "${ROOTFS_DIR}/etc/systemd/system/basic.target.wants/kata-containers.target"
-		mkdir -p "${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants"
-		ln -sf "/usr/lib/systemd/system/dbus.socket" "${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants/dbus.socket"
-		chmod g+rx,o+x "${ROOTFS_DIR}"
-	fi
-
-	if [ "${SECURITY_POLICY}" == "yes" ]; then
-		# Setup systemd-based environment for kata-opa
-		local rootfs_opa_bin="$(get_rootfs_opa_bin_path "${ROOTFS_DIR}")"
-		if [ -z "${rootfs_opa_bin}" ]; then
-			# OPA was not installed already, so download it here.
-			#
-			# TODO: if an OPA package is not available for the Guest image distro,
-			#   	Kata should cache the OPA source code, toolchain information, etc.
-			#   	OPA should be built from the cached source code instead of downloading
-			#   	this binary.
-			#
-			opa_bin_url="$(get_package_version_from_kata_yaml externals.open-policy-agent.meta.binary)"
-			rootfs_opa_bin="${ROOTFS_DIR}/usr/local/bin/opa"
-			info "Downloading OPA binary from ${opa_bin_url}"
-			curl --fail -L "${opa_bin_url}" -o opa || die "Failed to download OPA"
-			info "Installing OPA binary to ${rootfs_opa_bin}"
-			install -D -o root -g root -m 0755 opa -T "${rootfs_opa_bin}"
-		else
-			info "OPA binary already exists in ${rootfs_opa_bin}"
-		fi
-		local kata_opa_path="${script_dir}/../../../src/kata-opa"
-		install -D -o root -g root -m 0644 "${kata_opa_path}/kata-opa.service" -T "${ROOTFS_DIR}/usr/lib/systemd/system/kata-opa.service"
-		local opa_settings_dir="${ROOTFS_DIR}/etc/kata-opa"
-		mkdir -p "${opa_settings_dir}"
-		install -D -o root -g root -m 0644 "${kata_opa_path}/allow-all.rego" -T "${opa_settings_dir}/default-policy.rego"
-		mkdir -p "${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants"
-		ln -sf "/usr/lib/systemd/system/kata-opa.service" "${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants/kata-opa.service"
 	fi
 
 	info "Check init is installed"
@@ -677,27 +655,57 @@ EOF
 	info "Create /etc/resolv.conf file in rootfs if not exist"
 	touch "$dns_file"
 
+    if [ -n "${AA_KBC}" ]; then
+		if [ "${AA_KBC}" == "offline_sev_kbc" ]; then
+			info "Adding agent config for ${AA_KBC}"
+			AA_KBC_PARAMS="offline_sev_kbc::null" envsubst < "${script_dir}/agent-config.toml.in" | tee "${ROOTFS_DIR}/etc/agent-config.toml"
+		fi
+		if [ "${AA_KBC}" == "online_sev_kbc" ]; then
+			info "Adding agent config for ${AA_KBC}"
+			#KBC URI will be specified in the config file via kernel params
+			AA_KBC_PARAMS="online_sev_kbc::123.123.123.123:44444" envsubst < "${script_dir}/agent-config.toml.in" | tee "${ROOTFS_DIR}/etc/agent-config.toml"
+		fi
+		attestation_agent_url="$(get_package_version_from_kata_yaml externals.attestation-agent.url)"
+		attestation_agent_version="$(get_package_version_from_kata_yaml externals.attestation-agent.version)"
+		info "Install attestation-agent with KBC ${AA_KBC}"
+		#git clone "${attestation_agent_url}" --branch "${attestation_agent_tag}" --single-branch
+		git clone --depth=1 "${attestation_agent_url}" attestation-agent
+		pushd attestation-agent/app
+		git fetch --depth=1 origin "${attestation_agent_version}"
+		git checkout FETCH_HEAD
+		source "${HOME}/.cargo/env"
+		target="${ARCH}-unknown-linux-${LIBC}"
+		if [ "${AA_KBC}" == "eaa_kbc" ] && [ "${ARCH}" == "x86_64" ]; then
+			RUSTFLAGS="-C link-args=-Wl,-rpath,/usr/local/lib/rats-tls"
+			# Currently eaa_kbc module only support this specific platform
+			target="x86_64-unknown-linux-gnu"
+		fi
+		if [ "$(uname -m)" != "$ARCH" ]; then
+			RUSTFLAGS+=" -C linker=$CC"
+		fi
+		export RUSTFLAGS
+		# Foreign CC is incompatible with libgit2 -- CC is still handled by `-C linker=...` flag
+		CC= cargo build --release --target "${target}" --no-default-features --features "${AA_KBC}"
+		install -D -o root -g root -m 0755 "target/${target}/release/attestation-agent" -t "${ROOTFS_DIR}/usr/local/bin/"
+		popd
+	fi
+
+	if [ "${KATA_BUILD_CC}" == "yes" ]; then
+		info "Integrate pause image inside rootfs for CC"
+		pause_repo="$(get_package_version_from_kata_yaml externals.pause.repo)"
+		pause_version="$(get_package_version_from_kata_yaml externals.pause.version)"
+		[ -n "pause_repo" ] || die "failed to get pause image repo"
+		[ -n "pause_version" ] || die "failed to get pause image version"
+
+		skopeo copy "${pause_repo}":"${pause_version}" oci:pause:"${pause_version}"
+		umoci unpack --image pause:"${pause_version}"  "${ROOTFS_DIR}/pause_bundle"
+
+		info "Install init_trusted_storage script for CC"
+		install -o root -g root -m 0500 "${script_dir}/init_trusted_storage.sh" "${ROOTFS_DIR}/usr/bin/kata-init-trusted-storage"
+	fi
+
 	info "Creating summary file"
 	create_summary_file "${ROOTFS_DIR}"
-}
-
-get_rootfs_opa_bin_path()
-{
-	local rootfs_dir="$1"
-	local -a bin_paths=(
-		"/bin"
-		"/usr/bin"
-		"/usr/local/bin"
-	)
-
-	for path in "${bin_paths[@]}"
-	do
-		local opa_path="${rootfs_dir}${path}/opa"
-		if [ -f "${opa_path}" ]; then
-			echo "${opa_path}"
-			return 0
-		fi
-	done
 }
 
 parse_arguments()
