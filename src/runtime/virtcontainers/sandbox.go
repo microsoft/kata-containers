@@ -10,6 +10,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"math"
@@ -645,6 +647,10 @@ func newSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Factor
 				sandboxConfig.Containers[cnt].DeviceInfos = infos
 			}
 		}
+	}
+
+	if sandboxConfig.HypervisorConfig.PolicyHash, err = getAgentPolicyHash(sandboxConfig.AgentConfig.Policy); err != nil {
+		return nil, err
 	}
 
 	// store doesn't require hypervisor to be stored immediately
@@ -2701,4 +2707,13 @@ func (s *Sandbox) resetVCPUsPinning(ctx context.Context, vCPUThreadsMap VcpuThre
 // PullImage pulls an image on a sandbox.
 func (s *Sandbox) PullImage(ctx context.Context, req *image.PullImageReq) (*image.PullImageResp, error) {
 	return s.agent.PullImage(ctx, req)
+}
+
+func getAgentPolicyHash(policy string) (string, error) {
+	if len(policy) == 0 {
+		return "", nil
+	}
+    h := sha256.New()
+    h.Write([]byte(policy))
+    return hex.EncodeToString(h.Sum(nil)), nil
 }
