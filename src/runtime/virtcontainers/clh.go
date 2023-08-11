@@ -411,10 +411,8 @@ func (clh *cloudHypervisor) enableProtection() error {
 
 	// SNP protection explicitly requested by config
 	if clh.config.SevSnpGuest {
-		clh.Logger().WithField("function", "enableProtection").Info("SEVSNPGUEST")
 		protection = snpProtection
 	} else {
-		clh.Logger().WithField("function", "enableProtection").Info("NOSEVSNPGUEST")
 		// protection method not explicitly requested, using available method
 		availableProtection, err := availableGuestProtection()
 		if err != nil {
