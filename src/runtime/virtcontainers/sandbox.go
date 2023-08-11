@@ -649,9 +649,7 @@ func newSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Factor
 		}
 	}
 
-	if sandboxConfig.HypervisorConfig.PolicyHash, err = getAgentPolicyHash(sandboxConfig.AgentConfig.Policy); err != nil {
-		return nil, err
-	}
+	sandboxConfig.HypervisorConfig.PolicyHash = getAgentPolicyHash(sandboxConfig.AgentConfig.Policy)
 
 	// store doesn't require hypervisor to be stored immediately
 	if err = s.hypervisor.CreateVM(ctx, s.id, s.network, &sandboxConfig.HypervisorConfig); err != nil {
@@ -2709,11 +2707,12 @@ func (s *Sandbox) PullImage(ctx context.Context, req *image.PullImageReq) (*imag
 	return s.agent.PullImage(ctx, req)
 }
 
-func getAgentPolicyHash(policy string) (string, error) {
+func getAgentPolicyHash(policy string) string {
 	if len(policy) == 0 {
-		return "", nil
+		return ""
+	} else {
+		h := sha256.New()
+		h.Write([]byte(policy))
+		return hex.EncodeToString(h.Sum(nil))
 	}
-    h := sha256.New()
-    h.Write([]byte(policy))
-    return hex.EncodeToString(h.Sum(nil)), nil
 }
