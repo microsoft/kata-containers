@@ -5,6 +5,7 @@
 
 use anyhow::{anyhow, Result};
 use reqwest::Client;
+use sha2::{Sha256, Digest};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, Duration};
@@ -106,6 +107,8 @@ impl AgentPolicy {
 
     /// Replace the Policy in OPA.
     pub async fn set_policy(&mut self, policy: &str) -> Result<()> {
+        check_policy_hash(policy)?;
+
         // Delete the old rules.
         self.opa_client
             .delete(&self.policy_path)
@@ -194,4 +197,14 @@ impl AgentPolicy {
             }
         }
     }
+}
+
+pub fn check_policy_hash(policy: &str) -> Result<()> {
+    let mut hasher = Sha256::new();
+    hasher.update(policy.as_bytes());
+    let digest = hasher.finalize();
+    debug!(sl!(), "New policy hash: {}", hex::encode(digest));
+
+    // TODO: check that the corresponding TEE field matches this hash.
+    Ok(())
 }

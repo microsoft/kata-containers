@@ -74,16 +74,19 @@ serde = { version = "1.0.129", features = ["derive"] }
 toml = "0.5.8"
 clap = { version = "3.0.1", features = ["derive"] }
 
-# "vendored" feature for openssl is required by musl build
-openssl = "0.10.54"
-openssl-src = "111.26.0"
 
 # OPA requests
-http = "0.2.8"
-reqwest = { version = "0.11.14" }
+http = { version = "0.2.8", optional = true }
+reqwest = { version = "0.11.14", optional = true }
+# "vendored" feature for openssl is required by musl build
+openssl = { version = "0.10.54", features = ["vendored"], optional = true }
 
 # Image pull/decrypt
 image-rs = { git = "https://github.com/confidential-containers/image-rs", tag = "v0.6.0", default-features = false, features = ["kata-cc-native-tls"] }
+
+# Policy validation
+sha2 = { version = "0.10.6", optional = true }
+hex = { version = "0.4.2", optional = true }
 
 [patch.crates-io]
 oci-distribution = { git = "https://github.com/krustlet/oci-distribution.git", rev = "f44124c" }
@@ -105,7 +108,7 @@ lto = true
 [features]
 seccomp = ["rustjail/seccomp"]
 standard-oci-runtime = ["rustjail/standard-oci-runtime"]
-security-policy = []
+security-policy = ["hex", "http", "openssl", "reqwest", "sha2"]
 
 [[bin]]
 name = "kata-agent"
