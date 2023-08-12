@@ -99,6 +99,7 @@ static int tarfs_readdir(struct file *file, struct dir_context *ctx)
 	char *name_buffer = NULL;
 	u64 name_len = 0;
 	u64 size = i_size_read(inode) / sizeof(disk_dentry) * sizeof(disk_dentry);
+	loff_t orig_pos = ctx->pos;
 
 	/* ctx->pos must be aligned to a directory entry. */
 	if (ctx->pos % sizeof(struct tarfs_direntry))
@@ -123,13 +124,18 @@ static int tarfs_readdir(struct file *file, struct dir_context *ctx)
 		disk_len = le64_to_cpu(disk_dentry.namelen);
 		if (disk_len > name_len) {
 			kfree(name_buffer);
+			name_buffer = NULL;
 
-			if (disk_len > SIZE_MAX)
-				return -ENOMEM;
+			if (disk_len > SIZE_MAX) {
+				ret = -ENOMEM;
+				break;
+			}
 
 			name_buffer = kmalloc(disk_len, GFP_KERNEL);
-			if (!name_buffer)
-				return -ENOMEM;
+			if (!name_buffer) {
+				ret = -ENOMEM;
+				break;
+			}
 			name_len = disk_len;
 		}
 
@@ -161,7 +167,7 @@ static int tarfs_readdir(struct file *file, struct dir_context *ctx)
 	}
 
 	kfree(name_buffer);
-	return ret;
+	return ctx->pos != orig_pos ? 0 : ret;
 }
 
 static int tarfs_readpage(struct file *file, struct page *page)
