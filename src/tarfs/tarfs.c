@@ -98,10 +98,9 @@ static int tarfs_readdir(struct file *file, struct dir_context *ctx)
 	int ret = 0;
 	char *name_buffer = NULL;
 	u64 name_len = 0;
-	u64 cur = ctx->pos;
 	u64 size = i_size_read(inode) / sizeof(disk_dentry) * sizeof(disk_dentry);
 
-	/* cur must be aligned to a directory entry. */
+	/* ctx->pos must be aligned to a directory entry. */
 	if (ctx->pos % sizeof(struct tarfs_direntry))
 		return -ENOENT;
 
@@ -109,15 +108,15 @@ static int tarfs_readdir(struct file *file, struct dir_context *ctx)
 	if (offset + size < offset)
 		return -ERANGE;
 
-	/* Make sure the increment of cur won't overflow by limiting size. */
+	/* Make sure the increment of ctx->pos won't overflow by limiting size. */
 	if (size >= U64_MAX - sizeof(disk_dentry))
 		return -ERANGE;
 
-	for (cur = ctx->pos; cur < size; cur += sizeof(disk_dentry)) {
+	for (; ctx->pos < size; ctx->pos += sizeof(disk_dentry)) {
 		u64 disk_len;
 		u8 type;
 
-		ret = tarfs_dev_read(inode->i_sb, offset + cur, &disk_dentry, sizeof(disk_dentry));
+		ret = tarfs_dev_read(inode->i_sb, offset + ctx->pos, &disk_dentry, sizeof(disk_dentry));
 		if (ret)
 			break;
 
@@ -162,10 +161,6 @@ static int tarfs_readdir(struct file *file, struct dir_context *ctx)
 	}
 
 	kfree(name_buffer);
-
-	if (!ret)
-		ctx->pos = cur;
-
 	return ret;
 }
 
