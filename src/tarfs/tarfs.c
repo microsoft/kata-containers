@@ -179,8 +179,11 @@ static int tarfs_readpage(struct file *file, struct page *page)
 	int ret;
 
 	buf = kmap_local_page(page);
-	if (!buf)
+	if (!buf) {
+		SetPageError(page);
+		unlock_page(page);
 		return -ENOMEM;
+	}
 
 	offset = page_offset(page);
 	size = i_size_read(inode);
