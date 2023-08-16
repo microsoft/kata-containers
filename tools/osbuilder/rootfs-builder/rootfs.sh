@@ -27,6 +27,7 @@ LIBC=${LIBC:-musl}
 # However, it is not enforced by default: you need to enable that in the main configuration file.
 SECCOMP=${SECCOMP:-"yes"}
 SELINUX=${SELINUX:-"no"}
+AGENT_POLICY=${AGENT_POLICY:-no}
 
 lib_file="${script_dir}/../scripts/lib.sh"
 source "$lib_file"
@@ -312,6 +313,7 @@ check_env_variables()
 	GOPATH_LOCAL="${GOPATH%%:*}"
 
 	[ "$AGENT_INIT" == "yes" -o "$AGENT_INIT" == "no" ] || die "AGENT_INIT($AGENT_INIT) is invalid (must be yes or no)"
+	[ "$AGENT_POLICY" == "yes" -o "$AGENT_POLICY" == "no" ] || die "AGENT_POLICY($AGENT_POLICY) is invalid (must be yes or no)"
 
 	[ -n "${KERNEL_MODULES_DIR}" ] && [ ! -d "${KERNEL_MODULES_DIR}" ] && die "KERNEL_MODULES_DIR defined but is not an existing directory"
 
@@ -458,6 +460,7 @@ build_rootfs_distro()
 			--env SELINUX="${SELINUX}" \
 			--env DEBUG="${DEBUG}" \
 			--env HOME="/root" \
+			--env AGENT_POLICY="${AGENT_POLICY}" \
 			-v "${repo_dir}":"/kata-containers" \
 			-v "${ROOTFS_DIR}":"/rootfs" \
 			-v "${script_dir}/../scripts":"/scripts" \
@@ -616,7 +619,7 @@ EOF
 			git checkout "${AGENT_VERSION}" && OK "git checkout successful" || die "checkout agent ${AGENT_VERSION} failed!"
 		fi
 		make clean
-		make LIBC=${LIBC} INIT=${AGENT_INIT} SECCOMP=${SECCOMP}
+		make LIBC=${LIBC} INIT=${AGENT_INIT} SECCOMP=${SECCOMP} AGENT_POLICY=${AGENT_POLICY}
 		make install DESTDIR="${ROOTFS_DIR}" LIBC=${LIBC} INIT=${AGENT_INIT}
 		if [ "${SECCOMP}" == "yes" ]; then
 			rm -rf "${libseccomp_install_dir}" "${gperf_install_dir}"
@@ -640,27 +643,59 @@ EOF
 		mkdir -p "${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants"
 		ln -sf "/usr/lib/systemd/system/dbus.socket" "${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants/dbus.socket"
 		chmod g+rx,o+x "${ROOTFS_DIR}"
+	fi
 
-		open_policy_agent_url="$(get_package_version_from_kata_yaml externals.open-policy-agent.url)"
-		open_policy_agent_version="$(get_package_version_from_kata_yaml externals.open-policy-agent.version)"
-		info "Install Open Policy Agent"
-		OPA_DIR="${script_dir}/opa"
-		if [ ! -d "${OPA_DIR}" ] ; then
-			git clone --depth=1 "${open_policy_agent_url}" "$OPA_DIR"
+	if [ "${AGENT_POLICY}" == "yes" ]; then
+		# Setup systemd-based environment for kata-opa.
+		local opa_bin_dir="$(get_opa_bin_dir "${ROOTFS_DIR}")"
+		if [ -z "${opa_bin_dir}" ]; then
+			# OPA was not installed already, so download it here.
+			#
+			# TODO: if an OPA package is not available for the Guest image distro,
+			#   	Kata should cache the OPA source code, toolchain information, etc.
+			#   	OPA should be built from the cached source code instead of downloading
+			#   	this binary.
+			#
+			opa_bin_url="$(get_package_version_from_kata_yaml externals.open-policy-agent.meta.binary)"
+			info "Downloading OPA binary from ${opa_bin_url}"
+			curl --fail -L "${opa_bin_url}" -o opa || die "Failed to download OPA"
+
+			# Install the OPA binary.
+			opa_bin_dir="/usr/local/bin"
+			local opa_bin="${ROOTFS_DIR}${opa_bin_dir}/opa"
+			info "Installing OPA binary to ${opa_bin}"
+			install -D -o root -g root -m 0755 opa -T "${opa_bin}"
+		else
+			info "OPA binary already exists in ${opa_bin_dir}"
 		fi
-		pushd "$OPA_DIR"
-		git fetch --depth=1 origin "${open_policy_agent_version}"
-		git checkout FETCH_HEAD
-		make build WASM_ENABLED=0
-		install -D -o root -g root -m 0755 opa_linux_amd64 -T "${ROOTFS_DIR}/usr/local/bin/opa"
-		popd
 
-		# TODO: clean-up OPA installation
-		samples_dir="${script_dir}/../../../src/agent/samples/policy/all-allowed"
-		cp "${samples_dir}/all-allowed.rego" "${ROOTFS_DIR}/coco_policy"
-		chmod 644 "${ROOTFS_DIR}/coco_policy"
-		cp "${samples_dir}/all-allowed-data.json" "${ROOTFS_DIR}/coco_policy_data"
-		chmod 644 "${ROOTFS_DIR}/coco_policy_data"
+		# Install default settings for the kata-opa service.
+		local kata_opa_in_dir="${script_dir}/../../../src/kata-opa"
+		local opa_settings_dir="/etc/kata-opa"
+		local policy_file="allow-all.rego"
+		local policy_dir="${ROOTFS_DIR}/${opa_settings_dir}"
+		mkdir -p "${policy_dir}"
+		install -D -o root -g root -m 0644 "${kata_opa_in_dir}/${policy_file}" -T "${policy_dir}/${policy_file}"
+		ln -sf "${policy_file}" "${policy_dir}/default-policy.rego"
+
+		if [ "${AGENT_INIT}" == "yes" ]; then
+			info "OPA will be started by the kata agent"
+		else
+			# Install the unit file for the kata-opa service.
+			local kata_opa_unit="kata-opa.service"
+			local kata_opa_unit_path="${ROOTFS_DIR}/usr/lib/systemd/system/${kata_opa_unit}"
+			local kata_containers_wants="${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants"
+
+			opa_settings_dir="${opa_settings_dir//\//\\/}"
+			sed -e "s/@SETTINGSDIR@/${opa_settings_dir}/g" "${kata_opa_in_dir}/${kata_opa_unit}.in" > "${kata_opa_unit}"
+
+			opa_bin_dir="${opa_bin_dir//\//\\/}"
+			sed -i -e "s/@BINDIR@/${opa_bin_dir}/g" "${kata_opa_unit}"
+
+			install -D -o root -g root -m 0644 "${kata_opa_unit}" -T "${kata_opa_unit_path}"
+			mkdir -p "${kata_containers_wants}"
+			ln -sf "${kata_opa_unit_path}" "${kata_containers_wants}/${kata_opa_unit}"
+		fi
 	fi
 
 	info "Check init is installed"
@@ -716,6 +751,24 @@ EOF
 
 	info "Creating summary file"
 	create_summary_file "${ROOTFS_DIR}"
+}
+
+get_opa_bin_dir()
+{
+	local rootfs_dir="$1"
+	local -a bin_dirs=(
+		"/bin"
+		"/usr/bin"
+		"/usr/local/bin"
+	)
+	for bin_dir in "${bin_dirs[@]}"
+	do
+		local opa_bin="${rootfs_dir}${bin_dir}/opa"
+		if [ -f "${opa_bin}" ]; then
+			echo "${bin_dir}"
+			return 0
+		fi
+	done
 }
 
 parse_arguments()

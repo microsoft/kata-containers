@@ -1,4 +1,4 @@
-package coco_policy
+package agent_policy
 
 import future.keywords.in
 import future.keywords.every
