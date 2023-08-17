@@ -339,15 +339,20 @@ discard:
 	return ERR_PTR(ret);
 }
 
-static int tarfs_strcmp(struct super_block *sb, unsigned long pos,
-			    const char *str, size_t size)
+static int tarfs_strcmp(struct super_block *sb, u64 pos, const char *str,
+			size_t size)
 {
 	struct buffer_head *bh;
 	unsigned long offset;
 	size_t segment;
 	bool matched;
+	const struct tarfs_state *state = sb->s_fs_info;
 
-	/* compare string up to a block at a time. */
+	/* If the string doesn't fit in the data size, it doesn't match. */
+	if (pos + size < pos || pos + size > state->data_size)
+		return 0;
+
+	/* Compare string up to a block at a time. */
 	while (size) {
 		offset = pos & (TARFS_BSIZE - 1);
 		segment = min_t(size_t, size, TARFS_BSIZE - offset);
