@@ -335,7 +335,7 @@ static struct inode *tarfs_iget(struct super_block *sb, u64 ino)
 	return inode;
 
 discard:
-	discard_new_inode(inode);
+	iget_failed(inode);
 	return ERR_PTR(ret);
 }
 
