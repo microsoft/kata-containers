@@ -2114,7 +2114,6 @@ dependencies = [
  "nix 0.24.3",
  "oci",
  "openssl",
- "openssl-src",
  "opentelemetry",
  "proc-mounts",
  "procfs 0.12.0",

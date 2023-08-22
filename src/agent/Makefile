@@ -33,12 +33,12 @@ ifeq ($(SECCOMP),yes)
     override EXTRA_RUSTFEATURES += seccomp
 endif
 
-##VAR SECURITY_POLICY=yes|no define if agent enables security policy feature
-SECURITY_POLICY := no
+##VAR AGENT_POLICY=yes|no define if agent enables the policy feature
+AGENT_POLICY := no
 
-# Enable security policy feature of rust build
-ifeq ($(SECURITY_POLICY),yes)
-    override EXTRA_RUSTFEATURES += security-policy
+# Enable the policy feature of rust build
+ifeq ($(AGENT_POLICY),yes)
+    override EXTRA_RUSTFEATURES += agent-policy
 endif
 
 include ../../utils.mk
@@ -95,10 +95,6 @@ ifeq ($(INIT),no)
     GENERATED_FILES += $(UNIT_FILES)
     # Target to be reached in systemd services
     UNIT_FILES += kata-containers.target
-
-    # Unit file to start OPA in systemd systems
-    # TODO: clean-up OPA installation
-    UNIT_FILES += coco-opa.service
 endif
 
 # Display name of command and it's version (or a message if not available).
