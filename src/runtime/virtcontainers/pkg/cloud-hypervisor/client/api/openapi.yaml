@@ -691,6 +691,7 @@ components:
             - oem_strings
             - oem_strings
             tdx: false
+            snp: false
             serial_number: serial_number
             uuid: uuid
           tpm:
@@ -722,6 +723,7 @@ components:
             kernel: kernel
             initramfs: initramfs
             igvm: igvm
+            host_data: host_data
             firmware: firmware
           serial:
             mode: "Off"
@@ -884,6 +886,7 @@ components:
         kernel: kernel
         initramfs: initramfs
         igvm: igvm
+        host_data: host_data
         firmware: firmware
       properties:
         firmware:
@@ -895,6 +898,8 @@ components:
         initramfs:
           type: string
         igvm:
+          type: string
+        host_data:
           type: string
       type: object
     VmConfig:
@@ -1122,6 +1127,7 @@ components:
           - oem_strings
           - oem_strings
           tdx: false
+          snp: false
           serial_number: serial_number
           uuid: uuid
         tpm:
@@ -1153,6 +1159,7 @@ components:
           kernel: kernel
           initramfs: initramfs
           igvm: igvm
+          host_data: host_data
           firmware: firmware
         serial:
           mode: "Off"
@@ -1421,6 +1428,7 @@ components:
         - oem_strings
         - oem_strings
         tdx: false
+        snp: false
         serial_number: serial_number
         uuid: uuid
       properties:
@@ -1441,6 +1449,9 @@ components:
             type: string
           type: array
         tdx:
+          default: false
+          type: boolean
+        snp:
           default: false
           type: boolean
       type: object
