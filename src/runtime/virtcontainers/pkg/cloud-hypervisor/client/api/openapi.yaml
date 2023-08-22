@@ -895,6 +895,7 @@ components:
         host_data: host_data
         initramfs: initramfs
         igvm: igvm
+        host_data: host_data
         firmware: firmware
       properties:
         firmware:
@@ -1451,6 +1452,7 @@ components:
         - oem_strings
         - oem_strings
         tdx: false
+        snp: false
         serial_number: serial_number
         sev_snp: false
         uuid: uuid
