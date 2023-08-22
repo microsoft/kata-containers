@@ -41,7 +41,9 @@ rootfs_type=@DEFROOTFSTYPE@
 confidential_guest = true
 
 # enable SEV SNP VMs.
-# This is not currently used by CLH
+# This is used in the CLH code path to request SEV SNP encryption. The function availableGuestProtection (see hypervisor_linux_amd64.go)
+# that detects guest protection features hypervisor_linux_amd64.go only supports QEMU/KVM platforms, and currently there is no way to
+# detect SEV SNP support with CLH/MSHV.
 sev_snp_guest = @DEFSNPGUEST@
 
 # SNP guest policy
