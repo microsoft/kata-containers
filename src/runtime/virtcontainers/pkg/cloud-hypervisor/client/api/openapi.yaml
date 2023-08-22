@@ -620,6 +620,7 @@ components:
             kernel: kernel
             igvm: igvm
             initramfs: initramfs
+            host_data: host_data
             firmware: firmware
           rate_limit_groups:
           - id: id
@@ -786,6 +787,44 @@ components:
           rng:
             iommu: false
             src: src
+          sgx_epc:
+          - prefault: false
+            size: 7
+            id: id
+          - prefault: false
+            size: 7
+            id: id
+          fs:
+          - pci_segment: 6
+            num_queues: 6
+            queue_size: 5
+            tag: tag
+            socket: socket
+            id: id
+          - pci_segment: 6
+            num_queues: 6
+            queue_size: 5
+            tag: tag
+            socket: socket
+            id: id
+          vsock:
+            pci_segment: 8
+            iommu: false
+            socket: socket
+            id: id
+            cid: 3
+          platform:
+            iommu_segments:
+            - 1
+            - 1
+            num_pci_segments: 4
+            oem_strings:
+            - oem_strings
+            - oem_strings
+            tdx: false
+            snp: false
+            serial_number: serial_number
+            uuid: uuid
           tpm:
             socket: socket
           watchdog: false
@@ -890,6 +929,7 @@ components:
         kernel: kernel
         initramfs: initramfs
         igvm: igvm
+        host_data: host_data
         firmware: firmware
       properties:
         firmware:
@@ -901,6 +941,8 @@ components:
         initramfs:
           type: string
         igvm:
+          type: string
+        host_data:
           type: string
       type: object
     VmConfig:
@@ -1057,6 +1099,7 @@ components:
           kernel: kernel
           igvm: igvm
           initramfs: initramfs
+          host_data: host_data
           firmware: firmware
         rate_limit_groups:
         - id: id
@@ -1223,6 +1266,44 @@ components:
         rng:
           iommu: false
           src: src
+        sgx_epc:
+        - prefault: false
+          size: 7
+          id: id
+        - prefault: false
+          size: 7
+          id: id
+        fs:
+        - pci_segment: 6
+          num_queues: 6
+          queue_size: 5
+          tag: tag
+          socket: socket
+          id: id
+        - pci_segment: 6
+          num_queues: 6
+          queue_size: 5
+          tag: tag
+          socket: socket
+          id: id
+        vsock:
+          pci_segment: 8
+          iommu: false
+          socket: socket
+          id: id
+          cid: 3
+        platform:
+          iommu_segments:
+          - 1
+          - 1
+          num_pci_segments: 4
+          oem_strings:
+          - oem_strings
+          - oem_strings
+          tdx: false
+          snp: false
+          serial_number: serial_number
+          uuid: uuid
         tpm:
           socket: socket
         watchdog: false
@@ -1440,6 +1521,7 @@ components:
         - oem_strings
         - oem_strings
         tdx: false
+        snp: false
         serial_number: serial_number
         uuid: uuid
       properties:
@@ -1460,6 +1542,9 @@ components:
             type: string
           type: array
         tdx:
+          default: false
+          type: boolean
+        snp:
           default: false
           type: boolean
       type: object
