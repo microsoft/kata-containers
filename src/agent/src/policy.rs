@@ -4,7 +4,10 @@
 //
 
 use anyhow::{bail, Result};
+use hex;
 use protobuf::MessageDyn;
+use sha2::{Digest, Sha256};
+use slog::Drain;
 use tokio::io::AsyncWriteExt;
 
 use crate::rpc::ttrpc_error;
@@ -217,6 +220,8 @@ impl AgentPolicy {
 
     /// Replace the Policy in regorus.
     pub async fn set_policy(&mut self, policy: &str) -> Result<()> {
+        check_policy_hash(policy)?;
+
         self.engine = Self::new_engine();
         self.engine
             .add_policy("agent_policy".to_string(), policy.to_string())?;
@@ -263,4 +268,14 @@ impl AgentPolicy {
         };
         Ok(())
     }
+}
+
+pub fn check_policy_hash(policy: &str) -> Result<()> {
+    let mut hasher = Sha256::new();
+    hasher.update(policy.as_bytes());
+    let digest = hasher.finalize();
+    debug!(sl!(), "New policy hash: {}", hex::encode(digest));
+
+    // TODO: check that the corresponding TEE field matches this hash.
+    Ok(())
 }
