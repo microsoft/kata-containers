@@ -2784,6 +2784,7 @@ dependencies = [
  "const_format",
  "derivative",
  "futures",
+ "hex",
  "image-rs",
  "ipnetwork",
  "kata-sys-util",
@@ -2813,6 +2814,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "sha2",
  "slog",
  "slog-scope",
  "slog-stdlog",
@@ -5315,6 +5317,17 @@ dependencies = [
  "const-oid",
  "digest",
  "generic-array 1.1.0",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "793db75ad2bcafc3ffa7c68b215fee268f537982cd901d132f89c6343f3a3dc8"
+dependencies = [
+ "cfg-if 1.0.0",
+ "cpufeatures",
+ "digest",
 ]
 
 [[package]]
