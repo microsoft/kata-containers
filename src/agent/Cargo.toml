@@ -83,6 +83,10 @@ openssl = { version = "0.10.54", features = ["vendored"], optional = true }
 # Image pull/decrypt
 image-rs = { git = "https://github.com/confidential-containers/image-rs", tag = "v0.6.0", default-features = false, features = ["kata-cc-native-tls"] }
 
+# Policy validation
+sha2 = { version = "0.10.6", optional = true }
+hex = { version = "0.4.2", optional = true }
+
 [patch.crates-io]
 oci-distribution = { git = "https://github.com/krustlet/oci-distribution.git", rev = "f44124c" }
 
@@ -103,7 +107,7 @@ lto = true
 [features]
 seccomp = ["rustjail/seccomp"]
 standard-oci-runtime = ["rustjail/standard-oci-runtime"]
-agent-policy = ["http", "openssl", "reqwest"]
+agent-policy = ["hex", "http", "openssl", "reqwest", "sha2"]
 
 [[bin]]
 name = "kata-agent"

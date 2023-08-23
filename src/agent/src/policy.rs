@@ -4,6 +4,7 @@
 //
 
 use anyhow::{bail, Result};
+use sha2::{Sha256, Digest};
 use serde::{Deserialize, Serialize};
 use slog::Drain;
 use tokio::io::AsyncWriteExt;
@@ -144,6 +145,8 @@ impl AgentPolicy {
 
     /// Replace the Policy in OPA.
     pub async fn set_policy(&mut self, policy: &str) -> Result<()> {
+        check_policy_hash(policy)?;
+
         if let Some(opa_client) = &mut self.opa_client {
             // Delete the old rules.
             opa_client.delete(&self.policy_path).send().await?;
@@ -264,4 +267,14 @@ fn start_opa(opa_addr: &str) -> Result<()> {
         }
     }
     bail!("OPA binary not found in {:?}", &bin_dirs);
+}
+
+pub fn check_policy_hash(policy: &str) -> Result<()> {
+    let mut hasher = Sha256::new();
+    hasher.update(policy.as_bytes());
+    let digest = hasher.finalize();
+    debug!(sl!(), "New policy hash: {}", hex::encode(digest));
+
+    // TODO: check that the corresponding TEE field matches this hash.
+    Ok(())
 }
