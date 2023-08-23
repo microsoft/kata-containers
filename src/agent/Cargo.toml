@@ -107,11 +107,7 @@ lto = true
 [features]
 seccomp = ["rustjail/seccomp"]
 standard-oci-runtime = ["rustjail/standard-oci-runtime"]
-<<<<<<< HEAD
-security-policy = ["hex", "http", "openssl", "reqwest", "sha2"]
-=======
-agent-policy = ["http", "openssl", "reqwest"]
->>>>>>> cc-msft-prototypes
+agent-policy = ["hex", "http", "openssl", "reqwest", "sha2"]
 
 [[bin]]
 name = "kata-agent"
