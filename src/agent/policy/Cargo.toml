@@ -23,8 +23,11 @@ regorus = { version = "0.2.8", default-features = false, features = [
 ] }
 json-patch = "2.0.0"
 
-
 # Note: this crate sets the slog 'max_*' features which allows the log level
 # to be modified at runtime.
 slog.workspace = true
 slog-scope.workspace = true
+
+# Policy validation
+sha2 = "0.10.6"
+hex = "0.4.2"

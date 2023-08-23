@@ -10,6 +10,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"math"
@@ -664,6 +666,8 @@ func newSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Factor
 	if err != nil {
 		return nil, err
 	}
+
+	sandboxConfig.HypervisorConfig.PolicyHash = getAgentPolicyHash(sandboxConfig.AgentConfig.Policy)
 
 	// store doesn't require hypervisor to be stored immediately
 	if err = s.hypervisor.CreateVM(ctx, s.id, s.network, &sandboxConfig.HypervisorConfig); err != nil {
@@ -2834,4 +2838,13 @@ func (s *Sandbox) resetVCPUsPinning(ctx context.Context, vCPUThreadsMap VcpuThre
 		}
 	}
 	return nil
+}
+func getAgentPolicyHash(policy string) string {
+	if len(policy) == 0 {
+		return ""
+	} else {
+		h := sha256.New()
+		h.Write([]byte(policy))
+		return hex.EncodeToString(h.Sum(nil))
+	}
 }
