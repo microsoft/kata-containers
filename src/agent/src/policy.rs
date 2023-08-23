@@ -3,11 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use kata_agent_policy::policy::AgentPolicy;
 use protobuf::MessageDyn;
 
 use crate::rpc::ttrpc_error;
 use crate::AGENT_POLICY;
-use kata_agent_policy::policy::AgentPolicy;
 
 async fn allow_request(policy: &mut AgentPolicy, ep: &str, request: &str) -> ttrpc::Result<()> {
     match policy.allow_request(ep, request).await {

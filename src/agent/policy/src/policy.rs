@@ -10,6 +10,8 @@ use anyhow::{bail, Result};
 use slog::{debug, error, info, warn};
 use tokio::io::AsyncWriteExt;
 
+use sha2::{Sha256, Digest};
+
 static POLICY_LOG_FILE: &str = "/tmp/policy.txt";
 static POLICY_DEFAULT_FILE: &str = "/etc/kata-opa/default-policy.rego";
 
@@ -194,6 +196,7 @@ impl AgentPolicy {
 
     /// Replace the Policy in regorus.
     pub async fn set_policy(&mut self, policy: &str) -> Result<()> {
+        check_policy_hash(policy)?;
         self.engine = Self::new_engine();
         self.engine
             .add_policy("agent_policy".to_string(), policy.to_string())?;
@@ -240,4 +243,14 @@ impl AgentPolicy {
         };
         Ok(())
     }
+}
+
+pub fn check_policy_hash(policy: &str) -> Result<()> {
+    let mut hasher = Sha256::new();
+    hasher.update(policy.as_bytes());
+    let digest = hasher.finalize();
+    debug!(sl!(), "New policy hash: {}", hex::encode(digest));
+
+    // TODO: check that the corresponding TEE field matches this hash.
+    Ok(())
 }

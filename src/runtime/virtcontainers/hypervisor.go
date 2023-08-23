@@ -688,8 +688,12 @@ type HypervisorConfig struct {
 	// GPU specific annotations (currently only applicable for Remote Hypervisor)
 	//DefaultGPUs specifies the number of GPUs required for the Kata VM
 	DefaultGPUs uint32
+
 	// DefaultGPUModel specifies GPU model like tesla, h100, readeon etc.
 	DefaultGPUModel string
+
+	// PolicyHash is the digest of the workload policy
+	PolicyHash string
 }
 
 // vcpu mapping from vcpu number to thread number

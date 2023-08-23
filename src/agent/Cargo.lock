@@ -3121,11 +3121,13 @@ name = "kata-agent-policy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hex",
  "json-patch",
  "logging",
  "regorus",
  "serde",
  "serde_json",
+ "sha2",
  "slog",
  "slog-scope",
  "slog-term",
