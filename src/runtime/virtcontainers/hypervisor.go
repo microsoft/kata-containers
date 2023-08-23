@@ -690,6 +690,9 @@ type HypervisorConfig struct {
 
 	// Initdata defines the initdata passed into guest when CreateVM
 	Initdata string
+
+	// PolicyHash is the digest of the workload policy
+	PolicyHash string
 }
 
 // vcpu mapping from vcpu number to thread number
