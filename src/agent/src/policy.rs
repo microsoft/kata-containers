@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use protobuf::MessageDyn;
+use sha2::{Sha256, Digest};
 use tokio::io::AsyncWriteExt;
 
 use crate::rpc::ttrpc_error;
@@ -217,6 +218,7 @@ impl AgentPolicy {
 
     /// Replace the Policy in regorus.
     pub async fn set_policy(&mut self, policy: &str) -> Result<()> {
+        check_policy_hash(policy)?;
         self.engine = Self::new_engine();
         self.engine
             .add_policy("agent_policy".to_string(), policy.to_string())?;
@@ -263,4 +265,26 @@ impl AgentPolicy {
         };
         Ok(())
     }
+}
+
+pub fn check_policy_hash(policy: &str) -> Result<()> {
+    let mut hasher = Sha256::new();
+    hasher.update(policy.as_bytes());
+    let digest = hasher.finalize();
+    debug!(sl!(), "policy: calculated hash ({:?})", digest.as_slice());
+
+    let mut firmware = sev::firmware::guest::Firmware::open()?;
+    let report_data: [u8; 64] = [0; 64];
+    let report_bytes = firmware.get_report(None, Some(report_data), Some(0))?;
+    let report = sev::firmware::guest::AttestationReport::from_bytes(&report_bytes)?;
+
+    if report.host_data.as_slice() != digest.as_slice() {
+        bail!(
+            "Unexpected policy hash ({:?}), expected ({:?})",
+            digest.as_slice(),
+            report.host_data
+        );
+    }
+
+    Ok(())
 }
