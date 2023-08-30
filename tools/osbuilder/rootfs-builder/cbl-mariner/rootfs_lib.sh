@@ -29,8 +29,10 @@ build_rootfs()
 		"curl" \
 		"curl-libs" \
 		"cyrus-sasl-lib" \
+		"e2fsprogs" \
 		"gmp" \
 		"gnupg2" \
+		"iana-etc" \
 		"iproute" \
 		"krb5" \
 		"libarchive" \
@@ -40,8 +42,11 @@ build_rootfs()
 		"libxml2" \
 		"libsolv" \
 		"libssh2" \
+		"libuv" \
 		"lua-libs" \
+		"mariner-rpm-macros" \
 		"nghttp2" \
+		"nettle" \
 		"npth" \
 		"openldap" \
 		"openssh-clients" \
