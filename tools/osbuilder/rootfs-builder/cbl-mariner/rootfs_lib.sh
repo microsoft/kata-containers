@@ -25,6 +25,7 @@ build_rootfs()
 	# Reduce the image size, for faster TEE memory measurement.
 	local MARINER_REMOVED_PACKAGES=( \
 		"bash" \
+		"bc" \
 		"bridge-utils" \
 		"bzip2" \
 		"chkconfig" \
