@@ -31,6 +31,7 @@ build_rootfs()
 		"cyrus-sasl-lib" \
 		"e2fsprogs" \
 		"expat" \
+		"findutils" \
 		"gmp" \
 		"gnupg2" \
 		"gpgme" \
@@ -49,6 +50,7 @@ build_rootfs()
 		"libuv" \
 		"lua-libs" \
 		"mariner-rpm-macros" \
+		"ncurses" \
 		"nghttp2" \
 		"nettle" \
 		"npth" \
