@@ -42,6 +42,7 @@ build_rootfs()
 		"gzip" \
 		"iana-etc" \
 		"iproute" \
+		"iputils" \
 		"krb5" \
 		"libarchive" \
 		"libassuan" \
@@ -57,6 +58,7 @@ build_rootfs()
 		"mariner-rpm-macros" \
 		"ncurses" \
 		"nghttp2" \
+		"net-tools" \
 		"nettle" \
 		"newt" \
 		"npth" \
@@ -76,6 +78,7 @@ build_rootfs()
 		"sudo" \
 		"tar" \
 		"tzdata" \
+		"xz" \
 		"zstd-libs" \
 	)
 
