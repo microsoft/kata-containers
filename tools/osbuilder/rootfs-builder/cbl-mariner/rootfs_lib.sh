@@ -33,12 +33,16 @@ build_rootfs()
 		"iproute" \
 		"krb5" \
 		"libdb" \
+		"libksba" \
 		"libtool" \
 		"libxml2" \
 		"libssh2" \
+		"nghttp2" \
+		"npth" \
 		"openldap" \
 		"openssh-clients" \
 		"openssl" \
+		"pinentry" \
 		"pcre" \
 		"procps-ng" \
 		"rpm" \
