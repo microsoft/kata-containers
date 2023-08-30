@@ -28,15 +28,19 @@ build_rootfs()
 		"cracklib-dicts" \
 		"curl" \
 		"curl-libs" \
+		"cyrus-sasl-lib" \
 		"gmp" \
 		"gnupg2" \
 		"iproute" \
 		"krb5" \
+		"libarchive" \
 		"libdb" \
 		"libksba" \
 		"libtool" \
 		"libxml2" \
+		"libsolv" \
 		"libssh2" \
+		"lua-libs" \
 		"nghttp2" \
 		"npth" \
 		"openldap" \
