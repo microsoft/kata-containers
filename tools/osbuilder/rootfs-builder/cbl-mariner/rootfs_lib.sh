@@ -25,6 +25,8 @@ build_rootfs()
 	# Reduce the image size, for faster TEE memory measurement.
 	local MARINER_REMOVED_PACKAGES=( \
 		"bash" \
+		"bzip2" \
+		"chkconfig" \
 		"coreutils" \
 		"cracklib-dicts" \
 		"curl" \
@@ -36,6 +38,7 @@ build_rootfs()
 		"gmp" \
 		"gnupg2" \
 		"gpgme" \
+		"grep" \
 		"gzip" \
 		"iana-etc" \
 		"iproute" \
@@ -44,17 +47,18 @@ build_rootfs()
 		"libassuan" \
 		"libdb" \
 		"libksba" \
-		"libtool" \
-		"libxml2" \
+		"libpwquality" \
 		"libsolv" \
 		"libssh2" \
+		"libtool" \
 		"libuv" \
-		"libpwquality" \
+		"libxml2" \
 		"lua-libs" \
 		"mariner-rpm-macros" \
 		"ncurses" \
 		"nghttp2" \
 		"nettle" \
+		"newt" \
 		"npth" \
 		"openldap" \
 		"openssh-clients" \
@@ -62,8 +66,10 @@ build_rootfs()
 		"pinentry" \
 		"pcre" \
 		"procps-ng" \
+		"readline" \
 		"rpm" \
 		"rpm-libs" \
+		"sed" \
 		"shadow-utils" \
 		"sqlite-libs" \
 		"slang" \
