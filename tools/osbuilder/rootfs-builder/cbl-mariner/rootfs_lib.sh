@@ -25,6 +25,7 @@ build_rootfs()
 	# Reduce the image size, for faster TEE memory measurement.
 	local MARINER_REMOVED_PACKAGES=( \
 		"bash" \
+		"bridge-utils" \
 		"bzip2" \
 		"chkconfig" \
 		"coreutils" \
@@ -34,7 +35,9 @@ build_rootfs()
 		"cyrus-sasl-lib" \
 		"e2fsprogs" \
 		"expat" \
+		"file" \
 		"findutils" \
+		"gdbm" \
 		"gmp" \
 		"gnupg2" \
 		"gpgme" \
