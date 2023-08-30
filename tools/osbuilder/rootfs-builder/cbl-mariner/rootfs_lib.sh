@@ -30,12 +30,16 @@ build_rootfs()
 		"curl-libs" \
 		"cyrus-sasl-lib" \
 		"e2fsprogs" \
+		"expat" \
 		"gmp" \
 		"gnupg2" \
+		"gpgme" \
+		"gzip" \
 		"iana-etc" \
 		"iproute" \
 		"krb5" \
 		"libarchive" \
+		"libassuan" \
 		"libdb" \
 		"libksba" \
 		"libtool" \
