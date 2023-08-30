@@ -25,6 +25,7 @@ build_rootfs()
 	# Reduce the image size, for faster TEE memory measurement.
 	local MARINER_REMOVED_PACKAGES=( \
 		"bash" \
+		"coreutils" \
 		"cracklib-dicts" \
 		"curl" \
 		"curl-libs" \
@@ -48,6 +49,7 @@ build_rootfs()
 		"libsolv" \
 		"libssh2" \
 		"libuv" \
+		"libpwquality" \
 		"lua-libs" \
 		"mariner-rpm-macros" \
 		"ncurses" \
