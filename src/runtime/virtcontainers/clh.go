@@ -72,9 +72,15 @@ const (
 const (
 	// Values are mandatory by http API
 	// Values based on:
-	clhTimeout                     = 10
-	clhAPITimeout                  = 1
-	clhAPITimeoutConfidentialGuest = 60
+	clhTimeout    = 10
+	clhAPITimeout = 1
+
+	// TODO: reduce the SEV-SNP Guest boot time.
+	//
+	// This larger timeout allows a few pods to start in parallel
+	// successfully, on a single Host.
+	clhAPITimeoutConfidentialGuest = 300
+
 	// Minimum timout for calling CreateVM followed by BootVM. Executing these two APIs
 	// might take longer than the value returned by getClhAPITimeout().
 	clhCreateAndBootVMMinimumTimeout = 10
