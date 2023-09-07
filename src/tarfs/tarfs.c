@@ -523,7 +523,7 @@ static int tarfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sb->s_xattr = xattr_handlers;
 
 	scount = bdev_nr_sectors(sb->s_bdev);
-	if (!scount)
+	if (scount < TARFS_BSIZE / SECTOR_SIZE)
 		return -ENXIO;
 
 	state = kmalloc(sizeof(*state), GFP_KERNEL);
