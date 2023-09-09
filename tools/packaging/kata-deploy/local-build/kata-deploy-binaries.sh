@@ -53,6 +53,7 @@ TARGET_BRANCH="${TARGET_BRANCH:-main}"
 PUSH_TO_REGISTRY="${PUSH_TO_REGISTRY:-}"
 KERNEL_HEADERS_PKG_TYPE="${KERNEL_HEADERS_PKG_TYPE:-deb}"
 RELEASE="${RELEASE:-"no"}"
+DM_VERITY_FORMAT=${DM_VERITY_FORMAT:-veritysetup}
 
 workdir="${WORKDIR:-$PWD}"
 
@@ -345,6 +346,8 @@ install_image_confidential() {
 
 #Install cbl-mariner guest image
 install_image_mariner() {
+	export MEASURED_ROOTFS=yes
+	export DM_VERITY_FORMAT="kernelinit"
 	install_image "mariner"
 }
 
