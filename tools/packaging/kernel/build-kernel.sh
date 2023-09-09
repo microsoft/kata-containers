@@ -68,6 +68,7 @@ linux_headers=""
 CROSS_BUILD_ARG=""
 
 MEASURED_ROOTFS=${MEASURED_ROOTFS:-no}
+DM_VERITY_FORMAT=${DM_VERITY_FORMAT:-veritysetup}
 
 packaging_scripts_dir="${script_dir}/../scripts"
 source "${packaging_scripts_dir}/lib.sh"
@@ -275,8 +276,8 @@ get_kernel_frag_path() {
 		local cryptsetup_configs="$(ls ${common_path}/confidential_containers/cryptsetup.conf)"
 		all_configs="${all_configs} ${cryptsetup_configs}"
 
-		if [ -f "${default_initramfs}" ]; then
-			info "Enabling config for confidential guest measured boot"
+		if [ "${DM_VERITY_FORMAT}" == "veritysetup" ] && [ -f "${default_initramfs}" ]; then
+			info "Enabling config for confidential guest measured boot initramfs"
 			local initramfs_configs="$(ls ${common_path}/confidential_containers/initramfs.conf)"
 			all_configs="${all_configs} ${initramfs_configs}"
 		fi
@@ -431,7 +432,7 @@ setup_kernel() {
 	[ -n "${hypervisor_target}" ] || hypervisor_target="kvm"
 	[ -n "${kernel_config_path}" ] || kernel_config_path=$(get_default_kernel_config "${kernel_version}" "${hypervisor_target}" "${arch_target}" "${kernel_path}")
 
-	if [ "${MEASURED_ROOTFS}" == "yes" ] && [ -f "${default_initramfs}" ]; then
+	if [ "${MEASURED_ROOTFS}" == "yes" ] && [ "${DM_VERITY_FORMAT}" == "veritysetup" ] && [ -f "${default_initramfs}" ]; then
 		info "Copying initramfs from: ${default_initramfs}"
 		cp "${default_initramfs}" ./
 	fi

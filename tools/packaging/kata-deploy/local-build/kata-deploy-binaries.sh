@@ -37,6 +37,7 @@ readonly rootfs_builder="${repo_root_dir}/tools/packaging/guest-image/build_imag
 
 ARCH=${ARCH:-$(uname -m)}
 MEASURED_ROOTFS=${MEASURED_ROOTFS:-no}
+DM_VERITY_FORMAT=${DM_VERITY_FORMAT:-veritysetup}
 USE_CACHE="${USE_CACHE:-"yes"}"
 ARTEFACT_REGISTRY="${ARTEFACT_REGISTRY:-ghcr.io}"
 ARTEFACT_REGISTRY_USERNAME="${ARTEFACT_REGISTRY_USERNAME:-}"
@@ -189,6 +190,8 @@ install_image() {
 #Install guest image for tdx
 install_image_tdx() {
 	export AGENT_POLICY=yes
+	export MEASURED_ROOTFS=yes
+	export DM_VERITY_FORMAT=kernelinit
 	install_image "tdx"
 }
 
@@ -304,7 +307,7 @@ install_kernel_helper() {
 
 	install_cached_kernel_tarball_component ${kernel_name} ${module_dir} && return 0
 
-	if [ "${MEASURED_ROOTFS}" == "yes" ]; then
+	if [ "${MEASURED_ROOTFS}" == "yes" ] && [ "${DM_VERITY_FORMAT}" == "veritysetup" ]; then
 		info "build initramfs for cc kernel"
 		"${initramfs_builder}"
 	fi
@@ -364,6 +367,7 @@ install_kernel_tdx_experimental() {
 	local kernel_url="$(get_from_kata_deps assets.kernel-tdx-experimental.url)"
 
 	export MEASURED_ROOTFS=yes
+	export DM_VERITY_FORMAT=kernelinit
 
 	install_kernel_helper \
 		"assets.kernel-tdx-experimental.version" \
@@ -574,11 +578,37 @@ install_shimv2() {
 	export RUST_VERSION
 
 	if [ "${MEASURED_ROOTFS}" == "yes" ]; then
-	        extra_opts="DEFSERVICEOFFLOAD=true"
-		if [ -f "${repo_root_dir}/tools/osbuilder/root_hash.txt" ]; then
-			root_hash=$(sudo sed -e 's/Root hash:\s*//g;t;d' "${repo_root_dir}/tools/osbuilder//root_hash.txt")
-			root_measure_config="rootfs_verity.scheme=dm-verity rootfs_verity.hash=${root_hash}"
-			extra_opts+=" ROOTMEASURECONFIG=\"${root_measure_config}\""
+		# TODO: also support measured rootfs without offloading container
+		# image management to kata-agent.
+		extra_opts="DEFSERVICEOFFLOAD=true"
+
+		root_hash_file="${repo_root_dir}/tools/osbuilder/root_hash.txt"
+		if [ -f "${root_hash_file}" ]; then
+			root_hash=$(sudo sed -e 's/Root hash:\s*//g;t;d' "${root_hash_file}")
+			case "${DM_VERITY_FORMAT}" in
+				veritysetup)
+					# Partition format compatible with "veritysetup open" but not with kernel's
+					# "dm-mod.create" command line parameter. Add the ROOTMEASURECONFIG option
+					# used by the Kata initramfs.
+					root_measure_config="rootfs_verity.scheme=dm-verity rootfs_verity.hash=${root_hash}"
+					extra_opts+=" ROOTMEASURECONFIG=\"${root_measure_config}\""
+					;;
+				kernelinit)
+					# Partition format compatible with kernel's "dm-mod.create" command line
+					# option but not with "veritysetup open".
+					salt=$(sudo sed -e 's/Salt:\s*//g;t;d' "${root_hash_file}")
+					data_blocks=$(sudo sed -e 's/Data blocks:\s*//g;t;d' "${root_hash_file}")
+					data_block_size=$(sudo sed -e 's/Data block size:\s*//g;t;d' "${root_hash_file}")
+					data_sectors_per_block=$((data_block_size / 512))
+					data_sectors=$((data_blocks * data_sectors_per_block))
+					hash_block_size=$(sudo sed -e 's/Hash block size:\s*//g;t;d' "${root_hash_file}")
+					extra_opts+=" ROOTMEASURECONFIG=\"dm-mod.create=\\\"dm-verity,,,ro,0 ${data_sectors} verity 1 @ROOTFS_DEVICE@ @VERITY_DEVICE@ ${data_block_size} ${hash_block_size} ${data_blocks} 0 sha256 ${root_hash} ${salt}\\\"\""
+					;;
+				*)
+					error "DM_VERITY_FORMAT(${DM_VERITY_FORMAT}) is incorrect (must be veritysetup or kernelinit)"
+					return 1
+					;;
+			esac
 		fi
 
 		DESTDIR="${destdir}" PREFIX="${prefix}" EXTRA_OPTS="${extra_opts}" "${shimv2_builder}"

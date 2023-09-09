@@ -61,15 +61,25 @@ sudo docker run --rm -i -v "${repo_root_dir}:${repo_root_dir}" \
 
 [ "${CROSS_BUILD}" == "true" ] && container_image="${container_image_bk}-cross-build"
 
-sudo docker run --rm -i -v "${repo_root_dir}:${repo_root_dir}" \
-	-w "${repo_root_dir}/src/runtime" \
-	"${container_image}" \
-	bash -c "git config --global --add safe.directory ${repo_root_dir} && make PREFIX=${PREFIX} QEMUCMD=qemu-system-${arch} ${EXTRA_OPTS}"
+# EXTRA_OPTS might contain kernel options similar to: dm-mod.create=\"dm-verity,,,ro,0 ...\"
+# That quoted value format must be propagated without changes into the runtime config file.
+# But that format gets modified:
+#
+# 1. When expanding EXTRA_OPTS as parameter to the make command below.
+# 2. When shim's Makefile uses sed to substitute @KERNELPARAMS@ in the config file.
+#
+# Therefore, replace here any \" substring to compensate for the two changes described above.
+EXTRA_OPTS_ESCAPED=$(echo "${EXTRA_OPTS}" | sed -e 's|\\\"|\\\\\\\\\\\\\\\\\\\\\\\"|g')
 
 sudo docker run --rm -i -v "${repo_root_dir}:${repo_root_dir}" \
 	-w "${repo_root_dir}/src/runtime" \
 	"${container_image}" \
-	bash -c "git config --global --add safe.directory ${repo_root_dir} && make PREFIX="${PREFIX}" DESTDIR="${DESTDIR}" ${EXTRA_OPTS} install"
+	bash -c "git config --global --add safe.directory ${repo_root_dir} && make PREFIX=${PREFIX} QEMUCMD=qemu-system-${arch} ${EXTRA_OPTS_ESCAPED}"
+
+sudo docker run --rm -i -v "${repo_root_dir}:${repo_root_dir}" \
+	-w "${repo_root_dir}/src/runtime" \
+	"${container_image}" \
+	bash -c "git config --global --add safe.directory ${repo_root_dir} && make PREFIX="${PREFIX}" DESTDIR="${DESTDIR}" ${EXTRA_OPTS_ESCAPED} install"
 
 for vmm in ${VMM_CONFIGS}; do
 	config_file="${DESTDIR}/${PREFIX}/share/defaults/kata-containers/configuration-${vmm}.toml"
