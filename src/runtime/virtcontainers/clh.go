@@ -581,7 +581,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.vmconfig.Rng = chclient.NewRngConfig(clh.config.EntropySource)
 
 	// set the initial root/boot disk of hypervisor
-	imagePath := "/kata-containers.img"
+	imagePath, err := clh.config.ImageAssetPath()
 	if err != nil {
 		return err
 	}
