@@ -84,6 +84,16 @@
                     "rprivate",
                     "ro"
                 ]
+            },
+            {
+                "destination": "/var/run/secrets/azure/tokens",
+                "source": "^/run/kata-containers/shared/containers/$(bundle-id)-[a-z0-9]{16}-tokens$",
+                "type_": "bind",
+                "options": [
+                  "rbind",
+                  "rprivate",
+                  "ro"
+                ]
             }
         ]
     },
