@@ -546,7 +546,8 @@ allow_env_var(policy_process, input_process, env_var, sandbox_name) {
     print("allow_env_var 1: some policy_env_var == env_var")
 
     some policy_env_var in policy_process.Env
-    policy_env_var == env_var
+    policy_var_regex = concat("", ["^", policy_env_var, "$"])
+    regex.match(policy_var_regex, env_var)
 
     print("allow_env_var 1: success")
 }
@@ -559,7 +560,8 @@ allow_env_var(policy_process, input_process, env_var, sandbox_name) {
     policy_var = replace(policy_env_var, "$(sandbox-name)", sandbox_name)
 
     print("allow_env_var 2: input =", env_var, "policy =", policy_var)
-    policy_var == env_var
+    policy_var_regex = concat("", ["^", policy_var, "$"])
+    regex.match(policy_var_regex, env_var)
 
     print("allow_env_var 2: success")
 }

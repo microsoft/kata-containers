@@ -427,14 +427,23 @@ impl Container {
     }
 
     pub fn get_env_variables(
-        &self,
-        dest_env: &mut Vec<String>,
+        &self, // Set by user in resource spec
+        dest_env: &mut Vec<String>, // Will end up in policy
         config_maps: &Vec<config_map::ConfigMap>,
         secrets: &Vec<secret::Secret>,
         namespace: &str,
         annotations: &Option<BTreeMap<String, String>>,
         service_account_name: &str,
+        infra_env: &Option<&Vec<String>>,
     ) {
+        if let Some(infra_env) = *infra_env {
+            for env_string in infra_env {
+                if !dest_env.contains(&env_string) {
+                    dest_env.push(env_string.clone());
+                }
+            }
+        }
+
         if let Some(source_env) = &self.env {
             for env_variable in source_env {
                 let mut src_string = env_variable.name.clone() + "=";

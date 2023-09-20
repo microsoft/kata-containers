@@ -33,6 +33,14 @@
         "Root": {
             "Path": "/run/kata-containers/shared/containers/$(bundle-id)"
         },
+        "Process": {
+            "Env": [
+                "AZURE_CLIENT_ID=[a-f0-9-]+",
+                "AZURE_TENANT_ID=[a-f0-9-]+",
+                "AZURE_FEDERATED_TOKEN_FILE=/var/run/secrets/azure/tokens/azure-identity-token",
+                "AZURE_AUTHORITY_HOST=https://login\\.microsoftonline\\.com/"
+            ]
+        },
         "Mounts": [
             {
                 "destination": "/etc/hosts",
