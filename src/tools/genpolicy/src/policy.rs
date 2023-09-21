@@ -78,24 +78,21 @@ pub struct KataSpec {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct KataProcess {
-    #[serde(default)]
     pub Terminal: bool,
-    #[serde(default)]
     pub User: KataUser,
-    
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub Args: Vec<String>,
-    
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub Env: Vec<String>,
-    
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub Cwd: String,
-    
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub Capabilities: Option<KataLinuxCapabilities>,
-    
-    #[serde(default)]
+
     pub NoNewPrivileges: bool,
 }
 
@@ -491,12 +488,6 @@ impl AgentPolicy {
             "default".to_string()
         };
 
-        let infra_env: Option<&Vec<String>> = if is_pause_container {
-            self.infra_policy.pause_container.Process.as_ref().map(|p| &p.Env)
-        } else {
-            self.infra_policy.other_container.Process.as_ref().map(|p| &p.Env)
-        };
-
         yaml_container.get_env_variables(
             &mut process.Env,
             &self.config_maps,
@@ -504,7 +495,6 @@ impl AgentPolicy {
             &namespace,
             &resource.get_annotations(),
             &service_account_name,
-            &infra_env,
         );
 
         substitute_env_variables(&mut process.Env);
