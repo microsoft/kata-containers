@@ -85,9 +85,6 @@ const (
 	clhHotPlugAPITimeout                   = 5
 	clhStopSandboxTimeout                  = 3
 	clhStopSandboxTimeoutConfidentialGuest = 10
-	clhNumPciSegments                      = 10
-	//clhNumPciSegments                      = 1
-	//clhNumPciSegmentsSevSnpGuest           = 10
 	clhSocket                              = "clh.sock"
 	clhAPISocket                           = "clh-api.sock"
 	virtioFsSocket                         = "virtiofsd.sock"
@@ -294,14 +291,6 @@ var clhDebugKernelParamsCommon = []Param{
 // hypervisor interface implementation for cloud-hypervisor
 //
 //###########################################################
-
-//func (clh *cloudHypervisor) getClhNumPciSegments() uint32 {
-//	if clh.config.SevSnpGuest {
-//		return clhNumPciSegmentsSevSnpGuest
-//	}
-//
-//	return clhNumPciSegments
-//}
 
 func (clh *cloudHypervisor) getClhAPITimeout() time.Duration {
 	// Increase the APITimeout when dealing with a Confidential Guest.
@@ -554,8 +543,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	if clh.vmconfig.Platform == nil {
 		clh.vmconfig.Platform = chclient.NewPlatformConfig()
 	}
-	clh.vmconfig.Platform.SetNumPciSegments(clhNumPciSegments)
-	//clh.vmconfig.Platform.SetNumPciSegments(getClhNumPciSegments())
+	clh.vmconfig.Platform.SetNumPciSegments(10)
 
 	// Create the VM memory config via the constructor to ensure default values are properly assigned
 	clh.vmconfig.Memory = chclient.NewMemoryConfig(int64((utils.MemUnit(clh.config.MemorySize) * utils.MiB).ToBytes()))
@@ -930,20 +918,7 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 
 	// Hotplug block devices on PCI segments >= 1. PCI segment 0 is used
 	// for the network interface, any disks present at Guest boot time, etc.
-
-	pciSegmentNum := int32(drive.Index) / 32 + 1
-
-//clh.Logger().WithFields(log.Fields{
-//"pciSegmentNum": pciSegmentNum,
-//"clhNumPciSegments": clhNumPciSegments,
-//}).Warn("Manuel: ATTENTION")
-
-	//if pciSegmentNum >= getClhNumPciSegments()
-	if pciSegmentNum >= clhNumPciSegments {
-		return fmt.Errorf("failed to hotplug block device to segment number %d - only %d segments are available", pciSegmentNum, clhNumPciSegments)
-	}
-
-	clhDisk.SetPciSegment(pciSegmentNum)
+	clhDisk.SetPciSegment(int32(drive.Index) / 32 + 1)
 
 	pciInfo, _, err := cl.VmAddDiskPut(ctx, clhDisk)
 
