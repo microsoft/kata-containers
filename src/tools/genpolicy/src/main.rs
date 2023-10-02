@@ -53,6 +53,9 @@ struct CommandLineOptions {
 
     #[clap(short, long)]
     base64_out: bool,
+
+    #[clap(short, long)]
+    debug_mode: bool,
 }
 
 #[tokio::main]
@@ -74,6 +77,7 @@ async fn main() {
         args.silent_unsupported_fields,
         args.raw_out,
         args.base64_out,
+        args.debug_mode,
     );
 
     debug!("Creating policy from yaml, infra data and rules files...");

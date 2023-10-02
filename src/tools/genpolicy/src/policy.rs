@@ -408,9 +408,22 @@ impl AgentPolicy {
             ));
         }
 
+        // enable debug mode if specified by the user
+        let mut request_defaults = self.infra_policy.request_defaults.clone();
+        if self.config.debug_mode {
+            // append to array /bin/bash and /bin/sh
+            let mut exec_commands = request_defaults.ExecProcessRequest.commands.clone();
+            exec_commands.push("/bin/bash".to_string());
+            exec_commands.push("/bin/sh".to_string());
+            // allow logging and put allowed commands back in
+            request_defaults.ExecProcessRequest.commands = exec_commands;
+            request_defaults.ReadStreamRequest = true;
+            request_defaults.WriteStreamRequest = true;
+        }
+
         let policy_data = policy::PolicyData {
             containers: policy_containers,
-            request_defaults: self.infra_policy.request_defaults.clone(),
+            request_defaults: request_defaults,
             common: self.infra_policy.common.clone(),
         };
 

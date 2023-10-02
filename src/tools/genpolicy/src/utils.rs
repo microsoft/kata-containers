@@ -17,6 +17,7 @@ pub struct Config {
     pub silent_unsupported_fields: bool,
     pub raw_out: bool,
     pub base64_out: bool,
+    pub debug_mode: bool,
 }
 
 impl Config {
@@ -28,6 +29,7 @@ impl Config {
         silent_unsupported_fields: bool,
         raw_out: bool,
         base64_out: bool,
+        debug_mode: bool,
     ) -> Self {
         let mut input_path = ".".to_string();
         if let Some(path) = input_files_path {
@@ -54,6 +56,7 @@ impl Config {
             silent_unsupported_fields,
             raw_out,
             base64_out,
+            debug_mode,
         }
     }
 }
