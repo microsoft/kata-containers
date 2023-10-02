@@ -85,6 +85,9 @@ const (
 	clhHotPlugAPITimeout                   = 5
 	clhStopSandboxTimeout                  = 3
 	clhStopSandboxTimeoutConfidentialGuest = 10
+	clhNumPciSegments                      = 10
+	//clhNumPciSegments                      = 1
+	//clhNumPciSegmentsSevSnpGuest           = 10
 	clhSocket                              = "clh.sock"
 	clhAPISocket                           = "clh-api.sock"
 	virtioFsSocket                         = "virtiofsd.sock"
@@ -292,6 +295,14 @@ var clhDebugKernelParamsCommon = []Param{
 //
 //###########################################################
 
+//func (clh *cloudHypervisor) getClhNumPciSegments() uint32 {
+//	if clh.config.SevSnpGuest {
+//		return clhNumPciSegmentsSevSnpGuest
+//	}
+//
+//	return clhNumPciSegments
+//}
+
 func (clh *cloudHypervisor) getClhAPITimeout() time.Duration {
 	// Increase the APITimeout when dealing with a Confidential Guest.
 	// The value has been chosen based on tests using `ctr`, and hopefully
@@ -464,7 +475,6 @@ func (clh *cloudHypervisor) enableProtection() error {
 			clh.vmconfig.Payload.SetHostData(snpZeroHostData)
 		}
 
-		clh.vmconfig.Platform.SetNumPciSegments(10)
 		return nil
 
 	default:
@@ -520,8 +530,8 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 	// Make sure the kernel path is valid if no igvm set
 	if igvmPath == "" {
-		if clh.config.ConfidentialGuest {
-			return errors.New("igvm must be set with confidential_guest")
+		if clh.config.SevSnpGuest {
+			return errors.New("igvm must be set with sev_snp_guest")
 		}
 		kernelPath, err := clh.config.KernelAssetPath()
 		if err != nil {
@@ -530,7 +540,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 		clh.vmconfig.Payload.SetKernel(kernelPath)
 	} else {
 		if !clh.config.ConfidentialGuest {
-			return errors.New("igvm can only be set with confidential_guest")
+			return errors.New("igvm may only be set with confidential_guest")
 		}
 		clh.vmconfig.Payload.SetIgvm(igvmPath)
 	}
@@ -540,6 +550,12 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 			return err
 		}
 	}
+
+	if clh.vmconfig.Platform == nil {
+		clh.vmconfig.Platform = chclient.NewPlatformConfig()
+	}
+	clh.vmconfig.Platform.SetNumPciSegments(clhNumPciSegments)
+	//clh.vmconfig.Platform.SetNumPciSegments(getClhNumPciSegments())
 
 	// Create the VM memory config via the constructor to ensure default values are properly assigned
 	clh.vmconfig.Memory = chclient.NewMemoryConfig(int64((utils.MemUnit(clh.config.MemorySize) * utils.MiB).ToBytes()))
@@ -914,7 +930,20 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 
 	// Hotplug block devices on PCI segments >= 1. PCI segment 0 is used
 	// for the network interface, any disks present at Guest boot time, etc.
-	clhDisk.SetPciSegment(int32(drive.Index) / 32 + 1)
+
+	pciSegmentNum := int32(drive.Index) / 32 + 1
+
+//clh.Logger().WithFields(log.Fields{
+//"pciSegmentNum": pciSegmentNum,
+//"clhNumPciSegments": clhNumPciSegments,
+//}).Warn("Manuel: ATTENTION")
+
+	//if pciSegmentNum >= getClhNumPciSegments()
+	if pciSegmentNum >= clhNumPciSegments {
+		return fmt.Errorf("failed to hotplug block device to segment number %d - only %d segments are available", pciSegmentNum, clhNumPciSegments)
+	}
+
+	clhDisk.SetPciSegment(pciSegmentNum)
 
 	pciInfo, _, err := cl.VmAddDiskPut(ctx, clhDisk)
 
