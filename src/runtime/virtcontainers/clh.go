@@ -520,9 +520,6 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 	// Make sure the kernel path is valid if no igvm set
 	if igvmPath == "" {
-		if clh.config.ConfidentialGuest {
-			return errors.New("igvm must be set with confidential_guest")
-		}
 		kernelPath, err := clh.config.KernelAssetPath()
 		if err != nil {
 			return err
