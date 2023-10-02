@@ -619,7 +619,7 @@ allow_var(p_process, i_process, i_var, s_name) {
     print("allow_var 5: true")
 }
 
-# "KUBERNETES_SERVICE_HOST=10.0.0.1",
+# "KUBERNETES_SERVICE_HOST=10.0.0.1"
 allow_var(p_process, i_process, i_var, s_name) {
     print("allow_var 6: start")
 
@@ -638,7 +638,7 @@ allow_var(p_process, i_process, i_var, s_name) {
     print("allow_var 6: true")
 }
 
-# "KUBERNETES_SERVICE_PORT=443",
+# "KUBERNETES_SERVICE_PORT=443"
 allow_var(p_process, i_process, i_var, s_name) {
     print("allow_var 7: start")
 
@@ -657,7 +657,7 @@ allow_var(p_process, i_process, i_var, s_name) {
     print("allow_var 7: true")
 }
 
-# "KUBERNETES_SERVICE_PORT_HTTPS=443",
+# "KUBERNETES_SERVICE_PORT_HTTPS=443"
 allow_var(p_process, i_process, i_var, s_name) {
     print("allow_var 8: start")
 
@@ -677,7 +677,7 @@ allow_var(p_process, i_process, i_var, s_name) {
     print("allow_var 8: true")
 }
 
-# "KUBERNETES_PORT=tcp://10.0.0.1:443",
+# "KUBERNETES_PORT=tcp://10.0.0.1:443"
 allow_var(p_process, i_process, i_var, s_name) {
     print("allow_var 9: start")
 
@@ -695,7 +695,7 @@ allow_var(p_process, i_process, i_var, s_name) {
     print("allow_var 9: true")
 }
 
-# "KUBERNETES_PORT_443_TCP=tcp://10.0.0.1:443",
+# "KUBERNETES_PORT_443_TCP=tcp://10.0.0.1:443"
 allow_var(p_process, i_process, i_var, s_name) {
     print("allow_var 10: start")
 
@@ -797,6 +797,26 @@ allow_var(p_process, i_process, i_var, s_name) {
     regex.match(p_regex, i_var)
 
     print("allow_var 15: true")
+}
+
+# "NGINX_SERVICE_SERVICE_PORT_HTTP=80"
+allow_var(p_process, i_process, i_var, s_name) {
+    print("allow_var 16: start")
+
+    name_value := split(i_var, "=")
+    count(name_value) == 2
+
+    is_port(name_value[1])
+
+    components = split(name_value[0], "_")
+    count1 := count(components)
+    count1 >= 4
+
+    components[count1 - 1] == "HTTP"
+    components[count1 - 2] == "PORT"
+    components[count1 - 3] == "SERVICE"
+
+    print("allow_var 16: true")
 }
 
 allow_pod_ip_var(var_name, p_var) {
