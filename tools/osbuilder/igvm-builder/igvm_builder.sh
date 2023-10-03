@@ -4,6 +4,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+# ./igvm_builder.sh -k /usr/share/cloud-hypervisor-cvm/bzImage -v /work_dir/kata-containers/tools/osbuilder/root_hash.txt -o igvm.img
+der/root_hash.txt -d -o igvm.img
+
 [ -z "${DEBUG}" ] || set -x
 
 set -o errexit
@@ -41,7 +44,7 @@ EOF
 exit "${error}"
 }
 
-while getopts "h:o:d:i:v:k:" opt
+while getopts "ho:di:v:k:" opt
 do
 	case "$opt" in
 		h)	usage ;;
@@ -55,7 +58,6 @@ done
 
 shift $(( $OPTIND - 1 ))
 
-igvm_vars="-kernel $bzimage_bin -boot_mode x64 -vtl 0 -svme 1 -encrypted_page 1 -pvalidate_opt 1 -acpi igvm/acpi/acpi-clh/"
 
 # [ -d "${ROOTFS}" ] || die "${ROOTFS} is not a directory"
 
@@ -71,11 +73,6 @@ wget https://kataccstorage.blob.core.windows.net/aks-rpms/msigvm-1.2.0.tar.gz
 (echo "76dd03153121cc6cc4374ca76fb4e5602adccd7ac286f4fb41e6f20a66dec7c0  msigvm-1.2.0.tar.gz" | sha256sum --check) || exit 1
 tar --no-same-owner -xf msigvm-1.2.0.tar.gz
 mv msigvm*/* .
-
-echo "kernel bin: ${KERNEL_BIN}"
-igvm_vars="-kernel ${KERNEL_BIN} -boot_mode x64 -vtl 0 -svme 1 -encrypted_page 1 -pvalidate_opt 1 -acpi igvm/acpi/acpi-clh/"
-igvm_params="rootflags=data=ordered,errors=remount-ro ro rootfstype=ext4 panic=1 no_timer_check noreplace-smp systemd.unit=kata-containers.target systemd.mask=systemd-networkd.service \
-  systemd.mask=systemd-networkd.socket agent.enable_signature_verification=false"
 
 # set image config options
 if [ -n "${DM_VERITY_FILE}" ] ; then
@@ -94,7 +91,7 @@ if [ -n "${DM_VERITY_FILE}" ] ; then
 	data_sectors=$((data_blocks * data_sectors_per_block))
 	hash_block_size=$(sudo sed -e 's/Hash block size:\s*//g;t;d' "${DM_VERITY_FILE}")
 
-	igvm_params+=" dm-mod.create=\"dm-verity,,,ro,0 ${data_sectors} verity 1 /dev/vda1 /dev/vda2 ${data_block_size} ${hash_block_size} ${data_blocks} 0 sha256 ${root_hash} ${salt}\" "
+	igvm_params="dm-mod.create=\"dm-verity,,,ro,0 ${data_sectors} verity 1 /dev/vda1 /dev/vda2 ${data_block_size} ${hash_block_size} ${data_blocks} 0 sha256 ${root_hash} ${salt}\" root=/dev/dm-0"
 
 elif [ -n "${INITRD_FILE}" ] ; then
 	if [ ! -f "${INITRD_FILE}" ] ; then
@@ -103,12 +100,14 @@ elif [ -n "${INITRD_FILE}" ] ; then
 		die "${INITRD_FILE} is not a file"
 	fi 
 
-	igvm_params+=" root=/dev/vda1"
-
+	igvm_params="root=/dev/vda1"
 fi
 
+igvm_vars="-kernel ${KERNEL_BIN} -boot_mode x64 -vtl 0 -svme 1 -encrypted_page 1 -pvalidate_opt 1 -acpi igvm/acpi/acpi-clh/"
+igvm_params+=" rootflags=data=ordered,errors=remount-ro ro rootfstype=ext4 panic=1 no_timer_check noreplace-smp systemd.unit=kata-containers.target systemd.mask=systemd-networkd.service \
+  systemd.mask=systemd-networkd.socket agent.enable_signature_verification=false"
 
-if [ -n "${DEBUG}" ] ; then
+if [ -z "${DEBUG}" ] ; then
 	info "Applying debug options"
 	igvm_params+=" console=hvc0 systemd.log_target=console agent.log=debug agent.debug_console agent.debug_console_vport=1026"
 else
@@ -116,10 +115,10 @@ else
 fi
 
 
-info "Building IGVM image: ${igvm_vars}"
-# info "${igvm_vars}"
-
+igvm_cmd="python3 ${igvm_vars} -o ${IGVM_IMAGE} -measurement_file igvm-measurement.cose -append "${igvm_params}" -svn 0"
+info "Building IGVM image: ${igvm_cmd}"
 python3 igvm/igvmgen.py ${igvm_vars} -o ${IGVM_IMAGE} -measurement_file igvm-measurement.cose -append "${igvm_params}" -svn 0
+
 mv ${IGVM_IMAGE} ${script_dir}
 
 popd
