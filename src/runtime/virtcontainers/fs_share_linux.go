@@ -699,7 +699,7 @@ func (f *FilesystemShare) StartFileEventWatcher(ctx context.Context) error {
 
 					destination := f.srcDstMap[dataDir]
 					f.Logger().Infof("StartFileEventWatcher: Copy file from src (%s) to dst (%s)", dataDir, destination)
-					err := f.copyFilesFromDataDir(dataDir, destination, source)
+					err := f.copyUpdatedFiles(dataDir, destination, source)
 					if err != nil {
 						f.Logger().Infof("StartFileEventWatcher: got an error (%v) when copying file from src (%s) to dst (%s)", err, dataDir, destination)
 						return err
@@ -720,15 +720,15 @@ func (f *FilesystemShare) StartFileEventWatcher(ctx context.Context) error {
 	}
 }
 
-func (f *FilesystemShare) copyFilesFromDataDir(src, dst, oldtsDir string) error {
-	f.Logger().Infof("copyFilesFromDataDir: Copy src:%s to dst:%s from old src:%s", src, dst, oldtsDir)
+func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
+	f.Logger().Infof("copyUpdatedFiles: Copy src:%s to dst:%s from old src:%s", src, dst, oldtsDir)
 
 	// 1. Read the symlink and get the actual data directory
 	// Get the symlink target
 	// eg. srcdir = ..2023_02_09_06_40_51.2326009790
 	srcnewtsdir, err := os.Readlink(src)
 	if err != nil {
-		f.Logger().WithError(err).Errorf("copyFilesFromDataDir: Reading data symlink %s returned error", src)
+		f.Logger().WithError(err).Errorf("copyUpdatedFiles: Reading data symlink %s returned error", src)
 		return err
 	}
 
@@ -744,7 +744,7 @@ func (f *FilesystemShare) copyFilesFromDataDir(src, dst, oldtsDir string) error 
 	// for creating user visible symlinks
 	newSecrets := make(map[string]string)
 
-	f.Logger().Infof("copyFilesFromDataDir: new src dir: %s && new dst dir:%s", srcNewTsPath, dstNewTsPath)
+	f.Logger().Infof("copyUpdatedFiles: new src dir: %s && new dst dir:%s", srcNewTsPath, dstNewTsPath)
 
 	// 5. Copy all the files from the new timestamped directory to the guest
 	walk := func(srcPath string, d fs.DirEntry, err error) error {
@@ -785,14 +785,14 @@ func (f *FilesystemShare) copyFilesFromDataDir(src, dst, oldtsDir string) error 
 	}
 
 	if err := filepath.WalkDir(srcNewTsPath, walk); err != nil {
-		f.Logger().WithError(err).Error("copyFilesFromDataDir: failed to copy files.")
+		f.Logger().WithError(err).Error("copyUpdatedFiles: failed to copy files.")
 		return err
 	}
 
 	// 6. Add watcher to the new timestamped directory in host
 	err = f.watchDir(srcNewTsPath)
 	if err != nil {
-		f.Logger().WithError(err).Error("copyFilesFromDataDir: Failed to add watcher on new ts source.")
+		f.Logger().WithError(err).Error("copyUpdatedFiles: Failed to add watcher on new ts source.")
 		return err
 	}
 
@@ -801,7 +801,7 @@ func (f *FilesystemShare) copyFilesFromDataDir(src, dst, oldtsDir string) error 
 	dstDataPath := filepath.Join(filepath.Dir(dstNewTsPath), "..data")
 	err = f.sandbox.agent.copyFile(context.Background(), srcDataPath, dstDataPath)
 	if err != nil {
-		f.Logger().WithError(err).Errorf("copyFilesFromDataDir: Failed to update data symlink")
+		f.Logger().WithError(err).Errorf("copyUpdatedFiles: Failed to update data symlink")
 		return err
 	}
 
@@ -812,7 +812,7 @@ func (f *FilesystemShare) copyFilesFromDataDir(src, dst, oldtsDir string) error 
 	for k,v := range newSecrets {
 		err = f.sandbox.agent.copyFile(context.Background(), k, v)
 		if err != nil {
-			f.Logger().WithError(err).Error("copyFilesFromDataDir: Failed to copy newly created secret")
+			f.Logger().WithError(err).Error("copyUpdatedFiles: Failed to copy newly created secret")
 			return err
 		}
 	}
