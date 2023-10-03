@@ -518,8 +518,8 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 	// Make sure the kernel path is valid if no igvm set
 	if igvmPath == "" {
-		if clh.config.ConfidentialGuest {
-			return errors.New("igvm must be set with confidential_guest")
+		if clh.config.SevSnpGuest {
+			return errors.New("igvm must be set with sev_snp_guest")
 		}
 		kernelPath, err := clh.config.KernelAssetPath()
 		if err != nil {
@@ -528,7 +528,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 		clh.vmconfig.Payload.SetKernel(kernelPath)
 	} else {
 		if !clh.config.ConfidentialGuest {
-			return errors.New("igvm can only be set with confidential_guest")
+			return errors.New("igvm may only be set with confidential_guest")
 		}
 		clh.vmconfig.Payload.SetIgvm(igvmPath)
 	}
@@ -545,6 +545,11 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 			return err
 		}
 	}
+
+	if clh.vmconfig.Platform == nil {
+		clh.vmconfig.Platform = chclient.NewPlatformConfig()
+	}
+	clh.vmconfig.Platform.SetNumPciSegments(10)
 
 	// Create the VM memory config via the constructor to ensure default values are properly assigned
 	clh.vmconfig.Memory = chclient.NewMemoryConfig(int64((utils.MemUnit(clh.config.MemorySize) * utils.MiB).ToBytes()))
