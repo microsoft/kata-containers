@@ -120,8 +120,7 @@ async fn main() {
         args.raw_out,
         args.base64_out,
     );
-    // println!("{:#?}", config);
-    println!("{:#?}", config);
+
     debug!("Creating policy from yaml, settings, and rules.rego files...");
     let mut policy = policy::AgentPolicy::from_files(&config).await.unwrap();
 
