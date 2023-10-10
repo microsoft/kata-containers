@@ -19,28 +19,28 @@ usage()
 	error="${1:-0}"
 	cat <<EOF
 Usage: ${script_name} [options] <rootfs-dir>
-	This script creates a Kata Containers IGVM image file based on the
-	<rootfs-dir> directory.
+	This script creates a Kata Containers IGVM file based on either a dm-verity protected image to 
+	be added as a disk or an initrd to be built into the IGVM
 
 Options:
 	-h Show help
 	-o Set the path where the generated image file is stored.
-	   DEFAULT: the path stored in the environment variable igvm_name
+	   DEFAULT: kata-containers-igvm.img
+	-k Kernel to be used for the UVM
+	-v Image to be used for dm-verity
+	-d Add debug options 
+	-i Initrd to be used to build IGVM with
 
-Extra environment variables:
-	kernel_bin:  use it to change the expected agent kernel name
-		    DEFAULT: bzImage
-	AGENT_INIT: use kata agent as init process
-		    DEFAULT: no
 EOF
 exit "${error}"
 }
 
-set_igvm_opts() {
-	echo "dallas *** checking var dm_verity_file ${dm_verity_file}"
-	echo "dallas *** checking var 1 ${1}"
-	# set_igvm_opts "${dm_verity_file}" "${initrd_bin}"
+cleanup() {
+	rm -rf "${igvm_dir}"
+	exit
+}
 
+set_igvm_opts() {
 	# initialize igvm options
 	igvm_vars="-kernel ${kernel_bin} -boot_mode x64 -vtl 0 -svme 1 -encrypted_page 1 -pvalidate_opt 1 -acpi igvm/acpi/acpi-clh/"
 
@@ -48,8 +48,8 @@ set_igvm_opts() {
 	if [ -n "${dm_verity_file}" ] ; then
 		if [ ! -f "${dm_verity_file}" ] ; then
 			popd
-			rm -rf "${igvm_dir}"
 			die "${dm_verity_file} is not a file"
+			cleanup
 		fi
 
 		info "Setting options for dm-verity image based on ${dm_verity_file}"
@@ -66,8 +66,8 @@ set_igvm_opts() {
 	elif [ -n "${initrd_bin}" ] ; then
 		if [ ! -f "${initrd_bin}" ] ; then
 			popd
-			rm -rf "${igvm_dir}"
 			die "${initrd_bin} is not a file"
+			cleanup
 		fi 
 
 		info "Setting options for initrd image based on ${initrd_bin}"
@@ -87,16 +87,15 @@ set_igvm_opts() {
 }
 
 build_image() {
-	
 	igvm_cmd="python3 ${igvm_vars} -o ${igvm_name} -measurement_file igvm-measurement.cose -append "${igvm_params}" -svn 0"
 	info "Building IGVM image: ${igvm_cmd}"
 	python3 igvm/igvmgen.py ${igvm_vars} -o ${igvm_name} -measurement_file igvm-measurement.cose -append "${igvm_params}" -svn 0
-
 }
 
 
 main() {
 	debug_image=false
+	igvm_name="kata-containers-igvm.img"
 	while getopts "ho:di:v:k:" opt
 
 	do
@@ -129,9 +128,9 @@ main() {
 
 	build_image
 	mv ${igvm_name} ${script_dir}
-	
+
+	cleanup
 	popd
 }
 
 main "$@"
-
