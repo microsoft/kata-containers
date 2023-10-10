@@ -106,7 +106,7 @@ async fn main() {
         config_map_files.push(config_map_file.clone());
     }
 
-    if args.debug_mode {
+    if args.debug_mode && args.settings_file_name == "genpolicy-settings.json" {
         args.settings_file_name = String::from("genpolicy-settings-debug.json");
     }
 
