@@ -83,6 +83,13 @@ struct CommandLineOptions {
     #[clap(
         short,
         long,
+        help = "Allows /bin/sh and /bin/bash and reading logs to stdout. This is not recommended for production systems"
+    )]
+    debug_mode: bool,
+
+    #[clap(
+        short,
+        long,
         help = "Ignore unsupported input Kubernetes YAML fields. This is not recommeded unless you understand exactly how genpolicy works!"
     )]
     silent_unsupported_fields: bool,
@@ -92,11 +99,15 @@ struct CommandLineOptions {
 async fn main() {
     env_logger::init();
 
-    let args = CommandLineOptions::parse();
+    let mut args = CommandLineOptions::parse();
 
     let mut config_map_files = Vec::new();
     if let Some(config_map_file) = &args.config_map_file {
         config_map_files.push(config_map_file.clone());
+    }
+
+    if args.debug_mode {
+        args.settings_file_name = String::from("genpolicy-settings-debug.json");
     }
 
     let config = utils::Config::new(
@@ -109,7 +120,8 @@ async fn main() {
         args.raw_out,
         args.base64_out,
     );
-
+    // println!("{:#?}", config);
+    println!("{:#?}", config);
     debug!("Creating policy from yaml, settings, and rules.rego files...");
     let mut policy = policy::AgentPolicy::from_files(&config).await.unwrap();
 
