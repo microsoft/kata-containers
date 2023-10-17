@@ -7,17 +7,18 @@
 #![allow(non_snake_case)]
 
 use crate::policy;
-
+use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
 use anyhow::{anyhow, Result};
 use docker_credential::{CredentialRetrievalError, DockerCredential};
 use log::warn;
 use log::{debug, info, LevelFilter};
-use oci_distribution::client::{linux_amd64_resolver, ClientConfig};
-use oci_distribution::{manifest, secrets::RegistryAuth, Client, Reference};
+// use oci_distribution::client::{linux_amd64_resolver, ClientConfig};
+// use oci_distribution::{manifest, secrets::RegistryAuth, Client, Reference};
 use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::{io, io::Seek, io::Write, path::Path};
 use tokio::{fs, io::AsyncWriteExt};
+use serde_json::json;
 
 #[derive(Clone, Debug, Default)]
 pub struct Container {
@@ -58,56 +59,81 @@ impl Container {
     pub async fn new(use_cached_files: bool, image: &str) -> Result<Self> {
         info!("============================================");
         info!("Pulling manifest and config for {:?}", image);
-        let reference: Reference = image.to_string().parse().unwrap();
-        let auth = build_auth(&reference);
 
-        let mut client = Client::new(ClientConfig {
-            platform_resolver: Some(Box::new(linux_amd64_resolver)),
-            ..Default::default()
+        // let reference: Reference = image.to_string().parse().unwrap();
+        println!("{}", image);
+        // let auth = build_auth(&reference);
+
+        // let mut client = Client::new(ClientConfig {
+        //     platform_resolver: Some(Box::new(linux_amd64_resolver)),
+        //     ..Default::default()
+        // });
+
+        // todo: get/set these correctly
+        let mut client: Client = Client::from_path("/var/run/containerd/containerd.sock").await?; 
+        let manifest: serde_json::Value = json!({
+            
         });
+        let config_layer_str = "";
 
-        match client.pull_manifest_and_config(&reference, &auth).await {
-            Ok((manifest, digest_hash, config_layer_str)) => {
-                debug!("digest_hash: {:?}", digest_hash);
-                debug!(
-                    "manifest: {}",
-                    serde_json::to_string_pretty(&manifest).unwrap()
-                );
-
-                // Log the contents of the config layer.
-                if log::max_level() >= LevelFilter::Debug {
-                    let mut deserializer = serde_json::Deserializer::from_str(&config_layer_str);
-                    let mut serializer = serde_json::Serializer::pretty(io::stderr());
-                    serde_transcode::transcode(&mut deserializer, &mut serializer).unwrap();
-                }
-
-                let config_layer: DockerConfigLayer =
+        let config_layer: DockerConfigLayer =
                     serde_json::from_str(&config_layer_str).unwrap();
-                let image_layers = get_image_layers(
-                    use_cached_files,
-                    &mut client,
-                    &reference,
-                    &manifest,
-                    &config_layer,
-                )
-                .await
-                .unwrap();
+        let image_layers = get_image_layers(
+            use_cached_files,
+            &mut client,
+            &image,
+            &manifest,
+            &config_layer,
+        )
+        .await
+        .unwrap();
 
-                Ok(Container {
-                    config_layer,
-                    image_layers,
-                })
-            }
-            Err(oci_distribution::errors::OciDistributionError::AuthenticationFailure(message)) => {
-                panic!("Container image registry authentication failure ({}). Are docker credentials set-up for current user?", &message);
-            }
-            Err(e) => {
-                panic!(
-                    "Failed to pull container image manifest and config - error: {:#?}",
-                    &e
-                );
-            }
-        }
+        Ok(Container {
+            config_layer,
+            image_layers})
+
+        // match client.pull_manifest_and_config(&reference, &auth).await {
+        //     Ok((manifest, digest_hash, config_layer_str)) => {
+        //         debug!("digest_hash: {:?}", digest_hash);
+        //         debug!(
+        //             "manifest: {}",
+        //             serde_json::to_string_pretty(&manifest).unwrap()
+        //         );
+
+        //         // Log the contents of the config layer.
+        //         if log::max_level() >= LevelFilter::Debug {
+        //             let mut deserializer = serde_json::Deserializer::from_str(&config_layer_str);
+        //             let mut serializer = serde_json::Serializer::pretty(io::stderr());
+        //             serde_transcode::transcode(&mut deserializer, &mut serializer).unwrap();
+        //         }
+
+        //         let config_layer: DockerConfigLayer =
+        //             serde_json::from_str(&config_layer_str).unwrap();
+        //         let image_layers = get_image_layers(
+        //             use_cached_files,
+        //             &mut client,
+        //             &reference,
+        //             &manifest,
+        //             &config_layer,
+        //         )
+        //         .await
+        //         .unwrap();
+
+        //         Ok(Container {
+        //             config_layer,
+        //             image_layers,
+        //         })
+        //     }
+        //     Err(oci_distribution::errors::OciDistributionError::AuthenticationFailure(message)) => {
+        //         panic!("Container image registry authentication failure ({}). Are docker credentials set-up for current user?", &message);
+        //     }
+        //     Err(e) => {
+        //         panic!(
+        //             "Failed to pull container image manifest and config - error: {:#?}",
+        //             &e
+        //         );
+        //     }
+        // }
     }
 
     // Convert Docker image config to policy data.
@@ -212,38 +238,65 @@ impl Container {
 async fn get_image_layers(
     use_cached_files: bool,
     client: &mut Client,
-    reference: &Reference,
-    manifest: &manifest::OciImageManifest,
+    reference: &str,
+    manifest: &serde_json::Value,
     config_layer: &DockerConfigLayer,
 ) -> Result<Vec<ImageLayer>> {
     let mut layer_index = 0;
-    let mut layers = Vec::new();
+    let mut layersVec = Vec::new();
 
-    for layer in &manifest.layers {
-        if layer
-            .media_type
-            .eq(manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE)
-        {
-            if layer_index < config_layer.rootfs.diff_ids.len() {
-                layers.push(ImageLayer {
+    // if manifest.schemaVersion == 2
+    let layers = manifest["manifests"].as_array().unwrap();
+    // println!("{:?}", manifests);
+    for layer in layers {
+        if &layer["mediaType"] == "application/vnd.oci.image.manifest.v1+json"{
+            if layer_index < 100 { //todo: config_layer.rootfs.diff_ids.len()
+                let layerDigest = &layer["digest"].as_str().unwrap();
+                println!("{}", layerDigest);
+                let imageLayer = ImageLayer {
                     diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
                     verity_hash: get_verity_hash(
                         use_cached_files,
                         client,
                         reference,
-                        &layer.digest,
+                        layerDigest,
                     )
                     .await?,
-                });
-            } else {
-                return Err(anyhow!("Too many Docker gzip layers"));
+                };
+                layersVec.push(imageLayer);
             }
-
+            else {
+                        return Err(anyhow!("Too many Docker gzip layers"));
+            }
             layer_index += 1;
         }
     }
 
-    Ok(layers)
+    // for layer in &manifest.layers {
+    //     if layer
+    //         .media_type
+    //         .eq("manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE")
+    //     {
+    //         if layer_index < config_layer.rootfs.diff_ids.len() {
+    //             layers.push(ImageLayer {
+    //                 diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
+    //                 verity_hash: get_verity_hash(
+    //                     use_cached_files,
+    //                     client,
+    //                     reference,
+    //                     &"layer.digest",
+    //                 )
+    //                 .await?,
+    //             });
+    //         } else {
+    //             return Err(anyhow!("Too many Docker gzip layers"));
+    //         }
+
+    //         layer_index += 1;
+    //     }
+    // }
+
+    Ok(layersVec)
 }
 
 fn delete_files(decompressed_path: &Path, compressed_path: &Path, verity_path: &Path) {
@@ -255,7 +308,7 @@ fn delete_files(decompressed_path: &Path, compressed_path: &Path, verity_path: &
 async fn get_verity_hash(
     use_cached_files: bool,
     client: &mut Client,
-    reference: &Reference,
+    reference: &str,
     layer_digest: &str,
 ) -> Result<String> {
     let base_dir = std::path::Path::new("layers_cache");
@@ -326,7 +379,7 @@ async fn get_verity_hash(
 async fn create_verity_hash_file(
     use_cached_files: bool,
     client: &mut Client,
-    reference: &Reference,
+    reference: &str,
     layer_digest: &str,
     base_dir: &Path,
     decompressed_path: &Path,
@@ -355,7 +408,7 @@ async fn create_verity_hash_file(
 async fn create_decompressed_layer_file(
     use_cached_files: bool,
     client: &mut Client,
-    reference: &Reference,
+    reference: &str,
     layer_digest: &str,
     decompressed_path: &Path,
     compressed_path: &Path,
@@ -367,10 +420,11 @@ async fn create_decompressed_layer_file(
         let mut file = tokio::fs::File::create(&compressed_path)
             .await
             .map_err(|e| anyhow!(e))?;
-        client
-            .pull_blob(&reference, layer_digest, &mut file)
-            .await
-            .map_err(|e| anyhow!(e))?;
+        // todo: get blob from containerd
+        // client
+        //     .pull_blob(&reference, layer_digest, &mut file)
+        //     .await
+        //     .map_err(|e| anyhow!(e))?;
         file.flush().await.map_err(|e| anyhow!(e))?;
     }
 
@@ -419,43 +473,43 @@ pub async fn get_container(use_cache: bool, image: &str) -> Result<Container> {
     Container::new(use_cache, image).await
 }
 
-fn build_auth(reference: &Reference) -> RegistryAuth {
-    debug!("build_auth: {:?}", reference);
+// fn build_auth(reference: &Reference) -> RegistryAuth {
+//     debug!("build_auth: {:?}", reference);
 
-    let server = reference
-        .resolve_registry()
-        .strip_suffix("/")
-        .unwrap_or_else(|| reference.resolve_registry());
+//     let server = reference
+//         .resolve_registry()
+//         .strip_suffix("/")
+//         .unwrap_or_else(|| reference.resolve_registry());
 
-    match docker_credential::get_credential(server) {
-        Ok(DockerCredential::UsernamePassword(username, password)) => {
-            debug!("build_auth: Found docker credentials");
-            return RegistryAuth::Basic(username, password);
-        }
-        Ok(DockerCredential::IdentityToken(_)) => {
-            warn!("build_auth: Cannot use contents of docker config, identity token not supported. Using anonymous access.");
-        }
-        Err(CredentialRetrievalError::ConfigNotFound) => {
-            debug!("build_auth: Docker config not found - using anonymous access.");
-        }
-        Err(CredentialRetrievalError::NoCredentialConfigured) => {
-            debug!("build_auth: Docker credentials not configured - using anonymous access.");
-        }
-        Err(CredentialRetrievalError::ConfigReadError) => {
-            debug!("build_auth: Cannot read docker credentials - using anonymous access.");
-        }
-        Err(CredentialRetrievalError::HelperFailure { stdout, stderr }) => {
-            if stdout == "credentials not found in native keychain\n" {
-                // On WSL, this error is generated when credentials are not
-                // available in ~/.docker/config.json.
-                debug!("build_auth: Docker credentials not found - using anonymous access.");
-            } else {
-                warn!("build_auth: Docker credentials not found - using anonymous access. stderr = {}, stdout = {}",
-                    &stderr, &stdout);
-            }
-        }
-        Err(e) => panic!("Error handling docker configuration file: {}", e),
-    }
+//     match docker_credential::get_credential(server) {
+//         Ok(DockerCredential::UsernamePassword(username, password)) => {
+//             debug!("build_auth: Found docker credentials");
+//             return RegistryAuth::Basic(username, password);
+//         }
+//         Ok(DockerCredential::IdentityToken(_)) => {
+//             warn!("build_auth: Cannot use contents of docker config, identity token not supported. Using anonymous access.");
+//         }
+//         Err(CredentialRetrievalError::ConfigNotFound) => {
+//             debug!("build_auth: Docker config not found - using anonymous access.");
+//         }
+//         Err(CredentialRetrievalError::NoCredentialConfigured) => {
+//             debug!("build_auth: Docker credentials not configured - using anonymous access.");
+//         }
+//         Err(CredentialRetrievalError::ConfigReadError) => {
+//             debug!("build_auth: Cannot read docker credentials - using anonymous access.");
+//         }
+//         Err(CredentialRetrievalError::HelperFailure { stdout, stderr }) => {
+//             if stdout == "credentials not found in native keychain\n" {
+//                 // On WSL, this error is generated when credentials are not
+//                 // available in ~/.docker/config.json.
+//                 debug!("build_auth: Docker credentials not found - using anonymous access.");
+//             } else {
+//                 warn!("build_auth: Docker credentials not found - using anonymous access. stderr = {}, stdout = {}",
+//                     &stderr, &stdout);
+//             }
+//         }
+//         Err(e) => panic!("Error handling docker configuration file: {}", e),
+//     }
 
-    RegistryAuth::Anonymous
-}
+//     RegistryAuth::Anonymous
+// }
