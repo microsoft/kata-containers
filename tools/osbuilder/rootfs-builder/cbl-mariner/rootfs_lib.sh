@@ -80,7 +80,6 @@ build_rootfs()
 		"tar" \
 		"tzdata" \
 		"xz" \
-		"zstd-libs" \
 	)
 
 	for MARINER_REMOVED_PACKAGE in ${MARINER_REMOVED_PACKAGES[@]}
