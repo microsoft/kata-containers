@@ -148,10 +148,22 @@ impl Process {
                 p.stdin = Some(stdin);
 
                 let (pstdout, stdout) = create_extended_pipe(OFlag::O_CLOEXEC, pipe_size)?;
+
+                // Reading container stdout from the Host is typically blocked for
+                // confidential containers, and thefore the pipe doesn't get drained.
+                // Avoid blocking the container when the pipe is full.
+                set_nonblocking(stdout);
+
                 p.parent_stdout = Some(pstdout);
                 p.stdout = Some(stdout);
 
                 let (pstderr, stderr) = create_extended_pipe(OFlag::O_CLOEXEC, pipe_size)?;
+
+                // Reading container stderr from the Host is typically blocked for
+                // confidential containers, and thefore the pipe doesn't get drained.
+                // Avoid blocking the container when the pipe is full.
+                set_nonblocking(stderr);
+
                 p.parent_stderr = Some(pstderr);
                 p.stderr = Some(stderr);
             }
@@ -236,6 +248,12 @@ fn create_extended_pipe(flags: OFlag, pipe_size: i32) -> Result<(RawFd, RawFd)> 
         fcntl(w, FcntlArg::F_SETPIPE_SZ(pipe_size))?;
     }
     Ok((r, w))
+}
+
+fn set_nonblocking(fd: RawFd) {
+    unsafe {
+        libc::fcntl(fd, libc::F_SETFL, libc::O_NONBLOCK);
+    }
 }
 
 #[cfg(test)]
