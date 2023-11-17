@@ -5,6 +5,7 @@
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use slog::Drain;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, Duration};
@@ -144,6 +145,8 @@ impl AgentPolicy {
 
     /// Replace the Policy in OPA.
     pub async fn set_policy(&mut self, policy: &str) -> Result<()> {
+        check_policy_hash(policy)?;
+
         if let Some(opa_client) = &mut self.opa_client {
             // Delete the old rules.
             opa_client.delete(&self.policy_path).send().await?;
@@ -264,4 +267,32 @@ fn start_opa(opa_addr: &str) -> Result<()> {
         }
     }
     bail!("OPA binary not found in {:?}", &bin_dirs);
+}
+
+fn check_policy_hash(policy: &str) -> Result<()> {
+    if let Ok(mut firmware) = sev::firmware::guest::Firmware::open() {
+        let report_data: [u8; 64] = [0; 64];
+        if let Ok(report) = firmware.get_report(None, Some(report_data), Some(0)) {
+            let mut hasher = Sha256::new();
+            hasher.update(policy.as_bytes());
+            let digest = hasher.finalize();
+            debug!(sl!(), "policy: calculated hash ({:?})", digest.as_slice());
+
+            if report.host_data != digest.as_slice() {
+                bail!(
+                    "policy: rejecting unexpected hash ({:?}), expected ({:?})",
+                    digest.as_slice(),
+                    report.host_data
+                );
+            }
+
+            return Ok(());
+        }
+    }
+
+    warn!(sl!(), "policy: integrity has not been verified!");
+
+    // TODO: return an error if the current platform supports policy
+    // integrity verification using this method.
+    Ok(())
 }

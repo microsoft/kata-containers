@@ -671,6 +671,9 @@ type HypervisorConfig struct {
 
 	// ExtraMonitorSocket allows to add an extra HMP or QMP socket when the VMM is Qemu
 	ExtraMonitorSocket govmmQemu.MonitorProtocol
+
+	// ConfigHash is a base64 encoded cryptographic hash value attached to a Guest TEE
+	ConfigHash string
 }
 
 // vcpu mapping from vcpu number to thread number
