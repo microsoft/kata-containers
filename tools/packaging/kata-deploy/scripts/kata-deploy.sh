@@ -350,6 +350,18 @@ EOF
 	fi
 }
 
+function print_config_file() {
+	local config_file="$1"
+
+        if [ -f "${config_file}" ]; then
+                echo "${config_file} contents:"
+                cat "${config_file}"
+                echo " "
+        else
+                echo "${config_file} is not present"
+        fi
+}
+
 function configure_containerd() {
 	# Configure containerd to use Kata:
 	echo "Add Kata Containers as a supported runtime for containerd"
@@ -367,6 +379,9 @@ function configure_containerd() {
 	for shim in "${shims[@]}"; do
 		configure_containerd_runtime "$1" $shim
 	done
+
+	print_config_file "/opt/kata/share/defaults/kata-containers/configuration.toml"
+	print_config_file "/opt/kata/share/defaults/kata-containers/configuration-qemu-snp.toml"
 }
 
 function remove_artifacts() {
