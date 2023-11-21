@@ -5,20 +5,20 @@
 
 // Allow Docker image config field names.
 #![allow(non_snake_case)]
-
 use crate::policy;
-use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
 use anyhow::{anyhow, Result};
-use docker_credential::{CredentialRetrievalError, DockerCredential};
 use log::warn;
 use log::{debug, info, LevelFilter};
-// use oci_distribution::client::{linux_amd64_resolver, ClientConfig};
-// use oci_distribution::{manifest, secrets::RegistryAuth, Client, Reference};
 use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::{io, io::Seek, io::Write, path::Path};
 use tokio::{fs, io::AsyncWriteExt};
-use serde_json::json;
+use k8s_cri::v1::image_service_client::ImageServiceClient;
+use std::{collections::HashMap,};
+use std::convert::TryFrom;
+use tokio::net::UnixStream;
+use tonic::transport::{Channel, Endpoint, Uri};
+use tower::service_fn;
 
 #[derive(Clone, Debug, Default)]
 pub struct Container {
@@ -58,29 +58,52 @@ pub struct ImageLayer {
 impl Container {
     pub async fn new(use_cached_files: bool, image: &str) -> Result<Self> {
         info!("============================================");
-        info!("Pulling manifest and config for {:?}", image);
-
-        // let reference: Reference = image.to_string().parse().unwrap();
-        println!("{}", image);
-        // let auth = build_auth(&reference);
-
-        // let mut client = Client::new(ClientConfig {
-        //     platform_resolver: Some(Box::new(linux_amd64_resolver)),
-        //     ..Default::default()
-        // });
+        info!("Pulling image and layers for {:?}", image);
 
         // todo: get/set these correctly
-        let mut client: Client = Client::from_path("/var/run/containerd/containerd.sock").await?; 
-        let manifest: serde_json::Value = json!({
-            
-        });
-        let config_layer_str = "";
+        let path = "/var/run/containerd/containerd.sock";
+        let channel = Endpoint::try_from("http://[::]")
+            .unwrap()
+            .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path)))
+            .await
+            .expect("Could not create client.");
+
+        let mut client = ImageServiceClient::new(channel);
+
+        let req =   k8s_cri::v1::PullImageRequest {
+            image: Some(k8s_cri::v1::ImageSpec {
+                image: image.to_string(),
+                annotations: HashMap::new(),
+            }),
+            auth: None,
+            sandbox_config: None,
+        };
+
+        let resp = client.pull_image(req).await?;
+
+        println!("pull image response: {:?}\n", resp);
+
+        let req = k8s_cri::v1::ImageStatusRequest {
+            image: Some(k8s_cri::v1::ImageSpec{
+                image: "docker.io/library/nginx:latest".to_string(),
+                annotations: HashMap::new(),
+            }),
+            verbose: true // need this so response returns layers
+        };
+        
+        let image_info = client.image_status(req).await?;
+
+        let inner_image_info = image_info.into_inner();
+
+        let status_info = inner_image_info.info.get("info").unwrap();
+
+        let manifest = serde_json::from_str(status_info)?;
+        let config_layer_str = ""; // todo: this may come from pull response or status
 
         let config_layer: DockerConfigLayer =
                     serde_json::from_str(&config_layer_str).unwrap();
         let image_layers = get_image_layers(
             use_cached_files,
-            &mut client,
             &image,
             &manifest,
             &config_layer,
@@ -91,49 +114,6 @@ impl Container {
         Ok(Container {
             config_layer,
             image_layers})
-
-        // match client.pull_manifest_and_config(&reference, &auth).await {
-        //     Ok((manifest, digest_hash, config_layer_str)) => {
-        //         debug!("digest_hash: {:?}", digest_hash);
-        //         debug!(
-        //             "manifest: {}",
-        //             serde_json::to_string_pretty(&manifest).unwrap()
-        //         );
-
-        //         // Log the contents of the config layer.
-        //         if log::max_level() >= LevelFilter::Debug {
-        //             let mut deserializer = serde_json::Deserializer::from_str(&config_layer_str);
-        //             let mut serializer = serde_json::Serializer::pretty(io::stderr());
-        //             serde_transcode::transcode(&mut deserializer, &mut serializer).unwrap();
-        //         }
-
-        //         let config_layer: DockerConfigLayer =
-        //             serde_json::from_str(&config_layer_str).unwrap();
-        //         let image_layers = get_image_layers(
-        //             use_cached_files,
-        //             &mut client,
-        //             &reference,
-        //             &manifest,
-        //             &config_layer,
-        //         )
-        //         .await
-        //         .unwrap();
-
-        //         Ok(Container {
-        //             config_layer,
-        //             image_layers,
-        //         })
-        //     }
-        //     Err(oci_distribution::errors::OciDistributionError::AuthenticationFailure(message)) => {
-        //         panic!("Container image registry authentication failure ({}). Are docker credentials set-up for current user?", &message);
-        //     }
-        //     Err(e) => {
-        //         panic!(
-        //             "Failed to pull container image manifest and config - error: {:#?}",
-        //             &e
-        //         );
-        //     }
-        // }
     }
 
     // Convert Docker image config to policy data.
@@ -237,7 +217,6 @@ impl Container {
 
 async fn get_image_layers(
     use_cached_files: bool,
-    client: &mut Client,
     reference: &str,
     manifest: &serde_json::Value,
     config_layer: &DockerConfigLayer,
@@ -245,56 +224,25 @@ async fn get_image_layers(
     let mut layer_index = 0;
     let mut layersVec = Vec::new();
 
-    // if manifest.schemaVersion == 2
-    let layers = manifest["manifests"].as_array().unwrap();
-    // println!("{:?}", manifests);
+    let layers: Vec<String> = serde_json::from_value(manifest["imageSpec"]["rootfs"]["diff_ids"].clone()).unwrap();
     for layer in layers {
-        if &layer["mediaType"] == "application/vnd.oci.image.manifest.v1+json"{
-            if layer_index < 100 { //todo: config_layer.rootfs.diff_ids.len()
-                let layerDigest = &layer["digest"].as_str().unwrap();
-                println!("{}", layerDigest);
-                let imageLayer = ImageLayer {
-                    diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
-                    verity_hash: get_verity_hash(
-                        use_cached_files,
-                        client,
-                        reference,
-                        layerDigest,
-                    )
-                    .await?,
-                };
-                layersVec.push(imageLayer);
-            }
-            else {
-                        return Err(anyhow!("Too many Docker gzip layers"));
-            }
-            layer_index += 1;
+        if layer_index < 100 { //todo: config_layer.rootfs.diff_ids.len()
+            let imageLayer = ImageLayer {
+                diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
+                verity_hash: get_verity_hash(
+                    use_cached_files,
+                    reference,
+                    &layer,
+                )
+                .await?,
+            };
+            layersVec.push(imageLayer);
         }
+        else {
+            return Err(anyhow!("Too many Docker gzip layers"));
+        }
+        layer_index += 1;
     }
-
-    // for layer in &manifest.layers {
-    //     if layer
-    //         .media_type
-    //         .eq("manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE")
-    //     {
-    //         if layer_index < config_layer.rootfs.diff_ids.len() {
-    //             layers.push(ImageLayer {
-    //                 diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
-    //                 verity_hash: get_verity_hash(
-    //                     use_cached_files,
-    //                     client,
-    //                     reference,
-    //                     &"layer.digest",
-    //                 )
-    //                 .await?,
-    //             });
-    //         } else {
-    //             return Err(anyhow!("Too many Docker gzip layers"));
-    //         }
-
-    //         layer_index += 1;
-    //     }
-    // }
 
     Ok(layersVec)
 }
@@ -307,7 +255,6 @@ fn delete_files(decompressed_path: &Path, compressed_path: &Path, verity_path: &
 
 async fn get_verity_hash(
     use_cached_files: bool,
-    client: &mut Client,
     reference: &str,
     layer_digest: &str,
 ) -> Result<String> {
@@ -333,7 +280,6 @@ async fn get_verity_hash(
         info!("Using cached file {:?}", &verity_path);
     } else if let Err(e) = create_verity_hash_file(
         use_cached_files,
-        client,
         reference,
         layer_digest,
         &base_dir,
@@ -378,7 +324,6 @@ async fn get_verity_hash(
 
 async fn create_verity_hash_file(
     use_cached_files: bool,
-    client: &mut Client,
     reference: &str,
     layer_digest: &str,
     base_dir: &Path,
@@ -393,7 +338,6 @@ async fn create_verity_hash_file(
 
         create_decompressed_layer_file(
             use_cached_files,
-            client,
             reference,
             layer_digest,
             &decompressed_path,
@@ -407,7 +351,6 @@ async fn create_verity_hash_file(
 
 async fn create_decompressed_layer_file(
     use_cached_files: bool,
-    client: &mut Client,
     reference: &str,
     layer_digest: &str,
     decompressed_path: &Path,
@@ -420,7 +363,7 @@ async fn create_decompressed_layer_file(
         let mut file = tokio::fs::File::create(&compressed_path)
             .await
             .map_err(|e| anyhow!(e))?;
-        // todo: get blob from containerd
+        // no need to do this since image gets pulled at the start
         // client
         //     .pull_blob(&reference, layer_digest, &mut file)
         //     .await
