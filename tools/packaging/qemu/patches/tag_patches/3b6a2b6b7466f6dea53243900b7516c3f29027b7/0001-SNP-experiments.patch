@@ -1,0 +1,25 @@
+From afe5c57e2396b42eafadf087bb7a90c6873d443e Mon Sep 17 00:00:00 2001
+From: Dan Mihai <dmihai@microsoft.com>
+Date: Wed, 22 Nov 2023 20:21:31 +0000
+Subject: [PATCH] SNP experiments
+
+---
+ target/i386/sev.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/target/i386/sev.c b/target/i386/sev.c
+index c5160aa8ca..6c34fba72f 100644
+--- a/target/i386/sev.c
++++ b/target/i386/sev.c
+@@ -623,6 +623,8 @@ sev_snp_guest_set_host_data(Object *obj, const char *value, Error **errp)
+     g_autofree guchar *blob;
+     gsize len;
+ 
++    error_report("**** %s: host-data = %s", __func__, value);
++
+     if (sev_snp_guest->host_data) {
+         g_free(sev_snp_guest->host_data);
+     }
+-- 
+2.33.8
+

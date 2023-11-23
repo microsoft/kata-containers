@@ -1,0 +1,35 @@
+From a47b345d41b8c950b0dee943b1a730c1e0aca9a8 Mon Sep 17 00:00:00 2001
+From: Dan Mihai <dmihai@microsoft.com>
+Date: Thu, 23 Nov 2023 00:52:27 +0000
+Subject: [PATCH] SNP experiments
+
+Signed-off-by: Dan Mihai <dmihai@microsoft.com>
+---
+ drivers/virt/coco/sev-guest/sev-guest.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/virt/coco/sev-guest/sev-guest.c b/drivers/virt/coco/sev-guest/sev-guest.c
+index f422f9c58..03ed35595 100644
+--- a/drivers/virt/coco/sev-guest/sev-guest.c
++++ b/drivers/virt/coco/sev-guest/sev-guest.c
+@@ -360,6 +360,8 @@ static int get_report(struct snp_guest_dev *snp_dev, struct snp_guest_request_io
+ 
+ 	lockdep_assert_held(&snp_cmd_mutex);
+ 
++	printk(KERN_ALERT "sev: get_report starting\n");
++
+ 	if (!arg->req_data || !arg->resp_data)
+ 		return -EINVAL;
+ 
+@@ -382,6 +384,8 @@ static int get_report(struct snp_guest_dev *snp_dev, struct snp_guest_request_io
+ 	if (rc)
+ 		goto e_free;
+ 
++	print_hex_dump(KERN_ALERT, "", DUMP_PREFIX_OFFSET, 16, 1, resp, sizeof(*resp), 0);
++
+ 	if (copy_to_user((void __user *)arg->resp_data, resp, sizeof(*resp)))
+ 		rc = -EFAULT;
+ 
+-- 
+2.33.8
+
