@@ -1222,6 +1222,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "ttrpc",
+ "vmm-sys-util",
  "vsock-exporter",
  "which",
 ]
@@ -3148,6 +3149,16 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "vmm-sys-util"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48b7b084231214f7427041e4220d77dfe726897a6d41fddee450696e66ff2a29"
+dependencies = [
+ "bitflags",
+ "libc",
+]
 
 [[package]]
 name = "vsock"
