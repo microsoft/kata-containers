@@ -5,9 +5,12 @@
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use slog::Drain;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, Duration};
+
+use crate::tdx::{get_tdx_expected_hash, verify_tdx_hash};
 
 static EMPTY_JSON_INPUT: &str = "{\"input\":{}}";
 
@@ -144,6 +147,8 @@ impl AgentPolicy {
 
     /// Replace the Policy in OPA.
     pub async fn set_policy(&mut self, policy: &str) -> Result<()> {
+        check_policy_hash(policy)?;
+
         if let Some(opa_client) = &mut self.opa_client {
             // Delete the old rules.
             opa_client.delete(&self.policy_path).send().await?;
@@ -264,4 +269,51 @@ fn start_opa(opa_addr: &str) -> Result<()> {
         }
     }
     bail!("OPA binary not found in {:?}", &bin_dirs);
+}
+
+fn check_policy_hash(policy: &str) -> Result<()> {
+    if let Ok(expected_hash) = get_snp_expected_hash() {
+        verify_snp_hash(policy, expected_hash.as_slice())
+    } else if let Ok(expected_hash) = get_tdx_expected_hash() {
+        verify_tdx_hash(policy, expected_hash.as_slice())
+    } else {
+        warn!(sl!(), "policy: integrity has not been verified!");
+
+        // TODO: return an error if the current platform supports policy
+        // integrity verification using this method.
+        Ok(())
+    }
+}
+
+fn get_snp_expected_hash() -> Result<Vec<u8>> {
+    match sev::firmware::guest::Firmware::open() {
+        Ok(mut firmware) => {
+            let report_data: [u8; 64] = [0; 64];
+            match firmware.get_report(None, Some(report_data), Some(0)) {
+                Ok(report) => {
+                    info!(sl!(), "policy: TEE hash ({:?})", &report.host_data);
+                    Ok(report.host_data.to_vec())
+                }
+                Err(e) => Err(e.into()),
+            }
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn verify_snp_hash(policy: &str, expected_hash: &[u8]) -> Result<()> {
+    let mut hasher = Sha256::new();
+    hasher.update(policy.as_bytes());
+    let digest = hasher.finalize();
+    info!(sl!(), "policy: calculated hash ({:?})", digest.as_slice());
+
+    if expected_hash != digest.as_slice() {
+        bail!(
+            "policy: rejecting unexpected hash ({:?}), expected ({:?})",
+            digest.as_slice(),
+            expected_hash
+        );
+    }
+
+    Ok(())
 }
