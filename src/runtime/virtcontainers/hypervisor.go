@@ -672,8 +672,9 @@ type HypervisorConfig struct {
 	// ExtraMonitorSocket allows to add an extra HMP or QMP socket when the VMM is Qemu
 	ExtraMonitorSocket govmmQemu.MonitorProtocol
 
-	// ConfigHash is a base64 encoded cryptographic hash value attached to a Guest TEE
-	ConfigHash string
+	// AgentPolicy contains the Kata Agent Policy if a valid io.katacontainers.config.agent.policy
+	// sandbox annotation has been specified.
+	AgentPolicy string
 }
 
 // vcpu mapping from vcpu number to thread number

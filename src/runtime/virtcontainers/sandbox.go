@@ -10,8 +10,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"math"
@@ -594,7 +592,7 @@ func newSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Factor
 
 	sandboxConfig.HypervisorConfig.VMStorePath = s.store.RunVMStoragePath()
 	sandboxConfig.HypervisorConfig.RunStorePath = s.store.RunStoragePath()
-	sandboxConfig.HypervisorConfig.ConfigHash = getAgentPolicyHash(sandboxConfig.AgentConfig.Policy)
+	sandboxConfig.HypervisorConfig.AgentPolicy = sandboxConfig.AgentConfig.Policy
 
 	spec := s.GetPatchedOCISpec()
 	if spec != nil && spec.Process.SelinuxLabel != "" {
@@ -2793,20 +2791,4 @@ func (s *Sandbox) resetVCPUsPinning(ctx context.Context, vCPUThreadsMap VcpuThre
 		}
 	}
 	return nil
-}
-
-// getAgentPolicyHash calculates the hash of the policy, and returns the base64 encoding of that hash
-func getAgentPolicyHash(policy string) string {
-	if len(policy) == 0 {
-		return ""
-	}
-
-	h := sha256.New()
-	h.Write([]byte(policy))
-	hash := h.Sum(nil)
-	virtLog.WithField("hash", hash).Info("policy hash")
-
-	encoded_hash := make([]byte, base64.StdEncoding.EncodedLen(len(hash)))
-	base64.StdEncoding.Encode(encoded_hash, hash)
-	return string(encoded_hash)
 }

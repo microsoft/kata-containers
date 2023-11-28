@@ -379,7 +379,9 @@ func (object Object) QemuParams(config *Config) []string {
 		if object.Debug {
 			objectParams = append(objectParams, "debug=on")
 		}
-		// TODO: append object.TEEConfigData to objectParams
+		if len(object.TEEConfigData) > 0 {
+			objectParams = append(objectParams, fmt.Sprintf("mrconfigid=%s", object.TEEConfigData))
+		}
 		config.Bios = object.File
 	case SEVGuest:
 		fallthrough
