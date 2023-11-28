@@ -313,6 +313,11 @@ type Object struct {
 
 	// Prealloc enables memory preallocation
 	Prealloc bool
+
+	// TEEConfigData represents opaque binary data attached to a TEE and typically used
+	// for Guest attestation. This is only relevant for sev-snp-guest and tdx-guest
+	// objects and is encoded in the format expected by QEMU for each TEE type.
+	TEEConfigData string
 }
 
 // Valid returns true if the Object structure is valid and complete.
@@ -375,6 +380,9 @@ func (object Object) QemuParams(config *Config) []string {
 		if object.Debug {
 			objectParams = append(objectParams, "debug=on")
 		}
+		if len(object.TEEConfigData) > 0 {
+			objectParams = append(objectParams, fmt.Sprintf("mrconfigid=%s", object.TEEConfigData))
+		}
 		config.Bios = object.File
 	case SEVGuest:
 		fallthrough
@@ -383,6 +391,9 @@ func (object Object) QemuParams(config *Config) []string {
 		objectParams = append(objectParams, fmt.Sprintf("id=%s", object.ID))
 		objectParams = append(objectParams, fmt.Sprintf("cbitpos=%d", object.CBitPos))
 		objectParams = append(objectParams, fmt.Sprintf("reduced-phys-bits=%d", object.ReducedPhysBits))
+		if len(object.TEEConfigData) > 0 {
+			objectParams = append(objectParams, fmt.Sprintf("host-data=%s", object.TEEConfigData))
+		}
 
 		driveParams = append(driveParams, "if=pflash,format=raw,readonly=on")
 		driveParams = append(driveParams, fmt.Sprintf("file=%s", object.File))
