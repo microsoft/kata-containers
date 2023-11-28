@@ -21,7 +21,6 @@ if [ -n "${K8S_TEST_UNION:-}" ]; then
 	K8S_TEST_UNION=($K8S_TEST_UNION)
 else
 	K8S_TEST_SMALL_HOST_UNION=( \
-		"k8s-confidential.bats" \
 		"k8s-attach-handlers.bats" \
 		"k8s-caps.bats" \
 		"k8s-configmap.bats" \
@@ -55,6 +54,7 @@ else
 		"k8s-shared-volume.bats" \
 		"k8s-volume.bats" \
 		"k8s-nginx-connectivity.bats" \
+		"k8s-confidential.bats" \
 	)
 
 	K8S_TEST_NORMAL_HOST_UNION=( \
