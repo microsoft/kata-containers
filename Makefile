@@ -22,7 +22,6 @@ TOOLS =
 TOOLS += agent-ctl
 TOOLS += kata-ctl
 TOOLS += log-parser
-TOOLS += log-parser-rs
 TOOLS += runk
 TOOLS += trace-forwarder
 
