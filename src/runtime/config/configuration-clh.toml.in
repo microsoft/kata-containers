@@ -39,7 +39,7 @@ rootfs_type=@DEFROOTFSTYPE@
 # Supported TEEs:
 # * Intel TDX
 #
-# Default true
+# Default false
 confidential_guest = true
 
 # Enable running clh VMM as a non-root user.
