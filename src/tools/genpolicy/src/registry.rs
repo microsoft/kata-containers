@@ -6,29 +6,33 @@
 // Allow Docker image config field names.
 #![allow(non_snake_case)]
 use crate::policy;
+use crate::verity;
+
 use anyhow::{anyhow, Result};
 use containerd_client::services::v1::GetImageRequest;
 use containerd_client::with_namespace;
 use log::warn;
-use log::{debug, info, LevelFilter};
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
-use std::{io, io::Seek, io::Write, path::Path};
+use std::{io::Seek, io::Write, path::Path};
 use tokio::{fs, io::AsyncWriteExt};
 use k8s_cri::v1::image_service_client::ImageServiceClient;
-use std::{collections::HashMap,};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use tokio::net::UnixStream;
-use tonic::transport::{Channel, Endpoint, Uri};
+use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 use tonic::Request;
 
+/// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
 pub struct Container {
     config_layer: DockerConfigLayer,
     image_layers: Vec<ImageLayer>,
 }
 
+/// Image config layer properties.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct DockerConfigLayer {
     architecture: String,
@@ -36,6 +40,7 @@ struct DockerConfigLayer {
     rootfs: DockerRootfs,
 }
 
+/// Image config properties.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct DockerImageConfig {
     User: Option<String>,
@@ -46,12 +51,14 @@ struct DockerImageConfig {
     Entrypoint: Option<Vec<String>>,
 }
 
+/// Container rootfs information.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct DockerRootfs {
     r#type: String,
     diff_ids: Vec<String>,
 }
 
+/// This application's image layer properties.
 #[derive(Clone, Debug)]
 pub struct ImageLayer {
     pub diff_id: String,
@@ -106,8 +113,8 @@ impl Container {
                             // "image: prom/prometheus" has user = "nobody", but
                             // process.User.UID is an u32 value.
                             warn!(
-                                "Failed to parse {} as u32, using uid = 0 - error {:?}",
-                                &user[0], &e
+                                "Failed to parse {} as u32, using uid = 0 - error {e}",
+                                &user[0]
                             );
                             process.User.UID = 0;
                         }
@@ -310,7 +317,6 @@ async fn get_image_layers(
                 diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
                 verity_hash: get_verity_hash(
                     use_cached_files,
-                    reference,
                     layer["digest"].as_str().unwrap()
                 )
                 .await?,
@@ -334,7 +340,6 @@ fn delete_files(decompressed_path: &Path, compressed_path: &Path, verity_path: &
 
 async fn get_verity_hash(
     use_cached_files: bool,
-    reference: &str,
     layer_digest: &str,
 ) -> Result<String> {
     let base_dir = std::path::Path::new("layers_cache");
@@ -359,7 +364,6 @@ async fn get_verity_hash(
         info!("Using cached file {:?}", &verity_path);
     } else if let Err(e) = create_verity_hash_file(
         use_cached_files,
-        reference,
         layer_digest,
         &base_dir,
         &decompressed_path,
@@ -369,21 +373,18 @@ async fn get_verity_hash(
     .await
     {
         error = true;
-        error_message = format!(
-            "Failed to create verity hash for {}, error {:?}",
-            layer_digest, &e
-        );
+        error_message = format!("Failed to create verity hash for {layer_digest}, error {e}");
     }
 
     if !error {
         match std::fs::read_to_string(&verity_path) {
             Err(e) => {
                 error = true;
-                error_message = format!("Failed to read {:?}, error {:?}", &verity_path, &e);
+                error_message = format!("Failed to read {:?}, error {e}", &verity_path);
             }
             Ok(v) => {
                 verity_hash = v;
-                info!("dm-verity root hash: {}", &verity_hash);
+                info!("dm-verity root hash: {verity_hash}");
             }
         }
     }
@@ -395,7 +396,7 @@ async fn get_verity_hash(
     }
 
     if error {
-        panic!("{}", &error_message);
+        panic!("{error_message}");
     } else {
         Ok(verity_hash)
     }
@@ -403,7 +404,6 @@ async fn get_verity_hash(
 
 async fn create_verity_hash_file(
     use_cached_files: bool,
-    reference: &str,
     layer_digest: &str,
     base_dir: &Path,
     decompressed_path: &Path,
@@ -417,7 +417,6 @@ async fn create_verity_hash_file(
 
         create_decompressed_layer_file(
             use_cached_files,
-            reference,
             layer_digest,
             &decompressed_path,
             &compressed_path,
@@ -430,7 +429,6 @@ async fn create_verity_hash_file(
 
 async fn create_decompressed_layer_file(
     use_cached_files: bool,
-    reference: &str,
     layer_digest: &str,
     decompressed_path: &Path,
     compressed_path: &Path,
@@ -438,7 +436,7 @@ async fn create_decompressed_layer_file(
     if use_cached_files && compressed_path.exists() {
         info!("Using cached file {:?}", &compressed_path);
     } else {
-        info!("Pulling layer {:?}", layer_digest);
+        info!("Pulling layer {layer_digest}");
         let mut file = tokio::fs::File::create(&compressed_path)
             .await
             .map_err(|e| anyhow!(e))?;
@@ -474,7 +472,7 @@ fn do_create_verity_hash_file(path: &Path, verity_path: &Path) -> Result<()> {
     let mut file = std::fs::File::open(path)?;
     let size = file.seek(std::io::SeekFrom::End(0))?;
     if size < 4096 {
-        return Err(anyhow!("Block device {:?} is too small: {}", path, size));
+        return Err(anyhow!("Block device {:?} is too small: {size}", &path));
     }
 
     let salt = [0u8; <Sha256 as OutputSizeUser>::OutputSize::USIZE];
