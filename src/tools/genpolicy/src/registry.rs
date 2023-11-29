@@ -16,7 +16,7 @@ use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::{io::Seek, io::Write, path::Path};
-use tokio::{fs, io::AsyncWriteExt};
+use tokio::{fs};
 use k8s_cri::v1::image_service_client::ImageServiceClient;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -24,6 +24,8 @@ use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 use tonic::Request;
+use tokio::io;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
@@ -74,9 +76,7 @@ impl Container {
 
         pull_image(image.to_string(), containerd_socket_path.to_string()).await?;
         let manifest = get_image_manifest(image.to_string(), containerd_socket_path.to_string()).await.unwrap();
-
-        let config_layer = get_config_layer(image.to_string(), containerd_socket_path.to_string()).await.unwrap();
-                    
+        let config_layer = get_config_layer(image.to_string(), containerd_socket_path.to_string()).await.unwrap();          
         let image_layers = get_image_layers(
             use_cached_files,
             &image,
@@ -85,7 +85,6 @@ impl Container {
         )
         .await
         .unwrap();
-
         Ok(Container {
             config_layer,
             image_layers})
@@ -238,10 +237,9 @@ pub async fn pull_image(image_ref: String, socket_path: String) ->  Result<(), a
         sandbox_config: None,
     };
 
-    let resp = client.pull_image(req).await?;
+    client.pull_image(req).await?;
 
-    println!("pull image response: {:?}\n", resp);
-    Err(anyhow!("Unable to get image manifest"))
+    Ok(())
 }
 
 async fn get_image_manifest (image_ref: String, socket_path: String) ->  Result<serde_json::Value, anyhow::Error>{
@@ -263,8 +261,6 @@ async fn get_image_manifest (image_ref: String, socket_path: String) ->  Result<
     let resp = imageChannel.get(req).await?;
 
     let image_digest = resp.into_inner().image.unwrap().target.clone().unwrap().digest.to_string();
-    println!("image digest used to query layers: {:?}\n", image_digest);
-
     let req = containerd_client::services::v1::ReadContentRequest {
         digest: image_digest.to_string(),
         offset: 0,
@@ -439,16 +435,38 @@ async fn create_decompressed_layer_file(
         info!("Pulling layer {layer_digest}");
         let mut file = tokio::fs::File::create(&compressed_path)
             .await
-            .map_err(|e| anyhow!(e))?;
-        // no need to do this since image gets pulled at the start
-        // client
-        //     .pull_blob(&reference, layer_digest, &mut file)
-        //     .await
-        //     .map_err(|e| anyhow!(e))?;
-        file.flush().await.map_err(|e| anyhow!(e))?;
-    }
+            .map_err(|e| anyhow!(e)).expect("Failed to create file");
 
-    info!("Decompressing layer");
+        info!("Decompressing layer");
+        let client = match containerd_client::Client::from_path("/var/run/containerd/containerd.sock").await {
+            Ok(c) => {
+                c
+            },
+            Err(e) => {
+                return Err(anyhow!("Failed to connect to containerd: {e:?}"));
+            }
+        };
+    
+        let req = containerd_client::services::v1::ReadContentRequest {
+            digest: layer_digest.to_string(),
+            offset: 0,
+            size: 0,
+        };
+        let req = with_namespace!(req, "k8s.io");
+        let mut c = client.content();
+        let resp = c.read(req).await?;
+        let mut stream = resp.into_inner();
+    
+        while let Some(chunk) = stream.message().await? {
+            if chunk.offset < 0 {
+                print!("oop")
+            }
+            file.seek(io::SeekFrom::Start(chunk.offset as u64)).await?;
+            file.write_all(&chunk.data).await?;
+        }
+        
+        file.flush().await.map_err(|e| anyhow!(e)).expect("Failed to flush file");
+    }
     let compressed_file = std::fs::File::open(&compressed_path).map_err(|e| anyhow!(e))?;
     let mut decompressed_file = std::fs::OpenOptions::new()
         .read(true)

@@ -34,7 +34,7 @@ for file in defaultYamls + silently_ignored + no_policy:
         print(f"filepath does not exists: {filepath}")
 
 # build tool
-runCmd("cargo build")
+runCmd("sudo cargo build")
 
 # update files
 genpolicy_path = "target/debug/genpolicy"
