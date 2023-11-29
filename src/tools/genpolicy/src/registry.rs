@@ -7,6 +7,8 @@
 #![allow(non_snake_case)]
 use crate::policy;
 use anyhow::{anyhow, Result};
+use containerd_client::services::v1::GetImageRequest;
+use containerd_client::with_namespace;
 use log::warn;
 use log::{debug, info, LevelFilter};
 use serde::{Deserialize, Serialize};
@@ -19,6 +21,7 @@ use std::convert::TryFrom;
 use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
+use tonic::Request;
 
 #[derive(Clone, Debug, Default)]
 pub struct Container {
@@ -60,48 +63,13 @@ impl Container {
         info!("============================================");
         info!("Pulling image and layers for {:?}", image);
 
-        // todo: get/set these correctly
-        let path = "/var/run/containerd/containerd.sock";
-        let channel = Endpoint::try_from("http://[::]")
-            .unwrap()
-            .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path)))
-            .await
-            .expect("Could not create client.");
+        let containerd_socket_path = "/var/run/containerd/containerd.sock";
 
-        let mut client = ImageServiceClient::new(channel);
+        pull_image(image.to_string(), containerd_socket_path.to_string()).await?;
+        let manifest = get_image_manifest(image.to_string(), containerd_socket_path.to_string()).await.unwrap();
 
-        let req =   k8s_cri::v1::PullImageRequest {
-            image: Some(k8s_cri::v1::ImageSpec {
-                image: image.to_string(),
-                annotations: HashMap::new(),
-            }),
-            auth: None,
-            sandbox_config: None,
-        };
-
-        let resp = client.pull_image(req).await?;
-
-        println!("pull image response: {:?}\n", resp);
-
-        let req = k8s_cri::v1::ImageStatusRequest {
-            image: Some(k8s_cri::v1::ImageSpec{
-                image: "docker.io/library/nginx:latest".to_string(),
-                annotations: HashMap::new(),
-            }),
-            verbose: true // need this so response returns layers
-        };
-        
-        let image_info = client.image_status(req).await?;
-
-        let inner_image_info = image_info.into_inner();
-
-        let status_info = inner_image_info.info.get("info").unwrap();
-
-        let manifest = serde_json::from_str(status_info)?;
-        let config_layer_str = ""; // todo: this may come from pull response or status
-
-        let config_layer: DockerConfigLayer =
-                    serde_json::from_str(&config_layer_str).unwrap();
+        let config_layer = get_config_layer(image.to_string(), containerd_socket_path.to_string()).await.unwrap();
+                    
         let image_layers = get_image_layers(
             use_cached_files,
             &image,
@@ -215,6 +183,103 @@ impl Container {
     }
 }
 
+async fn get_config_layer(image_ref: String, socket_path: String) ->  Result<DockerConfigLayer, Box<dyn std::error::Error>>{
+    
+    let socket = socket_path.clone(); // todo: figure out how not to clone everything to get it working
+    let channel = Endpoint::try_from("http://[::]")
+        .unwrap()
+        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(socket.clone())))
+        .await
+        .expect("Could not create client.");
+
+    let mut client = ImageServiceClient::new(channel);
+
+    let req =   k8s_cri::v1::ImageStatusRequest {
+        image: Some(k8s_cri::v1::ImageSpec {
+            image: image_ref,
+            annotations: HashMap::new(),
+        }),
+        verbose: true
+    };
+
+    let resp = client.image_status(req).await?;
+    let image_layers = resp.into_inner();
+
+    let status_info: serde_json::Value = serde_json::from_str(image_layers.info.get("info").unwrap())?;
+    let image_spec = status_info["imageSpec"].as_object().unwrap();
+    let docker_config_layer: DockerConfigLayer = serde_json::from_value(serde_json::to_value(image_spec)?).unwrap();
+
+    Ok(docker_config_layer)
+}
+
+pub async fn pull_image(image_ref: String, socket_path: String) ->  Result<(), anyhow::Error>{
+    let socket = socket_path.clone(); // todo: figure out how not to have to clone everything just to get it working
+    let channel = Endpoint::try_from("http://[::]")
+        .unwrap()
+        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(socket.clone())))
+        .await
+        .expect("Could not create client.");
+
+    let mut client = ImageServiceClient::new(channel);
+
+    let req =   k8s_cri::v1::PullImageRequest {
+        image: Some(k8s_cri::v1::ImageSpec {
+            image: image_ref.clone(),
+            annotations: HashMap::new(),
+        }),
+        auth: None,
+        sandbox_config: None,
+    };
+
+    let resp = client.pull_image(req).await?;
+
+    println!("pull image response: {:?}\n", resp);
+    Err(anyhow!("Unable to get image manifest"))
+}
+
+async fn get_image_manifest (image_ref: String, socket_path: String) ->  Result<serde_json::Value, anyhow::Error>{
+    let client = match containerd_client::Client::from_path(socket_path).await {
+        Ok(c) => {
+            c
+        },
+        Err(e) => {
+            return Err(anyhow!("Failed to connect to containerd: {e:?}"));
+        }
+    };
+
+    let mut imageChannel = client.images();
+
+    let req = GetImageRequest{
+        name: image_ref.clone()
+    };
+    let req = with_namespace!(req, "k8s.io");
+    let resp = imageChannel.get(req).await?;
+
+    let image_digest = resp.into_inner().image.unwrap().target.clone().unwrap().digest.to_string();
+    println!("image digest used to query layers: {:?}\n", image_digest);
+
+    let req = containerd_client::services::v1::ReadContentRequest {
+        digest: image_digest.to_string(),
+        offset: 0,
+        size: 0,
+    };
+    let req = with_namespace!(req, "k8s.io");
+    let mut c = client.content();
+    let resp = c.read(req).await?;
+    let mut stream = resp.into_inner();
+
+    while let Some(chunk) = stream.message().await? {
+        if chunk.offset < 0 {
+            print!("oop")
+        }
+        else {
+            let manifest: serde_json::Value = serde_json::from_slice(&chunk.data)?;
+            return Ok(manifest);
+        }
+    }
+    Err(anyhow!("Unable to get image manifest"))
+}
+
 async fn get_image_layers(
     use_cached_files: bool,
     reference: &str,
@@ -223,25 +288,39 @@ async fn get_image_layers(
 ) -> Result<Vec<ImageLayer>> {
     let mut layer_index = 0;
     let mut layersVec = Vec::new();
+    
+    
+    let isv2_manifest = manifest.get("manifests") != None; // v2 has manifest["manifests"]
 
-    let layers: Vec<String> = serde_json::from_value(manifest["imageSpec"]["rootfs"]["diff_ids"].clone()).unwrap();
+    let layers = if isv2_manifest {
+        info!("v2 layers for {}:", reference);
+        manifest["manifests"].as_array().unwrap()
+    }
+    else {
+        info!("v1 layers for {}: ", reference);
+        manifest["layers"].as_array().unwrap()
+    };
+    
     for layer in layers {
-        if layer_index < 100 { //todo: config_layer.rootfs.diff_ids.len()
-            let imageLayer = ImageLayer {
+        if layer["mediaType"].as_str().unwrap()
+        .eq("application/vnd.docker.image.rootfs.diff.tar.gzip")
+    {
+        if layer_index < config_layer.rootfs.diff_ids.len() {
+            layersVec.push(ImageLayer {
                 diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
                 verity_hash: get_verity_hash(
                     use_cached_files,
                     reference,
-                    &layer,
+                    layer["digest"].as_str().unwrap()
                 )
                 .await?,
-            };
-            layersVec.push(imageLayer);
-        }
-        else {
+            });
+        } else {
             return Err(anyhow!("Too many Docker gzip layers"));
         }
+
         layer_index += 1;
+    }
     }
 
     Ok(layersVec)
