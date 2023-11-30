@@ -84,9 +84,14 @@ impl Container {
         )
         .await
         .unwrap();
-        Ok(Container {
+
+        let c = Container {
             config_layer,
-            image_layers})
+            image_layers};
+
+        println!("c: {:#?}", c);
+
+        Ok(c)
     }
 
     // Convert Docker image config to policy data.
@@ -312,7 +317,7 @@ async fn get_image_layers(
                 )
                 .await?,
             };
-            println!("Image layer: {:#?}", imageLayer);
+
             layersVec.push(imageLayer);
         } else {
             return Err(anyhow!("Too many Docker gzip layers"));
