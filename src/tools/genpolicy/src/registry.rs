@@ -304,14 +304,16 @@ async fn get_image_layers(
         .eq("application/vnd.docker.image.rootfs.diff.tar.gzip")
     {
         if layer_index < config_layer.rootfs.diff_ids.len() {
-            layersVec.push(ImageLayer {
+            let imageLayer = ImageLayer {
                 diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
                 verity_hash: get_verity_hash(
                     use_cached_files,
                     layer["digest"].as_str().unwrap()
                 )
                 .await?,
-            });
+            };
+            println!("Image layer: {:#?}", imageLayer);
+            layersVec.push(imageLayer);
         } else {
             return Err(anyhow!("Too many Docker gzip layers"));
         }
