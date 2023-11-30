@@ -79,7 +79,6 @@ impl Container {
         let config_layer = get_config_layer(image.to_string(), containerd_socket_path.to_string()).await.unwrap();          
         let image_layers = get_image_layers(
             use_cached_files,
-            &image,
             &manifest,
             &config_layer,
         )
@@ -285,22 +284,18 @@ async fn get_image_manifest (image_ref: String, socket_path: String) ->  Result<
 
 async fn get_image_layers(
     use_cached_files: bool,
-    reference: &str,
     manifest: &serde_json::Value,
     config_layer: &DockerConfigLayer,
 ) -> Result<Vec<ImageLayer>> {
     let mut layer_index = 0;
     let mut layersVec = Vec::new();
-    
-    
+
     let isv2_manifest = manifest.get("manifests") != None; // v2 has manifest["manifests"]
 
     let layers = if isv2_manifest {
-        info!("v2 layers for {}:", reference);
         manifest["manifests"].as_array().unwrap()
     }
     else {
-        info!("v1 layers for {}: ", reference);
         manifest["layers"].as_array().unwrap()
     };
     
