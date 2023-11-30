@@ -272,17 +272,48 @@ fn start_opa(opa_addr: &str) -> Result<()> {
 }
 
 fn check_policy_hash(policy: &str) -> Result<()> {
-    if let Ok(expected_hash) = get_snp_expected_hash() {
-        verify_snp_hash(policy, expected_hash.as_slice())
-    } else if let Ok(expected_hash) = get_tdx_expected_hash() {
-        verify_tdx_hash(policy, expected_hash.as_slice())
-    } else {
-        warn!(sl!(), "policy: integrity has not been verified!");
+    warn!(sl!(), "policy: trying to get TDX policy hash.");
 
-        // TODO: return an error if the current platform supports policy
-        // integrity verification using this method.
-        Ok(())
+    match get_tdx_expected_hash() {
+        Ok(expected_hash) => {
+            warn!(sl!(), "policy: verifying TDX policy hash.");
+
+            match verify_tdx_hash(policy, expected_hash.as_slice()) {
+                Err(e) => {
+                    warn!(sl!(), "policy: TDX policy verification failed ({e})!");
+                }
+                Ok(()) => return Ok(()),
+            }
+        }
+        Err(e) => {
+            warn!(
+                sl!(),
+                "policy: TDX policy hash not found ({e}) - trying SNP policy hash."
+            );
+
+            match get_snp_expected_hash() {
+                Ok(expected_hash) => {
+                    warn!(sl!(), "policy: verifying SNP policy hash.");
+
+                    match verify_snp_hash(policy, expected_hash.as_slice()) {
+                        Err(e) => {
+                            warn!(sl!(), "policy: SNP policy verification failed ({e})!");
+                        }
+                        Ok(()) => return Ok(()),
+                    }
+                }
+                Err(e) => {
+                    warn!(sl!(), "policy: SNP policy hash not found ({e}).");
+                }
+            }
+        }
     }
+
+    warn!(sl!(), "policy: integrity has not been verified!");
+
+    // TODO: return an error if the current platform supports policy
+    // integrity verification using this method.
+    Ok(())
 }
 
 fn get_snp_expected_hash() -> Result<Vec<u8>> {
