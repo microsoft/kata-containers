@@ -90,8 +90,6 @@ impl Container {
             config_layer,
             image_layers};
 
-        println!("c: {:#?}", c);
-
         Ok(c)
     }
 
@@ -286,19 +284,16 @@ async fn get_image_manifest (image_ref: String, socket_path: String) ->  Result<
             manifest = serde_json::from_slice(&chunk.data)?;
             let isv1_manifest = manifest.get("layers") != None;
             if isv1_manifest {
-                println!("v1 layers for {}: ", image_ref);
                 return Ok(manifest);
             }
         }
     }
 
-    println!("v2 manifest for {:#?}\n: ", manifest);
-
     // manifest is v2
     let manifest = manifest["manifests"].as_array().unwrap();
 
     if manifest.len() < 1 {
-        println!("No manifests found for image: {}", image_ref);
+        info!("No manifests found for image: {}", image_ref);
         return Ok(serde_json::Value::Null);
     }
 
@@ -306,7 +301,6 @@ async fn get_image_manifest (image_ref: String, socket_path: String) ->  Result<
     let manifestAmd64 = &manifest[0];
 
     let image_digest = manifestAmd64["digest"].as_str().unwrap().to_string();
-    println!("image digest2 used to query layers: {:?}\n", image_digest);
 
     let req = ReadContentRequest {
         digest: image_digest.to_string(),
