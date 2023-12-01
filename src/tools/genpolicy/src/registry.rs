@@ -26,6 +26,7 @@ use tower::service_fn;
 use tonic::Request;
 use tokio::io;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+use containerd_client::services::v1::ReadContentRequest;
 
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
@@ -275,16 +276,58 @@ async fn get_image_manifest (image_ref: String, socket_path: String) ->  Result<
     let resp = c.read(req).await?;
     let mut stream = resp.into_inner();
 
+    let mut manifest: serde_json::Value = Default::default();
+    while let Some(chunk) = stream.message().await? {
+        if chunk.offset < 0 {
+            print!("oop")
+        }
+        else {
+            
+            manifest = serde_json::from_slice(&chunk.data)?;
+            let isv1_manifest = manifest.get("layers") != None;
+            if isv1_manifest {
+                println!("v1 layers for {}: ", image_ref);
+                return Ok(manifest);
+            }
+        }
+    }
+
+    println!("v2 manifest for {:#?}\n: ", manifest);
+
+    // manifest is v2
+    let manifest = manifest["manifests"].as_array().unwrap();
+
+    if manifest.len() < 1 {
+        println!("No manifests found for image: {}", image_ref);
+        return Ok(serde_json::Value::Null);
+    }
+
+    // assume amd64 manifest is the first one
+    let manifestAmd64 = &manifest[0];
+
+    let image_digest = manifestAmd64["digest"].as_str().unwrap().to_string();
+    println!("image digest2 used to query layers: {:?}\n", image_digest);
+
+    let req = ReadContentRequest {
+        digest: image_digest.to_string(),
+        offset: 0,
+        size: 0,
+    };
+    let req = with_namespace!(req, "k8s.io");
+    let mut c = client.content();
+    let resp = c.read(req).await?;
+    let mut stream = resp.into_inner();
     while let Some(chunk) = stream.message().await? {
         if chunk.offset < 0 {
             print!("oop")
         }
         else {
             let manifest: serde_json::Value = serde_json::from_slice(&chunk.data)?;
-            return Ok(manifest);
+            return Ok(manifest)
         }
     }
-    Err(anyhow!("Unable to get image manifest"))
+
+    Ok(serde_json::Value::Null)
 }
 
 async fn get_image_layers(
