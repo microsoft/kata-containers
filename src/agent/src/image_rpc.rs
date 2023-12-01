@@ -257,7 +257,7 @@ impl ImageService {
 impl protocols::image_ttrpc_async::Image for ImageService {
     async fn pull_image(
         &self,
-        _ctx: &ttrpc::r#async::TtrpcContext,
+        _ctx: &ttrpc::asynchronous::TtrpcContext,
         req: image::PullImageRequest,
     ) -> ttrpc::Result<image::PullImageResponse> {
         match self.pull_image(&req).await {
