@@ -74,14 +74,22 @@ impl Container {
         info!("Pulling image and layers for {:?}", image);
 
         let containerd_socket_path = "/var/run/containerd/containerd.sock";
-
+        let client = match containerd_client::Client::from_path("/var/run/containerd/containerd.sock").await {
+            Ok(c) => {
+                c
+            },
+            Err(e) => {
+                return Err(anyhow!("Failed to connect to containerd: {e:?}"));
+            }
+        };
         pull_image(image.to_string(), containerd_socket_path.to_string()).await?;
-        let manifest = get_image_manifest(image.to_string(), containerd_socket_path.to_string()).await.unwrap();
+        let manifest = get_image_manifest(image.to_string(), &client).await.unwrap();
         let config_layer = get_config_layer(image.to_string(), containerd_socket_path.to_string()).await.unwrap();          
         let image_layers = get_image_layers(
             use_cached_files,
             &manifest,
             &config_layer,
+            &client
         )
         .await
         .unwrap();
@@ -245,15 +253,7 @@ pub async fn pull_image(image_ref: String, socket_path: String) ->  Result<(), a
     Ok(())
 }
 
-async fn get_image_manifest (image_ref: String, socket_path: String) ->  Result<serde_json::Value, anyhow::Error>{
-    let client = match containerd_client::Client::from_path(socket_path).await {
-        Ok(c) => {
-            c
-        },
-        Err(e) => {
-            return Err(anyhow!("Failed to connect to containerd: {e:?}"));
-        }
-    };
+async fn get_image_manifest (image_ref: String, client: &containerd_client::Client) ->  Result<serde_json::Value, anyhow::Error>{
 
     let mut imageChannel = client.images();
 
@@ -328,6 +328,7 @@ async fn get_image_layers(
     use_cached_files: bool,
     manifest: &serde_json::Value,
     config_layer: &DockerConfigLayer,
+    client: &containerd_client::Client
 ) -> Result<Vec<ImageLayer>> {
     let mut layer_index = 0;
     let mut layersVec = Vec::new();
@@ -350,7 +351,8 @@ async fn get_image_layers(
                 diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
                 verity_hash: get_verity_hash(
                     use_cached_files,
-                    layer["digest"].as_str().unwrap()
+                    layer["digest"].as_str().unwrap(),
+                    &client
                 )
                 .await?,
             };
@@ -376,6 +378,7 @@ fn delete_files(decompressed_path: &Path, compressed_path: &Path, verity_path: &
 async fn get_verity_hash(
     use_cached_files: bool,
     layer_digest: &str,
+    client: &containerd_client::Client
 ) -> Result<String> {
     let base_dir = std::path::Path::new("layers_cache");
 
@@ -404,6 +407,7 @@ async fn get_verity_hash(
         &decompressed_path,
         &compressed_path,
         &verity_path,
+        &client
     )
     .await
     {
@@ -444,6 +448,7 @@ async fn create_verity_hash_file(
     decompressed_path: &Path,
     compressed_path: &Path,
     verity_path: &Path,
+    client: &containerd_client::Client
 ) -> Result<()> {
     if use_cached_files && decompressed_path.exists() {
         info!("Using cached file {:?}", &decompressed_path);
@@ -455,6 +460,7 @@ async fn create_verity_hash_file(
             layer_digest,
             &decompressed_path,
             &compressed_path,
+            &client
         )
         .await?;
     }
@@ -467,6 +473,7 @@ async fn create_decompressed_layer_file(
     layer_digest: &str,
     decompressed_path: &Path,
     compressed_path: &Path,
+    client: &containerd_client::Client
 ) -> Result<()> {
     if use_cached_files && compressed_path.exists() {
         info!("Using cached file {:?}", &compressed_path);
@@ -477,14 +484,6 @@ async fn create_decompressed_layer_file(
             .map_err(|e| anyhow!(e)).expect("Failed to create file");
 
         info!("Decompressing layer");
-        let client = match containerd_client::Client::from_path("/var/run/containerd/containerd.sock").await {
-            Ok(c) => {
-                c
-            },
-            Err(e) => {
-                return Err(anyhow!("Failed to connect to containerd: {e:?}"));
-            }
-        };
     
         let req = containerd_client::services::v1::ReadContentRequest {
             digest: layer_digest.to_string(),
