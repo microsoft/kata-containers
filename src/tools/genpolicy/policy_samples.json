@@ -30,6 +30,7 @@
         "kubernetes/incomplete-init/cassandra-statefulset.yaml",
         "kubernetes/incomplete-init/controller.yaml",
         "kubernetes/incomplete-init/cockroachdb-statefulset.yaml",
+        "kubernetes/unsupported-image/nginxrc.yaml",
         "pod/pod-exec.yaml",
         "pod/pod-lifecycle.yaml",
         "pod/pod-one-container.yaml",
