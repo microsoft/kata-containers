@@ -297,8 +297,17 @@ async fn get_image_manifest (image_ref: String, client: &containerd_client::Clie
         return Ok(serde_json::Value::Null);
     }
 
-    // assume amd64 manifest is the first one
-    let manifestAmd64 = &manifest[0];
+    let mut manifestAmd64 = &manifest[0];
+    for entry in manifest {
+        let platform = entry["platform"].as_object().unwrap();
+        let architecture = platform["architecture"].as_str().unwrap();
+        let os = platform["os"].as_str().unwrap();
+        if architecture == "amd64" && os == "linux" {
+            // println!("found amd64 linux manifest: {:#?}", entry);
+            manifestAmd64 = entry;
+            break;
+        }
+    }
 
     let image_digest = manifestAmd64["digest"].as_str().unwrap().to_string();
 
