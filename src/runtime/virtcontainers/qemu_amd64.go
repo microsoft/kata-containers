@@ -334,6 +334,12 @@ func snpHostData(policy string) string {
 	hash := h.Sum(nil)
 	hvLogger.WithField("hash", hash).Info("policy hash")
 
+	hex_hash := fmt.Sprintf("%x", hash)
+	hvLogger.WithField("hex_hash", hex_hash).Info("policy hash")
+
+	hex_encoded_string := hex.EncodeToString(hash)
+	hvLogger.WithField("hex_encoded_string", hex_encoded_string).Info("policy hash")
+	
 	encoded_hash := make([]byte, base64.StdEncoding.EncodedLen(len(hash)))
 	base64.StdEncoding.Encode(encoded_hash, hash)
 	return string(encoded_hash)
