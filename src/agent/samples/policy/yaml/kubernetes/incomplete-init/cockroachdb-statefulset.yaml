@@ -19,7 +19,7 @@ spec:
       runtimeClassName: kata-cc
       initContainers:
         - name: bootstrap
-          image: "cockroachdb/cockroach-k8s-init:0.1"
+          image: "docker.io/cockroachdb/cockroach-k8s-init:0.1"
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - mountPath: /cockroach/cockroach-data

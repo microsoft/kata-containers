@@ -31,6 +31,7 @@
         "kubernetes/incomplete-init/controller.yaml",
         "kubernetes/incomplete-init/cockroachdb-statefulset.yaml",
         "kubernetes/unsupported-image/nginxrc.yaml",
+        "kubernetes/unsupported-image/aptinstall.yaml",
         "pod/pod-exec.yaml",
         "pod/pod-lifecycle.yaml",
         "pod/pod-one-container.yaml",
