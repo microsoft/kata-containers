@@ -285,6 +285,12 @@ DEFCREATECONTAINERTIMEOUT ?= 60
 # Default directory of directly attachable network config.
 DEFDANCONF := /run/kata-containers/dans
 
+# SNP
+DEFSNPGUEST ?= true
+# Based on SEV Secure Nested Paging Firmware ABI Specification section 4.3
+# unspecified or == 0 --> 0x30000 i.e. Bit#17 is '1' and Bit#16 is '1' (SMT is allowed)
+DEFSNPGUESTPOLICY ?= 0x30000
+
 SED = sed
 
 CLI_DIR = cmd
@@ -758,6 +764,8 @@ USER_VARS += DEFCREATECONTAINERTIMEOUT
 USER_VARS += DEFDANCONF
 USER_VARS += DEFVFIOMODE
 USER_VARS += BUILDFLAGS
+USER_VARS += DEFSNPGUESTPOLICY
+USER_VARS += DEFSNPGUEST
 
 
 V              = @
