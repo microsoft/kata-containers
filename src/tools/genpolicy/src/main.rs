@@ -30,7 +30,7 @@ mod utils;
 mod verity;
 mod volume;
 mod yaml;
-mod my_agent;
+mod agent;
 
 #[derive(Debug, Parser)]
 struct CommandLineOptions {

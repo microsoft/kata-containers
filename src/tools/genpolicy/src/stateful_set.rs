@@ -13,7 +13,7 @@ use crate::pod_template;
 use crate::policy;
 use crate::settings;
 use crate::yaml;
-use crate::my_agent;
+use crate::agent;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -111,7 +111,7 @@ impl yaml::K8sResource for StatefulSet {
     fn get_container_mounts_and_storages(
         &self,
         policy_mounts: &mut Vec<policy::KataMount>,
-        storages: &mut Vec<my_agent::Storage>,
+        storages: &mut Vec<agent::Storage>,
         container: &pod::Container,
         settings: &settings::Settings,
     ) {

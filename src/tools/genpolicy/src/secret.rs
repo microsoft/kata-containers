@@ -11,7 +11,7 @@ use crate::pod;
 use crate::policy;
 use crate::settings;
 use crate::yaml;
-use crate::my_agent;
+use crate::agent;
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
@@ -85,7 +85,7 @@ impl yaml::K8sResource for Secret {
     fn get_container_mounts_and_storages(
         &self,
         _policy_mounts: &mut Vec<policy::KataMount>,
-        _storages: &mut Vec<my_agent::Storage>,
+        _storages: &mut Vec<agent::Storage>,
         _container: &pod::Container,
         _settings: &settings::Settings,
     ) {

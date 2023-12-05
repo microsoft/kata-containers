@@ -9,7 +9,7 @@
 use crate::config_map;
 use crate::containerd;
 use crate::mount_and_storage;
-use crate::my_agent;
+use crate::agent;
 use crate::pod;
 use crate::policy;
 use crate::registry;
@@ -254,7 +254,7 @@ pub struct ContainerPolicy {
     pub OCI: KataSpec,
 
     /// Data compared with req.storages for CreateContainerRequest calls.
-    storages: Vec<my_agent::Storage>,
+    storages: Vec<agent::Storage>,
 
     /// Allow list of ommand lines that are allowed to be executed using
     /// ExecProcessRequest. By default, all ExecProcessRequest calls are blocked
@@ -620,11 +620,11 @@ impl KataSpec {
 }
 
 fn get_image_layer_storages(
-    storages: &mut Vec<my_agent::Storage>,
+    storages: &mut Vec<agent::Storage>,
     image_layers: &Vec<registry::ImageLayer>,
     root: &KataRoot,
 ) {
-    let mut new_storages: Vec<my_agent::Storage> = Vec::new();
+    let mut new_storages: Vec<agent::Storage> = Vec::new();
     let mut layer_names: Vec<String> = Vec::new();
     let mut layer_hashes: Vec<String> = Vec::new();
     let mut previous_chain_id = String::new();
@@ -650,7 +650,7 @@ fn get_image_layer_storages(
         layer_hashes.push(layer.verity_hash.to_string());
         layer_index -= 1;
 
-        new_storages.push(my_agent::Storage {
+        new_storages.push(agent::Storage {
             driver: "blk".to_string(),
             driver_options: Vec::new(),
             source: String::new(), // TODO
@@ -669,7 +669,7 @@ fn get_image_layer_storages(
     layer_names.reverse();
     layer_hashes.reverse();
 
-    let overlay_storage = my_agent::Storage {
+    let overlay_storage = agent::Storage {
         driver: "overlayfs".to_string(),
         driver_options: Vec::new(),
         source: String::new(), // TODO

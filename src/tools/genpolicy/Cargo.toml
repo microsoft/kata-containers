@@ -45,7 +45,6 @@ tokio = {version = "1.33.0", features = ["rt-multi-thread"]}
 oci = { path = "../../libs/oci" }
 
 # Kata Agent prototol.
-# protocols = { path = "../../libs/protocols", features = ["with-serde"] }
 protobuf = "3.2.0"
 
 # dm-verity root hash support
