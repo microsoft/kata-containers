@@ -9,6 +9,7 @@
 use crate::config_map;
 use crate::containerd;
 use crate::mount_and_storage;
+use crate::my_agent;
 use crate::pod;
 use crate::policy;
 use crate::registry;
@@ -20,7 +21,6 @@ use crate::yaml;
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use log::debug;
-use protocols::agent;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use sha2::{Digest, Sha256};
@@ -254,7 +254,7 @@ pub struct ContainerPolicy {
     pub OCI: KataSpec,
 
     /// Data compared with req.storages for CreateContainerRequest calls.
-    storages: Vec<agent::Storage>,
+    storages: Vec<my_agent::Storage>,
 
     /// Allow list of ommand lines that are allowed to be executed using
     /// ExecProcessRequest. By default, all ExecProcessRequest calls are blocked
@@ -620,11 +620,11 @@ impl KataSpec {
 }
 
 fn get_image_layer_storages(
-    storages: &mut Vec<agent::Storage>,
+    storages: &mut Vec<my_agent::Storage>,
     image_layers: &Vec<registry::ImageLayer>,
     root: &KataRoot,
 ) {
-    let mut new_storages: Vec<agent::Storage> = Vec::new();
+    let mut new_storages: Vec<my_agent::Storage> = Vec::new();
     let mut layer_names: Vec<String> = Vec::new();
     let mut layer_hashes: Vec<String> = Vec::new();
     let mut previous_chain_id = String::new();
@@ -650,15 +650,15 @@ fn get_image_layer_storages(
         layer_hashes.push(layer.verity_hash.to_string());
         layer_index -= 1;
 
-        new_storages.push(agent::Storage {
+        new_storages.push(my_agent::Storage {
             driver: "blk".to_string(),
             driver_options: Vec::new(),
             source: String::new(), // TODO
             fstype: "tar".to_string(),
             options: vec![format!("$(hash{layer_index})")],
             mount_point: format!("$(layer{layer_index})"),
-            fs_group: protobuf::MessageField::none(),
-            special_fields: ::protobuf::SpecialFields::new(),
+            fs_group: None,
+            // special_fields: None,
         });
     }
 
@@ -670,15 +670,15 @@ fn get_image_layer_storages(
     layer_names.reverse();
     layer_hashes.reverse();
 
-    let overlay_storage = agent::Storage {
+    let overlay_storage = my_agent::Storage {
         driver: "overlayfs".to_string(),
         driver_options: Vec::new(),
         source: String::new(), // TODO
         fstype: "fuse3.kata-overlay".to_string(),
         options: vec![layer_names.join(":"), layer_hashes.join(":")],
         mount_point: root.Path.clone(),
-        fs_group: protobuf::MessageField::none(),
-        special_fields: ::protobuf::SpecialFields::new(),
+        fs_group: None,
+        // special_fields: ::protobuf::SpecialFields::new(),
     };
 
     storages.push(overlay_storage);

@@ -10,9 +10,9 @@ use crate::pod;
 use crate::policy;
 use crate::settings;
 use crate::volume;
+use crate::my_agent;
 
 use log::debug;
-use protocols::agent;
 use std::ffi::OsString;
 use std::path::Path;
 use std::str;
@@ -95,7 +95,7 @@ fn adjust_termination_path(mount: &mut policy::KataMount, yaml_container: &pod::
 pub fn get_mount_and_storage(
     settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
-    storages: &mut Vec<agent::Storage>,
+    storages: &mut Vec<my_agent::Storage>,
     yaml_volume: &volume::Volume,
     yaml_mount: &pod::VolumeMount,
 ) {
@@ -124,7 +124,7 @@ pub fn get_mount_and_storage(
 fn get_empty_dir_mount_and_storage(
     settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
-    storages: &mut Vec<agent::Storage>,
+    storages: &mut Vec<my_agent::Storage>,
     yaml_mount: &pod::VolumeMount,
     memory_medium: bool,
 ) {
@@ -137,15 +137,15 @@ fn get_empty_dir_mount_and_storage(
     debug!("Settings emptyDir: {:?}", settings_empty_dir);
 
     if yaml_mount.subPathExpr.is_none() {
-        storages.push(agent::Storage {
+        storages.push(my_agent::Storage {
             driver: settings_empty_dir.driver.clone(),
             driver_options: Vec::new(),
             source: settings_empty_dir.source.clone(),
             fstype: settings_empty_dir.fstype.clone(),
             options: settings_empty_dir.options.clone(),
             mount_point: format!("{}{}$", &settings_empty_dir.mount_point, &yaml_mount.name),
-            fs_group: protobuf::MessageField::none(),
-            special_fields: ::protobuf::SpecialFields::new(),
+            fs_group: None,
+            // special_fields: ::protobuf::SpecialFields::new(),
         });
     }
 
@@ -233,7 +233,7 @@ fn get_host_path_mount(
 fn get_config_map_mount_and_storage(
     settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
-    storages: &mut Vec<agent::Storage>,
+    storages: &mut Vec<my_agent::Storage>,
     yaml_mount: &pod::VolumeMount,
 ) {
     let settings_volumes = &settings.volumes;
@@ -248,15 +248,15 @@ fn get_config_map_mount_and_storage(
         let mount_path = Path::new(&yaml_mount.mountPath).file_name().unwrap();
         let mount_path_str = OsString::from(mount_path).into_string().unwrap();
 
-        storages.push(agent::Storage {
+        storages.push(my_agent::Storage {
             driver: settings_config_map.driver.clone(),
             driver_options: Vec::new(),
             source: format!("{}{}$", &settings_config_map.mount_source, &yaml_mount.name),
             fstype: settings_config_map.fstype.clone(),
             options: settings_config_map.options.clone(),
             mount_point: format!("{}{mount_path_str}$", &settings_config_map.mount_point),
-            fs_group: protobuf::MessageField::none(),
-            special_fields: ::protobuf::SpecialFields::new(),
+            fs_group: None,
+            // special_fields: ::protobuf::SpecialFields::new(),
         });
     }
 

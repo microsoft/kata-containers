@@ -14,10 +14,10 @@ use crate::secret;
 use crate::settings;
 use crate::volume;
 use crate::yaml;
+use crate::my_agent;
 
 use async_trait::async_trait;
 use log::{debug, warn};
-use protocols::agent;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -697,7 +697,7 @@ impl yaml::K8sResource for Pod {
     fn get_container_mounts_and_storages(
         &self,
         policy_mounts: &mut Vec<policy::KataMount>,
-        storages: &mut Vec<agent::Storage>,
+        storages: &mut Vec<my_agent::Storage>,
         container: &Container,
         settings: &settings::Settings,
     ) {
