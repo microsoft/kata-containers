@@ -658,7 +658,7 @@ fn get_image_layer_storages(
             options: vec![format!("$(hash{layer_index})")],
             mount_point: format!("$(layer{layer_index})"),
             fs_group: None,
-            // special_fields: None,
+            special_fields: my_agent::SpecialFields::default(),
         });
     }
 
@@ -678,7 +678,7 @@ fn get_image_layer_storages(
         options: vec![layer_names.join(":"), layer_hashes.join(":")],
         mount_point: root.Path.clone(),
         fs_group: None,
-        // special_fields: ::protobuf::SpecialFields::new(),
+        special_fields: my_agent::SpecialFields::default(),
     };
 
     storages.push(overlay_storage);
