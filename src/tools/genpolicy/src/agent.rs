@@ -11,9 +11,6 @@ pub struct Storage {
     pub fs_group: Option<SerializedFsGroup>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct MessageField<T>(pub Option<Box<T>>);
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SerializedFsGroup {
     pub group_id: u32,
