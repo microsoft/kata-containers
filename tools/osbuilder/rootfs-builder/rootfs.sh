@@ -16,6 +16,7 @@ AGENT_VERSION=${AGENT_VERSION:-}
 RUST_VERSION="null"
 AGENT_BIN=${AGENT_BIN:-kata-agent}
 AGENT_INIT=${AGENT_INIT:-no}
+AGENT_POLICY_FILE=${AGENT_POLICY_FILE:-"../../../src/agent/samples/policy/all-allowed/all-allowed.rego"}
 KATA_BUILD_CC=${KATA_BUILD_CC:-no}
 KERNEL_MODULES_DIR=${KERNEL_MODULES_DIR:-""}
 OSBUILDER_VERSION="unknown"
@@ -30,6 +31,8 @@ SELINUX=${SELINUX:-"no"}
 
 lib_file="${script_dir}/../scripts/lib.sh"
 source "$lib_file"
+
+agent_policy_file="${script_dir}/${AGENT_POLICY_FILE}"
 
 handle_error() {
 	local exit_code="${?}"
@@ -101,6 +104,13 @@ AGENT_BIN           Name of the agent binary (used when running sanity checks on
 AGENT_INIT          When set to "yes", use ${AGENT_BIN} as init process in place
                     of systemd.
                     Default value: no
+
+AGENT_POLICY_FILE   Path to the agent policy rego file to be set in the rootfs.
+                    If defined, this overwrites the default setting of the
+                    permissive policy file. The path is relative to the script
+                    directory designated by the script_dir variable.
+                    Default value: ../../../src/agent/samples/policy/set-policy
+                    -allowed/set-policy-allowed.rego
 
 AGENT_SOURCE_BIN    Path to the directory of agent binary.
                     If set, use the binary as agent but not build agent package.
@@ -315,6 +325,8 @@ check_env_variables()
 
 	[ -n "${KERNEL_MODULES_DIR}" ] && [ ! -d "${KERNEL_MODULES_DIR}" ] && die "KERNEL_MODULES_DIR defined but is not an existing directory"
 
+	[ ! -f "${agent_policy_file}" ] && die "agent policy file not found in '${agent_policy_file}'"
+
 	[ -n "${OSBUILDER_VERSION}" ] || die "need osbuilder version"
 }
 
@@ -444,6 +456,7 @@ build_rootfs_distro()
 			--env ROOTFS_DIR="/rootfs" \
 			--env AGENT_BIN="${AGENT_BIN}" \
 			--env AGENT_INIT="${AGENT_INIT}" \
+			--env AGENT_POLICY_FILE="${AGENT_POLICY_FILE}" \
 			--env KATA_BUILD_CC="${KATA_BUILD_CC}" \
 			--env ARCH="${ARCH}" \
 			--env CI="${CI}" \
@@ -656,8 +669,7 @@ EOF
 		popd
 
 		# TODO: clean-up OPA installation
-		samples_dir="${script_dir}/../../../src/agent/samples/policy/all-allowed"
-		cp "${samples_dir}/all-allowed.rego" "${ROOTFS_DIR}/agent_policy"
+		cp "${agent_policy_file}" "${ROOTFS_DIR}/agent_policy"
 		chmod 644 "${ROOTFS_DIR}/agent_policy"
 	fi
 
