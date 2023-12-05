@@ -6,6 +6,7 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
+use crate::agent;
 use crate::obj_meta;
 use crate::persistent_volume_claim;
 use crate::pod;
@@ -13,7 +14,6 @@ use crate::pod_template;
 use crate::policy;
 use crate::settings;
 use crate::yaml;
-use crate::agent;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

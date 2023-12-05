@@ -6,11 +6,11 @@
 // Allow OCI spec field names.
 #![allow(non_snake_case)]
 
+use crate::agent;
 use crate::pod;
 use crate::policy;
 use crate::settings;
 use crate::volume;
-use crate::agent;
 
 use log::debug;
 use std::ffi::OsString;

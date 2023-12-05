@@ -7,6 +7,7 @@ use clap::Parser;
 use env_logger;
 use log::{debug, info};
 
+mod agent;
 mod config_map;
 mod containerd;
 mod daemon_set;
@@ -30,7 +31,6 @@ mod utils;
 mod verity;
 mod volume;
 mod yaml;
-mod agent;
 
 #[derive(Debug, Parser)]
 struct CommandLineOptions {
