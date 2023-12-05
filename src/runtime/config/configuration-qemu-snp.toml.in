@@ -42,7 +42,13 @@ rootfs_type=@DEFROOTFSTYPE@
 confidential_guest = true
 
 # enable SEV SNP VMs
-sev_snp_guest = true
+sev_snp_guest = @DEFSNPGUEST@
+
+# SNP guest policy
+# Based on SEV Secure Nested Paging Firmware ABI Specification section 4.3
+# If it is unspecified or 0, it will default to 0x30000 (i.e. Bit#17 is '1' which is reserved and Bit#16 is '1' which means SMT is allowed).
+snp_guest_policy=@DEFSNPGUESTPOLICY@
+
 
 # Enable running QEMU VMM as a non-root user.
 # By default QEMU VMM run as root. When this is set to true, QEMU VMM process runs as
@@ -449,7 +455,6 @@ disable_selinux=@DEFDISABLESELINUX@
 # with `SELINUX=yes`.
 # (default: true)
 disable_guest_selinux=@DEFDISABLEGUESTSELINUX@
-
 
 [factory]
 # VM templating support. Once enabled, new VMs are created from template
