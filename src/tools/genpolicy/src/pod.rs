@@ -15,10 +15,10 @@ use crate::settings;
 use crate::utils::Config;
 use crate::volume;
 use crate::yaml;
+use crate::agent;
 
 use async_trait::async_trait;
 use log::{debug, warn};
-use protocols::agent;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

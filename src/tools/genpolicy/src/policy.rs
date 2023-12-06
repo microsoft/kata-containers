@@ -6,6 +6,7 @@
 // Allow OCI spec field names.
 #![allow(non_snake_case)]
 
+use crate::agent;
 use crate::config_map;
 use crate::containerd;
 use crate::mount_and_storage;
@@ -20,8 +21,7 @@ use crate::yaml;
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use log::debug;
-use oci_spec::runtime as oci;
-use protocols::agent;
+use protocols::oci;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use sha2::{Digest, Sha256};
@@ -627,8 +627,10 @@ impl AgentPolicy {
         let mut devices: Vec<agent::Device> = vec![];
         if let Some(volumeDevices) = &yaml_container.volumeDevices {
             for volumeDevice in volumeDevices {
-                let mut device = agent::Device::new();
-                device.set_container_path(volumeDevice.devicePath.clone());
+                let device = agent::Device {
+                    container_path: volumeDevice.devicePath.clone(),
+                    ..Default::default()
+                };
                 devices.push(device);
 
                 linux.Devices.push(KataLinuxDevice {
@@ -781,9 +783,8 @@ fn get_image_layer_storages(
             fstype: "tar".to_string(),
             options: vec![format!("$(hash{layer_index})")],
             mount_point: format!("$(layer{layer_index})"),
-            fs_group: protobuf::MessageField::none(),
-            special_fields: ::protobuf::SpecialFields::new(),
-        });
+            fs_group: None,
+            });
     }
 
     new_storages.reverse();
@@ -801,9 +802,8 @@ fn get_image_layer_storages(
         fstype: "fuse3.kata-overlay".to_string(),
         options: vec![layer_names.join(":"), layer_hashes.join(":")],
         mount_point: root.Path.clone(),
-        fs_group: protobuf::MessageField::none(),
-        special_fields: ::protobuf::SpecialFields::new(),
-    };
+        fs_group: None,
+        };
 
     storages.push(overlay_storage);
 }

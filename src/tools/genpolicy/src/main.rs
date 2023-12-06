@@ -5,6 +5,7 @@
 
 use log::{debug, info};
 
+mod agent;
 mod config_map;
 mod containerd;
 mod cronjob;
