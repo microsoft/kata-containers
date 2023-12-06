@@ -45,7 +45,6 @@ impl ConfigMap {
         debug!("Reading ConfigMap...");
         let config_map: ConfigMap = serde_yaml::from_reader(File::open(file)?)?;
         debug!("\nRead ConfigMap => {:#?}", config_map);
-
         Ok(config_map)
     }
 
