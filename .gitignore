@@ -18,6 +18,7 @@ src/tools/log-parser/kata-log-parser
 tools/packaging/static-build/agent/install_libseccomp.sh
 
 # Microsoft-specific
+src/agent/samples/policy/test-input/
 src/tarfs/**/*.cmd
 src/tarfs/**/*.ko
 src/tarfs/**/*.mod
