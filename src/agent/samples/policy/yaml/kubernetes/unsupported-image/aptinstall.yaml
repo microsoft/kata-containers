@@ -26,4 +26,4 @@ spec:
         - apt update && apt install ripgrep
       image: "docker.io/library/ubuntu:latest"
       name: ubuntu-apt
-  runtimeClassName: runtime-class
+  runtimeClassName: kata-cc

@@ -16,7 +16,7 @@ use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::{io::Seek, io::Write, path::Path};
-use tokio::{fs};
+use tokio::fs;
 use k8s_cri::v1::image_service_client::ImageServiceClient;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -26,7 +26,6 @@ use tower::service_fn;
 use tonic::Request;
 use tokio::io;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use containerd_client::services::v1::ReadContentRequest;
 
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
@@ -68,37 +67,28 @@ pub struct ImageLayer {
     pub verity_hash: String,
 }
 
+const CONTAINERD_SOCKET_PATH : &str = "/var/run/containerd/containerd.sock";
+
 impl Container {
     pub async fn new(use_cached_files: bool, image: &str) -> Result<Self> {
         info!("============================================");
         info!("Pulling image and layers for {:?}", image);
 
-        let containerd_socket_path = "/var/run/containerd/containerd.sock";
-        let client = match containerd_client::Client::from_path("/var/run/containerd/containerd.sock").await {
-            Ok(c) => {
-                c
-            },
-            Err(e) => {
-                return Err(anyhow!("Failed to connect to containerd: {e:?}"));
-            }
-        };
-        pull_image(image.to_string(), containerd_socket_path.to_string()).await?;
-        let manifest = get_image_manifest(image.to_string(), &client).await.unwrap();
-        let config_layer = get_config_layer(image.to_string(), containerd_socket_path.to_string()).await.unwrap();          
+        let client = containerd_client::Client::from_path(CONTAINERD_SOCKET_PATH).await?;
+        pull_image(image).await?;
+        let manifest = get_image_manifest(image, &client).await?;
+        let config_layer = get_config_layer(image).await.unwrap();          
         let image_layers = get_image_layers(
             use_cached_files,
             &manifest,
             &config_layer,
             &client
-        )
-        .await
-        .unwrap();
+        ).await?;
 
-        let c = Container {
+        Ok(Container {
             config_layer,
-            image_layers};
-
-        Ok(c)
+            image_layers
+        })
     }
 
     // Convert Docker image config to policy data.
@@ -200,20 +190,18 @@ impl Container {
     }
 }
 
-async fn get_config_layer(image_ref: String, socket_path: String) ->  Result<DockerConfigLayer, Box<dyn std::error::Error>>{
+async fn get_config_layer(image_ref: &str) ->  Result<DockerConfigLayer>{
     
-    let socket = socket_path.clone(); // todo: figure out how not to clone everything to get it working
     let channel = Endpoint::try_from("http://[::]")
         .unwrap()
-        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(socket.clone())))
-        .await
-        .expect("Could not create client.");
+        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(CONTAINERD_SOCKET_PATH)))
+        .await?;
 
     let mut client = ImageServiceClient::new(channel);
 
     let req =   k8s_cri::v1::ImageStatusRequest {
         image: Some(k8s_cri::v1::ImageSpec {
-            image: image_ref,
+            image: image_ref.to_string(),
             annotations: HashMap::new(),
         }),
         verbose: true
@@ -224,24 +212,22 @@ async fn get_config_layer(image_ref: String, socket_path: String) ->  Result<Doc
 
     let status_info: serde_json::Value = serde_json::from_str(image_layers.info.get("info").unwrap())?;
     let image_spec = status_info["imageSpec"].as_object().unwrap();
-    let docker_config_layer: DockerConfigLayer = serde_json::from_value(serde_json::to_value(image_spec)?).unwrap();
+    let docker_config_layer: DockerConfigLayer = serde_json::from_value(serde_json::to_value(image_spec)?)?;
 
     Ok(docker_config_layer)
 }
 
-pub async fn pull_image(image_ref: String, socket_path: String) ->  Result<(), anyhow::Error>{
-    let socket = socket_path.clone(); // todo: figure out how not to have to clone everything just to get it working
+pub async fn pull_image(image_ref: &str) ->  Result<()>{
     let channel = Endpoint::try_from("http://[::]")
         .unwrap()
-        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(socket.clone())))
-        .await
-        .expect("Could not create client.");
+        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(CONTAINERD_SOCKET_PATH)))
+        .await?;
 
     let mut client = ImageServiceClient::new(channel);
 
     let req =   k8s_cri::v1::PullImageRequest {
         image: Some(k8s_cri::v1::ImageSpec {
-            image: image_ref.clone(),
+            image: image_ref.to_string(),
             annotations: HashMap::new(),
         }),
         auth: None,
@@ -253,19 +239,10 @@ pub async fn pull_image(image_ref: String, socket_path: String) ->  Result<(), a
     Ok(())
 }
 
-async fn get_image_manifest (image_ref: String, client: &containerd_client::Client) ->  Result<serde_json::Value, anyhow::Error>{
+async fn get_content (digest: &str, client: &containerd_client::Client) ->  Result<serde_json::Value, anyhow::Error>{
 
-    let mut imageChannel = client.images();
-
-    let req = GetImageRequest{
-        name: image_ref.clone()
-    };
-    let req = with_namespace!(req, "k8s.io");
-    let resp = imageChannel.get(req).await?;
-
-    let image_digest = resp.into_inner().image.unwrap().target.clone().unwrap().digest.to_string();
     let req = containerd_client::services::v1::ReadContentRequest {
-        digest: image_digest.to_string(),
+        digest: digest.to_string(),
         offset: 0,
         size: 0,
     };
@@ -274,63 +251,56 @@ async fn get_image_manifest (image_ref: String, client: &containerd_client::Clie
     let resp = c.read(req).await?;
     let mut stream = resp.into_inner();
 
-    let mut manifest: serde_json::Value = Default::default();
     while let Some(chunk) = stream.message().await? {
         if chunk.offset < 0 {
-            print!("oop")
+            return Err(anyhow!("Negative offset in chunk"));
         }
         else {
-            
-            manifest = serde_json::from_slice(&chunk.data)?;
-            let isv1_manifest = manifest.get("layers") != None;
-            if isv1_manifest {
-                return Ok(manifest);
-            }
+            return Ok(serde_json::from_slice(&chunk.data)?);
         }
     }
 
-    // manifest is v2
-    let manifest = manifest["manifests"].as_array().unwrap();
+    Err(anyhow!("Unable to find content for digest: {}", digest))
+}
 
-    if manifest.len() < 1 {
-        info!("No manifests found for image: {}", image_ref);
-        return Ok(serde_json::Value::Null);
-    }
+async fn get_image_manifest (image_ref: &str, client: &containerd_client::Client) ->  Result<serde_json::Value>{
 
-    let mut manifestAmd64 = &manifest[0];
-    for entry in manifest {
+    let mut imageChannel = client.images();
+
+    let req = GetImageRequest{
+        name: image_ref.to_string()
+    };
+    let req = with_namespace!(req, "k8s.io");
+    let resp = imageChannel.get(req).await?;
+
+    let image_digest = resp.into_inner().image.unwrap().target.unwrap().digest;
+
+    let content = get_content(&image_digest, &client).await?;
+    let is_image_manifest = content.get("layers") != None;
+
+    if is_image_manifest { // https://github.com/opencontainers/image-spec/blob/main/manifest.md
+        return Ok(content);
+    } 
+    // else content is an image index https://github.com/opencontainers/image-spec/blob/main/image-index.md
+    
+    let image_index = content;
+    let manifests = image_index["manifests"].as_array().unwrap();
+
+    let mut manifestAmd64 = &serde_json::Value::Null;
+
+    for entry in manifests {
         let platform = entry["platform"].as_object().unwrap();
         let architecture = platform["architecture"].as_str().unwrap();
         let os = platform["os"].as_str().unwrap();
         if architecture == "amd64" && os == "linux" {
-            // println!("found amd64 linux manifest: {:#?}", entry);
             manifestAmd64 = entry;
             break;
         }
     }
 
-    let image_digest = manifestAmd64["digest"].as_str().unwrap().to_string();
-
-    let req = ReadContentRequest {
-        digest: image_digest.to_string(),
-        offset: 0,
-        size: 0,
-    };
-    let req = with_namespace!(req, "k8s.io");
-    let mut c = client.content();
-    let resp = c.read(req).await?;
-    let mut stream = resp.into_inner();
-    while let Some(chunk) = stream.message().await? {
-        if chunk.offset < 0 {
-            print!("oop")
-        }
-        else {
-            let manifest: serde_json::Value = serde_json::from_slice(&chunk.data)?;
-            return Ok(manifest)
-        }
-    }
-
-    Ok(serde_json::Value::Null)
+    let image_digest = manifestAmd64["digest"].as_str().unwrap();
+    
+    Ok(get_content(image_digest, &client).await?)
 }
 
 async fn get_image_layers(
@@ -342,37 +312,26 @@ async fn get_image_layers(
     let mut layer_index = 0;
     let mut layersVec = Vec::new();
 
-    let isv2_manifest = manifest.get("manifests") != None; // v2 has manifest["manifests"]
-
-    let layers = if isv2_manifest {
-        manifest["manifests"].as_array().unwrap()
-    }
-    else {
-        manifest["layers"].as_array().unwrap()
-    };
+    let layers = manifest["layers"].as_array().unwrap();
     
     for layer in layers {
         if layer["mediaType"].as_str().unwrap()
-        .eq("application/vnd.docker.image.rootfs.diff.tar.gzip")
-    {
-        if layer_index < config_layer.rootfs.diff_ids.len() {
-            let imageLayer = ImageLayer {
-                diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
-                verity_hash: get_verity_hash(
-                    use_cached_files,
-                    layer["digest"].as_str().unwrap(),
-                    &client
-                )
-                .await?,
-            };
-
-            layersVec.push(imageLayer);
-        } else {
-            return Err(anyhow!("Too many Docker gzip layers"));
+        .eq("application/vnd.docker.image.rootfs.diff.tar.gzip") {
+            if layer_index < config_layer.rootfs.diff_ids.len() {
+                let imageLayer = ImageLayer {
+                    diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
+                    verity_hash: get_verity_hash(
+                        use_cached_files,
+                        layer["digest"].as_str().unwrap(),
+                        &client
+                    ).await?,
+                };
+                layersVec.push(imageLayer);
+            } else {
+                return Err(anyhow!("Too many Docker gzip layers"));
+            }
+            layer_index += 1;
         }
-
-        layer_index += 1;
-    }
     }
 
     Ok(layersVec)
@@ -557,44 +516,3 @@ fn do_create_verity_hash_file(path: &Path, verity_path: &Path) -> Result<()> {
 pub async fn get_container(use_cache: bool, image: &str) -> Result<Container> {
     Container::new(use_cache, image).await
 }
-
-// fn build_auth(reference: &Reference) -> RegistryAuth {
-//     debug!("build_auth: {:?}", reference);
-
-//     let server = reference
-//         .resolve_registry()
-//         .strip_suffix("/")
-//         .unwrap_or_else(|| reference.resolve_registry());
-
-//     match docker_credential::get_credential(server) {
-//         Ok(DockerCredential::UsernamePassword(username, password)) => {
-//             debug!("build_auth: Found docker credentials");
-//             return RegistryAuth::Basic(username, password);
-//         }
-//         Ok(DockerCredential::IdentityToken(_)) => {
-//             warn!("build_auth: Cannot use contents of docker config, identity token not supported. Using anonymous access.");
-//         }
-//         Err(CredentialRetrievalError::ConfigNotFound) => {
-//             debug!("build_auth: Docker config not found - using anonymous access.");
-//         }
-//         Err(CredentialRetrievalError::NoCredentialConfigured) => {
-//             debug!("build_auth: Docker credentials not configured - using anonymous access.");
-//         }
-//         Err(CredentialRetrievalError::ConfigReadError) => {
-//             debug!("build_auth: Cannot read docker credentials - using anonymous access.");
-//         }
-//         Err(CredentialRetrievalError::HelperFailure { stdout, stderr }) => {
-//             if stdout == "credentials not found in native keychain\n" {
-//                 // On WSL, this error is generated when credentials are not
-//                 // available in ~/.docker/config.json.
-//                 debug!("build_auth: Docker credentials not found - using anonymous access.");
-//             } else {
-//                 warn!("build_auth: Docker credentials not found - using anonymous access. stderr = {}, stdout = {}",
-//                     &stderr, &stdout);
-//             }
-//         }
-//         Err(e) => panic!("Error handling docker configuration file: {}", e),
-//     }
-
-//     RegistryAuth::Anonymous
-// }
