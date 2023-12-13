@@ -67,7 +67,7 @@ pub struct ImageLayer {
     pub verity_hash: String,
 }
 
-const CONTAINERD_SOCKET_PATH : &str = "/var/run/containerd/containerd.sock";
+const CONTAINERD_SOCKET_PATH : &str = "npipe:////./pipe/containerd-containerd";
 
 impl Container {
     pub async fn new(use_cached_files: bool, image: &str) -> Result<Self> {
