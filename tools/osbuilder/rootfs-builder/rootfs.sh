@@ -28,12 +28,12 @@ LIBC=${LIBC:-musl}
 SECCOMP=${SECCOMP:-"yes"}
 SELINUX=${SELINUX:-"no"}
 AGENT_POLICY=${AGENT_POLICY:-no}
-AGENT_POLICY_FILE=${AGENT_POLICY_FILE:-"../../../src/kata-opa/allow-all.rego"}
+AGENT_POLICY_FILE=${AGENT_POLICY_FILE:-"allow-all.rego"}
 
 lib_file="${script_dir}/../scripts/lib.sh"
 source "$lib_file"
 
-agent_policy_file="${script_dir}/${AGENT_POLICY_FILE}"
+agent_policy_file="$(readlink -f "${script_dir}/../../../src/kata-opa/${AGENT_POLICY_FILE}")"
 
 #For cross build
 CROSS_BUILD=${CROSS_BUILD:-false}
@@ -118,9 +118,9 @@ AGENT_INIT          When set to "yes", use ${AGENT_BIN} as init process in place
 
 AGENT_POLICY_FILE   Path to the agent policy rego file to be set in the rootfs.
                     If defined, this overwrites the default setting of the
-                    permissive policy file. The path is relative to the script
-                    directory designated by the script_dir variable.
-                    Default value: ../../../src/kata-opa/allow-all.rego
+                    permissive policy file. The path is relative to the policy
+                    rego file directory 'src/kata-opa'.
+                    Default value: allow-all.rego
 
 AGENT_SOURCE_BIN    Path to the directory of agent binary.
                     If set, use the binary as agent but not build agent package.
