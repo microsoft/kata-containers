@@ -191,6 +191,7 @@ type runtime struct {
 	DisableGuestEmptyDir      bool     `toml:"disable_guest_empty_dir"`
 	CreateContainerTimeout    uint64   `toml:"create_container_timeout"`
 	DanConf                   string   `toml:"dan_conf"`
+	StaticSandboxWorkloadDefaultMem uint32   `toml:"static_sandbox_default_workload_mem"`
 }
 
 type agent struct {
@@ -1573,6 +1574,7 @@ func LoadConfiguration(configPath string, ignoreLogging bool) (resolvedConfigPat
 	config.EnableVCPUsPinning = tomlConf.Runtime.EnableVCPUsPinning
 	config.GuestSeLinuxLabel = tomlConf.Runtime.GuestSeLinuxLabel
 	config.StaticSandboxResourceMgmt = tomlConf.Runtime.StaticSandboxResourceMgmt
+	config.StaticSandboxWorkloadDefaultMem = tomlConf.Runtime.StaticSandboxWorkloadDefaultMem
 	config.SandboxCgroupOnly = tomlConf.Runtime.SandboxCgroupOnly
 	config.DisableNewNetNs = tomlConf.Runtime.DisableNewNetNs
 	config.EnablePprof = tomlConf.Runtime.EnablePprof
