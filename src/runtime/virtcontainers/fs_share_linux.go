@@ -530,13 +530,13 @@ func (f *FilesystemShare) ShareRootFilesystem(ctx context.Context, c *Container)
 			return nil, err
 		}
 		return &SharedFile{
-			storage: &grpc.Storage{
+			containerStorages: []*grpc.Storage{{
 				MountPoint: rootfsGuestPath,
 				Source:     "none",
 				Fstype:     c.rootFs.Type,
 				Driver:     kataOverlayDevType,
 				Options:    c.rootFs.Options,
-			},
+			}},
 			guestPath: rootfsGuestPath,
 		}, nil
 	}
