@@ -18,6 +18,8 @@ src/tools/log-parser/kata-log-parser
 tools/packaging/static-build/agent/install_libseccomp.sh
 
 # Microsoft-specific
+.cargo/
+vendor/
 src/agent/samples/policy/test-input/
 src/tarfs/**/*.cmd
 src/tarfs/**/*.ko
@@ -29,3 +31,4 @@ src/tarfs/**/Module.symvers
 src/tarfs-cvm/
 tools/osbuilder/root_hash.txt
 tools/osbuilder/kata-opa.service
+tools/osbuilder/rootfs-builder/opa/
