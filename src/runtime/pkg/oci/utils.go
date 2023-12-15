@@ -145,6 +145,9 @@ type RuntimeConfig struct {
 	// any later resource updates.
 	StaticSandboxResourceMgmt bool
 
+	// Memory to allocate for workloads within the sandbox when workload memory is unspecified
+	StaticSandboxWorkloadDefaultMem uint32
+
 	// Determines if create a netns for hypervisor process
 	DisableNewNetNs bool
 
@@ -991,6 +994,8 @@ func SandboxConfig(ocispec specs.Spec, runtime RuntimeConfig, bundlePath, cid st
 
 		StaticResourceMgmt: runtime.StaticSandboxResourceMgmt,
 
+		StaticWorkloadDefaultMem: runtime.StaticSandboxWorkloadDefaultMem,
+
 		ShmSize: shmSize,
 
 		VfioMode: runtime.VfioMode,
@@ -1017,6 +1022,12 @@ func SandboxConfig(ocispec specs.Spec, runtime RuntimeConfig, bundlePath, cid st
 	// with the base number of CPU/memory (which is equal to the default CPU/memory specified for the runtime
 	// configuration or annotations) as well as any specified workload resources.
 	if sandboxConfig.StaticResourceMgmt {
+		// If no Limits are set in pod config, use StaticWorkloadDefaultMem to ensure the containers generally
+		// have a reasonable amount of memory available
+		if sandboxConfig.SandboxResources.WorkloadMemMB == 0 {
+			sandboxConfig.SandboxResources.WorkloadMemMB = sandboxConfig.StaticWorkloadDefaultMem
+		}
+
 		sandboxConfig.SandboxResources.BaseCPUs = sandboxConfig.HypervisorConfig.NumVCPUsF
 		sandboxConfig.SandboxResources.BaseMemMB = sandboxConfig.HypervisorConfig.MemorySize
 

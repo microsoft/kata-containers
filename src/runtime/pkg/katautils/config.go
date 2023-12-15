@@ -170,23 +170,24 @@ type hypervisor struct {
 }
 
 type runtime struct {
-	InterNetworkModel         string   `toml:"internetworking_model"`
-	JaegerEndpoint            string   `toml:"jaeger_endpoint"`
-	JaegerUser                string   `toml:"jaeger_user"`
-	JaegerPassword            string   `toml:"jaeger_password"`
-	VfioMode                  string   `toml:"vfio_mode"`
-	GuestSeLinuxLabel         string   `toml:"guest_selinux_label"`
-	SandboxBindMounts         []string `toml:"sandbox_bind_mounts"`
-	Experimental              []string `toml:"experimental"`
-	Tracing                   bool     `toml:"enable_tracing"`
-	DisableNewNetNs           bool     `toml:"disable_new_netns"`
-	DisableGuestSeccomp       bool     `toml:"disable_guest_seccomp"`
-	EnableVCPUsPinning        bool     `toml:"enable_vcpus_pinning"`
-	Debug                     bool     `toml:"enable_debug"`
-	SandboxCgroupOnly         bool     `toml:"sandbox_cgroup_only"`
-	StaticSandboxResourceMgmt bool     `toml:"static_sandbox_resource_mgmt"`
-	EnablePprof               bool     `toml:"enable_pprof"`
-	DisableGuestEmptyDir      bool     `toml:"disable_guest_empty_dir"`
+	InterNetworkModel               string   `toml:"internetworking_model"`
+	JaegerEndpoint                  string   `toml:"jaeger_endpoint"`
+	JaegerUser                      string   `toml:"jaeger_user"`
+	JaegerPassword                  string   `toml:"jaeger_password"`
+	VfioMode                        string   `toml:"vfio_mode"`
+	GuestSeLinuxLabel               string   `toml:"guest_selinux_label"`
+	SandboxBindMounts               []string `toml:"sandbox_bind_mounts"`
+	Experimental                    []string `toml:"experimental"`
+	Tracing                         bool     `toml:"enable_tracing"`
+	DisableNewNetNs                 bool     `toml:"disable_new_netns"`
+	DisableGuestSeccomp             bool     `toml:"disable_guest_seccomp"`
+	EnableVCPUsPinning              bool     `toml:"enable_vcpus_pinning"`
+	Debug                           bool     `toml:"enable_debug"`
+	SandboxCgroupOnly               bool     `toml:"sandbox_cgroup_only"`
+	StaticSandboxResourceMgmt       bool     `toml:"static_sandbox_resource_mgmt"`
+	EnablePprof                     bool     `toml:"enable_pprof"`
+	DisableGuestEmptyDir            bool     `toml:"disable_guest_empty_dir"`
+	StaticSandboxWorkloadDefaultMem uint32   `toml:"static_sandbox_default_workload_mem"`
 }
 
 type agent struct {
@@ -1585,6 +1586,7 @@ func LoadConfiguration(configPath string, ignoreLogging bool) (resolvedConfigPat
 	config.EnableVCPUsPinning = tomlConf.Runtime.EnableVCPUsPinning
 	config.GuestSeLinuxLabel = tomlConf.Runtime.GuestSeLinuxLabel
 	config.StaticSandboxResourceMgmt = tomlConf.Runtime.StaticSandboxResourceMgmt
+	config.StaticSandboxWorkloadDefaultMem = tomlConf.Runtime.StaticSandboxWorkloadDefaultMem
 	config.SandboxCgroupOnly = tomlConf.Runtime.SandboxCgroupOnly
 	config.DisableNewNetNs = tomlConf.Runtime.DisableNewNetNs
 	config.EnablePprof = tomlConf.Runtime.EnablePprof
