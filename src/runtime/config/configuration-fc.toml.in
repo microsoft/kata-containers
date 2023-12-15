@@ -353,6 +353,11 @@ sandbox_cgroup_only=@DEFSANDBOXCGROUPONLY@
 # - When running single containers using a tool like ctr, container sizing information will be available.
 static_sandbox_resource_mgmt=@DEFSTATICRESOURCEMGMT_FC@
 
+# If set, the runtime will use the value as the default workload memory in MB for the sandbox when no workload memory request is passed
+# down to the shim via the OCI when static sandbox resource management is enabled. With this, we ensure that workloads have a proper
+# default amount of memory available within the sandbox.
+static_sandbox_default_workload_mem=@DEFSTATICSANDBOXWORKLOADMEM@
+
 # If enabled, the runtime will not create Kubernetes emptyDir mounts on the guest filesystem. Instead, emptyDir mounts will
 # be created on the host and shared via virtio-fs. This is potentially slower, but allows sharing of files from host to guest.
 disable_guest_empty_dir=@DEFDISABLEGUESTEMPTYDIR@
