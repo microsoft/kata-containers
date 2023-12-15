@@ -68,7 +68,7 @@ const (
 
 	procCPUInfo = "/proc/cpuinfo"
 
-	defaultVCPUs = float32(1)
+	defaultVCPUs = float32(0)
 	// 2 GiB
 	defaultMemSzMiB = 2048
 
@@ -85,7 +85,7 @@ const (
 	vSockLogsPort = 1025
 
 	// MinHypervisorMemory is the minimum memory required for a VM.
-	MinHypervisorMemory = 256
+	MinHypervisorMemory = 0
 
 	defaultMsize9p = 8192
 
