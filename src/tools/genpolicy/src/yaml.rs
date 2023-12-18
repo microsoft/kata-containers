@@ -171,6 +171,14 @@ pub fn new_k8s_resource(
             debug!("{:#?}", &secret);
             Ok((boxed::Box::new(secret), header.kind))
         }
+        "Ingress" => {
+            let ingress: secret::Secret = serde_ignored::deserialize(d, |path| {
+                handle_unused_field(&path.to_string(), silent_unsupported_fields);
+            })
+            .unwrap();
+            debug!("{:#?}", &ingress);
+            Ok((boxed::Box::new(ingress), header.kind))
+        }
         "StatefulSet" => {
             let set: stateful_set::StatefulSet = serde_ignored::deserialize(d, |path| {
                 handle_unused_field(&path.to_string(), silent_unsupported_fields);

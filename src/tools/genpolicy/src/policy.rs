@@ -376,7 +376,7 @@ impl AgentPolicy {
                 let config_map: config_map::ConfigMap = serde_yaml::from_str(&yaml_string)?;
                 debug!("{:#?}", &config_map);
                 config_maps.push(config_map);
-            } else if kind.eq("Secret") {
+            } else if kind.eq("Secret") || kind.eq("Ingress") {
                 let secret: secret::Secret = serde_yaml::from_str(&yaml_string)?;
                 debug!("{:#?}", &secret);
                 secrets.push(secret);
