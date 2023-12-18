@@ -468,8 +468,6 @@ func (clh *cloudHypervisor) enableProtection() error {
 			clh.vmconfig.Payload.SetHostData(snpZeroHostData)
 		}
 
-		clh.vmconfig.Platform.SetNumPciSegments(10)
-
 		return nil
 
 	default:
