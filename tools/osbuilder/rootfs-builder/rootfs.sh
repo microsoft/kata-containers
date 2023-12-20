@@ -35,6 +35,7 @@ AGENT_TARBALL=${AGENT_TARBALL:-""}
 COCO_GUEST_COMPONENTS_TARBALL=${COCO_GUEST_COMPONENTS_TARBALL:-""}
 CONFIDENTIAL_GUEST="${CONFIDENTIAL_GUEST:-no}"
 PAUSE_IMAGE_TARBALL=${PAUSE_IMAGE_TARBALL:-""}
+AGENT_POLICY_FILE=${AGENT_POLICY_FILE:-"allow-all.rego"}
 
 lib_file="${script_dir}/../scripts/lib.sh"
 source "$lib_file"
@@ -56,6 +57,7 @@ EXTRA_PKGS=${EXTRA_PKGS:-""}
 NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-""}
 nvidia_rootfs="${script_dir}/nvidia/nvidia_rootfs.sh"
 [ "${ARCH}" == "x86_64" ] || [ "${ARCH}" == "aarch64" ] && source "$nvidia_rootfs"
+agent_policy_file="$(readlink -f "${script_dir}/../../../src/kata-opa/${AGENT_POLICY_FILE}")"
 
 #For cross build
 CROSS_BUILD=${CROSS_BUILD:-false}
@@ -172,7 +174,8 @@ AGENT_INIT          When set to "yes", use ${AGENT_BIN} as init process in place
 
 AGENT_POLICY_FILE   Path to the agent policy rego file to be set in the rootfs.
                     If defined, this overwrites the default setting of the
-                    permissive policy file.
+                    permissive policy file. The path is relative to the policy
+                    rego file directory 'src/kata-opa'.
                     Default value: allow-all.rego
 
 AGENT_SOURCE_BIN    Path to the directory of agent binary.
@@ -778,6 +781,26 @@ EOF
 		mkdir -p "${policy_dir}"
 		install -D -o root -g root -m 0644 "${agent_policy_file}" -T "${policy_dir}/${policy_file_name}"
 		ln -sf "${policy_file_name}" "${policy_dir}/default-policy.rego"
+
+		if [ "${AGENT_INIT}" == "yes" ]; then
+			info "OPA will be started by the kata agent"
+		else
+			# Install the unit file for the kata-opa service.
+			local kata_opa_in_dir="${script_dir}/../../../src/kata-opa"
+			local kata_opa_unit="kata-opa.service"
+			local kata_opa_unit_path="${ROOTFS_DIR}/usr/lib/systemd/system/${kata_opa_unit}"
+			local kata_containers_wants="${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants"
+
+			opa_settings_dir="${opa_settings_dir//\//\\/}"
+			sed -e "s/@SETTINGSDIR@/${opa_settings_dir}/g" "${kata_opa_in_dir}/${kata_opa_unit}.in" > "${kata_opa_unit}"
+
+			opa_bin_dir="${opa_bin_dir//\//\\/}"
+			sed -i -e "s/@BINDIR@/${opa_bin_dir}/g" "${kata_opa_unit}"
+
+			install -D -o root -g root -m 0644 "${kata_opa_unit}" -T "${kata_opa_unit_path}"
+			mkdir -p "${kata_containers_wants}"
+			ln -sf "${kata_opa_unit_path}" "${kata_containers_wants}/${kata_opa_unit}"
+		fi
 	fi
 
 	info "Check init is installed"
