@@ -108,6 +108,7 @@ GENERATED_VARS = \
 		CONFIG_CLH_SNP_IN \
 		CONFIG_STRATOVIRT_IN \
 		CONFIG_REMOTE_IN \
+		CONFIG_QEMU_SE_IN \
 		$(USER_VARS)
 SCRIPTS += $(COLLECT_SCRIPT)
 SCRIPTS_DIR := $(BINDIR)
@@ -384,6 +385,18 @@ ifneq (,$(QEMUCMD))
 
     CONFIGS += $(CONFIG_CLH_SNP)
 
+    CONFIG_FILE_QEMU_SE = configuration-qemu-se.toml
+    CONFIG_QEMU_SE = config/$(CONFIG_FILE_QEMU_SE)
+    CONFIG_QEMU_SE_IN = $(CONFIG_QEMU_SE).in
+
+    CONFIG_PATH_QEMU_SE = $(abspath $(CONFDIR)/$(CONFIG_FILE_QEMU_SE))
+    CONFIG_PATHS += $(CONFIG_PATH_QEMU_SE)
+
+    SYSCONFIG_QEMU_SE = $(abspath $(SYSCONFDIR)/$(CONFIG_FILE_QEMU_SE))
+    SYSCONFIG_PATHS += $(SYSCONFIG_QEMU_SE)
+
+    CONFIGS += $(CONFIG_QEMU_SE)
+
     # qemu-specific options (all should be suffixed by "_QEMU")
     DEFBLOCKSTORAGEDRIVER_QEMU := virtio-scsi
     DEFBLOCKDEVICEAIO_QEMU := io_uring
@@ -405,6 +418,8 @@ ifneq (,$(QEMUCMD))
     KERNELSNPNAME = $(call MAKE_KERNEL_SNP_NAME,$(KERNELSNPTYPE))
     KERNELSNPPATH = $(KERNELDIR)/$(KERNELSNPNAME)
 
+    KERNELSENAME = kata-containers-se.img
+    KERNELSEPATH = $(KERNELDIR)/$(KERNELSENAME)
 endif
 
 ifneq (,$(CLHCMD))
@@ -606,6 +621,7 @@ USER_VARS += KERNELPATH
 USER_VARS += KERNELSEVPATH
 USER_VARS += KERNELTDXPATH
 USER_VARS += KERNELSNPPATH
+USER_VARS += KERNELSEPATH
 USER_VARS += KERNELPATH_CLH
 USER_VARS += KERNELPATH_FC
 USER_VARS += KERNELPATH_STRATOVIRT
@@ -916,14 +932,15 @@ vendor: handle_vendor
 
 static-checks-build: $(GENERATED_FILES)
 
-clean:
+clean: clean-generated-files
 	$(QUIET_CLEAN)rm -f \
-		$(CONFIGS) \
-		$(GENERATED_FILES) \
 		$(MONITOR) \
 		$(SHIMV2) \
 		$(TARGET) \
 		.git-commit .git-commit.tmp
+
+clean-generated-files:
+	$(QUIET_CLEAN)rm -f $(GENERATED_FILES)
 
 show-usage: show-header
 	@printf "• Overview:\n"
@@ -941,6 +958,7 @@ show-usage: show-header
 	@printf "\tfast-test                  : run tests with failfast option.\n"
 	@printf "\tcheck                      : run code checks.\n"
 	@printf "\tclean                      : remove built files.\n"
+	@printf "\tclean-generated-files      : remove generated files.\n"
 	@printf "\tcontainerd-shim-v2         : only build containerd shim v2.\n"
 	@printf "\tcoverage                   : run coverage tests.\n"
 	@printf "\tdefault                    : same as 'make build' (or just 'make').\n"

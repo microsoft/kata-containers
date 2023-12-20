@@ -25,7 +25,6 @@ readonly versions_yaml="${repo_root_dir}/versions.yaml"
 readonly agent_builder="${static_build_dir}/agent/build.sh"
 readonly clh_builder="${static_build_dir}/cloud-hypervisor/build-static-clh.sh"
 readonly firecracker_builder="${static_build_dir}/firecracker/build-static-firecracker.sh"
-readonly initramfs_builder="${static_build_dir}/initramfs/build.sh"
 readonly kernel_builder="${static_build_dir}/kernel/build.sh"
 readonly ovmf_builder="${static_build_dir}/ovmf/build.sh"
 readonly qemu_builder="${static_build_dir}/qemu/build-static-qemu.sh"
@@ -36,6 +35,7 @@ readonly virtiofsd_builder="${static_build_dir}/virtiofsd/build.sh"
 readonly nydus_builder="${static_build_dir}/nydus/build.sh"
 readonly rootfs_builder="${repo_root_dir}/tools/packaging/guest-image/build_image.sh"
 readonly tools_builder="${static_build_dir}/tools/build.sh"
+readonly se_image_builder="${repo_root_dir}/tools/packaging/guest-image/build_se_image.sh"
 
 ARCH=${ARCH:-$(uname -m)}
 MEASURED_ROOTFS=${MEASURED_ROOTFS:-no}
@@ -86,6 +86,7 @@ options:
 	agent
 	agent-opa
 	agent-ctl
+	boot-image-se
 	cloud-hypervisor
 	cloud-hypervisor-glibc
 	firecracker
@@ -98,7 +99,6 @@ options:
 	kernel-nvidia-gpu-tdx-experimental
 	kernel-sev-tarball
 	kernel-tdx-experimental
-	log-parser-rs
 	nydus
 	ovmf
 	ovmf-sev
@@ -259,6 +259,11 @@ install_initrd_sev() {
 	install_initrd "sev"
 }
 
+install_se_image() {
+	info "Create IBM SE image configured with AA_KBC=${AA_KBC}"
+	"${se_image_builder}" --destdir="${destdir}"
+}
+
 #Install kernel component helper
 install_cached_kernel_tarball_component() {
 	local kernel_name=${1}
@@ -300,7 +305,7 @@ install_cached_kernel_tarball_component() {
 install_kernel_helper() {
 	local kernel_version_yaml_path="${1}"
 	local kernel_name="${2}"
-	local extra_cmd=${3}
+	local extra_cmd="${3:-}"
 
 	export kernel_version="$(get_from_kata_deps ${kernel_version_yaml_path})"
 	export kernel_kata_config_version="$(cat ${repo_root_dir}/tools/packaging/kernel/kata_config_version)"
@@ -313,11 +318,6 @@ install_kernel_helper() {
 	fi
 
 	install_cached_kernel_tarball_component ${kernel_name} ${module_dir} && return 0
-
-	if [ "${MEASURED_ROOTFS}" == "yes" ]; then
-		info "build initramfs for cc kernel"
-		"${initramfs_builder}"
-	fi
 
 	info "build ${kernel_name}"
 	info "Kernel version ${kernel_version}"
@@ -605,18 +605,7 @@ install_shimv2() {
 	export GO_VERSION
 	export RUST_VERSION
 
-	if [ "${MEASURED_ROOTFS}" == "yes" ]; then
-	        extra_opts="DEFSERVICEOFFLOAD=true"
-		if [ -f "${repo_root_dir}/tools/osbuilder/root_hash.txt" ]; then
-			root_hash=$(sudo sed -e 's/Root hash:\s*//g;t;d' "${repo_root_dir}/tools/osbuilder//root_hash.txt")
-			root_measure_config="rootfs_verity.scheme=dm-verity rootfs_verity.hash=${root_hash}"
-			extra_opts+=" ROOTMEASURECONFIG=\"${root_measure_config}\""
-		fi
-
-		DESTDIR="${destdir}" PREFIX="${prefix}" EXTRA_OPTS="${extra_opts}" "${shimv2_builder}"
-	else
-		DESTDIR="${destdir}" PREFIX="${prefix}" "${shimv2_builder}"
-	fi
+	DESTDIR="${destdir}" PREFIX="${prefix}" "${shimv2_builder}"
 }
 
 install_ovmf() {
@@ -698,7 +687,6 @@ install_tools_helper() {
 
 	tool_binary=${tool}
 	[ ${tool} = "agent-ctl" ] && tool_binary="kata-agent-ctl"
-	[ ${tool} = "log-parser-rs" ] && tool_binary="log-parser"
 	[ ${tool} = "trace-forwarder" ] && tool_binary="kata-trace-forwarder"
 	binary=$(find ${repo_root_dir}/src/tools/${tool}/ -type f -name ${tool_binary})
 
@@ -713,10 +701,6 @@ install_agent_ctl() {
 
 install_kata_ctl() {
 	install_tools_helper "kata-ctl"
-}
-
-install_log_parser_rs() {
-	install_tools_helper "log-parser-rs"
 }
 
 install_runk() {
@@ -779,6 +763,8 @@ handle_build() {
 	agent-opa) install_agent_opa ;;
 
 	agent-ctl) install_agent_ctl ;;
+	
+	boot-image-se) install_se_image ;;
 
 	cloud-hypervisor) install_clh ;;
 
@@ -801,8 +787,6 @@ handle_build() {
 	kernel-tdx-experimental) install_kernel_tdx_experimental ;;
 
 	kernel-sev) install_kernel_sev ;;
-
-	log-parser-rs) install_log_parser_rs ;;
 
 	nydus) install_nydus ;;
 
@@ -895,7 +879,6 @@ main() {
 		kata-ctl
 		kernel
 		kernel-experimental
-		log-parser-rs
 		nydus
 		qemu
 		stratovirt

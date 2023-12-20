@@ -12,7 +12,7 @@ use dragonball::api::v1::{
 };
 use dragonball::device_manager::blk_dev_mgr::BlockDeviceType;
 
-use super::DragonballInner;
+use super::{build_dragonball_network_config, DragonballInner};
 use crate::{
     device::DeviceType, HybridVsockConfig, NetworkConfig, ShareFsConfig, ShareFsMountConfig,
     ShareFsMountOperation, ShareFsMountType, VfioBusMode, VfioDevice, VmmState, JAILER_ROOT,
@@ -67,6 +67,7 @@ impl DragonballInner {
             DeviceType::ShareFs(sharefs) => self
                 .add_share_fs_device(&sharefs.config)
                 .context("add share fs device"),
+            DeviceType::Vsock(_) => todo!(),
         }
     }
 
@@ -209,8 +210,9 @@ impl DragonballInner {
     }
 
     fn add_net_device(&mut self, config: &NetworkConfig) -> Result<()> {
+        let net_cfg = build_dragonball_network_config(&self.config, config);
         self.vmm_instance
-            .insert_network_device(config.into())
+            .insert_network_device(net_cfg)
             .context("insert network device")
     }
 

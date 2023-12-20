@@ -479,8 +479,18 @@ impl Annotation {
         let u32_err = io::Error::new(io::ErrorKind::InvalidData, "parse u32 error".to_string());
         let u64_err = io::Error::new(io::ErrorKind::InvalidData, "parse u64 error".to_string());
         let i32_err = io::Error::new(io::ErrorKind::InvalidData, "parse i32 error".to_string());
-        let hv = config.hypervisor.get_mut(hypervisor_name).unwrap();
-        let ag = config.agent.get_mut(agent_name).unwrap();
+        let hv = config.hypervisor.get_mut(hypervisor_name).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid hypervisor name {}", hypervisor_name),
+            )
+        })?;
+        let ag = config.agent.get_mut(agent_name).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid agent name {}", agent_name),
+            )
+        })?;
         for (key, value) in &self.annotations {
             if hv.security_info.is_annotation_enabled(key) {
                 match key.as_str() {
@@ -695,10 +705,10 @@ impl Annotation {
                     }
                     // Hypervisor Memory related annotations
                     KATA_ANNO_CFG_HYPERVISOR_DEFAULT_MEMORY => {
-                        match byte_unit::Byte::from_str(value) {
+                        match byte_unit::Byte::parse_str(value,true) {
                             Ok(mem_bytes) => {
                                 let memory_size = mem_bytes
-                                    .get_adjusted_unit(byte_unit::ByteUnit::MiB)
+                                    .get_adjusted_unit(byte_unit::Unit::MiB)
                                     .get_value()
                                     as u32;
                                 info!(sl!(), "get mem {} from annotations: {}", memory_size, value);

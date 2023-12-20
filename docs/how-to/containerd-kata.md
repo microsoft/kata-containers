@@ -62,7 +62,7 @@ Follow the instructions to [install Kata Containers](../install/README.md).
 > You do not need to install `cri` if you have containerd 1.1 or above. Just remove the `cri` plugin from the list of
 > `disabled_plugins` in the containerd configuration file (`/etc/containerd/config.toml`).
 
-Follow the instructions from the [CRI installation guide](http://github.com/containerd/cri/blob/master/docs/installation.md).
+Follow the instructions from the [CRI installation guide](https://github.com/containerd/containerd/blob/main/docs/cri/installation.md).
 
 Then, check if `containerd` is now available:
 
@@ -185,7 +185,7 @@ and then, run an untrusted workload with Kata Containers:
       runtime_type = "io.containerd.kata.v2"
 ```
 
-You can find more information on the [Containerd config documentation](https://github.com/containerd/cri/blob/master/docs/config.md)
+You can find more information on the [Containerd config documentation](https://github.com/containerd/containerd/blob/main/docs/cri/config.md)
 
 #### Kata Containers as the default runtime
 

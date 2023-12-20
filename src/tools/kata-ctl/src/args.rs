@@ -3,15 +3,22 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
+
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use thiserror::Error;
 
 #[derive(Parser, Debug)]
-#[clap(name = "kata-ctl", author, about = "Kata Containers control tool")]
+#[clap(
+    name = "kata-ctl",
+    author,
+    about = "Kata Containers control tool",
+    arg_required_else_help = true
+)]
 pub struct KataCtlCli {
     #[clap(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
     #[clap(short, long, value_enum, value_parser = parse_log_level)]
     /// Sets the minimum log level required for log messages to be displayed. Default is 'info'.
     /// Valid values are: trace, debug, info, warning, error, critical
@@ -19,6 +26,10 @@ pub struct KataCtlCli {
     #[clap(short, long, action)]
     /// If enabled, log messages will be JSON formatted for easier machine parsing
     pub json_logging: bool,
+
+    /// If specified, display a list of config file locations.
+    #[clap(long, action)]
+    pub show_default_config_paths: bool,
 }
 
 fn parse_log_level(arg: &str) -> Result<slog::Level, String> {
@@ -61,6 +72,9 @@ pub enum Commands {
 
     /// Display version details
     Version,
+
+    /// Parse Logs and output in various formats
+    LogParser(LogParser),
 }
 
 #[derive(Debug, Args, Error)]
@@ -181,4 +195,56 @@ pub struct ExecArguments {
     #[clap(short = 'p', long = "kata-debug-port", default_value_t = 1026)]
     /// kata debug console vport same as configuration, default is 1026.
     pub vport: u32,
+}
+
+#[derive(Args, Debug)]
+#[command(name="kata-log-parser", author="Gabriel Venberg", version, about, long_about = None)]
+pub struct LogParser {
+    pub input_file: Vec<PathBuf>,
+
+    #[arg(short, long)]
+    pub output_file: Option<PathBuf>,
+
+    #[arg(short, long, help = "check log files and only display output on error")]
+    pub check_only: bool,
+
+    #[arg(long, help = "error if any files are empty")]
+    pub error_if_file_empty: bool,
+
+    #[arg(long, help = "error if all logfiles are empty")]
+    pub error_if_no_records: bool,
+
+    #[arg(
+        long,
+        help = "do not make an error for lines with no pid, source, name, or level"
+    )]
+    pub ignore_missing_fields: bool,
+
+    #[arg(
+        short,
+        long,
+        help = "suppress warning messages that would otherwise go to stderr."
+    )]
+    pub quiet: bool,
+
+    #[arg(
+        short,
+        long,
+        help = "do not tolerate misformed agent messages (may be caused by non-Kata Containers log lines)"
+    )]
+    pub strict: bool,
+
+    #[arg(long, value_enum, default_value_t = LogOutputFormat::Json, help="set the output format")]
+    pub output_format: LogOutputFormat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum LogOutputFormat {
+    Csv,
+    Json,
+    Ron,
+    Text,
+    Toml,
+    Xml,
+    Yaml,
 }
