@@ -8,8 +8,8 @@ Feel free to delete sections of the template which do not apply to your PR, or a
 <!-- **All** boxes should be checked before merging the PR *(just tick any boxes which don't apply to this PR)* -->
 - [ ] Followed patch format from upstream recommendation: https://github.com/kata-containers/community/blob/main/CONTRIBUTING.md#patch-format
 - [ ] Included a single commit in a given PR - at least unless there are related commits and each makes sense as a change on its own.
-- [ ] Merged using "create a merge commit" rather than "squash and merge" (or similar)
-- [ ] genPolicy only: Builds on Windows
+- [ ] Aware about the PR to be merged using "create a merge commit" rather than "squash and merge" (or similar)
+- [ ] genPolicy only: Ensured the tool still builds on Windows
 - [ ] genPolicy only: Updated sample YAMLs' policy annotations, if applicable
 
 ###### Summary <!-- REQUIRED -->
