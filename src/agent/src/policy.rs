@@ -4,7 +4,11 @@
 //
 
 use kata_agent_policy::policy::AgentPolicy;
+use nix::sys::stat;
 use protobuf::MessageDyn;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
 
 use crate::rpc::ttrpc_error;
 use crate::AGENT_POLICY;
@@ -32,6 +36,53 @@ pub async fn is_allowed(req: &(impl MessageDyn + serde::Serialize)) -> ttrpc::Re
     let request = serde_json::to_string(req).unwrap();
     let mut policy = AGENT_POLICY.lock().await;
     allow_request(&mut policy, req.descriptor_dyn().name(), &request).await
+}
+
+/// PolicyCopyFileRequest is very similar to CopyFileRequest from src/libs/protocols, except:
+/// - When creating a symbolic link, the symlink_src field is a string representation of the
+///   data bytes vector from CopyFileRequest. It's easier to verify a string compared with
+///   a bytes vector in OPA.
+/// - When not creating a symbolic link, the data bytes field from CopyFileRequest is not
+///   present in PolicyCopyFileRequest, because it might be large and probably unused by OPA.
+#[derive(::serde::Serialize)]
+struct PolicyCopyFileRequest {
+    path: String,
+    file_size: i64,
+    file_mode: u32,
+    dir_mode: u32,
+    uid: i32,
+    gid: i32,
+    offset: i64,
+
+    symlink_src: PathBuf,
+}
+
+pub async fn is_allowed_copy_file(req: &protocols::agent::CopyFileRequest) -> ttrpc::Result<()> {
+    let sflag = stat::SFlag::from_bits_truncate(req.file_mode);
+    let symlink_src = if sflag.contains(stat::SFlag::S_IFLNK) {
+        // The symlink source path
+        PathBuf::from(OsStr::from_bytes(&req.data))
+    } else {
+        // If this CopyFile request is not creating a symlink, remove the incoming data bytes,
+        // to avoid sending large amounts of data to OPA, that is unlikely to be use this data anyway.
+        PathBuf::new()
+    };
+
+    let policy_req = PolicyCopyFileRequest {
+        path: req.path.clone(),
+        file_size: req.file_size,
+        file_mode: req.file_mode,
+        dir_mode: req.dir_mode,
+        uid: req.uid,
+        gid: req.gid,
+        offset: req.offset,
+
+        symlink_src,
+    };
+
+    let request = serde_json::to_string(&policy_req).unwrap();
+    let mut policy = AGENT_POLICY.lock().await;
+    allow_request(&mut policy, "CopyFileRequest", &request).await
 }
 
 pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::Result<()> {
