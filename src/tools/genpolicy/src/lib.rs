@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+pub mod agent;
 pub mod config_map;
 pub mod containerd;
 pub mod cronjob;
