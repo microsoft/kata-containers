@@ -3,8 +3,7 @@ name: Sync Fork
 on:
   schedule:
     - cron: '*/12 * * * *' # every 30 minutes
-  workflow_dispatch: # on button click
-
+    
 jobs:
   sync:
 
@@ -16,3 +15,5 @@ jobs:
           token: ${{ secrets.PERSONAL_TOKEN }}
           base: msft-main
           head: msft-main
+          auto_approve: true
+          auto_merge: true
