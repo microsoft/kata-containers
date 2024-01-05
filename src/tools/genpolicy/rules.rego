@@ -1200,11 +1200,7 @@ CopyFileRequest {
 
     some regex1 in policy_data.request_defaults.CopyFileRequest
     regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
-<<<<<<< HEAD
     regex3 := replace(regex2, "$(cpath)", policy_data.common.mount_source_cpath)
-=======
-    regex3 := replace(regex2, "$(cpath)", policy_data.common.cpath)
->>>>>>> 9c978be606 (genpolicy: reject some of the CopyFile requests)
     regex4 := replace(regex3, "$(bundle-id)", "[a-z0-9]{64}")
     print("CopyFileRequest: regex4 =", regex4)
 
