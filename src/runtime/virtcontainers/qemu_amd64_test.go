@@ -255,30 +255,47 @@ func TestQemuAmd64AppendProtectionDevice(t *testing.T) {
 
 	id := amd64.(*qemuAmd64).devLoadersCount
 	firmware := "tdvf.fd"
+	hostData := "Fc+jr0/5HZMfG0uu54bbUsYuu8K0G7PXH8WNc4idAT8="
+	mrconfigid := "123456789012345678901234567890123456789012345678"
 	var bios string
 	var err error
-	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "")
-	assert.NoError(err)
 
 	// non-protection
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", "")
+	assert.NoError(err)
+	assert.NotEmpty(bios)
+
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", hostData)
+	assert.NoError(err)
 	assert.NotEmpty(bios)
 
 	// pef protection
 	amd64.(*qemuAmd64).protection = pefProtection
-	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "")
+
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", "")
+	assert.Error(err)
+	assert.Empty(bios)
+
+	amd64.(*qemuAmd64).protection = pefProtection
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", mrconfigid)
 	assert.Error(err)
 	assert.Empty(bios)
 
 	// Secure Execution protection
 	amd64.(*qemuAmd64).protection = seProtection
-	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "")
+
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", "")
+	assert.Error(err)
+	assert.Empty(bios)
+
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", hostData)
 	assert.Error(err)
 	assert.Empty(bios)
 
 	// sev protection
 	amd64.(*qemuAmd64).protection = sevProtection
 
-	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "")
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", "")
 	assert.NoError(err)
 	assert.Empty(bios)
 
@@ -295,10 +312,27 @@ func TestQemuAmd64AppendProtectionDevice(t *testing.T) {
 
 	assert.Equal(expectedOut, devices)
 
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", hostData)
+	assert.NoError(err)
+	assert.Empty(bios)
+
+	expectedOut = append(expectedOut,
+		govmmQemu.Object{
+			Type:            govmmQemu.SEVGuest,
+			ID:              "sev",
+			Debug:           false,
+			File:            firmware,
+			CBitPos:         cpuid.AMDMemEncrypt.CBitPosition,
+			ReducedPhysBits: 1,
+		},
+	)
+
+	assert.Equal(expectedOut, devices)
+
 	// snp protection
 	amd64.(*qemuAmd64).protection = snpProtection
 
-	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "")
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", "")
 	assert.NoError(err)
 	assert.Empty(bios)
 
@@ -313,12 +347,28 @@ func TestQemuAmd64AppendProtectionDevice(t *testing.T) {
 		},
 	)
 
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", hostData)
+	assert.NoError(err)
+	assert.Empty(bios)
+
+	expectedOut = append(expectedOut,
+		govmmQemu.Object{
+			Type:            govmmQemu.SNPGuest,
+			ID:              "snp",
+			Debug:           false,
+			File:            firmware,
+			CBitPos:         cpuid.AMDMemEncrypt.CBitPosition,
+			ReducedPhysBits: 1,
+			TEEConfigData:   hostData,
+		},
+	)
+
 	assert.Equal(expectedOut, devices)
 
 	// tdxProtection
 	amd64.(*qemuAmd64).protection = tdxProtection
 
-	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "")
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", "")
 	assert.NoError(err)
 	assert.Empty(bios)
 
@@ -330,6 +380,24 @@ func TestQemuAmd64AppendProtectionDevice(t *testing.T) {
 			DeviceID: fmt.Sprintf("fd%d", id),
 			Debug:    false,
 			File:     firmware,
+		},
+	)
+
+	assert.Equal(expectedOut, devices)
+
+	devices, bios, err = amd64.appendProtectionDevice(devices, firmware, "", mrconfigid)
+	assert.NoError(err)
+	assert.Empty(bios)
+
+	expectedOut = append(expectedOut,
+		govmmQemu.Object{
+			Driver:        govmmQemu.Loader,
+			Type:          govmmQemu.TDXGuest,
+			ID:            "tdx",
+			DeviceID:      fmt.Sprintf("fd%d", id),
+			Debug:         false,
+			File:          firmware,
+			TEEConfigData: mrconfigid,
 		},
 	)
 
