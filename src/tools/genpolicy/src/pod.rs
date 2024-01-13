@@ -6,6 +6,7 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
+use crate::agent;
 use crate::config_map;
 use crate::obj_meta;
 use crate::policy;
@@ -15,7 +16,6 @@ use crate::settings;
 use crate::utils::Config;
 use crate::volume;
 use crate::yaml;
-use crate::agent;
 
 use async_trait::async_trait;
 use log::{debug, warn};
