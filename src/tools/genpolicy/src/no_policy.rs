@@ -6,13 +6,20 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
+<<<<<<< HEAD
 use crate::agent;
+=======
+>>>>>>> upstream/main
 use crate::pod;
 use crate::policy;
 use crate::settings;
 use crate::yaml;
 
 use async_trait::async_trait;
+<<<<<<< HEAD
+=======
+use protocols::agent;
+>>>>>>> upstream/main
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
@@ -49,7 +56,11 @@ impl yaml::K8sResource for NoPolicyResource {
     }
 
     fn generate_policy(&self, _agent_policy: &policy::AgentPolicy) -> String {
+<<<<<<< HEAD
         return "".to_string();
+=======
+        "".to_string()
+>>>>>>> upstream/main
     }
 
     fn serialize(&mut self, _policy: &str) -> String {

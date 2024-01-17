@@ -9,20 +9,18 @@ MK_DIR := $(dir $(MK_PATH))
 # Verbose build
 V := 1
 
-define BUILD
-	$(MK_DIR)/kata-deploy-binaries-in-docker.sh $(if $(V),,-s) --build=$1
-endef
+ifeq ($(CROSS_BUILD),)
+	CROSS_BUILD = false
+endif
 
-kata-tarball: | all-parallel merge-builds
+ifeq ($(CROSS_BUILD),false)
+	ARCH := $(shell uname -m)
+endif
 
-$(MK_DIR)/dockerbuild/install_yq.sh:
-	$(MK_DIR)/kata-deploy-copy-yq-installer.sh
-
-all-parallel: $(MK_DIR)/dockerbuild/install_yq.sh
-	${MAKE} -f $(MK_PATH) all -j $(shell nproc ${CI:+--ignore 1}) V=
-
-all: serial-targets \
+ifeq ($(ARCH), x86_64)
+BASE_TARBALLS = serial-targets \
 	firecracker-tarball \
+	kernel-confidential-tarball \
 	kernel-dragonball-experimental-tarball \
 	kernel-nvidia-gpu-tarball \
 	kernel-nvidia-gpu-snp-tarball \
@@ -39,16 +37,40 @@ all: serial-targets \
 	shim-v2-tarball \
 	tdvf-tarball \
 	virtiofsd-tarball
-
-serial-targets:
-	${MAKE} -f $(MK_PATH) -j 1 V= \
-	rootfs-image-tarball \
+BASE_SERIAL_TARBALLS = rootfs-image-tarball \
 	rootfs-image-tdx-tarball \
 	rootfs-initrd-mariner-tarball \
 	rootfs-initrd-sev-tarball \
 	rootfs-initrd-tarball \
 	cloud-hypervisor-tarball \
 	cloud-hypervisor-glibc-tarball
+else ifeq ($(ARCH), s390x)
+BASE_TARBALLS = serial-targets \
+	kernel-tarball \
+	qemu-tarball \
+	shim-v2-tarball \
+	virtiofsd-tarball
+BASE_SERIAL_TARBALLS = rootfs-image-tarball \
+	rootfs-initrd-tarball
+endif
+
+define BUILD
+	$(MK_DIR)/kata-deploy-binaries-in-docker.sh $(if $(V),,-s) --build=$1
+endef
+
+kata-tarball: | all-parallel merge-builds
+
+$(MK_DIR)/dockerbuild/install_yq.sh:
+	$(MK_DIR)/kata-deploy-copy-yq-installer.sh
+
+all-parallel: $(MK_DIR)/dockerbuild/install_yq.sh
+	${MAKE} -f $(MK_PATH) all -j $(shell nproc ${CI:+--ignore 1}) V=
+
+all: ${BASE_TARBALLS}
+
+serial-targets:
+	${MAKE} -f $(MK_PATH) -j 1 V= \
+	${BASE_SERIAL_TARBALLS}
 
 %-tarball-build: $(MK_DIR)/dockerbuild/install_yq.sh
 	$(call BUILD,$*)
@@ -71,6 +93,9 @@ cloud-hypervisor-glibc-tarball:
 firecracker-tarball:
 	${MAKE} $@-build
 
+genpolicy-tarball:
+	${MAKE} $@-build
+
 kata-ctl-tarball:
 	${MAKE} $@-build
 
@@ -89,13 +114,13 @@ kernel-nvidia-gpu-tdx-experimental-tarball:
 kernel-tarball:
 	${MAKE} $@-build
 
+kernel-confidential-tarball:
+	${MAKE} $@-build
+
 kernel-tdx-experimental-tarball:
 	${MAKE} $@-build
 
 kernel-sev-tarball:
-	${MAKE} $@-build
-
-log-parser-rs-tarball:
 	${MAKE} $@-build
 
 nydus-tarball:
@@ -111,6 +136,9 @@ qemu-snp-experimental-tarball:
 	${MAKE} $@-build
 
 qemu-tarball:
+	${MAKE} $@-build
+
+boot-image-se-tarball: kernel-tarball rootfs-initrd-tarball
 	${MAKE} $@-build
 
 qemu-tdx-experimental-tarball:

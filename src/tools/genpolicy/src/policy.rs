@@ -6,7 +6,10 @@
 // Allow OCI spec field names.
 #![allow(non_snake_case)]
 
+<<<<<<< HEAD
 use crate::agent;
+=======
+>>>>>>> upstream/main
 use crate::config_map;
 use crate::containerd;
 use crate::mount_and_storage;
@@ -21,6 +24,10 @@ use crate::yaml;
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use log::debug;
+<<<<<<< HEAD
+=======
+use protocols::agent;
+>>>>>>> upstream/main
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use sha2::{Digest, Sha256};
@@ -63,9 +70,12 @@ pub struct PolicyData {
     /// Settings read from genpolicy-settings.json.
     pub common: CommonData,
 
+<<<<<<< HEAD
     /// Sandbox settings read from genpolicy-settings.json.
     pub sandbox: SandboxData,
 
+=======
+>>>>>>> upstream/main
     /// Settings read from genpolicy-settings.json, related directly to each
     /// kata agent endpoint, that get added to the output policy.
     pub request_defaults: RequestDefaults,
@@ -327,9 +337,12 @@ pub struct RequestDefaults {
     /// Allow Host reading from Guest containers stdout and stderr.
     pub ReadStreamRequest: bool,
 
+<<<<<<< HEAD
     /// Allow Host to update Guest mounts.
     pub UpdateEphemeralMountsRequest: bool,
 
+=======
+>>>>>>> upstream/main
     /// Allow Host writing to Guest containers stdin.
     pub WriteStreamRequest: bool,
 }
@@ -362,6 +375,7 @@ pub struct CommonData {
     pub privileged_caps: Vec<String>,
 }
 
+<<<<<<< HEAD
 /// Struct used to read data from the settings file and copy that data into the policy.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SandboxData {
@@ -369,6 +383,8 @@ pub struct SandboxData {
     pub storages: Vec<agent::Storage>,
 }
 
+=======
+>>>>>>> upstream/main
 impl AgentPolicy {
     pub async fn from_files(config: &utils::Config) -> Result<AgentPolicy> {
         let mut config_maps = Vec::new();
@@ -406,7 +422,11 @@ impl AgentPolicy {
 
         if let Some(config_map_files) = &config.config_map_files {
             for file in config_map_files {
+<<<<<<< HEAD
                 config_maps.push(config_map::ConfigMap::new(&file)?);
+=======
+                config_maps.push(config_map::ConfigMap::new(file)?);
+>>>>>>> upstream/main
             }
         }
 
@@ -442,6 +462,7 @@ impl AgentPolicy {
                 .create(true)
                 .open(yaml_file)
                 .unwrap()
+<<<<<<< HEAD
                 .write_all(&yaml_string.as_bytes())
                 .unwrap();
         } else {
@@ -449,6 +470,13 @@ impl AgentPolicy {
             std::io::stdout()
                 .write_all(&yaml_string.as_bytes())
                 .unwrap();
+=======
+                .write_all(yaml_string.as_bytes())
+                .unwrap();
+        } else {
+            // When input YAML came through stdin, print the output YAML to stdout.
+            std::io::stdout().write_all(yaml_string.as_bytes()).unwrap();
+>>>>>>> upstream/main
         }
     }
 
@@ -456,19 +484,27 @@ impl AgentPolicy {
         let yaml_containers = resource.get_containers();
         let mut policy_containers = Vec::new();
 
+<<<<<<< HEAD
         for i in 0..yaml_containers.len() {
             policy_containers.push(self.get_container_policy(
                 resource,
                 &yaml_containers[i],
                 i == 0,
             ));
+=======
+        for (i, yaml_container) in yaml_containers.iter().enumerate() {
+            policy_containers.push(self.get_container_policy(resource, yaml_container, i == 0));
+>>>>>>> upstream/main
         }
 
         let policy_data = policy::PolicyData {
             containers: policy_containers,
             request_defaults: self.settings.request_defaults.clone(),
             common: self.settings.common.clone(),
+<<<<<<< HEAD
             sandbox: self.settings.sandbox.clone(),
+=======
+>>>>>>> upstream/main
         };
 
         let json_data = serde_json::to_string_pretty(&policy_data).unwrap();
@@ -671,8 +707,14 @@ fn get_image_layer_storages(
             fstype: "tar".to_string(),
             options: vec![format!("$(hash{layer_index})")],
             mount_point: format!("$(layer{layer_index})"),
+<<<<<<< HEAD
             fs_group: None,
             });
+=======
+            fs_group: protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        });
+>>>>>>> upstream/main
     }
 
     new_storages.reverse();
@@ -690,8 +732,14 @@ fn get_image_layer_storages(
         fstype: "fuse3.kata-overlay".to_string(),
         options: vec![layer_names.join(":"), layer_hashes.join(":")],
         mount_point: root.Path.clone(),
+<<<<<<< HEAD
         fs_group: None,
         };
+=======
+        fs_group: protobuf::MessageField::none(),
+        special_fields: ::protobuf::SpecialFields::new(),
+    };
+>>>>>>> upstream/main
 
     storages.push(overlay_storage);
 }
@@ -710,8 +758,13 @@ fn substitute_env_variables(env: &mut Vec<String>) {
         for i in 0..env.len() {
             let components: Vec<&str> = env[i].split('=').collect();
             if components.len() == 2 {
+<<<<<<< HEAD
                 if let Some((start, end)) = find_subst_target(&components[1]) {
                     if let Some(new_value) = substitute_variable(&components[1], start, end, env) {
+=======
+                if let Some((start, end)) = find_subst_target(components[1]) {
+                    if let Some(new_value) = substitute_variable(components[1], start, end, env) {
+>>>>>>> upstream/main
                         let new_var = format!("{}={new_value}", &components[0]);
                         debug!("Replacing env variable <{}> with <{new_var}>", &env[i]);
                         env[i] = new_var;
@@ -731,7 +784,11 @@ fn find_subst_target(env_value: &str) -> Option<(usize, usize)> {
     if let Some(mut start) = env_value.find("$(") {
         start += 2;
         if env_value.len() > start {
+<<<<<<< HEAD
             if let Some(end) = env_value[start..].find(")") {
+=======
+            if let Some(end) = env_value[start..].find(')') {
+>>>>>>> upstream/main
                 return Some((start, start + end));
             }
         }
@@ -747,7 +804,11 @@ fn substitute_variable(
     env: &Vec<String>,
 ) -> Option<String> {
     // Variables generated by this application.
+<<<<<<< HEAD
     let internal_vars = vec![
+=======
+    let internal_vars = [
+>>>>>>> upstream/main
         "bundle-id",
         "host-ip",
         "node-name",
@@ -890,7 +951,14 @@ fn add_missing_strings(src: &Vec<String>, dest: &mut Vec<String>) {
     debug!("src = {:?}, dest = {:?}", src, dest)
 }
 
+<<<<<<< HEAD
 pub fn get_kata_namespaces(is_pause_container: bool, use_host_network: bool) -> Vec<KataLinuxNamespace> {
+=======
+pub fn get_kata_namespaces(
+    is_pause_container: bool,
+    use_host_network: bool,
+) -> Vec<KataLinuxNamespace> {
+>>>>>>> upstream/main
     let mut namespaces: Vec<KataLinuxNamespace> = vec![KataLinuxNamespace {
         Type: "ipc".to_string(),
         Path: "".to_string(),

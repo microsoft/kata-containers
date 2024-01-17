@@ -8,8 +8,10 @@ use crate::ch::utils::get_api_socket_path;
 use crate::ch::utils::get_vsock_path;
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
+use crate::MemoryConfig;
+use crate::VM_ROOTFS_DRIVER_BLK;
+use crate::VM_ROOTFS_DRIVER_PMEM;
 use crate::{VcpuThreadIds, VmmState};
-use crate::{VM_ROOTFS_DRIVER_BLK, VM_ROOTFS_DRIVER_PMEM};
 use anyhow::{anyhow, Context, Result};
 use ch_config::ch_api::{
     cloud_hypervisor_vm_create, cloud_hypervisor_vm_start, cloud_hypervisor_vmm_ping,
@@ -23,10 +25,12 @@ use kata_sys_util::protection::{available_guest_protection, GuestProtection};
 use kata_types::capabilities::{Capabilities, CapabilityBits};
 use kata_types::config::default::DEFAULT_CH_ROOTFS_TYPE;
 use lazy_static::lazy_static;
+use nix::sched::{setns, CloneFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::convert::TryFrom;
 use std::fs::create_dir_all;
+use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::Stdio;
@@ -107,8 +111,6 @@ impl CloudHypervisorInner {
                 }
             }
         }
-
-        self.state = VmmState::VmmServerReady;
 
         Ok(())
     }
@@ -245,8 +247,6 @@ impl CloudHypervisorInner {
             debug!(sl!(), "vm start response: {:?}", detail);
         }
 
-        self.state = VmmState::VmRunning;
-
         Ok(())
     }
 
@@ -372,6 +372,26 @@ impl CloudHypervisorInner {
 
         if disable_seccomp {
             cmd.args(["--seccomp", "false"]);
+        }
+
+        let netns = self.netns.clone();
+        if self.netns.is_some() {
+            info!(
+                sl!(),
+                "set netns for vmm : {:?}",
+                self.netns.as_ref().unwrap()
+            );
+        }
+
+        unsafe {
+            let _pre = cmd.pre_exec(move || {
+                if let Some(netns_path) = &netns {
+                    let netns_fd = std::fs::File::open(netns_path);
+                    let _ = setns(netns_fd?.as_raw_fd(), CloneFlags::CLONE_NEWNET)
+                        .context("set netns failed");
+                }
+                Ok(())
+            });
         }
 
         debug!(sl!(), "launching {} as: {:?}", CH_NAME, cmd);
@@ -603,13 +623,28 @@ impl CloudHypervisorInner {
         self.timeout_secs = timeout_secs;
         self.start_hypervisor(self.timeout_secs).await?;
 
+        self.state = VmmState::VmmServerReady;
+
         self.boot_vm().await?;
+
+        self.state = VmmState::VmRunning;
 
         Ok(())
     }
 
     pub(crate) fn stop_vm(&mut self) -> Result<()> {
-        block_on(self.cloud_hypervisor_shutdown())?;
+        // If the container workload exits, this method gets called. However,
+        // the container manager always makes a ShutdownContainer request,
+        // which results in this method being called potentially a second
+        // time. Without this check, we'll return an error representing EPIPE
+        // since the CH API socket is at that point invalid.
+        if self.state != VmmState::VmRunning {
+            return Ok(());
+        }
+
+        self.state = VmmState::NotReady;
+
+        block_on(self.cloud_hypervisor_shutdown()).map_err(|e| anyhow!(e))?;
 
         Ok(())
     }
@@ -690,11 +725,14 @@ impl CloudHypervisorInner {
 
         let flags = if guest_protection_is_tdx(self.guest_protection_to_use.clone()) {
             // TDX does not permit the use of virtio-fs.
-            CapabilityBits::BlockDeviceSupport | CapabilityBits::BlockDeviceHotplugSupport
+            CapabilityBits::BlockDeviceSupport
+                | CapabilityBits::BlockDeviceHotplugSupport
+                | CapabilityBits::HybridVsockSupport
         } else {
             CapabilityBits::BlockDeviceSupport
                 | CapabilityBits::BlockDeviceHotplugSupport
                 | CapabilityBits::FsSharingSupport
+                | CapabilityBits::HybridVsockSupport
         };
 
         caps.set(flags);
@@ -703,7 +741,27 @@ impl CloudHypervisorInner {
     }
 
     pub(crate) async fn get_hypervisor_metrics(&self) -> Result<String> {
-        todo!()
+        Err(anyhow!("CH hypervisor metrics not implemented - see https://github.com/kata-containers/kata-containers/issues/8800"))
+    }
+
+    pub(crate) fn set_capabilities(&mut self, flag: CapabilityBits) {
+        let mut caps = Capabilities::default();
+
+        caps.set(flag)
+    }
+
+    pub(crate) fn set_guest_memory_block_size(&mut self, size: u32) {
+        self._guest_memory_block_size_mb = size;
+    }
+
+    pub(crate) fn guest_memory_block_size_mb(&self) -> u32 {
+        self._guest_memory_block_size_mb
+    }
+
+    pub(crate) fn resize_memory(&self, _new_mem_mb: u32) -> Result<(u32, MemoryConfig)> {
+        warn!(sl!(), "CH memory resize not implemented - see https://github.com/kata-containers/kata-containers/issues/8801");
+
+        Ok((0, MemoryConfig::default()))
     }
 }
 

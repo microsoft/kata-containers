@@ -1,3 +1,11 @@
+<<<<<<< HEAD
+=======
+# Copyright (c) 2024 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+>>>>>>> upstream/main
 [package]
 name = "genpolicy"
 version = "0.1.0"
@@ -35,7 +43,11 @@ async-trait = "0.1.68"
 docker_credential = "1.2.0"
 flate2 = { version = "1.0.26", features = ["zlib-ng"], default-features = false }
 oci-distribution = { version = "0.10.0" }
+<<<<<<< HEAD
 openssl = { version = "0.10.54", features = ["vendored"] }
+=======
+openssl = { version = "0.10.54" }
+>>>>>>> upstream/main
 serde_ignored = "0.1.7"
 serde_json = "1.0.39"
 serde-transcode = "1.1.1"
@@ -44,6 +56,7 @@ tokio = {version = "1.33.0", features = ["rt-multi-thread"]}
 # OCI container specs.
 oci = { path = "../../libs/oci" }
 
+<<<<<<< HEAD
 # dm-verity root hash support
 generic-array = "0.14.6"
 sha2 = "0.10.6"
@@ -51,3 +64,15 @@ tarindex = { path = "../../tardev-snapshotter/tarindex" }
 tempfile = "3.5.0"
 zerocopy = "0.6.1"
 fs2 = "0.4.3"
+=======
+# Kata Agent protocol.
+protocols = { path = "../../libs/protocols", features = ["with-serde"] }
+protobuf = "3.2.0"
+
+# dm-verity root hash support
+generic-array = "0.14.6"
+sha2 = "0.10.6"
+tarindex = { git = "https://github.com/kata-containers/tardev-snapshotter", rev = "06183a5" }
+tempfile = "3.5.0"
+zerocopy = "0.6.1"
+>>>>>>> upstream/main

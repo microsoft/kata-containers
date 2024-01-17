@@ -8,15 +8,19 @@ use std::sync::Arc;
 
 use agent::kata::KataAgent;
 use agent::types::KernelModule;
-use agent::{self, Agent, GetIPTablesRequest, SetIPTablesRequest, VolumeStatsRequest};
+use agent::{
+    self, Agent, GetGuestDetailsRequest, GetIPTablesRequest, SetIPTablesRequest, VolumeStatsRequest,
+};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use common::message::{Action, Message};
 use common::{Sandbox, SandboxNetworkEnv};
 use containerd_shim_protos::events::task::TaskOOM;
+use hypervisor::VsockConfig;
 use hypervisor::{dragonball::Dragonball, BlockConfig, Hypervisor, HYPERVISOR_DRAGONBALL};
 use hypervisor::{utils::get_hvsock_path, HybridVsockConfig, DEFAULT_GUEST_VSOCK_CID};
 use kata_sys_util::hooks::HookStates;
+use kata_types::capabilities::CapabilityBits;
 use kata_types::config::TomlConfig;
 use persist::{self, sandbox_persist::Persist};
 use resource::manager::ManagerArgs;
@@ -28,6 +32,7 @@ use tracing::instrument;
 use crate::health_check::HealthCheck;
 
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
+
 pub struct SandboxRestoreArgs {
     pub sid: String,
     pub toml_config: TomlConfig,
@@ -102,13 +107,12 @@ impl VirtSandbox {
     ) -> Result<Vec<ResourceConfig>> {
         let mut resource_configs = vec![];
 
-        // Prepare VM hybrid vsock device config and add the hybrid vsock device first.
-        info!(sl!(), "prepare hybrid vsock resource for sandbox.");
-        let vm_hvsock = ResourceConfig::HybridVsock(HybridVsockConfig {
-            guest_cid: DEFAULT_GUEST_VSOCK_CID,
-            uds_path: get_hvsock_path(id),
-        });
-        resource_configs.push(vm_hvsock);
+        info!(sl!(), "prepare vm socket config for sandbox.");
+        let vm_socket_config = self
+            .prepare_vm_socket_config()
+            .await
+            .context("failed to prepare vm socket config")?;
+        resource_configs.push(vm_socket_config);
 
         // prepare network config
         if !network_env.network_created {
@@ -195,7 +199,41 @@ impl VirtSandbox {
         // * spec details: https://github.com/opencontainers/runtime-spec/blob/c1662686cff159595277b79322d0272f5182941b/config.md#createruntime-hooks
         let mut create_runtime_hook_states = HookStates::new();
         create_runtime_hook_states.execute_hooks(create_runtime_hooks, Some(st.clone()))?;
+        Ok(())
+    }
 
+    // store_guest_details will get the information from the guest OS, like memory block size, agent details and is memory hotplug probe support
+    async fn store_guest_details(&self) -> Result<()> {
+        // get the information from agent
+        let guest_details = self
+            .agent
+            .get_guest_details(GetGuestDetailsRequest {
+                mem_block_size: true,
+                mem_hotplug_probe: true,
+            })
+            .await
+            .context("failed to store guest details")?;
+
+        // set memory block size
+        self.hypervisor
+            .set_guest_memory_block_size(guest_details.mem_block_size_bytes as u32)
+            .await;
+
+        // set memory hotplug probe
+        if guest_details.support_mem_hotplug_probe {
+            self.hypervisor
+                .set_capabilities(CapabilityBits::GuestMemoryProbe)
+                .await;
+        }
+        info!(
+            sl!(),
+            "memory block size is {}, memory probe support {}",
+            self.hypervisor.guest_memory_block_size().await,
+            self.hypervisor
+                .capabilities()
+                .await?
+                .is_mem_hotplug_probe_supported()
+        );
         Ok(())
     }
 
@@ -221,6 +259,30 @@ impl VirtSandbox {
             driver_option: boot_info.vm_rootfs_driver,
             ..Default::default()
         })
+    }
+
+    async fn prepare_vm_socket_config(&self) -> Result<ResourceConfig> {
+        // It will check the hypervisor's capabilities to see if it supports hybrid-vsock.
+        // If it does not, it'll assume that it only supports legacy vsock.
+        let vm_socket = if self
+            .hypervisor
+            .capabilities()
+            .await?
+            .is_hybrid_vsock_supported()
+        {
+            // Firecracker/Dragonball/CLH use the hybrid-vsock device model.
+            ResourceConfig::HybridVsock(HybridVsockConfig {
+                guest_cid: DEFAULT_GUEST_VSOCK_CID,
+                uds_path: get_hvsock_path(&self.sid),
+            })
+        } else {
+            // Qemu uses the vsock device model.
+            ResourceConfig::Vsock(VsockConfig {
+                guest_cid: libc::VMADDR_CID_ANY,
+            })
+        };
+
+        Ok(vm_socket)
     }
 
     fn has_prestart_hooks(
@@ -350,6 +412,12 @@ impl Sandbox for VirtSandbox {
             .context("create sandbox")?;
 
         inner.state = SandboxState::Running;
+
+        // get and store guest details
+        self.store_guest_details()
+            .await
+            .context("failed to store guest details")?;
+
         let agent = self.agent.clone();
         let sender = self.msg_sender.clone();
         info!(sl!(), "oom watcher start");

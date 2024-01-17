@@ -4,6 +4,8 @@
 
 include ../../utils.mk
 
+PROJECT_DIRS := $(shell find . -name Cargo.toml -printf '%h\n' | sort -u)
+
 ifeq ($(ARCH), s390x)
 default build check test clippy:
 	@echo "s390x not support currently"
@@ -31,15 +33,19 @@ vendor:
 	@echo "INFO: vendor do nothing.."
 
 format:
-	@echo "INFO: cargo fmt..."
-	cargo fmt -- --check
+	@echo "INFO: rust fmt..."
+	# This is kinda dirty step here simply because cargo fmt --all will apply fmt to all dependencies of dragonball which will include /src/libs/protocols with some file generated during compilation time and could not be formatted when you use cargo fmt --all before building the whole project. In order to avoid this problem, we do fmt check in this following way. 
+	rustfmt --edition 2018 ./src/dbs_address_space/src/lib.rs ./src/dbs_allocator/src/lib.rs ./src/dbs_arch/src/lib.rs ./src/dbs_boot/src/lib.rs ./src/dbs_device/src/lib.rs ./src/dbs_interrupt/src/lib.rs ./src/dbs_legacy_devices/src/lib.rs ./src/dbs_pci/src/lib.rs ./src/dbs_upcall/src/lib.rs ./src/dbs_utils/src/lib.rs ./src/dbs_virtio_devices/src/lib.rs ./src/lib.rs --check
 
 clean:
 	cargo clean
 
 test:
 ifdef SUPPORT_VIRTUALIZATION
-	RUST_BACKTRACE=1 cargo test --all-features --target $(TRIPLE) -- --nocapture --test-threads=1
+	@set -e; \
+	for dir in $(PROJECT_DIRS); do \
+		bash -c "pushd $${dir} && RUST_BACKTRACE=1 cargo test --all-features --target $(TRIPLE) -- --nocapture --test-threads=1 && popd"; \
+	done
 else
 	@echo "INFO: skip testing dragonball, it need virtualization support."
 	exit 0
