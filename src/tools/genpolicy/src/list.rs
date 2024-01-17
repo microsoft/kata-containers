@@ -6,7 +6,10 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
+<<<<<<< HEAD
 use crate::agent;
+=======
+>>>>>>> upstream/main
 use crate::pod;
 use crate::policy;
 use crate::settings;
@@ -14,6 +17,10 @@ use crate::yaml;
 
 use async_trait::async_trait;
 use core::fmt::Debug;
+<<<<<<< HEAD
+=======
+use protocols::agent;
+>>>>>>> upstream/main
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::boxed;
@@ -75,13 +82,22 @@ impl yaml::K8sResource for List {
     }
 
     fn serialize(&mut self, policy: &str) -> String {
+<<<<<<< HEAD
         let policies: Vec<&str> = policy.split(":").collect();
+=======
+        let policies: Vec<&str> = policy.split(':').collect();
+>>>>>>> upstream/main
         let len = policies.len();
         assert!(len == self.resources.len());
 
         self.items.clear();
+<<<<<<< HEAD
         for i in 0..len {
             let yaml = self.resources[i].serialize(policies[i]);
+=======
+        for (i, p) in policies.iter().enumerate().take(len) {
+            let yaml = self.resources[i].serialize(p);
+>>>>>>> upstream/main
             let document = serde_yaml::Deserializer::from_str(&yaml);
             let doc_value = Value::deserialize(document).unwrap();
             self.items.push(doc_value.clone());

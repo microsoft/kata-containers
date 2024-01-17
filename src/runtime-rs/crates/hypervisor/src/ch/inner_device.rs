@@ -5,24 +5,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::inner::CloudHypervisorInner;
+use crate::device::pci_path::PciPath;
 use crate::device::DeviceType;
-use crate::BlockDevice;
 use crate::HybridVsockDevice;
 use crate::NetworkConfig;
-use crate::PciPath;
+use crate::NetworkDevice;
 use crate::ShareFsConfig;
 use crate::ShareFsDevice;
 use crate::VfioDevice;
 use crate::VmmState;
+use crate::{BlockConfig, BlockDevice};
 use anyhow::{anyhow, Context, Result};
 use ch_config::ch_api::cloud_hypervisor_vm_device_add;
 use ch_config::ch_api::{
     cloud_hypervisor_vm_blockdev_add, cloud_hypervisor_vm_device_remove,
-    cloud_hypervisor_vm_fs_add, PciDeviceInfo, VmRemoveDeviceData,
+    cloud_hypervisor_vm_fs_add, cloud_hypervisor_vm_netdev_add, cloud_hypervisor_vm_vsock_add,
+    PciDeviceInfo, VmRemoveDeviceData,
 };
 use ch_config::convert::{DEFAULT_DISK_QUEUES, DEFAULT_DISK_QUEUE_SIZE, DEFAULT_NUM_PCI_SEGMENTS};
 use ch_config::DiskConfig;
-use ch_config::{net_util::MacAddr, DeviceConfig, FsConfig, NetConfig};
+use ch_config::{net_util::MacAddr, DeviceConfig, FsConfig, NetConfig, VsockConfig};
 use safe_path::scoped_join;
 use std::convert::TryFrom;
 use std::path::PathBuf;
@@ -79,6 +81,7 @@ impl CloudHypervisorInner {
             DeviceType::HybridVsock(hvsock) => self.handle_hvsock_device(hvsock).await,
             DeviceType::Block(block) => self.handle_block_device(block).await,
             DeviceType::Vfio(vfiodev) => self.handle_vfio_device(vfiodev).await,
+            DeviceType::Network(netdev) => self.handle_network_device(netdev).await,
             _ => Err(anyhow!("unhandled device: {:?}", device)),
         }
     }
@@ -166,10 +169,6 @@ impl CloudHypervisorInner {
         }
 
         Ok(DeviceType::ShareFs(sharefs))
-    }
-
-    async fn handle_hvsock_device(&mut self, device: HybridVsockDevice) -> Result<DeviceType> {
-        Ok(DeviceType::HybridVsock(device))
     }
 
     async fn handle_vfio_device(&mut self, device: VfioDevice) -> Result<DeviceType> {
@@ -278,7 +277,34 @@ impl CloudHypervisorInner {
             ));
         }
 
-        PciPath::convert_from_string(toks[0])
+        PciPath::try_from(toks[0])
+    }
+
+    async fn handle_hvsock_device(&mut self, device: HybridVsockDevice) -> Result<DeviceType> {
+        let hvsock_config = device.config.clone();
+        let socket = self
+            .api_socket
+            .as_ref()
+            .ok_or("missing socket")
+            .map_err(|e| anyhow!(e))?;
+
+        let vsock_config = VsockConfig {
+            cid: hvsock_config.guest_cid.into(),
+            socket: hvsock_config.uds_path.into(),
+            ..Default::default()
+        };
+
+        let response = cloud_hypervisor_vm_vsock_add(
+            socket.try_clone().context("failed to clone socket")?,
+            vsock_config,
+        )
+        .await?;
+
+        if let Some(detail) = response {
+            debug!(sl!(), "hvsock add response: {:?}", detail);
+        }
+
+        Ok(DeviceType::HybridVsock(device))
     }
 
     async fn handle_block_device(&mut self, device: BlockDevice) -> Result<DeviceType> {
@@ -289,20 +315,11 @@ impl CloudHypervisorInner {
             .ok_or("missing socket")
             .map_err(|e| anyhow!(e))?;
 
-        let num_queues: usize = DEFAULT_DISK_QUEUES;
-        let queue_size: u16 = DEFAULT_DISK_QUEUE_SIZE;
-
-        let block_config = DiskConfig {
-            path: Some(device.config.path_on_host.as_str().into()),
-            readonly: device.config.is_readonly,
-            num_queues,
-            queue_size,
-            ..Default::default()
-        };
+        let disk_config = DiskConfig::try_from(device.config)?;
 
         let response = cloud_hypervisor_vm_blockdev_add(
             socket.try_clone().context("failed to clone socket")?,
-            block_config,
+            disk_config,
         )
         .await?;
 
@@ -316,6 +333,30 @@ impl CloudHypervisorInner {
         }
 
         Ok(DeviceType::Block(block_dev))
+    }
+
+    async fn handle_network_device(&mut self, device: NetworkDevice) -> Result<DeviceType> {
+        let netdev = device.clone();
+
+        let socket = self
+            .api_socket
+            .as_ref()
+            .ok_or("missing socket")
+            .map_err(|e| anyhow!(e))?;
+
+        let clh_net_config = NetConfig::try_from(device.config)?;
+
+        let response = cloud_hypervisor_vm_netdev_add(
+            socket.try_clone().context("failed to clone socket")?,
+            clh_net_config,
+        )
+        .await?;
+
+        if let Some(detail) = response {
+            debug!(sl!(), "netdev add response: {:?}", detail);
+        }
+
+        Ok(DeviceType::Network(netdev))
     }
 
     pub(crate) async fn get_shared_devices(
@@ -365,6 +406,23 @@ impl TryFrom<NetworkConfig> for NetConfig {
         Err(anyhow!("Missing mac address for network device"))
     }
 }
+
+impl TryFrom<BlockConfig> for DiskConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(blkcfg: BlockConfig) -> Result<Self, Self::Error> {
+        let disk_config: DiskConfig = DiskConfig {
+            path: Some(blkcfg.path_on_host.as_str().into()),
+            readonly: blkcfg.is_readonly,
+            num_queues: DEFAULT_DISK_QUEUES,
+            queue_size: DEFAULT_DISK_QUEUE_SIZE,
+            ..Default::default()
+        };
+
+        Ok(disk_config)
+    }
+}
+
 #[derive(Debug)]
 pub struct ShareFsSettings {
     cfg: ShareFsConfig,
@@ -417,7 +475,7 @@ impl TryFrom<ShareFsSettings> for FsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Address, Backend};
+    use crate::Address;
 
     #[test]
     fn test_networkconfig_to_netconfig() {
@@ -431,7 +489,6 @@ mod tests {
             allow_duplicate_mac: false,
             use_generic_irq: None,
             use_shared_irq: None,
-            backend: Backend::default(),
         };
 
         let net = NetConfig::try_from(cfg.clone());

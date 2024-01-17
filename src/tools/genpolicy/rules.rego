@@ -1,3 +1,7 @@
+# Copyright (c) 2023 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 package agent_policy
 
 import future.keywords.in
@@ -8,7 +12,11 @@ import input
 # Default values, returned by OPA when rules cannot be evaluated to true.
 default CopyFileRequest := false
 default CreateContainerRequest := false
+<<<<<<< HEAD
 default CreateSandboxRequest := false
+=======
+default CreateSandboxRequest := true
+>>>>>>> upstream/main
 default DestroySandboxRequest := true
 default ExecProcessRequest := false
 default GetOOMEventRequest := true
@@ -22,7 +30,11 @@ default SignalProcessRequest := true
 default StartContainerRequest := true
 default StatsContainerRequest := true
 default TtyWinResizeRequest := true
+<<<<<<< HEAD
 default UpdateEphemeralMountsRequest := false
+=======
+default UpdateEphemeralMountsRequest := true
+>>>>>>> upstream/main
 default UpdateInterfaceRequest := true
 default UpdateRoutesRequest := true
 default WaitProcessRequest := true
@@ -38,9 +50,12 @@ CreateContainerRequest {
     i_oci := input.OCI
     i_storages := input.storages
 
+<<<<<<< HEAD
     print("CreateContainerRequest: i_oci.Hooks =", i_oci.Hooks)
     is_null(i_oci.Hooks)
 
+=======
+>>>>>>> upstream/main
     some p_container in policy_data.containers
     print("======== CreateContainerRequest: trying next policy container")
 
@@ -427,7 +442,12 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) {
         allow_mount(p_oci, i_mount, bundle_id, sandbox_id)
     }
 
+<<<<<<< HEAD
     allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
+=======
+    # TODO: enable allow_storages() after fixing https://github.com/kata-containers/kata-containers/issues/8833
+    # allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
+>>>>>>> upstream/main
 
     print("allow_by_bundle_or_sandbox_id: true")
 }
@@ -699,8 +719,14 @@ is_ip_other_byte(component) {
 
 # OCI root.Path
 allow_root_path(p_oci, i_oci, bundle_id) {
+<<<<<<< HEAD
     p_path1 := p_oci.Root.Path
     print("allow_root_path: p_path1 =", p_path1)
+=======
+    i_path := i_oci.Root.Path
+    p_path1 := p_oci.Root.Path
+    print("allow_root_path: i_path =", i_path, "p_path1 =", p_path1)
+>>>>>>> upstream/main
 
     p_path2 := replace(p_path1, "$(cpath)", policy_data.common.cpath)
     print("allow_root_path: p_path2 =", p_path2)
@@ -708,7 +734,11 @@ allow_root_path(p_oci, i_oci, bundle_id) {
     p_path3 := replace(p_path2, "$(bundle-id)", bundle_id)
     print("allow_root_path: p_path3 =", p_path3)
 
+<<<<<<< HEAD
     p_path3 == i_oci.Root.Path
+=======
+    p_path3 == i_path
+>>>>>>> upstream/main
 
     print("allow_root_path: true")
 }
@@ -790,7 +820,11 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
 }
 
 ######################################################################
+<<<<<<< HEAD
 # Create container Storages
+=======
+# Storages
+>>>>>>> upstream/main
 
 allow_storages(p_storages, i_storages, bundle_id, sandbox_id) {
     p_count := count(p_storages)
@@ -876,8 +910,13 @@ allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
     lowerdir := concat("=", ["lowerdir", p_storage.options[0]])
     print("allow_storage_options 2: lowerdir =", lowerdir)
 
+<<<<<<< HEAD
     print("allow_storage_options 2: i_storage.options[i_count - 1] =", i_storage.options[i_count - 1])
     i_storage.options[i_count - 1] == lowerdir
+=======
+    i_storage.options[i_count - 1] == lowerdir
+    print("allow_storage_options 2: i_storage.options[i_count - 1] =", i_storage.options[i_count - 1])
+>>>>>>> upstream/main
 
     every i, policy_id in policy_ids {
         allow_overlay_layer(policy_id, policy_hashes[i], i_storage.options[i + 1])
@@ -1063,6 +1102,7 @@ match_caps(p_caps, i_caps) {
 }
 
 ######################################################################
+<<<<<<< HEAD
 check_directory_traversal(i_path) {
     contains(i_path, "../") == false
     endswith(i_path, "/..") == false
@@ -1115,10 +1155,19 @@ CopyFileRequest {
     print("CopyFileRequest: regex4 =", regex4)
 
     regex.match(regex4, input.path)
+=======
+CopyFileRequest {
+    print("CopyFileRequest: input.path =", input.path)
+
+    some regex1 in policy_data.request_defaults.CopyFileRequest
+    regex2 := replace(regex1, "$(cpath)", policy_data.common.cpath)
+    regex.match(regex2, input.path)
+>>>>>>> upstream/main
 
     print("CopyFileRequest: true")
 }
 
+<<<<<<< HEAD
 CreateSandboxRequest {
     print("CreateSandboxRequest: input.guest_hook_path =", input.guest_hook_path)
     count(input.guest_hook_path) == 0
@@ -1129,6 +1178,8 @@ CreateSandboxRequest {
     allow_sandbox_storages(input.storages)
 }
 
+=======
+>>>>>>> upstream/main
 ExecProcessRequest {
     print("ExecProcessRequest 1: input =", input)
 
@@ -1174,10 +1225,13 @@ ReadStreamRequest {
     policy_data.request_defaults.ReadStreamRequest == true
 }
 
+<<<<<<< HEAD
 UpdateEphemeralMountsRequest {
     policy_data.request_defaults.UpdateEphemeralMountsRequest == true
 }
 
+=======
+>>>>>>> upstream/main
 WriteStreamRequest {
     policy_data.request_defaults.WriteStreamRequest == true
 }

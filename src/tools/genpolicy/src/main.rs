@@ -3,11 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+<<<<<<< HEAD
 use clap::Parser;
 use env_logger;
 use log::{debug, info};
 
 mod agent;
+=======
+use log::{debug, info};
+
+>>>>>>> upstream/main
 mod config_map;
 mod containerd;
 mod daemon_set;
@@ -32,6 +37,7 @@ mod verity;
 mod volume;
 mod yaml;
 
+<<<<<<< HEAD
 #[derive(Debug, Parser)]
 struct CommandLineOptions {
     #[clap(
@@ -114,6 +120,12 @@ async fn main() {
         args.raw_out,
         args.base64_out,
     );
+=======
+#[tokio::main]
+async fn main() {
+    env_logger::init();
+    let config = utils::Config::new();
+>>>>>>> upstream/main
 
     debug!("Creating policy from yaml, settings, and rules.rego files...");
     let mut policy = policy::AgentPolicy::from_files(&config).await.unwrap();

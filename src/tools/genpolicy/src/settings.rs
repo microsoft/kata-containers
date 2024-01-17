@@ -23,7 +23,10 @@ pub struct Settings {
     pub request_defaults: policy::RequestDefaults,
     pub common: policy::CommonData,
     pub mount_destinations: Vec<String>,
+<<<<<<< HEAD
     pub sandbox: policy::SandboxData,
+=======
+>>>>>>> upstream/main
 }
 
 /// Volume settings loaded from genpolicy-settings.json.

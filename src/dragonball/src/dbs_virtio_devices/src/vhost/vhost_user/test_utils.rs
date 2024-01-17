@@ -7,7 +7,6 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::{mem, slice};
 
-use vmm_sys_util::tempfile::TempFile;
 use libc::{c_void, iovec};
 use vhost_rs::vhost_user::message::{
     VhostUserHeaderFlag, VhostUserInflight, VhostUserMemory, VhostUserMemoryRegion,
@@ -16,6 +15,7 @@ use vhost_rs::vhost_user::message::{
 };
 use vhost_rs::vhost_user::Error;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+use vmm_sys_util::tempfile::TempFile;
 
 pub const MAX_ATTACHED_FD_ENTRIES: usize = 32;
 
@@ -610,7 +610,6 @@ impl<T: Req> AsRawFd for Endpoint<T> {
 pub(crate) fn negotiate_slave(
     slave: &mut Endpoint<MasterReq>,
     pfeatures: VhostUserProtocolFeatures,
-    use_ali_feature: bool,
     has_protocol_mq: bool,
     queue_num: u64,
 ) {
@@ -700,6 +699,8 @@ pub(crate) fn negotiate_slave(
             VhostUserHeaderFlag::REPLY.bits(),
             std::mem::size_of::<VhostUserInflight>() as u32,
         );
+        slave.send_header(&hdr, None).unwrap();
+    } else {
         slave.send_header(&hdr, None).unwrap();
     }
 

@@ -25,6 +25,10 @@ for allowed_hypervisor_annotation in "${non_formatted_allowed_hypervisor_annotat
 done
 allowed_hypervisor_annotations=$(echo $allowed_hypervisor_annotations | sed 's/,$//')
 
+SNAPSHOTTER_HANDLER_MAPPING="${SNAPSHOTTER_HANDLER_MAPPING:-}"
+IFS=',' read -a snapshotters <<< "$SNAPSHOTTER_HANDLER_MAPPING"
+snapshotters_delimiter=':'
+
 # If we fail for any reason a message will be displayed
 die() {
         msg="$*"
@@ -105,6 +109,42 @@ function get_container_runtime() {
 	fi
 }
 
+function get_kata_containers_config_path() {
+	local shim="$1"
+
+	# Directory holding pristine configuration files for the current default golang runtime.
+	local golang_config_path="/opt/kata/share/defaults/kata-containers/"
+
+	# Directory holding pristine configuration files for the new rust runtime.
+	#
+	# These are put into a separate directory since:
+	#
+	# - In some cases, the rust runtime configuration syntax is
+	#   slightly different to the golang runtime configuration files
+	#   so some hypervisors need two different configuration files,
+	#   one for reach runtime type (for example Cloud Hypervisor which
+	#   uses 'clh' for the golang runtime and 'cloud-hypervisor' for
+	#   the rust runtime.
+	#
+	# - Some hypervisors only currently work with the golang runtime.
+	#
+	# - Some hypervisors only work with the rust runtime (dragonball).
+	#
+	# See: https://github.com/kata-containers/kata-containers/issues/6020
+	local rust_config_path="${golang_config_path}/runtime-rs"
+
+	local config_path
+
+	# Map the runtime shim name to the appropriate configuration
+	# file directory.
+	case "$shim" in
+		cloud-hypervisor | dragonball) config_path="$rust_config_path" ;;
+		*) config_path="$golang_config_path" ;;
+	esac
+
+	echo "$config_path"
+}
+
 function install_artifacts() {
 	echo "copying kata artifacts onto host"
 	cp -au /opt/kata-artifacts/opt/kata/* /opt/kata/
@@ -112,8 +152,12 @@ function install_artifacts() {
 	[ -d /opt/kata/runtime-rs/bin ] && \
 		chmod +x /opt/kata/runtime-rs/bin/*
 
-	config_path="/opt/kata/share/defaults/kata-containers/"
+	local config_path
+
 	for shim in "${shims[@]}"; do
+		config_path=$(get_kata_containers_config_path "${shim}")
+		mkdir -p "$config_path"
+
 		local kata_config_file="${config_path}/configuration-${shim}.toml"
 		# Allow enabling debug for Kata Containers
 		if [[ "${DEBUG}" == "true" ]]; then
@@ -204,11 +248,15 @@ function configure_different_shims_base() {
 
 		backup_shim "${shim_file}"
 
-		if [[ "${shim}" == "dragonball" ]]; then
-			ln -sf /opt/kata/runtime-rs/bin/containerd-shim-kata-v2 "${shim_file}"
-		else
-			ln -sf /opt/kata/bin/containerd-shim-kata-v2 "${shim_file}"
-		fi
+		# Map the runtime shim name to the appropriate
+		# containerd-shim-kata-v2 binary
+		case "$shim" in
+			cloud-hypervisor | dragonball)
+				ln -sf /opt/kata/runtime-rs/bin/containerd-shim-kata-v2 "${shim_file}" ;;
+			*)
+				ln -sf /opt/kata/bin/containerd-shim-kata-v2 "${shim_file}" ;;
+		esac
+
 		chmod +x "$shim_file"
 
 		if [ "${shim}" == "${default_shim}" ]; then
@@ -250,20 +298,18 @@ function cleanup_different_shims_base() {
 }
 
 function configure_crio_runtime() {
-	local runtime="kata"
-	local configuration="configuration"
-	if [ -n "${1-}" ]; then
-		runtime+="-$1"
-		configuration+="-$1"
-	fi
+	local shim="${1}"
+	local runtime="kata-${shim}"
+	local configuration="configuration-${shim}"
+
+	local config_path=$(get_kata_containers_config_path "${shim}")
 
 	local kata_path="/usr/local/bin/containerd-shim-${runtime}-v2"
 	local kata_conf="crio.runtime.runtimes.${runtime}"
-	local kata_config_path="/opt/kata/share/defaults/kata-containers/$configuration.toml"
+	local kata_config_path="${config_path}/${configuration}.toml"
 
 	cat <<EOF | tee -a "$crio_drop_in_conf_file"
 
-# Path to the Kata Containers runtime binary that uses the $1
 [$kata_conf]
 	runtime_path = "${kata_path}"
 	runtime_type = "vm"
@@ -298,55 +344,42 @@ EOF
 }
 
 function configure_containerd_runtime() {
-	local runtime="kata"
-	local configuration="configuration"
-	if [ -n "${2-}" ]; then
-		runtime+="-$2"
-		configuration+="-$2"
-	fi
+	local shim="$2"
+	local runtime="kata-${shim}"
+	local configuration="configuration-${shim}"
 	local pluginid=cri
 	
 	# if we are running k0s auto containerd.toml generation, the base template is by default version 2
-	# we can safely assume to reference the older version of cri
+	# we can safely assume to reference the newer version of cri
 	if grep -q "version = 2\>" $containerd_conf_file || [ "$1" == "k0s-worker" ] || [ "$1" == "k0s-controller" ]; then
 		pluginid=\"io.containerd.grpc.v1.cri\"
 	fi
-	local runtime_table="plugins.${pluginid}.containerd.runtimes.$runtime"
-	local runtime_type="io.containerd.$runtime.v2"
-	local options_table="$runtime_table.options"
-	local config_path="/opt/kata/share/defaults/kata-containers/$configuration.toml"
-	if grep -q "\[$runtime_table\]" $containerd_conf_file; then
-		echo "Configuration exists for $runtime_table, overwriting"
-		sed -i "/\[$runtime_table\]/,+1s#runtime_type.*#runtime_type = \"${runtime_type}\"#" $containerd_conf_file
-	else
-		cat <<EOF | tee -a "$containerd_conf_file"
-[$runtime_table]
-  runtime_type = "${runtime_type}"
-  privileged_without_host_devices = true
-  pod_annotations = ["io.katacontainers.*"]
-EOF
-	fi
-
-	if grep -q "\[$options_table\]" $containerd_conf_file; then
-		echo "Configuration exists for $options_table, overwriting"
-		sed -i "/\[$options_table\]/,+1s#ConfigPath.*#ConfigPath = \"${config_path}\"#" $containerd_conf_file
-	else
-		cat <<EOF | tee -a "$containerd_conf_file"
-  [$options_table]
-    ConfigPath = "${config_path}"
-EOF
-	fi
-
+	local runtime_table=".plugins.${pluginid}.containerd.runtimes.\"${runtime}\""
+	local runtime_options_table="${runtime_table}.options"
+	local runtime_type=\"io.containerd."${runtime}".v2\"
+	local runtime_config_path=\"$(get_kata_containers_config_path "${shim}")/${configuration}.toml\"
+	
+	tomlq -i -t $(printf '%s.runtime_type=%s' ${runtime_table} ${runtime_type}) ${containerd_conf_file}
+	tomlq -i -t $(printf '%s.privileged_without_host_devices=true' ${runtime_table}) ${containerd_conf_file}
+	tomlq -i -t $(printf '%s.pod_annotations=["io.katacontainers.*"]' ${runtime_table}) ${containerd_conf_file}
+	tomlq -i -t $(printf '%s.ConfigPath=%s' ${runtime_options_table} ${runtime_config_path}) ${containerd_conf_file}
+	
 	if [ "${DEBUG}" == "true" ]; then
-		if grep -q "\[debug\]" $containerd_conf_file; then
-			sed -i 's/level.*/level = \"debug\"/' $containerd_conf_file
-		else
-			cat <<EOF | tee -a "$containerd_conf_file"
-[debug]
-  level = "debug"
-EOF
-		fi
+		tomlq -i -t '.debug.level = "debug"' ${containerd_conf_file}
+	fi
 
+	if [ -n "${SNAPSHOTTER_HANDLER_MAPPING}" ]; then
+		for m in ${snapshotters[@]}; do
+			key="${m%$snapshotters_delimiter*}"
+
+			if [ "${key}" != "${shim}" ]; then
+				continue
+			fi
+
+			value="${m#*$snapshotters_delimiter}"
+			tomlq -i -t $(printf '%s.snapshotter="%s"' ${runtime_table} ${value}) ${containerd_conf_file}
+			break
+		done
 	fi
 }
 
@@ -360,9 +393,6 @@ function configure_containerd() {
 		# backup the config.toml only if a backup doesn't already exist (don't override original)
 		cp -n "$containerd_conf_file" "$containerd_conf_file_backup"
 	fi
-
-	# Add default Kata runtime configuration
-	configure_containerd_runtime "$1" 
 
 	for shim in "${shims[@]}"; do
 		configure_containerd_runtime "$1" $shim
@@ -419,6 +449,49 @@ function reset_runtime() {
 	wait_till_node_is_ready
 }
 
+function containerd_snapshotter_version_check() {
+	local container_runtime_version=$(kubectl get node $NODE_NAME -o jsonpath='{.status.nodeInfo.containerRuntimeVersion}')
+	local containerd_prefix="containerd://"
+	local containerd_version_to_avoid="1.6"
+	local containerd_version=${container_runtime_version#$containerd_prefix}
+
+	if grep -q ^$containerd_version_to_avoid <<< $containerd_version; then
+		if [ -n "${SNAPSHOTTER_HANDLER_MAPPING}" ]; then
+			die "kata-deploy only supports snapshotter configuration with containerd 1.7 or newer"
+		fi
+	fi
+}
+
+function snapshotter_handler_mapping_validation_check() {
+	echo "Validating the snapshotter-handler mapping: \"${SNAPSHOTTER_HANDLER_MAPPING}\""
+	if [ -z "${SNAPSHOTTER_HANDLER_MAPPING}" ]; then
+		echo "No snapshotter has been requested, using the default value from containerd"
+		return
+	fi
+
+	for m in ${snapshotters[@]}; do
+		shim="${m%$snapshotters_delimiter*}"
+		snapshotter="${m#*$snapshotters_delimiter}"
+
+		if [ -z "$shim" ]; then
+			die "The snapshotter must follow the \"shim:snapshotter,shim:snapshotter,...\" format, but at least one shim is empty"
+		fi
+
+		if [ -z "$snapshotter" ]; then
+			die "The snapshotter must follow the \"shim:snapshotter,shim:snapshotter,...\" format, but at least one snapshotter is empty"
+		fi
+
+		if ! grep -q " $shim " <<< " $SHIMS "; then
+			die "\"$shim\" is not part of \"$SHIMS\""
+		fi
+
+		matches=$(grep -o "$shim$snapshotters_delimiter" <<< "${SNAPSHOTTER_HANDLER_MAPPING}" | wc -l)
+		if [ $matches -ne 1 ]; then
+			die "One, and only one, entry per shim is required"
+		fi
+	done
+}
+
 function main() {
 	echo "Environment variables passed to this script"
 	echo "* NODE_NAME: ${NODE_NAME}"
@@ -469,6 +542,10 @@ function main() {
 
 	# only install / remove / update if we are dealing with CRIO or containerd
 	if [[ "$runtime" =~ ^(crio|containerd|k3s|k3s-agent|rke2-agent|rke2-server|k0s-worker|k0s-controller)$ ]]; then
+		if [ "$runtime" != "crio" ]; then
+			containerd_snapshotter_version_check
+			snapshotter_handler_mapping_validation_check
+		fi
 
 		case "$action" in
 		install)

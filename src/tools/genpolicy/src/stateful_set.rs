@@ -6,7 +6,10 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
+<<<<<<< HEAD
 use crate::agent;
+=======
+>>>>>>> upstream/main
 use crate::obj_meta;
 use crate::persistent_volume_claim;
 use crate::pod;
@@ -16,6 +19,10 @@ use crate::settings;
 use crate::yaml;
 
 use async_trait::async_trait;
+<<<<<<< HEAD
+=======
+use protocols::agent;
+>>>>>>> upstream/main
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -200,7 +207,11 @@ impl StatefulSet {
                             source:
                                 "^/run/kata-containers/shared/containers/$(bundle-id)-[a-z0-9]{16}-"
                                     .to_string()
+<<<<<<< HEAD
                                     + &file_name
+=======
+                                    + file_name
+>>>>>>> upstream/main
                                     + "$",
                             options: vec![
                                 "rbind".to_string(),

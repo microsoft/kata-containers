@@ -43,7 +43,17 @@ TARGET_ARCH=${TARGET_ARCH:-$(uname -m)}
 ARCH=${ARCH:-$(uname -m)}
 [ "${TARGET_ARCH}" == "aarch64" ] && TARGET_ARCH=arm64
 TARGET_OS=${TARGET_OS:-linux}
-[ "${CROSS_BUILD}" == "true" ] && BUILDX=buildx && PLATFORM="--platform=${TARGET_OS}/${TARGET_ARCH}"
+stripping_tool="strip"
+if [ "${CROSS_BUILD}" == "true" ]; then
+	BUILDX=buildx
+	PLATFORM="--platform=${TARGET_OS}/${TARGET_ARCH}"
+	if command -v "${TARGET_ARCH}-linux-gnu-strip" >/dev/null; then
+		stripping_tool="${TARGET_ARCH}-linux-gnu-strip"
+	else
+		die "Could not find ${TARGET_ARCH}-linux-gnu-strip for cross build"
+	fi
+fi
+
 
 handle_error() {
 	local exit_code="${?}"
@@ -471,6 +481,8 @@ build_rootfs_distro()
 			--env SECCOMP="${SECCOMP}" \
 			--env SELINUX="${SELINUX}" \
 			--env DEBUG="${DEBUG}" \
+			--env CROSS_BUILD="${CROSS_BUILD}" \
+			--env TARGET_ARCH="${TARGET_ARCH}" \
 			--env HOME="/root" \
 			--env AGENT_POLICY="${AGENT_POLICY}" \
 			-v "${repo_dir}":"/kata-containers" \
@@ -502,6 +514,39 @@ prepare_overlay()
 	fi
 
 	popd  > /dev/null
+}
+
+build_opa_from_source()
+{
+	local opa_repo_url=$1
+	opa_version="$(get_package_version_from_kata_yaml externals.open-policy-agent.version)"
+
+	if [ ${CROSS_BUILD} == "yes" ]; then
+		export GOOS="${TARGET_OS}"
+		export GOARCH="${TARGET_ARCH}}"
+	fi
+
+	current_dir="$(pwd)"
+	pushd $(mktemp -d) &>/dev/null
+	git clone -b "${opa_version}" "${opa_repo_url}" opa || return 1
+	(
+		cd opa
+		export WASM_ENABLED=0
+		export DOCKER_RUNNING=0
+		make ci-go-ci-build-linux-static || return 1
+
+		info "Copy OPA binary to ${current_dir}/opa"
+		binary_name="_release/${opa_version##v}/opa_${GOOS}_${GOARCH}_static"
+		if [ -f "${binary_name}" ]; then
+			cp "${binary_name}" "${current_dir}/opa"
+		else
+			echo "OPA binary ${binary_name} not found"
+			return 1
+		fi
+	)
+	rm -rf opa
+	popd &>/dev/null
+	return 0
 }
 
 # Setup an existing rootfs directory, based on the OPTIONAL distro name
@@ -633,7 +678,7 @@ EOF
 		make clean
 		make LIBC=${LIBC} INIT=${AGENT_INIT} SECCOMP=${SECCOMP} AGENT_POLICY=${AGENT_POLICY}
 		make install DESTDIR="${ROOTFS_DIR}" LIBC=${LIBC} INIT=${AGENT_INIT}
-		strip ${ROOTFS_DIR}/usr/bin/kata-agent
+		${stripping_tool} ${ROOTFS_DIR}/usr/bin/kata-agent
 		if [ "${SECCOMP}" == "yes" ]; then
 			rm -rf "${libseccomp_install_dir}" "${gperf_install_dir}"
 		fi
@@ -669,16 +714,22 @@ EOF
 			#   	OPA should be built from the cached source code instead of downloading
 			#   	this binary.
 			#
-			opa_bin_url="$(get_package_version_from_kata_yaml externals.open-policy-agent.meta.binary)"
-			info "Downloading OPA binary from ${opa_bin_url}"
-			curl --fail -L "${opa_bin_url}" -o opa || die "Failed to download OPA"
+			if [ "$ARCH" == "ppc64le" ] || [ "$ARCH" == "s390x" ]; then
+				opa_repo_url="$(get_package_version_from_kata_yaml externals.open-policy-agent.url)"
+				info "Building OPA binary from source at ${opa_repo_url}"
+				build_opa_from_source "${opa_repo_url}" || die "Failed to build OPA"
+			else
+				opa_bin_url="$(get_package_version_from_kata_yaml externals.open-policy-agent.meta.binary)"
+				info "Downloading OPA binary from ${opa_bin_url}"
+				curl --fail -L "${opa_bin_url}" -o opa || die "Failed to download OPA"
+			fi
 
 			# Install the OPA binary.
 			opa_bin_dir="/usr/local/bin"
 			local opa_bin="${ROOTFS_DIR}${opa_bin_dir}/opa"
 			info "Installing OPA binary to ${opa_bin}"
 			install -D -o root -g root -m 0755 opa -T "${opa_bin}"
-			strip ${ROOTFS_DIR}${opa_bin_dir}/opa
+			${stripping_tool} ${ROOTFS_DIR}${opa_bin_dir}/opa
 		else
 			info "OPA binary already exists in ${opa_bin_dir}"
 		fi

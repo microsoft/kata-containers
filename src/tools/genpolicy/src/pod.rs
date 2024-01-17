@@ -14,10 +14,17 @@ use crate::secret;
 use crate::settings;
 use crate::volume;
 use crate::yaml;
+<<<<<<< HEAD
 use crate::agent;
 
 use async_trait::async_trait;
 use log::{debug, warn};
+=======
+
+use async_trait::async_trait;
+use log::{debug, warn};
+use protocols::agent;
+>>>>>>> upstream/main
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -76,9 +83,12 @@ pub struct PodSpec {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hostNetwork: Option<bool>,
+<<<<<<< HEAD
 
     #[serde(skip_serializing_if = "Option::is_none")]
     topologySpreadConstraints: Option<Vec<TopologySpreadConstraint>>,
+=======
+>>>>>>> upstream/main
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
@@ -442,6 +452,7 @@ struct LocalObjectReference {
     name: String,
 }
 
+<<<<<<< HEAD
 /// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct TopologySpreadConstraint {
@@ -465,6 +476,8 @@ struct TopologySpreadConstraint {
     nodeTaintsPolicy : Option<String>,
 }
 
+=======
+>>>>>>> upstream/main
 impl Container {
     pub async fn init(&mut self, use_cache: bool) {
         // Load container image properties from the registry.
@@ -755,7 +768,11 @@ impl Container {
                             capabilities.Permitted.clear();
                             capabilities.Effective.clear();
                         } else {
+<<<<<<< HEAD
                             let cap = "CAP_".to_string() + &c;
+=======
+                            let cap = "CAP_".to_string() + c;
+>>>>>>> upstream/main
 
                             capabilities.Bounding.retain(|x| !x.eq(&cap));
                             capabilities.Permitted.retain(|x| !x.eq(&cap));
@@ -765,7 +782,11 @@ impl Container {
                 }
                 if let Some(add) = &yaml_capabilities.add {
                     for c in add {
+<<<<<<< HEAD
                         let cap = "CAP_".to_string() + &c;
+=======
+                        let cap = "CAP_".to_string() + c;
+>>>>>>> upstream/main
 
                         if !capabilities.Bounding.contains(&cap) {
                             capabilities.Bounding.push(cap.clone());
@@ -805,7 +826,11 @@ fn compress_capabilities(capabilities: &mut Vec<String>, defaults: &policy::Comm
         ""
     };
 
+<<<<<<< HEAD
     if default_caps.len() != 0 {
+=======
+    if !default_caps.is_empty() {
+>>>>>>> upstream/main
         capabilities.clear();
         capabilities.push(default_caps.to_string());
     }

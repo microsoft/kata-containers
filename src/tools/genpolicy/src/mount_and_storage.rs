@@ -6,13 +6,20 @@
 // Allow OCI spec field names.
 #![allow(non_snake_case)]
 
+<<<<<<< HEAD
 use crate::agent;
+=======
+>>>>>>> upstream/main
 use crate::pod;
 use crate::policy;
 use crate::settings;
 use crate::volume;
 
 use log::debug;
+<<<<<<< HEAD
+=======
+use protocols::agent;
+>>>>>>> upstream/main
 use std::ffi::OsString;
 use std::path::Path;
 use std::str;
@@ -32,9 +39,15 @@ pub fn get_policy_mounts(
     };
 
     for s_mount in settings_mounts {
+<<<<<<< HEAD
         if keep_settings_mount(settings, &s_mount, &yaml_container.volumeMounts) {
             let mut mount = s_mount.clone();
             adjust_termination_path(&mut mount, &yaml_container);
+=======
+        if keep_settings_mount(settings, s_mount, &yaml_container.volumeMounts) {
+            let mut mount = s_mount.clone();
+            adjust_termination_path(&mut mount, yaml_container);
+>>>>>>> upstream/main
 
             if mount.source.is_empty() && mount.type_.eq("bind") {
                 if let Some(file_name) = Path::new(&mount.destination).file_name() {
@@ -54,12 +67,20 @@ pub fn get_policy_mounts(
                 policy_mount.options = mount.options.iter().map(String::from).collect();
             } else {
                 // Add a new mount.
+<<<<<<< HEAD
                 if !is_pause_container {
                     if s_mount.destination.eq("/etc/hostname")
                         || s_mount.destination.eq("/etc/resolv.conf")
                     {
                         mount.options.push(rootfs_access.to_string());
                     }
+=======
+                if !is_pause_container
+                    && (s_mount.destination.eq("/etc/hostname")
+                        || s_mount.destination.eq("/etc/resolv.conf"))
+                {
+                    mount.options.push(rootfs_access.to_string());
+>>>>>>> upstream/main
                 }
                 p_mounts.push(mount);
             }
@@ -144,8 +165,14 @@ fn get_empty_dir_mount_and_storage(
             fstype: settings_empty_dir.fstype.clone(),
             options: settings_empty_dir.options.clone(),
             mount_point: format!("{}{}$", &settings_empty_dir.mount_point, &yaml_mount.name),
+<<<<<<< HEAD
             fs_group: None,
             });
+=======
+            fs_group: protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        });
+>>>>>>> upstream/main
     }
 
     let source = if yaml_mount.subPathExpr.is_some() {
@@ -254,8 +281,14 @@ fn get_config_map_mount_and_storage(
             fstype: settings_config_map.fstype.clone(),
             options: settings_config_map.options.clone(),
             mount_point: format!("{}{mount_path_str}$", &settings_config_map.mount_point),
+<<<<<<< HEAD
             fs_group: None,
             });
+=======
+            fs_group: protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        });
+>>>>>>> upstream/main
     }
 
     let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();

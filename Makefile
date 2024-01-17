@@ -1,4 +1,4 @@
-# Copyright (c) 2020 Intel Corporation
+# Copyright (c) 2020-2023 Intel Corporation
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -22,7 +22,6 @@ TOOLS =
 TOOLS += agent-ctl
 TOOLS += kata-ctl
 TOOLS += log-parser
-TOOLS += log-parser-rs
 TOOLS += runk
 TOOLS += trace-forwarder
 
@@ -47,7 +46,7 @@ generate-protocols:
 
 # Some static checks rely on generated source files of components.
 static-checks: static-checks-build
-	bash ci/static-checks.sh
+	bash tests/static-checks.sh github.com/kata-containers/kata-containers
 
 docs-url-alive-check:
 	bash ci/docs-url-alive-check.sh

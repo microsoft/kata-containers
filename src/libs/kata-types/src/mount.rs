@@ -94,14 +94,18 @@ impl Mount {
 #[derive(Debug, Clone, Eq, PartialEq, Default, Serialize, Deserialize)]
 pub struct DirectVolumeMountInfo {
     /// The type of the volume (ie. block)
+    #[serde(rename = "volume-type")]
     pub volume_type: String,
     /// The device backing the volume.
     pub device: String,
     /// The filesystem type to be mounted on the volume.
+    #[serde(rename = "fstype")]
     pub fs_type: String,
     /// Additional metadata to pass to the agent regarding this volume.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub metadata: HashMap<String, String>,
     /// Additional mount options.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<String>,
 }
 
@@ -483,7 +487,7 @@ impl<H> StorageHandlerManager<H> {
 /// The `volume_path` is base64-url-encoded and then safely joined to the `prefix`
 pub fn join_path(prefix: &str, volume_path: &str) -> Result<PathBuf> {
     if volume_path.is_empty() {
-        return Err(anyhow!("volume path must not be empty"));
+        return Err(anyhow!(std::io::ErrorKind::NotFound));
     }
     let b64_url_encoded_path = base64::encode_config(volume_path.as_bytes(), base64::URL_SAFE);
 

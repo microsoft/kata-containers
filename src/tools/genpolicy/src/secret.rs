@@ -6,7 +6,10 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
+<<<<<<< HEAD
 use crate::agent;
+=======
+>>>>>>> upstream/main
 use crate::obj_meta;
 use crate::pod;
 use crate::policy;
@@ -15,6 +18,10 @@ use crate::yaml;
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
+<<<<<<< HEAD
+=======
+use protocols::agent;
+>>>>>>> upstream/main
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -44,7 +51,11 @@ impl Secret {
                     if my_name.eq(name) {
                         if let Some(data) = &self.data {
                             if let Some(value) = data.get(&key_ref.key) {
+<<<<<<< HEAD
                                 let value_bytes = general_purpose::STANDARD.decode(&value).unwrap();
+=======
+                                let value_bytes = general_purpose::STANDARD.decode(value).unwrap();
+>>>>>>> upstream/main
                                 let value_string = std::str::from_utf8(&value_bytes).unwrap();
                                 return Some(value_string.to_string());
                             }

@@ -124,6 +124,8 @@ DEFMEMSZ := 2048
 # - vm template memory
 # - hugepage memory
 DEFMEMSLOTS := 10
+# Default maximum memory in MiB
+DEFMAXMEMSZ := 0
 ##VAR DEFBRIDGES=<number> Default number of bridges
 DEFBRIDGES := 0
 DEFENABLEANNOTATIONS := [\"kernel_params\"]
@@ -189,7 +191,7 @@ KNOWN_HYPERVISORS =
 # List of hypervisors known for the current architecture
 KNOWN_HYPERVISORS =
 
-CONFDIR := $(DEFAULTSDIR)/$(PROJECT_DIR)
+CONFDIR := $(DEFAULTSDIR)/$(PROJECT_DIR)/runtime-rs
 SYSCONFDIR := $(SYSCONFDIR)/$(PROJECT_DIR)
 ##VAR CONFIG_PATH=<path> Main configuration file location for stateless systems
 CONFIG_PATH := $(abspath $(CONFDIR)/$(CONFIG_FILE))
@@ -307,6 +309,7 @@ USER_VARS += DEFMAXVCPUS_ACRN
 USER_VARS += DEFMAXVCPUS_DB
 USER_VARS += DEFMEMSZ
 USER_VARS += DEFMEMSLOTS
+USER_VARS += DEFMAXMEMSZ
 USER_VARS += DEFBRIDGES
 USER_VARS += DEFNETWORKMODEL_DB
 USER_VARS += DEFNETWORKMODEL_CLH
@@ -452,11 +455,14 @@ optimize: $(SOURCES) | show-summary show-header
 	@RUSTFLAGS="-C link-arg=-s $(EXTRA_RUSTFLAGS) --deny warnings" cargo build --target $(TRIPLE) --$(BUILD_TYPE) $(EXTRA_RUSTFEATURES)
 
 ##TARGET clean: clean build
-clean:
+clean: clean-generated-files
 	@cargo clean
-	@rm -f $(GENERATED_FILES)
 	@rm -f tarpaulin-report.html
 	@rm -f $(CONFIGS)
+
+##TARGET clean-generated-files: clean generated files
+clean-generated-files:
+	@rm -f $(GENERATED_FILES)
 
 vendor:
 	@cargo vendor
