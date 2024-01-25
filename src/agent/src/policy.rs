@@ -119,6 +119,11 @@ pub struct AgentPolicy {
     /// When true policy errors are ignored, for debug purposes.
     allow_failures: bool,
 
+    /// When true, policy hash checking is bypassed to allow multiple
+    /// calls to set_policy to upload new policy document to OPA
+    /// THIS IS A TEST CONFIGURATION
+    bypass_policy_hash_check: bool,
+
     /// OPA path used to query if an Agent gRPC request should be allowed.
     /// The request name (e.g., CreateContainerRequest) must be added to
     /// this path.
@@ -140,6 +145,7 @@ impl AgentPolicy {
     pub fn new() -> Self {
         Self {
             allow_failures: false,
+            bypass_policy_hash_check: false,
             ..Default::default()
         }
     }
@@ -204,6 +210,14 @@ impl AgentPolicy {
                 self.allow_failures = self
                     .post_query("AllowRequestsFailingPolicy", EMPTY_JSON_INPUT)
                     .await?;
+
+                // THIS IS A TEST ONLY CONFIGURATION
+                // Check if OPA should only evaluate the request and return
+                // without allowing the request to be served, even when request
+                // evaluates to true
+                self.bypass_policy_hash_check = self
+                    .post_query("AllowBypassPolicyHashCheck", EMPTY_JSON_INPUT)
+                    .await?;
                 return Ok(());
             }
         }
@@ -228,7 +242,10 @@ impl AgentPolicy {
 
     /// Replace the Policy in OPA.
     pub async fn set_policy(&mut self, policy: &str) -> Result<()> {
-        check_policy_hash(policy)?;
+        // Bypass policy hash validation when bypass_policy_hash_check is set
+        if !self.bypass_policy_hash_check {
+            check_policy_hash(policy)?;
+        }
 
         if let Some(opa_client) = &mut self.opa_client {
             // Delete the old rules.
@@ -252,6 +269,13 @@ impl AgentPolicy {
                 .post_query("AllowRequestsFailingPolicy", EMPTY_JSON_INPUT)
                 .await?;
 
+            // THIS IS A TEST ONLY CONFIGURATION
+            // Check if OPA should only evaluate the request and return
+            // without allowing the request to be served, even when request
+            // evaluates to true
+            self.bypass_policy_hash_check = self
+                .post_query("AllowBypassPolicyHashCheck", EMPTY_JSON_INPUT)
+                .await?;
             Ok(())
         } else {
             bail!("Agent Policy is not initialized")

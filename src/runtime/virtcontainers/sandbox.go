@@ -2613,6 +2613,11 @@ func (s *Sandbox) SetIPTables(ctx context.Context, isIPv6 bool, data []byte) err
 	return s.agent.setIPTables(ctx, isIPv6, data)
 }
 
+// SetPolicy will set the policy in the guest
+func (s *Sandbox) SetPolicy(ctx context.Context, policy string) error {
+	return s.agent.setPolicy(ctx, policy)
+}
+
 // GuestVolumeStats return the filesystem stat of a given volume in the guest.
 func (s *Sandbox) GuestVolumeStats(ctx context.Context, volumePath string) ([]byte, error) {
 	guestMountPath, err := s.guestMountPath(volumePath)
@@ -2798,6 +2803,7 @@ func (s *Sandbox) resetVCPUsPinning(ctx context.Context, vCPUThreadsMap VcpuThre
 	}
 	return nil
 }
+
 func getAgentPolicyHash(policy string) string {
 	if len(policy) == 0 {
 		return ""
