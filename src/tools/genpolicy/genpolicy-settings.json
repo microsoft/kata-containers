@@ -277,7 +277,7 @@
         ]
     },
     "kata_config": {
-        "confidential_guest": true
+        "confidential_guest": false
     },
     "request_defaults": {
         "CreateContainerRequest": {
