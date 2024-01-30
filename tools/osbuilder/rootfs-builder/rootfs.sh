@@ -58,6 +58,7 @@ NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-""}
 nvidia_rootfs="${script_dir}/nvidia/nvidia_rootfs.sh"
 [ "${ARCH}" == "x86_64" ] || [ "${ARCH}" == "aarch64" ] && source "$nvidia_rootfs"
 agent_policy_file="$(readlink -f "${script_dir}/../../../src/kata-opa/${AGENT_POLICY_FILE}")"
+[ "${AGENT_POLICY}" == "yes" ] && agent_policy_file="$(readlink -f "${script_dir}/../../../src/kata-opa/${AGENT_POLICY_FILE}")"
 
 #For cross build
 CROSS_BUILD=${CROSS_BUILD:-false}
