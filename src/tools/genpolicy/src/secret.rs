@@ -6,9 +6,11 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
+use crate::agent;
 use crate::obj_meta;
 use crate::pod;
 use crate::policy;
+use crate::settings;
 use crate::utils::Config;
 use crate::yaml;
 
@@ -101,6 +103,20 @@ pub fn get_values(secret_name: &str, secrets: &Vec<Secret>) -> Option<Vec<String
 impl yaml::K8sResource for Secret {
     async fn init(&mut self, _config: &Config, doc_mapping: &serde_yaml::Value, _silent: bool) {
         self.doc_mapping = doc_mapping.clone();
+    }
+
+    fn get_sandbox_name(&self) -> Option<String> {
+        panic!("Unsupported");
+    }
+
+    fn get_container_mounts_and_storages(
+        &self,
+        _policy_mounts: &mut Vec<policy::KataMount>,
+        _storages: &mut Vec<agent::Storage>,
+        _container: &pod::Container,
+        _settings: &settings::Settings,
+    ) {
+        panic!("Unsupported");
     }
 
     fn generate_policy(&self, _agent_policy: &policy::AgentPolicy) -> String {

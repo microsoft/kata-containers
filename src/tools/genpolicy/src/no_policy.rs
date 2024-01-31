@@ -6,7 +6,10 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
+use crate::agent;
+use crate::pod;
 use crate::policy;
+use crate::settings;
 use crate::utils::Config;
 use crate::yaml;
 
@@ -25,6 +28,20 @@ impl yaml::K8sResource for NoPolicyResource {
         _doc_mapping: &serde_yaml::Value,
         _silent_unsupported_fields: bool,
     ) {
+    }
+
+    fn get_sandbox_name(&self) -> Option<String> {
+        panic!("Unsupported");
+    }
+
+    fn get_container_mounts_and_storages(
+        &self,
+        _policy_mounts: &mut Vec<policy::KataMount>,
+        _storages: &mut Vec<agent::Storage>,
+        _container: &pod::Container,
+        _settings: &settings::Settings,
+    ) {
+        panic!("Unsupported");
     }
 
     fn generate_policy(&self, _agent_policy: &policy::AgentPolicy) -> String {
