@@ -57,11 +57,8 @@ pub trait K8sResource {
     fn serialize(&mut self, _policy: &str) -> String {
         panic!("Unsupported");
     }
-
-    fn get_sandbox_name(&self) -> Option<String> {
-        panic!("Unsupported");
-    }
-
+    
+    fn get_sandbox_name(&self) -> Option<String>;
     fn get_namespace(&self) -> Option<String> {
         panic!("Unsupported");
     }
