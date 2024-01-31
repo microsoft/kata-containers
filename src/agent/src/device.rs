@@ -150,7 +150,7 @@ where
 pub fn pcipath_to_sysfs(root_bus_sysfs: &str, pcipath: &pci::Path) -> Result<String> {
     // Support up to 10 PCI segments.
     let mut bus = "000[0-9]:00".to_string();
-    
+
     let mut relpath = String::new();
 
     for i in 0..pcipath.len() {
