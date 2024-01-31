@@ -330,7 +330,7 @@ pub(crate) fn common_storage_handler(logger: &Logger, storage: &Storage) -> Resu
     let dm = devicemapper::DM::new()?;
     let name = devicemapper::DmName::new(fname)?;
     let opts = devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY);
-    dm.device_create(&name, None, opts)
+    dm.device_create(name, None, opts)
         .context("Unable to create dm device")?;
 
     let id = devicemapper::DevId::Name(name);
