@@ -312,22 +312,20 @@ pub fn find_dm_name(mount_point: &str) -> io::Result<Option<String>> {
     let mapper = Path::new("/dev/mapper");
     let target = Path::new(mount_point);
 
-    for mount in proc_mounts::MountIter::new()? {
-        if let Ok(m) = mount {
-            if m.dest != target {
-                continue;
-            }
+    for mount in (proc_mounts::MountIter::new()?).flatten() {
+        if mount.dest != target {
+            continue;
+        }
 
-            if let Some(p) = m.source.parent() {
-                if p == mapper {
-                    if let Some(f) = m.source.file_name() {
-                        return Ok(Some(f.to_string_lossy().into()));
-                    }
+        if let Some(p) = mount.source.parent() {
+            if p == mapper {
+                if let Some(f) = mount.source.file_name() {
+                    return Ok(Some(f.to_string_lossy().into()));
                 }
             }
-
-            break;
         }
+
+        break;
     }
     Ok(None)
 }
@@ -335,13 +333,13 @@ pub fn find_dm_name(mount_point: &str) -> io::Result<Option<String>> {
 #[instrument]
 pub fn remove_mounts(mounts: &[String]) -> Result<()> {
     for m in mounts.iter() {
-        let dm_target = find_dm_name(&m);
+        let dm_target = find_dm_name(m);
         nix::mount::umount(m.as_str()).context(format!("failed to umount {:?}", m))?;
         if let Some(dm_name) = dm_target? {
             let dm = devicemapper::DM::new()?;
             let name = devicemapper::DmName::new(&dm_name)?;
             dm.device_remove(
-                &devicemapper::DevId::Name(&name),
+                &devicemapper::DevId::Name(name),
                 devicemapper::DmOptions::default(),
             )?;
         }
