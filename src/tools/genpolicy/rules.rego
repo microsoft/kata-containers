@@ -1200,6 +1200,10 @@ ExecProcessRequest {
     print("ExecProcessRequest 3: true")
 }
 
+CloseStdinRequest {
+    policy_data.request_defaults.CloseStdinRequest == true
+}
+
 ReadStreamRequest {
     policy_data.request_defaults.ReadStreamRequest == true
 }

@@ -320,6 +320,7 @@
         },
         "ReadStreamRequest": true,
         "UpdateEphemeralMountsRequest": false,
+        "CloseStdinRequest": false,
         "WriteStreamRequest": false
     }
 }
