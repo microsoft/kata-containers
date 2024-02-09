@@ -131,7 +131,7 @@ static int tarfs_readdir(struct file *file, struct dir_context *ctx)
 				break;
 			}
 
-			name_buffer = kmalloc(disk_len, GFP_KERNEL);
+			name_buffer = kmalloc(disk_len, GFP_NOFS);
 			if (!name_buffer) {
 				ret = -ENOMEM;
 				break;
@@ -457,7 +457,7 @@ static struct inode *tarfs_alloc_inode(struct super_block *sb)
 {
 	struct tarfs_inode_info *info;
 
-        info = alloc_inode_sb(sb, tarfs_inode_cachep, GFP_KERNEL);
+        info = alloc_inode_sb(sb, tarfs_inode_cachep, GFP_NOFS);
         if (!info)
                 return NULL;
 
