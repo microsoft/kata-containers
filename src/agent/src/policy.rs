@@ -133,6 +133,9 @@ pub struct AgentPolicy {
 
     /// "/tmp/policy.txt" log file for policy activity.
     log_file: Option<tokio::fs::File>,
+
+    /// Shadow regorus engine
+    engine: regorus::Engine,
 }
 
 impl AgentPolicy {
@@ -140,6 +143,7 @@ impl AgentPolicy {
     pub fn new() -> Self {
         Self {
             allow_failures: false,
+            engine: regorus::Engine::new(),
             ..Default::default()
         }
     }
@@ -163,6 +167,9 @@ impl AgentPolicy {
             );
             debug!(sl!(), "policy: log file: {}", POLICY_LOG_FILE);
         }
+
+        self.engine
+            .add_policy(policy_name.to_string(), default_policy.to_string())?;
 
         if launch_opa {
             start_opa(opa_addr)?;
@@ -214,6 +221,7 @@ impl AgentPolicy {
     async fn allow_request(&mut self, ep: &str, request: &str) -> bool {
         let post_input = format!("{{\"input\":{request}}}");
         self.log_opa_input(ep, &post_input).await;
+
         match self.post_query(ep, &post_input).await {
             Err(e) => {
                 debug!(
@@ -229,6 +237,11 @@ impl AgentPolicy {
     /// Replace the Policy in OPA.
     pub async fn set_policy(&mut self, policy: &str) -> Result<()> {
         check_policy_hash(policy)?;
+
+        // Replace the engine instance.
+        self.engine = regorus::Engine::new();
+        self.engine
+            .add_policy("agent_policy.rego".to_string(), policy.to_string())?;
 
         if let Some(opa_client) = &mut self.opa_client {
             // Delete the old rules.
@@ -262,6 +275,9 @@ impl AgentPolicy {
     async fn post_query(&mut self, ep: &str, post_input: &str) -> Result<bool> {
         debug!(sl!(), "policy check: {ep}");
 
+        self.engine.set_input_json(post_input)?;
+        let regorus_result = self.engine.eval_bool_query(ep.to_string(), false)?;
+
         if let Some(opa_client) = &mut self.opa_client {
             let uri = format!("{}{ep}", &self.query_path);
             let response = opa_client
@@ -291,6 +307,7 @@ impl AgentPolicy {
                             error!(sl!(), "policy: POST {} response <{}>", ep, http_response);
                         }
                     }
+                    assert_eq!(resp.result, regorus_result);
                     Ok(resp.result)
                 }
                 Err(_) => {
