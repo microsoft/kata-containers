@@ -31,6 +31,7 @@ verity = { path = "../tardev-snapshotter/verity" }
 zerocopy = "0.6.1"
 devicemapper = "0.33.1"
 proc-mounts = "0.3.0"
+regorus = { git = "https://github.com/anakrish/regorus", branch="msft-kata-cc", default-features = false, features = ["arc", "regex"] }
 
 # Async helpers
 async-trait = "0.1.42"
