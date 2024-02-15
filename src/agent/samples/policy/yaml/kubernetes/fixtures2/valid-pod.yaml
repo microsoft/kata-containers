@@ -11,7 +11,7 @@ spec:
   runtimeClassName: kata-cc
   containers:
     - name: kubernetes-serve-hostname
-      image: registry.k8s.io/serve_hostname
+      image: "registry.k8s.io/serve_hostname:latest"
       resources:
         limits:
           cpu: "1"

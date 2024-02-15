@@ -39,11 +39,11 @@ runCmd("cargo build")
 # update files
 genpolicy_path = "target/debug/genpolicy"
 for file in defaultYamls:
-    runCmd(f"{genpolicy_path} -y {os.path.join(file_base_path, file)}")
+    runCmd(f"sudo {genpolicy_path} -y {os.path.join(file_base_path, file)}")
 
 for file in silently_ignored:
-    runCmd(f"{genpolicy_path} -y {os.path.join(file_base_path, file)} -s")
+    runCmd(f"sudo {genpolicy_path} -y {os.path.join(file_base_path, file)} -s")
 
 for file in no_policy:
-    runCmd(f"{genpolicy_path} -y {os.path.join(file_base_path, file)}")
+    runCmd(f"sudo {genpolicy_path} -y {os.path.join(file_base_path, file)}")
 
