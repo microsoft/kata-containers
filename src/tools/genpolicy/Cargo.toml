@@ -38,26 +38,24 @@ serde_yaml = "0.8"
 anyhow = "1.0.32"
 async-trait = "0.1.68"
 docker_credential = "1.2.0"
-flate2 = { version = "1.0.26", features = [
-    "zlib-ng",
-], default-features = false }
-openssl = { version = "0.10.54", features = ["vendored"] }
+flate2 = { version = "1.0.26", features = ["zlib-ng"], default-features = false }
+oci-distribution = { version = "0.10.0" }
+openssl = { version = "0.10.54" }
 serde_ignored = "0.1.7"
 serde_json = "1.0.39"
 serde-transcode = "1.1.1"
-tokio = { version = "1.33.0", features = ["full"] }
+tokio = {version = "1.33.0", features = ["rt-multi-thread"]}
 
 # OCI container specs.
 oci = { path = "../../libs/oci" }
 
 # dm-verity root hash support
-
-fs2 = "0.4.3"
 generic-array = "0.14.6"
 sha2 = "0.10.6"
 tarindex = { path = "../../tardev-snapshotter/tarindex" }
 tempfile = "3.5.0"
 zerocopy = "0.6.1"
+fs2 = "0.4.3"
 k8s-cri = "0.7.0"
 tonic = "0.9.2"
 tower = "0.4.13"
