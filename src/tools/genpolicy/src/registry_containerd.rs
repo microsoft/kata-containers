@@ -24,20 +24,16 @@ use tonic::transport::{Endpoint, Uri};
 use tonic::Request;
 use tower::service_fn;
 
-// todo: take from cmdline param. Default to this if not provided
-const CONTAINERD_SOCKET_PATH: &str = "/var/run/containerd/containerd.sock";
-
 impl Container {
-    pub async fn new_containerd_pull(use_cached_files: bool, image: &str) -> Result<Self> {
+    pub async fn new_containerd_pull(image: &str, socket_path: &str) -> Result<Self> {
         info!("============================================");
-        info!("Pulling image and layers for {:?}", image);
+        info!("Pulling image {:?}", image);
 
-        let client = containerd_client::Client::from_path(CONTAINERD_SOCKET_PATH).await?;
-        pull_image(image).await?;
+        let client = containerd_client::Client::from_path(socket_path).await?;
+        pull_image(image, socket_path).await?;
         let manifest = get_image_manifest(image, &client).await?;
-        let config_layer = get_config_layer(image).await.unwrap();
-        let image_layers =
-            get_image_layers(use_cached_files, &manifest, &config_layer, &client).await?;
+        let config_layer = get_config_layer(image, socket_path).await.unwrap();
+        let image_layers = get_image_layers(false, &manifest, &config_layer, &client).await?;
 
         Ok(Container {
             config_layer,
@@ -116,12 +112,14 @@ pub async fn get_image_manifest(
     Ok(get_content(image_digest, &client).await?)
 }
 
-pub async fn get_config_layer(image_ref: &str) -> Result<DockerConfigLayer> {
+pub async fn get_config_layer(
+    image_ref: &str,
+    containerd_socket_path: &str,
+) -> Result<DockerConfigLayer> {
+    let path = containerd_socket_path.to_string();
     let channel = Endpoint::try_from("http://[::]")
         .unwrap()
-        .connect_with_connector(service_fn(move |_: Uri| {
-            UnixStream::connect(CONTAINERD_SOCKET_PATH)
-        }))
+        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path.clone())))
         .await?;
 
     let mut client = ImageServiceClient::new(channel);
@@ -146,12 +144,11 @@ pub async fn get_config_layer(image_ref: &str) -> Result<DockerConfigLayer> {
     Ok(docker_config_layer)
 }
 
-pub async fn pull_image(image_ref: &str) -> Result<()> {
+pub async fn pull_image(image_ref: &str, containerd_socket_path: &str) -> Result<()> {
+    let path = containerd_socket_path.to_string();
     let channel = Endpoint::try_from("http://[::]")
         .unwrap()
-        .connect_with_connector(service_fn(move |_: Uri| {
-            UnixStream::connect(CONTAINERD_SOCKET_PATH)
-        }))
+        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path.clone())))
         .await?;
 
     let mut client = ImageServiceClient::new(channel);

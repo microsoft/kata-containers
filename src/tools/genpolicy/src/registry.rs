@@ -9,6 +9,7 @@
 use crate::policy;
 use crate::verity;
 
+use crate::utils::Config;
 use anyhow::{anyhow, bail, Result};
 use docker_credential::{CredentialRetrievalError, DockerCredential};
 use log::warn;
@@ -421,13 +422,11 @@ fn do_create_verity_hash_file(decompressed_path: &PathBuf) -> Result<()> {
 
     Ok(())
 }
-
-pub async fn get_container(use_cache: bool, image: &str) -> Result<Container> {
-    let useContainerdPull = false;
-    if useContainerdPull {
-        return Container::new_containerd_pull(use_cache, image).await;
+pub async fn get_container(config: &Config, image: &str) -> Result<Container> {
+    if let Some(socket_path) = &config.containerd_socket_path {
+        return Container::new_containerd_pull(image, socket_path).await;
     }
-    Container::new(use_cache, image).await
+    Container::new(config.use_cache, image).await
 }
 
 fn build_auth(reference: &Reference) -> RegistryAuth {
