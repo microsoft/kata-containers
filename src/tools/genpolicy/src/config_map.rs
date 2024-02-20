@@ -11,6 +11,7 @@ use crate::obj_meta;
 use crate::pod;
 use crate::policy;
 use crate::settings;
+use crate::utils::Config;
 use crate::yaml;
 
 use async_trait::async_trait;
@@ -105,7 +106,7 @@ pub fn get_values(config_map_name: &str, config_maps: &Vec<ConfigMap>) -> Option
 impl yaml::K8sResource for ConfigMap {
     async fn init(
         &mut self,
-        _use_cache: bool,
+        _config: &Config,
         doc_mapping: &serde_yaml::Value,
         _silent_unsupported_fields: bool,
     ) {

@@ -11,6 +11,7 @@ use crate::obj_meta;
 use crate::pod;
 use crate::policy;
 use crate::settings;
+use crate::utils::Config;
 use crate::yaml;
 
 use async_trait::async_trait;
@@ -97,7 +98,7 @@ pub fn get_values(secret_name: &str, secrets: &Vec<Secret>) -> Option<Vec<String
 
 #[async_trait]
 impl yaml::K8sResource for Secret {
-    async fn init(&mut self, _use_cache: bool, doc_mapping: &serde_yaml::Value, _silent: bool) {
+    async fn init(&mut self, _config: &Config, doc_mapping: &serde_yaml::Value, _silent: bool) {
         self.doc_mapping = doc_mapping.clone();
     }
 
