@@ -25,15 +25,25 @@ use tonic::Request;
 use tower::service_fn;
 
 impl Container {
-    pub async fn new_containerd_pull(image: &str, socket_path: &str) -> Result<Self> {
+    pub async fn new_containerd_pull(image: &str, containerd_socket_path: &str) -> Result<Self> {
         info!("============================================");
         info!("Pulling image {:?}", image);
 
-        let client = containerd_client::Client::from_path(socket_path).await?;
-        pull_image(image, socket_path).await?;
-        let manifest = get_image_manifest(image, &client).await?;
-        let config_layer = get_config_layer(image, socket_path).await.unwrap();
-        let image_layers = get_image_layers(false, &manifest, &config_layer, &client).await?;
+        let ctrd_path = containerd_socket_path.to_string();
+        let containerd_channel = Endpoint::try_from("http://[::]")
+            .unwrap()
+            .connect_with_connector(service_fn(move |_: Uri| {
+                UnixStream::connect(ctrd_path.clone())
+            }))
+            .await?;
+
+        let ctrd_client = containerd_client::Client::from(containerd_channel.clone());
+        let k8_cri_image_client = ImageServiceClient::new(containerd_channel);
+
+        pull_image(image, k8_cri_image_client.clone()).await?;
+        let manifest = get_image_manifest(image, &ctrd_client).await?;
+        let config_layer = get_config_layer(image, k8_cri_image_client).await.unwrap();
+        let image_layers = get_image_layers(false, &manifest, &config_layer, &ctrd_client).await?;
 
         Ok(Container {
             config_layer,
@@ -80,9 +90,10 @@ pub async fn get_image_manifest(
 
     let image_digest = resp.into_inner().image.unwrap().target.unwrap().digest;
 
+    // content may be an image manifest (https://github.com/opencontainers/image-spec/blob/main/manifest.md)
+    //or an image index (https://github.com/opencontainers/image-spec/blob/main/image-index.md)
     let content = get_content(&image_digest, &client).await?;
 
-    // https://github.com/opencontainers/image-spec/blob/main/manifest.md
     let is_image_manifest = content.get("layers") != None;
 
     if is_image_manifest {
@@ -90,7 +101,6 @@ pub async fn get_image_manifest(
     }
 
     // else, content is an image index
-    // https://github.com/opencontainers/image-spec/blob/main/image-index.md
     let image_index = content;
 
     let manifests = image_index["manifests"].as_array().unwrap();
@@ -114,16 +124,8 @@ pub async fn get_image_manifest(
 
 pub async fn get_config_layer(
     image_ref: &str,
-    containerd_socket_path: &str,
+    mut client: ImageServiceClient<tonic::transport::Channel>,
 ) -> Result<DockerConfigLayer> {
-    let path = containerd_socket_path.to_string();
-    let channel = Endpoint::try_from("http://[::]")
-        .unwrap()
-        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path.clone())))
-        .await?;
-
-    let mut client = ImageServiceClient::new(channel);
-
     let req = k8s_cri::v1::ImageStatusRequest {
         image: Some(k8s_cri::v1::ImageSpec {
             image: image_ref.to_string(),
@@ -144,15 +146,10 @@ pub async fn get_config_layer(
     Ok(docker_config_layer)
 }
 
-pub async fn pull_image(image_ref: &str, containerd_socket_path: &str) -> Result<()> {
-    let path = containerd_socket_path.to_string();
-    let channel = Endpoint::try_from("http://[::]")
-        .unwrap()
-        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path.clone())))
-        .await?;
-
-    let mut client = ImageServiceClient::new(channel);
-
+pub async fn pull_image(
+    image_ref: &str,
+    mut client: ImageServiceClient<tonic::transport::Channel>,
+) -> Result<()> {
     let req = k8s_cri::v1::PullImageRequest {
         image: Some(k8s_cri::v1::ImageSpec {
             image: image_ref.to_string(),
