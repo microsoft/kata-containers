@@ -10,9 +10,11 @@ use crate::verity;
 use anyhow::{anyhow, Result};
 use containerd_client::services::v1::GetImageRequest;
 use containerd_client::with_namespace;
-use k8s_cri::v1::image_service_client::ImageServiceClient;
-use log::info;
+use docker_credential::{CredentialRetrievalError, DockerCredential};
+use k8s_cri::v1::{image_service_client::ImageServiceClient, AuthConfig};
 use log::warn;
+use log::{debug, info};
+use oci_distribution::Reference;
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -147,21 +149,76 @@ pub async fn get_config_layer(
 }
 
 pub async fn pull_image(
-    image_ref: &str,
+    image: &str,
     mut client: ImageServiceClient<tonic::transport::Channel>,
 ) -> Result<()> {
+    let image_ref: Reference = image.to_string().parse().unwrap();
+    let auth = build_auth(&image_ref);
+
+    debug!("cri auth: {:?}", auth);
+
     let req = k8s_cri::v1::PullImageRequest {
         image: Some(k8s_cri::v1::ImageSpec {
-            image: image_ref.to_string(),
+            image: image.to_string(),
             annotations: HashMap::new(),
         }),
-        auth: None,
+        auth,
         sandbox_config: None,
     };
 
     client.pull_image(req).await?;
 
     Ok(())
+}
+
+pub fn build_auth(reference: &Reference) -> Option<AuthConfig> {
+    debug!("build_auth: {:?}", reference);
+
+    let server = reference
+        .resolve_registry()
+        .strip_suffix('/')
+        .unwrap_or_else(|| reference.resolve_registry());
+
+    debug!("server: {:?}", server);
+
+    match docker_credential::get_credential(server) {
+        Ok(DockerCredential::UsernamePassword(username, password)) => {
+            debug!("build_auth: Found docker credentials");
+            return Some(AuthConfig {
+                username,
+                password,
+                auth: "".to_string(),
+                server_address: "".to_string(),
+                identity_token: "".to_string(),
+                registry_token: "".to_string(),
+            });
+        }
+        Ok(DockerCredential::IdentityToken(_)) => {
+            warn!("build_auth: Cannot use contents of docker config, identity token not supported. Using anonymous access.");
+        }
+        Err(CredentialRetrievalError::ConfigNotFound) => {
+            debug!("build_auth: Docker config not found - using anonymous access.");
+        }
+        Err(CredentialRetrievalError::NoCredentialConfigured) => {
+            debug!("build_auth: Docker credentials not configured - using anonymous access.");
+        }
+        Err(CredentialRetrievalError::ConfigReadError) => {
+            debug!("build_auth: Cannot read docker credentials - using anonymous access.");
+        }
+        Err(CredentialRetrievalError::HelperFailure { stdout, stderr }) => {
+            if stdout == "credentials not found in native keychain\n" {
+                // On WSL, this error is generated when credentials are not
+                // available in ~/.docker/config.json.
+                debug!("build_auth: Docker credentials not found - using anonymous access.");
+            } else {
+                warn!("build_auth: Docker credentials not found - using anonymous access. stderr = {}, stdout = {}",
+                    &stderr, &stdout);
+            }
+        }
+        Err(e) => panic!("Error handling docker configuration file: {}", e),
+    }
+
+    None
 }
 
 pub async fn get_image_layers(
