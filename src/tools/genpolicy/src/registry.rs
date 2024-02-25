@@ -257,25 +257,25 @@ async fn get_image_layers(
     Ok(layers)
 }
 
-fn get_verity_path(base_dir: &Path, file_name: &str) -> PathBuf {
+pub fn get_verity_path(base_dir: &Path, file_name: &str) -> PathBuf {
     let mut verity_path: PathBuf = base_dir.join(file_name);
     verity_path.set_extension("verity");
     verity_path
 }
 
-fn get_decompressed_path(verity_path: &Path) -> PathBuf {
+pub fn get_decompressed_path(verity_path: &Path) -> PathBuf {
     let mut decompressed_path = verity_path.to_path_buf().clone();
     decompressed_path.set_extension("tar");
     decompressed_path
 }
 
-fn get_compressed_path(decompressed_path: &Path) -> PathBuf {
+pub fn get_compressed_path(decompressed_path: &Path) -> PathBuf {
     let mut compressed_path = decompressed_path.to_path_buf().clone();
     compressed_path.set_extension("gz");
     compressed_path
 }
 
-async fn delete_files(base_dir: &Path, file_name: &str) {
+pub async fn delete_files(base_dir: &Path, file_name: &str) {
     let verity_path = get_verity_path(base_dir, file_name);
     let _ = fs::remove_file(&verity_path).await;
 
@@ -396,7 +396,7 @@ async fn create_decompressed_layer_file(
     Ok(())
 }
 
-fn do_create_verity_hash_file(decompressed_path: &PathBuf) -> Result<()> {
+pub fn do_create_verity_hash_file(decompressed_path: &PathBuf) -> Result<()> {
     info!("Calculating dm-verity root hash");
     let mut file = std::fs::File::open(decompressed_path)?;
     let size = file.seek(std::io::SeekFrom::End(0))?;
@@ -424,7 +424,7 @@ fn do_create_verity_hash_file(decompressed_path: &PathBuf) -> Result<()> {
 }
 pub async fn get_container(config: &Config, image: &str) -> Result<Container> {
     if let Some(socket_path) = &config.containerd_socket_path {
-        return Container::new_containerd_pull(image, socket_path).await;
+        return Container::new_containerd_pull(config.use_cache, image, socket_path).await;
     }
     Container::new(config.use_cache, image).await
 }
