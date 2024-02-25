@@ -27,7 +27,11 @@ use tonic::Request;
 use tower::service_fn;
 
 impl Container {
-    pub async fn new_containerd_pull(image: &str, containerd_socket_path: &str) -> Result<Self> {
+    pub async fn new_containerd_pull(
+        use_cached_files: bool,
+        image: &str,
+        containerd_socket_path: &str,
+    ) -> Result<Self> {
         info!("============================================");
         info!("Pulling image {:?}", image);
 
@@ -45,7 +49,8 @@ impl Container {
         pull_image(image, k8_cri_image_client.clone()).await?;
         let manifest = get_image_manifest(image, &ctrd_client).await?;
         let config_layer = get_config_layer(image, k8_cri_image_client).await.unwrap();
-        let image_layers = get_image_layers(false, &manifest, &config_layer, &ctrd_client).await?;
+        let image_layers =
+            get_image_layers(use_cached_files, &manifest, &config_layer, &ctrd_client).await?;
 
         Ok(Container {
             config_layer,
