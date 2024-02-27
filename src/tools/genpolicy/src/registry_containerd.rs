@@ -198,9 +198,18 @@ pub fn build_auth(reference: &Reference) -> Option<AuthConfig> {
                 registry_token: "".to_string(),
             });
         }
-        Ok(DockerCredential::IdentityToken(_)) => {
-            warn!("build_auth: Cannot use contents of docker config, identity token not supported. Using anonymous access.");
+        Ok(DockerCredential::IdentityToken(identity_token)) => {
+            debug!("build_auth: Found identity token");
+            return Some(AuthConfig {
+                username: "".to_string(),
+                password: "".to_string(),
+                auth: "".to_string(),
+                server_address: "".to_string(),
+                identity_token,
+                registry_token: "".to_string(),
+            });
         }
+
         Err(CredentialRetrievalError::ConfigNotFound) => {
             debug!("build_auth: Docker config not found - using anonymous access.");
         }

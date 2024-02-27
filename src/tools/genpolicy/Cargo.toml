@@ -37,7 +37,7 @@ serde_yaml = "0.8"
 # Container repository.
 anyhow = "1.0.32"
 async-trait = "0.1.68"
-docker_credential = "1.2.0"
+docker_credential = "1.2.1"
 flate2 = { version = "1.0.26", features = ["zlib-ng"], default-features = false }
 oci-distribution = { version = "0.10.0" }
 openssl = { version = "0.10.54" }
