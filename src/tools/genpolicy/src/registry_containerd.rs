@@ -5,7 +5,9 @@
 
 // Allow Docker image config field names.
 #![allow(non_snake_case)]
-use crate::registry::{Container, DockerConfigLayer, ImageLayer};
+use crate::registry::{
+    add_verity_to_store, read_verity_from_store, Container, DockerConfigLayer, ImageLayer,
+};
 use crate::verity;
 use anyhow::{anyhow, Result};
 use containerd_client::services::v1::GetImageRequest;
@@ -258,6 +260,7 @@ pub async fn get_image_layers(
                         use_cached_files,
                         layer["digest"].as_str().unwrap(),
                         &client,
+                        &config_layer.rootfs.diff_ids[layer_index].clone(),
                     )
                     .await?,
                 };
@@ -278,6 +281,7 @@ async fn get_verity_hash(
     use_cached_files: bool,
     layer_digest: &str,
     client: &containerd_client::Client,
+    diff_id: &str,
 ) -> Result<String> {
     let temp_dir = tempfile::tempdir_in(".")?;
     let base_dir = temp_dir.path();
@@ -297,39 +301,45 @@ async fn get_verity_hash(
     let mut error_message = "".to_string();
     let mut error = false;
 
-    if use_cached_files && verity_path.exists() {
-        // may not need any caching mechanism since layer should already be present in containerd
-        // verity_hash = read_verity_from_store(cache_file, diff_id)?;
+    if use_cached_files {
+        verity_hash = read_verity_from_store(cache_file, diff_id)?;
         info!("Using cache file");
         info!("dm-verity root hash: {verity_hash}");
-    } else if let Err(e) = create_verity_hash_file(
-        use_cached_files,
-        layer_digest,
-        &base_dir,
-        &decompressed_path,
-        &compressed_path,
-        &verity_path,
-        &client,
-    )
-    .await
-    {
-        error = true;
-        error_message = format!("Failed to create verity hash for {layer_digest}, error {e}");
     }
 
-    if !error {
-        match std::fs::read_to_string(&verity_path) {
-            Err(e) => {
-                error = true;
-                error_message = format!("Failed to read {:?}, error {e}", &verity_path);
-            }
-            Ok(v) => {
-                verity_hash = v;
-                info!("dm-verity root hash: {verity_hash}");
+    if verity_hash.is_empty() {
+        // go find verity hash if not found in cache
+        if let Err(e) = create_verity_hash_file(
+            use_cached_files,
+            layer_digest,
+            &base_dir,
+            &decompressed_path,
+            &compressed_path,
+            &verity_path,
+            &client,
+        )
+        .await
+        {
+            error = true;
+            error_message = format!("Failed to create verity hash for {layer_digest}, error {e}");
+        }
+
+        if !error {
+            match std::fs::read_to_string(&verity_path) {
+                Err(e) => {
+                    error = true;
+                    error_message = format!("Failed to read {:?}, error {e}", &verity_path);
+                }
+                Ok(v) => {
+                    verity_hash = v;
+                    if use_cached_files {
+                        add_verity_to_store(cache_file, diff_id, &verity_hash)?;
+                    }
+                    info!("dm-verity root hash: {verity_hash}");
+                }
             }
         }
     }
-
     temp_dir.close()?;
     if error {
         // remove the cache file if we're using it
@@ -337,8 +347,6 @@ async fn get_verity_hash(
             std::fs::remove_file(cache_file)?;
         }
         warn!("{error_message}");
-    } else {
-        return Ok(verity_hash);
     }
     Ok(verity_hash)
 }

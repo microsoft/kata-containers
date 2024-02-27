@@ -331,7 +331,7 @@ async fn get_verity_hash(
 }
 
 // the store is a json file that matches layer hashes to verity hashes
-fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -> Result<()> {
+pub fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -> Result<()> {
     // open the json file in read mode, create it if it doesn't exist
     let read_file = OpenOptions::new()
         .read(true)
@@ -374,7 +374,7 @@ fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -> Re
 
 // helper function to read the verity hash from the store
 // returns empty string if not found or file does not exist
-fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<String> {
+pub fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<String> {
     match OpenOptions::new().read(true).open(cache_file) {
         Ok(file) => match serde_json::from_reader(file) {
             Result::<Vec<ImageLayer>, _>::Ok(layers) => {
