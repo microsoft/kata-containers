@@ -95,7 +95,7 @@ func (device *BlockDevice) Attach(ctx context.Context, devReceiver api.DeviceRec
 
 		switch customOptions[config.BlockDriverOpt] {
 		case config.VirtioBlock:
-			globalIdx = index
+			globalIdx = index + 1
 		case config.VirtioBlockCCW:
 			globalIdx = index
 		case config.VirtioMmio:
