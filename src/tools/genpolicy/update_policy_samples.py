@@ -2,7 +2,7 @@ import os
 import subprocess
 import sys
 import json
-
+import time
 # runs genpolicy tools on the following files
 # should run this after any change to genpolicy
 # usage: python3 update_policy_samples.py
@@ -27,6 +27,12 @@ def runCmd(arg):
         print(f"`{arg}` failed with exit code {proc.returncode}. Stderr: {proc.stderr}, Stdout: {proc.stdout}")
     return proc
 
+def timeRunCmd(arg):
+    start = time.time()
+    runCmd(arg)
+    end = time.time()
+    print(f"Time taken: {round(end - start, 2)} seconds")
+
 # check we can access all files we are about to update
 for file in defaultYamls + silently_ignored + no_policy:
     filepath = os.path.join(file_base_path, file)
@@ -38,12 +44,18 @@ runCmd("cargo build")
 
 # update files
 genpolicy_path = "target/debug/genpolicy"
+
+total_start = time.time()
+
 for file in defaultYamls:
-    runCmd(f"sudo {genpolicy_path} -d -y {os.path.join(file_base_path, file)}")
+    timeRunCmd(f"sudo {genpolicy_path} -d -y {os.path.join(file_base_path, file)}")
 
 for file in silently_ignored:
-    runCmd(f"sudo {genpolicy_path} -d -y {os.path.join(file_base_path, file)} -s")
+    timeRunCmd(f"sudo {genpolicy_path} -d -y {os.path.join(file_base_path, file)} -s")
 
 for file in no_policy:
-    runCmd(f"sudo {genpolicy_path} -d -y {os.path.join(file_base_path, file)}")
+    timeRunCmd(f"sudo {genpolicy_path} -d -y {os.path.join(file_base_path, file)}")
 
+total_end = time.time()
+
+print(f"Total time taken: {total_end - total_start} seconds")
