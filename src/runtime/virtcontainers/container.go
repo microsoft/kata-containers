@@ -921,6 +921,10 @@ func (c *Container) create(ctx context.Context) (err error) {
 		}
 	}
 
+	if err = c.hotPlugEmptyDirDrive(ctx); err != nil {
+		return
+	}
+
 	// If cold-plug we've attached the devices already, do not try to
 	// attach them a second time.
 	coldPlugVFIO := (c.sandbox.config.HypervisorConfig.ColdPlugVFIO != config.NoPort)
@@ -1287,6 +1291,21 @@ func (c *Container) resume(ctx context.Context) error {
 	}
 
 	return c.setContainerState(types.StateRunning)
+}
+
+func (c *Container) hotPlugEmptyDirDrive(ctx context.Context) error {
+	devicePath := "/dev/loop0"
+	b, err := c.sandbox.devManager.NewDevice(config.DeviceInfo{
+		HostPath:      devicePath,
+		ContainerPath: "/mnt/emptyDir",
+		DevType:       "b",
+		Major:         7,
+		Minor:         0,
+	})
+	if err != nil {
+		return fmt.Errorf("device manager failed to create emptyDir device for %q: %v", devicePath, err)
+	}
+	return c.sandbox.devManager.AttachDevice(ctx, b.DeviceID(), c.sandbox)
 }
 
 // hotplugDrive will attempt to hotplug the container rootfs if it is backed by a
