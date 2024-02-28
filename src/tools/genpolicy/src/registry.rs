@@ -24,16 +24,16 @@ use tokio::{fs, io::AsyncWriteExt};
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
 pub struct Container {
-    config_layer: DockerConfigLayer,
-    image_layers: Vec<ImageLayer>,
+    pub config_layer: DockerConfigLayer,
+    pub image_layers: Vec<ImageLayer>,
 }
 
 /// Image config layer properties.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct DockerConfigLayer {
+pub struct DockerConfigLayer {
     architecture: String,
     config: DockerImageConfig,
-    rootfs: DockerRootfs,
+    pub rootfs: DockerRootfs,
 }
 
 /// Image config properties.
@@ -49,9 +49,9 @@ struct DockerImageConfig {
 
 /// Container rootfs information.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct DockerRootfs {
+pub struct DockerRootfs {
     r#type: String,
-    diff_ids: Vec<String>,
+    pub diff_ids: Vec<String>,
 }
 
 /// This application's image layer properties.
@@ -423,6 +423,10 @@ fn do_create_verity_hash_file(decompressed_path: &PathBuf) -> Result<()> {
 }
 
 pub async fn get_container(use_cache: bool, image: &str) -> Result<Container> {
+    let useContainerdPull = false;
+    if useContainerdPull {
+        return Container::new_containerd_pull(use_cache, image).await;
+    }
     Container::new(use_cache, image).await
 }
 
