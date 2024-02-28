@@ -61,6 +61,9 @@ const (
 	// containers.
 	KataLocalDevType = "local"
 
+	// KataBlkDevType mounts a block device with virtio-blk.
+	KataBlkDevType = "blk"
+
 	// Allocating an FSGroup that owns the pod's volumes
 	fsGid = "fsgid"
 
@@ -1517,30 +1520,21 @@ func (k *kataAgent) handleLocalStorage(mounts []specs.Mount, sandboxID string, r
 				return nil, err
 			}
 
-			dir_options := localDirOptions
-
-			// if volume's gid isn't root group(default group), this means there's
-			// an specific fsGroup is set on this local volume, then it should pass
-			// to guest.
-			if stat.Gid != 0 {
-				dir_options = append(dir_options, fmt.Sprintf("%s=%d", fsGid, stat.Gid))
-			}
-
 			// Set the mount source path to a the desired directory point in the VM.
 			// In this case it is located in the sandbox directory.
 			// We rely on the fact that the first container in the VM has the same ID as the sandbox ID.
 			// In Kubernetes, this is usually the pause container and we depend on it existing for
 			// local directories to work.
-			mounts[idx].Source = filepath.Join(kataGuestSharedDir(), sandboxID, rootfsSuffix, KataLocalDevType, filepath.Base(mnt.Source))
+			mounts[idx].Source = "/tmp/mnt/empty"
 
 			// Create a storage struct so that the kata agent is able to create the
 			// directory inside the VM.
 			localStorage := &grpc.Storage{
-				Driver:     KataLocalDevType,
-				Source:     KataLocalDevType,
-				Fstype:     KataLocalDevType,
+				Driver:     KataBlkDevType,
+				Source:     "/dev/vdb",
+				Fstype:     "ext4",
 				MountPoint: mounts[idx].Source,
-				Options:    dir_options,
+				Options:    nil,
 			}
 			localStorages = append(localStorages, localStorage)
 		}
