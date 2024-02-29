@@ -21,3 +21,4 @@ kubernetes:
   - k8s-inotify
   - k8s-qos-pods
   - k8s-footloose
+  - k8s-pod-manifest-v1.bats
