@@ -92,6 +92,8 @@ const (
 	fieldsPerLine = 6
 )
 
+type procIndex int
+
 const (
 	procDeviceIndex = iota
 	procPathIndex
@@ -99,11 +101,28 @@ const (
 	procOptionIndex
 )
 
+// GetDevicePathAndFsTypeOptions gets the mount point for the device, the file system type
+// and mount options
+func GetMountPointAndFsTypeOptions(devicePath string) (mountPoint, fsType string, fsOptions []string, err error) {
+	_, mountPoint, fsType, fsOptions, err = getFsTypeOptionsBy(procDeviceIndex, devicePath)
+	return mountPoint, fsType, fsOptions, err
+}
+
 // GetDevicePathAndFsTypeOptions gets the device for the mount point, the file system type
 // and mount options
 func GetDevicePathAndFsTypeOptions(mountPoint string) (devicePath, fsType string, fsOptions []string, err error) {
-	if mountPoint == "" {
-		err = fmt.Errorf("Mount point cannot be empty")
+	devicePath, _, fsType, fsOptions, err = getFsTypeOptionsBy(procPathIndex, mountPoint)
+	return devicePath, fsType, fsOptions, err
+}
+
+func getFsTypeOptionsBy(index procIndex, search string) (devicePath, mountPoint, fsType string, fsOptions []string, err error) {
+	if index != procDeviceIndex && index != procPathIndex {
+		err = fmt.Errorf("index must be either procDeviceIndex or procPathIndex")
+		return
+	}
+
+	if search == "" {
+		err = fmt.Errorf("search cannot be empty")
 		return
 	}
 
@@ -132,8 +151,15 @@ func GetDevicePathAndFsTypeOptions(mountPoint string) (devicePath, fsType string
 			return
 		}
 
-		if mountPoint == fields[procPathIndex] {
+		if index == procDeviceIndex && search == fields[procDeviceIndex] {
+			devicePath = search
+			mountPoint = fields[procPathIndex]
+			fsType = fields[procTypeIndex]
+			fsOptions = strings.Split(fields[procOptionIndex], ",")
+			return
+		} else if index == procPathIndex && search == fields[procPathIndex] {
 			devicePath = fields[procDeviceIndex]
+			mountPoint = search
 			fsType = fields[procTypeIndex]
 			fsOptions = strings.Split(fields[procOptionIndex], ",")
 			return

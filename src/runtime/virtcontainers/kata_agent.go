@@ -1596,10 +1596,22 @@ func (k *kataAgent) handleDeviceBlockVolume(c *Container, m Mount, device api.De
 
 	vol.MountPoint = m.Destination
 
-	// If no explicit FS Type or Options are being set, then let's use what is provided for the particular mount:
+	// If the FS type isn't set, query the mounted devices for it. If that
+	// fails, use the specified mount type:
+	// * In general, block devices such as emptyDirs have m.Type == "blk", which
+	//   mount(2) does not understand, so we query /proc/mounts.
+	// * However for layers, m.Type can refer to a specific kernel module such
+	//   as tarfs (m.Type == "tar", which furthermore aren't mounted as they're
+	//   regular files), so we fall back on m.Type if the previous lookup failed.
 	if vol.Fstype == "" {
+		if _, fstype, _, err := utils.GetMountPointAndFsTypeOptions(m.Source); err == nil && fstype != "" {
+			vol.Fstype = fstype
+		} else {
 		vol.Fstype = m.Type
 	}
+	}
+	// If no explicit options are set, use what is provided for that particular
+	// mount.
 	if len(vol.Options) == 0 {
 		vol.Options = m.Options
 	}
