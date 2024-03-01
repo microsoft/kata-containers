@@ -3,11 +3,11 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: nginxhttps
-
+  
 spec:
   runtimeClassName: kata
   containers:
     - name: nginxhttps
-      image: "docker.io/bprashanth/nginxhttps:1.0"
+      image: "quay.io/redent0r/nginxhttps_no_vol:1.5"
       ports:
         - containerPort: 80

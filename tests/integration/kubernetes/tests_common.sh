@@ -133,7 +133,7 @@ create_common_genpolicy_settings() {
 	set_namespace_to_policy_settings "${genpolicy_settings_dir}" "${TEST_CLUSTER_NAMESPACE}"
 
 	# allow genpolicy to access containerd without sudo
-	sudo chown "$(whoami)" /var/run/containerd/containerd.sock
+	sudo chmod a+rw /var/run/containerd/containerd.sock
 }
 
 # If auto-generated policy testing is enabled, make a copy of the common genpolicy settings
@@ -169,7 +169,7 @@ auto_generate_policy() {
 	declare -r config_map_yaml_file="$3"
 
 	auto_generate_policy_enabled || return 0
-	local genpolicy_command="RUST_LOG=info /opt/kata/bin/genpolicy -ud -y ${yaml_file}"
+	local genpolicy_command="RUST_LOG=info /opt/kata/bin/genpolicy -u -d -y ${yaml_file}"
 	genpolicy_command+=" -p ${settings_dir}/rules.rego"
 	genpolicy_command+=" -j ${settings_dir}/genpolicy-settings.json"
 

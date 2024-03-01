@@ -34,7 +34,10 @@ impl Container {
         containerd_socket_path: &str,
     ) -> Result<Self> {
         info!("============================================");
-        info!("Pulling image {:?}", image);
+        info!(
+            "Pulling image {:?} using socket file: {:?}",
+            image, containerd_socket_path
+        );
 
         let ctrd_path = containerd_socket_path.to_string();
         let containerd_channel = Endpoint::try_from("http://[::]")
