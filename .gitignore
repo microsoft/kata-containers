@@ -16,3 +16,20 @@ src/agent/protocols/src/*.rs
 build
 src/tools/log-parser/kata-log-parser
 tools/packaging/static-build/agent/install_libseccomp.sh
+
+# Microsoft-specific
+.cargo/
+vendor/
+src/agent/samples/policy/test-input/
+src/tarfs/**/*.cmd
+src/tarfs/**/*.ko
+src/tarfs/**/*.mod
+src/tarfs/**/*.mod.c
+src/tarfs/**/*.o
+src/tarfs/**/modules.order
+src/tarfs/**/Module.symvers
+src/tarfs-cvm/
+tools/osbuilder/root_hash.txt
+tools/osbuilder/igvm.log
+tools/osbuilder/kata-opa.service
+tools/osbuilder/rootfs-builder/opa/
