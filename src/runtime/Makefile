@@ -491,6 +491,18 @@ ifneq (,$(CLHCMD))
 
     CONFIGS += $(CONFIG_CLH)
 
+    CONFIG_FILE_CLH_SNP = configuration-clh-snp.toml
+    CONFIG_CLH_SNP = config/$(CONFIG_FILE_CLH_SNP)
+    CONFIG_CLH_SNP_IN = $(CONFIG_CLH_SNP).in
+
+    CONFIG_PATH_CLH_SNP = $(abspath $(CONFDIR)/$(CONFIG_FILE_CLH_SNP))
+    CONFIG_PATHS += $(CONFIG_PATH_CLH_SNP)
+
+    SYSCONFIG_CLH_SNP = $(abspath $(SYSCONFDIR)/$(CONFIG_FILE_CLH_SNP))
+    SYSCONFIG_PATHS += $(SYSCONFIG_CLH_SNP)
+
+    CONFIGS += $(CONFIG_CLH_SNP)
+
     # CLH-specific options (all should be suffixed by "_CLH")
     # currently, huge pages are required for virtiofsd support
     DEFNETWORKMODEL_CLH := tcfilter
