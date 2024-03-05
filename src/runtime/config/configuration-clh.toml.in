@@ -15,7 +15,6 @@
 path = "@CLHPATH@"
 kernel = "@KERNELPATH_CLH@"
 image = "@IMAGEPATH@"
-#initrd = "@INITRDPATH@"
 
 # rootfs filesystem type:
 #   - ext4 (default)
