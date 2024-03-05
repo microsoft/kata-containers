@@ -30,5 +30,6 @@ src/tarfs/**/modules.order
 src/tarfs/**/Module.symvers
 src/tarfs-cvm/
 tools/osbuilder/root_hash.txt
+tools/osbuilder/igvm.log
 tools/osbuilder/kata-opa.service
 tools/osbuilder/rootfs-builder/opa/

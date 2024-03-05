@@ -1,5 +1,4 @@
-# Copyright (c) 2019 Ericsson Eurolab Deutschland GmbH
-# Copyright (c) 2021 Adobe Inc.
+# Copyright (c) 2023 Microsoft Corporation
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -45,12 +44,7 @@ confidential_guest = true
 # This is used in the CLH code path to request SEV SNP encryption. The function availableGuestProtection (see hypervisor_linux_amd64.go)
 # that detects guest protection features hypervisor_linux_amd64.go only supports QEMU/KVM platforms, and currently there is no way to
 # detect SEV SNP support with CLH/MSHV.
-sev_snp_guest = @DEFSNPGUEST@
-
-# SNP guest policy
-# Based on SEV Secure Nested Paging Firmware ABI Specification section 4.3
-# If it is unspecified or 0, it will default to 0x30000 (i.e. Bit#17 is '1' which is reserved and Bit#16 is '1' which means SMT is allowed).
-snp_guest_policy=@DEFSNPGUESTPOLICY@
+sev_snp_guest = true
 
 # Enable running clh VMM as a non-root user.
 # By default clh VMM run as root. When this is set to true, clh VMM process runs as
