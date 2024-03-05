@@ -49,6 +49,7 @@ fn visit_breadth_first_mut(
 fn read_all_entries(
     reader: &mut (impl io::Read + io::Seek),
     root: &mut Rc<RefCell<Entry>>,
+    special_link: &mut Vec<Vec<u8>>,
     mut cb: impl FnMut(&mut Rc<RefCell<Entry>>, &[u8], &Entry),
     mut hardlink: impl FnMut(&mut Rc<RefCell<Entry>>, &[u8], &[u8]),
 ) -> io::Result<u64> {
@@ -136,18 +137,12 @@ fn read_all_entries(
                             .link_name_bytes()
                             .unwrap_or(std::borrow::Cow::Borrowed(b""));
                         if *hname != *name {
-                            // TODO: Handle this case by duplicating the full name.
-                            eprintln!(
-                                "Skipping symlink with long link name ({}, {} bytes, {}, {} bytes): {}",
-                                String::from_utf8_lossy(&name), name.len(),
-                                String::from_utf8_lossy(&hname), hname.len(),
-                                String::from_utf8_lossy(&f.path_bytes())
-                            );
-                            continue;
+                            special_link.push(name.to_vec());
+                            entry_offset = 0;
+                        } else {
+                            entry_offset = f.raw_header_position() + 157;
                         }
-
                         entry_size = name.len() as u64;
-                        entry_offset = f.raw_header_position() + 157;
                     }
                     None => {
                         eprintln!(
@@ -306,10 +301,11 @@ pub fn append_index(data: &mut (impl io::Read + io::Write + io::Seek)) -> io::Re
         mode: S_IFDIR | 0o555,
         ..Entry::default()
     }));
-
+    let mut special_link = Vec::new();
     let contents_size = read_all_entries(
         data,
         &mut root,
+        &mut special_link,
         |root, name, e| {
             // Break the name into path components.
             let mut path = if let Some(p) = clean_path(name) {
@@ -427,12 +423,22 @@ pub fn append_index(data: &mut (impl io::Read + io::Write + io::Seek)) -> io::Re
     // Calculate the offsets for directory entries.
     let inode_table_size: u64 = mem::size_of::<Inode>() as u64 * ino_count;
     let string_table_offset = init_direntry_offset(root.clone(), contents_size + inode_table_size)?;
+    let mut symlink_offset = string_table_offset;
 
     // Write the i-node table.
     visit_breadth_first_mut(root.clone(), |e| {
         if e.emitted {
             return Ok(());
         }
+
+        // Check for special symlink names
+        let inode_offset = if (e.mode & S_IFMT) != S_IFLNK || e.offset != 0 {
+            e.offset
+        } else {
+            let v = symlink_offset;
+            symlink_offset += e.size;
+            v
+        };
 
         e.emitted = true;
         let inode = Inode {
@@ -447,14 +453,20 @@ pub fn append_index(data: &mut (impl io::Read + io::Write + io::Seek)) -> io::Re
             group: e.group.into(),
             lmtime: (e.mtime as u32).into(),
             size: e.size.into(),
-            offset: e.offset.into(),
+            offset: inode_offset.into(),
         };
         data.write_all(inode.as_bytes())?;
         Ok(())
     })?;
 
     // Write the directory bodies.
-    let mut end_offset = write_direntry_bodies(root.clone(), string_table_offset, data)?;
+    let mut end_offset = write_direntry_bodies(root.clone(), symlink_offset, data)?;
+
+    // Duplicate special symlink names.
+    for link_name in special_link.iter() {
+        data.write_all(link_name.as_bytes())?;
+        end_offset += link_name.len() as u64;
+    }
 
     // Write the strings.
     visit_breadth_first_mut(root, |e| {
