@@ -5,6 +5,7 @@ obj-m := tarfs.o
 else
 
 KDIR ?= /lib/modules/`uname -r`/build
+KVER ?= `uname -r`
 INSTALL_MOD_PATH ?= $$PWD/_install
 
 default:
@@ -12,6 +13,7 @@ default:
 
 install:
 	$(MAKE) -C $(KDIR) M=$$PWD INSTALL_MOD_PATH=$(INSTALL_MOD_PATH) modules_install
+	depmod -a -b $(INSTALL_MOD_PATH) $(KVER)
 
 clean:
 	rm -rf _install
