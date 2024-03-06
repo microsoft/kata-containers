@@ -11,7 +11,10 @@ package containerdshim
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/user"
 	"path"
@@ -32,6 +35,9 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 
 	// only register the proto type
 	crioption "github.com/containerd/containerd/pkg/runtimeoptions/v1"
@@ -159,6 +165,153 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 
 	detach := !r.Terminal
 	ociSpec, bundlePath, err := loadSpec(r)
+
+	// for each mount object, check the source path for csi/cifs mounts
+	for i, m := range ociSpec.Mounts {
+		// if m.Source contains ~csi, then it is a csi mount, check files
+		if !(strings.Contains(m.Source, "~csi") || strings.Contains(m.Source, "~cifs")) {
+			continue
+		}
+		// Check the files in the source directory for vol_data.json and  proceed to update Mount object if the storage driver is file.csi.azure.com
+		p := filepath.Dir(m.Source)
+		dir, err := os.Open(p)
+		if err != nil {
+			shimLog.Info("archana: error opening the csi host mount directory")
+		}
+		defer dir.Close()
+		files, err := dir.Readdir(0)
+		if err != nil {
+			shimLog.Info("archana: error the csi host mount directory")
+		}
+		for _, file := range files {
+			// if file name is vol_data.json, then get its contents
+			if file.Name() == "vol_data.json" {
+				shimLog.WithFields(
+					logrus.Fields{
+						"file": file.Name(),
+					}).Info("archana: vol_data.json file present in the source")
+
+				f, err := os.Open(p + "/" + file.Name())
+				if err != nil {
+					shimLog.Info("archana: error opening the file vol_data.json")
+				}
+				defer f.Close()
+				contents, err := io.ReadAll(f)
+
+				if err != nil {
+					shimLog.Info("archana: error reading the file vol_data.json")
+				}
+				type volData struct {
+					AttachmentID        string `json:"attachmentID"`
+					DriverName          string `json:"driverName"`
+					NodeName            string `json:"nodeName"`
+					SpecVolID           string `json:"specVolID"`
+					VolumeLifecycleMode string `json:"volumeLifecycleMode"`
+					VolumeHandle        string `json:"volumeHandle"`
+				}
+				var volData_ volData
+				err = json.Unmarshal(contents, &volData_)
+				if err != nil {
+					shimLog.Info("archana: error parsing the file vol_data.json")
+				}
+				// check if the drive name matches azure file csi driver's name
+				// This code is similar to what node controller of azurefile csi driver does https://github.com/kubernetes-sigs/azurefile-csi-driver/blob/7671de6256e3e604b32e006ae143d49cf4a981fc/pkg/azurefile/nodeserver.go#L156
+				if volData_.DriverName == "file.csi.azure.com" {
+					// Get the account name from volume handle
+					accountName := strings.Split(volData_.VolumeHandle, "#")[1]
+					fileShareName := strings.Split(volData_.VolumeHandle, "#")[2]
+					// get the k8s secret associated with the volume
+					k8sSecretName := "azure-storage-account" + "-" + accountName + "-secret"
+					var secretData map[string]string
+
+					// get the k8s secret associated with the volume
+					config, err := clientcmd.BuildConfigFromFlags("", "/var/lib/kubelet/kubeconfig")
+					if err != nil {
+						shimLog.Info(err)
+					}
+					clientset, err := kubernetes.NewForConfig(config)
+					if err != nil {
+						shimLog.Info(err)
+					}
+					// Get pod with name like csi-azurefile-node-* and namespace kube-system
+					pods, err := clientset.CoreV1().Pods("kube-system").List(context.TODO(), metav1.ListOptions{
+						LabelSelector: "app=csi-azurefile-node",
+					})
+					if err != nil {
+						shimLog.Info(err)
+					}
+					// get the uid of pod
+					for _, pod := range pods.Items {
+						podUID := pod.UID
+						// get the volume name from pod that looks like kube-api-access-*
+						for _, volume := range pod.Spec.Volumes {
+							if strings.Contains(volume.Name, "kube-api-access") {
+								// get the token and ca.crt from path <pod_path>/kuberenetes.io~projected/kube-api-access
+								saPath := "/var/lib/kubelet/pods/" + string(podUID) + "/volumes/kubernetes.io~projected/" + volume.Name
+								tokenPath := saPath + "/token"
+								caPath := saPath + "/ca.crt"
+								token, err := os.ReadFile(tokenPath)
+								if err != nil {
+									shimLog.Info(err)
+								}
+								if err != nil {
+									shimLog.Info(err)
+								}
+								// create a k8s client
+								restConfig := config
+								restConfig.BearerToken = string(token)
+								restConfig.TLSClientConfig.CAFile = caPath
+								// remove key and cert
+								restConfig.TLSClientConfig.KeyFile = ""
+								restConfig.TLSClientConfig.CertFile = ""
+								clientset2, err := kubernetes.NewForConfig(restConfig)
+								if err != nil {
+									shimLog.Info(err)
+								}
+								// get the secret
+								secret, err := clientset2.CoreV1().Secrets("default").Get(context.TODO(), k8sSecretName, metav1.GetOptions{})
+								if err != nil {
+									shimLog.Info(err)
+								}
+								// get the secret data
+								secretData = make(map[string]string)
+								for key, value := range secret.Data {
+									secretData[key] = string(value)
+								}
+								break
+							}
+						}
+					}
+					// get the share path
+					sharePath := "//" + accountName + ".file.core.windows.net/" + fileShareName
+					// for some reason, addr is not being resolved to ip address, so need to get the ip address of the share
+					// get the ip address of the shar
+					ipAddr, err := net.ResolveIPAddr("ip", accountName+".file.core.windows.net")
+					if err != nil {
+						shimLog.Info(err)
+					}
+					// get the mount options
+					mountOptions := []string{"dir_mode=0777,file_mode=0777,cache=strict,actimeo=30,vers=3.1.1", "nostrictsync", "addr=" + ipAddr.IP.String()}
+					sensitiveOptions := []string{"username=" + string(secretData["azurestorageaccountname"]), "password=" + string(secretData["azurestorageaccountkey"])}
+
+					// Update the mount object of containerd spec
+					m.Source = sharePath
+					m.Type = "cifs"
+					m.Options = mountOptions
+					m.Options = append(m.Options, sensitiveOptions...)
+					// update the mount object in the spec
+					ociSpec.Mounts[i] = m
+					break
+				}
+				break
+			}
+		}
+	}
+
+	// show all mounts
+	shimLog.WithFields(logrus.Fields{
+		"mounts": ociSpec.Mounts,
+	}).Info("archana: mounts")
 
 	if err != nil {
 		return nil, err
