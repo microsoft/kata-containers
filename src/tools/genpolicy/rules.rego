@@ -714,6 +714,8 @@ allow_root_path(p_oci, i_oci, bundle_id) {
     print("allow_root_path: p_path2 =", p_path2)
 
     p_path3 := replace(p_path2, "$(bundle-id)", bundle_id)
+    print("allow_root_path: p_path3 =", p_path3)
+
     p_path3 == i_path
 
     print("allow_root_path: true")
@@ -801,7 +803,8 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) {
     p_count := count(p_storages)
     i_count := count(i_storages)
     print("allow_storages start: p_count =", p_count, " i_count =", i_count)
-    count(p_storages) == count(i_storages)
+
+    p_count == i_count
 
     index := [index | i_storages[index]; true]
     every i in index {
@@ -813,11 +816,13 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) {
 
 allow_storage(p_storages, i_storages, bundle_id, sandbox_id, index) {
     some p_storage in p_storages
-    print("allow_storage: p_storage =", p_storage, " i_storage =",i_storages[index])
+
+    print("allow_storage: p_storage =", p_storage)
+    print("allow_storage: i_storage =", i_storages[index])
 
     p_storage.driver == i_storages[index].driver
     p_storage.fs_group == i_storages[index].fs_group
-    
+
     allow_storage_driver_options(p_storage, i_storages[index], bundle_id)
     allow_storage_options(p_storage, i_storages, bundle_id, index)
     allow_mount_point(p_storage, i_storages, bundle_id, sandbox_id, index)
@@ -857,6 +862,7 @@ allow_storage_driver_options(p_storage, i_storage, bundle_id) {
 
 allow_storage_options(p_storage, i_storages, bundle_id, index) {
     print("allow_storage_options 1 start: p_storage.options =", p_storage.options, "i_storage.options =", i_storages[index].options)
+
     p_storage.driver != "blk"
     p_storage.driver != "overlayfs"
     p_storage.driver != "dm-verity"
@@ -884,9 +890,7 @@ allow_storage_options(p_storage, i_storages, bundle_id, index) {
 
     lowerdir := concat("=", ["lowerdir", p_storage.options[0]])
     print("allow_storage_options 2: lowerdir =", lowerdir)
-
-    print("allow_storage_options 2: i_storage.options[i_count - 1] =", i_storage.options[i_count - 1])
-    i_storage.options[i_count - 1] == lowerdir
+    i_storages[index].options[i_count - 1] == lowerdir
 
     every i, policy_id in policy_ids {
         allow_overlay_layer(policy_id, policy_hashes[i], i_storages[index].options[i + 1])
@@ -931,9 +935,10 @@ allow_storage_options(p_storage, i_storages, bundle_id, index) {
 }
 
 index_of_overlayfs(i_storages) = i {
-  some i
-  i_storages[i].driver == "overlayfs"
+    some i
+    i_storages[i].driver == "overlayfs"
 }
+
 allow_overlay_layer(policy_id, policy_hash, i_option) {
     print("allow_overlay_layer: start")
 
