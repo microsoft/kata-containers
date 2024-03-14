@@ -907,10 +907,16 @@ allow_storage_options(p_storage, i_storages, bundle_id, index) {
     endswith(hash_suffix, ")")
     hash_index := trim_right(hash_suffix, ")")
     i := to_number(hash_index)
+    print("allow_storage_options 3: i =", i)
 
     overlayfs_index := index_of_overlayfs(i_storages)
-    root_hashes := split(i_storages[overlayfs_index].options[1], ":")
-    hash_option := concat("=", ["io.katacontainers.fs-opt.root-hash", root_hashes[i]])
+    print("allow_storage_options 3: overlayfs_index =", overlayfs_index)
+
+    i_root_hashes := split(i_storages[overlayfs_index].options[1], ":")
+    print("allow_storage_options 3: i_root_hashes =", i_root_hashes)
+
+    hash_option := concat("=", ["io.katacontainers.fs-opt.root-hash", i_root_hashes[i]])
+    print("allow_storage_options 3: hash_option =", hash_option)
 
     count(i_storages[index].options) == 4
     i_storages[index].options[0] == "ro"
