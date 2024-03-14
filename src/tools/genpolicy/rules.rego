@@ -893,10 +893,16 @@ allow_storage_options(p_storage, i_storages, bundle_id, index) {
     endswith(hash_suffix, ")")
     hash_index := trim_right(hash_suffix, ")")
     i := to_number(hash_index)
+    print("allow_storage_options 3: i =", i)
 
     overlayfs_index := index_of_overlayfs(i_storages)
-    root_hashes := split(i_storages[overlayfs_index].options[1], ":")
-    hash_option := concat("=", ["io.katacontainers.fs-opt.root-hash", root_hashes[i]])
+    print("allow_storage_options 3: overlayfs_index =", overlayfs_index)
+
+    i_root_hashes := split(i_storages[overlayfs_index].options[1], ":")
+    print("allow_storage_options 3: i_root_hashes =", i_root_hashes)
+
+    hash_option := concat("=", ["io.katacontainers.fs-opt.root-hash", i_root_hashes[i]])
+    print("allow_storage_options 3: hash_option =", hash_option)
 
     count(i_storages[index].options) == 4
     i_storages[index].options[0] == "ro"
@@ -969,6 +975,7 @@ allow_mount_point(p_storage, i_storages, bundle_id, sandbox_id, index) {
     layer_ids := split(i_storages[overlayfs_index].options[0], ":")
     layer_id := layer_ids[i]
     p_mount := concat("/", ["/run/kata-containers/sandbox/layers", layer_id])
+    print("allow_mount_point 1: p_mount =", p_mount)
 
     p_mount == i_storages[index].mount_point
 
@@ -980,6 +987,7 @@ allow_mount_point(p_storage, i_storages, bundle_id, sandbox_id, index) {
 
     mount1 := replace(p_storage.mount_point, "$(cpath)", policy_data.common.cpath)
     mount2 := replace(mount1, "$(bundle-id)", bundle_id)
+    print("allow_mount_point 2: mount2 =", mount2)
 
     mount2 == i_storages[index].mount_point
 
@@ -1004,6 +1012,7 @@ allow_mount_point(p_storage, i_storages, bundle_id, sandbox_id, index) {
     mount1 := p_storage.mount_point
     mount2 := replace(mount1, "$(cpath)", policy_data.common.cpath)
     mount3 := replace(mount2, "$(bundle-id)", bundle_id)
+    print("allow_mount_point 4: mount3 =", mount3)
 
     regex.match(mount3, i_storages[index].mount_point)
 
@@ -1047,6 +1056,8 @@ allow_direct_vol_driver(p_storage, i_storage) {
     print("allow_direct_vol_driver 2: start")
     p_storage.driver == "smb"
     print("allow_direct_vol_driver 2: true")
+}
+
 allow_mount_point(p_storage, i_storages, bundle_id, sandbox_id, index) {
     print("allow_mount_point 6 start: p_storage.mount_point =", p_storage.mount_point, "i_storage.mount_point =", i_storages[index].mount_point)
     p_storage.driver == "dmverity"
