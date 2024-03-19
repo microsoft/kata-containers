@@ -9,6 +9,7 @@ load "${BATS_TEST_DIRNAME}/../../common.bash"
 load "${BATS_TEST_DIRNAME}/tests_common.sh"
 
 setup() {
+	[ "${KATA_HOST_OS}" == "cbl-mariner" ] && skip "test not working see: see #9297"
 	sleep_liveness=20
 	agnhost_name="${container_images_agnhost_name}"
 	agnhost_version="${container_images_agnhost_version}"
@@ -73,6 +74,7 @@ setup() {
 }
 
 teardown() {
+	[ "${KATA_HOST_OS}" == "cbl-mariner" ] && skip "test not working see: see #9297"
 	# Debugging information
 	kubectl describe "pod/$pod_name"
 

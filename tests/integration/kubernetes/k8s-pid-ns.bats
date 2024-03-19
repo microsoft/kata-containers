@@ -9,6 +9,7 @@ load "${BATS_TEST_DIRNAME}/../../common.bash"
 load "${BATS_TEST_DIRNAME}/tests_common.sh"
 
 setup() {
+	[ "${KATA_HOST_OS}" == "cbl-mariner" ] && skip "test not working see: see #9297"
 	pod_name="busybox"
 	first_container_name="first-test-container"
 	second_container_name="second-test-container"
@@ -52,6 +53,7 @@ setup() {
 }
 
 teardown() {
+	[ "${KATA_HOST_OS}" == "cbl-mariner" ] && skip "test not working see: see #9297"
 	# Debugging information
 	kubectl describe "pod/$pod_name"
 

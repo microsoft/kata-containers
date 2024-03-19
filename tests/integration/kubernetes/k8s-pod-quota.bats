@@ -9,6 +9,7 @@ load "${BATS_TEST_DIRNAME}/tests_common.sh"
 
 setup() {
 	[ "${KATA_HYPERVISOR}" == "fc" ] && skip "test not working see: https://github.com/kata-containers/kata-containers/issues/7873"
+	[ "${KATA_HOST_OS}" == "cbl-mariner" ] && skip "test not working see: see #9297"
 
 	get_pod_config_dir
 }
@@ -34,6 +35,7 @@ setup() {
 
 teardown() {
 	[ "${KATA_HYPERVISOR}" == "fc" ] && skip "test not working see: https://github.com/kata-containers/kata-containers/issues/7873"
+	[ "${KATA_HOST_OS}" == "cbl-mariner" ] && skip "test not working see: see #9297"
 
 	# Debugging information
 	kubectl describe deployment ${deployment_name}

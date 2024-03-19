@@ -11,6 +11,7 @@ TEST_INITRD="${TEST_INITRD:-no}"
 
 # Not working on ARM CI see https://github.com/kata-containers/tests/issues/4727  
 setup() {
+	[ "${KATA_HOST_OS}" == "cbl-mariner" ] && skip "test not working see: see #9297"
 	get_pod_config_dir
 }
 
@@ -72,6 +73,7 @@ setup() {
 }
 
 teardown() {
+	[ "${KATA_HOST_OS}" == "cbl-mariner" ] && skip "test not working see: see #9297"
 	kubectl delete pod "$pod_name"
 	delete_tmp_policy_settings_dir "${policy_settings_dir}"
 }

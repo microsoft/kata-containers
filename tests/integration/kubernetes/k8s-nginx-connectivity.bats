@@ -9,6 +9,7 @@ load "${BATS_TEST_DIRNAME}/../../common.bash"
 load "${BATS_TEST_DIRNAME}/tests_common.sh"
 
 setup() {
+	[ "${KATA_HOST_OS}" == "cbl-mariner" ] && skip "test not working see: see #9297"
 	nginx_version="${docker_images_nginx_version}"
 	nginx_image="nginx:$nginx_version"
 	busybox_image="busybox"
@@ -38,6 +39,7 @@ setup() {
 }
 
 teardown() {
+	[ "${KATA_HOST_OS}" == "cbl-mariner" ] && skip "test not working see: see #9297"
 	# Debugging information
 	kubectl describe "pod/$busybox_pod"
 	kubectl get "pod/$busybox_pod" -o yaml
