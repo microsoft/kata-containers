@@ -1078,6 +1078,7 @@ match_caps(p_caps, i_caps) {
 check_directory_traversal(i_path) {
     contains(i_path, "../") == false
     endswith(i_path, "/..") == false
+    i_path != ".."
 }
 
 check_symlink_source {
