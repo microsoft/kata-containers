@@ -290,6 +290,8 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 	if !gidPresent && volumeMountGroup != "" {
 		cifsMountFlags = append(cifsMountFlags, fmt.Sprintf("gid=%s", volumeMountGroup))
 	}
+
+	// Obselete code, remove in future
 	isDiskMount := isDiskFsType(fsType)
 	if isDiskMount {
 		if !strings.HasSuffix(diskName, vhdSuffix) {
@@ -300,7 +302,9 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 	}
 
 	var mountOptions, sensitiveMountOptions []string
-	if protocol == nfs {
+
+	// will not come to this as nfs is not supported
+	if protocol == nfs { 
 		mountOptions = util.JoinMountOptions(mountFlags, []string{"vers=4,minorversion=1,sec=sys"})
 		mountOptions = appendDefaultNfsMountOptions(mountOptions, d.appendNoResvPortOption, d.appendActimeoOption)
 	} else {
@@ -350,6 +354,8 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 			}
 			return nil, status.Error(codes.Internal, fmt.Sprintf("volume(%s) mount %s on %s failed with %v%s", volumeID, source, cifsMountPath, err, helpLinkMsg))
 		}
+		
+		// will not come to this as nfs is not supported
 		if protocol == nfs {
 			if performChmodOp {
 				if err := chmodIfPermissionMismatch(targetPath, os.FileMode(mountPermissions)); err != nil {
@@ -362,6 +368,8 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 		klog.V(2).Infof("volume(%s) mount %s on %s succeeded", volumeID, source, cifsMountPath)
 	}
 
+	// Obselete code, disk mount is not supported
+	// azure disk csi driver should be used for disk mount
 	if isDiskMount {
 		mnt, err := d.ensureMountPoint(targetPath, os.FileMode(mountPermissions))
 		if err != nil {
@@ -387,6 +395,7 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 		klog.V(2).Infof("NodeStageVolume: volume %s format %s and mounting at %s successfully", volumeID, targetPath, diskPath)
 	}
 
+	// Will not come here as both options not supported
 	if protocol == nfs || isDiskMount {
 		if volumeMountGroup != "" && fsGroupChangePolicy != FSGroupChangeNone {
 			klog.V(2).Infof("set gid of volume(%s) as %s using fsGroupChangePolicy(%s)", volumeID, volumeMountGroup, fsGroupChangePolicy)
