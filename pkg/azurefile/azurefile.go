@@ -192,9 +192,9 @@ const (
 )
 
 var (
-	supportedFsTypeList              = []string{cifs, smb, nfs, ext4, ext3, ext2, xfs}
-	supportedProtocolList            = []string{smb, nfs}
-	supportedDiskFsTypeList          = []string{ext4, ext3, ext2, xfs}
+	supportedFsTypeList              = []string{cifs, smb}
+	supportedProtocolList            = []string{smb}
+	supportedDiskFsTypeList          = []string{}
 	supportedFSGroupChangePolicyList = []string{FSGroupChangeNone, string(v1.FSGroupChangeAlways), string(v1.FSGroupChangeOnRootMismatch)}
 
 	retriableErrors = []string{accountNotProvisioned, tooManyRequests, shareBeingDeleted, clientThrottled}
