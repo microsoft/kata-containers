@@ -657,6 +657,8 @@ func (c *Container) createBlockDevices(ctx context.Context) error {
 						continue
 					}
 					c.mounts[i].FSGroupChangePolicy = volume.FSGroupChangePolicy(value)
+				case volume.SensitiveMountOptions:
+					c.mounts[i].Options = append(c.mounts[i].Options, value)
 				default:
 					c.Logger().Warnf("Ignoring unsupported direct-assignd volume metadata key: %s, value: %s", key, value)
 				}
