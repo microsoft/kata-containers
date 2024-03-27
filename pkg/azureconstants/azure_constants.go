@@ -26,7 +26,7 @@ const (
 	DefaultAzureCredentialFileEnv     = "AZURE_CREDENTIAL_FILE"
 	DefaultCredFilePathLinux          = "/etc/kubernetes/azure.json"
 	DefaultCredFilePathWindows        = "C:\\k\\azure.json"
-	DefaultDriverName                 = "disk.csi.azure.com"
+	DefaultDriverName                 = "cc.disk.csi.azure.com"
 	DesIDField                        = "diskencryptionsetid"
 	DiskEncryptionTypeField           = "diskencryptiontype"
 	DiskAccessIDField                 = "diskaccessid"

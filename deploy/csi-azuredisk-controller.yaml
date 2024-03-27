@@ -2,20 +2,20 @@
 kind: Deployment
 apiVersion: apps/v1
 metadata:
-  name: csi-azuredisk-controller
+  name: csi-azuredisk-cc-controller
   namespace: kube-system
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: csi-azuredisk-controller
+      app: csi-azuredisk-cc-controller
   template:
     metadata:
       labels:
-        app: csi-azuredisk-controller
+        app: csi-azuredisk-cc-controller
     spec:
       hostNetwork: true
-      serviceAccountName: csi-azuredisk-controller-sa
+      serviceAccountName: csi-azuredisk-cc-controller-sa
       nodeSelector:
         kubernetes.io/os: linux  # add "kubernetes.io/role: master" to run controller on master node
       priorityClassName: system-cluster-critical
@@ -129,7 +129,7 @@ spec:
           args:
             - --csi-address=/csi/csi.sock
             - --probe-timeout=3s
-            - --health-port=29602
+            - --health-port=29702
             - --v=2
           volumeMounts:
             - name: socket-dir
@@ -140,21 +140,21 @@ spec:
             requests:
               cpu: 10m
               memory: 20Mi
-        - name: azuredisk
+        - name: azuredisk-cc
           image: sprt24/azuredisk-csi
           imagePullPolicy: Always
           args:
             - "--v=5"
             - "--endpoint=$(CSI_ENDPOINT)"
-            - "--metrics-address=0.0.0.0:29604"
+            - "--metrics-address=0.0.0.0:29704"
             - "--user-agent-suffix=OSS-kubectl"
             - "--disable-avset-nodes=false"
             - "--allow-empty-cloud-config=false"
           ports:
-            - containerPort: 29602
+            - containerPort: 29702
               name: healthz
               protocol: TCP
-            - containerPort: 29604
+            - containerPort: 29704
               name: metrics
               protocol: TCP
           livenessProbe:

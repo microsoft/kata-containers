@@ -2,7 +2,7 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: csi-azuredisk-node-win
+  name: csi-azuredisk-cc-node-win
   namespace: kube-system
 spec:
   updateStrategy:
@@ -11,13 +11,13 @@ spec:
     type: RollingUpdate
   selector:
     matchLabels:
-      app: csi-azuredisk-node-win
+      app: csi-azuredisk-cc-node-win
   template:
     metadata:
       labels:
-        app: csi-azuredisk-node-win
+        app: csi-azuredisk-cc-node-win
     spec:
-      serviceAccountName: csi-azuredisk-node-sa
+      serviceAccountName: csi-azuredisk-cc-node-sa
       tolerations:
         - key: "node.kubernetes.io/os"
           operator: "Exists"
@@ -93,7 +93,7 @@ spec:
             requests:
               cpu: 30m
               memory: 40Mi
-        - name: azuredisk
+        - name: azuredisk-cc
           image: sprt24/azuredisk-csi
           imagePullPolicy: Always
           args:

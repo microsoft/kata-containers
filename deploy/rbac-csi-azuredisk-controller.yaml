@@ -2,14 +2,14 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: csi-azuredisk-controller-sa
+  name: csi-azuredisk-cc-controller-sa
   namespace: kube-system
 ---
 
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: azuredisk-external-provisioner-role
+  name: azuredisk-cc-external-provisioner-role
 rules:
   - apiGroups: [""]
     resources: ["persistentvolumes"]
@@ -43,14 +43,14 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: azuredisk-csi-provisioner-binding
+  name: azuredisk-cc-csi-provisioner-binding
 subjects:
   - kind: ServiceAccount
-    name: csi-azuredisk-controller-sa
+    name: csi-azuredisk-cc-controller-sa
     namespace: kube-system
 roleRef:
   kind: ClusterRole
-  name: azuredisk-external-provisioner-role
+  name: azuredisk-cc-external-provisioner-role
   apiGroup: rbac.authorization.k8s.io
 
 ---
@@ -58,7 +58,7 @@ roleRef:
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: azuredisk-external-attacher-role
+  name: azuredisk-cc-external-attacher-role
 rules:
   - apiGroups: [""]
     resources: ["persistentvolumes"]
@@ -83,14 +83,14 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: azuredisk-csi-attacher-binding
+  name: azuredisk-cc-csi-attacher-binding
 subjects:
   - kind: ServiceAccount
-    name: csi-azuredisk-controller-sa
+    name: csi-azuredisk-cc-controller-sa
     namespace: kube-system
 roleRef:
   kind: ClusterRole
-  name: azuredisk-external-attacher-role
+  name: azuredisk-cc-external-attacher-role
   apiGroup: rbac.authorization.k8s.io
 
 ---
@@ -98,7 +98,7 @@ roleRef:
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: azuredisk-external-snapshotter-role
+  name: azuredisk-cc-external-snapshotter-role
 rules:
   - apiGroups: [""]
     resources: ["events"]
@@ -123,21 +123,21 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: azuredisk-csi-snapshotter-binding
+  name: azuredisk-cc-csi-snapshotter-binding
 subjects:
   - kind: ServiceAccount
-    name: csi-azuredisk-controller-sa
+    name: csi-azuredisk-cc-controller-sa
     namespace: kube-system
 roleRef:
   kind: ClusterRole
-  name: azuredisk-external-snapshotter-role
+  name: azuredisk-cc-external-snapshotter-role
   apiGroup: rbac.authorization.k8s.io
 ---
 
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: azuredisk-external-resizer-role
+  name: azuredisk-cc-external-resizer-role
 rules:
   - apiGroups: [""]
     resources: ["persistentvolumes"]
@@ -161,21 +161,21 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: azuredisk-csi-resizer-role
+  name: azuredisk-cc-csi-resizer-role
 subjects:
   - kind: ServiceAccount
-    name: csi-azuredisk-controller-sa
+    name: csi-azuredisk-cc-controller-sa
     namespace: kube-system
 roleRef:
   kind: ClusterRole
-  name: azuredisk-external-resizer-role
+  name: azuredisk-cc-external-resizer-role
   apiGroup: rbac.authorization.k8s.io
 
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: csi-azuredisk-controller-secret-role
+  name: csi-azuredisk-cc-controller-secret-role
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
@@ -185,12 +185,12 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: csi-azuredisk-controller-secret-binding
+  name: csi-azuredisk-cc-controller-secret-binding
 subjects:
   - kind: ServiceAccount
-    name: csi-azuredisk-controller-sa
+    name: csi-azuredisk-cc-controller-sa
     namespace: kube-system
 roleRef:
   kind: ClusterRole
-  name: csi-azuredisk-controller-secret-role
+  name: csi-azuredisk-cc-controller-secret-role
   apiGroup: rbac.authorization.k8s.io

@@ -2,7 +2,7 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: csi-azuredisk-node
+  name: csi-azuredisk-cc-node
   namespace: kube-system
 spec:
   updateStrategy:
@@ -11,15 +11,15 @@ spec:
     type: RollingUpdate
   selector:
     matchLabels:
-      app: csi-azuredisk-node
+      app: csi-azuredisk-cc-node
   template:
     metadata:
       labels:
-        app: csi-azuredisk-node
+        app: csi-azuredisk-cc-node
     spec:
       hostNetwork: true
       dnsPolicy: Default
-      serviceAccountName: csi-azuredisk-node-sa
+      serviceAccountName: csi-azuredisk-cc-node-sa
       nodeSelector:
         kubernetes.io/os: linux
       affinity:
@@ -46,7 +46,7 @@ spec:
           args:
             - --csi-address=/csi/csi.sock
             - --probe-timeout=3s
-            - --health-port=29603
+            - --health-port=29703
             - --v=2
           resources:
             limits:
@@ -72,7 +72,7 @@ spec:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins/disk.csi.azure.com/csi.sock
+              value: /var/lib/kubelet/plugins/cc.disk.csi.azure.com/csi.sock
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -84,7 +84,7 @@ spec:
             requests:
               cpu: 10m
               memory: 20Mi
-        - name: azuredisk
+        - name: azuredisk-cc
           image: sprt24/azuredisk-csi
           imagePullPolicy: Always
           args:
@@ -95,7 +95,7 @@ spec:
             - "--allow-empty-cloud-config=true"
             - "--get-node-info-from-labels=false"
           ports:
-            - containerPort: 29603
+            - containerPort: 29703
               name: healthz
               protocol: TCP
           livenessProbe:
@@ -146,7 +146,7 @@ spec:
               memory: 20Mi
       volumes:
         - hostPath:
-            path: /var/lib/kubelet/plugins/disk.csi.azure.com
+            path: /var/lib/kubelet/plugins/cc.disk.csi.azure.com
             type: DirectoryOrCreate
           name: socket-dir
         - hostPath:
