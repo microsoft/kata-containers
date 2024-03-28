@@ -1,0 +1,22 @@
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: cc-azurefile-csi
+provisioner: cc.file.csi.azure.com
+parameters:
+  subscriptionID: STORAGE_ACCOUNT_SUBSCRIPTION_ID  # optional, only set this when storage account is not in the same subscription as agent node
+  resourceGroup: EXISTING_RESOURCE_GROUP_NAME  # optional, only set this when storage account is not in the same resource group as agent node
+  storageAccount: EXISTING_STORAGE_ACCOUNT_NAME
+  shareName: SHARE_NAME
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+mountOptions:
+  - dir_mode=0777
+  - file_mode=0777
+  - uid=0
+  - gid=0
+  - mfsymlinks
+  - cache=strict  # https://linux.die.net/man/8/mount.cifs
+  - nosharesock  # reduce probability of reconnect race
+  - actimeo=30  # reduce latency for metadata-heavy workload
