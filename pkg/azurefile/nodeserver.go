@@ -133,8 +133,8 @@ func (d *Driver) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpublishVo
 	volumeID := req.GetVolumeId()
 
 	klog.V(2).Infof("NodeUnpublishVolume: unmounting volume %s on %s", volumeID, targetPath)
-	if err := CleanupMountPoint(d.mounter, targetPath, true /*extensiveMountPointCheck*/); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to unmount target %s: %v", targetPath, err)
+	if err := directvolume.Remove(targetPath); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to remove mount info %s: %v", targetPath, err)
 	}
 	klog.V(2).Infof("NodeUnpublishVolume: unmount volume %s on %s successfully", volumeID, targetPath)
 
@@ -439,14 +439,9 @@ func (d *Driver) NodeUnstageVolume(_ context.Context, req *csi.NodeUnstageVolume
 	}()
 
 	klog.V(2).Infof("NodeUnstageVolume: CleanupMountPoint volume %s on %s", volumeID, stagingTargetPath)
-	if err := CleanupMountPoint(d.mounter, stagingTargetPath, true /*extensiveMountPointCheck*/); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to unmount staging target %s: %v", stagingTargetPath, err)
-	}
-
-	targetPath := filepath.Join(filepath.Dir(stagingTargetPath), proxyMount)
-	klog.V(2).Infof("NodeUnstageVolume: CleanupMountPoint volume %s on %s", volumeID, targetPath)
-	if err := CleanupMountPoint(d.mounter, targetPath, false); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to unmount staging target %s: %v", targetPath, err)
+	err := directvolume.Remove(stagingTargetPath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to remove mount info %s: %v", stagingTargetPath, err)
 	}
 	klog.V(2).Infof("NodeUnstageVolume: unmount volume %s on %s successfully", volumeID, stagingTargetPath)
 
