@@ -10,7 +10,9 @@ use std::sync::Arc;
 
 use crate::storage::{common_storage_handler, new_device, StorageContext, StorageHandler};
 use anyhow::{anyhow, Context, Result};
-use kata_types::device::{DRIVER_9P_TYPE, DRIVER_OVERLAYFS_TYPE, DRIVER_VIRTIOFS_TYPE};
+use kata_types::device::{
+    DRIVER_9P_TYPE, DRIVER_OVERLAYFS_TYPE, DRIVER_SMB_TYPE, DRIVER_VIRTIOFS_TYPE,
+};
 use kata_types::mount::StorageDevice;
 use protocols::agent::Storage;
 use tracing::instrument;
@@ -93,6 +95,27 @@ impl StorageHandler for VirtioFsHandler {
     #[instrument]
     fn driver_types(&self) -> &[&str] {
         &[DRIVER_VIRTIOFS_TYPE]
+    }
+
+    #[instrument]
+    async fn create_device(
+        &self,
+        storage: Storage,
+        ctx: &mut StorageContext,
+    ) -> Result<Arc<dyn StorageDevice>> {
+        let path = common_storage_handler(ctx.logger, &storage)?;
+        new_device(path)
+    }
+}
+
+#[derive(Debug)]
+pub struct SMBHandler {}
+
+#[async_trait::async_trait]
+impl StorageHandler for SMBHandler {
+    #[instrument]
+    fn driver_types(&self) -> &[&str] {
+        &[DRIVER_SMB_TYPE]
     }
 
     #[instrument]
