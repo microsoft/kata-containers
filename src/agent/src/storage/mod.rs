@@ -27,14 +27,14 @@ use zerocopy::AsBytes;
 use self::bind_watcher_handler::BindWatcherHandler;
 use self::block_handler::{PmemHandler, ScsiHandler, VirtioBlkMmioHandler, VirtioBlkPciHandler};
 use self::ephemeral_handler::EphemeralHandler;
-use self::fs_handler::{OverlayfsHandler, Virtio9pHandler, VirtioFsHandler};
+use self::fs_handler::{OverlayfsHandler, SMBHandler, Virtio9pHandler, VirtioFsHandler};
 #[cfg(feature = "guest-pull")]
 use self::image_pull_handler::ImagePullHandler;
 use self::local_handler::LocalHandler;
 use crate::device::{
     DRIVER_9P_TYPE, DRIVER_BLK_MMIO_TYPE, DRIVER_BLK_PCI_TYPE, DRIVER_EPHEMERAL_TYPE,
     DRIVER_LOCAL_TYPE, DRIVER_NVDIMM_TYPE, DRIVER_OVERLAYFS_TYPE, DRIVER_SCSI_TYPE,
-    DRIVER_VIRTIOFS_TYPE, DRIVER_WATCHABLE_BIND_TYPE,
+    DRIVER_SMB_TYPE, DRIVER_VIRTIOFS_TYPE, DRIVER_WATCHABLE_BIND_TYPE,
 };
 use crate::mount::{baremount, is_mounted, remove_mounts};
 use crate::sandbox::Sandbox;
@@ -142,6 +142,7 @@ lazy_static! {
     pub static ref STORAGE_HANDLERS: StorageHandlerManager<Arc<dyn StorageHandler>> = {
         let mut manager: StorageHandlerManager<Arc<dyn StorageHandler>> = StorageHandlerManager::new();
         manager.add_handler(DRIVER_9P_TYPE, Arc::new(Virtio9pHandler{})).unwrap();
+        manager.add_handler(DRIVER_SMB_TYPE, Arc::new(SMBHandler{})).unwrap();
         #[cfg(target_arch = "s390x")]
         manager.add_handler(crate::device::DRIVER_BLK_CCW_TYPE, Arc::new(self::block_handler::VirtioBlkCcwHandler{})).unwrap();
         manager.add_handler(DRIVER_BLK_MMIO_TYPE, Arc::new(VirtioBlkMmioHandler{})).unwrap();

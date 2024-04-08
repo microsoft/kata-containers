@@ -52,6 +52,7 @@ pub const DRIVER_VFIO_PCI_TYPE: &str = "vfio-pci";
 pub const DRIVER_VFIO_AP_TYPE: &str = "vfio-ap";
 pub const DRIVER_OVERLAYFS_TYPE: &str = "overlayfs";
 pub const FS_TYPE_HUGETLB: &str = "hugetlbfs";
+pub const DRIVER_SMB_TYPE: &str =  "smb";
 
 cfg_if! {
     if #[cfg(target_arch = "s390x")] {
