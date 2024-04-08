@@ -39,6 +39,8 @@ pub const DRIVER_OVERLAYFS_TYPE: &str = "overlayfs";
 pub const DRIVER_VIRTIOFS_TYPE: &str = "virtio-fs";
 /// DRIVER_VIRTIOFS_TYPE is the driver for Bind watch volume.
 pub const DRIVER_WATCHABLE_BIND_TYPE: &str = "watchable-bind";
+/// DRIVER_VIRTIOFS_TYPE is the driver for SMB volume.
+pub const DRIVER_SMB_TYPE: &str =  "smb";
 
 /// Manager to manage registered device handlers.
 pub type DeviceHandlerManager<H> = HandlerManager<H>;
