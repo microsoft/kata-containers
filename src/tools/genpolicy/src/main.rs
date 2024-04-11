@@ -20,6 +20,7 @@ mod pod;
 mod pod_template;
 mod policy;
 mod registry;
+mod registry_containerd;
 mod replica_set;
 mod replication_controller;
 mod secret;

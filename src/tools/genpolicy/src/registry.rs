@@ -10,6 +10,7 @@ use crate::containerd;
 use crate::policy;
 use crate::verity;
 
+use crate::utils::Config;
 use anyhow::{anyhow, Result};
 use docker_credential::{CredentialRetrievalError, DockerCredential};
 use fs2::FileExt;
@@ -27,16 +28,16 @@ use tokio::io::AsyncWriteExt;
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
 pub struct Container {
-    config_layer: DockerConfigLayer,
-    image_layers: Vec<ImageLayer>,
+    pub config_layer: DockerConfigLayer,
+    pub image_layers: Vec<ImageLayer>,
 }
 
 /// Image config layer properties.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct DockerConfigLayer {
+pub struct DockerConfigLayer {
     architecture: String,
     config: DockerImageConfig,
-    rootfs: DockerRootfs,
+    pub rootfs: DockerRootfs,
 }
 
 /// Image config properties.
@@ -52,9 +53,9 @@ struct DockerImageConfig {
 
 /// Container rootfs information.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct DockerRootfs {
+pub struct DockerRootfs {
     r#type: String,
-    diff_ids: Vec<String>,
+    pub diff_ids: Vec<String>,
 }
 
 /// This application's image layer properties.
@@ -336,7 +337,7 @@ async fn get_verity_hash(
 }
 
 // the store is a json file that matches layer hashes to verity hashes
-fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -> Result<()> {
+pub fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -> Result<()> {
     // open the json file in read mode, create it if it doesn't exist
     let read_file = OpenOptions::new()
         .read(true)
@@ -379,7 +380,7 @@ fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -> Re
 
 // helper function to read the verity hash from the store
 // returns empty string if not found or file does not exist
-fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<String> {
+pub fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<String> {
     match OpenOptions::new().read(true).open(cache_file) {
         Ok(file) => match serde_json::from_reader(file) {
             Result::<Vec<ImageLayer>, _>::Ok(layers) => {
@@ -452,9 +453,11 @@ fn get_verity_hash_value(path: &Path) -> Result<String> {
 
     Ok(result)
 }
-
-pub async fn get_container(use_cache: bool, image: &str) -> Result<Container> {
-    Container::new(use_cache, image).await
+pub async fn get_container(config: &Config, image: &str) -> Result<Container> {
+    if let Some(socket_path) = &config.containerd_socket_path {
+        return Container::new_containerd_pull(config.use_cache, image, socket_path).await;
+    }
+    Container::new(config.use_cache, image).await
 }
 
 fn build_auth(reference: &Reference) -> RegistryAuth {
