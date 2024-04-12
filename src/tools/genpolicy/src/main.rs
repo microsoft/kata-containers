@@ -16,10 +16,10 @@ mod list;
 mod mount_and_storage;
 mod no_policy;
 mod obj_meta;
-mod persistent_volume_claim;
 mod pod;
 mod pod_template;
 mod policy;
+mod pvc;
 mod registry;
 #[cfg(target_os = "linux")]
 mod registry_containerd;

@@ -9,6 +9,7 @@
 use crate::agent;
 use crate::pod;
 use crate::policy;
+use crate::pvc;
 use crate::settings;
 use crate::volume;
 
@@ -103,6 +104,7 @@ pub fn get_mount_and_storage(
     settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
     storages: &mut Vec<agent::Storage>,
+    _persistent_volume_claims: &[pvc::PersistentVolumeClaim],
     yaml_volume: &volume::Volume,
     yaml_mount: &pod::VolumeMount,
 ) {
