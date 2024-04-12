@@ -11,6 +11,7 @@ use crate::obj_meta;
 use crate::pod;
 use crate::pod_template;
 use crate::policy;
+use crate::pvc;
 use crate::settings;
 use crate::utils::Config;
 use crate::yaml;
@@ -65,12 +66,14 @@ impl yaml::K8sResource for Job {
         &self,
         policy_mounts: &mut Vec<policy::KataMount>,
         storages: &mut Vec<agent::Storage>,
+        persistent_volume_claims: &[pvc::PersistentVolumeClaim],
         container: &pod::Container,
         settings: &settings::Settings,
     ) {
         yaml::get_container_mounts_and_storages(
             policy_mounts,
             storages,
+            persistent_volume_claims,
             container,
             settings,
             &self.spec.template.spec.volumes,

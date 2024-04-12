@@ -10,6 +10,7 @@ use crate::agent;
 use crate::config_map;
 use crate::obj_meta;
 use crate::policy;
+use crate::pvc;
 use crate::registry;
 use crate::secret;
 use crate::settings;
@@ -852,12 +853,14 @@ impl yaml::K8sResource for Pod {
         &self,
         policy_mounts: &mut Vec<policy::KataMount>,
         storages: &mut Vec<agent::Storage>,
+        persistent_volume_claims: &[pvc::PersistentVolumeClaim],
         container: &Container,
         settings: &settings::Settings,
     ) {
         yaml::get_container_mounts_and_storages(
             policy_mounts,
             storages,
+            persistent_volume_claims,
             container,
             settings,
             &self.spec.volumes,

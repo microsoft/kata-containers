@@ -9,6 +9,7 @@
 use crate::agent;
 use crate::pod;
 use crate::policy;
+use crate::pvc;
 use crate::settings;
 use crate::utils::Config;
 use crate::yaml;
@@ -57,6 +58,7 @@ impl yaml::K8sResource for List {
         &self,
         _policy_mounts: &mut Vec<policy::KataMount>,
         _storages: &mut Vec<agent::Storage>,
+        _persistent_volume_claims: &[pvc::PersistentVolumeClaim],
         _container: &pod::Container,
         _settings: &settings::Settings,
     ) {
