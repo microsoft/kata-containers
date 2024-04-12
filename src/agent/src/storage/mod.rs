@@ -25,7 +25,7 @@ use zerocopy::AsBytes;
 use self::bind_watcher_handler::BindWatcherHandler;
 use self::block_handler::{PmemHandler, ScsiHandler, VirtioBlkMmioHandler, VirtioBlkPciHandler};
 use self::ephemeral_handler::EphemeralHandler;
-use self::fs_handler::{OverlayfsHandler, Virtio9pHandler, VirtioFsHandler};
+use self::fs_handler::{OverlayfsHandler, SMBHandler, Virtio9pHandler, VirtioFsHandler};
 #[cfg(feature = "guest-pull")]
 use self::image_pull_handler::ImagePullHandler;
 use self::local_handler::LocalHandler;
@@ -148,6 +148,7 @@ lazy_static! {
             Arc::new(ScsiHandler {}),
             Arc::new(VirtioFsHandler {}),
             Arc::new(BindWatcherHandler {}),
+            Arc::new(SMBHandler {}),
             #[cfg(target_arch = "s390x")]
             Arc::new(self::block_handler::VirtioBlkCcwHandler {}),
             #[cfg(feature = "guest-pull")]
