@@ -406,6 +406,9 @@ pub struct CommonData {
     /// Regex prefix for shared file paths - e.g., "^$(cpath)/$(bundle-id)-[a-z0-9]{16}-".
     pub sfprefix: String,
 
+    /// Path to the shared sandbox storage - e.g., "/run/kata-containers/sandbox/storage".
+    pub spath: String,
+
     /// Regex for an IPv4 address.
     pub ipv4_a: String,
 
@@ -423,6 +426,9 @@ pub struct CommonData {
 
     /// Default capabilities for a privileged container.
     pub privileged_caps: Vec<String>,
+
+    /// Storage classes which mounts should be handled as virtio-blk devices.
+    pub virtio_blk_storage_classes: Vec<String>,
 }
 
 /// Configuration from "kubectl config".
