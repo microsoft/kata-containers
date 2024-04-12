@@ -591,6 +591,7 @@ pub fn get_verity_hash_and_users(path: &Path) -> Result<(String, String)> {
     Ok((result, passwd))
 }
 
+#[cfg(target_os = "linux")]
 pub async fn get_container(config: &Config, image: &str) -> Result<Container> {
     if let Some(socket_path) = &config.containerd_socket_path {
         return Container::new_containerd_pull(
@@ -601,6 +602,11 @@ pub async fn get_container(config: &Config, image: &str) -> Result<Container> {
         .await;
     }
     Container::new(config, image).await
+}
+
+#[cfg(target_os = "windows")]
+pub async fn get_container(config: &Config, image: &str) -> Result<Container> {
+    Container::new(config.use_cache, image).await
 }
 
 fn build_auth(reference: &Reference) -> RegistryAuth {
