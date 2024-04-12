@@ -90,3 +90,19 @@ impl StorageHandler for VirtioFsHandler {
         new_device(path)
     }
 }
+
+#[derive(Debug)]
+pub struct SMBHandler {}
+
+#[async_trait::async_trait]
+impl StorageHandler for SMBHandler {
+    #[instrument]
+    async fn create_device(
+        &self,
+        storage: Storage,
+        ctx: &mut StorageContext,
+    ) -> Result<Arc<dyn StorageDevice>> {
+        let path = common_storage_handler(ctx.logger, &storage)?;
+        new_device(path)
+    }
+}
