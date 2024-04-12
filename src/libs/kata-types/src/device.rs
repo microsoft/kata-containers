@@ -15,7 +15,7 @@ pub const DRIVER_BLK_MMIO_TYPE: &str = "mmioblk";
 pub const DRIVER_SCSI_TYPE: &str = "scsi";
 /// DRIVER_NVDIMM_TYPE is the device driver for nvdimm
 pub const DRIVER_NVDIMM_TYPE: &str = "nvdimm";
-/// DRIVER_VFIO_PCI_GK_TYPE is the device driver for vfio-pci 
+/// DRIVER_VFIO_PCI_GK_TYPE is the device driver for vfio-pci
 /// while the device will be bound to a guest kernel driver
 pub const DRIVER_VFIO_PCI_GK_TYPE: &str = "vfio-pci-gk";
 /// DRIVER_VFIO_PCI_TYPE is the device driver for vfio-pci
@@ -37,6 +37,8 @@ pub const DRIVER_OVERLAYFS_TYPE: &str = "overlayfs";
 pub const DRIVER_VIRTIOFS_TYPE: &str = "virtio-fs";
 /// DRIVER_VIRTIOFS_TYPE is the driver for Bind watch volume.
 pub const DRIVER_WATCHABLE_BIND_TYPE: &str = "watchable-bind";
+/// DRIVER_SMB_TYPE is the driver for SMB volume.
+pub const DRIVER_SMB_TYPE: &str = "smb";
 
 /// Manager to manage registered device handlers.
 pub type DeviceHandlerManager<H> = HandlerManager<H>;
