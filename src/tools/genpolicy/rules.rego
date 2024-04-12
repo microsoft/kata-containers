@@ -971,6 +971,27 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
 
     print("mount_source_allows 2: true")
 }
+mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
+    print("mount_source_allows 3: i_mount.source=", i_mount.source)
+
+    i_source_parts = split(i_mount.source, "/")
+    b64_pci_device_id = i_source_parts[count(i_source_parts) - 1]
+
+    base64.is_valid(b64_pci_device_id)
+
+    source1 := p_mount.source
+    print("mount_source_allows 3: source1 =", source1)
+
+    source2 := replace(source1, "$(spath)", policy_data.common.spath)
+    print("mount_source_allows 3: source2 =", source2)
+
+    source3 := replace(source2, "$(b64-pci-device-id)", b64_pci_device_id)
+    print("mount_source_allows 3: source3 =", source3)
+
+    source3 == i_mount.source
+
+    print("mount_source_allows 3: true")
+}
 
 ######################################################################
 # Create container Storages
@@ -1022,7 +1043,6 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hash
 allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
     print("allow_storage_options 1: start")
 
-    p_storage.driver != "blk"
     p_storage.driver != "overlayfs"
     p_storage.options == i_storage.options
 
@@ -1185,6 +1205,24 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
     regex.match(mount1, i_storage.mount_point)
 
     print("allow_mount_point 5: true")
+}
+allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
+    print("allow_mount_point 6: i_storage.mount_point =", i_storage.mount_point)
+    p_storage.driver == "blk"
+
+    mount1 := p_storage.mount_point
+    print("allow_mount_point 6: mount1 =", mount1)
+
+    mount2 := replace(mount1, "$(spath)", policy_data.common.spath)
+    print("allow_mount_point 6: mount2 =", mount2)
+
+    pci_device_id := i_storage.source
+    mount3 := replace(mount2, "$(b64-pci-device-id)", base64url.encode(pci_device_id))
+    print("allow_mount_point 6: mount3 =", mount3)
+
+    mount3 == i_storage.mount_point
+
+    print("allow_mount_point 6: true")
 }
 
 # process.Capabilities
