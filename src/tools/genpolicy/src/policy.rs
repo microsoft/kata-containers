@@ -19,6 +19,7 @@ use crate::secret;
 use crate::utils;
 use crate::yaml;
 
+use anyhow::anyhow;
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use log::debug;
@@ -438,6 +439,11 @@ pub struct SandboxData {
     pub storages: Vec<agent::Storage>,
 }
 
+enum K8sResourceEnum {
+    ConfigMap(config_map::ConfigMap),
+    Secret(secret::Secret),
+}
+
 impl AgentPolicy {
     pub async fn from_files(config: &utils::Config) -> Result<AgentPolicy> {
         let mut config_maps = Vec::new();
@@ -493,9 +499,12 @@ impl AgentPolicy {
             }
         }
 
-        if let Some(config_map_files) = &config.config_map_files {
-            for file in config_map_files {
-                config_maps.push(config_map::ConfigMap::new(file)?);
+        if let Some(config_files) = &config.config_files {
+            for resource_file in config_files {
+                match parse_config_file(resource_file.clone()).await? {
+                    K8sResourceEnum::ConfigMap(config_map) => config_maps.push(config_map),
+                    K8sResourceEnum::Secret(secret) => secrets.push(secret),
+                }
             }
         }
 
@@ -817,6 +826,26 @@ fn get_image_layer_storages(
     };
 
     storages.push(overlay_storage);
+}
+
+async fn parse_config_file(yaml_file: String) -> Result<K8sResourceEnum> {
+    let yaml_contents = yaml::get_input_yaml(&Some(yaml_file))?;
+    let document = serde_yaml::Deserializer::from_str(&yaml_contents);
+    let doc_mapping = Value::deserialize(document)?;
+    let kind = doc_mapping
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .ok_or(anyhow!("no kind"))?;
+
+    match kind {
+        "ConfigMap" => Ok(K8sResourceEnum::ConfigMap(serde_yaml::from_value(
+            doc_mapping,
+        )?)),
+        "Secret" => Ok(K8sResourceEnum::Secret(serde_yaml::from_value(
+            doc_mapping,
+        )?)),
+        k => Err(anyhow!("unsupported attached resource kind '{k}'")),
+    }
 }
 
 /// Converts the given name to a string representation of its sha256 hash.
