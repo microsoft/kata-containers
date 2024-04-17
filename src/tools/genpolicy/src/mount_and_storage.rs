@@ -161,6 +161,15 @@ pub fn get_mount_and_storage(
         get_shared_bind_mount(yaml_mount, p_mounts, ("rprivate", "ro"));
     } else if yaml_volume.downwardAPI.is_some() {
         get_downward_api_mount(yaml_mount, p_mounts);
+    } else if yaml_volume.ephemeral.is_some() {
+        get_ephemeral_mount(
+            settings,
+            yaml_mount,
+            yaml_volume,
+            p_mounts,
+            storages,
+            mount_options,
+        );
     } else {
         todo!("Unsupported volume type {:?}", yaml_volume);
     }
@@ -247,45 +256,7 @@ fn get_persistent_volume_claim_mount(
         .and_then(|pvc_resource| pvc_resource.spec.storageClassName.as_ref())
         .is_some_and(|sc| settings.common.virtio_blk_storage_classes.contains(sc));
 
-    if is_blk_mount {
-        let source = "$(spath)/$(b64-pci-device-id)".to_string();
-
-        storages.push(agent::Storage {
-            driver: "blk".to_string(),
-            driver_options: Vec::new(),
-            fs_group: None,
-            source: "$(pci-device-id)".to_string(),
-            mount_point: source.to_string(),
-            fstype: "$(fs-type)".to_string(),
-            options: Vec::new(),
-        });
-
-        let dest = yaml_mount.mountPath.clone();
-        let type_ = "bind".to_string();
-        let (propagation, access) = mount_options;
-        let options = vec![
-            "rbind".to_string(),
-            propagation.to_string(),
-            access.to_string(),
-        ];
-
-        if let Some(policy_mount) = p_mounts.iter_mut().find(|m| m.destination == dest) {
-            debug!("get_persistent_volume_claim_mount: updating dest = {dest}, source = {source}");
-            policy_mount.type_ = type_;
-            policy_mount.source = source;
-            policy_mount.options = options;
-        } else {
-            debug!("get_persistent_volume_claim_mount: adding dest = {dest}, source = {source}");
-            p_mounts.push(policy::KataMount {
-                destination: dest,
-                type_,
-                source,
-                options,
-            });
-        }
-    } else {
-        get_shared_bind_mount(yaml_mount, p_mounts, mount_options);
-    }
+    handle_persistent_volume_claim(is_blk_mount, yaml_mount, p_mounts, storages, mount_options);
 }
 
 fn get_host_path_mount(
@@ -495,4 +466,76 @@ pub fn get_image_mount_and_storage(
         source,
         options: settings_image.options.clone(),
     });
+}
+
+fn get_ephemeral_mount(
+    settings: &settings::Settings,
+    yaml_mount: &pod::VolumeMount,
+    yaml_volume: &volume::Volume,
+    p_mounts: &mut Vec<policy::KataMount>,
+    storages: &mut Vec<agent::Storage>,
+    mount_options: (&str, &str),
+) {
+    let storage_class = &yaml_volume
+        .ephemeral
+        .as_ref()
+        .unwrap()
+        .volumeClaimTemplate
+        .spec
+        .storageClassName;
+
+    let is_blk_mount = storage_class
+        .as_ref()
+        .map(|sc| settings.common.virtio_blk_storage_classes.contains(sc))
+        .unwrap_or(false);
+
+    handle_persistent_volume_claim(is_blk_mount, yaml_mount, p_mounts, storages, mount_options);
+}
+
+fn handle_persistent_volume_claim(
+    is_blk_mount: bool,
+    yaml_mount: &pod::VolumeMount,
+    p_mounts: &mut Vec<policy::KataMount>,
+    storages: &mut Vec<agent::Storage>,
+    mount_options: (&str, &str),
+) {
+    if is_blk_mount {
+        let source = "$(spath)/$(b64-pci-device-id)".to_string();
+
+        storages.push(agent::Storage {
+            driver: "blk".to_string(),
+            driver_options: Vec::new(),
+            fs_group: None,
+            source: "$(pci-device-id)".to_string(),
+            mount_point: source.to_string(),
+            fstype: "$(fs-type)".to_string(),
+            options: Vec::new(),
+        });
+
+        let dest = yaml_mount.mountPath.clone();
+        let type_ = "bind".to_string();
+        let (propagation, access) = mount_options;
+        let options = vec![
+            "rbind".to_string(),
+            propagation.to_string(),
+            access.to_string(),
+        ];
+
+        if let Some(policy_mount) = p_mounts.iter_mut().find(|m| m.destination == dest) {
+            debug!("handle_persistent_volume_claim: updating dest = {dest}, source = {source}");
+            policy_mount.type_ = type_;
+            policy_mount.source = source;
+            policy_mount.options = options;
+        } else {
+            debug!("handle_persistent_volume_claim: adding dest = {dest}, source = {source}");
+            p_mounts.push(policy::KataMount {
+                destination: dest,
+                type_,
+                source,
+                options,
+            });
+        }
+    } else {
+        get_shared_bind_mount(yaml_mount, p_mounts, mount_options);
+    }
 }

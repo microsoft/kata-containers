@@ -311,6 +311,7 @@
             "CAP_CHECKPOINT_RESTORE"
         ],
         "virtio_blk_storage_classes": [
+            "cc-local-csi",
             "cc-managed-csi",
             "cc-managed-premium-csi"
         ]
