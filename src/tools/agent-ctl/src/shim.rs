@@ -2,17 +2,15 @@
 
 use crate::types::{Config, Options};
 use crate::utils;
+use crate::client;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use futures::executor;
 use reqwest::StatusCode;
 use slog::{debug, info};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::time::Duration;
-use ttrpc::TtrpcContext;
 
-use ttrpc::context::Context;
 
 use shim_interface::shim_mgmt::client::MgmtClient;
 use shim_interface::shim_mgmt::TEST_AGENT_APIS;
@@ -57,13 +55,10 @@ fn get_api_prep_handle(name: &str) -> Result<PrepApiReqFp> {
 }
 
 pub fn handle_test_api_cmd(
-    cfg: &Config,
-    ctx: &Context,
-    options: &mut Options,
     cmdline: &str,
 ) -> (Result<()>, bool) {
     info!(sl!(), "Test-shim::handle_test_api_cmd enter");
-
+    info!(sl!(), "cmdline: {:}", cmdline);
     // break the whitespace separated cmdline args
     // ex: TestAgentApi createsandbox file:///<>
     //     TestAgentApi copyfile sandbox_id file:///<>
@@ -86,11 +81,10 @@ pub fn handle_test_api_cmd(
 
     // Forward this to a subcommand handler to forward calls.
     // Not using ingore errors flag, return the result as retrieved.
-    forward_cmds(ctx, &args)
+    forward_cmds(&args)
 }
 
 fn forward_cmds(
-    ctx: &Context,
     cmd: &str,
 ) -> (Result<()>, bool) {
     info!(sl!(), "Test-shim: forward cmds");
@@ -124,20 +118,32 @@ fn forward_cmds(
         return (result, false);
     }
 
-    let cmd_result = executor::block_on(post_request(ctx, req, cmd_fields[1].to_string()));
-    if cmd_result.is_err() {
-        return (Err(anyhow!("Failed to post request")), false);
+    let res = get_response(req, cmd_fields[1].to_string());
+    if res.is_err() {
+        return (res, false);
     }
 
     (Ok(()), false)
 }
 
-// We need to post the req now.
-async fn post_request(
-    ctx: &Context,
+fn get_response(
     req: TestApiRequest,
     sandbox: String,
-) -> Result<Option<String>> {
+) -> Result<()> {
+    let cmd_result = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()?
+    .block_on(post_request(req, sandbox))
+    .context("get post response")?;
+
+    Ok(())
+}
+
+// We need to post the req now.
+async fn post_request(
+    req: TestApiRequest,
+    sandbox: String,
+) -> Result<()> {
     info!(sl!(), "post_request..");
 
     let encoded = serde_json::to_string(&req)?;
@@ -157,7 +163,7 @@ async fn post_request(
         ));
     }
 
-    Ok(None)
+    Ok(())
 }
 
 fn prep_copy_file_req(args: &str, req: &mut TestApiRequest, api: String, id: String) -> Result<()> {

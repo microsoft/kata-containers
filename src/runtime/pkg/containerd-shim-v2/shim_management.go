@@ -278,6 +278,8 @@ func (s *service) testAgentTtrpcApiHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	shimMgtLog.Info("testAgentTtrpcApiHandler invoked")
+
 	err = vc.TestApi(context.Background(), body, s.sandbox)
 	if err != nil {
 		shimMgtLog.WithError(err).Error("failed to test Ttrpc Api.")

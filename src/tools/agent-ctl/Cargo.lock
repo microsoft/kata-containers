@@ -1106,6 +1106,7 @@ dependencies = [
  "shim-interface",
  "slog",
  "slog-scope",
+ "tokio",
  "ttrpc",
 ]
 
