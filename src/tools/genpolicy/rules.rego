@@ -907,6 +907,17 @@ allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
 
     print("allow_storage_options 3: true")
 }
+allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
+    print("allow_storage_options 4: start")
+
+    p_storage.driver == "smb"
+    count(p_storage.options) == 0
+    count(i_storage.options) >= 1
+
+    # Todo - add more checks on storage options
+
+    print("allow_storage_options 4: true")
+}
 
 allow_overlay_layer(policy_id, policy_hash, i_option) {
     print("allow_overlay_layer: policy_id =", policy_id, "policy_hash =", policy_hash)
@@ -1017,6 +1028,22 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
     mount3 == i_storage.mount_point
 
     print("allow_mount_point 6: true")
+}
+allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
+    print("allow_mount_point 7: i_storage.mount_point =", i_storage.mount_point)
+    p_storage.driver == "smb"
+
+    mount1 := p_storage.mount_point
+    print("allow_mount_point 7: mount1 =", mount1)
+
+    mount2 := replace(mount1, "$(spath)", policy_data.common.spath)
+    print("allow_mount_point 7: mount2 =", mount2)
+
+    mount_path := i_storage.source
+    print("allow_mount_point 7: source_mount_path =", mount_path)
+    mount3 := replace(mount2, "$(b64-pci-device-id)", base64url.encode(mount_path))
+
+    print("allow_mount_point 7: true")
 }
 
 # process.Capabilities

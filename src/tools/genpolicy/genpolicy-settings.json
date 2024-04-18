@@ -217,6 +217,7 @@
         "ipv4_a": "((25[0-5]|(2[0-4]|1\\d|[1-9]|)\\d)\\.?\\b){4}",
         "svc_name": "[A-Z0-9_\\.\\-]+",
         "dns_label": "[a-zA-Z0-9_\\.\\-]+",
+        "azurefileshare_path": "\/\/[a-z0-9]{3,24}\\.file\\core\\.windows\\.net\/[a-z0-9\\-]+",
         "default_caps": [
             "CAP_CHOWN",
             "CAP_DAC_OVERRIDE",
@@ -279,6 +280,10 @@
         "virtio_blk_storage_classes": [
             "cc-managed-csi",
             "cc-managed-premium-csi"
+        ],
+        "smb_storage_classes": [
+            "cc-azurefile-csi",
+            "cc-azurefile-premium-csi"
         ]
     },
     "kata_config": {

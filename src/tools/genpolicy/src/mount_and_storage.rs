@@ -233,6 +233,10 @@ fn get_persistent_volume_claim_mount(
         .and_then(|pvc_resource| pvc_resource.spec.storageClassName.as_ref())
         .is_some_and(|sc| settings.common.virtio_blk_storage_classes.contains(sc));
 
+    let is_smb_mount = pvc_resource
+        .and_then(|pvc_resource| pvc_resource.spec.storageClassName.as_ref())
+        .is_some_and(|sc| settings.common.smb_storage_classes.contains(sc));
+
     if is_blk_mount {
         let source = "$(spath)/$(b64-pci-device-id)".to_string();
 
@@ -257,6 +261,39 @@ fn get_persistent_volume_claim_mount(
 
         if let Some(policy_mount) = p_mounts.iter_mut().find(|m| m.destination == dest) {
             debug!("get_persistent_volume_claim_mount: updating dest = {dest}, source = {source}");
+            policy_mount.type_ = type_;
+            policy_mount.source = source;
+            policy_mount.options = options;
+        } else {
+            debug!("get_persistent_volume_claim_mount: adding dest = {dest}, source = {source}");
+            p_mounts.push(policy::KataMount {
+                destination: dest,
+                type_,
+                source,
+                options,
+            });
+        }
+    } else if is_smb_mount {
+        storages.push(agent::Storage {
+            driver: "smb".to_string(),
+            driver_options: Vec::new(),
+            fs_group: None,
+            source: "$(azurefileshare_path)".to_string(),
+            mount_point: "$(spath)/$(b64-pci-device-id)".to_string(),
+            fstype: "cifs".to_string(),
+            options: Vec::new(),
+        });
+        let dest = yaml_mount.mountPath.clone();
+        let type_ = "bind".to_string();
+        let (propagation, access) = mount_options;
+        let options = vec![
+            "rbind".to_string(),
+            propagation.to_string(),
+            access.to_string(),
+        ];
+        let source: String = "$(spath)/$(b64-pci-device-id)".to_string();
+        if let Some(policy_mount) = p_mounts.iter_mut().find(|m| m.destination == dest) {
+            debug!("ac: get_persistent_volume_claim_mount: updating dest = {dest}, source = {source}");
             policy_mount.type_ = type_;
             policy_mount.source = source;
             policy_mount.options = options;
