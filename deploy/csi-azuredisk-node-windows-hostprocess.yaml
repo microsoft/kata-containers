@@ -41,7 +41,7 @@ spec:
       hostNetwork: true
       initContainers:
         - name: init
-          image: sprt24/azuredisk-csi-windows-hp
+          image: marinerconfpodsdev.azurecr.io/oss/kubernetes-sig/cc-azuredisk-csi-windows-hp
           imagePullPolicy: Always
           command:
             - "powershell.exe"

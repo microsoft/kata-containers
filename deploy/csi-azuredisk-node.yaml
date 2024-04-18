@@ -85,7 +85,7 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: azuredisk-cc
-          image: sprt24/azuredisk-csi
+          image: marinerconfpodsdev.azurecr.io/oss/kubernetes-sig/cc-azuredisk-csi
           imagePullPolicy: Always
           args:
             - "--v=5"
