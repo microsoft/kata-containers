@@ -5,6 +5,7 @@
 
 // Description: Client side of ttRPC comms
 
+use crate::shim;
 use crate::types::{Config, Options};
 use crate::utils;
 use anyhow::{anyhow, Result};
@@ -606,10 +607,33 @@ pub fn client(cfg: &Config, commands: Vec<&str>) -> Result<()> {
 
         println!();
 
+        // Single command, no need for a helper here!!
+        println!("Test Agent API command:\n");
+        println!("  TestAgentApi (forward agent APIS via shim management server)");
+
         return Ok(());
     }
 
     announce(cfg);
+
+    let mut options = Options::new();
+
+    let mut ttrpc_ctx = ttrpc::context::with_timeout(cfg.timeout_nano);
+
+    // Special handling for TestAgentApi command.
+    // 1. We DO NOT CLUB it with other existing builtin/agent cmds.
+    // 2. We use a running kata shim's management server to forward the API requests to agent.
+    if commands.len() == 1 && commands[0].contains("TestAgentApi") {
+        let (result, shutdown) = shim::handle_test_api_cmd(
+            cfg,
+            &ttrpc_ctx,
+            &mut options,
+            commands[0],
+        );
+
+        result.map_err(|e| anyhow!(e))?;
+        return Ok(());
+    }
 
     // Create separate connections for each of the services provided
     // by the agent.
@@ -625,13 +649,8 @@ pub fn client(cfg: &Config, commands: Vec<&str>) -> Result<()> {
         cfg.hybrid_vsock,
     )?;
 
-    let mut options = Options::new();
-
-    let mut ttrpc_ctx = ttrpc::context::with_timeout(cfg.timeout_nano);
-
     // Allow the commands to change their behaviour based on the value
     // of this option.
-
     if !cfg.no_auto_values {
         ttrpc_ctx.add(METADATA_CFG_NS.into(), NO_AUTO_VALUES_CFG_NAME.to_string());
 

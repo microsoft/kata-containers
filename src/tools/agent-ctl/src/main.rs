@@ -22,6 +22,7 @@ macro_rules! sl {
 
 mod client;
 mod rpc;
+mod shim;
 mod types;
 mod utils;
 
@@ -118,6 +119,13 @@ fn make_examples_text(program_name: &str) -> String {
 - Create a Container using a custom configuration file:
 
   $ {program} connect --server-address "{vsock_server_address}" --bundle-dir {bundle:?} --cmd 'CreateContainer spec={config_file_uri}'
+
+- Forward the API request via shim-management server to the agent
+
+  $ {program} connect --server-address "" --cmd 'TestAgentApi createsandbox'
+  $ {program} connect --server-address "" --cmd 'TestAgentApi copyfile $sandbox_id json://{{"src": "abcd", "dest": "ABCD"}}'
+  $ {program} connect --server-address "" --cmd 'TestAgentApi copyfile $sandbox_id file:///sample.json'
+
 	"#,
         abstract_server_address = abstract_server_address,
         bundle = bundle,
@@ -139,6 +147,7 @@ fn connect(name: &str, global_args: clap::ArgMatches) -> Result<()> {
     let interactive = args.is_present("interactive");
     let ignore_errors = args.is_present("ignore-errors");
 
+    // For cmd: TestAgentApi, we do not need a server_address, but to keep from erroring out, send an empty address.
     let server_address = args
         .value_of("server-address")
         .ok_or_else(|| anyhow!("need server adddress"))?

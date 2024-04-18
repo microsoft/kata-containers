@@ -21,13 +21,17 @@ use anyhow::{anyhow, Result};
 
 pub mod shim_mgmt;
 
-use kata_types::config::KATA_PATH;
+use kata_types::config::{KATA_PATH, KATA_PATH_RUNTIME_GO};
 
 pub const SHIM_MGMT_SOCK_NAME: &str = "shim-monitor.sock";
 
 // return sandbox's storage path
 pub fn sb_storage_path() -> String {
     String::from(KATA_PATH)
+}
+
+pub fn sb_storage_path_runtime_go() -> String {
+    String::from(KATA_PATH_RUNTIME_GO)
 }
 
 // returns the address of the unix domain socket(UDS) for communication with shim
@@ -44,8 +48,16 @@ pub fn mgmt_socket_addr(sid: &str) -> Result<String> {
         .join(sid)
         .join(SHIM_MGMT_SOCK_NAME);
 
+    // When using go implemented runtime, the sandboxes info is stored under a different path
+    // Also check for this, if running this runtime.
+    let p_old = Path::new(&sb_storage_path_runtime_go())
+        .join(sid)
+        .join(SHIM_MGMT_SOCK_NAME);
+
     if let Some(p) = p.to_str() {
         Ok(format!("unix://{}", p))
+    } else if let Some(p_old) = p_old.to_str() {
+        Ok(format!("unix://{}", p_old))
     } else {
         Err(anyhow!("Bad socket path"))
     }

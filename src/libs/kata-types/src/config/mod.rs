@@ -37,6 +37,9 @@ pub use self::agent::AGENT_NAME_KATA;
 /// kata run dir
 pub const KATA_PATH: &str = "/run/kata";
 
+/// kata run path where sandboxes info are stored in runtime(go)
+pub const KATA_PATH_RUNTIME_GO: &str = "/run/vc/sbs";
+
 // TODO: let agent use the constants here for consistency
 /// Debug console enabled flag for agent
 pub const DEBUG_CONSOLE_FLAG: &str = "agent.debug_console";
