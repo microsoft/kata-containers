@@ -1,16 +1,45 @@
 #!/bin/bash
 
+# Copyright 2020 The Kubernetes Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 set -euo pipefail
 
-deploy_cc_dir="$(dirname "$(realpath "$0")")"
+ver="master"
+if [[ "$#" -gt 0 ]]; then
+  ver="$1"
+fi
 
-kubectl apply -f $deploy_cc_dir/csi-azuredisk-driver.yaml
-kubectl apply -f $deploy_cc_dir/rbac-csi-azuredisk-controller.yaml
-kubectl apply -f $deploy_cc_dir/rbac-csi-azuredisk-node.yaml
-kubectl apply -f $deploy_cc_dir/csi-azuredisk-node.yaml
-kubectl apply -f $deploy_cc_dir/csi-azuredisk-controller.yaml
+repo="https://raw.githubusercontent.com/sprt/cc-azuredisk-csi-driver/$ver/cc-deploy"
+if [[ "$#" -gt 1 ]]; then
+  if [[ "$2" == *"local"* ]]; then
+    echo "use local deploy"
+    repo="$(dirname "$(realpath "$0")")"
+  fi
+fi
 
-kubectl apply -f $deploy_cc_dir/storageclass-cc-azuredisk-csi.yaml
-kubectl apply -f $deploy_cc_dir/storageclass-cc-azuredisk-premium-csi.yaml
+if [ $ver != "master" ]; then
+	repo="$repo/$ver"
+fi
+
+kubectl apply -f $repo/csi-azuredisk-driver.yaml
+kubectl apply -f $repo/rbac-csi-azuredisk-controller.yaml
+kubectl apply -f $repo/rbac-csi-azuredisk-node.yaml
+kubectl apply -f $repo/csi-azuredisk-node.yaml
+kubectl apply -f $repo/csi-azuredisk-controller.yaml
+
+kubectl apply -f $repo/storageclass-cc-azuredisk-csi.yaml
+kubectl apply -f $repo/storageclass-cc-azuredisk-premium-csi.yaml
 
 echo "Driver installed"
