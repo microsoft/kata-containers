@@ -624,7 +624,7 @@ pub fn client(cfg: &Config, commands: Vec<&str>) -> Result<()> {
     // 1. We DO NOT CLUB it with other existing builtin/agent cmds.
     // 2. We use a running kata shim's management server to forward the API requests to agent.
     if commands.len() == 1 && commands[0].contains("TestAgentApi") {
-        let (result, shutdown) = shim::handle_test_api_cmd(
+        let (result, _) = shim::handle_test_api_cmd(
             commands[0],
         );
 

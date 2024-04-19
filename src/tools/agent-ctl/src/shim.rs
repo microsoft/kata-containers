@@ -1,19 +1,12 @@
 // Description: Agent Api forwarder to running shim management server
 
-use crate::types::{Config, Options};
 use crate::utils;
-use crate::client;
-
 use anyhow::{anyhow, Context, Result};
-use futures::executor;
 use reqwest::StatusCode;
-use slog::{debug, info};
+use slog::info;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-
-
-use shim_interface::shim_mgmt::client::MgmtClient;
-use shim_interface::shim_mgmt::TEST_AGENT_APIS;
+use shim_interface::shim_mgmt::{client::MgmtClient, TEST_AGENT_APIS, AGENT_URL};
 
 pub const TIMEOUT: Duration = Duration::from_millis(2000);
 
@@ -21,6 +14,7 @@ type PrepApiReqFp = fn(&str, &mut TestApiRequest, String, String) -> Result<()>;
 
 struct PrepApiReq {
     name: &'static str,
+    api: &'static str,
     fp: PrepApiReqFp,
 }
 
@@ -40,6 +34,7 @@ struct CopyFile {
 static PREP_API_REQ: &[PrepApiReq] = &[
     PrepApiReq{
         name: "copyfile",
+        api: "CopyFileRequest",
         fp: prep_copy_file_req,
     },
 ];
@@ -48,6 +43,15 @@ fn get_api_prep_handle(name: &str) -> Result<PrepApiReqFp> {
     for cmd in PREP_API_REQ {
         if cmd.name.eq(name) {
             return Ok(cmd.fp);
+        }
+    }
+
+    Err(anyhow!("Invalid api: {:?}", name))
+}
+fn get_requesting_api_name(name: &str) -> Result<String> {
+    for cmd in PREP_API_REQ {
+        if cmd.name.eq(name) {
+            return Ok(cmd.api.to_string());
         }
     }
 
@@ -88,16 +92,29 @@ fn forward_cmds(
     cmd: &str,
 ) -> (Result<()>, bool) {
     info!(sl!(), "Test-shim: forward cmds");
-    // the cmd string slice format is space separated: 'agent-api data'
-    // ex: copyfile sandbox-id json://{}
-    // split the cmd and input
-    let cmd_fields: Vec<&str> = cmd.split_whitespace().collect();
-    let agent_api = cmd_fields[0].to_string();
-    let sandbox_id = cmd_fields[1].to_string();
 
-    if agent_api.eq("createsandbox") || agent_api.eq("destroysandbox") {
-        // Special handling using crictl
-        info!(sl!(), "To be implemented");
+    let cmd_fields: Vec<&str> = cmd.split_whitespace().collect();
+    let api_short_name = cmd_fields[0].to_string();
+
+    // Handle specific api requests.
+    if cmd_fields.len() == 1 {
+        if api_short_name.eq("createsandbox") || api_short_name.eq("destroysandbox") {
+            info!(sl!(), "To be implemented");
+            return (Ok(()), false);
+        } else {
+            return (Err(anyhow!("Invalid api requested:{}", api_short_name)), false);
+        }
+    }
+
+    let sandbox_id: String = cmd_fields[1].to_string();
+
+    if api_short_name.eq("testagenturl") {
+        info!(sl!(), "Test getting agent url");
+        let res = get_agent_url(&sandbox_id, 1026);
+        if res.is_err() {
+            return (res, false);
+        }
+
         return (Ok(()), false);
     }
 
@@ -109,11 +126,17 @@ fn forward_cmds(
 
     let mut req = TestApiRequest{..Default::default()};
 
-    let f = match get_api_prep_handle(&agent_api) {
+    let f = match get_api_prep_handle(&api_short_name) {
         Ok(fp) => fp,
         Err(e) => return (Err(e), false),
     };
-    let result = f(&args, &mut req, agent_api, sandbox_id);
+
+    let api_name = match get_requesting_api_name(&api_short_name) {
+        Ok(api) => api,
+        Err(e) => return (Err(e), false),
+    };
+
+    let result = f(&args, &mut req, api_name, sandbox_id);
     if result.is_err() {
         return (result, false);
     }
@@ -130,7 +153,7 @@ fn get_response(
     req: TestApiRequest,
     sandbox: String,
 ) -> Result<()> {
-    let cmd_result = tokio::runtime::Builder::new_current_thread()
+    let _cmd_result = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?
     .block_on(post_request(req, sandbox))
@@ -171,5 +194,42 @@ fn prep_copy_file_req(args: &str, req: &mut TestApiRequest, api: String, id: Str
     req.api = api;
     req.sandbox_id = id;
     req.params = serde_json::to_value(cpreq)?;
+    Ok(())
+}
+
+async fn get_agent_socket(sandbox_id: &str) -> anyhow::Result<String> {
+    let shim_client = MgmtClient::new(sandbox_id, Some(TIMEOUT))?;
+
+    // get agent sock from body when status code is OK.
+    let response = shim_client.get(AGENT_URL).await?;
+    let status = response.status();
+    if status != StatusCode::OK {
+        return Err(anyhow!("shim client get connection failed: {:?} ", status));
+    }
+
+    let body = hyper::body::to_bytes(response.into_body()).await?;
+    let agent_sock = String::from_utf8(body.to_vec())?;
+
+    Ok(agent_sock)
+}
+
+fn get_server_socket(sandbox_id: &str) -> anyhow::Result<String> {
+    let server_url = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(get_agent_socket(sandbox_id))
+        .context("get connection vsock")?;
+
+    Ok(server_url)
+}
+
+fn get_agent_url(sandbox_id: &str, dbg_console_vport: u32) -> anyhow::Result<()> {
+    // sandbox_id MUST be a long ID.
+    let server_url = get_server_socket(sandbox_id).context("get debug console socket URL")?;
+    if server_url.is_empty() {
+        return Err(anyhow!("server url is empty."));
+    }
+
+    info!(sl!(), "Success serverl_url: {:?} console_port:{}", server_url, dbg_console_vport);
     Ok(())
 }
