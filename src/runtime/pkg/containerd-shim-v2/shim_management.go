@@ -41,7 +41,7 @@ const (
 	PolicyUrl             = "/policy"
 	IP6TablesUrl          = "/ip6tables"
 	MetricsUrl            = "/metrics"
-	TestAgentTtrpcUrl     = "/test-agent-ttrpc"
+	TestAgentApiUrl     = "/test-agent-api"
 )
 
 var (
@@ -317,7 +317,7 @@ func (s *service) startManagementServer(ctx context.Context, ociSpec *specs.Spec
 	m.Handle(PolicyUrl, http.HandlerFunc(s.policyHandler))
 	m.Handle(IPTablesUrl, http.HandlerFunc(s.ipTablesHandler))
 	m.Handle(IP6TablesUrl, http.HandlerFunc(s.ip6TablesHandler))
-	m.Handle(TestAgentTtrpcUrl, http.HandlerFunc(s.testAgentTtrpcApiHandler))
+	m.Handle(TestAgentApiUrl, http.HandlerFunc(s.testAgentTtrpcApiHandler))
 	s.mountPprofHandle(m, ociSpec)
 
 	// register shim metrics
