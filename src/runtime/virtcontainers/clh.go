@@ -540,7 +540,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 	clh.vmconfig.Platform = chclient.NewPlatformConfig()
 	platform := clh.vmconfig.Platform
-	platform.SetNumPciSegments(2)
+	platform.SetNumPciSegments(10)
 	if clh.config.IOMMU {
 		platform.SetIommuSegments([]int32{0})
 	}
@@ -550,11 +550,6 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 			return err
 		}
 	}
-
-	if clh.vmconfig.Platform == nil {
-		clh.vmconfig.Platform = chclient.NewPlatformConfig()
-	}
-	clh.vmconfig.Platform.SetNumPciSegments(10)
 
 	// Create the VM memory config via the constructor to ensure default values are properly assigned
 	clh.vmconfig.Memory = chclient.NewMemoryConfig(int64((utils.MemUnit(clh.config.MemorySize) * utils.MiB).ToBytes()))
