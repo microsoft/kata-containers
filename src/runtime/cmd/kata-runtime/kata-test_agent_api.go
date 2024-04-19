@@ -61,7 +61,7 @@ var copyFileTestCommand = cli.Command{
 				return err
 			}
 
-			return shimclient.DoPost(sandboxId, defaultTimeout, containerdshim.TestAgentTtrpcUrl, "application/json", encoded)
+			return shimclient.DoPost(sandboxId, defaultTimeout, containerdshim.TestAgentApiUrl, "application/json", encoded)
 	},
 }
 
@@ -108,6 +108,6 @@ var setPolicyTestCommand = cli.Command{
 				return err
 			}
 
-			return shimclient.DoPost(sandboxId, defaultTimeout, containerdshim.TestAgentTtrpcUrl, "application/json", encoded)
+			return shimclient.DoPost(sandboxId, defaultTimeout, containerdshim.TestAgentApiUrl, "application/json", encoded)
 	},
 }
