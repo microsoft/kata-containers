@@ -6,7 +6,7 @@ use reqwest::StatusCode;
 use slog::info;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use shim_interface::shim_mgmt::{client::MgmtClient, TEST_AGENT_APIS, AGENT_URL};
+use shim_interface::shim_mgmt::{client::MgmtClient, TEST_AGENT_APIS};
 
 pub const TIMEOUT: Duration = Duration::from_millis(2000);
 
@@ -108,16 +108,6 @@ fn forward_cmds(
 
     let sandbox_id: String = cmd_fields[1].to_string();
 
-    if api_short_name.eq("testagenturl") {
-        info!(sl!(), "Test getting agent url");
-        let res = get_agent_url(&sandbox_id, 1026);
-        if res.is_err() {
-            return (res, false);
-        }
-
-        return (Ok(()), false);
-    }
-
     let args = if cmd_fields.len() > 2 {
         cmd_fields[2..].join(" ")
     }else{
@@ -194,42 +184,5 @@ fn prep_copy_file_req(args: &str, req: &mut TestApiRequest, api: String, id: Str
     req.api = api;
     req.sandbox_id = id;
     req.params = serde_json::to_value(cpreq)?;
-    Ok(())
-}
-
-async fn get_agent_socket(sandbox_id: &str) -> anyhow::Result<String> {
-    let shim_client = MgmtClient::new(sandbox_id, Some(TIMEOUT))?;
-
-    // get agent sock from body when status code is OK.
-    let response = shim_client.get(AGENT_URL).await?;
-    let status = response.status();
-    if status != StatusCode::OK {
-        return Err(anyhow!("shim client get connection failed: {:?} ", status));
-    }
-
-    let body = hyper::body::to_bytes(response.into_body()).await?;
-    let agent_sock = String::from_utf8(body.to_vec())?;
-
-    Ok(agent_sock)
-}
-
-fn get_server_socket(sandbox_id: &str) -> anyhow::Result<String> {
-    let server_url = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(get_agent_socket(sandbox_id))
-        .context("get connection vsock")?;
-
-    Ok(server_url)
-}
-
-fn get_agent_url(sandbox_id: &str, dbg_console_vport: u32) -> anyhow::Result<()> {
-    // sandbox_id MUST be a long ID.
-    let server_url = get_server_socket(sandbox_id).context("get debug console socket URL")?;
-    if server_url.is_empty() {
-        return Err(anyhow!("server url is empty."));
-    }
-
-    info!(sl!(), "Success serverl_url: {:?} console_port:{}", server_url, dbg_console_vport);
     Ok(())
 }
