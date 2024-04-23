@@ -109,6 +109,14 @@ impl Address {
             slotfn,
         }
     }
+
+    pub fn get_sysfs_path(&self) -> String {
+        // Example: /devices/pci0001:00/0001:00:01.0
+        format!(
+            "/devices/pci{:04x}:00/{:04x}:{:02x}:{}",
+            self.domain, self.domain, self.bus, self.slotfn
+        )
+    }
 }
 
 impl FromStr for Address {
