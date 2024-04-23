@@ -6,12 +6,10 @@
 
 #[cfg(target_arch = "s390x")]
 use crate::ccw;
-use crate::device::{
-    pcipath_to_sysfs, DeviceContext, DeviceHandler, DeviceInfo, SpecUpdate, BLOCK,
-};
+use crate::device::{DeviceContext, DeviceHandler, DeviceInfo, SpecUpdate, BLOCK};
 #[cfg(target_arch = "s390x")]
 use crate::linux_abi::CCW_ROOT_BUS_PATH;
-use crate::linux_abi::{create_pci_root_bus_path, SYSFS_DIR, SYSTEM_DEV_PATH};
+use crate::linux_abi::SYSTEM_DEV_PATH;
 use crate::pci;
 use crate::sandbox::Sandbox;
 use crate::uevent::{wait_for_uevent, Uevent, UeventMatcher};
@@ -43,7 +41,7 @@ impl DeviceHandler for VirtioBlkPciDeviceHandler {
 
     #[instrument]
     async fn device_handler(&self, device: &Device, ctx: &mut DeviceContext) -> Result<SpecUpdate> {
-        let pcipath = pci::Path::from_str(&device.id)?;
+        let pcipath = pci::Address::from_str(&device.id)?;
         let vm_path = get_virtio_blk_pci_device_name(ctx.sandbox, &pcipath).await?;
 
         Ok(DeviceInfo::new(&vm_path, true)
@@ -107,11 +105,10 @@ impl DeviceHandler for VirtioBlkMmioDeviceHandler {
 #[instrument]
 pub async fn get_virtio_blk_pci_device_name(
     sandbox: &Arc<Mutex<Sandbox>>,
-    pcipath: &pci::Path,
+    pciaddr: &pci::Address,
 ) -> Result<String> {
-    let root_bus_sysfs = format!("{}{}", SYSFS_DIR, create_pci_root_bus_path());
-    let sysfs_rel_path = pcipath_to_sysfs(&root_bus_sysfs, pcipath)?;
-    let matcher = VirtioBlkPciMatcher::new(&sysfs_rel_path);
+    let sysfs_path = pciaddr.get_sysfs_path();
+    let matcher = VirtioBlkPciMatcher::new(&sysfs_path);
 
     let uev = wait_for_uevent(sandbox, matcher).await?;
     Ok(format!("{}/{}", SYSTEM_DEV_PATH, &uev.devname))
@@ -162,9 +159,8 @@ pub struct VirtioBlkPciMatcher {
 }
 
 impl VirtioBlkPciMatcher {
-    pub fn new(relpath: &str) -> VirtioBlkPciMatcher {
-        let root_bus = create_pci_root_bus_path();
-        let re = format!(r"^{}{}/virtio[0-9]+/block/", root_bus, relpath);
+    fn new(sysfspath: &str) -> VirtioBlkPciMatcher {
+        let re = format!(r"^{sysfspath}/virtio[0-9]+/block/");
 
         VirtioBlkPciMatcher {
             rex: Regex::new(&re).expect("BUG: failed to compile VirtioBlkPciMatcher regex"),
