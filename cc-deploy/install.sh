@@ -16,21 +16,10 @@
 
 set -euo pipefail
 
-ver="master"
-if [[ "$#" -gt 0 ]]; then
-  ver="$1"
-fi
-
-repo="https://raw.githubusercontent.com/sprt/cc-azuredisk-csi-driver/$ver/cc-deploy"
-if [[ "$#" -gt 1 ]]; then
-  if [[ "$2" == *"local"* ]]; then
-    echo "use local deploy"
-    repo="$(dirname "$(realpath "$0")")"
-  fi
-fi
-
-if [ $ver != "master" ]; then
-	repo="$repo/$ver"
+if [[ "$#" -gt 0 ]] && [[ "$1" = "local" ]]; then
+  repo="$(dirname "$(realpath "$0")")"
+else
+  repo="https://raw.githubusercontent.com/microsoft/kata-containers/cc-azuredisk-csi-driver/latest/cc-deploy/latest"
 fi
 
 kubectl apply -f $repo/csi-azuredisk-driver.yaml
