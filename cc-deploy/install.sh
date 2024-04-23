@@ -40,6 +40,6 @@ kubectl apply -f $repo/csi-azuredisk-node.yaml
 kubectl apply -f $repo/csi-azuredisk-controller.yaml
 
 kubectl apply -f $repo/storageclass-cc-azuredisk-csi.yaml
-kubectl apply -f $repo/storageclass-cc-azuredisk-premium-csi.yaml
+kubectl apply -f $repo/storageclass-cc-azuredisk-csi-premium.yaml
 
 echo "Driver installed"

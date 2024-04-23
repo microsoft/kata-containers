@@ -40,6 +40,6 @@ kubectl delete --ignore-not-found -f $repo/csi-azuredisk-node.yaml
 kubectl delete --ignore-not-found -f $repo/csi-azuredisk-controller.yaml
 
 kubectl delete --ignore-not-found -f $repo/storageclass-cc-azuredisk-csi.yaml
-kubectl delete --ignore-not-found -f $repo/storageclass-cc-azuredisk-premium-csi.yaml
+kubectl delete --ignore-not-found -f $repo/storageclass-cc-azuredisk-csi-premium.yaml
 
 echo "Driver uninstalled"
