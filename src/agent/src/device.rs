@@ -226,9 +226,8 @@ struct VirtioBlkPciMatcher {
 }
 
 impl VirtioBlkPciMatcher {
-    fn new(relpath: &str) -> VirtioBlkPciMatcher {
-        let root_bus = create_pci_root_bus_path();
-        let re = format!(r"^{}{}/virtio[0-9]+/block/", root_bus, relpath);
+    fn new(sysfspath: &str) -> VirtioBlkPciMatcher {
+        let re = format!(r"^{sysfspath}/virtio[0-9]+/block/");
 
         VirtioBlkPciMatcher {
             rex: Regex::new(&re).expect("BUG: failed to compile VirtioBlkPciMatcher regex"),
@@ -245,11 +244,10 @@ impl UeventMatcher for VirtioBlkPciMatcher {
 #[instrument]
 pub async fn get_virtio_blk_pci_device_name(
     sandbox: &Arc<Mutex<Sandbox>>,
-    pcipath: &pci::Path,
+    pciaddr: &pci::Address,
 ) -> Result<String> {
-    let root_bus_sysfs = format!("{}{}", SYSFS_DIR, create_pci_root_bus_path());
-    let sysfs_rel_path = pcipath_to_sysfs(&root_bus_sysfs, pcipath)?;
-    let matcher = VirtioBlkPciMatcher::new(&sysfs_rel_path);
+    let sysfs_path = pciaddr.get_sysfs_path();
+    let matcher = VirtioBlkPciMatcher::new(&sysfs_path);
 
     let uev = wait_for_uevent(sandbox, matcher).await?;
     Ok(format!("{}/{}", SYSTEM_DEV_PATH, &uev.devname))
@@ -862,7 +860,7 @@ async fn virtio_blk_device_handler(
     device: &Device,
     sandbox: &Arc<Mutex<Sandbox>>,
 ) -> Result<SpecUpdate> {
-    let pcipath = pci::Path::from_str(&device.id)?;
+    let pcipath = pci::Address::from_str(&device.id)?;
     let vm_path = get_virtio_blk_pci_device_name(sandbox, &pcipath).await?;
 
     Ok(DeviceInfo::new(&vm_path, true)

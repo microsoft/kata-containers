@@ -16,6 +16,9 @@ const (
 	// number), giving slots 0..31
 	pciSlotBits = 5
 	maxPciSlot  = (1 << pciSlotBits) - 1
+
+	pcidomainBits = 16
+	maxPcidomain  = (1 << pcidomainBits) - 1
 )
 
 // A PciSlot describes where a PCI device sits on a single bus
@@ -25,27 +28,65 @@ const (
 //
 // XXX In order to support multifunction device's we'll need to extend
 // this to include the PCI 3-bit function number as well.
-type PciSlot struct{ slot uint8 }
+type PciSlot struct {
+	domain	uint16
+	slot    uint8
+}
 
 func PciSlotFromString(s string) (PciSlot, error) {
-	v, err := strconv.ParseUint(s, 16, pciSlotBits)
+	tokens := strings.Split(s, ":")
+	if len(tokens) == 3 {
+		return PciSlotFromBdfString(tokens)
+	} else {
+		device, err := PciSlotFromDeviceIndexString(s)
+		if err != nil {
+			return PciSlot{}, err
+		}
+
+		return PciSlot{domain: 0, slot: uint8(device)}, nil
+	}
+}
+
+func PciSlotFromDeviceIndexString(s string) (uint64, error) {
+	return strconv.ParseUint(s, 16, pciSlotBits)
+}
+
+func PciSlotFromBdfString(bdfTokens []string) (PciSlot, error) {
+	if bdfTokens[1] != "00" {
+		return PciSlot{}, fmt.Errorf("Unexpected PCI bus index %q", bdfTokens[1])
+	}
+
+	domain, err := strconv.ParseUint(bdfTokens[0], 16, pcidomainBits)
 	if err != nil {
 		return PciSlot{}, err
 	}
-	// The 5 bit width passed to ParseUint ensures the value is <=
-	// maxPciSlot
-	return PciSlot{slot: uint8(v)}, nil
+
+	deviceTokens := strings.Split(bdfTokens[2], ".")
+	if len(deviceTokens) != 2 || deviceTokens[1] != "0" || len(deviceTokens[0]) != 2 {
+		return PciSlot{}, fmt.Errorf("Unexpected PCI BDF device format %q", bdfTokens[2])
+	}
+
+	device, err := PciSlotFromDeviceIndexString(deviceTokens[0])
+	if err != nil {
+		return PciSlot{}, err
+	}
+
+	return PciSlot{domain: uint16(domain), slot: uint8(device)}, nil
 }
 
 func PciSlotFromInt(v int) (PciSlot, error) {
 	if v < 0 || v > maxPciSlot {
 		return PciSlot{}, fmt.Errorf("PCI slot 0x%x should be in range [0..0x%x]", v, maxPciSlot)
 	}
-	return PciSlot{slot: uint8(v)}, nil
+	return PciSlot{domain: 0, slot: uint8(v)}, nil
 }
 
 func (slot PciSlot) String() string {
-	return fmt.Sprintf("%02x", slot.slot)
+	if slot.domain == 0 {
+		return fmt.Sprintf("%02x", slot.slot)
+	} else {
+		return fmt.Sprintf("%04x:00:%02x.0", slot.domain, slot.slot)
+	}
 }
 
 // A PciPath describes where a PCI sits in a PCI hierarchy.
