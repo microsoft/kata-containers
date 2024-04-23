@@ -48,23 +48,23 @@ pub fn mgmt_socket_addr(sid: &str) -> Result<String> {
         .join(sid)
         .join(SHIM_MGMT_SOCK_NAME);
 
-    // Check if file exists on disk
-    if p.is_file() {
+    // Check if file exists
+    if !p.metadata().is_err() {
         if let Some(p) = p.to_str() {
             return Ok(format!("unix://{}", p));
         }
     }
 
-    // When using go implemented runtime, the sandboxes info is stored under a different path
-    // Also check for this, if running this runtime.
-    let p_old = Path::new(&sb_storage_path_runtime_go())
+    // When running runtime-go, the sandboxes info is stored under a different path.
+    // Fallback, if the default path check fails.
+    let p_go = Path::new(&sb_storage_path_runtime_go())
         .join(sid)
         .join(SHIM_MGMT_SOCK_NAME);
 
     // Check if file exists on disk
-    if p_old.is_file() {
-        if let Some(p_old) = p_old.to_str() {
-            return Ok(format!("unix://{}", p_old));
+    if !p_go.metadata().is_err() {
+        if let Some(p_go) = p_go.to_str() {
+            return Ok(format!("unix://{}", p_go));
         }
     }
 
