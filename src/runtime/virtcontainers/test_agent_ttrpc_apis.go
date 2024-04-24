@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"unsafe"
+
 	"github.com/sirupsen/logrus"
 )
 
@@ -16,12 +17,13 @@ var (
 	// This allows to implement only the Unmarshaler interface (and not the Marshaler) since we
 	// can use the 'Api' field in the JSON encoded object.
 	apiMap = map[string]reflect.Type{
-		"CopyFileRequest" : reflect.TypeOf(CopyFileReq{}),
-		"SetPolicyRequest": reflect.TypeOf(SetPolicyReq{}),
+		"CreateContainerRequest": reflect.TypeOf(CreateContainerReq{}),
+		"CopyFileRequest":        reflect.TypeOf(CopyFileReq{}),
+		"SetPolicyRequest":       reflect.TypeOf(SetPolicyReq{}),
 	}
 
 	// to enable more verbose logging
-	logger = logrus.WithFields(logrus.Fields{"ttrpc-test": "logs"})
+	logger = logrus.WithFields(logrus.Fields{"test-agent-api": "logs"})
 )
 
 func getAgentInterface(sandbox VCSandbox) any {
@@ -45,13 +47,13 @@ type TtrpcTestReq struct {
 // Implement Unmarshaller for TtrpcTestReq
 func (ttreq *TtrpcTestReq) UnmarshalJSON(b []byte) error {
 	var data struct {
-		Api string
+		Api       string
 		SandboxID string
-		Params json.RawMessage
+		Params    json.RawMessage
 	}
 
 	if err := json.Unmarshal(b, &data); err != nil {
-		logger.Error("DEBUG: ttrpc-test: failed to unmarshal JSON to custom object.")
+		logger.Error("DEBUG: test-agent-api: failed to unmarshal JSON to custom object.")
 		return err
 	}
 
@@ -59,7 +61,7 @@ func (ttreq *TtrpcTestReq) UnmarshalJSON(b []byte) error {
 		handlerType := reflect.New(apiHandlerType)
 
 		if err := json.Unmarshal(data.Params, handlerType.Interface()); err != nil {
-			logger.Error("DEBUG: ttrpc-test: failed to unmarshal JSON for Params field.")
+			logger.Error("DEBUG: test-agent-api: failed to unmarshal JSON for Params field.")
 			return err
 		}
 
@@ -67,9 +69,29 @@ func (ttreq *TtrpcTestReq) UnmarshalJSON(b []byte) error {
 		return nil
 	}
 
-	logger.WithFields(logrus.Fields{"api": fmt.Sprintf("%s", data.Api),}).Error("DEBUG: ttrpc-test: Agent Api is not valid")
+	logger.WithFields(logrus.Fields{"api": fmt.Sprintf("%s", data.Api)}).Error("DEBUG: test-agent-api: Agent Api is not valid")
 
-	return errors.New("ttrpc-test: Failed to unmarshal encoded JSON")
+	return errors.New("test-agent-api: Failed to unmarshal encoded JSON")
+}
+
+// Agent API: CreateContainerRequest
+type CreateContainerReq struct {
+	Id            string
+	RootfsOptions string
+	Config        string
+	Snapshotter   string
+}
+
+func (cc CreateContainerReq) CallApi(ctx context.Context, sandbox VCSandbox) error {
+	logrus.Error("DEBUG: test-agent-api: testing createContainer api")
+
+	logger.WithFields(logrus.Fields{"container id": fmt.Sprintf("%s", cc.Id)}).Error("Debug: test-agent api ")
+	logger.WithFields(logrus.Fields{"rootfs options": fmt.Sprintf("%s", cc.RootfsOptions)}).Error("Debug: test-agent api ")
+	logger.WithFields(logrus.Fields{"config file path": fmt.Sprintf("%s", cc.Config)}).Error("Debug: test-agent api ")
+	logger.WithFields(logrus.Fields{"snapshotter ": fmt.Sprintf("%s", cc.Snapshotter)}).Error("Debug: test-agent api ")
+
+	return errors.New("test-agent-api: Not implemented")
+
 }
 
 // Agent API: CopyFileRequest
@@ -79,7 +101,7 @@ type CopyFileReq struct {
 }
 
 func (cp CopyFileReq) CallApi(ctx context.Context, sandbox VCSandbox) error {
-	logrus.Error("DEBUG: ttrpc-test: testing copyFile Api")
+	logrus.Error("DEBUG: test-agent-api: testing copyFile Api")
 	return getAgentInterface(sandbox).(*kataAgent).copyFile(ctx, cp.Src, cp.Dest)
 }
 
@@ -89,7 +111,7 @@ type SetPolicyReq struct {
 }
 
 func (sp SetPolicyReq) CallApi(ctx context.Context, sandbox VCSandbox) error {
-	logrus.Error("DEBUG: ttrpc-test: testing setPolicy Api")
+	logrus.Error("DEBUG: test-agent-api: testing setPolicy Api")
 	return getAgentInterface(sandbox).(*kataAgent).setPolicy(ctx, string(sp.Buf))
 }
 
