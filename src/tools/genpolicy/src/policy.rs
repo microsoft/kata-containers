@@ -429,6 +429,9 @@ pub struct CommonData {
 
     /// Storage classes which mounts should be handled as virtio-blk devices.
     pub virtio_blk_storage_classes: Vec<String>,
+
+    /// Storage classes which mounts should be handled as smb mounts
+    pub smb_storage_classes: Vec<String>,
 }
 
 /// Configuration from "kubectl config".

@@ -256,7 +256,18 @@ fn get_persistent_volume_claim_mount(
         .and_then(|pvc_resource| pvc_resource.spec.storageClassName.as_ref())
         .is_some_and(|sc| settings.common.virtio_blk_storage_classes.contains(sc));
 
-    handle_persistent_volume_claim(is_blk_mount, yaml_mount, p_mounts, storages, mount_options);
+    let is_smb_mount = pvc_resource
+        .and_then(|pvc_resource| pvc_resource.spec.storageClassName.as_ref())
+        .is_some_and(|sc| settings.common.smb_storage_classes.contains(sc));
+
+    handle_persistent_volume_claim(
+        is_blk_mount,
+        is_smb_mount,
+        yaml_mount,
+        p_mounts,
+        storages,
+        mount_options,
+    );
 }
 
 fn get_host_path_mount(
@@ -488,25 +499,41 @@ fn get_ephemeral_mount(
         .as_ref()
         .map(|sc| settings.common.virtio_blk_storage_classes.contains(sc))
         .unwrap_or(false);
+    let is_smb_mount = storage_class
+        .as_ref()
+        .map(|sc| settings.common.smb_storage_classes.contains(sc))
+        .unwrap_or(false);
 
-    handle_persistent_volume_claim(is_blk_mount, yaml_mount, p_mounts, storages, mount_options);
+    handle_persistent_volume_claim(
+        is_blk_mount,
+        is_smb_mount,
+        yaml_mount,
+        p_mounts,
+        storages,
+        mount_options,
+    );
 }
 
 fn handle_persistent_volume_claim(
     is_blk_mount: bool,
+    is_smb_mount: bool,
     yaml_mount: &pod::VolumeMount,
     p_mounts: &mut Vec<policy::KataMount>,
     storages: &mut Vec<agent::Storage>,
     mount_options: (&str, &str),
 ) {
-    if is_blk_mount {
-        let source = "$(spath)/$(b64-pci-device-id)".to_string();
+    if is_blk_mount || is_smb_mount {
+        let source = "$(spath)/$(b64-direct-vol-path)".to_string();
 
         storages.push(agent::Storage {
-            driver: "blk".to_string(),
+            driver: if is_blk_mount {
+                "blk".to_string()
+            } else {
+                "smb".to_string()
+            },
             driver_options: Vec::new(),
             fs_group: None,
-            source: "$(pci-device-id)".to_string(),
+            source: "$(direct-vol-path)".to_string(),
             mount_point: source.to_string(),
             fstype: "$(fs-type)".to_string(),
             options: Vec::new(),
