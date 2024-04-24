@@ -975,9 +975,9 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
     print("mount_source_allows 3: i_mount.source=", i_mount.source)
 
     i_source_parts = split(i_mount.source, "/")
-    b64_pci_device_id = i_source_parts[count(i_source_parts) - 1]
+    b64_direct_vol_path = i_source_parts[count(i_source_parts) - 1]
 
-    base64.is_valid(b64_pci_device_id)
+    base64.is_valid(b64_direct_vol_path)
 
     source1 := p_mount.source
     print("mount_source_allows 3: source1 =", source1)
@@ -985,7 +985,7 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
     source2 := replace(source1, "$(spath)", policy_data.common.spath)
     print("mount_source_allows 3: source2 =", source2)
 
-    source3 := replace(source2, "$(b64-pci-device-id)", b64_pci_device_id)
+    source3 := replace(source2, "$(b64-direct-vol-path)", b64_direct_vol_path)
     print("mount_source_allows 3: source3 =", source3)
 
     source3 == i_mount.source
@@ -1113,6 +1113,25 @@ allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
 
     print("allow_storage_options 3: true")
 }
+allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
+    print("allow_storage_options 4: start")
+
+    p_storage.driver == "smb"
+    count(i_storage.options) == 8
+    i_storage.options[0] == "dir_mode=0666"
+    i_storage.options[1] == "file_mode=0666"
+    i_storage.options[2] == "mfsymlinks"    
+    i_storage.options[3] == "cache=strict"  
+    i_storage.options[4] == "nosharesock"
+    i_storage.options[5] == "actimeo=30"    
+    startswith(i_storage.options[6], "addr=")
+    creds = split(i_storage.options[7], ",")
+    count(creds) == 2
+    startswith(creds[0], "username=")
+    startswith(creds[1], "password=")
+    
+    print("allow_storage_options 4: true")
+}
 
 allow_overlay_layer(policy_id, policy_hash, i_option) {
     print("allow_overlay_layer: policy_id =", policy_id, "policy_hash =", policy_hash)
@@ -1208,7 +1227,7 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
 }
 allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
     print("allow_mount_point 6: i_storage.mount_point =", i_storage.mount_point)
-    p_storage.driver == "blk"
+    allow_direct_vol_driver(p_storage, i_storage)
 
     mount1 := p_storage.mount_point
     print("allow_mount_point 6: mount1 =", mount1)
@@ -1216,13 +1235,24 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
     mount2 := replace(mount1, "$(spath)", policy_data.common.spath)
     print("allow_mount_point 6: mount2 =", mount2)
 
-    pci_device_id := i_storage.source
-    mount3 := replace(mount2, "$(b64-pci-device-id)", base64url.encode(pci_device_id))
+    direct_vol_path := i_storage.source
+    mount3 := replace(mount2, "$(b64-direct-vol-path)", base64url.encode(direct_vol_path))
     print("allow_mount_point 6: mount3 =", mount3)
 
     mount3 == i_storage.mount_point
 
     print("allow_mount_point 6: true")
+}
+
+allow_direct_vol_driver(p_storage, i_storage) {
+    print("allow_direct_vol_driver 1: start")
+    p_storage.driver == "blk"
+    print("allow_direct_vol_driver 1: true")
+}
+allow_direct_vol_driver(p_storage, i_storage) {
+    print("allow_direct_vol_driver 2: start")
+    p_storage.driver == "smb"
+    print("allow_direct_vol_driver 2: true")
 }
 
 # process.Capabilities
