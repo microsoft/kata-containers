@@ -659,30 +659,6 @@ EOF
 	fi
 
 	if [ "${AGENT_POLICY}" == "yes" ]; then
-		# Setup systemd-based environment for kata-opa.
-		local opa_bin_dir="$(get_opa_bin_dir "${ROOTFS_DIR}")"
-		if [ -z "${opa_bin_dir}" ]; then
-			# OPA was not installed already, so download it here.
-			#
-			# TODO: if an OPA package is not available for the Guest image distro,
-			#   	Kata should cache the OPA source code, toolchain information, etc.
-			#   	OPA should be built from the cached source code instead of downloading
-			#   	this binary.
-			#
-			opa_bin_url="$(get_package_version_from_kata_yaml externals.open-policy-agent.meta.binary)"
-			info "Downloading OPA binary from ${opa_bin_url}"
-			curl --fail -L "${opa_bin_url}" -o opa || die "Failed to download OPA"
-
-			# Install the OPA binary.
-			opa_bin_dir="/usr/local/bin"
-			local opa_bin="${ROOTFS_DIR}${opa_bin_dir}/opa"
-			info "Installing OPA binary to ${opa_bin}"
-			install -D -o root -g root -m 0755 opa -T "${opa_bin}"
-			strip ${ROOTFS_DIR}${opa_bin_dir}/opa
-		else
-			info "OPA binary already exists in ${opa_bin_dir}"
-		fi
-
 		# Install default settings for the kata-opa service.
 		local opa_settings_dir="/etc/kata-opa"
 		local policy_file_name="$(basename ${agent_policy_file})"
@@ -690,26 +666,6 @@ EOF
 		mkdir -p "${policy_dir}"
 		install -D -o root -g root -m 0644 "${agent_policy_file}" -T "${policy_dir}/${policy_file_name}"
 		ln -sf "${policy_file_name}" "${policy_dir}/default-policy.rego"
-
-		if [ "${AGENT_INIT}" == "yes" ]; then
-			info "OPA will be started by the kata agent"
-		else
-			# Install the unit file for the kata-opa service.
-			local kata_opa_in_dir="${script_dir}/../../../src/kata-opa"
-			local kata_opa_unit="kata-opa.service"
-			local kata_opa_unit_path="${ROOTFS_DIR}/usr/lib/systemd/system/${kata_opa_unit}"
-			local kata_containers_wants="${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants"
-
-			opa_settings_dir="${opa_settings_dir//\//\\/}"
-			sed -e "s/@SETTINGSDIR@/${opa_settings_dir}/g" "${kata_opa_in_dir}/${kata_opa_unit}.in" > "${kata_opa_unit}"
-
-			opa_bin_dir="${opa_bin_dir//\//\\/}"
-			sed -i -e "s/@BINDIR@/${opa_bin_dir}/g" "${kata_opa_unit}"
-
-			install -D -o root -g root -m 0644 "${kata_opa_unit}" -T "${kata_opa_unit_path}"
-			mkdir -p "${kata_containers_wants}"
-			ln -sf "${kata_opa_unit_path}" "${kata_containers_wants}/${kata_opa_unit}"
-		fi
 	fi
 
 	info "Check init is installed"
@@ -727,24 +683,6 @@ EOF
 
 	info "Creating summary file"
 	create_summary_file "${ROOTFS_DIR}"
-}
-
-get_opa_bin_dir()
-{
-	local rootfs_dir="$1"
-	local -a bin_dirs=(
-		"/bin"
-		"/usr/bin"
-		"/usr/local/bin"
-	)
-	for bin_dir in "${bin_dirs[@]}"
-	do
-		local opa_bin="${rootfs_dir}${bin_dir}/opa"
-		if [ -f "${opa_bin}" ]; then
-			echo "${bin_dir}"
-			return 0
-		fi
-	done
 }
 
 parse_arguments()

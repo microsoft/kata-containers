@@ -9,4 +9,3 @@ PACKAGES="kata-packages-uvm"
 [ "$CONF_GUEST" = yes ] && PACKAGES+=" kata-packages-uvm-coco"
 [ "$AGENT_INIT" = no ] && PACKAGES+=" systemd"
 [ "$SECCOMP" = yes ] && PACKAGES+=" libseccomp"
-[ "$AGENT_POLICY" = yes ] && PACKAGES+=" opa" || true
