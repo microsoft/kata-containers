@@ -214,7 +214,6 @@ fn fix_config_entry(path: &str, container_id: &str, sandbox_id: &str) -> Result<
     let mut modified_contents = String::new();
 
     for lines in contents.lines() {
-        info!(sl!(), "line: {}", lines);
         let reg = Regex::new(r"(^.*)(\$[A-Za-z]+)(.*$)")?;
         if reg.is_match(lines) {
             // Matches
@@ -280,7 +279,7 @@ fn prep_create_container_req(args: &str, req: &mut TestApiRequest, api: String, 
     req.sandbox_id = id;
     req.params = serde_json::to_value(create_container_req)?;
 
-    Err(anyhow!("CreateContainer only testing agent"))
+    Ok(())
 }
 
 fn prep_copy_file_req(args: &str, req: &mut TestApiRequest, api: String, id: String) -> Result<()> {
