@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+	#!/usr/bin/env bash
 #
 # Copyright (c) 2018 Intel Corporation
 #
@@ -796,26 +796,6 @@ EOF
 		mkdir -p "${policy_dir}"
 		install -D -o root -g root -m 0644 "${agent_policy_file}" -T "${policy_dir}/${policy_file_name}"
 		ln -sf "${policy_file_name}" "${policy_dir}/default-policy.rego"
-
-		if [ "${AGENT_INIT}" == "yes" ]; then
-			info "OPA will be started by the kata agent"
-		else
-			# Install the unit file for the kata-opa service.
-			local kata_opa_in_dir="${script_dir}/../../../src/kata-opa"
-			local kata_opa_unit="kata-opa.service"
-			local kata_opa_unit_path="${ROOTFS_DIR}/usr/lib/systemd/system/${kata_opa_unit}"
-			local kata_containers_wants="${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants"
-
-			opa_settings_dir="${opa_settings_dir//\//\\/}"
-			sed -e "s/@SETTINGSDIR@/${opa_settings_dir}/g" "${kata_opa_in_dir}/${kata_opa_unit}.in" > "${kata_opa_unit}"
-
-			opa_bin_dir="${opa_bin_dir//\//\\/}"
-			sed -i -e "s/@BINDIR@/${opa_bin_dir}/g" "${kata_opa_unit}"
-
-			install -D -o root -g root -m 0644 "${kata_opa_unit}" -T "${kata_opa_unit_path}"
-			mkdir -p "${kata_containers_wants}"
-			ln -sf "${kata_opa_unit_path}" "${kata_containers_wants}/${kata_opa_unit}"
-		fi
 	fi
 
 	if [[ -n "${GUEST_HOOKS_TARBALL}" ]]; then
