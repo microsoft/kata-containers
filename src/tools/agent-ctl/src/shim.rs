@@ -37,7 +37,7 @@ struct CreateContainer {
     id: String,
     // Rootfs options as created via snapshotter.
     // TO-DO: This will be hardcoded for now since we rely on using the same container image for this test
-    rootfsopts: String,
+    rootfsoptions: String,
     // File containing the OCI config.json template entry.
     // TO-DO: For now, only a few entries will be updated and rest will be used hardcoded.
     config: String,
@@ -270,7 +270,7 @@ fn prep_create_container_req(args: &str, req: &mut TestApiRequest, api: String, 
 
     let create_container_req = CreateContainer{
         id: container_id,
-        rootfsopts: rootfs_options,
+        rootfsoptions: rootfs_options,
         config: config.path,
         snapshotter: "tardev-snapshotter".to_string(),
     };
