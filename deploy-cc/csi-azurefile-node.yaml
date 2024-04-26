@@ -85,7 +85,7 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: azurefile
-          image: arc9693.azurecr.io/azurefile-csi:latest
+          image: arc9693.azurecr.io/oss/kubernetes-sig/cc-azurefile-csi:latest
           imagePullPolicy: Always
           args:
             - "--v=5"

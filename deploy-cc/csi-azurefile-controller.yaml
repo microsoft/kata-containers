@@ -5,7 +5,7 @@ metadata:
   name: csi-azurefile-cc-controller
   namespace: kube-system
 spec:
-  replicas: 2
+  replicas: 1 # Defaults to 2 upstream.
   selector:
     matchLabels:
       app: csi-azurefile-cc-controller
@@ -112,7 +112,7 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: azurefile
-          image: arc9693.azurecr.io/azurefile-csi:latest
+          image: arc9693.azurecr.io/oss/kubernetes-sig/cc-azurefile-csi:latest
           imagePullPolicy: Always
           args:
             - "--v=5"
