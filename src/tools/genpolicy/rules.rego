@@ -928,9 +928,11 @@ allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
     count(creds) == 2
     startswith(creds[0], "username=")
     startswith(creds[1], "password=")
+    print("allow_storage_options 4: true")
+}
     
 allow_storage_options(p_storage, i_storages, bundle_id, index) {
-    print("allow_storage_options 4 start: p_storage.options =", p_storage.options, "i_storage.options =", i_storages[index].options)
+    print("allow_storage_options 5 start: p_storage.options =", p_storage.options, "i_storage.options =", i_storages[index].options)
     p_storage.driver == "overlayfs"
     count(p_storage.options) == 3
 
@@ -940,7 +942,7 @@ allow_storage_options(p_storage, i_storages, bundle_id, index) {
     p_storage_option_1 == i_storages[index].options[1]
     p_storage_option_2 == i_storages[index].options[2]
 
-    print("allow_storage_options 4: true")
+    print("allow_storage_options 5: true")
 }
 
 index_of_overlayfs(i_storages) = i {
