@@ -46,6 +46,18 @@ struct CreateContainer {
 }
 
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
+struct StartContainer {
+    // Container id
+    id: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
+struct RemoveContainer {
+    // Container id
+    id: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 struct CopyFile {
     src: String,
     dest: String,
@@ -61,6 +73,16 @@ static PREP_API_REQ: &[PrepApiReq] = &[
         name: "createcontainer",
         api: "CreateContainerRequest",
         fp: prep_create_container_req,
+    },
+    PrepApiReq{
+        name: "startcontainer",
+        api: "StartContainerRequest",
+        fp: prep_start_container_req,
+    },
+    PrepApiReq{
+        name: "removecontainer",
+        api: "RemoveContainerRequest",
+        fp: prep_remove_container_req,
     },
 ];
 
@@ -246,12 +268,13 @@ fn prep_create_container_req(args: &str, req: &mut TestApiRequest, api: String, 
 
     // Create a random container id.
     let container_id = utils::generate_random_hex_string(64);
+    info!(sl!(), "CreateContainer called for id: {}", container_id);
 
     // TO-DO: For testing createContainer api, use a known busybox image for now.
     // This image will be pulled and unpacked using the specific snapshotter prior to testing this command. NO checks in place for now.
     // The rootFS options used are hardcoded since the image used is static with known pre-calculated hashes.
     // Image <name:version> : "mcr.microsoft.com/mirror/docker/library/busybox:1.35"
-    let rootfs_options = "[io.katacontainers.fs-opt.layer-src-prefix=/var/lib/containerd/io.containerd.snapshotter.v1.tardev/layers io.katacontainers.fs-opt.layer=ZmRmZmUwM2JhZjAwNWRhZjI2ODQ5MzBlYWQ0NGIwZWZiYWEyMjQ2YzhmM2Y5NjM0NmE3MmQ1MjdjZThiMzY1MCx0YXIscm8saW8ua2F0YWNvbnRhaW5lcnMuZnMtb3B0LmJsb2NrX2RldmljZT1maWxlLGlvLmthdGFjb250YWluZXJzLmZzLW9wdC5pcy1sYXllcixpby5rYXRhY29udGFpbmVycy5mcy1vcHQucm9vdC1oYXNoPTI4MWQ2N2NiYzc0ZGNjY2VjZDg1MTVkNTU2MGY3ZmViNWNkNmIwMTU5NDY4ODhhYTk4MmMxZDBlMzYyMDRmMWM= io.katacontainers.fs-opt.overlay-rw lowerdir=fdffe03baf005daf2684930ead44b0efbaa2246c8f3f96346a72d527ce8b3650]".to_string();
+    let rootfs_options = "io.katacontainers.fs-opt.layer-src-prefix=/var/lib/containerd/io.containerd.snapshotter.v1.tardev/layers io.katacontainers.fs-opt.layer=ZmRmZmUwM2JhZjAwNWRhZjI2ODQ5MzBlYWQ0NGIwZWZiYWEyMjQ2YzhmM2Y5NjM0NmE3MmQ1MjdjZThiMzY1MCx0YXIscm8saW8ua2F0YWNvbnRhaW5lcnMuZnMtb3B0LmJsb2NrX2RldmljZT1maWxlLGlvLmthdGFjb250YWluZXJzLmZzLW9wdC5pcy1sYXllcixpby5rYXRhY29udGFpbmVycy5mcy1vcHQucm9vdC1oYXNoPTI4MWQ2N2NiYzc0ZGNjY2VjZDg1MTVkNTU2MGY3ZmViNWNkNmIwMTU5NDY4ODhhYTk4MmMxZDBlMzYyMDRmMWM= io.katacontainers.fs-opt.overlay-rw lowerdir=fdffe03baf005daf2684930ead44b0efbaa2246c8f3f96346a72d527ce8b3650".to_string();
 
     #[derive(Serialize, Deserialize, Clone, Default, Debug)]
     struct LocalConfig {
@@ -279,6 +302,26 @@ fn prep_create_container_req(args: &str, req: &mut TestApiRequest, api: String, 
     req.sandbox_id = id;
     req.params = serde_json::to_value(create_container_req)?;
 
+    Ok(())
+}
+
+fn prep_start_container_req(args: &str, req: &mut TestApiRequest, api: String, id: String) -> Result<()>{
+    info!(sl!(), "Inside start container req)");
+
+    let screq: StartContainer = utils::make_request(&args)?;
+    req.api = api;
+    req.sandbox_id = id;
+    req.params = serde_json::to_value(screq)?;
+    Ok(())
+}
+
+fn prep_remove_container_req(args: &str, req: &mut TestApiRequest, api: String, id: String) -> Result<()>{
+    info!(sl!(), "Inside start container req)");
+
+    let rmreq: RemoveContainer = utils::make_request(&args)?;
+    req.api = api;
+    req.sandbox_id = id;
+    req.params = serde_json::to_value(rmreq)?;
     Ok(())
 }
 
