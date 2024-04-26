@@ -7,6 +7,8 @@ use regex::{Regex, Captures};
 use slog::info;
 use serde::{Deserialize, Serialize};
 use std::{fs::{self, OpenOptions}, io::Write, time::Duration};
+use std::io;
+use std::process::Command;
 use shim_interface::shim_mgmt::{client::MgmtClient, TEST_AGENT_APIS};
 
 pub const TIMEOUT: Duration = Duration::from_millis(2000);
@@ -32,13 +34,24 @@ struct TestApiRequest {
 }
 
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
+struct CreateSandbox {
+    // File(yaml/json format) corresponding to request pod sandbox
+    configfile: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
+struct DestroySandbox {
+    id: String,
+
+}
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 struct CreateContainer {
     // Container id
     id: String,
     // Rootfs options as created via snapshotter.
     // TO-DO: This will be hardcoded for now since we rely on using the same container image for this test
     rootfsoptions: String,
-    // File containing the OCI config.json template entry.
+    // File containing the OCI config template entries.
     // TO-DO: For now, only a few entries will be updated and rest will be used hardcoded.
     config: String,
     // Reference to used snapshotter
@@ -68,6 +81,16 @@ static PREP_API_REQ: &[PrepApiReq] = &[
         name: "copyfile",
         api: "CopyFileRequest",
         fp: prep_copy_file_req,
+    },
+    PrepApiReq{
+        name: "createsandbox",
+        api: "CreateSandboxRequest",
+        fp: prep_create_sandbox_req,
+    },
+    PrepApiReq{
+        name: "destroysandbox",
+        api: "DestroySandboxRequest",
+        fp: prep_destroy_sandbox_req,
     },
     PrepApiReq{
         name: "createcontainer",
@@ -143,17 +166,17 @@ fn forward_cmds(
     let cmd_fields: Vec<&str> = cmd.split_whitespace().collect();
     let api_short_name = cmd_fields[0].to_string();
 
-    // Handle specific api requests.
-    if cmd_fields.len() == 1 {
-        if api_short_name.eq("createsandbox") || api_short_name.eq("destroysandbox") {
-            info!(sl!(), "To be implemented");
-            return (Ok(()), false);
-        } else {
-            return (Err(anyhow!("Invalid api requested:{}", api_short_name)), false);
-        }
+    if cmd_fields.len() < 2 {
+        info!(sl!(), "Expecting atleast 2 arguments. See sub-command usage");
+        return (Err(anyhow!("Invalid arguments.")), false);
     }
 
-    let sandbox_id: String = cmd_fields[1].to_string();
+    let sandbox_id = cmd_fields[1].to_string();
+
+    if !api_short_name.contains("createsandbox") && sandbox_id.len() == 0 {
+        info!(sl!(), "Invalid sandbox id");
+        return (Err(anyhow!("Invalid sandbox id")), false);
+    }
 
     let args = if cmd_fields.len() > 2 {
         cmd_fields[2..].join(" ")
@@ -176,6 +199,10 @@ fn forward_cmds(
     let result = f(&args, &mut req, api_name, sandbox_id);
     if result.is_err() {
         return (result, false);
+    }
+
+    if api_short_name.contains("createsandbox") || api_short_name.contains("destroysandbox") {
+        return (Ok(()), false);
     }
 
     let res = get_response(req, cmd_fields[1].to_string());
@@ -263,6 +290,49 @@ fn fix_config_entry(path: &str, container_id: &str, sandbox_id: &str) -> Result<
     Ok(())
 }
 
+fn prep_create_sandbox_req(args: &str, _req: &mut TestApiRequest, _api: String, _id: String) -> Result<()>{
+    info!(sl!(), "Inside create sandbox request");
+
+    let input: CreateSandbox = utils::make_request(&args)?;
+
+    if fs::metadata(&input.configfile).is_err() {
+        info!(sl!(), "Invalid config file: {}", input.configfile);
+        return Err(anyhow!("Invalid sandbox config file"));
+    }
+
+    let output = Command::new("crictl").args(["runp","-T","30s","-r","kata-cc",&input.configfile]).output()?;
+
+    info!(sl!(), "Command status: {}", output.status);
+
+    //forward stderr
+    io::stderr().write_all(&output.stderr)?;
+    //forward stdout
+    io::stdout().write_all(&output.stdout)?;
+
+    Ok(())
+
+}
+
+fn prep_destroy_sandbox_req(_args: &str, _req: &mut TestApiRequest, _api: String, id: String) -> Result<()>{
+    info!(sl!(), "Inside destroy sandbox request for id:{}", id);
+
+    let stop_output = Command::new("crictl").args(["stopp", &id]).output()?;
+    info!(sl!(), "Command status: {}", stop_output.status);
+    //forward stderr
+    io::stderr().write_all(&stop_output.stderr)?;
+    //forward stdout
+    io::stdout().write_all(&stop_output.stdout)?;
+
+    let rm_output = Command::new("crictl").args(["rmp",&id]).output()?;
+    info!(sl!(), "Command status: {}", rm_output.status);
+    //forward stderr
+    io::stderr().write_all(&rm_output.stderr)?;
+    //forward stdout
+    io::stdout().write_all(&rm_output.stdout)?;
+
+    Ok(())
+}
+
 fn prep_create_container_req(args: &str, req: &mut TestApiRequest, api: String, id: String) -> Result<()>{
     info!(sl!(), "Inside create container request");
 
@@ -306,7 +376,7 @@ fn prep_create_container_req(args: &str, req: &mut TestApiRequest, api: String, 
 }
 
 fn prep_start_container_req(args: &str, req: &mut TestApiRequest, api: String, id: String) -> Result<()>{
-    info!(sl!(), "Inside start container req)");
+    info!(sl!(), "Inside start container req");
 
     let screq: StartContainer = utils::make_request(&args)?;
     req.api = api;
@@ -316,7 +386,7 @@ fn prep_start_container_req(args: &str, req: &mut TestApiRequest, api: String, i
 }
 
 fn prep_remove_container_req(args: &str, req: &mut TestApiRequest, api: String, id: String) -> Result<()>{
-    info!(sl!(), "Inside start container req)");
+    info!(sl!(), "Inside start container req");
 
     let rmreq: RemoveContainer = utils::make_request(&args)?;
     req.api = api;
