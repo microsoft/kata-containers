@@ -1,0 +1,49 @@
+# Copyright (c) Microsoft Corporation.
+
+name: Check policy samples
+
+on:
+  pull_request:
+
+jobs:
+  check-policy-samples:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Install yq
+      env:
+        INSTALL_IN_GOPATH: false
+      run: |
+        ./ci/install_yq.sh
+
+    - name: Install Rust
+      run: |
+        ./tests/install_rust.sh
+        echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Install protobuf-compiler
+      run: |
+        sudo apt-get -y install protobuf-compiler
+
+    - name: Configure containerd
+      run: |
+        sudo containerd config default | sudo dd of=/etc/containerd/config.toml
+        sudo systemctl restart containerd
+        sudo systemctl is-active containerd
+
+    - name: Update policy samples
+      working-directory: ./src/tools/genpolicy
+      run: |
+        python3 update_policy_samples.py
+
+    - name: Show diff
+      run: |
+        git diff
+
+    - name: Check policy samples
+      run: |
+        git diff-files --exit-code
