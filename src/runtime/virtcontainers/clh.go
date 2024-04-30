@@ -546,7 +546,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 	clh.vmconfig.Platform = chclient.NewPlatformConfig()
 	platform := clh.vmconfig.Platform
-	platform.SetNumPciSegments(2)
+	platform.SetNumPciSegments(10)
 	if clh.config.IOMMU {
 		platform.SetIommuSegments([]int32{0})
 	}
@@ -556,11 +556,6 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 			return err
 		}
 	}
-
-	if clh.vmconfig.Platform == nil {
-		clh.vmconfig.Platform = chclient.NewPlatformConfig()
-	}
-	clh.vmconfig.Platform.SetNumPciSegments(10)
 
 	// Create the VM memory config via the constructor to ensure default values are properly assigned
 	clh.vmconfig.Memory = chclient.NewMemoryConfig(int64((utils.MemUnit(clh.config.MemorySize) * utils.MiB).ToBytes()))
@@ -879,7 +874,17 @@ func clhDriveIndexToID(i int) string {
 // assumption convert a clh PciDeviceInfo into a PCI path
 func clhPciInfoToPath(pciInfo chclient.PciDeviceInfo) (types.PciPath, error) {
 	tokens := strings.Split(pciInfo.Bdf, ":")
-	if len(tokens) != 3 || tokens[0] != "0000" || tokens[1] != "00" {
+	if len(tokens) != 3 || tokens[1] != "00" {
+		return types.PciPath{}, fmt.Errorf("Unexpected PCI address %q from clh hotplug", pciInfo.Bdf)
+	}
+
+	// Support up to 10 PCI segments.
+	pciSegment, err := regexp.Compile(`^000[0-9]$`)
+	if err != nil {
+		return types.PciPath{}, fmt.Errorf("Internal error: cannot compile PCI segment regex")
+	}
+
+	if !pciSegment.MatchString(tokens[0]) {
 		return types.PciPath{}, fmt.Errorf("Unexpected PCI address %q from clh hotplug", pciInfo.Bdf)
 	}
 
@@ -888,7 +893,7 @@ func clhPciInfoToPath(pciInfo chclient.PciDeviceInfo) (types.PciPath, error) {
 		return types.PciPath{}, fmt.Errorf("Unexpected PCI address %q from clh hotplug", pciInfo.Bdf)
 	}
 
-	return types.PciPathFromString(tokens[0])
+	return types.PciPathFromString(pciInfo.Bdf)
 }
 
 func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) error {
@@ -932,6 +937,13 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 		clhDisk.SetRateLimiterConfig(*diskRateLimiterConfig)
 	}
 
+	// Hotplug block devices on PCI segments >= 1. PCI segment 0 is used
+	// for the network interface, any disks present at Guest boot time, etc.
+	// Just bus 0 of each segment is used, and up to 31 devices can be
+	// plugged in to each bus.
+	pciSegment := int32(drive.Index)/31 + 1
+	clhDisk.SetPciSegment(pciSegment)
+
 	pciInfo, _, err := cl.VmAddDiskPut(ctx, clhDisk)
 
 	if err != nil {
@@ -940,6 +952,12 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 
 	clh.devicesIds[driveID] = pciInfo.GetId()
 	drive.PCIPath, err = clhPciInfoToPath(pciInfo)
+	clh.Logger().
+		WithField("bdf", pciInfo.Bdf).
+		WithField("index", drive.Index).
+		WithField("pcipath", drive.PCIPath).
+		WithField("segment", pciSegment).
+		Debug("hotplugAddBlockDevice")
 
 	return err
 }
