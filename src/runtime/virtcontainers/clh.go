@@ -546,7 +546,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 	clh.vmconfig.Platform = chclient.NewPlatformConfig()
 	platform := clh.vmconfig.Platform
-	platform.SetNumPciSegments(2)
+	platform.SetNumPciSegments(10)
 	if clh.config.IOMMU {
 		platform.SetIommuSegments([]int32{0})
 	}
@@ -556,11 +556,6 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 			return err
 		}
 	}
-
-	if clh.vmconfig.Platform == nil {
-		clh.vmconfig.Platform = chclient.NewPlatformConfig()
-	}
-	clh.vmconfig.Platform.SetNumPciSegments(10)
 
 	// Create the VM memory config via the constructor to ensure default values are properly assigned
 	clh.vmconfig.Memory = chclient.NewMemoryConfig(int64((utils.MemUnit(clh.config.MemorySize) * utils.MiB).ToBytes()))
@@ -898,7 +893,7 @@ func clhPciInfoToPath(pciInfo chclient.PciDeviceInfo) (types.PciPath, error) {
 		return types.PciPath{}, fmt.Errorf("Unexpected PCI address %q from clh hotplug", pciInfo.Bdf)
 	}
 
-	return types.PciPathFromString(tokens[0])
+	return types.PciPathFromString(pciInfo.Bdf)
 }
 
 func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) error {
@@ -944,7 +939,10 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 
 	// Hotplug block devices on PCI segments >= 1. PCI segment 0 is used
 	// for the network interface, any disks present at Guest boot time, etc.
-	clhDisk.SetPciSegment(int32(drive.Index)/32 + 1)
+	// Just bus 0 of each segment is used, and up to 31 devices can be
+	// plugged in to each bus.
+	pciSegment := int32(drive.Index)/31 + 1
+	clhDisk.SetPciSegment(pciSegment)
 
 	pciInfo, _, err := cl.VmAddDiskPut(ctx, clhDisk)
 
@@ -954,6 +952,12 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 
 	clh.devicesIds[driveID] = pciInfo.GetId()
 	drive.PCIPath, err = clhPciInfoToPath(pciInfo)
+	clh.Logger().
+		WithField("bdf", pciInfo.Bdf).
+		WithField("index", drive.Index).
+		WithField("pcipath", drive.PCIPath).
+		WithField("segment", pciSegment).
+		Debug("hotplugAddBlockDevice")
 
 	return err
 }

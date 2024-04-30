@@ -66,8 +66,8 @@ impl StorageHandler for VirtioBlkPciHandler {
                 return Err(anyhow!("Invalid device {}", &storage.source));
             }
         } else {
-            let pcipath = pci::Path::from_str(&storage.source)?;
-            let dev_path = get_virtio_blk_pci_device_name(ctx.sandbox, &pcipath).await?;
+            let pciaddr = pci::Address::from_str(&storage.source)?;
+            let dev_path = get_virtio_blk_pci_device_name(ctx.sandbox, &pciaddr).await?;
             storage.source = dev_path;
         }
 
