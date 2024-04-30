@@ -11,7 +11,6 @@ use tokio::sync::Mutex;
 use std::convert::TryFrom;
 use std::ffi::{CString, OsStr};
 use std::fmt::Debug;
-use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::str::FromStr;
@@ -56,7 +55,6 @@ use nix::unistd::{self, Pid};
 use rustjail::process::ProcessOperations;
 
 use crate::cdh;
-use crate::device::block_device_handler::get_virtio_blk_pci_device_name;
 use crate::device::network_device_handler::wait_for_net_interface;
 use crate::device::{add_devices, update_env_pci};
 use crate::features::get_build_features;
@@ -90,7 +88,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use tracing::instrument;
 
-use libc::{self, c_char, c_ushort, pid_t, winsize, TIOCSWINSZ};
+use libc::{self, c_ushort, pid_t, winsize, TIOCSWINSZ};
 use std::fs;
 use std::os::unix::prelude::PermissionsExt;
 use std::process::{Command, Stdio};
@@ -1979,24 +1977,8 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
     Ok(())
 }
 
-async fn do_add_swap(sandbox: &Arc<Mutex<Sandbox>>, req: &AddSwapRequest) -> Result<()> {
-    let mut slots = Vec::new();
-    for slot in &req.PCIPath {
-        slots.push(pci::SlotFn::new(*slot, 0)?);
-    }
-    let pcipath = pci::Path::new(slots)?;
-    let dev_name = get_virtio_blk_pci_device_name(sandbox, &pcipath).await?;
-
-    let c_str = CString::new(dev_name)?;
-    let ret = unsafe { libc::swapon(c_str.as_ptr() as *const c_char, 0) };
-    if ret != 0 {
-        return Err(anyhow!(
-            "libc::swapon get error {}",
-            io::Error::last_os_error()
-        ));
-    }
-
-    Ok(())
+async fn do_add_swap(_sandbox: &Arc<Mutex<Sandbox>>, _req: &AddSwapRequest) -> Result<()> {
+    Err(anyhow!(nix::Error::ENOTSUP))
 }
 
 // Setup container bundle under CONTAINER_BASE, which is cleaned up
