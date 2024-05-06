@@ -20,3 +20,9 @@ pub struct Config {
     pub ignore_errors: bool,
     pub no_auto_values: bool,
 }
+
+// CreateSandbox struct to save cmdline inputs and generate the actual struct
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct CreateSandboxInput {
+    pub sandbox_id: String,
+}

@@ -5,7 +5,7 @@
 
 // Description: Client side of ttRPC comms
 
-use crate::types::{Config, Options};
+use crate::types::{Config, Options, CreateSandboxInput};
 use crate::utils;
 use anyhow::{anyhow, Result};
 use byteorder::ByteOrder;
@@ -914,19 +914,16 @@ fn agent_cmd_sandbox_create(
     ctx: &Context,
     client: &AgentServiceClient,
     _health: &HealthClient,
-    options: &mut Options,
+    _: &mut Options,
     args: &str,
 ) -> Result<()> {
-    let mut req: CreateSandboxRequest = utils::make_request(args)?;
+    info!(sl!(), "Sumedh createSandbox Request");
+
+    let inputs: CreateSandboxInput = utils::make_request(args)?;
 
     let ctx = clone_context(ctx);
 
-    run_if_auto_values!(ctx, || -> Result<()> {
-        let sid = utils::get_option("sid", options, args)?;
-        req.set_sandbox_id(sid);
-
-        Ok(())
-    });
+    let req = utils::make_create_sandbox_req(inputs)?;
 
     debug!(sl!(), "sending request"; "request" => format!("{:?}", req));
 

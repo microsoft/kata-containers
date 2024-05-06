@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::types::{Config, Options};
+use crate::types::{Config, Options, CreateSandboxInput};
 use anyhow::{anyhow, Result};
 use oci::{
     Linux as ociLinux, Mount as ociMount, Process as ociProcess, Root as ociRoot, Spec as ociSpec,
 };
+use protobuf::{MessageField, SpecialFields};
+use protocols::agent::{CreateSandboxRequest, FSGroup, KernelModule, Storage};
 use protocols::oci::{
     Box as ttrpcBox, Linux as ttrpcLinux, LinuxBlockIO as ttrpcLinuxBlockIO,
     LinuxCPU as ttrpcLinuxCPU, LinuxCapabilities as ttrpcLinuxCapabilities,
@@ -24,9 +26,9 @@ use protocols::oci::{
 };
 use rand::Rng;
 use serde::de::DeserializeOwned;
-use slog::{debug, warn};
+use slog::{debug, info, warn};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -40,6 +42,9 @@ const MIN_HOSTNAME_LEN: u8 = 8;
 
 // Name of the OCI configuration file found at the root of an OCI bundle.
 const CONFIG_FILE: &str = "config.json";
+
+// Path for sandbox related mounts
+const SANDBOX_HOST_PATH: &str = "/run/kata-containers/sandbox";
 
 lazy_static! {
     // Create a mutable hash map statically
@@ -819,4 +824,47 @@ pub fn make_request<T: Default + DeserializeOwned>(args: &str) -> Result<T> {
         // are not handled by this functionz.
         _ => Ok(Default::default()),
     }
+}
+
+// Returns a CreateSandboxRequest object
+// For now use defaults to fill the struct
+pub fn make_create_sandbox_req(inputs: CreateSandboxInput) -> Result<CreateSandboxRequest> {
+    info!(sl!(), "Sumedh make_create_sandbox_req");
+
+    if inputs.sandbox_id.is_empty() {
+        warn!(sl!(), "Sandbox_id is empty, needed to create request");
+        return Err(anyhow!("missing sandbox_id"));
+    }
+
+    let mut req: CreateSandboxRequest = CreateSandboxRequest::default();
+
+    // set empty hostname
+    req.hostname = "".to_owned();
+
+    // set dns, copy the host's /etc/resolv.conf into this setting since we are not running with any dns daemon like kube-dns.
+    let dns_contents: String = fs::read_to_string("/etc/resolv.conf")?;
+    req.dns = Vec::new();
+    let _ = dns_contents.split("\n").map(|x| req.dns.push(x.to_string()));
+
+    // for storages, there is file system share & shm, set up just shm since we do not enable file system share
+    let mut p = String::from(SANDBOX_HOST_PATH);
+    p.push_str("shm");
+
+    req.storages = vec![Storage{
+        driver: "ephemeral".to_owned(),
+        driver_options: Vec::<String>::new(),
+        source: "shm".to_owned(),
+        fstype: "tmpfs".to_owned(),
+        options: vec!["noexec".to_owned(), "nosuid".to_owned(), "nodev".to_owned(), "mode=1777".to_owned(), "size=67108864".to_owned()],
+        mount_point: p,
+        fs_group: MessageField::<FSGroup>::default(),
+        special_fields: SpecialFields::default(),
+    }];
+
+    req.sandbox_pidns = false;
+    req.sandbox_id = inputs.sandbox_id;
+    req.guest_hook_path = "".to_owned();
+    req.kernel_modules = Vec::<KernelModule>::new();
+
+    Ok(req)
 }
