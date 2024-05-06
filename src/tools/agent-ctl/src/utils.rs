@@ -44,7 +44,7 @@ const MIN_HOSTNAME_LEN: u8 = 8;
 const CONFIG_FILE: &str = "config.json";
 
 // Path for sandbox related mounts
-const SANDBOX_HOST_PATH: &str = "/run/kata-containers/sandbox";
+const SANDBOX_HOST_PATH: &str = "/run/kata-containers/sandbox/";
 
 lazy_static! {
     // Create a mutable hash map statically
@@ -849,7 +849,8 @@ pub fn make_create_sandbox_req(inputs: CreateSandboxInput) -> Result<CreateSandb
     // set dns, copy the host's /etc/resolv.conf into this setting since we are not running with any dns daemon like kube-dns.
     let dns_contents: String = fs::read_to_string("/etc/resolv.conf")?;
     req.dns = Vec::new();
-    let _ = dns_contents.split("\n").map(|x| req.dns.push(x.to_string()));
+    let dns_iter = dns_contents.split("\n").map(|x| x.to_string());
+    req.dns = dns_iter.collect();
 
     // for storages, there is file system share & shm, set up just shm since we do not enable file system share
     let mut p = String::from(SANDBOX_HOST_PATH);
