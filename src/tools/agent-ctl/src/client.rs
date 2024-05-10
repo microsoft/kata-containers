@@ -5,8 +5,9 @@
 
 // Description: Client side of ttRPC comms
 
-use crate::types::{Config, Options, CreateSandboxInput};
+use crate::types::{Config, Options, CreateSandboxInput, CreateContainerInput, CopyFileInput};
 use crate::utils;
+use crate::oci_helper;
 use anyhow::{anyhow, Result};
 use byteorder::ByteOrder;
 use nix::sys::socket::{connect, socket, AddressFamily, SockAddr, SockFlag, SockType, UnixAddr};
@@ -967,23 +968,39 @@ fn agent_cmd_container_create(
     options: &mut Options,
     args: &str,
 ) -> Result<()> {
-    let mut req: CreateContainerRequest = utils::make_request(args)?;
+    let mut req = CreateContainerRequest::default();
+
+    // Adding oci input generation path for request which does not provide a
+    // bundle-dir (and equivalent config.json) path in the request.
+    // TO-DO: Figure out the complete input fields to use, for now relying on some basic
+    // inputs to generate the complete OCI equivalent input from.
+    let json_spec= utils::get_option("spec", options, "")?;
+    if json_spec.is_empty() {
+        info!(sl!(), "Generating container oci spec based on command line params");
+        let input: CreateContainerInput = utils::make_request(&args)?;
+        // Generate the oci equivalent
+        let oci_spec = oci_helper::generate_oci_spec(&input)?;
+        req.set_container_id(input.container_id.clone());
+        let ttrpc_spec = utils::oci_to_ttrpc("", &input.container_id, &oci_spec)?;
+        req.set_OCI(ttrpc_spec);
+    } else {
+        req = utils::make_request(args)?;
+            // FIXME: container create: add back "spec=file:///" support
+
+        run_if_auto_values!(ctx, || -> Result<()> {
+            let cid = utils::get_option("cid", options, args)?;
+            let exec_id = utils::get_option("exec_id", options, args)?;
+            let ttrpc_spec = utils::get_ttrpc_spec(options, &cid).map_err(|e| anyhow!(e))?;
+
+            req.set_container_id(cid);
+            req.set_exec_id(exec_id);
+            req.set_OCI(ttrpc_spec);
+
+            Ok(())
+        });
+    }
 
     let ctx = clone_context(ctx);
-
-    // FIXME: container create: add back "spec=file:///" support
-
-    run_if_auto_values!(ctx, || -> Result<()> {
-        let cid = utils::get_option("cid", options, args)?;
-        let exec_id = utils::get_option("exec_id", options, args)?;
-        let ttrpc_spec = utils::get_ttrpc_spec(options, &cid).map_err(|e| anyhow!(e))?;
-
-        req.set_container_id(cid);
-        req.set_exec_id(exec_id);
-        req.set_OCI(ttrpc_spec);
-
-        Ok(())
-    });
 
     debug!(sl!(), "sending request"; "request" => format!("{:?}", req));
 
@@ -1705,7 +1722,12 @@ fn agent_cmd_sandbox_copy_file(
     options: &mut Options,
     args: &str,
 ) -> Result<()> {
-    let mut req: CopyFileRequest = utils::make_request(args)?;
+    // Alternate work
+    let input: CopyFileInput = utils::make_request(args)?;
+
+    let mut req: CopyFileRequest = utils::make_copy_file_request(&input)?;
+
+    //let mut req: CopyFileRequest = utils::make_request(args)?;
 
     let ctx = clone_context(ctx);
 

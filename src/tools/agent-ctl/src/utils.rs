@@ -3,13 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::types::{Config, Options, CreateSandboxInput};
+use crate::types::{Config, Options, CreateSandboxInput, CopyFileInput};
 use anyhow::{anyhow, Result};
 use oci::{
     Linux as ociLinux, Mount as ociMount, Process as ociProcess, Root as ociRoot, Spec as ociSpec,
 };
 use protobuf::{MessageField, SpecialFields};
-use protocols::agent::{CreateSandboxRequest, FSGroup, KernelModule, Storage};
+use protocols::agent::{CopyFileRequest, CreateSandboxRequest, FSGroup, KernelModule, Storage};
 use protocols::oci::{
     Box as ttrpcBox, Linux as ttrpcLinux, LinuxBlockIO as ttrpcLinuxBlockIO,
     LinuxCPU as ttrpcLinuxCPU, LinuxCapabilities as ttrpcLinuxCapabilities,
@@ -29,6 +29,7 @@ use serde::de::DeserializeOwned;
 use slog::{debug, info, warn};
 use std::collections::HashMap;
 use std::fs::{self, File};
+use std::os::linux::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -660,7 +661,7 @@ fn linux_oci_to_ttrpc(l: &ociLinux) -> ttrpcLinux {
     }
 }
 
-fn oci_to_ttrpc(bundle_dir: &str, cid: &str, oci: &ociSpec) -> Result<ttrpcSpec> {
+pub fn oci_to_ttrpc(bundle_dir: &str, cid: &str, oci: &ociSpec) -> Result<ttrpcSpec> {
     let process = match &oci.process {
         Some(p) => protobuf::MessageField::some(process_oci_to_ttrpc(p)),
         None => protobuf::MessageField::none(),
@@ -843,6 +844,7 @@ pub fn make_create_sandbox_req(inputs: CreateSandboxInput) -> Result<CreateSandb
 
     let mut req: CreateSandboxRequest = CreateSandboxRequest::default();
 
+    // TO-DO: Use struct methods instead.
     // set empty hostname
     req.hostname = "".to_owned();
 
@@ -871,6 +873,32 @@ pub fn make_create_sandbox_req(inputs: CreateSandboxInput) -> Result<CreateSandb
     req.sandbox_id = inputs.sandbox_id;
     req.guest_hook_path = "".to_owned();
     req.kernel_modules = Vec::<KernelModule>::new();
+
+    Ok(req)
+}
+
+pub fn make_copy_file_request(input: &CopyFileInput) -> Result<CopyFileRequest> {
+    // create dir mode permissions
+    // Dir mode | 750
+    let perms = 0o20000000750;
+
+    let grpc_max_data_size = 1024*1024;
+
+    let src_meta = fs::metadata(&input.src)?;
+
+    if src_meta.st_size() as i32 > grpc_max_data_size {
+        info!(sl!(), "File size {} is greater than max size {}, copy in loop is not supprted", src_meta.st_size(), grpc_max_data_size);
+        return Err(anyhow!("File size greater than supported max size"));
+    }
+    let mut req = CopyFileRequest::default();
+    req.set_path(input.dest.clone());
+    req.set_dir_mode(perms);
+    req.set_file_mode(src_meta.st_mode());
+    req.set_uid(src_meta.st_uid() as i32);
+    req.set_gid(src_meta.st_gid() as i32);
+    req.set_file_size(src_meta.st_size() as i64);
+    req.set_offset(0);
+    req.set_data(fs::read(&input.src)?);
 
     Ok(req)
 }

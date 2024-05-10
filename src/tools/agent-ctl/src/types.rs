@@ -21,8 +21,37 @@ pub struct Config {
     pub no_auto_values: bool,
 }
 
-// CreateSandbox struct to save cmdline inputs and generate the actual struct
+// create sandbox request input struct
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CreateSandboxInput {
     pub sandbox_id: String,
+}
+
+// create container request input struct
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct MountPoints {
+    pub src: String,
+    pub dest: String, 
+    // space separated list of string slices for providing additional mount options
+    pub options: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct CreateContainerInput {
+    pub container_id: String,
+    pub container_type: String,
+    pub sandbox_id: String,
+    // rootfs path as prepared by snapshotter
+    pub root_fs_path: String,
+    // args that the container should run
+    pub args: Vec<String>,
+    // mount options
+    pub mnt_options: Vec<MountPoints>,
+}
+
+// Simplified copy file request
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct CopyFileInput {
+    pub src: String,
+    pub dest: String,
 }

@@ -24,6 +24,7 @@ mod client;
 mod rpc;
 mod types;
 mod utils;
+mod oci_helper;
 
 const DEFAULT_LOG_LEVEL: slog::Level = slog::Level::Info;
 
