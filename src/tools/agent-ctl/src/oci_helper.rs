@@ -325,7 +325,7 @@ pub fn create_oci_mounts(is_pause_container: bool, i_mounts: &Vec<MountPoints>) 
                     "nosuid".to_owned(),
                     "nodev".to_owned(),
                     "noexec".to_owned(),
-                ]       
+                ]
             };
             if !mnts.options.is_empty() {
                 let mut user_options = mnts.options.split(" ").map(|x| x.to_string()).collect::<Vec<String>>();
