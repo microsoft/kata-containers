@@ -64,7 +64,7 @@ fn get_default_mounts(is_pause_container: bool) -> Vec<ociMount> {
     let mut mounts = vec![
         ociMount {
             destination: "/proc".to_string(),
-            r#type: "/proc".to_string(), 
+            r#type: "proc".to_string(), 
             source: "proc".to_string(),
             options: vec![
                 "nosuid".to_string(),
@@ -185,7 +185,7 @@ fn get_linux_namespaces() -> Vec<ociLinuxNamespace> {
     // TO-DO: Look at this code
     namespaces.push(ociLinuxNamespace {
             r#type: oci::UTSNAMESPACE.to_string(),
-            path: "/run/sandbox-ns/uts".to_owned(),
+            path: "".to_owned(),
     });
 
     namespaces.push(ociLinuxNamespace {
@@ -195,7 +195,7 @@ fn get_linux_namespaces() -> Vec<ociLinuxNamespace> {
 
     namespaces.push(ociLinuxNamespace {
         r#type: oci::IPCNAMESPACE.to_string(),
-        path: "/run/sandbox-ns/ipc".to_owned(),
+        path: "".to_owned(),
     });
     // TO-DO: Handle network namespaces
     namespaces
@@ -318,8 +318,9 @@ pub fn create_oci_mounts(is_pause_container: bool, i_mounts: &Vec<MountPoints>) 
             let mut mounts = ociMount {
                 destination: mnts.src.clone(),
                 source: mnts.dest.clone(),
-                r#type: "".to_owned(),
+                r#type: "bind".to_owned(),
                 options: vec![
+                    "rbind".to_owned(),
                     "ro".to_owned(),
                     "nosuid".to_owned(),
                     "nodev".to_owned(),
