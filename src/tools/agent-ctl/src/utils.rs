@@ -690,6 +690,12 @@ pub fn oci_to_ttrpc(bundle_dir: &str, cid: &str, oci: &ociSpec) -> Result<ttrpcS
         return Err(anyhow!("container ID too short for hostname"));
     }
 
+    // Support annotations
+    let mut annot: HashMap<String,String> = HashMap::new();
+    for (key, val) in oci.annotations.iter() {
+        annot.insert(key.clone(), val.clone());
+    }
+
     // FIXME: Implement setting a custom (and unique!) hostname (requires uts ns setup)
     //let hostname = cid[0..MIN_HOSTNAME_LEN as usize].to_string();
     let hostname = "".to_string();
@@ -701,7 +707,7 @@ pub fn oci_to_ttrpc(bundle_dir: &str, cid: &str, oci: &ociSpec) -> Result<ttrpcS
         Hostname: hostname,
         Mounts: mounts,
         Hooks: protobuf::MessageField::none(),
-        Annotations: HashMap::new(),
+        Annotations: annot,
         Linux: linux,
         Solaris: protobuf::MessageField::none(),
         Windows: protobuf::MessageField::none(),
