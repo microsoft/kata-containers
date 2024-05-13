@@ -34,7 +34,7 @@ rootfs_type=@DEFROOTFSTYPE@
 #
 # Known limitations:
 # * Does not work by design:
-#   - CPU Hotplug 
+#   - CPU Hotplug
 #   - Memory Hotplug
 #   - NVDIMM devices
 #
@@ -42,13 +42,7 @@ rootfs_type=@DEFROOTFSTYPE@
 confidential_guest = true
 
 # enable SEV SNP VMs
-sev_snp_guest = @DEFSNPGUEST@
-
-# SNP guest policy
-# Based on SEV Secure Nested Paging Firmware ABI Specification section 4.3
-# If it is unspecified or 0, it will default to 0x30000 (i.e. Bit#17 is '1' which is reserved and Bit#16 is '1' which means SMT is allowed).
-snp_guest_policy=@DEFSNPGUESTPOLICY@
-
+sev_snp_guest = true
 
 # The path to the file containing the SNP certificate chain (including
 # VCEK/VLEK certificates). This wil be used to get the extended attestation
