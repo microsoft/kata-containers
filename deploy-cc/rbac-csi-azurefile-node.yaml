@@ -16,6 +16,16 @@ rules:
     verbs: ["get"]
 
 ---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-azurefile-cc-node-pod-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+
+---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
@@ -28,3 +38,17 @@ roleRef:
   kind: ClusterRole
   name: csi-azurefile-cc-node-secret-role
   apiGroup: rbac.authorization.k8s.io
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-azurefile-cc-node-pod-binding
+subjects:
+  - kind: ServiceAccount
+    name: csi-azurefile-cc-node-sa
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: csi-azurefile-cc-node-pod-role
+  apiGroup: rbac.authorization.k8s.io
+---
