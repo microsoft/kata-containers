@@ -19,7 +19,7 @@ set -euo pipefail
 if [[ "$#" -gt 0 ]] && [[ "$1" = "local" ]]; then
   repo="$(dirname "$(realpath "$0")")"
 else
-  repo="https://raw.githubusercontent.com/microsoft/kata-containers/cc-azurefile-csi-driver/latest/deploy-cc/latest"
+  repo="https://raw.githubusercontent.com/microsoft/kata-containers/archana1/dynamic-pvc-support/deploy-cc/v1.30.1.cc0"
 fi
 
 kubectl apply -f $repo/csi-azurefile-driver.yaml
