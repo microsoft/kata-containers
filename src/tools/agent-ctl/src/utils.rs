@@ -3,13 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::types::{Config, Options, CreateSandboxInput, CopyFileInput};
+use crate::types::{Config, Options, CreateSandboxInput, CopyFileInput, SetPolicyInput};
 use anyhow::{anyhow, Result};
 use oci::{
     Linux as ociLinux, Mount as ociMount, Process as ociProcess, Root as ociRoot, Spec as ociSpec,
 };
 use protobuf::{MessageField, SpecialFields};
-use protocols::agent::{CopyFileRequest, CreateSandboxRequest, FSGroup, KernelModule, Storage};
+use protocols::agent::{CopyFileRequest, CreateSandboxRequest, FSGroup, KernelModule, SetPolicyRequest, Storage};
 use protocols::oci::{
     Box as ttrpcBox, Linux as ttrpcLinux, LinuxBlockIO as ttrpcLinuxBlockIO,
     LinuxCPU as ttrpcLinuxCPU, LinuxCapabilities as ttrpcLinuxCapabilities,
@@ -29,6 +29,7 @@ use serde::de::DeserializeOwned;
 use slog::{debug, info, warn};
 use std::collections::HashMap;
 use std::fs::{self, File};
+use std::io::Read;
 use std::os::linux::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -906,5 +907,24 @@ pub fn make_copy_file_request(input: &CopyFileInput) -> Result<CopyFileRequest> 
     req.set_offset(0);
     req.set_data(fs::read(&input.src)?);
 
+    Ok(req)
+}
+
+pub fn make_set_policy_request(input: &SetPolicyInput) -> Result<SetPolicyRequest> {
+    let mut policy_file = File::open(&input.policy_file)?;
+    let metadata = policy_file.metadata()?;
+
+    let mut policy_data = String::new();
+    match policy_file.read_to_string(&mut policy_data) {
+        Ok(bytes_read) => {
+            if bytes_read != metadata.len() as usize {
+                return Err(anyhow!("Failed to read all policy data, size {} read {}", metadata.len(), bytes_read));
+            }
+        }
+        Err(e) => return Err(anyhow!("Error reading policy file: {}", e)),
+    }
+
+    let mut req = SetPolicyRequest::default();
+    req.set_policy(policy_data);
     Ok(req)
 }

@@ -5,7 +5,7 @@
 
 // Description: Client side of ttRPC comms
 
-use crate::types::{Config, Options, CreateSandboxInput, CreateContainerInput, CopyFileInput};
+use crate::types::{Config, Options, CreateSandboxInput, CreateContainerInput, CopyFileInput, SetPolicyInput};
 use crate::utils;
 use crate::oci_helper;
 use anyhow::{anyhow, Result};
@@ -286,6 +286,11 @@ static AGENT_CMDS: &[AgentCmd] = &[
         name: "WriteStdin",
         st: ServiceType::Agent,
         fp: agent_cmd_container_write_stdin,
+    },
+    AgentCmd {
+        name: "SetPolicy",
+        st: ServiceType::Agent,
+        fp: agent_cmd_sandbox_set_policy,
     },
 ];
 
@@ -2170,6 +2175,31 @@ fn agent_cmd_sandbox_add_swap(
 
     // FIXME: Implement 'AddSwap' fully.
     eprintln!("FIXME: 'AddSwap' not fully implemented");
+
+    info!(sl!(), "response received";
+        "response" => format!("{:?}", reply));
+
+    Ok(())
+}
+
+fn agent_cmd_sandbox_set_policy(
+    ctx: &Context,
+    client: &AgentServiceClient,
+    _health: &HealthClient,
+    _options: &mut Options,
+    args: &str,
+) -> Result<()> {
+    let input: SetPolicyInput = utils::make_request(&args)?;
+
+    let req = utils::make_set_policy_request(&input)?;
+
+    let ctx = clone_context(ctx);
+
+    debug!(sl!(), "sending request"; "request" => format!("{:?}", req));
+
+    let reply = client
+        .set_policy(ctx, &req)
+        .map_err(|e| anyhow!("{:?}", e).context(ERR_API_FAILED))?;
 
     info!(sl!(), "response received";
         "response" => format!("{:?}", reply));
