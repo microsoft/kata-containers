@@ -40,7 +40,7 @@ azcopyPath="/usr/local/bin/azcopy"
 if [ ! -f "$azcopyPath" ]; then
   azcopyTarFile="azcopy.tar.gz"
   echo 'Downloading azcopy...'
-  wget -O $azcopyTarFile azcopyvnext.azureedge.net/releases/release-10.22.2-20240110/azcopy_linux_amd64_10.22.2.tar.gz
+  wget -O $azcopyTarFile azcopyvnext.azureedge.net/releases/release-10.24.0-20240326/azcopy_linux_amd64_10.24.0.tar.gz
   tar -zxvf $azcopyTarFile
   mv ./azcopy*/azcopy /usr/local/bin/azcopy
   rm -rf ./$azcopyTarFile
@@ -54,7 +54,7 @@ sleep 1
 
 echo 'Begin to run sanity test...'
 readonly CSI_SANITY_BIN='csi-sanity'
-"$CSI_SANITY_BIN" --ginkgo.v --ginkgo.noColor --csi.endpoint="$endpoint" --ginkgo.skip='should fail when the volume source snapshot is not found|should work|should fail when the volume does not exist|should fail when the node does not exist|Node Service NodeGetCapabilities|should remove target path|should create volume from an existing source snapshot'
+"$CSI_SANITY_BIN" --ginkgo.v --ginkgo.noColor --csi.endpoint="$endpoint" --ginkgo.skip='should fail when the volume source snapshot is not found|should work|should fail when the volume does not exist|should fail when the node does not exist|Node Service NodeGetCapabilities|should remove target path'
 
 testvolumeparameters='/tmp/vhd.yaml'
 cat > $testvolumeparameters << EOF
@@ -62,4 +62,4 @@ fstype: ext4
 EOF
 
 echo 'Begin to run sanity test for vhd disk feature...'
-"$CSI_SANITY_BIN" --ginkgo.v --ginkgo.noColor --csi.endpoint="$endpoint" --csi.testvolumeparameters="$testvolumeparameters" --ginkgo.skip='should fail when the volume source snapshot is not found|should work|should fail when volume does not exist on the specified path|should fail when the volume does not exist|should fail when the node does not exist|should be idempotent|Node Service NodeGetCapabilities|should remove target path|should create volume from an existing source snapshot'
+"$CSI_SANITY_BIN" --ginkgo.v --ginkgo.noColor --csi.endpoint="$endpoint" --csi.testvolumeparameters="$testvolumeparameters" --ginkgo.skip='should fail when the volume source snapshot is not found|should work|should fail when volume does not exist on the specified path|should fail when the volume does not exist|should fail when the node does not exist|should be idempotent|Node Service NodeGetCapabilities|should remove target path'

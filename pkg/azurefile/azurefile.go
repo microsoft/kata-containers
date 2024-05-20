@@ -23,8 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -187,8 +185,6 @@ const (
 	SnapshotID       = "snapshot_id"
 
 	FSGroupChangeNone = "None"
-
-	waitForAzCopyInterval = 2 * time.Second
 )
 
 var (
@@ -199,7 +195,10 @@ var (
 
 	retriableErrors = []string{accountNotProvisioned, tooManyRequests, shareBeingDeleted, clientThrottled}
 
-	defaultAzcopyCopyOptions = []string{"--recursive", "--check-length=false"}
+	// azcopyCloneVolumeOptions used in volume cloning and set --check-length to false because volume data may be in changing state, copy volume is not same as current source volume
+	azcopyCloneVolumeOptions = []string{"--recursive", "--check-length=false"}
+	// azcopySnapshotRestoreOptions used in smb snapshot restore and set --check-length to true because snapshot data is changeless
+	azcopySnapshotRestoreOptions = []string{"--recursive", "--check-length=true"}
 )
 
 // Driver implements all interfaces of CSI drivers
@@ -221,6 +220,7 @@ type Driver struct {
 	kubeAPIQPS                             float64
 	kubeAPIBurst                           int
 	enableWindowsHostProcess               bool
+	removeSMBMountOnWindows                bool
 	appendClosetimeoOption                 bool
 	appendNoShareSockOption                bool
 	appendNoResvPortOption                 bool
@@ -264,9 +264,6 @@ type Driver struct {
 
 	kubeconfig string
 	endpoint   string
-
-	// azcopy use sas token by default
-	azcopyUseSasToken bool
 }
 
 // NewDriver Creates a NewCSIDriver object. Assumes vendor version is equal to driver version &
@@ -291,6 +288,7 @@ func NewDriver(options *DriverOptions) *Driver {
 	driver.kubeAPIQPS = options.KubeAPIQPS
 	driver.kubeAPIBurst = options.KubeAPIBurst
 	driver.enableWindowsHostProcess = options.EnableWindowsHostProcess
+	driver.removeSMBMountOnWindows = options.RemoveSMBMountOnWindows
 	driver.appendClosetimeoOption = options.AppendClosetimeoOption
 	driver.appendNoShareSockOption = options.AppendNoShareSockOption
 	driver.appendNoResvPortOption = options.AppendNoResvPortOption
@@ -304,7 +302,6 @@ func NewDriver(options *DriverOptions) *Driver {
 	driver.azcopy = &fileutil.Azcopy{}
 	driver.kubeconfig = options.KubeConfig
 	driver.endpoint = options.Endpoint
-	driver.azcopyUseSasToken = options.AzcopyUseSasToken
 
 	var err error
 	getter := func(key string) (interface{}, error) { return nil, nil }
@@ -1011,55 +1008,10 @@ func (d *Driver) copyFileShare(ctx context.Context, req *csi.CreateVolumeRequest
 		return fmt.Errorf("srcFileShareName(%s) or dstFileShareName(%s) is empty", srcFileShareName, dstFileShareName)
 	}
 
-	timeAfter := time.After(time.Duration(d.waitForAzCopyTimeoutMinutes) * time.Minute)
-	timeTick := time.Tick(waitForAzCopyInterval)
 	srcPath := fmt.Sprintf("https://%s.file.%s/%s%s", accountName, storageEndpointSuffix, srcFileShareName, accountSASToken)
 	dstPath := fmt.Sprintf("https://%s.file.%s/%s%s", accountName, storageEndpointSuffix, dstFileShareName, accountSASToken)
 
-	jobState, percent, err := d.azcopy.GetAzcopyJob(dstFileShareName, authAzcopyEnv)
-	klog.V(2).Infof("azcopy job status: %s, copy percent: %s%%, error: %v", jobState, percent, err)
-	if jobState == fileutil.AzcopyJobError || jobState == fileutil.AzcopyJobCompleted {
-		return err
-	}
-	klog.V(2).Infof("begin to copy fileshare %s to %s", srcFileShareName, dstFileShareName)
-	for {
-		select {
-		case <-timeTick:
-			jobState, percent, err := d.azcopy.GetAzcopyJob(dstFileShareName, authAzcopyEnv)
-			klog.V(2).Infof("azcopy job status: %s, copy percent: %s%%, error: %v", jobState, percent, err)
-			switch jobState {
-			case fileutil.AzcopyJobError, fileutil.AzcopyJobCompleted:
-				return err
-			case fileutil.AzcopyJobNotFound:
-				klog.V(2).Infof("copy fileshare %s to %s", srcFileShareName, dstFileShareName)
-				cmd := exec.Command("azcopy", "copy", srcPath, dstPath)
-				cmd.Args = append(cmd.Args, defaultAzcopyCopyOptions...)
-				if len(authAzcopyEnv) > 0 {
-					cmd.Env = append(os.Environ(), authAzcopyEnv...)
-				}
-				out, copyErr := cmd.CombinedOutput()
-				if accountSASToken == "" && strings.Contains(string(out), authorizationPermissionMismatch) && copyErr != nil {
-					klog.Warningf("azcopy list failed with AuthorizationPermissionMismatch error, should assign \"Storage File Data SMB Share Elevated Contributor\" role to controller identity, fall back to use sas token, original output: %v", string(out))
-					d.azcopySasTokenCache.Set(accountName, "")
-					var sasToken string
-					if sasToken, _, err = d.getAzcopyAuth(ctx, accountName, "", storageEndpointSuffix, accountOptions, secrets, secretName, secretNamespace, true); err != nil {
-						return err
-					}
-					cmd := exec.Command("azcopy", "copy", srcPath+sasToken, dstPath+sasToken)
-					cmd.Args = append(cmd.Args, defaultAzcopyCopyOptions...)
-					out, copyErr = cmd.CombinedOutput()
-				}
-				if copyErr != nil {
-					klog.Warningf("CopyFileShare(%s, %s, %s) failed with error(%v): %v", resourceGroupName, accountName, dstFileShareName, copyErr, string(out))
-				} else {
-					klog.V(2).Infof("copied fileshare %s to %s successfully", srcFileShareName, dstFileShareName)
-				}
-				return copyErr
-			}
-		case <-timeAfter:
-			return fmt.Errorf("timeout waiting for copy fileshare %s to %s succeed", srcFileShareName, dstFileShareName)
-		}
-	}
+	return d.copyFileShareByAzcopy(ctx, srcFileShareName, dstFileShareName, srcPath, dstPath, "", accountName, accountName, resourceGroupName, accountSASToken, authAzcopyEnv, secretName, secretNamespace, secrets, accountOptions, storageEndpointSuffix)
 }
 
 // GetTotalAccountQuota returns the total quota in GB of all file shares in the storage account and the number of file shares
@@ -1079,8 +1031,8 @@ func (d *Driver) GetTotalAccountQuota(ctx context.Context, subsID, resourceGroup
 
 // RemoveStorageAccountTag remove tag from storage account
 func (d *Driver) RemoveStorageAccountTag(ctx context.Context, subsID, resourceGroup, account, key string) error {
-	if d.cloud == nil {
-		return fmt.Errorf("cloud is nil")
+	if d.cloud == nil || d.cloud.StorageAccountClient == nil {
+		return fmt.Errorf("cloud or StorageAccountClient is nil")
 	}
 	// search in cache first
 	cache, err := d.skipMatchingTagCache.Get(account, azcache.CacheReadTypeDefault)

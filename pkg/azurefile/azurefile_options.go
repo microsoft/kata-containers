@@ -37,6 +37,7 @@ type DriverOptions struct {
 	KubeAPIQPS                             float64
 	KubeAPIBurst                           int
 	EnableWindowsHostProcess               bool
+	RemoveSMBMountOnWindows                bool
 	AppendClosetimeoOption                 bool
 	AppendNoShareSockOption                bool
 	AppendNoResvPortOption                 bool
@@ -48,7 +49,6 @@ type DriverOptions struct {
 	WaitForAzCopyTimeoutMinutes            int
 	KubeConfig                             string
 	Endpoint                               string
-	AzcopyUseSasToken                      bool
 }
 
 func (o *DriverOptions) AddFlags() *flag.FlagSet {
@@ -73,6 +73,7 @@ func (o *DriverOptions) AddFlags() *flag.FlagSet {
 	fs.Float64Var(&o.KubeAPIQPS, "kube-api-qps", 25.0, "QPS to use while communicating with the kubernetes apiserver.")
 	fs.IntVar(&o.KubeAPIBurst, "kube-api-burst", 50, "Burst to use while communicating with the kubernetes apiserver.")
 	fs.BoolVar(&o.EnableWindowsHostProcess, "enable-windows-host-process", false, "enable windows host process")
+	fs.BoolVar(&o.RemoveSMBMountOnWindows, "remove-smb-mount-on-windows", true, "remove smb global mapping on windows during unmount")
 	fs.BoolVar(&o.AppendClosetimeoOption, "append-closetimeo-option", false, "Whether appending closetimeo=0 option to smb mount command")
 	fs.BoolVar(&o.AppendNoShareSockOption, "append-nosharesock-option", true, "Whether appending nosharesock option to smb mount command")
 	fs.BoolVar(&o.AppendNoResvPortOption, "append-noresvport-option", true, "Whether appending noresvport option to nfs mount command")
@@ -81,10 +82,9 @@ func (o *DriverOptions) AddFlags() *flag.FlagSet {
 	fs.IntVar(&o.VolStatsCacheExpireInMinutes, "vol-stats-cache-expire-in-minutes", 10, "The cache expire time in minutes for volume stats cache")
 	fs.BoolVar(&o.PrintVolumeStatsCallLogs, "print-volume-stats-call-logs", false, "Whether to print volume statfs call logs with log level 2")
 	fs.IntVar(&o.SasTokenExpirationMinutes, "sas-token-expiration-minutes", 1440, "sas token expiration minutes during volume cloning and snapshot restore")
-	fs.IntVar(&o.WaitForAzCopyTimeoutMinutes, "wait-for-azcopy-timeout-minutes", 18, "timeout in minutes for waiting for azcopy to finish")
+	fs.IntVar(&o.WaitForAzCopyTimeoutMinutes, "wait-for-azcopy-timeout-minutes", 5, "timeout in minutes for waiting for azcopy to finish")
 	fs.StringVar(&o.KubeConfig, "kubeconfig", "", "Absolute path to the kubeconfig file. Required only when running out of cluster.")
 	fs.StringVar(&o.Endpoint, "endpoint", "unix://tmp/csi.sock", "CSI endpoint")
-	fs.BoolVar(&o.AzcopyUseSasToken, "azcopy-use-sas-token", true, "Whether SAS token should be used in azcopy based on volume clone and snapshot restore")
 
 	return fs
 }

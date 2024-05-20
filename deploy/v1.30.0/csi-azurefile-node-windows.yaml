@@ -46,7 +46,7 @@ spec:
           args:
             - --csi-address=$(CSI_ENDPOINT)
             - --probe-timeout=3s
-            - --health-port=29613
+            - --health-port=localhost:29613
             - --v=2
           env:
             - name: CSI_ENDPOINT

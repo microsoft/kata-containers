@@ -1670,7 +1670,7 @@ func TestCopyVolume(t *testing.T) {
 		testFunc func(t *testing.T)
 	}{
 		{
-			name: "copy volume from volumeSnapshot is not supported",
+			name: "restore volume from volumeSnapshot nfs is not supported",
 			testFunc: func(t *testing.T) {
 				allParam := map[string]string{}
 
@@ -1697,8 +1697,78 @@ func TestCopyVolume(t *testing.T) {
 				d := NewFakeDriver()
 				ctx := context.Background()
 
-				expectedErr := status.Errorf(codes.InvalidArgument, "copy volume from volumeSnapshot is not supported")
-				err := d.copyVolume(ctx, req, "", []string{}, "", "", secret, nil, nil, "core.windows.net")
+				expectedErr := fmt.Errorf("protocol nfs is not supported for snapshot restore")
+				err := d.copyVolume(ctx, req, "", "", []string{}, "", "", secret, &fileclient.ShareOptions{Protocol: storage.EnabledProtocolsNFS}, nil, "core.windows.net")
+				if !reflect.DeepEqual(err, expectedErr) {
+					t.Errorf("Unexpected error: %v", err)
+				}
+			},
+		},
+		{
+			name: "restore volume from volumeSnapshot not found",
+			testFunc: func(t *testing.T) {
+				allParam := map[string]string{}
+
+				volumeSnapshotSource := &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: "unit-test",
+				}
+				volumeContentSourceSnapshotSource := &csi.VolumeContentSource_Snapshot{
+					Snapshot: volumeSnapshotSource,
+				}
+				volumecontensource := csi.VolumeContentSource{
+					Type: volumeContentSourceSnapshotSource,
+				}
+
+				req := &csi.CreateVolumeRequest{
+					Name:                "random-vol-name-valid-request",
+					VolumeCapabilities:  stdVolCap,
+					CapacityRange:       lessThanPremCapRange,
+					Parameters:          allParam,
+					VolumeContentSource: &volumecontensource,
+				}
+
+				secret := map[string]string{}
+
+				d := NewFakeDriver()
+				ctx := context.Background()
+
+				expectedErr := status.Errorf(codes.NotFound, "error parsing volume id: \"unit-test\", should at least contain two #")
+				err := d.copyVolume(ctx, req, "", "", []string{}, "", "", secret, &fileclient.ShareOptions{Name: "dstFileshare"}, nil, "core.windows.net")
+				if !reflect.DeepEqual(err, expectedErr) {
+					t.Errorf("Unexpected error: %v", err)
+				}
+			},
+		},
+		{
+			name: "restore volume from volumeSnapshot src fileshare is empty",
+			testFunc: func(t *testing.T) {
+				allParam := map[string]string{}
+
+				volumeSnapshotSource := &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: "rg#unit-test###",
+				}
+				volumeContentSourceSnapshotSource := &csi.VolumeContentSource_Snapshot{
+					Snapshot: volumeSnapshotSource,
+				}
+				volumecontensource := csi.VolumeContentSource{
+					Type: volumeContentSourceSnapshotSource,
+				}
+
+				req := &csi.CreateVolumeRequest{
+					Name:                "random-vol-name-valid-request",
+					VolumeCapabilities:  stdVolCap,
+					CapacityRange:       lessThanPremCapRange,
+					Parameters:          allParam,
+					VolumeContentSource: &volumecontensource,
+				}
+
+				secret := map[string]string{}
+
+				d := NewFakeDriver()
+				ctx := context.Background()
+
+				expectedErr := fmt.Errorf("srcFileShareName() or dstFileShareName(dstFileshare) is empty")
+				err := d.copyVolume(ctx, req, "", "", []string{}, "", "", secret, &fileclient.ShareOptions{Name: "dstFileshare"}, nil, "core.windows.net")
 				if !reflect.DeepEqual(err, expectedErr) {
 					t.Errorf("Unexpected error: %v", err)
 				}
@@ -1733,7 +1803,7 @@ func TestCopyVolume(t *testing.T) {
 				ctx := context.Background()
 
 				expectedErr := fmt.Errorf("protocol nfs is not supported for volume cloning")
-				err := d.copyVolume(ctx, req, "", []string{}, "", "", secret, &fileclient.ShareOptions{Protocol: storage.EnabledProtocolsNFS}, nil, "core.windows.net")
+				err := d.copyVolume(ctx, req, "", "", []string{}, "", "", secret, &fileclient.ShareOptions{Protocol: storage.EnabledProtocolsNFS}, nil, "core.windows.net")
 				if !reflect.DeepEqual(err, expectedErr) {
 					t.Errorf("Unexpected error: %v", err)
 				}
@@ -1768,7 +1838,7 @@ func TestCopyVolume(t *testing.T) {
 				ctx := context.Background()
 
 				expectedErr := status.Errorf(codes.NotFound, "error parsing volume id: \"unit-test\", should at least contain two #")
-				err := d.copyVolume(ctx, req, "", []string{}, "", "", secret, &fileclient.ShareOptions{Name: "dstFileshare"}, nil, "core.windows.net")
+				err := d.copyVolume(ctx, req, "", "", []string{}, "", "", secret, &fileclient.ShareOptions{Name: "dstFileshare"}, nil, "core.windows.net")
 				if !reflect.DeepEqual(err, expectedErr) {
 					t.Errorf("Unexpected error: %v", err)
 				}
@@ -1803,7 +1873,7 @@ func TestCopyVolume(t *testing.T) {
 				ctx := context.Background()
 
 				expectedErr := fmt.Errorf("srcFileShareName() or dstFileShareName(dstFileshare) is empty")
-				err := d.copyVolume(ctx, req, "", []string{}, "", "", secret, &fileclient.ShareOptions{Name: "dstFileshare"}, nil, "core.windows.net")
+				err := d.copyVolume(ctx, req, "", "", []string{}, "", "", secret, &fileclient.ShareOptions{Name: "dstFileshare"}, nil, "core.windows.net")
 				if !reflect.DeepEqual(err, expectedErr) {
 					t.Errorf("Unexpected error: %v", err)
 				}
@@ -1838,14 +1908,14 @@ func TestCopyVolume(t *testing.T) {
 				ctx := context.Background()
 
 				expectedErr := fmt.Errorf("srcFileShareName(fileshare) or dstFileShareName() is empty")
-				err := d.copyVolume(ctx, req, "", []string{}, "", "", secret, &fileclient.ShareOptions{}, nil, "core.windows.net")
+				err := d.copyVolume(ctx, req, "", "", []string{}, "", "", secret, &fileclient.ShareOptions{}, nil, "core.windows.net")
 				if !reflect.DeepEqual(err, expectedErr) {
 					t.Errorf("Unexpected error: %v", err)
 				}
 			},
 		},
 		{
-			name: "azcopy job is already completed",
+			name: "azcopy job is in progress",
 			testFunc: func(t *testing.T) {
 				d := NewFakeDriver()
 				mp := map[string]string{}
@@ -1867,50 +1937,6 @@ func TestCopyVolume(t *testing.T) {
 					VolumeContentSource: &volumecontensource,
 				}
 
-				secret := map[string]string{}
-				ctx := context.Background()
-
-				ctrl := gomock.NewController(t)
-				defer ctrl.Finish()
-
-				m := util.NewMockEXEC(ctrl)
-				listStr := "JobId: ed1c3833-eaff-fe42-71d7-513fb065a9d9\nStart Time: Monday, 07-Aug-23 03:29:54 UTC\nStatus: Completed\nCommand: copy https://{accountName}.file.core.windows.net/{srcFileshare}{SAStoken} https://{accountName}.file.core.windows.net/{dstFileshare}{SAStoken} --recursive --check-length=false"
-				m.EXPECT().RunCommand(gomock.Eq("azcopy jobs list | grep dstFileshare -B 3"), gomock.Any()).Return(listStr, nil)
-				// if test.enableShow {
-				// 	m.EXPECT().RunCommand(gomock.Not("azcopy jobs list | grep dstContainer -B 3")).Return(test.showStr, test.showErr)
-				// }
-
-				d.azcopy.ExecCmd = m
-
-				var expectedErr error
-				err := d.copyVolume(ctx, req, "sastoken", []string{}, "", "", secret, &fileclient.ShareOptions{Name: "dstFileshare"}, nil, "core.windows.net")
-				if !reflect.DeepEqual(err, expectedErr) {
-					t.Errorf("Unexpected error: %v", err)
-				}
-			},
-		},
-		{
-			name: "azcopy job is first in progress and then be completed",
-			testFunc: func(t *testing.T) {
-				d := NewFakeDriver()
-				mp := map[string]string{}
-
-				volumeSource := &csi.VolumeContentSource_VolumeSource{
-					VolumeId: "vol_1#f5713de20cde511e8ba4900#fileshare#",
-				}
-				volumeContentSourceVolumeSource := &csi.VolumeContentSource_Volume{
-					Volume: volumeSource,
-				}
-				volumecontensource := csi.VolumeContentSource{
-					Type: volumeContentSourceVolumeSource,
-				}
-
-				req := &csi.CreateVolumeRequest{
-					Name:                "unit-test",
-					VolumeCapabilities:  stdVolCap,
-					Parameters:          mp,
-					VolumeContentSource: &volumecontensource,
-				}
 				secret := map[string]string{}
 				ctx := context.Background()
 
@@ -1919,16 +1945,13 @@ func TestCopyVolume(t *testing.T) {
 
 				m := util.NewMockEXEC(ctrl)
 				listStr1 := "JobId: ed1c3833-eaff-fe42-71d7-513fb065a9d9\nStart Time: Monday, 07-Aug-23 03:29:54 UTC\nStatus: InProgress\nCommand: copy https://{accountName}.file.core.windows.net/{srcFileshare}{SAStoken} https://{accountName}.file.core.windows.net/{dstFileshare}{SAStoken} --recursive --check-length=false"
-				listStr2 := "JobId: ed1c3833-eaff-fe42-71d7-513fb065a9d9\nStart Time: Monday, 07-Aug-23 03:29:54 UTC\nStatus: Completed\nCommand: copy https://{accountName}.file.core.windows.net/{srcFileshare}{SAStoken} https://{accountName}.file.core.windows.net/{dstFileshare}{SAStoken} --recursive --check-length=false"
-				o1 := m.EXPECT().RunCommand(gomock.Eq("azcopy jobs list | grep dstFileshare -B 3"), gomock.Any()).Return(listStr1, nil).Times(1)
+				m.EXPECT().RunCommand(gomock.Eq("azcopy jobs list | grep dstFileshare -B 3"), gomock.Any()).Return(listStr1, nil).Times(1)
 				m.EXPECT().RunCommand(gomock.Not("azcopy jobs list | grep dstFileshare -B 3"), gomock.Any()).Return("Percent Complete (approx): 50.0", nil)
-				o2 := m.EXPECT().RunCommand(gomock.Eq("azcopy jobs list | grep dstFileshare -B 3"), gomock.Any()).Return(listStr2, nil)
-				gomock.InOrder(o1, o2)
 
 				d.azcopy.ExecCmd = m
 
-				var expectedErr error
-				err := d.copyVolume(ctx, req, "sastoken", []string{}, "", "", secret, &fileclient.ShareOptions{Name: "dstFileshare"}, nil, "core.windows.net")
+				expectedErr := fmt.Errorf("wait for the existing AzCopy job to complete, current copy percentage is 50.0%%")
+				err := d.copyVolume(ctx, req, "", "sastoken", []string{}, "", "", secret, &fileclient.ShareOptions{Name: "dstFileshare"}, nil, "core.windows.net")
 				if !reflect.DeepEqual(err, expectedErr) {
 					t.Errorf("Unexpected error: %v", err)
 				}
@@ -2716,6 +2739,7 @@ func TestSetAzureCredentials(t *testing.T) {
 }
 
 func TestGenerateSASToken(t *testing.T) {
+	d := NewFakeDriver()
 	storageEndpointSuffix := "core.windows.net"
 	tests := []struct {
 		name        string
@@ -2741,7 +2765,7 @@ func TestGenerateSASToken(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sas, err := generateSASToken(tt.accountName, tt.accountKey, storageEndpointSuffix, 30)
+			sas, err := d.generateSASToken(tt.accountName, tt.accountKey, storageEndpointSuffix, 30)
 			if !reflect.DeepEqual(err, tt.expectedErr) {
 				t.Errorf("generateSASToken error = %v, expectedErr %v, sas token = %v, want %v", err, tt.expectedErr, sas, tt.want)
 				return

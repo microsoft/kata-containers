@@ -38,6 +38,7 @@ import (
 
 	directvolume "github.com/kata-containers/kata-containers/src/runtime/pkg/direct-volume"
 	"golang.org/x/net/context"
+
 	azcache "sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/metrics"
 )
@@ -519,6 +520,7 @@ func (d *Driver) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolumeSta
 	}
 
 	mc := metrics.NewMetricContext(azureFileCSIDriverName, "node_get_volume_stats", d.cloud.ResourceGroup, "", d.Name)
+	mc.LogLevel = 6 // change log level
 	isOperationSucceeded := false
 	defer func() {
 		mc.ObserveOperationWithResult(isOperationSucceeded, VolumeID, req.VolumeId)
