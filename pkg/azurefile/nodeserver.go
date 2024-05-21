@@ -101,7 +101,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		// get runtime class using pod info from volume context
 		runtimeClass := getRuntimeClassForPod(ctx, d.kubeconfig, context[podNameField], context[podNamespaceField])
 		klog.V(2).Infof("NodePublishVolume: volume(%s) mount on %s with runtimeClass %s", volumeID, target, runtimeClass)
-		if runtimeClass == "kata-cc" {
+		if runtimeClass == "kata-cc" || runtimeClass == "kata-cc-isolation" {
 			klog.V(2).Infof("NodePublishVolume for volume(%s) where runtimeClass %s is kata-cc", volumeID, runtimeClass)
 			source := req.GetStagingTargetPath()
 			if len(source) == 0 {
