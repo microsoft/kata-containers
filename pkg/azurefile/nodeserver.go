@@ -322,7 +322,7 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 		cifsMountFlags = append(cifsMountFlags, fmt.Sprintf("gid=%s", volumeMountGroup))
 	}
 
-	// Obselete code, remove in future
+	// Obsolete code, remove in future
 	isDiskMount := isDiskFsType(fsType)
 	if isDiskMount {
 		if !strings.HasSuffix(diskName, vhdSuffix) {
@@ -432,7 +432,7 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 		klog.V(2).Infof("NodeStageVolume: mount info for volume %s saved on %s", volumeID, targetPath)
 	}
 
-	// Obselete code, disk mount is not supported
+	// Obsolete code, disk mount is not supported
 	// azure disk csi driver should be used for disk mount
 	if isDiskMount {
 		mnt, err := d.ensureMountPoint(targetPath, os.FileMode(mountPermissions))
