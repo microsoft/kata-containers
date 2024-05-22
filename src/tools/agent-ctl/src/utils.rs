@@ -30,7 +30,7 @@ use slog::{debug, info, warn};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Read;
-use std::os::linux::fs::MetadataExt;
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -889,23 +889,30 @@ pub fn make_copy_file_request(input: &CopyFileInput) -> Result<CopyFileRequest> 
     // Dir mode | 750
     let perms = 0o20000000750;
 
-    let grpc_max_data_size = 1024*1024;
+    let src_meta: fs::Metadata = fs::symlink_metadata(&input.src)?;
 
-    let src_meta = fs::metadata(&input.src)?;
-
-    if src_meta.st_size() as i32 > grpc_max_data_size {
-        info!(sl!(), "File size {} is greater than max size {}, copy in loop is not supprted", src_meta.st_size(), grpc_max_data_size);
-        return Err(anyhow!("File size greater than supported max size"));
-    }
     let mut req = CopyFileRequest::default();
+
     req.set_path(input.dest.clone());
     req.set_dir_mode(perms);
-    req.set_file_mode(src_meta.st_mode());
-    req.set_uid(src_meta.st_uid() as i32);
-    req.set_gid(src_meta.st_gid() as i32);
-    req.set_file_size(src_meta.st_size() as i64);
+    req.set_file_mode(src_meta.mode());
+    req.set_uid(src_meta.uid() as i32);
+    req.set_gid(src_meta.gid() as i32);
     req.set_offset(0);
-    req.set_data(fs::read(&input.src)?);
+    req.set_file_size(0);
+
+    if src_meta.is_symlink() {
+        match fs::read_link(&input.src)?.into_os_string().into_string() {
+            Ok(path) => {
+                req.set_data(path.into_bytes());
+            }
+            Err(_) => {
+                return Err(anyhow!("failed to read link for {}", input.src));
+            }
+        }
+    } else if src_meta.is_file() {
+        req.set_file_size(src_meta.size() as i64);
+    }
 
     Ok(req)
 }
