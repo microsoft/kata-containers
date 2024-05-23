@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **Cmdline** | Pointer to **string** |  | [optional] 
 **Initramfs** | Pointer to **string** |  | [optional] 
 **Igvm** | Pointer to **string** |  | [optional] 
+**HostData** | Pointer to **string** |  | [optional] 
 
 ## Methods
 
@@ -153,6 +154,31 @@ SetIgvm sets Igvm field to given value.
 `func (o *PayloadConfig) HasIgvm() bool`
 
 HasIgvm returns a boolean if a field has been set.
+
+### GetHostData
+
+`func (o *PayloadConfig) GetHostData() string`
+
+GetHostData returns the HostData field if non-nil, zero value otherwise.
+
+### GetHostDataOk
+
+`func (o *PayloadConfig) GetHostDataOk() (*string, bool)`
+
+GetHostDataOk returns a tuple with the HostData field if it's non-nil, zero value otherwise
+and a boolean to check if the value has been set.
+
+### SetHostData
+
+`func (o *PayloadConfig) SetHostData(v string)`
+
+SetHostData sets HostData field to given value.
+
+### HasHostData
+
+`func (o *PayloadConfig) HasHostData() bool`
+
+HasHostData returns a boolean if a field has been set.
 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)

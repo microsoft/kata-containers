@@ -679,6 +679,7 @@ components:
             - 4
             - 4
             num_pci_segments: 3
+            snp: false
             oem_strings:
             - oem_strings
             - oem_strings
@@ -706,6 +707,7 @@ components:
             cmdline: cmdline
             igvm: igvm
             kernel: kernel
+            host_data: host_data
             initramfs: initramfs
             firmware: firmware
           serial:
@@ -867,6 +869,7 @@ components:
         cmdline: cmdline
         igvm: igvm
         kernel: kernel
+        host_data: host_data
         initramfs: initramfs
         firmware: firmware
       properties:
@@ -879,6 +882,8 @@ components:
         initramfs:
           type: string
         igvm:
+          type: string
+        host_data:
           type: string
       type: object
     VmConfig:
@@ -1100,6 +1105,7 @@ components:
           - 4
           - 4
           num_pci_segments: 3
+          snp: false
           oem_strings:
           - oem_strings
           - oem_strings
@@ -1127,6 +1133,7 @@ components:
           cmdline: cmdline
           igvm: igvm
           kernel: kernel
+          host_data: host_data
           initramfs: initramfs
           firmware: firmware
         serial:
@@ -1368,6 +1375,7 @@ components:
         - 4
         - 4
         num_pci_segments: 3
+        snp: false
         oem_strings:
         - oem_strings
         - oem_strings
@@ -1392,6 +1400,9 @@ components:
             type: string
           type: array
         tdx:
+          default: false
+          type: boolean
+        snp:
           default: false
           type: boolean
       type: object
