@@ -23,6 +23,7 @@ type PayloadConfig struct {
 	Kernel *string `json:"kernel,omitempty"`
 	Cmdline *string `json:"cmdline,omitempty"`
 	Initramfs *string `json:"initramfs,omitempty"`
+	Igvm *string `json:"igvm,omitempty"`
 }
 
 // NewPayloadConfig instantiates a new PayloadConfig object
@@ -170,6 +171,38 @@ func (o *PayloadConfig) SetInitramfs(v string) {
 	o.Initramfs = &v
 }
 
+// GetIgvm returns the Igvm field value if set, zero value otherwise.
+func (o *PayloadConfig) GetIgvm() string {
+	if o == nil || IsNil(o.Igvm) {
+		var ret string
+		return ret
+	}
+	return *o.Igvm
+}
+
+// GetIgvmOk returns a tuple with the Igvm field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *PayloadConfig) GetIgvmOk() (*string, bool) {
+	if o == nil || IsNil(o.Igvm) {
+		return nil, false
+	}
+	return o.Igvm, true
+}
+
+// HasIgvm returns a boolean if a field has been set.
+func (o *PayloadConfig) HasIgvm() bool {
+	if o != nil && !IsNil(o.Igvm) {
+		return true
+	}
+
+	return false
+}
+
+// SetIgvm gets a reference to the given string and assigns it to the Igvm field.
+func (o *PayloadConfig) SetIgvm(v string) {
+	o.Igvm = &v
+}
+
 func (o PayloadConfig) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -191,6 +224,9 @@ func (o PayloadConfig) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.Initramfs) {
 		toSerialize["initramfs"] = o.Initramfs
+	}
+	if !IsNil(o.Igvm) {
+		toSerialize["igvm"] = o.Igvm
 	}
 	return toSerialize, nil
 }

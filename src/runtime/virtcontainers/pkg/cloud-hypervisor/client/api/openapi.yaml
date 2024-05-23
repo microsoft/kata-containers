@@ -704,6 +704,7 @@ components:
           iommu: false
           payload:
             cmdline: cmdline
+            igvm: igvm
             kernel: kernel
             initramfs: initramfs
             firmware: firmware
@@ -864,6 +865,7 @@ components:
       description: Payloads to boot in guest
       example:
         cmdline: cmdline
+        igvm: igvm
         kernel: kernel
         initramfs: initramfs
         firmware: firmware
@@ -875,6 +877,8 @@ components:
         cmdline:
           type: string
         initramfs:
+          type: string
+        igvm:
           type: string
       type: object
     VmConfig:
@@ -1121,6 +1125,7 @@ components:
         iommu: false
         payload:
           cmdline: cmdline
+          igvm: igvm
           kernel: kernel
           initramfs: initramfs
           firmware: firmware

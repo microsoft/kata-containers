@@ -92,5 +92,4 @@ model_vm_snapshot_config.go
 model_vmm_ping_response.go
 model_vsock_config.go
 response.go
-test/api_default_test.go
 utils.go
