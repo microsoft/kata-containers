@@ -53,26 +53,23 @@ func getRuntimeClassForPod(ctx context.Context, kubeconfig, podName string, podN
 		kubeClient *clientset.Clientset
 	)
 	kubeCfg, err := getKubeConfig(kubeconfig, false)
-	if err == nil && kubeCfg != nil {
-		kubeClient, err = clientset.NewForConfig(kubeCfg)
-		if err != nil {
-			klog.Warningf("NewForConfig failed with error: %v", err)
-			return "", err
-		}
-		// Get runtime class for pod
-		if kubeClient != nil {
-			pod, err := kubeClient.CoreV1().Pods(podNameSpace).Get(ctx, podName, metav1.GetOptions{})
-			if err != nil {
-				klog.Warningf("Get pod(%s) failed with error: %v", podName, err)
-				return "", err
-			}
-			if pod.Spec.RuntimeClassName != nil {
-				return *pod.Spec.RuntimeClassName, nil
-			}
-		}
-	} else {
-		klog.Warningf("get kubeconfig(%s) failed with error: %v", kubeconfig, err)
+	if err != nil {
+		klog.Warningf("getKubeConfig(%s) failed with error: %v", kubeconfig, err)
 		return "", err
+	}
+	kubeClient, err = clientset.NewForConfig(kubeCfg)
+	if err != nil {
+		klog.Warningf("NewForConfig failed with error: %v", err)
+		return "", err
+	}
+	// Get runtime class for pod
+	pod, err := kubeClient.CoreV1().Pods(podNameSpace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		klog.Warningf("Get pod(%s) failed with error: %v", podName, err)
+		return "", err
+	}
+	if pod.Spec.RuntimeClassName != nil {
+		return *pod.Spec.RuntimeClassName, nil
 	}
 	return "", nil
 }
