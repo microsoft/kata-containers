@@ -12,16 +12,23 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the VdpaConfig type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &VdpaConfig{}
 
 // VdpaConfig struct for VdpaConfig
 type VdpaConfig struct {
-	Path       string  `json:"path"`
-	NumQueues  int32   `json:"num_queues"`
-	Iommu      *bool   `json:"iommu,omitempty"`
-	PciSegment *int32  `json:"pci_segment,omitempty"`
-	Id         *string `json:"id,omitempty"`
+	Path string `json:"path"`
+	NumQueues int32 `json:"num_queues"`
+	Iommu *bool `json:"iommu,omitempty"`
+	PciSegment *int32 `json:"pci_segment,omitempty"`
+	Id *string `json:"id,omitempty"`
 }
+
+type _VdpaConfig VdpaConfig
 
 // NewVdpaConfig instantiates a new VdpaConfig object
 // This constructor will assign default values to properties that have it defined,
@@ -98,7 +105,7 @@ func (o *VdpaConfig) SetNumQueues(v int32) {
 
 // GetIommu returns the Iommu field value if set, zero value otherwise.
 func (o *VdpaConfig) GetIommu() bool {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		var ret bool
 		return ret
 	}
@@ -108,7 +115,7 @@ func (o *VdpaConfig) GetIommu() bool {
 // GetIommuOk returns a tuple with the Iommu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VdpaConfig) GetIommuOk() (*bool, bool) {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		return nil, false
 	}
 	return o.Iommu, true
@@ -116,7 +123,7 @@ func (o *VdpaConfig) GetIommuOk() (*bool, bool) {
 
 // HasIommu returns a boolean if a field has been set.
 func (o *VdpaConfig) HasIommu() bool {
-	if o != nil && o.Iommu != nil {
+	if o != nil && !IsNil(o.Iommu) {
 		return true
 	}
 
@@ -130,7 +137,7 @@ func (o *VdpaConfig) SetIommu(v bool) {
 
 // GetPciSegment returns the PciSegment field value if set, zero value otherwise.
 func (o *VdpaConfig) GetPciSegment() int32 {
-	if o == nil || o.PciSegment == nil {
+	if o == nil || IsNil(o.PciSegment) {
 		var ret int32
 		return ret
 	}
@@ -140,7 +147,7 @@ func (o *VdpaConfig) GetPciSegment() int32 {
 // GetPciSegmentOk returns a tuple with the PciSegment field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VdpaConfig) GetPciSegmentOk() (*int32, bool) {
-	if o == nil || o.PciSegment == nil {
+	if o == nil || IsNil(o.PciSegment) {
 		return nil, false
 	}
 	return o.PciSegment, true
@@ -148,7 +155,7 @@ func (o *VdpaConfig) GetPciSegmentOk() (*int32, bool) {
 
 // HasPciSegment returns a boolean if a field has been set.
 func (o *VdpaConfig) HasPciSegment() bool {
-	if o != nil && o.PciSegment != nil {
+	if o != nil && !IsNil(o.PciSegment) {
 		return true
 	}
 
@@ -162,7 +169,7 @@ func (o *VdpaConfig) SetPciSegment(v int32) {
 
 // GetId returns the Id field value if set, zero value otherwise.
 func (o *VdpaConfig) GetId() string {
-	if o == nil || o.Id == nil {
+	if o == nil || IsNil(o.Id) {
 		var ret string
 		return ret
 	}
@@ -172,7 +179,7 @@ func (o *VdpaConfig) GetId() string {
 // GetIdOk returns a tuple with the Id field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VdpaConfig) GetIdOk() (*string, bool) {
-	if o == nil || o.Id == nil {
+	if o == nil || IsNil(o.Id) {
 		return nil, false
 	}
 	return o.Id, true
@@ -180,7 +187,7 @@ func (o *VdpaConfig) GetIdOk() (*string, bool) {
 
 // HasId returns a boolean if a field has been set.
 func (o *VdpaConfig) HasId() bool {
-	if o != nil && o.Id != nil {
+	if o != nil && !IsNil(o.Id) {
 		return true
 	}
 
@@ -193,23 +200,65 @@ func (o *VdpaConfig) SetId(v string) {
 }
 
 func (o VdpaConfig) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if true {
-		toSerialize["path"] = o.Path
-	}
-	if true {
-		toSerialize["num_queues"] = o.NumQueues
-	}
-	if o.Iommu != nil {
-		toSerialize["iommu"] = o.Iommu
-	}
-	if o.PciSegment != nil {
-		toSerialize["pci_segment"] = o.PciSegment
-	}
-	if o.Id != nil {
-		toSerialize["id"] = o.Id
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o VdpaConfig) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	toSerialize["path"] = o.Path
+	toSerialize["num_queues"] = o.NumQueues
+	if !IsNil(o.Iommu) {
+		toSerialize["iommu"] = o.Iommu
+	}
+	if !IsNil(o.PciSegment) {
+		toSerialize["pci_segment"] = o.PciSegment
+	}
+	if !IsNil(o.Id) {
+		toSerialize["id"] = o.Id
+	}
+	return toSerialize, nil
+}
+
+func (o *VdpaConfig) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"path",
+		"num_queues",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varVdpaConfig := _VdpaConfig{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varVdpaConfig)
+
+	if err != nil {
+		return err
+	}
+
+	*o = VdpaConfig(varVdpaConfig)
+
+	return err
 }
 
 type NullableVdpaConfig struct {
@@ -247,3 +296,5 @@ func (v *NullableVdpaConfig) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

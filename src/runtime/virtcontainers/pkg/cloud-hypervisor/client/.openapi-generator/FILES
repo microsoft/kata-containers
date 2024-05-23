@@ -1,5 +1,4 @@
 .gitignore
-.openapi-generator-ignore
 .travis.yml
 README.md
 api/openapi.yaml
@@ -12,7 +11,8 @@ docs/CpuAffinity.md
 docs/CpuFeatures.md
 docs/CpuTopology.md
 docs/CpusConfig.md
-docs/DefaultApi.md
+docs/DebugConsoleConfig.md
+docs/DefaultAPI.md
 docs/DeviceConfig.md
 docs/DeviceNode.md
 docs/DiskConfig.md
@@ -26,6 +26,7 @@ docs/PayloadConfig.md
 docs/PciDeviceInfo.md
 docs/PlatformConfig.md
 docs/PmemConfig.md
+docs/RateLimitGroupConfig.md
 docs/RateLimiterConfig.md
 docs/ReceiveMigrationData.md
 docs/RestoreConfig.md
@@ -35,6 +36,8 @@ docs/SgxEpcConfig.md
 docs/TokenBucket.md
 docs/TpmConfig.md
 docs/VdpaConfig.md
+docs/VirtQueueAffinity.md
+docs/VmAddUserDevice.md
 docs/VmConfig.md
 docs/VmCoredumpData.md
 docs/VmInfo.md
@@ -53,6 +56,7 @@ model_cpu_affinity.go
 model_cpu_features.go
 model_cpu_topology.go
 model_cpus_config.go
+model_debug_console_config.go
 model_device_config.go
 model_device_node.go
 model_disk_config.go
@@ -66,6 +70,7 @@ model_payload_config.go
 model_pci_device_info.go
 model_platform_config.go
 model_pmem_config.go
+model_rate_limit_group_config.go
 model_rate_limiter_config.go
 model_receive_migration_data.go
 model_restore_config.go
@@ -75,6 +80,8 @@ model_sgx_epc_config.go
 model_token_bucket.go
 model_tpm_config.go
 model_vdpa_config.go
+model_virt_queue_affinity.go
+model_vm_add_user_device.go
 model_vm_config.go
 model_vm_coredump_data.go
 model_vm_info.go
@@ -85,4 +92,5 @@ model_vm_snapshot_config.go
 model_vmm_ping_response.go
 model_vsock_config.go
 response.go
+test/api_default_test.go
 utils.go

@@ -12,6 +12,7 @@ package openapi
 
 import (
 	"encoding/json"
+	"reflect"
 	"time"
 )
 
@@ -319,10 +320,28 @@ func NewNullableTime(val *time.Time) *NullableTime {
 }
 
 func (v NullableTime) MarshalJSON() ([]byte, error) {
-	return v.value.MarshalJSON()
+	return json.Marshal(v.value)
 }
 
 func (v *NullableTime) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
+}
+
+// IsNil checks if an input is nil
+func IsNil(i interface{}) bool {
+	if i == nil {
+		return true
+	}
+	switch reflect.TypeOf(i).Kind() {
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Ptr, reflect.UnsafePointer, reflect.Interface, reflect.Slice:
+		return reflect.ValueOf(i).IsNil()
+	case reflect.Array:
+		return reflect.ValueOf(i).IsZero()
+	}
+	return false
+}
+
+type MappedNullable interface {
+	ToMap() (map[string]interface{}, error)
 }

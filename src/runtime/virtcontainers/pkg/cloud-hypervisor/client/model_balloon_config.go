@@ -12,7 +12,12 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the BalloonConfig type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &BalloonConfig{}
 
 // BalloonConfig struct for BalloonConfig
 type BalloonConfig struct {
@@ -22,6 +27,8 @@ type BalloonConfig struct {
 	// Enable guest to report free pages.
 	FreePageReporting *bool `json:"free_page_reporting,omitempty"`
 }
+
+type _BalloonConfig BalloonConfig
 
 // NewBalloonConfig instantiates a new BalloonConfig object
 // This constructor will assign default values to properties that have it defined,
@@ -75,7 +82,7 @@ func (o *BalloonConfig) SetSize(v int64) {
 
 // GetDeflateOnOom returns the DeflateOnOom field value if set, zero value otherwise.
 func (o *BalloonConfig) GetDeflateOnOom() bool {
-	if o == nil || o.DeflateOnOom == nil {
+	if o == nil || IsNil(o.DeflateOnOom) {
 		var ret bool
 		return ret
 	}
@@ -85,7 +92,7 @@ func (o *BalloonConfig) GetDeflateOnOom() bool {
 // GetDeflateOnOomOk returns a tuple with the DeflateOnOom field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *BalloonConfig) GetDeflateOnOomOk() (*bool, bool) {
-	if o == nil || o.DeflateOnOom == nil {
+	if o == nil || IsNil(o.DeflateOnOom) {
 		return nil, false
 	}
 	return o.DeflateOnOom, true
@@ -93,7 +100,7 @@ func (o *BalloonConfig) GetDeflateOnOomOk() (*bool, bool) {
 
 // HasDeflateOnOom returns a boolean if a field has been set.
 func (o *BalloonConfig) HasDeflateOnOom() bool {
-	if o != nil && o.DeflateOnOom != nil {
+	if o != nil && !IsNil(o.DeflateOnOom) {
 		return true
 	}
 
@@ -107,7 +114,7 @@ func (o *BalloonConfig) SetDeflateOnOom(v bool) {
 
 // GetFreePageReporting returns the FreePageReporting field value if set, zero value otherwise.
 func (o *BalloonConfig) GetFreePageReporting() bool {
-	if o == nil || o.FreePageReporting == nil {
+	if o == nil || IsNil(o.FreePageReporting) {
 		var ret bool
 		return ret
 	}
@@ -117,7 +124,7 @@ func (o *BalloonConfig) GetFreePageReporting() bool {
 // GetFreePageReportingOk returns a tuple with the FreePageReporting field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *BalloonConfig) GetFreePageReportingOk() (*bool, bool) {
-	if o == nil || o.FreePageReporting == nil {
+	if o == nil || IsNil(o.FreePageReporting) {
 		return nil, false
 	}
 	return o.FreePageReporting, true
@@ -125,7 +132,7 @@ func (o *BalloonConfig) GetFreePageReportingOk() (*bool, bool) {
 
 // HasFreePageReporting returns a boolean if a field has been set.
 func (o *BalloonConfig) HasFreePageReporting() bool {
-	if o != nil && o.FreePageReporting != nil {
+	if o != nil && !IsNil(o.FreePageReporting) {
 		return true
 	}
 
@@ -138,17 +145,60 @@ func (o *BalloonConfig) SetFreePageReporting(v bool) {
 }
 
 func (o BalloonConfig) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if true {
-		toSerialize["size"] = o.Size
-	}
-	if o.DeflateOnOom != nil {
-		toSerialize["deflate_on_oom"] = o.DeflateOnOom
-	}
-	if o.FreePageReporting != nil {
-		toSerialize["free_page_reporting"] = o.FreePageReporting
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o BalloonConfig) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	toSerialize["size"] = o.Size
+	if !IsNil(o.DeflateOnOom) {
+		toSerialize["deflate_on_oom"] = o.DeflateOnOom
+	}
+	if !IsNil(o.FreePageReporting) {
+		toSerialize["free_page_reporting"] = o.FreePageReporting
+	}
+	return toSerialize, nil
+}
+
+func (o *BalloonConfig) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"size",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varBalloonConfig := _BalloonConfig{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varBalloonConfig)
+
+	if err != nil {
+		return err
+	}
+
+	*o = BalloonConfig(varBalloonConfig)
+
+	return err
 }
 
 type NullableBalloonConfig struct {
@@ -186,3 +236,5 @@ func (v *NullableBalloonConfig) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

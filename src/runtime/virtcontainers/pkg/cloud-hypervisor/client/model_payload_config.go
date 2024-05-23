@@ -14,14 +14,15 @@ import (
 	"encoding/json"
 )
 
+// checks if the PayloadConfig type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &PayloadConfig{}
+
 // PayloadConfig Payloads to boot in guest
 type PayloadConfig struct {
-	Firmware  *string `json:"firmware,omitempty"`
-	Kernel    *string `json:"kernel,omitempty"`
-	Cmdline   *string `json:"cmdline,omitempty"`
+	Firmware *string `json:"firmware,omitempty"`
+	Kernel *string `json:"kernel,omitempty"`
+	Cmdline *string `json:"cmdline,omitempty"`
 	Initramfs *string `json:"initramfs,omitempty"`
-	Igvm      *string `json:"igvm,omitempty"`
-	HostData  *string `json:"host_data,omitempty"`
 }
 
 // NewPayloadConfig instantiates a new PayloadConfig object
@@ -41,73 +42,9 @@ func NewPayloadConfigWithDefaults() *PayloadConfig {
 	return &this
 }
 
-// GetIgvm returns the Igvm field value if set, zero value otherwise.
-func (o *PayloadConfig) GetIgvm() string {
-	if o == nil || o.Igvm == nil {
-		var ret string
-		return ret
-	}
-	return *o.Igvm
-}
-
-// GetIgvmOk returns a tuple with the Igvm field value if set, nil otherwise
-// and a boolean to check if the value has been set.
-func (o *PayloadConfig) GetIgvmOk() (*string, bool) {
-	if o == nil || o.Igvm == nil {
-		return nil, false
-	}
-	return o.Igvm, true
-}
-
-// HasIgvm returns a boolean if a field has been set.
-func (o *PayloadConfig) HasIgvm() bool {
-	if o != nil && o.Igvm != nil {
-		return true
-	}
-
-	return false
-}
-
-// SetIgvm gets a reference to the given string and assigns it to the Igvm field.
-func (o *PayloadConfig) SetIgvm(v string) {
-	o.Igvm = &v
-}
-
-// GetHostData returns the HostData field value if set, zero value otherwise.
-func (o *PayloadConfig) GetHostData() string {
-	if o == nil || o.HostData == nil {
-		var ret string
-		return ret
-	}
-	return *o.HostData
-}
-
-// GetHostDataOk returns a tuple with the HostData field value if set, nil otherwise
-// and a boolean to check if the value has been set.
-func (o *PayloadConfig) GetHostDataOk() (*string, bool) {
-	if o == nil || o.HostData == nil {
-		return nil, false
-	}
-	return o.HostData, true
-}
-
-// HasHostData returns a boolean if a field has been set.
-func (o *PayloadConfig) HasHostData() bool {
-	if o != nil && o.HostData != nil {
-		return true
-	}
-
-	return false
-}
-
-// SetHostData gets a reference to the given string and assigns it to the HostData field.
-func (o *PayloadConfig) SetHostData(v string) {
-	o.HostData = &v
-}
-
 // GetFirmware returns the Firmware field value if set, zero value otherwise.
 func (o *PayloadConfig) GetFirmware() string {
-	if o == nil || o.Firmware == nil {
+	if o == nil || IsNil(o.Firmware) {
 		var ret string
 		return ret
 	}
@@ -117,7 +54,7 @@ func (o *PayloadConfig) GetFirmware() string {
 // GetFirmwareOk returns a tuple with the Firmware field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PayloadConfig) GetFirmwareOk() (*string, bool) {
-	if o == nil || o.Firmware == nil {
+	if o == nil || IsNil(o.Firmware) {
 		return nil, false
 	}
 	return o.Firmware, true
@@ -125,7 +62,7 @@ func (o *PayloadConfig) GetFirmwareOk() (*string, bool) {
 
 // HasFirmware returns a boolean if a field has been set.
 func (o *PayloadConfig) HasFirmware() bool {
-	if o != nil && o.Firmware != nil {
+	if o != nil && !IsNil(o.Firmware) {
 		return true
 	}
 
@@ -139,7 +76,7 @@ func (o *PayloadConfig) SetFirmware(v string) {
 
 // GetKernel returns the Kernel field value if set, zero value otherwise.
 func (o *PayloadConfig) GetKernel() string {
-	if o == nil || o.Kernel == nil {
+	if o == nil || IsNil(o.Kernel) {
 		var ret string
 		return ret
 	}
@@ -149,7 +86,7 @@ func (o *PayloadConfig) GetKernel() string {
 // GetKernelOk returns a tuple with the Kernel field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PayloadConfig) GetKernelOk() (*string, bool) {
-	if o == nil || o.Kernel == nil {
+	if o == nil || IsNil(o.Kernel) {
 		return nil, false
 	}
 	return o.Kernel, true
@@ -157,7 +94,7 @@ func (o *PayloadConfig) GetKernelOk() (*string, bool) {
 
 // HasKernel returns a boolean if a field has been set.
 func (o *PayloadConfig) HasKernel() bool {
-	if o != nil && o.Kernel != nil {
+	if o != nil && !IsNil(o.Kernel) {
 		return true
 	}
 
@@ -171,7 +108,7 @@ func (o *PayloadConfig) SetKernel(v string) {
 
 // GetCmdline returns the Cmdline field value if set, zero value otherwise.
 func (o *PayloadConfig) GetCmdline() string {
-	if o == nil || o.Cmdline == nil {
+	if o == nil || IsNil(o.Cmdline) {
 		var ret string
 		return ret
 	}
@@ -181,7 +118,7 @@ func (o *PayloadConfig) GetCmdline() string {
 // GetCmdlineOk returns a tuple with the Cmdline field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PayloadConfig) GetCmdlineOk() (*string, bool) {
-	if o == nil || o.Cmdline == nil {
+	if o == nil || IsNil(o.Cmdline) {
 		return nil, false
 	}
 	return o.Cmdline, true
@@ -189,7 +126,7 @@ func (o *PayloadConfig) GetCmdlineOk() (*string, bool) {
 
 // HasCmdline returns a boolean if a field has been set.
 func (o *PayloadConfig) HasCmdline() bool {
-	if o != nil && o.Cmdline != nil {
+	if o != nil && !IsNil(o.Cmdline) {
 		return true
 	}
 
@@ -203,7 +140,7 @@ func (o *PayloadConfig) SetCmdline(v string) {
 
 // GetInitramfs returns the Initramfs field value if set, zero value otherwise.
 func (o *PayloadConfig) GetInitramfs() string {
-	if o == nil || o.Initramfs == nil {
+	if o == nil || IsNil(o.Initramfs) {
 		var ret string
 		return ret
 	}
@@ -213,7 +150,7 @@ func (o *PayloadConfig) GetInitramfs() string {
 // GetInitramfsOk returns a tuple with the Initramfs field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PayloadConfig) GetInitramfsOk() (*string, bool) {
-	if o == nil || o.Initramfs == nil {
+	if o == nil || IsNil(o.Initramfs) {
 		return nil, false
 	}
 	return o.Initramfs, true
@@ -221,7 +158,7 @@ func (o *PayloadConfig) GetInitramfsOk() (*string, bool) {
 
 // HasInitramfs returns a boolean if a field has been set.
 func (o *PayloadConfig) HasInitramfs() bool {
-	if o != nil && o.Initramfs != nil {
+	if o != nil && !IsNil(o.Initramfs) {
 		return true
 	}
 
@@ -234,26 +171,28 @@ func (o *PayloadConfig) SetInitramfs(v string) {
 }
 
 func (o PayloadConfig) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if o.Igvm != nil {
-		toSerialize["igvm"] = o.Igvm
-	}
-	if o.HostData != nil {
-		toSerialize["host_data"] = o.HostData
-	}
-	if o.Firmware != nil {
-		toSerialize["firmware"] = o.Firmware
-	}
-	if o.Kernel != nil {
-		toSerialize["kernel"] = o.Kernel
-	}
-	if o.Cmdline != nil {
-		toSerialize["cmdline"] = o.Cmdline
-	}
-	if o.Initramfs != nil {
-		toSerialize["initramfs"] = o.Initramfs
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o PayloadConfig) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	if !IsNil(o.Firmware) {
+		toSerialize["firmware"] = o.Firmware
+	}
+	if !IsNil(o.Kernel) {
+		toSerialize["kernel"] = o.Kernel
+	}
+	if !IsNil(o.Cmdline) {
+		toSerialize["cmdline"] = o.Cmdline
+	}
+	if !IsNil(o.Initramfs) {
+		toSerialize["initramfs"] = o.Initramfs
+	}
+	return toSerialize, nil
 }
 
 type NullablePayloadConfig struct {
@@ -291,3 +230,5 @@ func (v *NullablePayloadConfig) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

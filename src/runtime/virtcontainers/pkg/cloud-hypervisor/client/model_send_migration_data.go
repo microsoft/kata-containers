@@ -12,13 +12,20 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the SendMigrationData type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &SendMigrationData{}
 
 // SendMigrationData struct for SendMigrationData
 type SendMigrationData struct {
 	DestinationUrl string `json:"destination_url"`
-	Local          *bool  `json:"local,omitempty"`
+	Local *bool `json:"local,omitempty"`
 }
+
+type _SendMigrationData SendMigrationData
 
 // NewSendMigrationData instantiates a new SendMigrationData object
 // This constructor will assign default values to properties that have it defined,
@@ -64,7 +71,7 @@ func (o *SendMigrationData) SetDestinationUrl(v string) {
 
 // GetLocal returns the Local field value if set, zero value otherwise.
 func (o *SendMigrationData) GetLocal() bool {
-	if o == nil || o.Local == nil {
+	if o == nil || IsNil(o.Local) {
 		var ret bool
 		return ret
 	}
@@ -74,7 +81,7 @@ func (o *SendMigrationData) GetLocal() bool {
 // GetLocalOk returns a tuple with the Local field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *SendMigrationData) GetLocalOk() (*bool, bool) {
-	if o == nil || o.Local == nil {
+	if o == nil || IsNil(o.Local) {
 		return nil, false
 	}
 	return o.Local, true
@@ -82,7 +89,7 @@ func (o *SendMigrationData) GetLocalOk() (*bool, bool) {
 
 // HasLocal returns a boolean if a field has been set.
 func (o *SendMigrationData) HasLocal() bool {
-	if o != nil && o.Local != nil {
+	if o != nil && !IsNil(o.Local) {
 		return true
 	}
 
@@ -95,14 +102,57 @@ func (o *SendMigrationData) SetLocal(v bool) {
 }
 
 func (o SendMigrationData) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if true {
-		toSerialize["destination_url"] = o.DestinationUrl
-	}
-	if o.Local != nil {
-		toSerialize["local"] = o.Local
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o SendMigrationData) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	toSerialize["destination_url"] = o.DestinationUrl
+	if !IsNil(o.Local) {
+		toSerialize["local"] = o.Local
+	}
+	return toSerialize, nil
+}
+
+func (o *SendMigrationData) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"destination_url",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varSendMigrationData := _SendMigrationData{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varSendMigrationData)
+
+	if err != nil {
+		return err
+	}
+
+	*o = SendMigrationData(varSendMigrationData)
+
+	return err
 }
 
 type NullableSendMigrationData struct {
@@ -140,3 +190,5 @@ func (v *NullableSendMigrationData) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

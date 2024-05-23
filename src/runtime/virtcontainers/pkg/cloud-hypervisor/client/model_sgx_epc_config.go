@@ -12,14 +12,21 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the SgxEpcConfig type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &SgxEpcConfig{}
 
 // SgxEpcConfig struct for SgxEpcConfig
 type SgxEpcConfig struct {
-	Id       string `json:"id"`
-	Size     int64  `json:"size"`
-	Prefault *bool  `json:"prefault,omitempty"`
+	Id string `json:"id"`
+	Size int64 `json:"size"`
+	Prefault *bool `json:"prefault,omitempty"`
 }
+
+type _SgxEpcConfig SgxEpcConfig
 
 // NewSgxEpcConfig instantiates a new SgxEpcConfig object
 // This constructor will assign default values to properties that have it defined,
@@ -94,7 +101,7 @@ func (o *SgxEpcConfig) SetSize(v int64) {
 
 // GetPrefault returns the Prefault field value if set, zero value otherwise.
 func (o *SgxEpcConfig) GetPrefault() bool {
-	if o == nil || o.Prefault == nil {
+	if o == nil || IsNil(o.Prefault) {
 		var ret bool
 		return ret
 	}
@@ -104,7 +111,7 @@ func (o *SgxEpcConfig) GetPrefault() bool {
 // GetPrefaultOk returns a tuple with the Prefault field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *SgxEpcConfig) GetPrefaultOk() (*bool, bool) {
-	if o == nil || o.Prefault == nil {
+	if o == nil || IsNil(o.Prefault) {
 		return nil, false
 	}
 	return o.Prefault, true
@@ -112,7 +119,7 @@ func (o *SgxEpcConfig) GetPrefaultOk() (*bool, bool) {
 
 // HasPrefault returns a boolean if a field has been set.
 func (o *SgxEpcConfig) HasPrefault() bool {
-	if o != nil && o.Prefault != nil {
+	if o != nil && !IsNil(o.Prefault) {
 		return true
 	}
 
@@ -125,17 +132,59 @@ func (o *SgxEpcConfig) SetPrefault(v bool) {
 }
 
 func (o SgxEpcConfig) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if true {
-		toSerialize["id"] = o.Id
-	}
-	if true {
-		toSerialize["size"] = o.Size
-	}
-	if o.Prefault != nil {
-		toSerialize["prefault"] = o.Prefault
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o SgxEpcConfig) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	toSerialize["id"] = o.Id
+	toSerialize["size"] = o.Size
+	if !IsNil(o.Prefault) {
+		toSerialize["prefault"] = o.Prefault
+	}
+	return toSerialize, nil
+}
+
+func (o *SgxEpcConfig) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"id",
+		"size",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varSgxEpcConfig := _SgxEpcConfig{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varSgxEpcConfig)
+
+	if err != nil {
+		return err
+	}
+
+	*o = SgxEpcConfig(varSgxEpcConfig)
+
+	return err
 }
 
 type NullableSgxEpcConfig struct {
@@ -173,3 +222,5 @@ func (v *NullableSgxEpcConfig) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

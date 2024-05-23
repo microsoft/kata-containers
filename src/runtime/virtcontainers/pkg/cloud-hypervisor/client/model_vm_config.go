@@ -12,31 +12,40 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the VmConfig type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &VmConfig{}
 
 // VmConfig Virtual machine configuration
 type VmConfig struct {
-	Cpus     *CpusConfig     `json:"cpus,omitempty"`
-	Memory   *MemoryConfig   `json:"memory,omitempty"`
-	Payload  PayloadConfig   `json:"payload"`
-	Disks    *[]DiskConfig   `json:"disks,omitempty"`
-	Net      *[]NetConfig    `json:"net,omitempty"`
-	Rng      *RngConfig      `json:"rng,omitempty"`
-	Balloon  *BalloonConfig  `json:"balloon,omitempty"`
-	Fs       *[]FsConfig     `json:"fs,omitempty"`
-	Pmem     *[]PmemConfig   `json:"pmem,omitempty"`
-	Serial   *ConsoleConfig  `json:"serial,omitempty"`
-	Console  *ConsoleConfig  `json:"console,omitempty"`
-	Devices  *[]DeviceConfig `json:"devices,omitempty"`
-	Vdpa     *[]VdpaConfig   `json:"vdpa,omitempty"`
-	Vsock    *VsockConfig    `json:"vsock,omitempty"`
-	SgxEpc   *[]SgxEpcConfig `json:"sgx_epc,omitempty"`
-	Numa     *[]NumaConfig   `json:"numa,omitempty"`
-	Iommu    *bool           `json:"iommu,omitempty"`
-	Watchdog *bool           `json:"watchdog,omitempty"`
+	Cpus *CpusConfig `json:"cpus,omitempty"`
+	Memory *MemoryConfig `json:"memory,omitempty"`
+	Payload PayloadConfig `json:"payload"`
+	RateLimitGroups []RateLimitGroupConfig `json:"rate_limit_groups,omitempty"`
+	Disks []DiskConfig `json:"disks,omitempty"`
+	Net []NetConfig `json:"net,omitempty"`
+	Rng *RngConfig `json:"rng,omitempty"`
+	Balloon *BalloonConfig `json:"balloon,omitempty"`
+	Fs []FsConfig `json:"fs,omitempty"`
+	Pmem []PmemConfig `json:"pmem,omitempty"`
+	Serial *ConsoleConfig `json:"serial,omitempty"`
+	Console *ConsoleConfig `json:"console,omitempty"`
+	DebugConsole *DebugConsoleConfig `json:"debug_console,omitempty"`
+	Devices []DeviceConfig `json:"devices,omitempty"`
+	Vdpa []VdpaConfig `json:"vdpa,omitempty"`
+	Vsock *VsockConfig `json:"vsock,omitempty"`
+	SgxEpc []SgxEpcConfig `json:"sgx_epc,omitempty"`
+	Numa []NumaConfig `json:"numa,omitempty"`
+	Iommu *bool `json:"iommu,omitempty"`
+	Watchdog *bool `json:"watchdog,omitempty"`
 	Platform *PlatformConfig `json:"platform,omitempty"`
-	Tpm      *TpmConfig      `json:"tpm,omitempty"`
+	Tpm *TpmConfig `json:"tpm,omitempty"`
 }
+
+type _VmConfig VmConfig
 
 // NewVmConfig instantiates a new VmConfig object
 // This constructor will assign default values to properties that have it defined,
@@ -66,7 +75,7 @@ func NewVmConfigWithDefaults() *VmConfig {
 
 // GetCpus returns the Cpus field value if set, zero value otherwise.
 func (o *VmConfig) GetCpus() CpusConfig {
-	if o == nil || o.Cpus == nil {
+	if o == nil || IsNil(o.Cpus) {
 		var ret CpusConfig
 		return ret
 	}
@@ -76,7 +85,7 @@ func (o *VmConfig) GetCpus() CpusConfig {
 // GetCpusOk returns a tuple with the Cpus field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetCpusOk() (*CpusConfig, bool) {
-	if o == nil || o.Cpus == nil {
+	if o == nil || IsNil(o.Cpus) {
 		return nil, false
 	}
 	return o.Cpus, true
@@ -84,7 +93,7 @@ func (o *VmConfig) GetCpusOk() (*CpusConfig, bool) {
 
 // HasCpus returns a boolean if a field has been set.
 func (o *VmConfig) HasCpus() bool {
-	if o != nil && o.Cpus != nil {
+	if o != nil && !IsNil(o.Cpus) {
 		return true
 	}
 
@@ -98,7 +107,7 @@ func (o *VmConfig) SetCpus(v CpusConfig) {
 
 // GetMemory returns the Memory field value if set, zero value otherwise.
 func (o *VmConfig) GetMemory() MemoryConfig {
-	if o == nil || o.Memory == nil {
+	if o == nil || IsNil(o.Memory) {
 		var ret MemoryConfig
 		return ret
 	}
@@ -108,7 +117,7 @@ func (o *VmConfig) GetMemory() MemoryConfig {
 // GetMemoryOk returns a tuple with the Memory field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetMemoryOk() (*MemoryConfig, bool) {
-	if o == nil || o.Memory == nil {
+	if o == nil || IsNil(o.Memory) {
 		return nil, false
 	}
 	return o.Memory, true
@@ -116,7 +125,7 @@ func (o *VmConfig) GetMemoryOk() (*MemoryConfig, bool) {
 
 // HasMemory returns a boolean if a field has been set.
 func (o *VmConfig) HasMemory() bool {
-	if o != nil && o.Memory != nil {
+	if o != nil && !IsNil(o.Memory) {
 		return true
 	}
 
@@ -152,19 +161,51 @@ func (o *VmConfig) SetPayload(v PayloadConfig) {
 	o.Payload = v
 }
 
+// GetRateLimitGroups returns the RateLimitGroups field value if set, zero value otherwise.
+func (o *VmConfig) GetRateLimitGroups() []RateLimitGroupConfig {
+	if o == nil || IsNil(o.RateLimitGroups) {
+		var ret []RateLimitGroupConfig
+		return ret
+	}
+	return o.RateLimitGroups
+}
+
+// GetRateLimitGroupsOk returns a tuple with the RateLimitGroups field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *VmConfig) GetRateLimitGroupsOk() ([]RateLimitGroupConfig, bool) {
+	if o == nil || IsNil(o.RateLimitGroups) {
+		return nil, false
+	}
+	return o.RateLimitGroups, true
+}
+
+// HasRateLimitGroups returns a boolean if a field has been set.
+func (o *VmConfig) HasRateLimitGroups() bool {
+	if o != nil && !IsNil(o.RateLimitGroups) {
+		return true
+	}
+
+	return false
+}
+
+// SetRateLimitGroups gets a reference to the given []RateLimitGroupConfig and assigns it to the RateLimitGroups field.
+func (o *VmConfig) SetRateLimitGroups(v []RateLimitGroupConfig) {
+	o.RateLimitGroups = v
+}
+
 // GetDisks returns the Disks field value if set, zero value otherwise.
 func (o *VmConfig) GetDisks() []DiskConfig {
-	if o == nil || o.Disks == nil {
+	if o == nil || IsNil(o.Disks) {
 		var ret []DiskConfig
 		return ret
 	}
-	return *o.Disks
+	return o.Disks
 }
 
 // GetDisksOk returns a tuple with the Disks field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *VmConfig) GetDisksOk() (*[]DiskConfig, bool) {
-	if o == nil || o.Disks == nil {
+func (o *VmConfig) GetDisksOk() ([]DiskConfig, bool) {
+	if o == nil || IsNil(o.Disks) {
 		return nil, false
 	}
 	return o.Disks, true
@@ -172,7 +213,7 @@ func (o *VmConfig) GetDisksOk() (*[]DiskConfig, bool) {
 
 // HasDisks returns a boolean if a field has been set.
 func (o *VmConfig) HasDisks() bool {
-	if o != nil && o.Disks != nil {
+	if o != nil && !IsNil(o.Disks) {
 		return true
 	}
 
@@ -181,22 +222,22 @@ func (o *VmConfig) HasDisks() bool {
 
 // SetDisks gets a reference to the given []DiskConfig and assigns it to the Disks field.
 func (o *VmConfig) SetDisks(v []DiskConfig) {
-	o.Disks = &v
+	o.Disks = v
 }
 
 // GetNet returns the Net field value if set, zero value otherwise.
 func (o *VmConfig) GetNet() []NetConfig {
-	if o == nil || o.Net == nil {
+	if o == nil || IsNil(o.Net) {
 		var ret []NetConfig
 		return ret
 	}
-	return *o.Net
+	return o.Net
 }
 
 // GetNetOk returns a tuple with the Net field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *VmConfig) GetNetOk() (*[]NetConfig, bool) {
-	if o == nil || o.Net == nil {
+func (o *VmConfig) GetNetOk() ([]NetConfig, bool) {
+	if o == nil || IsNil(o.Net) {
 		return nil, false
 	}
 	return o.Net, true
@@ -204,7 +245,7 @@ func (o *VmConfig) GetNetOk() (*[]NetConfig, bool) {
 
 // HasNet returns a boolean if a field has been set.
 func (o *VmConfig) HasNet() bool {
-	if o != nil && o.Net != nil {
+	if o != nil && !IsNil(o.Net) {
 		return true
 	}
 
@@ -213,12 +254,12 @@ func (o *VmConfig) HasNet() bool {
 
 // SetNet gets a reference to the given []NetConfig and assigns it to the Net field.
 func (o *VmConfig) SetNet(v []NetConfig) {
-	o.Net = &v
+	o.Net = v
 }
 
 // GetRng returns the Rng field value if set, zero value otherwise.
 func (o *VmConfig) GetRng() RngConfig {
-	if o == nil || o.Rng == nil {
+	if o == nil || IsNil(o.Rng) {
 		var ret RngConfig
 		return ret
 	}
@@ -228,7 +269,7 @@ func (o *VmConfig) GetRng() RngConfig {
 // GetRngOk returns a tuple with the Rng field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetRngOk() (*RngConfig, bool) {
-	if o == nil || o.Rng == nil {
+	if o == nil || IsNil(o.Rng) {
 		return nil, false
 	}
 	return o.Rng, true
@@ -236,7 +277,7 @@ func (o *VmConfig) GetRngOk() (*RngConfig, bool) {
 
 // HasRng returns a boolean if a field has been set.
 func (o *VmConfig) HasRng() bool {
-	if o != nil && o.Rng != nil {
+	if o != nil && !IsNil(o.Rng) {
 		return true
 	}
 
@@ -250,7 +291,7 @@ func (o *VmConfig) SetRng(v RngConfig) {
 
 // GetBalloon returns the Balloon field value if set, zero value otherwise.
 func (o *VmConfig) GetBalloon() BalloonConfig {
-	if o == nil || o.Balloon == nil {
+	if o == nil || IsNil(o.Balloon) {
 		var ret BalloonConfig
 		return ret
 	}
@@ -260,7 +301,7 @@ func (o *VmConfig) GetBalloon() BalloonConfig {
 // GetBalloonOk returns a tuple with the Balloon field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetBalloonOk() (*BalloonConfig, bool) {
-	if o == nil || o.Balloon == nil {
+	if o == nil || IsNil(o.Balloon) {
 		return nil, false
 	}
 	return o.Balloon, true
@@ -268,7 +309,7 @@ func (o *VmConfig) GetBalloonOk() (*BalloonConfig, bool) {
 
 // HasBalloon returns a boolean if a field has been set.
 func (o *VmConfig) HasBalloon() bool {
-	if o != nil && o.Balloon != nil {
+	if o != nil && !IsNil(o.Balloon) {
 		return true
 	}
 
@@ -282,17 +323,17 @@ func (o *VmConfig) SetBalloon(v BalloonConfig) {
 
 // GetFs returns the Fs field value if set, zero value otherwise.
 func (o *VmConfig) GetFs() []FsConfig {
-	if o == nil || o.Fs == nil {
+	if o == nil || IsNil(o.Fs) {
 		var ret []FsConfig
 		return ret
 	}
-	return *o.Fs
+	return o.Fs
 }
 
 // GetFsOk returns a tuple with the Fs field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *VmConfig) GetFsOk() (*[]FsConfig, bool) {
-	if o == nil || o.Fs == nil {
+func (o *VmConfig) GetFsOk() ([]FsConfig, bool) {
+	if o == nil || IsNil(o.Fs) {
 		return nil, false
 	}
 	return o.Fs, true
@@ -300,7 +341,7 @@ func (o *VmConfig) GetFsOk() (*[]FsConfig, bool) {
 
 // HasFs returns a boolean if a field has been set.
 func (o *VmConfig) HasFs() bool {
-	if o != nil && o.Fs != nil {
+	if o != nil && !IsNil(o.Fs) {
 		return true
 	}
 
@@ -309,22 +350,22 @@ func (o *VmConfig) HasFs() bool {
 
 // SetFs gets a reference to the given []FsConfig and assigns it to the Fs field.
 func (o *VmConfig) SetFs(v []FsConfig) {
-	o.Fs = &v
+	o.Fs = v
 }
 
 // GetPmem returns the Pmem field value if set, zero value otherwise.
 func (o *VmConfig) GetPmem() []PmemConfig {
-	if o == nil || o.Pmem == nil {
+	if o == nil || IsNil(o.Pmem) {
 		var ret []PmemConfig
 		return ret
 	}
-	return *o.Pmem
+	return o.Pmem
 }
 
 // GetPmemOk returns a tuple with the Pmem field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *VmConfig) GetPmemOk() (*[]PmemConfig, bool) {
-	if o == nil || o.Pmem == nil {
+func (o *VmConfig) GetPmemOk() ([]PmemConfig, bool) {
+	if o == nil || IsNil(o.Pmem) {
 		return nil, false
 	}
 	return o.Pmem, true
@@ -332,7 +373,7 @@ func (o *VmConfig) GetPmemOk() (*[]PmemConfig, bool) {
 
 // HasPmem returns a boolean if a field has been set.
 func (o *VmConfig) HasPmem() bool {
-	if o != nil && o.Pmem != nil {
+	if o != nil && !IsNil(o.Pmem) {
 		return true
 	}
 
@@ -341,12 +382,12 @@ func (o *VmConfig) HasPmem() bool {
 
 // SetPmem gets a reference to the given []PmemConfig and assigns it to the Pmem field.
 func (o *VmConfig) SetPmem(v []PmemConfig) {
-	o.Pmem = &v
+	o.Pmem = v
 }
 
 // GetSerial returns the Serial field value if set, zero value otherwise.
 func (o *VmConfig) GetSerial() ConsoleConfig {
-	if o == nil || o.Serial == nil {
+	if o == nil || IsNil(o.Serial) {
 		var ret ConsoleConfig
 		return ret
 	}
@@ -356,7 +397,7 @@ func (o *VmConfig) GetSerial() ConsoleConfig {
 // GetSerialOk returns a tuple with the Serial field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetSerialOk() (*ConsoleConfig, bool) {
-	if o == nil || o.Serial == nil {
+	if o == nil || IsNil(o.Serial) {
 		return nil, false
 	}
 	return o.Serial, true
@@ -364,7 +405,7 @@ func (o *VmConfig) GetSerialOk() (*ConsoleConfig, bool) {
 
 // HasSerial returns a boolean if a field has been set.
 func (o *VmConfig) HasSerial() bool {
-	if o != nil && o.Serial != nil {
+	if o != nil && !IsNil(o.Serial) {
 		return true
 	}
 
@@ -378,7 +419,7 @@ func (o *VmConfig) SetSerial(v ConsoleConfig) {
 
 // GetConsole returns the Console field value if set, zero value otherwise.
 func (o *VmConfig) GetConsole() ConsoleConfig {
-	if o == nil || o.Console == nil {
+	if o == nil || IsNil(o.Console) {
 		var ret ConsoleConfig
 		return ret
 	}
@@ -388,7 +429,7 @@ func (o *VmConfig) GetConsole() ConsoleConfig {
 // GetConsoleOk returns a tuple with the Console field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetConsoleOk() (*ConsoleConfig, bool) {
-	if o == nil || o.Console == nil {
+	if o == nil || IsNil(o.Console) {
 		return nil, false
 	}
 	return o.Console, true
@@ -396,7 +437,7 @@ func (o *VmConfig) GetConsoleOk() (*ConsoleConfig, bool) {
 
 // HasConsole returns a boolean if a field has been set.
 func (o *VmConfig) HasConsole() bool {
-	if o != nil && o.Console != nil {
+	if o != nil && !IsNil(o.Console) {
 		return true
 	}
 
@@ -408,19 +449,51 @@ func (o *VmConfig) SetConsole(v ConsoleConfig) {
 	o.Console = &v
 }
 
+// GetDebugConsole returns the DebugConsole field value if set, zero value otherwise.
+func (o *VmConfig) GetDebugConsole() DebugConsoleConfig {
+	if o == nil || IsNil(o.DebugConsole) {
+		var ret DebugConsoleConfig
+		return ret
+	}
+	return *o.DebugConsole
+}
+
+// GetDebugConsoleOk returns a tuple with the DebugConsole field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *VmConfig) GetDebugConsoleOk() (*DebugConsoleConfig, bool) {
+	if o == nil || IsNil(o.DebugConsole) {
+		return nil, false
+	}
+	return o.DebugConsole, true
+}
+
+// HasDebugConsole returns a boolean if a field has been set.
+func (o *VmConfig) HasDebugConsole() bool {
+	if o != nil && !IsNil(o.DebugConsole) {
+		return true
+	}
+
+	return false
+}
+
+// SetDebugConsole gets a reference to the given DebugConsoleConfig and assigns it to the DebugConsole field.
+func (o *VmConfig) SetDebugConsole(v DebugConsoleConfig) {
+	o.DebugConsole = &v
+}
+
 // GetDevices returns the Devices field value if set, zero value otherwise.
 func (o *VmConfig) GetDevices() []DeviceConfig {
-	if o == nil || o.Devices == nil {
+	if o == nil || IsNil(o.Devices) {
 		var ret []DeviceConfig
 		return ret
 	}
-	return *o.Devices
+	return o.Devices
 }
 
 // GetDevicesOk returns a tuple with the Devices field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *VmConfig) GetDevicesOk() (*[]DeviceConfig, bool) {
-	if o == nil || o.Devices == nil {
+func (o *VmConfig) GetDevicesOk() ([]DeviceConfig, bool) {
+	if o == nil || IsNil(o.Devices) {
 		return nil, false
 	}
 	return o.Devices, true
@@ -428,7 +501,7 @@ func (o *VmConfig) GetDevicesOk() (*[]DeviceConfig, bool) {
 
 // HasDevices returns a boolean if a field has been set.
 func (o *VmConfig) HasDevices() bool {
-	if o != nil && o.Devices != nil {
+	if o != nil && !IsNil(o.Devices) {
 		return true
 	}
 
@@ -437,22 +510,22 @@ func (o *VmConfig) HasDevices() bool {
 
 // SetDevices gets a reference to the given []DeviceConfig and assigns it to the Devices field.
 func (o *VmConfig) SetDevices(v []DeviceConfig) {
-	o.Devices = &v
+	o.Devices = v
 }
 
 // GetVdpa returns the Vdpa field value if set, zero value otherwise.
 func (o *VmConfig) GetVdpa() []VdpaConfig {
-	if o == nil || o.Vdpa == nil {
+	if o == nil || IsNil(o.Vdpa) {
 		var ret []VdpaConfig
 		return ret
 	}
-	return *o.Vdpa
+	return o.Vdpa
 }
 
 // GetVdpaOk returns a tuple with the Vdpa field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *VmConfig) GetVdpaOk() (*[]VdpaConfig, bool) {
-	if o == nil || o.Vdpa == nil {
+func (o *VmConfig) GetVdpaOk() ([]VdpaConfig, bool) {
+	if o == nil || IsNil(o.Vdpa) {
 		return nil, false
 	}
 	return o.Vdpa, true
@@ -460,7 +533,7 @@ func (o *VmConfig) GetVdpaOk() (*[]VdpaConfig, bool) {
 
 // HasVdpa returns a boolean if a field has been set.
 func (o *VmConfig) HasVdpa() bool {
-	if o != nil && o.Vdpa != nil {
+	if o != nil && !IsNil(o.Vdpa) {
 		return true
 	}
 
@@ -469,12 +542,12 @@ func (o *VmConfig) HasVdpa() bool {
 
 // SetVdpa gets a reference to the given []VdpaConfig and assigns it to the Vdpa field.
 func (o *VmConfig) SetVdpa(v []VdpaConfig) {
-	o.Vdpa = &v
+	o.Vdpa = v
 }
 
 // GetVsock returns the Vsock field value if set, zero value otherwise.
 func (o *VmConfig) GetVsock() VsockConfig {
-	if o == nil || o.Vsock == nil {
+	if o == nil || IsNil(o.Vsock) {
 		var ret VsockConfig
 		return ret
 	}
@@ -484,7 +557,7 @@ func (o *VmConfig) GetVsock() VsockConfig {
 // GetVsockOk returns a tuple with the Vsock field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetVsockOk() (*VsockConfig, bool) {
-	if o == nil || o.Vsock == nil {
+	if o == nil || IsNil(o.Vsock) {
 		return nil, false
 	}
 	return o.Vsock, true
@@ -492,7 +565,7 @@ func (o *VmConfig) GetVsockOk() (*VsockConfig, bool) {
 
 // HasVsock returns a boolean if a field has been set.
 func (o *VmConfig) HasVsock() bool {
-	if o != nil && o.Vsock != nil {
+	if o != nil && !IsNil(o.Vsock) {
 		return true
 	}
 
@@ -506,17 +579,17 @@ func (o *VmConfig) SetVsock(v VsockConfig) {
 
 // GetSgxEpc returns the SgxEpc field value if set, zero value otherwise.
 func (o *VmConfig) GetSgxEpc() []SgxEpcConfig {
-	if o == nil || o.SgxEpc == nil {
+	if o == nil || IsNil(o.SgxEpc) {
 		var ret []SgxEpcConfig
 		return ret
 	}
-	return *o.SgxEpc
+	return o.SgxEpc
 }
 
 // GetSgxEpcOk returns a tuple with the SgxEpc field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *VmConfig) GetSgxEpcOk() (*[]SgxEpcConfig, bool) {
-	if o == nil || o.SgxEpc == nil {
+func (o *VmConfig) GetSgxEpcOk() ([]SgxEpcConfig, bool) {
+	if o == nil || IsNil(o.SgxEpc) {
 		return nil, false
 	}
 	return o.SgxEpc, true
@@ -524,7 +597,7 @@ func (o *VmConfig) GetSgxEpcOk() (*[]SgxEpcConfig, bool) {
 
 // HasSgxEpc returns a boolean if a field has been set.
 func (o *VmConfig) HasSgxEpc() bool {
-	if o != nil && o.SgxEpc != nil {
+	if o != nil && !IsNil(o.SgxEpc) {
 		return true
 	}
 
@@ -533,22 +606,22 @@ func (o *VmConfig) HasSgxEpc() bool {
 
 // SetSgxEpc gets a reference to the given []SgxEpcConfig and assigns it to the SgxEpc field.
 func (o *VmConfig) SetSgxEpc(v []SgxEpcConfig) {
-	o.SgxEpc = &v
+	o.SgxEpc = v
 }
 
 // GetNuma returns the Numa field value if set, zero value otherwise.
 func (o *VmConfig) GetNuma() []NumaConfig {
-	if o == nil || o.Numa == nil {
+	if o == nil || IsNil(o.Numa) {
 		var ret []NumaConfig
 		return ret
 	}
-	return *o.Numa
+	return o.Numa
 }
 
 // GetNumaOk returns a tuple with the Numa field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *VmConfig) GetNumaOk() (*[]NumaConfig, bool) {
-	if o == nil || o.Numa == nil {
+func (o *VmConfig) GetNumaOk() ([]NumaConfig, bool) {
+	if o == nil || IsNil(o.Numa) {
 		return nil, false
 	}
 	return o.Numa, true
@@ -556,7 +629,7 @@ func (o *VmConfig) GetNumaOk() (*[]NumaConfig, bool) {
 
 // HasNuma returns a boolean if a field has been set.
 func (o *VmConfig) HasNuma() bool {
-	if o != nil && o.Numa != nil {
+	if o != nil && !IsNil(o.Numa) {
 		return true
 	}
 
@@ -565,12 +638,12 @@ func (o *VmConfig) HasNuma() bool {
 
 // SetNuma gets a reference to the given []NumaConfig and assigns it to the Numa field.
 func (o *VmConfig) SetNuma(v []NumaConfig) {
-	o.Numa = &v
+	o.Numa = v
 }
 
 // GetIommu returns the Iommu field value if set, zero value otherwise.
 func (o *VmConfig) GetIommu() bool {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		var ret bool
 		return ret
 	}
@@ -580,7 +653,7 @@ func (o *VmConfig) GetIommu() bool {
 // GetIommuOk returns a tuple with the Iommu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetIommuOk() (*bool, bool) {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		return nil, false
 	}
 	return o.Iommu, true
@@ -588,7 +661,7 @@ func (o *VmConfig) GetIommuOk() (*bool, bool) {
 
 // HasIommu returns a boolean if a field has been set.
 func (o *VmConfig) HasIommu() bool {
-	if o != nil && o.Iommu != nil {
+	if o != nil && !IsNil(o.Iommu) {
 		return true
 	}
 
@@ -602,7 +675,7 @@ func (o *VmConfig) SetIommu(v bool) {
 
 // GetWatchdog returns the Watchdog field value if set, zero value otherwise.
 func (o *VmConfig) GetWatchdog() bool {
-	if o == nil || o.Watchdog == nil {
+	if o == nil || IsNil(o.Watchdog) {
 		var ret bool
 		return ret
 	}
@@ -612,7 +685,7 @@ func (o *VmConfig) GetWatchdog() bool {
 // GetWatchdogOk returns a tuple with the Watchdog field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetWatchdogOk() (*bool, bool) {
-	if o == nil || o.Watchdog == nil {
+	if o == nil || IsNil(o.Watchdog) {
 		return nil, false
 	}
 	return o.Watchdog, true
@@ -620,7 +693,7 @@ func (o *VmConfig) GetWatchdogOk() (*bool, bool) {
 
 // HasWatchdog returns a boolean if a field has been set.
 func (o *VmConfig) HasWatchdog() bool {
-	if o != nil && o.Watchdog != nil {
+	if o != nil && !IsNil(o.Watchdog) {
 		return true
 	}
 
@@ -634,7 +707,7 @@ func (o *VmConfig) SetWatchdog(v bool) {
 
 // GetPlatform returns the Platform field value if set, zero value otherwise.
 func (o *VmConfig) GetPlatform() PlatformConfig {
-	if o == nil || o.Platform == nil {
+	if o == nil || IsNil(o.Platform) {
 		var ret PlatformConfig
 		return ret
 	}
@@ -644,7 +717,7 @@ func (o *VmConfig) GetPlatform() PlatformConfig {
 // GetPlatformOk returns a tuple with the Platform field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetPlatformOk() (*PlatformConfig, bool) {
-	if o == nil || o.Platform == nil {
+	if o == nil || IsNil(o.Platform) {
 		return nil, false
 	}
 	return o.Platform, true
@@ -652,7 +725,7 @@ func (o *VmConfig) GetPlatformOk() (*PlatformConfig, bool) {
 
 // HasPlatform returns a boolean if a field has been set.
 func (o *VmConfig) HasPlatform() bool {
-	if o != nil && o.Platform != nil {
+	if o != nil && !IsNil(o.Platform) {
 		return true
 	}
 
@@ -666,7 +739,7 @@ func (o *VmConfig) SetPlatform(v PlatformConfig) {
 
 // GetTpm returns the Tpm field value if set, zero value otherwise.
 func (o *VmConfig) GetTpm() TpmConfig {
-	if o == nil || o.Tpm == nil {
+	if o == nil || IsNil(o.Tpm) {
 		var ret TpmConfig
 		return ret
 	}
@@ -676,7 +749,7 @@ func (o *VmConfig) GetTpm() TpmConfig {
 // GetTpmOk returns a tuple with the Tpm field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmConfig) GetTpmOk() (*TpmConfig, bool) {
-	if o == nil || o.Tpm == nil {
+	if o == nil || IsNil(o.Tpm) {
 		return nil, false
 	}
 	return o.Tpm, true
@@ -684,7 +757,7 @@ func (o *VmConfig) GetTpmOk() (*TpmConfig, bool) {
 
 // HasTpm returns a boolean if a field has been set.
 func (o *VmConfig) HasTpm() bool {
-	if o != nil && o.Tpm != nil {
+	if o != nil && !IsNil(o.Tpm) {
 		return true
 	}
 
@@ -697,68 +770,117 @@ func (o *VmConfig) SetTpm(v TpmConfig) {
 }
 
 func (o VmConfig) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if o.Cpus != nil {
-		toSerialize["cpus"] = o.Cpus
-	}
-	if o.Memory != nil {
-		toSerialize["memory"] = o.Memory
-	}
-	if true {
-		toSerialize["payload"] = o.Payload
-	}
-	if o.Disks != nil {
-		toSerialize["disks"] = o.Disks
-	}
-	if o.Net != nil {
-		toSerialize["net"] = o.Net
-	}
-	if o.Rng != nil {
-		toSerialize["rng"] = o.Rng
-	}
-	if o.Balloon != nil {
-		toSerialize["balloon"] = o.Balloon
-	}
-	if o.Fs != nil {
-		toSerialize["fs"] = o.Fs
-	}
-	if o.Pmem != nil {
-		toSerialize["pmem"] = o.Pmem
-	}
-	if o.Serial != nil {
-		toSerialize["serial"] = o.Serial
-	}
-	if o.Console != nil {
-		toSerialize["console"] = o.Console
-	}
-	if o.Devices != nil {
-		toSerialize["devices"] = o.Devices
-	}
-	if o.Vdpa != nil {
-		toSerialize["vdpa"] = o.Vdpa
-	}
-	if o.Vsock != nil {
-		toSerialize["vsock"] = o.Vsock
-	}
-	if o.SgxEpc != nil {
-		toSerialize["sgx_epc"] = o.SgxEpc
-	}
-	if o.Numa != nil {
-		toSerialize["numa"] = o.Numa
-	}
-	if o.Iommu != nil {
-		toSerialize["iommu"] = o.Iommu
-	}
-	if o.Watchdog != nil {
-		toSerialize["watchdog"] = o.Watchdog
-	}
-	if o.Platform != nil {
-		toSerialize["platform"] = o.Platform
-	}
-	if o.Tpm != nil {
-		toSerialize["tpm"] = o.Tpm
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o VmConfig) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	if !IsNil(o.Cpus) {
+		toSerialize["cpus"] = o.Cpus
+	}
+	if !IsNil(o.Memory) {
+		toSerialize["memory"] = o.Memory
+	}
+	toSerialize["payload"] = o.Payload
+	if !IsNil(o.RateLimitGroups) {
+		toSerialize["rate_limit_groups"] = o.RateLimitGroups
+	}
+	if !IsNil(o.Disks) {
+		toSerialize["disks"] = o.Disks
+	}
+	if !IsNil(o.Net) {
+		toSerialize["net"] = o.Net
+	}
+	if !IsNil(o.Rng) {
+		toSerialize["rng"] = o.Rng
+	}
+	if !IsNil(o.Balloon) {
+		toSerialize["balloon"] = o.Balloon
+	}
+	if !IsNil(o.Fs) {
+		toSerialize["fs"] = o.Fs
+	}
+	if !IsNil(o.Pmem) {
+		toSerialize["pmem"] = o.Pmem
+	}
+	if !IsNil(o.Serial) {
+		toSerialize["serial"] = o.Serial
+	}
+	if !IsNil(o.Console) {
+		toSerialize["console"] = o.Console
+	}
+	if !IsNil(o.DebugConsole) {
+		toSerialize["debug_console"] = o.DebugConsole
+	}
+	if !IsNil(o.Devices) {
+		toSerialize["devices"] = o.Devices
+	}
+	if !IsNil(o.Vdpa) {
+		toSerialize["vdpa"] = o.Vdpa
+	}
+	if !IsNil(o.Vsock) {
+		toSerialize["vsock"] = o.Vsock
+	}
+	if !IsNil(o.SgxEpc) {
+		toSerialize["sgx_epc"] = o.SgxEpc
+	}
+	if !IsNil(o.Numa) {
+		toSerialize["numa"] = o.Numa
+	}
+	if !IsNil(o.Iommu) {
+		toSerialize["iommu"] = o.Iommu
+	}
+	if !IsNil(o.Watchdog) {
+		toSerialize["watchdog"] = o.Watchdog
+	}
+	if !IsNil(o.Platform) {
+		toSerialize["platform"] = o.Platform
+	}
+	if !IsNil(o.Tpm) {
+		toSerialize["tpm"] = o.Tpm
+	}
+	return toSerialize, nil
+}
+
+func (o *VmConfig) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"payload",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varVmConfig := _VmConfig{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varVmConfig)
+
+	if err != nil {
+		return err
+	}
+
+	*o = VmConfig(varVmConfig)
+
+	return err
 }
 
 type NullableVmConfig struct {
@@ -796,3 +918,5 @@ func (v *NullableVmConfig) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

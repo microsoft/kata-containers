@@ -14,22 +14,25 @@ import (
 	"encoding/json"
 )
 
+// checks if the NetConfig type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &NetConfig{}
+
 // NetConfig struct for NetConfig
 type NetConfig struct {
-	Tap               *string            `json:"tap,omitempty"`
-	Ip                *string            `json:"ip,omitempty"`
-	Mask              *string            `json:"mask,omitempty"`
-	Mac               *string            `json:"mac,omitempty"`
-	HostMac           *string            `json:"host_mac,omitempty"`
-	Mtu               *int32             `json:"mtu,omitempty"`
-	Iommu             *bool              `json:"iommu,omitempty"`
-	NumQueues         *int32             `json:"num_queues,omitempty"`
-	QueueSize         *int32             `json:"queue_size,omitempty"`
-	VhostUser         *bool              `json:"vhost_user,omitempty"`
-	VhostSocket       *string            `json:"vhost_socket,omitempty"`
-	VhostMode         *string            `json:"vhost_mode,omitempty"`
-	Id                *string            `json:"id,omitempty"`
-	PciSegment        *int32             `json:"pci_segment,omitempty"`
+	Tap *string `json:"tap,omitempty"`
+	Ip *string `json:"ip,omitempty"`
+	Mask *string `json:"mask,omitempty"`
+	Mac *string `json:"mac,omitempty"`
+	HostMac *string `json:"host_mac,omitempty"`
+	Mtu *int32 `json:"mtu,omitempty"`
+	Iommu *bool `json:"iommu,omitempty"`
+	NumQueues *int32 `json:"num_queues,omitempty"`
+	QueueSize *int32 `json:"queue_size,omitempty"`
+	VhostUser *bool `json:"vhost_user,omitempty"`
+	VhostSocket *string `json:"vhost_socket,omitempty"`
+	VhostMode *string `json:"vhost_mode,omitempty"`
+	Id *string `json:"id,omitempty"`
+	PciSegment *int32 `json:"pci_segment,omitempty"`
 	RateLimiterConfig *RateLimiterConfig `json:"rate_limiter_config,omitempty"`
 }
 
@@ -80,7 +83,7 @@ func NewNetConfigWithDefaults() *NetConfig {
 
 // GetTap returns the Tap field value if set, zero value otherwise.
 func (o *NetConfig) GetTap() string {
-	if o == nil || o.Tap == nil {
+	if o == nil || IsNil(o.Tap) {
 		var ret string
 		return ret
 	}
@@ -90,7 +93,7 @@ func (o *NetConfig) GetTap() string {
 // GetTapOk returns a tuple with the Tap field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetTapOk() (*string, bool) {
-	if o == nil || o.Tap == nil {
+	if o == nil || IsNil(o.Tap) {
 		return nil, false
 	}
 	return o.Tap, true
@@ -98,7 +101,7 @@ func (o *NetConfig) GetTapOk() (*string, bool) {
 
 // HasTap returns a boolean if a field has been set.
 func (o *NetConfig) HasTap() bool {
-	if o != nil && o.Tap != nil {
+	if o != nil && !IsNil(o.Tap) {
 		return true
 	}
 
@@ -112,7 +115,7 @@ func (o *NetConfig) SetTap(v string) {
 
 // GetIp returns the Ip field value if set, zero value otherwise.
 func (o *NetConfig) GetIp() string {
-	if o == nil || o.Ip == nil {
+	if o == nil || IsNil(o.Ip) {
 		var ret string
 		return ret
 	}
@@ -122,7 +125,7 @@ func (o *NetConfig) GetIp() string {
 // GetIpOk returns a tuple with the Ip field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetIpOk() (*string, bool) {
-	if o == nil || o.Ip == nil {
+	if o == nil || IsNil(o.Ip) {
 		return nil, false
 	}
 	return o.Ip, true
@@ -130,7 +133,7 @@ func (o *NetConfig) GetIpOk() (*string, bool) {
 
 // HasIp returns a boolean if a field has been set.
 func (o *NetConfig) HasIp() bool {
-	if o != nil && o.Ip != nil {
+	if o != nil && !IsNil(o.Ip) {
 		return true
 	}
 
@@ -144,7 +147,7 @@ func (o *NetConfig) SetIp(v string) {
 
 // GetMask returns the Mask field value if set, zero value otherwise.
 func (o *NetConfig) GetMask() string {
-	if o == nil || o.Mask == nil {
+	if o == nil || IsNil(o.Mask) {
 		var ret string
 		return ret
 	}
@@ -154,7 +157,7 @@ func (o *NetConfig) GetMask() string {
 // GetMaskOk returns a tuple with the Mask field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetMaskOk() (*string, bool) {
-	if o == nil || o.Mask == nil {
+	if o == nil || IsNil(o.Mask) {
 		return nil, false
 	}
 	return o.Mask, true
@@ -162,7 +165,7 @@ func (o *NetConfig) GetMaskOk() (*string, bool) {
 
 // HasMask returns a boolean if a field has been set.
 func (o *NetConfig) HasMask() bool {
-	if o != nil && o.Mask != nil {
+	if o != nil && !IsNil(o.Mask) {
 		return true
 	}
 
@@ -176,7 +179,7 @@ func (o *NetConfig) SetMask(v string) {
 
 // GetMac returns the Mac field value if set, zero value otherwise.
 func (o *NetConfig) GetMac() string {
-	if o == nil || o.Mac == nil {
+	if o == nil || IsNil(o.Mac) {
 		var ret string
 		return ret
 	}
@@ -186,7 +189,7 @@ func (o *NetConfig) GetMac() string {
 // GetMacOk returns a tuple with the Mac field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetMacOk() (*string, bool) {
-	if o == nil || o.Mac == nil {
+	if o == nil || IsNil(o.Mac) {
 		return nil, false
 	}
 	return o.Mac, true
@@ -194,7 +197,7 @@ func (o *NetConfig) GetMacOk() (*string, bool) {
 
 // HasMac returns a boolean if a field has been set.
 func (o *NetConfig) HasMac() bool {
-	if o != nil && o.Mac != nil {
+	if o != nil && !IsNil(o.Mac) {
 		return true
 	}
 
@@ -208,7 +211,7 @@ func (o *NetConfig) SetMac(v string) {
 
 // GetHostMac returns the HostMac field value if set, zero value otherwise.
 func (o *NetConfig) GetHostMac() string {
-	if o == nil || o.HostMac == nil {
+	if o == nil || IsNil(o.HostMac) {
 		var ret string
 		return ret
 	}
@@ -218,7 +221,7 @@ func (o *NetConfig) GetHostMac() string {
 // GetHostMacOk returns a tuple with the HostMac field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetHostMacOk() (*string, bool) {
-	if o == nil || o.HostMac == nil {
+	if o == nil || IsNil(o.HostMac) {
 		return nil, false
 	}
 	return o.HostMac, true
@@ -226,7 +229,7 @@ func (o *NetConfig) GetHostMacOk() (*string, bool) {
 
 // HasHostMac returns a boolean if a field has been set.
 func (o *NetConfig) HasHostMac() bool {
-	if o != nil && o.HostMac != nil {
+	if o != nil && !IsNil(o.HostMac) {
 		return true
 	}
 
@@ -240,7 +243,7 @@ func (o *NetConfig) SetHostMac(v string) {
 
 // GetMtu returns the Mtu field value if set, zero value otherwise.
 func (o *NetConfig) GetMtu() int32 {
-	if o == nil || o.Mtu == nil {
+	if o == nil || IsNil(o.Mtu) {
 		var ret int32
 		return ret
 	}
@@ -250,7 +253,7 @@ func (o *NetConfig) GetMtu() int32 {
 // GetMtuOk returns a tuple with the Mtu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetMtuOk() (*int32, bool) {
-	if o == nil || o.Mtu == nil {
+	if o == nil || IsNil(o.Mtu) {
 		return nil, false
 	}
 	return o.Mtu, true
@@ -258,7 +261,7 @@ func (o *NetConfig) GetMtuOk() (*int32, bool) {
 
 // HasMtu returns a boolean if a field has been set.
 func (o *NetConfig) HasMtu() bool {
-	if o != nil && o.Mtu != nil {
+	if o != nil && !IsNil(o.Mtu) {
 		return true
 	}
 
@@ -272,7 +275,7 @@ func (o *NetConfig) SetMtu(v int32) {
 
 // GetIommu returns the Iommu field value if set, zero value otherwise.
 func (o *NetConfig) GetIommu() bool {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		var ret bool
 		return ret
 	}
@@ -282,7 +285,7 @@ func (o *NetConfig) GetIommu() bool {
 // GetIommuOk returns a tuple with the Iommu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetIommuOk() (*bool, bool) {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		return nil, false
 	}
 	return o.Iommu, true
@@ -290,7 +293,7 @@ func (o *NetConfig) GetIommuOk() (*bool, bool) {
 
 // HasIommu returns a boolean if a field has been set.
 func (o *NetConfig) HasIommu() bool {
-	if o != nil && o.Iommu != nil {
+	if o != nil && !IsNil(o.Iommu) {
 		return true
 	}
 
@@ -304,7 +307,7 @@ func (o *NetConfig) SetIommu(v bool) {
 
 // GetNumQueues returns the NumQueues field value if set, zero value otherwise.
 func (o *NetConfig) GetNumQueues() int32 {
-	if o == nil || o.NumQueues == nil {
+	if o == nil || IsNil(o.NumQueues) {
 		var ret int32
 		return ret
 	}
@@ -314,7 +317,7 @@ func (o *NetConfig) GetNumQueues() int32 {
 // GetNumQueuesOk returns a tuple with the NumQueues field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetNumQueuesOk() (*int32, bool) {
-	if o == nil || o.NumQueues == nil {
+	if o == nil || IsNil(o.NumQueues) {
 		return nil, false
 	}
 	return o.NumQueues, true
@@ -322,7 +325,7 @@ func (o *NetConfig) GetNumQueuesOk() (*int32, bool) {
 
 // HasNumQueues returns a boolean if a field has been set.
 func (o *NetConfig) HasNumQueues() bool {
-	if o != nil && o.NumQueues != nil {
+	if o != nil && !IsNil(o.NumQueues) {
 		return true
 	}
 
@@ -336,7 +339,7 @@ func (o *NetConfig) SetNumQueues(v int32) {
 
 // GetQueueSize returns the QueueSize field value if set, zero value otherwise.
 func (o *NetConfig) GetQueueSize() int32 {
-	if o == nil || o.QueueSize == nil {
+	if o == nil || IsNil(o.QueueSize) {
 		var ret int32
 		return ret
 	}
@@ -346,7 +349,7 @@ func (o *NetConfig) GetQueueSize() int32 {
 // GetQueueSizeOk returns a tuple with the QueueSize field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetQueueSizeOk() (*int32, bool) {
-	if o == nil || o.QueueSize == nil {
+	if o == nil || IsNil(o.QueueSize) {
 		return nil, false
 	}
 	return o.QueueSize, true
@@ -354,7 +357,7 @@ func (o *NetConfig) GetQueueSizeOk() (*int32, bool) {
 
 // HasQueueSize returns a boolean if a field has been set.
 func (o *NetConfig) HasQueueSize() bool {
-	if o != nil && o.QueueSize != nil {
+	if o != nil && !IsNil(o.QueueSize) {
 		return true
 	}
 
@@ -368,7 +371,7 @@ func (o *NetConfig) SetQueueSize(v int32) {
 
 // GetVhostUser returns the VhostUser field value if set, zero value otherwise.
 func (o *NetConfig) GetVhostUser() bool {
-	if o == nil || o.VhostUser == nil {
+	if o == nil || IsNil(o.VhostUser) {
 		var ret bool
 		return ret
 	}
@@ -378,7 +381,7 @@ func (o *NetConfig) GetVhostUser() bool {
 // GetVhostUserOk returns a tuple with the VhostUser field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetVhostUserOk() (*bool, bool) {
-	if o == nil || o.VhostUser == nil {
+	if o == nil || IsNil(o.VhostUser) {
 		return nil, false
 	}
 	return o.VhostUser, true
@@ -386,7 +389,7 @@ func (o *NetConfig) GetVhostUserOk() (*bool, bool) {
 
 // HasVhostUser returns a boolean if a field has been set.
 func (o *NetConfig) HasVhostUser() bool {
-	if o != nil && o.VhostUser != nil {
+	if o != nil && !IsNil(o.VhostUser) {
 		return true
 	}
 
@@ -400,7 +403,7 @@ func (o *NetConfig) SetVhostUser(v bool) {
 
 // GetVhostSocket returns the VhostSocket field value if set, zero value otherwise.
 func (o *NetConfig) GetVhostSocket() string {
-	if o == nil || o.VhostSocket == nil {
+	if o == nil || IsNil(o.VhostSocket) {
 		var ret string
 		return ret
 	}
@@ -410,7 +413,7 @@ func (o *NetConfig) GetVhostSocket() string {
 // GetVhostSocketOk returns a tuple with the VhostSocket field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetVhostSocketOk() (*string, bool) {
-	if o == nil || o.VhostSocket == nil {
+	if o == nil || IsNil(o.VhostSocket) {
 		return nil, false
 	}
 	return o.VhostSocket, true
@@ -418,7 +421,7 @@ func (o *NetConfig) GetVhostSocketOk() (*string, bool) {
 
 // HasVhostSocket returns a boolean if a field has been set.
 func (o *NetConfig) HasVhostSocket() bool {
-	if o != nil && o.VhostSocket != nil {
+	if o != nil && !IsNil(o.VhostSocket) {
 		return true
 	}
 
@@ -432,7 +435,7 @@ func (o *NetConfig) SetVhostSocket(v string) {
 
 // GetVhostMode returns the VhostMode field value if set, zero value otherwise.
 func (o *NetConfig) GetVhostMode() string {
-	if o == nil || o.VhostMode == nil {
+	if o == nil || IsNil(o.VhostMode) {
 		var ret string
 		return ret
 	}
@@ -442,7 +445,7 @@ func (o *NetConfig) GetVhostMode() string {
 // GetVhostModeOk returns a tuple with the VhostMode field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetVhostModeOk() (*string, bool) {
-	if o == nil || o.VhostMode == nil {
+	if o == nil || IsNil(o.VhostMode) {
 		return nil, false
 	}
 	return o.VhostMode, true
@@ -450,7 +453,7 @@ func (o *NetConfig) GetVhostModeOk() (*string, bool) {
 
 // HasVhostMode returns a boolean if a field has been set.
 func (o *NetConfig) HasVhostMode() bool {
-	if o != nil && o.VhostMode != nil {
+	if o != nil && !IsNil(o.VhostMode) {
 		return true
 	}
 
@@ -464,7 +467,7 @@ func (o *NetConfig) SetVhostMode(v string) {
 
 // GetId returns the Id field value if set, zero value otherwise.
 func (o *NetConfig) GetId() string {
-	if o == nil || o.Id == nil {
+	if o == nil || IsNil(o.Id) {
 		var ret string
 		return ret
 	}
@@ -474,7 +477,7 @@ func (o *NetConfig) GetId() string {
 // GetIdOk returns a tuple with the Id field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetIdOk() (*string, bool) {
-	if o == nil || o.Id == nil {
+	if o == nil || IsNil(o.Id) {
 		return nil, false
 	}
 	return o.Id, true
@@ -482,7 +485,7 @@ func (o *NetConfig) GetIdOk() (*string, bool) {
 
 // HasId returns a boolean if a field has been set.
 func (o *NetConfig) HasId() bool {
-	if o != nil && o.Id != nil {
+	if o != nil && !IsNil(o.Id) {
 		return true
 	}
 
@@ -496,7 +499,7 @@ func (o *NetConfig) SetId(v string) {
 
 // GetPciSegment returns the PciSegment field value if set, zero value otherwise.
 func (o *NetConfig) GetPciSegment() int32 {
-	if o == nil || o.PciSegment == nil {
+	if o == nil || IsNil(o.PciSegment) {
 		var ret int32
 		return ret
 	}
@@ -506,7 +509,7 @@ func (o *NetConfig) GetPciSegment() int32 {
 // GetPciSegmentOk returns a tuple with the PciSegment field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetPciSegmentOk() (*int32, bool) {
-	if o == nil || o.PciSegment == nil {
+	if o == nil || IsNil(o.PciSegment) {
 		return nil, false
 	}
 	return o.PciSegment, true
@@ -514,7 +517,7 @@ func (o *NetConfig) GetPciSegmentOk() (*int32, bool) {
 
 // HasPciSegment returns a boolean if a field has been set.
 func (o *NetConfig) HasPciSegment() bool {
-	if o != nil && o.PciSegment != nil {
+	if o != nil && !IsNil(o.PciSegment) {
 		return true
 	}
 
@@ -528,7 +531,7 @@ func (o *NetConfig) SetPciSegment(v int32) {
 
 // GetRateLimiterConfig returns the RateLimiterConfig field value if set, zero value otherwise.
 func (o *NetConfig) GetRateLimiterConfig() RateLimiterConfig {
-	if o == nil || o.RateLimiterConfig == nil {
+	if o == nil || IsNil(o.RateLimiterConfig) {
 		var ret RateLimiterConfig
 		return ret
 	}
@@ -538,7 +541,7 @@ func (o *NetConfig) GetRateLimiterConfig() RateLimiterConfig {
 // GetRateLimiterConfigOk returns a tuple with the RateLimiterConfig field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *NetConfig) GetRateLimiterConfigOk() (*RateLimiterConfig, bool) {
-	if o == nil || o.RateLimiterConfig == nil {
+	if o == nil || IsNil(o.RateLimiterConfig) {
 		return nil, false
 	}
 	return o.RateLimiterConfig, true
@@ -546,7 +549,7 @@ func (o *NetConfig) GetRateLimiterConfigOk() (*RateLimiterConfig, bool) {
 
 // HasRateLimiterConfig returns a boolean if a field has been set.
 func (o *NetConfig) HasRateLimiterConfig() bool {
-	if o != nil && o.RateLimiterConfig != nil {
+	if o != nil && !IsNil(o.RateLimiterConfig) {
 		return true
 	}
 
@@ -559,53 +562,61 @@ func (o *NetConfig) SetRateLimiterConfig(v RateLimiterConfig) {
 }
 
 func (o NetConfig) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if o.Tap != nil {
-		toSerialize["tap"] = o.Tap
-	}
-	if o.Ip != nil {
-		toSerialize["ip"] = o.Ip
-	}
-	if o.Mask != nil {
-		toSerialize["mask"] = o.Mask
-	}
-	if o.Mac != nil {
-		toSerialize["mac"] = o.Mac
-	}
-	if o.HostMac != nil {
-		toSerialize["host_mac"] = o.HostMac
-	}
-	if o.Mtu != nil {
-		toSerialize["mtu"] = o.Mtu
-	}
-	if o.Iommu != nil {
-		toSerialize["iommu"] = o.Iommu
-	}
-	if o.NumQueues != nil {
-		toSerialize["num_queues"] = o.NumQueues
-	}
-	if o.QueueSize != nil {
-		toSerialize["queue_size"] = o.QueueSize
-	}
-	if o.VhostUser != nil {
-		toSerialize["vhost_user"] = o.VhostUser
-	}
-	if o.VhostSocket != nil {
-		toSerialize["vhost_socket"] = o.VhostSocket
-	}
-	if o.VhostMode != nil {
-		toSerialize["vhost_mode"] = o.VhostMode
-	}
-	if o.Id != nil {
-		toSerialize["id"] = o.Id
-	}
-	if o.PciSegment != nil {
-		toSerialize["pci_segment"] = o.PciSegment
-	}
-	if o.RateLimiterConfig != nil {
-		toSerialize["rate_limiter_config"] = o.RateLimiterConfig
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o NetConfig) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	if !IsNil(o.Tap) {
+		toSerialize["tap"] = o.Tap
+	}
+	if !IsNil(o.Ip) {
+		toSerialize["ip"] = o.Ip
+	}
+	if !IsNil(o.Mask) {
+		toSerialize["mask"] = o.Mask
+	}
+	if !IsNil(o.Mac) {
+		toSerialize["mac"] = o.Mac
+	}
+	if !IsNil(o.HostMac) {
+		toSerialize["host_mac"] = o.HostMac
+	}
+	if !IsNil(o.Mtu) {
+		toSerialize["mtu"] = o.Mtu
+	}
+	if !IsNil(o.Iommu) {
+		toSerialize["iommu"] = o.Iommu
+	}
+	if !IsNil(o.NumQueues) {
+		toSerialize["num_queues"] = o.NumQueues
+	}
+	if !IsNil(o.QueueSize) {
+		toSerialize["queue_size"] = o.QueueSize
+	}
+	if !IsNil(o.VhostUser) {
+		toSerialize["vhost_user"] = o.VhostUser
+	}
+	if !IsNil(o.VhostSocket) {
+		toSerialize["vhost_socket"] = o.VhostSocket
+	}
+	if !IsNil(o.VhostMode) {
+		toSerialize["vhost_mode"] = o.VhostMode
+	}
+	if !IsNil(o.Id) {
+		toSerialize["id"] = o.Id
+	}
+	if !IsNil(o.PciSegment) {
+		toSerialize["pci_segment"] = o.PciSegment
+	}
+	if !IsNil(o.RateLimiterConfig) {
+		toSerialize["rate_limiter_config"] = o.RateLimiterConfig
+	}
+	return toSerialize, nil
 }
 
 type NullableNetConfig struct {
@@ -643,3 +654,5 @@ func (v *NullableNetConfig) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

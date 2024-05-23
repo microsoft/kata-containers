@@ -16,6 +16,8 @@ Name | Type | Description | Notes
 **PciSegment** | Pointer to **int32** |  | [optional] 
 **Id** | Pointer to **string** |  | [optional] 
 **Serial** | Pointer to **string** |  | [optional] 
+**RateLimitGroup** | Pointer to **string** |  | [optional] 
+**Affinity** | Pointer to [**[]VirtQueueAffinity**](VirtQueueAffinity.md) |  | [optional] 
 
 ## Methods
 
@@ -330,6 +332,56 @@ SetSerial sets Serial field to given value.
 `func (o *DiskConfig) HasSerial() bool`
 
 HasSerial returns a boolean if a field has been set.
+
+### GetRateLimitGroup
+
+`func (o *DiskConfig) GetRateLimitGroup() string`
+
+GetRateLimitGroup returns the RateLimitGroup field if non-nil, zero value otherwise.
+
+### GetRateLimitGroupOk
+
+`func (o *DiskConfig) GetRateLimitGroupOk() (*string, bool)`
+
+GetRateLimitGroupOk returns a tuple with the RateLimitGroup field if it's non-nil, zero value otherwise
+and a boolean to check if the value has been set.
+
+### SetRateLimitGroup
+
+`func (o *DiskConfig) SetRateLimitGroup(v string)`
+
+SetRateLimitGroup sets RateLimitGroup field to given value.
+
+### HasRateLimitGroup
+
+`func (o *DiskConfig) HasRateLimitGroup() bool`
+
+HasRateLimitGroup returns a boolean if a field has been set.
+
+### GetAffinity
+
+`func (o *DiskConfig) GetAffinity() []VirtQueueAffinity`
+
+GetAffinity returns the Affinity field if non-nil, zero value otherwise.
+
+### GetAffinityOk
+
+`func (o *DiskConfig) GetAffinityOk() (*[]VirtQueueAffinity, bool)`
+
+GetAffinityOk returns a tuple with the Affinity field if it's non-nil, zero value otherwise
+and a boolean to check if the value has been set.
+
+### SetAffinity
+
+`func (o *DiskConfig) SetAffinity(v []VirtQueueAffinity)`
+
+SetAffinity sets Affinity field to given value.
+
+### HasAffinity
+
+`func (o *DiskConfig) HasAffinity() bool`
+
+HasAffinity returns a boolean if a field has been set.
 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)

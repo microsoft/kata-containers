@@ -12,17 +12,24 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the NumaConfig type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &NumaConfig{}
 
 // NumaConfig struct for NumaConfig
 type NumaConfig struct {
-	GuestNumaId    int32           `json:"guest_numa_id"`
-	Cpus           *[]int32        `json:"cpus,omitempty"`
-	Distances      *[]NumaDistance `json:"distances,omitempty"`
-	MemoryZones    *[]string       `json:"memory_zones,omitempty"`
-	SgxEpcSections *[]string       `json:"sgx_epc_sections,omitempty"`
-	PciSegments    *[]int32        `json:"pci_segments,omitempty"`
+	GuestNumaId int32 `json:"guest_numa_id"`
+	Cpus []int32 `json:"cpus,omitempty"`
+	Distances []NumaDistance `json:"distances,omitempty"`
+	MemoryZones []string `json:"memory_zones,omitempty"`
+	SgxEpcSections []string `json:"sgx_epc_sections,omitempty"`
+	PciSegments []int32 `json:"pci_segments,omitempty"`
 }
+
+type _NumaConfig NumaConfig
 
 // NewNumaConfig instantiates a new NumaConfig object
 // This constructor will assign default values to properties that have it defined,
@@ -68,17 +75,17 @@ func (o *NumaConfig) SetGuestNumaId(v int32) {
 
 // GetCpus returns the Cpus field value if set, zero value otherwise.
 func (o *NumaConfig) GetCpus() []int32 {
-	if o == nil || o.Cpus == nil {
+	if o == nil || IsNil(o.Cpus) {
 		var ret []int32
 		return ret
 	}
-	return *o.Cpus
+	return o.Cpus
 }
 
 // GetCpusOk returns a tuple with the Cpus field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *NumaConfig) GetCpusOk() (*[]int32, bool) {
-	if o == nil || o.Cpus == nil {
+func (o *NumaConfig) GetCpusOk() ([]int32, bool) {
+	if o == nil || IsNil(o.Cpus) {
 		return nil, false
 	}
 	return o.Cpus, true
@@ -86,7 +93,7 @@ func (o *NumaConfig) GetCpusOk() (*[]int32, bool) {
 
 // HasCpus returns a boolean if a field has been set.
 func (o *NumaConfig) HasCpus() bool {
-	if o != nil && o.Cpus != nil {
+	if o != nil && !IsNil(o.Cpus) {
 		return true
 	}
 
@@ -95,22 +102,22 @@ func (o *NumaConfig) HasCpus() bool {
 
 // SetCpus gets a reference to the given []int32 and assigns it to the Cpus field.
 func (o *NumaConfig) SetCpus(v []int32) {
-	o.Cpus = &v
+	o.Cpus = v
 }
 
 // GetDistances returns the Distances field value if set, zero value otherwise.
 func (o *NumaConfig) GetDistances() []NumaDistance {
-	if o == nil || o.Distances == nil {
+	if o == nil || IsNil(o.Distances) {
 		var ret []NumaDistance
 		return ret
 	}
-	return *o.Distances
+	return o.Distances
 }
 
 // GetDistancesOk returns a tuple with the Distances field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *NumaConfig) GetDistancesOk() (*[]NumaDistance, bool) {
-	if o == nil || o.Distances == nil {
+func (o *NumaConfig) GetDistancesOk() ([]NumaDistance, bool) {
+	if o == nil || IsNil(o.Distances) {
 		return nil, false
 	}
 	return o.Distances, true
@@ -118,7 +125,7 @@ func (o *NumaConfig) GetDistancesOk() (*[]NumaDistance, bool) {
 
 // HasDistances returns a boolean if a field has been set.
 func (o *NumaConfig) HasDistances() bool {
-	if o != nil && o.Distances != nil {
+	if o != nil && !IsNil(o.Distances) {
 		return true
 	}
 
@@ -127,22 +134,22 @@ func (o *NumaConfig) HasDistances() bool {
 
 // SetDistances gets a reference to the given []NumaDistance and assigns it to the Distances field.
 func (o *NumaConfig) SetDistances(v []NumaDistance) {
-	o.Distances = &v
+	o.Distances = v
 }
 
 // GetMemoryZones returns the MemoryZones field value if set, zero value otherwise.
 func (o *NumaConfig) GetMemoryZones() []string {
-	if o == nil || o.MemoryZones == nil {
+	if o == nil || IsNil(o.MemoryZones) {
 		var ret []string
 		return ret
 	}
-	return *o.MemoryZones
+	return o.MemoryZones
 }
 
 // GetMemoryZonesOk returns a tuple with the MemoryZones field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *NumaConfig) GetMemoryZonesOk() (*[]string, bool) {
-	if o == nil || o.MemoryZones == nil {
+func (o *NumaConfig) GetMemoryZonesOk() ([]string, bool) {
+	if o == nil || IsNil(o.MemoryZones) {
 		return nil, false
 	}
 	return o.MemoryZones, true
@@ -150,7 +157,7 @@ func (o *NumaConfig) GetMemoryZonesOk() (*[]string, bool) {
 
 // HasMemoryZones returns a boolean if a field has been set.
 func (o *NumaConfig) HasMemoryZones() bool {
-	if o != nil && o.MemoryZones != nil {
+	if o != nil && !IsNil(o.MemoryZones) {
 		return true
 	}
 
@@ -159,22 +166,22 @@ func (o *NumaConfig) HasMemoryZones() bool {
 
 // SetMemoryZones gets a reference to the given []string and assigns it to the MemoryZones field.
 func (o *NumaConfig) SetMemoryZones(v []string) {
-	o.MemoryZones = &v
+	o.MemoryZones = v
 }
 
 // GetSgxEpcSections returns the SgxEpcSections field value if set, zero value otherwise.
 func (o *NumaConfig) GetSgxEpcSections() []string {
-	if o == nil || o.SgxEpcSections == nil {
+	if o == nil || IsNil(o.SgxEpcSections) {
 		var ret []string
 		return ret
 	}
-	return *o.SgxEpcSections
+	return o.SgxEpcSections
 }
 
 // GetSgxEpcSectionsOk returns a tuple with the SgxEpcSections field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *NumaConfig) GetSgxEpcSectionsOk() (*[]string, bool) {
-	if o == nil || o.SgxEpcSections == nil {
+func (o *NumaConfig) GetSgxEpcSectionsOk() ([]string, bool) {
+	if o == nil || IsNil(o.SgxEpcSections) {
 		return nil, false
 	}
 	return o.SgxEpcSections, true
@@ -182,7 +189,7 @@ func (o *NumaConfig) GetSgxEpcSectionsOk() (*[]string, bool) {
 
 // HasSgxEpcSections returns a boolean if a field has been set.
 func (o *NumaConfig) HasSgxEpcSections() bool {
-	if o != nil && o.SgxEpcSections != nil {
+	if o != nil && !IsNil(o.SgxEpcSections) {
 		return true
 	}
 
@@ -191,22 +198,22 @@ func (o *NumaConfig) HasSgxEpcSections() bool {
 
 // SetSgxEpcSections gets a reference to the given []string and assigns it to the SgxEpcSections field.
 func (o *NumaConfig) SetSgxEpcSections(v []string) {
-	o.SgxEpcSections = &v
+	o.SgxEpcSections = v
 }
 
 // GetPciSegments returns the PciSegments field value if set, zero value otherwise.
 func (o *NumaConfig) GetPciSegments() []int32 {
-	if o == nil || o.PciSegments == nil {
+	if o == nil || IsNil(o.PciSegments) {
 		var ret []int32
 		return ret
 	}
-	return *o.PciSegments
+	return o.PciSegments
 }
 
 // GetPciSegmentsOk returns a tuple with the PciSegments field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *NumaConfig) GetPciSegmentsOk() (*[]int32, bool) {
-	if o == nil || o.PciSegments == nil {
+func (o *NumaConfig) GetPciSegmentsOk() ([]int32, bool) {
+	if o == nil || IsNil(o.PciSegments) {
 		return nil, false
 	}
 	return o.PciSegments, true
@@ -214,7 +221,7 @@ func (o *NumaConfig) GetPciSegmentsOk() (*[]int32, bool) {
 
 // HasPciSegments returns a boolean if a field has been set.
 func (o *NumaConfig) HasPciSegments() bool {
-	if o != nil && o.PciSegments != nil {
+	if o != nil && !IsNil(o.PciSegments) {
 		return true
 	}
 
@@ -223,30 +230,73 @@ func (o *NumaConfig) HasPciSegments() bool {
 
 // SetPciSegments gets a reference to the given []int32 and assigns it to the PciSegments field.
 func (o *NumaConfig) SetPciSegments(v []int32) {
-	o.PciSegments = &v
+	o.PciSegments = v
 }
 
 func (o NumaConfig) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if true {
-		toSerialize["guest_numa_id"] = o.GuestNumaId
-	}
-	if o.Cpus != nil {
-		toSerialize["cpus"] = o.Cpus
-	}
-	if o.Distances != nil {
-		toSerialize["distances"] = o.Distances
-	}
-	if o.MemoryZones != nil {
-		toSerialize["memory_zones"] = o.MemoryZones
-	}
-	if o.SgxEpcSections != nil {
-		toSerialize["sgx_epc_sections"] = o.SgxEpcSections
-	}
-	if o.PciSegments != nil {
-		toSerialize["pci_segments"] = o.PciSegments
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o NumaConfig) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	toSerialize["guest_numa_id"] = o.GuestNumaId
+	if !IsNil(o.Cpus) {
+		toSerialize["cpus"] = o.Cpus
+	}
+	if !IsNil(o.Distances) {
+		toSerialize["distances"] = o.Distances
+	}
+	if !IsNil(o.MemoryZones) {
+		toSerialize["memory_zones"] = o.MemoryZones
+	}
+	if !IsNil(o.SgxEpcSections) {
+		toSerialize["sgx_epc_sections"] = o.SgxEpcSections
+	}
+	if !IsNil(o.PciSegments) {
+		toSerialize["pci_segments"] = o.PciSegments
+	}
+	return toSerialize, nil
+}
+
+func (o *NumaConfig) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"guest_numa_id",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varNumaConfig := _NumaConfig{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varNumaConfig)
+
+	if err != nil {
+		return err
+	}
+
+	*o = NumaConfig(varNumaConfig)
+
+	return err
 }
 
 type NullableNumaConfig struct {
@@ -284,3 +334,5 @@ func (v *NullableNumaConfig) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

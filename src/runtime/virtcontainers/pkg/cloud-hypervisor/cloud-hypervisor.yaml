@@ -347,6 +347,28 @@ paths:
         500:
           description: The new vDPA device could not be added to the VM instance.
 
+  /vm.add-user-device:
+    put:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VmAddUserDevice'
+        description: The path of the new device
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PciDeviceInfo'
+          description: The new device was successfully added to the VM instance.
+        "204":
+          description: The new device was successfully (cold) added to the VM instance.
+        "404":
+          description: The new device could not be added to the VM instance.
+      summary: Add a new userspace device to the VM
+
   /vm.snapshot:
     put:
       summary: Returns a VM snapshot.
@@ -519,10 +541,6 @@ components:
           type: string
         initramfs:
           type: string
-        igvm:
-          type: string
-        host_data:
-          type: string
       description: Payloads to boot in guest
 
     VmConfig:
@@ -536,6 +554,10 @@ components:
           $ref: "#/components/schemas/MemoryConfig"
         payload:
           $ref: "#/components/schemas/PayloadConfig"
+        rate_limit_groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/RateLimitGroupConfig"
         disks:
           type: array
           items:
@@ -560,6 +582,8 @@ components:
           $ref: "#/components/schemas/ConsoleConfig"
         console:
           $ref: "#/components/schemas/ConsoleConfig"
+        debug_console:
+          $ref: "#/components/schemas/DebugConsoleConfig"
         devices:
           type: array
           items:
@@ -669,9 +693,6 @@ components:
           items:
             type: string
         tdx:
-          type: boolean
-          default: false
-        snp:
           type: boolean
           default: false
 
@@ -797,6 +818,30 @@ components:
         Defines an IO rate limiter with independent bytes/s and ops/s limits.
         Limits are defined by configuring each of the _bandwidth_ and _ops_ token buckets.
 
+    RateLimitGroupConfig:
+      required:
+        - id
+        - rate_limiter_config
+      type: object
+      properties:
+        id:
+          type: string
+        rate_limiter_config:
+          $ref: "#/components/schemas/RateLimiterConfig"
+    
+    VirtQueueAffinity:
+      required:
+        - queue_index
+        - host_cpus
+      type: object
+      properties:
+        queue_index:
+          type: integer
+        host_cpus:
+          type: array
+          items:
+            type: integer
+
     DiskConfig:
       required:
         - path
@@ -833,6 +878,12 @@ components:
           type: string
         serial:
           type: string
+        rate_limit_group:
+          type: string
+        affinity:
+          type: array
+          items:
+            $ref: "#/components/schemas/VirtQueueAffinity"
 
     NetConfig:
       type: object
@@ -962,10 +1013,23 @@ components:
           type: string
         mode:
           type: string
-          enum: [Off, Pty, Tty, File, Socket, Null]
+          enum: ["Off", "Pty", "Tty", "File", "Socket", "Null"]
         iommu:
           type: boolean
           default: false
+
+    DebugConsoleConfig:
+      required:
+        - mode
+      type: object
+      properties:
+        file:
+          type: string
+        mode:
+          type: string
+          enum: ["Off", "Pty", "Tty", "File", "Null"]
+        iobase:
+          type: integer
 
     DeviceConfig:
       required:
@@ -1163,3 +1227,11 @@ components:
           type: string
         local:
           type: boolean
+
+    VmAddUserDevice:
+      required:
+        - socket
+      type: object
+      properties:
+        socket:
+          type: string

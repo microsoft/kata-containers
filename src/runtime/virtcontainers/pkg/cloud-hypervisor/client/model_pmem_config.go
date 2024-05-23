@@ -12,17 +12,24 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the PmemConfig type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &PmemConfig{}
 
 // PmemConfig struct for PmemConfig
 type PmemConfig struct {
-	File          string  `json:"file"`
-	Size          *int64  `json:"size,omitempty"`
-	Iommu         *bool   `json:"iommu,omitempty"`
-	DiscardWrites *bool   `json:"discard_writes,omitempty"`
-	PciSegment    *int32  `json:"pci_segment,omitempty"`
-	Id            *string `json:"id,omitempty"`
+	File string `json:"file"`
+	Size *int64 `json:"size,omitempty"`
+	Iommu *bool `json:"iommu,omitempty"`
+	DiscardWrites *bool `json:"discard_writes,omitempty"`
+	PciSegment *int32 `json:"pci_segment,omitempty"`
+	Id *string `json:"id,omitempty"`
 }
+
+type _PmemConfig PmemConfig
 
 // NewPmemConfig instantiates a new PmemConfig object
 // This constructor will assign default values to properties that have it defined,
@@ -76,7 +83,7 @@ func (o *PmemConfig) SetFile(v string) {
 
 // GetSize returns the Size field value if set, zero value otherwise.
 func (o *PmemConfig) GetSize() int64 {
-	if o == nil || o.Size == nil {
+	if o == nil || IsNil(o.Size) {
 		var ret int64
 		return ret
 	}
@@ -86,7 +93,7 @@ func (o *PmemConfig) GetSize() int64 {
 // GetSizeOk returns a tuple with the Size field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PmemConfig) GetSizeOk() (*int64, bool) {
-	if o == nil || o.Size == nil {
+	if o == nil || IsNil(o.Size) {
 		return nil, false
 	}
 	return o.Size, true
@@ -94,7 +101,7 @@ func (o *PmemConfig) GetSizeOk() (*int64, bool) {
 
 // HasSize returns a boolean if a field has been set.
 func (o *PmemConfig) HasSize() bool {
-	if o != nil && o.Size != nil {
+	if o != nil && !IsNil(o.Size) {
 		return true
 	}
 
@@ -108,7 +115,7 @@ func (o *PmemConfig) SetSize(v int64) {
 
 // GetIommu returns the Iommu field value if set, zero value otherwise.
 func (o *PmemConfig) GetIommu() bool {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		var ret bool
 		return ret
 	}
@@ -118,7 +125,7 @@ func (o *PmemConfig) GetIommu() bool {
 // GetIommuOk returns a tuple with the Iommu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PmemConfig) GetIommuOk() (*bool, bool) {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		return nil, false
 	}
 	return o.Iommu, true
@@ -126,7 +133,7 @@ func (o *PmemConfig) GetIommuOk() (*bool, bool) {
 
 // HasIommu returns a boolean if a field has been set.
 func (o *PmemConfig) HasIommu() bool {
-	if o != nil && o.Iommu != nil {
+	if o != nil && !IsNil(o.Iommu) {
 		return true
 	}
 
@@ -140,7 +147,7 @@ func (o *PmemConfig) SetIommu(v bool) {
 
 // GetDiscardWrites returns the DiscardWrites field value if set, zero value otherwise.
 func (o *PmemConfig) GetDiscardWrites() bool {
-	if o == nil || o.DiscardWrites == nil {
+	if o == nil || IsNil(o.DiscardWrites) {
 		var ret bool
 		return ret
 	}
@@ -150,7 +157,7 @@ func (o *PmemConfig) GetDiscardWrites() bool {
 // GetDiscardWritesOk returns a tuple with the DiscardWrites field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PmemConfig) GetDiscardWritesOk() (*bool, bool) {
-	if o == nil || o.DiscardWrites == nil {
+	if o == nil || IsNil(o.DiscardWrites) {
 		return nil, false
 	}
 	return o.DiscardWrites, true
@@ -158,7 +165,7 @@ func (o *PmemConfig) GetDiscardWritesOk() (*bool, bool) {
 
 // HasDiscardWrites returns a boolean if a field has been set.
 func (o *PmemConfig) HasDiscardWrites() bool {
-	if o != nil && o.DiscardWrites != nil {
+	if o != nil && !IsNil(o.DiscardWrites) {
 		return true
 	}
 
@@ -172,7 +179,7 @@ func (o *PmemConfig) SetDiscardWrites(v bool) {
 
 // GetPciSegment returns the PciSegment field value if set, zero value otherwise.
 func (o *PmemConfig) GetPciSegment() int32 {
-	if o == nil || o.PciSegment == nil {
+	if o == nil || IsNil(o.PciSegment) {
 		var ret int32
 		return ret
 	}
@@ -182,7 +189,7 @@ func (o *PmemConfig) GetPciSegment() int32 {
 // GetPciSegmentOk returns a tuple with the PciSegment field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PmemConfig) GetPciSegmentOk() (*int32, bool) {
-	if o == nil || o.PciSegment == nil {
+	if o == nil || IsNil(o.PciSegment) {
 		return nil, false
 	}
 	return o.PciSegment, true
@@ -190,7 +197,7 @@ func (o *PmemConfig) GetPciSegmentOk() (*int32, bool) {
 
 // HasPciSegment returns a boolean if a field has been set.
 func (o *PmemConfig) HasPciSegment() bool {
-	if o != nil && o.PciSegment != nil {
+	if o != nil && !IsNil(o.PciSegment) {
 		return true
 	}
 
@@ -204,7 +211,7 @@ func (o *PmemConfig) SetPciSegment(v int32) {
 
 // GetId returns the Id field value if set, zero value otherwise.
 func (o *PmemConfig) GetId() string {
-	if o == nil || o.Id == nil {
+	if o == nil || IsNil(o.Id) {
 		var ret string
 		return ret
 	}
@@ -214,7 +221,7 @@ func (o *PmemConfig) GetId() string {
 // GetIdOk returns a tuple with the Id field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PmemConfig) GetIdOk() (*string, bool) {
-	if o == nil || o.Id == nil {
+	if o == nil || IsNil(o.Id) {
 		return nil, false
 	}
 	return o.Id, true
@@ -222,7 +229,7 @@ func (o *PmemConfig) GetIdOk() (*string, bool) {
 
 // HasId returns a boolean if a field has been set.
 func (o *PmemConfig) HasId() bool {
-	if o != nil && o.Id != nil {
+	if o != nil && !IsNil(o.Id) {
 		return true
 	}
 
@@ -235,26 +242,69 @@ func (o *PmemConfig) SetId(v string) {
 }
 
 func (o PmemConfig) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if true {
-		toSerialize["file"] = o.File
-	}
-	if o.Size != nil {
-		toSerialize["size"] = o.Size
-	}
-	if o.Iommu != nil {
-		toSerialize["iommu"] = o.Iommu
-	}
-	if o.DiscardWrites != nil {
-		toSerialize["discard_writes"] = o.DiscardWrites
-	}
-	if o.PciSegment != nil {
-		toSerialize["pci_segment"] = o.PciSegment
-	}
-	if o.Id != nil {
-		toSerialize["id"] = o.Id
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o PmemConfig) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	toSerialize["file"] = o.File
+	if !IsNil(o.Size) {
+		toSerialize["size"] = o.Size
+	}
+	if !IsNil(o.Iommu) {
+		toSerialize["iommu"] = o.Iommu
+	}
+	if !IsNil(o.DiscardWrites) {
+		toSerialize["discard_writes"] = o.DiscardWrites
+	}
+	if !IsNil(o.PciSegment) {
+		toSerialize["pci_segment"] = o.PciSegment
+	}
+	if !IsNil(o.Id) {
+		toSerialize["id"] = o.Id
+	}
+	return toSerialize, nil
+}
+
+func (o *PmemConfig) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"file",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varPmemConfig := _PmemConfig{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varPmemConfig)
+
+	if err != nil {
+		return err
+	}
+
+	*o = PmemConfig(varPmemConfig)
+
+	return err
 }
 
 type NullablePmemConfig struct {
@@ -292,3 +342,5 @@ func (v *NullablePmemConfig) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

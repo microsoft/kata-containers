@@ -14,6 +14,9 @@ import (
 	"encoding/json"
 )
 
+// checks if the VmCoredumpData type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &VmCoredumpData{}
+
 // VmCoredumpData struct for VmCoredumpData
 type VmCoredumpData struct {
 	DestinationUrl *string `json:"destination_url,omitempty"`
@@ -38,7 +41,7 @@ func NewVmCoredumpDataWithDefaults() *VmCoredumpData {
 
 // GetDestinationUrl returns the DestinationUrl field value if set, zero value otherwise.
 func (o *VmCoredumpData) GetDestinationUrl() string {
-	if o == nil || o.DestinationUrl == nil {
+	if o == nil || IsNil(o.DestinationUrl) {
 		var ret string
 		return ret
 	}
@@ -48,7 +51,7 @@ func (o *VmCoredumpData) GetDestinationUrl() string {
 // GetDestinationUrlOk returns a tuple with the DestinationUrl field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmCoredumpData) GetDestinationUrlOk() (*string, bool) {
-	if o == nil || o.DestinationUrl == nil {
+	if o == nil || IsNil(o.DestinationUrl) {
 		return nil, false
 	}
 	return o.DestinationUrl, true
@@ -56,7 +59,7 @@ func (o *VmCoredumpData) GetDestinationUrlOk() (*string, bool) {
 
 // HasDestinationUrl returns a boolean if a field has been set.
 func (o *VmCoredumpData) HasDestinationUrl() bool {
-	if o != nil && o.DestinationUrl != nil {
+	if o != nil && !IsNil(o.DestinationUrl) {
 		return true
 	}
 
@@ -69,11 +72,19 @@ func (o *VmCoredumpData) SetDestinationUrl(v string) {
 }
 
 func (o VmCoredumpData) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if o.DestinationUrl != nil {
-		toSerialize["destination_url"] = o.DestinationUrl
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o VmCoredumpData) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	if !IsNil(o.DestinationUrl) {
+		toSerialize["destination_url"] = o.DestinationUrl
+	}
+	return toSerialize, nil
 }
 
 type NullableVmCoredumpData struct {
@@ -111,3 +122,5 @@ func (v *NullableVmCoredumpData) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

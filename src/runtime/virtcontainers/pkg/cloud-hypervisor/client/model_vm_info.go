@@ -12,15 +12,22 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the VmInfo type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &VmInfo{}
 
 // VmInfo Virtual Machine information
 type VmInfo struct {
-	Config           VmConfig               `json:"config"`
-	State            string                 `json:"state"`
-	MemoryActualSize *int64                 `json:"memory_actual_size,omitempty"`
-	DeviceTree       *map[string]DeviceNode `json:"device_tree,omitempty"`
+	Config VmConfig `json:"config"`
+	State string `json:"state"`
+	MemoryActualSize *int64 `json:"memory_actual_size,omitempty"`
+	DeviceTree *map[string]DeviceNode `json:"device_tree,omitempty"`
 }
+
+type _VmInfo VmInfo
 
 // NewVmInfo instantiates a new VmInfo object
 // This constructor will assign default values to properties that have it defined,
@@ -91,7 +98,7 @@ func (o *VmInfo) SetState(v string) {
 
 // GetMemoryActualSize returns the MemoryActualSize field value if set, zero value otherwise.
 func (o *VmInfo) GetMemoryActualSize() int64 {
-	if o == nil || o.MemoryActualSize == nil {
+	if o == nil || IsNil(o.MemoryActualSize) {
 		var ret int64
 		return ret
 	}
@@ -101,7 +108,7 @@ func (o *VmInfo) GetMemoryActualSize() int64 {
 // GetMemoryActualSizeOk returns a tuple with the MemoryActualSize field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmInfo) GetMemoryActualSizeOk() (*int64, bool) {
-	if o == nil || o.MemoryActualSize == nil {
+	if o == nil || IsNil(o.MemoryActualSize) {
 		return nil, false
 	}
 	return o.MemoryActualSize, true
@@ -109,7 +116,7 @@ func (o *VmInfo) GetMemoryActualSizeOk() (*int64, bool) {
 
 // HasMemoryActualSize returns a boolean if a field has been set.
 func (o *VmInfo) HasMemoryActualSize() bool {
-	if o != nil && o.MemoryActualSize != nil {
+	if o != nil && !IsNil(o.MemoryActualSize) {
 		return true
 	}
 
@@ -123,7 +130,7 @@ func (o *VmInfo) SetMemoryActualSize(v int64) {
 
 // GetDeviceTree returns the DeviceTree field value if set, zero value otherwise.
 func (o *VmInfo) GetDeviceTree() map[string]DeviceNode {
-	if o == nil || o.DeviceTree == nil {
+	if o == nil || IsNil(o.DeviceTree) {
 		var ret map[string]DeviceNode
 		return ret
 	}
@@ -133,7 +140,7 @@ func (o *VmInfo) GetDeviceTree() map[string]DeviceNode {
 // GetDeviceTreeOk returns a tuple with the DeviceTree field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *VmInfo) GetDeviceTreeOk() (*map[string]DeviceNode, bool) {
-	if o == nil || o.DeviceTree == nil {
+	if o == nil || IsNil(o.DeviceTree) {
 		return nil, false
 	}
 	return o.DeviceTree, true
@@ -141,7 +148,7 @@ func (o *VmInfo) GetDeviceTreeOk() (*map[string]DeviceNode, bool) {
 
 // HasDeviceTree returns a boolean if a field has been set.
 func (o *VmInfo) HasDeviceTree() bool {
-	if o != nil && o.DeviceTree != nil {
+	if o != nil && !IsNil(o.DeviceTree) {
 		return true
 	}
 
@@ -154,20 +161,62 @@ func (o *VmInfo) SetDeviceTree(v map[string]DeviceNode) {
 }
 
 func (o VmInfo) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if true {
-		toSerialize["config"] = o.Config
-	}
-	if true {
-		toSerialize["state"] = o.State
-	}
-	if o.MemoryActualSize != nil {
-		toSerialize["memory_actual_size"] = o.MemoryActualSize
-	}
-	if o.DeviceTree != nil {
-		toSerialize["device_tree"] = o.DeviceTree
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o VmInfo) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	toSerialize["config"] = o.Config
+	toSerialize["state"] = o.State
+	if !IsNil(o.MemoryActualSize) {
+		toSerialize["memory_actual_size"] = o.MemoryActualSize
+	}
+	if !IsNil(o.DeviceTree) {
+		toSerialize["device_tree"] = o.DeviceTree
+	}
+	return toSerialize, nil
+}
+
+func (o *VmInfo) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"config",
+		"state",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varVmInfo := _VmInfo{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varVmInfo)
+
+	if err != nil {
+		return err
+	}
+
+	*o = VmInfo(varVmInfo)
+
+	return err
 }
 
 type NullableVmInfo struct {
@@ -205,3 +254,5 @@ func (v *NullableVmInfo) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

@@ -12,7 +12,12 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the TokenBucket type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &TokenBucket{}
 
 // TokenBucket Defines a token bucket with a maximum capacity (_size_), an initial burst size (_one_time_burst_) and an interval for refilling purposes (_refill_time_). The refill-rate is derived from _size_ and _refill_time_, and it is the constant rate at which the tokens replenish. The refill process only starts happening after the initial burst budget is consumed. Consumption from the token bucket is unbounded in speed which allows for bursts bound in size by the amount of tokens available. Once the token bucket is empty, consumption speed is bound by the refill-rate.
 type TokenBucket struct {
@@ -23,6 +28,8 @@ type TokenBucket struct {
 	// The amount of milliseconds it takes for the bucket to refill.
 	RefillTime int64 `json:"refill_time"`
 }
+
+type _TokenBucket TokenBucket
 
 // NewTokenBucket instantiates a new TokenBucket object
 // This constructor will assign default values to properties that have it defined,
@@ -69,7 +76,7 @@ func (o *TokenBucket) SetSize(v int64) {
 
 // GetOneTimeBurst returns the OneTimeBurst field value if set, zero value otherwise.
 func (o *TokenBucket) GetOneTimeBurst() int64 {
-	if o == nil || o.OneTimeBurst == nil {
+	if o == nil || IsNil(o.OneTimeBurst) {
 		var ret int64
 		return ret
 	}
@@ -79,7 +86,7 @@ func (o *TokenBucket) GetOneTimeBurst() int64 {
 // GetOneTimeBurstOk returns a tuple with the OneTimeBurst field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *TokenBucket) GetOneTimeBurstOk() (*int64, bool) {
-	if o == nil || o.OneTimeBurst == nil {
+	if o == nil || IsNil(o.OneTimeBurst) {
 		return nil, false
 	}
 	return o.OneTimeBurst, true
@@ -87,7 +94,7 @@ func (o *TokenBucket) GetOneTimeBurstOk() (*int64, bool) {
 
 // HasOneTimeBurst returns a boolean if a field has been set.
 func (o *TokenBucket) HasOneTimeBurst() bool {
-	if o != nil && o.OneTimeBurst != nil {
+	if o != nil && !IsNil(o.OneTimeBurst) {
 		return true
 	}
 
@@ -124,17 +131,59 @@ func (o *TokenBucket) SetRefillTime(v int64) {
 }
 
 func (o TokenBucket) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if true {
-		toSerialize["size"] = o.Size
-	}
-	if o.OneTimeBurst != nil {
-		toSerialize["one_time_burst"] = o.OneTimeBurst
-	}
-	if true {
-		toSerialize["refill_time"] = o.RefillTime
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o TokenBucket) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	toSerialize["size"] = o.Size
+	if !IsNil(o.OneTimeBurst) {
+		toSerialize["one_time_burst"] = o.OneTimeBurst
+	}
+	toSerialize["refill_time"] = o.RefillTime
+	return toSerialize, nil
+}
+
+func (o *TokenBucket) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"size",
+		"refill_time",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varTokenBucket := _TokenBucket{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varTokenBucket)
+
+	if err != nil {
+		return err
+	}
+
+	*o = TokenBucket(varTokenBucket)
+
+	return err
 }
 
 type NullableTokenBucket struct {
@@ -172,3 +221,5 @@ func (v *NullableTokenBucket) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

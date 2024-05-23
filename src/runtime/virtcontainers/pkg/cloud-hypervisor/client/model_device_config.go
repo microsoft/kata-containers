@@ -12,15 +12,22 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the DeviceConfig type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &DeviceConfig{}
 
 // DeviceConfig struct for DeviceConfig
 type DeviceConfig struct {
-	Path       string  `json:"path"`
-	Iommu      *bool   `json:"iommu,omitempty"`
-	PciSegment *int32  `json:"pci_segment,omitempty"`
-	Id         *string `json:"id,omitempty"`
+	Path string `json:"path"`
+	Iommu *bool `json:"iommu,omitempty"`
+	PciSegment *int32 `json:"pci_segment,omitempty"`
+	Id *string `json:"id,omitempty"`
 }
+
+type _DeviceConfig DeviceConfig
 
 // NewDeviceConfig instantiates a new DeviceConfig object
 // This constructor will assign default values to properties that have it defined,
@@ -70,7 +77,7 @@ func (o *DeviceConfig) SetPath(v string) {
 
 // GetIommu returns the Iommu field value if set, zero value otherwise.
 func (o *DeviceConfig) GetIommu() bool {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		var ret bool
 		return ret
 	}
@@ -80,7 +87,7 @@ func (o *DeviceConfig) GetIommu() bool {
 // GetIommuOk returns a tuple with the Iommu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *DeviceConfig) GetIommuOk() (*bool, bool) {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		return nil, false
 	}
 	return o.Iommu, true
@@ -88,7 +95,7 @@ func (o *DeviceConfig) GetIommuOk() (*bool, bool) {
 
 // HasIommu returns a boolean if a field has been set.
 func (o *DeviceConfig) HasIommu() bool {
-	if o != nil && o.Iommu != nil {
+	if o != nil && !IsNil(o.Iommu) {
 		return true
 	}
 
@@ -102,7 +109,7 @@ func (o *DeviceConfig) SetIommu(v bool) {
 
 // GetPciSegment returns the PciSegment field value if set, zero value otherwise.
 func (o *DeviceConfig) GetPciSegment() int32 {
-	if o == nil || o.PciSegment == nil {
+	if o == nil || IsNil(o.PciSegment) {
 		var ret int32
 		return ret
 	}
@@ -112,7 +119,7 @@ func (o *DeviceConfig) GetPciSegment() int32 {
 // GetPciSegmentOk returns a tuple with the PciSegment field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *DeviceConfig) GetPciSegmentOk() (*int32, bool) {
-	if o == nil || o.PciSegment == nil {
+	if o == nil || IsNil(o.PciSegment) {
 		return nil, false
 	}
 	return o.PciSegment, true
@@ -120,7 +127,7 @@ func (o *DeviceConfig) GetPciSegmentOk() (*int32, bool) {
 
 // HasPciSegment returns a boolean if a field has been set.
 func (o *DeviceConfig) HasPciSegment() bool {
-	if o != nil && o.PciSegment != nil {
+	if o != nil && !IsNil(o.PciSegment) {
 		return true
 	}
 
@@ -134,7 +141,7 @@ func (o *DeviceConfig) SetPciSegment(v int32) {
 
 // GetId returns the Id field value if set, zero value otherwise.
 func (o *DeviceConfig) GetId() string {
-	if o == nil || o.Id == nil {
+	if o == nil || IsNil(o.Id) {
 		var ret string
 		return ret
 	}
@@ -144,7 +151,7 @@ func (o *DeviceConfig) GetId() string {
 // GetIdOk returns a tuple with the Id field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *DeviceConfig) GetIdOk() (*string, bool) {
-	if o == nil || o.Id == nil {
+	if o == nil || IsNil(o.Id) {
 		return nil, false
 	}
 	return o.Id, true
@@ -152,7 +159,7 @@ func (o *DeviceConfig) GetIdOk() (*string, bool) {
 
 // HasId returns a boolean if a field has been set.
 func (o *DeviceConfig) HasId() bool {
-	if o != nil && o.Id != nil {
+	if o != nil && !IsNil(o.Id) {
 		return true
 	}
 
@@ -165,20 +172,63 @@ func (o *DeviceConfig) SetId(v string) {
 }
 
 func (o DeviceConfig) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if true {
-		toSerialize["path"] = o.Path
-	}
-	if o.Iommu != nil {
-		toSerialize["iommu"] = o.Iommu
-	}
-	if o.PciSegment != nil {
-		toSerialize["pci_segment"] = o.PciSegment
-	}
-	if o.Id != nil {
-		toSerialize["id"] = o.Id
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o DeviceConfig) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	toSerialize["path"] = o.Path
+	if !IsNil(o.Iommu) {
+		toSerialize["iommu"] = o.Iommu
+	}
+	if !IsNil(o.PciSegment) {
+		toSerialize["pci_segment"] = o.PciSegment
+	}
+	if !IsNil(o.Id) {
+		toSerialize["id"] = o.Id
+	}
+	return toSerialize, nil
+}
+
+func (o *DeviceConfig) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"path",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varDeviceConfig := _DeviceConfig{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varDeviceConfig)
+
+	if err != nil {
+		return err
+	}
+
+	*o = DeviceConfig(varDeviceConfig)
+
+	return err
 }
 
 type NullableDeviceConfig struct {
@@ -216,3 +266,5 @@ func (v *NullableDeviceConfig) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

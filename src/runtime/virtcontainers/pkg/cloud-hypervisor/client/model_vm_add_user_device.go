@@ -16,36 +16,36 @@ import (
 	"fmt"
 )
 
-// checks if the TpmConfig type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &TpmConfig{}
+// checks if the VmAddUserDevice type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &VmAddUserDevice{}
 
-// TpmConfig struct for TpmConfig
-type TpmConfig struct {
+// VmAddUserDevice struct for VmAddUserDevice
+type VmAddUserDevice struct {
 	Socket string `json:"socket"`
 }
 
-type _TpmConfig TpmConfig
+type _VmAddUserDevice VmAddUserDevice
 
-// NewTpmConfig instantiates a new TpmConfig object
+// NewVmAddUserDevice instantiates a new VmAddUserDevice object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewTpmConfig(socket string) *TpmConfig {
-	this := TpmConfig{}
+func NewVmAddUserDevice(socket string) *VmAddUserDevice {
+	this := VmAddUserDevice{}
 	this.Socket = socket
 	return &this
 }
 
-// NewTpmConfigWithDefaults instantiates a new TpmConfig object
+// NewVmAddUserDeviceWithDefaults instantiates a new VmAddUserDevice object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewTpmConfigWithDefaults() *TpmConfig {
-	this := TpmConfig{}
+func NewVmAddUserDeviceWithDefaults() *VmAddUserDevice {
+	this := VmAddUserDevice{}
 	return &this
 }
 
 // GetSocket returns the Socket field value
-func (o *TpmConfig) GetSocket() string {
+func (o *VmAddUserDevice) GetSocket() string {
 	if o == nil {
 		var ret string
 		return ret
@@ -56,7 +56,7 @@ func (o *TpmConfig) GetSocket() string {
 
 // GetSocketOk returns a tuple with the Socket field value
 // and a boolean to check if the value has been set.
-func (o *TpmConfig) GetSocketOk() (*string, bool) {
+func (o *VmAddUserDevice) GetSocketOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -64,11 +64,11 @@ func (o *TpmConfig) GetSocketOk() (*string, bool) {
 }
 
 // SetSocket sets field value
-func (o *TpmConfig) SetSocket(v string) {
+func (o *VmAddUserDevice) SetSocket(v string) {
 	o.Socket = v
 }
 
-func (o TpmConfig) MarshalJSON() ([]byte, error) {
+func (o VmAddUserDevice) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -76,13 +76,13 @@ func (o TpmConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o TpmConfig) ToMap() (map[string]interface{}, error) {
+func (o VmAddUserDevice) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["socket"] = o.Socket
 	return toSerialize, nil
 }
 
-func (o *TpmConfig) UnmarshalJSON(data []byte) (err error) {
+func (o *VmAddUserDevice) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -104,53 +104,53 @@ func (o *TpmConfig) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varTpmConfig := _TpmConfig{}
+	varVmAddUserDevice := _VmAddUserDevice{}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varTpmConfig)
+	err = decoder.Decode(&varVmAddUserDevice)
 
 	if err != nil {
 		return err
 	}
 
-	*o = TpmConfig(varTpmConfig)
+	*o = VmAddUserDevice(varVmAddUserDevice)
 
 	return err
 }
 
-type NullableTpmConfig struct {
-	value *TpmConfig
+type NullableVmAddUserDevice struct {
+	value *VmAddUserDevice
 	isSet bool
 }
 
-func (v NullableTpmConfig) Get() *TpmConfig {
+func (v NullableVmAddUserDevice) Get() *VmAddUserDevice {
 	return v.value
 }
 
-func (v *NullableTpmConfig) Set(val *TpmConfig) {
+func (v *NullableVmAddUserDevice) Set(val *VmAddUserDevice) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableTpmConfig) IsSet() bool {
+func (v NullableVmAddUserDevice) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableTpmConfig) Unset() {
+func (v *NullableVmAddUserDevice) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableTpmConfig(val *TpmConfig) *NullableTpmConfig {
-	return &NullableTpmConfig{value: val, isSet: true}
+func NewNullableVmAddUserDevice(val *VmAddUserDevice) *NullableVmAddUserDevice {
+	return &NullableVmAddUserDevice{value: val, isSet: true}
 }
 
-func (v NullableTpmConfig) MarshalJSON() ([]byte, error) {
+func (v NullableVmAddUserDevice) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableTpmConfig) UnmarshalJSON(src []byte) error {
+func (v *NullableVmAddUserDevice) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

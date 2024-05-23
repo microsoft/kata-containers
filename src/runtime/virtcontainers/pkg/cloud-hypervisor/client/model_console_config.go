@@ -12,15 +12,22 @@ package openapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
+
+// checks if the ConsoleConfig type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &ConsoleConfig{}
 
 // ConsoleConfig struct for ConsoleConfig
 type ConsoleConfig struct {
-	File   *string `json:"file,omitempty"`
+	File *string `json:"file,omitempty"`
 	Socket *string `json:"socket,omitempty"`
-	Mode   string  `json:"mode"`
-	Iommu  *bool   `json:"iommu,omitempty"`
+	Mode string `json:"mode"`
+	Iommu *bool `json:"iommu,omitempty"`
 }
+
+type _ConsoleConfig ConsoleConfig
 
 // NewConsoleConfig instantiates a new ConsoleConfig object
 // This constructor will assign default values to properties that have it defined,
@@ -46,7 +53,7 @@ func NewConsoleConfigWithDefaults() *ConsoleConfig {
 
 // GetFile returns the File field value if set, zero value otherwise.
 func (o *ConsoleConfig) GetFile() string {
-	if o == nil || o.File == nil {
+	if o == nil || IsNil(o.File) {
 		var ret string
 		return ret
 	}
@@ -56,7 +63,7 @@ func (o *ConsoleConfig) GetFile() string {
 // GetFileOk returns a tuple with the File field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *ConsoleConfig) GetFileOk() (*string, bool) {
-	if o == nil || o.File == nil {
+	if o == nil || IsNil(o.File) {
 		return nil, false
 	}
 	return o.File, true
@@ -64,7 +71,7 @@ func (o *ConsoleConfig) GetFileOk() (*string, bool) {
 
 // HasFile returns a boolean if a field has been set.
 func (o *ConsoleConfig) HasFile() bool {
-	if o != nil && o.File != nil {
+	if o != nil && !IsNil(o.File) {
 		return true
 	}
 
@@ -78,7 +85,7 @@ func (o *ConsoleConfig) SetFile(v string) {
 
 // GetSocket returns the Socket field value if set, zero value otherwise.
 func (o *ConsoleConfig) GetSocket() string {
-	if o == nil || o.Socket == nil {
+	if o == nil || IsNil(o.Socket) {
 		var ret string
 		return ret
 	}
@@ -88,7 +95,7 @@ func (o *ConsoleConfig) GetSocket() string {
 // GetSocketOk returns a tuple with the Socket field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *ConsoleConfig) GetSocketOk() (*string, bool) {
-	if o == nil || o.Socket == nil {
+	if o == nil || IsNil(o.Socket) {
 		return nil, false
 	}
 	return o.Socket, true
@@ -96,7 +103,7 @@ func (o *ConsoleConfig) GetSocketOk() (*string, bool) {
 
 // HasSocket returns a boolean if a field has been set.
 func (o *ConsoleConfig) HasSocket() bool {
-	if o != nil && o.Socket != nil {
+	if o != nil && !IsNil(o.Socket) {
 		return true
 	}
 
@@ -134,7 +141,7 @@ func (o *ConsoleConfig) SetMode(v string) {
 
 // GetIommu returns the Iommu field value if set, zero value otherwise.
 func (o *ConsoleConfig) GetIommu() bool {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		var ret bool
 		return ret
 	}
@@ -144,7 +151,7 @@ func (o *ConsoleConfig) GetIommu() bool {
 // GetIommuOk returns a tuple with the Iommu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *ConsoleConfig) GetIommuOk() (*bool, bool) {
-	if o == nil || o.Iommu == nil {
+	if o == nil || IsNil(o.Iommu) {
 		return nil, false
 	}
 	return o.Iommu, true
@@ -152,7 +159,7 @@ func (o *ConsoleConfig) GetIommuOk() (*bool, bool) {
 
 // HasIommu returns a boolean if a field has been set.
 func (o *ConsoleConfig) HasIommu() bool {
-	if o != nil && o.Iommu != nil {
+	if o != nil && !IsNil(o.Iommu) {
 		return true
 	}
 
@@ -165,20 +172,63 @@ func (o *ConsoleConfig) SetIommu(v bool) {
 }
 
 func (o ConsoleConfig) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if o.File != nil {
-		toSerialize["file"] = o.File
-	}
-	if o.Socket != nil {
-		toSerialize["socket"] = o.Socket
-	}
-	if true {
-		toSerialize["mode"] = o.Mode
-	}
-	if o.Iommu != nil {
-		toSerialize["iommu"] = o.Iommu
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o ConsoleConfig) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	if !IsNil(o.File) {
+		toSerialize["file"] = o.File
+	}
+	if !IsNil(o.Socket) {
+		toSerialize["socket"] = o.Socket
+	}
+	toSerialize["mode"] = o.Mode
+	if !IsNil(o.Iommu) {
+		toSerialize["iommu"] = o.Iommu
+	}
+	return toSerialize, nil
+}
+
+func (o *ConsoleConfig) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"mode",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varConsoleConfig := _ConsoleConfig{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varConsoleConfig)
+
+	if err != nil {
+		return err
+	}
+
+	*o = ConsoleConfig(varConsoleConfig)
+
+	return err
 }
 
 type NullableConsoleConfig struct {
@@ -216,3 +266,5 @@ func (v *NullableConsoleConfig) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

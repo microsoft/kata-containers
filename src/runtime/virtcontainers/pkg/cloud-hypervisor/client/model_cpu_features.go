@@ -14,6 +14,9 @@ import (
 	"encoding/json"
 )
 
+// checks if the CpuFeatures type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &CpuFeatures{}
+
 // CpuFeatures struct for CpuFeatures
 type CpuFeatures struct {
 	Amx *bool `json:"amx,omitempty"`
@@ -38,7 +41,7 @@ func NewCpuFeaturesWithDefaults() *CpuFeatures {
 
 // GetAmx returns the Amx field value if set, zero value otherwise.
 func (o *CpuFeatures) GetAmx() bool {
-	if o == nil || o.Amx == nil {
+	if o == nil || IsNil(o.Amx) {
 		var ret bool
 		return ret
 	}
@@ -48,7 +51,7 @@ func (o *CpuFeatures) GetAmx() bool {
 // GetAmxOk returns a tuple with the Amx field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *CpuFeatures) GetAmxOk() (*bool, bool) {
-	if o == nil || o.Amx == nil {
+	if o == nil || IsNil(o.Amx) {
 		return nil, false
 	}
 	return o.Amx, true
@@ -56,7 +59,7 @@ func (o *CpuFeatures) GetAmxOk() (*bool, bool) {
 
 // HasAmx returns a boolean if a field has been set.
 func (o *CpuFeatures) HasAmx() bool {
-	if o != nil && o.Amx != nil {
+	if o != nil && !IsNil(o.Amx) {
 		return true
 	}
 
@@ -69,11 +72,19 @@ func (o *CpuFeatures) SetAmx(v bool) {
 }
 
 func (o CpuFeatures) MarshalJSON() ([]byte, error) {
-	toSerialize := map[string]interface{}{}
-	if o.Amx != nil {
-		toSerialize["amx"] = o.Amx
+	toSerialize,err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
 	}
 	return json.Marshal(toSerialize)
+}
+
+func (o CpuFeatures) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	if !IsNil(o.Amx) {
+		toSerialize["amx"] = o.Amx
+	}
+	return toSerialize, nil
 }
 
 type NullableCpuFeatures struct {
@@ -111,3 +122,5 @@ func (v *NullableCpuFeatures) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+
