@@ -305,3 +305,17 @@ func replaceWithMap(str string, m map[string]string) string {
 	}
 	return str
 }
+
+func getConfidentialRuntimeClasses() []string {
+	return []string{"kata-cc", "kata-cc-isolation"}
+}
+
+// check if runtimeClass is confidential
+func isConfidentialRuntimeClass(runtimeClass string) bool {
+	for _, confidentialRuntimeClass := range getConfidentialRuntimeClasses() {
+		if runtimeClass == confidentialRuntimeClass {
+			return true
+		}
+	}
+	return false
+}

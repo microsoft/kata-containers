@@ -48,7 +48,7 @@ var (
 	storageService = "Microsoft.Storage"
 )
 
-func getRuntimeClassForPod(ctx context.Context, kubeconfig, podName string, podNameSpace string) string {
+func getRuntimeClassForPod(ctx context.Context, kubeconfig, podName string, podNameSpace string) (string, error) {
 	var (
 		kubeClient *clientset.Clientset
 	)
@@ -57,21 +57,24 @@ func getRuntimeClassForPod(ctx context.Context, kubeconfig, podName string, podN
 		kubeClient, err = clientset.NewForConfig(kubeCfg)
 		if err != nil {
 			klog.Warningf("NewForConfig failed with error: %v", err)
+			return "", err
 		}
 		// Get runtime class for pod
 		if kubeClient != nil {
 			pod, err := kubeClient.CoreV1().Pods(podNameSpace).Get(ctx, podName, metav1.GetOptions{})
 			if err != nil {
 				klog.Warningf("Get pod(%s) failed with error: %v", podName, err)
+				return "", err
 			}
 			if pod.Spec.RuntimeClassName != nil {
-				return *pod.Spec.RuntimeClassName
+				return *pod.Spec.RuntimeClassName, nil
 			}
 		}
 	} else {
 		klog.Warningf("get kubeconfig(%s) failed with error: %v", kubeconfig, err)
+		return "", err
 	}
-	return ""
+	return "", nil
 }
 
 // getCloudProvider get Azure Cloud Provider
