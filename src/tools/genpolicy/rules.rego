@@ -54,6 +54,7 @@ default AllowRequestsFailingPolicy := false
 CreateContainerRequest {
     i_oci := input.OCI
     i_storages := input.storages
+    i_devices := input.devices
 
     print("CreateContainerRequest: i_oci.Hooks =", i_oci.Hooks)
     is_null(i_oci.Hooks)
@@ -81,6 +82,9 @@ CreateContainerRequest {
 
     p_storages := p_container.storages
     allow_by_anno(p_oci, i_oci, p_storages, i_storages)
+
+    p_devices := p_container.devices
+    allow_devices(p_devices, i_devices)
 
     allow_linux(p_oci, i_oci)
 
@@ -333,6 +337,16 @@ allow_log_directory(p_oci, i_oci) {
     print("allow_log_directory: true")
 }
 
+allow_devices(p_devices, i_devices) {
+    print("allow_devices: start")
+    every i_device in i_devices {
+        print("allow_devices: i_device =", i_device)
+        some p_device in p_devices
+        p_device.container_path == i_device.container_path
+    }
+    print("allow_devices: true")
+}
+
 allow_linux(p_oci, i_oci) {
     p_namespaces := p_oci.Linux.Namespaces
     print("allow_linux: p namespaces =", p_namespaces)
@@ -344,6 +358,7 @@ allow_linux(p_oci, i_oci) {
 
     allow_masked_paths(p_oci, i_oci)
     allow_readonly_paths(p_oci, i_oci)
+    allow_linux_devices(p_oci.Linux.Devices, i_oci.Linux.Devices)
 
     print("allow_linux: true")
 }
@@ -430,6 +445,16 @@ allow_readonly_path(p_elem, i_array, masked_paths) {
     p_elem == i_masked
 
     print("allow_readonly_path 2: true")
+}
+
+allow_linux_devices(p_devices, i_devices) {
+    print("allow_linux_devices: start")
+    every i_device in i_devices {
+        print("allow_linux_devices: i_device =", i_device)
+        some p_device in p_devices
+        i_device.Path == p_device.Path
+    }
+    print("allow_linux_devices: true")
 }
 
 # Check the consistency of the input "io.katacontainers.pkg.oci.bundle_path"
