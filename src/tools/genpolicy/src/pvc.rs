@@ -34,6 +34,9 @@ pub struct PersistentVolumeClaimSpec {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storageClassName: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    volumeMode: Option<String>,
     // TODO: additional fields.
 }
 
