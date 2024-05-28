@@ -642,8 +642,8 @@ components:
             - oem_strings
             - oem_strings
             tdx: false
-            snp: false
             serial_number: serial_number
+            sev_snp: false
             uuid: uuid
           tpm:
             socket: socket
@@ -664,10 +664,10 @@ components:
           iommu: false
           payload:
             cmdline: cmdline
-            kernel: kernel
-            initramfs: initramfs
             igvm: igvm
+            kernel: kernel
             host_data: host_data
+            initramfs: initramfs
             firmware: firmware
           serial:
             mode: "false"
@@ -801,10 +801,10 @@ components:
       description: Payloads to boot in guest
       example:
         cmdline: cmdline
-        kernel: kernel
-        initramfs: initramfs
         igvm: igvm
+        kernel: kernel
         host_data: host_data
+        initramfs: initramfs
         firmware: firmware
       properties:
         firmware:
@@ -1023,8 +1023,8 @@ components:
           - oem_strings
           - oem_strings
           tdx: false
-          snp: false
           serial_number: serial_number
+          sev_snp: false
           uuid: uuid
         tpm:
           socket: socket
@@ -1045,10 +1045,10 @@ components:
         iommu: false
         payload:
           cmdline: cmdline
-          kernel: kernel
-          initramfs: initramfs
           igvm: igvm
+          kernel: kernel
           host_data: host_data
+          initramfs: initramfs
           firmware: firmware
         serial:
           mode: "false"
@@ -1262,8 +1262,8 @@ components:
         - oem_strings
         - oem_strings
         tdx: false
-        snp: false
         serial_number: serial_number
+        sev_snp: false
         uuid: uuid
       properties:
         num_pci_segments:
@@ -1285,7 +1285,7 @@ components:
         tdx:
           default: false
           type: boolean
-        snp:
+        sev_snp:
           default: false
           type: boolean
       type: object

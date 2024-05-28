@@ -671,7 +671,7 @@ components:
         tdx:
           type: boolean
           default: false
-        snp:
+        sev_snp:
           type: boolean
           default: false
 

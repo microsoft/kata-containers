@@ -22,7 +22,7 @@ type PlatformConfig struct {
 	Uuid           *string   `json:"uuid,omitempty"`
 	OemStrings     *[]string `json:"oem_strings,omitempty"`
 	Tdx            *bool     `json:"tdx,omitempty"`
-	Snp            *bool     `json:"snp,omitempty"`
+	SevSnp         *bool     `json:"sev_snp,omitempty"`
 }
 
 // NewPlatformConfig instantiates a new PlatformConfig object
@@ -33,8 +33,8 @@ func NewPlatformConfig() *PlatformConfig {
 	this := PlatformConfig{}
 	var tdx bool = false
 	this.Tdx = &tdx
-	var snp bool = false
-	this.Snp = &snp
+	var sevSnp bool = false
+	this.SevSnp = &sevSnp
 	return &this
 }
 
@@ -45,8 +45,8 @@ func NewPlatformConfigWithDefaults() *PlatformConfig {
 	this := PlatformConfig{}
 	var tdx bool = false
 	this.Tdx = &tdx
-	var snp bool = false
-	this.Snp = &snp
+	var sevSnp bool = false
+	this.SevSnp = &sevSnp
 	return &this
 }
 
@@ -242,36 +242,36 @@ func (o *PlatformConfig) SetTdx(v bool) {
 	o.Tdx = &v
 }
 
-// GetSnp returns the Snp field value if set, zero value otherwise.
-func (o *PlatformConfig) GetSnp() bool {
-	if o == nil || o.Snp == nil {
+// GetSevSnp returns the SevSnp field value if set, zero value otherwise.
+func (o *PlatformConfig) GetSevSnp() bool {
+	if o == nil || o.SevSnp == nil {
 		var ret bool
 		return ret
 	}
-	return *o.Snp
+	return *o.SevSnp
 }
 
-// GetSnpOk returns a tuple with the Snp field value if set, nil otherwise
+// GetSevSnpOk returns a tuple with the SevSnp field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *PlatformConfig) GetSnpOk() (*bool, bool) {
-	if o == nil || o.Snp == nil {
+func (o *PlatformConfig) GetSevSnpOk() (*bool, bool) {
+	if o == nil || o.SevSnp == nil {
 		return nil, false
 	}
-	return o.Snp, true
+	return o.SevSnp, true
 }
 
-// HasSnp returns a boolean if a field has been set.
-func (o *PlatformConfig) HasSnp() bool {
-	if o != nil && o.Snp != nil {
+// HasSevSnp returns a boolean if a field has been set.
+func (o *PlatformConfig) HasSevSnp() bool {
+	if o != nil && o.SevSnp != nil {
 		return true
 	}
 
 	return false
 }
 
-// SetSnp gets a reference to the given bool and assigns it to the Snp field.
-func (o *PlatformConfig) SetSnp(v bool) {
-	o.Snp = &v
+// SetSevSnp gets a reference to the given bool and assigns it to the SevSnp field.
+func (o *PlatformConfig) SetSevSnp(v bool) {
+	o.SevSnp = &v
 }
 
 func (o PlatformConfig) MarshalJSON() ([]byte, error) {
@@ -294,8 +294,8 @@ func (o PlatformConfig) MarshalJSON() ([]byte, error) {
 	if o.Tdx != nil {
 		toSerialize["tdx"] = o.Tdx
 	}
-	if o.Snp != nil {
-		toSerialize["snp"] = o.Snp
+	if o.SevSnp != nil {
+		toSerialize["sev_snp"] = o.SevSnp
 	}
 	return json.Marshal(toSerialize)
 }
