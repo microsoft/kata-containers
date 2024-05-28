@@ -466,7 +466,7 @@ func (clh *cloudHypervisor) enableProtection() error {
 		if clh.vmconfig.Platform == nil {
 			clh.vmconfig.Platform = chclient.NewPlatformConfig()
 		}
-		clh.vmconfig.Platform.SetSnp(true)
+		clh.vmconfig.Platform.SetSevSnp(true)
 
 		if len(clh.config.PolicyHash) > 0 {
 			clh.vmconfig.Payload.SetHostData(clh.config.PolicyHash)
