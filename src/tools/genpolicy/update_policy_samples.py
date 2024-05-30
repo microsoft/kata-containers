@@ -39,11 +39,11 @@ for file in default_yamls + silently_ignored + no_policy:
         print(f"filepath does not exists: {filepath}")
 
 # build tool
-print("COMMAND: cargo build")
-runCmd("cargo build")
+print("COMMAND: LIBC=gnu BUILD_TYPE= make")
+runCmd("LIBC=gnu BUILD_TYPE= make")
 
 # update files
-genpolicy_path = "target/debug/genpolicy"
+genpolicy_path = "target/x86_64-unknown-linux-gnu/debug/genpolicy"
 
 total_start = time.time()
 executor = ThreadPoolExecutor(max_workers=os.cpu_count())
