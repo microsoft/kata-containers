@@ -514,7 +514,7 @@ fn get_ephemeral_mount(
     );
 }
 
-fn handle_persistent_volume_claim(
+pub fn handle_persistent_volume_claim(
     is_blk_mount: bool,
     is_smb_mount: bool,
     yaml_mount: &pod::VolumeMount,

@@ -7,6 +7,7 @@
 #![allow(non_snake_case)]
 
 use crate::agent;
+use crate::mount_and_storage;
 use crate::obj_meta;
 use crate::pod;
 use crate::pod_template;
@@ -17,9 +18,9 @@ use crate::utils::Config;
 use crate::yaml;
 
 use async_trait::async_trait;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
 
 /// See Reference / Kubernetes API / Workload Resources / StatefulSet.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -149,6 +150,8 @@ impl yaml::K8sResource for StatefulSet {
             if let Some(claims) = &self.spec.volumeClaimTemplates {
                 StatefulSet::get_mounts_and_storages(
                     policy_mounts,
+                    storages,
+                    settings,
                     volume_mounts,
                     claims,
                 );
@@ -211,35 +214,54 @@ impl yaml::K8sResource for StatefulSet {
 impl StatefulSet {
     fn get_mounts_and_storages(
         policy_mounts: &mut Vec<policy::KataMount>,
+        storages: &mut Vec<agent::Storage>,
+        settings: &settings::Settings,
         volume_mounts: &Vec<pod::VolumeMount>,
         claims: &[pvc::PersistentVolumeClaim],
     ) {
+        debug!("StatefulSet::get_mounts_and_storages");
         for mount in volume_mounts {
             for claim in claims {
                 if let Some(claim_name) = &claim.metadata.name {
                     if claim_name.eq(&mount.name) {
-                        let file_name = Path::new(&mount.mountPath)
-                            .file_name()
-                            .unwrap()
-                            .to_str()
-                            .unwrap();
-                        // TODO:
-                        // - Get the source path below from the settings file.
-                        // - Generate proper options value.
-                        policy_mounts.push(policy::KataMount {
-                            destination: mount.mountPath.clone(),
-                            type_: "bind".to_string(),
-                            source:
-                                "^/run/kata-containers/shared/containers/$(bundle-id)-[a-z0-9]{16}-"
-                                    .to_string()
-                                    + file_name
-                                    + "$",
-                            options: vec![
-                                "rbind".to_string(),
-                                "rprivate".to_string(),
-                                "rw".to_string(),
-                            ],
-                        });
+                        // check if a storage class is set and if it is a virtio-blk storage class
+                        let is_blk_mount = if let Some(storage_class) = &claim.spec.storageClassName
+                        {
+                            settings
+                                .common
+                                .virtio_blk_storage_classes
+                                .contains(storage_class)
+                        } else {
+                            false
+                        };
+                        // check if a storage class is set and if it is a smb storage class
+                        let is_smb_mount = if let Some(storage_class) = &claim.spec.storageClassName
+                        {
+                            settings.common.smb_storage_classes.contains(storage_class)
+                        } else {
+                            false
+                        };
+
+                        let propagation = match &mount.mountPropagation {
+                            Some(p) if p == "Bidirectional" => "rshared",
+                            _ => "rprivate",
+                        };
+
+                        let access = if let Some(true) = mount.readOnly {
+                            "ro"
+                        } else {
+                            "rw"
+                        };
+
+                        let mount_options = (propagation, access);
+                        mount_and_storage::handle_persistent_volume_claim(
+                            is_blk_mount,
+                            is_smb_mount,
+                            mount,
+                            policy_mounts,
+                            storages,
+                            mount_options,
+                        );
                     }
                 }
             }
