@@ -23,7 +23,6 @@ FCJAILERCMD := jailer
 
 # cloud-hypervisor binary name
 CLHCMD := cloud-hypervisor
-CLHSNPCMD := cloud-hypervisor-snp
 
 DEFSTATICRESOURCEMGMT_CLH := false
 
