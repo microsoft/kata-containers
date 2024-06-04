@@ -10,18 +10,18 @@ set -o errtrace
 
 [ -n "$DEBUG" ] && set -x
 
-script_dir="$(dirname $(readlink -f $0))"
+SCRIPT_DIR="$(dirname $(readlink -f $0))"
 
 # distro-specific config file
 typeset -r CONFIG_SH="config.sh"
 
 # Name of an optional distro-specific file which, if it exists, must implement the
-# install_igvm() function.
+# install_igvm_tool, build_igvm_files, and uninstall_igvm_tool functions.
 typeset -r LIB_SH="igvm_lib.sh"
 
-build_igvm_distro()
+load_config_distro()
 {
-	distro_config_dir="${script_dir}/${distro}"
+	distro_config_dir="${SCRIPT_DIR}/${DISTRO}"
 
 	[ -d "${distro_config_dir}" ] || die "Could not find configuration directory '${distro_config_dir}'"
 
@@ -31,50 +31,20 @@ build_igvm_distro()
 		source "${igvm_lib}"
 	fi
 
-	root_hash_file="${script_dir}/../root_hash.txt"
-
-	if [ ! -f "${root_hash_file}" ]; then
-		echo "Could no find image root hash file '${root_hash_file}', aborting"
-		exit 1
-	fi
-
-	echo "Reading image dm-verity root hash values"
-	root_hash=$(sed -e 's/Root hash:\s*//g;t;d' "${root_hash_file}")
-	salt=$(sed -e 's/Salt:\s*//g;t;d' "${root_hash_file}")
-	data_blocks=$(sed -e 's/Data blocks:\s*//g;t;d' "${root_hash_file}")
-	data_block_size=$(sed -e 's/Data block size:\s*//g;t;d' "${root_hash_file}")
-	data_sectors_per_block=$((data_block_size / 512))
-	data_sectors=$((data_blocks * data_sectors_per_block))
-	hash_block_size=$(sed -e 's/Hash block size:\s*//g;t;d' "${root_hash_file}")
-
 	# Source config.sh from distro, depends on root_hash based variables here
 	igvm_config="${distro_config_dir}/${CONFIG_SH}"
 	source "${igvm_config}"
-
-	echo "Install IGVM tool"
-	install_igvm
-
-	echo "Build IGVM (debug) file and calculate reference measurements"
-	# we could call into the installed binary '~/.local/bin/igvmgen' when adding to PATH or, better, into 'python3 -m msigvm'
-	# however, as we still need the installation directory for the ACPI tables, we leave things as is for now
-	# at the same time we seem to need to call pip3 install for invoking the tool at all
-	python3 ${igvmgen_py_file} $igvm_vars -o kata-containers-igvm.img -measurement_file igvm-measurement.cose -append "$igvm_kernel_prod_params" -svn $SVN
-	python3 ${igvmgen_py_file} $igvm_vars -o kata-containers-igvm-debug.img -measurement_file igvm-debug-measurement.cose -append "$igvm_kernel_debug_params" -svn $SVN
-
-	if [ "${PWD}" -ef "$(readlink -f $OUT_DIR)" ]; then
-		echo "OUT_DIR matches with current dir, not moving build artifacts"
-	else
-		echo "Moving build artifacts to ${OUT_DIR}"
-		mv igvm-measurement.cose kata-containers-igvm.img igvm-debug-measurement.cose kata-containers-igvm-debug.img $OUT_DIR
-	fi
 }
 
-distro="azure-linux"
+DISTRO="azure-linux"
+MODE="build"
 
-while getopts ":o:s:" OPTIONS; do
+while getopts ":o:s:iu" OPTIONS; do
 	case "${OPTIONS}" in
 		o ) OUT_DIR=$OPTARG ;;
 		s ) SVN=$OPTARG ;;
+		i ) MODE="install" ;;
+		u ) MODE="uninstall" ;;
 		\? )
 			echo "Error - Invalid Option: -$OPTARG" 1>&2
 			exit 1
@@ -89,11 +59,24 @@ done
 echo "IGVM builder script"
 echo "-- OUT_DIR -> $OUT_DIR"
 echo "-- SVN -> $SVN"
-echo "-- distro -> $distro"
+echo "-- DISTRO -> $DISTRO"
+echo "-- MODE -> $MODE"
 
-if [ -n "$distro" ]; then
-  build_igvm_distro
+if [ -n "$DISTRO" ]; then
+	load_config_distro
 else
-  echo "distro must be specified"
-  exit 1
+	echo "DISTRO must be specified"
+	exit 1
 fi
+
+case "$MODE" in
+	"install")
+		install_igvm_tool
+		;;
+	"uninstall")
+		uninstall_igvm_tool
+		;;
+	"build")
+		build_igvm_files
+		;;
+esac
