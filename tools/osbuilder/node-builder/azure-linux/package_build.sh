@@ -60,7 +60,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	make ${runtime_make_flags}
 else
 	# cannot add the kernelparams in initial assignment, quotation issue
-	make ${runtime_make_flags} KERNELPARAMS="systemd.legacy_systemd_cgroup_controller=yes systemd.unified_cgroup_hierarchy=0"
+	make ${runtime_make_flags} KERNELPARAMS=""
 fi
 popd
 
