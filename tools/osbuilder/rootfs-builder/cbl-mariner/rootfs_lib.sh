@@ -24,3 +24,4 @@ build_rootfs()
 
 	rm -rf ${ROOTFS_DIR}/usr/share/{bash-completion,cracklib,doc,info,locale,man,misc,pixmaps,terminfo,zoneinfo,zsh}
 }
+

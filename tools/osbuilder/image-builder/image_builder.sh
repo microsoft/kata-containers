@@ -528,7 +528,11 @@ create_rootfs_image() {
 
 		info "${setup_cmd}"
 		local image_dir=$(dirname "${image}")
-		eval "${setup_cmd}" > "${image_dir}"/root_hash.txt 2>&1
+		echo "FOOBY!!!"
+		set -x
+		echo "setup_cmd: $setup_cmd"
+		eval "${setup_cmd} -s \"deadbeef\"" > "${image_dir}"/root_hash.txt 2>&1
+		set +x
 	fi
 
 	losetup -d "${device}"

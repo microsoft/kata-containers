@@ -45,6 +45,11 @@ ARCH=${ARCH:-$(uname -m)}
 TARGET_OS=${TARGET_OS:-linux}
 [ "${CROSS_BUILD}" == "true" ] && BUILDX=buildx && PLATFORM="--platform=${TARGET_OS}/${TARGET_ARCH}"
 
+
+echo "FOOBY rootfs!!!"
+echo "CONF_PODS tag: $CONF_PODS"
+
+
 handle_error() {
 	local exit_code="${?}"
 	local line_number="${1:-}"
@@ -685,6 +690,14 @@ EOF
 	create_summary_file "${ROOTFS_DIR}"
 }
 
+cleanup_rootfs()
+{
+	echo "FOOBY cleanup_rootfs!!!"
+	rm "${ROOTFS_DIR}/lib/sysimage/tdnf/history.db"
+	rm "${ROOTFS_DIR}/var/lib/osbuilder/osbuilder.yaml"
+	rm -r "${ROOTFS_DIR}/lib/debug/.build-id"
+}
+
 parse_arguments()
 {
 	[ "$#" -eq 0 ] && usage && return 0
@@ -742,6 +755,10 @@ main()
 
 	init="${ROOTFS_DIR}/sbin/init"
 	setup_rootfs
+	set -x
+	if [ ! -z "$CONF_PODS" ]; then
+		cleanup_rootfs
+	fi
 }
 
 main $*
