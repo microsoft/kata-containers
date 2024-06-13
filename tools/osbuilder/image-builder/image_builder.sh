@@ -498,7 +498,10 @@ create_rootfs_image() {
 
 	info "Setup systemd"
 	setup_systemd "${mount_dir}"
-
+	echo "FOOBY: mount_dir: ${mount_dir}"
+	find "${mount_dir}" -type f | xargs touch -d "Sun, 29 Feb 2004 16:21:42 -0800"
+	find "${mount_dir}" -type d | xargs touch -d "Sun, 29 Feb 2004 16:21:42 -0800"
+	sudo chroot /
 	info "Unmounting root partition"
 	umount "${mount_dir}"
 	OK "Root partition unmounted"
@@ -531,7 +534,7 @@ create_rootfs_image() {
 		echo "FOOBY!!!"
 		set -x
 		echo "setup_cmd: $setup_cmd"
-		eval "${setup_cmd} -s \"deadbeef\"" > "${image_dir}"/root_hash.txt 2>&1
+		eval "${setup_cmd} -v --uuid "bddba635-5269-45dc-8a64-e5abc5b7b1df" -s \"deadbeef\"" > "${image_dir}"/root_hash.txt 2>&1
 		set +x
 	fi
 
