@@ -27,7 +27,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	# AGENT_POLICY_FILE=allow-all.rego would build a UVM with permissive security policy.
 	# The current variable assignment builds a UVM with prohibitive security policy which is the default on
 	# Confidential Containers on AKS
-	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=allow-set-policy.rego"
+	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=allow-all.rego"
 fi
 
 if [ "${CONF_PODS}" == "yes" ]; then

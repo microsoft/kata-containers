@@ -2,6 +2,14 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+temp_upgrade_cacerts()
+{
+        rpm -Uhv ca-certificates-tools-2.0.0-17.cm2.noarch.rpm --replacepkgs
+	rm ca-certificates-tools-2.0.0-17.cm2.noarch.rpm
+	rm /etc/pki/ca-trust/extracted/java/cacerts
+	update-ca-trust
+}
+
 build_rootfs()
 {
 	# Mandatory
@@ -18,9 +26,15 @@ build_rootfs()
 	PKG_MANAGER="tdnf"
 
 	DNF="${PKG_MANAGER} -y --installroot=${ROOTFS_DIR} --noplugins --releasever=${OS_VERSION}"
-
+	set -x
 	info "install packages for rootfs"
-	$DNF install ${EXTRA_PKGS} ${PACKAGES}
-
+	$DNF install ${EXTRA_PKGS} ${PACKAGES} rpm wget
+	wget https://cameronbairdstorage.blob.core.windows.net/public/ca-certificates-tools-2.0.0-17.cm2.noarch.rpm
+	cp ca-certificates-tools-2.0.0-17.cm2.noarch.rpm "${ROOTFS_DIR}"
+	export -f temp_upgrade_cacerts
+	chroot "${ROOTFS_DIR}" /bin/bash -c "temp_upgrade_cacerts"
+	echo "chroot done"
+	set +x
 	rm -rf ${ROOTFS_DIR}/usr/share/{bash-completion,cracklib,doc,info,locale,man,misc,pixmaps,terminfo,zoneinfo,zsh}
 }
+
