@@ -23,6 +23,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use log::debug;
+use protocols::agent::Device;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use sha2::{Digest, Sha256};
@@ -281,7 +282,7 @@ pub struct ContainerPolicy {
     storages: Vec<agent::Storage>,
 
     /// Data compared with req.devices for CreateContainerRequest calls.
-    devices: Vec<agent::Device>,
+    devices: Vec<Device>,
 
     /// Data compared with req.sandbox_pidns for CreateContainerRequest calls.
     sandbox_pidns: bool,
@@ -607,10 +608,10 @@ impl AgentPolicy {
         };
         let exec_commands = yaml_container.get_exec_commands();
 
-        let mut devices: Vec<agent::Device> = vec![];
+        let mut devices: Vec<Device> = vec![];
         if let Some(volumeDevices) = &yaml_container.volumeDevices {
             for volumeDevice in volumeDevices {
-                let mut device = agent::Device::new();
+                let mut device = Device::new();
                 device.set_container_path(volumeDevice.devicePath.clone());
                 devices.push(device);
 
