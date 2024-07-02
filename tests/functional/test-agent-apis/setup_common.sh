@@ -1,3 +1,5 @@
+#!/bin/bash
+
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -18,7 +20,6 @@ agent_socket_file="kata-agent.socket"
 
 # Kata Agent socket URI.
 local_agent_server_addr="unix://${agent_socket_file}"
-local_agent_ctl_server_addr="unix://@${agent_socket_file}"
 
 # Log file that contains agent ctl output
 ctl_log_file="${PWD}/agent-ctl.log"
@@ -71,7 +72,7 @@ run_agent_ctl()
 
 	local redirect="&>\"${ctl_log_file}\""
 
-	local server_address="--server-address \"${local_agent_ctl_server_addr}\""
+	local server_address="--server-address \"${local_agent_server_addr}\""
 
 	eval \
 		sudo \
@@ -79,7 +80,7 @@ run_agent_ctl()
 		"${agent_ctl_path}" \
 		-l debug \
 		connect \
-        --no-auto-values \
+		--no-auto-values \
 		"${server_address}" \
 		"${cmds}" \
 		"${redirect}"
@@ -141,20 +142,20 @@ start_agent()
 	[ -n "$running" ] && die "agent already running: '$running'"
 
 	eval \
-		\"sudo \
+		sudo \
 			RUST_BACKTRACE=full \
 			KATA_AGENT_LOG_LEVEL=${agent_log_level} \
 			KATA_AGENT_SERVER_ADDR=${local_agent_server_addr} \
 			${agent_binary} \
-			&> ${log_file}\"
+			&> ${log_file} \
+			&
 
     wait_for_agent_to_start
 }
 
-setup() {
-	trap cleanup EXIT
-
+setup_agent() {
 	info "Starting a single kata agent process."
+
 	start_agent $agent_log_file
 
 	info "Setup done."

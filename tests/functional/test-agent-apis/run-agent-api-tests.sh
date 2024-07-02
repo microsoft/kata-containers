@@ -1,7 +1,9 @@
+#!/bin/bash
+
 set -e
 
 test_agent_apis_dir="$(dirname "$(readlink -f "$0")")"
-source "${tracing_dir}/../../common.bash"
+source "${test_agent_apis_dir}/../../common.bash"
 
 usage()
 {
