@@ -4,7 +4,7 @@ set -o pipefail
 
 kata_tarball_dir="${2:-kata-artifacts}"
 test_agent_apis_dir="$(dirname "$(readlink -f "$0")")"
-source "${tracing_dir}/../../common.bash"
+source "${test_agent_apis_dir}/../../common.bash"
 
 function install_dependencies() {
 	info "Installing dependencies needed for testing individual agent apis using agent-ctl"
@@ -36,3 +36,5 @@ function main() {
 		*) >&2 die "Invalid argument" ;;
 	esac
 }
+
+main "$@"
