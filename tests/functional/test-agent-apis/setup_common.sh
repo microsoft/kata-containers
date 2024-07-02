@@ -1,0 +1,161 @@
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+
+# 1. Setup: start kata-agent as an individual process listening on the default port
+# 2. Use a bats script to run all tests
+# 3. Collect logs if possible (look into this to validate success/failures)
+# 4. handle errors/exit in cleanup to remove all mounts, etc.
+# IMP: Look at how to assert tests.
+# The agent process runs locally as a standalone process for now.
+
+agent_binary="/usr/bin/kata-agent"
+agent_ctl_path="/opt/kata/bin/kata-agent-ctl"
+
+# Name of socket file used by a local agent.
+agent_socket_file="kata-agent.socket"
+
+# Kata Agent socket URI.
+local_agent_server_addr="unix://${agent_socket_file}"
+local_agent_ctl_server_addr="unix://@${agent_socket_file}"
+
+# Log file that contains agent ctl output
+ctl_log_file="${PWD}/agent-ctl.log"
+# Log file that contains agent output.
+agent_log_file="${PWD}/kata-agent.log"
+
+agent_log_level="debug"
+keep_logs=true
+
+cleanup()
+{
+	local failure_ret="$?"
+
+	if [ "$failure_ret" -eq 0 ] && [ "$keep_logs" = 'true' ]
+	then
+		info "SUCCESS: Test passed, but leaving logs:"
+		info ""
+		info "agent log file       : ${agent_log_file}"
+		info "agent-ctl log file   : ${ctl_log_file}"
+		return 0
+	fi
+
+	if [ $failure_ret -ne 0 ]; then
+	    warn "ERROR: Test failed"
+	    warn ""
+	    warn "Not cleaning up to help debug failure:"
+	    warn ""
+
+	    info "agent-ctl log file   : ${ctl_log_file}"
+	    info "agent log file       : ${agent_log_file}"
+		return 0
+	fi
+
+	sudo rm -f \
+		"$agent_log_file" \
+		"$ctl_log_file"
+
+	clean_env_ctr &>/dev/null || true
+
+	local sandbox_dir="/run/sandbox-ns/"
+	sudo umount -f "${sandbox_dir}/uts" "${sandbox_dir}/ipc" &>/dev/null || true
+	sudo rm -rf "${sandbox_dir}" &>/dev/null || true
+}
+
+run_agent_ctl()
+{
+	local cmds="${1:-}"
+
+	[ -n "$cmds" ] || die "need commands for agent control tool"
+
+	local redirect="&>\"${ctl_log_file}\""
+
+	local server_address="--server-address \"${local_agent_ctl_server_addr}\""
+
+	eval \
+		sudo \
+		RUST_BACKTRACE=full \
+		"${agent_ctl_path}" \
+		-l debug \
+		connect \
+        --no-auto-values \
+		"${server_address}" \
+		"${cmds}" \
+		"${redirect}"
+}
+
+get_agent_pid()
+{
+	local pids
+
+	local name
+	name=$(basename "$agent_binary")
+
+	pids=$(pgrep "$name" || true)
+	[ -z "$pids" ] && return 0
+
+	local count
+	count=$(echo "$pids"|wc -l)
+
+	[ "$count" -gt 1 ] && \
+		die "too many agent processes running ($count, '$pids')"
+
+	echo $pids
+}
+
+check_agent_alive()
+{
+	local cmds=()
+
+	cmds+=("-c Check")
+
+	run_agent_ctl \
+		"${cmds[@]}"
+
+	true
+}
+
+wait_for_agent_to_start()
+{
+	local cmd="check_agent_alive"
+
+	info "Waiting for agent process to start.."
+
+	waitForProcess \
+		"$wait_time_secs" \
+		"$sleep_time_secs" \
+		"$cmd"
+
+	info "Kata agent process running."
+}
+
+start_agent()
+{
+	local log_file="${1:-}"
+	[ -z "$log_file" ] && die "need agent log file"
+
+	local running
+	running=$(get_agent_pid || true)
+
+	[ -n "$running" ] && die "agent already running: '$running'"
+
+	eval \
+		\"sudo \
+			RUST_BACKTRACE=full \
+			KATA_AGENT_LOG_LEVEL=${agent_log_level} \
+			KATA_AGENT_SERVER_ADDR=${local_agent_server_addr} \
+			${agent_binary} \
+			&> ${log_file}\"
+
+    wait_for_agent_to_start
+}
+
+setup() {
+	trap cleanup EXIT
+
+	info "Starting a single kata agent process."
+	start_agent $agent_log_file
+
+	info "Setup done."
+}
