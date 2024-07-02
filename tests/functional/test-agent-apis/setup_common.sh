@@ -16,10 +16,10 @@ agent_binary="/usr/bin/kata-agent"
 agent_ctl_path="/opt/kata/bin/kata-agent-ctl"
 
 # Name of socket file used by a local agent.
-agent_socket_file="kata-agent.socket"
+agent_socket_file="/tmp/kata-agent.socket"
 
 # Kata Agent socket URI.
-local_agent_server_addr="unix://${agent_socket_file}"
+local_agent_server_addr="unix://@${agent_socket_file}"
 
 # Log file that contains agent ctl output
 ctl_log_file="${PWD}/agent-ctl.log"
@@ -72,7 +72,7 @@ run_agent_ctl()
 
 	local redirect="&>\"${ctl_log_file}\""
 
-	local server_address="--server-address \"${local_agent_server_addr}\""
+	local server_address="--server-address ${local_agent_server_addr}"
 
 	eval \
 		sudo \
@@ -81,9 +81,9 @@ run_agent_ctl()
 		-l debug \
 		connect \
 		--no-auto-values \
-		"${server_address}" \
-		"${cmds}" \
-		"${redirect}"
+		${server_address} \
+		${cmds} \
+		${redirect}
 }
 
 get_agent_pid()
@@ -113,8 +113,6 @@ check_agent_alive()
 
 	run_agent_ctl \
 		"${cmds[@]}"
-
-	true
 }
 
 wait_for_agent_to_start()

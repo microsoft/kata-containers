@@ -8,7 +8,12 @@ setup_file() {
 }
 
 @test "Test CopyFile API: Copy a file to /run/kata-containers" {
-    info "Copy file to /run/kata-containers."
+    info "Copy file to /run/kata-containers"
+    src_file=$(mktemp)
+    local cmds()
+    cmds+=("-c CopyFile json://{\"src\": \"$src_file\", \"dest\":\"/run/kata-containers/foo\"}")
+
+    run_agent_ctl "${cmds[@]}"
 }
 
 @test "Test CopyFile API: Copy a symlink to /run/kata-containers" {
