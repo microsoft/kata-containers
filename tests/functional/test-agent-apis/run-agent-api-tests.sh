@@ -29,7 +29,7 @@ EOF
 
 run_tests() {
     info "Ruuning tests."
-    bats "test-agent-apis.bats"
+    bats "${test_agent_apis_dir}/test-agent-apis.bats"
 }
 
 main()
