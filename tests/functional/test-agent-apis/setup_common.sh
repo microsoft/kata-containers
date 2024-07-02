@@ -121,6 +121,9 @@ wait_for_agent_to_start()
 {
 	local cmd="check_agent_alive"
 
+	local wait_time_secs=20
+	local sleep_time_secs=1
+
 	info "Waiting for agent process to start.."
 
 	waitForProcess \
