@@ -4,7 +4,7 @@ load "${BATS_TEST_DIRNAME}/../../common.bash"
 load "${BATS_TEST_DIRNAME}/setup_common.sh"
 
 setup_file() {
-    setup_agent
+    info "setup"
 }
 
 @test "Test CopyFile API: Copy a file to /run/kata-containers" {
@@ -28,5 +28,5 @@ setup_file() {
 }
 
 teardown_file() {
-    cleanup
+    info "teardown"
 }

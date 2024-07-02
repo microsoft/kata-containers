@@ -4,6 +4,7 @@ set -e
 
 test_agent_apis_dir="$(dirname "$(readlink -f "$0")")"
 source "${test_agent_apis_dir}/../../common.bash"
+source "${test_agent_apis_dir}/setup_common.sh"
 
 usage()
 {
@@ -39,6 +40,8 @@ main()
 	case "$cmd" in
 		help|-h|-help|--help) usage; exit 0;;
 	esac
+
+	setup_agent
 
 	run_tests
 }
