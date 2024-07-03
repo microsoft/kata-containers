@@ -42,7 +42,8 @@ setup_file() {
     src_file=$(mktemp)
     local cmds=()
     cmds+=("-c 'CopyFile json://{\"src\": \"$src_file\", \"dest\":\"/tmp/foo\"}'")
-    run_agent_ctl "${cmds[@]}"
+    run run_agent_ctl "${cmds[@]}"
+    if [ "$status" -ne 0 ]
     rm $src_file
 }
 
@@ -58,4 +59,5 @@ setup_file() {
 
 teardown_file() {
     info "teardown"
+    sudo rm -f /run/kata-containers/
 }
