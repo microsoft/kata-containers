@@ -27,7 +27,7 @@ ctl_log_file="${PWD}/agent-ctl.log"
 agent_log_file="${PWD}/kata-agent.log"
 
 agent_log_level="debug"
-keep_logs=true
+keep_logs=false
 
 cleanup()
 {
