@@ -43,7 +43,7 @@ setup_file() {
     local cmds=()
     cmds+=("-c 'CopyFile json://{\"src\": \"$src_file\", \"dest\":\"/tmp/foo\"}'")
     run run_agent_ctl "${cmds[@]}"
-    if [ "$status" -ne 0 ]
+    [ "$status" -ne 0 ]
     rm $src_file
 }
 
