@@ -33,6 +33,12 @@ cleanup()
 {
 	local failure_ret="$?"
 
+	stop_agent
+
+	local sandbox_dir="/run/sandbox-ns/"
+	sudo umount -f "${sandbox_dir}/uts" "${sandbox_dir}/ipc" &>/dev/null || true
+	sudo rm -rf "${sandbox_dir}" &>/dev/null || true
+
 	if [ "$failure_ret" -eq 0 ] && [ "$keep_logs" = 'true' ]
 	then
 		info "SUCCESS: Test passed, but leaving logs:"
@@ -43,25 +49,19 @@ cleanup()
 	fi
 
 	if [ $failure_ret -ne 0 ]; then
-	    warn "ERROR: Test failed"
-	    warn ""
-	    warn "Not cleaning up to help debug failure:"
-	    warn ""
+		warn "ERROR: Test failed"
+		warn ""
+		warn "Not cleaning up to help debug failure:"
+		warn ""
 
-	    info "agent-ctl log file   : ${ctl_log_file}"
-	    info "agent log file       : ${agent_log_file}"
+		info "agent-ctl log file   : ${ctl_log_file}"
+		info "agent log file       : ${agent_log_file}"
 		return 0
 	fi
 
 	sudo rm -f \
 		"$agent_log_file" \
 		"$ctl_log_file"
-
-	clean_env_ctr &>/dev/null || true
-
-	local sandbox_dir="/run/sandbox-ns/"
-	sudo umount -f "${sandbox_dir}/uts" "${sandbox_dir}/ipc" &>/dev/null || true
-	sudo rm -rf "${sandbox_dir}" &>/dev/null || true
 }
 
 run_agent_ctl()
@@ -130,6 +130,13 @@ wait_for_agent_to_start()
 		"$cmd"
 
 	info "Kata agent process running."
+}
+
+stop_agent() {
+	local cmds=()
+	cmds+=("-c DestroySandbox")
+	run_agent_ctl \
+		"${cmds[@]}"
 }
 
 start_agent()
