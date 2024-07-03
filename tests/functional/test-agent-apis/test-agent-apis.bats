@@ -59,5 +59,5 @@ setup_file() {
 
 teardown_file() {
     info "teardown"
-    sudo rm -f /run/kata-containers/
+    sudo rm -r /run/kata-containers/
 }
