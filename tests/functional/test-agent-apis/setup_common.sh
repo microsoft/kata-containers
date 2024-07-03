@@ -31,6 +31,8 @@ keep_logs=true
 
 cleanup()
 {
+	info "cleaning resources..."
+
 	local failure_ret="$?"
 
 	stop_agent
@@ -133,6 +135,7 @@ wait_for_agent_to_start()
 }
 
 stop_agent() {
+	info "Stopping agent"
 	local cmds=()
 	cmds+=("-c DestroySandbox")
 	run_agent_ctl \

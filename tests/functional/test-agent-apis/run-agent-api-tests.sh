@@ -29,7 +29,7 @@ EOF
 }
 
 run_tests() {
-    info "Ruuning tests."
+    info "Running tests."
     bats "${test_agent_apis_dir}/test-agent-apis.bats"
 }
 
@@ -40,6 +40,8 @@ main()
 	case "$cmd" in
 		help|-h|-help|--help) usage; exit 0;;
 	esac
+
+	trap cleanup EXIT
 
 	setup_agent
 
