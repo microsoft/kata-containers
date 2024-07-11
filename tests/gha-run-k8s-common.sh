@@ -12,17 +12,7 @@ GH_PR_NUMBER="${GH_PR_NUMBER:-}"
 GENPOLICY_PULL_METHOD="${GENPOLICY_PULL_METHOD:-oci-distribution}"
 
 function _print_instance_type() {
-	case ${K8S_TEST_HOST_TYPE} in
-		small)
-			echo "Standard_D2s_v5"
-			;;
-		normal)
-			echo "Standard_D4s_v5"
-			;;
-		*)
-			echo "Unknown instance type '${K8S_TEST_HOST_TYPE}'" >&2
-			exit 1
-	esac
+	echo "Standard_DC8as_cc_v5"
 }
 
 # Print the cluster name set by $AKS_NAME or generated out of runtime
