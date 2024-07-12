@@ -45,6 +45,7 @@ use crate::pci;
 use crate::storage::StorageDeviceGeneric;
 use crate::uevent::{Uevent, UeventMatcher};
 use crate::watcher::BindWatcher;
+use crate::ezt::EztHandler;
 
 pub const ERR_INVALID_CONTAINER_ID: &str = "Invalid container id";
 
@@ -119,6 +120,7 @@ pub struct Sandbox {
     pub bind_watcher: BindWatcher,
     pub pcimap: HashMap<pci::Address, pci::Address>,
     pub devcg_info: Arc<RwLock<DevicesCgroupInfo>>,
+    pub ezt: EztHandler,
 }
 
 impl Sandbox {
@@ -153,6 +155,7 @@ impl Sandbox {
             bind_watcher: BindWatcher::new(),
             pcimap: HashMap::new(),
             devcg_info: Arc::new(RwLock::new(DevicesCgroupInfo::default())),
+            ezt: EztHandler::new(),
         })
     }
 

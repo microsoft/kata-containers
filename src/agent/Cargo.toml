@@ -91,6 +91,9 @@ sev = { git = "https://github.com/virtee/sev", version = "1.2", default-features
 # TODO: use regorus version 0.1.5 when it will be released to crates.io.
 regorus = { git = "https://github.com/anakrish/regorus", rev = "fc6f5d4", default-features = false, features = ["arc", "base64", "base64url", "regex"], optional = true }
 
+# EZT dependency
+socket2 = "0.5.7"
+
 [dev-dependencies]
 tempfile = "3.1.0"
 test-utils = { path = "../libs/test-utils" }
