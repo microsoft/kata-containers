@@ -16,8 +16,6 @@ repo_dir="${script_dir}/../../../../"
 common_file="common.sh"
 source "${common_file}"
 
-agent_install_dir="${script_dir}/agent-install"
-
 pushd "${repo_dir}"
 
 echo "Clean runtime build"
@@ -30,12 +28,15 @@ pushd src/agent/
 make clean
 popd
 
-rm -rf ${agent_install_dir}
+rm -rf ${AGENT_INSTALL_DIR}
 
 echo "Clean UVM build"
 pushd tools/osbuilder/
 sudo -E PATH=$PATH make DISTRO=cbl-mariner clean
 popd
+
+echo "Clean IGVM tool installation"
+
 
 if [ "${CONF_PODS}" == "yes" ]; then
 
