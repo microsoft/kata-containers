@@ -33,7 +33,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	cp -a --backup=numbered "${UVM_MEASUREMENT_FILE_NAME}" "${UVM_PATH}"
 	cp -a --backup=numbered "${UVM_DBG_MEASUREMENT_FILE_NAME}" "${UVM_PATH}"
 else
-	cp -a --backup=numbered "${initrd_file_name}" "${UVM_PATH}"
+	cp -a --backup=numbered "${INITRD_FILE_NAME}" "${UVM_PATH}"
 fi
 popd
 
