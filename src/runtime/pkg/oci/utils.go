@@ -930,6 +930,16 @@ func addAgentConfigOverrides(ocispec specs.Spec, config *vc.SandboxConfig) error
 		}
 	}
 
+	// EZT: Parse network policy
+	if value, ok := ocispec.Annotations[vcAnnotations.NetworkPolicy]; ok {
+		if decoded_network_policy, err := base64.StdEncoding.DecodeString(value); err == nil {
+			c.NetworkPolicy = string(decoded_network_policy)
+			updateConfig = true
+		} else {
+			return err
+		}
+	}
+
 	if updateConfig {
 		config.AgentConfig = c
 	}
