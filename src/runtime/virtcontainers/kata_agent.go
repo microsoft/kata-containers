@@ -776,7 +776,7 @@ func (k *kataAgent) startSandbox(ctx context.Context, sandbox *Sandbox) error {
 
 		// EZT: If a network Policy has been specified, send it to the agent.
 		if len(sandbox.config.AgentConfig.NetworkPolicy) > 0 {
-			l.Logger().Warn("EZT: Setpolicy called for sending network policy")
+			k.Logger().Warn("EZT: Setpolicy called for sending network policy")
 			if err := sandbox.agent.setPolicy(ctx, sandbox.config.AgentConfig.NetworkPolicy); err != nil {
 				return err
 			}
