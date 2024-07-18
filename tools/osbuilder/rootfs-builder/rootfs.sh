@@ -28,12 +28,11 @@ LIBC=${LIBC:-musl}
 SECCOMP=${SECCOMP:-"yes"}
 SELINUX=${SELINUX:-"no"}
 AGENT_POLICY=${AGENT_POLICY:-no}
-AGENT_POLICY_FILE=${AGENT_POLICY_FILE:-"allow-all.rego"}
 
 lib_file="${script_dir}/../scripts/lib.sh"
 source "$lib_file"
 
-agent_policy_file="$(readlink -f "${script_dir}/../../../src/kata-opa/${AGENT_POLICY_FILE}")"
+agent_policy_file="$(readlink -f -v "${AGENT_POLICY_FILE:-"${script_dir}/../../../src/kata-opa/allow-all.rego"}")"
 
 #For cross build
 CROSS_BUILD=${CROSS_BUILD:-false}
