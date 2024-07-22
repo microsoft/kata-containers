@@ -57,6 +57,9 @@ echo "Installing agent service files from staging directory into rootfs"
 sudo cp ${agent_install_dir}/usr/lib/systemd/system/kata-containers.target ${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target
 sudo cp ${agent_install_dir}/usr/lib/systemd/system/kata-agent.service ${ROOTFS_PATH}/usr/lib/systemd/system/kata-agent.service
 
+echo "EZT: Test installing ezt setup scripts inside uvm"
+sudo cp -a ezt/scripts/* ${ROOTFS_PATH}/usr/lib/
+
 if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building tarfs kernel driver and installing into rootfs"
 	pushd src/tarfs
