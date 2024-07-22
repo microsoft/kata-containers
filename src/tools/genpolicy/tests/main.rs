@@ -11,12 +11,9 @@ mod tests {
     use std::path;
     use std::str;
 
-    use protocols::agent::{
-        CopyFileRequest, CreateContainerRequest, CreateSandboxRequest, UpdateInterfaceRequest,
-        UpdateRoutesRequest,
-    };
-    use serde::de::DeserializeOwned;
-    use serde::{Deserialize, Serialize};
+use protocols::agent::CreateSandboxRequest;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
     use kata_agent_policy::policy::AgentPolicy;
 
@@ -162,4 +159,17 @@ mod tests {
     async fn test_create_container_generate_name() {
         runtests::<CreateContainerRequest>("createcontainer/generate_name").await;
     }
+}
+
+// todo: fix this test
+// CopyFileRequest need to go through is_allowed_copy_file(), so request gets transformed to PolicyCopyFileRequest,
+// and requests get allowed or blocked as expected
+// #[test]
+// fn test_copyfile() {
+//     runtests::<CopyFileRequest>("copyfile");
+// }
+
+#[test]
+fn test_create_sandbox() {
+    runtests::<CreateSandboxRequest>("createsandbox");
 }
