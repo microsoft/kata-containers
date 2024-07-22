@@ -18,7 +18,11 @@
     "allowed": false,
     "request": {
       "sandbox_pidns": false,
-      "kernel_modules": [{"name": "evil.ko"}]
+      "kernel_modules": [
+        {
+          "name": "evil.ko"
+        }
+      ]
     }
   },
   {
