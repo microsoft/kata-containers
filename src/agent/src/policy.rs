@@ -104,8 +104,8 @@ pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::R
     // If we have something like a network policy file, just dump in filesystem.
     if req.policy.contains("NetworkPolicy") {
         warn!(sl!(), "EZT: Setpolicy contains network document");
-        let mut file = File::create("/tmp/networkpolicy.txt").await.map_err(|e| ttrpc_error(ttrpc::code::INVALID_ARGUMENT))?;
-        file.write_all(&req.policy.as_bytes()).await.map_err(|e| ttrpc_error(ttrpc::code::INVALID_ARGUMENT))?;
+        let mut file = File::create("/tmp/networkpolicy.txt").await.map_err(|e| ttrpc_error(ttrpc::code::INVALID_ARGUMENT, e))?;
+        file.write_all(&req.policy.as_bytes()).await.map_err(|e| ttrpc_error(ttrpc::code::INVALID_ARGUMENT, e))?;
         return Ok(());
     }
     policy
