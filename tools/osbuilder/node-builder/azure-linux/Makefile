@@ -39,6 +39,10 @@ deploy: deploy-package deploy-uvm
 deploy-package:
 	./package_install.sh
 
+.PHONY: deploy-package-tools
+deploy-package-tools:
+	./package_tools_install.sh
+
 .PHONY: deploy-uvm
 deploy-uvm:
 	./uvm_install.sh
@@ -49,6 +53,10 @@ deploy-confpods: deploy-confpods-package deploy-confpods-uvm
 .PHONY: deploy-confpods-package
 deploy-confpods-package:
 	CONF_PODS=yes ./package_install.sh
+
+.PHONY: deploy-confpods-package-tools
+deploy-confpods-package-tools:
+	CONF_PODS=yes ./package_tools_install.sh
 
 .PHONY: deploy-confpods-uvm
 deploy-confpods-uvm:

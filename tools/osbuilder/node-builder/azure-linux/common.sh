@@ -14,6 +14,7 @@ OS_VERSION=${OS_VERSION:-2.0}
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	INSTALL_PATH_PREFIX="/opt/confidential-containers"
+	UVM_TOOLS_PATH="${INSTALL_PATH_PREFIX}/uvm/tools/osbuilder"
 	UVM_PATH="${INSTALL_PATH_PREFIX}/share/kata-containers"
 	IMG_FILE_NAME="kata-containers.img"
 	IGVM_FILE_NAME="kata-containers-igvm.img"
@@ -28,6 +29,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	SHIM_BINARY_NAME="containerd-shim-kata-cc-v2"
 else
 	INSTALL_PATH_PREFIX="/usr"
+	UVM_TOOLS_PATH="/opt/kata-containers/uvm/tools/osbuilder"
 	UVM_PATH="/var/cache/kata-containers/osbuilder-images/kernel-uvm"
 	INITRD_FILE_NAME="kata-containers-initrd.img"
 	SHIM_CONFIG_PATH="${INSTALL_PATH_PREFIX}/share/defaults/kata-containers"

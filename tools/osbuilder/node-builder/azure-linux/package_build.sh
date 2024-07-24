@@ -36,9 +36,8 @@ fi
 # On Mariner 3.0 we use cgroupsv2 with a single sandbox cgroup
 if [ "${OS_VERSION}" == "3.0" ]; then
 	runtime_make_flags+=" DEFSANDBOXCGROUPONLY=true"
-	echo "test1"
 fi
-echo "test"
+
 # add BUILD_TYPE=debug to build a debug agent (result in significantly increased agent binary size)
 # this will require to add same flag to the `make install` section for the agent in uvm_build.sh
 agent_make_flags="LIBC=gnu OPENSSL_NO_VENDOR=Y DESTDIR=${AGENT_INSTALL_DIR}"
