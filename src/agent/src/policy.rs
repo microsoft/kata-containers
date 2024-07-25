@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use protobuf::MessageDyn;
 use serde::{Deserialize, Serialize};
 use slog::Drain;
@@ -21,7 +21,11 @@ macro_rules! sl {
     };
 }
 
-async fn allow_request(policy: &mut AgentPolicy, ep: &str, req: &(impl MessageDyn + serde::Serialize)) -> ttrpc::Result<()> {
+async fn allow_request(
+    policy: &mut AgentPolicy,
+    ep: &str,
+    req: &(impl MessageDyn + serde::Serialize),
+) -> ttrpc::Result<()> {
     match policy.allow_request(ep, req).await {
         Ok((allowed, prints)) => {
             if allowed {
@@ -108,7 +112,10 @@ impl AgentPolicy {
 
         self.engine.add_policy_from_file(default_policy_file)?;
         self.engine.set_input_json("{}")?;
-        self.allow_failures = match self.allow_request_string("AllowRequestsFailingPolicy", "{}").await {
+        self.allow_failures = match self
+            .allow_request_string("AllowRequestsFailingPolicy", "{}")
+            .await
+        {
             Ok((allowed, _prints)) => allowed,
             Err(_) => false,
         };
@@ -117,12 +124,57 @@ impl AgentPolicy {
 
     /// Ask regorus if an API call should be allowed or not.
     // async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
-    async fn allow_request(&mut self, ep: &str, req: &(impl MessageDyn + serde::Serialize)) -> Result<(bool, String)> {
+    async fn allow_request(
+        &mut self,
+        ep: &str,
+        req: &(impl MessageDyn + serde::Serialize),
+    ) -> Result<(bool, String)> {
         let mut root_value = serde_json::to_value(req).unwrap();
         root_value["policy_state"] = serde_json::to_value(&self.state).unwrap();
         let ep_input = serde_json::to_string(&root_value).unwrap();
 
         return self.allow_request_string(ep, &ep_input).await;
+    }
+
+    struct MetadataResponse {
+        allowed: Boolean,
+        metadata: Option<serde_json::Value>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Metadata {
+        action: String,
+        name: String,
+        key: String,
+        value: serde_json::Value,
+    }
+
+    fn process_metadata(metadata: Value) -> Result<(), Box<dyn std::error::Error>> {
+        // Deserialize the metadata from a JSON value
+        let metadata_map: std::collections::HashMap<String, Metadata> = serde_json::from_value(metadata)?;
+        
+        // Iterate over each metadataAction in the metadata map
+        for (_, metadata_action) in metadata_map {
+            // Check if the action is "add"
+            match metadata_action.action.as_str() {
+                "add" => {
+                    // Create the JSON value with the action's key and name
+                    let json_value = json!({
+                        metadata_action.name: {
+                            metadata_action.key: metadata_action.value
+                        }
+                    });
+                    
+                    // Add data to the engine using the JSON value
+                    self.engine.add_data(regorus::Value::from_json_value(json_value)?)?;
+                },
+                _ => {
+                    // Handle other actions or do nothing
+                }
+            }
+        }
+        
+        Ok(())
     }
 
     async fn allow_request_string(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
@@ -137,11 +189,28 @@ impl AgentPolicy {
             bail!("policy check: unexpected eval_query results {:?}", results);
         }
         if results.result[0].expressions.len() != 1 {
-            bail!("policy check: unexpected eval_query result expressions {:?}", results);
+            bail!(
+                "policy check: unexpected eval_query result expressions {:?}",
+                results
+            );
         }
         let mut allow = match results.result[0].expressions[0].value {
             regorus::Value::Bool(b) => b,
-            _ => bail!("policy check: unexpected eval_query result type {:?}", results),
+
+            MetadataResponse { allowed, metadata } => {
+                if allowed {
+                    if let Some(metadata) = metadata {
+                        // perform state changes based on metadata
+                        process_metadata(metadata)?;
+                    }
+                }
+                allowed
+            }
+
+            _ => bail!(
+                "policy check: unexpected eval_query result type {:?}",
+                results
+            ),
         };
 
         if !allow && self.allow_failures {
