@@ -224,6 +224,7 @@ function deploy_kata() {
 
 	echo "::group::Final kata-deploy.yaml that is used in the test"
 	cat "${tools_dir}/packaging/kata-deploy/kata-deploy/base/kata-deploy.yaml"
+	echo "${DOCKER_REGISTRY}/${DOCKER_REPO}:${DOCKER_TAG}"
 	grep "${DOCKER_REGISTRY}/${DOCKER_REPO}:${DOCKER_TAG}" "${tools_dir}/packaging/kata-deploy/kata-deploy/base/kata-deploy.yaml" || die "Failed to setup the tests image"
 	echo "::endgroup::"
 

@@ -6,6 +6,7 @@
 use anyhow::{bail, Result};
 use protobuf::MessageDyn;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use slog::Drain;
 use tokio::io::AsyncWriteExt;
 
@@ -79,6 +80,20 @@ pub struct AgentPolicy {
     state: AgentPolicyState,
 }
 
+#[derive(serde::Deserialize)]
+struct MetadataResponse {
+    allowed: bool,
+    metadata: Option<serde_json::Value>,
+}
+
+#[derive(serde::Deserialize)]
+struct Metadata {
+    action: String,
+    name: String,
+    key: String,
+    value: serde_json::Value,
+}
+
 impl AgentPolicy {
     /// Create AgentPolicy object.
     pub fn new() -> Self {
@@ -130,6 +145,35 @@ impl AgentPolicy {
         return self.allow_request_string(ep, &ep_input).await;
     }
 
+    fn process_metadata(&mut self, metadata: serde_json::Value) -> Result<()> {
+        // Deserialize the metadata from a JSON value
+        let metadata_map: std::collections::HashMap<String, Metadata> =
+            serde_json::from_value(metadata)?;
+
+        // Iterate over each metadataAction in the metadata map
+        for (_, metadata_action) in metadata_map {
+            // Check if the action is "add"
+            match metadata_action.action.as_str() {
+                "add" => {
+                    // Create the JSON value with the action's key and name
+                    let json_value = json!({
+                        metadata_action.name: {
+                            metadata_action.key: metadata_action.value
+                        }
+                    });
+
+                    // Add data to the engine using the JSON value
+                    self.engine.add_data(regorus::Value::from(json_value))?;
+                }
+                _ => {
+                    // Handle other actions or do nothing
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn allow_request_string(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
         self.log_eval_input(ep, ep_input).await;
@@ -147,8 +191,32 @@ impl AgentPolicy {
                 results
             );
         }
-        let mut allow = match results.result[0].expressions[0].value {
-            regorus::Value::Bool(b) => b,
+
+        let mut allow = match &results.result[0].expressions[0].value {
+            regorus::Value::Bool(b) => *b,
+
+            // Match against a specific variant that could be interpreted as MetadataResponse
+            regorus::Value::Object(obj) => {
+                println!("obj found: {:?}", obj);
+                let obj_str = format!("obj found: {:?}", obj);
+                self.log_eval_input("allow_request_string", &obj_str).await;
+
+                // Convert obj to a JSON string and then to serde_json::Value
+                // let json_str = serde_json::to_string(obj)?;
+                let metadata_response: MetadataResponse = serde_json::from_str(
+                    "{
+                    \"allowed\": true,
+                }",
+                )?;
+                if metadata_response.allowed {
+                    if let Some(metadata) = metadata_response.metadata {
+                        // perform state changes based on metadata
+                        self.process_metadata(metadata)?;
+                    }
+                }
+                metadata_response.allowed
+            }
+
             _ => bail!(
                 "policy check: unexpected eval_query result type {:?}",
                 results
