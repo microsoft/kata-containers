@@ -2,6 +2,18 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
+BUILD_TYPE := release
+
+ifeq ($(BUILD_TYPE),debug)
+	export AGENT_BUILD_TYPE := debug
+	export AGENT_POLICY_FILE := allow-all.rego
+	export SHIM_USE_DEBUG_CONFIG := yes
+else
+	export AGENT_BUILD_TYPE := release
+	export AGENT_POLICY_FILE := allow-set-policy.rego
+	export SHIM_USE_DEBUG_CONFIG := no
+endif
+
 .PHONY: all
 all: package uvm
 
