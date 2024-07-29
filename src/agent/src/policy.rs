@@ -80,7 +80,7 @@ pub struct AgentPolicy {
     state: AgentPolicyState,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 struct MetadataResponse {
     allowed: bool,
     metadata: Option<serde_json::Value>,
@@ -145,16 +145,20 @@ impl AgentPolicy {
         return self.allow_request_string(ep, &ep_input).await;
     }
 
-    fn process_metadata(&mut self, metadata: serde_json::Value) -> Result<()> {
+    async fn process_metadata(&mut self, metadata: serde_json::Value) -> Result<()> {
         // Deserialize the metadata from a JSON value
         let metadata_map: std::collections::HashMap<String, Metadata> =
             serde_json::from_value(metadata)?;
+
+        self.log_eval_input("process_metadata", "metadata_map")
+            .await;
 
         // Iterate over each metadataAction in the metadata map
         for (_, metadata_action) in metadata_map {
             // Check if the action is "add"
             match metadata_action.action.as_str() {
                 "add" => {
+                    self.log_eval_input("process_metadata", "add").await;
                     // Create the JSON value with the action's key and name
                     let json_value = json!({
                         metadata_action.name: {
@@ -166,6 +170,7 @@ impl AgentPolicy {
                     self.engine.add_data(regorus::Value::from(json_value))?;
                 }
                 _ => {
+                    self.log_eval_input("process_metadata", "not handled").await;
                     // Handle other actions or do nothing
                 }
             }
@@ -201,26 +206,38 @@ impl AgentPolicy {
                 let obj_str = format!("obj found: {:?}", obj);
                 self.log_eval_input("allow_request_string", &obj_str).await;
 
-                // Convert obj to a JSON string and then to serde_json::Value
-                // let json_str = serde_json::to_string(obj)?;
-                let metadata_response: MetadataResponse = serde_json::from_str(
-                    "{
-                    \"allowed\": true,
-                }",
-                )?;
+                let json_str = serde_json::to_string(obj)?;
+
+                println!("json_str found: {:?}", json_str);
+                let obj_str = format!("json_str found: {:?}", json_str);
+                self.log_eval_input("allow_request_string", &obj_str).await;
+
+                let metadata_response: MetadataResponse = serde_json::from_str(&json_str)?;
+
+                println!("metadata_response found: {:?}", metadata_response);
+                let obj_str = format!("metadata_response found: {:?}", metadata_response);
+                self.log_eval_input("allow_request_string", &obj_str).await;
+
                 if metadata_response.allowed {
+                    self.log_eval_input("allow_request_string", "metadata_response.allowed")
+                        .await;
                     if let Some(metadata) = metadata_response.metadata {
+                        self.log_eval_input("allow_request_string", "metadata_response.metadata")
+                            .await;
                         // perform state changes based on metadata
-                        self.process_metadata(metadata)?;
+                        self.process_metadata(metadata).await?;
                     }
                 }
                 metadata_response.allowed
             }
 
-            _ => bail!(
-                "policy check: unexpected eval_query result type {:?}",
-                results
-            ),
+            _ => {
+                self.log_eval_input("allow_request_string", "bailing").await;
+                bail!(
+                    "policy check: unexpected eval_query result type {:?}",
+                    results
+                );
+            }
         };
 
         if !allow && self.allow_failures {
