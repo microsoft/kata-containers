@@ -56,6 +56,7 @@ else
 		"k8s-optional-empty-secret.bats" \
 		"k8s-pid-ns.bats" \
 		"k8s-pod-quota.bats" \
+		"k8s-policy-generation-error.bats" \
 		"k8s-policy-job.bats" \
 		"k8s-policy-pod.bats" \
 		"k8s-policy-pvc.bats" \
