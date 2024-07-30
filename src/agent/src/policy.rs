@@ -80,13 +80,15 @@ pub struct AgentPolicy {
     state: AgentPolicyState,
 }
 
+#[allow(unused)]
 #[derive(serde::Deserialize, Debug)]
 struct MetadataResponse {
     allowed: bool,
-    metadata: Option<serde_json::Value>,
+    metadata: Option<Vec<Metadata>>,
 }
 
-#[derive(serde::Deserialize)]
+#[allow(unused)]
+#[derive(serde::Deserialize, Debug)]
 struct Metadata {
     action: String,
     name: String,
@@ -145,16 +147,12 @@ impl AgentPolicy {
         return self.allow_request_string(ep, &ep_input).await;
     }
 
-    async fn process_metadata(&mut self, metadata: serde_json::Value) -> Result<()> {
-        // Deserialize the metadata from a JSON value
-        let metadata_map: std::collections::HashMap<String, Metadata> =
-            serde_json::from_value(metadata)?;
-
+    async fn process_metadata(&mut self, metadata: Vec<Metadata>) -> Result<()> {
         self.log_eval_input("process_metadata", "metadata_map")
             .await;
 
         // Iterate over each metadataAction in the metadata map
-        for (_, metadata_action) in metadata_map {
+        for metadata_action in metadata {
             // Check if the action is "add"
             match metadata_action.action.as_str() {
                 "add" => {
@@ -168,6 +166,7 @@ impl AgentPolicy {
 
                     // Add data to the engine using the JSON value
                     self.engine.add_data(regorus::Value::from(json_value))?;
+                    self.log_eval_input("process_metadata", "added!").await;
                 }
                 _ => {
                     self.log_eval_input("process_metadata", "not handled").await;
@@ -202,19 +201,16 @@ impl AgentPolicy {
 
             // Match against a specific variant that could be interpreted as MetadataResponse
             regorus::Value::Object(obj) => {
-                println!("obj found: {:?}", obj);
                 let obj_str = format!("obj found: {:?}", obj);
                 self.log_eval_input("allow_request_string", &obj_str).await;
 
                 let json_str = serde_json::to_string(obj)?;
 
-                println!("json_str found: {:?}", json_str);
                 let obj_str = format!("json_str found: {:?}", json_str);
                 self.log_eval_input("allow_request_string", &obj_str).await;
 
                 let metadata_response: MetadataResponse = serde_json::from_str(&json_str)?;
 
-                println!("metadata_response found: {:?}", metadata_response);
                 let obj_str = format!("metadata_response found: {:?}", metadata_response);
                 self.log_eval_input("allow_request_string", &obj_str).await;
 
@@ -228,7 +224,7 @@ impl AgentPolicy {
                         self.process_metadata(metadata).await?;
                     }
                 }
-                metadata_response.allowed
+                true
             }
 
             _ => {

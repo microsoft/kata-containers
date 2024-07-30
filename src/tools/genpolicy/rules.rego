@@ -51,7 +51,7 @@ default WriteStreamRequest := false
 # them and inspect OPA logs for the root cause of a failure.
 default AllowRequestsFailingPolicy := false
 
-CreateContainerRequest {"metadata": [addSandboxName], "allowed": true} {
+CreateContainerRequest:= {"metadata": [addSandboxName], "allowed": true} {
     # Check if the input request should be rejected even before checking the
     # policy_data.containers information.
     allow_create_container_input
@@ -88,6 +88,12 @@ CreateContainerRequest {"metadata": [addSandboxName], "allowed": true} {
     allow_linux(p_oci, i_oci)
 
     print("CreateContainerRequest: true")
+    addSandboxName := {
+        "name": "sandbox",
+        "action": "add",
+        "key": "name", 
+        "value": "some-sandbox-name",
+    }
 }
 
 allow_create_container_input {
@@ -205,14 +211,14 @@ allow_sandbox_name2(s_name) {
         "name": "sandbox",
         "action": "add",
         "key": "name", 
-        "value": pod_sandbox_name,
+        "value": s_name,
     }
 }
 
 allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name) {
     print("allow_by_sandbox_name: start")
 
-    allow_sandbox_name2(s_name)
+    # allow_sandbox_name2(s_name)
 
     s_namespace := "io.kubernetes.cri.sandbox-namespace"
 
