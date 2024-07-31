@@ -110,6 +110,14 @@ impl AgentPolicy {
         let mut engine = regorus::Engine::new();
         engine.set_strict_builtin_errors(false);
         engine.set_gather_prints(true);
+        let json_value = json!({
+            "testdata": {
+                "testkey": "testvalue"
+            }
+        });
+
+        // Add data to the engine using the JSON value
+        let _ = engine.add_data(regorus::Value::from(json_value));
         engine
     }
 
@@ -167,6 +175,7 @@ impl AgentPolicy {
 
                         // Add data to the engine using the JSON value
                         self.engine.add_data(regorus::Value::from(json_value))?;
+
                         self.log_eval_input("process_metadata", "added!").await;
                     }
                     _ => {
