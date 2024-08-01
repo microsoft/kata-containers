@@ -260,6 +260,8 @@ impl AgentPolicy {
             Err(e) => format!("Failed to get policy log: {e}"),
         };
 
+        self.log_eval_input("rego prints: ", &prints).await;
+
         Ok((allow, prints))
     }
 
