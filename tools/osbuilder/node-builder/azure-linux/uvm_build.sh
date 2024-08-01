@@ -25,7 +25,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	# AGENT_POLICY_FILE=allow-all.rego would build a UVM with permissive security policy.
 	# The current variable assignment builds a UVM with prohibitive security policy which is the default on
 	# Confidential Containers on AKS
-	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=allow-set-policy.rego"
+	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=allow-all.rego"
 fi
 
 if [ "${CONF_PODS}" == "yes" ]; then
@@ -54,6 +54,9 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	make KDIR=${UVM_KERNEL_HEADER_DIR}
 	sudo make KDIR=${UVM_KERNEL_HEADER_DIR} KVER=${UVM_KERNEL_VERSION} INSTALL_MOD_PATH=${ROOTFS_PATH} install
 	popd
+
+	echo "Installing ezt scripts"
+	sudo cp src/ezt/scripts/eztsetup.sh ${ROOTFS_PATH}/usr/lib/
 
 	echo "Building dm-verity protected image based on rootfs"
 	pushd tools/osbuilder

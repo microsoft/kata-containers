@@ -286,6 +286,8 @@ type KataAgentConfig struct {
 	Trace              bool
 	EnableDebugConsole bool
 	Policy             string
+	NetworkPolicy      string
+	EztPodLabel        string
 }
 
 // KataAgentState is the structure describing the data stored from this
@@ -769,6 +771,14 @@ func (k *kataAgent) startSandbox(ctx context.Context, sandbox *Sandbox) error {
 		// If a Policy has been specified, send it to the agent.
 		if len(sandbox.config.AgentConfig.Policy) > 0 {
 			if err := sandbox.agent.setPolicy(ctx, sandbox.config.AgentConfig.Policy); err != nil {
+				return err
+			}
+		}
+
+		// EZT: If a network Policy has been specified, send it to the agent.
+		if len(sandbox.config.AgentConfig.NetworkPolicy) > 0 {
+			k.Logger().Warn("EZT: Setpolicy called for sending network policy")
+			if err := sandbox.agent.setPolicy(ctx, sandbox.config.AgentConfig.NetworkPolicy); err != nil {
 				return err
 			}
 		}

@@ -78,6 +78,9 @@ mod tracer;
 #[cfg(feature = "agent-policy")]
 mod policy;
 
+// EZT
+mod ezt;
+
 cfg_if! {
     if #[cfg(target_arch = "s390x")] {
         mod ap;

@@ -1177,6 +1177,11 @@ impl agent_ttrpc::AgentService for AgentService {
             }
         }
 
+	// EZT: start listeners & broadcast content
+	let _= self.sandbox.lock().await.ezt.start_ezt_handler(req.sandbox_id.clone()).map_err(|e| {
+            error!(sl(), "Failed to start EZT handlers: {:?}", e);
+        });
+
         Ok(Empty::new())
     }
 
@@ -1189,6 +1194,10 @@ impl agent_ttrpc::AgentService for AgentService {
         is_allowed(&req).await?;
 
         let mut sandbox = self.sandbox.lock().await;
+
+        // EZT: stop the ezt handlers
+        sandbox.ezt.stop_ezt_handler();
+
         // destroy all containers, clean up, notify agent to exit etc.
         sandbox.destroy().await.map_ttrpc_err(same)?;
         // Close get_oom_event connection,

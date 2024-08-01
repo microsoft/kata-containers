@@ -12,6 +12,7 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
+use tokio::fs::File;
 
 use crate::rpc::ttrpc_error;
 use crate::AGENT_POLICY;
@@ -101,6 +102,14 @@ pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::R
     let request = serde_json::to_string(req).unwrap();
     let mut policy = AGENT_POLICY.lock().await;
     allow_request(&mut policy, "SetPolicyRequest", &request).await?;
+
+    // EZT: If we have a network policy file, dump contents to filesystem.
+    if req.policy.contains("NetworkPolicy") {
+        warn!(sl!(), "EZT: Setpolicy contains network document");
+        let mut file = File::create("/tmp/eztnetworkpolicy.txt").await.map_err(|e| ttrpc_error(ttrpc::Code::INVALID_ARGUMENT, e))?;
+        file.write_all(&req.policy.as_bytes()).await.map_err(|e| ttrpc_error(ttrpc::Code::INVALID_ARGUMENT, e))?;
+        return Ok(());
+    }
     policy
         .set_policy(&req.policy)
         .await
