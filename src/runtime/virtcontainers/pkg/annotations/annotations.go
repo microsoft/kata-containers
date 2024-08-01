@@ -306,6 +306,9 @@ const (
 
 	// Policy is an annotation containing the contents of an agent policy file, base64 encoded.
 	Policy = kataAnnotAgentPrefix + "policy"
+
+	// EZT: Add annotation for network policy
+	NetworkPolicy = kataAnnotAgentPrefix + "network-policy"
 )
 
 // Container resource related annotations
