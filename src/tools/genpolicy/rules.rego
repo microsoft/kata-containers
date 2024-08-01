@@ -80,7 +80,7 @@ CreateContainerRequest:= {"metadata": [addSandboxName], "allowed": true} {
     allow_anno(p_oci, i_oci)
 
     p_storages := p_container.storages
-    allow_by_anno(p_oci, i_oci, p_storages, i_storages)
+    addSandboxName := allow_by_anno(p_oci, i_oci, p_storages, i_storages)
 
     p_devices := p_container.devices
     allow_devices(p_devices, i_devices)
@@ -88,12 +88,6 @@ CreateContainerRequest:= {"metadata": [addSandboxName], "allowed": true} {
     allow_linux(p_oci, i_oci)
 
     print("CreateContainerRequest: true")
-    addSandboxName := {
-        "name": "sandbox",
-        "action": "add",
-        "key": "name", 
-        "value": "some-sandbox-name",
-    }
 }
 
 allow_create_container_input {
@@ -167,7 +161,7 @@ allow_anno_key(i_key, p_oci) {
 
 # Get the value of the "io.kubernetes.cri.sandbox-name" annotation and
 # correlate it with other annotations and process fields.
-allow_by_anno(p_oci, i_oci, p_storages, i_storages) {
+allow_by_anno(p_oci, i_oci, p_storages, i_storages) = addSandboxName {
     print("allow_by_anno 1: start")
 
     s_name := "io.kubernetes.cri.sandbox-name"
@@ -177,11 +171,11 @@ allow_by_anno(p_oci, i_oci, p_storages, i_storages) {
     i_s_name := i_oci.Annotations[s_name]
     print("allow_by_anno 1: i_s_name =", i_s_name)
 
-    allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, i_s_name)
+    addSandboxName := allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, i_s_name)
 
     print("allow_by_anno 1: true")
 }
-allow_by_anno(p_oci, i_oci, p_storages, i_storages) {
+allow_by_anno(p_oci, i_oci, p_storages, i_storages) = addSandboxName {
     print("allow_by_anno 2: start")
 
     s_name := "io.kubernetes.cri.sandbox-name"
@@ -191,20 +185,28 @@ allow_by_anno(p_oci, i_oci, p_storages, i_storages) {
     print("allow_by_anno 2: i_s_name =", i_s_name, "p_s_name =", p_s_name)
 
     allow_sandbox_name(p_s_name, i_s_name)
-    allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, i_s_name)
+    addSandboxName := allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, i_s_name)
 
     print("allow_by_anno 2: true")
 }
 
-allow_sandbox_name2(s_name) {
+allow_sandbox_name2(s_name) = addSandboxName {
+    print("searching sandbox name in data = ", data.testdata["testkey"])
+    "testvalue" == data.testdata["testkey"]
+    print("testvalue == data.testdata[testkey]")
     # validates all containers have the same sandox name\
-    s_name == data.metadata.sandbox["name"]
+    # todo: below is not working for second container
+    s_name == data.sandbox["name"]
     print("found sandbox_name match on state = ", s_name) 
+    addSandboxName := null
 }
 
-allow_sandbox_name2(s_name) {
+allow_sandbox_name2(s_name) = addSandboxName {
+    print("checking sandbox name doesn't exist in data = ", data.testdata["testkey"]) 
+    "testvalue" == data.testdata["testkey"]
+    print("testvalue == data.testdata[testkey]")
     # no sandbox name is set yet because this is the first container we see
-    not data.metadata.sandbox["name"]
+    not data.sandbox["name"]
     print("sandbox name not found in state. Adding name = ", s_name)
     # save the sandbox name for future reference
     addSandboxName := {
@@ -215,10 +217,12 @@ allow_sandbox_name2(s_name) {
     }
 }
 
-allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name) {
+allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name) = addSandboxName {
     print("allow_by_sandbox_name: start")
 
-    # allow_sandbox_name2(s_name)
+    addSandboxName = allow_sandbox_name2(s_name)
+
+    #1 == 2
 
     s_namespace := "io.kubernetes.cri.sandbox-namespace"
 
