@@ -84,7 +84,8 @@ pub struct AgentPolicy {
 #[derive(serde::Deserialize, Debug)]
 struct MetadataResponse {
     allowed: bool,
-    metadata: Option<Vec<Option<Metadata>>>,
+    // metadata: Option<Vec<Option<Metadata>>>,
+    metadata: Option<bool>,
 }
 
 #[allow(unused)]
@@ -155,42 +156,42 @@ impl AgentPolicy {
         return self.allow_request_string(ep, &ep_input).await;
     }
 
-    async fn process_metadata(&mut self, metadata: Vec<Option<Metadata>>) -> Result<()> {
-        // self.log_eval_input("process_metadata", "metadata_map")
-        // .await;
+    // async fn process_metadata(&mut self, metadata: Vec<Option<Metadata>>) -> Result<()> {
+    //     // self.log_eval_input("process_metadata", "metadata_map")
+    //     // .await;
 
-        // Iterate over each metadataAction in the metadata map
-        for action in metadata {
-            // Check if the action is "add"
-            if let Some(metadata_action) = action {
-                match metadata_action.action.as_str() {
-                    "add" => {
-                        self.log_eval_input("process_metadata", "add").await;
-                        // Create the JSON value with the action's key and name
-                        let json_value = json!({
-                            metadata_action.name: {
-                                metadata_action.key: metadata_action.value
-                            }
-                        });
+    //     // Iterate over each metadataAction in the metadata map
+    //     for action in metadata {
+    //         // Check if the action is "add"
+    //         if let Some(metadata_action) = action {
+    //             match metadata_action.action.as_str() {
+    //                 "add" => {
+    //                     self.log_eval_input("process_metadata", "add").await;
+    //                     // Create the JSON value with the action's key and name
+    //                     let json_value = json!({
+    //                         metadata_action.name: {
+    //                             metadata_action.key: metadata_action.value
+    //                         }
+    //                     });
 
-                        // Add data to the engine using the JSON value
-                        self.engine.add_data(regorus::Value::from(json_value))?;
+    //                     // Add data to the engine using the JSON value
+    //                     self.engine.add_data(regorus::Value::from(json_value))?;
 
-                        self.log_eval_input("process_metadata", "added!").await;
-                    }
-                    _ => {
-                        self.log_eval_input("process_metadata", "not handled").await;
-                        // Handle other actions or do nothing
-                    }
-                }
-            } else {
-                self.log_eval_input("process_metadata", "detected null action")
-                    .await;
-            }
-        }
+    //                     self.log_eval_input("process_metadata", "added!").await;
+    //                 }
+    //                 _ => {
+    //                     self.log_eval_input("process_metadata", "not handled").await;
+    //                     // Handle other actions or do nothing
+    //                 }
+    //             }
+    //         } else {
+    //             self.log_eval_input("process_metadata", "detected null action")
+    //                 .await;
+    //         }
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     async fn allow_request_string(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
@@ -231,11 +232,21 @@ impl AgentPolicy {
                 if metadata_response.allowed {
                     // self.log_eval_input("allow_request_string", "metadata_response.allowed")
                     //     .await;
-                    if let Some(metadata) = metadata_response.metadata {
+                    if let Some(_metadata) = metadata_response.metadata {
                         // self.log_eval_input("allow_request_string", "metadata_response.metadata")
                         //     .await;
                         // perform state changes based on metadata
-                        self.process_metadata(metadata).await?;
+                        // self.process_metadata(metadata).await?;
+                        let json_value = json!({
+                            "sandbox": {
+                                "name": "busybox"
+                            }
+                        });
+
+                        // Add data to the engine using the JSON value
+                        self.engine.add_data(regorus::Value::from(json_value))?;
+
+                        self.log_eval_input("process_metadata", "added!").await;
                     }
                 }
                 true

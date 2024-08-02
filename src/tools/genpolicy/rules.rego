@@ -51,50 +51,72 @@ default WriteStreamRequest := false
 # them and inspect OPA logs for the root cause of a failure.
 default AllowRequestsFailingPolicy := false
 
-CreateContainerRequest:= {"metadata": [addSandboxName], "allowed": true} {
-    # Check if the input request should be rejected even before checking the
-    # policy_data.containers information.
-    # allow_create_container_input
+# CreateContainerRequest:= {"metadata": [addSandboxName], "allowed": true} {
+#     # Check if the input request should be rejected even before checking the
+#     # policy_data.containers information.
+#     # allow_create_container_input
 
+#     i_oci := input.OCI
+#     # i_storages := input.storages
+#     # i_devices := input.devices
+
+#     # # Check if any element from the policy_data.containers array allows the input request.
+#     # some p_container in policy_data.containers
+#     # print("======== CreateContainerRequest: trying next policy container")
+
+#     # p_pidns := p_container.sandbox_pidns
+#     # i_pidns := input.sandbox_pidns
+#     # # print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
+#     # p_pidns == i_pidns
+
+#     # p_oci := p_container.OCI
+
+#     # print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
+#     # p_oci.Version == i_oci.Version
+
+#     # print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
+#     # p_oci.Root.Readonly == i_oci.Root.Readonly
+
+#     # allow_anno(p_oci, i_oci)
+
+#     # p_storages := p_container.storages
+#     #allow_by_anno(p_oci, i_oci, p_storages, i_storages)
+
+#     print("validating sandbox name")
+
+#     sandbox_name = i_oci.Annotations["io.kubernetes.cri.sandbox-name"]
+#     addSandboxName := allow_sandbox_name2(sandbox_name)
+
+#     print("addSandboxName = ", addSandboxName)
+
+#     # p_devices := p_container.devices
+#     # allow_devices(p_devices, i_devices)
+
+#     # allow_linux(p_oci, i_oci)
+
+#     print("CreateContainerRequest: true")
+# }
+
+CreateContainerRequest:= { "allowed": true, "metadata": true,} {
     i_oci := input.OCI
-    # i_storages := input.storages
-    # i_devices := input.devices
-
-    # # Check if any element from the policy_data.containers array allows the input request.
-    # some p_container in policy_data.containers
-    # print("======== CreateContainerRequest: trying next policy container")
-
-    # p_pidns := p_container.sandbox_pidns
-    # i_pidns := input.sandbox_pidns
-    # # print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
-    # p_pidns == i_pidns
-
-    # p_oci := p_container.OCI
-
-    # print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
-    # p_oci.Version == i_oci.Version
-
-    # print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
-    # p_oci.Root.Readonly == i_oci.Root.Readonly
-
-    # allow_anno(p_oci, i_oci)
-
-    # p_storages := p_container.storages
-    #allow_by_anno(p_oci, i_oci, p_storages, i_storages)
-
-    print("validating sandbox name")
-
     sandbox_name = i_oci.Annotations["io.kubernetes.cri.sandbox-name"]
-    addSandboxName := allow_sandbox_name2(sandbox_name)
+    not data.sandbox["name"]
 
-    print("addSandboxName = ", addSandboxName)
+    print("v2 sandbox name not found in state. Adding name = ", sandbox_name)
 
-    # p_devices := p_container.devices
-    # allow_devices(p_devices, i_devices)
+    # addSandboxName := {
+    #     "name": "sandbox",
+    #     "action": "add",
+    #     "key": "name", 
+    #     "value": sandbox_name,
+    # }
+}
 
-    # allow_linux(p_oci, i_oci)
-
-    print("CreateContainerRequest: true")
+CreateContainerRequest:= { "allowed": true, "metadata": false,} {
+    i_oci := input.OCI
+    sandbox_name = i_oci.Annotations["io.kubernetes.cri.sandbox-name"]
+    data.sandbox["name"] == sandbox_name
+    print("v2 found sandbox_name match on state = ", sandbox_name) 
 }
 
 allow_sandbox_name2(s_name) = addSandboxName {
