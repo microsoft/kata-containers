@@ -54,44 +54,72 @@ default AllowRequestsFailingPolicy := false
 CreateContainerRequest:= {"metadata": [addSandboxName], "allowed": true} {
     # Check if the input request should be rejected even before checking the
     # policy_data.containers information.
-    allow_create_container_input
+    # allow_create_container_input
 
     i_oci := input.OCI
-    i_storages := input.storages
-    i_devices := input.devices
+    # i_storages := input.storages
+    # i_devices := input.devices
 
-    # Check if any element from the policy_data.containers array allows the input request.
-    some p_container in policy_data.containers
-    print("======== CreateContainerRequest: trying next policy container")
+    # # Check if any element from the policy_data.containers array allows the input request.
+    # some p_container in policy_data.containers
+    # print("======== CreateContainerRequest: trying next policy container")
 
-    p_pidns := p_container.sandbox_pidns
-    i_pidns := input.sandbox_pidns
-    print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
-    p_pidns == i_pidns
+    # p_pidns := p_container.sandbox_pidns
+    # i_pidns := input.sandbox_pidns
+    # # print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
+    # p_pidns == i_pidns
 
-    p_oci := p_container.OCI
+    # p_oci := p_container.OCI
 
-    print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
-    p_oci.Version == i_oci.Version
+    # print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
+    # p_oci.Version == i_oci.Version
 
-    print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
-    p_oci.Root.Readonly == i_oci.Root.Readonly
+    # print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
+    # p_oci.Root.Readonly == i_oci.Root.Readonly
 
-    allow_anno(p_oci, i_oci)
+    # allow_anno(p_oci, i_oci)
 
-    p_storages := p_container.storages
-    addSandboxName := allow_by_anno(p_oci, i_oci, p_storages, i_storages)
+    # p_storages := p_container.storages
+    #allow_by_anno(p_oci, i_oci, p_storages, i_storages)
 
-    p_devices := p_container.devices
-    allow_devices(p_devices, i_devices)
+    print("validating sandbox name")
 
-    allow_linux(p_oci, i_oci)
+    sandbox_name = i_oci.Annotations["io.kubernetes.cri.sandbox-name"]
+    addSandboxName := allow_sandbox_name2(sandbox_name)
+
+    print("addSandboxName = ", addSandboxName)
+
+    # p_devices := p_container.devices
+    # allow_devices(p_devices, i_devices)
+
+    # allow_linux(p_oci, i_oci)
 
     print("CreateContainerRequest: true")
 }
 
+allow_sandbox_name2(s_name) = addSandboxName {
+    print("searching sandbox name in data = ", data.sandbox)
+    # validates all containers have the same sandox name
+    s_name == data.sandbox["name"]
+    print("found sandbox_name match on state = ", s_name) 
+    addSandboxName := null
+}
+
+allow_sandbox_name2(s_name) = addSandboxName {
+    print("checking sandbox name doesn't exist in data = ", data.sandbox) 
+    not data.sandbox["name"]
+    print("sandbox name not found in state. Adding name = ", s_name)
+    # save the sandbox name for future reference
+    addSandboxName := {
+        "name": "sandbox",
+        "action": "add",
+        "key": "name", 
+        "value": s_name,
+    }
+}
+
 allow_create_container_input {
-    print("allow_create_container_input: input =", input)
+    # print("allow_create_container_input: input =", input)
 
     count(input.shared_mounts) == 0
     is_null(input.string_user)
@@ -130,8 +158,8 @@ allow_anno(p_oci, i_oci) {
     print("allow_anno 1: true")
 }
 allow_anno(p_oci, i_oci) {
-    print("allow_anno 2: p Annotations =", p_oci.Annotations)
-    print("allow_anno 2: i Annotations =", i_oci.Annotations)
+    # print("allow_anno 2: p Annotations =", p_oci.Annotations)
+    # print("allow_anno 2: i Annotations =", i_oci.Annotations)
 
     i_keys := object.keys(i_oci.Annotations)
     print("allow_anno 2: i keys =", i_keys)
@@ -161,7 +189,7 @@ allow_anno_key(i_key, p_oci) {
 
 # Get the value of the "io.kubernetes.cri.sandbox-name" annotation and
 # correlate it with other annotations and process fields.
-allow_by_anno(p_oci, i_oci, p_storages, i_storages) = addSandboxName {
+allow_by_anno(p_oci, i_oci, p_storages, i_storages) {
     print("allow_by_anno 1: start")
 
     s_name := "io.kubernetes.cri.sandbox-name"
@@ -171,11 +199,11 @@ allow_by_anno(p_oci, i_oci, p_storages, i_storages) = addSandboxName {
     i_s_name := i_oci.Annotations[s_name]
     print("allow_by_anno 1: i_s_name =", i_s_name)
 
-    addSandboxName := allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, i_s_name)
+    allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, i_s_name)
 
     print("allow_by_anno 1: true")
 }
-allow_by_anno(p_oci, i_oci, p_storages, i_storages) = addSandboxName {
+allow_by_anno(p_oci, i_oci, p_storages, i_storages) {
     print("allow_by_anno 2: start")
 
     s_name := "io.kubernetes.cri.sandbox-name"
@@ -185,36 +213,9 @@ allow_by_anno(p_oci, i_oci, p_storages, i_storages) = addSandboxName {
     print("allow_by_anno 2: i_s_name =", i_s_name, "p_s_name =", p_s_name)
 
     allow_sandbox_name(p_s_name, i_s_name)
-    addSandboxName := allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, i_s_name)
+    allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, i_s_name)
 
     print("allow_by_anno 2: true")
-}
-
-allow_sandbox_name2(s_name) = addSandboxName {
-    print("searching sandbox name in data = ", data.testdata["testkey"])
-    "testvalue" == data.testdata["testkey"]
-    print("testvalue == data.testdata[testkey]")
-    # validates all containers have the same sandox name\
-    # todo: below is not working for second container
-    s_name == data.sandbox["name"]
-    print("found sandbox_name match on state = ", s_name) 
-    addSandboxName := null
-}
-
-allow_sandbox_name2(s_name) = addSandboxName {
-    print("checking sandbox name doesn't exist in data = ", data.testdata["testkey"]) 
-    "testvalue" == data.testdata["testkey"]
-    print("testvalue == data.testdata[testkey]")
-    # no sandbox name is set yet because this is the first container we see
-    not data.sandbox["name"]
-    print("sandbox name not found in state. Adding name = ", s_name)
-    # save the sandbox name for future reference
-    addSandboxName := {
-        "name": "sandbox",
-        "action": "add",
-        "key": "name", 
-        "value": s_name,
-    }
 }
 
 allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name) = addSandboxName {
@@ -228,12 +229,12 @@ allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name) = addSandbox
 
     p_namespace := p_oci.Annotations[s_namespace]
     i_namespace := i_oci.Annotations[s_namespace]
-    print("allow_by_sandbox_name: p_namespace =", p_namespace, "i_namespace =", i_namespace)
+    # print("allow_by_sandbox_name: p_namespace =", p_namespace, "i_namespace =", i_namespace)
     p_namespace == i_namespace
 
-    allow_by_container_types(p_oci, i_oci, s_name, p_namespace)
-    allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages)
-    allow_process(p_oci, i_oci, s_name)
+    # allow_by_container_types(p_oci, i_oci, s_name, p_namespace)
+    # allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages)
+    # allow_process(p_oci, i_oci, s_name)
 
     print("allow_by_sandbox_name: true")
 }
@@ -266,7 +267,7 @@ allow_by_container_types(p_oci, i_oci, s_name, s_namespace) {
     
     p_cri_type := p_oci.Annotations[c_type]
     i_cri_type := i_oci.Annotations[c_type]
-    print("allow_by_container_types: p_cri_type =", p_cri_type, "i_cri_type =", i_cri_type)
+    # print("allow_by_container_types: p_cri_type =", p_cri_type, "i_cri_type =", i_cri_type)
     p_cri_type == i_cri_type
 
     allow_by_container_type(i_cri_type, p_oci, i_oci, s_name, s_namespace)
@@ -594,8 +595,8 @@ allow_args(p_process, i_process, s_name) {
     print("allow_args 1: true")
 }
 allow_args(p_process, i_process, s_name) {
-    print("allow_args 2: policy args =", p_process.Args)
-    print("allow_args 2: input args =", i_process.Args)
+    # print("allow_args 2: policy args =", p_process.Args)
+    # print("allow_args 2: input args =", i_process.Args)
 
     count(p_process.Args) == count(i_process.Args)
 
