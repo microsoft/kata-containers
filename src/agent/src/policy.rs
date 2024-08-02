@@ -110,14 +110,14 @@ impl AgentPolicy {
         let mut engine = regorus::Engine::new();
         engine.set_strict_builtin_errors(false);
         engine.set_gather_prints(true);
-        let json_value = json!({
-            "testdata": {
-                "testkey": "testvalue"
-            }
-        });
+        // let json_value = json!({
+        //     "testdata": {
+        //         "testkey": "testvalue"
+        //     }
+        // });
 
         // Add data to the engine using the JSON value
-        let _ = engine.add_data(regorus::Value::from(json_value));
+        // let _ = engine.add_data(regorus::Value::from(json_value));
         engine
     }
 
@@ -156,8 +156,8 @@ impl AgentPolicy {
     }
 
     async fn process_metadata(&mut self, metadata: Vec<Option<Metadata>>) -> Result<()> {
-        self.log_eval_input("process_metadata", "metadata_map")
-            .await;
+        // self.log_eval_input("process_metadata", "metadata_map")
+        // .await;
 
         // Iterate over each metadataAction in the metadata map
         for action in metadata {
@@ -215,13 +215,13 @@ impl AgentPolicy {
 
             // Match against a specific variant that could be interpreted as MetadataResponse
             regorus::Value::Object(obj) => {
-                let obj_str = format!("obj found: {:?}", obj);
-                self.log_eval_input("allow_request_string", &obj_str).await;
+                // let obj_str = format!("obj found: {:?}", obj);
+                // self.log_eval_input("allow_request_string", &obj_str).await;
 
                 let json_str = serde_json::to_string(obj)?;
 
-                let obj_str = format!("json_str found: {:?}", json_str);
-                self.log_eval_input("allow_request_string", &obj_str).await;
+                // let obj_str = format!("json_str found: {:?}", json_str);
+                // self.log_eval_input("allow_request_string", &obj_str).await;
 
                 let metadata_response: MetadataResponse = serde_json::from_str(&json_str)?;
 
@@ -229,11 +229,11 @@ impl AgentPolicy {
                 self.log_eval_input("allow_request_string", &obj_str).await;
 
                 if metadata_response.allowed {
-                    self.log_eval_input("allow_request_string", "metadata_response.allowed")
-                        .await;
+                    // self.log_eval_input("allow_request_string", "metadata_response.allowed")
+                    //     .await;
                     if let Some(metadata) = metadata_response.metadata {
-                        self.log_eval_input("allow_request_string", "metadata_response.metadata")
-                            .await;
+                        // self.log_eval_input("allow_request_string", "metadata_response.metadata")
+                        //     .await;
                         // perform state changes based on metadata
                         self.process_metadata(metadata).await?;
                     }
