@@ -201,6 +201,11 @@ impl AgentPolicy {
         self.engine.set_input_json(ep_input)?;
 
         let results = self.engine.eval_query(query, false)?;
+
+        let query = format!("results {:?},", results);
+
+        self.log_eval_input("results", &query).await;
+
         if results.result.len() != 1 {
             bail!("policy check: unexpected eval_query results {:?}", results);
         }
