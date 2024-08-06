@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (c) 2023 Microsoft Corporation
+# Copyright (c) 2024 Microsoft Corporation
 
 # This script aims to adapt the system for the genpolicy tool to be able to use containerd pull function properly.
 # This is needed for managed identity based authentication to private registries using an identity token.
@@ -17,7 +17,7 @@ set -e -x
 
 # Function to check if a command exists
 command_exists() {
-    command -v "$1" &> /dev/null
+    command -v "$1" > /dev/null
 }
 
 # Utility function for error messages and exit
@@ -26,11 +26,22 @@ error_exit() {
     exit 1
 }
 
+# Detect the package manager
+if command_exists apt-get; then
+    UPDATE_CMD="sudo apt-get update"
+    INSTALL_CMD="sudo apt-get install -y"
+elif command_exists tdnf; then
+    UPDATE_CMD="sudo tdnf makecache"
+    INSTALL_CMD="sudo tdnf install -y"
+else
+    error_exit "No supported package manager found. Please install either apt-get or tdnf."
+fi
+
 # Function to ensure a command is installed
 ensure_command_installed() {
     if ! command_exists "$1"; then
         echo "$1 could not be found, installing..."
-        sudo apt-get install -y "$1"
+        $INSTALL_CMD "$1"
         if ! command_exists "$1"; then
             error_exit "Failed to install $1"
         fi
@@ -39,7 +50,7 @@ ensure_command_installed() {
     fi
 }
 
-sudo apt-get update
+$UPDATE_CMD
 
 ensure_command_installed containerd
 
@@ -123,5 +134,5 @@ else
     error_exit "Docker config file not found. Please update DOCKER_CONFIG_FILE in this script to point to the correct Docker config file."
 fi
 
-echo "Script execution completed. Please use $SOCKET_FILE_LOCATION as socker file location."
+echo "Script execution completed. Please use $SOCKET_FILE_LOCATION as socket file location."
 echo "Eg. genpolicy -d=$SOCKET_FILE_LOCATION -y foo.yaml"
