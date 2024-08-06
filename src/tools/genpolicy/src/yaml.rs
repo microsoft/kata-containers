@@ -27,7 +27,7 @@ use crate::volume;
 
 use async_trait::async_trait;
 use core::fmt::Debug;
-use log::debug;
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use std::boxed;
 use std::collections::BTreeMap;
@@ -247,24 +247,62 @@ pub fn get_container_mounts_and_storages(
     persistent_volume_claims: &[pvc::PersistentVolumeClaim],
     container: &pod::Container,
     settings: &settings::Settings,
-    volumes: &Vec<volume::Volume>,
+    volumes_option: &Option<Vec<volume::Volume>>,
 ) {
-    if let Some(volume_mounts) = &container.volumeMounts {
-        for volume in volumes {
-            for volume_mount in volume_mounts {
-                if volume_mount.name.eq(&volume.name) {
-                    mount_and_storage::get_mount_and_storage(
-                        settings,
-                        policy_mounts,
-                        storages,
-                        persistent_volume_claims,
-                        volume,
-                        volume_mount,
-                    );
+    let mut fatal_error = false;
+
+    if let Some(volumes) = volumes_option {
+        if let Some(volume_mounts) = &container.volumeMounts {
+            for volume in volumes {
+                for volume_mount in volume_mounts {
+                    if volume_mount.name.eq(&volume.name) {
+                        mount_and_storage::get_mount_and_storage(
+                            settings,
+                            policy_mounts,
+                            storages,
+                            persistent_volume_claims,
+                            volume,
+                            volume_mount,
+                        );
+                    }
                 }
             }
         }
+
+        // Volume mounts specified in a container image docker configuration layer
+        // have an undefined volume name and type. Reject such volume mounts if they
+        // have not been defined in the input K8s YAML file too.
+        if let Some(volumes) = &container.registry.config_layer.config.Volumes {
+            for volume in volumes {
+                let mut found = false;
+
+                for mount in &mut *policy_mounts {
+                    if mount.destination == *volume.0 {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if !found {
+                    error!("Please define volume mount `{}` for container image `{}` in your input YAML file.",
+                        volume.0,
+                        &container.registry.image,
+                    );
+                    fatal_error = true;
+                }
+            }
+        }
+    } else if let Some(image_volumes) = &container.registry.config_layer.config.Volumes {
+        for image_volume in image_volumes {
+            error!(
+                "Please define volume mount `{}` for container image `{}` in your input YAML file.",
+                image_volume.0, &container.registry.image,
+            );
+            fatal_error = true;
+        }
     }
+
+    assert!(!fatal_error, "Unsupported policy inputs.")
 }
 
 /// Add the "io.katacontainers.config.agent.policy" annotation into
