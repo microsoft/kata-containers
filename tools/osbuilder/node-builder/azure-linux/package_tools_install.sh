@@ -21,7 +21,6 @@ source "${common_file}"
 
 pushd "${repo_dir}"
 
-# CONTINUE HERE - VANILLA kata-containers.spec only so far
 echo "Creating target directories"
 mkdir -p "${PREFIX}/${UVM_TOOLS_PATH_OSB}/scripts"
 mkdir -p "${PREFIX}/${UVM_TOOLS_PATH_OSB}/rootfs-builder/cbl-mariner"
@@ -45,7 +44,7 @@ cp -a --backup=numbered tools/osbuilder/rootfs-builder/cbl-mariner/config.sh "${
 cp -a --backup=numbered tools/osbuilder/rootfs-builder/cbl-mariner/rootfs_lib.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/rootfs-builder/cbl-mariner/"
 cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/Makefile "${PREFIX}/${UVM_TOOLS_PATH_OSB}/node-builder/azure-linux/"
 cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/clean.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/node-builder/azure-linux/"
-cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/common.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}node-builder/azure-linux/"
+cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/common.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/node-builder/azure-linux/"
 cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/uvm_build.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/node-builder/azure-linux/"
 
 echo "Installing agent binary and service files"
@@ -61,7 +60,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	cp -a --backup=numbered tools/osbuilder/image-builder/image_builder.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/image-builder/"
 	cp -a --backup=numbered tools/osbuilder/igvm-builder/igvm_builder.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/"
 	cp -a --backup=numbered tools/osbuilder/igvm-builder/azure-linux/config.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/azure-linux/"
-	cp -a --backup=numbered tools/osbuilder/igvm-builder/azure-linux/rootfs_lib.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/azure-linux/"
+	cp -a --backup=numbered tools/osbuilder/igvm-builder/azure-linux/igvm_lib.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/azure-linux/"
 else
 	cp -a --backup=numbered tools/osbuilder/initrd-builder/initrd_builder.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/initrd-builder/"
 fi
