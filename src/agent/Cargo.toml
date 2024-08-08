@@ -9,7 +9,9 @@ license = "Apache-2.0"
 
 [dependencies]
 runtime-spec = { path = "../libs/runtime-spec" }
-oci-spec = { version = "0.6.8", features = ["runtime"] }
+oci-spec = { version = "0.6.8", features = [
+    "runtime",
+] }
 rustjail = { path = "rustjail" }
 protocols = { path = "../libs/protocols", features = [
     "async",
@@ -99,7 +101,7 @@ strum_macros = "0.26.2"
 image-rs = { git = "https://github.com/confidential-containers/guest-components", rev = "2c5ac6b01aafcb0be3875f5743c77d654a548146", default-features = false, optional = true }
 
 # Agent Policy
-regorus = { version = "0.2.2", default-features = false, features = [
+regorus = { git = "https://github.com/microsoft/regorus", rev = "e4a58ad1dcaa8b9714820ed126636553d47574c2", default-features = false, features = [
     "arc",
     "regex",
     "std",
