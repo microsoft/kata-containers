@@ -61,3 +61,9 @@ pub struct CopyFileInput {
 pub struct SetPolicyInput {
     pub policy_file: String,
 }
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ExecProcessInput {
+    pub id: String,
+    pub args: String,
+}

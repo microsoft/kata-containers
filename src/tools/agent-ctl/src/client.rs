@@ -5,7 +5,7 @@
 
 // Description: Client side of ttRPC comms
 
-use crate::types::{Config, Options, CreateSandboxInput, CreateContainerInput, CopyFileInput, SetPolicyInput};
+use crate::types::{Config, Options, CreateSandboxInput, CreateContainerInput, CopyFileInput, SetPolicyInput, ExecProcessInput};
 use crate::utils;
 use crate::oci_helper;
 use anyhow::{anyhow, Result};
@@ -1057,38 +1057,51 @@ fn agent_cmd_container_exec(
     options: &mut Options,
     args: &str,
 ) -> Result<()> {
-    let mut req: ExecProcessRequest = utils::make_request(args)?;
+    let mut req = ExecProcessRequest::default();
 
     let ctx = clone_context(ctx);
 
-    run_if_auto_values!(ctx, || -> Result<()> {
-        let cid = utils::get_option("cid", options, args)?;
-        let exec_id = utils::get_option("exec_id", options, args)?;
+    let json_spec= utils::get_option("spec", options, "")?;
+    if json_spec.is_empty() {
+        info!(sl!(), "Test: Parsing custom inputs");
+        let input: ExecProcessInput = utils::make_request(&args)?;
+        // get the oci process from template
+        let ttrpc_process = utils::get_exec_process(&input)?;
+        // set the inputs in the req.
+        req.set_container_id(input.id.clone());
+        req.set_exec_id(input.id.clone());
+        req.set_process(ttrpc_process);
+    } else {
+	req = utils::make_request(&args)?;
+        run_if_auto_values!(ctx, || -> Result<()> {
+            let cid = utils::get_option("cid", options, args)?;
+            let exec_id = utils::get_option("exec_id", options, args)?;
 
-        let ttrpc_spec = utils::get_ttrpc_spec(options, &cid).map_err(|e| anyhow!(e))?;
+            let ttrpc_spec = utils::get_ttrpc_spec(options, &cid).map_err(|e| anyhow!(e))?;
 
-        let bundle_dir = options
-            .get("bundle-dir")
-            .ok_or("BUG: bundle-dir missing")
-            .map_err(|e| anyhow!(e))?;
+            let bundle_dir = options
+                .get("bundle-dir")
+                .ok_or("BUG: bundle-dir missing")
+                .map_err(|e| anyhow!(e))?;
 
-        let process = ttrpc_spec
-            .Process
-            .into_option()
-            .ok_or(format!(
-                "failed to get process from OCI spec: {}",
-                bundle_dir,
-            ))
-            .map_err(|e| anyhow!(e))?;
+            let process = ttrpc_spec
+                .Process
+                .into_option()
+                .ok_or(format!(
+                        "failed to get process from OCI spec: {}",
+                        bundle_dir,
+                        ))
+                .map_err(|e| anyhow!(e))?;
 
-        req.set_container_id(cid);
-        req.set_exec_id(exec_id);
-        req.set_process(process);
+            req.set_container_id(cid);
+            req.set_exec_id(exec_id);
+            req.set_process(process);
 
-        Ok(())
-    });
+            Ok(())
+        });
+    }
 
-    debug!(sl!(), "sending request"; "request" => format!("{:?}", req));
+    info!(sl!(), "sending request"; "request" => format!("{:?}", req));
 
     let reply = client
         .exec_process(ctx, &req)

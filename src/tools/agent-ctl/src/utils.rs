@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::types::{Config, Options, CreateSandboxInput, CopyFileInput, SetPolicyInput};
+use crate::types::{Config, Options, CreateSandboxInput, CopyFileInput, SetPolicyInput, ExecProcessInput};
 use anyhow::{anyhow, Result};
 use oci::{
     Linux as ociLinux, Mount as ociMount, Process as ociProcess, Root as ociRoot, Spec as ociSpec,
@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::sync::{Arc, Mutex};
 
 // Length of a sandbox identifier
@@ -934,4 +934,26 @@ pub fn make_set_policy_request(input: &SetPolicyInput) -> Result<SetPolicyReques
     let mut req = SetPolicyRequest::default();
     req.set_policy(policy_data);
     Ok(req)
+}
+
+pub fn get_exec_process(input: &ExecProcessInput) -> Result<ttrpcProcess> {
+    info!(sl!(), "Test: get_exec_process");
+
+    // fill the ociProcess struct from template file
+    if !Path::new("/tmp/exec_process.json").exists() {
+        info!(sl!(), "Test: Missig template file");
+        return Err(anyhow!("Missing ExecProces template file"));
+    }
+
+    let file = File::open("/tmp/exec_process.json")?;
+    let execproc: ociProcess = serde_json::from_reader(file)?;
+
+    // covert this process struct to ttrpc equivalent
+    let mut ttrpc_process = process_oci_to_ttrpc(&execproc);
+
+    // fill the cmd struct from here
+    let args : Vec<String> = input.args.split(' ').collect::<Vec<&str>>().into_iter().map(|x| x.to_owned()).collect();
+    ttrpc_process.set_Args(args);
+
+    Ok(ttrpc_process)
 }
