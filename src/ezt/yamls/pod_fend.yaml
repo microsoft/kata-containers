@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ezt-pod-frontend
+  annotations:
+    io.katacontainers.config.agent.network-policy: YXBpVmVyc2lvbjogbmV0d29ya2luZy5rOHMuaW8vdjEKa2luZDogTmV0d29ya1BvbGljeQptZXRhZGF0YToKICBsYWJlbHM6IAogICAgcm9sZTogRlJPTlRFTkQKc3BlYzoKICBwb2RTZWxlY3RvcjoKICAgICBtYXRjaExhYmVsczoKICAgICAgIHJvbGU6IEJBQ0tFTkQKICBpbmdyZXNzOgogIC0gZnJvbToKICAgIC0gcG9kU2VsZWN0b3I6CiAgICAgICAgbWF0Y2hMYWJlbHM6CiAgICAgICAgICByb2xlOiBGUk9OVEVORCAgIAogICAgcG9ydHM6CiAgICAtIHByb3RvY29sOiBUQ1AKICAgICAgcG9ydDogODAK
+spec:
+  containers:
+  - image: nginx
+    name: ezt-cont-fend
+  runtimeClassName: kata-cc

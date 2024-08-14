@@ -1,0 +1,9 @@
+## NEEDED
+apiVersion: networking.k8s.io/v1
+## NEEDED
+kind: NetworkPolicy
+##NEEDED
+metadata:
+## NEEDED:For now this is the self label of the pod
+  labels: 
+spec:

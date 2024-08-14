@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    role: MALICIOUS
+spec:
+  podSelector:
+     matchLabels:
+       role: BACKEND
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          role: FRONTEND   
+    ports:
+    - protocol: TCP
+      port: 80
