@@ -38,7 +38,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	cp -a --backup=numbered src/tardev-snapshotter/tardev-snapshotter.service ${PREFIX}/usr/lib/systemd/system/
 
 	echo "Installing SNP shim debug configuration"
-	cp -a --backup=numbered src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}"
+	cp -a --backup=numbered src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}"/"${SHIM_DBG_CONFIG_INST_FILE_NAME}"
 
 	echo "Enabling and starting snapshotter service"
 	if [ "${START_SERVICES}" == "yes" ]; then
@@ -55,6 +55,6 @@ cp -a --backup=numbered src/runtime/data/kata-collect-data.sh "${PREFIX}/${DEBUG
 echo "Installing shim binary and configuration"
 cp -a --backup=numbered src/runtime/containerd-shim-kata-v2 "${PREFIX}/${SHIM_BINARIES_PATH}"/"${SHIM_BINARY_NAME}"
 
-cp -a --backup=numbered src/runtime/config/"${SHIM_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}"
+cp -a --backup=numbered src/runtime/config/"${SHIM_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_INST_FILE_NAME}"
 
 popd
