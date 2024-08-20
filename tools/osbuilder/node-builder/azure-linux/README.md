@@ -89,16 +89,6 @@ sudo dnf -y install git vim golang rust cargo build-essential protobuf-compiler 
 
 **Note:** The kernel-uvm-devel package in step above is only required for Confidential Containers and can be omitted for regular Kata Containers builds.
 
-When intending to build the components for Confidential Containers, install the IGVM tool that will be used by the build tooling to create IGVM files with their reference measurements for the ConfPods UVM.
-
-```
-pushd kata-containers/tools/osbuilder/igvm-builder
-sudo ./igvm_builder.sh -i
-popd
-```
-
-This command installs the latest release of the [IGVM tooling](https://github.com/microsoft/igvm-tooling/) using `pip3 install`. The tool can be uninstalled at any time by calling the script using the -u parameter instead.
-
 # Optional: Build and deploy the containerd fork from scratch
 
 ```
@@ -117,7 +107,22 @@ sudo systemctl restart containerd
 # Build and install the Kata(-CC) host and guest components
 
 Clone the Microsoft's fork of the kata-containers repository:
+
 ```git clone https://github.com/microsoft/kata-containers.git```
+
+## Install IGVM tooling for ConfPods
+
+When intending to build the components for Confidential Containers, install the IGVM tool that will be used by the build tooling to create IGVM files with their reference measurements for the ConfPods UVM.
+
+```
+pushd kata-containers/tools/osbuilder/igvm-builder
+sudo ./igvm_builder.sh -i
+popd
+```
+
+This command installs the latest release of the [IGVM tooling](https://github.com/microsoft/igvm-tooling/) using `pip3 install`. The tool can be uninstalled at any time by calling the script using the -u parameter instead.
+
+## Build and deploy
 
 To build and install Kata Containers for AKS components, run:
 ```
@@ -139,7 +144,7 @@ The `all[-confpods]` target runs the targets `package[-confpods]` and `uvm[-conf
 
 Notes:
   - To retrieve more detailed build output, prefix the make commands with `DEBUG=1`.
-  - To build for Mariner 3, prefix the make commands that build artifacts with `OS_VERSION=3.0`
+  - To build for Azure Linux 3, prefix the make commands that build artifacts with `OS_VERSION=3.0`
   - For build and deployment of both Kata and Kata-CC artifacts, first run the `make all` and `make deploy` commands to build and install the Kata Containers for AKS components followed by `make clean`, and then run `make all-confpods` and `make deploy-confpods` to build and install the Confidential Containers for AKS components - or vice versa (using `make clean-confpods`).
 
 # Run Kata (Confidential) Containers
@@ -164,7 +169,7 @@ The following instructions serve as a general reference:
   sudo dnf -y install cni
   ```
 
-- Set a proper CNI configuration: This step is omitted as it depends on the individual needs.
+- Set a proper CNI configuration and create a sample pod manifest: This step is omitted as it depends on the individual needs.
 
 - Run pods with `crictl`, for example:
 
@@ -172,9 +177,9 @@ The following instructions serve as a general reference:
 
 - Run containers with `ctr`, for example a confidential container:
 
-  `sudo ctr image pull --snapshotter=tardev docker.io/library/busybox:latest`
+  `sudo ctr -n=k8s.io image pull --snapshotter=tardev docker.io/library/busybox:latest`
 
-  `sudo ctr run --cni --runtime io.containerd.run.kata-cc.v2 --runtime-config-path /opt/confidential-containers/share/defaults/kata-containers/configuration-clh-snp.toml --snapshotter tardev -t --rm docker.io/library/busybox:latest hello sh`
+  `sudo ctr -n=k8s.io run --cni --runtime io.containerd.run.kata-cc.v2 --runtime-config-path /opt/confidential-containers/share/defaults/kata-containers/configuration-clh-snp.toml --snapshotter tardev -t --rm docker.io/library/busybox:latest hello sh`
 
 For further usage we refer to the upstream `crictl` (or `ctr`) and CNI documentation.
 
@@ -183,7 +188,7 @@ For further usage we refer to the upstream `crictl` (or `ctr`) and CNI documenta
 If your environment was set up through `az aks create` the respective node is ready to run Kata (Confidential) Containers as AKS Kubernetes pods.
 Other types of Kubernetes clusters should work as well - but this document doesn't cover how to set-up those clusters.
 
-Next, apply the kata and kata-cc runtime classes on the machine that holds your kubeconfig file:
+Next, apply the kata and kata-cc runtime classes on the machine that holds your kubeconfig file, example AKS:
 ```
 cat << EOF > runtimeClass-kata-cc.yaml
 kind: RuntimeClass
@@ -193,8 +198,7 @@ metadata:
 handler: kata-cc
 overhead:
     podFixed:
-        memory: "160Mi"
-        cpu: "250m"
+        memory: "2Gi"
 scheduling:
   nodeSelector:
     katacontainers.io/kata-runtime: "true"
@@ -206,10 +210,6 @@ apiVersion: node.k8s.io/v1
 metadata:
     name: kata
 handler: kata
-overhead:
-    podFixed:
-        memory: "160Mi"
-        cpu: "250m"
 scheduling:
   nodeSelector:
     katacontainers.io/kata-runtime: "true"
