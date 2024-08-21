@@ -136,52 +136,68 @@ impl AgentPolicy {
         self.allow_request_string(ep, &ep_input).await
     }
 
-    async fn apply_patch_to_state(&mut self, patch: json_patch::Patch) -> Result<()> {
-        // Convert the current engine data to a JSON value
-        let mut state = serde_json::Value::from_str(&self.engine.get_data().to_string())?;
-
-        // Apply the patch to the state
-        json_patch::patch(&mut state, &patch)?;
-
-        // Clear the existing data in the engine
-        self.engine.clear_data();
-
-        // Add the patched state back to the engine
-        self.engine
-            .add_data(regorus::Value::from_json_str(&state.to_string())?)?;
-
-        Ok(())
-    }
-
-    async fn process_metadata(&mut self, metadata: Vec<Option<Metadata>>) -> Result<()> {
+    async fn process_metadata(&mut self, metadata_ops: Vec<Option<Metadata>>) -> Result<()> {
         // Iterate over each metadataAction in the metadata map
-        for action in metadata {
-            if let Some(metadata_action) = action {
-                match metadata_action.action.as_str() {
-                    "add" | "update" => {
-                        let patch = serde_json::from_value(serde_json::json!([
-                            { "op": "add", "path": format!("/{}", metadata_action.key), "value": metadata_action.value },
-                        ]))?;
+        let mut policy_state =
+            serde_json::Value::from_str(&self.engine.get_data().to_string()).unwrap();
+        for m in metadata_ops {
+            if let Some(metadata) = m {
+                let state_slice_map = policy_state
+                    .as_object_mut()
+                    .unwrap()
+                    .entry(metadata.name.to_string())
+                    .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+                    .as_object_mut()
+                    .unwrap();
 
-                        self.apply_patch_to_state(patch).await?;
+                match metadata.action.as_str() {
+                    "add" => {
+                        if state_slice_map.contains_key(&metadata.key) {
+                            // may just log error and continue instead
+                            bail!(
+                                "Received duplicate metadata key: {} in metadata",
+                                metadata.key
+                            );
+                        }
+
+                        state_slice_map.insert(metadata.key, metadata.value);
+                    }
+
+                    "update" => {
+                        state_slice_map.insert(metadata.key, metadata.value);
                     }
 
                     "remove" => {
-                        let patch = serde_json::from_value(serde_json::json!([
-                        { "op": "remove", "path": format!("/{}", metadata_action.key) },
-                        ]))?;
-
-                        self.apply_patch_to_state(patch).await?;
+                        state_slice_map.remove(&metadata.key);
                     }
 
                     _ => {
                         bail!(
                             "Received unknown metadata action: {} in metadata",
-                            metadata_action.action
+                            metadata.action
                         );
                     }
                 }
+                // self.log_eval_input("state after update", &format!("{:#?}", state))
+                //     .await;
+
+                self.log_eval_input(
+                    "whole state after update: ",
+                    &serde_json::to_string_pretty(&policy_state).unwrap(),
+                )
+                .await;
             }
+
+            self.engine.clear_data();
+
+            self.engine
+                .add_data(regorus::Value::from_json_str(&policy_state.to_string())?)?;
+
+            self.log_eval_input(
+                "state debug print after update",
+                &(self.engine.get_data().to_string()),
+            )
+            .await;
         }
 
         Ok(())
