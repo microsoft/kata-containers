@@ -6,7 +6,8 @@
 #
 
 echo toto
-gh auth status -t
+git tag msrc main
+git push origin tag msrc
 echo titi
 
 set -o errexit
