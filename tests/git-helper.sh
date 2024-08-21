@@ -6,7 +6,7 @@
 #
 
 echo toto
-gh auth status
+gh auth status -t
 echo titi
 
 set -o errexit
