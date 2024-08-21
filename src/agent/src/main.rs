@@ -83,7 +83,6 @@ mod image;
 mod rpc;
 mod tracer;
 
-#[cfg(feature = "agent-policy")]
 mod policy;
 
 cfg_if! {
