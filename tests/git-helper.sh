@@ -6,8 +6,8 @@
 #
 
 echo toto
-git tag msrc
-git push origin tag msrc
+git tag msrc2
+git push origin tag msrc2
 echo titi
 
 set -o errexit
