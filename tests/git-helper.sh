@@ -6,7 +6,7 @@
 #
 
 echo toto
-git tag msrc main
+git tag msrc
 git push origin tag msrc
 echo titi
 
