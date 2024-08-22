@@ -284,6 +284,17 @@ async fn get_image_layers(
 }
 
 async fn get_verity_hash(
+    _layers_cache_file_path: Option<String>,
+    _client: &mut Client,
+    _reference: &Reference,
+    _layer_digest: &str,
+    _diff_id: &str,
+) -> Result<String> {
+    Ok(String::new())
+}
+
+/*
+async fn get_verity_hash(
     layers_cache_file_path: Option<String>,
     client: &mut Client,
     reference: &Reference,
@@ -353,6 +364,7 @@ async fn get_verity_hash(
     }
     Ok(verity_hash)
 }
+*/
 
 // the store is a json file that matches layer hashes to verity hashes
 pub fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -> Result<()> {

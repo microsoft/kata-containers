@@ -703,10 +703,11 @@ impl KataSpec {
 }
 
 fn get_image_layer_storages(
-    storages: &mut Vec<agent::Storage>,
-    image_layers: &Vec<registry::ImageLayer>,
-    root: &KataRoot,
+    _storages: &mut Vec<agent::Storage>,
+    _image_layers: &Vec<registry::ImageLayer>,
+    _root: &KataRoot,
 ) {
+    /*
     let mut new_storages: Vec<agent::Storage> = Vec::new();
     let mut layer_names: Vec<String> = Vec::new();
     let mut layer_hashes: Vec<String> = Vec::new();
@@ -765,6 +766,7 @@ fn get_image_layer_storages(
     };
 
     storages.push(overlay_storage);
+    */
 }
 
 /// Converts the given name to a string representation of its sha256 hash.
