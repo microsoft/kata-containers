@@ -54,9 +54,9 @@ default AllowRequestsFailingPolicy := false
 CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # Check if the input request should be rejected even before checking the
     # policy_data.containers information.
-    allow_create_container_input
+    # allow_create_container_input
 
-    initial_ops := []
+    ops_builder := []
 
     i_oci := input.OCI
 
@@ -65,38 +65,48 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
 
     print("addSandboxName = ", addSandboxName)
 
-    ops := concat_op_if_not_null(initial_ops, addSandboxName)
-    print("ops = ", ops)
 
-    i_storages := input.storages
-    i_devices := input.devices
+    # i_storages := input.storages
+    # i_devices := input.devices
 
-    # Check if any element from the policy_data.containers array allows the input request.
+    # # Check if any element from the policy_data.containers array allows the input request.
     some p_container in policy_data.containers
     print("======== CreateContainerRequest: trying next policy container")
 
-    p_pidns := p_container.sandbox_pidns
-    i_pidns := input.sandbox_pidns
-    print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
-    p_pidns == i_pidns
+    # p_pidns := p_container.sandbox_pidns
+    # i_pidns := input.sandbox_pidns
+    # print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
+    # p_pidns == i_pidns
 
     p_oci := p_container.OCI
 
-    print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
-    p_oci.Version == i_oci.Version
+    ops_builder1 := concat_op_if_not_null(ops_builder, addSandboxName)
+    print("ops_builder1 = ", ops_builder1)
 
-    print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
-    p_oci.Root.Readonly == i_oci.Root.Readonly
+    s_namespace := "io.kubernetes.cri.sandbox-namespace"
+    p_namespace := p_oci.Annotations[s_namespace]
+    i_namespace := i_oci.Annotations[s_namespace]
+    print("allow_by_sandbox_name: p_namespace =", p_namespace, "i_namespace =", i_namespace)
 
-    allow_anno(p_oci, i_oci)
+    addNamespace := check_namespace(p_namespace, i_namespace)
+    ops := concat_op_if_not_null(ops_builder1, addNamespace)
+    print("ops = ", ops)
 
-    p_storages := p_container.storages
-    allow_by_anno(p_oci, i_oci, p_storages, i_storages)
+    # print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
+    # p_oci.Version == i_oci.Version
 
-    p_devices := p_container.devices
-    allow_devices(p_devices, i_devices)
+    # print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
+    # p_oci.Root.Readonly == i_oci.Root.Readonly
 
-    allow_linux(p_oci, i_oci)
+    # allow_anno(p_oci, i_oci)
+
+    # p_storages := p_container.storages
+    # allow_by_anno(p_oci, i_oci, p_storages, i_storages)
+
+    # p_devices := p_container.devices
+    # allow_devices(p_devices, i_devices)
+
+    # allow_linux(p_oci, i_oci)
 
     print("CreateContainerRequest: true")
 }
@@ -131,6 +141,29 @@ allow_sandbox_name(s_name) = addSandboxName {
         "path": "/sandboxName", 
         "value": s_name,
     }
+}
+
+check_namespace(p_namespace, i_namespace) = addNamespace {
+    p_namespace == i_namespace
+    addNamespace := null
+    print("check_namespace 1")
+}
+
+check_namespace(p_namespace, i_namespace) = addNamespace {
+    p_namespace == ""
+    not data.namespace
+    addNamespace := {
+        "op": "add",
+        "path": "/namespace", 
+        "value": i_namespace,
+    }
+    print("check_namespace 2")
+}
+
+check_namespace(p_namespace, i_namespace) = addNamespace {
+    i_namespace == data.namespace
+    addNamespace := null
+    print("check_namespace 3")
 }
 
 allow_create_container_input {
@@ -235,12 +268,7 @@ allow_by_anno(p_oci, i_oci, p_storages, i_storages) {
 allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name) {
     print("allow_by_sandbox_name: start")
 
-    s_namespace := "io.kubernetes.cri.sandbox-namespace"
-
-    p_namespace := p_oci.Annotations[s_namespace]
-    i_namespace := i_oci.Annotations[s_namespace]
-    print("allow_by_sandbox_name: p_namespace =", p_namespace, "i_namespace =", i_namespace)
-    p_namespace == i_namespace
+    p_namespace := p_oci.Annotations["io.kubernetes.cri.sandbox-namespace"]
 
     allow_by_container_types(p_oci, i_oci, s_name, p_namespace)
     allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages)

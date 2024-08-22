@@ -149,6 +149,12 @@ impl AgentPolicy {
         self.engine
             .add_data(regorus::Value::from_json_str(&state.to_string())?)?;
 
+        self.log_eval_input(
+            "debug print after state update: ",
+            &self.engine.get_data().to_string(),
+        )
+        .await;
+
         Ok(())
     }
 
@@ -185,7 +191,9 @@ impl AgentPolicy {
 
                 if metadata_response.allowed {
                     if let Some(ops) = metadata_response.ops {
-                        self.apply_patch_to_state(ops).await?;
+                        if ops.len() > 0 {
+                            self.apply_patch_to_state(ops).await?;
+                        }
                     }
                 }
                 metadata_response.allowed
