@@ -9,6 +9,7 @@ ROOTFS_BUILDER := $(MK_DIR)/rootfs-builder/rootfs.sh
 INITRD_BUILDER := $(MK_DIR)/initrd-builder/initrd_builder.sh
 IMAGE_BUILDER  := $(MK_DIR)/image-builder/image_builder.sh
 IGVM_BUILDER   := $(MK_DIR)/igvm-builder/igvm_builder.sh
+IGVM_SVN       ?= 0
 
 DISTRO                ?= ubuntu
 BUILD_METHOD          := distro
@@ -165,7 +166,7 @@ $(DRACUT_OVERLAY_DIR):
 
 .PHONY: igvm
 igvm: $(TARGET_IMAGE)
-	$(IGVM_BUILDER) -o $(IGVM_BUILD_DEST) -s 0
+	$(IGVM_BUILDER) -o $(IGVM_BUILD_DEST) -s $(IGVM_SVN)
 
 .PHONY: test
 test:
