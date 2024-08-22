@@ -11,6 +11,7 @@ set -o errtrace
 [ -n "$DEBUG" ] && set -x
 
 CONF_PODS=${CONF_PODS:-no}
+IGVM_SVN=${IGVM_SVN:-0}
 
 script_dir="$(dirname $(readlink -f $0))"
 repo_dir="${script_dir}/../../../../"
@@ -63,7 +64,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building IGVM and UVM measurement files"
 	pushd tools/osbuilder
 	sudo chmod o+r root_hash.txt
-	sudo make igvm DISTRO=cbl-mariner
+	sudo make igvm DISTRO=cbl-mariner IGVM_SVN=${IGVM_SVN}
 	popd
 else
 	echo "Creating initrd based on rootfs"
