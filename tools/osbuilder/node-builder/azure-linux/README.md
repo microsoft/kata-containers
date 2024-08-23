@@ -145,6 +145,7 @@ The `all[-confpods]` target runs the targets `package[-confpods]` and `uvm[-conf
 Notes:
   - To retrieve more detailed build output, prefix the make commands with `DEBUG=1`.
   - To build for Azure Linux 3, prefix the make commands that build artifacts with `OS_VERSION=3.0`
+  - To build an IGVM file for CondPods with a non-default SVN of 0, prefix the `make uvm-confpods` command with `IGVM_SVN=<number>`
   - For build and deployment of both Kata and Kata-CC artifacts, first run the `make all` and `make deploy` commands to build and install the Kata Containers for AKS components followed by `make clean`, and then run `make all-confpods` and `make deploy-confpods` to build and install the Confidential Containers for AKS components - or vice versa (using `make clean-confpods`).
 
 # Run Kata (Confidential) Containers
