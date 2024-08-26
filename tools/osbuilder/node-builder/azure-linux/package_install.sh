@@ -12,6 +12,7 @@ set -o errtrace
 
 CONF_PODS=${CONF_PODS:-no}
 PREFIX=${PREFIX:-}
+SHIM_USE_DEBUG_CONFIG=${SHIM_USE_DEBUG_CONFIG:-no}
 START_SERVICES=${START_SERVICES:-yes}
 
 script_dir="$(dirname $(readlink -f $0))"
@@ -39,6 +40,12 @@ if [ "${CONF_PODS}" == "yes" ]; then
 
 	echo "Installing SNP shim debug configuration"
 	cp -a --backup=numbered src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}"/"${SHIM_DBG_CONFIG_INST_FILE_NAME}"
+
+	if [ "${SHIM_USE_DEBUG_CONFIG}" == "yes" ]; then
+		# We simply override the release config with the debug config,
+		# which is probably fine when debugging.
+		ln -sf src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" src/runtime/config/"${SHIM_CONFIG_FILE_NAME}" 
+	fi
 
 	echo "Enabling and starting snapshotter service"
 	if [ "${START_SERVICES}" == "yes" ]; then
