@@ -10,6 +10,7 @@ set -o errtrace
 
 [ -n "$DEBUG" ] && set -x
 
+AGENT_POLICY_FILE="${AGENT_POLICY_FILE:-allow-set-policy.rego}"
 CONF_PODS=${CONF_PODS:-no}
 IGVM_SVN=${IGVM_SVN:-0}
 
@@ -23,10 +24,7 @@ source "${common_file}"
 rootfs_make_flags="AGENT_SOURCE_BIN=${AGENT_INSTALL_DIR}/usr/bin/kata-agent"
 
 if [ "${CONF_PODS}" == "yes" ]; then
-	# AGENT_POLICY_FILE=allow-all.rego would build a UVM with permissive security policy.
-	# The current variable assignment builds a UVM with prohibitive security policy which is the default on
-	# Confidential Containers on AKS
-	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=allow-set-policy.rego"
+	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=${AGENT_POLICY_FILE}"
 fi
 
 if [ "${CONF_PODS}" == "yes" ]; then
