@@ -148,6 +148,37 @@ Notes:
   - To build an IGVM file for CondPods with a non-default SVN of 0, prefix the `make uvm-confpods` command with `IGVM_SVN=<number>`
   - For build and deployment of both Kata and Kata-CC artifacts, first run the `make all` and `make deploy` commands to build and install the Kata Containers for AKS components followed by `make clean`, and then run `make all-confpods` and `make deploy-confpods` to build and install the Confidential Containers for AKS components - or vice versa (using `make clean-confpods`).
 
+## Debug build
+
+`make all-confpods` takes the following variables:
+
+ * `AGENT_BUILD_TYPE`: Specify `release` (default) to build the agent in
+   release mode, or `debug` to build it in debug mode.
+ * `AGENT_POLICY_FILE`: Specify `allow-set-policy.rego` (default) to use
+   a restrictive policy, or `allow-all.rego` to use a permissive policy.
+
+`make deploy-confpods` takes the following variable:
+
+ * `SHIM_USE_DEBUG_CONFIG`: Specify `no` (default) to use the production
+   configuration, or `yes` to use the debug configuration (all debug
+   logging enabled). In this case you'll want to enable debug logging
+   in containerd as well.
+
+In general, you can specify the debug configuration for all the above
+variables by using `BUILD_TYPE=debug` as such:
+
+```shell
+sudo make BUILD_TYPE=debug all-confpods deploy-confpods
+```
+
+Also note that make still lets you override the other variables even
+after setting `BUILD_TYPE`. For example, you can use the production shim
+config with `BUILD_TYPE=debug`:
+
+```shell
+sudo make BUILD_TYPE=debug SHIM_USE_DEBUG_CONFIG=no all-confpods deploy-confpods
+```
+
 # Run Kata (Confidential) Containers
 
 ## Run via CRI or via containerd API
