@@ -27,6 +27,8 @@ Install relevant packages and modify the grub configuration to boot into the SEV
 sudo dnf -y makecache
 sudo dnf -y install kata-packages-host
 
+Note: The below steps in this section can be skipped if you are using AzureLinux 3.0 VM image.
+
 boot_uuid=$(sudo grep -o -m 1 '[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}' /boot/efi/boot/grub2/grub.cfg)
 
 sudo sed -i -e 's@load_env -f \$bootprefix\/mariner.cfg@load_env -f \$bootprefix\/mariner-mshv.cfg\nload_env -f $bootprefix\/mariner.cfg\n@'  /boot/grub2/grub.cfg
