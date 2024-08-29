@@ -150,6 +150,8 @@ Notes:
 
 ## Debug build
 
+This section describes how to build and deploy in debug mode.
+
 `make all-confpods` takes the following variables:
 
  * `AGENT_BUILD_TYPE`: Specify `release` (default) to build the agent in
@@ -177,6 +179,26 @@ config with `BUILD_TYPE=debug`:
 
 ```shell
 sudo make BUILD_TYPE=debug SHIM_USE_DEBUG_CONFIG=no all-confpods deploy-confpods
+```
+
+### Prevent redeploying the shim configuration
+
+If you're manually modifying the shim configuration directly on the host
+during development and you don't want to redeploy and overwrite that
+file each time you redeploy binaries, you can separately specify the
+`SHIM_REDEPLOY_CONFIG` (default `yes`):
+
+```shell
+sudo make SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
+```
+
+Note that this variable is independent from the other variables
+mentioned above. So if you want to avoid redeploying the shim
+configuration AND build in debug mode, you have to use the following
+command:
+
+```shell
+sudo make BUILD_TYPE=debug SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
 ```
 
 # Run Kata (Confidential) Containers
