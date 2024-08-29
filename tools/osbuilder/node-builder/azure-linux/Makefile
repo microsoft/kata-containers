@@ -4,6 +4,8 @@
 #
 BUILD_TYPE := release
 
+export SHIM_REDEPLOY_CONFIG := yes
+
 ifeq ($(BUILD_TYPE),debug)
 	export AGENT_BUILD_TYPE := debug
 	export AGENT_POLICY_FILE := allow-all.rego
