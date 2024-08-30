@@ -27,14 +27,14 @@ mkdir -p "${UVM_PATH}"
 
 echo "Installing UVM files to target directory"
 if [ "${CONF_PODS}" == "yes" ]; then
-	cp -a --backup=numbered "${IMG_FILE_NAME}" "${UVM_PATH}"
 	cp -a --backup=numbered "${IGVM_FILE_NAME}" "${UVM_PATH}"
 	cp -a --backup=numbered "${IGVM_DBG_FILE_NAME}" "${UVM_PATH}"
 	cp -a --backup=numbered "${UVM_MEASUREMENT_FILE_NAME}" "${UVM_PATH}"
 	cp -a --backup=numbered "${UVM_DBG_MEASUREMENT_FILE_NAME}" "${UVM_PATH}"
-else
-	cp -a --backup=numbered "${INITRD_FILE_NAME}" "${UVM_PATH}"
 fi
+
+cp -a --backup=numbered "${IMG_FILE_NAME}" "${UVM_PATH}"
+
 popd
 
 popd
