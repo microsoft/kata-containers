@@ -46,12 +46,6 @@ if [ "${CONF_PODS}" == "yes" ]; then
 		echo "Skipping installation of SNP shim debug configuration"
 	fi
 
-	if [ "${SHIM_USE_DEBUG_CONFIG}" == "yes" ]; then
-		# We simply override the release config with the debug config,
-		# which is probably fine when debugging.
-		ln -sf src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" src/runtime/config/"${SHIM_CONFIG_FILE_NAME}" 
-	fi
-
 	echo "Enabling and starting snapshotter service"
 	if [ "${START_SERVICES}" == "yes" ]; then
 		systemctl enable tardev-snapshotter && systemctl daemon-reload && systemctl restart tardev-snapshotter
@@ -70,6 +64,14 @@ cp -a --backup=numbered src/runtime/containerd-shim-kata-v2 "${PREFIX}/${SHIM_BI
 if [ "${SHIM_REDEPLOY_CONFIG}" == "yes" ]; then
 	echo "Installing shim configuration"
 	cp -a --backup=numbered src/runtime/config/"${SHIM_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_INST_FILE_NAME}"
+
+	if [ "${CONF_PODS}" == "yes" ] && [ "${SHIM_USE_DEBUG_CONFIG}" == "yes" ]; then
+		# We simply override the release config with the debug config,
+		# which is probably fine when debugging. Not symlinking as that
+		# would create cycles the next time this script is called.
+		echo "Overriding shim configuration with SNP debug configuration"
+		cp -a --backup=numbered src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_INST_FILE_NAME}"
+	fi
 else
 	echo "Skipping installation of shim configuration"
 fi
