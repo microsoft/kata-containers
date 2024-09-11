@@ -6,9 +6,10 @@
 
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -25,12 +26,12 @@ use zerocopy::AsBytes;
 use self::bind_watcher_handler::BindWatcherHandler;
 use self::block_handler::{PmemHandler, ScsiHandler, VirtioBlkMmioHandler, VirtioBlkPciHandler};
 use self::ephemeral_handler::EphemeralHandler;
-use self::fs_handler::{OverlayfsHandler, Virtio9pHandler, VirtioFsHandler, SMBHandler};
+use self::fs_handler::{OverlayfsHandler, SMBHandler, Virtio9pHandler, VirtioFsHandler};
 use self::local_handler::LocalHandler;
 use crate::device::{
     DRIVER_9P_TYPE, DRIVER_BLK_MMIO_TYPE, DRIVER_BLK_PCI_TYPE, DRIVER_EPHEMERAL_TYPE,
     DRIVER_LOCAL_TYPE, DRIVER_NVDIMM_TYPE, DRIVER_OVERLAYFS_TYPE, DRIVER_SCSI_TYPE,
-    DRIVER_VIRTIOFS_TYPE, DRIVER_WATCHABLE_BIND_TYPE, DRIVER_SMB_TYPE,
+    DRIVER_SMB_TYPE, DRIVER_VIRTIOFS_TYPE, DRIVER_WATCHABLE_BIND_TYPE,
 };
 use crate::mount::{baremount, is_mounted, remove_mounts};
 use crate::sandbox::Sandbox;
@@ -380,8 +381,122 @@ fn mount_storage(logger: &Logger, storage: &Storage) -> Result<()> {
         "mount-options" => options.as_str(),
     );
 
+    let confidential = storage.driver_options.contains(&"confidential=true".into());
+    let ephemeral = storage.driver_options.contains(&"ephemeral=true".into());
+
+    let src_path = if confidential && ephemeral {
+        // NOTE: This whole branch will be replaced by the following
+        // upstream script eventually:
+        // https://github.com/confidential-containers/guest-components/blob/main/confidential-data-hub/storage/scripts/luks-encrypt-storage
+
+        // TODO: Ensure that this allows:
+        //  * Multiple containers (same pod) to mount the same ephemeral
+        //    volume.
+        //  * A container to mount the same ephemeral volume mutliple
+        //    times (under different paths).
+        // => No issue in my testing but need to ensure that this is
+        // only called once per pod.
+
+        // Path to the key file that will be passed to the cryptsetup
+        // commands.
+        const KEY_FILE_PATH: &str = "/tmp/ephemeral_encryption_key";
+
+        // Name of the devmapper that will live under /dev/mapper/.
+        let devmapper_device_name = src_path
+            .file_name()
+            .ok_or_else(|| anyhow!("could not get filename from {:?}", src_path))?
+            .to_str()
+            .ok_or_else(|| anyhow!("could not convert {:?} to string", src_path))?;
+
+        // Full path of the devmapper device. This is a virtual device
+        // that appears as cleartext to the end user and maps to
+        // `storage.source`. Under the hood, writes to this device are
+        // encrypted by the kernel and funnelled to the underlying
+        // logical `storage.source` device.
+        let devmapper_device_path = format!("/dev/mapper/{devmapper_device_name}");
+
+        // Generate a random encryption key and write it to a file.
+        let mut urandom = File::open("/dev/urandom")?;
+        let mut key = [0u8; 32];
+        urandom.read_exact(&mut key)?;
+        let mut key_file = File::create(KEY_FILE_PATH)?;
+        key_file.write_all(&key)?;
+
+        // Encrypt the logical `storage.source` device.
+        let output = Command::new("cryptsetup")
+            .args([
+                // TODO: Validate these encryption settings.
+                "luksFormat",
+                "--type",
+                "luks2",
+                &storage.source,
+                "--key-file",
+                KEY_FILE_PATH,
+                "-v",
+                "--batch-mode",
+                "--sector-size",
+                "4096",
+                "--cipher",
+                "aes-xts-plain64",
+                "--pbkdf",
+                "pbkdf2",
+                "--pbkdf-force-iterations",
+                "1000",
+            ])
+            .output()?;
+        if !output.status.success() {
+            info!(logger, "failed to encrypt device";
+                "status" => output.status.code().unwrap_or(-1),
+                "stdout" => String::from_utf8_lossy(&output.stdout).to_string(),
+                "stderr" => String::from_utf8_lossy(&output.stderr).to_string(),
+            );
+            assert!(output.status.success());
+        }
+
+        // Open (or decrypt) the logical device and expose it as
+        // cleartext under /dev/mapper/{devmapper_device_name}.
+        let output = Command::new("cryptsetup")
+            .args([
+                // TODO: Validate these encryption settings.
+                "luksOpen",
+                &storage.source,
+                devmapper_device_name,
+                "--key-file",
+                KEY_FILE_PATH,
+                "--integrity-no-journal",
+                "--persistent",
+            ])
+            .output()?;
+        if !output.status.success() {
+            info!(logger, "failed to decrypt device";
+                "status" => output.status.code().unwrap_or(-1),
+                "stdout" => String::from_utf8_lossy(&output.stdout).to_string(),
+                "stderr" => String::from_utf8_lossy(&output.stderr).to_string(),
+            );
+            assert!(output.status.success());
+        }
+
+        // Format the virtual device as an ext4 filesystem. This is the
+        // device that will be mounted into the container.
+        let output = Command::new("mkfs")
+            .args(["-t", "ext4", &devmapper_device_path])
+            .output()?;
+        if !output.status.success() {
+            info!(logger, "failed to format device";
+                "status" => output.status.code().unwrap_or(-1),
+                "stdout" => String::from_utf8_lossy(&output.stdout).to_string(),
+                "stderr" => String::from_utf8_lossy(&output.stderr).to_string(),
+            );
+            assert!(output.status.success());
+        }
+
+        PathBuf::from(devmapper_device_path)
+    } else {
+        src_path.to_path_buf()
+    };
+
     baremount(
-        src_path,
+        &src_path,
         mount_path,
         storage.fstype.as_str(),
         flags,
