@@ -658,6 +658,20 @@ func (c *Container) createBlockDevices(ctx context.Context) error {
 					c.mounts[i].FSGroupChangePolicy = volume.FSGroupChangePolicy(value)
 				case volume.SensitiveMountOptions:
 					c.mounts[i].Options = append(c.mounts[i].Options, value)
+				case volume.ConfidentialMetadataKey:
+					confidential, err := strconv.ParseBool(value)
+					if err != nil {
+						c.Logger().Errorf("invalid value %q for metadata key %q, expected boolean string", value, key)
+						continue
+					}
+					c.mounts[i].Confidential = confidential
+				case volume.EphemeralMetadataKey:
+					ephemeral, err := strconv.ParseBool(value)
+					if err != nil {
+						c.Logger().Errorf("invalid value %q for metadata key %q, expected boolean string", value, key)
+						continue
+					}
+					c.mounts[i].Ephemeral = ephemeral
 				default:
 					c.Logger().Warnf("Ignoring unsupported direct-assignd volume metadata key: %s, value: %s", key, value)
 				}
