@@ -254,8 +254,11 @@ func (d *Driver) NodePublishVolume(_ context.Context, req *csi.NodePublishVolume
 		VolumeType: "blk",
 		Device:     device,
 		FsType:     fstype,
-		Metadata:   nil,
-		Options:    nil,
+		Metadata: map[string]string{
+			"confidential": "true",
+			"ephemeral":    "true",
+		},
+		Options: nil,
 	}
 
 	rawMountInfo, err := json.Marshal(mountInfo)
