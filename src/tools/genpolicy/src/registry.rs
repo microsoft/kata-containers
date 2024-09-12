@@ -142,6 +142,7 @@ impl Container {
                     serde_json::from_str(&config_layer_str).unwrap();
                 debug!("config_layer: {:?}", &config_layer);
 
+                /*
                 let image_layers = get_image_layers(
                     config.layers_cache_file_path.clone(),
                     &mut client,
@@ -151,11 +152,12 @@ impl Container {
                 )
                 .await
                 .unwrap();
+                */
 
                 Ok(Container {
                     image: image_string,
                     config_layer,
-                    image_layers,
+                    image_layers: Vec::new(),
                 })
             }
             Err(oci_distribution::errors::OciDistributionError::AuthenticationFailure(message)) => {

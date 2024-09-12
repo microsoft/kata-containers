@@ -12,7 +12,8 @@ spec:
   runtimeClassName: kata
   containers:
     - name: prometheus
-      image: quay.io/prometheus/prometheus:latest
+#      image: quay.io/prometheus/busybox:latest
+      image: quay.io/footloose/ubuntu18.04:latest
       command:
         - /bin/sh
       env:

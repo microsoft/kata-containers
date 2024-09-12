@@ -234,7 +234,7 @@ auto_generate_policy() {
 	declare -r additional_flags="$4"
 
 	auto_generate_policy_enabled || return 0
-	local genpolicy_command="RUST_LOG=info /opt/kata/bin/genpolicy -u -y ${yaml_file}"
+	local genpolicy_command="RUST_LOG=info /opt/kata/bin/genpolicy -r -u -y ${yaml_file}"
 	genpolicy_command+=" -p ${settings_dir}/rules.rego"
 	genpolicy_command+=" -j ${settings_dir}/genpolicy-settings.json"
 
@@ -249,7 +249,7 @@ auto_generate_policy() {
 	genpolicy_command+=" ${additional_flags}"
 
 	info "Executing: ${genpolicy_command}"
-	eval "${genpolicy_command}"
+	eval "${genpolicy_command} > ~/tmp/after.rego"
 }
 
 # Change genpolicy settings to allow "kubectl exec" to execute a command
