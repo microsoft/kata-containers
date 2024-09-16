@@ -65,9 +65,9 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	sudo make igvm DISTRO=cbl-mariner IGVM_SVN=${IGVM_SVN}
 	popd
 else
-	echo "Creating initrd based on rootfs"
+	echo "Building image based on rootfs"
 	pushd tools/osbuilder
-	sudo -E PATH=$PATH make DISTRO=cbl-mariner TARGET_ROOTFS=${ROOTFS_PATH} initrd
+	sudo -E PATH=$PATH make DISTRO=cbl-mariner image
 	popd
 fi
 
