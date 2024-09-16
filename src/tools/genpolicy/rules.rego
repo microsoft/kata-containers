@@ -783,6 +783,7 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
     regex.match(regex4, i_mount.source)
 
     print("mount_source_allows 1: true")
+    1 == 2
 }
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
     regex1 := p_mount.source
@@ -794,6 +795,7 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
     regex.match(regex4, i_mount.source)
 
     print("mount_source_allows 2: true")
+    1 == 2
 }
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
     print("mount_source_allows 3: i_mount.source=", i_mount.source)
