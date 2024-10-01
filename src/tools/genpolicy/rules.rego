@@ -61,10 +61,9 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     i_oci := input.OCI
 
     sandbox_name = i_oci.Annotations["io.kubernetes.cri.sandbox-name"]
-    addSandboxName := allow_sandbox_name(sandbox_name)
+    addSandboxName := state_allows("sandboxName", sandbox_name)
 
     print("addSandboxName = ", addSandboxName)
-
 
     # i_storages := input.storages
     # i_devices := input.devices
@@ -95,6 +94,7 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
     # p_oci.Version == i_oci.Version
 
+
     # print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
     # p_oci.Root.Readonly == i_oci.Root.Readonly
 
@@ -109,6 +109,30 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # allow_linux(p_oci, i_oci)
 
     print("CreateContainerRequest: true")
+}
+
+
+state_allows(key, value) = action {
+  print("searching sandbox name value = ", value, " NOT present in data = ", data)
+  not data[key]
+  print("state_allows: saving to state key =", key, "value =", value)
+  state_key := concat("/", ["", key])
+#   state_key := "/" + key
+  print("state_allows: state_key =", state_key)
+  # save state_data to state
+  action := {
+    "op": "add",
+    "path": state_key, 
+    "value": value,
+  }
+  print("state_allows: true = ", action)
+}
+ 
+state_allows(key, value) = action {
+  print("searching sandbox name value = ", value, " present in data = ", data)
+  value == data[key]
+  print("state_allows: found key =", key, "value =", value)
+  action := null
 }
 
 # Helper functions to conditionally concatenate if op is not null
