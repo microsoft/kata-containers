@@ -127,6 +127,8 @@ cc-managed-csi-premium cc.disk.csi.azure.com Delete WaitForFirstConsumer true 35
  * [`volumeMode:
    Block`](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#volume-mode)
    is not supported.
+ * Specifying `securityContext.runAsUser` or `securityContext.fsGroup`
+   in the pod spec is not supported.
 
 ### Quick testing
 
@@ -388,6 +390,8 @@ cc-local-csi   cc.local.csi.azure.com   Delete          WaitForFirstConsumer   t
  * [`volumeMode:
    Block`](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#volume-mode)
    has not been tested.
+ * Specifying `securityContext.runAsUser` or `securityContext.fsGroup`
+   in the pod spec is not supported.
 
 ### Notes
 
