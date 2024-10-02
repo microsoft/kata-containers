@@ -15,7 +15,7 @@ spec:
   containers:
     # 29 layers
     - name: azure-vote-front
-      image: "mcr.microsoft.com/azuredocs/azure-vote-front:v1"
+      image: "marinerconfpodsdev.azurecr.io/azuredocs/azure-vote-front:v1"
       command:
         - sh
         - "-c"
