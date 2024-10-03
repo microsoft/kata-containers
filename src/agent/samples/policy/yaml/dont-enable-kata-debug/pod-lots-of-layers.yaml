@@ -13,13 +13,6 @@ spec:
   restartPolicy: Never
   runtimeClassName: kata-cc
   containers:
-    # 29 layers
-    - name: azure-vote-front
-      image: "mcr.microsoft.com/azuredocs/azure-vote-front:v1"
-      command:
-        - sh
-        - "-c"
-        - while true; do echo hello; sleep 10; done
     # 11 layers
     - name: footloose
       image: "quay.io/footloose/ubuntu18.04:latest"
