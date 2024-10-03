@@ -48,8 +48,10 @@ if [ "${CONF_PODS}" == "yes" ]; then
 
 	if [ "${SHIM_USE_DEBUG_CONFIG}" == "yes" ]; then
 		# We simply override the release config with the debug config,
-		# which is probably fine when debugging.
-		ln -sf src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" src/runtime/config/"${SHIM_CONFIG_FILE_NAME}" 
+		# which is probably fine when debugging. Not symlinking as that
+		# would create cycles the next time this script is called.
+		echo "Overriding shim configuration with debug shim configuration"
+		cp -a --backup=numbered src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" src/runtime/config/"${SHIM_CONFIG_FILE_NAME}" 
 	fi
 
 	echo "Enabling and starting snapshotter service"
