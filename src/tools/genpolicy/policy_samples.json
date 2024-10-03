@@ -78,6 +78,25 @@
         "common_images": [
                 "mcr.microsoft.com/azurelinux/busybox:1.36",
                 "mcr.microsoft.com/azurelinux/base/nginx:1.25",
-                "mcr.microsoft.com/mirror/docker/library/ubuntu:noble"
+                "mcr.microsoft.com/mirror/docker/library/ubuntu:noble",
+                "mcr.microsoft.com/acc/samples/helloworld-outproc",
+                "mcr.microsoft.com/acc/samples/attested-tls-inproc",
+                "mcr.microsoft.com/acc/samples/attested-tls-outproc",
+                "mcr.microsoft.com/acc/samples/layered-attested-tls-outproc",
+                "mcr.microsoft.com/acc/samples/acc-perl",
+                "mcr.microsoft.com/acc/samples/attested-tls-psw",
+                "mcr.microsoft.com/acc/samples/cvm-attestation",
+                "mcr.microsoft.com/acc/samples/cvm-python-attestation",
+                "mcr.microsoft.com/acc/samples/count-primes",
+                "mcr.microsoft.com/acc/samples/helloworld-inproc",
+                "mcr.microsoft.com/acc/samples/attestation-outproc",
+                "mcr.microsoft.com/acc/samples/attestation-inproc",
+                "mcr.microsoft.com/acc/samples/accstress",
+                "mcr.microsoft.com/acc/samples/myst-helloworld",
+                "mcr.microsoft.com/acc/samples/oe-helloworld",
+                "mcr.microsoft.com/acc/samples/kafka/consumer",
+                "mcr.microsoft.com/acc/samples/kafka/producer",
+                "mcr.microsoft.com/acc/samples/aks/helloworld",
+                "mcr.microsoft.com/acc/samples/aci/helloworld"
         ]
 }
