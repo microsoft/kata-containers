@@ -93,6 +93,7 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
 
     # print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
     # p_oci.Version == i_oci.Version
+    allow_oci_version( p_oci.Version, i_oci.Version)
 
 
     # print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
@@ -109,6 +110,15 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # allow_linux(p_oci, i_oci)
 
     print("CreateContainerRequest: true")
+}
+
+allow_oci_version(p_oci_version, i_oci_version) {
+    print("allow_oci_version: p Version =", p_oci_version, "i Version =", i_oci_version)
+    p_oci_semantic := regex.find_n(`^(\d+\.\d+\.\d+)`, p_oci_version, 1)[0]
+    i_oci_semantic := regex.find_n(`^(\d+\.\d+\.\d+)`, i_oci_version, 1)[0]
+    print("allow_oci_version: p_oci_semantic =", p_oci_semantic, "i_oci_semantic =", i_oci_semantic)    
+    p_oci_semantic == i_oci_semantic
+    print("allow_oci_version: true")
 }
 
 
@@ -146,26 +156,6 @@ concat_op_if_not_null(ops, op) = result {
     result := array.concat(ops, [op])
 }
 
-
-allow_sandbox_name(s_name) = addSandboxName {
-    print("searching sandbox name in data = ", data)
-    # validates all containers have the same sandox name
-    s_name == data.sandboxName
-    print("found sandbox_name match on state = ", s_name) 
-    addSandboxName := null
-}
-
-allow_sandbox_name(s_name) = addSandboxName {
-    print("checking sandbox name doesn't exist in data = ", data) 
-    not data.sandboxName
-    print("sandbox name not found in state. Adding name = ", s_name)
-    # save the sandbox name for future reference
-    addSandboxName := {
-        "op": "add",
-        "path": "/sandboxName", 
-        "value": s_name,
-    }
-}
 
 check_namespace(p_namespace, i_namespace) = addNamespace {
     p_namespace == i_namespace
