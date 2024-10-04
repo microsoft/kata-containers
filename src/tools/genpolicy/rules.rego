@@ -66,7 +66,13 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     print("addSandboxName = ", addSandboxName)
 
     # i_storages := input.storages
-    # i_devices := input.devices
+    # i_devices := input.
+    
+    # check if pause container
+    i_cri_type := i_oci.Annotations["io.kubernetes.cri.container-type"]
+    # allow if not pause, or if pause and we haven't seen it before
+    seen_pause = allow_container_type(i_cri_type)
+    ops_builder1 := concat_op_if_not_null(ops_builder, seen_pause)
 
     # # Check if any element from the policy_data.containers array allows the input request.
     some p_container in policy_data.containers
@@ -79,8 +85,8 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
 
     p_oci := p_container.OCI
 
-    ops_builder1 := concat_op_if_not_null(ops_builder, addSandboxName)
-    print("ops_builder1 = ", ops_builder1)
+    ops_builder2 := concat_op_if_not_null(ops_builder1, addSandboxName)
+    print("ops_builder2 = ", ops_builder2)
 
     s_namespace := "io.kubernetes.cri.sandbox-namespace"
     p_namespace := p_oci.Annotations[s_namespace]
@@ -88,13 +94,12 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     print("allow_by_sandbox_name: p_namespace =", p_namespace, "i_namespace =", i_namespace)
 
     addNamespace := check_namespace(p_namespace, i_namespace)
-    ops := concat_op_if_not_null(ops_builder1, addNamespace)
+    ops := concat_op_if_not_null(ops_builder2, addNamespace)
     print("ops = ", ops)
 
     # print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
     # p_oci.Version == i_oci.Version
     allow_oci_version( p_oci.Version, i_oci.Version)
-
 
     # print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
     # p_oci.Root.Readonly == i_oci.Root.Readonly
@@ -110,6 +115,25 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # allow_linux(p_oci, i_oci)
 
     print("CreateContainerRequest: true")
+}
+
+allow_container_type(cri_type) = action {
+    # container type is not pause
+    cri_type != "sandbox"
+    action := null
+    print("allow_container_type true. Not sandbox")
+}
+
+allow_container_type(cri_type) = action {
+    # container type is pause and we have not seen it before
+    not data.seen_pause
+    # record that we have seen pause container
+    action := {
+    "op": "add",
+    "path": "/seen_pause", 
+    "value": true,
+    }
+    print("allow_container_type true = ", action)
 }
 
 allow_oci_version(p_oci_version, i_oci_version) {
