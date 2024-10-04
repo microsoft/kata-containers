@@ -52,12 +52,7 @@ readonly dax_alignment=2
 
 # The list of systemd units and files that are not needed in Kata Containers
 readonly -a systemd_units=(
-	"systemd-coredump@"
-	"systemd-journald"
-	"systemd-journald-dev-log"
-	"systemd-journal-flush"
 	"systemd-random-seed"
-	"systemd-timesyncd"
 	"systemd-tmpfiles-setup"
 	"systemd-update-utmp"
 )
@@ -459,6 +454,18 @@ setup_systemd() {
 		for u in "${systemd_files[@]}"; do
 			find "${mount_dir}" -type f -name "${u}" -exec rm -f {} \;
 		done
+
+		info "Enabling coredump collection"
+		cat <<EOF > "${mount_dir}/etc/systemd/coredump.conf"
+[Coredump]
+Storage=external
+#Compress=yes
+ProcessSizeMax=2G
+ExternalSizeMax=2G
+#JournalSizeMax=767M
+#MaxUse=
+#KeepFree=
+EOF
 
 		info "Creating empty machine-id to allow systemd to bind-mount it"
 		touch "${mount_dir}/etc/machine-id"
