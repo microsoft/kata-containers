@@ -21,7 +21,7 @@ build_rootfs()
 
 	info "install packages for rootfs"
 	# DEBUG!! Remove later
-	$DNF install ${EXTRA_PKGS} ${PACKAGES} findutils vim sudo
+	$DNF install ${EXTRA_PKGS} ${PACKAGES} findutils vim sudo rpm systemd-udev
 
 	rm -rf ${ROOTFS_DIR}/usr/share/{bash-completion,cracklib,doc,info,locale,man,misc,pixmaps,terminfo,zoneinfo,zsh}
 }
