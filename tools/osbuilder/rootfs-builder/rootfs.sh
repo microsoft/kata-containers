@@ -779,7 +779,6 @@ EOF
 	fi
 
 	if [[ "${AGENT_POLICY}" == "yes" ]]; then
-		info "Install the default policy"
 		# Install default settings for the kata-opa service.
 		local opa_settings_dir="/etc/kata-opa"
 		local policy_file_name="$(basename ${agent_policy_file})"
