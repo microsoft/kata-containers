@@ -56,13 +56,21 @@ S_NAME_KEY = "io.kubernetes.cri.sandbox-name"
 S_NAMESPACE_KEY = "io.kubernetes.cri.sandbox-namespace"
 BUNDLE_ID = "[a-z0-9]{64}"
 
-CreateContainerRequest {
+CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # Check if the input request should be rejected even before checking the
     # policy_data.containers information.
     allow_create_container_input
 
     i_oci := input.OCI
     i_storages := input.storages
+
+    # array of possible state operations
+    ops_builder := []
+
+    # check sandbox name
+    sandbox_name = i_oci.Annotations["io.kubernetes.cri.sandbox-name"]
+    add_sandbox_name_to_state := state_allows("sandbox_name", sandbox_name)
+    ops := concat_op_if_not_null(ops_builder, add_sandbox_name_to_state)
 
     # Check if any element from the policy_data.containers array allows the input request.
     some p_container in policy_data.containers
@@ -120,6 +128,47 @@ allow_create_container_input {
     count(i_process.User.Username) == 0
 
     print("allow_create_container_input: true")
+}
+
+# value hasn't been seen before, save it to state
+state_allows(key, value) = action {
+  state := get_state()
+  not state[key]
+  print("state_allows: saving to state key =", key, "value =", value)
+  path := get_state_path(key) 
+  action := {
+    "op": "add",
+    "path": path, 
+    "value": value,
+  }
+}
+
+# value matches what's in state, allow it
+state_allows(key, value) = action {
+  state := get_state()
+  value == state[key]
+  print("state_allows: found key =", key, "value =", value, " in state")
+  action := null
+}
+
+# helper functions to interact with the state
+get_state() = state {
+  state := data["pstate"]
+}
+
+get_state_path(key) = path {
+    path := concat("/", ["", key]) # prepend "/" to key
+}
+
+# Helper functions to conditionally concatenate if op is not null
+concat_op_if_not_null(ops, op) = result {
+    op == null
+    result := ops
+}
+
+concat_op_if_not_null(ops, op) = result {
+    op != null
+    result := array.concat(ops, [op])
 }
 
 # Reject unexpected annotations.
