@@ -20,7 +20,8 @@ build_rootfs()
 	DNF="${PKG_MANAGER} -y --installroot=${ROOTFS_DIR} --noplugins --releasever=${OS_VERSION}"
 
 	info "install packages for rootfs"
-	$DNF install ${EXTRA_PKGS} ${PACKAGES}
+	# DEBUG!! Remove later
+	$DNF install ${EXTRA_PKGS} ${PACKAGES} findutils vim
 
 	rm -rf ${ROOTFS_DIR}/usr/share/{bash-completion,cracklib,doc,info,locale,man,misc,pixmaps,terminfo,zoneinfo,zsh}
 }
