@@ -467,6 +467,9 @@ ExternalSizeMax=2G
 #KeepFree=
 EOF
 
+		echo "StandardOutput=journal" | sudo tee -a "${mount_dir}/usr/lib/systemd/system/systemd-coredump@.service"
+		echo "StandardError=journal" | sudo tee -a "${mount_dir}/usr/lib/systemd/system/systemd-coredump@.service"
+
 		info "Creating empty machine-id to allow systemd to bind-mount it"
 		touch "${mount_dir}/etc/machine-id"
 }
