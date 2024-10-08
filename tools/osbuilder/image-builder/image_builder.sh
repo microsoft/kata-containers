@@ -470,7 +470,7 @@ EOF
 		mkdir -p "${mount_dir}/run/systemd/coredump"
 		chmod 755 "${mount_dir}/run/systemd/coredump"
 		mkdir -p "${mount_dir}/var/lib/systemd"
-		ln -s "${mount_dir}/run/systemd/coredump" "${mount_dir}/var/lib/systemd/coredump"
+		ln -s "/run/systemd/coredump" "${mount_dir}/var/lib/systemd/coredump"
 		chmod 755 "${mount_dir}/var/lib/systemd/coredump"
 
 		info "Creating empty machine-id to allow systemd to bind-mount it"
