@@ -72,7 +72,7 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # allow if not pause, or if pause and we haven't seen pause before
     seen_pause = allow_container_type(i_cri_type)
 
-    ops := concat_op_if_not_null(ops_builder1, seen_pause)
+    ops_builder2 := concat_op_if_not_null(ops_builder1, seen_pause)
 
     # Check if any element from the policy_data.containers array allows the input request.
     some p_container in policy_data.containers
@@ -84,6 +84,16 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     p_pidns == i_pidns
 
     p_oci := p_container.OCI
+
+    # check namespace
+    s_namespace := "io.kubernetes.cri.sandbox-namespace"
+    p_namespace := p_oci.Annotations[s_namespace]
+    i_namespace := i_oci.Annotations[s_namespace]
+    print("allow_by_sandbox_name: p_namespace =", p_namespace, "i_namespace =", i_namespace)
+
+    add_namespace_to_state := allow_namespace(p_namespace, i_namespace)
+
+    ops := concat_op_if_not_null(ops_builder2, add_namespace_to_state)
 
     print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
     p_oci.Version == i_oci.Version
@@ -133,6 +143,29 @@ allow_create_container_input {
     count(i_process.User.Username) == 0
 
     print("allow_create_container_input: true")
+}
+
+allow_namespace(p_namespace, i_namespace) = add_namespace {
+    p_namespace == i_namespace
+    add_namespace := null
+    print("allow_namespace 1: input namespace matches policy data")
+}
+
+allow_namespace(p_namespace, i_namespace) = add_namespace {
+    p_namespace == ""
+    not data.namespace
+    add_namespace := {
+        "op": "add",
+        "path": "/namespace", 
+        "value": i_namespace,
+    }
+    print("allow_namespace 2: policy data namespace is not specified. Save input namespace to state")
+}
+
+allow_namespace(p_namespace, i_namespace) = add_namespace {
+    i_namespace == data.namespace
+    add_namespace := null
+    print("allow_namespace 3: input namespace matches what's on state")
 }
 
 allow_container_type(cri_type) = action {
@@ -257,14 +290,9 @@ allow_by_anno(p_oci, i_oci, p_storages, i_storages) {
 allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name) {
     print("allow_by_sandbox_name: start")
 
-    s_namespace := "io.kubernetes.cri.sandbox-namespace"
+    i_namespace := i_oci.Annotations["io.kubernetes.cri.sandbox-namespace"]
 
-    p_namespace := p_oci.Annotations[s_namespace]
-    i_namespace := i_oci.Annotations[s_namespace]
-    print("allow_by_sandbox_name: p_namespace =", p_namespace, "i_namespace =", i_namespace)
-    p_namespace == i_namespace
-
-    allow_by_container_types(p_oci, i_oci, s_name, p_namespace)
+    allow_by_container_types(p_oci, i_oci, s_name, i_namespace)
     allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages)
     allow_process(p_oci, i_oci, s_name)
 
@@ -408,6 +436,11 @@ allow_sandbox_log_directory(p_oci, i_oci, s_name, s_namespace) {
     key := "io.kubernetes.cri.sandbox-log-directory"
 
     p_dir := p_oci.Annotations[key]
+
+    print("p_dir =", p_dir)
+    print("s_name =", s_name)
+    print("s_namespace =", s_namespace)
+
     regex1 := replace(p_dir, "$(sandbox-name)", s_name)
     regex2 := replace(regex1, "$(sandbox-namespace)", s_namespace)
     print("allow_sandbox_log_directory: regex2 =", regex2)
