@@ -65,7 +65,14 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # chack sandbox name
     sandbox_name = i_oci.Annotations["io.kubernetes.cri.sandbox-name"]
     add_sandbox_name_to_state := state_allows("sandbox_name", sandbox_name)
-    ops := concat_op_if_not_null(ops_builder, add_sandbox_name_to_state)
+    ops_builder1 := concat_op_if_not_null(ops_builder, add_sandbox_name_to_state)
+
+    # check if pause container
+    i_cri_type := i_oci.Annotations["io.kubernetes.cri.container-type"]
+    # allow if not pause, or if pause and we haven't seen pause before
+    seen_pause = allow_container_type(i_cri_type)
+
+    ops := concat_op_if_not_null(ops_builder1, seen_pause)
 
     # Check if any element from the policy_data.containers array allows the input request.
     some p_container in policy_data.containers
@@ -126,6 +133,25 @@ allow_create_container_input {
     count(i_process.User.Username) == 0
 
     print("allow_create_container_input: true")
+}
+
+allow_container_type(cri_type) = action {
+    # container type is not pause
+    cri_type != "sandbox"
+    action := null
+    print("allow_container_type true. Not sandbox")
+}
+
+allow_container_type(cri_type) = action {
+    # container type is pause and we have not seen it before
+    not data.seen_pause
+    # record that we have seen pause container
+    action := {
+      "op": "add",
+      "path": "/seen_pause", 
+      "value": true,
+    }
+    print("allow_container_type true = ", action)
 }
 
 state_allows(key, value) = action {
