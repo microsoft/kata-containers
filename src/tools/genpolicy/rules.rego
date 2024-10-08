@@ -95,8 +95,7 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
 
     ops := concat_op_if_not_null(ops_builder2, add_namespace_to_state)
 
-    print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
-    p_oci.Version == i_oci.Version
+    allow_oci_version(p_oci.Version, i_oci.Version)
 
     print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
     p_oci.Root.Readonly == i_oci.Root.Readonly
@@ -143,6 +142,16 @@ allow_create_container_input {
     count(i_process.User.Username) == 0
 
     print("allow_create_container_input: true")
+}
+
+allow_oci_version(p_oci_version, i_oci_version) {
+    print("allow_oci_version: p Version =", p_oci_version, "i Version =", i_oci_version)
+    # extract the semantic version from the full version string
+    p_oci_semantic := regex.find_n(`^(\d+\.\d+\.\d+)`, p_oci_version, 1)[0]
+    i_oci_semantic := regex.find_n(`^(\d+\.\d+\.\d+)`, i_oci_version, 1)[0]
+    print("allow_oci_version: p_oci_semantic =", p_oci_semantic, "i_oci_semantic =", i_oci_semantic)    
+    p_oci_semantic == i_oci_semantic
+    print("allow_oci_version: true")
 }
 
 allow_namespace(p_namespace, i_namespace) = add_namespace {
