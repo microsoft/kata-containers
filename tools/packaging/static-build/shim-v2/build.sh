@@ -8,6 +8,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+[ -n "${DEBUG:-}" ] && set -o xtrace
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "${script_dir}/../../scripts/lib.sh"
