@@ -50,18 +50,8 @@ sudo tee -a /etc/containerd/config.toml 2&>1 <<EOF
 
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata]
   runtime_type = "io.containerd.kata.v2"
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.katacli]
-  runtime_type = "io.containerd.runc.v1"
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.katacli.options]
-  NoPivotRoot = false
-  NoNewKeyring = false
-  ShimCgroup = ""
-  IoUid = 0
-  IoGid = 0
-  BinaryName = "/usr/bin/kata-runtime"
-  Root = ""
-  CriuPath = ""
-  SystemdCgroup = false
+  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata.options]
+    ConfigPath = "/usr/share/defaults/kata-containers/configuration.toml"
 [proxy_plugins]
   [proxy_plugins.tardev]
     type = "snapshot"
@@ -70,7 +60,6 @@ sudo tee -a /etc/containerd/config.toml 2&>1 <<EOF
   snapshotter = "tardev"
   runtime_type = "io.containerd.kata-cc.v2"
   privileged_without_host_devices = true
-  pod_annotations = ["io.katacontainers.*"]
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-cc.options]
     ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/configuration-clh-snp.toml"
 EOF
@@ -242,7 +231,7 @@ For further usage we refer to the upstream `crictl` (or `ctr`) and CNI documenta
 If your environment was set up through `az aks create` the respective node is ready to run Kata (Confidential) Containers as AKS Kubernetes pods.
 Other types of Kubernetes clusters should work as well - but this document doesn't cover how to set-up those clusters.
 
-Next, apply the kata and kata-cc runtime classes on the machine that holds your kubeconfig file, example AKS:
+Next, apply the kata and kata-cc runtime classes on the machine that holds your kubeconfig file, for example:
 ```
 cat << EOF > runtimeClass-kata-cc.yaml
 kind: RuntimeClass
@@ -264,6 +253,9 @@ apiVersion: node.k8s.io/v1
 metadata:
     name: kata
 handler: kata
+overhead:
+    podFixed:
+        memory: "2Gi"
 scheduling:
   nodeSelector:
     katacontainers.io/kata-runtime: "true"
