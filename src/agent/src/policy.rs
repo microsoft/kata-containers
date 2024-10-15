@@ -163,7 +163,13 @@ impl AgentPolicy {
             regorus::Value::Object(obj) => {
                 let json_str = serde_json::to_string(obj)?;
 
+                let obj_str = format!("json_str: {:?}", json_str);
+                self.log_eval_input("allow_request", &obj_str).await;
+
                 let metadata_response: MetadataResponse = serde_json::from_str(&json_str)?;
+
+                let obj_str = format!("metadata_response found: {:?}", metadata_response);
+                self.log_eval_input("allow_request", &obj_str).await;
 
                 if metadata_response.allowed {
                     if let Some(ops) = metadata_response.ops {
