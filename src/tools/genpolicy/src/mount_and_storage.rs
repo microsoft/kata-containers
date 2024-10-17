@@ -467,7 +467,7 @@ pub fn handle_persistent_volume_claim(
     storages: &mut Vec<agent::Storage>,
     mount_options: (&str, &str),
 ) {
-    if is_blk_mount || is_smb_mount {
+    if is_blk_mount || is_smb_mount || is_coco_ephemeral_mount {
         let source = "$(spath)/$(b64-direct-vol-path)".to_string();
 
         let mut driver_options = Vec::new();
