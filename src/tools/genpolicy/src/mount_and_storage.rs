@@ -246,9 +246,14 @@ fn get_persistent_volume_claim_mount(
         .and_then(|pvc_resource| pvc_resource.spec.storageClassName.as_ref())
         .is_some_and(|sc| settings.common.smb_storage_classes.contains(sc));
 
+    let is_coco_ephemeral_mount = pvc_resource
+        .and_then(|pvc_resource| pvc_resource.spec.storageClassName.as_ref())
+        .is_some_and(|sc| settings.common.coco_ephemeral_storage_classes.contains(sc));
+
     handle_persistent_volume_claim(
         is_blk_mount,
         is_smb_mount,
+        is_coco_ephemeral_mount,
         yaml_mount,
         p_mounts,
         storages,
@@ -431,14 +436,21 @@ fn get_ephemeral_mount(
         .as_ref()
         .map(|sc| settings.common.virtio_blk_storage_classes.contains(sc))
         .unwrap_or(false);
+
     let is_smb_mount = storage_class
         .as_ref()
         .map(|sc| settings.common.smb_storage_classes.contains(sc))
         .unwrap_or(false);
 
+    let is_coco_ephemeral_mount = storage_class
+        .as_ref()
+        .map(|sc| settings.common.coco_ephemeral_storage_classes.contains(sc))
+        .unwrap_or(false);
+
     handle_persistent_volume_claim(
         is_blk_mount,
         is_smb_mount,
+        is_coco_ephemeral_mount,
         yaml_mount,
         p_mounts,
         storages,
@@ -449,6 +461,7 @@ fn get_ephemeral_mount(
 pub fn handle_persistent_volume_claim(
     is_blk_mount: bool,
     is_smb_mount: bool,
+    is_coco_ephemeral_mount: bool,
     yaml_mount: &pod::VolumeMount,
     p_mounts: &mut Vec<policy::KataMount>,
     storages: &mut Vec<agent::Storage>,
@@ -457,13 +470,19 @@ pub fn handle_persistent_volume_claim(
     if is_blk_mount || is_smb_mount {
         let source = "$(spath)/$(b64-direct-vol-path)".to_string();
 
+        let mut driver_options = Vec::new();
+        if is_coco_ephemeral_mount {
+            driver_options.push("confidential=true".to_string());
+            driver_options.push("ephemeral=true".to_string());
+        }
+
         storages.push(agent::Storage {
             driver: if is_blk_mount {
                 "blk".to_string()
             } else {
                 "smb".to_string()
             },
-            driver_options: Vec::new(),
+            driver_options,
             fs_group: None,
             source: "$(direct-vol-path)".to_string(),
             mount_point: source.to_string(),
