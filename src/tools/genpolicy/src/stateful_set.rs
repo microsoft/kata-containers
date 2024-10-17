@@ -226,6 +226,12 @@ impl StatefulSet {
                         } else {
                             false
                         };
+                        // check if a storage class is set and if it is a coco ephemeral storage class
+                        let is_coco_ephemeral_mount = if let Some(storage_class) = &claim.spec.storageClassName {
+                            settings.common.coco_ephemeral_storage_classes.contains(storage_class)
+                        } else {
+                            false
+                        };
 
                         let propagation = match &mount.mountPropagation {
                             Some(p) if p == "Bidirectional" => "rshared",
@@ -242,6 +248,7 @@ impl StatefulSet {
                         mount_and_storage::handle_persistent_volume_claim(
                             is_blk_mount,
                             is_smb_mount,
+                            is_coco_ephemeral_mount,
                             mount,
                             policy_mounts,
                             storages,
