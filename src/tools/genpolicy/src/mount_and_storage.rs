@@ -477,7 +477,7 @@ pub fn handle_persistent_volume_claim(
         }
 
         storages.push(agent::Storage {
-            driver: if is_blk_mount {
+            driver: if is_blk_mount || is_coco_ephemeral_mount {
                 "blk".to_string()
             } else {
                 "smb".to_string()
