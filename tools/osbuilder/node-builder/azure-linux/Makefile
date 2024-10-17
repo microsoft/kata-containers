@@ -17,10 +17,10 @@ else
 endif
 
 .PHONY: all
-all: package uvm
+all: package
 
 .PHONY: all-confpods
-all-confpods: package-confpods uvm-confpods
+all-confpods: package-confpods
 
 .PHONY: package
 package:
@@ -47,7 +47,7 @@ clean-confpods:
 	CONF_PODS=yes ./clean.sh
 
 .PHONY: deploy
-deploy: deploy-package deploy-uvm
+deploy: deploy-package
 
 .PHONY: deploy-package
 deploy-package:
@@ -62,7 +62,7 @@ deploy-uvm:
 	./uvm_install.sh
 
 .PHONY: deploy-confpods
-deploy-confpods: deploy-confpods-package deploy-confpods-uvm
+deploy-confpods: deploy-confpods-package
 
 .PHONY: deploy-confpods-package
 deploy-confpods-package:
