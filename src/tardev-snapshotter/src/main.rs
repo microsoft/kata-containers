@@ -22,6 +22,10 @@ pub async fn main() {
         );
         process::exit(1);
     }
+    // argv[1], data-root-path:              /var/lib/containerd/io.containerd.snapshotter.v1.tardev]
+    // argv[2], listen-socket-name:          /run/containerd/tardev-snapshotter.sock (containerd knows about tardev-snapshotter.sock through its configuration in AgentBaker)
+    // argv[3], containerd-socket(default):  /var/run/containerd/containerd.sock
+    info!("<mitchzhu> demo log");
 
     let containerd_socket = if argv.len() >= 4 {
         &argv[3]
@@ -31,6 +35,9 @@ pub async fn main() {
 
     // TODO: Check that the directory is accessible.
 
+    // Handle incoming request to bind to tardev-snapshotter.sock
+    // `containerd` will send connection requests to `tardev-snapshotter.sock` whenever it needs to perform operations related to 
+    // container snapshots that are handled by the `tardev` snapshotter plugin. 
     let incoming = {
         let uds = match bind(&argv[2]) {
             Ok(l) => l,
@@ -48,6 +55,9 @@ pub async fn main() {
         }
     };
 
+    // Essentially, this code is setting up a server that listens for incoming connections on a Unix domain socket 
+    // and then processes those connections asynchronously as a stream of events. 
+    // The `TarDevSnapshotter` service will then handle these connections according to the gRPC definitions provided elsewhere in application. 
     info!("Snapshotter started");
     if let Err(e) = Server::builder()
         .add_service(server(Arc::new(TarDevSnapshotter::new(
