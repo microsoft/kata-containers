@@ -12,16 +12,18 @@
 #
 # RUST_LOG=info /tmp/genpolicy/genpolicy -p /tmp/genpolicy/rules.rego -j /tmp/genpolicy/genpolicy-settings.json -y ../../agent/samples/policy/yaml/pod/pod-one-container.yaml
 
-FROM mcr.microsoft.com/cbl-mariner/base/core:2.0 AS genpolicy-build-stage
+FROM ubuntu:20.04 AS genpolicy-build-stage
+ENV DEBIAN_FRONTEND=noninteractive
 
-RUN tdnf install -y \
-    build-essential \
-    ca-certificates \
-    cmake \
-    git \
-    openssl-static \
-    protobuf-compiler \
-    rust 
+RUN apt-get update
+RUN apt-get install -y build-essential
+RUN apt-get install -y cargo
+RUN apt-get install -y cmake
+RUN apt-get install -y git
+RUN apt-get install -y libssl-dev
+RUN apt-get install -y pkg-config
+RUN apt-get install -y protobuf-compiler
+RUN apt-get install -y rustc
 
 # Get genpolicy source code.
 WORKDIR /src
@@ -30,9 +32,8 @@ RUN git clone https://github.com/microsoft/kata-containers.git -b "${GENPOLICY_B
 
 # Build from source code.
 WORKDIR /src/kata-containers/src/tools/genpolicy
+
 RUN OPENSSL_STATIC=1 \
-    OPENSSL_LIB_DIR=/usr/lib \
-    OPENSSL_INCLUDE_DIR=/usr/include/openssl \
     LIBC=gnu \
     make build
 
