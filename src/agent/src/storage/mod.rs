@@ -25,12 +25,12 @@ use zerocopy::AsBytes;
 use self::bind_watcher_handler::BindWatcherHandler;
 use self::block_handler::{PmemHandler, ScsiHandler, VirtioBlkMmioHandler, VirtioBlkPciHandler};
 use self::ephemeral_handler::EphemeralHandler;
-use self::fs_handler::{OverlayfsHandler, Virtio9pHandler, VirtioFsHandler, SMBHandler};
+use self::fs_handler::{OverlayfsHandler, SMBHandler, Virtio9pHandler, VirtioFsHandler};
 use self::local_handler::LocalHandler;
 use crate::device::{
     DRIVER_9P_TYPE, DRIVER_BLK_MMIO_TYPE, DRIVER_BLK_PCI_TYPE, DRIVER_EPHEMERAL_TYPE,
     DRIVER_LOCAL_TYPE, DRIVER_NVDIMM_TYPE, DRIVER_OVERLAYFS_TYPE, DRIVER_SCSI_TYPE,
-    DRIVER_VIRTIOFS_TYPE, DRIVER_WATCHABLE_BIND_TYPE, DRIVER_SMB_TYPE,
+    DRIVER_SMB_TYPE, DRIVER_VIRTIOFS_TYPE, DRIVER_WATCHABLE_BIND_TYPE,
 };
 use crate::mount::{baremount, is_mounted, remove_mounts};
 use crate::sandbox::Sandbox;
@@ -39,6 +39,7 @@ pub use self::ephemeral_handler::update_ephemeral_mounts;
 
 mod bind_watcher_handler;
 mod block_handler;
+mod encryption;
 mod ephemeral_handler;
 mod fs_handler;
 mod local_handler;
@@ -380,8 +381,22 @@ fn mount_storage(logger: &Logger, storage: &Storage) -> Result<()> {
         "mount-options" => options.as_str(),
     );
 
+    let confidential = storage
+        .driver_options
+        .contains(&"confidential=true".to_string());
+    let ephemeral = storage
+        .driver_options
+        .contains(&"ephemeral=true".to_string());
+
+    let src_path = if confidential && ephemeral {
+        // TODO: Call into the CDH instead after we've synced with upstream.
+        encryption::encrypt_device(&logger, src_path)?
+    } else {
+        src_path.to_path_buf()
+    };
+
     baremount(
-        src_path,
+        &src_path,
         mount_path,
         storage.fstype.as_str(),
         flags,

@@ -277,13 +277,15 @@
             "CAP_CHECKPOINT_RESTORE"
         ],
         "virtio_blk_storage_classes": [
-            "cc-local-csi",
             "cc-managed-csi",
             "cc-managed-premium-csi"
         ],
         "smb_storage_classes": [
             "cc-azurefile-csi",
             "cc-azurefile-premium-csi"
+        ],
+        "coco_ephemeral_storage_classes": [
+           "cc-local-csi"
         ]
     },
     "kata_config": {
