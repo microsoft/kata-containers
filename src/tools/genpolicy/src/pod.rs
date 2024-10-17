@@ -836,16 +836,14 @@ impl yaml::K8sResource for Pod {
         container: &Container,
         settings: &settings::Settings,
     ) {
-        if let Some(volumes) = &self.spec.volumes {
-            yaml::get_container_mounts_and_storages(
-                policy_mounts,
-                storages,
-                persistent_volume_claims,
-                container,
-                settings,
-                volumes,
-            );
-        }
+        yaml::get_container_mounts_and_storages(
+            policy_mounts,
+            storages,
+            persistent_volume_claims,
+            container,
+            settings,
+            &self.spec.volumes,
+        );
     }
 
     fn generate_policy(&self, agent_policy: &policy::AgentPolicy) -> String {
