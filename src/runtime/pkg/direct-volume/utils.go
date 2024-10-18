@@ -20,6 +20,8 @@ const (
 	FSGroupMetadataKey             = "fsGroup"
 	FSGroupChangePolicyMetadataKey = "fsGroupChangePolicy"
 	SensitiveMountOptions          = "sensitiveMountOptions"
+	ConfidentialMetadataKey        = "confidential"
+	EphemeralMetadataKey           = "ephemeral"
 )
 
 // FSGroupChangePolicy holds policies that will be used for applying fsGroup to a volume.
