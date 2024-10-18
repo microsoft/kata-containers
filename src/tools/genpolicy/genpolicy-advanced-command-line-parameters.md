@@ -57,17 +57,29 @@ To enable caching, use the `-u` command line parameter - e.g.,
 $ RUST_LOG=info genpolicy -u -y test.yaml
 ```
 
-# Use containerd to pull and manage images
-You may specify `-d` to use existing `containerd` installation as image manager. This method supports a wider set of images (e.g., older images with `v1` manifest). Needs `sudo` permission to access socket - e.g.,
+# Use containerd to pull and manage images (required for managed identity based authentication)
+
+Prereq: This features needs to run the following script to adapt your docker and containerd config (needs `sudo` access):
 
 ```bash
-$ sudo genpolicy -d -y test.yaml
+$ ./setup_containerd_docker.sh
+```
+
+Optional: Authenticate to private registry. For example in azure:
+```bash
+$ az acr login -n my_acr_name
+```
+
+You may specify `-d` to use existing `containerd` installation as image manager. This method supports a wider set of images (e.g., older images with `v1` manifest) - e.g.,
+
+```bash
+$ genpolicy -d -y test.yaml
 ```
 
 This will use `/var/contaienrd/containerd.sock` as default socket path. Or you may specify your own socket path - e.g.,
 
 ```bash
-$ sudo genpolicy -d=/my/path/containerd.sock -y test.yaml
+$ genpolicy -d=/my/path/containerd.sock -y test.yaml
 ```
 
 # Print the Policy text
