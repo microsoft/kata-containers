@@ -28,12 +28,13 @@ LIBC=${LIBC:-musl}
 SECCOMP=${SECCOMP:-"yes"}
 SELINUX=${SELINUX:-"no"}
 AGENT_POLICY=${AGENT_POLICY:-no}
-AGENT_POLICY_FILE=${AGENT_POLICY_FILE:-"allow-all.rego"}
 
 lib_file="${script_dir}/../scripts/lib.sh"
 source "$lib_file"
 
-[ "${AGENT_POLICY}" == "yes" ] && agent_policy_file="$(readlink -f "${script_dir}/../../../src/kata-opa/${AGENT_POLICY_FILE}")"
+if [[ "${AGENT_POLICY}" == "yes" ]]; then
+	agent_policy_file="$(readlink -f -v "${AGENT_POLICY_FILE:-"${script_dir}/../../../src/kata-opa/allow-all.rego"}")"
+fi
 
 #For cross build
 CROSS_BUILD=${CROSS_BUILD:-false}
@@ -330,7 +331,9 @@ check_env_variables()
 
 	[ -n "${KERNEL_MODULES_DIR}" ] && [ ! -d "${KERNEL_MODULES_DIR}" ] && die "KERNEL_MODULES_DIR defined but is not an existing directory"
 
-	[ "${AGENT_POLICY}" == "yes" ] && [ ! -f "${agent_policy_file}" ] && die "agent policy file not found in '${agent_policy_file}'"
+	if [[ "${AGENT_POLICY}" == "yes" ]]; then
+		[ ! -f "${agent_policy_file}" ] && die "agent policy file not found in '${agent_policy_file}'"
+	fi
 
 	[ -n "${OSBUILDER_VERSION}" ] || die "need osbuilder version"
 }
@@ -652,7 +655,7 @@ EOF
 		chmod g+rx,o+x "${ROOTFS_DIR}"
 	fi
 
-	if [ "${AGENT_POLICY}" == "yes" ]; then
+	if [[ "${AGENT_POLICY}" == "yes" ]]; then
 		# Install default settings for the kata-opa service.
 		local opa_settings_dir="/etc/kata-opa"
 		local policy_file_name="$(basename ${agent_policy_file})"
