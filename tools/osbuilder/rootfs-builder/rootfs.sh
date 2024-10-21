@@ -33,7 +33,7 @@ AGENT_POLICY_FILE=${AGENT_POLICY_FILE:-"allow-all.rego"}
 lib_file="${script_dir}/../scripts/lib.sh"
 source "$lib_file"
 
-[ "${AGENT_POLICY}" == "yes" ] && agent_policy_file="$(readlink -f "${script_dir}/../../../src/kata-opa/${AGENT_POLICY_FILE}")"
+agent_policy_file="$(readlink -f "${script_dir}/../../../src/kata-opa/${AGENT_POLICY_FILE}")"
 
 #For cross build
 CROSS_BUILD=${CROSS_BUILD:-false}
@@ -330,7 +330,7 @@ check_env_variables()
 
 	[ -n "${KERNEL_MODULES_DIR}" ] && [ ! -d "${KERNEL_MODULES_DIR}" ] && die "KERNEL_MODULES_DIR defined but is not an existing directory"
 
-	[ "${AGENT_POLICY}" == "yes" ] && [ ! -f "${agent_policy_file}" ] && die "agent policy file not found in '${agent_policy_file}'"
+	[ ! -f "${agent_policy_file}" ] && die "agent policy file not found in '${agent_policy_file}'"
 
 	[ -n "${OSBUILDER_VERSION}" ] || die "need osbuilder version"
 }
