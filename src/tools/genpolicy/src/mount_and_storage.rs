@@ -100,6 +100,40 @@ fn adjust_termination_path(mount: &mut policy::KataMount, yaml_container: &pod::
     }
 }
 
+pub fn get_mount_info(
+    storage_class: Option<&String>,
+    settings: &settings::Settings,
+) -> (bool, bool, Option<Vec<String>>) {
+    if let Some(storage_class) = storage_class {
+        let is_blk_mount = settings
+            .common
+            .virtio_blk_storage_classes
+            .contains(storage_class);
+
+        let is_smb_mount = settings
+            .common
+            .smb_storage_classes
+            .iter()
+            .any(|smb_class| &smb_class.name == storage_class);
+
+        let smb_mount_options = if is_smb_mount {
+            settings
+                .common
+                .smb_storage_classes
+                .iter()
+                .find(|sc| &sc.name == storage_class)
+                .map(|sc| sc.mount_options.clone())
+        } else {
+            None
+        };
+
+        (is_blk_mount, is_smb_mount, smb_mount_options)
+    } else {
+        warn!("Storage class is None. Defaulting to no mounts.");
+        (false, false, None)
+    }
+}
+
 pub fn get_mount_and_storage(
     settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
@@ -238,13 +272,17 @@ fn get_persistent_volume_claim_mount(
         );
     }
 
-    let is_blk_mount = pvc_resource
-        .and_then(|pvc_resource| pvc_resource.spec.storageClassName.as_ref())
-        .is_some_and(|sc| settings.common.virtio_blk_storage_classes.contains(sc));
+    let storage_class = if let Some(pvc_resource) = pvc_resource {
+        pvc_resource.spec.storageClassName.as_ref()
+    } else {
+        None
+    };
 
-    let is_smb_mount = pvc_resource
-        .and_then(|pvc_resource| pvc_resource.spec.storageClassName.as_ref())
-        .is_some_and(|sc| settings.common.smb_storage_classes.contains(sc));
+    if storage_class.is_none() {
+        warn!("Storage class is missing for persistent volume claim '{pvc_name}'.");
+    }
+
+    let (is_blk_mount, is_smb_mount, smb_mount_options) = get_mount_info(storage_class, settings);
 
     handle_persistent_volume_claim(
         is_blk_mount,
@@ -253,6 +291,7 @@ fn get_persistent_volume_claim_mount(
         p_mounts,
         storages,
         mount_options,
+        smb_mount_options,
     );
 }
 
@@ -419,22 +458,16 @@ fn get_ephemeral_mount(
     storages: &mut Vec<agent::Storage>,
     mount_options: (&str, &str),
 ) {
-    let storage_class = &yaml_volume
+    let storage_class = yaml_volume
         .ephemeral
         .as_ref()
         .unwrap()
         .volumeClaimTemplate
         .spec
-        .storageClassName;
+        .storageClassName
+        .as_ref();
 
-    let is_blk_mount = storage_class
-        .as_ref()
-        .map(|sc| settings.common.virtio_blk_storage_classes.contains(sc))
-        .unwrap_or(false);
-    let is_smb_mount = storage_class
-        .as_ref()
-        .map(|sc| settings.common.smb_storage_classes.contains(sc))
-        .unwrap_or(false);
+    let (is_blk_mount, is_smb_mount, smb_mount_options) = get_mount_info(storage_class, settings);
 
     handle_persistent_volume_claim(
         is_blk_mount,
@@ -443,6 +476,7 @@ fn get_ephemeral_mount(
         p_mounts,
         storages,
         mount_options,
+        smb_mount_options,
     );
 }
 
@@ -453,6 +487,7 @@ pub fn handle_persistent_volume_claim(
     p_mounts: &mut Vec<policy::KataMount>,
     storages: &mut Vec<agent::Storage>,
     mount_options: (&str, &str),
+    smb_mount_options: Option<Vec<String>>, // Pass SMB mount options
 ) {
     if is_blk_mount || is_smb_mount {
         let source = "$(spath)/$(b64-direct-vol-path)".to_string();
@@ -468,7 +503,15 @@ pub fn handle_persistent_volume_claim(
             source: "$(direct-vol-path)".to_string(),
             mount_point: source.to_string(),
             fstype: "$(fs-type)".to_string(),
-            options: Vec::new(),
+            options: if is_smb_mount {
+                if let Some(mount_options) = smb_mount_options {
+                    mount_options.clone()
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            },
         });
 
         let dest = yaml_mount.mountPath.clone();
