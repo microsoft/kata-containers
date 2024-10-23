@@ -282,8 +282,18 @@
             "cc-managed-premium-csi"
         ],
         "smb_storage_classes": [
-            "cc-azurefile-csi",
-            "cc-azurefile-premium-csi"
+            {
+                "name": "azurefile-csi-kata-cc",
+                "mount_options": [
+                    "dir_mode=0777",
+                    "file_mode=0777",
+                    "mfsymlinks",
+                    "cache=strict",
+                    "nosharesock",
+                    "actimeo=30",
+                    "nobrl"
+                ]
+            }
         ]
     },
     "kata_config": {

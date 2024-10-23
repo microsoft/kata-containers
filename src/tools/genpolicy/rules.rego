@@ -941,15 +941,15 @@ allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
     print("allow_storage_options 4: start")
 
     p_storage.driver == "smb"
-    count(i_storage.options) == 8
-    i_storage.options[0] == "dir_mode=0666"
-    i_storage.options[1] == "file_mode=0666"
-    i_storage.options[2] == "mfsymlinks"    
-    i_storage.options[3] == "cache=strict"  
-    i_storage.options[4] == "nosharesock"
-    i_storage.options[5] == "actimeo=30"    
-    startswith(i_storage.options[6], "addr=")
-    creds = split(i_storage.options[7], ",")
+    p_opts_count := count(p_storage.options)
+    i_opts_count := count(i_storage.options)
+    i_opts_count == p_opts_count + 2
+
+    i_opt_matches := [i | i := idx; idx < p_opts_count; p_storage.options[idx] == i_storage.options[idx]]
+    count(i_opt_matches) == p_opts_count
+
+    startswith(i_storage.options[i_opts_count-2], "addr=")
+    creds = split(i_storage.options[i_opts_count-1], ",")
     count(creds) == 2
     startswith(creds[0], "username=")
     startswith(creds[1], "password=")

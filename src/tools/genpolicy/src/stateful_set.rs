@@ -212,23 +212,9 @@ impl StatefulSet {
             for claim in claims {
                 if let Some(claim_name) = &claim.metadata.name {
                     if claim_name.eq(&mount.name) {
-                        // check if a storage class is set and if it is a virtio-blk storage class
-                        let is_blk_mount = if let Some(storage_class) = &claim.spec.storageClassName
-                        {
-                            settings
-                                .common
-                                .virtio_blk_storage_classes
-                                .contains(storage_class)
-                        } else {
-                            false
-                        };
-                        // check if a storage class is set and if it is a smb storage class
-                        let is_smb_mount = if let Some(storage_class) = &claim.spec.storageClassName
-                        {
-                            settings.common.smb_storage_classes.contains(storage_class)
-                        } else {
-                            false
-                        };
+                        let storage_class = claim.spec.storageClassName.as_ref();
+                        let (is_blk_mount, is_smb_mount, smb_mount_options) =
+                            mount_and_storage::get_mount_info(storage_class, settings);
 
                         let propagation = match &mount.mountPropagation {
                             Some(p) if p == "Bidirectional" => "rshared",
@@ -249,6 +235,7 @@ impl StatefulSet {
                             policy_mounts,
                             storages,
                             mount_options,
+                            smb_mount_options,
                         );
                     }
                 }
