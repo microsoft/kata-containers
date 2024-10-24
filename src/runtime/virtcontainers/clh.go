@@ -81,6 +81,10 @@ const (
 	// successfully, on a single Host.
 	clhAPITimeoutConfidentialGuest = 300
 
+	// If filesystem sharing is enabled, memory=shared causes large pod bootup times
+	// when requesting large memory
+	clhAPITimeoutVhost = 100
+
 	// Timeout for hot-plug - hotplug devices can take more time, than usual API calls
 	// Use longer time timeout for it.
 	clhHotPlugAPITimeout                   = 5
@@ -303,6 +307,10 @@ func (clh *cloudHypervisor) getClhAPITimeout() time.Duration {
 	// this change can be dropped in further steps of the development.
 	if clh.config.ConfidentialGuest {
 		return clhAPITimeoutConfidentialGuest
+	}
+
+	if clh.vmconfig.Memory.GetShared() == true {
+		return clhAPITimeoutVhost
 	}
 
 	return clhAPITimeout
@@ -556,8 +564,17 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 	// Create the VM memory config via the constructor to ensure default values are properly assigned
 	clh.vmconfig.Memory = chclient.NewMemoryConfig(int64((utils.MemUnit(clh.config.MemorySize) * utils.MiB).ToBytes()))
-	// shared memory should be enabled if using vhost-user(kata uses virtiofsd)
-	clh.vmconfig.Memory.Shared = func(b bool) *bool { return &b }(true)
+
+	// Memory config shared is to be enabled when vhost_user backends are used,
+	// ex: with filesystem sharing using virtio-fs
+	// If vhost_user backends are disabled, do not setup memory as shared
+	// TODO: not sure how to check for all vhost_user backends(blk/net)
+	if clh.config.SharedFS == config.NoSharedFS && !clh.config.HugePages {
+		clh.vmconfig.Memory.Shared = func(b bool) *bool { return &b }(false)
+	} else {
+		clh.vmconfig.Memory.Shared = func(b bool) *bool { return &b }(true)
+	}
+
 	// Enable hugepages if needed
 	clh.vmconfig.Memory.Hugepages = func(b bool) *bool { return &b }(clh.config.HugePages)
 	if !clh.config.ConfidentialGuest && igvmPath == "" {
