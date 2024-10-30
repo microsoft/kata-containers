@@ -17,6 +17,8 @@ IGVM_SVN=${IGVM_SVN:-0}
 script_dir="$(dirname $(readlink -f $0))"
 repo_dir="${script_dir}/../../../../"
 
+agent_policy_file_abs="${repo_dir}/src/kata-opa/${AGENT_POLICY_FILE}"
+
 common_file="common.sh"
 source "${common_file}"
 
@@ -24,7 +26,7 @@ source "${common_file}"
 rootfs_make_flags="AGENT_SOURCE_BIN=${AGENT_INSTALL_DIR}/usr/bin/kata-agent"
 
 if [ "${CONF_PODS}" == "yes" ]; then
-	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=${AGENT_POLICY_FILE}"
+	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=${agent_policy_file_abs}"
 fi
 
 if [ "${CONF_PODS}" == "yes" ]; then
