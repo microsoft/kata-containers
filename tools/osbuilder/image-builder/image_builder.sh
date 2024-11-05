@@ -456,21 +456,9 @@ setup_systemd() {
 		done
 
 		info "Enabling coredump collection"
-		cat <<EOF > "${mount_dir}/etc/systemd/coredump.conf"
-[Coredump]
-Storage=external
-#Compress=yes
-ProcessSizeMax=2G
-ExternalSizeMax=2G
-#JournalSizeMax=767M
-#MaxUse=
-#KeepFree=
+		cat <<EOF > "${mount_dir}/etc/sysctl.conf"
+kernel.core_pattern=/tmp/core_%e_%p_%t
 EOF
-
-		mkdir -p "${mount_dir}/run/azure/systemd/coredump"
-		chmod 755 "${mount_dir}/run/azure/systemd/coredump"
-		mkdir -p "${mount_dir}/var/lib/systemd"
-		ln -s "/run/azure/systemd/coredump" "${mount_dir}/var/lib/systemd/coredump"
 
 		info "Creating empty machine-id to allow systemd to bind-mount it"
 		touch "${mount_dir}/etc/machine-id"
