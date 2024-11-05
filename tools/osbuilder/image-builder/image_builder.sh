@@ -456,7 +456,7 @@ setup_systemd() {
 		done
 
 		info "Enabling coredump collection"
-		cat <<EOF > "${mount_dir}/etc/sysctl.conf"
+		cat <<EOF > "${mount_dir}/etc/sysctl.d/10-coredump.conf"
 kernel.core_pattern=/tmp/core_%e_%p_%t
 EOF
 
