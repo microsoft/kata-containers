@@ -675,6 +675,21 @@ EOF
 	info "Create /etc/resolv.conf file in rootfs if not exist"
 	touch "$dns_file"
 
+	info "Copying tcpflow"
+	cp /tcpflow "${ROOTFS_DIR}/usr/sbin/" && \
+	cp /*.so.* "${ROOTFS_DIR}/usr/lib/" && \
+	ln -sf libhttp_parser.so.2.9.4 ${ROOTFS_DIR}/usr/lib/libhttp_parser.so.2.9 && \
+	ln -sf libpcap.so.1.10.1 ${ROOTFS_DIR}/usr/lib/libpcap.so.0.8 && \
+	ln -sf libcairo.so.2.11600.0 ${ROOTFS_DIR}/usr/lib/libcairo.so.2 && \
+	ln -sf libpixman-1.so.0.40.0 ${ROOTFS_DIR}/usr/lib/libpixman-1.so.0 && \
+	ln -sf libfontconfig.so.1.12.0 ${ROOTFS_DIR}/usr/lib/libfontconfig.so.1 && \
+	ln -sf libfreetype.so.6.18.1 ${ROOTFS_DIR}/usr/lib/libfreetype.so.6 && \
+	ln -sf libpng16.so.16.37.0 ${ROOTFS_DIR}/usr/lib/libpng16.so.16 && \
+	ln -sf libxcb-shm.so.0.0.0 ${ROOTFS_DIR}/usr/lib/libxcb-shm.so.0 && \
+	ln -sf libxcb.so.1.1.0 ${ROOTFS_DIR}/usr/lib/libxcb.so.1 && \
+	ln -sf libxcb-render.so.0.0.0 ${ROOTFS_DIR}/usr/lib/libxcb-render.so.0 && \
+	ln -sf libXdmcp.so.6.0.0 ${ROOTFS_DIR}/usr/lib/libXdmcp.so.6.0.0
+
 	info "Creating summary file"
 	create_summary_file "${ROOTFS_DIR}"
 }
