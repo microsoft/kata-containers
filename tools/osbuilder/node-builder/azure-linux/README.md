@@ -1,6 +1,6 @@
 # Overview
 
-This guide enables to build and evaluate the underlying software stack for *Kata VM Isolated Containers on AKS* and for *Confidential Containers on AKS* using Azure Linux.
+This guide serves as a reference on how to build and evaluate the underlying software stack for *Kata VM Isolated Containers on AKS* and for *Confidential Containers on AKS* using Azure Linux.
 The underlying software stack referred to in this guide will stretch from containerd to lower layers, for instance, enabling to deploy Kata (Confidential) Containers via the OCI interface, or deploying a local kubelet, or leveraging AKS' Kubernetes solution.
 
 In the following, the terms *Kata* and *Kata-CC* refer to *Kata VM Isolated Containers on AKS* and *Confidential Containers on AKS*, respectively. Note that, *Kata VM Isolated Containers on AKS* is also referred to as *Pod Sandboxing with AKS* in the public.
@@ -8,25 +8,28 @@ In the following, the terms *Kata* and *Kata-CC* refer to *Kata VM Isolated Cont
 # Pre-requirements
 
 While build can happen in any Azure Linux based environment, the stack can only be evaluated in Azure Linux environments on top of AMD SEV-SNP - the details here are omitted:
-- Deploy an Azure Linux VM via `az vm create` using a [CC vm size SKU](https://learn.microsoft.com/en-us/azure/virtual-machines/dcasccv5-dcadsccv5-series)
-  - Example: `az vm create --resource-group <rg_name> --name <vm_name> --os-disk-size-gb <e.g. 60> --public-ip-sku Standard --size <e.g. Standard_DC4as_cc_v5> --admin-username azureuser --ssh-key-values <ssh_pubkey> --image <MicrosoftCBLMariner:cbl-mariner:...> --security-type Standard`
-- Deploy a [Confidential Containers for AKS cluster](https://learn.microsoft.com/en-us/azure/aks/deploy-confidential-containers-default-policy) via `az aks create`. Note, this way the bits built in this guide will already be present on the cluster's Azure Linux based nodes.
+- Deploy an Azure Linux 3 VM via `az vm create` using a [CC vm size SKU](https://learn.microsoft.com/en-us/azure/virtual-machines/dcasccv5-dcadsccv5-series)
+  - Example: `az vm create --resource-group <rg_name> --name <vm_name> --os-disk-size-gb <e.g. 60> --public-ip-sku Standard --size <e.g. Standard_DC4as_cc_v5> --admin-username azureuser --ssh-key-values <ssh_pubkey> --image <MicrosoftCBLMariner:azure-linux-3:azure-linux-3-gen2:latest>`
+- Deploy a [Confidential Containers for AKS cluster](https://learn.microsoft.com/en-us/azure/aks/deploy-confidential-containers-default-policy) via `az aks create` (using `AzureLinux` as `os-sku`). Note, this way the bits built in this guide will already be present on the cluster's Azure Linux based nodes. The current version is Azure Linux 2.
   - Deploy a debugging pod onto one of the nodes, SSH onto the node.
-- Not validated for evaluation: Install [Azure Linux](https://github.com/microsoft/azurelinux) on a bare metal machine supporting AMD SEV-SNP.
+- Not validated for evaluation: Install [Azure Linux 3](https://github.com/microsoft/azurelinux) on a bare metal machine supporting AMD SEV-SNP.
 
-To only build the stack, we refer to the official [Azure Linux GitHub page](https://github.com/microsoft/azurelinux) to set up Azure Linux.
+To merely build the stack, we refer to the official [Azure Linux GitHub page](https://github.com/microsoft/azurelinux) to set up Azure Linux.
 
-The following steps assume the user has direct console access on the environnment that was set up.
+The following steps assume the user has direct console access on the environment that was set up.
 
 # Deploy required virtualization packages (e.g., VMM, SEV-SNP capable kernel and Microsoft Hypervisor)
 
 Note: This step can be skipped if your environment was set up through `az aks create`
 
-Install relevant packages and modify the grub configuration to boot into the SEV-SNP capable kernel `kernel-mshv` upon next reboot:
+Install relevant packages:
 ```
 sudo dnf -y makecache
 sudo dnf -y install kata-packages-host
+```
 
+Azure Linux 2 only: modify the grub configuration to boot into the SEV-SNP capable kernel `kernel-mshv` upon next reboot:
+```
 boot_uuid=$(sudo grep -o -m 1 '[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}' /boot/efi/boot/grub2/grub.cfg)
 
 sudo sed -i -e 's@load_env -f \$bootprefix\/mariner.cfg@load_env -f \$bootprefix\/mariner-mshv.cfg\nload_env -f $bootprefix\/mariner.cfg\n@'  /boot/grub2/grub.cfg
@@ -73,10 +76,10 @@ Restart containerd (ensuring the configuration file is intact):
 
 ```
 sudo dnf -y makecache
-sudo dnf -y install git vim golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel parted qemu-img btrfs-progs-devel device-mapper-devel cmake fuse-devel jq curl kata-packages-uvm-build kernel-uvm-devel
+sudo dnf -y install git golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel cmake fuse-devel jq kata-packages-uvm-build
+# Azure Linux 2 only (kernel-uvm-devel package is only required when building Confidential Containers)
+sudo dnf -y install parted qemu-img curl kernel-uvm-devel
 ```
-
-**Note:** The kernel-uvm-devel package in step above is only required for Confidential Containers and can be omitted for regular Kata Containers builds.
 
 # Optional: Build and deploy the containerd fork from scratch
 
@@ -133,7 +136,6 @@ The `all[-confpods]` target runs the targets `package[-confpods]` and `uvm[-conf
 
 Notes:
   - To retrieve more detailed build output, prefix the make commands with `DEBUG=1`.
-  - To build for Azure Linux 3, prefix the make commands that build artifacts with `OS_VERSION=3.0`
   - To build an IGVM file for CondPods with a non-default SVN of 0, prefix the `make uvm-confpods` command with `IGVM_SVN=<number>`
   - For build and deployment of both Kata and Kata-CC artifacts, first run the `make all` and `make deploy` commands to build and install the Kata Containers for AKS components followed by `make clean`, and then run `make all-confpods` and `make deploy-confpods` to build and install the Confidential Containers for AKS components - or vice versa (using `make clean-confpods`).
 

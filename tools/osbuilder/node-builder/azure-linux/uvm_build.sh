@@ -23,7 +23,7 @@ common_file="common.sh"
 source "${common_file}"
 
 # This ensures that a pre-built agent binary is being injected into the rootfs
-rootfs_make_flags="AGENT_SOURCE_BIN=${AGENT_INSTALL_DIR}/usr/bin/kata-agent"
+rootfs_make_flags="AGENT_SOURCE_BIN=${AGENT_INSTALL_DIR}/usr/bin/kata-agent OS_VERSION=${OS_VERSION}"
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=${agent_policy_file_abs}"
