@@ -345,6 +345,13 @@ pub struct RequestDefaults {
     pub WriteStreamRequest: bool,
 }
 
+// SMB storage class settings from genpolicy-settings.json.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SmbStorageClass {
+    pub name: String,
+    pub mount_options: Vec<String>,
+}
+
 /// Struct used to read data from the settings file and copy that data into the policy.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommonData {
@@ -379,7 +386,7 @@ pub struct CommonData {
     pub virtio_blk_storage_classes: Vec<String>,
 
     /// Storage classes which mounts should be handled as smb mounts
-    pub smb_storage_classes: Vec<String>,
+    pub smb_storage_classes: Vec<SmbStorageClass>,
 }
 
 /// Struct used to read data from the settings file and copy that data into the policy.
