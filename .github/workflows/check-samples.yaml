@@ -14,6 +14,12 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v4
 
+    - name: Rebase atop of the latest target branch
+      env:
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref }}
+      run: |
+        ./tests/git-helper.sh "rebase-atop-of-the-latest-target-branch"
+
     - name: Install yq
       env:
         INSTALL_IN_GOPATH: false

@@ -8,6 +8,7 @@
 set -o errexit
 set -o nounset
 set -o pipefail
+set -x
 
 function add_kata_bot_info() {
 	echo "Adding user name and email to the local git repo"
@@ -21,6 +22,7 @@ function rebase_atop_of_the_latest_target_branch() {
 		echo "Rebasing atop of the latest ${TARGET_BRANCH}"
 		# Recover from any previous rebase left halfway
 		git rebase --abort 2> /dev/null || true
+		git fetch origin ${TARGET_BRANCH}
 		git rebase origin/${TARGET_BRANCH}
 	fi
 }
