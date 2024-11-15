@@ -8,9 +8,9 @@ script_dir="$(dirname $(readlink -f $0))"
 lib_file="${script_dir}/../../scripts/lib.sh"
 source "${lib_file}"
 
-OS_VERSION=${OS_VERSION:-2.0}
+OS_VERSION=$(sort -r /etc/*-release | gawk 'match($0, /^(VERSION_ID=(.*))$/, a) { print toupper(a[2] a[3]); exit }' | tr -d '"')
 
-([[ "${OS_VERSION}" == "2.0" ]] || [[ "${OS_VERSION}" == "3.0" ]]) || die "OS_VERSION: must equal 2.0 (default) or 3.0"
+([[ "${OS_VERSION}" == "2.0" ]] || [[ "${OS_VERSION}" == "3.0" ]]) || die "OS_VERSION: value '${OS_VERSION}' must equal 3.0 (default) or 2.0"
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	INSTALL_PATH_PREFIX="/opt/confidential-containers"
