@@ -18,6 +18,8 @@ repo_dir="${script_dir}/../../../../"
 common_file="common.sh"
 source "${common_file}"
 
+UVM_PATH=${UVM_PATH:-${UVM_PATH_DEFAULT}}
+
 pushd "${repo_dir}"
 
 pushd tools/osbuilder
