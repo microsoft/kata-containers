@@ -31,9 +31,6 @@ use std::collections::BTreeMap;
 use std::fs::read_to_string;
 use std::io::Write;
 
-// TODO: load this value from the settings file.
-const DEFAULT_OCI_VERSION: &str = "1.1.0-rc.1";
-
 /// Intermediary format of policy data.
 pub struct AgentPolicy {
     /// K8s resources described by the input YAML file.
@@ -84,7 +81,7 @@ pub struct PolicyData {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct KataSpec {
     /// Version of the Open Container Initiative Runtime Specification with which the bundle complies.
-    #[serde(default = "version_default")]
+    #[serde(default)]
     pub Version: String,
 
     /// Process configures the container process.
@@ -109,10 +106,6 @@ pub struct KataSpec {
     /// Linux is platform-specific configuration for Linux based containers.
     #[serde(default)]
     pub Linux: KataLinux,
-}
-
-fn version_default() -> String {
-    DEFAULT_OCI_VERSION.to_string()
 }
 
 /// OCI container Process struct. This struct is very similar to the Process
@@ -597,7 +590,7 @@ impl AgentPolicy {
 
         ContainerPolicy {
             OCI: KataSpec {
-                Version: version_default(),
+                Version: self.settings.kata_config.oci_version.clone(),
                 Process: process,
                 Root: root,
                 Mounts: mounts,
