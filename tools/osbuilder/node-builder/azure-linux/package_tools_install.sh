@@ -45,6 +45,7 @@ cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/Makefile "${PRE
 cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/clean.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/node-builder/azure-linux/"
 cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/common.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/node-builder/azure-linux/"
 cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/uvm_build.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/node-builder/azure-linux/"
+cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/uvm_install.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/node-builder/azure-linux/"
 
 echo "Installing agent binary and service files"
 cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/agent-install/usr/bin/kata-agent "${PREFIX}/${UVM_TOOLS_PATH_OSB}/node-builder/azure-linux/agent-install/usr/bin/"
