@@ -1,58 +1,42 @@
 # Overview
 
-This guide serves as a reference on how to build and evaluate the underlying software stack for *Kata VM Isolated Containers on AKS* and for *Confidential Containers on AKS* using Azure Linux.
-The underlying software stack referred to in this guide will stretch from containerd to lower layers, for instance, enabling to deploy Kata (Confidential) Containers via the OCI interface, or deploying a local kubelet, or leveraging AKS' Kubernetes solution.
+This guide serves as a reference on how to build and install the underlying software stack for *Pod Sandboxing with AKS* and for *Confidential Containers on AKS* using Azure Linux.
+This enables running Kata (Confidential) Containers via the OCI interface, or via a local kubelet, or leveraging AKS' Kubernetes solution.
 
-In the following, the terms *Kata* and *Kata-CC* refer to *Kata VM Isolated Containers on AKS* and *Confidential Containers on AKS*, respectively. Note that, *Kata VM Isolated Containers on AKS* is also referred to as *Pod Sandboxing with AKS* in the public.
+In the following, the terms *Kata* and *Kata-CC* refer to *Pod Sandboxing with AKS* and *Confidential Containers on AKS*, respectively.
+The term *building* refers to build the components from source, whereas the term *installing* refers to utilizing components released by the Azure Linux team for straightforward evaluation.
 
-# Pre-requirements
+The guide provides the steps for two different environments:
+- Azure Linux 3 based systems, such as Azure VMs
+  - Variant I: Utilize released components
+  - Variant II: Build components from source
+- AKS nodes (based on Azure Linux 2 as of today)
 
-While build can happen in any Azure Linux based environment, the stack can only be evaluated in Azure Linux environments on top of AMD SEV-SNP - the details here are omitted:
+# Steps for Azure Linux 3 based environments
+
+## Set up environment
+
+While build can happen in any Azure Linux 3 based environment, the stack can only be evaluated on environments with proper virtualization support and, for Kata-CC, on top of AMD SEV-SNP. An example of such environment are Azure Linux 3 based Azure VMs using a proper SKU:
 - Deploy an Azure Linux 3 VM via `az vm create` using a [CC vm size SKU](https://learn.microsoft.com/en-us/azure/virtual-machines/dcasccv5-dcadsccv5-series)
   - Example: `az vm create --resource-group <rg_name> --name <vm_name> --os-disk-size-gb <e.g. 60> --public-ip-sku Standard --size <e.g. Standard_DC4as_cc_v5> --admin-username azureuser --ssh-key-values <ssh_pubkey> --image <MicrosoftCBLMariner:azure-linux-3:azure-linux-3-gen2:latest>`
-- Deploy a [Confidential Containers for AKS cluster](https://learn.microsoft.com/en-us/azure/aks/deploy-confidential-containers-default-policy) via `az aks create` (using `AzureLinux` as `os-sku`). Note, this way the bits built in this guide will already be present on the cluster's Azure Linux based nodes. The current version is Azure Linux 2.
-  - Deploy a debugging pod onto one of the nodes, SSH onto the node.
-- Not validated for evaluation: Install [Azure Linux 3](https://github.com/microsoft/azurelinux) on a bare metal machine supporting AMD SEV-SNP.
+- SSH onto the VM
 
-To merely build the stack, we refer to the official [Azure Linux GitHub page](https://github.com/microsoft/azurelinux) to set up Azure Linux.
+Not validated for evaluation: Install [Azure Linux 3](https://github.com/microsoft/azurelinux) on a bare metal machine supporting AMD SEV-SNP.
 
-The following steps assume the user has direct console access on the environment that was set up.
+To merely build the stack, we refer to the official [Azure Linux GitHub page](https://github.com/microsoft/azurelinux) to set up an Azure Linux 3 environment.
 
-# Deploy required virtualization packages (e.g., VMM, SEV-SNP capable kernel and Microsoft Hypervisor)
+## Deploy required host packages (incl. VMM, SEV-SNP capable kernel and Microsoft Hypervisor) and extend containerd configuration
 
-Note: This step can be skipped if your environment was set up through `az aks create`
-
-Install relevant packages:
+Install relevant packages, append a configuration snippet to `/etc/containerd/config.toml` to register the Kata(-CC) handlers, then reboot the system:
 ```
 sudo dnf -y makecache
 sudo dnf -y install kata-packages-host
-```
 
-Azure Linux 2 only: modify the grub configuration to boot into the SEV-SNP capable kernel `kernel-mshv` upon next reboot:
-```
-boot_uuid=$(sudo grep -o -m 1 '[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}' /boot/efi/boot/grub2/grub.cfg)
-
-sudo sed -i -e 's@load_env -f \$bootprefix\/mariner.cfg@load_env -f \$bootprefix\/mariner-mshv.cfg\nload_env -f $bootprefix\/mariner.cfg\n@'  /boot/grub2/grub.cfg
-
-sudo sed -i -e 's@menuentry "CBL-Mariner"@menuentry "Dom0" {\n    search --no-floppy --set=root --file /HvLoader.efi\n    chainloader /HvLoader.efi lxhvloader.dll MSHV_ROOT=\\\\Windows MSHV_ENABLE=TRUE MSHV_SCHEDULER_TYPE=ROOT MSHV_X2APIC_POLICY=ENABLE MSHV_SEV_SNP=TRUE MSHV_LOAD_OPTION=INCLUDETRACEMETADATA=1\n    boot\n    search --no-floppy --fs-uuid '"$boot_uuid"' --set=root\n    linux $bootprefix/$mariner_linux_mshv $mariner_cmdline_mshv $systemd_cmdline root=$rootdevice\n    if [ -f $bootprefix/$mariner_initrd_mshv ]; then\n    initrd $bootprefix/$mariner_initrd_mshv\n    fi\n}\n\nmenuentry "CBL-Mariner"@'  /boot/grub2/grub.cfg
-```
-
-Reboot the system:
-```sudo reboot```
-
-Note: We currently use a [forked version](https://github.com/microsoft/confidential-containers-containerd/tree/tardev-v1.7.7) of `containerd` called `containerd-cc` which is installed as part of the `kata-packages-host` package. This containerd version is based on stock containerd with patches to support the Confidential Containers on AKS use case and conflicts with the `containerd` package.
-
-# Add Kata(-CC) handler configuration snippets to containerd configuration
-
-Note: This step can be skipped if your environment was set up through `az aks create`.
-
-Append the following containerd configuration snippet to `/etc/containerd/config.toml` to register the Kata(-CC) handlers, for example, using this command:
-
-```
 sudo tee -a /etc/containerd/config.toml 2&>1 <<EOF
 
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata]
   runtime_type = "io.containerd.kata.v2"
+  privileged_without_host_devices = true
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata.options]
     ConfigPath = "/usr/share/defaults/kata-containers/configuration.toml"
 [proxy_plugins]
@@ -66,37 +50,81 @@ sudo tee -a /etc/containerd/config.toml 2&>1 <<EOF
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-cc.options]
     ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/configuration-clh-snp.toml"
 EOF
+
+sudo reboot
 ```
 
-Restart containerd (ensuring the configuration file is intact):
+Note: We currently use a [forked version](https://github.com/microsoft/confidential-containers-containerd/tree/tardev-v1.7.7) of `containerd` called `containerd-cc` which is installed as part of the `kata-packages-host` package. This containerd version is based on stock containerd with patches to support the Kata-CC use case and conflicts with the `containerd` package.
+As part of the build steps below, we provide instructions on how to build `containerd-cc` from source and to replace the component on the environment.
 
-```sudo systemctl restart containerd```
+## Variant I: Utilize released components to assemble the UVM
 
-# Install general build dependencies
+While the priorly installed `kata-packages-host` package delivers all host-side components, the tools required to assemble the UVM components are delivered through the `kata-packages-uvm-build` package.
+Using this package, it is straightforward to assemble the UVM and then to run pods.
 
+For Kata:
 ```
-sudo dnf -y makecache
-sudo dnf -y install git golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel cmake fuse-devel jq kata-packages-uvm-build
-# Azure Linux 2 only (kernel-uvm-devel package is only required when building Confidential Containers)
-sudo dnf -y install parted qemu-img curl kernel-uvm-devel
-```
-
-# Optional: Build and deploy the containerd fork from scratch
-
-```
-git clone --depth 1 --branch tardev-v1.7.7 https://github.com/microsoft/confidential-containers-containerd.git
-pushd confidential-containers-containerd/
-GODEBUG=1 make
+sudo dnf -y install kata-packages-uvm-build make
+pushd /opt/kata-containers/uvm/tools/osbuilder
+pushd node-builder/azure-linux
+sudo make OS_VERSION=3.0 uvm
+popd
+sudo mkdir -p /usr/share/kata-containers
+sudo cp kata-containers.img /usr/share/kata-containers/
+popd
 popd
 ```
 
-Overwrite existing containerd binary, restart service:
+For Kata-CC:
 ```
-sudo cp -a --backup=numbered confidential-containers-containerd/bin/containerd /usr/bin/containerd
-sudo systemctl restart containerd
+sudo dnf -y install kata-packages-uvm-build make curl jq # curl and jq are only required for installing the IGVM tool
+pushd /opt/confidential-containers/uvm/tools/osbuilder
+pushd igvm-builder
+sudo ./igvm_builder.sh -i
+popd
+pushd node-builder/azure-linux
+sudo make OS_VERSION=3.0 AGENT_POLICY_FILE=allow-all.rego uvm-confpods
+popd
+sudo mkdir -p /opt/confidential-containers/share/kata-containers
+sudo cp kata-containers.img /opt/confidential-containers/share/kata-containers/
+sudo cp kata-containers-igvm.img /opt/confidential-containers/share/kata-containers/
+# Note: currently depends on kubelet, need to manually start at every reboot.
+sudo systemctl start tardev-snapshotter
+popd
 ```
 
-# Build and install the Kata(-CC) host and guest components
+You environment is ready. Continue with section *Run Kata (Confidential) Containers*
+
+## Variant II: Build components from source
+
+### Install build dependencies
+
+```
+sudo dnf -y install git golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel cmake fuse-devel kata-packages-uvm-build
+```
+
+Continue with the section *Build the Kata(-CC) host and guest components from source and install*.
+
+# Steps for AKS nodes
+
+## Set up environment
+
+- Deploy a [Confidential Containers for AKS cluster](https://learn.microsoft.com/en-us/azure/aks/deploy-confidential-containers-default-policy) via `az aks create` (using `AzureLinux` as `os-sku`). Note, this way the bits built in this guide will already be present on the cluster's Azure Linux based nodes.
+- Deploy a debugging pod onto one of the nodes
+- From the debugging pod, SSH onto the node you intend to use to build on.
+
+As released components are already pre-installed onto AKS nodes, the remainder of this section focuses on how to (re-)build the components from source.
+
+## Install build dependencies
+
+```
+sudo dnf -y makecache
+sudo dnf -y install git golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel cmake fuse-devel kata-packages-uvm-build parted qemu-img kernel-uvm-devel curl jq # curl and jq are only required for installing the IGVM tool
+```
+
+From here on, continue with the following section to build.
+
+# Build the Kata(-CC) host and guest components from source and install
 
 Clone the Microsoft's fork of the kata-containers repository:
 
@@ -116,7 +144,7 @@ This command installs the latest release of the [IGVM tooling](https://github.co
 
 ## Build and deploy
 
-To build and install Kata Containers for AKS components, run:
+To build and install Kata components, run:
 ```
 pushd kata-containers/tools/osbuilder/node-builder/azure-linux
 make all
@@ -124,7 +152,7 @@ sudo make deploy
 popd
 ```
 
-To build and install Confidential Containers for AKS, use the `all-confpods` and `deploy-confpods` targets:
+To build and install Kata-CC components, use the `all-confpods` and `deploy-confpods` targets:
 ```
 pushd kata-containers/tools/osbuilder/node-builder/azure-linux
 make all-confpods
@@ -139,7 +167,7 @@ Notes:
   - To build an IGVM file for CondPods with a non-default SVN of 0, prefix the `make uvm-confpods` command with `IGVM_SVN=<number>`
   - For build and deployment of both Kata and Kata-CC artifacts, first run the `make all` and `make deploy` commands to build and install the Kata Containers for AKS components followed by `make clean`, and then run `make all-confpods` and `make deploy-confpods` to build and install the Confidential Containers for AKS components - or vice versa (using `make clean-confpods`).
 
-## Debug build
+## Debug builds
 
 This section describes how to build and deploy in debug mode.
 
@@ -192,6 +220,21 @@ command:
 sudo make BUILD_TYPE=debug SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
 ```
 
+## Optional build step: Build and deploy the containerd fork from scratch
+
+```
+git clone --depth 1 --branch tardev-v1.7.7 https://github.com/microsoft/confidential-containers-containerd.git
+pushd confidential-containers-containerd/
+GODEBUG=1 make
+popd
+```
+
+Overwrite existing containerd binary, restart service:
+```
+sudo cp -a --backup=numbered confidential-containers-containerd/bin/containerd /usr/bin/containerd
+sudo systemctl restart containerd
+```
+
 # Run Kata (Confidential) Containers
 
 ## Run via CRI or via containerd API
@@ -201,17 +244,11 @@ Use e.g. `crictl` (or `ctr`) to schedule Kata (Confidential) containers, referen
 Note: On Kubernetes nodes, pods created via `crictl` will be deleted by the control plane.
 
 The following instructions serve as a general reference:
-- Install `crictl`, set runtime endpoint in `crictl` configuration:
+- Install `crictl`, `cni` binaries, and set runtime endpoint in `crictl` configuration:
 
   ```
-  sudo dnf -y install cri-tools
+  sudo dnf -y install cri-tools cni
   sudo crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock
-  ```
-
-- Install CNI binaries:
-
-  ```
-  sudo dnf -y install cni
   ```
 
 - Set a proper CNI configuration and create a sample pod manifest: This step is omitted as it depends on the individual needs.
@@ -231,9 +268,8 @@ For further usage we refer to the upstream `crictl` (or `ctr`) and CNI documenta
 ## Run via Kubernetes
 
 If your environment was set up through `az aks create` the respective node is ready to run Kata (Confidential) Containers as AKS Kubernetes pods.
-Other types of Kubernetes clusters should work as well - but this document doesn't cover how to set-up those clusters.
-
-Next, apply the kata and kata-cc runtime classes on the machine that holds your kubeconfig file, for example:
+Other types of Kubernetes clusters should work as well. While this document doesn't cover how to set-up those clusters, you can
+apply the kata and kata-cc runtime classes to your cluster from the machine that holds your kubeconfig file, for example:
 ```
 cat << EOF > runtimeClass-kata-cc.yaml
 kind: RuntimeClass
