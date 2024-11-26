@@ -238,10 +238,12 @@ func (d *Driver) NodePublishVolume(_ context.Context, req *csi.NodePublishVolume
 
 	// Get fsType that the volume will be formatted and mounted with
 	fstype := getDefaultFsType()
+	var mntGroup string
 	if mnt := volumeCapability.GetMount(); mnt != nil {
 		if mnt.FsType != "" {
 			fstype = mnt.FsType
 		}
+		mntGroup = mnt.VolumeMountGroup
 	}
 
 	volContextFSType := azureutils.GetFStype(req.GetVolumeContext())
@@ -254,8 +256,10 @@ func (d *Driver) NodePublishVolume(_ context.Context, req *csi.NodePublishVolume
 		VolumeType: "blk",
 		Device:     device,
 		FsType:     fstype,
-		Metadata:   nil,
-		Options:    nil,
+		Metadata: map[string]string{
+			"fsGroup": mntGroup,
+		},
+		Options: nil,
 	}
 
 	rawMountInfo, err := json.Marshal(mountInfo)
