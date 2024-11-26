@@ -1378,6 +1378,9 @@ func (k *kataAgent) createContainer(ctx context.Context, sandbox *Sandbox, c *Co
 	sharedDirMounts := make(map[string]Mount)
 	ignoredMounts := make(map[string]Mount)
 
+	// path to copyFile
+	// it seems files get copied over before path to mounting block devices
+	// here we may consider getting all the file paths that would get copied over instead
 	shareStorages, err := c.mountSharedDirMounts(ctx, sharedDirMounts, ignoredMounts)
 	if err != nil {
 		return nil, err
@@ -1421,6 +1424,7 @@ func (k *kataAgent) createContainer(ctx context.Context, sandbox *Sandbox, c *Co
 	// Append container devices for block devices passed with --device.
 	ctrDevices = k.appendDevices(ctrDevices, c)
 
+	// path to virtio-blk
 	// Block based volumes will require some adjustments in the OCI spec, and creation of
 	// storage objects to pass to the agent.
 	layerStorages, volumeStorages, err := k.handleBlkOCIMounts(c, ociSpec)
@@ -1763,6 +1767,7 @@ func handleVirtualVolumeStorageObject(c *Container, blockDeviceId string, virtVo
 	return vol, nil
 }
 
+// virtio-blk this is created
 // handleDeviceBlockVolume handles volume that is block device file
 // and DeviceBlock type.
 func (k *kataAgent) handleDeviceBlockVolume(c *Container, m Mount, device api.Device) (*grpc.Storage, error) {
@@ -1816,10 +1821,13 @@ func (k *kataAgent) handleVhostUserBlkVolume(c *Container, m Mount, device api.D
 	return vol, nil
 }
 
+// calls handleDeviceBlockVolume
+// creates block storage objects
 func (k *kataAgent) createBlkStorageObject(c *Container, m Mount) (*grpc.Storage, error) {
 	var vol *grpc.Storage
 
 	id := m.BlockDeviceID
+	// ohh we expect the device to be known by the sandbox devManager too
 	device := c.sandbox.devManager.GetDeviceByID(id)
 	if device == nil {
 		k.Logger().WithField("device", id).Error("failed to find device by id")
@@ -1839,6 +1847,7 @@ func (k *kataAgent) createBlkStorageObject(c *Container, m Mount) (*grpc.Storage
 	return vol, err
 }
 
+// calls createBlkStorageObject
 // handleBlkOCIMounts will create a unique destination mountpoint in the guest for each volume in the
 // given container and will update the OCI spec to utilize this mount point as the new source for the
 // container volume. The container mount structure is updated to store the guest destination mountpoint.
@@ -1846,6 +1855,8 @@ func (k *kataAgent) handleBlkOCIMounts(c *Container, spec *specs.Spec) ([]*grpc.
 
 	var volumeStorages []*grpc.Storage
 	var layerStorages []*grpc.Storage
+
+	// here or after this loop we may try to call createBlkStorageObject to mount a device containing initial files
 
 	for i, m := range c.mounts {
 		id := m.BlockDeviceID
@@ -1859,6 +1870,7 @@ func (k *kataAgent) handleBlkOCIMounts(c *Container, spec *specs.Spec) ([]*grpc.
 		c.devices = append(c.devices, ContainerDevice{ID: id, ContainerPath: m.Destination})
 
 		// Create Storage structure
+		// virtio block devices come from container.mounts
 		vol, err := k.createBlkStorageObject(c, m)
 		if vol == nil || err != nil {
 			return nil, nil, err
@@ -1879,6 +1891,7 @@ func (k *kataAgent) handleBlkOCIMounts(c *Container, spec *specs.Spec) ([]*grpc.
 
 		// Update applicable OCI mount source
 		for idx, ociMount := range spec.Mounts {
+			// may also need a OCI mount entry
 			if ociMount.Destination != vol.MountPoint {
 				continue
 			}

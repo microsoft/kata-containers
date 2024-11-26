@@ -151,6 +151,7 @@ func (dm *deviceManager) createDevice(devInfo config.DeviceInfo) (dev api.Device
 	}
 }
 
+// device creation implementation
 // NewDevice creates a device based on specified DeviceInfo
 func (dm *deviceManager) NewDevice(devInfo config.DeviceInfo) (api.Device, error) {
 	dm.Lock()

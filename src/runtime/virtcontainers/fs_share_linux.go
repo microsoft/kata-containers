@@ -296,12 +296,17 @@ func (f *FilesystemShare) Cleanup(ctx context.Context) error {
 }
 
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+
+	// how to get the filepath from the mount:
+
 	randBytes, err := utils.GenerateRandomBytes(8)
 	if err != nil {
 		return nil, err
 	}
 
+	// filename is <id>-<random-bytes>-<basename-of-mount-destination>
 	filename := fmt.Sprintf("%s-%s-%s", c.id, hex.EncodeToString(randBytes), filepath.Base(m.Destination))
+	// guest path is "/run/kata-containers/shared/containers/" + filename
 	guestPath := filepath.Join(kataGuestSharedDir(), filename)
 
 	// copy file to container's rootfs if filesystem sharing is not supported, otherwise
@@ -311,6 +316,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 		f.Logger().Debug("filesystem sharing is not supported, files will be copied")
 
 		var ignored bool
+		// srcRoot is just a clean mount.source
 		srcRoot := filepath.Clean(m.Source)
 
 		walk := func(srcPath string, d fs.DirEntry, err error) error {
@@ -339,6 +345,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 			f.Logger().Infof("ShareFile: Copying file from src (%s) to dest (%s)", srcPath, dstPath)
 			//TODO: Improve the agent protocol, to handle the case for existing symlink.
 			// Currently for an existing symlink, this will fail with EEXIST.
+			// copyFile request is issued
 			err = f.sandbox.agent.copyFile(ctx, srcPath, dstPath)
 			if err != nil {
 				f.Logger().WithError(err).Error("Failed to copy file")
@@ -377,6 +384,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 			return nil
 		}
 
+		// Walk the srcRoot and copy the files to the guest
 		if err := filepath.WalkDir(srcRoot, walk); err != nil {
 			c.Logger().WithField("failed-file", m.Source).Debugf("failed to copy file to sandbox: %v", err)
 			return nil, err

@@ -236,7 +236,7 @@ func containerMounts(spec specs.Spec) []vc.Mount {
 	}
 
 	var mnts []vc.Mount
-	for _, m := range ociMounts {
+	for _, m := range ociMounts { // initial mounts only seem to be ociMounts
 		mnts = append(mnts, newMount(m))
 	}
 

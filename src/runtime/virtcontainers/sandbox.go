@@ -1588,11 +1588,20 @@ func (s *Sandbox) CreateContainer(ctx context.Context, contConfig ContainerConfi
 		}
 	}()
 
+	// below is where we branch between copyFile and creating block devices.
+	// important note is adding block devices happen first
+
+	// path do adding block devices
+	// this path plugs all mounts that are block devices (adds them to sandbox manager)
+	// we should ensure desired block devices to be mounted is present here so
+	// it gets added to device manager as expected
 	// Create the container object, add devices to the sandbox's device-manager:
 	c, err := newContainer(ctx, s, &s.config.Containers[len(s.config.Containers)-1])
 	if err != nil {
 		return nil, err
 	}
+	// path to copyFile
+	// this path copies all mounts that are not mounts(?)
 	// create and start the container
 	if err = c.create(ctx); err != nil {
 		return nil, err

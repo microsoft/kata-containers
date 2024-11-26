@@ -436,7 +436,10 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 		}
 	}()
 
+	// we end up copying all the container mounts that are
+
 	for idx, m := range c.mounts {
+		// not system mounts
 		// Skip mounting certain system paths from the source on the host side
 		// into the container as it does not make sense to do so.
 		// Example sources could be /sys/fs/cgroup etc.
@@ -444,6 +447,7 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 			continue
 		}
 
+		// this may be a different path that attaches block devices
 		// Check if mount is a block device file. If it is, the block device will be attached to the host
 		// instead of passing this as a shared mount:
 		if len(m.BlockDeviceID) > 0 {
@@ -455,11 +459,13 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 			continue
 		}
 
+		//not bind mounts
 		// For non-block based mounts, we are only interested in bind mounts
 		if m.Type != "bind" {
 			continue
 		}
 
+		// not mounts that have /dev/shm as destination
 		// We need to treat /dev/shm as a special case. This is passed as a bind mount in the spec,
 		// but it does not make sense to pass this as a 9p mount from the host side.
 		// This needs to be handled purely in the guest, by allocating memory for this inside the VM.
@@ -467,6 +473,7 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 			continue
 		}
 
+		// not mounts that have /dev as destination
 		// Ignore /dev, directories and all other device files. We handle
 		// only regular files in /dev. It does not make sense to pass the host
 		// device nodes to the guest.
@@ -474,6 +481,7 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 			continue
 		}
 
+		// path to copyFile
 		sharedFile, err := c.sandbox.fsShare.ShareFile(ctx, c, &c.mounts[idx])
 		if err != nil {
 			return storages, err
@@ -484,6 +492,9 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 			ignoredMounts[m.Source] = Mount{Source: m.Source}
 			continue
 		}
+
+		// mounts that get shared, proceed to get watched below
+
 		sharedDirMount := Mount{
 			Source:      sharedFile.guestPath,
 			Destination: m.Destination,
@@ -667,7 +678,7 @@ func (c *Container) createBlockDevices(ctx context.Context) error {
 		// instead of passing this as a shared mount.
 		di, err := c.createDeviceInfo(c.mounts[i].Source, c.mounts[i].Destination, c.mounts[i].ReadOnly, isBlockFile)
 		if err == nil && di != nil {
-			b, err := c.sandbox.devManager.NewDevice(*di)
+			b, err := c.sandbox.devManager.NewDevice(*di) // dev manager handles block device creation
 			if err != nil {
 				// Do not return an error, try to create
 				// devices for other mounts
@@ -698,6 +709,8 @@ func newContainer(ctx context.Context, sandbox *Sandbox, contConfig *ContainerCo
 	if !contConfig.valid() {
 		return &Container{}, fmt.Errorf("Invalid container configuration")
 	}
+
+	// todo: print contConfig.mounts. Are they empty?
 
 	c := &Container{
 		id:            contConfig.ID,
@@ -751,6 +764,7 @@ func newContainer(ctx context.Context, sandbox *Sandbox, contConfig *ContainerCo
 		return nil, err
 	}
 
+	// block device mounts get added to devmanager
 	// If mounts are block devices, add to devmanager
 	if err := c.createMounts(ctx); err != nil {
 		return nil, err
@@ -1051,6 +1065,7 @@ func (c *Container) create(ctx context.Context) (err error) {
 	// inside the VM
 	c.getSystemMountInfo()
 
+	// path to copyFile (kata_agent.go/agent.createContainer)
 	process, err := c.sandbox.agent.createContainer(ctx, c.sandbox, c)
 	if err != nil {
 		return err

@@ -238,6 +238,8 @@ func CreateContainer(ctx context.Context, sandbox vc.VCSandbox, ociSpec specs.Sp
 
 	ociSpec = SetEphemeralStorageType(ociSpec, disableGuestEmptyDir)
 
+	// here or later we can specify contConfig.Mounts that have info about block device(s) we may want to mount
+	// into the container
 	contConfig, err := oci.ContainerConfig(ociSpec, bundlePath, containerID, disableOutput)
 	if err != nil {
 		return vc.Process{}, err
@@ -260,6 +262,7 @@ func CreateContainer(ctx context.Context, sandbox vc.VCSandbox, ociSpec specs.Sp
 
 	katatrace.AddTags(span, "sandbox_id", sandboxID)
 
+	// path to adding block devices
 	c, err = sandbox.CreateContainer(ctx, contConfig)
 	if err != nil {
 		return vc.Process{}, err
