@@ -339,9 +339,7 @@
     "cluster_config": {
         "pause_container_image": "mcr.microsoft.com/oss/kubernetes/pause:3.6"
     },
-    "cluster_config": {
-        "default_namespace": "default"
-    },
+    "cluster_config": {},
     "request_defaults": {
         "CreateContainerRequest": {
             "allow_env_regex": [
