@@ -21,6 +21,7 @@ clap = { version = "4.1.8", features = ["derive"] }
 # YAML file serialization/deserialization.
 base64 = "0.21.0"
 serde = { version = "1.0.159", features = ["derive"] }
+serde_repr = "0.1"
 
 # Newer serde_yaml versions are using unsafe-libyaml instead of yaml-rust,
 # and incorrectly change on serialization:

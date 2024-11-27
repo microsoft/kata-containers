@@ -76,6 +76,7 @@ impl yaml::K8sResource for ReplicaSet {
                 container,
                 settings,
                 volumes,
+                None,
             );
         }
     }

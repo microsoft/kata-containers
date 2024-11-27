@@ -78,6 +78,7 @@ impl yaml::K8sResource for Job {
                 container,
                 settings,
                 volumes,
+                None,
             );
         }
     }

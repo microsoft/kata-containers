@@ -126,6 +126,7 @@ impl yaml::K8sResource for StatefulSet {
                 container,
                 settings,
                 volumes,
+                None,
             );
         }
 
@@ -156,6 +157,7 @@ impl yaml::K8sResource for StatefulSet {
                     settings,
                     volume_mounts,
                     claims,
+                    None,
                 );
             }
         }
@@ -206,6 +208,7 @@ impl StatefulSet {
         settings: &settings::Settings,
         volume_mounts: &Vec<pod::VolumeMount>,
         claims: &[pvc::PersistentVolumeClaim],
+        pod_fs_group: Option<i64>,
     ) {
         debug!("StatefulSet::get_mounts_and_storages");
         for mount in volume_mounts {
@@ -236,6 +239,7 @@ impl StatefulSet {
                             storages,
                             mount_options,
                             smb_mount_options,
+                            pod_fs_group,
                         );
                     }
                 }

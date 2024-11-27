@@ -104,6 +104,7 @@ impl yaml::K8sResource for Deployment {
                 container,
                 settings,
                 volumes,
+                None,
             );
         }
     }

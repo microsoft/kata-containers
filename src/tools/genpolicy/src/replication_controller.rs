@@ -78,6 +78,7 @@ impl yaml::K8sResource for ReplicationController {
                 container,
                 settings,
                 volumes,
+                None,
             );
         }
     }

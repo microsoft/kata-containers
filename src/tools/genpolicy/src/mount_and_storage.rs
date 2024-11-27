@@ -141,6 +141,7 @@ pub fn get_mount_and_storage(
     persistent_volume_claims: &[pvc::PersistentVolumeClaim],
     yaml_volume: &volume::Volume,
     yaml_mount: &pod::VolumeMount,
+    pod_fs_group: Option<i64>,
 ) {
     let propagation = match &yaml_mount.mountPropagation {
         Some(p) if p == "Bidirectional" => "rshared",
@@ -171,6 +172,7 @@ pub fn get_mount_and_storage(
             storages,
             persistent_volume_claims,
             mount_options,
+            pod_fs_group,
         );
     } else if yaml_volume.azureFile.is_some() {
         get_shared_bind_mount(yaml_mount, p_mounts, mount_options);
@@ -191,6 +193,7 @@ pub fn get_mount_and_storage(
             p_mounts,
             storages,
             mount_options,
+            pod_fs_group,
         );
     } else {
         todo!("Unsupported volume type {:?}", yaml_volume);
@@ -258,6 +261,7 @@ fn get_persistent_volume_claim_mount(
     storages: &mut Vec<agent::Storage>,
     persistent_volume_claims: &[pvc::PersistentVolumeClaim],
     mount_options: (&str, &str),
+    pod_fs_group: Option<i64>,
 ) {
     let volume_pvc = yaml_volume.persistentVolumeClaim.as_ref().unwrap();
     let pvc_name = &volume_pvc.claimName;
@@ -292,6 +296,7 @@ fn get_persistent_volume_claim_mount(
         storages,
         mount_options,
         smb_mount_options,
+        pod_fs_group,
     );
 }
 
@@ -457,6 +462,7 @@ fn get_ephemeral_mount(
     p_mounts: &mut Vec<policy::KataMount>,
     storages: &mut Vec<agent::Storage>,
     mount_options: (&str, &str),
+    pod_fs_group: Option<i64>,
 ) {
     let storage_class = yaml_volume
         .ephemeral
@@ -477,6 +483,7 @@ fn get_ephemeral_mount(
         storages,
         mount_options,
         smb_mount_options,
+        pod_fs_group,
     );
 }
 
@@ -487,10 +494,20 @@ pub fn handle_persistent_volume_claim(
     p_mounts: &mut Vec<policy::KataMount>,
     storages: &mut Vec<agent::Storage>,
     mount_options: (&str, &str),
-    smb_mount_options: Option<Vec<String>>, // Pass SMB mount options
+    smb_mount_options: Option<Vec<String>>,
+    pod_fs_group: Option<i64>,
 ) {
     if is_blk_mount || is_smb_mount {
         let source = "$(spath)/$(b64-direct-vol-path)".to_string();
+
+        let fs_group = if is_blk_mount {
+            pod_fs_group.map(|group_id| agent::FSGroup {
+                group_id,
+                group_change_policy: Default::default(),
+            })
+        } else {
+            None
+        };
 
         storages.push(agent::Storage {
             driver: if is_blk_mount {
@@ -499,7 +516,7 @@ pub fn handle_persistent_volume_claim(
                 "smb".to_string()
             },
             driver_options: Vec::new(),
-            fs_group: None,
+            fs_group: fs_group,
             source: "$(direct-vol-path)".to_string(),
             mount_point: source.to_string(),
             fstype: "$(fs-type)".to_string(),

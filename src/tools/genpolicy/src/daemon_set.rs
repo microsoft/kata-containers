@@ -106,6 +106,7 @@ impl yaml::K8sResource for DaemonSet {
                 container,
                 settings,
                 volumes,
+                None,
             )
         }
     }

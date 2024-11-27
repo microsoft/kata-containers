@@ -257,6 +257,7 @@ pub fn get_container_mounts_and_storages(
     container: &pod::Container,
     settings: &settings::Settings,
     volumes: &Vec<volume::Volume>,
+    pod_fs_group: Option<i64>,
 ) {
     if let Some(volume_mounts) = &container.volumeMounts {
         for volume in volumes {
@@ -269,6 +270,7 @@ pub fn get_container_mounts_and_storages(
                         persistent_volume_claims,
                         volume,
                         volume_mount,
+                        pod_fs_group,
                     );
                 }
             }
@@ -347,6 +349,9 @@ pub fn get_process_fields(
     if let Some(context) = security_context {
         if let Some(uid) = context.runAsUser {
             process.User.UID = uid.try_into().unwrap();
+        }
+        if let Some(group_id) = context.fsGroup {
+            process.User.AdditionalGids.push(group_id.try_into().unwrap());
         }
     }
 }

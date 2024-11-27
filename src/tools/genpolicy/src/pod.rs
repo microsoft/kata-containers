@@ -295,6 +295,9 @@ struct SecurityContext {
     runAsUser: Option<i64>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    fsGroup: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     seccompProfile: Option<SeccompProfile>,
 }
 
@@ -313,6 +316,9 @@ struct SeccompProfile {
 pub struct PodSecurityContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runAsUser: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fsGroup: Option<i64>,
     // TODO: additional fields.
 }
 
@@ -844,6 +850,7 @@ impl yaml::K8sResource for Pod {
                 container,
                 settings,
                 volumes,
+                self.spec.securityContext.as_ref().and_then(|sctx| sctx.fsGroup),
             );
         }
     }
@@ -935,6 +942,9 @@ impl Container {
             if let Some(uid) = context.runAsUser {
                 process.User.UID = uid.try_into().unwrap();
             }
+            if let Some(group_id) = context.fsGroup {
+                process.User.AdditionalGids.push(group_id.try_into().unwrap());
+            }
             if let Some(allow) = context.allowPrivilegeEscalation {
                 process.NoNewPrivileges = !allow
             }
@@ -983,6 +993,7 @@ pub async fn add_pause_container(containers: &mut Vec<Container>, config: &Confi
             privileged: None,
             capabilities: None,
             runAsUser: None,
+            fsGroup: None,
             seccompProfile: None,
         }),
         ..Default::default()

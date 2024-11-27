@@ -104,6 +104,7 @@ impl yaml::K8sResource for CronJob {
                 container,
                 settings,
                 volumes,
+                None,
             );
         }
     }
