@@ -288,9 +288,12 @@ allow_by_anno(p_oci, i_oci, p_storages, i_storages) {
 allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name) {
     print("allow_by_sandbox_name: start")
 
+    p_namespace := p_oci.Annotations[S_NAMESPACE_KEY]
     i_namespace := i_oci.Annotations[S_NAMESPACE_KEY]
+    print("allow_by_sandbox_name: p_namespace =", p_namespace, "i_namespace =", i_namespace)
+    p_namespace == i_namespace
 
-    allow_by_container_types(p_oci, i_oci, s_name, i_namespace)
+    allow_by_container_types(p_oci, i_oci, s_name, p_namespace)
     allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages)
     allow_process(p_oci.Process, i_oci.Process, s_name)
 
