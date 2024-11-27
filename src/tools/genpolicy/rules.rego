@@ -68,7 +68,7 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     ops_builder := []
 
     # check sandbox name
-    sandbox_name = i_oci.Annotations["io.kubernetes.cri.sandbox-name"]
+    sandbox_name = i_oci.Annotations[S_NAME_KEY]
     add_sandbox_name_to_state := state_allows("sandbox_name", sandbox_name)
     ops := concat_op_if_not_null(ops_builder, add_sandbox_name_to_state)
 
