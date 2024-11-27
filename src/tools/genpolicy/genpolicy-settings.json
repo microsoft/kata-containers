@@ -301,9 +301,7 @@
     "kata_config": {
         "confidential_guest": true
     },
-    "cluster_config": {
-        "default_namespace": "default"
-    },
+    "cluster_config": {},
     "request_defaults": {
         "CreateContainerRequest": {
             "allow_env_regex": [

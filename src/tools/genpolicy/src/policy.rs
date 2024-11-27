@@ -404,9 +404,7 @@ pub struct SandboxData {
 
 /// Configuration from "kubectl config".
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ClusterConfig {
-    default_namespace: String,
-}
+pub struct ClusterConfig {}
 
 enum K8sResourceEnum {
     ConfigMap(config_map::ConfigMap),
@@ -539,11 +537,7 @@ impl AgentPolicy {
         let mut root = c_settings.Root.clone();
         root.Readonly = yaml_container.read_only_root_filesystem();
 
-        let namespace = if let Some(ns) = resource.get_namespace() {
-            ns
-        } else {
-            self.settings.cluster_config.default_namespace.clone()
-        };
+        let namespace = resource.get_namespace().unwrap_or_default();
 
         let use_host_network = resource.use_host_network();
         let annotations = get_container_annotations(
