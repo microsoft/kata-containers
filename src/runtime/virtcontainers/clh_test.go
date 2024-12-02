@@ -492,7 +492,7 @@ func TestClhCreateVM(t *testing.T) {
 		{config0, false, true},
 		{config1, false, true},
 		{config2, false, true},
-		{config3, true, false},
+		{config3, false, false},
 		{config4, false, true},
 		{config5, false, true},
 	}
