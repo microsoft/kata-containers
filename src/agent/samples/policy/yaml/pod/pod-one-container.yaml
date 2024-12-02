@@ -3,6 +3,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: one-container
+  uid: one-container-uid
   labels:
     run: busybox
   annotations:
