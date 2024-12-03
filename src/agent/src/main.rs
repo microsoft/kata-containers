@@ -689,7 +689,7 @@ async fn initialize_policy() -> Result<()> {
         .await
         .initialize(
             AGENT_CONFIG.log_level.as_usize(),
-            AGENT_CONFIG.policy_file.clone(),
+            "/etc/kata-opa/default-policy.rego",
             None,
         )
         .await
