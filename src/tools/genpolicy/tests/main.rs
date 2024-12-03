@@ -85,16 +85,18 @@ mod tests {
 
         let config = genpolicy::utils::Config {
             base64_out: false,
-            config_map_files: None,
+            config_files: None,
             containerd_socket_path: None, // Some(String::from("/var/run/containerd/containerd.sock")),
-            insecure_registries: Vec::new(),
-            layers_cache_file_path: None,
+            // insecure_registries: Vec::new(),
+            // layers_cache_file_path: None,
             raw_out: false,
             rego_rules_path: workdir.join("rules.rego").to_str().unwrap().to_string(),
-            runtime_class_names: Vec::new(),
-            settings: genpolicy::settings::Settings::new(
-                workdir.join("genpolicy-settings.json").to_str().unwrap(),
-            ),
+            // runtime_class_names: Vec::new(),
+            json_settings_path: workdir
+                .join("genpolicy-settings.json")
+                .to_str()
+                .unwrap()
+                .to_string(),
             silent_unsupported_fields: false,
             use_cache: false,
             version: false,
@@ -117,7 +119,7 @@ mod tests {
         let mut pol = AgentPolicy::new();
         pol.initialize(
             slog::Level::Debug.as_usize(),
-            workdir.join("policy.rego").to_str().unwrap().to_string(),
+            workdir.join("policy.rego").to_str().unwrap(),
             workdir.join("policy.log").to_str().map(|s| s.to_string()),
         )
         .await
