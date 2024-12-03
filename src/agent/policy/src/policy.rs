@@ -7,13 +7,11 @@
 //! Policy evaluation for the kata-agent.
 
 use anyhow::{bail, Result};
-use slog::{debug, error, info, warn};
+use sha2::{Digest, Sha256};
+use slog::{debug, error, warn};
 use tokio::io::AsyncWriteExt;
 
-use sha2::{Sha256, Digest};
-
 static POLICY_LOG_FILE: &str = "/tmp/policy.txt";
-static POLICY_DEFAULT_FILE: &str = "/etc/kata-opa/default-policy.rego";
 
 /// Convenience macro to obtain the scope logger
 macro_rules! sl {
@@ -73,7 +71,7 @@ impl AgentPolicy {
     pub async fn initialize(
         &mut self,
         log_level: usize,
-        default_policy_file: String,
+        default_policy_file: &str,
         log_file: Option<String>,
     ) -> Result<()> {
         // log file path
@@ -89,19 +87,11 @@ impl AgentPolicy {
                     .write(true)
                     .truncate(true)
                     .create(true)
-                    .open(&log_file_path)
+                    .open(log_file_path)
                     .await?,
             );
             debug!(sl!(), "policy: log file: {}", log_file_path);
         }
-
-        // Check if policy file has been set via AgentConfig
-        // If empty, use default file.
-        let mut default_policy_file = default_policy_file;
-        if default_policy_file.is_empty() {
-            default_policy_file = POLICY_DEFAULT_FILE.to_string();
-        }
-        info!(sl!(), "default policy: {default_policy_file}");
 
         self.engine.add_policy_from_file(default_policy_file)?;
         self.update_allow_failures_flag().await?;
@@ -128,7 +118,7 @@ impl AgentPolicy {
     /// Ask regorus if an API call should be allowed or not.
     pub async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
-        self.log_eval_input(ep, ep_input).await;
+        self.log_request(ep, ep_input).await;
 
         let query = format!("data.agent_policy.{ep}");
         self.engine.set_input_json(ep_input)?;
@@ -165,7 +155,7 @@ impl AgentPolicy {
             regorus::Value::Object(obj) => {
                 let json_str = serde_json::to_string(obj)?;
 
-                self.log_eval_input(ep, &json_str).await;
+                self.log_request(ep, &json_str).await;
 
                 let metadata_response: MetadataResponse = serde_json::from_str(&json_str)?;
 
@@ -186,9 +176,12 @@ impl AgentPolicy {
             }
         };
 
-        if !allow && self.allow_failures {
-            warn!(sl!(), "policy: ignoring error for {ep}");
-            allow = true;
+        if !allow {
+            self.log_request(ep, &prints).await;
+            if self.allow_failures {
+                warn!(sl!(), "policy: ignoring error for {ep}");
+                allow = true;
+            }
         }
 
         Ok((allow, prints))
@@ -204,24 +197,22 @@ impl AgentPolicy {
         Ok(())
     }
 
-    async fn log_eval_input(&mut self, ep: &str, input: &str) {
+    async fn log_request(&mut self, ep: &str, input: &str) {
         if let Some(log_file) = &mut self.log_file {
             match ep {
-                "StatsContainerRequest" | "ReadStreamRequest" | "SetPolicyRequest" => {
-                    // - StatsContainerRequest and ReadStreamRequest are called
-                    //   relatively often, so we're not logging them, to avoid
-                    //   growing this log file too much.
-                    // - Confidential Containers Policy documents are relatively
-                    //   large, so we're not logging them here, for SetPolicyRequest.
-                    //   The Policy text can be obtained directly from the pod YAML.
+                "StatsContainerRequest"
+                | "ReadStreamRequest"
+                | "SetPolicyRequest"
+                | "AllowRequestsFailingPolicy" => {
+                    // Logging these request types would create too much unnecessary output.
                 }
                 _ => {
                     let log_entry = format!("[\"ep\":\"{ep}\",{input}],\n\n");
 
                     if let Err(e) = log_file.write_all(log_entry.as_bytes()).await {
-                        warn!(sl!(), "policy: log_eval_input: write_all failed: {}", e);
+                        warn!(sl!(), "policy: log_request: write_all failed: {}", e);
                     } else if let Err(e) = log_file.flush().await {
-                        warn!(sl!(), "policy: log_eval_input: flush failed: {}", e);
+                        warn!(sl!(), "policy: log_request: flush failed: {}", e);
                     }
                 }
             }
@@ -249,8 +240,19 @@ pub fn check_policy_hash(policy: &str) -> Result<()> {
     let mut hasher = Sha256::new();
     hasher.update(policy.as_bytes());
     let digest = hasher.finalize();
-    debug!(sl!(), "New policy hash: {}", hex::encode(digest));
+    debug!(sl!(), "policy: calculated hash ({:?})", digest.as_slice());
 
-    // TODO: check that the corresponding TEE field matches this hash.
+    let mut firmware = sev::firmware::guest::Firmware::open()?;
+    let report_data: [u8; 64] = [0; 64];
+    let report = firmware.get_report(None, Some(report_data), Some(0))?;
+
+    if report.host_data != digest.as_slice() {
+        bail!(
+            "Unexpected policy hash ({:?}), expected ({:?})",
+            digest.as_slice(),
+            report.host_data
+        );
+    }
+
     Ok(())
 }
