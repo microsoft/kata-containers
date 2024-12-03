@@ -96,6 +96,7 @@ regorus = { version = "0.2.6", default-features = false, features = [
     "base64url",
 ], optional = true }
 json-patch = "2.0.0"
+kata-agent-policy = { path = "policy" }
 
 [dev-dependencies]
 tempfile = "3.1.0"
@@ -103,9 +104,7 @@ test-utils = { path = "../libs/test-utils" }
 which = "4.3.0"
 
 [workspace]
-members = [
-    "rustjail",
-]
+members = ["rustjail", "policy"]
 
 [profile.release]
 lto = true
