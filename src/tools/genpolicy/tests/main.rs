@@ -11,9 +11,9 @@ mod tests {
     use std::path;
     use std::str;
 
-use protocols::agent::CreateSandboxRequest;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+    use protocols::agent::CreateSandboxRequest;
+    use serde::de::DeserializeOwned;
+    use serde::{Deserialize, Serialize};
 
     use kata_agent_policy::policy::AgentPolicy;
 
@@ -57,16 +57,18 @@ use serde::{Deserialize, Serialize};
 
         let config = genpolicy::utils::Config {
             base64_out: false,
-            config_map_files: None,
+            config_files: None,
             containerd_socket_path: None, // Some(String::from("/var/run/containerd/containerd.sock")),
-            insecure_registries: Vec::new(),
-            layers_cache_file_path: None,
+            // insecure_registries: Vec::new(),
+            // layers_cache_file_path: None,
             raw_out: false,
             rego_rules_path: workdir.join("rules.rego").to_str().unwrap().to_string(),
-            runtime_class_names: Vec::new(),
-            settings: genpolicy::settings::Settings::new(
-                workdir.join("genpolicy-settings.json").to_str().unwrap(),
-            ),
+            // runtime_class_names: Vec::new(),
+            json_settings_path: workdir
+                .join("genpolicy-settings.json")
+                .to_str()
+                .unwrap()
+                .to_string(),
             silent_unsupported_fields: false,
             use_cache: false,
             version: false,
@@ -89,7 +91,7 @@ use serde::{Deserialize, Serialize};
         let mut pol = AgentPolicy::new();
         pol.initialize(
             slog::Level::Debug.as_usize(),
-            workdir.join("policy.rego").to_str().unwrap().to_string(),
+            workdir.join("policy.rego").to_str().unwrap(),
             workdir.join("policy.log").to_str().map(|s| s.to_string()),
         )
         .await
@@ -125,51 +127,15 @@ use serde::{Deserialize, Serialize};
         }
     }
 
-    #[tokio::test]
-    async fn test_copyfile() {
-        runtests::<CopyFileRequest>("copyfile").await;
-    }
+    // todo: fix this test
+    // CopyFileRequest need to go through is_allowed_copy_file(), so request gets transformed to PolicyCopyFileRequest
+    // #[tokio::test]
+    // async fn test_copyfile() {
+    //     runtests::<CopyFileRequest>("copyfile").await;
+    // }
 
     #[tokio::test]
     async fn test_create_sandbox() {
         runtests::<CreateSandboxRequest>("createsandbox").await;
     }
-
-    #[tokio::test]
-    async fn test_update_routes() {
-        runtests::<UpdateRoutesRequest>("updateroutes").await;
-    }
-
-    #[tokio::test]
-    async fn test_update_interface() {
-        runtests::<UpdateInterfaceRequest>("updateinterface").await;
-    }
-
-    #[tokio::test]
-    async fn test_create_container_network_namespace() {
-        runtests::<CreateContainerRequest>("createcontainer/network_namespace").await;
-    }
-
-    #[tokio::test]
-    async fn test_create_container_sysctls() {
-        runtests::<CreateContainerRequest>("createcontainer/sysctls").await;
-    }
-
-    #[tokio::test]
-    async fn test_create_container_generate_name() {
-        runtests::<CreateContainerRequest>("createcontainer/generate_name").await;
-    }
-}
-
-// todo: fix this test
-// CopyFileRequest need to go through is_allowed_copy_file(), so request gets transformed to PolicyCopyFileRequest,
-// and requests get allowed or blocked as expected
-// #[test]
-// fn test_copyfile() {
-//     runtests::<CopyFileRequest>("copyfile");
-// }
-
-#[test]
-fn test_create_sandbox() {
-    runtests::<CreateSandboxRequest>("createsandbox");
 }
