@@ -1294,7 +1294,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "sev",
+ "sev 1.2.1",
  "sha2",
  "simple_asn1",
  "slog",
@@ -1328,7 +1328,7 @@ dependencies = [
  "regorus",
  "serde",
  "serde_json",
- "sev",
+ "sev 1.2.0",
  "sha2",
  "slog",
  "slog-scope",
@@ -2621,6 +2621,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "sev"
+version = "1.2.0"
+source = "git+https://github.com/virtee/sev?tag=v1.2.0#a5c9eb231cea1a1233e57b6e34a1bdd05809e364"
+dependencies = [
+ "bincode",
+ "bitfield",
+ "bitflags 1.3.2",
+ "codicon",
+ "dirs",
+ "hex",
+ "iocuddle",
+ "kvm-ioctls",
+ "serde",
+ "serde-big-array",
+ "serde_bytes",
+ "static_assertions",
+ "uuid",
 ]
 
 [[package]]
