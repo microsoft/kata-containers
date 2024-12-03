@@ -481,6 +481,7 @@ func TestAssetPath(t *testing.T) {
 
 		KernelPath: "/" + "io.katacontainers.config.hypervisor.kernel",
 
+		IgvmPath:  "/" + "io.katacontainers.config.hypervisor.igvm",
 		ImagePath:  "/" + "io.katacontainers.config.hypervisor.image",
 		InitrdPath: "/" + "io.katacontainers.config.hypervisor.initrd",
 
