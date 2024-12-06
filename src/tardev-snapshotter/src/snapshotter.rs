@@ -107,6 +107,7 @@ impl Store {
 
     // <mitchzhu> ported over from kata agent
     fn prepare_dm_target(&self, path: &str, hash: &str) -> Result<(u64, u64, String, String)> {
+        info!("<mitchzhu> started prepare_dm_target");
         let mut file = File::open(path)?;
         let size = file.seek(std::io::SeekFrom::End(0))?;
         if size < 4096 {
@@ -149,6 +150,7 @@ impl Store {
 
     // <mitchzhu> created for runc support
     fn create_dm_verity_device(&self, layer_path: &str, root_hash: &str) -> Result<String> {
+        info!("<mitchzhu> started create_dm_verity_device");
         let dm =  devicemapper::DM::new()?;
         let layer_name = Path::new(layer_path)
             .file_name()
@@ -158,12 +160,14 @@ impl Store {
     
         let name = devicemapper::DmName::new(layer_name)?;
         let opts = devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY);
+        info!("<mitchzhu> before dm.device_create");
         dm.device_create(name, None, opts)
             .context("<mitchzhu> Unable to create DM device")?;
     
         let id = devicemapper::DevId::Name(name);
         let target = self.prepare_dm_target(layer_path, root_hash)?;
     
+        info!("<mitchzhu> before dm.table_load");
         dm.table_load(&id, &[target], opts).context("<mitchzhu> Unable to load DM-Verity table")?;
         dm.device_suspend(&id, opts).context("<mitchzhu> Unable to suspend DM device")?;
     
