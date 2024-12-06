@@ -319,10 +319,23 @@ impl Store {
             next_parent = (!info.parent.is_empty()).then_some(info.parent);
         }
     
+        let work_dir = format!("/var/lib/containerd/io.containerd.snapshotter.v1.tardev/work/{}", parent);
+        let upper_dir = format!("/var/lib/containerd/io.containerd.snapshotter.v1.tardev/upper/{}", parent);
+        fs::create_dir_all(&work_dir)
+            .context("Creating overlay work directory")
+            .map_err(|e| Status::internal(format!("OverlayFS workdir error: {:?}", e)))?;
+
+        fs::create_dir_all(&upper_dir)
+            .context("Creating overlay upper directory")
+            .map_err(|e| Status::internal(format!("OverlayFS upperdir error: {:?}", e)))?;
+
         let options = vec![
             format!("lowerdir={}", lower_dirs.join(":")),
+            format!("workdir={}", work_dir),
+            format!("upperdir={}", upper_dir),
         ];
-    
+
+        info!("<mitchzhu> Preparing overlayFS");
         Ok(vec![api::types::Mount {
             r#type: "overlay".into(),
             source: "overlay".into(),
