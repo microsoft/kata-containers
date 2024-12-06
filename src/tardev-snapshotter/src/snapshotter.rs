@@ -162,8 +162,10 @@ impl Store {
         let name = devicemapper::DmName::new(layer_name)?;
         let opts = devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY);
         info!("<mitchzhu> before dm.device_create");
-        dm.device_create(name, None, opts)
-            .context("<mitchzhu> Unable to create DM device")?;
+        if let Err(e) = dm.device_create(name, None, opts) {
+            info!("<mitchzhu> Failed to create Device Mapper device: {:?}", e);
+            return Err(e.into());
+        }
     
         let id = devicemapper::DevId::Name(name);
         let target = self.prepare_dm_target(layer_path, root_hash)?;
