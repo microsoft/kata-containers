@@ -229,7 +229,7 @@ impl Store {
                 .context("<mitchzhu> Unable to suspend DM device")?;
         
             // Step 6: Return success, with the path of the DM-Verity device
-            info!("<mitchzhu> create_dm_verity_device return success")
+            info!("<mitchzhu> create_dm_verity_device return success");
             Ok(format!("/dev/mapper/{}", layer_name))
         })();
         
