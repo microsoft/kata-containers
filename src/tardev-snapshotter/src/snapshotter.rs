@@ -13,6 +13,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek};
 use zerocopy::AsBytes;
 use std::process::Command;
+use uuid::Uuid;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
@@ -153,14 +154,17 @@ impl Store {
     fn create_dm_verity_device(&self, layer_path: &str, root_hash: &str) -> Result<String> {
         info!("<mitchzhu> started create_dm_verity_device");
         let dm =  devicemapper::DM::new()?;
-        let layer_name = Path::new(layer_path)
+        let base_name = Path::new(layer_path)
             .file_name()
             .ok_or_else(|| anyhow!("<mitchzhu> Unable to get file name from layer path"))?
             .to_str()
             .ok_or_else(|| anyhow!("<mitchzhu> Unable to convert file name to UTF-8 string"))?;
     
+        info!("<mitchzhu> basename: {}", base_name);
+        let unique_id = Uuid::new_v4();
+        let layer_name = format!("{}_{}", name_to_hash(base_name), unique_id);
         info!("<mitchzhu> layername: {}", layer_name);
-        let name = devicemapper::DmName::new(layer_name)?;
+        let name = devicemapper::DmName::new(&layer_name)?;
         let opts = devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY);
         info!("<mitchzhu> before dm.device_create");
         if let Err(e) = dm.device_create(name, None, opts) {
