@@ -169,14 +169,41 @@ impl Store {
     
         info!("<mitchzhu> before devicemapper::DevId::Name");
         let id = devicemapper::DevId::Name(name);
-        info!("<mitchzhu> before prepare_dm_target");
-        let target = self.prepare_dm_target(layer_path, root_hash)?;
-    
-        info!("<mitchzhu> before dm.table_load");
-        dm.table_load(&id, &[target], opts).context("<mitchzhu> Unable to load DM-Verity table")?;
-        dm.device_suspend(&id, opts).context("<mitchzhu> Unable to suspend DM device")?;
-    
-        Ok(format!("/dev/mapper/{}", layer_name))
+
+        let result = (|| {
+            // Prepare DM-Verity target
+            info!("<mitchzhu> layer_path: {}", layer_path);
+            info!("<mitchzhu> root_hash: {}", root_hash);
+            info!("<mitchzhu> before prepare_dm_target");
+            let target = self.prepare_dm_target(layer_path, root_hash)?;
+
+            // Load the DM table for DM-Verity
+            info!("<mitchzhu> target before table_load: {:?}", target);
+            info!("<mitchzhu> before dm.table_load");
+            dm.table_load(&id, &[target], opts)
+                .context("<mitchzhu> Unable to load DM-Verity table")?;
+
+            // Suspend the DM device to make it active
+            info!("<mitchzhu> before dm.device_suspend");
+            dm.device_suspend(&id, opts)
+                .context("<mitchzhu> Unable to suspend DM device")?;
+
+            // Return success, with the path of the DM-Verity device
+            Ok(format!("/dev/mapper/{}", layer_name))
+        })();
+
+        // If there is an error, remove the DM device and log the failure
+        result.map_err(|e| {
+            if let Err(remove_err) = dm.device_remove(&id, devicemapper::DmOptions::default()) {
+                info!(
+                    "<mitchzhu> Unable to remove DM device ({}): {:?}", 
+                    layer_name, 
+                    remove_err
+                );
+            }
+            info!("<mitchzhu> Error occurred during DM-Verity setup: {:?}", e);
+            e
+        })
     }
 
     /// Creates a new snapshot for use.
