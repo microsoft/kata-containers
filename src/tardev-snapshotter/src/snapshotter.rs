@@ -167,7 +167,9 @@ impl Store {
             return Err(e.into());
         }
     
+        info!("<mitchzhu> before devicemapper::DevId::Name");
         let id = devicemapper::DevId::Name(name);
+        info!("<mitchzhu> before prepare_dm_target");
         let target = self.prepare_dm_target(layer_path, root_hash)?;
     
         info!("<mitchzhu> before dm.table_load");
