@@ -12,6 +12,7 @@ use anyhow::{anyhow, Context, Result};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek};
 use zerocopy::AsBytes;
+use std::process::Command;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
@@ -174,26 +175,66 @@ impl Store {
             // Prepare DM-Verity target
             info!("<mitchzhu> layer_path: {}", layer_path);
             info!("<mitchzhu> root_hash: {}", root_hash);
+        
+            // Step 1: Set up loop device for the given layer_path
+            info!("<mitchzhu> Setting up loop device for {}", layer_path);
+            let setup_output = Command::new("losetup")
+                .arg("-fP")
+                .arg(layer_path)
+                .output()
+                .expect("<mitchzhu> Failed to execute losetup command to create loop device");
+        
+            if !setup_output.status.success() {
+                info!(
+                    "<mitchzhu> Failed to set up loop device: {:?}",
+                    String::from_utf8_lossy(&setup_output.stderr)
+                );
+                return Err(anyhow::anyhow!(
+                    "<mitchzhu> Failed to set up loop device: {:?}",
+                    String::from_utf8_lossy(&setup_output.stderr)
+                ));
+            }
+        
+            // Step 2: Find the loop device associated with the file
+            let loop_output = Command::new("losetup")
+                .arg("-a")
+                .output()
+                .expect("<mitchzhu> Failed to list loop devices");
+        
+            let loop_output_str = String::from_utf8_lossy(&loop_output.stdout);
+            let loop_device = loop_output_str
+                .lines()
+                .find(|line| line.contains(layer_path))
+                .and_then(|line| line.split(":").next())
+                .ok_or_else(|| anyhow::anyhow!("<mitchzhu> Could not find loop device for {}", layer_path))?;
+        
+            info!("<mitchzhu> Using loop device: {}", loop_device);
+        
+            // Use the loop device path for DM-Verity
+            let device_path = loop_device;
+        
+            // Step 3: Prepare DM-Verity target
             info!("<mitchzhu> before prepare_dm_target");
-            let target = self.prepare_dm_target(layer_path, root_hash)?;
-
-            // Load the DM table for DM-Verity
+            let target = self.prepare_dm_target(device_path, root_hash)?;
+        
+            // Step 4: Load the DM table for DM-Verity
             info!("<mitchzhu> target before table_load: {:?}", target);
             info!("<mitchzhu> before dm.table_load");
             dm.table_load(&id, &[target], opts)
                 .context("<mitchzhu> Unable to load DM-Verity table")?;
-
-            // Suspend the DM device to make it active
+        
+            // Step 5: Suspend the DM device to make it active
             info!("<mitchzhu> before dm.device_suspend");
             dm.device_suspend(&id, opts)
                 .context("<mitchzhu> Unable to suspend DM device")?;
-
-            // Return success, with the path of the DM-Verity device
+        
+            // Step 6: Return success, with the path of the DM-Verity device
             Ok(format!("/dev/mapper/{}", layer_name))
         })();
-
-        // If there is an error, remove the DM device and log the failure
+        
+        // If there is an error, remove the DM device and clean up the loop device
         result.map_err(|e| {
+            // Remove the DM device if it was created
             if let Err(remove_err) = dm.device_remove(&id, devicemapper::DmOptions::default()) {
                 info!(
                     "<mitchzhu> Unable to remove DM device ({}): {:?}", 
@@ -201,6 +242,24 @@ impl Store {
                     remove_err
                 );
             }
+        
+            // Clean up the loop device
+            info!("<mitchzhu> Cleaning up loop device: {}", layer_path);
+            let detach_output = Command::new("losetup")
+                .arg("-d")
+                .arg(layer_path)
+                .output()
+                .expect("<mitchzhu> Failed to execute losetup detach command");
+        
+            if !detach_output.status.success() {
+                info!(
+                    "<mitchzhu> Failed to detach loop device: {:?}",
+                    String::from_utf8_lossy(&detach_output.stderr)
+                );
+            } else {
+                info!("<mitchzhu> Successfully detached loop device: {}", layer_path);
+            }
+        
             info!("<mitchzhu> Error occurred during DM-Verity setup: {:?}", e);
             e
         })
