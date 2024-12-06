@@ -1,13 +1,17 @@
-use base64::prelude::{Engine, BASE64_STANDARD};
+//use base64::prelude::{Engine, BASE64_STANDARD};
 use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
 use log::{debug, info, trace};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::{collections::HashMap, fs, fs::OpenOptions, io, io::Seek, os::unix::ffi::OsStrExt};
+use std::{collections::HashMap, io, os::unix::ffi::OsStrExt};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 use tonic::Status;
+use anyhow::{anyhow, Context, Result};
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Seek};
+use zerocopy::AsBytes;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
@@ -101,6 +105,71 @@ impl Store {
             .map_err(|_| Status::internal("unable to write snapshot"))
     }
 
+    // <mitchzhu> ported over from kata agent
+    fn prepare_dm_target(&self, path: &str, hash: &str) -> Result<(u64, u64, String, String)> {
+        let mut file = File::open(path)?;
+        let size = file.seek(std::io::SeekFrom::End(0))?;
+        if size < 4096 {
+            return Err(anyhow!("<mitchzhu> Block device ({path}) is too small: {size}"));
+        }
+    
+        file.seek(std::io::SeekFrom::End(-4096))?;
+        let mut buf = [0u8; 4096];
+        file.read_exact(&mut buf)?;
+    
+        let mut sb = verity::SuperBlock::default();
+        sb.as_bytes_mut()
+            .copy_from_slice(&buf[4096 - 512..][..std::mem::size_of::<verity::SuperBlock>()]);
+        let data_block_size = u64::from(sb.data_block_size.get());
+        let hash_block_size = u64::from(sb.hash_block_size.get());
+        let data_size = sb
+            .data_block_count
+            .get()
+            .checked_mul(data_block_size)
+            .ok_or_else(|| anyhow!("<mitchzhu> Invalid data size"))?;
+        if data_size > size {
+            return Err(anyhow!(
+                "<mitchzhu> Data size ({data_size}) is greater than device size ({size}) for device {path}"
+            ));
+        }
+    
+        // TODO: Store other parameters in super block: version, hash type, salt.
+        Ok((
+            0,
+            data_size / 512,
+            "verity".into(),
+            format!(
+                "1 {path} {path} {data_block_size} {hash_block_size
+    } {} {} sha256 {hash} 0000000000000000000000000000000000000000000000000000000000000000",
+                data_size / data_block_size,
+                (data_size + hash_block_size - 1) / hash_block_size
+            ),
+        ))
+    }
+
+    // <mitchzhu> created for runc support
+    fn create_dm_verity_device(&self, layer_path: &str, root_hash: &str) -> Result<String> {
+        let dm =  devicemapper::DM::new()?;
+        let layer_name = Path::new(layer_path)
+            .file_name()
+            .ok_or_else(|| anyhow!("<mitchzhu> Unable to get file name from layer path"))?
+            .to_str()
+            .ok_or_else(|| anyhow!("<mitchzhu> Unable to convert file name to UTF-8 string"))?;
+    
+        let name = devicemapper::DmName::new(layer_name)?;
+        let opts = devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY);
+        dm.device_create(name, None, opts)
+            .context("<mitchzhu> Unable to create DM device")?;
+    
+        let id = devicemapper::DevId::Name(name);
+        let target = self.prepare_dm_target(layer_path, root_hash)?;
+    
+        dm.table_load(&id, &[target], opts).context("<mitchzhu> Unable to load DM-Verity table")?;
+        dm.device_suspend(&id, opts).context("<mitchzhu> Unable to suspend DM device")?;
+    
+        Ok(format!("/dev/mapper/{}", layer_name))
+    }
+
     /// Creates a new snapshot for use.
     ///
     /// It checks that the parent chain exists and that all ancestors are committed and consist of
@@ -118,15 +187,12 @@ impl Store {
     }
 
     fn mounts_from_snapshot(&self, parent: &str) -> Result<Vec<api::types::Mount>, Status> {
-        const PREFIX: &str = "io.katacontainers.fs-opt";
+        //const PREFIX: &str = "io.katacontainers.fs-opt";
 
         // Get chain of layers.
         let mut next_parent = Some(parent.to_string());
-        let mut layers = Vec::new();
-        let mut opts = vec![format!(
-            "{PREFIX}.layer-src-prefix={}",
-            self.root.join("layers").to_string_lossy()
-        )];
+        let mut lower_dirs = Vec::new();
+    
         while let Some(p) = next_parent {
             let info = self.read_snapshot(&p)?;
             if info.kind != Kind::Committed {
@@ -142,28 +208,24 @@ impl Store {
                     "parent snapshot has no root hash stored",
                 ));
             };
-
-            let name = name_to_hash(&p);
-            let layer_info = format!(
-                "{name},tar,ro,{PREFIX}.block_device=file,{PREFIX}.is-layer,{PREFIX}.root-hash={root_hash}");
-            layers.push(name);
-
-            opts.push(format!(
-                "{PREFIX}.layer={}",
-                BASE64_STANDARD.encode(layer_info.as_bytes())
-            ));
-
+        
+            let layer_path = self.layer_path(&p);
+            let dm_verity_device = self.create_dm_verity_device(layer_path.to_str().unwrap(), root_hash)
+                .map_err(|_| Status::internal("unable to create DM-Verity device"))?;
+            
+            lower_dirs.push(dm_verity_device);
             next_parent = (!info.parent.is_empty()).then_some(info.parent);
         }
-
-        opts.push(format!("{PREFIX}.overlay-rw"));
-        opts.push(format!("lowerdir={}", layers.join(":")));
-
+    
+        let options = vec![
+            format!("lowerdir={}", lower_dirs.join(":")),
+        ];
+    
         Ok(vec![api::types::Mount {
-            r#type: "fuse3.kata-overlay".into(),
-            source: "/".into(),
+            r#type: "overlay".into(),
+            source: "overlay".into(),
             target: String::new(),
-            options: opts,
+            options,
         }])
     }
 }

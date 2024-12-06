@@ -20,3 +20,7 @@ tempfile = "3.3.0"
 flate2 = { version = "1.0.26", features = ["zlib-ng"], default-features = false }
 base64 = "0.21.2"
 containerd-client = "0.4.0"
+
+devicemapper = "0.33.1"
+anyhow = "=1.0.58"
+zerocopy = "0.6.1"
