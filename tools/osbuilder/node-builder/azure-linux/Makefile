@@ -20,7 +20,7 @@ endif
 all: package uvm
 
 .PHONY: all-confpods
-all-confpods: package-confpods uvm-confpods
+all-confpods: package-confpods
 
 .PHONY: package
 package:
@@ -62,7 +62,7 @@ deploy-uvm:
 	./uvm_install.sh
 
 .PHONY: deploy-confpods
-deploy-confpods: deploy-confpods-package deploy-confpods-uvm
+deploy-confpods: deploy-confpods-package
 
 .PHONY: deploy-confpods-package
 deploy-confpods-package:
