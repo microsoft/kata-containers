@@ -158,6 +158,7 @@ impl Store {
             .to_str()
             .ok_or_else(|| anyhow!("<mitchzhu> Unable to convert file name to UTF-8 string"))?;
     
+        info!("<mitchzhu> layername: {}", layer_name);
         let name = devicemapper::DmName::new(layer_name)?;
         let opts = devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY);
         info!("<mitchzhu> before dm.device_create");
