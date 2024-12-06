@@ -492,6 +492,13 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 		return err
 	}
 
+	// TODO: initialize hugeTLB at boot time instead of using the Kata Shim for this.
+	if clh.config.HugePages {
+		if err := clh.EnableHugeTLB(); err != nil {
+			return err
+		}
+	}
+
 	clh.id = id
 	clh.state.state = clhNotReady
 	clh.devicesIds = make(map[string]string)
@@ -1869,4 +1876,44 @@ func (clh *cloudHypervisor) vmInfo() (chclient.VmInfo, error) {
 
 func (clh *cloudHypervisor) IsRateLimiterBuiltin() bool {
 	return true
+}
+
+func (clh *cloudHypervisor) EnableHugeTLB() error {
+	const filePath = "/proc/sys/vm/nr_overcommit_hugepages"
+
+	// TODO: how to calculate this number?
+	const newValue = "100000"
+
+	value, err := ReadSystemFile(filePath)
+	if err != nil {
+		clh.Logger().WithError(err).WithField("file", filePath).Error("EnableHugeTLB: failed to read file")
+		return err
+	}
+
+	if value != "0" {
+		clh.Logger().WithField("file", filePath).WithField("overcommit_pages", value).Info("EnableHugeTLB: already enabled")
+	} else {
+		err = WriteSystemFile(filePath, newValue)
+		if err != nil {
+			clh.Logger().WithError(err).WithField("file", filePath).Error("EnableHugeTLB: failed to write file")
+		}
+	}
+
+	if err == nil {
+		clh.Logger().WithField("file", filePath).WithField("overcommit_pages", newValue).Info("EnableHugeTLB: success")
+	}
+
+	return err
+}
+
+func ReadSystemFile(file string) (string, error) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", nil
+	}
+	return string(bytes.TrimSpace(b)), nil
+}
+
+func WriteSystemFile(file string, value string) (error) {
+	return os.WriteFile(file, []byte(value), 0644)
 }
