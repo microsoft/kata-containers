@@ -290,6 +290,7 @@ impl Store {
         let mut lower_dirs = Vec::new();
     
         while let Some(p) = next_parent {
+            info!("----------------------<mitchzhu> processing layer");
             let info = self.read_snapshot(&p)?;
             if info.kind != Kind::Committed {
                 return Err(Status::failed_precondition(
@@ -304,11 +305,12 @@ impl Store {
                     "parent snapshot has no root hash stored",
                 ));
             };
-        
+
+            
             let layer_path = self.layer_path(&p);
             let dm_verity_device = self.create_dm_verity_device(layer_path.to_str().unwrap(), root_hash)
                 .map_err(|_| Status::internal("unable to create DM-Verity device"))?;
-            
+            info!("<mitchzhu> completed preparing a layer");
             lower_dirs.push(dm_verity_device);
             next_parent = (!info.parent.is_empty()).then_some(info.parent);
         }
