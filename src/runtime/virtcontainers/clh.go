@@ -1462,7 +1462,7 @@ func (clh *cloudHypervisor) launchClh() error {
 		// output. For further details, see the discussion on:
 		//
 		//   https://github.com/kata-containers/kata-containers/pull/2751
-		args = append(args, "-v")
+		args = append(args, "-vvv")
 	}
 
 	// Enable the `seccomp` feature from Cloud Hypervisor by default
