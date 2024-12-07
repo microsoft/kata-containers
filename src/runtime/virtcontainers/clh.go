@@ -568,7 +568,8 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.vmconfig.Memory = chclient.NewMemoryConfig(int64((utils.MemUnit(2048) * utils.MiB).ToBytes()))
 
 	// shared memory should be enabled if using vhost-user(kata uses virtiofsd)
-	clh.vmconfig.Memory.Shared = func(b bool) *bool { return &b }(true)
+	// clh.vmconfig.Memory.Shared = func(b bool) *bool { return &b }(true)
+	clh.vmconfig.Memory.Shared = func(b bool) *bool { return &b }(clh.config.SharedFS != "none")
 	
 	// Enable hugepages if needed
 	clh.vmconfig.Memory.Hugepages = func(b bool) *bool { return &b }(clh.config.HugePages)
