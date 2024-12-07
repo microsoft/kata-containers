@@ -1636,7 +1636,15 @@ func (clh *cloudHypervisor) bootVM(ctx context.Context) error {
 	}
 
 	clh.Logger().Debug("Booting VM")
-	_, err = cl.BootVM(ctx)
+
+	for i := 0; i < 10; i++ {
+		_, err = cl.BootVM(ctx)
+
+		if err != nil {
+			clh.Logger().WithError(err).Error("BootVM failed")
+		}
+	}
+
 	if err != nil {
 		return openAPIClientError(err)
 	}
