@@ -1468,38 +1468,41 @@ func (clh *cloudHypervisor) launchClh() error {
 
 	clh.Logger().WithField("path", clhPath).Info()
 	clh.Logger().WithField("args", strings.Join(args, " ")).Info()
-	cmdHypervisor := exec.Command(clhPath, args...)
-	if clh.config.Debug {
-		cmdHypervisor.Env = os.Environ()
-		cmdHypervisor.Env = append(cmdHypervisor.Env, "RUST_BACKTRACE=full")
-		if clh.console != nil {
-			cmdHypervisor.Stderr = clh.console
-			cmdHypervisor.Stdout = clh.console
+
+	for i := 0; i < 10; i++ {
+		cmdHypervisor := exec.Command(clhPath, args...)
+		if clh.config.Debug {
+			cmdHypervisor.Env = os.Environ()
+			cmdHypervisor.Env = append(cmdHypervisor.Env, "RUST_BACKTRACE=full")
+			if clh.console != nil {
+				cmdHypervisor.Stderr = clh.console
+				cmdHypervisor.Stdout = clh.console
+			}
+		}
+		cmdHypervisor.Stderr = cmdHypervisor.Stdout
+
+		attr := syscall.SysProcAttr{}
+		attr.Credential = &syscall.Credential{
+			Uid:    clh.config.Uid,
+			Gid:    clh.config.Gid,
+			Groups: clh.config.Groups,
+		}
+		cmdHypervisor.SysProcAttr = &attr
+
+		err = utils.StartCmd(cmdHypervisor)
+		if err != nil {
+			return err
+		}
+
+		clh.state.PID = cmdHypervisor.Process.Pid
+
+		err = clh.waitVMM(clhTimeout)
+		if err != nil {
+			clh.Logger().WithError(err).Warn("cloud-hypervisor init failed")
 		}
 	}
-	cmdHypervisor.Stderr = cmdHypervisor.Stdout
 
-	attr := syscall.SysProcAttr{}
-	attr.Credential = &syscall.Credential{
-		Uid:    clh.config.Uid,
-		Gid:    clh.config.Gid,
-		Groups: clh.config.Groups,
-	}
-	cmdHypervisor.SysProcAttr = &attr
-
-	err = utils.StartCmd(cmdHypervisor)
-	if err != nil {
-		return err
-	}
-
-	clh.state.PID = cmdHypervisor.Process.Pid
-
-	if err := clh.waitVMM(clhTimeout); err != nil {
-		clh.Logger().WithError(err).Warn("cloud-hypervisor init failed")
-		return err
-	}
-
-	return nil
+	return err
 }
 
 //###########################################################################
