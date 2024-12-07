@@ -1483,7 +1483,7 @@ func (clh *cloudHypervisor) launchClh() error {
 	}
 	*/
 
-	args := []string{"-ex", "run", "--args"}
+	args := []string{"-ex", "r", "-ex", "bt", "-ex", "q", "--args"}
 	args = append(args, clhPath)
 	args = append(args, cscAPIsocket)
 	args = append(args, clh.state.apiSocket)
