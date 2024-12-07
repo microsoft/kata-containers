@@ -1451,6 +1451,8 @@ func (clh *cloudHypervisor) launchClh() error {
 		return err
 	}
 
+	clhPath = "gdb -ex run --args " + clhPath
+
 	args := []string{cscAPIsocket, clh.state.apiSocket}
 	if clh.config.Debug {
 		// Cloud hypervisor log levels
