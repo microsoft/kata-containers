@@ -1624,7 +1624,7 @@ func (clh *cloudHypervisor) bootVM(ctx context.Context) error {
 		return err
 	}
 
-	clh.Logger().Debugf("VM state after create: %#v", info)
+	clh.Logger().WithField("Cpus", *info.Config.Cpus).WithField("Memory", *info.Config.Memory).Debugf("VM state after create: %#v", info)
 
 	if info.State != clhStateCreated {
 		return fmt.Errorf("VM state is not 'Created' after 'CreateVM'")
