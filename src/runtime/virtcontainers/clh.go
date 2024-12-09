@@ -267,6 +267,8 @@ type cloudHypervisor struct {
 	config          HypervisorConfig
 	stopped         int32
 	mu              sync.Mutex
+
+	outFile         *os.File
 }
 
 var clhKernelParams = []Param{
@@ -792,6 +794,13 @@ func (clh *cloudHypervisor) GetVMConsole(ctx context.Context, id string) (string
 		return consoleProtoPty, "", err
 	}
 	clh.console = master
+
+	outFile, err := os.Create("/tmp/clh.txt")
+	if err != nil {
+		clh.Logger().WithError(err).Error("Create failed for CLH output file")
+		return consoleProtoPty, "", err
+	}
+	clh.outFile = outFile
 
 	return consoleProtoPty, slave, nil
 }
@@ -1470,7 +1479,9 @@ func (clh *cloudHypervisor) launchClh() error {
 			cmdHypervisor.Stdout = clh.console
 		}
 	}
-	cmdHypervisor.Stderr = cmdHypervisor.Stdout
+	// cmdHypervisor.Stderr = cmdHypervisor.Stdout
+	cmdHypervisor.Stdout = clh.outFile
+	cmdHypervisor.Stderr = clh.outFile
 
 	attr := syscall.SysProcAttr{}
 	attr.Credential = &syscall.Credential{
