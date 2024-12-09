@@ -769,8 +769,8 @@ func (clh *cloudHypervisor) StartVM(ctx context.Context, timeout int) error {
 
 	bootvm_timeout := clh.getClhAPITimeout()
 	// TODO: review this 10 second minimum timeout value.
-	if bootvm_timeout < 10 {
-		bootvm_timeout = 10
+	if bootvm_timeout < 120 {
+		bootvm_timeout = 120
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), bootvm_timeout*time.Second)
