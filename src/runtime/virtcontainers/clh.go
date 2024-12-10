@@ -1481,7 +1481,7 @@ func (clh *cloudHypervisor) launchClh() error {
 	args = append(args, clhPath)
 	args = append(args, cscAPIsocket)
 	args = append(args, clh.state.apiSocket)
-	args = append(args, "-vvv")
+	args = append(args, "-v")
 	clhPath = "/usr/bin/gdb"
 
 	clh.Logger().WithField("path", clhPath).Info()
