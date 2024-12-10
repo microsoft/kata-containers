@@ -191,6 +191,12 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 		// ctx will be canceled after this rpc service call, but the sandbox will live
 		// across multiple rpc service calls.
 		//
+
+		// create block device with files on them
+		// direct-volume add device
+		// make sure device is present as mount in ociSpec
+		shimLog.Info("I can log something")
+
 		sandbox, _, err := katautils.CreateSandbox(s.ctx, vci, *ociSpec, *s.config, rootFs, r.ID, bundlePath, disableOutput, false)
 		if err != nil {
 			return nil, err

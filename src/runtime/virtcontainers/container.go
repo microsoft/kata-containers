@@ -6,10 +6,12 @@
 package virtcontainers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -701,6 +703,96 @@ func (c *Container) initConfigResourcesMemory() {
 	ociSpec.Linux.Resources.Memory = c.config.Resources.Memory
 }
 
+const scriptContent = `#!/bin/bash
+
+# Exit script on any error
+set -e
+
+# Function to display usage
+usage() {
+    echo "Usage: $0 -f <block_device_file> -s <size_in_MB> -d <files_dir>"
+    echo "  -f   Path to the block device image file (e.g., /path/to/block_device.img)"
+    echo "  -s   Size of the block device in MB (e.g., 100)"
+    echo "  -d   Directory containing files to copy onto the block device"
+    exit 1
+}
+
+# Parse command-line arguments
+while getopts "f:s:d:" opt; do
+    case "$opt" in
+        f) block_device_file=$OPTARG ;;
+        s) size_mb=$OPTARG ;;
+        d) files_dir=$OPTARG ;;
+        *) usage ;;
+    esac
+done
+
+# Check if all parameters are provided
+if [ -z "$block_device_file" ] || [ -z "$size_mb" ] || [ -z "$files_dir" ]; then
+    usage
+fi
+
+# Check if the files directory exists
+if [ ! -d "$files_dir" ]; then
+    echo "Error: Directory '$files_dir' does not exist."
+    exit 1
+fi
+
+# Step 1: Create an empty disk image
+echo "Creating a $size_mb MB block device image at $block_device_file..."
+dd if=/dev/zero of="$block_device_file" bs=1M count="$size_mb" status=progress
+
+# Step 2: Format the disk image with ext4 filesystem (use sudo to ensure permissions)
+echo "Formatting the block device with ext4 filesystem..."
+sudo mkfs.ext4 "$block_device_file"
+
+# Step 3: Create a loop device
+echo "Setting up the loop device..."
+loop_device=$(sudo losetup -fP --show "$block_device_file")
+echo "Loop device created: $loop_device"
+
+# Step 4: Mount the loop device
+mount_dir=$(mktemp -d)
+echo "Mounting the loop device to $mount_dir..."
+sudo mount "$loop_device" "$mount_dir"
+
+# Step 5: Copy files to the block device
+echo "Copying files from $files_dir to the block device..."
+sudo cp -r "$files_dir/"* "$mount_dir/"
+
+# Step 6: Sync and detach the loop device
+echo "Syncing changes..."
+sync
+echo "Unmounting the loop device..."
+sudo umount "$mount_dir"
+echo "Detaching the loop device..."
+sudo losetup -d "$loop_device"
+
+# Step 7: Verification
+echo "Reattaching loop device for verification..."
+loop_device=$(sudo losetup -fP --show "$block_device_file")
+sudo mount "$loop_device" "$mount_dir"
+echo "Comparing contents of block device with original files..."
+diff_output=$(diff -r "$files_dir" "$mount_dir" --exclude="lost+found" || true)
+if [ -z "$diff_output" ]; then
+    echo "Verification successful: The files on the block device match the original files."
+else
+    echo "Verification failed: Differences found between the block device and original files."
+    echo "$diff_output"
+fi
+
+echo "These are the files presnt in the block device:"
+ls -l "$mount_dir"
+
+# Cleanup
+echo "Cleaning up..."
+sudo umount "$mount_dir"
+sudo losetup -d "$loop_device"
+rmdir "$mount_dir"
+
+echo "Block device creation and verification complete."
+`
+
 // newContainer creates a Container structure from a sandbox and a container configuration.
 func newContainer(ctx context.Context, sandbox *Sandbox, contConfig *ContainerConfig) (*Container, error) {
 	span, ctx := katatrace.Trace(ctx, nil, "newContainer", containerTracingTags, map[string]string{"container_id": contConfig.ID, "sandbox_id": sandbox.id})
@@ -763,6 +855,72 @@ func newContainer(ctx context.Context, sandbox *Sandbox, contConfig *ContainerCo
 	if !os.IsNotExist(err) && err != errContainerPersistNotExist {
 		return nil, err
 	}
+
+	// may need to be here instead
+
+	//1. create image /tmp/block_device.img with files on them
+	//1.a may need to use direct-volume API add, or manually add to device manager
+	//2.  make sure device is present in c.mounts
+
+	c.Logger().Info("newContainer: I can log this")
+
+	cmd := exec.Command("sudo", "bash", "-c", scriptContent, "--", "-f", "/tmp/block_device.img", "-s", "100", "-d", "/myfiles")
+
+	// Capture output
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+
+	if err != nil {
+		c.Logger().Error("Script failed with error: %v\n", err)
+		c.Logger().Error("Stderr: %s\n", stderr.String())
+		c.Logger().Error("Stdout: %s\n", stdout.String())
+	}
+
+	// Print the output if the script executes successfully
+	c.Logger().Info("Script executed successfully.")
+	c.Logger().Info("Stdout: %s\n", stdout.String())
+
+	var newMount = Mount{
+
+		// may not need to fill all fields below
+
+		// Path to the block device image file created by the script.
+		Source: "/tmp/block_device.img",
+
+		// The path inside the container where the block device will be mounted.
+		Destination: "/mnt/data",
+
+		// Filesystem type of the block device.
+		Type: "ext4",
+
+		// Host path where the block device image resides.
+		HostPath: "/tmp/block_device.img",
+
+		// Path inside the VM where the block device is mounted.
+		GuestDeviceMount: "/mnt/data",
+
+		// Identifier for the block device (can be the loop device ID or the block_device.img name).
+		BlockDeviceID: "block_device.img",
+
+		// Mount options for the filesystem (e.g., defaults).
+		Options: []string{"defaults"},
+
+		// Specify if the mount is read-only or not.
+		ReadOnly: false,
+
+		// Group ID ownership for the files in the mounted volume (optional, can be nil).
+		FSGroup: nil,
+
+		// Policy for changing group ownership (optional, specify as per your requirements).
+		// FSGroupChangePolicy: volume.FSGroupChangePolicy{},
+	}
+	c.Logger().Infof("newContainer: newMount: %+v", newMount)
+	c.mounts = append(c.mounts, newMount)
+
+	c.Logger().Info("newContainer: block device mount added to spec")
 
 	// block device mounts get added to devmanager
 	// If mounts are block devices, add to devmanager
