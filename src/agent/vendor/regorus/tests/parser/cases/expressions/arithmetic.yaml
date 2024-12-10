@@ -1,0 +1,40 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+cases:
+  - note: basic
+    rego: |
+      package test
+
+      x = 1 - 2 * 3 / 4 + 2
+    policy:
+      - spec:
+          head:
+            compr:
+              refr:
+                var: x
+              assign:
+                op: =
+                value:
+                  arithexpr:
+                    op: +
+                    lhs:
+                      arithexpr:
+                        op: "-"
+                        lhs:
+                          number: 1
+                        rhs:
+                          arithexpr:
+                            op: "/"
+                            lhs:
+                              arithexpr:
+                                op: "*"
+                                lhs:
+                                  number: 2
+                                rhs:
+                                  number: 3
+                            rhs:
+                              number: 4
+                    rhs:
+                      number: 2
+          bodies: []

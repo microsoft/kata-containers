@@ -1,0 +1,543 @@
+devicemapper 0.33.5
+===================
+Recommended Rust toolchain version: 1.70.0
+Lowest supported Rust toolchain version: 1.69.0
+Recommended development release: Fedora 38
+
+- Test for presence of udev daemon in UdevSync implementation:
+  https://github.com/stratis-storage/devicemapper-rs/pull/859
+
+- Patch Cargo.toml to avoid loopdev FTBFS:
+  https://github.com/stratis-storage/devicemapper-rs/pull/852
+
+- Increase bitflags dependency lower bound to 1.3.2:
+  https://github.com/stratis-storage/devicemapper-rs/pull/855
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/862
+  https://github.com/stratis-storage/devicemapper-rs/pull/861
+  https://github.com/stratis-storage/devicemapper-rs/pull/860
+  https://github.com/stratis-storage/devicemapper-rs/pull/857
+  https://github.com/stratis-storage/devicemapper-rs/pull/854
+  https://github.com/stratis-storage/devicemapper-rs/pull/853
+
+
+devicemapper 0.33.4
+===================
+Recommended Rust toolchain version: 1.68.0
+Lowest supported Rust toolchain version: 1.66.1
+Recommended development release: Fedora 37
+
+- Make CacheDev, LinearDev, and ThinPoolDev private on resume():
+  https://github.com/stratis-storage/devicemapper-rs/pull/850
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/849
+
+
+devicemapper 0.33.3
+===================
+Recommended Rust toolchain version: 1.68.0
+Lowest supported Rust toolchain version: 1.66.1
+Recommended development release: Fedora 37
+
+- Send udev options to make cache, linear, and thinpool devs private:
+  https://github.com/stratis-storage/devicemapper-rs/pull/845
+
+- Increase env_logger dependency lower bound to 0.10.0:
+  https://github.com/stratis-storage/devicemapper-rs/pull/844
+
+
+devicemapper 0.33.2
+===================
+Recommended Rust toolchain version: 1.68.0
+Lowest supported Rust toolchain version: 1.66.1
+Recommended development release: Fedora 37
+
+- Expose target table related structs:
+  https://github.com/stratis-storage/devicemapper-rs/pull/839
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/842
+  https://github.com/stratis-storage/devicemapper-rs/pull/841
+  https://github.com/stratis-storage/devicemapper-rs/pull/838
+
+
+devicemapper 0.33.1
+===================
+Recommended Rust toolchain version: 1.67.1
+Lowest supported Rust toolchain version: 1.66.1
+Recommended development release: Fedora 37
+
+- Require devicemapper-sys v0.1.5:
+  https://github.com/stratis-storage/devicemapper-rs/pull/837
+
+- Release devicemapper-sys v0.1.5:
+  https://github.com/stratis-storage/devicemapper-rs/pull/835
+
+
+devicemapper 0.33.0
+===================
+Recommended Rust toolchain version: 1.67.1
+Lowest supported Rust toolchain version: 1.66.1
+Recommended development release: Fedora 37
+
+- Add udev synchronization and logging support:
+  https://github.com/stratis-storage/devicemapper-rs/issues/768
+  https://github.com/stratis-storage/devicemapper-rs/issues/730
+  https://github.com/stratis-storage/devicemapper-rs/pull/774
+
+- Increase nix dependency lower bound to 0.26.0:
+  https://github.com/stratis-storage/devicemapper-rs/pull/820
+
+- Release devicemapper-sys v0.1.4:
+  https://github.com/stratis-storage/devicemapper-rs/pull/826
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/828
+  https://github.com/stratis-storage/devicemapper-rs/pull/827
+  https://github.com/stratis-storage/devicemapper-rs/pull/825
+  https://github.com/stratis-storage/devicemapper-rs/pull/824
+  https://github.com/stratis-storage/devicemapper-rs/pull/823
+  https://github.com/stratis-storage/devicemapper-rs/pull/822
+  https://github.com/stratis-storage/devicemapper-rs/pull/821
+  https://github.com/stratis-storage/devicemapper-rs/pull/819
+  https://github.com/stratis-storage/devicemapper-rs/pull/818
+  https://github.com/stratis-storage/devicemapper-rs/pull/817
+  https://github.com/stratis-storage/devicemapper-rs/pull/816
+  https://github.com/stratis-storage/devicemapper-rs/pull/814
+  https://github.com/stratis-storage/devicemapper-rs/pull/803
+
+
+devicemapper 0.32.3
+===================
+Recommended Rust toolchain version: 1.65.0
+Lowest supported Rust toolchain version: 1.62.1
+Recommended development release: Fedora 37
+
+- Expose DeviceInfo struct:
+  https://github.com/stratis-storage/devicemapper-rs/pull/787
+
+- Fix a code defect that could result in an ill-formed ioctl message header:
+  https://github.com/stratis-storage/devicemapper-rs/pull/806
+
+- Increase bindgen dependency version specification to 0.63:
+  https://github.com/stratis-storage/devicemapper-rs/pull/804
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/812
+  https://github.com/stratis-storage/devicemapper-rs/pull/810
+  https://github.com/stratis-storage/devicemapper-rs/pull/807
+  https://github.com/stratis-storage/devicemapper-rs/pull/802
+  https://github.com/stratis-storage/devicemapper-rs/pull/800
+  https://github.com/stratis-storage/devicemapper-rs/pull/799
+  https://github.com/stratis-storage/devicemapper-rs/pull/798
+  https://github.com/stratis-storage/devicemapper-rs/pull/797
+  https://github.com/stratis-storage/devicemapper-rs/pull/796
+  https://github.com/stratis-storage/devicemapper-rs/pull/795
+  https://github.com/stratis-storage/devicemapper-rs/pull/794
+  https://github.com/stratis-storage/devicemapper-rs/pull/793
+  https://github.com/stratis-storage/devicemapper-rs/pull/791
+  https://github.com/stratis-storage/devicemapper-rs/pull/788
+  https://github.com/stratis-storage/devicemapper-rs/pull/786
+  https://github.com/stratis-storage/devicemapper-rs/pull/785
+  https://github.com/stratis-storage/devicemapper-rs/pull/778
+
+
+devicemapper 0.32.2
+===================
+Recommended Rust toolchain version: 1.63.0
+Lowest supported Rust toolchain version: 1.62.1
+Recommended development release: Fedora 36
+
+- Update to edition 2021:
+  https://github.com/stratis-storage/devicemapper-rs/pull/766
+
+- Do not use feature_args for thinpool equivalence:
+  https://github.com/stratis-storage/devicemapper-rs/pull/783
+
+- Increase loopdev dependency lower bound to 0.4.0:
+  https://github.com/stratis-storage/devicemapper-rs/pull/781
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/780
+  https://github.com/stratis-storage/devicemapper-rs/pull/779
+  https://github.com/stratis-storage/devicemapper-rs/pull/777
+  https://github.com/stratis-storage/devicemapper-rs/pull/776
+  https://github.com/stratis-storage/devicemapper-rs/pull/775
+
+
+devicemapper 0.32.1
+===================
+Recommended Rust toolchain version: 1.62.0
+Lowest supported Rust toolchain version: 1.58.1
+Recommended development release: Fedora 36
+
+- Expose TargetTable and TargetParams:
+  https://github.com/stratis-storage/devicemapper-rs/issues/747
+  https://github.com/stratis-storage/devicemapper-rs/pull/750
+
+- Add a proper list of categories to the Cargo.toml file:
+  https://github.com/stratis-storage/devicemapper-rs/pull/751
+
+- Release devicemapper-sys version 0.1.3:
+  https://github.com/stratis-storage/devicemapper-rs/pull/771
+
+- Set a per-command ioctl version in device-mapper header:
+  https://github.com/stratis-storage/devicemapper-rs/issues/769
+  https://github.com/stratis-storage/devicemapper-rs/pull/772
+  https://github.com/stratis-storage/devicemapper-rs/pull/770
+
+- Increase nix dependency version to 0.24.0:
+  https://github.com/stratis-storage/devicemapper-rs/pull/758
+
+- Increase uuid dependency version to 1.0.0:
+  https://github.com/stratis-storage/devicemapper-rs/pull/760
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/767
+  https://github.com/stratis-storage/devicemapper-rs/pull/765
+  https://github.com/stratis-storage/devicemapper-rs/pull/764
+  https://github.com/stratis-storage/devicemapper-rs/pull/763
+  https://github.com/stratis-storage/devicemapper-rs/pull/761
+  https://github.com/stratis-storage/devicemapper-rs/pull/759
+  https://github.com/stratis-storage/devicemapper-rs/pull/757
+  https://github.com/stratis-storage/devicemapper-rs/pull/756
+  https://github.com/stratis-storage/devicemapper-rs/pull/755
+  https://github.com/stratis-storage/devicemapper-rs/pull/754
+  https://github.com/stratis-storage/devicemapper-rs/pull/753
+  https://github.com/stratis-storage/devicemapper-rs/pull/752
+  https://github.com/stratis-storage/devicemapper-rs/pull/748
+
+
+devicemapper 0.32.0
+===================
+Recommended Rust toolchain version: 1.58.1
+Lowest supported Rust toolchain version: 1.54.0
+Recommended development release: Fedora 35
+
+- New version: 0.32.0:
+  https://github.com/stratis-storage/devicemapper-rs/pull/744
+
+- Allow passing feature args when creating a thinpool device:
+  https://github.com/stratis-storage/devicemapper-rs/pull/745
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/743
+  https://github.com/stratis-storage/devicemapper-rs/pull/742
+
+
+devicemapper 0.31.0
+===================
+Recommended Rust toolchain version: 1.58.0
+Lowest supported Rust toolchain version: 1.54.0
+Recommended development release: Fedora 34
+
+- Allow specifying features args when setting up a thinpool device:
+  https://github.com/stratis-storage/devicemapper-rs/pull/731
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/739
+  https://github.com/stratis-storage/devicemapper-rs/pull/738
+  https://github.com/stratis-storage/devicemapper-rs/pull/737
+  https://github.com/stratis-storage/devicemapper-rs/pull/736
+  https://github.com/stratis-storage/devicemapper-rs/pull/734
+
+
+devicemapper 0.30.1
+===================
+Recommended Rust toolchain version: 1.57.0
+Lowest supported Rust toolchain version: 1.54.0
+Recommended development release: Fedora 34
+
+- New release: 0.30.1
+  https://github.com/stratis-storage/devicemapper-rs/pull/714
+
+- Make internal errors module public:
+  https://github.com/stratis-storage/devicemapper-rs/issues/724
+  https://github.com/stratis-storage/devicemapper-rs/pull/726
+
+- Release devicemapper-sys version 0.1.2:
+  https://github.com/stratis-storage/devicemapper-rs/pull/720
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/733
+  https://github.com/stratis-storage/devicemapper-rs/pull/732
+  https://github.com/stratis-storage/devicemapper-rs/pull/729
+  https://github.com/stratis-storage/devicemapper-rs/pull/728
+  https://github.com/stratis-storage/devicemapper-rs/pull/725
+  https://github.com/stratis-storage/devicemapper-rs/pull/718
+  https://github.com/stratis-storage/devicemapper-rs/pull/717
+  https://github.com/stratis-storage/devicemapper-rs/pull/715
+  https://github.com/stratis-storage/devicemapper-rs/pull/713
+  https://github.com/stratis-storage/devicemapper-rs/pull/712
+
+
+devicemapper 0.30.0
+===================
+Recommended Rust toolchain version: 1.55.0
+Lowest supported Rust toolchain version: 1.54.0
+Recommended development release: Fedora 34
+
+- Introduce devicemapper-version based conditional compilation:
+  https://github.com/stratis-storage/devicemapper-rs/issues/686
+  https://github.com/stratis-storage/devicemapper-rs/pull/709
+  https://github.com/stratis-storage/devicemapper-rs/pull/705
+  https://github.com/stratis-storage/devicemapper-rs/pull/703
+  https://github.com/stratis-storage/devicemapper-rs/pull/702
+  https://github.com/stratis-storage/devicemapper-rs/pull/700
+  https://github.com/stratis-storage/devicemapper-rs/pull/699
+  https://github.com/stratis-storage/devicemapper-rs/pull/698
+
+- Pass DmOptions parameter to DmDevice::suspend and status() methods:
+  https://github.com/stratis-storage/devicemapper-rs/issues/663
+  https://github.com/stratis-storage/devicemapper-rs/pull/707
+
+- Make DmOptions implement Copy:
+  https://github.com/stratis-storage/devicemapper-rs/pull/710
+
+- Pass DmOptions parameter to Dm::table_load:
+  https://github.com/stratis-storage/devicemapper-rs/pull/627
+
+- Allow DM_SECURE_DATA flag in Dm::table_load:
+  https://github.com/stratis-storage/devicemapper-rs/pull/688
+
+- Remove implementation of description() method from DmError:
+  https://github.com/stratis-storage/devicemapper-rs/pull/657
+
+- Make name field optional in DeviceInfo struct:
+  https://github.com/stratis-storage/devicemapper-rs/pull/668
+
+- Use definitions of constants defined in dm-ioctl.h:
+  https://github.com/stratis-storage/devicemapper-rs/pull/693
+  https://github.com/stratis-storage/devicemapper-rs/pull/691
+
+- Use bindgen with only runtime feature enabled:
+  https://github.com/stratis-storage/devicemapper-rs/pull/665
+
+- Remove dependency on error-chain:
+  https://github.com/stratis-storage/devicemapper-rs/pull/671
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/706
+  https://github.com/stratis-storage/devicemapper-rs/pull/704
+  https://github.com/stratis-storage/devicemapper-rs/pull/701
+  https://github.com/stratis-storage/devicemapper-rs/pull/697
+  https://github.com/stratis-storage/devicemapper-rs/pull/696
+  https://github.com/stratis-storage/devicemapper-rs/pull/695
+  https://github.com/stratis-storage/devicemapper-rs/pull/689
+  https://github.com/stratis-storage/devicemapper-rs/pull/687
+  https://github.com/stratis-storage/devicemapper-rs/pull/685
+  https://github.com/stratis-storage/devicemapper-rs/pull/684
+  https://github.com/stratis-storage/devicemapper-rs/pull/683
+  https://github.com/stratis-storage/devicemapper-rs/pull/680
+  https://github.com/stratis-storage/devicemapper-rs/pull/679
+  https://github.com/stratis-storage/devicemapper-rs/pull/678
+  https://github.com/stratis-storage/devicemapper-rs/pull/677
+  https://github.com/stratis-storage/devicemapper-rs/pull/676
+  https://github.com/stratis-storage/devicemapper-rs/pull/674
+  https://github.com/stratis-storage/devicemapper-rs/pull/673
+  https://github.com/stratis-storage/devicemapper-rs/pull/672
+  https://github.com/stratis-storage/devicemapper-rs/pull/669
+  https://github.com/stratis-storage/devicemapper-rs/pull/666
+  https://github.com/stratis-storage/devicemapper-rs/pull/662
+  https://github.com/stratis-storage/devicemapper-rs/pull/661
+
+
+devicemapper 0.29.2
+===================
+Recommended Rust toolchain version: 1.53.0
+Lowest supported Rust toolchain version: 1.49
+
+- General cleanup of core implementation:
+  * use bindgen to dynamically generate ioctl bindings
+  * handle potential unmarshalling errors
+  https://github.com/stratis-storage/devicemapper-rs/issues/623
+  https://github.com/stratis-storage/devicemapper-rs/issues/433
+  https://github.com/stratis-storage/devicemapper-rs/issues/525
+  https://github.com/stratis-storage/devicemapper-rs/pull/633
+
+- Enable support for Android targets:
+  https://github.com/stratis-storage/devicemapper-rs/pull/626
+
+- Make all types generated by range macro hashable:
+  https://github.com/stratis-storage/devicemapper-rs/pull/622
+
+- Add CI support for Android build target:
+  https://github.com/stratis-storage/devicemapper-rs/issues/640
+  https://github.com/stratis-storage/devicemapper-rs/pull/652
+
+- Add CI for musl:
+  https://github.com/stratis-storage/devicemapper-rs/issues/648
+  https://github.com/stratis-storage/devicemapper-rs/pull/651
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/656
+  https://github.com/stratis-storage/devicemapper-rs/pull/655
+  https://github.com/stratis-storage/devicemapper-rs/pull/653
+  https://github.com/stratis-storage/devicemapper-rs/pull/650
+  https://github.com/stratis-storage/devicemapper-rs/pull/646
+  https://github.com/stratis-storage/devicemapper-rs/pull/645
+  https://github.com/stratis-storage/devicemapper-rs/pull/642
+  https://github.com/stratis-storage/devicemapper-rs/pull/639
+  https://github.com/stratis-storage/devicemapper-rs/pull/636
+  https://github.com/stratis-storage/devicemapper-rs/pull/635
+  https://github.com/stratis-storage/devicemapper-rs/pull/634
+  https://github.com/stratis-storage/devicemapper-rs/pull/631
+  https://github.com/stratis-storage/devicemapper-rs/pull/629
+  https://github.com/stratis-storage/devicemapper-rs/pull/628
+  https://github.com/stratis-storage/devicemapper-rs/pull/625
+  https://github.com/stratis-storage/devicemapper-rs/pull/621
+  https://github.com/stratis-storage/devicemapper-rs/pull/619
+  https://github.com/stratis-storage/devicemapper-rs/pull/617
+
+
+devicemapper 0.29.1
+===================
+Recommended Rust toolchain version: 1.51.0
+Lowest supported Rust toolchain version: 1.49
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/612
+  https://github.com/stratis-storage/devicemapper-rs/pull/611
+  https://github.com/stratis-storage/devicemapper-rs/pull/608
+  https://github.com/stratis-storage/devicemapper-rs/pull/607
+  https://github.com/stratis-storage/devicemapper-rs/pull/605
+  https://github.com/stratis-storage/devicemapper-rs/pull/603
+  https://github.com/stratis-storage/devicemapper-rs/pull/602
+  https://github.com/stratis-storage/devicemapper-rs/pull/601
+
+
+devicemapper 0.29.0
+===================
+Recommended Rust toolchain version: 1.48.0
+Lowest supported Rust toolchain version: 1.47
+
+YAML linter: yamllint (1.25.0)
+Python: 3.8.5
+
+New minimum Rust crate requirements:
+  - nix: 0.19
+
+- Use u128 for underlying Bytes representation:
+  https://github.com/stratis-storage/devicemapper-rs/issues/426
+  https://github.com/stratis-storage/devicemapper-rs/pull/598
+
+- Implement AsRawFd for DM:
+  https://github.com/stratis-storage/devicemapper-rs/pull/592
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/600
+  https://github.com/stratis-storage/devicemapper-rs/pull/599
+  https://github.com/stratis-storage/devicemapper-rs/pull/597
+  https://github.com/stratis-storage/devicemapper-rs/pull/595
+  https://github.com/stratis-storage/devicemapper-rs/pull/594
+  https://github.com/stratis-storage/devicemapper-rs/pull/593
+  https://github.com/stratis-storage/devicemapper-rs/pull/591
+  https://github.com/stratis-storage/devicemapper-rs/pull/590
+  https://github.com/stratis-storage/devicemapper-rs/pull/588
+
+
+devicemapper 0.28.1
+===================
+Recommended Rust toolchain version: 1.47.0
+Lowest supported Rust toolchain version: 1.45
+
+New minimum Rust crate requirements:
+  - error_chain: 0.12.4
+  - nix: 0.18
+  - uuid: 0.8
+
+YAML linter: yamllint (1.23.0)
+
+- Fix incorrect parsing of flakey target parameters:
+  https://github.com/stratis-storage/devicemapper-rs/issues/261
+  https://github.com/stratis-storage/devicemapper-rs/pull/492
+
+- Fix some bugs in parsing target parameters when the number of feature
+  arguments is 0:
+  https://github.com/stratis-storage/devicemapper-rs/issues/484
+  https://github.com/stratis-storage/devicemapper-rs/pull/489
+  https://github.com/stratis-storage/devicemapper-rs/pull/495
+
+- Fix an incompatibility with musl:
+  https://github.com/stratis-storage/devicemapper-rs/issues/560
+  https://github.com/stratis-storage/devicemapper-rs/pull/562
+
+- Use fully qualified names in macros:
+  https://github.com/stratis-storage/devicemapper-rs/pull/524
+
+- Tidies and Maintenance:
+  https://github.com/stratis-storage/devicemapper-rs/pull/585
+  https://github.com/stratis-storage/devicemapper-rs/pull/584
+  https://github.com/stratis-storage/devicemapper-rs/pull/583
+  https://github.com/stratis-storage/devicemapper-rs/pull/582
+  https://github.com/stratis-storage/devicemapper-rs/pull/581
+  https://github.com/stratis-storage/devicemapper-rs/pull/580
+  https://github.com/stratis-storage/devicemapper-rs/pull/579
+  https://github.com/stratis-storage/devicemapper-rs/pull/578
+  https://github.com/stratis-storage/devicemapper-rs/pull/577
+  https://github.com/stratis-storage/devicemapper-rs/pull/576
+  https://github.com/stratis-storage/devicemapper-rs/pull/575
+  https://github.com/stratis-storage/devicemapper-rs/pull/574
+  https://github.com/stratis-storage/devicemapper-rs/pull/573
+  https://github.com/stratis-storage/devicemapper-rs/pull/572
+  https://github.com/stratis-storage/devicemapper-rs/pull/571
+  https://github.com/stratis-storage/devicemapper-rs/pull/569
+  https://github.com/stratis-storage/devicemapper-rs/pull/568
+  https://github.com/stratis-storage/devicemapper-rs/pull/567
+  https://github.com/stratis-storage/devicemapper-rs/pull/566
+  https://github.com/stratis-storage/devicemapper-rs/pull/565
+  https://github.com/stratis-storage/devicemapper-rs/pull/564
+  https://github.com/stratis-storage/devicemapper-rs/pull/561
+  https://github.com/stratis-storage/devicemapper-rs/pull/558
+  https://github.com/stratis-storage/devicemapper-rs/pull/555
+  https://github.com/stratis-storage/devicemapper-rs/pull/554
+  https://github.com/stratis-storage/devicemapper-rs/pull/553
+  https://github.com/stratis-storage/devicemapper-rs/pull/552
+  https://github.com/stratis-storage/devicemapper-rs/pull/551
+  https://github.com/stratis-storage/devicemapper-rs/pull/550
+  https://github.com/stratis-storage/devicemapper-rs/pull/548
+  https://github.com/stratis-storage/devicemapper-rs/pull/547
+  https://github.com/stratis-storage/devicemapper-rs/pull/546
+  https://github.com/stratis-storage/devicemapper-rs/pull/545
+  https://github.com/stratis-storage/devicemapper-rs/pull/544
+  https://github.com/stratis-storage/devicemapper-rs/pull/543
+  https://github.com/stratis-storage/devicemapper-rs/pull/542
+  https://github.com/stratis-storage/devicemapper-rs/pull/541
+  https://github.com/stratis-storage/devicemapper-rs/pull/540
+  https://github.com/stratis-storage/devicemapper-rs/pull/539
+  https://github.com/stratis-storage/devicemapper-rs/pull/538
+  https://github.com/stratis-storage/devicemapper-rs/pull/536
+  https://github.com/stratis-storage/devicemapper-rs/pull/534
+  https://github.com/stratis-storage/devicemapper-rs/pull/533
+  https://github.com/stratis-storage/devicemapper-rs/pull/532
+  https://github.com/stratis-storage/devicemapper-rs/pull/531
+  https://github.com/stratis-storage/devicemapper-rs/pull/530
+  https://github.com/stratis-storage/devicemapper-rs/pull/529
+  https://github.com/stratis-storage/devicemapper-rs/pull/528
+  https://github.com/stratis-storage/devicemapper-rs/pull/527
+  https://github.com/stratis-storage/devicemapper-rs/pull/521
+  https://github.com/stratis-storage/devicemapper-rs/pull/520
+  https://github.com/stratis-storage/devicemapper-rs/pull/519
+  https://github.com/stratis-storage/devicemapper-rs/pull/518
+  https://github.com/stratis-storage/devicemapper-rs/pull/517
+  https://github.com/stratis-storage/devicemapper-rs/pull/514
+  https://github.com/stratis-storage/devicemapper-rs/pull/512
+  https://github.com/stratis-storage/devicemapper-rs/pull/511
+  https://github.com/stratis-storage/devicemapper-rs/pull/509
+  https://github.com/stratis-storage/devicemapper-rs/pull/508
+  https://github.com/stratis-storage/devicemapper-rs/pull/507
+  https://github.com/stratis-storage/devicemapper-rs/pull/504
+  https://github.com/stratis-storage/devicemapper-rs/pull/502
+  https://github.com/stratis-storage/devicemapper-rs/pull/501
+  https://github.com/stratis-storage/devicemapper-rs/pull/500
+  https://github.com/stratis-storage/devicemapper-rs/pull/499
+  https://github.com/stratis-storage/devicemapper-rs/pull/497
+  https://github.com/stratis-storage/devicemapper-rs/pull/496
+  https://github.com/stratis-storage/devicemapper-rs/pull/494
+  https://github.com/stratis-storage/devicemapper-rs/pull/487
+  https://github.com/stratis-storage/devicemapper-rs/pull/486
+  https://github.com/stratis-storage/devicemapper-rs/pull/480
+  https://github.com/stratis-storage/devicemapper-rs/pull/478
+  https://github.com/stratis-storage/devicemapper-rs/pull/477 
