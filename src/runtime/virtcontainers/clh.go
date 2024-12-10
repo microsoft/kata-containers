@@ -1438,6 +1438,7 @@ func (clh *cloudHypervisor) launchClh() error {
 		return err
 	}
 
+	/*
 	args := []string{cscAPIsocket, clh.state.apiSocket}
 	if clh.config.Debug {
 		// Cloud hypervisor log levels
@@ -1467,6 +1468,14 @@ func (clh *cloudHypervisor) launchClh() error {
 	if clh.config.DisableSeccomp {
 		args = append(args, "--seccomp", "false")
 	}
+	*/
+
+	args := []string{"-ex", "r", "-ex", "bt", "-ex", "q", "--args"}
+	args = append(args, clhPath)
+	args = append(args, cscAPIsocket)
+	args = append(args, clh.state.apiSocket)
+	args = append(args, "-vvv")
+	clhPath = "/usr/bin/gdb"
 
 	clh.Logger().WithField("path", clhPath).Info()
 	clh.Logger().WithField("args", strings.Join(args, " ")).Info()
