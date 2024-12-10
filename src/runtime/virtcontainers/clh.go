@@ -1475,6 +1475,7 @@ func (clh *cloudHypervisor) launchClh() error {
 		"-ex", "info registers",
 		"-ex", "disass $rip",
 		"-ex", "bt", 
+		"-ex", "shell sleep 120",
 		// "-ex", "quit", 
 		"--args"}
 	args = append(args, clhPath)
