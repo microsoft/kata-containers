@@ -14,6 +14,7 @@ use std::io::{Read, Seek};
 use zerocopy::AsBytes;
 use std::process::Command;
 use uuid::Uuid;
+use nix::mount::MsFlags;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
@@ -286,6 +287,56 @@ impl Store {
         Ok(mounts)
     }
 
+    /// Mounts a DM-Verity device to a specified path using integrated `baremount` logic.
+    fn mount_dm_verity_device(
+        &self,
+        source: &str,
+        target: &str,
+        fstype: &str,
+        options: &str,
+        flags: MsFlags,
+    ) -> Result<()> {
+        if source.is_empty() {
+            return Err(anyhow!("Source path for mounting cannot be empty."));
+        }
+
+        if target.is_empty() {
+            return Err(anyhow!("Target path for mounting cannot be empty."));
+        }
+
+        if fstype.is_empty() {
+            return Err(anyhow!("Filesystem type cannot be empty."));
+        }
+
+        let source_path = Path::new(source);
+        let target_path = Path::new(target);
+
+        // Ensure the target directory exists
+        if !target_path.exists() {
+            fs::create_dir_all(target_path)
+                .with_context(|| format!("Failed to create mount point: {}", target))?;
+        }
+
+        // Attempt the mount operation
+        nix::mount::mount(
+            Some(source_path),
+            target_path,
+            Some(fstype),
+            flags,
+            Some(options),
+        )
+        .map_err(|e| {
+            anyhow!(
+                "Failed to mount {} to {} with error: {}",
+                source,
+                target,
+                e
+            )
+        })?;
+
+        Ok(())
+    }
+
     fn mounts_from_snapshot(&self, parent: &str) -> Result<Vec<api::types::Mount>, Status> {
         let mut next_parent = Some(parent.to_string());
         let mut lower_dirs = Vec::new();
@@ -313,20 +364,15 @@ impl Store {
     
             // Mount the DM-Verity device
             let mount_path = format!("/var/lib/containerd/io.containerd.snapshotter.v1.tardev/mounts/{}", p);
-            if let Err(e) = fs::create_dir_all(&mount_path) {
-                return Err(Status::internal(format!("Failed to create mount directory: {:?}", e)));
-            }
-            
-            let output = Command::new("mount")
-                .arg(&dm_verity_device)
-                .arg(&mount_path)
-                .output()
-                .expect("<mitchzhu> Failed to execute mount command for DM-Verity device");
-    
-            if !output.status.success() {
+            if let Err(e) = self.mount_dm_verity_device(
+                &dm_verity_device,
+                &mount_path,
+                "tar", // Assume ext4 as the filesystem type; adjust as needed
+                "ro",
+                MsFlags::MS_RDONLY,
+            ) {
                 return Err(Status::internal(format!(
-                    "Failed to mount DM-Verity device: {:?}",
-                    String::from_utf8_lossy(&output.stderr)
+                    "Failed to mount DM-Verity device: {:?}", e
                 )));
             }
     
@@ -336,8 +382,14 @@ impl Store {
             next_parent = (!info.parent.is_empty()).then_some(info.parent);
         }
     
-        let work_dir = format!("/var/lib/containerd/io.containerd.snapshotter.v1.tardev/work/{}", parent);
-        let upper_dir = format!("/var/lib/containerd/io.containerd.snapshotter.v1.tardev/upper/{}", parent);
+        let work_dir = format!(
+            "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/work/{}",
+            parent
+        );
+        let upper_dir = format!(
+            "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/upper/{}",
+            parent
+        );
     
         if let Err(e) = fs::create_dir_all(&work_dir) {
             return Err(Status::internal(format!("Failed to create workdir: {:?}", e)));

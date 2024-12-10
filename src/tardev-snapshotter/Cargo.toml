@@ -25,3 +25,4 @@ devicemapper = "0.33.1"
 anyhow = "=1.0.58"
 zerocopy = "0.6.1"
 uuid = { version = "1.0", features = ["v4"] }
+nix = "0.24.2"
