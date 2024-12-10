@@ -1475,7 +1475,7 @@ func (clh *cloudHypervisor) launchClh() error {
 		"-ex", "info registers",
 		"-ex", "disass $rip",
 		"-ex", "bt", 
-		"-ex", "quit", 
+		// "-ex", "quit", 
 		"--args"}
 	args = append(args, clhPath)
 	args = append(args, cscAPIsocket)
