@@ -1472,7 +1472,8 @@ func (clh *cloudHypervisor) launchClh() error {
 
 	args := []string{
 		"-ex", "run", 
-		"-ex", "info registers", 
+		"-ex", "info registers",
+		"-ex", "disass $rip",
 		"-ex", "bt", 
 		"-ex", "quit", 
 		"--args"}
