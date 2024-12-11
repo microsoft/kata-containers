@@ -81,6 +81,10 @@ const (
 	// successfully, on a single Host.
 	clhAPITimeoutConfidentialGuest = 300
 
+	// Minimum timout for calling CreateVM followed by BootVM. Executing these two APIs
+	// might take longer than the value returned by getClhAPITimeout().
+	clhCreateAndBootVMMinimumTimeout = 100
+
 	// Timeout for hot-plug - hotplug devices can take more time, than usual API calls
 	// Use longer time timeout for it.
 	clhHotPlugAPITimeout                   = 5
@@ -766,9 +770,8 @@ func (clh *cloudHypervisor) StartVM(ctx context.Context, timeout int) error {
 	}
 
 	bootvm_timeout := clh.getClhAPITimeout()
-	// TODO: review this 10 second minimum timeout value.
-	if bootvm_timeout < 10 {
-		bootvm_timeout = 10
+	if bootvm_timeout < clhCreateAndBootVMMinimumTimeout {
+		bootvm_timeout = clhCreateAndBootVMMinimumTimeout
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), bootvm_timeout*time.Second)
