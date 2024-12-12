@@ -349,7 +349,6 @@ impl Store {
         let mut lower_dirs = Vec::new();
     
         while let Some(p) = next_parent {
-            info!("----------------------<mitchzhu> processing layer");
             let info = self.read_snapshot(&p)?;
             if info.kind != Kind::Committed {
                 return Err(Status::failed_precondition(
@@ -641,8 +640,10 @@ impl Snapshotter for TarDevSnapshotter {
         // There are two reasons for preparing a snapshot: to build an image and to actually use it
         // as a container image. We determine the reason by the presence of the snapshot-ref label.
         if labels.get(TARGET_LAYER_DIGEST_LABEL).is_some() {
+            info!("prepare(): prepare a staging dir for containerd tar data extraction");
             self.prepare_unpack_dir(key, parent, labels).await
         } else {
+            info!("prepare(): create active snapshot");
             self.store
                 .write()
                 .await
