@@ -70,6 +70,12 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     add_sandbox_name_to_state := state_allows("sandbox_name", sandbox_name)
     ops_builder1 := concat_op_if_not_null(ops_builder, add_sandbox_name_to_state)
 
+    # check if pause container
+    i_cri_type := i_oci.Annotations["io.kubernetes.cri.container-type"]
+    # allow if it's not pause container, or it is and we haven't seen it before
+    seen_pause = allow_container_type(i_cri_type)
+    ops_builder2 := concat_op_if_not_null(ops_builder1, seen_pause)
+
     # Check if any element from the policy_data.containers array allows the input request.
     some p_container in policy_data.containers
     print("======== CreateContainerRequest: trying next policy container")
@@ -86,7 +92,7 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     i_namespace := i_oci.Annotations[S_NAMESPACE_KEY]
     print ("CreateContainerRequest: p_namespace =", p_namespace, "i_namespace =", i_namespace)
     add_namespace_to_state := allow_namespace(p_namespace, i_namespace)
-    ops := concat_op_if_not_null(ops_builder1, add_namespace_to_state)
+    ops := concat_op_if_not_null(ops_builder2, add_namespace_to_state)
 
     print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
     p_oci.Version == i_oci.Version
@@ -136,6 +142,26 @@ allow_create_container_input {
     count(i_process.User.Username) == 0
 
     print("allow_create_container_input: true")
+}
+
+allow_container_type(cri_type) = action {
+    cri_type != "sandbox"
+    action := null
+    print("allow_container_type 1: true")
+}
+
+allow_container_type(cri_type) = action {
+    cri_type == "sandbox"
+    state := get_state()
+    not state["seen_pause"]
+    # record that we have seen pause container for the first time
+    key = get_state_path("seen_pause")
+    action := {
+      "op": "add",
+      "path": key, 
+      "value": true,
+    }
+    print("allow_container_type 2: true")
 }
 
 allow_namespace(p_namespace, i_namespace) = add_namespace {
