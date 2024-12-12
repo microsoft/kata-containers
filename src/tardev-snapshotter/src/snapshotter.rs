@@ -1,4 +1,4 @@
-//use base64::prelude::{Engine, BASE64_STANDARD};
+use base64::prelude::{Engine, BASE64_STANDARD};
 use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
 use log::{debug, info, trace};
@@ -317,6 +317,13 @@ impl Store {
                 .with_context(|| format!("Failed to create mount point: {}", target))?;
         }
 
+        //info!("mounting storage, mount-source:{}, mount-destination:{}, mount-fstype:{}, mount-options:{}",
+        //    source_path,
+        //    target_path,
+        //    fstype,
+        //    options,
+        //);
+
         // Attempt the mount operation
         nix::mount::mount(
             Some(source_path),
@@ -367,7 +374,7 @@ impl Store {
             if let Err(e) = self.mount_dm_verity_device(
                 &dm_verity_device,
                 &mount_path,
-                "tar", // Assume ext4 as the filesystem type; adjust as needed
+                "tar", // Assume tarfs as the filesystem type; adjust as needed
                 "ro",
                 MsFlags::MS_RDONLY,
             ) {
@@ -610,6 +617,7 @@ impl Snapshotter for TarDevSnapshotter {
 
         if info.labels.get(TARGET_LAYER_DIGEST_LABEL).is_some() {
             let extract_dir = store.extract_dir(&key);
+            info!("mounts(): snapshot: {}, pass extract_dir to containerd so that it unpacks the layer to extract_dir: {}", &info.name, extract_dir.to_string_lossy());
             Ok(vec![api::types::Mount {
                 r#type: "bind".into(),
                 source: extract_dir.to_string_lossy().into(),
@@ -617,6 +625,7 @@ impl Snapshotter for TarDevSnapshotter {
                 options: Vec::new(),
             }])
         } else {
+            info!("mounts(): snapshot: {}, ready to use, preparing itself and parents ", &info.name);
             store.mounts_from_snapshot(&info.parent)
         }
     }
