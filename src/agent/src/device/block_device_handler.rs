@@ -226,21 +226,20 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::redundant_clone)]
     async fn test_virtio_blk_matcher() {
-        let root_bus = create_pci_root_bus_path();
         let devname = "vda";
 
         let mut uev_a = crate::uevent::Uevent::default();
-        let relpath_a = "/0000:00:0a.0";
+        let pci_a = pci::Address::new(0, 0, pci::SlotFn::new(10, 0).unwrap());
         uev_a.action = crate::linux_abi::U_EVENT_ACTION_ADD.to_string();
         uev_a.subsystem = BLOCK.to_string();
         uev_a.devname = devname.to_string();
-        uev_a.devpath = format!("{}{}/virtio4/block/{}", root_bus, relpath_a, devname);
-        let matcher_a = VirtioBlkPciMatcher::new(relpath_a);
+        uev_a.devpath = format!("{}/virtio4/block/{}", &pci_a.get_sysfs_path(), devname);
+        let matcher_a = VirtioBlkPciMatcher::new(&pci_a.get_sysfs_path());
 
         let mut uev_b = uev_a.clone();
-        let relpath_b = "/0000:00:0a.0/0000:00:0b.0";
-        uev_b.devpath = format!("{}{}/virtio0/block/{}", root_bus, relpath_b, devname);
-        let matcher_b = VirtioBlkPciMatcher::new(relpath_b);
+        let pci_b = pci::Address::new(0, 0, pci::SlotFn::new(11, 0).unwrap());
+        uev_b.devpath = format!("{}/virtio0/block/{}", &pci_b.get_sysfs_path(), devname);
+        let matcher_b = VirtioBlkPciMatcher::new(&pci_b.get_sysfs_path());
 
         assert!(matcher_a.is_match(&uev_a));
         assert!(matcher_b.is_match(&uev_b));
