@@ -1147,9 +1147,8 @@ mod tests {
     #[tokio::test]
     async fn test_get_device_name() {
         let devname = "vda";
-        let root_bus = create_pci_root_bus_path();
-        let relpath = "/0000:00:0a.0/0000:03:0b.0";
-        let devpath = format!("{}{}/virtio4/block/{}", root_bus, relpath, devname);
+        let pci0 = pci::Address::new(0, 0, pci::SlotFn::new(10, 0).unwrap());
+        let devpath = format!("{}/virtio4/block/{}", pci0.get_sysfs_path(), devname);
 
         let mut uev = crate::uevent::Uevent::default();
         uev.action = crate::linux_abi::U_EVENT_ACTION_ADD.to_string();
@@ -1164,7 +1163,7 @@ mod tests {
         sb.uevent_map.insert(devpath.clone(), uev);
         drop(sb); // unlock
 
-        let name = example_get_device_name(&sandbox, relpath).await;
+        let name = example_get_device_name(&sandbox, &pci0.get_sysfs_path()).await;
         assert!(name.is_ok(), "{}", name.unwrap_err());
         assert_eq!(name.unwrap(), devname);
 
@@ -1174,7 +1173,7 @@ mod tests {
 
         spawn_test_watcher(sandbox.clone(), uev);
 
-        let name = example_get_device_name(&sandbox, relpath).await;
+        let name = example_get_device_name(&sandbox, &pci0.get_sysfs_path()).await;
         assert!(name.is_ok(), "{}", name.unwrap_err());
         assert_eq!(name.unwrap(), devname);
     }
