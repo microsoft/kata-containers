@@ -83,7 +83,8 @@ const (
 
 	// Minimum timout for calling CreateVM followed by BootVM. Executing these two APIs
 	// might take longer than the value returned by getClhAPITimeout().
-	clhCreateAndBootVMMinimumTimeout = 10
+	clhCreateAndBootVMMinimumTimeout = 100
+
 	// Timeout for hot-plug - hotplug devices can take more time, than usual API calls
 	// Use longer time timeout for it.
 	clhHotPlugAPITimeout                   = 5
