@@ -1136,7 +1136,6 @@ match_caps(p_caps, i_caps) {
 check_directory_traversal(i_path) {
     contains(i_path, "../") == false
     endswith(i_path, "/..") == false
-    i_path != ".."
 }
 
 check_symlink_source {
@@ -1148,6 +1147,9 @@ check_symlink_source {
     i_src := input.symlink_src
     print("check_symlink_source: i_src =", i_src)
 
+    i_src != "."
+    i_src != ".."
+    
     startswith(i_src, "/") == false
     check_directory_traversal(i_src)
 }
