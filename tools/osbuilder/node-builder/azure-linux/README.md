@@ -64,7 +64,7 @@ Using this package, it is straightforward to assemble the UVM and then to run po
 
 For Kata:
 ```
-sudo dnf -y install kata-packages-uvm-build make
+sudo dnf -y install kata-packages-uvm-build
 pushd /opt/kata-containers/uvm/tools/osbuilder
 pushd node-builder/azure-linux
 sudo make OS_VERSION=3.0 uvm
@@ -72,17 +72,19 @@ popd
 sudo mkdir -p /usr/share/kata-containers
 sudo cp kata-containers.img /usr/share/kata-containers/
 popd
-popd
 ```
 
 For Kata-CC:
 ```
-sudo dnf -y install kata-packages-uvm-build make curl jq # curl and jq are only required for installing the IGVM tool
+sudo dnf -y install kata-packages-uvm-build curl jq # curl and jq are only required for installing the IGVM tool
 pushd /opt/confidential-containers/uvm/tools/osbuilder
 pushd igvm-builder
 sudo ./igvm_builder.sh -i
 popd
 pushd node-builder/azure-linux
+# Note: see explanation on AGENT_POLICY_FILE below. We build with a permissive agent policy
+# as security policy annotations part of the pod metadata field are not passed to the shim.
+# This setup SHOULD NOT BE USED for Confidential Containers in production.
 sudo make OS_VERSION=3.0 AGENT_POLICY_FILE=allow-all.rego uvm-confpods
 popd
 sudo mkdir -p /opt/confidential-containers/share/kata-containers
