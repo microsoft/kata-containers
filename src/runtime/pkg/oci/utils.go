@@ -1024,9 +1024,11 @@ func SandboxConfig(ocispec specs.Spec, runtime RuntimeConfig, bundlePath, cid st
 	if sandboxConfig.StaticResourceMgmt {
 		// If no Limits are set in pod config, use StaticWorkloadDefaultMem to ensure the containers generally
 		// have a reasonable amount of memory available
+		/*
 		if sandboxConfig.SandboxResources.WorkloadMemMB == 0 {
 			sandboxConfig.SandboxResources.WorkloadMemMB = sandboxConfig.StaticWorkloadDefaultMem
 		}
+		*/
 
 		sandboxConfig.SandboxResources.BaseCPUs = sandboxConfig.HypervisorConfig.NumVCPUsF
 		sandboxConfig.SandboxResources.BaseMemMB = sandboxConfig.HypervisorConfig.MemorySize
