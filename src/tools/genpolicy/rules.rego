@@ -1320,6 +1320,9 @@ check_symlink_source {
     i_src := input.symlink_src
     print("check_symlink_source: i_src =", i_src)
 
+    i_src != "."
+    i_src != ".."
+    
     startswith(i_src, "/") == false
     check_directory_traversal(i_src)
 }
