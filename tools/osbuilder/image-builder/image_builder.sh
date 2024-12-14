@@ -75,8 +75,8 @@ AGENT_INIT=${AGENT_INIT:-no}
 SELINUX=${SELINUX:-no}
 SELINUXFS="/sys/fs/selinux"
 
-# Align image to 128M
-readonly mem_boundary_mb=128
+# Image file size alignment in Mb.
+readonly mem_boundary_mb=2
 
 # shellcheck source=../scripts/lib.sh
 source "${lib_file}"
