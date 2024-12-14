@@ -636,6 +636,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 				clh.vmconfig.Disks = &[]chclient.DiskConfig{*disk}
 			}
 		} else {
+			/*
 			pmem := chclient.NewPmemConfig(assetPath)
 			*pmem.DiscardWrites = true
 			pmem.SetIommu(clh.config.IOMMU)
@@ -644,6 +645,15 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 				*clh.vmconfig.Pmem = append(*clh.vmconfig.Pmem, *pmem)
 			} else {
 				clh.vmconfig.Pmem = &[]chclient.PmemConfig{*pmem}
+			}
+			*/
+			disk := chclient.NewDiskConfig(assetPath)
+			*disk.Readonly = true
+
+			if clh.vmconfig.Disks != nil {
+				*clh.vmconfig.Disks = append(*clh.vmconfig.Disks, *disk)
+			} else {
+				clh.vmconfig.Disks = &[]chclient.DiskConfig{*disk}
 			}
 		}
 	}
