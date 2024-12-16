@@ -520,17 +520,21 @@ create_rootfs_image() {
 	fi
 
 	if [ "${MEASURED_ROOTFS}" == "yes" ] && [ -b "${device}p2" ]; then
-		setup_cmd="veritysetup format ${device}p1 ${device}p2"
+		local setup_cmd="veritysetup format ${device}p1 ${device}p2"
+		local image_dir=$(dirname "${image}")
+		local root_hash_file="${image_dir}/root_hash"
 
 		case "${DM_VERITY_FORMAT}" in
 			veritysetup)
 				# Partition format compatible with "veritysetup open" but not with kernel's
 				# "dm-mod.create" command line parameter.
+				root_hash_file+=".txt"
 				;;
 			kernelinit)
 				# Partition format compatible with kernel's "dm-mod.create" command line
 				# parameter but not with "veritysetup open".
 				setup_cmd+=" --no-superblock"
+				root_hash_file+="_kernelinit.txt"
 				;;
 			*)
 				error "DM_VERITY_FORMAT(${DM_VERITY_FORMAT}) is incorrect (must be veritysetup or kernelinit)"
@@ -538,9 +542,8 @@ create_rootfs_image() {
 				;;
 		esac
 
-		info "${setup_cmd}"
-		local image_dir=$(dirname "${image}")
-		eval "${setup_cmd}" > "${image_dir}"/root_hash.txt 2>&1
+		info "${setup_cmd} > ${root_hash_file}"
+		eval "${setup_cmd}" > "${root_hash_file}" 2>&1
 	fi
 
 	losetup -d "${device}"
