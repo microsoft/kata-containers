@@ -577,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "genpolicy"
-version = "3.2.0-azl3.genpolicy0"
+version = "3.2.0-azl3.genpolicy1"
 dependencies = [
  "anyhow",
  "async-trait",
