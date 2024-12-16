@@ -88,8 +88,14 @@ hex = { version = "0.4.2", optional = true }
 sev = { git = "https://github.com/virtee/sev", version = "1.2", default-features = false, features = ["snp"], optional = true }
 
 # Agent Policy
-# TODO: use regorus version 0.1.5 when it will be released to crates.io.
-regorus = { git = "https://github.com/anakrish/regorus", rev = "fc6f5d4", default-features = false, features = ["arc", "base64", "base64url", "regex"], optional = true }
+regorus = { version = "0.2.6", default-features = false, features = [
+    "arc",
+    "regex",
+    "std",
+    "base64",
+    "base64url",
+], optional = true }
+json-patch = "2.0.0"
 
 [dev-dependencies]
 tempfile = "3.1.0"
