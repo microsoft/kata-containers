@@ -23,8 +23,6 @@ PREFIX=${PREFIX:-/opt/kata}
 container_image="${SHIM_V2_CONTAINER_BUILDER:-$(get_shim_v2_image_name)}"
 
 EXTRA_OPTS="${EXTRA_OPTS:-""}"
-MEASURED_ROOTFS=${MEASURED_ROOTFS:-"no"}
-DM_VERITY_FORMAT=${DM_VERITY_FORMAT:-"veritysetup"}
 
 [ "${CROSS_BUILD}" == "true" ] && container_image_bk="${container_image}" && container_image="${container_image}-cross-build"
 if [ "${MEASURED_ROOTFS}" == "yes" ]; then
@@ -36,30 +34,8 @@ if [ "${MEASURED_ROOTFS}" == "yes" ]; then
 		die "Root hash file for measured rootfs not found at ${root_hash_file}"
 
 	root_hash=$(sed -e 's/Root hash:\s*//g;t;d' "${root_hash_file}")
-	case "${DM_VERITY_FORMAT}" in
-		veritysetup)
-			# Partition format compatible with "veritysetup open" but not with kernel's
-			# "dm-mod.create" command line parameter. Add the ROOTMEASURECONFIG option
-			# used by the Kata initramfs.
-			root_measure_config="rootfs_verity.scheme=dm-verity rootfs_verity.hash=${root_hash}"
-			EXTRA_OPTS+=" ROOTMEASURECONFIG=\"${root_measure_config}\""
-			;;
-		kernelinit)
-			# Partition format compatible with kernel's "dm-mod.create" command line
-			# option but not with "veritysetup open".
-			salt=$(sed -e 's/Salt:\s*//g;t;d' "${root_hash_file}")
-			data_blocks=$(sed -e 's/Data blocks:\s*//g;t;d' "${root_hash_file}")
-			data_block_size=$(sed -e 's/Data block size:\s*//g;t;d' "${root_hash_file}")
-			data_sectors_per_block=$((data_block_size / 512))
-			data_sectors=$((data_blocks * data_sectors_per_block))
-			hash_block_size=$(sed -e 's/Hash block size:\s*//g;t;d' "${root_hash_file}")
-			EXTRA_OPTS+=" ROOTMEASURECONFIG=\"dm-mod.create=\\\"dm-verity,,,ro,0 ${data_sectors} verity 1 @ROOTFS_DEVICE@ @VERITY_DEVICE@ ${data_block_size} ${hash_block_size} ${data_blocks} 0 sha256 ${root_hash} ${salt}\\\"\""
-			;;
-		*)
-			error "DM_VERITY_FORMAT(${DM_VERITY_FORMAT}) is incorrect (must be veritysetup or kernelinit)"
-			return 1
-			;;
-	esac
+	root_measure_config="rootfs_verity.scheme=dm-verity rootfs_verity.hash=${root_hash}"
+	EXTRA_OPTS+=" ROOTMEASURECONFIG=\"${root_measure_config}\""
 fi
 
 docker pull ${container_image} || \
@@ -100,27 +76,17 @@ docker run --rm -i -v "${repo_root_dir}:${repo_root_dir}" \
 
 [ "${CROSS_BUILD}" == "true" ] && container_image="${container_image_bk}-cross-build"
 
-# EXTRA_OPTS might contain kernel options similar to: dm-mod.create=\"dm-verity,,,ro,0 ...\"
-# That quoted value format must be propagated without changes into the runtime config file.
-# But that format gets modified:
-#
-# 1. When expanding EXTRA_OPTS as parameter to the make command below.
-# 2. When shim's Makefile uses sed to substitute @KERNELPARAMS@ in the config file.
-#
-# Therefore, replace here any \" substring to compensate for the two changes described above.
-EXTRA_OPTS_ESCAPED=$(echo "${EXTRA_OPTS}" | sed -e 's|\\\"|\\\\\\\\\\\\\\\\\\\\\\\"|g')
+docker run --rm -i -v "${repo_root_dir}:${repo_root_dir}" \
+	-w "${repo_root_dir}/src/runtime" \
+	--user "$(id -u)":"$(id -g)" \
+	"${container_image}" \
+	bash -c "make clean-generated-files && make PREFIX=${PREFIX} QEMUCMD=qemu-system-${arch} ${EXTRA_OPTS}"
 
 docker run --rm -i -v "${repo_root_dir}:${repo_root_dir}" \
 	-w "${repo_root_dir}/src/runtime" \
 	--user "$(id -u)":"$(id -g)" \
 	"${container_image}" \
-	bash -c "make clean-generated-files && make PREFIX=${PREFIX} QEMUCMD=qemu-system-${arch} ${EXTRA_OPTS_ESCAPED}"
-
-docker run --rm -i -v "${repo_root_dir}:${repo_root_dir}" \
-	-w "${repo_root_dir}/src/runtime" \
-	--user "$(id -u)":"$(id -g)" \
-	"${container_image}" \
-	bash -c "make PREFIX="${PREFIX}" DESTDIR="${DESTDIR}" ${EXTRA_OPTS_ESCAPED} install"
+	bash -c "make PREFIX="${PREFIX}" DESTDIR="${DESTDIR}" ${EXTRA_OPTS} install"
 
 for vmm in ${VMM_CONFIGS}; do
 	config_file="${DESTDIR}/${PREFIX}/share/defaults/kata-containers/configuration-${vmm}.toml"
