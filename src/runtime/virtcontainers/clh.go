@@ -1461,17 +1461,21 @@ func kernelParamsToString(params []Param) string {
 		if len(p.Value) > 0 {
 			paramBuilder.WriteString("=")
 			
+			/*
 			if strings.Contains(p.Value, " ") {
 				// paramBuilder.WriteString("\"")
 				paramBuilder.Write([]byte(`"`))
 			}
+			*/
 			
 			paramBuilder.WriteString(p.Value)
 			
+			/*
 			if strings.Contains(p.Value, " ") {
 				// paramBuilder.WriteString("\"")
 				paramBuilder.Write([]byte(`"`))
 			}
+			*/
 		}
 		paramBuilder.WriteString(" ")
 	}
