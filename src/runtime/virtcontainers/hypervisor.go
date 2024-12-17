@@ -159,8 +159,8 @@ func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool, config
 			hvLogger.WithField("p", p).Info("GetKernelRootParams")
 			hvLogger.WithField("p.Value", p.Value).Info("GetKernelRootParams")
 
-			// dmCreateValue = p.Value
-			dmCreateValue ="dm-verity,,,ro,0 512000 verity 1 @ROOTFS_DEVICE@ @VERITY_DEVICE@ 4096 4096 64000 0 sha256  12a11ac8c171e19bce2db8dd52dd6396e141446cb769b2cb24576689196ba45c"
+			dmCreateValue = p.Value
+			// dmCreateValue ="dm-verity,,,ro,0 512000 verity 1 @ROOTFS_DEVICE@ @VERITY_DEVICE@ 4096 4096 64000 0 sha256  12a11ac8c171e19bce2db8dd52dd6396e141446cb769b2cb24576689196ba45c"
 			hvLogger.WithField("dmCreateValue", dmCreateValue).Info("GetKernelRootParams")
 
 			hvLogger.WithField(DeviceMapperCreate, dmCreateValue).Info("device mapper create param")
