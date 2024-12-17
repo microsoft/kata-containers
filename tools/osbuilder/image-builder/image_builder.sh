@@ -710,7 +710,7 @@ main() {
 						"${fs_type}" "${block_size}" "${agent_bin}"
 	fi
 	# insert at the beginning of the image the MBR + DAX header
-	set_dax_header "${image}" "${img_size}" "${fs_type}" "${nsdax_bin}"
+	# set_dax_header "${image}" "${img_size}" "${fs_type}" "${nsdax_bin}"
 
 	chown "${USER}:${GROUP}" "${image}"
 }
