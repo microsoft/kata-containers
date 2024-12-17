@@ -354,8 +354,21 @@ setup_loop_device() {
 	# Poll for the block device p1
 	for _ in $(seq 1 5); do
 		if [ -b "${device}p1" ]; then
-			echo "${device}"
-			return 0
+			if [ "${MEASURED_ROOTFS}" == "yes" ]; then
+				# Poll for the block device p2
+				for _ in $(seq 1 5); do
+					if [ -b "${device}p2" ]; then
+						echo "${device}"
+						return 0
+					fi
+					sleep 1
+				done
+
+				error "File ${device}p2 is not a block device"
+			else
+				echo "${device}"
+				return 0
+			fi
 		fi
 		sleep 1
 	done
@@ -542,7 +555,6 @@ create_rootfs_image() {
 				;;
 		esac
 
-		info "${setup_cmd} > ${root_hash_file}"
 		eval "${setup_cmd}" > "${root_hash_file}" 2>&1
 	fi
 
