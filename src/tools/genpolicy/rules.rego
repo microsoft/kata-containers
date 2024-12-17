@@ -1231,6 +1231,9 @@ ExecProcessRequest {
 
     # TODO: should other input data fields be validated as well?
     p_command == i_command
+    sandbox_name = container.OCI.Annotations["io.kubernetes.cri.sandbox-name"]
+    allow_env(container.Process, input.process, sandbox_name)
+    container.Process.Cwd == input.process.Cwd
 
     print("ExecProcessRequest 2: true")
 }
