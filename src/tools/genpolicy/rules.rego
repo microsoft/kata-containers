@@ -1447,6 +1447,7 @@ ExecProcessRequest {
     print("ExecProcessRequest 1: p_command =", p_command)
     p_command == input.process.Args
 
+    # TODO: match p_container's ID with the input container_id.
     some p_container in policy_data.containers
     allow_interactive_exec(p_container, input.process)
 
@@ -1478,6 +1479,7 @@ ExecProcessRequest {
 
     regex.match(p_regex, i_command)
 
+    # TODO: match p_container's ID with the input container_id.
     some p_container in policy_data.containers
     allow_interactive_exec(p_container, input.process)
 
