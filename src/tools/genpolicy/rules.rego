@@ -1456,7 +1456,6 @@ ExecProcessRequest {
     print("ExecProcessRequest 2: input =", input)
 
     # TODO: match input container ID with its corresponding container.exec_commands.
-
     some p_container in policy_data.containers
     some p_command in p_container.exec_commands
     print("ExecProcessRequest 2: p_command =", p_command)
