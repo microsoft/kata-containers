@@ -1,5 +1,5 @@
 use generic_array::{typenum::Unsigned, GenericArray};
-use sha2::{digest::OutputSizeUser, Digest};
+use sha2::Digest;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use zerocopy::byteorder::{LE, U32, U64};
@@ -228,11 +228,10 @@ pub fn write_to(f: &mut File) -> impl FnMut(&mut File, &[u8], u64) -> io::Result
 
 pub fn append_tree<T: Digest + Clone>(
     file: &mut File,
+    salt: &[u8],
 ) -> io::Result<GenericArray<u8, T::OutputSize>> {
     let file_size = file.seek(io::SeekFrom::End(0))?;
     file.rewind()?;
-    let mut salt = Vec::new();
-    salt.resize(<T as OutputSizeUser>::OutputSize::USIZE, 0);
     let verity = Verity::<T>::new(file_size, 4096, 4096, &salt, file_size)?;
     traverse_file(file, 0, true, verity, &mut |f, data, offset| {
         f.seek(SeekFrom::Start(offset))?;
