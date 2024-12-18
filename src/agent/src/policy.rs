@@ -159,7 +159,7 @@ impl AgentPolicy {
     /// Ask regorus if an API call should be allowed or not.
     async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
-        self.log_eval_input(ep, ep_input).await;
+        self.log_request(ep, ep_input).await;
 
         let query = format!("data.agent_policy.{ep}");
         self.engine.set_input_json(ep_input)?;
@@ -174,15 +174,19 @@ impl AgentPolicy {
             }
         };
 
-        if !allow && self.allow_failures {
-            warn!(sl!(), "policy: ignoring error for {ep}");
-            allow = true;
-        }
-
         let prints = match self.engine.take_prints() {
             Ok(p) => p.join(" "),
             Err(e) => format!("Failed to get policy log: {e}"),
         };
+
+        if !allow {
+            self.log_request(ep, &prints).await;
+        }
+
+        if !allow && self.allow_failures {
+            warn!(sl!(), "policy: ignoring error for {ep}");
+            allow = true;
+        }
 
         Ok((allow, prints))
     }
@@ -197,24 +201,22 @@ impl AgentPolicy {
         Ok(())
     }
 
-    async fn log_eval_input(&mut self, ep: &str, input: &str) {
+    async fn log_request(&mut self, ep: &str, input: &str) {
         if let Some(log_file) = &mut self.log_file {
             match ep {
-                "StatsContainerRequest" | "ReadStreamRequest" | "SetPolicyRequest" => {
-                    // - StatsContainerRequest and ReadStreamRequest are called
-                    //   relatively often, so we're not logging them, to avoid
-                    //   growing this log file too much.
-                    // - Confidential Containers Policy documents are relatively
-                    //   large, so we're not logging them here, for SetPolicyRequest.
-                    //   The Policy text can be obtained directly from the pod YAML.
+                "StatsContainerRequest"
+                | "ReadStreamRequest"
+                | "SetPolicyRequest"
+                | "AllowRequestsFailingPolicy" => {
+                    // Logging these request types would create too much unnecessary output.
                 }
                 _ => {
                     let log_entry = format!("[\"ep\":\"{ep}\",{input}],\n\n");
 
                     if let Err(e) = log_file.write_all(log_entry.as_bytes()).await {
-                        warn!(sl!(), "policy: log_eval_input: write_all failed: {}", e);
+                        warn!(sl!(), "policy: log_request: write_all failed: {}", e);
                     } else if let Err(e) = log_file.flush().await {
-                        warn!(sl!(), "policy: log_eval_input: flush failed: {}", e);
+                        warn!(sl!(), "policy: log_request: flush failed: {}", e);
                     }
                 }
             }
