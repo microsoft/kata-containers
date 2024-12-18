@@ -1174,20 +1174,26 @@ check_directory_traversal(i_path) {
     endswith(i_path, "/..") == false
 }
 
-check_symlink_source {
-    # TODO: delete this rule once the symlink_src field gets implemented
-    # by all/most Guest VMs.
-    not input.symlink_src
+check_symlink_source(i_src) {
+    i_src == ""
+    print("check_symlink_source 1: true")
 }
-check_symlink_source {
-    i_src := input.symlink_src
-    print("check_symlink_source: i_src =", i_src)
+check_symlink_source(i_src) {
+    i_src != ""
+    print("check_symlink_source 2: i_src =", i_src)
 
-    i_src != "."
-    i_src != ".."
-    
-    startswith(i_src, "/") == false
+    regex.match(policy_data.common.s_source1, i_src)
+
+    print("check_symlink_source 2: true")
+}
+check_symlink_source(i_src) {
+    i_src != ""
+    print("check_symlink_source 3: i_src =", i_src)
+
+    regex.match(policy_data.common.s_source2, i_src)
     check_directory_traversal(i_src)
+
+    print("check_symlink_source 3: true")
 }
 
 allow_sandbox_storages(i_storages) {
@@ -1214,7 +1220,7 @@ allow_sandbox_storage(p_storages, i_storage) {
 CopyFileRequest {
     print("CopyFileRequest: input.path =", input.path)
 
-    check_symlink_source
+    check_symlink_source(input.symlink_src)
     check_directory_traversal(input.path)
 
     some regex1 in policy_data.request_defaults.CopyFileRequest
