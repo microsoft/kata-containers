@@ -10,7 +10,7 @@ use clap::Parser;
 #[derive(Debug, Parser)]
 struct CommandLineOptions {
     #[clap(short, long, help = "Image tag")]
-    image: String,
+    image: Vec<String>,
 
     #[clap(
         short,
@@ -51,7 +51,7 @@ struct CommandLineOptions {
 pub struct Config {
     pub use_cache: bool,
 
-    pub image: String,
+    pub image: Vec<String>,
 
     pub containerd_socket_path: Option<String>,
     pub version: bool,

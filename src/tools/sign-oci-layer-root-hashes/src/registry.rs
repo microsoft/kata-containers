@@ -9,19 +9,29 @@
 use crate::verity;
 
 use crate::utils::Config;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use docker_credential::{CredentialRetrievalError, DockerCredential};
 use fs2::FileExt;
 use log::warn;
 use log::{debug, info, LevelFilter};
 use oci_distribution::client::{linux_amd64_resolver, ClientConfig};
 use oci_distribution::{manifest, secrets::RegistryAuth, Client, Reference};
+use rand::rngs::ThreadRng;
 use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::fs::OpenOptions;
 use std::io::BufWriter;
 use std::{io, io::Seek, io::Write, path::Path};
 use tokio::io::AsyncWriteExt;
+use rand::Rng;
+
+pub(crate) type Salt = [u8; <Sha256 as OutputSizeUser>::OutputSize::USIZE];
+
+#[derive(Debug)]
+pub(crate) struct VerityHash {
+    pub root_hash: String,
+    pub salt: Salt
+}
 
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
@@ -61,6 +71,7 @@ pub struct DockerRootfs {
 pub struct ImageLayer {
     pub diff_id: String,
     pub verity_hash: String,
+    pub salt: Salt,
 }
 
 impl Container {
@@ -119,105 +130,6 @@ impl Container {
         }
     }
 
-    // // Convert Docker image config to policy data.
-    // pub fn get_process(
-    //     &self,
-    //     process: &mut policy::KataProcess,
-    //     yaml_has_command: bool,
-    //     yaml_has_args: bool,
-    // ) {
-    //     debug!("Getting process field from docker config layer...");
-    //     let docker_config = &self.config_layer.config;
-
-    //     if let Some(image_user) = &docker_config.User {
-    //         if !image_user.is_empty() {
-    //             debug!("Splitting Docker config user = {:?}", image_user);
-    //             let user: Vec<&str> = image_user.split(':').collect();
-    //             if !user.is_empty() {
-    //                 debug!("Parsing uid from user[0] = {}", &user[0]);
-    //                 match user[0].parse() {
-    //                     Ok(id) => process.User.UID = id,
-    //                     Err(e) => {
-    //                         // "image: prom/prometheus" has user = "nobody", but
-    //                         // process.User.UID is an u32 value.
-    //                         warn!(
-    //                             "Failed to parse {} as u32, using uid = 0 - error {e}",
-    //                             &user[0]
-    //                         );
-    //                         process.User.UID = 0;
-    //                     }
-    //                 }
-    //             }
-    //             if user.len() > 1 {
-    //                 debug!("Parsing gid from user[1] = {:?}", user[1]);
-    //                 process.User.GID = user[1].parse().unwrap();
-    //             }
-    //         }
-    //     }
-
-    //     if let Some(terminal) = docker_config.Tty {
-    //         process.Terminal = terminal;
-    //     } else {
-    //         process.Terminal = false;
-    //     }
-
-    //     assert!(process.Env.is_empty());
-    //     if let Some(config_env) = &docker_config.Env {
-    //         for env in config_env {
-    //             process.Env.push(env.clone());
-    //         }
-    //     } else {
-    //         containerd::get_default_unix_env(&mut process.Env);
-    //     }
-
-    //     let policy_args = &mut process.Args;
-    //     debug!("Already existing policy args: {:?}", policy_args);
-
-    //     if let Some(entry_points) = &docker_config.Entrypoint {
-    //         debug!("Image Entrypoint: {:?}", entry_points);
-    //         if !yaml_has_command {
-    //             debug!("Inserting Entrypoint into policy args");
-
-    //             let mut reversed_entry_points = entry_points.clone();
-    //             reversed_entry_points.reverse();
-
-    //             for entry_point in reversed_entry_points {
-    //                 policy_args.insert(0, entry_point.clone());
-    //             }
-    //         } else {
-    //             debug!("Ignoring image Entrypoint because YAML specified the container command");
-    //         }
-    //     } else {
-    //         debug!("No image Entrypoint");
-    //     }
-
-    //     debug!("Updated policy args: {:?}", policy_args);
-
-    //     if yaml_has_command {
-    //         debug!("Ignoring image Cmd because YAML specified the container command");
-    //     } else if yaml_has_args {
-    //         debug!("Ignoring image Cmd because YAML specified the container args");
-    //     } else if let Some(commands) = &docker_config.Cmd {
-    //         debug!("Adding to policy args the image Cmd: {:?}", commands);
-
-    //         for cmd in commands {
-    //             policy_args.push(cmd.clone());
-    //         }
-    //     } else {
-    //         debug!("Image Cmd field is not present");
-    //     }
-
-    //     debug!("Updated policy args: {:?}", policy_args);
-
-    //     if let Some(working_dir) = &docker_config.WorkingDir {
-    //         if !working_dir.is_empty() {
-    //             process.Cwd = working_dir.clone();
-    //         }
-    //     }
-
-    //     debug!("get_process succeeded.");
-    // }
-
     pub fn get_image_layers(&self) -> Vec<ImageLayer> {
         self.image_layers.clone()
     }
@@ -232,6 +144,7 @@ async fn get_image_layers(
 ) -> Result<Vec<ImageLayer>> {
     let mut layer_index = 0;
     let mut layers = Vec::new();
+    let mut rng = rand::thread_rng();
 
     for layer in &manifest.layers {
         if layer
@@ -240,16 +153,19 @@ async fn get_image_layers(
             || layer.media_type.eq(manifest::IMAGE_LAYER_GZIP_MEDIA_TYPE)
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
-                layers.push(ImageLayer {
-                    diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
-                    verity_hash: get_verity_hash(
+                let verity_hash = get_verity_hash(
                         use_cached_files,
                         client,
                         reference,
                         &layer.digest,
                         &config_layer.rootfs.diff_ids[layer_index].clone(),
+                        &mut rng,
                     )
-                    .await?,
+                    .await?;
+                layers.push(ImageLayer {
+                    diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
+                    verity_hash: verity_hash.root_hash,
+                    salt: verity_hash.salt,
                 });
             } else {
                 return Err(anyhow!("Too many Docker gzip layers"));
@@ -268,7 +184,8 @@ async fn get_verity_hash(
     reference: &Reference,
     layer_digest: &str,
     diff_id: &str,
-) -> Result<String> {
+    rng: &mut ThreadRng,
+) -> Result<VerityHash> {
     let temp_dir = tempfile::tempdir_in(".")?;
     let base_dir = temp_dir.path();
     let cache_file = "layers-cache.json";
@@ -280,62 +197,54 @@ async fn get_verity_hash(
     let mut compressed_path = decompressed_path.clone();
     compressed_path.set_extension("gz");
 
-    let mut verity_hash = "".to_string();
-    let mut error_message = "".to_string();
-    let mut error = false;
 
     // get value from store and return if it exists
-    if use_cached_files {
-        verity_hash = read_verity_from_store(cache_file, diff_id)?;
+    let verity_hash = if use_cached_files {
+        let verity_hash = read_verity_from_store(cache_file, diff_id)?;
         info!("Using cache file");
-        info!("dm-verity root hash: {verity_hash}");
-    }
+        info!("dm-verity root hash: {:#?}", verity_hash);
+
+        verity_hash
+    } else {None};
 
     // create the layer files
-    if verity_hash.is_empty() {
-        if let Err(e) = create_decompressed_layer_file(
-            client,
-            reference,
-            layer_digest,
-            &decompressed_path,
-            &compressed_path,
-        )
-        .await
-        {
-            error_message = format!("Failed to create verity hash for {layer_digest}, error {e}");
-            error = true
-        };
+    let verity_hash_result = match verity_hash {
+        Some(v) => Ok(v),
+        None => {
+            create_decompressed_layer_file(
+                client,
+                reference,
+                layer_digest,
+                &decompressed_path,
+                &compressed_path,
+            )
+            .await.context("Failed to create verity hash for {layer_digest}")?;
 
-        if !error {
-            match get_verity_hash_value(&decompressed_path) {
-                Err(e) => {
-                    error_message = format!("Failed to get verity hash {e}");
-                    error = true;
-                }
-                Ok(v) => {
-                    verity_hash = v;
-                    if use_cached_files {
-                        add_verity_to_store(cache_file, diff_id, &verity_hash)?;
-                    }
-                    info!("dm-verity root hash: {verity_hash}");
-                }
+            let salt: Salt = rng.gen();
+            let root_hash = get_verity_hash_value(&decompressed_path, &salt).context("Failed to get verity hash")?;
+            let verity_hash = VerityHash{root_hash, salt};
+            if use_cached_files {
+                add_verity_to_store(cache_file, diff_id, &verity_hash)?;
             }
+            info!("dm-verity root hash: {:#?}", verity_hash);
+
+            Ok(verity_hash)
         }
-    }
+    };
 
     temp_dir.close()?;
-    if error {
+    if verity_hash_result.is_err() {
         // remove the cache file if we're using it
         if use_cached_files {
             std::fs::remove_file(cache_file)?;
         }
-        warn!("{error_message}");
     }
-    Ok(verity_hash)
+
+    verity_hash_result
 }
 
 // the store is a json file that matches layer hashes to verity hashes
-pub fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -> Result<()> {
+pub(crate) fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &VerityHash) -> Result<()> {
     // open the json file in read mode, create it if it doesn't exist
     let read_file = OpenOptions::new()
         .read(true)
@@ -353,7 +262,8 @@ pub fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -
     // Add new data to the deserialized JSON
     data.push(ImageLayer {
         diff_id: diff_id.to_string(),
-        verity_hash: verity_hash.to_string(),
+        verity_hash: verity_hash.root_hash.clone(),
+        salt: verity_hash.salt,
     });
 
     // Serialize in pretty format
@@ -378,13 +288,13 @@ pub fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -
 
 // helper function to read the verity hash from the store
 // returns empty string if not found or file does not exist
-pub fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<String> {
+pub(crate) fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<Option<VerityHash>> {
     match OpenOptions::new().read(true).open(cache_file) {
         Ok(file) => match serde_json::from_reader(file) {
             Result::<Vec<ImageLayer>, _>::Ok(layers) => {
                 for layer in layers {
                     if layer.diff_id == diff_id {
-                        return Ok(layer.verity_hash);
+                        return Ok(Some(VerityHash { root_hash: layer.verity_hash, salt: layer.salt }));
                     }
                 }
             }
@@ -397,7 +307,7 @@ pub fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<String>
         }
     }
 
-    Ok(String::new())
+    Ok(None)
 }
 
 async fn create_decompressed_layer_file(
@@ -436,7 +346,7 @@ async fn create_decompressed_layer_file(
     Ok(())
 }
 
-pub fn get_verity_hash_value(path: &Path) -> Result<String> {
+pub fn get_verity_hash_value(path: &Path, salt: &Salt) -> Result<String> {
     info!("Calculating dm-verity root hash");
     let mut file = std::fs::File::open(path)?;
     let size = file.seek(std::io::SeekFrom::End(0))?;
@@ -444,8 +354,7 @@ pub fn get_verity_hash_value(path: &Path) -> Result<String> {
         return Err(anyhow!("Block device {:?} is too small: {size}", &path));
     }
 
-    let salt = [0u8; <Sha256 as OutputSizeUser>::OutputSize::USIZE];
-    let v = verity::Verity::<Sha256>::new(size, 4096, 4096, &salt, 0)?;
+    let v = verity::Verity::<Sha256>::new(size, 4096, 4096, salt, 0)?;
     let hash = verity::traverse_file(&mut file, 0, false, v, &mut verity::no_write)?;
     let result = format!("{:x}", hash);
 
