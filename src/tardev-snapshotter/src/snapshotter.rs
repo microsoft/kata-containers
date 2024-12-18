@@ -477,40 +477,6 @@ impl Store {
                 .join(":");
             info!("Combining dm-verity layers into overlay lowerdirs: {}", lowerdirs);
 
-            // Replicate directory structure in the upperdir (if needed)
-            for layer_path in &mounted_layers {
-                let layer_root = Path::new(layer_path);
-                for entry in fs::read_dir(layer_root)? {
-                    let entry = entry?;
-                    let path = entry.path();
-                    if path.is_dir() {
-                        let relative_path = path.strip_prefix(layer_root).unwrap();
-                        let target_path = overlay_upper.join(relative_path);
-
-                        // Create the corresponding directory in the upperdir
-                        fs::create_dir_all(&target_path)?;
-                        fs::set_permissions(&target_path, fs::Permissions::from_mode(0o755))?;
-                        // Recursively replicate structure for subdirectories
-                        let mut stack = vec![path];
-                        while let Some(current_dir) = stack.pop() {
-                            for sub_entry in fs::read_dir(&current_dir)? {
-                                let sub_entry = sub_entry?;
-                                let sub_path = sub_entry.path();
-                                if sub_path.is_dir() {
-                                    let sub_relative_path =
-                                        sub_path.strip_prefix(layer_root).unwrap();
-                                    let sub_target_path = overlay_upper.join(sub_relative_path);
-                                    fs::create_dir_all(&sub_target_path)?;
-                                    fs::set_permissions(&sub_target_path, fs::Permissions::from_mode(0o755))?;
-                                    stack.push(sub_path);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            info!("Directory structure replication complete.");
-
             // Perform an overlay mount 
             let status = Command::new("mount")
                 .arg("none")
