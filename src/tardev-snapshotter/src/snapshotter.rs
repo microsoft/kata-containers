@@ -1,30 +1,105 @@
+use anyhow::{anyhow, Context, Result};
 use base64::prelude::{Engine, BASE64_STANDARD};
 use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
-use log::{debug, info, trace};
+use log::{debug, error, info, trace};
+use nix::mount::MsFlags;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::{collections::HashMap, fs, fs::OpenOptions, fs::File, io, io::Read, io::Seek, os::unix::ffi::OsStrExt, process::Command};
+use std::process::Stdio;
+use std::{
+    collections::HashMap, fs, fs::File, fs::OpenOptions, io, io::Read, io::Seek,
+    os::unix::ffi::OsStrExt, process::Command,
+};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 use tonic::Status;
 use uuid::Uuid;
-use std::os::unix::fs::PermissionsExt;
-//use nix::unistd::{chown, Gid, Uid};
-use anyhow::{anyhow, Context, Result};
 use zerocopy::AsBytes;
-use nix::mount::MsFlags;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
 
+#[derive(Serialize, Deserialize)]
+struct ImageInfo {
+    name: String,
+    layers: Vec<LayerInfo>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LayerInfo {
+    digest: String,
+    root_hash: String,
+    signature: String,
+    salt: String,
+}
+
+#[derive(PartialEq)]
+struct LayerInfoInternal {
+    salt: String,
+    signature: Vec<u8>,
+}
+
 struct Store {
     root: PathBuf,
+    signatures: Option<HashMap<String, LayerInfoInternal>>, // root_hash to info
+    salts: Option<HashMap<String, Vec<u8>>>,                // digest to salt
 }
+
+const SIGNATURE_STORE: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/signatures";
 
 impl Store {
     fn new(root: &Path) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            signatures: None,
+            salts: None,
+        }
+    }
+
+    fn lazy_read_signatures(&mut self) -> Result<()> {
+        if self.signatures == None {
+            info!("Loading signatures");
+            self.read_signatures()
+                .context("Failed to read signatures")?;
+        }
+
+        Ok(())
+    }
+
+    fn read_signatures(&mut self) -> Result<()> {
+        let paths = std::fs::read_dir(Path::new(SIGNATURE_STORE))?;
+        let mut signatures = HashMap::new();
+        let mut salts = HashMap::new();
+        for signatures_json_path in paths {
+            let signatures_json = std::fs::read_to_string(signatures_json_path?.path())?;
+            let image_info_list = serde_json::from_str::<Vec<ImageInfo>>(signatures_json.as_str())?;
+            for image_info in image_info_list {
+                for layer_info in image_info.layers {
+                    signatures.insert(
+                        layer_info.root_hash,
+                        LayerInfoInternal {
+                            signature: BASE64_STANDARD
+                                .decode(layer_info.signature)
+                                .context("Failed to decode signature")?,
+                            salt: layer_info.salt.clone(),
+                        },
+                    );
+                    salts.insert(
+                        layer_info.digest,
+                        hex::decode(layer_info.salt).context("Failed to decode salt")?,
+                    );
+                }
+            }
+        }
+
+        self.signatures = Some(signatures);
+        self.salts = Some(salts);
+
+        Ok(())
     }
 
     /// Creates the name of the directory that containerd can use to extract a layer into.
@@ -103,8 +178,49 @@ impl Store {
         let name = self.snapshot_path(&info.name, true)?;
         // TODO: How to specify the file mode (e.g., 0600)?
         let file = OpenOptions::new().write(true).create_new(true).open(name)?;
-        serde_json::to_writer_pretty(file, &info)
-            .map_err(|_| Status::internal("unable to write snapshot"))
+        let foo = serde_json::to_writer_pretty(file, &info)
+            .map_err(|_| Status::internal("unable to write snapshot"));
+        foo?;
+        Ok(())
+    }
+
+    fn get_salt(&self, digest: &str) -> Result<Vec<u8>> {
+        self.salts
+            .as_ref()
+            .context("salts not loaded")?
+            .get(digest)
+            .context("missing signature for the requested layer")
+            .cloned()
+    }
+
+    fn load_signature(&self, hash: &str) -> Result<(String, String)> {
+        let signature_name = format!("verity:{hash}");
+
+        let (signature, salt) = match &self.signatures {
+            None => panic!("signatures were not loaded"),
+            Some(signatures) => match signatures.get(hash) {
+                Some(layer_info) => (&layer_info.signature, layer_info.salt.clone()),
+                None => return Err(anyhow::anyhow!("missing signature for root hash {hash}")),
+            },
+        };
+
+        // https://lkml.org/lkml/2019/7/17/762
+        // https://www.kernel.org/doc/html/latest/admin-guide/device-mapper/verity.html
+        let keyctl = Command::new("keyctl")
+            .stdin(Stdio::piped())
+            .arg("padd")
+            .arg("user")
+            .arg(&signature_name)
+            .arg("@s")
+            .spawn()?;
+        keyctl.stdin.as_ref().unwrap().write_all(&signature)?; // TODO do not unwrap
+                                                               // write!(keyctl.stdin.as_ref().unwrap(), "{}", signature)?; // TODO do not unwrap
+        let output = keyctl.wait_with_output()?;
+        if !output.status.success() {
+            return Err(anyhow::anyhow!("failed to load signature"));
+        }
+
+        Ok((signature_name, salt))
     }
 
     /// Creates a new snapshot for use.
@@ -118,15 +234,25 @@ impl Store {
         parent: String,
         labels: HashMap<String, String>,
     ) -> Result<Vec<api::types::Mount>, Status> {
+        if let Err(e) = self.lazy_read_signatures() {
+            error!("Failing to read signatures: {e}");
+            return Err(Status::internal(format!("Failed read signatures: {:?}", e)));
+        }
         let mounts = self.mounts_from_snapshot(&parent, false)?;
         self.write_snapshot(kind, key, parent, labels)?;
         Ok(mounts)
     }
 
     // ported over from kata agent
-    // prepares a dm-verity target configuration by reading metadata from a file (block/loop device) 
+    // prepares a dm-verity target configuration by reading metadata from a file (block/loop device)
     // and returning the parameters required to set up the device-mapper verity target
-    fn prepare_dm_target(&self, path: &str, hash: &str) -> Result<(u64, u64, String, String)> {
+    fn prepare_dm_target(
+        &self,
+        path: &str,
+        hash: &str,
+        signature_name: &str,
+        salt: &String,
+    ) -> Result<(u64, u64, String, String)> {
         info!("prepare_dm_target for loop device");
         let mut file = File::open(path)?;
         let size = file.seek(std::io::SeekFrom::End(0))?;
@@ -157,23 +283,20 @@ impl Store {
         }
 
         // generate dm-verity table, use all zero salt
-        // TODO: Store other parameters in super block: version, hash type, salt.
-        Ok((
-            0,
-            data_size / 512,
-            "verity".into(),
-            format!(
-                "1 {path} {path} {data_block_size} {hash_block_size
-    } {} {} sha256 {hash} 0000000000000000000000000000000000000000000000000000000000000000",
+        // TODO: Store other parameters in super block: version, hash type,
+        // salt.
+        let construction_parameters = format!(
+                "1 {path} {path} {data_block_size} {hash_block_size} {} {} sha256 {hash} {salt} 2 root_hash_sig_key_desc {signature_name}",
                 data_size / data_block_size,
-                (data_size + hash_block_size - 1) / hash_block_size
-            ),
-        ))
+                (data_size + hash_block_size - 1) / hash_block_size,
+            );
+        trace!("dm-verity construction params: {construction_parameters}");
+        Ok((0, data_size / 512, "verity".into(), construction_parameters))
     }
 
     // Creates dm-verity device for a given layer file
     fn create_dm_verity_device(&self, layer_path: &str, root_hash: &str) -> Result<String> {
-        let dm =  devicemapper::DM::new()?;
+        let dm = devicemapper::DM::new()?;
         let layer_name = Path::new(layer_path)
             .file_name()
             .ok_or_else(|| anyhow!("Unable to get file name from layer path"))?
@@ -228,8 +351,10 @@ impl Store {
             // Use the loop device path for DM-Verity
             let device_path = loop_device;
 
+            let (signature_name, salt) = self.load_signature(root_hash)?;
+
             // Step 3: Prepare DM-Verity target
-            let target = self.prepare_dm_target(device_path, root_hash)?;
+            let target = self.prepare_dm_target(device_path, root_hash, &signature_name, &salt)?;
 
             // Step 4: Load the DM table for DM-Verity
             dm.table_load(&id, &[target], opts)
@@ -250,9 +375,8 @@ impl Store {
             // Remove the DM device if it was created
             if let Err(remove_err) = dm.device_remove(&id, devicemapper::DmOptions::default()) {
                 info!(
-                    "Unable to remove DM device ({}): {:?}", 
-                    layer_name, 
-                    remove_err
+                    "Unable to remove DM device ({}): {:?}",
+                    layer_name, remove_err
                 );
             }
 
@@ -314,20 +438,16 @@ impl Store {
             flags,
             Some(options),
         )
-        .map_err(|e| {
-            anyhow!(
-                "Failed to mount {} to {} with error: {}",
-                source,
-                target,
-                e
-            )
-        })?;
+        .map_err(|e| anyhow!("Failed to mount {} to {} with error: {}", source, target, e))?;
 
         Ok(())
     }
 
-
-    fn mounts_from_snapshot(&self, parent: &str, do_mount: bool) -> Result<Vec<api::types::Mount>, Status> {
+    fn mounts_from_snapshot(
+        &self,
+        parent: &str,
+        do_mount: bool,
+    ) -> Result<Vec<api::types::Mount>, Status> {
         const PREFIX: &str = "io.katacontainers.fs-opt";
 
         // Get chain of layers.
@@ -340,7 +460,14 @@ impl Store {
         let src_prefix = self.root.join("layers");
         let mut mounted_layers = Vec::new();
         while let Some(p) = next_parent {
-            let info = self.read_snapshot(&p)?;
+            let infor = self.read_snapshot(&p);
+            let info = match infor {
+                Ok(a) => a,
+                Err(b) => {
+                    error!("iled to read snoasoht {}", b);
+                    return Err(b);
+                }
+            };
             if info.kind != Kind::Committed {
                 return Err(Status::failed_precondition(
                     "parent snapshot is not committed",
@@ -358,7 +485,10 @@ impl Store {
             let name = name_to_hash(&p);
             let layer_info = format!(
                 "{name},tar,ro,{PREFIX}.block_device=file,{PREFIX}.is-layer,{PREFIX}.root-hash={root_hash}");
-            info!("mounts_from_snapshot(): processing snapshots: {}, layername: {}", &info.name, &name);
+            info!(
+                "mounts_from_snapshot(): processing snapshots: {}, layername: {}",
+                &info.name, &name
+            );
 
             if do_mount {
                 info!("mounts_from_snapshot(): performing tarfs mounting via dm-verity");
@@ -371,15 +501,17 @@ impl Store {
                         Path::new(p).to_path_buf()
                     }
                 } else {
-                    return Err(Status::invalid_argument("Missing source path in layer info"));
+                    return Err(Status::invalid_argument(
+                        "Missing source path in layer info",
+                    ));
                 };
                 info!("src: {}", src.display());
-    
+
                 let fs_type = fields.next().ok_or_else(|| {
                     Status::invalid_argument("Missing filesystem type in layer info")
                 })?;
                 info!("fs_type: {}", fs_type);
-    
+
                 let fs_opts = fields
                     .filter(|o| !o.starts_with("io.katacontainers."))
                     .fold(String::new(), |a, b| {
@@ -390,7 +522,7 @@ impl Store {
                         }
                     });
                 info!("fs_opts: {}", fs_opts);
-                
+
                 let mount_path = self.root.join("mounts").join(&name);
                 info!("mount_path: {}", mount_path.display());
                 std::fs::create_dir_all(&mount_path)?;
@@ -431,13 +563,19 @@ impl Store {
                 } else {
                     // Mount the dm-verity device to the mount path
                     let flags = MsFlags::MS_RDONLY; // Read-only to ensure integrity
-                    self.mount_dm_verity_device(&dm_verity_device, mount_path.to_str().unwrap(), fs_type, &fs_opts, flags)
-                        .map_err(|e| {
-                            Status::internal(format!(
-                                "Failed to mount dm-verity device {} to {:?}: {:?}",
-                                dm_verity_device, mount_path, e
-                            ))
-                        })?;
+                    self.mount_dm_verity_device(
+                        &dm_verity_device,
+                        mount_path.to_str().unwrap(),
+                        fs_type,
+                        &fs_opts,
+                        flags,
+                    )
+                    .map_err(|e| {
+                        Status::internal(format!(
+                            "Failed to mount dm-verity device {} to {:?}: {:?}",
+                            dm_verity_device, mount_path, e
+                        ))
+                    })?;
                     info!(
                         "mounted single layer dm-verity device {} to {:?}",
                         dm_verity_device, mount_path
@@ -453,29 +591,33 @@ impl Store {
                 "{PREFIX}.layer={}",
                 BASE64_STANDARD.encode(layer_info.as_bytes())
             ));
-            
+
             next_parent = (!info.parent.is_empty()).then_some(info.parent);
         }
 
         if do_mount {
             info!("mounts_from_snapshot(): perform overlay mounting");
-            let overlay_target = self.root.join("overlay").join(Uuid::new_v4().to_string());
-            let overlay_upper = overlay_target.join("upper");
-            let overlay_work = overlay_target.join("work");
+            let overlay_root = self.root.join("overlay").join(Uuid::new_v4().to_string());
+            let overlay_target = overlay_root.join("mount");
+            let overlay_upper = overlay_root.join("upper");
+            let overlay_work = overlay_root.join("work");
 
             std::fs::create_dir_all(&overlay_upper)?;
             std::fs::create_dir_all(&overlay_work)?;
             std::fs::create_dir_all(&overlay_target)?;
             fs::set_permissions(&overlay_upper, fs::Permissions::from_mode(0o755))?;
             fs::set_permissions(&overlay_work, fs::Permissions::from_mode(0o755))?;
-            
-           // Prepare the list of lowerdirs from mounted dm-verity layers
+
+            // Prepare the list of lowerdirs from mounted dm-verity layers
             let lowerdirs = mounted_layers
                 .iter()
                 .map(|layer| layer.to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
                 .join(":");
-            info!("Combining dm-verity layers into overlay lowerdirs: {}", lowerdirs);
+            info!(
+                "Combining dm-verity layers into overlay lowerdirs: {}",
+                lowerdirs
+            );
 
             // DEBUG: Validate that lowerdirs does not exceed PATH_MAX
             info!("Lowerdirs string len: {}", lowerdirs.len());
@@ -486,13 +628,29 @@ impl Store {
                 )));
             }
 
-            // Perform an overlay mount 
+            // Perform an overlay mount
+            trace!(
+                "mount none {} -t overlay -o lowerdir={lowerdirs},upperdir={},workdir={}",
+                overlay_target.to_string_lossy(),
+                overlay_upper.to_string_lossy(),
+                overlay_work.to_string_lossy()
+            );
+
             let status = Command::new("mount")
                 .arg("none")
                 .arg(&overlay_target)
-                .args(&["-t", "overlay","-o", &format!("lowerdir={},upperdir={},workdir={}",
-                    lowerdirs, overlay_upper.to_string_lossy(), overlay_work.to_string_lossy()),])
-                    .status()?;
+                .args(&[
+                    "-t",
+                    "overlay",
+                    "-o",
+                    &format!(
+                        "lowerdir={},upperdir={},workdir={}",
+                        lowerdirs,
+                        overlay_upper.to_string_lossy(),
+                        overlay_work.to_string_lossy()
+                    ),
+                ])
+                .status()?;
             if !status.success() {
                 return Err(Status::internal(format!(
                     "Failed to perform overlay mount at {:?}",
@@ -644,11 +802,13 @@ impl TarDevSnapshotter {
         key: String,
         parent: String,
         mut labels: HashMap<String, String>,
+        salt: Vec<u8>,
     ) -> Result<(), Status> {
         let dir = self.store.read().await.staging_dir()?;
 
         {
             let Some(digest_str) = labels.get(TARGET_LAYER_DIGEST_LABEL) else {
+                error!("abort");
                 return Err(Status::invalid_argument(
                     "missing target layer digest label",
                 ));
@@ -679,7 +839,7 @@ impl TarDevSnapshotter {
                 tarindex::append_index(&mut file)?;
 
                 trace!("Appending dm-verity tree to {:?}", &name);
-                let root_hash = verity::append_tree::<Sha256>(&mut file)?;
+                let root_hash = verity::append_tree::<Sha256>(&mut file, &salt)?;
 
                 trace!("Root hash for {:?} is {:x}", &name, root_hash);
                 Ok(root_hash)
@@ -704,28 +864,55 @@ impl TarDevSnapshotter {
         trace!("Layer prepared");
         Ok(())
     }
-}
 
-#[tonic::async_trait]
-impl Snapshotter for TarDevSnapshotter {
-    type Error = Status;
-
-    async fn stat(&self, key: String) -> Result<Info, Self::Error> {
-        trace!("stat({})", key);
-        self.store.read().await.read_snapshot(&key)
-    }
-
-    async fn update(
+    async fn commit_impl(
         &self,
-        info: Info,
-        fieldpaths: Option<Vec<String>>,
-    ) -> Result<Info, Self::Error> {
-        trace!("update({:?}, {:?})", info, fieldpaths);
-        Err(Status::unimplemented("no support for updating snapshots"))
+        name: String,
+        key: String,
+        labels: HashMap<String, String>,
+    ) -> Result<(), Status> {
+        let (salt, parent) = {
+            // Needs to be in the closure to release the lock
+            let mut store = self.store.write().await;
+            let info = store.read_snapshot(&key)?;
+            if info.kind != Kind::Active {
+                return Err(Status::failed_precondition("snapshot is not active"));
+            }
+
+            let digest = match info.labels.get(TARGET_LAYER_DIGEST_LABEL) {
+                None => {
+                    return Err(Status::unimplemented(
+                        "no support for commiting arbitrary snapshots",
+                    ));
+                }
+                Some(digest) => digest,
+            };
+
+            let result = store.lazy_read_signatures();
+            match result {
+                Err(e) => {
+                    return Err(Status::failed_precondition(format!(
+                        "signature read failure: {e}"
+                    )))
+                }
+                Ok(()) => (),
+            };
+
+            trace!("Looking up salt for {digest}");
+            let salt = store.get_salt(digest);
+
+            (salt, info.parent)
+        };
+
+        match salt {
+            Err(e) => Err(Status::failed_precondition(format!(
+                "signature missing: {e}"
+            ))),
+            Ok(salt) => self.prepare_image_layer(name, parent, labels, salt).await,
+        }
     }
 
-    async fn usage(&self, key: String) -> Result<Usage, Self::Error> {
-        trace!("usage({})", key);
+    async fn usage_impl(&self, key: String) -> Result<Usage, Status> {
         let store = self.store.read().await;
 
         let info = store.read_snapshot(&key)?;
@@ -743,8 +930,7 @@ impl Snapshotter for TarDevSnapshotter {
         })
     }
 
-    async fn mounts(&self, key: String) -> Result<Vec<api::types::Mount>, Self::Error> {
-        trace!("mounts({})", key);
+    async fn mounts_impl(&self, key: String) -> Result<Vec<api::types::Mount>, Status> {
         let store = self.store.read().await;
         let info = store.read_snapshot(&key)?;
 
@@ -764,74 +950,15 @@ impl Snapshotter for TarDevSnapshotter {
                 options: Vec::new(),
             }])
         } else {
-            info!("mounts(): snapshot: {}, ready to use, preparing itself and parents ", &info.name);
+            info!(
+                "mounts(): snapshot: {}, ready to use, preparing itself and parents ",
+                &info.name
+            );
             store.mounts_from_snapshot(&info.parent, true)
         }
     }
 
-    async fn prepare(
-        &self,
-        key: String,
-        parent: String,
-        labels: HashMap<String, String>,
-    ) -> Result<Vec<api::types::Mount>, Status> {
-        trace!("prepare({}, {}, {:?})", key, parent, labels);
-
-        // There are two reasons for preparing a snapshot: to build an image and to actually use it
-        // as a container image. We determine the reason by the presence of the snapshot-ref label.
-        if labels.get(TARGET_LAYER_DIGEST_LABEL).is_some() {
-            info!("prepare(): prepare a staging dir for containerd tar data extraction");
-            self.prepare_unpack_dir(key, parent, labels).await
-        } else {
-            info!("prepare(): create active snapshot");
-            self.store
-                .write()
-                .await
-                .prepare_snapshot_for_use(Kind::Active, key, parent, labels)
-        }
-    }
-
-    async fn view(
-        &self,
-        key: String,
-        parent: String,
-        labels: HashMap<String, String>,
-    ) -> Result<Vec<api::types::Mount>, Self::Error> {
-        trace!("view({}, {}, {:?})", key, parent, labels);
-        self.store
-            .write()
-            .await
-            .prepare_snapshot_for_use(Kind::View, key, parent, labels)
-    }
-
-    async fn commit(
-        &self,
-        name: String,
-        key: String,
-        labels: HashMap<String, String>,
-    ) -> Result<(), Self::Error> {
-        trace!("commit({}, {}, {:?})", name, key, labels);
-
-        let info;
-        {
-            let store = self.store.write().await;
-            info = store.read_snapshot(&key)?;
-            if info.kind != Kind::Active {
-                return Err(Status::failed_precondition("snapshot is not active"));
-            }
-        }
-
-        if info.labels.get(TARGET_LAYER_DIGEST_LABEL).is_some() {
-            self.prepare_image_layer(name, info.parent, labels).await
-        } else {
-            Err(Status::unimplemented(
-                "no support for commiting arbitrary snapshots",
-            ))
-        }
-    }
-
-    async fn remove(&self, key: String) -> Result<(), Self::Error> {
-        trace!("remove({})", key);
+    async fn remove_impl(&self, key: String) -> Result<(), Status> {
         let store = self.store.write().await;
 
         // TODO: Move this to store.
@@ -862,6 +989,123 @@ impl Snapshotter for TarDevSnapshotter {
         fs::remove_file(name)?;
 
         Ok(())
+    }
+}
+
+#[tonic::async_trait]
+impl Snapshotter for TarDevSnapshotter {
+    type Error = Status;
+
+    async fn stat(&self, key: String) -> Result<Info, Self::Error> {
+        trace!("stat({})", key);
+
+        let result = self.store.read().await.read_snapshot(&key);
+
+        if result.is_err() {
+            error!("stat() failed with: {:#?}", result);
+        }
+        return result;
+    }
+
+    async fn update(
+        &self,
+        info: Info,
+        fieldpaths: Option<Vec<String>>,
+    ) -> Result<Info, Self::Error> {
+        trace!("update({:?}, {:?})", info, fieldpaths);
+        Err(Status::unimplemented("no support for updating snapshots"))
+    }
+
+    async fn usage(&self, key: String) -> Result<Usage, Self::Error> {
+        trace!("usage({})", key);
+
+        let result = self.usage_impl(key).await;
+        if result.is_err() {
+            error!("usage() failed with: {:#?}", result);
+        }
+        return result;
+    }
+
+    async fn mounts(&self, key: String) -> Result<Vec<api::types::Mount>, Self::Error> {
+        trace!("mounts({})", key);
+        let result = self.mounts_impl(key).await;
+        if result.is_err() {
+            error!("mounts() failed with: {:#?}", result);
+        }
+        return result;
+    }
+
+    async fn prepare(
+        &self,
+        key: String,
+        parent: String,
+        labels: HashMap<String, String>,
+    ) -> Result<Vec<api::types::Mount>, Status> {
+        trace!("prepare({}, {}, {:?})", key, parent, labels);
+
+        let result = {
+            // There are two reasons for preparing a snapshot: to build an image and to actually use it
+            // as a container image. We determine the reason by the presence of the snapshot-ref label.
+            if labels.get(TARGET_LAYER_DIGEST_LABEL).is_some() {
+                info!("prepare(): prepare a staging dir for containerd tar data extraction");
+                self.prepare_unpack_dir(key, parent, labels).await
+            } else {
+                info!("prepare(): create active snapshot");
+                self.store
+                    .write()
+                    .await
+                    .prepare_snapshot_for_use(Kind::Active, key, parent, labels)
+            }
+        };
+
+        if result.is_err() {
+            error!("prepare() failed with: {:#?}", result);
+        }
+        return result;
+    }
+
+    async fn view(
+        &self,
+        key: String,
+        parent: String,
+        labels: HashMap<String, String>,
+    ) -> Result<Vec<api::types::Mount>, Self::Error> {
+        trace!("view({}, {}, {:?})", key, parent, labels);
+
+        let result =
+            self.store
+                .write()
+                .await
+                .prepare_snapshot_for_use(Kind::View, key, parent, labels);
+
+        if result.is_err() {
+            error!("view() failed with {:#?}", result);
+        }
+        return result;
+    }
+
+    async fn commit(
+        &self,
+        name: String,
+        key: String,
+        labels: HashMap<String, String>,
+    ) -> Result<(), Self::Error> {
+        trace!("commit({}, {}, {:?})", name, key, labels);
+        let result = self.commit_impl(name, key, labels).await;
+        if result.is_err() {
+            error!("commit() failed with: {:#?}", result);
+        }
+        return result;
+    }
+
+    async fn remove(&self, key: String) -> Result<(), Self::Error> {
+        trace!("remove({})", key);
+
+        let result = self.remove_impl(key).await;
+        if result.is_err() {
+            error!("remove() failed with {:#?}", result);
+        }
+        return result;
     }
 
     type InfoStream = impl tokio_stream::Stream<Item = Result<Info, Self::Error>> + Send + 'static;
