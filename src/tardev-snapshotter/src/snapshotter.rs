@@ -154,8 +154,14 @@ impl Store {
     /// Reads the information from storage for the given snapshot name.
     fn read_snapshot(&self, name: &str) -> Result<Info, Status> {
         let path = self.snapshot_path(name, false)?;
-        let file = fs::File::open(path)?;
-        serde_json::from_reader(file).map_err(|_| Status::unknown("unable to read snapshot"))
+        let file = fs::File::open(&path).map_err(|e| {
+            Status::unknown(format!(
+                "unable to open snapshot ('{}'): {e}",
+                path.display()
+            ))
+        })?;
+        serde_json::from_reader(file)
+            .map_err(|_| Status::unknown(format!("unable to read snapshot ('{}')", path.display())))
     }
 
     /// Writes to storage the given snapshot information.
@@ -236,7 +242,10 @@ impl Store {
     ) -> Result<Vec<api::types::Mount>, Status> {
         if let Err(e) = self.lazy_read_signatures() {
             error!("Failing to read signatures: {e}");
-            return Err(Status::internal(format!("Failed read signatures: {:?}", e)));
+            return Err(Status::internal(format!(
+                "Failed to read signatures: {:?}",
+                e
+            )));
         }
         let mounts = self.mounts_from_snapshot(&parent, false)?;
         self.write_snapshot(kind, key, parent, labels)?;
@@ -464,7 +473,7 @@ impl Store {
             let info = match infor {
                 Ok(a) => a,
                 Err(b) => {
-                    error!("iled to read snoasoht {}", b);
+                    error!("failed to read snapshot: {}", b);
                     return Err(b);
                 }
             };
