@@ -4,6 +4,7 @@
 //
 
 use std::{
+    fs,
     path::PathBuf,
     process::{Command, Stdio},
 };
@@ -29,7 +30,7 @@ struct ImageInfo {
 
 #[derive(Serialize, Deserialize)]
 struct LayerInfo {
-    diff_id: String,
+    digest: String,
     root_hash: String,
     signature: String,
     salt: String,
@@ -116,12 +117,12 @@ async fn get_container_image_root_hashes(
     let hash_signatures = layers
         .iter()
         .map(|layer| {
-            let diff_id = layer.diff_id.clone();
+            let digest = layer.digest.clone();
             let root_hash = layer.verity_hash.clone();
             let signature = sign_hash(&root_hash, &config.key, &config.passphrase, &config.signer)
                 .context("Failed to sign hash")?;
             Ok(LayerInfo {
-                diff_id,
+                digest,
                 root_hash,
                 salt: hex::encode(layer.salt),
                 signature,
@@ -137,9 +138,23 @@ async fn get_container_image_root_hashes(
 }
 
 async fn get_root_hashes(config: &utils::Config) -> Result<Vec<ImageInfo>, Error> {
+    let mut image_tags: Vec<String> = vec![];
+    if let Some(images) = &config.images {
+        image_tags.append(
+            fs::read_to_string(images)
+                .context("Failed to read image tags file")?
+                .lines()
+                .map(|line| line.to_string())
+                .collect::<Vec<String>>()
+                .as_mut(),
+        );
+    } else if let Some(images) = &config.image {
+        image_tags.append(images.clone().as_mut());
+    } else {
+        return Err(anyhow::anyhow!("No images specified"));
+    };
     let images = future::try_join_all(
-        config
-            .image
+        image_tags
             .iter()
             .map(|image| get_container_image_root_hashes(&image, config)),
     )

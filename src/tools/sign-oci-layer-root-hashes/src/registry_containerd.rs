@@ -5,9 +5,7 @@
 
 // Allow Docker image config field names.
 #![allow(non_snake_case)]
-use crate::registry::{
-    self, Container, DockerConfigLayer, ImageLayer, Salt, VerityHash
-};
+use crate::registry::{self, Container, DockerConfigLayer, ImageLayer, Salt, VerityHash};
 
 use anyhow::{anyhow, Context, Result};
 use containerd_client::{services::v1::GetImageRequest, with_namespace};
@@ -259,18 +257,13 @@ pub async fn get_image_layers(
             || layer_media_type.eq("application/vnd.oci.image.layer.v1.tar+gzip")
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
-                let verity_hash = get_verity_hash(
-                        use_cached_files,
-                        layer["digest"].as_str().unwrap(),
-                        client,
-                        &config_layer.rootfs.diff_ids[layer_index].clone(),
-                        &mut rng,
-                    )
-                    .await?;
+                let layer_digest = layer["digest"].as_str().unwrap();
+                let verity_hash =
+                    get_verity_hash(use_cached_files, layer_digest, client, &mut rng).await?;
                 let imageLayer = ImageLayer {
-                    diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
+                    digest: layer_digest.to_string(),
                     verity_hash: verity_hash.root_hash,
-                    salt: verity_hash.salt
+                    salt: verity_hash.salt,
                 };
                 layersVec.push(imageLayer);
             } else {
@@ -287,7 +280,6 @@ async fn get_verity_hash(
     use_cached_files: bool,
     layer_digest: &str,
     client: &containerd_client::Client,
-    diff_id: &str,
     rng: &mut ThreadRng,
 ) -> Result<VerityHash> {
     let temp_dir = tempfile::tempdir_in(".")?;
@@ -302,12 +294,13 @@ async fn get_verity_hash(
     compressed_path.set_extension("gz");
 
     let verity_hash = if use_cached_files {
-        let verity_hash = registry::read_verity_from_store(cache_file, diff_id)?;
+        let verity_hash = registry::read_verity_from_store(cache_file, layer_digest)?;
         info!("Using cache file");
-        info!("dm-verity root hash: {:#?}", verity_hash);
 
         verity_hash
-    } else { None };
+    } else {
+        None
+    };
 
     let verity_hash_result = match verity_hash {
         Some(v) => Ok(v),
@@ -319,29 +312,32 @@ async fn get_verity_hash(
                 &decompressed_path,
                 &compressed_path,
             )
-            .await.context("Failed to create verity hash for {layer_digest}")?;
+            .await
+            .context("Failed to create verity hash for {layer_digest}")?;
 
             let salt: Salt = rng.gen();
-            let root_hash = registry::get_verity_hash_value(&decompressed_path, &salt).context("Failed to get verity hash")?;
-            let verity_hash = VerityHash {
-                root_hash,
-                salt,
-            };
+            let root_hash = registry::get_verity_hash_value(&decompressed_path, &salt)
+                .context("Failed to get verity hash")?;
+            let verity_hash = VerityHash { root_hash, salt };
             if use_cached_files {
-                registry::add_verity_to_store(cache_file, diff_id, &verity_hash)?;
+                registry::add_verity_to_store(cache_file, layer_digest, &verity_hash)?;
             }
-            info!("dm-verity root hash: {:#?}", verity_hash);
 
             Ok(verity_hash)
         }
     };
     temp_dir.close()?;
-    if verity_hash_result.is_err() {
-        // remove the cache file if we're using it
-        if use_cached_files {
-            std::fs::remove_file(cache_file)?;
+    match &verity_hash_result {
+        Ok(v) => {
+            info!("dm-verity root hash: {}", v.root_hash);
         }
-    }
+        Err(_) => {
+            // remove the cache file if we're using it
+            if use_cached_files {
+                std::fs::remove_file(cache_file)?;
+            }
+        }
+    };
 
     verity_hash_result
 }

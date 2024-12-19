@@ -17,20 +17,20 @@ use log::{debug, info, LevelFilter};
 use oci_distribution::client::{linux_amd64_resolver, ClientConfig};
 use oci_distribution::{manifest, secrets::RegistryAuth, Client, Reference};
 use rand::rngs::ThreadRng;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::fs::OpenOptions;
 use std::io::BufWriter;
 use std::{io, io::Seek, io::Write, path::Path};
 use tokio::io::AsyncWriteExt;
-use rand::Rng;
 
 pub(crate) type Salt = [u8; <Sha256 as OutputSizeUser>::OutputSize::USIZE];
 
 #[derive(Debug)]
 pub(crate) struct VerityHash {
     pub root_hash: String,
-    pub salt: Salt
+    pub salt: Salt,
 }
 
 /// Container image properties obtained from an OCI repository.
@@ -69,7 +69,7 @@ pub struct DockerRootfs {
 /// This application's image layer properties.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageLayer {
-    pub diff_id: String,
+    pub digest: String,
     pub verity_hash: String,
     pub salt: Salt,
 }
@@ -153,17 +153,11 @@ async fn get_image_layers(
             || layer.media_type.eq(manifest::IMAGE_LAYER_GZIP_MEDIA_TYPE)
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
-                let verity_hash = get_verity_hash(
-                        use_cached_files,
-                        client,
-                        reference,
-                        &layer.digest,
-                        &config_layer.rootfs.diff_ids[layer_index].clone(),
-                        &mut rng,
-                    )
-                    .await?;
+                let verity_hash =
+                    get_verity_hash(use_cached_files, &layer.digest, client, reference, &mut rng)
+                        .await?;
                 layers.push(ImageLayer {
-                    diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
+                    digest: layer.digest.clone(),
                     verity_hash: verity_hash.root_hash,
                     salt: verity_hash.salt,
                 });
@@ -180,10 +174,9 @@ async fn get_image_layers(
 
 async fn get_verity_hash(
     use_cached_files: bool,
+    layer_digest: &str,
     client: &mut Client,
     reference: &Reference,
-    layer_digest: &str,
-    diff_id: &str,
     rng: &mut ThreadRng,
 ) -> Result<VerityHash> {
     let temp_dir = tempfile::tempdir_in(".")?;
@@ -197,15 +190,15 @@ async fn get_verity_hash(
     let mut compressed_path = decompressed_path.clone();
     compressed_path.set_extension("gz");
 
-
     // get value from store and return if it exists
     let verity_hash = if use_cached_files {
-        let verity_hash = read_verity_from_store(cache_file, diff_id)?;
+        let verity_hash = read_verity_from_store(cache_file, layer_digest)?;
         info!("Using cache file");
-        info!("dm-verity root hash: {:#?}", verity_hash);
 
         verity_hash
-    } else {None};
+    } else {
+        None
+    };
 
     // create the layer files
     let verity_hash_result = match verity_hash {
@@ -218,33 +211,43 @@ async fn get_verity_hash(
                 &decompressed_path,
                 &compressed_path,
             )
-            .await.context("Failed to create verity hash for {layer_digest}")?;
+            .await
+            .context("Failed to create verity hash for {layer_digest}")?;
 
             let salt: Salt = rng.gen();
-            let root_hash = get_verity_hash_value(&decompressed_path, &salt).context("Failed to get verity hash")?;
-            let verity_hash = VerityHash{root_hash, salt};
+            let root_hash = get_verity_hash_value(&decompressed_path, &salt)
+                .context("Failed to get verity hash")?;
+            let verity_hash = VerityHash { root_hash, salt };
             if use_cached_files {
-                add_verity_to_store(cache_file, diff_id, &verity_hash)?;
+                add_verity_to_store(cache_file, layer_digest, &verity_hash)?;
             }
-            info!("dm-verity root hash: {:#?}", verity_hash);
 
             Ok(verity_hash)
         }
     };
 
     temp_dir.close()?;
-    if verity_hash_result.is_err() {
-        // remove the cache file if we're using it
-        if use_cached_files {
-            std::fs::remove_file(cache_file)?;
+    match &verity_hash_result {
+        Ok(v) => {
+            info!("dm-verity root hash: {}", v.root_hash);
         }
-    }
+        Err(_) => {
+            // remove the cache file if we're using it
+            if use_cached_files {
+                std::fs::remove_file(cache_file)?;
+            }
+        }
+    };
 
     verity_hash_result
 }
 
 // the store is a json file that matches layer hashes to verity hashes
-pub(crate) fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &VerityHash) -> Result<()> {
+pub(crate) fn add_verity_to_store(
+    cache_file: &str,
+    digest: &str,
+    verity_hash: &VerityHash,
+) -> Result<()> {
     // open the json file in read mode, create it if it doesn't exist
     let read_file = OpenOptions::new()
         .read(true)
@@ -261,7 +264,7 @@ pub(crate) fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: 
 
     // Add new data to the deserialized JSON
     data.push(ImageLayer {
-        diff_id: diff_id.to_string(),
+        digest: digest.into(),
         verity_hash: verity_hash.root_hash.clone(),
         salt: verity_hash.salt,
     });
@@ -288,13 +291,16 @@ pub(crate) fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: 
 
 // helper function to read the verity hash from the store
 // returns empty string if not found or file does not exist
-pub(crate) fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<Option<VerityHash>> {
+pub(crate) fn read_verity_from_store(cache_file: &str, digest: &str) -> Result<Option<VerityHash>> {
     match OpenOptions::new().read(true).open(cache_file) {
         Ok(file) => match serde_json::from_reader(file) {
             Result::<Vec<ImageLayer>, _>::Ok(layers) => {
                 for layer in layers {
-                    if layer.diff_id == diff_id {
-                        return Ok(Some(VerityHash { root_hash: layer.verity_hash, salt: layer.salt }));
+                    if layer.digest == digest {
+                        return Ok(Some(VerityHash {
+                            root_hash: layer.verity_hash,
+                            salt: layer.salt,
+                        }));
                     }
                 }
             }

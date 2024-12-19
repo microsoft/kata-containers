@@ -3,14 +3,21 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::path::{PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
 
 #[derive(Debug, Parser)]
 struct CommandLineOptions {
     #[clap(short, long, help = "Image tag")]
-    image: Vec<String>,
+    image: Option<Vec<String>>,
+
+    #[clap(
+        short,
+        long,
+        help = "Path to a file containing a newline-separated list of image tags"
+    )]
+    images: Option<PathBuf>,
 
     #[clap(
         short,
@@ -51,7 +58,8 @@ struct CommandLineOptions {
 pub struct Config {
     pub use_cache: bool,
 
-    pub image: Vec<String>,
+    pub image: Option<Vec<String>>,
+    pub images: Option<PathBuf>,
 
     pub containerd_socket_path: Option<String>,
     pub version: bool,
@@ -67,6 +75,7 @@ impl Config {
         Self {
             use_cache: args.use_cached_files,
             image: args.image,
+            images: args.images,
             containerd_socket_path: args.containerd_socket_path,
             version: args.version,
             signer: args.signer,
