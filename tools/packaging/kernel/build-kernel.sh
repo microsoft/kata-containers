@@ -113,7 +113,7 @@ Options:
 	-u <url>	: Kernel URL to be used to download the kernel tarball.
 	-V <format>     : dm-verity partition format for measured guest rootfs - kernelinit or veritysetup.
 	-v <version>	: Kernel version to use if kernel path not provided.
-	-x <type>       : All the confidential guest protection type for a specific architecture.
+	-x              : All the confidential guest protection type for a specific architecture.
 EOF
 	exit "$exit_code"
 }

@@ -156,13 +156,7 @@ func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool, config
 
 	for _, p := range configParams {
 		if p.Key == DeviceMapperCreate {
-			hvLogger.WithField("p", p).Info("GetKernelRootParams")
-			hvLogger.WithField("p.Value", p.Value).Info("GetKernelRootParams")
-
 			dmCreateValue = p.Value
-			// dmCreateValue ="dm-verity,,,ro,0 512000 verity 1 @ROOTFS_DEVICE@ @VERITY_DEVICE@ 4096 4096 64000 0 sha256  12a11ac8c171e19bce2db8dd52dd6396e141446cb769b2cb24576689196ba45c"
-			hvLogger.WithField("dmCreateValue", dmCreateValue).Info("GetKernelRootParams")
-
 			hvLogger.WithField(DeviceMapperCreate, dmCreateValue).Info("device mapper create param")
 			break
 		}
@@ -182,8 +176,6 @@ func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool, config
 		dmCreateValue = strings.ReplaceAll(dmCreateValue, "@ROOTFS_DEVICE@", string(rootDevice))
 		dmCreateValue = strings.ReplaceAll(dmCreateValue, "@VERITY_DEVICE@", string(verityDevice))
 
-		hvLogger.WithField("dmCreateValue2", dmCreateValue).Info("GetKernelRootParams")
-
 		kernelRootParams = append(kernelRootParams, Param{"dm-mod.create", dmCreateValue})
 		kernelRootParams = append(kernelRootParams, Param{"root", string(DMVerityRoot)})
 	}
@@ -200,7 +192,7 @@ func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool, config
 	// EXT4 filesystem is used by default.
 	case EXT4:
 		if dax {
-			// kernelRootParams = append(kernelRootParams, Param{"rootflags", "dax,data=ordered,errors=remount-ro ro"})
+			kernelRootParams = append(kernelRootParams, Param{"rootflags", "dax,data=ordered,errors=remount-ro ro"})
 		} else {
 			kernelRootParams = append(kernelRootParams, Param{"rootflags", "data=ordered,errors=remount-ro ro"})
 		}

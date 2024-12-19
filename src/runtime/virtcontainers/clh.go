@@ -532,14 +532,11 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Set initial amount of cpu's for the virtual machine
 	clh.vmconfig.Cpus = chclient.NewCpusConfig(int32(clh.config.NumVCPUs()), int32(clh.config.DefaultMaxVCPUs))
 
-	clh.Logger().WithField("KernelParams", clh.config.KernelParams).Info("CreateVM")
 	params, err := GetKernelRootParams(hypervisorConfig.RootfsType, clh.config.ConfidentialGuest, !clh.config.ConfidentialGuest, clh.config.KernelParams)
 	if err != nil {
 		return err
 	}
-	clh.Logger().WithField("params", params).Info("CreateVM")
 	params = append(params, clhKernelParams...)
-	clh.Logger().WithField("params", params).Info("CreateVM")
 
 	// Followed by extra debug parameters if debug enabled in configuration file
 	if clh.config.Debug {
@@ -563,7 +560,6 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	params = appendConfigFileParams(params, clh.config.KernelParams)
 
 	vmConfigCmdLine := kernelParamsToString(params)
-	clh.Logger().WithField("vmConfigCmdLine", vmConfigCmdLine).Info("CreateVM")
 	clh.vmconfig.Payload.SetCmdline(vmConfigCmdLine)
 
 	// set random device generator to hypervisor
@@ -1460,22 +1456,7 @@ func kernelParamsToString(params []Param) string {
 		paramBuilder.WriteString(p.Key)
 		if len(p.Value) > 0 {
 			paramBuilder.WriteString("=")
-			
-			/*
-			if strings.Contains(p.Value, " ") {
-				// paramBuilder.WriteString("\"")
-				paramBuilder.Write([]byte(`"`))
-			}
-			*/
-			
 			paramBuilder.WriteString(p.Value)
-			
-			/*
-			if strings.Contains(p.Value, " ") {
-				// paramBuilder.WriteString("\"")
-				paramBuilder.Write([]byte(`"`))
-			}
-			*/
 		}
 		paramBuilder.WriteString(" ")
 	}
