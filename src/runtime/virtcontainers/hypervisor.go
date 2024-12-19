@@ -97,15 +97,17 @@ var (
 // cores.
 var defaultMaxVCPUs = govmm.MaxVCPUs()
 
-// RootfsDriver describes a rootfs driver.
-type RootfsDriver string
+// StorageDevice describes the path to a storage device.
+type StorageDevice string
 
 const (
-	// VirtioBlk is the Virtio-Blk rootfs driver.
-	VirtioBlk RootfsDriver = "/dev/vda1"
+	VirtioBlkRoot   StorageDevice = "/dev/vda1"
+	VirtioBlkVerity StorageDevice = "/dev/vda2"
 
-	// Nvdimm is the Nvdimm rootfs driver.
-	Nvdimm RootfsType = "/dev/pmem0p1"
+	NvdimmRoot   StorageDevice = "/dev/pmem0p1"
+	NvdimmVerity StorageDevice = "/dev/pmem0p2"
+
+	DMVerityRoot StorageDevice = "/dev/dm-0"
 )
 
 // RootfsType describes a rootfs type.
@@ -122,8 +124,20 @@ const (
 	EROFS RootfsType = "erofs"
 )
 
-func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool) ([]Param, error) {
+const (
+	// DeviceMapperCreate is a kernel parameter used for creating /dev/dm-0
+	// from two image partitins - one containing the rootfs files and the
+	// other containing the corresponding dm-verity Merkle tree. /dev/dm-0
+	// gets created during kernel devive mapper initialization, after the
+	// two partitions become available.
+	DeviceMapperCreate string = "dm-mod.create"
+)
+
+func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool, configParams []Param) ([]Param, error) {
 	var kernelRootParams []Param
+	var rootDevice StorageDevice
+	var verityDevice StorageDevice
+	var dmCreateValue string
 
 	// EXT4 filesystem is used by default.
 	if rootfstype == "" {
@@ -135,11 +149,43 @@ func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool) ([]Par
 	}
 
 	if disableNvdimm {
-		// Virtio-Blk
-		kernelRootParams = append(kernelRootParams, Param{"root", string(VirtioBlk)})
+		rootDevice = VirtioBlkRoot
 	} else {
-		// Nvdimm
-		kernelRootParams = append(kernelRootParams, Param{"root", string(Nvdimm)})
+		rootDevice = NvdimmRoot
+	}
+
+	for _, p := range configParams {
+		if p.Key == DeviceMapperCreate {
+			hvLogger.WithField("p", p).Info("GetKernelRootParams")
+			hvLogger.WithField("p.Value", p.Value).Info("GetKernelRootParams")
+
+			dmCreateValue = p.Value
+			// dmCreateValue ="dm-verity,,,ro,0 512000 verity 1 @ROOTFS_DEVICE@ @VERITY_DEVICE@ 4096 4096 64000 0 sha256  12a11ac8c171e19bce2db8dd52dd6396e141446cb769b2cb24576689196ba45c"
+			hvLogger.WithField("dmCreateValue", dmCreateValue).Info("GetKernelRootParams")
+
+			hvLogger.WithField(DeviceMapperCreate, dmCreateValue).Info("device mapper create param")
+			break
+		}
+	}
+
+	if dmCreateValue == "" {
+		// Use either /dev/pmem0p1 or /dev/vda1 as root.
+		kernelRootParams = append(kernelRootParams, Param{"root", string(rootDevice)})
+	} else {
+		// Use dm-mod.create to create /dev/dm-0 and use that device as root.
+		if disableNvdimm {
+			verityDevice = VirtioBlkVerity
+		} else {
+			verityDevice = NvdimmVerity
+		}
+
+		dmCreateValue = strings.ReplaceAll(dmCreateValue, "@ROOTFS_DEVICE@", string(rootDevice))
+		dmCreateValue = strings.ReplaceAll(dmCreateValue, "@VERITY_DEVICE@", string(verityDevice))
+
+		hvLogger.WithField("dmCreateValue2", dmCreateValue).Info("GetKernelRootParams")
+
+		kernelRootParams = append(kernelRootParams, Param{"dm-mod.create", dmCreateValue})
+		kernelRootParams = append(kernelRootParams, Param{"root", string(DMVerityRoot)})
 	}
 
 	switch RootfsType(rootfstype) {
@@ -154,7 +200,7 @@ func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool) ([]Par
 	// EXT4 filesystem is used by default.
 	case EXT4:
 		if dax {
-			kernelRootParams = append(kernelRootParams, Param{"rootflags", "dax,data=ordered,errors=remount-ro ro"})
+			// kernelRootParams = append(kernelRootParams, Param{"rootflags", "dax,data=ordered,errors=remount-ro ro"})
 		} else {
 			kernelRootParams = append(kernelRootParams, Param{"rootflags", "data=ordered,errors=remount-ro ro"})
 		}
@@ -165,6 +211,16 @@ func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool) ([]Par
 	kernelRootParams = append(kernelRootParams, Param{"rootfstype", rootfstype})
 
 	return kernelRootParams, nil
+}
+
+func appendConfigFileParams(params []Param, configParams []Param) []Param {
+	for _, p := range configParams {
+		// The dm-mod.create parameter is handled by GetKernelRootParams()
+		if p.Key != DeviceMapperCreate {
+			params = append(params, p)
+		}
+	}
+	return params
 }
 
 // DeviceType describes a virtualized device type.

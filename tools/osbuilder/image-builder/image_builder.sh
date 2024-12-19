@@ -12,6 +12,7 @@ set -o pipefail
 
 DOCKER_RUNTIME=${DOCKER_RUNTIME:-runc}
 MEASURED_ROOTFS=${MEASURED_ROOTFS:-no}
+DM_VERITY_FORMAT=${DM_VERITY_FORMAT:-veritysetup}
 
 #For cross build
 CROSS_BUILD=${CROSS_BUILD:-false}
@@ -202,6 +203,7 @@ build_with_container() {
 		   --env TARGET_ARCH="${TARGET_ARCH}" \
 		   --env USER="$(id -u)" \
 		   --env GROUP="$(id -g)" \
+		   --env DM_VERITY_FORMAT="${DM_VERITY_FORMAT}" \
 		   -v /dev:/dev \
 		   -v "${script_dir}":"/osbuilder" \
 		   -v "${script_dir}/../scripts":"/scripts" \
@@ -352,8 +354,21 @@ setup_loop_device() {
 	# Poll for the block device p1
 	for _ in $(seq 1 5); do
 		if [ -b "${device}p1" ]; then
-			echo "${device}"
-			return 0
+			if [ "${MEASURED_ROOTFS}" == "yes" ]; then
+				# Poll for the block device p2
+				for _ in $(seq 1 5); do
+					if [ -b "${device}p2" ]; then
+						echo "${device}"
+						return 0
+					fi
+					sleep 1
+				done
+
+				error "File ${device}p2 is not a block device"
+			else
+				echo "${device}"
+				return 0
+			fi
 		fi
 		sleep 1
 	done
@@ -518,9 +533,29 @@ create_rootfs_image() {
 	fi
 
 	if [ "${MEASURED_ROOTFS}" == "yes" ] && [ -b "${device}p2" ]; then
-		info "veritysetup format rootfs device: ${device}p1, hash device: ${device}p2"
+		local setup_cmd="veritysetup format ${device}p1 ${device}p2"
 		local image_dir=$(dirname "${image}")
-		veritysetup format "${device}p1" "${device}p2" > "${image_dir}"/root_hash.txt 2>&1
+		local root_hash_file="${image_dir}/root_hash"
+
+		case "${DM_VERITY_FORMAT}" in
+			veritysetup)
+				# Partition format compatible with "veritysetup open" but not with kernel's
+				# "dm-mod.create" command line parameter.
+				root_hash_file+=".txt"
+				;;
+			kernelinit)
+				# Partition format compatible with kernel's "dm-mod.create" command line
+				# parameter but not with "veritysetup open".
+				setup_cmd+=" --no-superblock"
+				root_hash_file+="_kernelinit.txt"
+				;;
+			*)
+				error "DM_VERITY_FORMAT(${DM_VERITY_FORMAT}) is incorrect (must be veritysetup or kernelinit)"
+				return 1
+				;;
+		esac
+
+		eval "${setup_cmd}" > "${root_hash_file}" 2>&1
 	fi
 
 	losetup -d "${device}"
@@ -675,7 +710,7 @@ main() {
 						"${fs_type}" "${block_size}" "${agent_bin}"
 	fi
 	# insert at the beginning of the image the MBR + DAX header
-	set_dax_header "${image}" "${img_size}" "${fs_type}" "${nsdax_bin}"
+	# set_dax_header "${image}" "${img_size}" "${fs_type}" "${nsdax_bin}"
 
 	chown "${USER}:${GROUP}" "${image}"
 }
