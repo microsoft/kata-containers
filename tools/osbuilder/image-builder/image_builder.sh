@@ -709,8 +709,10 @@ main() {
 		create_rootfs_image "${rootfs}" "${image}" "${rootfs_img_size}" \
 						"${fs_type}" "${block_size}" "${agent_bin}"
 	fi
+
+	# DMFIX - set_dax_header disabled
 	# insert at the beginning of the image the MBR + DAX header
-	set_dax_header "${image}" "${img_size}" "${fs_type}" "${nsdax_bin}"
+	# set_dax_header "${image}" "${img_size}" "${fs_type}" "${nsdax_bin}"
 
 	chown "${USER}:${GROUP}" "${image}"
 }
