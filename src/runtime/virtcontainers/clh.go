@@ -532,11 +532,31 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Set initial amount of cpu's for the virtual machine
 	clh.vmconfig.Cpus = chclient.NewCpusConfig(int32(clh.config.NumVCPUs()), int32(clh.config.DefaultMaxVCPUs))
 
+	clh.Logger().Info("CreateVM: KernelParams start")
+	for _, p := range clh.config.KernelParams {
+		clh.Logger().WithField("key", p.Key).WithField("value", p.Value).Info("KernelParams")
+	}
+	clh.Logger().Info("CreateVM: KernelParams end")
+
 	params, err := GetKernelRootParams(hypervisorConfig.RootfsType, clh.config.ConfidentialGuest, !clh.config.ConfidentialGuest, clh.config.KernelParams)
 	if err != nil {
 		return err
 	}
+
+	clh.Logger().Info("CreateVM: post GetKernelRootParams start")
+	for _, p := range params {
+		clh.Logger().WithField("key", p.Key).WithField("value", p.Value).Info("params")
+	}
+	clh.Logger().Info("CreateVM: post GetKernelRootParams end")
+
+
 	params = append(params, clhKernelParams...)
+
+	clh.Logger().Info("CreateVM: post clhKernelParams start")
+	for _, p := range params {
+		clh.Logger().WithField("key", p.Key).WithField("value", p.Value).Info("params")
+	}
+	clh.Logger().Info("CreateVM: post clhKernelParams end")
 
 	// Followed by extra debug parameters if debug enabled in configuration file
 	if clh.config.Debug {
@@ -559,7 +579,15 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Followed by extra kernel parameters defined in the configuration file
 	params = appendConfigFileParams(params, clh.config.KernelParams)
 
+	clh.Logger().Info("CreateVM: post appendConfigFileParams start")
+	for _, p := range params {
+		clh.Logger().WithField("key", p.Key).WithField("value", p.Value).Info("params")
+	}
+	clh.Logger().Info("CreateVM: post appendConfigFileParams end")
+
 	vmConfigCmdLine := kernelParamsToString(params)
+	clh.Logger().WithField("vmConfigCmdLine", vmConfigCmdLine).Info("CreateVM")
+
 	clh.vmconfig.Payload.SetCmdline(vmConfigCmdLine)
 
 	// set random device generator to hypervisor
