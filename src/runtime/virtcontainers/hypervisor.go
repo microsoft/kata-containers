@@ -191,7 +191,7 @@ func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool, config
 		fallthrough
 	// EXT4 filesystem is used by default.
 	case EXT4:
-		if dax {
+		if dax && dmCreateValue == "" {
 			kernelRootParams = append(kernelRootParams, Param{"rootflags", "dax,data=ordered,errors=remount-ro ro"})
 		} else {
 			kernelRootParams = append(kernelRootParams, Param{"rootflags", "data=ordered,errors=remount-ro ro"})
