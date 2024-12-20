@@ -111,7 +111,7 @@ add_cbl_mariner_specific_annotations() {
 		local mariner_image_path="${guest_image_dir}/kata-containers-mariner.img"
 
 		local mariner_annotation_kernel_params="io.katacontainers.config.hypervisor.kernel_params"
-		local mariner_kernel_params="\\\"SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1 systemd.legacy_systemd_cgroup_controller=yes systemd.unified_cgroup_hierarchy=0"
+		local mariner_kernel_params="SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1 systemd.legacy_systemd_cgroup_controller=yes systemd.unified_cgroup_hierarchy=0"
 
 		local root_hash_file="${guest_image_dir}/root_hash_kernelinit.txt"
 		[ -f "${root_hash_file}" ] || die "${root_hash_file} not found"
@@ -123,8 +123,7 @@ add_cbl_mariner_specific_annotations() {
 		local data_sectors_per_block=$((data_block_size / 512))
 		local data_sectors=$((data_blocks * data_sectors_per_block))
 		local hash_block_size=$(sed -e 's/Hash block size:\s*//g;t;d' "${root_hash_file}")
-		local mariner_kernel_params+=" \\\"dm-mod.create=\\\\\\\"dm-verity,,,ro,0 ${data_sectors} verity 1 @ROOTFS_DEVICE@ @VERITY_DEVICE@ ${data_block_size} ${hash_block_size} ${data_blocks} 0 sha256 ${root_hash} ${salt}\\\\\\\"\\\""
-		local mariner_kernel_params+="\\\""
+		mariner_kernel_params+=" dm-mod.create=\\\"dm-verity,,,ro,0 ${data_sectors} verity 1 @ROOTFS_DEVICE@ @VERITY_DEVICE@ ${data_block_size} ${hash_block_size} ${data_blocks} 0 sha256 ${root_hash} ${salt}\\\""
 
 		for K8S_TEST_YAML in runtimeclass_workloads_work/*.yaml
 		do
