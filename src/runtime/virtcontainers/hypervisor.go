@@ -158,6 +158,11 @@ func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool, config
 		if p.Key == DeviceMapperCreate {
 			dmCreateValue = p.Value
 			hvLogger.WithField(DeviceMapperCreate, dmCreateValue).Info("device mapper create param")
+
+			if dax {
+				hvLogger.Info("Disabling DAX root device - incompatible with dm-verity")
+				dax = false
+			}
 			break
 		}
 	}
@@ -191,7 +196,7 @@ func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool, config
 		fallthrough
 	// EXT4 filesystem is used by default.
 	case EXT4:
-		if dax && dmCreateValue == "" {
+		if dax {
 			kernelRootParams = append(kernelRootParams, Param{"rootflags", "dax,data=ordered,errors=remount-ro ro"})
 		} else {
 			kernelRootParams = append(kernelRootParams, Param{"rootflags", "data=ordered,errors=remount-ro ro"})
