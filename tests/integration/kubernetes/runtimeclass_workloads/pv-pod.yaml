@@ -9,7 +9,7 @@ metadata:
   name: pv-pod
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   nodeName: NODE
   volumes:
     - name: pv-storage

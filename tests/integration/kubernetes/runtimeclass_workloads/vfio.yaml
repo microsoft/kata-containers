@@ -9,7 +9,7 @@ metadata:
   name: vfio
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   containers:
   - name: c1
     image: quay.io/prometheus/busybox:latest

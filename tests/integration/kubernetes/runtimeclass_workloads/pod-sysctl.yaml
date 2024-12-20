@@ -9,7 +9,7 @@ metadata:
   name: sysctl-test
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   securityContext:
     sysctls:
     - name: kernel.shm_rmid_forced

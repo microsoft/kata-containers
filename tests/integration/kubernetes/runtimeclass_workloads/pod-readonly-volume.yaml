@@ -9,7 +9,7 @@ metadata:
   name: test-readonly-volume
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   restartPolicy: Never
   volumes:
   - name: shared-data

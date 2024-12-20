@@ -10,7 +10,7 @@ metadata:
   annotations:
     io.katacontainers.config.runtime.disable_guest_seccomp: "false"
 spec:
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   terminationGracePeriodSeconds: 0
   restartPolicy: Never
   containers:

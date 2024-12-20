@@ -8,7 +8,7 @@ kind: Pod
 metadata:
   name: sharevol-kata
 spec:
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   restartPolicy: Never
   securityContext:
     runAsUser: 1001

@@ -18,7 +18,7 @@ spec:
         app: nginx
     spec:
       terminationGracePeriodSeconds: 0
-      runtimeClassName: kata-clh
+      runtimeClassName: kata
       containers:
       - name: nginx
         image: quay.io/fidencio/${nginx_version}

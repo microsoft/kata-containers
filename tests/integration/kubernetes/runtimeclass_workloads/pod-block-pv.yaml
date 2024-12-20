@@ -4,7 +4,7 @@ metadata:
   name: pod-block-pv
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   containers:
     - name: my-container
       image: quay.io/libpod/ubuntu:latest

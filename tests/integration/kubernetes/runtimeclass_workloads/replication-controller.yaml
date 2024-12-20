@@ -18,7 +18,7 @@ spec:
         app: nginx-rc-test
     spec:
       terminationGracePeriodSeconds: 0
-      runtimeClassName: kata-clh
+      runtimeClassName: kata
       containers:
       - name: nginxtest
         image: quay.io/fidencio/${nginx_version}

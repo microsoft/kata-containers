@@ -11,7 +11,7 @@ metadata:
   annotations:
     io.katacontainers.config.hypervisor.default_vcpus: "0"
 spec:
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   containers:
   - name: vcpus-less-than-one-with-no-limits
     image: quay.io/prometheus/busybox:latest
@@ -25,7 +25,7 @@ metadata:
   annotations:
     io.katacontainers.config.hypervisor.default_vcpus: "0.75"
 spec:
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   containers:
   - name: vcpus-less-than-one-with-limits
     image: quay.io/prometheus/busybox:latest
@@ -42,7 +42,7 @@ metadata:
   annotations:
     io.katacontainers.config.hypervisor.default_vcpus: "0.75"
 spec:
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   containers:
   - name: vcpus-more-than-one-with-limits
     image: quay.io/prometheus/busybox:latest

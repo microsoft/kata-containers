@@ -8,7 +8,7 @@ kind: Pod
 metadata:
   name: hugepage-pod
 spec:
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   containers:
   - name: hugepage-container
     image: quay.io/prometheus/busybox:latest

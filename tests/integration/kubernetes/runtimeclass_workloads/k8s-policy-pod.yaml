@@ -10,7 +10,7 @@ metadata:
   uid: policy-pod-uid
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   containers:
     - name: prometheus
       image: quay.io/prometheus/prometheus:latest

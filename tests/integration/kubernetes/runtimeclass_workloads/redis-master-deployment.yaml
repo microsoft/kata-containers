@@ -24,7 +24,7 @@ spec:
         tier: backend
     spec:
       terminationGracePeriodSeconds: 0
-      runtimeClassName: kata-clh
+      runtimeClassName: kata
       containers:
       - name: master
         image: quay.io/libpod/redis

@@ -25,7 +25,7 @@ spec:
       labels:
         app: "confidential-unencrypted"
     spec:
-      runtimeClassName: kata-clh
+      runtimeClassName: kata
       containers:
       - name: "confidential-unencrypted"
         image: ghcr.io/kata-containers/test-images:unencrypted-nightly

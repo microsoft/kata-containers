@@ -9,7 +9,7 @@ metadata:
   name: qos-test
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   containers:
   - name: qos-guaranteed
     image: quay.io/prometheus/busybox:latest

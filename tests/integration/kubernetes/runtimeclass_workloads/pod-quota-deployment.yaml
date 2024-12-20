@@ -18,7 +18,7 @@ spec:
         purpose: quota-demo
     spec:
       terminationGracePeriodSeconds: 0
-      runtimeClassName: kata-clh
+      runtimeClassName: kata
       containers:
       - name: pod-quota-demo
         image: quay.io/prometheus/busybox:latest

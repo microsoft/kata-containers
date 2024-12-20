@@ -17,7 +17,7 @@ spec:
         jobgroup: jobtest
     spec:
       terminationGracePeriodSeconds: 0
-      runtimeClassName: kata-clh
+      runtimeClassName: kata
       containers:
       - name: test
         image: quay.io/prometheus/busybox:latest

@@ -9,7 +9,7 @@ metadata:
   name: initcontainer-shared-volume
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   initContainers:
   - name: first
     image: quay.io/prometheus/busybox:latest

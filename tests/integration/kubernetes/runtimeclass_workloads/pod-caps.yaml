@@ -9,7 +9,7 @@ metadata:
   name: pod-caps
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   containers:
     - name: test-container
       image: quay.io/prometheus/busybox:latest

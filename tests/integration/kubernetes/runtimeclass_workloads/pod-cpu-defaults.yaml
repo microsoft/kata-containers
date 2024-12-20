@@ -9,7 +9,7 @@ metadata:
   name: default-cpu-test
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata-clh
+  runtimeClassName: kata
   containers:
   - name: default-cpu-demo-ctr
     image: quay.io/prometheus/busybox:latest
