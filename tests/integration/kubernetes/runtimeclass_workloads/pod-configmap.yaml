@@ -9,7 +9,7 @@ metadata:
   name: config-env-test-pod
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   containers:
     - name: test-container
       image: quay.io/prometheus/busybox:latest

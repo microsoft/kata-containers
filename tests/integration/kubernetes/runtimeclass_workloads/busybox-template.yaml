@@ -9,7 +9,7 @@ metadata:
   name: POD_NAME
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   shareProcessNamespace: true
   containers:
   - name: CTR_NAME

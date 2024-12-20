@@ -10,7 +10,7 @@ metadata:
 spec:
   terminationGracePeriodSeconds: 0
   shareProcessNamespace: true
-  runtimeClassName: kata-clh
+  runtimeClassName: kata-clh-clh
   containers:
   - name: first-test-container
     image: quay.io/prometheus/busybox:latest

@@ -10,7 +10,7 @@ metadata:
   name: test-pod-hostname
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   restartPolicy: Never
   containers:
   - image: quay.io/prometheus/busybox:latest 

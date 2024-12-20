@@ -11,7 +11,7 @@ metadata:
   name: liveness-http
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   containers:
   - name: liveness
     image: ${agnhost_image}

@@ -9,7 +9,7 @@ metadata:
   name: test-file-volume
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   restartPolicy: Never
   nodeName: NODE
   volumes:

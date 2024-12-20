@@ -9,7 +9,7 @@ metadata:
   name: burstable-test
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   containers:
   - name: qos-burstable
     image: quay.io/prometheus/busybox:latest

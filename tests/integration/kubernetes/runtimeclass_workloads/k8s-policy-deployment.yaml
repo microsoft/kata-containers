@@ -24,7 +24,7 @@ spec:
         tier: backend
     spec:
       terminationGracePeriodSeconds: 0
-      runtimeClassName: kata
+      runtimeClassName: kata-clh
       securityContext:
         runAsUser: 1000
       containers:

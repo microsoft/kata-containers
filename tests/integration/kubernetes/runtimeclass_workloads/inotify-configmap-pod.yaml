@@ -22,7 +22,7 @@ spec:
     volumeMounts:
       - name: config
         mountPath: /config
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   restartPolicy: Never
   volumes:
     - name: config

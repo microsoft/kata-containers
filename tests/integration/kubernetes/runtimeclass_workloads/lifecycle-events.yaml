@@ -10,7 +10,7 @@ metadata:
   name: handlers
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   containers:
   - name: handlers-container
     image: quay.io/fidencio/${nginx_version}

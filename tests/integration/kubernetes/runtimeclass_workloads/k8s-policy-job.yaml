@@ -11,7 +11,7 @@ spec:
   template:
     spec:
       terminationGracePeriodSeconds: 0
-      runtimeClassName: kata
+      runtimeClassName: kata-clh
       containers:
         - name: hello
           image: quay.io/prometheus/busybox:latest

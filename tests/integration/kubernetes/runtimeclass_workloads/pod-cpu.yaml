@@ -9,7 +9,7 @@ metadata:
   name: constraints-cpu-test
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   containers:
   - name: first-cpu-container
     image: quay.io/prometheus/busybox:latest

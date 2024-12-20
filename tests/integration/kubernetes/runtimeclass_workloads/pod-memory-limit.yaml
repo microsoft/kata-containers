@@ -9,7 +9,7 @@ metadata:
   name: memory-test
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   containers:
   - name: memory-test-ctr
     image: quay.io/kata-containers/sysbench-kata:latest

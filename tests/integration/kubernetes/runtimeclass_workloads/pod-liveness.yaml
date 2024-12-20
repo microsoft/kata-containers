@@ -11,7 +11,7 @@ metadata:
   name: liveness-exec
 spec:
   terminationGracePeriodSeconds: 0
-  runtimeClassName: kata
+  runtimeClassName: kata-clh
   containers:
   - name: liveness
     image: quay.io/prometheus/busybox:latest
