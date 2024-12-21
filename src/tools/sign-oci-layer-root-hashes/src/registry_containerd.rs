@@ -313,7 +313,7 @@ async fn get_verity_hash(
                 &compressed_path,
             )
             .await
-            .context("Failed to create verity hash for {layer_digest}")?;
+            .context(format!("Failed to create verity hash for {layer_digest}"))?;
 
             let salt: Salt = rng.gen();
             let root_hash = registry::get_verity_hash_value(&decompressed_path, &salt)
