@@ -125,6 +125,11 @@ const (
 func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool) ([]Param, error) {
 	var kernelRootParams []Param
 
+	// Custom means that the root params are already part of the kernel_params.
+	if rootfstype == "" {
+		return kernelRootParams, nil
+	}
+
 	// EXT4 filesystem is used by default.
 	if rootfstype == "" {
 		rootfstype = string(EXT4)
