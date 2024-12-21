@@ -127,7 +127,8 @@ add_cbl_mariner_specific_annotations() {
 		local data_sectors_per_block=$((data_block_size / 512))
 		local data_sectors=$((data_blocks * data_sectors_per_block))
 		local hash_block_size=$(sed -e 's/Hash block size:\s*//g;t;d' "${root_hash_file}")
-		mariner_kernel_params+=" dm-mod.create=\\\"dm-verity,,,ro,0 ${data_sectors} verity 1 @ROOTFS_DEVICE@ @VERITY_DEVICE@ ${data_block_size} ${hash_block_size} ${data_blocks} 0 sha256 ${root_hash} ${salt}\\\""
+		mariner_kernel_params+=" dm-mod.create=\\\"dm-verity,,,ro,0 ${data_sectors} verity 1 /dev/pmem0p1 /dev/pmem0p2 ${data_block_size} ${hash_block_size} ${data_blocks} 0 sha256 ${root_hash} ${salt}\\\""
+		mariner_kernel_params+=" root=/dev/dm-0 rootflags=data=ordered,errors=remount-ro ro"
 
 		for K8S_TEST_YAML in runtimeclass_workloads_work/*.yaml
 		do
