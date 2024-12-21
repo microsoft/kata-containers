@@ -477,6 +477,15 @@ impl Store {
                 .join(":");
             info!("Combining dm-verity layers into overlay lowerdirs: {}", lowerdirs);
 
+            // DEBUG: Validate that lowerdirs does not exceed PATH_MAX
+            info!("Lowerdirs string len: {}", lowerdirs.len());
+            if lowerdirs.len() > 4096 {
+                return Err(Status::internal(format!(
+                    "Lowerdirs string exceeds allowable length: {}",
+                    lowerdirs.len()
+                )));
+            }
+
             // Perform an overlay mount 
             let status = Command::new("mount")
                 .arg("none")
@@ -491,7 +500,6 @@ impl Store {
                 )));
             }
             info!("Overlay mount completed at {:?}", overlay_target);
-            mounted_layers.clear();
 
             // Clean up dm-verity and loop devices
             /*for layer_path in &mounted_layers {
