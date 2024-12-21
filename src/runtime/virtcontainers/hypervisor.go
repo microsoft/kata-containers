@@ -125,6 +125,8 @@ const (
 func GetKernelRootParams(rootfstype string, disableNvdimm bool, dax bool) ([]Param, error) {
 	var kernelRootParams []Param
 
+	hvLogger.WithField("rootfstype", rootfstype).Info("GetKernelRootParams")
+
 	// Custom means that the root params are already part of the kernel_params.
 	if rootfstype == "" {
 		return kernelRootParams, nil
