@@ -313,6 +313,12 @@ block_device_driver = "virtio-blk"
 # set to a non zero value.
 #disk_rate_limiter_ops_one_time_burst = 0
 
+# If false and nvdimm is supported, use nvdimm device to plug guest image.
+# Otherwise virtio-block device is used.
+#
+# Default is false
+disable_image_nvdimm = true
+
 [agent.@PROJECT_TYPE@]
 # If enabled, make the agent display debug-level messages.
 # (default: disabled)
