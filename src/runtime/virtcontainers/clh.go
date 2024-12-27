@@ -485,6 +485,11 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.ctx = newCtx
 	defer span.End()
 
+	clh.Logger().
+		WithField("DisableImageNvdimm", hypervisorConfig.DisableImageNvdimm).
+		WithField("ConfidentialGuest", hypervisorConfig.ConfidentialGuest).
+		Info("CreateVM")
+
 	if err := clh.setConfig(hypervisorConfig); err != nil {
 		return err
 	}
@@ -571,7 +576,9 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Set initial amount of cpu's for the virtual machine
 	clh.vmconfig.Cpus = chclient.NewCpusConfig(int32(clh.config.NumVCPUs()), int32(clh.config.DefaultMaxVCPUs))
 
-	params, err := GetKernelRootParams(hypervisorConfig.RootfsType, clh.config.ConfidentialGuest, !clh.config.ConfidentialGuest)
+	disableNvdimm := (clh.config.DisableImageNvdimm || clh.config.ConfidentialGuest)
+	enableDax := false
+	params, err := GetKernelRootParams(hypervisorConfig.RootfsType, disableNvdimm, enableDax)
 	if err != nil {
 		return err
 	}
@@ -614,7 +621,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	}
 
 	if assetType == types.ImageAsset {
-		if clh.config.ConfidentialGuest {
+		if disableNvdimm {
 			disk := chclient.NewDiskConfig(assetPath)
 			disk.SetReadonly(true)
 
