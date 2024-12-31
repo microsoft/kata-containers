@@ -645,27 +645,27 @@ impl Store {
                 overlay_work.to_string_lossy()
             );
 
-            let status = Command::new("mount")
-                .arg("none")
-                .arg(&overlay_target)
-                .args(&[
-                    "-t",
-                    "overlay",
-                    "-o",
-                    &format!(
-                        "lowerdir={},upperdir={},workdir={}",
-                        lowerdirs,
-                        overlay_upper.to_string_lossy(),
-                        overlay_work.to_string_lossy()
-                    ),
-                ])
-                .status()?;
-            if !status.success() {
-                return Err(Status::internal(format!(
-                    "Failed to perform overlay mount at {:?}",
-                    overlay_target
-                )));
-            }
+            let opts = format!(
+                "lowerdir={},upperdir={},workdir={}",
+                lowerdirs,
+                overlay_upper.to_string_lossy(),
+                overlay_work.to_string_lossy()
+            );
+            nix::mount::mount(
+                Some(""),
+                &overlay_target,
+                Some("overlay"),
+                MsFlags::empty(),
+                Some(opts.as_str()),
+            )
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to mount overlay to {} with error: {}",
+                    overlay_target.display(),
+                    e
+                ))
+            })?;
+
             info!("Overlay mount completed at {:?}", overlay_target);
 
             // Clean up dm-verity and loop devices
@@ -755,8 +755,12 @@ impl TarDevSnapshotter {
         let extract_dir;
         {
             let mut store = self.store.write().await;
-            extract_dir = store.extract_dir_to_write(&key)?;
-            store.write_snapshot(Kind::Active, key, parent, labels)?;
+            extract_dir = store.extract_dir_to_write(&key).map_err(|e| {
+                Status::unknown(format!("failed to extract directory to write: {e}"))
+            })?;
+            store
+                .write_snapshot(Kind::Active, key.clone(), parent, labels)
+                .map_err(|e| Status::unknown(format!("failed to write the snapshot: {e}")))?;
         }
         Ok(vec![api::types::Mount {
             r#type: "bind".into(),
@@ -817,7 +821,7 @@ impl TarDevSnapshotter {
 
         {
             let Some(digest_str) = labels.get(TARGET_LAYER_DIGEST_LABEL) else {
-                error!("abort");
+                error!("missing target layer digest label");
                 return Err(Status::invalid_argument(
                     "missing target layer digest label",
                 ));
@@ -832,7 +836,7 @@ impl TarDevSnapshotter {
             // TODO: Decompress in stream instead of reopening.
             // Decompress data.
             trace!("Decompressing {:?} to {:?}", &gzname, &name);
-            let root_hash = tokio::task::spawn_blocking(move || -> io::Result<_> {
+            let root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
                 let compressed = fs::File::open(&gzname)?;
                 let mut file = OpenOptions::new()
                     .read(true)
@@ -841,20 +845,23 @@ impl TarDevSnapshotter {
                     .truncate(true)
                     .open(&name)?;
                 let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
-                std::io::copy(&mut gz_decoder, &mut file)?;
+                std::io::copy(&mut gz_decoder, &mut file)
+                    .context("failed to copy payload from gz decoder")?;
 
                 trace!("Appending index to {:?}", &name);
-                file.rewind()?;
-                tarindex::append_index(&mut file)?;
+                file.rewind().context("failed to rewind the file handle")?;
+                tarindex::append_index(&mut file).context("failed to append tar index")?;
 
                 trace!("Appending dm-verity tree to {:?}", &name);
-                let root_hash = verity::append_tree::<Sha256>(&mut file, &salt)?;
+                let root_hash = verity::append_tree::<Sha256>(&mut file, &salt)
+                    .context("failed to append verity tree")?;
 
                 trace!("Root hash for {:?} is {:x}", &name, root_hash);
                 Ok(root_hash)
             })
             .await
-            .map_err(|_| Status::unknown("error in worker task"))??;
+            .map_err(|e| Status::unknown(format!("error in worker task: {e}")))?
+            .map_err(|e| Status::unknown(format!("failed to extract image layer: {e}")))?;
 
             // Store a label with the root hash so that we can recall it later when mounting.
             labels.insert(ROOT_HASH_LABEL.into(), format!("{:x}", root_hash));
