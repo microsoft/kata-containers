@@ -1124,6 +1124,7 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		FileBackedMemRootList:          h.FileBackedMemRootList,
 		Debug:                          h.Debug,
 		DisableNestingChecks:           h.DisableNestingChecks,
+		DisableImageNvdimm:             h.DisableImageNvdimm,
 		BlockDeviceDriver:              blockDriver,
 		BlockDeviceCacheSet:            h.BlockDeviceCacheSet,
 		BlockDeviceCacheDirect:         h.BlockDeviceCacheDirect,
