@@ -84,7 +84,7 @@ const (
 	vSockLogsPort = 1025
 
 	// MinHypervisorMemory is the minimum memory required for a VM.
-	MinHypervisorMemory = 256
+	MinHypervisorMemory = 0
 
 	defaultMsize9p = 8192
 
