@@ -51,6 +51,26 @@ async fn main() -> Result<(), Error> {
         return Ok(());
     }
 
+    if config.images.is_none() && config.image.is_none() {
+        return Err(anyhow::anyhow!("No images specified"));
+    }
+
+    if config.signer.exists() {
+        if !config.signer.is_file() {
+            return Err(anyhow::anyhow!("Signer certificate is not a file"));
+        }
+    } else {
+        return Err(anyhow::anyhow!("Signer certificate does not exist"));
+    }
+
+    if config.key.exists() {
+        if !config.key.is_file() {
+            return Err(anyhow::anyhow!("Key file is not a file"));
+        }
+    } else {
+        return Err(anyhow::anyhow!("Key file does not exist"));
+    }
+
     get_root_hashes(&config)
         .await
         .context("Failed to get root hashes")?;
