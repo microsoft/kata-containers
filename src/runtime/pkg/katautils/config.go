@@ -194,6 +194,7 @@ type runtime struct {
 	CreateContainerTimeout    uint64   `toml:"create_container_timeout"`
 	DanConf                   string   `toml:"dan_conf"`
 	StaticSandboxWorkloadDefaultMem uint32   `toml:"static_sandbox_default_workload_mem"`
+	StaticSandboxWorkloadDefaultVcpus float32  `toml:"static_sandbox_default_workload_vcpus"`
 }
 
 type agent struct {
@@ -1563,6 +1564,7 @@ func LoadConfiguration(configPath string, ignoreLogging bool) (resolvedConfigPat
 	config.GuestSeLinuxLabel = tomlConf.Runtime.GuestSeLinuxLabel
 	config.StaticSandboxResourceMgmt = tomlConf.Runtime.StaticSandboxResourceMgmt
 	config.StaticSandboxWorkloadDefaultMem = tomlConf.Runtime.StaticSandboxWorkloadDefaultMem
+	config.StaticSandboxWorkloadDefaultVcpus = tomlConf.Runtime.StaticSandboxWorkloadDefaultVcpus
 	config.SandboxCgroupOnly = tomlConf.Runtime.SandboxCgroupOnly
 	config.DisableNewNetNs = tomlConf.Runtime.DisableNewNetNs
 	config.EnablePprof = tomlConf.Runtime.EnablePprof

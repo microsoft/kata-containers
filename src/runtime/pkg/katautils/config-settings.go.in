@@ -59,7 +59,7 @@ const defaultKernelParams = ""
 const defaultMachineType = "q35"
 const defaultQgsPort = 4050
 
-const defaultVCPUCount uint32 = 1
+const defaultVCPUCount uint32 = 0
 const defaultMaxVCPUCount uint32 = 0
 const defaultMemSize uint32 = 2048 // MiB
 const defaultMemSlots uint32 = 10
