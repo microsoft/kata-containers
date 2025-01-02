@@ -65,7 +65,7 @@ const (
 
 	procCPUInfo = "/proc/cpuinfo"
 
-	defaultVCPUs = float32(1)
+	defaultVCPUs = float32(0)
 	// 2 GiB
 	defaultMemSzMiB = 2048
 
