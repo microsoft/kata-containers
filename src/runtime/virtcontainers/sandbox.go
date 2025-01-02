@@ -163,6 +163,8 @@ type SandboxConfig struct {
 
 	StaticWorkloadDefaultMem uint32
 
+	StaticWorkloadDefaultVcpus float32
+
 	// Memory to allocate for workloads within the sandbox when workload memory is unspecified
 	ShmSize uint64
 
