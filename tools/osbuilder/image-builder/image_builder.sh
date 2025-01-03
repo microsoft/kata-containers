@@ -66,6 +66,7 @@ readonly -a systemd_units=(
 	"systemd-timesyncd"
 	"systemd-tmpfiles-setup"
 	"systemd-update-utmp"
+	"systemd-vconsole-setup"
 )
 
 readonly -a systemd_files=(
@@ -81,6 +82,7 @@ readonly -a systemd_files=(
 	"systemd-tmpfiles-cleanup.timer"
 	"systemd-tmpfiles"
 	"systemd-update-utmp"
+	"systemd-vconsole-setup"
 )
 
 readonly -a unneeded_files=(
