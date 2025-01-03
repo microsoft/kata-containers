@@ -455,7 +455,7 @@ setup_systemd() {
 			find "${mount_dir}" -type f \( \
 				 -name "${u}.service" -o \
 				 -name "${u}.socket" \) \
-				 -exec echo {} \;
+				 -exec echo {} \; \
 				 -exec rm -f {} \;
 		done
 
@@ -463,7 +463,7 @@ setup_systemd() {
 		for u in "${systemd_files[@]}"; do
 			find "${mount_dir}" -type f \
 				 -name "${u}" \
-				 -exec echo {} \;
+				 -exec echo {} \; \
 				 -exec rm -f {} \;
 		done
 
