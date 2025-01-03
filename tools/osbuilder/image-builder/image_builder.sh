@@ -44,7 +44,7 @@ readonly rootfs_end=-1
 # DAX header size
 # * NVDIMM driver reads the device namespace information from nvdimm namespace (4K offset).
 #   The MBR #1 + DAX metadata are saved in the first 2MB of the image.
-readonly dax_header_sz=2
+readonly dax_header_sz=0
 
 # DAX aligment
 # * DAX huge pages [2]: 2MB alignment
