@@ -452,16 +452,17 @@ setup_systemd() {
 
 		info "Removing unneeded systemd services and sockets"
 		for u in "${systemd_units[@]}"; do
-			find "${mount_dir}" -type f \( \
-				 -name "${u}.service" -o \
-				 -name "${u}.socket" \) \
+			find "${mount_dir}" \
+				 \( -type f -o -type l \) \
+				 \( -name "${u}.service" -o -name "${u}.socket" \) \
 				 -exec echo {} \; \
 				 -exec rm -f {} \;
 		done
 
 		info "Removing unneeded systemd files"
 		for u in "${systemd_files[@]}"; do
-			find "${mount_dir}" -type f \
+			find "${mount_dir}" \
+				 \( -type f -o -type l \) \
 				 -name "${u}" \
 				 -exec echo {} \; \
 				 -exec rm -f {} \;
