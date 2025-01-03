@@ -83,6 +83,10 @@ readonly -a systemd_files=(
 	"systemd-update-utmp"
 )
 
+readonly -a unneeded_files=(
+	"lvm"
+)
+
 # Set a default value
 AGENT_INIT=${AGENT_INIT:-no}
 SELINUX=${SELINUX:-no}
@@ -468,6 +472,15 @@ setup_systemd() {
 
 		info "Removing unneeded systemd files"
 		for u in "${systemd_files[@]}"; do
+			find "${mount_dir}" \
+				 \( -type f -o -type l \) \
+				 -name "${u}" \
+				 -exec echo {} \; \
+				 -exec rm -f {} \;
+		done
+
+		info "Removing other unneeded files"
+		for u in "${unneeded_files[@]}"; do
 			find "${mount_dir}" \
 				 \( -type f -o -type l \) \
 				 -name "${u}" \
