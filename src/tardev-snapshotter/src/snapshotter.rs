@@ -21,6 +21,8 @@ use uuid::Uuid;
 use zerocopy::AsBytes;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
+const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
+const SALT_LABEL: &str = "io.katacontainers.dm-verity.salt";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
 
 #[derive(Serialize, Deserialize)]
@@ -29,24 +31,23 @@ struct ImageInfo {
     layers: Vec<LayerInfo>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
 struct LayerInfo {
-    digest: String,
-    root_hash: String,
-    signature: String,
-    salt: String,
+    digest: String,    // `sha256:` + hex encoded
+    root_hash: String, // hex encoded
+    signature: String, // base64 encoded
+    salt: String,      // hex encoded
 }
 
-#[derive(PartialEq)]
-struct LayerInfoInternal {
-    salt: String,
-    signature: Vec<u8>,
+#[derive(PartialEq, Clone)]
+struct LayerInfoSalt {
+    info: LayerInfo,
+    salt_bytes: Vec<u8>,
 }
 
 struct Store {
     root: PathBuf,
-    signatures: Option<HashMap<String, LayerInfoInternal>>, // root_hash to info
-    salts: Option<HashMap<String, Vec<u8>>>,                // digest to salt
+    signatures: Option<HashMap<String, LayerInfoSalt>>, // digest to layer info
 }
 
 const SIGNATURE_STORE: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/signatures";
@@ -56,7 +57,6 @@ impl Store {
         Self {
             root: root.into(),
             signatures: None,
-            salts: None,
         }
     }
 
@@ -73,33 +73,72 @@ impl Store {
     fn read_signatures(&mut self) -> Result<()> {
         let paths = std::fs::read_dir(Path::new(SIGNATURE_STORE))?;
         let mut signatures = HashMap::new();
-        let mut salts = HashMap::new();
         for signatures_json_path in paths {
-            let signatures_json = std::fs::read_to_string(signatures_json_path?.path())?;
+            let signatures_json = std::fs::read_to_string(
+                signatures_json_path
+                    .context("failed to load signature file path")?
+                    .path(),
+            )?;
             let image_info_list = serde_json::from_str::<Vec<ImageInfo>>(signatures_json.as_str())?;
             for image_info in image_info_list {
                 for layer_info in image_info.layers {
                     signatures.insert(
-                        layer_info.root_hash,
-                        LayerInfoInternal {
-                            signature: BASE64_STANDARD
-                                .decode(layer_info.signature)
-                                .context("Failed to decode signature")?,
-                            salt: layer_info.salt.clone(),
+                        layer_info.digest.clone(),
+                        LayerInfoSalt {
+                            info: layer_info.clone(),
+                            salt_bytes: hex::decode(layer_info.salt)
+                                .context("failed to decode salt")?,
                         },
-                    );
-                    salts.insert(
-                        layer_info.digest,
-                        hex::decode(layer_info.salt).context("Failed to decode salt")?,
                     );
                 }
             }
         }
 
         self.signatures = Some(signatures);
-        self.salts = Some(salts);
 
         Ok(())
+    }
+
+    fn get_info_from_digest(&self, digest: &str) -> Result<LayerInfoSalt> {
+        self.signatures
+            .as_ref()
+            .context("signatures not loaded")?
+            .get(digest)
+            .context("missing signature for the requested layer")
+            .cloned()
+    }
+
+    fn load_signature(&self, hash: &str, signature: &str) -> Result<String> {
+        let signature_name = format!("verity:{hash}");
+
+        // https://lkml.org/lkml/2019/7/17/762
+        // https://www.kernel.org/doc/html/latest/admin-guide/device-mapper/verity.html
+        let keyctl = Command::new("keyctl")
+            .stdin(Stdio::piped())
+            .arg("padd")
+            .arg("user")
+            .arg(&signature_name)
+            .arg("@s")
+            .spawn()
+            .context("failed to start keyctl")?;
+        keyctl
+            .stdin
+            .as_ref()
+            .context("failed to bind to the input of keyctl")?
+            .write_all(
+                &BASE64_STANDARD
+                    .decode(signature)
+                    .context("failed to decode signature")?,
+            )
+            .context("failed to write keyctl input")?;
+        let output = keyctl
+            .wait_with_output()
+            .context("failed to wait for keyctl output")?;
+        if !output.status.success() {
+            return Err(anyhow::anyhow!("failed to load signature, keyctl failed"));
+        }
+
+        Ok(signature_name)
     }
 
     /// Creates the name of the directory that containerd can use to extract a layer into.
@@ -190,45 +229,6 @@ impl Store {
         Ok(())
     }
 
-    fn get_salt(&self, digest: &str) -> Result<Vec<u8>> {
-        self.salts
-            .as_ref()
-            .context("salts not loaded")?
-            .get(digest)
-            .context("missing signature for the requested layer")
-            .cloned()
-    }
-
-    fn load_signature(&self, hash: &str) -> Result<(String, String)> {
-        let signature_name = format!("verity:{hash}");
-
-        let (signature, salt) = match &self.signatures {
-            None => panic!("signatures were not loaded"),
-            Some(signatures) => match signatures.get(hash) {
-                Some(layer_info) => (&layer_info.signature, layer_info.salt.clone()),
-                None => return Err(anyhow::anyhow!("missing signature for root hash {hash}")),
-            },
-        };
-
-        // https://lkml.org/lkml/2019/7/17/762
-        // https://www.kernel.org/doc/html/latest/admin-guide/device-mapper/verity.html
-        let keyctl = Command::new("keyctl")
-            .stdin(Stdio::piped())
-            .arg("padd")
-            .arg("user")
-            .arg(&signature_name)
-            .arg("@s")
-            .spawn()?;
-        keyctl.stdin.as_ref().unwrap().write_all(&signature)?; // TODO do not unwrap
-                                                               // write!(keyctl.stdin.as_ref().unwrap(), "{}", signature)?; // TODO do not unwrap
-        let output = keyctl.wait_with_output()?;
-        if !output.status.success() {
-            return Err(anyhow::anyhow!("failed to load signature"));
-        }
-
-        Ok((signature_name, salt))
-    }
-
     /// Creates a new snapshot for use.
     ///
     /// It checks that the parent chain exists and that all ancestors are committed and consist of
@@ -260,7 +260,7 @@ impl Store {
         path: &str,
         hash: &str,
         signature_name: &str,
-        salt: &String,
+        salt: &str,
     ) -> Result<(u64, u64, String, String)> {
         info!("prepare_dm_target for loop device");
         let mut file = File::open(path)?;
@@ -304,7 +304,13 @@ impl Store {
     }
 
     // Creates dm-verity device for a given layer file
-    fn create_dm_verity_device(&self, layer_path: &str, root_hash: &str) -> Result<String> {
+    fn create_dm_verity_device(
+        &self,
+        layer_path: &str,
+        root_hash: &str,
+        root_hash_sig_name: &str,
+        salt: &str,
+    ) -> Result<String> {
         let dm = devicemapper::DM::new()?;
         let layer_name = Path::new(layer_path)
             .file_name()
@@ -360,10 +366,9 @@ impl Store {
             // Use the loop device path for DM-Verity
             let device_path = loop_device;
 
-            let (signature_name, salt) = self.load_signature(root_hash)?;
-
             // Step 3: Prepare DM-Verity target
-            let target = self.prepare_dm_target(device_path, root_hash, &signature_name, &salt)?;
+            let target =
+                self.prepare_dm_target(device_path, root_hash, root_hash_sig_name, salt)?;
 
             // Step 4: Load the DM table for DM-Verity
             dm.table_load(&id, &[target], opts)
@@ -483,12 +488,13 @@ impl Store {
                 ));
             }
 
-            let root_hash = if let Some(rh) = info.labels.get(ROOT_HASH_LABEL) {
-                rh
-            } else {
-                return Err(Status::failed_precondition(
-                    "parent snapshot has no root hash stored",
-                ));
+            let root_hash = match info.labels.get(ROOT_HASH_LABEL) {
+                Some(rh) => rh,
+                None => {
+                    return Err(Status::failed_precondition(
+                        "parent snapshot has no root hash stored",
+                    ));
+                }
             };
 
             let name = name_to_hash(&p);
@@ -544,9 +550,40 @@ impl Store {
                         name, dm_verity_device
                     );
                 } else {
+                    let root_hash_sig = match info.labels.get(ROOT_HASH_SIG_LABEL) {
+                        Some(rh) => rh,
+                        None => {
+                            return Err(Status::failed_precondition(
+                                "parent snapshot has no root hash stored",
+                            ));
+                        }
+                    };
+                    let salt = match info.labels.get(SALT_LABEL) {
+                        Some(rh) => rh,
+                        None => {
+                            return Err(Status::failed_precondition(
+                                "parent snapshot has no root hash stored",
+                            ));
+                        }
+                    };
+
+                    let signature_name = match self.load_signature(root_hash, root_hash_sig) {
+                        Ok(name) => name,
+                        Err(e) => {
+                            return Err(Status::failed_precondition(format!(
+                                "Failed to load signature: {e}"
+                            )))
+                        }
+                    };
+
                     // Step 1:  Create a dm-verity device for the tarfs layer
                     let created_dm_verity_device = self
-                        .create_dm_verity_device(src.to_str().unwrap(), root_hash)
+                        .create_dm_verity_device(
+                            src.to_str().unwrap(),
+                            root_hash,
+                            &signature_name,
+                            salt,
+                        )
                         .map_err(|e| {
                             Status::internal(format!(
                                 "Failed to create dm-verity device for source {:?}: {:?}",
@@ -816,6 +853,9 @@ impl TarDevSnapshotter {
         parent: String,
         mut labels: HashMap<String, String>,
         salt: Vec<u8>,
+        root_hash: String,     // hex encoded
+        root_hash_sig: String, // base64 encoded
+        salt_str: String,      // base64 encoded
     ) -> Result<(), Status> {
         let dir = self.store.read().await.staging_dir()?;
 
@@ -836,7 +876,7 @@ impl TarDevSnapshotter {
             // TODO: Decompress in stream instead of reopening.
             // Decompress data.
             trace!("Decompressing {:?} to {:?}", &gzname, &name);
-            let root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
+            let generated_root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
                 let compressed = fs::File::open(&gzname)?;
                 let mut file = OpenOptions::new()
                     .read(true)
@@ -863,8 +903,19 @@ impl TarDevSnapshotter {
             .map_err(|e| Status::unknown(format!("error in worker task: {e}")))?
             .map_err(|e| Status::unknown(format!("failed to extract image layer: {e}")))?;
 
+            let generated_root_hash = format!("{:x}", generated_root_hash);
+
+            if root_hash != generated_root_hash {
+                return Err(Status::internal(format!(
+                    "root hash mismatch: expected {}, got {}",
+                    root_hash, generated_root_hash
+                )));
+            }
+
             // Store a label with the root hash so that we can recall it later when mounting.
-            labels.insert(ROOT_HASH_LABEL.into(), format!("{:x}", root_hash));
+            labels.insert(ROOT_HASH_LABEL.into(), root_hash);
+            labels.insert(ROOT_HASH_SIG_LABEL.into(), root_hash_sig);
+            labels.insert(SALT_LABEL.into(), salt_str);
         }
 
         // Move file to its final location and write the snapshot.
@@ -887,7 +938,7 @@ impl TarDevSnapshotter {
         key: String,
         labels: HashMap<String, String>,
     ) -> Result<(), Status> {
-        let (salt, parent) = {
+        let (layer_info, parent) = {
             // Needs to be in the closure to release the lock
             let mut store = self.store.write().await;
             let info = store.read_snapshot(&key)?;
@@ -914,18 +965,29 @@ impl TarDevSnapshotter {
                 Ok(()) => (),
             };
 
-            trace!("Looking up salt for {digest}");
-            let salt = store.get_salt(digest);
+            trace!("Looking up layer info for {digest}");
+            let layer_info = match store.get_info_from_digest(digest) {
+                Ok(layer_info) => layer_info,
+                Err(e) => {
+                    return Err(Status::failed_precondition(format!(
+                        "signature missing for layer with digest {digest}: {e}"
+                    )));
+                }
+            };
 
-            (salt, info.parent)
+            (layer_info, info.parent)
         };
 
-        match salt {
-            Err(e) => Err(Status::failed_precondition(format!(
-                "signature missing: {e}"
-            ))),
-            Ok(salt) => self.prepare_image_layer(name, parent, labels, salt).await,
-        }
+        self.prepare_image_layer(
+            name,
+            parent,
+            labels,
+            layer_info.salt_bytes,
+            layer_info.info.root_hash,
+            layer_info.info.signature,
+            layer_info.info.salt,
+        )
+        .await
     }
 
     async fn usage_impl(&self, key: String) -> Result<Usage, Status> {
