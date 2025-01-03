@@ -72,6 +72,7 @@ readonly -a systemd_files=(
 	"systemd-gpt-auto-generator"
 	"systemd-journald"
 	"systemd-tmpfiles-cleanup.timer"
+	"systemd-tmpfiles"
 )
 
 # Set a default value
