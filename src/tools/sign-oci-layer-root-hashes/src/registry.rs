@@ -151,11 +151,18 @@ async fn get_image_layers(
             .media_type
             .eq(manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE)
             || layer.media_type.eq(manifest::IMAGE_LAYER_GZIP_MEDIA_TYPE)
+            || layer.media_type.eq(manifest::IMAGE_LAYER_MEDIA_TYPE)
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
-                let verity_hash =
-                    get_verity_hash(use_cached_files, &layer.digest, client, reference, &mut rng)
-                        .await?;
+                let verity_hash = get_verity_hash(
+                    use_cached_files,
+                    &layer.digest,
+                    client,
+                    reference,
+                    &mut rng,
+                    layer.media_type.eq(manifest::IMAGE_LAYER_MEDIA_TYPE),
+                )
+                .await?;
                 layers.push(ImageLayer {
                     digest: layer.digest.clone(),
                     verity_hash: verity_hash.root_hash,
@@ -178,6 +185,7 @@ async fn get_verity_hash(
     client: &mut Client,
     reference: &Reference,
     rng: &mut ThreadRng,
+    decompressed: bool,
 ) -> Result<VerityHash> {
     let temp_dir = tempfile::tempdir_in(".")?;
     let base_dir = temp_dir.path();
@@ -209,7 +217,11 @@ async fn get_verity_hash(
                 reference,
                 layer_digest,
                 &decompressed_path,
-                &compressed_path,
+                if decompressed {
+                    None
+                } else {
+                    Some(&compressed_path)
+                },
             )
             .await
             .context("Failed to create verity hash for {layer_digest}")?;
@@ -321,10 +333,28 @@ async fn create_decompressed_layer_file(
     reference: &Reference,
     layer_digest: &str,
     decompressed_path: &Path,
-    compressed_path: &Path,
+    compressed_path: Option<&Path>,
+) -> Result<()> {
+    match compressed_path {
+        Some(compressed_path) => {
+            pull_layer_file(client, reference, layer_digest, compressed_path).await?;
+            decompress_file(compressed_path, decompressed_path)?;
+        }
+        None => pull_layer_file(client, reference, layer_digest, decompressed_path).await?,
+    }
+    attach_tarfs_index(decompressed_path)?;
+
+    Ok(())
+}
+
+async fn pull_layer_file(
+    client: &mut Client,
+    reference: &Reference,
+    layer_digest: &str,
+    path: &Path,
 ) -> Result<()> {
     info!("Pulling layer {:?}", layer_digest);
-    let mut file = tokio::fs::File::create(&compressed_path)
+    let mut file = tokio::fs::File::create(&path)
         .await
         .map_err(|e| anyhow!(e))?;
     client
@@ -333,6 +363,10 @@ async fn create_decompressed_layer_file(
         .map_err(|e| anyhow!(e))?;
     file.flush().await.map_err(|e| anyhow!(e))?;
 
+    Ok(())
+}
+
+fn decompress_file(compressed_path: &Path, decompressed_path: &Path) -> Result<()> {
     info!("Decompressing layer");
     let compressed_file = std::fs::File::open(compressed_path).map_err(|e| anyhow!(e))?;
     let mut decompressed_file = std::fs::OpenOptions::new()
@@ -343,11 +377,19 @@ async fn create_decompressed_layer_file(
         .open(decompressed_path)?;
     let mut gz_decoder = flate2::read::GzDecoder::new(compressed_file);
     std::io::copy(&mut gz_decoder, &mut decompressed_file).map_err(|e| anyhow!(e))?;
-
-    info!("Adding tarfs index to layer");
-    decompressed_file.seek(std::io::SeekFrom::Start(0))?;
-    tarindex::append_index(&mut decompressed_file).map_err(|e| anyhow!(e))?;
     decompressed_file.flush().map_err(|e| anyhow!(e))?;
+
+    Ok(())
+}
+
+fn attach_tarfs_index(path: &Path) -> Result<()> {
+    info!("Adding tarfs index to layer");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?;
+    tarindex::append_index(&mut file).map_err(|e| anyhow!(e))?;
+    file.flush().map_err(|e| anyhow!(e))?;
 
     Ok(())
 }

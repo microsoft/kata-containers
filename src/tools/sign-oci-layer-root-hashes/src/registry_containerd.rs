@@ -14,7 +14,7 @@ use k8s_cri::v1::{image_service_client::ImageServiceClient, AuthConfig};
 use log::{debug, info, warn};
 use oci_distribution::Reference;
 use rand::{rngs::ThreadRng, Rng};
-use std::{collections::HashMap, convert::TryFrom, io::Seek, io::Write, path::Path};
+use std::{collections::HashMap, convert::TryFrom, io::Write, path::Path};
 use tokio::{
     io,
     io::{AsyncSeekExt, AsyncWriteExt},
@@ -239,6 +239,8 @@ pub fn build_auth(reference: &Reference) -> Option<AuthConfig> {
     None
 }
 
+const TAR_LAYER_TYPE: &str = "application/vnd.oci.image.layer.v1.tar";
+
 pub async fn get_image_layers(
     use_cached_files: bool,
     manifest: &serde_json::Value,
@@ -255,11 +257,18 @@ pub async fn get_image_layers(
         let layer_media_type = layer["mediaType"].as_str().unwrap();
         if layer_media_type.eq("application/vnd.docker.image.rootfs.diff.tar.gzip")
             || layer_media_type.eq("application/vnd.oci.image.layer.v1.tar+gzip")
+            || layer_media_type.eq(TAR_LAYER_TYPE)
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
                 let layer_digest = layer["digest"].as_str().unwrap();
-                let verity_hash =
-                    get_verity_hash(use_cached_files, layer_digest, client, &mut rng).await?;
+                let verity_hash = get_verity_hash(
+                    use_cached_files,
+                    layer_digest,
+                    client,
+                    &mut rng,
+                    layer_media_type.eq(TAR_LAYER_TYPE),
+                )
+                .await?;
                 let imageLayer = ImageLayer {
                     digest: layer_digest.to_string(),
                     verity_hash: verity_hash.root_hash,
@@ -281,6 +290,7 @@ async fn get_verity_hash(
     layer_digest: &str,
     client: &containerd_client::Client,
     rng: &mut ThreadRng,
+    decompressed: bool,
 ) -> Result<VerityHash> {
     let temp_dir = tempfile::tempdir_in(".")?;
     let base_dir = temp_dir.path();
@@ -310,7 +320,11 @@ async fn get_verity_hash(
                 client,
                 layer_digest,
                 &decompressed_path,
-                &compressed_path,
+                if decompressed {
+                    None
+                } else {
+                    Some(&compressed_path)
+                },
             )
             .await
             .context(format!("Failed to create verity hash for {layer_digest}"))?;
@@ -346,14 +360,55 @@ async fn create_decompressed_layer_file(
     client: &containerd_client::Client,
     layer_digest: &str,
     decompressed_path: &Path,
-    compressed_path: &Path,
+    compressed_path: Option<&Path>,
+) -> Result<()> {
+    match compressed_path {
+        Some(compressed_path) => {
+            pull_layer_file(client, layer_digest, compressed_path).await?;
+            decompress_file(compressed_path, decompressed_path)?;
+        }
+        None => pull_layer_file(client, layer_digest, decompressed_path).await?,
+    }
+    attach_tarfs_index(decompressed_path)?;
+
+    Ok(())
+}
+
+fn attach_tarfs_index(path: &Path) -> Result<()> {
+    info!("Adding tarfs index to layer");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?;
+    tarindex::append_index(&mut file).map_err(|e| anyhow!(e))?;
+    file.flush().map_err(|e| anyhow!(e))?;
+    Ok(())
+}
+
+fn decompress_file(compressed_path: &Path, decompressed_path: &Path) -> Result<()> {
+    let compressed_file = std::fs::File::open(compressed_path).map_err(|e| anyhow!(e))?;
+    let mut decompressed_file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(decompressed_path)?;
+    let mut gz_decoder = flate2::read::GzDecoder::new(compressed_file);
+    std::io::copy(&mut gz_decoder, &mut decompressed_file).map_err(|e| anyhow!(e))?;
+
+    decompressed_file.flush().map_err(|e| anyhow!(e))?;
+    Ok(())
+}
+
+async fn pull_layer_file(
+    client: &containerd_client::Client,
+    layer_digest: &str,
+    path: &Path,
 ) -> Result<()> {
     info!("Pulling layer {layer_digest}");
-    let mut file = tokio::fs::File::create(&compressed_path)
+    let mut file = tokio::fs::File::create(&path)
         .await
         .map_err(|e| anyhow!(e))?;
-
-    info!("Decompressing layer");
 
     let req = containerd_client::services::v1::ReadContentRequest {
         digest: layer_digest.to_string(),
@@ -377,20 +432,6 @@ async fn create_decompressed_layer_file(
         .await
         .map_err(|e| anyhow!(e))
         .expect("Failed to flush file");
-    let compressed_file = std::fs::File::open(compressed_path).map_err(|e| anyhow!(e))?;
-    let mut decompressed_file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(decompressed_path)?;
-    let mut gz_decoder = flate2::read::GzDecoder::new(compressed_file);
-    std::io::copy(&mut gz_decoder, &mut decompressed_file).map_err(|e| anyhow!(e))?;
-
-    info!("Adding tarfs index to layer");
-    decompressed_file.seek(std::io::SeekFrom::Start(0))?;
-    tarindex::append_index(&mut decompressed_file).map_err(|e| anyhow!(e))?;
-    decompressed_file.flush().map_err(|e| anyhow!(e))?;
 
     Ok(())
 }
