@@ -73,6 +73,7 @@ readonly -a systemd_files=(
 	"systemd-journald"
 	"systemd-tmpfiles-cleanup.timer"
 	"systemd-tmpfiles"
+	"systemd-update-utmp"
 )
 
 # Set a default value
