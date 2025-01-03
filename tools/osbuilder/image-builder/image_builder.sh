@@ -54,6 +54,7 @@ readonly dax_alignment=2
 # The list of systemd units and files that are not needed in Kata Containers
 readonly -a systemd_units=(
 	"blk-availability"
+	"modprobe@"
 	"systemd-coredump@"
 	"systemd-journald"
 	"systemd-journald-dev-log"
