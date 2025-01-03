@@ -55,6 +55,8 @@ readonly dax_alignment=2
 readonly -a systemd_units=(
 	"blk-availability"
 	"modprobe@"
+	"systemd-ask-password-console"
+	"systemd-ask-password-wall"
 	"systemd-coredump@"
 	"systemd-journald"
 	"systemd-journald-dev-log"
@@ -67,6 +69,7 @@ readonly -a systemd_units=(
 )
 
 readonly -a systemd_files=(
+	"ask-password"
 	"blkdeactivate"
 	"dev-hugepages.mount"
 	"journalctl"
@@ -454,11 +457,11 @@ setup_selinux() {
 setup_systemd() {
 		local mount_dir="$1"
 
-		info "Removing unneeded systemd services and sockets"
+		info "Removing unneeded systemd paths, services and sockets"
 		for u in "${systemd_units[@]}"; do
 			find "${mount_dir}" \
 				 \( -type f -o -type l \) \
-				 \( -name "${u}.service" -o -name "${u}.socket" \) \
+				 \( -name "${u}.path" -o -name "${u}.service" -o -name "${u}.socket" \) \
 				 -exec echo {} \; \
 				 -exec rm -f {} \;
 		done
