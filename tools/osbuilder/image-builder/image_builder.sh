@@ -57,6 +57,7 @@ readonly -a systemd_units=(
 	"modprobe@"
 	"systemd-ask-password-console"
 	"systemd-ask-password-wall"
+	"systemd-boot-update"
 	"systemd-coredump@"
 	"systemd-journald"
 	"systemd-journald-dev-log"
@@ -74,6 +75,7 @@ readonly -a systemd_units=(
 readonly -a systemd_files=(
 	"ask-password"
 	"blkdeactivate"
+	"bootctl"
 	"dev-hugepages.mount"
 	"journalctl"
 	"systemd-bless-boot-generator"
