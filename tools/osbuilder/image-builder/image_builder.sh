@@ -69,6 +69,7 @@ readonly -a systemd_files=(
 	"systemd-fstab-generator"
 	"systemd-getty-generator"
 	"systemd-gpt-auto-generator"
+	"systemd-journald"
 	"systemd-tmpfiles-cleanup.timer"
 )
 
