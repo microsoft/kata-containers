@@ -450,12 +450,16 @@ setup_systemd() {
 			find "${mount_dir}" -type f \( \
 				 -name "${u}.service" -o \
 				 -name "${u}.socket" \) \
+				 -exec echo {} \;
 				 -exec rm -f {} \;
 		done
 
 		info "Removing unneeded systemd files"
 		for u in "${systemd_files[@]}"; do
-			find "${mount_dir}" -type f -name "${u}" -exec rm -f {} \;
+			find "${mount_dir}" -type f \
+				 -name "${u}" \
+				 -exec echo {} \;
+				 -exec rm -f {} \;
 		done
 
 		info "Creating empty machine-id to allow systemd to bind-mount it"
