@@ -65,6 +65,8 @@ readonly -a systemd_units=(
 	"systemd-random-seed"
 	"systemd-timesyncd"
 	"systemd-tmpfiles-setup"
+	"systemd-tmpfiles-setup-dev"
+	"systemd-tmpfiles-setup-dev-early"
 	"systemd-update-utmp"
 	"systemd-vconsole-setup"
 )
