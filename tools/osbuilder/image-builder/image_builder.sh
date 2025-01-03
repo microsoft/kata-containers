@@ -53,6 +53,7 @@ readonly dax_alignment=2
 
 # The list of systemd units and files that are not needed in Kata Containers
 readonly -a systemd_units=(
+	"dev-hugepages"
 	"systemd-coredump@"
 	"systemd-journald"
 	"systemd-journald-dev-log"
@@ -445,12 +446,13 @@ setup_selinux() {
 setup_systemd() {
 		local mount_dir="$1"
 
-		info "Removing unneeded systemd services and sockets"
+		info "Removing unneeded systemd mounts, services and sockets"
 		for u in "${systemd_units[@]}"; do
 			find "${mount_dir}" -type f \( \
+				 -name "${u}.mount" -o \
 				 -name "${u}.service" -o \
 				 -name "${u}.socket" \) \
-				 -exec echo {} \;
+				 -exec echo {} \; \
 				 -exec rm -f {} \;
 		done
 
@@ -458,7 +460,7 @@ setup_systemd() {
 		for u in "${systemd_files[@]}"; do
 			find "${mount_dir}" -type f \
 				 -name "${u}" \
-				 -exec echo {} \;
+				 -exec echo {} \; \
 				 -exec rm -f {} \;
 		done
 
