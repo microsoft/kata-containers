@@ -706,6 +706,8 @@ main() {
 		rootfs_img_size=$?
 		img_size=$((rootfs_img_size + dax_header_sz))
 	else
+		setup_systemd "${rootfs}"
+
 		img_size=$(calculate_img_size "${rootfs}" "${root_free_space}" \
 			"${fs_type}" "${block_size}")
 
