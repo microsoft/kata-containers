@@ -240,6 +240,7 @@ pub fn build_auth(reference: &Reference) -> Option<AuthConfig> {
 }
 
 const TAR_LAYER_TYPE: &str = "application/vnd.oci.image.layer.v1.tar";
+const TAR_DIFF_LAYER_TYPE: &str = "application/vnd.docker.image.rootfs.diff.tar";
 
 pub async fn get_image_layers(
     use_cached_files: bool,
@@ -258,6 +259,7 @@ pub async fn get_image_layers(
         if layer_media_type.eq("application/vnd.docker.image.rootfs.diff.tar.gzip")
             || layer_media_type.eq("application/vnd.oci.image.layer.v1.tar+gzip")
             || layer_media_type.eq(TAR_LAYER_TYPE)
+            || layer_media_type.eq(TAR_DIFF_LAYER_TYPE)
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
                 let layer_digest = layer["digest"].as_str().unwrap();
@@ -266,7 +268,7 @@ pub async fn get_image_layers(
                     layer_digest,
                     client,
                     &mut rng,
-                    layer_media_type.eq(TAR_LAYER_TYPE),
+                    layer_media_type.eq(TAR_LAYER_TYPE) || layer_media_type.eq(TAR_DIFF_LAYER_TYPE),
                 )
                 .await?;
                 let imageLayer = ImageLayer {

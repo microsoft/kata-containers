@@ -152,6 +152,9 @@ async fn get_image_layers(
             .eq(manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE)
             || layer.media_type.eq(manifest::IMAGE_LAYER_GZIP_MEDIA_TYPE)
             || layer.media_type.eq(manifest::IMAGE_LAYER_MEDIA_TYPE)
+            || layer
+                .media_type
+                .eq(manifest::IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE)
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
                 let verity_hash = get_verity_hash(
@@ -160,7 +163,10 @@ async fn get_image_layers(
                     client,
                     reference,
                     &mut rng,
-                    layer.media_type.eq(manifest::IMAGE_LAYER_MEDIA_TYPE),
+                    layer.media_type.eq(manifest::IMAGE_LAYER_MEDIA_TYPE)
+                        || layer
+                            .media_type
+                            .eq(manifest::IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE),
                 )
                 .await?;
                 layers.push(ImageLayer {
