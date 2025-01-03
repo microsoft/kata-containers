@@ -85,6 +85,7 @@ readonly -a systemd_files=(
 
 readonly -a unneeded_files=(
 	"lvm"
+	"openssl"
 )
 
 # Set a default value
