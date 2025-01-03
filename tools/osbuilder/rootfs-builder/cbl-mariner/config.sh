@@ -9,3 +9,6 @@ PACKAGES="kata-packages-uvm"
 [ "$CONF_GUEST" = yes ] && PACKAGES+=" kata-packages-uvm-coco"
 [ "$AGENT_INIT" = no ] && PACKAGES+=" systemd"
 [ "$SECCOMP" = yes ] && PACKAGES+=" libseccomp"
+
+# TODO: move some of the packages just into Debug images.
+PACKAGES+=" findutils"
