@@ -53,6 +53,7 @@ readonly dax_alignment=2
 
 # The list of systemd units and files that are not needed in Kata Containers
 readonly -a systemd_units=(
+	"blk-availability"
 	"systemd-coredump@"
 	"systemd-journald"
 	"systemd-journald-dev-log"
@@ -64,6 +65,7 @@ readonly -a systemd_units=(
 )
 
 readonly -a systemd_files=(
+	"blkdeactivate"
 	"dev-hugepages.mount"
 	"journalctl"
 	"systemd-bless-boot-generator"
