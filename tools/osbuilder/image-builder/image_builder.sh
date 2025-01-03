@@ -64,6 +64,7 @@ readonly -a systemd_units=(
 )
 
 readonly -a systemd_files=(
+	"dev-hugepages.mount"
 	"journalctl"
 	"systemd-bless-boot-generator"
 	"systemd-fstab-generator"
