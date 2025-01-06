@@ -856,50 +856,90 @@ impl TarDevSnapshotter {
                     "missing target layer digest label",
                 ));
             };
+
+            // Determine image layer media type
             let Some(media_type) = labels.get(TARGET_LAYER_MEDIA_TYPE_LABEL) else {
                 error!("missing target layer media type label");
                 return Err(Status::invalid_argument(
                     "missing target layer media type label",
                 ));
             };
-
             trace!("layer digest {} media_type: {:?}", digest_str, media_type);
 
-            // TODO use the media_type:
-            // gzipped: "application/vnd.docker.image.rootfs.diff.tar.gzip", "application/vnd.oci.image.layer.v1.tar+gzip";
-            // uncompressed: "application/vnd.oci.image.layer.v1.tar", "application/vnd.docker.image.rootfs.diff.tar"
+            let layer_type = match media_type.as_str() {
+                "application/vnd.docker.image.rootfs.diff.tar.gzip" 
+                | "application/vnd.oci.image.layer.v1.tar+gzip" => "gz",
+                "application/vnd.oci.image.layer.v1.tar" 
+                | "application/vnd.docker.image.rootfs.diff.tar" => "tar",
+                _ => {
+                    error!("unsupported media type: {}", media_type);
+                    return Err(Status::invalid_argument(format!(
+                        "unsupported media type: {}",
+                        media_type
+                    )));
+                }
+            };
 
+            // Rename the file with the correct extension
             let name = dir.path().join(name_to_hash(&key));
-            let mut gzname = name.clone();
-            gzname.set_extension("gz");
-            trace!("Fetching layer image to {:?}", &gzname);
-            self.get_layer_image(&gzname, digest_str).await?;
-
-            // TODO: Decompress in stream instead of reopening.
-            // Decompress data.
-            trace!("Decompressing {:?} to {:?}", &gzname, &name);
-            let generated_root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
-                let compressed = fs::File::open(&gzname)?;
-                let mut file = OpenOptions::new()
+            let target_name = {
+                let mut renamed = name.clone();
+                renamed.set_extension(layer_type);
+                trace!("Renaming {:?} to {:?}", &name, &renamed);
+                std::fs::rename(&name, &renamed)
+                    .map_err(|e| Status::internal(format!("Failed to rename file: {e}")))?;
+                renamed
+            };
+    
+            // Fetch the layer image
+            trace!("Fetching {} layer image to {:?}", layer_type, target_name);
+            self.get_layer_image(&PathBuf::from(&target_name), digest_str)
+                .await?;
+    
+            let decompress_file = |layer_type: &str, input_path: &Path, output_path: &Path| -> Result<(), anyhow::Error> {
+                let mut input_file = fs::File::open(input_path)?;
+                let mut output_file = OpenOptions::new()
                     .read(true)
                     .write(true)
                     .create(true)
                     .truncate(true)
-                    .open(&name)?;
-                let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
-                std::io::copy(&mut gz_decoder, &mut file)
-                    .context("failed to copy payload from gz decoder")?;
+                    .open(output_path)?;
+                
+                match layer_type {
+                    "gz" => {
+                        let mut gz_decoder = flate2::read::GzDecoder::new(input_file);
+                        std::io::copy(&mut gz_decoder, &mut output_file)
+                            .context("failed to copy payload from gz decoder")?;
+                    }
+                    "tar" => {
+                        std::io::copy(&mut input_file, &mut output_file)
+                            .context("failed to copy uncompressed payload")?;
+                    }
+                    _ => {
+                            return Err(anyhow::anyhow!("Unknown layer type: {}", layer_type));
+                    }
+                }
+                Ok(())
+            };
+    
+            // Handle decompression
+            trace!("Decompressing {:?} to {:?}", target_name, &name);
+            let generated_root_hash = tokio::task::spawn_blocking({
+                let target_name = target_name.clone();
+                move || -> Result<_> {
+                    decompress_file(&layer_type, &Path::new(&target_name), &name)?;
+    
+                    trace!("Appending index to {:?}", &name);
+                    let mut file = fs::File::open(&name).context("failed to open layer file")?;
+                    tarindex::append_index(&mut file).context("failed to append tar index")?;
 
-                trace!("Appending index to {:?}", &name);
-                file.rewind().context("failed to rewind the file handle")?;
-                tarindex::append_index(&mut file).context("failed to append tar index")?;
+                    trace!("Appending dm-verity tree to {:?}", &name);
+                    let root_hash = verity::append_tree::<Sha256>(&mut file, &salt)
+                        .context("failed to append verity tree")?;
 
-                trace!("Appending dm-verity tree to {:?}", &name);
-                let root_hash = verity::append_tree::<Sha256>(&mut file, &salt)
-                    .context("failed to append verity tree")?;
-
-                trace!("Root hash for {:?} is {:x}", &name, root_hash);
-                Ok(root_hash)
+                    trace!("Root hash for {:?} is {:x}", &name, root_hash);
+                    Ok(root_hash)
+                }
             })
             .await
             .map_err(|e| Status::unknown(format!("error in worker task: {e}")))?
