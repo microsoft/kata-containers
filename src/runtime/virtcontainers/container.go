@@ -965,6 +965,8 @@ func (c *Container) create(ctx context.Context) (err error) {
 	// inside the VM
 	c.getSystemMountInfo()
 
+	c.config.Annotations["io.katacontainers.pkg.oci.bundle_path"]="foo"
+
 	process, err := c.sandbox.agent.createContainer(ctx, c.sandbox, c)
 	if err != nil {
 		return err
