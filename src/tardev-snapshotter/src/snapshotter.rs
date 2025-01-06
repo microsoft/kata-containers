@@ -1,6 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 use base64::prelude::{Engine, BASE64_STANDARD};
-use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
+use containerd_client::{
+    services::v1::ReadContentRequest,
+    tonic::Request,
+    with_namespace, Client,
+};
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
 use log::{debug, error, info, trace};
 use nix::mount::MsFlags;
@@ -24,6 +28,7 @@ const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
 const SALT_LABEL: &str = "io.katacontainers.dm-verity.salt";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
+const TARGET_LAYER_MEDIA_TYPE_LABEL: &str = "containerd.io/snapshot/cri.layer-media-type";
 
 #[derive(Serialize, Deserialize)]
 struct ImageInfo {
@@ -240,13 +245,6 @@ impl Store {
         parent: String,
         labels: HashMap<String, String>,
     ) -> Result<Vec<api::types::Mount>, Status> {
-        if let Err(e) = self.lazy_read_signatures() {
-            error!("Failing to read signatures: {e}");
-            return Err(Status::internal(format!(
-                "Failed to read signatures: {:?}",
-                e
-            )));
-        }
         let mounts = self.mounts_from_snapshot(&parent, false)?;
         self.write_snapshot(kind, key, parent, labels)?;
         Ok(mounts)
@@ -666,7 +664,6 @@ impl Store {
             );
 
             // DEBUG: Validate that lowerdirs does not exceed PATH_MAX
-            info!("Lowerdirs string len: {}", lowerdirs.len());
             if lowerdirs.len() > 4096 {
                 return Err(Status::internal(format!(
                     "Lowerdirs string exceeds allowable length: {}",
@@ -675,13 +672,6 @@ impl Store {
             }
 
             // Perform an overlay mount
-            trace!(
-                "mount none {} -t overlay -o lowerdir={lowerdirs},upperdir={},workdir={}",
-                overlay_target.to_string_lossy(),
-                overlay_upper.to_string_lossy(),
-                overlay_work.to_string_lossy()
-            );
-
             let opts = format!(
                 "lowerdir={},upperdir={},workdir={}",
                 lowerdirs,
@@ -866,6 +856,18 @@ impl TarDevSnapshotter {
                     "missing target layer digest label",
                 ));
             };
+            let Some(media_type) = labels.get(TARGET_LAYER_MEDIA_TYPE_LABEL) else {
+                error!("missing target layer media type label");
+                return Err(Status::invalid_argument(
+                    "missing target layer media type label",
+                ));
+            };
+
+            trace!("layer digest {} media_type: {:?}", digest_str, media_type);
+
+            // TODO use the media_type:
+            // gzipped: "application/vnd.docker.image.rootfs.diff.tar.gzip", "application/vnd.oci.image.layer.v1.tar+gzip";
+            // uncompressed: "application/vnd.oci.image.layer.v1.tar", "application/vnd.docker.image.rootfs.diff.tar"
 
             let name = dir.path().join(name_to_hash(&key));
             let mut gzname = name.clone();
