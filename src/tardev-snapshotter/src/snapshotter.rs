@@ -868,7 +868,7 @@ impl TarDevSnapshotter {
 
             let layer_type = match media_type.as_str() {
                 "application/vnd.docker.image.rootfs.diff.tar.gzip" 
-                | "application/vnd.oci.image.layer.v1.tar+gzip" => "gz",
+                | "application/vnd.oci.image.layer.v1.tar+gzip" => "tar.gz",
                 "application/vnd.oci.image.layer.v1.tar" 
                 | "application/vnd.docker.image.rootfs.diff.tar" => "tar",
                 _ => {
@@ -880,8 +880,13 @@ impl TarDevSnapshotter {
                 }
             };
 
-            // Rename the file with the correct extension
+            // Fetch the layer image
             let name = dir.path().join(name_to_hash(&key));
+            trace!("Fetching {} layer image to {:?}", layer_type, name);
+            self.get_layer_image(&PathBuf::from(&name), digest_str)
+                .await?;
+
+            // Rename the file with the correct extension
             let target_name = {
                 let mut renamed = name.clone();
                 renamed.set_extension(layer_type);
@@ -890,11 +895,6 @@ impl TarDevSnapshotter {
                     .map_err(|e| Status::internal(format!("Failed to rename file: {e}")))?;
                 renamed
             };
-    
-            // Fetch the layer image
-            trace!("Fetching {} layer image to {:?}", layer_type, target_name);
-            self.get_layer_image(&PathBuf::from(&target_name), digest_str)
-                .await?;
     
             let decompress_file = |layer_type: &str, input_path: &Path, output_path: &Path| -> Result<(), anyhow::Error> {
                 let mut input_file = fs::File::open(input_path)?;
@@ -906,7 +906,7 @@ impl TarDevSnapshotter {
                     .open(output_path)?;
                 
                 match layer_type {
-                    "gz" => {
+                    "tar.gz" => {
                         let mut gz_decoder = flate2::read::GzDecoder::new(input_file);
                         std::io::copy(&mut gz_decoder, &mut output_file)
                             .context("failed to copy payload from gz decoder")?;
