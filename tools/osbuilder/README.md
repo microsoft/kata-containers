@@ -204,7 +204,7 @@ For further details, see [the tests documentation](tests/README.md).
 ## Platform-Distro Compatibility Matrix
 
 The following table illustrates what target architecture is supported for each
-of the the osbuilder distributions.
+of the osbuilder distributions.
 
 > Note: this table is not relevant for the dracut build method, since it supports
 any Linux distribution and architecture where dracut is available.
