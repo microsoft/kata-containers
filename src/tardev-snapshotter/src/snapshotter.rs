@@ -1,10 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use base64::prelude::{Engine, BASE64_STANDARD};
-use containerd_client::{
-    services::v1::ReadContentRequest,
-    tonic::Request,
-    with_namespace, Client,
-};
+use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
 use log::{debug, error, info, trace};
 use nix::mount::MsFlags;
@@ -29,6 +25,9 @@ const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
 const SALT_LABEL: &str = "io.katacontainers.dm-verity.salt";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
 const TARGET_LAYER_MEDIA_TYPE_LABEL: &str = "containerd.io/snapshot/cri.layer-media-type";
+
+const TAR_GZ_EXTENSION: &str = "tar.gz";
+const TAR_EXTENSION: &str = "tar";
 
 #[derive(Serialize, Deserialize)]
 struct ImageInfo {
@@ -849,6 +848,9 @@ impl TarDevSnapshotter {
     ) -> Result<(), Status> {
         let dir = self.store.read().await.staging_dir()?;
 
+        let base_name = dir.path().join(name_to_hash(&key));
+        let snapshot_name = base_name.clone();
+
         {
             let Some(digest_str) = labels.get(TARGET_LAYER_DIGEST_LABEL) else {
                 error!("missing target layer digest label");
@@ -864,13 +866,14 @@ impl TarDevSnapshotter {
                     "missing target layer media type label",
                 ));
             };
+
             trace!("layer digest {} media_type: {:?}", digest_str, media_type);
 
             let layer_type = match media_type.as_str() {
-                "application/vnd.docker.image.rootfs.diff.tar.gzip" 
-                | "application/vnd.oci.image.layer.v1.tar+gzip" => "tar.gz",
-                "application/vnd.oci.image.layer.v1.tar" 
-                | "application/vnd.docker.image.rootfs.diff.tar" => "tar",
+                "application/vnd.docker.image.rootfs.diff.tar.gzip"
+                | "application/vnd.oci.image.layer.v1.tar+gzip" => TAR_GZ_EXTENSION,
+                "application/vnd.oci.image.layer.v1.tar"
+                | "application/vnd.docker.image.rootfs.diff.tar" => TAR_EXTENSION,
                 _ => {
                     error!("unsupported media type: {}", media_type);
                     return Err(Status::invalid_argument(format!(
@@ -880,38 +883,46 @@ impl TarDevSnapshotter {
                 }
             };
 
-            // Fetch the layer image
-            let name = dir.path().join(name_to_hash(&key));
-            trace!("Fetching {} layer image to {:?}", layer_type, name);
-            self.get_layer_image(&name, digest_str).await?;
-            let mut target_name = name.clone();
-            target_name.set_extension(layer_type);
-    
-            // Decompress and process the layer
-            trace!("Decompressing {:?} to {:?}", &target_name, &name);
+            let upstream_name = base_name.with_extension(layer_type);
+
+            trace!("Fetching {} layer image to {:?}", layer_type, upstream_name);
+            self.get_layer_image(&upstream_name, digest_str).await?;
+
+            // Process the layer
             let generated_root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
+                // if layer_type == TAR_EXTENSION {
+                //     trace!("Renaming {:?} to {:?}", &upstream_name, &base_name);
+                //     std::fs::rename(&upstream_name, &base_name)?;
+                // }
                 let mut file = OpenOptions::new()
                     .read(true)
                     .write(true)
                     .create(true)
                     .truncate(true)
-                    .open(&name)?;
-                if layer_type == "tar.gz" {
-                    let compressed = fs::File::open(&target_name)?;
+                    .open(&base_name)?;
+                if layer_type == TAR_GZ_EXTENSION {
+                    trace!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
+                    let compressed = fs::File::open(&upstream_name)?;
                     let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
                     std::io::copy(&mut gz_decoder, &mut file)
-                    .context("failed to copy payload from gz decoder")?;
+                        .context("failed to copy payload from gz decoder")?;
+                } else {
+                    // should not re really needed, but getting different root
+                    // hash with the rename above
+                    let mut tar_file = fs::File::open(&upstream_name)?;
+                    std::io::copy(&mut tar_file, &mut file)
+                        .context("failed to copy payload from gz decoder")?;
                 }
-    
-                trace!("Appending index to {:?}", &name);
+
+                trace!("Appending index to {:?}", &base_name);
                 file.rewind().context("failed to rewind the file handle")?;
                 tarindex::append_index(&mut file).context("failed to append tar index")?;
 
-                trace!("Appending dm-verity tree to {:?}", &name);
+                trace!("Appending dm-verity tree to {:?}", &base_name);
                 let root_hash = verity::append_tree::<Sha256>(&mut file, &salt)
                     .context("failed to append verity tree")?;
 
-                trace!("Root hash for {:?} is {:x}", &name, root_hash);
+                trace!("Root hash for {:?} is {:x}", &base_name, root_hash);
                 Ok(root_hash)
             })
             .await
@@ -935,11 +946,10 @@ impl TarDevSnapshotter {
 
         // Move file to its final location and write the snapshot.
         {
-            let from = dir.path().join(name_to_hash(&key));
             let mut store = self.store.write().await;
             let to = store.layer_path_to_write(&key)?;
-            trace!("Renaming from {:?} to {:?}", &from, &to);
-            tokio::fs::rename(from, to).await?;
+            trace!("Renaming from {:?} to {:?}", &snapshot_name, &to);
+            tokio::fs::rename(snapshot_name, to).await?;
             store.write_snapshot(Kind::Committed, key, parent, labels)?;
         }
 
