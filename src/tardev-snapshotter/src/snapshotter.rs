@@ -884,16 +884,8 @@ impl TarDevSnapshotter {
             let name = dir.path().join(name_to_hash(&key));
             trace!("Fetching {} layer image to {:?}", layer_type, name);
             self.get_layer_image(&name, digest_str).await?;
-
-            // Rename the file with the correct extension
-            let target_name = {
-                let mut renamed = name.clone();
-                renamed.set_extension(layer_type);
-                trace!("Renaming {:?} to {:?}", &name, &renamed);
-                std::fs::rename(&name, &renamed)
-                    .map_err(|e| Status::internal(format!("Failed to rename file: {e}")))?;
-                renamed
-            };
+            let mut target_name = name.clone();
+            target_name.set_extension(layer_type);
     
             // Decompress and process the layer
             trace!("Decompressing {:?} to {:?}", &target_name, &name);
@@ -909,9 +901,6 @@ impl TarDevSnapshotter {
                     let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
                     std::io::copy(&mut gz_decoder, &mut file)
                     .context("failed to copy payload from gz decoder")?;
-                } else {
-                    let mut tar_file = fs::File::open(&target_name)?;
-                    std::io::copy(&mut tar_file, &mut file).context("failed to copy payload from gz decoder")?;
                 }
     
                 trace!("Appending index to {:?}", &name);
