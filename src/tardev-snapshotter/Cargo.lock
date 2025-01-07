@@ -1088,6 +1088,7 @@ dependencies = [
 name = "tardev-snapshotter"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-stream",
  "base64",
  "containerd-client",

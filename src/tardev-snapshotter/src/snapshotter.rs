@@ -1,7 +1,8 @@
+use anyhow::{Context, Result};
 use base64::prelude::{Engine, BASE64_STANDARD};
 use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
-use log::{debug, info, trace};
+use log::{debug, info, trace, error};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::{collections::HashMap, fs, fs::OpenOptions, io, io::Seek, os::unix::ffi::OsStrExt};
@@ -11,6 +12,9 @@ use tonic::Status;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
+const TARGET_LAYER_MEDIA_TYPE_LABEL: &str = "containerd.io/snapshot/cri.layer-media-type";
+const TAR_GZ_EXTENSION: &str = "tar.gz";
+const TAR_EXTENSION: &str = "tar";
 
 struct Store {
     root: PathBuf,
@@ -255,45 +259,79 @@ impl TarDevSnapshotter {
     ) -> Result<(), Status> {
         let dir = self.store.read().await.staging_dir()?;
 
+        let base_name = dir.path().join(name_to_hash(&key));
+        let snapshot_name = base_name.clone();
+
         {
             let Some(digest_str) = labels.get(TARGET_LAYER_DIGEST_LABEL) else {
+                error!("missing target layer digest label");
                 return Err(Status::invalid_argument(
                     "missing target layer digest label",
                 ));
             };
 
-            let name = dir.path().join(name_to_hash(&key));
-            let mut gzname = name.clone();
-            gzname.set_extension("gz");
-            trace!("Fetching layer image to {:?}", &gzname);
-            self.get_layer_image(&gzname, digest_str).await?;
+            // Determine image layer media type
+            let Some(media_type) = labels.get(TARGET_LAYER_MEDIA_TYPE_LABEL) else {
+                error!("missing target layer media type label");
+                return Err(Status::invalid_argument(
+                    "missing target layer media type label",
+                ));
+            };
+            trace!("layer digest {} media_type: {:?}", digest_str, media_type);
 
-            // TODO: Decompress in stream instead of reopening.
-            // Decompress data.
-            trace!("Decompressing {:?} to {:?}", &gzname, &name);
-            let root_hash = tokio::task::spawn_blocking(move || -> io::Result<_> {
-                let compressed = fs::File::open(&gzname)?;
+            let layer_type = match media_type.as_str() {
+                "application/vnd.docker.image.rootfs.diff.tar.gzip"
+                | "application/vnd.oci.image.layer.v1.tar+gzip" => TAR_GZ_EXTENSION,
+                "application/vnd.oci.image.layer.v1.tar"
+                | "application/vnd.docker.image.rootfs.diff.tar" => TAR_EXTENSION,
+                _ => {
+                    error!("unsupported media type: {}", media_type);
+                    return Err(Status::invalid_argument(format!(
+                        "unsupported media type: {}",
+                        media_type
+                    )));
+                }
+            };
+
+            let upstream_name = base_name.with_extension(layer_type);
+
+            trace!("Fetching {} layer image to {:?}", layer_type, upstream_name);
+            self.get_layer_image(&upstream_name, digest_str).await?;
+
+            // Process the layer
+            let root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
+                if layer_type == TAR_EXTENSION {
+                    trace!("Renaming {:?} to {:?}", &upstream_name, &base_name);
+                    std::fs::rename(&upstream_name, &base_name)?;
+                }
                 let mut file = OpenOptions::new()
                     .read(true)
                     .write(true)
                     .create(true)
-                    .truncate(true)
-                    .open(&name)?;
-                let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
-                std::io::copy(&mut gz_decoder, &mut file)?;
+                    .truncate(layer_type == TAR_GZ_EXTENSION)
+                    .open(&base_name)?;
+                if layer_type == TAR_GZ_EXTENSION {
+                    trace!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
+                    let compressed = fs::File::open(&upstream_name)?;
+                    let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
+                    std::io::copy(&mut gz_decoder, &mut file)
+                        .context("failed to copy payload from gz decoder")?;
+                }
 
-                trace!("Appending index to {:?}", &name);
-                file.rewind()?;
-                tarindex::append_index(&mut file)?;
+                trace!("Appending index to {:?}", &base_name);
+                file.rewind().context("failed to rewind the file handle")?;
+                tarindex::append_index(&mut file).context("failed to append tar index")?;
 
-                trace!("Appending dm-verity tree to {:?}", &name);
-                let root_hash = verity::append_tree::<Sha256>(&mut file)?;
+                trace!("Appending dm-verity tree to {:?}", &base_name);
+                let root_hash = verity::append_tree::<Sha256>(&mut file)
+                    .context("failed to append verity tree")?;
 
-                trace!("Root hash for {:?} is {:x}", &name, root_hash);
+                trace!("Root hash for {:?} is {:x}", &base_name, root_hash);
                 Ok(root_hash)
             })
             .await
-            .map_err(|_| Status::unknown("error in worker task"))??;
+            .map_err(|e| Status::unknown(format!("error in worker task: {e}")))?
+            .map_err(|e| Status::unknown(format!("failed to extract image layer: {e}")))?;
 
             // Store a label with the root hash so that we can recall it later when mounting.
             labels.insert(ROOT_HASH_LABEL.into(), format!("{:x}", root_hash));
@@ -301,11 +339,10 @@ impl TarDevSnapshotter {
 
         // Move file to its final location and write the snapshot.
         {
-            let from = dir.path().join(name_to_hash(&key));
             let mut store = self.store.write().await;
             let to = store.layer_path_to_write(&key)?;
-            trace!("Renaming from {:?} to {:?}", &from, &to);
-            tokio::fs::rename(from, to).await?;
+            trace!("Renaming from {:?} to {:?}", &snapshot_name, &to);
+            tokio::fs::rename(snapshot_name, to).await?;
             store.write_snapshot(Kind::Committed, key, parent, labels)?;
         }
 
