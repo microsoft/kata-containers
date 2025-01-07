@@ -11,7 +11,7 @@ import (
 	"context"
 	//"encoding/hex"
 	"fmt"
-	"io/fs"
+	//"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -807,6 +807,11 @@ func (f *FilesystemShare) StartFileEventWatcher(ctx context.Context) error {
 }
 
 func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
+	f.Logger().WithField("src", src).WithField("dst", dst).WithField("oldtsDir", oldtsDir).Debug("copyUpdatedFiles")
+	return nil
+}
+/*
+func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 	f.Logger().Infof("copyUpdatedFiles: Copy src:%s to dst:%s from old src:%s", src, dst, oldtsDir)
 
 	// 1. Read the symlink and get the actual data directory
@@ -905,6 +910,7 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 
 	return nil
 }
+*/
 
 func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 
