@@ -890,27 +890,21 @@ impl TarDevSnapshotter {
 
             // Process the layer
             let generated_root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
-                // if layer_type == TAR_EXTENSION {
-                //     trace!("Renaming {:?} to {:?}", &upstream_name, &base_name);
-                //     std::fs::rename(&upstream_name, &base_name)?;
-                // }
+                if layer_type == TAR_EXTENSION {
+                    trace!("Renaming {:?} to {:?}", &upstream_name, &base_name);
+                    std::fs::rename(&upstream_name, &base_name)?;
+                }
                 let mut file = OpenOptions::new()
                     .read(true)
                     .write(true)
                     .create(true)
-                    .truncate(true)
+                    .truncate(layer_type == TAR_GZ_EXTENSION)
                     .open(&base_name)?;
                 if layer_type == TAR_GZ_EXTENSION {
                     trace!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
                     let compressed = fs::File::open(&upstream_name)?;
                     let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
                     std::io::copy(&mut gz_decoder, &mut file)
-                        .context("failed to copy payload from gz decoder")?;
-                } else {
-                    // should not re really needed, but getting different root
-                    // hash with the rename above
-                    let mut tar_file = fs::File::open(&upstream_name)?;
-                    std::io::copy(&mut tar_file, &mut file)
                         .context("failed to copy payload from gz decoder")?;
                 }
 
