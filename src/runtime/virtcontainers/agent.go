@@ -211,4 +211,6 @@ type agent interface {
 
 	// setPolicy sends a new policy to the guest agent
 	setPolicy(ctx context.Context, policy string) error
+
+	setFile(ctx context.Context, t string, b []byte) error
 }
