@@ -9,7 +9,7 @@ package virtcontainers
 
 import (
 	"context"
-	"encoding/hex"
+	//"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
@@ -20,7 +20,7 @@ import (
 	"syscall"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/pkg/errors"
+	//"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/config"
@@ -28,7 +28,7 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/agent/protocols/grpc"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/annotations"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
-	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
+	//"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
 )
 
 // Splitting Regex pattern:
@@ -269,6 +269,19 @@ func (f *FilesystemShare) Cleanup(ctx context.Context) error {
 }
 
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+	srcRoot := filepath.Clean(m.Source)
+	f.Logger().WithField("srcRoot", srcRoot).WithField("m", m).Debug("ShareFile")
+	return nil, nil
+}
+
+func (f *FilesystemShare) UnshareFile(ctx context.Context, c *Container, m *Mount) error {
+	f.Logger().WithField("m", m).Debug("UnshareFile")
+	return nil
+}
+
+
+/*
+func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
 	randBytes, err := utils.GenerateRandomBytes(8)
 	if err != nil {
 		return nil, err
@@ -416,6 +429,7 @@ func (f *FilesystemShare) UnshareFile(ctx context.Context, c *Container, m *Moun
 
 	return nil
 }
+*/
 
 func (f *FilesystemShare) shareRootFilesystemWithNydus(ctx context.Context, c *Container) (*SharedFile, error) {
 	rootfsGuestPath := filepath.Join(kataGuestSharedDir(), c.id, c.rootfsSuffix)
