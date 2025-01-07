@@ -210,7 +210,7 @@
         ]
     },
     "common": {
-        "cpath": "/run/kata-containers/shared/containers",
+        "cpath": "^/run/kata-containers/shared/containers",
         "sfprefix": "^$(cpath)/$(bundle-id)-[a-z0-9]{16}-",
         "spath": "/run/kata-containers/sandbox/storage",
         "ip_p": "[0-9]{1,5}",

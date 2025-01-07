@@ -771,7 +771,7 @@ allow_root_path(p_oci, i_oci, bundle_id) {
     p_path3 := replace(p_path2, "$(bundle-id)", bundle_id)
     print("allow_root_path: p_path3 =", p_path3)
 
-    p_path3 == i_path
+    regex.match(p_path3, i_path)
 
     print("allow_root_path: true")
 }
@@ -1034,7 +1034,7 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
     mount2 := replace(mount1, "$(bundle-id)", bundle_id)
     print("allow_mount_point 2: mount2 =", mount2)
 
-    mount2 == i_storage.mount_point
+    regex.match(mount2, i_storage.mount_point)
 
     print("allow_mount_point 2: true")
 }
