@@ -883,8 +883,7 @@ impl TarDevSnapshotter {
             // Fetch the layer image
             let name = dir.path().join(name_to_hash(&key));
             trace!("Fetching {} layer image to {:?}", layer_type, name);
-            self.get_layer_image(&PathBuf::from(&name), digest_str)
-                .await?;
+            self.get_layer_image(&name, digest_str).await?;
 
             // Rename the file with the correct extension
             let target_name = {
@@ -896,50 +895,35 @@ impl TarDevSnapshotter {
                 renamed
             };
     
-            let decompress_file = |layer_type: &str, input_path: &Path, output_path: &Path| -> Result<(), anyhow::Error> {
-                let mut input_file = fs::File::open(input_path)?;
-                let mut output_file = OpenOptions::new()
+            // Decompress and process the layer
+            trace!("Decompressing {:?} to {:?}", &target_name, &name);
+            let generated_root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
+                let mut file = OpenOptions::new()
                     .read(true)
                     .write(true)
                     .create(true)
                     .truncate(true)
-                    .open(output_path)?;
-                
-                match layer_type {
-                    "tar.gz" => {
-                        let mut gz_decoder = flate2::read::GzDecoder::new(input_file);
-                        std::io::copy(&mut gz_decoder, &mut output_file)
-                            .context("failed to copy payload from gz decoder")?;
-                    }
-                    "tar" => {
-                        std::io::copy(&mut input_file, &mut output_file)
-                            .context("failed to copy uncompressed payload")?;
-                    }
-                    _ => {
-                            return Err(anyhow::anyhow!("Unknown layer type: {}", layer_type));
-                    }
+                    .open(&name)?;
+                if layer_type == "tar.gz" {
+                    let compressed = fs::File::open(&target_name)?;
+                    let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
+                    std::io::copy(&mut gz_decoder, &mut file)
+                    .context("failed to copy payload from gz decoder")?;
+                } else {
+                    let mut tar_file = fs::File::open(&target_name)?;
+                    std::io::copy(&mut tar_file, &mut file).context("failed to copy payload from gz decoder")?;
                 }
-                Ok(())
-            };
     
-            // Handle decompression
-            trace!("Decompressing {:?} to {:?}", target_name, &name);
-            let generated_root_hash = tokio::task::spawn_blocking({
-                let target_name = target_name.clone();
-                move || -> Result<_> {
-                    decompress_file(&layer_type, &Path::new(&target_name), &name)?;
-    
-                    trace!("Appending index to {:?}", &name);
-                    let mut file = fs::File::open(&name).context("failed to open layer file")?;
-                    tarindex::append_index(&mut file).context("failed to append tar index")?;
+                trace!("Appending index to {:?}", &name);
+                file.rewind().context("failed to rewind the file handle")?;
+                tarindex::append_index(&mut file).context("failed to append tar index")?;
 
-                    trace!("Appending dm-verity tree to {:?}", &name);
-                    let root_hash = verity::append_tree::<Sha256>(&mut file, &salt)
-                        .context("failed to append verity tree")?;
+                trace!("Appending dm-verity tree to {:?}", &name);
+                let root_hash = verity::append_tree::<Sha256>(&mut file, &salt)
+                    .context("failed to append verity tree")?;
 
-                    trace!("Root hash for {:?} is {:x}", &name, root_hash);
-                    Ok(root_hash)
-                }
+                trace!("Root hash for {:?} is {:x}", &name, root_hash);
+                Ok(root_hash)
             })
             .await
             .map_err(|e| Status::unknown(format!("error in worker task: {e}")))?
