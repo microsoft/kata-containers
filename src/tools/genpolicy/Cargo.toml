@@ -5,7 +5,7 @@
 
 [package]
 name = "genpolicy"
-version = "3.2.0-azl3.genpolicy2"
+version = "3.2.0-azl3.genpolicy3"
 authors = ["The Kata Containers community <kata-dev@lists.katacontainers.io>"]
 edition = "2021"
 license = "Apache-2.0"
