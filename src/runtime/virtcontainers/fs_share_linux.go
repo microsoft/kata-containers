@@ -268,18 +268,6 @@ func (f *FilesystemShare) Cleanup(ctx context.Context) error {
 	return nil
 }
 
-func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
-	srcRoot := filepath.Clean(m.Source)
-	f.Logger().WithField("srcRoot", srcRoot).WithField("m", m).Debug("ShareFile")
-	return nil, nil
-}
-
-func (f *FilesystemShare) UnshareFile(ctx context.Context, c *Container, m *Mount) error {
-	f.Logger().WithField("m", m).Debug("UnshareFile")
-	return nil
-}
-
-
 /*
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
 	randBytes, err := utils.GenerateRandomBytes(8)
@@ -917,4 +905,52 @@ func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 	f.Logger().Info("StopFileEventWatcher: Closing watcher")
 	close(f.watcherDoneChannel)
 
+}
+
+const (
+	fileUnknown string = "unknown"
+	fileResolveConf string = "resolve.conf"
+)
+
+func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+	f.Logger().WithField("m", m).Debug("ShareFile")
+
+	fileType := f.getFileType(m.Source)
+
+	switch {
+	case fileType == fileResolveConf:
+		f.shareFile(ctx, c, m, fileType)
+
+	default:
+		f.Logger().Debugf("Ignoring file type %s", fileType)
+	}
+
+	return nil, nil
+}
+
+func (f *FilesystemShare) UnshareFile(ctx context.Context, c *Container, m *Mount) error {
+	f.Logger().WithField("m", m).Debug("UnshareFile")
+	return nil
+}
+
+func (f *FilesystemShare) getFileType(filePath string) (string) {
+	if strings.HasSuffix(filePath, "resolve.conf") {
+		return fileResolveConf
+	}
+	return fileUnknown
+}
+
+func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, m *Mount, fileType string) (error) {
+	b, err := os.ReadFile(m.Source)
+	if err != nil {
+		return fmt.Errorf("ReadFile failed %v", err)
+	}
+
+	err = f.sandbox.agent.setFile(ctx, m.Source, b)
+	if err != nil {
+		f.Logger().WithError(err).Error("Failed to send file")
+		return err
+	}
+
+	return nil
 }

@@ -160,6 +160,7 @@ const (
 	grpcGetIPTablesRequest                    = "grpc.GetIPTablesRequest"
 	grpcSetIPTablesRequest                    = "grpc.SetIPTablesRequest"
 	grpcSetPolicyRequest                      = "grpc.SetPolicyRequest"
+	grpcSetFileRequest                        = "grpc.SetFileRequest"
 )
 
 // newKataAgent returns an agent from an agent type.
@@ -2193,6 +2194,9 @@ func (k *kataAgent) installReqFunc(c *kataclient.AgentClient) {
 	k.reqHandlers[grpcSetPolicyRequest] = func(ctx context.Context, req interface{}) (interface{}, error) {
 		return k.client.AgentServiceClient.SetPolicy(ctx, req.(*grpc.SetPolicyRequest))
 	}
+	k.reqHandlers[grpcSetFileRequest] = func(ctx context.Context, req interface{}) (interface{}, error) {
+		return k.client.AgentServiceClient.SetFile(ctx, req.(*grpc.SetFileRequest))
+	}
 }
 
 func (k *kataAgent) getReqContext(ctx context.Context, reqName string) (newCtx context.Context, cancel context.CancelFunc) {
@@ -2481,5 +2485,10 @@ func (k *kataAgent) resizeGuestVolume(ctx context.Context, volumeGuestPath strin
 
 func (k *kataAgent) setPolicy(ctx context.Context, policy string) error {
 	_, err := k.sendReq(ctx, &grpc.SetPolicyRequest{Policy: policy})
+	return err
+}
+
+func (k *kataAgent) setFile(ctx context.Context, t string, b []byte) error {
+	_, err := k.sendReq(ctx, &grpc.SetFileRequest{Type: t, Data: b})
 	return err
 }
