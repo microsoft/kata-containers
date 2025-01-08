@@ -902,10 +902,23 @@ impl TarDevSnapshotter {
                     .open(&base_name)?;
                 if layer_type == TAR_GZ_EXTENSION {
                     info!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
-                    let compressed = fs::File::open(&upstream_name)?;
+                    let compressed = fs::File::open(&upstream_name)
+                        .map_err(|e| {
+                        let file_error = format!(
+                            "Failed to open file {:?} for decompression: {:?}",
+                            &upstream_name, e
+                        );
+                        error!("{}", file_error);
+                        anyhow::anyhow!(file_error)
+                    })?;
+
                     let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
-                    std::io::copy(&mut gz_decoder, &mut file)
-                        .context("failed to copy payload from gz decoder")?;
+
+                    if let Err(e) = std::io::copy(&mut gz_decoder, &mut file) {
+                        let copy_error = format!("failed to copy payload from gz decoder {:?}", e);
+                        error!("{}", copy_error);
+                        return Err(anyhow::anyhow!(copy_error));                    
+                    }
                 }
 
                 trace!("Appending index to {:?}", &base_name);
