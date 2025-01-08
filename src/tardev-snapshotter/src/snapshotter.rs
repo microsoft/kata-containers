@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use base64::prelude::{Engine, BASE64_STANDARD};
 use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use nix::mount::MsFlags;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -66,7 +66,7 @@ impl Store {
 
     fn lazy_read_signatures(&mut self) -> Result<()> {
         if self.signatures == None {
-            info!("Loading signatures");
+            trace!("Loading signatures");
             self.read_signatures()
                 .context("Failed to read signatures")?;
         }
@@ -259,7 +259,7 @@ impl Store {
         signature_name: &str,
         salt: &str,
     ) -> Result<(u64, u64, String, String)> {
-        info!("prepare_dm_target for loop device");
+        trace!("prepare_dm_target for loop device");
         let mut file = File::open(path)?;
         let size = file.seek(std::io::SeekFrom::End(0))?;
         if size < 4096 {
@@ -314,13 +314,13 @@ impl Store {
             .ok_or_else(|| anyhow!("Unable to get file name from layer path"))?
             .to_str()
             .ok_or_else(|| anyhow!("Unable to convert file name to UTF-8 string"))?;
-        info!("create_dm_verity_device for layer: {}", layer_name);
+        trace!("create_dm_verity_device for layer: {}", layer_name);
 
         let name = devicemapper::DmName::new(&layer_name)?;
         let opts = devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY);
 
         if let Err(e) = dm.device_create(name, None, opts) {
-            info!("Failed to create Device Mapper device: {:?}", e);
+            warn!("Failed to create Device Mapper device: {:?}", e);
             return Err(e.into());
         }
         let id = devicemapper::DevId::Name(name);
@@ -334,7 +334,7 @@ impl Store {
                 .expect("Failed to execute losetup command to create loop device");
 
             if !setup_output.status.success() {
-                info!(
+                warn!(
                     "Failed to set up loop device: {:?}",
                     String::from_utf8_lossy(&setup_output.stderr)
                 );
@@ -343,7 +343,7 @@ impl Store {
                     String::from_utf8_lossy(&setup_output.stderr)
                 ));
             }
-            info!("set up loop device");
+            trace!("set up loop device");
 
             // Step 2: Find the loop device associated with the file
             let loop_output = Command::new("losetup")
@@ -358,7 +358,7 @@ impl Store {
                 .and_then(|line| line.split(":").next())
                 .ok_or_else(|| anyhow::anyhow!("Could not find loop device for {}", layer_path))?;
 
-            info!("selected newly created loop device: {}", loop_device);
+            trace!("selected newly created loop device: {}", loop_device);
 
             // Use the loop device path for DM-Verity
             let device_path = loop_device;
@@ -370,12 +370,12 @@ impl Store {
             // Step 4: Load the DM table for DM-Verity
             dm.table_load(&id, &[target], opts)
                 .context("Unable to load DM-Verity table")?;
-            info!("loaded DM table for DM-Verity");
+            trace!("loaded DM table for DM-Verity");
 
             // Step 5: Suspend the DM device to make it active
             dm.device_suspend(&id, opts)
                 .context("Unable to suspend DM device")?;
-            info!("suspended DM device for activation");
+            trace!("suspended DM device for activation");
 
             // Step 6: Return success, with the path of the DM-Verity device
             Ok(format!("/dev/mapper/{}", layer_name))
@@ -385,14 +385,14 @@ impl Store {
         result.map_err(|e| {
             // Remove the DM device if it was created
             if let Err(remove_err) = dm.device_remove(&id, devicemapper::DmOptions::default()) {
-                info!(
+                warn!(
                     "Unable to remove DM device ({}): {:?}",
                     layer_name, remove_err
                 );
             }
 
             // Clean up the loop device
-            info!("Cleaning up loop device: {}", layer_path);
+            trace!("Cleaning up loop device: {}", layer_path);
             let detach_output = Command::new("losetup")
                 .arg("-d")
                 .arg(layer_path)
@@ -400,15 +400,15 @@ impl Store {
                 .expect("Failed to execute losetup detach command");
 
             if !detach_output.status.success() {
-                info!(
+                warn!(
                     "Failed to detach loop device: {:?}",
                     String::from_utf8_lossy(&detach_output.stderr)
                 );
             } else {
-                info!("Successfully detached loop device: {}", layer_path);
+                trace!("Successfully detached loop device: {}", layer_path);
             }
 
-            info!("Error occurred during DM-Verity setup: {:?}", e);
+            warn!("Error occurred during DM-Verity setup: {:?}", e);
             e
         })
     }
@@ -497,13 +497,13 @@ impl Store {
             let name = name_to_hash(&p);
             let layer_info = format!(
                 "{name},tar,ro,{PREFIX}.block_device=file,{PREFIX}.is-layer,{PREFIX}.root-hash={root_hash}");
-            info!(
+            trace!(
                 "mounts_from_snapshot(): processing snapshots: {}, layername: {}",
                 &info.name, &name
             );
 
             if do_mount {
-                info!("mounts_from_snapshot(): performing tarfs mounting via dm-verity");
+                trace!("mounts_from_snapshot(): performing tarfs mounting via dm-verity");
                 // Extract layer information
                 let mut fields = layer_info.split(',');
                 let src = if let Some(p) = fields.next() {
@@ -517,12 +517,12 @@ impl Store {
                         "Missing source path in layer info",
                     ));
                 };
-                info!("src: {}", src.display());
+                trace!("src: {}", src.display());
 
                 let fs_type = fields.next().ok_or_else(|| {
                     Status::invalid_argument("Missing filesystem type in layer info")
                 })?;
-                info!("fs_type: {}", fs_type);
+                trace!("fs_type: {}", fs_type);
 
                 let fs_opts = fields
                     .filter(|o| !o.starts_with("io.katacontainers."))
@@ -533,16 +533,16 @@ impl Store {
                             format!("{a},{b}")
                         }
                     });
-                info!("fs_opts: {}", fs_opts);
+                trace!("fs_opts: {}", fs_opts);
 
                 let mount_path = self.root.join("mounts").join(&name);
-                info!("mount_path: {}", mount_path.display());
+                trace!("mount_path: {}", mount_path.display());
                 std::fs::create_dir_all(&mount_path)?;
 
                 // Step 0: Check if the dm-verity device already exists
                 let dm_verity_device = format!("/dev/mapper/{}", name);
                 if Path::new(&dm_verity_device).exists() {
-                    info!(
+                    trace!(
                         "dm-verity device already exists for layer {}: {}",
                         name, dm_verity_device
                     );
@@ -639,7 +639,7 @@ impl Store {
         }
 
         if do_mount {
-            info!("mounts_from_snapshot(): perform overlay mounting");
+            trace!("mounts_from_snapshot(): perform overlay mounting");
             let overlay_root = self.root.join("overlay").join(Uuid::new_v4().to_string());
             let overlay_target = overlay_root.join("mount");
             let overlay_upper = overlay_root.join("upper");
@@ -657,7 +657,7 @@ impl Store {
                 .map(|layer| layer.to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
                 .join(":");
-            info!(
+            trace!(
                 "Combining dm-verity layers into overlay lowerdirs: {}",
                 lowerdirs
             );
@@ -692,7 +692,7 @@ impl Store {
                 ))
             })?;
 
-            info!("Overlay mount completed at {:?}", overlay_target);
+            trace!("Overlay mount completed at {:?}", overlay_target);
 
             // Clean up dm-verity and loop devices
             /*for layer_path in &mounted_layers {
@@ -809,7 +809,7 @@ impl TarDevSnapshotter {
             let guard = self.containerd_client.read().await;
             let Some(client) = &*guard else {
                 drop(guard);
-                info!("Connecting to containerd at {}", self.containerd_path);
+                trace!("Connecting to containerd at {}", self.containerd_path);
                 let c = Client::from_path(&self.containerd_path)
                     .await
                     .map_err(|_| Status::unknown("unable to connect to containerd"))?;
@@ -885,13 +885,13 @@ impl TarDevSnapshotter {
 
             let upstream_name = base_name.with_extension(layer_type);
 
-            trace!("Fetching {} layer image to {:?}", layer_type, upstream_name);
+            info!("Fetching {} layer image to {:?}", layer_type, upstream_name);
             self.get_layer_image(&upstream_name, digest_str).await?;
 
             // Process the layer
             let generated_root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
                 if layer_type == TAR_EXTENSION {
-                    trace!("Renaming {:?} to {:?}", &upstream_name, &base_name);
+                    info!("Renaming {:?} to {:?}", &upstream_name, &base_name);
                     std::fs::rename(&upstream_name, &base_name)?;
                 }
                 let mut file = OpenOptions::new()
@@ -901,11 +901,24 @@ impl TarDevSnapshotter {
                     .truncate(layer_type == TAR_GZ_EXTENSION)
                     .open(&base_name)?;
                 if layer_type == TAR_GZ_EXTENSION {
-                    trace!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
-                    let compressed = fs::File::open(&upstream_name)?;
+                    info!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
+                    let compressed = fs::File::open(&upstream_name)
+                        .map_err(|e| {
+                        let file_error = format!(
+                            "Failed to open file {:?} for decompression: {:?}",
+                            &upstream_name, e
+                        );
+                        error!("{}", file_error);
+                        anyhow::anyhow!(file_error)
+                    })?;
+
                     let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
-                    std::io::copy(&mut gz_decoder, &mut file)
-                        .context("failed to copy payload from gz decoder")?;
+
+                    if let Err(e) = std::io::copy(&mut gz_decoder, &mut file) {
+                        let copy_error = format!("failed to copy payload from gz decoder {:?}", e);
+                        error!("{}", copy_error);
+                        return Err(anyhow::anyhow!(copy_error));                    
+                    }
                 }
 
                 trace!("Appending index to {:?}", &base_name);
@@ -1039,7 +1052,7 @@ impl TarDevSnapshotter {
 
         if info.labels.get(TARGET_LAYER_DIGEST_LABEL).is_some() {
             let extract_dir = store.extract_dir(&key);
-            info!("mounts(): snapshot: {}, pass extract_dir to containerd so that it unpacks the layer to extract_dir: {}", &info.name, extract_dir.to_string_lossy());
+            trace!("mounts(): snapshot: {}, pass extract_dir to containerd so that it unpacks the layer to extract_dir: {}", &info.name, extract_dir.to_string_lossy());
             Ok(vec![api::types::Mount {
                 r#type: "bind".into(),
                 source: extract_dir.to_string_lossy().into(),
@@ -1047,7 +1060,7 @@ impl TarDevSnapshotter {
                 options: Vec::new(),
             }])
         } else {
-            info!(
+            trace!(
                 "mounts(): snapshot: {}, ready to use, preparing itself and parents ",
                 &info.name
             );
@@ -1144,10 +1157,10 @@ impl Snapshotter for TarDevSnapshotter {
             // There are two reasons for preparing a snapshot: to build an image and to actually use it
             // as a container image. We determine the reason by the presence of the snapshot-ref label.
             if labels.get(TARGET_LAYER_DIGEST_LABEL).is_some() {
-                info!("prepare(): prepare a staging dir for containerd tar data extraction");
+                trace!("prepare(): prepare a staging dir for containerd tar data extraction");
                 self.prepare_unpack_dir(key, parent, labels).await
             } else {
-                info!("prepare(): create active snapshot");
+                trace!("prepare(): create active snapshot");
                 self.store
                     .write()
                     .await
