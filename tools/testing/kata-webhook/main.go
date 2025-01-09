@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/sirupsen/logrus"
@@ -27,6 +28,13 @@ func getRuntimeClass(runtimeClassKey, defaultRuntimeClass string) string {
 		return runtimeClass
 	}
 	return defaultRuntimeClass
+}
+
+func getEnvValue(envKey, defaultEnvValue string) string {
+	if envValue, ok := os.LookupEnv(envKey); ok {
+		return envValue
+	}
+	return defaultEnvValue
 }
 
 func annotatePodMutator(_ context.Context, ar *kwhmodel.AdmissionReview, obj metav1.Object) (*kwhmutating.MutatorResult, error) {
@@ -77,6 +85,31 @@ func annotatePodMutator(_ context.Context, ar *kwhmodel.AdmissionReview, obj met
 	runtimeClassEnvKey := "RUNTIME_CLASS"
 	kataRuntimeClassName := getRuntimeClass(runtimeClassEnvKey, "kata")
 	pod.Spec.RuntimeClassName = &kataRuntimeClassName
+
+	if getEnvValue("MANAGE_RESOURCES", "true") == "true" {
+		fmt.Println("managing resources")
+		defaultCpuLimit := getEnvValue("CPU_LIMIT", "1")
+		defaultMemoryLimit := getEnvValue("MEMORY_LIMIT", "256Mi")
+		for i := range pod.Spec.Containers {
+			if pod.Spec.Containers[i].Resources.Limits == nil {
+				fmt.Println("setting default resources for container: ", pod.Spec.Containers[i].Name)
+				pod.Spec.Containers[i].Resources.Limits = corev1.ResourceList{
+					"cpu":    resource.MustParse(defaultCpuLimit),
+					"memory": resource.MustParse(defaultMemoryLimit),
+				}
+				break
+			}
+
+			memoryLimit, _ := pod.Spec.Containers[i].Resources.Limits.Memory().AsInt64()
+			fmt.Println("memory limit found: ", memoryLimit)
+
+			// if no memoryLimit is found or under expected minimum, set default
+			if !ok || memoryLimit < 256*1000000 {
+				fmt.Println("setting default memory limit for container: ", pod.Spec.Containers[i].Name)
+				pod.Spec.Containers[i].Resources.Limits["memory"] = resource.MustParse(defaultMemoryLimit)
+			}
+		}
+	}
 
 	return &kwhmutating.MutatorResult{
 		MutatedObject: pod,
