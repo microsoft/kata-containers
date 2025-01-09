@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: pod-annotate-webhook
-          image: quay.io/kata-containers/kata-webhook-example:latest
+          image: marineraks.azurecr.io/kata-containers/kata-webhook:min_memory_limit
           imagePullPolicy: Always
           env:
             - name: RUNTIME_CLASS
@@ -80,3 +80,4 @@ metadata:
   name: kata-webhook
 data:
   runtime_class: kata
+  min_memory_limit: "128Mi"

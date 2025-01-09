@@ -116,6 +116,23 @@ func annotatePodMutator(_ context.Context, ar *kwhmodel.AdmissionReview, obj met
 	kataRuntimeClassName := getRuntimeClass(runtimeClassEnvKey, "kata")
 	pod.Spec.RuntimeClassName = &kataRuntimeClassName
 
+	minMemoryLimit, foundMinMemoryLimit := os.LookupEnv("MIN_MEMORY_LIMIT")
+
+	if foundMinMemoryLimit {
+		minMemoryLimitVal := resource.MustParse(minMemoryLimit)
+		for i := range pod.Spec.Containers {
+			if pod.Spec.Containers[i].Resources.Limits == nil {
+				continue
+			} else {
+				currentMemoryLimit := pod.Spec.Containers[i].Resources.Limits.Memory().Value()
+				if currentMemoryLimit < minMemoryLimitVal.Value() {
+					pod.Spec.Containers[i].Resources.Limits["memory"] = resource.MustParse(minMemoryLimit)
+					fmt.Println("memory limit too low. Updating to : ", pod.Spec.Containers[i].Resources.Limits)
+				}
+			}
+		}
+	}
+
 	return &kwhmutating.MutatorResult{
 		MutatedObject: pod,
 	}, nil
