@@ -149,6 +149,9 @@ type RuntimeConfig struct {
 	// Memory to allocate for workloads within the sandbox when workload memory is unspecified
 	StaticSandboxWorkloadDefaultMem uint32
 
+	// vcpus to allocate for workloads within the sandbox when workload vcpus is unspecified
+	StaticSandboxWorkloadDefaultVcpus float32
+
 	// Determines if create a netns for hypervisor process
 	DisableNewNetNs bool
 
@@ -1054,6 +1057,8 @@ func SandboxConfig(ocispec specs.Spec, runtime RuntimeConfig, bundlePath, cid st
 
 		StaticWorkloadDefaultMem: runtime.StaticSandboxWorkloadDefaultMem,
 
+		StaticWorkloadDefaultVcpus: runtime.StaticSandboxWorkloadDefaultVcpus,
+
 		ShmSize: shmSize,
 
 		VfioMode: runtime.VfioMode,
@@ -1082,10 +1087,13 @@ func SandboxConfig(ocispec specs.Spec, runtime RuntimeConfig, bundlePath, cid st
 	// with the base number of CPU/memory (which is equal to the default CPU/memory specified for the runtime
 	// configuration or annotations) as well as any specified workload resources.
 	if sandboxConfig.StaticResourceMgmt {
-		// If no Limits are set in pod config, use StaticWorkloadDefaultMem to ensure the containers generally
-		// have a reasonable amount of memory available
+		// If no Limits are set in pod config, use StaticWorkloadDefaultMem/Vcpus to ensure the containers generally
+		// have a reasonable amount of resources available
 		if sandboxConfig.SandboxResources.WorkloadMemMB == 0 {
 			sandboxConfig.SandboxResources.WorkloadMemMB = sandboxConfig.StaticWorkloadDefaultMem
+		}
+		if sandboxConfig.SandboxResources.WorkloadCPUs == 0 {
+			sandboxConfig.SandboxResources.WorkloadCPUs = sandboxConfig.StaticWorkloadDefaultVcpus
 		}
 
 		sandboxConfig.SandboxResources.BaseCPUs = sandboxConfig.HypervisorConfig.NumVCPUsF
