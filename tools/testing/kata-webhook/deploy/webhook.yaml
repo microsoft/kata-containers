@@ -29,23 +29,17 @@ spec:
                   name: kata-webhook
                   key: runtime_class
                   optional: true
-            - name: CPU_LIMIT
+            - name: MIN_CPU_LIMIT
               valueFrom:
                 configMapKeyRef:
                   name: kata-webhook
-                  key: cpu_limit
+                  key: min_cpu_limit
                   optional: true
-            - name: MEMORY_LIMIT
+            - name: MIN_MEMORY_LIMIT
               valueFrom:
                 configMapKeyRef:
                   name: kata-webhook
-                  key: memory_limit
-                  optional: true
-            - name: MANAGE_RESOURCES
-              valueFrom:
-                configMapKeyRef:
-                  name: kata-webhook
-                  key: manage_resources
+                  key: min_memory_limit
                   optional: true
           args:
             - -tls-cert-file=/etc/webhook/certs/cert.pem
@@ -92,6 +86,5 @@ metadata:
   name: kata-webhook
 data:
   runtime_class: kata
-  manage_resources: "true"
-  cpu_limit: "1"
-  memory_limit: "256Mi"
+  min_cpu_limit: "1"
+  min_memory_limit: "256Mi"

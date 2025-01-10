@@ -86,27 +86,40 @@ func annotatePodMutator(_ context.Context, ar *kwhmodel.AdmissionReview, obj met
 	kataRuntimeClassName := getRuntimeClass(runtimeClassEnvKey, "kata")
 	pod.Spec.RuntimeClassName = &kataRuntimeClassName
 
-	if getEnvValue("MANAGE_RESOURCES", "true") == "true" {
-		fmt.Println("managing resources")
-		defaultCpuLimit := getEnvValue("CPU_LIMIT", "1")
-		defaultMemoryLimit := getEnvValue("MEMORY_LIMIT", "256Mi")
+	minCPULimit, ok := os.LookupEnv("MIN_CPU_LIMIT")
+
+	if ok {
 		for i := range pod.Spec.Containers {
 			if pod.Spec.Containers[i].Resources.Limits == nil {
-				fmt.Println("setting default resources for container: ", pod.Spec.Containers[i].Name)
 				pod.Spec.Containers[i].Resources.Limits = corev1.ResourceList{
-					"cpu":    resource.MustParse(defaultCpuLimit),
-					"memory": resource.MustParse(defaultMemoryLimit),
+					"cpu": resource.MustParse(minCPULimit),
+					// "memory": resource.MustParse(minMemoryLimit),
 				}
-				break
+			} else {
+				currentCPULimit, ok := pod.Spec.Containers[i].Resources.Limits.Cpu().AsInt64()
+				if !ok || currentCPULimit < 1024*1024*1024 {
+					pod.Spec.Containers[i].Resources.Limits["cpu"] = resource.MustParse(minCPULimit)
+				}
+
 			}
+		}
+	}
 
-			memoryLimit, _ := pod.Spec.Containers[i].Resources.Limits.Memory().AsInt64()
-			fmt.Println("memory limit found: ", memoryLimit)
+	minMemoryLimit, ok := os.LookupEnv("MIN_MEMORY_LIMIT")
 
-			// if no memoryLimit is found or under expected minimum, set default
-			if !ok || memoryLimit < 256*1000000 {
-				fmt.Println("setting default memory limit for container: ", pod.Spec.Containers[i].Name)
-				pod.Spec.Containers[i].Resources.Limits["memory"] = resource.MustParse(defaultMemoryLimit)
+	if ok {
+		for i := range pod.Spec.Containers {
+			if pod.Spec.Containers[i].Resources.Limits == nil {
+				pod.Spec.Containers[i].Resources.Limits = corev1.ResourceList{
+					"memory": resource.MustParse(minMemoryLimit),
+				}
+			} else {
+
+				currentMemoryLimit, ok := pod.Spec.Containers[i].Resources.Limits.Memory().AsInt64()
+				if !ok || currentMemoryLimit < 1024*1024*1024 {
+					// set the memory limit
+					pod.Spec.Containers[i].Resources.Limits["memory"] = resource.MustParse(minMemoryLimit)
+				}
 			}
 		}
 	}
