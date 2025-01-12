@@ -43,7 +43,7 @@ determine if your host system is capable of running and creating a
 Kata Container:
 
 ```bash
-$ kata-runtime check
+kata-runtime check
 ```
 
 > **Notes:**
