@@ -499,7 +499,8 @@ impl Store {
                 "{name},tar,ro,{PREFIX}.block_device=file,{PREFIX}.is-layer,{PREFIX}.root-hash={root_hash}");
             trace!(
                 "mounts_from_snapshot(): processing snapshots: {}, layername: {}",
-                &info.name, &name
+                &info.name,
+                &name
             );
 
             if do_mount {
@@ -544,7 +545,8 @@ impl Store {
                 if Path::new(&dm_verity_device).exists() {
                     trace!(
                         "dm-verity device already exists for layer {}: {}",
-                        name, dm_verity_device
+                        name,
+                        dm_verity_device
                     );
                 } else {
                     let root_hash_sig = match info.labels.get(ROOT_HASH_SIG_LABEL) {
@@ -902,8 +904,7 @@ impl TarDevSnapshotter {
                     .open(&base_name)?;
                 if layer_type == TAR_GZ_EXTENSION {
                     info!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
-                    let compressed = fs::File::open(&upstream_name)
-                        .map_err(|e| {
+                    let compressed = fs::File::open(&upstream_name).map_err(|e| {
                         let file_error = format!(
                             "Failed to open file {:?} for decompression: {:?}",
                             &upstream_name, e
@@ -917,7 +918,7 @@ impl TarDevSnapshotter {
                     if let Err(e) = std::io::copy(&mut gz_decoder, &mut file) {
                         let copy_error = format!("failed to copy payload from gz decoder {:?}", e);
                         error!("{}", copy_error);
-                        return Err(anyhow::anyhow!(copy_error));                    
+                        return Err(anyhow::anyhow!(copy_error));
                     }
                 }
 
