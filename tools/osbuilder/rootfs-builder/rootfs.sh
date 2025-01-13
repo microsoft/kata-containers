@@ -833,7 +833,7 @@ delete_unnecessary_files()
 	info "Removing unneeded systemd services and sockets"
 	for u in "${systemd_units[@]}"; do
 		find "${ROOTFS_DIR}" \
-			-type f \
+			\( -type f -o -type l \) \
 			\( -name "${u}.service" -o -name "${u}.socket" \) \
 			-exec echo "deleting {}" \; \
 			-exec rm -f {} \;
@@ -842,7 +842,7 @@ delete_unnecessary_files()
 	info "Removing unneeded systemd files"
 	for u in "${systemd_files[@]}"; do
 		find "${ROOTFS_DIR}" \
-			-type f \
+			\( -type f -o -type l \) \
 			-name "${u}" \
 			-exec echo "deleting {}" \; \
 			-exec rm -f {} \;
