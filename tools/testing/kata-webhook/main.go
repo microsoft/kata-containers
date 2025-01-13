@@ -30,13 +30,6 @@ func getRuntimeClass(runtimeClassKey, defaultRuntimeClass string) string {
 	return defaultRuntimeClass
 }
 
-func getEnvValue(envKey, defaultEnvValue string) string {
-	if envValue, ok := os.LookupEnv(envKey); ok {
-		return envValue
-	}
-	return defaultEnvValue
-}
-
 func annotatePodMutator(_ context.Context, ar *kwhmodel.AdmissionReview, obj metav1.Object) (*kwhmutating.MutatorResult, error) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
@@ -86,40 +79,54 @@ func annotatePodMutator(_ context.Context, ar *kwhmodel.AdmissionReview, obj met
 	kataRuntimeClassName := getRuntimeClass(runtimeClassEnvKey, "kata")
 	pod.Spec.RuntimeClassName = &kataRuntimeClassName
 
-	minCPULimit, ok := os.LookupEnv("MIN_CPU_LIMIT")
-
-	if ok {
+	minCPULimit, foundMinCPULimit := os.LookupEnv("MIN_CPU_LIMIT")
+	fmt.Println("min cpu limit: ", minCPULimit)
+	fmt.Println("foundMinCPULimit: ", foundMinCPULimit)
+	if foundMinCPULimit {
+		minCPULimitVal := resource.MustParse(minCPULimit)
+		fmt.Println("min cpu limit value: ", minCPULimitVal.Value())
 		for i := range pod.Spec.Containers {
 			if pod.Spec.Containers[i].Resources.Limits == nil {
+				fmt.Println("no limits found. Setting cpu limit: ", minCPULimit)
 				pod.Spec.Containers[i].Resources.Limits = corev1.ResourceList{
 					"cpu": resource.MustParse(minCPULimit),
 					// "memory": resource.MustParse(minMemoryLimit),
 				}
+				fmt.Println("limits set to : ", pod.Spec.Containers[i].Resources.Limits)
 			} else {
-				currentCPULimit, ok := pod.Spec.Containers[i].Resources.Limits.Cpu().AsInt64()
-				if !ok || currentCPULimit < 1024*1024*1024 {
+				currentCPULimit := pod.Spec.Containers[i].Resources.Limits.Cpu().Value()
+				fmt.Println("current cpu limit: ", currentCPULimit)
+				if currentCPULimit < minCPULimitVal.Value() {
 					pod.Spec.Containers[i].Resources.Limits["cpu"] = resource.MustParse(minCPULimit)
 				}
+				fmt.Println("limit too low. Set limits set to : ", pod.Spec.Containers[i].Resources.Limits)
 
 			}
 		}
 	}
 
-	minMemoryLimit, ok := os.LookupEnv("MIN_MEMORY_LIMIT")
+	minMemoryLimit, foundMinMemoryLimit := os.LookupEnv("MIN_MEMORY_LIMIT")
+	fmt.Println("min memory limit: ", minMemoryLimit)
+	fmt.Println("foundMinMemoryLimit: ", foundMinMemoryLimit)
 
-	if ok {
+	if foundMinMemoryLimit {
+		minMemoryLimitVal := resource.MustParse(minMemoryLimit)
+		fmt.Println("min memory limit value: ", minMemoryLimitVal.Value())
 		for i := range pod.Spec.Containers {
 			if pod.Spec.Containers[i].Resources.Limits == nil {
+				fmt.Println("no limits found. Setting memory limit: ", minMemoryLimit)
 				pod.Spec.Containers[i].Resources.Limits = corev1.ResourceList{
 					"memory": resource.MustParse(minMemoryLimit),
 				}
+				fmt.Println("limits set to : ", pod.Spec.Containers[i].Resources.Limits)
 			} else {
-
-				currentMemoryLimit, ok := pod.Spec.Containers[i].Resources.Limits.Memory().AsInt64()
-				if !ok || currentMemoryLimit < 1024*1024*1024 {
+				currentMemoryLimit := pod.Spec.Containers[i].Resources.Limits.Memory().Value()
+				fmt.Println("current memory limit: ", currentMemoryLimit)
+				if currentMemoryLimit < minMemoryLimitVal.Value() {
 					// set the memory limit
 					pod.Spec.Containers[i].Resources.Limits["memory"] = resource.MustParse(minMemoryLimit)
 				}
+				fmt.Println("limit too low. Set limits set to : ", pod.Spec.Containers[i].Resources.Limits)
 			}
 		}
 	}
