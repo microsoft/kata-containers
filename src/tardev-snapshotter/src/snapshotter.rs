@@ -887,63 +887,110 @@ impl TarDevSnapshotter {
 
             let upstream_name = base_name.with_extension(layer_type);
 
-            info!("Fetching {} layer image to {:?}", layer_type, upstream_name);
-            self.get_layer_image(&upstream_name, digest_str).await?;
+            const MAX_RETRIES: usize = 3;
+            let mut retries = 0;
 
-            // Process the layer
-            let generated_root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
-                if layer_type == TAR_EXTENSION {
-                    info!("Renaming {:?} to {:?}", &upstream_name, &base_name);
-                    std::fs::rename(&upstream_name, &base_name)?;
+            while retries < MAX_RETRIES {
+                info!("Fetching {} layer image to {:?}", layer_type, upstream_name);
+                if let Err(download_err) = self.get_layer_image(&upstream_name, digest_str).await {
+                    retries += 1;
+                    error!(
+                        "Failed to fetch layer image (attempt {}/{}): {:?}",
+                        retries,
+                        MAX_RETRIES,
+                        download_err
+                    );
+                    if retries >= MAX_RETRIES {
+                        return Err(Status::unknown(format!(
+                            "Failed to fetch layer image after {} attempts: {:?}",
+                            MAX_RETRIES, download_err
+                        )));
+                    }
+
+                    warn!("Retrying layer image download...");
+                    continue; // Retry fetching the layer image
                 }
-                let mut file = OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .create(true)
-                    .truncate(layer_type == TAR_GZ_EXTENSION)
-                    .open(&base_name)?;
-                if layer_type == TAR_GZ_EXTENSION {
-                    info!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
-                    let compressed = fs::File::open(&upstream_name).map_err(|e| {
-                        let file_error = format!(
-                            "Failed to open file {:?} for decompression: {:?}",
-                            &upstream_name, e
+
+                // Process the layer
+                let process_result = tokio::task::spawn_blocking({
+                    let upstream_name = upstream_name.clone();
+                    let base_name = base_name.clone();
+                    let salt = salt.clone();
+
+                    move || -> Result<_> {
+                        if layer_type == TAR_EXTENSION {
+                            info!("Renaming {:?} to {:?}", &upstream_name, &base_name);
+                            std::fs::rename(&upstream_name, &base_name)?;
+                        }
+                        let mut file = OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .create(true)
+                            .truncate(layer_type == TAR_GZ_EXTENSION)
+                            .open(&base_name)?;
+                        if layer_type == TAR_GZ_EXTENSION {
+                            info!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
+                            let compressed = fs::File::open(&upstream_name).map_err(|e| {
+                                let file_error = format!(
+                                    "Failed to open file {:?} for decompression: {:?}",
+                                    &upstream_name, e
+                                );
+                                error!("{}", file_error);
+                                anyhow::anyhow!(file_error)
+                            })?;
+
+                            let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
+
+                            if let Err(e) = std::io::copy(&mut gz_decoder, &mut file) {
+                                let copy_error = format!("failed to copy payload from gz decoder {:?}", e);
+                                error!("{}", copy_error);
+                                return Err(anyhow::anyhow!(copy_error));
+                            }
+                        }
+
+                        trace!("Appending index to {:?}", &base_name);
+                        file.rewind().context("failed to rewind the file handle")?;
+                        tarindex::append_index(&mut file).context("failed to append tar index")?;
+
+                        trace!("Appending dm-verity tree to {:?}", &base_name);
+                        let root_hash = verity::append_tree::<Sha256>(&mut file, &salt)
+                            .context("failed to append verity tree")?;
+
+                        trace!("Root hash for {:?} is {:x}", &base_name, root_hash);
+                        Ok(root_hash)
+                    }
+                })
+                .await
+                .map_err(|e| Status::unknown(format!("error in worker task: {e}")))?;
+
+                match process_result {
+                    Ok(generated_root_hash) => {
+                        let generated_root_hash = format!("{:x}", generated_root_hash);
+                        if root_hash != generated_root_hash {
+                            return Err(Status::internal(format!(
+                                "root hash mismatch: expected {}, got {}",
+                                root_hash, generated_root_hash
+                            )));
+                        }
+                        break; // succeeded; exit retry loop
+                    }
+                    Err(process_err) => {
+                        retries += 1;
+                        error!(
+                            "Failed to process layer (attempt {}/{}): {:?}",
+                            retries,
+                            MAX_RETRIES,
+                            process_err
                         );
-                        error!("{}", file_error);
-                        anyhow::anyhow!(file_error)
-                    })?;
-
-                    let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
-
-                    if let Err(e) = std::io::copy(&mut gz_decoder, &mut file) {
-                        let copy_error = format!("failed to copy payload from gz decoder {:?}", e);
-                        error!("{}", copy_error);
-                        return Err(anyhow::anyhow!(copy_error));
+                        if retries >= MAX_RETRIES {
+                            return Err(Status::unknown(format!(
+                                "Failed to process layer after {} attempts: {:?}",
+                                MAX_RETRIES, process_err
+                            )));
+                        }
+                        warn!("Retrying layer processing...");
                     }
                 }
-
-                trace!("Appending index to {:?}", &base_name);
-                file.rewind().context("failed to rewind the file handle")?;
-                tarindex::append_index(&mut file).context("failed to append tar index")?;
-
-                trace!("Appending dm-verity tree to {:?}", &base_name);
-                let root_hash = verity::append_tree::<Sha256>(&mut file, &salt)
-                    .context("failed to append verity tree")?;
-
-                trace!("Root hash for {:?} is {:x}", &base_name, root_hash);
-                Ok(root_hash)
-            })
-            .await
-            .map_err(|e| Status::unknown(format!("error in worker task: {e}")))?
-            .map_err(|e| Status::unknown(format!("failed to extract image layer: {e}")))?;
-
-            let generated_root_hash = format!("{:x}", generated_root_hash);
-
-            if root_hash != generated_root_hash {
-                return Err(Status::internal(format!(
-                    "root hash mismatch: expected {}, got {}",
-                    root_hash, generated_root_hash
-                )));
             }
 
             // Store a label with the root hash so that we can recall it later when mounting.
