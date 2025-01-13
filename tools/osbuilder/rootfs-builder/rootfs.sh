@@ -750,6 +750,7 @@ delete_unnecessary_files()
 		find "${ROOTFS_DIR}" \
 			-type f \
 			\( -name "${u}.service" -o -name "${u}.socket" \) \
+			-exec echo "deleting {}" \; \
 			-exec rm -f {} \;
 	done
 
@@ -758,6 +759,7 @@ delete_unnecessary_files()
 		find "${ROOTFS_DIR}" \
 			-type f \
 			-name "${u}" \
+			-exec echo "deleting {}" \; \
 			-exec rm -f {} \;
 	done
 }
