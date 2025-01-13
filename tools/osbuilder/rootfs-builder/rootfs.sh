@@ -61,6 +61,26 @@ if [ "${CROSS_BUILD}" == "true" ]; then
 fi
 
 
+# The list of systemd units and files that are not needed in Kata Containers
+readonly -a systemd_units=(
+	"systemd-coredump@"
+	"systemd-journald"
+	"systemd-journald-dev-log"
+	"systemd-journal-flush"
+	"systemd-random-seed"
+	"systemd-timesyncd"
+	"systemd-tmpfiles-setup"
+	"systemd-update-utmp"
+)
+
+readonly -a systemd_files=(
+	"systemd-bless-boot-generator"
+	"systemd-fstab-generator"
+	"systemd-getty-generator"
+	"systemd-gpt-auto-generator"
+	"systemd-tmpfiles-cleanup.timer"
+)
+
 handle_error() {
 	local exit_code="${?}"
 	local line_number="${1:-}"
@@ -761,6 +781,8 @@ EOF
 	info "Create /etc/resolv.conf file in rootfs if not exist"
 	touch "$dns_file"
 
+	delete_unnecessary_files
+
 	info "Creating summary file"
 	create_summary_file "${ROOTFS_DIR}"
 }
@@ -802,6 +824,25 @@ detect_host_distro()
 			distro="$ID"
 			;;
 	esac
+}
+
+delete_unnecessary_files()
+{
+	info "Removing unneeded systemd services and sockets"
+	for u in "${systemd_units[@]}"; do
+		find "${ROOTFS_DIR}" \
+			-type f \
+			\( -name "${u}.service" -o -name "${u}.socket" \) \
+			-exec rm -f {} \;
+	done
+
+	info "Removing unneeded systemd files"
+	for u in "${systemd_files[@]}"; do
+		find "${ROOTFS_DIR}" \
+			-type f \
+			-name "${u}" \
+			-exec rm -f {} \;
+	done
 }
 
 main()
