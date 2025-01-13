@@ -680,7 +680,7 @@ impl Store {
                 overlay_work.to_string_lossy()
             );
             nix::mount::mount(
-                Some(""),
+                Some("overlay"),
                 &overlay_target,
                 Some("overlay"),
                 MsFlags::empty(),
