@@ -27,7 +27,7 @@ use protocols::agent::{
     AddSwapRequest, AgentDetails, CopyFileRequest, GetIPTablesRequest, GetIPTablesResponse,
     GuestDetailsResponse, Interfaces, Metrics, OOMEvent, ReadStreamResponse, Routes,
     SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse, VolumeStatsRequest,
-    WaitProcessResponse, WriteStreamResponse,
+    WaitProcessResponse, WriteStreamResponse, SetFileRequest,
 };
 use protocols::csi::{
     volume_usage::Unit as VolumeUsage_Unit, VolumeCondition, VolumeStatsResponse, VolumeUsage,
@@ -1428,6 +1428,19 @@ impl agent_ttrpc::AgentService for AgentService {
 
         Ok(Empty::new())
     }
+
+    async fn set_file(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::SetFileRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "set_file", req);
+        is_allowed(&req).await?;
+
+        do_set_file(&req).await.map_ttrpc_err(same)?;
+
+        Ok(Empty::new())
+    }
 }
 
 #[derive(Clone)]
@@ -1854,6 +1867,101 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
 
 async fn do_add_swap(_sandbox: &Arc<Mutex<Sandbox>>, _req: &AddSwapRequest) -> Result<()> {
     Err(anyhow!(nix::Error::ENOTSUP))
+}
+
+async fn do_set_file(req: &SetFileRequest) -> Result<()> {
+    info!(sl(), "SetFileRequest: type = {}", &req.type_);
+
+    /*
+    let path = PathBuf::from(req.path.as_str());
+
+    if !path.starts_with(CONTAINER_BASE) {
+        return Err(anyhow!(
+            "Path {:?} does not start with {}",
+            path,
+            CONTAINER_BASE
+        ));
+    }
+
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let dir = parent.to_path_buf();
+            if let Err(e) = fs::create_dir_all(&dir) {
+                if e.kind() != std::io::ErrorKind::AlreadyExists {
+                    return Err(e.into());
+                }
+            } else {
+                std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(req.dir_mode))?;
+            }
+        }
+    }
+
+    let sflag = stat::SFlag::from_bits_truncate(req.file_mode);
+
+    if sflag.contains(stat::SFlag::S_IFDIR) {
+        fs::create_dir(&path).or_else(|e| {
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                return Err(e);
+            }
+            Ok(())
+        })?;
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(req.file_mode))?;
+
+        unistd::chown(
+            &path,
+            Some(Uid::from_raw(req.uid as u32)),
+            Some(Gid::from_raw(req.gid as u32)),
+        )?;
+
+        return Ok(());
+    }
+
+    if sflag.contains(stat::SFlag::S_IFLNK) {
+        // After kubernetes secret's volume update, the '..data' symlink should point to
+        // the new timestamped directory.
+        // TODO:The old and deleted timestamped dir still exists due to missing DELETE api in agent.
+        // Hence, Unlink the existing symlink.
+        if path.is_symlink() && path.exists() {
+            unistd::unlink(&path)?;
+        }
+        let src = PathBuf::from(OsStr::from_bytes(&req.data));
+        unistd::symlinkat(&src, None, &path)?;
+        let path_str = CString::new(path.as_os_str().as_bytes())?;
+
+        let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
+        Errno::result(ret).map(drop)?;
+
+        return Ok(());
+    }
+
+    let mut tmpfile = path.clone();
+    tmpfile.set_extension("tmp");
+
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&tmpfile)?;
+
+    file.write_all_at(req.data.as_slice(), req.offset as u64)?;
+    let st = stat::stat(&tmpfile)?;
+
+    if st.st_size != req.file_size {
+        return Ok(());
+    }
+
+    file.set_permissions(std::fs::Permissions::from_mode(req.file_mode))?;
+
+    unistd::chown(
+        &tmpfile,
+        Some(Uid::from_raw(req.uid as u32)),
+        Some(Gid::from_raw(req.gid as u32)),
+    )?;
+
+    fs::rename(tmpfile, path)?;
+    */
+    Ok(())
 }
 
 // Setup container bundle under CONTAINER_BASE, which is cleaned up

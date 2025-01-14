@@ -22,6 +22,7 @@ default RemoveContainerRequest := true
 default RemoveStaleVirtiofsShareMountsRequest := true
 default ReseedRandomDevRequest := true
 default ResumeContainerRequest := true
+default SetFileRequest := true
 default SetGuestDateTimeRequest := true
 default SetPolicyRequest := true
 default SignalProcessRequest := true
