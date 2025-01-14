@@ -26,8 +26,8 @@ use protobuf::MessageField;
 use protocols::agent::{
     AddSwapRequest, AgentDetails, CopyFileRequest, GetIPTablesRequest, GetIPTablesResponse,
     GuestDetailsResponse, Interfaces, Metrics, OOMEvent, ReadStreamResponse, Routes,
-    SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse, VolumeStatsRequest,
-    WaitProcessResponse, WriteStreamResponse, SetFileRequest,
+    SetFileRequest, SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse,
+    VolumeStatsRequest, WaitProcessResponse, WriteStreamResponse,
 };
 use protocols::csi::{
     volume_usage::Unit as VolumeUsage_Unit, VolumeCondition, VolumeStatsResponse, VolumeUsage,
@@ -629,6 +629,36 @@ impl AgentService {
                 Err(anyhow!("eof"))
             }
         }
+    }
+
+    async fn do_set_file(&self, req: &SetFileRequest) -> Result<()> {
+        // TODO: validate the format of req.type_.
+
+        let path_string = "/run/kata-containers/shared/containers/".to_string()
+            + &self.sandbox.lock().await.id.clone()
+            + "/"
+            + &req.type_;
+        let path = PathBuf::from(path_string);
+        info!(
+            sl(),
+            "do_set_file: {:?}, {} bytes",
+            &path,
+            req.data.as_slice().len()
+        );
+
+        let mut tmpfile = path.clone();
+        tmpfile.set_extension("tmp");
+
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&tmpfile)?;
+
+        file.write_all_at(req.data.as_slice(), 0)?;
+        fs::rename(tmpfile, path)?;
+
+        Ok(())
     }
 }
 
@@ -1437,7 +1467,7 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "set_file", req);
         is_allowed(&req).await?;
 
-        do_set_file(&req).await.map_ttrpc_err(same)?;
+        self.do_set_file(&req).await.map_ttrpc_err(same)?;
 
         Ok(Empty::new())
     }
@@ -1867,26 +1897,6 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
 
 async fn do_add_swap(_sandbox: &Arc<Mutex<Sandbox>>, _req: &AddSwapRequest) -> Result<()> {
     Err(anyhow!(nix::Error::ENOTSUP))
-}
-
-async fn do_set_file(req: &SetFileRequest) -> Result<()> {
-    // TODO: validate the format of req.type_.
-    let path = PathBuf::from(CONTAINER_BASE.to_string() + &req.type_);
-    info!(sl(), "do_set_file: {:?}, {} bytes", &path, req.data.as_slice().len());
-
-    let mut tmpfile = path.clone();
-    tmpfile.set_extension("tmp");
-
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&tmpfile)?;
-
-    file.write_all_at(req.data.as_slice(), 0)?;
-    fs::rename(tmpfile, path)?;
-
-    Ok(())
 }
 
 // Setup container bundle under CONTAINER_BASE, which is cleaned up
