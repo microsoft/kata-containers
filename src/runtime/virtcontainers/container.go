@@ -767,6 +767,13 @@ func newContainer(ctx context.Context, sandbox *Sandbox, contConfig *ContainerCo
 
 // Create Device Information about the block device
 func (c *Container) createDeviceInfo(source, destination string, readonly, isBlockFile bool) (*config.DeviceInfo, error) {
+	c.Logger().
+		WithField("source", source).
+		WithField("destination", destination).
+		WithField("readonly", readonly).
+		WithField("isBlockFile", isBlockFile).
+		Debug("createDeviceInfo")
+
 	var stat unix.Stat_t
 	if err := unix.Stat(source, &stat); err != nil {
 		return nil, fmt.Errorf("stat %q failed: %v", source, err)
