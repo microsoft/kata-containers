@@ -251,11 +251,6 @@ impl AgentPolicy {
             }
         };
 
-        let prints = match self.engine.take_prints() {
-            Ok(p) => p.join(" "),
-            Err(e) => format!("Failed to get policy log: {e}"),
-        };
-
         if !allow {
             self.log_request(ep, &prints).await;
             if self.allow_failures {
