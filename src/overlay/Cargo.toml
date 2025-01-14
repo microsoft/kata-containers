@@ -7,3 +7,4 @@ edition = "2021"
 clap = { version = "4.3.2", features = ["derive"] }
 base64 = "0.21.2"
 tempfile = "3.3.0"
+nix = "0.24.2"
