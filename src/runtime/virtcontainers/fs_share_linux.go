@@ -935,7 +935,7 @@ func (f *FilesystemShare) UnshareFile(ctx context.Context, c *Container, m *Moun
 }
 
 func (f *FilesystemShare) getFileType(filePath string) (string) {
-	if strings.HasSuffix(filePath, "resolve.conf") {
+	if strings.HasSuffix(filePath, "resolv.conf") {
 		return fileResolveConf
 	}
 	return fileUnknown
