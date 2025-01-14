@@ -1870,70 +1870,9 @@ async fn do_add_swap(_sandbox: &Arc<Mutex<Sandbox>>, _req: &AddSwapRequest) -> R
 }
 
 async fn do_set_file(req: &SetFileRequest) -> Result<()> {
-    info!(sl(), "SetFileRequest: type = {}", &req.type_);
-
-    /*
-    let path = PathBuf::from(req.path.as_str());
-
-    if !path.starts_with(CONTAINER_BASE) {
-        return Err(anyhow!(
-            "Path {:?} does not start with {}",
-            path,
-            CONTAINER_BASE
-        ));
-    }
-
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            let dir = parent.to_path_buf();
-            if let Err(e) = fs::create_dir_all(&dir) {
-                if e.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(e.into());
-                }
-            } else {
-                std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(req.dir_mode))?;
-            }
-        }
-    }
-
-    let sflag = stat::SFlag::from_bits_truncate(req.file_mode);
-
-    if sflag.contains(stat::SFlag::S_IFDIR) {
-        fs::create_dir(&path).or_else(|e| {
-            if e.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(e);
-            }
-            Ok(())
-        })?;
-
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(req.file_mode))?;
-
-        unistd::chown(
-            &path,
-            Some(Uid::from_raw(req.uid as u32)),
-            Some(Gid::from_raw(req.gid as u32)),
-        )?;
-
-        return Ok(());
-    }
-
-    if sflag.contains(stat::SFlag::S_IFLNK) {
-        // After kubernetes secret's volume update, the '..data' symlink should point to
-        // the new timestamped directory.
-        // TODO:The old and deleted timestamped dir still exists due to missing DELETE api in agent.
-        // Hence, Unlink the existing symlink.
-        if path.is_symlink() && path.exists() {
-            unistd::unlink(&path)?;
-        }
-        let src = PathBuf::from(OsStr::from_bytes(&req.data));
-        unistd::symlinkat(&src, None, &path)?;
-        let path_str = CString::new(path.as_os_str().as_bytes())?;
-
-        let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
-        Errno::result(ret).map(drop)?;
-
-        return Ok(());
-    }
+    // TODO: validate the format of req.type_.
+    let path = PathBuf::from(CONTAINER_BASE.to_string() + &req.type_);
+    info!(sl(), "do_set_file: {:?}, {} bytes", &path, req.data.as_slice().len());
 
     let mut tmpfile = path.clone();
     tmpfile.set_extension("tmp");
@@ -1944,23 +1883,9 @@ async fn do_set_file(req: &SetFileRequest) -> Result<()> {
         .truncate(false)
         .open(&tmpfile)?;
 
-    file.write_all_at(req.data.as_slice(), req.offset as u64)?;
-    let st = stat::stat(&tmpfile)?;
-
-    if st.st_size != req.file_size {
-        return Ok(());
-    }
-
-    file.set_permissions(std::fs::Permissions::from_mode(req.file_mode))?;
-
-    unistd::chown(
-        &tmpfile,
-        Some(Uid::from_raw(req.uid as u32)),
-        Some(Gid::from_raw(req.gid as u32)),
-    )?;
-
+    file.write_all_at(req.data.as_slice(), 0)?;
     fs::rename(tmpfile, path)?;
-    */
+
     Ok(())
 }
 

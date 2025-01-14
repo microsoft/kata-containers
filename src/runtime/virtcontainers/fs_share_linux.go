@@ -909,7 +909,7 @@ func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 
 const (
 	fileUnknown string = "unknown"
-	fileResolveConf string = "resolve.conf"
+	fileResolvConf string = "resolv.conf"
 )
 
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
@@ -919,7 +919,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 	f.Logger().Debugf("File %s type %s", m.Source, fileType)
 
 	switch {
-	case fileType == fileResolveConf:
+	case fileType == fileResolvConf:
 		f.shareFile(ctx, c, m, fileType)
 
 	default:
@@ -936,7 +936,7 @@ func (f *FilesystemShare) UnshareFile(ctx context.Context, c *Container, m *Moun
 
 func (f *FilesystemShare) getFileType(filePath string) (string) {
 	if strings.HasSuffix(filePath, "resolv.conf") {
-		return fileResolveConf
+		return fileResolvConf
 	}
 	return fileUnknown
 }
@@ -947,7 +947,7 @@ func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, m *Mount,
 		return fmt.Errorf("ReadFile failed %v", err)
 	}
 
-	err = f.sandbox.agent.setFile(ctx, m.Source, b)
+	err = f.sandbox.agent.setFile(ctx, fileType, b)
 	if err != nil {
 		f.Logger().WithError(err).Error("Failed to send file")
 		return err
