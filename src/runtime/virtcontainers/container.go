@@ -426,6 +426,8 @@ func (c *Container) setContainerState(state types.StateString) error {
 // container mounts to the storage. This way, we will have the HostPath info
 // available when we will need to unmount those mounts.
 func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, ignoredMounts map[string]Mount) (storages []*grpc.Storage, err error) {
+	c.Logger().WithField("sharedDirMounts", sharedDirMounts).WithField("ignoredMounts", ignoredMounts).Debug("mountSharedDirMounts")
+
 	var devicesToDetach []string
 	defer func() {
 		if err != nil {
@@ -436,16 +438,21 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 	}()
 
 	for idx, m := range c.mounts {
+		c.Logger().WithField("m", m).Debug("mountSharedDirMounts")
+
 		// Skip mounting certain system paths from the source on the host side
 		// into the container as it does not make sense to do so.
 		// Example sources could be /sys/fs/cgroup etc.
 		if isSystemMount(m.Source) {
+			c.Logger().WithField("m.Source", m.Source).Debug("mountSharedDirMounts: isSystemMount")
 			continue
 		}
 
 		// Check if mount is a block device file. If it is, the block device will be attached to the host
 		// instead of passing this as a shared mount:
 		if len(m.BlockDeviceID) > 0 {
+			c.Logger().WithField("m.BlockDeviceID", m.BlockDeviceID).Debug("mountSharedDirMounts: BlockDeviceID")
+
 			// Attach this block device, all other devices passed in the config have been attached at this point
 			if err = c.sandbox.devManager.AttachDevice(ctx, m.BlockDeviceID, c.sandbox); err != nil {
 				return storages, err
@@ -456,6 +463,7 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 
 		// For non-block based mounts, we are only interested in bind mounts
 		if m.Type != "bind" {
+			c.Logger().WithField("m.Type", m.Type).Debug("mountSharedDirMounts: not bind")
 			continue
 		}
 
@@ -463,6 +471,7 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 		// but it does not make sense to pass this as a 9p mount from the host side.
 		// This needs to be handled purely in the guest, by allocating memory for this inside the VM.
 		if m.Destination == "/dev/shm" {
+			c.Logger().WithField("m.Destination", m.Destination).Debug("mountSharedDirMounts: shm")
 			continue
 		}
 
@@ -470,16 +479,19 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 		// only regular files in /dev. It does not make sense to pass the host
 		// device nodes to the guest.
 		if isHostDevice(m.Destination) {
+			c.Logger().WithField("m.Destination", m.Destination).Debug("mountSharedDirMounts: isHostDevice")
 			continue
 		}
 
 		sharedFile, err := c.sandbox.fsShare.ShareFile(ctx, c, &c.mounts[idx])
 		if err != nil {
+			c.Logger().WithError(err).Debug("mountSharedDirMounts: ShareFile failed")
 			return storages, err
 		}
 
 		// Expand the list of mounts to ignore.
 		if sharedFile == nil {
+			c.Logger().WithField("m.Source", m.Source).Debug("mountSharedDirMounts: adding to ignoredMounts")
 			ignoredMounts[m.Source] = Mount{Source: m.Source}
 			continue
 		}
@@ -527,8 +539,15 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, sharedDirMounts, i
 			sharedDirMount.Source = watchableGuestMount
 		}
 
+		c.Logger().WithField("sharedDirMount.Destination", sharedDirMount.Destination).Debug("mountSharedDirMounts: adding to sharedDirMounts")
 		sharedDirMounts[sharedDirMount.Destination] = sharedDirMount
 	}
+
+	c.Logger().
+		WithField("sharedDirMounts", sharedDirMounts).
+		WithField("ignoredMounts", ignoredMounts).
+		WithField("storages", storages).
+		Debug("mountSharedDirMounts returning success")
 
 	return storages, nil
 }
