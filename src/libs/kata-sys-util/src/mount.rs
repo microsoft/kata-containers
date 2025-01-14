@@ -485,7 +485,25 @@ fn parse_mount_flags(mut flags: MsFlags, flag_str: &str) -> Option<MsFlags> {
         "silent" => flags |= MsFlags::MS_SILENT,
         "strictatime" => flags |= MsFlags::MS_STRICTATIME,
         "sync" => flags |= MsFlags::MS_SYNCHRONOUS,
+        "io.katacontainers.fs-opt.block_device=file" => return None,
+        "io.katacontainers.fs-opt.is-layer" => return None,
+        "io.katacontainers.fs-opt.layer-src-prefix=/var/lib/containerd/io.containerd.snapshotter.v1.tardev/layers" => return None,
+        "io.katacontainers.fs-opt.overlay-rw" => return None,
         flag_str => {
+            let ignored_prefixes = [
+                "io.katacontainers.fs-opt.root-hash=",
+                "io.katacontainers.fs-opt.layer=",
+                "lowerdir=",
+                "upperdir=",
+                "workdir=",
+            ];
+
+            for p in &ignored_prefixes {
+                if flag_str.starts_with(p) {
+                    return None;
+                }
+            }
+
             warn!(sl!(), "BUG: unknown mount flag: {:?}", flag_str);
             return None;
         }
