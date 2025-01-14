@@ -916,13 +916,14 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 	f.Logger().WithField("m", m).Debug("ShareFile")
 
 	fileType := f.getFileType(m.Source)
+	f.Logger().Debugf("File %s type %s", m.Source, fileType)
 
 	switch {
 	case fileType == fileResolveConf:
 		f.shareFile(ctx, c, m, fileType)
 
 	default:
-		f.Logger().Debugf("Ignoring file type %s", fileType)
+		f.Logger().Debugf("Ignoring file %s", m.Source)
 	}
 
 	return nil, nil
