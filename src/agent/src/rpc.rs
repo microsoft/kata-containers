@@ -646,6 +646,17 @@ impl AgentService {
             req.data.as_slice().len()
         );
 
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                let dir = parent.to_path_buf();
+                if let Err(e) = fs::create_dir_all(&dir) {
+                    if e.kind() != std::io::ErrorKind::AlreadyExists {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+    
         let mut tmpfile = path.clone();
         tmpfile.set_extension("tmp");
 

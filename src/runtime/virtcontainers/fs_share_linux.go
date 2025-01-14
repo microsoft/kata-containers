@@ -949,7 +949,7 @@ func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, m *Mount,
 
 	err = f.sandbox.agent.setFile(ctx, fileType, b)
 	if err != nil {
-		f.Logger().WithError(err).Error("Failed to send file")
+		f.Logger().WithError(err).WithField("fileType", fileType).Error("Failed to send file")
 		return err
 	}
 
