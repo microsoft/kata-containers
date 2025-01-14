@@ -921,6 +921,9 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 	switch {
 	case fileType == fileResolvConf:
 		f.shareFile(ctx, c, m, fileType)
+		return &SharedFile{
+			guestPath: fileType,
+		}, nil
 
 	default:
 		f.Logger().Debugf("Ignoring file %s", m.Source)
