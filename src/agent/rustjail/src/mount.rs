@@ -257,6 +257,8 @@ pub fn init_rootfs(
             if let Err(e) = mount_from(cfd_log, m, rootfs, flags, &data, label) {
                 if !m.source.contains("resolv.conf") {
                     return Err(anyhow!("init_rootfs: mount_from error: {:?}", e));
+                } else {
+                    log_child!(cfd_log, "init_rootfs: mount_from failed: {:?}", e);
                 }
             }
 
@@ -267,7 +269,7 @@ pub fn init_rootfs(
             if m.r#type == "bind" && !pgflags.is_empty() {
                 let dest = secure_join(rootfs, &m.destination);
 
-                log_child!(cfd_log, "init_rootfs: calling mount: m = {:?}", m);
+                log_child!(cfd_log, "init_rootfs: calling mount: dest = {:?}, m = {:?}", dest, m);
 
                 if let Err(e) = mount(
                     None::<&str>,
@@ -278,6 +280,8 @@ pub fn init_rootfs(
                 ) {
                     if m.source != "resolv.conf" {
                         return Err(anyhow!("init_rootfs: mount error: {:?}", e));
+                    } else {
+                        log_child!(cfd_log, "init_rootfs: mount failed: {:?}", e);
                     }
                 }
             }
@@ -803,13 +807,26 @@ fn mount_from(
     let dest = secure_join(rootfs, &m.destination);
 
     let src = if m.r#type.as_str() == "bind" {
+        log_child!(cfd_log, "mount_from: bind: canonicalize: {:?}", &source);
+
         // let src = fs::canonicalize(m.source.as_str())?;
-        let src = fs::canonicalize(&source)?;
+        // let src = fs::canonicalize(&source)?;
+
+        let r = fs::canonicalize(&source);
+        if r.is_err() {
+            return Err(anyhow!("canonicalize error: {:?}", r));
+        }
+        let src = r.unwrap();
+
+        log_child!(cfd_log, "mount_from: src = {:?}", &src);
+
         let dir = if src.is_dir() {
             Path::new(&dest)
         } else {
             Path::new(&dest).parent().unwrap()
         };
+
+        log_child!(cfd_log, "mount_from: create_dir_all parent: {:?}", &dir);
 
         fs::create_dir_all(dir).map_err(|e| {
             log_child!(
@@ -823,6 +840,8 @@ fn mount_from(
 
         // make sure file exists so we can bind over it
         if !src.is_dir() {
+            log_child!(cfd_log, "mount_from: creating file: {:?}", &dest);
+
             let _ = OpenOptions::new()
                 .create(true)
                 .write(true)
@@ -839,6 +858,8 @@ fn mount_from(
         }
         src.to_str().unwrap().to_string()
     } else {
+        log_child!(cfd_log, "mount_from: create_dir_all dest: {:?}", &dest);
+
         let _ = fs::create_dir_all(&dest);
         if m.r#type.as_str() == "cgroup2" {
             "cgroup2".to_string()
@@ -888,6 +909,8 @@ fn mount_from(
         }
     }
 
+    log_child!(cfd_log, "mount_from: calling mount: {:?} -> {:?}, d = {:?}", &src, &dest, &d);
+
     mount(
         Some(src.as_str()),
         dest.as_str(),
@@ -914,6 +937,8 @@ fn mount_from(
                 | MsFlags::MS_SLAVE),
         )
     {
+        log_child!(cfd_log, "mount_from: calling mount 2: {:?}", &dest);
+
         mount(
             Some(dest.as_str()),
             dest.as_str(),
@@ -926,6 +951,9 @@ fn mount_from(
             e
         })?;
     }
+
+    log_child!(cfd_log, "mount_from: success");
+
     Ok(())
 }
 
