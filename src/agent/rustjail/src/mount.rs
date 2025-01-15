@@ -251,6 +251,8 @@ pub fn init_rootfs(
                 }
             }
 
+            log_child!(cfd_log, "init_rootfs: calling mount_from: m = {:?}", m);
+
             // mount_from(cfd_log, m, rootfs, flags, &data, label)?;
             if let Err(e) = mount_from(cfd_log, m, rootfs, flags, &data, label) {
                 if m.source != "resolv.conf" {
@@ -264,6 +266,9 @@ pub fn init_rootfs(
             // remount
             if m.r#type == "bind" && !pgflags.is_empty() {
                 let dest = secure_join(rootfs, &m.destination);
+
+                log_child!(cfd_log, "init_rootfs: calling mount: m = {:?}", m);
+
                 if let Err(e) = mount(
                     None::<&str>,
                     dest.as_str(),
