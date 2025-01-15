@@ -171,8 +171,7 @@ pub struct AgentService {
 }
 
 impl AgentService {
-    async fn adjust_mounts(&self, _oci: &mut Spec) {
-        /*
+    async fn adjust_mounts(&self, oci: &mut Spec) {
         for mount in &mut oci.mounts {
             if mount.source == "resolv.conf" {
                 let s = self.sandbox.lock().await;
@@ -185,7 +184,6 @@ impl AgentService {
                 return;
             }
         }
-        */
     }
 
     #[instrument]

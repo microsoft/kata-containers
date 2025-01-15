@@ -255,7 +255,7 @@ pub fn init_rootfs(
 
             // mount_from(cfd_log, m, rootfs, flags, &data, label)?;
             if let Err(e) = mount_from(cfd_log, m, rootfs, flags, &data, label) {
-                if m.source != "resolv.conf" {
+                if !m.source.contains("resolv.conf") {
                     return Err(anyhow!("init_rootfs: mount_from error: {:?}", e));
                 }
             }
@@ -792,10 +792,12 @@ fn mount_from(
 ) -> Result<()> {
     log_child!(cfd_log, "mount_from: m = {:?}, rootfs = {}", m, rootfs);
 
-    let mut source = m.source.clone();
+    let source = m.source.clone();
+    /*
     if source == "resolv.conf" {
         source = rootfs.to_string() + "../resolv.conf";
     }
+    */
 
     let mut d = String::from(data);
     let dest = secure_join(rootfs, &m.destination);
