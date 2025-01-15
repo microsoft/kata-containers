@@ -171,6 +171,21 @@ pub struct AgentService {
 }
 
 impl AgentService {
+    async fn adjust_mounts(&self, oci: &mut Spec) {
+        for mount in &mut oci.mounts {
+            if mount.source == "resolv.conf" {
+                let s = self.sandbox.lock().await;
+                mount.source = "/run/kata-containers/shared/containers/"
+                    .to_string()
+                    + &s.id
+                    + "/resolv.conf";
+
+                info!(sl(), "adjust_mounts: source {}, destination {}", &mount.source, &mount.destination);
+                return;
+            }
+        }
+    }
+
     #[instrument]
     async fn do_create_container(
         &self,
@@ -191,6 +206,7 @@ impl AgentService {
             }
         };
 
+        self.adjust_mounts(&mut oci).await;
         let container_name = k8s::container_name(&oci);
 
         info!(sl(), "receive createcontainer, spec: {:?}", &oci);
@@ -656,7 +672,7 @@ impl AgentService {
                 }
             }
         }
-    
+
         let mut tmpfile = path.clone();
         tmpfile.set_extension("tmp");
 
