@@ -74,6 +74,8 @@ pub fn baremount(
 ) -> Result<()> {
     let logger = logger.new(o!("subsystem" => "baremount"));
 
+    info!(logger, "baremount: source = {:?}, destination = {:?}", &source, &destination);
+
     if source.as_os_str().is_empty() {
         return Err(anyhow!("need mount source"));
     }
@@ -131,6 +133,8 @@ pub fn is_mounted(mount_point: &str) -> Result<bool> {
 
 #[instrument]
 fn mount_to_rootfs(logger: &Logger, m: &InitMount) -> Result<()> {
+    info!(logger, "mount_to_rootfs: m = {:?}", m);
+
     fs::create_dir_all(m.dest).context("could not create directory")?;
 
     let (flags, options) = parse_mount_options(&m.options)?;
