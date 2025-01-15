@@ -171,6 +171,8 @@ pub fn init_rootfs(
     lazy_static::initialize(&PROPAGATION);
     lazy_static::initialize(&LINUXDEVICETYPE);
 
+    log_child!(cfd_log, "init_rootfs: bind_device = {}", bind_device);
+
     let linux = &spec
         .linux
         .as_ref()
@@ -210,6 +212,8 @@ pub fn init_rootfs(
 
     let mut bind_mount_dev = false;
     for m in &spec.mounts {
+        log_child!(cfd_log, "init_rootfs: m = {:?}", m);
+
         let (mut flags, pgflags, data) = parse_mount(m);
         if !m.destination.starts_with('/') || m.destination.contains("..") {
             return Err(anyhow!(
@@ -771,6 +775,13 @@ fn mount_from(
     data: &str,
     label: &str,
 ) -> Result<()> {
+    log_child!(
+        cfd_log,
+        "mount_from: m = {:?}, rootfs = {}",
+        m,
+        rootfs
+    );
+
     let mut d = String::from(data);
     let dest = secure_join(rootfs, &m.destination);
 
