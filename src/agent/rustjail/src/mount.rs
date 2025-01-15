@@ -251,20 +251,30 @@ pub fn init_rootfs(
                 }
             }
 
-            mount_from(cfd_log, m, rootfs, flags, &data, label)?;
+            // mount_from(cfd_log, m, rootfs, flags, &data, label)?;
+            if let Err(e) = mount_from(cfd_log, m, rootfs, flags, &data, label) {
+                if m.source != "resolv.conf" {
+                    return Err(anyhow!("init_rootfs: mount_from error: {:?}", e));
+                }
+            }
+
             // bind mount won't change mount options, we need remount to make mount options
             // effective.
             // first check that we have non-default options required before attempting a
             // remount
             if m.r#type == "bind" && !pgflags.is_empty() {
                 let dest = secure_join(rootfs, &m.destination);
-                mount(
+                if let Err(e) = mount(
                     None::<&str>,
                     dest.as_str(),
                     None::<&str>,
                     pgflags,
                     None::<&str>,
-                )?;
+                ) {
+                    if m.source != "resolv.conf" {
+                        return Err(anyhow!("init_rootfs: mount error: {:?}", e));
+                    }
+                }
             }
         }
     }
@@ -775,12 +785,7 @@ fn mount_from(
     data: &str,
     label: &str,
 ) -> Result<()> {
-    log_child!(
-        cfd_log,
-        "mount_from: m = {:?}, rootfs = {}",
-        m,
-        rootfs
-    );
+    log_child!(cfd_log, "mount_from: m = {:?}, rootfs = {}", m, rootfs);
 
     let mut source = m.source.clone();
     if source == "resolv.conf" {
