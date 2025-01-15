@@ -782,11 +782,17 @@ fn mount_from(
         rootfs
     );
 
+    let mut source = m.source.clone();
+    if source == "resolv.conf" {
+        source = rootfs.to_string() + "../resolv.conf";
+    }
+
     let mut d = String::from(data);
     let dest = secure_join(rootfs, &m.destination);
 
     let src = if m.r#type.as_str() == "bind" {
-        let src = fs::canonicalize(m.source.as_str())?;
+        // let src = fs::canonicalize(m.source.as_str())?;
+        let src = fs::canonicalize(&source)?;
         let dir = if src.is_dir() {
             Path::new(&dest)
         } else {
@@ -825,7 +831,8 @@ fn mount_from(
         if m.r#type.as_str() == "cgroup2" {
             "cgroup2".to_string()
         } else {
-            let tmp = PathBuf::from(&m.source);
+            // let tmp = PathBuf::from(&m.source);
+            let tmp = PathBuf::from(&source);
             tmp.to_str().unwrap().to_string()
         }
     };
@@ -839,11 +846,14 @@ fn mount_from(
     let mut use_xattr = false;
     if !label.is_empty() {
         if selinux::is_enabled()? {
-            let device = Path::new(&m.source)
+            // let device = Path::new(&m.source)
+            let device = Path::new(&source)
                 .file_name()
-                .ok_or_else(|| anyhow!("invalid device source path: {}", &m.source))?
+                // .ok_or_else(|| anyhow!("invalid device source path: {}", &m.source))?
+                .ok_or_else(|| anyhow!("invalid device source path: {}", &source))?
                 .to_str()
-                .ok_or_else(|| anyhow!("failed to convert device source path: {}", &m.source))?;
+                // .ok_or_else(|| anyhow!("failed to convert device source path: {}", &m.source))?;
+                .ok_or_else(|| anyhow!("failed to convert device source path: {}", &source))?;
 
             match device {
                 // SELinux does not support labeling of /proc or /sys
