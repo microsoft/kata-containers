@@ -172,11 +172,17 @@ pub struct AgentService {
 
 impl AgentService {
     async fn adjust_mounts(&self, oci: &mut Spec) {
+        let file_types = [
+            "resolv.conf", 
+            "etc-hosts",
+        ];
+
         for mount in &mut oci.mounts {
-            // DMFIX: file type matching.
-            if !mount.source.starts_with('/') {
-                mount.source = "/run/kata-containers/shared/containers/".to_string() + &mount.source;
-                info!(sl(), "adjust_mounts: source {}, destination {}", &mount.source, &mount.destination);
+            for file_type in file_types {
+                if mount.source == file_type {
+                    mount.source = "/run/kata-containers/shared/containers/".to_string() + file_type;
+                    info!(sl(), "adjust_mounts: source {}, destination {}", &mount.source, &mount.destination);
+                }
             }
         }
     }
