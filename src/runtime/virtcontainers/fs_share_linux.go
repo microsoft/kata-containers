@@ -9,9 +9,9 @@ package virtcontainers
 
 import (
 	"context"
-	//"encoding/hex"
+	"encoding/hex"
 	"fmt"
-	//"io/fs"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,7 +20,7 @@ import (
 	"syscall"
 
 	"github.com/fsnotify/fsnotify"
-	//"github.com/pkg/errors"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/config"
@@ -28,7 +28,7 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/agent/protocols/grpc"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/annotations"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
-	//"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
+	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
 )
 
 // Splitting Regex pattern:
@@ -268,7 +268,6 @@ func (f *FilesystemShare) Cleanup(ctx context.Context) error {
 	return nil
 }
 
-/*
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
 	randBytes, err := utils.GenerateRandomBytes(8)
 	if err != nil {
@@ -417,7 +416,6 @@ func (f *FilesystemShare) UnshareFile(ctx context.Context, c *Container, m *Moun
 
 	return nil
 }
-*/
 
 func (f *FilesystemShare) shareRootFilesystemWithNydus(ctx context.Context, c *Container) (*SharedFile, error) {
 	rootfsGuestPath := filepath.Join(kataGuestSharedDir(), c.id, c.rootfsSuffix)
@@ -794,11 +792,12 @@ func (f *FilesystemShare) StartFileEventWatcher(ctx context.Context) error {
 	}
 }
 
+/*
 func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 	f.Logger().WithField("src", src).WithField("dst", dst).WithField("oldtsDir", oldtsDir).Debug("copyUpdatedFiles")
 	return nil
 }
-/*
+*/
 func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 	f.Logger().Infof("copyUpdatedFiles: Copy src:%s to dst:%s from old src:%s", src, dst, oldtsDir)
 
@@ -898,7 +897,6 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 
 	return nil
 }
-*/
 
 func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 
@@ -907,6 +905,7 @@ func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 
 }
 
+/*
 const (
 	fileUnknown string = "unknown"
 	fileResolvConf string = "resolv.conf"
@@ -958,3 +957,4 @@ func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, m *Mount,
 
 	return nil
 }
+*/

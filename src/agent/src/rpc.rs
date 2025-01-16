@@ -171,6 +171,7 @@ pub struct AgentService {
 }
 
 impl AgentService {
+    /*
     async fn adjust_mounts(&self, oci: &mut Spec) {
         for mount in &mut oci.mounts {
             if mount.source == "resolv.conf" {
@@ -185,6 +186,7 @@ impl AgentService {
             }
         }
     }
+    */
 
     #[instrument]
     async fn do_create_container(
@@ -206,7 +208,7 @@ impl AgentService {
             }
         };
 
-        self.adjust_mounts(&mut oci).await;
+        // self.adjust_mounts(&mut oci).await;
         let container_name = k8s::container_name(&oci);
 
         info!(sl(), "receive createcontainer, spec: {:?}", &oci);
