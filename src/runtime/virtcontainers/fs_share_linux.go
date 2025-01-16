@@ -907,10 +907,8 @@ func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 
 }
 
-const (
-	fileUnknown string = "unknown"
-	fileResolvConf string = "resolv.conf"
-)
+var fileTypes = [2]string{"resolv.conf", "etc-hosts"}
+var fileTypeUnknown string = "unknown"
 
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
 	f.Logger().WithField("m", m).Debug("ShareFile")
@@ -918,15 +916,13 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 	fileType := f.getFileType(m.Source)
 	f.Logger().Debugf("File %s type %s", m.Source, fileType)
 
-	switch {
-	case fileType == fileResolvConf:
+	if fileType != fileTypeUnknown {
 		f.shareFile(ctx, c, m, fileType)
 		return &SharedFile{
 			guestPath: fileType,
 		}, nil
-
-	default:
-		f.Logger().Debugf("Ignoring file %s", m.Source)
+	} else {
+		f.Logger().Errorf("Ignoring file %s", m.Source)
 	}
 
 	return nil, nil
@@ -938,10 +934,12 @@ func (f *FilesystemShare) UnshareFile(ctx context.Context, c *Container, m *Moun
 }
 
 func (f *FilesystemShare) getFileType(filePath string) (string) {
-	if strings.HasSuffix(filePath, "resolv.conf") {
-		return fileResolvConf
+	for _, fileType := range fileTypes {
+		if strings.HasSuffix(filePath, fileType) {
+			return fileType;
+		}
 	}
-	return fileUnknown
+	return fileTypeUnknown
 }
 
 func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, m *Mount, fileType string) (error) {
