@@ -146,7 +146,7 @@ fn main() -> io::Result<()> {
         unmounter.0.push(n);
     }
 
-    // Mont the overlay if we have multiple layers, otherwise do a bind-mount.
+    // Mount the overlay if we have multiple layers, otherwise do a bind-mount.
     let mp = std::fs::canonicalize(&args.directory)?;
     if unmounter.0.len() == 1 {
         let p = unmounter.1.path().join(unmounter.0.first().unwrap());
@@ -165,23 +165,25 @@ fn main() -> io::Result<()> {
         let saved = std::env::current_dir()?;
         set_current_dir(unmounter.1.path())?;
 
-        let status = Command::new("mount")
-            .arg("none")
-            .arg(&mp)
-            .args(&[
-                "-t",
-                "overlay",
-                "-o",
-                &format!("lowerdir={}", unmounter.0.join(":")),
-            ])
-            .status()?;
-        if !status.success() {
-            return Err(Error::new(
+        let lowerdirs = unmounter.0.join(":");
+        let opts = format!("lowerdir={}", lowerdirs);
+    
+        // Replace the mount(8) tool with nix::mount to address the limitation of FSCONFIG_SET_STRING,
+        // which has a 256-byte limit and cannot accommodate multiple lowerdir entries.
+        nix::mount::mount(
+            Some("overlay"),
+            &mp,
+            Some("overlay"),
+            nix::mount::MsFlags::empty(),
+            Some(opts.as_str()),
+        )
+        .map_err(|e| {
+            Error::new(
                 ErrorKind::Other,
-                format!("failed to mount overlay: {status}"),
-            ));
-        }
-
+                format!("failed to mount overlay to {}: {}", mp.display(), e),
+            )
+        })?;
+    
         set_current_dir(saved)?;
     }
 
