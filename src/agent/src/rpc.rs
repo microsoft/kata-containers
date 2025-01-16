@@ -174,12 +174,15 @@ impl AgentService {
     async fn adjust_mounts(&self, oci: &mut Spec) {
         for mount in &mut oci.mounts {
             if mount.source == "resolv.conf" {
+                /*
                 let s = self.sandbox.lock().await;
+
                 mount.source = "/run/kata-containers/shared/containers/"
                     .to_string()
                     + &s.id
                     + "/resolv.conf";
-
+                */
+                mount.source = "/run/kata-containers/shared/containers/resolv.conf".to_string();
                 info!(sl(), "adjust_mounts: source {}, destination {}", &mount.source, &mount.destination);
                 return;
             }
@@ -651,8 +654,8 @@ impl AgentService {
         // TODO: validate the format of req.type_.
 
         let path_string = "/run/kata-containers/shared/containers/".to_string()
-            + &self.sandbox.lock().await.id.clone()
-            + "/"
+            // + &self.sandbox.lock().await.id.clone()
+            // + "/"
             + &req.type_;
         let path = PathBuf::from(path_string);
         info!(
