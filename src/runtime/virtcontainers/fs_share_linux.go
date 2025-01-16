@@ -907,7 +907,8 @@ func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 
 }
 
-var fileTypes = [2]string{"resolv.conf", "etc-hosts"}
+var fileTypes = [3]string{"resolv.conf", "etc-hosts", "hostname"}
+
 var fileTypeUnknown string = "unknown"
 
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
@@ -922,7 +923,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 			guestPath: fileType,
 		}, nil
 	} else {
-		f.Logger().Errorf("Ignoring file %s", m.Source)
+		f.Logger().Errorf("ShareFile: Ignoring file %s", m.Source)
 	}
 
 	return nil, nil

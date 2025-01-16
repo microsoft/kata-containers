@@ -175,6 +175,7 @@ impl AgentService {
         let file_types = [
             "resolv.conf", 
             "etc-hosts",
+            "hostname",
         ];
 
         for mount in &mut oci.mounts {
