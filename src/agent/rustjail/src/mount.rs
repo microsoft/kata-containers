@@ -278,7 +278,7 @@ pub fn init_rootfs(
                     pgflags,
                     None::<&str>,
                 ) {
-                    if m.source != "resolv.conf" {
+                    if !m.source.contains("resolv.conf") {
                         return Err(anyhow!("init_rootfs: mount error: {:?}", e));
                     } else {
                         log_child!(cfd_log, "init_rootfs: mount failed: {:?}", e);
@@ -797,12 +797,6 @@ fn mount_from(
     log_child!(cfd_log, "mount_from: m = {:?}, rootfs = {}", m, rootfs);
 
     let source = m.source.clone();
-    /*
-    if source == "resolv.conf" {
-        source = rootfs.to_string() + "../resolv.conf";
-    }
-    */
-
     let mut d = String::from(data);
     let dest = secure_join(rootfs, &m.destination);
 
