@@ -176,6 +176,7 @@ impl AgentService {
             "resolv.conf", 
             "etc-hosts",
             "hostname",
+            "termination-log",
         ];
 
         for mount in &mut oci.mounts {
