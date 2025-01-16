@@ -910,6 +910,7 @@ func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 var fileTypes = [3]string{"resolv.conf", "etc-hosts", "hostname"}
 
 var fileTypeUnknown string = "unknown"
+var fileTypeTerminationLog string = "termination-log"
 
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
 	f.Logger().WithField("m", m).Debug("ShareFile")
@@ -940,6 +941,16 @@ func (f *FilesystemShare) getFileType(filePath string) (string) {
 			return fileType;
 		}
 	}
+
+	fi, err := os.Stat(filePath)
+	if err == nil {
+		if !fi.IsDir() && fi.Size() == 0 {
+			return fileTypeTerminationLog
+		}
+	} else {
+		f.Logger().WithField("filePath", filePath).Debug("getFileType: Stat failed: %v", err)
+	}
+
 	return fileTypeUnknown
 }
 
