@@ -1,8 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::{Result};
 use base64::prelude::{Engine, BASE64_STANDARD};
 use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
-use log::{debug, info, trace, error};
+use log::{debug, info, trace, error, warn};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::{collections::HashMap, fs, fs::OpenOptions, io, io::Seek, os::unix::ffi::OsStrExt};
@@ -247,6 +247,81 @@ impl TarDevSnapshotter {
         }
     }
 
+    /// Fetches and processes an image layer.
+    ///
+    /// Downloads the layer, decompresses it if needed, appends a tar index,
+    /// and generates a dm-verity tree. Prepares the layer for use in the snapshotter.
+    async fn fetch_and_process_layer(
+        &self,
+        upstream_name: PathBuf,
+        base_name: PathBuf,
+        digest_str: &str,
+        layer_type: &str,
+    ) -> Result<String, Status> {
+        let layer_type = layer_type.to_string(); // Clone `layer_type` into an owned `String`
+    
+        info!("Fetching {} layer image to {:?}", layer_type, upstream_name);
+    
+        // Fetch the layer image
+        self.get_layer_image(&upstream_name, digest_str).await.map_err(|download_err| {
+            error!("Failed to fetch layer image: {:?}", download_err);
+            Status::unknown(format!("Failed to fetch layer image: {:?}", download_err))
+        })?;
+    
+        // Process the layer
+        let process_result = tokio::task::spawn_blocking({
+            let upstream_name = upstream_name.clone();
+            let base_name = base_name.clone();
+            let layer_type = layer_type.clone(); // Move `layer_type` into the closure
+    
+            move || -> Result<String, anyhow::Error> {
+                if layer_type == TAR_EXTENSION {
+                    info!("Renaming {:?} to {:?}", &upstream_name, &base_name);
+                    std::fs::rename(&upstream_name, &base_name)?;
+                }
+                let mut file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .truncate(layer_type == TAR_GZ_EXTENSION)
+                    .open(&base_name)?;
+                if layer_type == TAR_GZ_EXTENSION {
+                    info!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
+                    let compressed = fs::File::open(&upstream_name).map_err(|e| {
+                        anyhow::anyhow!(format!(
+                            "Failed to open file {:?} for decompression: {:?}",
+                            &upstream_name, e
+                        ))
+                    })?;
+                    let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
+    
+                    if let Err(e) = std::io::copy(&mut gz_decoder, &mut file) {
+                        return Err(anyhow::anyhow!(format!("Failed to copy payload from gz decoder: {:?}", e)));
+                    }
+                }
+    
+                trace!("Appending index to {:?}", &base_name);
+                file.rewind()?;
+                tarindex::append_index(&mut file)?;
+    
+                trace!("Appending dm-verity tree to {:?}", &base_name);
+                let root_hash = verity::append_tree::<Sha256>(&mut file)?;
+    
+                trace!("Root hash for {:?} is {:x}", &base_name, root_hash);
+                Ok(format!("{:x}", root_hash))
+            }
+        })
+        .await
+        .map_err(|e| Status::unknown(format!("Error in worker task: {:?}", e)))?;
+    
+        process_result.map_err(|e| {
+            Status::unknown(format!(
+                "Failed to process layer: {:?}",
+                e
+            ))
+        })
+    }
+
     /// Creates a new snapshot for an image layer.
     ///
     /// It downloads, decompresses, and creates the index for the layer before writing the new
@@ -265,17 +340,13 @@ impl TarDevSnapshotter {
         {
             let Some(digest_str) = labels.get(TARGET_LAYER_DIGEST_LABEL) else {
                 error!("missing target layer digest label");
-                return Err(Status::invalid_argument(
-                    "missing target layer digest label",
-                ));
+                return Err(Status::invalid_argument("missing target layer digest label"));
             };
 
             // Determine image layer media type
             let Some(media_type) = labels.get(TARGET_LAYER_MEDIA_TYPE_LABEL) else {
                 error!("missing target layer media type label");
-                return Err(Status::invalid_argument(
-                    "missing target layer media type label",
-                ));
+                return Err(Status::invalid_argument("missing target layer media type label"));
             };
             trace!("layer digest {} media_type: {:?}", digest_str, media_type);
 
@@ -295,46 +366,39 @@ impl TarDevSnapshotter {
 
             let upstream_name = base_name.with_extension(layer_type);
 
-            trace!("Fetching {} layer image to {:?}", layer_type, upstream_name);
-            self.get_layer_image(&upstream_name, digest_str).await?;
-
-            // Process the layer
-            let root_hash = tokio::task::spawn_blocking(move || -> Result<_> {
-                if layer_type == TAR_EXTENSION {
-                    trace!("Renaming {:?} to {:?}", &upstream_name, &base_name);
-                    std::fs::rename(&upstream_name, &base_name)?;
+            // Retry logic to handle occasional transient errors during image layer extraction,
+            // such as "UnexpectedEof" errors observed in gzip decompression. These issues may
+            // be due to incomplete reads or temporary network failures. While the root cause
+            // is unclear, this provides resilience. Be mindful of containerd's operation deadlines.
+            const MAX_RETRIES: usize = 3;
+            const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500); // 500ms delay
+            let mut retries = 0;
+            let root_hash = loop {
+                match self
+                    .fetch_and_process_layer(upstream_name.clone(), base_name.clone(), digest_str, layer_type)
+                    .await
+                {
+                    Ok(root_hash) => break root_hash, // Success; exit loop with root_hash
+                    Err(err) => {
+                        retries += 1;
+                        error!(
+                            "Failed to fetch/process layer (attempt {}/{}): {:?}",
+                            retries, MAX_RETRIES, err
+                        );
+                        if retries >= MAX_RETRIES {
+                            return Err(Status::unknown(format!(
+                                "Failed to fetch/process layer after {} attempts: {:?}",
+                                MAX_RETRIES, err
+                            )));
+                        }
+                        warn!("Retrying fetch/process layer...");
+                        tokio::time::sleep(RETRY_DELAY).await; // Sleep before retrying
+                    }
                 }
-                let mut file = OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .create(true)
-                    .truncate(layer_type == TAR_GZ_EXTENSION)
-                    .open(&base_name)?;
-                if layer_type == TAR_GZ_EXTENSION {
-                    trace!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
-                    let compressed = fs::File::open(&upstream_name)?;
-                    let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
-                    std::io::copy(&mut gz_decoder, &mut file)
-                        .context("failed to copy payload from gz decoder")?;
-                }
-
-                trace!("Appending index to {:?}", &base_name);
-                file.rewind().context("failed to rewind the file handle")?;
-                tarindex::append_index(&mut file).context("failed to append tar index")?;
-
-                trace!("Appending dm-verity tree to {:?}", &base_name);
-                let root_hash = verity::append_tree::<Sha256>(&mut file)
-                    .context("failed to append verity tree")?;
-
-                trace!("Root hash for {:?} is {:x}", &base_name, root_hash);
-                Ok(root_hash)
-            })
-            .await
-            .map_err(|e| Status::unknown(format!("error in worker task: {e}")))?
-            .map_err(|e| Status::unknown(format!("failed to extract image layer: {e}")))?;
-
+            };
+    
             // Store a label with the root hash so that we can recall it later when mounting.
-            labels.insert(ROOT_HASH_LABEL.into(), format!("{:x}", root_hash));
+            labels.insert(ROOT_HASH_LABEL.into(), root_hash);
         }
 
         // Move file to its final location and write the snapshot.
