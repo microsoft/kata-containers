@@ -173,18 +173,10 @@ pub struct AgentService {
 impl AgentService {
     async fn adjust_mounts(&self, oci: &mut Spec) {
         for mount in &mut oci.mounts {
-            if mount.source == "resolv.conf" {
-                /*
-                let s = self.sandbox.lock().await;
-
-                mount.source = "/run/kata-containers/shared/containers/"
-                    .to_string()
-                    + &s.id
-                    + "/resolv.conf";
-                */
-                mount.source = "/run/kata-containers/shared/containers/resolv.conf".to_string();
+            // DMFIX: file type matching.
+            if !mount.source.starts_with('/') {
+                mount.source = "/run/kata-containers/shared/containers/".to_string() + &mount.source;
                 info!(sl(), "adjust_mounts: source {}, destination {}", &mount.source, &mount.destination);
-                return;
             }
         }
     }
