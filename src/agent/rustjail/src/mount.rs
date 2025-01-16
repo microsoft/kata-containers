@@ -255,11 +255,8 @@ pub fn init_rootfs(
 
             // mount_from(cfd_log, m, rootfs, flags, &data, label)?;
             if let Err(e) = mount_from(cfd_log, m, rootfs, flags, &data, label) {
-                if !m.source.contains("resolv.conf") {
-                    return Err(anyhow!("init_rootfs: mount_from error: {:?}", e));
-                } else {
-                    log_child!(cfd_log, "init_rootfs: mount_from failed: {:?}", e);
-                }
+                log_child!(cfd_log, "init_rootfs: mount_from failed: {:?}", e);
+                return Err(anyhow!("init_rootfs: mount_from error: {:?}", e));
             }
 
             // bind mount won't change mount options, we need remount to make mount options
@@ -269,7 +266,12 @@ pub fn init_rootfs(
             if m.r#type == "bind" && !pgflags.is_empty() {
                 let dest = secure_join(rootfs, &m.destination);
 
-                log_child!(cfd_log, "init_rootfs: calling mount: dest = {:?}, m = {:?}", dest, m);
+                log_child!(
+                    cfd_log,
+                    "init_rootfs: calling mount: dest = {:?}, m = {:?}",
+                    dest,
+                    m
+                );
 
                 if let Err(e) = mount(
                     None::<&str>,
@@ -278,11 +280,8 @@ pub fn init_rootfs(
                     pgflags,
                     None::<&str>,
                 ) {
-                    if !m.source.contains("resolv.conf") {
-                        return Err(anyhow!("init_rootfs: mount error: {:?}", e));
-                    } else {
-                        log_child!(cfd_log, "init_rootfs: mount failed: {:?}", e);
-                    }
+                    log_child!(cfd_log, "init_rootfs: mount failed: {:?}", e);
+                    return Err(anyhow!("init_rootfs: mount error: {:?}", e));
                 }
             }
         }
@@ -903,7 +902,13 @@ fn mount_from(
         }
     }
 
-    log_child!(cfd_log, "mount_from: calling mount: {:?} -> {:?}, d = {:?}", &src, &dest, &d);
+    log_child!(
+        cfd_log,
+        "mount_from: calling mount: {:?} -> {:?}, d = {:?}",
+        &src,
+        &dest,
+        &d
+    );
 
     mount(
         Some(src.as_str()),
