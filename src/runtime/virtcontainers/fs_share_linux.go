@@ -958,11 +958,15 @@ func (f *FilesystemShare) getFileType(filePath string) (string) {
 	}
 
 	if !fi.IsDir() {
+		f.Logger().WithField("filePath", filePath).Debug("getFileType: not a directory")
+
 		if fi.Size() == 0 {
 			return fileTypeTerminationLog
 		}
 	} else if strings.Contains(filePath, fileTypeKubeApiAccess) {
 		return fileTypeKubeApiAccess
+	} else {
+		f.Logger().WithField("filePath", filePath).Debug("getFileType: doesn't contain %s", fileTypeKubeApiAccess)
 	}
 
 	return fileTypeUnknown
