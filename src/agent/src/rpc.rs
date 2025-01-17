@@ -173,17 +173,44 @@ pub struct AgentService {
 impl AgentService {
     async fn adjust_mounts(&self, oci: &mut Spec) {
         let file_types = [
-            "resolv.conf", 
+            "resolv.conf",
             "etc-hosts",
             "hostname",
             "termination-log",
+            "kube-api-access",
         ];
+        let kube_api_access_file_types = ["ca.crt", "namespace", "token"];
+        let c_path = "/run/kata-containers/shared/containers/".to_string();
 
         for mount in &mut oci.mounts {
+            let mut found = false;
+
             for file_type in file_types {
                 if mount.source == file_type {
-                    mount.source = "/run/kata-containers/shared/containers/".to_string() + file_type;
-                    info!(sl(), "adjust_mounts: source {}, destination {}", &mount.source, &mount.destination);
+                    mount.source = c_path.clone() + file_type;
+                    info!(
+                        sl(),
+                        "adjust_mounts: source {}, destination {}",
+                        &mount.source,
+                        &mount.destination
+                    );
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                for file_type in kube_api_access_file_types {
+                    if mount.source == file_type {
+                        mount.source = c_path.clone() + "kube-api-access/" + file_type;
+                        info!(
+                            sl(),
+                            "adjust_mounts: source {}, destination {}",
+                            &mount.source,
+                            &mount.destination
+                        );
+                        break;
+                    }
                 }
             }
         }
@@ -651,12 +678,15 @@ impl AgentService {
     }
 
     async fn do_set_file(&self, req: &SetFileRequest) -> Result<()> {
-        // TODO: validate the format of req.type_.
+        let mut path_string = "/run/kata-containers/shared/containers/".to_string();
+        match req.type_.as_str() {
+            "ca.crt" | "namespace" | "token" => {
+                path_string += "kube-api-access/";
+            }
+            _ => {}
+        }
+        path_string += &req.type_;
 
-        let path_string = "/run/kata-containers/shared/containers/".to_string()
-            // + &self.sandbox.lock().await.id.clone()
-            // + "/"
-            + &req.type_;
         let path = PathBuf::from(path_string);
         info!(
             sl(),
@@ -665,28 +695,38 @@ impl AgentService {
             req.data.as_slice().len()
         );
 
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                let dir = parent.to_path_buf();
-                if let Err(e) = fs::create_dir_all(&dir) {
-                    if e.kind() != std::io::ErrorKind::AlreadyExists {
-                        return Err(e.into());
+        if req.type_ == "kube-api-access" {
+            if let Err(e) = fs::create_dir_all(&path) {
+                if e.kind() != std::io::ErrorKind::AlreadyExists {
+                    error!(sl(), "create_dir_all {:?} failed: {:?}", &path, e);
+                    return Err(e.into());
+                }
+            }
+        } else {
+            if let Some(parent) = path.parent() {
+                if !parent.exists() {
+                    let dir = parent.to_path_buf();
+                    if let Err(e) = fs::create_dir_all(&dir) {
+                        if e.kind() != std::io::ErrorKind::AlreadyExists {
+                            error!(sl(), "create_dir_all {:?} failed: {:?}", &dir, e);
+                            return Err(e.into());
+                        }
                     }
                 }
             }
+
+            let mut tmpfile = path.clone();
+            tmpfile.set_extension("tmp");
+
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&tmpfile)?;
+
+            file.write_all_at(req.data.as_slice(), 0)?;
+            fs::rename(tmpfile, path)?;
         }
-
-        let mut tmpfile = path.clone();
-        tmpfile.set_extension("tmp");
-
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&tmpfile)?;
-
-        file.write_all_at(req.data.as_slice(), 0)?;
-        fs::rename(tmpfile, path)?;
 
         Ok(())
     }

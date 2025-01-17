@@ -909,8 +909,14 @@ func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 
 var fileTypes = [3]string{"resolv.conf", "etc-hosts", "hostname"}
 
-var fileTypeUnknown string = "unknown"
 var fileTypeTerminationLog string = "termination-log"
+
+var fileTypeKubeApiAccess string = "kube-api-access"
+var fileTypeCaCrt string = "ca.crt"
+var fileTypeNamespace string = "namespace"
+var fileTypeToken string = "token"
+
+var fileTypeUnknown string = "unknown"
 
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
 	f.Logger().WithField("m", m).Debug("ShareFile")
@@ -918,13 +924,16 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 	fileType := f.getFileType(m.Source)
 	f.Logger().Debugf("File %s type %s", m.Source, fileType)
 
-	if fileType != fileTypeUnknown {
-		f.shareFile(ctx, c, m, fileType)
+	switch {
+	fileType == fileTypeUnknown:
+		f.Logger().Errorf("ShareFile: Ignoring file %s", m.Source)
+	fileType == fileTypeKubeApiAccess:
+		return f.ShareKubeApiAccess(ctx, c, m)
+	default:
+		f.shareFile(ctx, c, m.Source, fileType)
 		return &SharedFile{
 			guestPath: fileType,
 		}, nil
-	} else {
-		f.Logger().Errorf("ShareFile: Ignoring file %s", m.Source)
 	}
 
 	return nil, nil
@@ -943,28 +952,51 @@ func (f *FilesystemShare) getFileType(filePath string) (string) {
 	}
 
 	fi, err := os.Stat(filePath)
-	if err == nil {
-		if !fi.IsDir() && fi.Size() == 0 {
+	if err != nil {
+		f.Logger().WithField("filePath", filePath).Error("getFileType: Stat failed: %v", err)
+		return fileTypeUnknown
+	}
+
+	if !fi.IsDir() {
+		if fi.Size() == 0 {
 			return fileTypeTerminationLog
 		}
-	} else {
-		f.Logger().WithField("filePath", filePath).Debug("getFileType: Stat failed: %v", err)
+	} else if strings.Contains(filePath, fileTypeKubeApiAccess) {
+		return fileTypeKubeApiAccess
 	}
 
 	return fileTypeUnknown
 }
 
-func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, m *Mount, fileType string) (error) {
-	b, err := os.ReadFile(m.Source)
-	if err != nil {
-		return fmt.Errorf("ReadFile failed %v", err)
+func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, source string, fileType string) (error) {
+	var err error = nil
+	var b = make([]byte, 0)
+
+	if fileType != fileTypeKubeApiAccess {
+		b, err = os.ReadFile(source)
+		if err != nil {
+			f.Logger().WithError(err).WithField("fileType", fileType).Error("shareFile: ReadFile failed")
+			return fmt.Errorf("ReadFile failed %v", err)
+		}
 	}
 
 	err = f.sandbox.agent.setFile(ctx, fileType, b)
 	if err != nil {
-		f.Logger().WithError(err).WithField("fileType", fileType).Error("Failed to send file")
-		return err
+		f.Logger().WithError(err).WithField("fileType", fileType).Error("shareFile: setFile failed")
+		return fmt.Errorf("shareFile: setFile failed: %v", err)
 	}
 
-	return nil
+	return err
+}
+
+func (f *FilesystemShare) ShareKubeApiAccess(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+	f.shareFile(ctx, c, m.Source, fileTypeKubeApiAccess)
+
+	f.shareFile(ctx, c, m.Source + "/" + fileTypeCaCrt, fileTypeCaCrt)
+	f.shareFile(ctx, c, m.Source + "/" + fileTypeNamespace, fileTypeNamespace)
+	f.shareFile(ctx, c, m.Source + "/" + fileTypeToken, fileTypeToken)
+
+	return &SharedFile{
+		guestPath: fileTypeKubeApiAccess,
+	}, nil
 }
