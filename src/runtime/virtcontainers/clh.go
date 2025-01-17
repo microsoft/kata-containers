@@ -73,7 +73,7 @@ const (
 	// Values are mandatory by http API
 	// Values based on:
 	clhTimeout    = 10
-	clhAPITimeout = 1
+	clhAPITimeout = 60
 
 	// TODO: reduce the SEV-SNP Guest boot time.
 	//

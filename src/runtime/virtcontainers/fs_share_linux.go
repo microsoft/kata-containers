@@ -919,10 +919,8 @@ var fileTypeToken string = "token"
 var fileTypeUnknown string = "unknown"
 
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
-	f.Logger().WithField("m", m).Debug("ShareFile")
-
 	fileType := f.getFileType(m.Source)
-	f.Logger().Debugf("File %s type %s", m.Source, fileType)
+	f.Logger().WithField("m", m).WithField("fileType", fileType).Debug("ShareFile")
 
 	switch {
 	case fileType == fileTypeUnknown:
