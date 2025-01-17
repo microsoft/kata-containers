@@ -925,9 +925,9 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 	f.Logger().Debugf("File %s type %s", m.Source, fileType)
 
 	switch {
-	fileType == fileTypeUnknown:
+	case fileType == fileTypeUnknown:
 		f.Logger().Errorf("ShareFile: Ignoring file %s", m.Source)
-	fileType == fileTypeKubeApiAccess:
+	case fileType == fileTypeKubeApiAccess:
 		return f.ShareKubeApiAccess(ctx, c, m)
 	default:
 		f.shareFile(ctx, c, m.Source, fileType)
