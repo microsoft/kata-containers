@@ -55,6 +55,7 @@ default AllowRequestsFailingPolicy := false
 S_NAME_KEY = "io.kubernetes.cri.sandbox-name"
 S_NAMESPACE_KEY = "io.kubernetes.cri.sandbox-namespace"
 BUNDLE_ID = "[a-z0-9]{64}"
+NODE_NAME = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 
 CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # Check if the input request should be rejected even before checking the
@@ -656,6 +657,26 @@ allow_args(p_process, i_process, s_name) {
 
     print("allow_args 2: true")
 }
+
+# Function to extract some token value from i_arg based on p_arg.
+extract_token(i_arg, p_arg, token) = result {
+
+    # Split p_arg into parts before and after token
+    p_arg_split := split(p_arg, token)
+
+    print("extract_token: p_arg_split =", p_arg_split)
+
+    starts_with := startswith(i_arg, p_arg_split[0])
+    ends_with := endswith(i_arg, p_arg_split[1])
+
+    starts_with
+    ends_with
+
+    # Remove the prefix and suffix from i_arg to get the token value
+    result := trim_prefix(trim_suffix(i_arg, p_arg_split[1]), p_arg_split[0])
+    print("extract_token: result =", result)
+}
+
 allow_arg(i, i_arg, p_process, s_name) {
     p_arg := p_process.Args[i]
     print("allow_arg 1: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
@@ -669,8 +690,12 @@ allow_arg(i, i_arg, p_process, s_name) {
     p_arg := p_process.Args[i]
     print("allow_arg 2: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
 
-    # TODO: can $(node-name) be handled better?
     contains(p_arg, "$(node-name)")
+
+    node_name = extract_token(i_arg, p_arg, "$(node-name)")
+    print("allow_arg 2: node_name =", node_name)
+
+    regex.match(NODE_NAME, node_name)
 
     print("allow_arg 2: true")
 }
