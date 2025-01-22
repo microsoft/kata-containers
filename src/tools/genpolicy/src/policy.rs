@@ -194,10 +194,16 @@ pub struct KataLinux {
     pub Namespaces: Vec<KataLinuxNamespace>,
 
     /// MaskedPaths masks over the provided paths inside the container.
+    #[serde(default)]
     pub MaskedPaths: Vec<String>,
 
     /// ReadonlyPaths sets the provided paths as RO inside the container.
+    #[serde(default)]
     pub ReadonlyPaths: Vec<String>,
+
+    /// Sysctls contains sysctls to be applied inside the container.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub Sysctl: BTreeMap<String, String>,
 }
 
 /// OCI container LinuxNamespace struct. This struct is similar to the LinuxNamespace
@@ -594,6 +600,11 @@ impl AgentPolicy {
             resource.use_sandbox_pidns()
         };
         let exec_commands = yaml_container.get_exec_commands();
+
+        linux.Sysctl.extend(c_settings.Linux.Sysctl.clone());
+        for sysctl in resource.get_sysctls() {
+            linux.Sysctl.insert(sysctl.name, sysctl.value);
+        }
 
         ContainerPolicy {
             OCI: KataSpec {
