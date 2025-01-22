@@ -91,7 +91,6 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     ops := concat_op_if_not_null(ops_builder1, add_namespace_to_state)
 
     print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
-    p_oci.Version == i_oci.Version
 
     print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
     p_oci.Root.Readonly == i_oci.Root.Readonly
