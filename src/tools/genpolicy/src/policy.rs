@@ -74,6 +74,9 @@ pub struct PolicyData {
     /// Settings read from genpolicy-settings.json, related directly to each
     /// kata agent endpoint, that get added to the output policy.
     pub request_defaults: RequestDefaults,
+
+    /// Policy Document version
+    pub version: kata_agent_policy::policy::PolicyDocumentVersion,
 }
 
 /// OCI Container spec. This struct is very similar to the Spec struct from
@@ -560,6 +563,7 @@ impl AgentPolicy {
             request_defaults: self.settings.request_defaults.clone(),
             common: self.settings.common.clone(),
             sandbox: self.settings.sandbox.clone(),
+            version: kata_agent_policy::policy::PolicyDocumentVersion::V1,
         };
 
         let json_data = serde_json::to_string_pretty(&policy_data).unwrap();
