@@ -60,6 +60,7 @@ readonly -a systemd_units=(
 	"systemd-journald"
 	"systemd-journald@"
 	"systemd-journald-audit"
+	"systemd-journald@"
 	"systemd-journald-dev-log"
 	"systemd-logind"
 	"systemd-network-generator"
