@@ -1,0 +1,432 @@
+{
+    "OCI": {
+        "Annotations": {
+            "io.katacontainers.pkg.oci.bundle_path": "/run/containerd/io.containerd.runtime.v2.task/k8s.io/busybox",
+            "io.katacontainers.pkg.oci.container_type": "pod_container",
+            "io.kubernetes.cri.container-name": "busybox",
+            "io.kubernetes.cri.container-type": "container",
+            "io.kubernetes.cri.image-name": "mcr.microsoft.com/aks/e2e/library-busybox:master.220314.1-linux-amd64",
+            "io.kubernetes.cri.sandbox-id": "7f2aceaac878f82b8b7d3a2ab4ce4df4069a241f7b896adf57c3dec47a2dd6e9",
+            "io.kubernetes.cri.sandbox-name": "exec-test",
+            "io.kubernetes.cri.sandbox-namespace": "default",
+            "io.kubernetes.cri.sandbox-uid": "2db86c40-86b1-48c4-9079-1d6cffed8f24"
+        },
+        "Hooks": null,
+        "Hostname": "",
+        "Linux": {
+            "CgroupsPath": "/kubepods/besteffort/pod2db86c40-86b1-48c4-9079-1d6cffed8f24/busybox",
+            "Devices": [],
+            "GIDMappings": [],
+            "IntelRdt": null,
+            "MaskedPaths": [],
+            "MountLabel": "",
+            "Namespaces": [
+                {
+                    "Path": "",
+                    "Type": "ipc"
+                },
+                {
+                    "Path": "",
+                    "Type": "uts"
+                },
+                {
+                    "Path": "",
+                    "Type": "mount"
+                }
+            ],
+            "ReadonlyPaths": [],
+            "Resources": {
+                "BlockIO": null,
+                "CPU": {
+                    "Cpus": "",
+                    "Mems": "",
+                    "Period": 100000,
+                    "Quota": 0,
+                    "RealtimePeriod": 0,
+                    "RealtimeRuntime": 0,
+                    "Shares": 2
+                },
+                "Devices": [],
+                "HugepageLimits": [],
+                "Memory": {
+                    "DisableOOMKiller": false,
+                    "Kernel": 0,
+                    "KernelTCP": 0,
+                    "Limit": 0,
+                    "Reservation": 0,
+                    "Swap": 0,
+                    "Swappiness": 0
+                },
+                "Network": null,
+                "Pids": null
+            },
+            "RootfsPropagation": "",
+            "Seccomp": null,
+            "Sysctl": {},
+            "UIDMappings": []
+        },
+        "Mounts": [
+            {
+                "destination": "/proc",
+                "options": [
+                    "nosuid",
+                    "noexec",
+                    "nodev"
+                ],
+                "source": "proc",
+                "type_": "proc"
+            },
+            {
+                "destination": "/dev",
+                "options": [
+                    "nosuid",
+                    "strictatime",
+                    "mode=755",
+                    "size=65536k"
+                ],
+                "source": "tmpfs",
+                "type_": "tmpfs"
+            },
+            {
+                "destination": "/dev/pts",
+                "options": [
+                    "nosuid",
+                    "noexec",
+                    "newinstance",
+                    "ptmxmode=0666",
+                    "mode=0620",
+                    "gid=5"
+                ],
+                "source": "devpts",
+                "type_": "devpts"
+            },
+            {
+                "destination": "/dev/mqueue",
+                "options": [
+                    "nosuid",
+                    "noexec",
+                    "nodev"
+                ],
+                "source": "mqueue",
+                "type_": "mqueue"
+            },
+            {
+                "destination": "/sys",
+                "options": [
+                    "nosuid",
+                    "noexec",
+                    "nodev",
+                    "rw"
+                ],
+                "source": "sysfs",
+                "type_": "sysfs"
+            },
+            {
+                "destination": "/sys/fs/cgroup",
+                "options": [
+                    "nosuid",
+                    "noexec",
+                    "nodev",
+                    "relatime",
+                    "rw"
+                ],
+                "source": "cgroup",
+                "type_": "cgroup"
+            },
+            {
+                "destination": "/etc/hosts",
+                "options": [
+                    "rbind",
+                    "rprivate",
+                    "rw"
+                ],
+                "source": "/run/kata-containers/shared/containers/busybox-cb28fade573ec3a0-hosts",
+                "type_": "bind"
+            },
+            {
+                "destination": "/dev/termination-log",
+                "options": [
+                    "rbind",
+                    "rprivate",
+                    "rw"
+                ],
+                "source": "/run/kata-containers/shared/containers/busybox-c83ba1879ef479d4-termination-log",
+                "type_": "bind"
+            },
+            {
+                "destination": "/etc/hostname",
+                "options": [
+                    "rbind",
+                    "rprivate",
+                    "rw"
+                ],
+                "source": "/run/kata-containers/shared/containers/busybox-6a0fca3eff31f646-hostname",
+                "type_": "bind"
+            },
+            {
+                "destination": "/etc/resolv.conf",
+                "options": [
+                    "rbind",
+                    "rprivate",
+                    "rw"
+                ],
+                "source": "/run/kata-containers/shared/containers/busybox-35127de2b7536709-resolv.conf",
+                "type_": "bind"
+            },
+            {
+                "destination": "/dev/shm",
+                "options": [
+                    "rbind"
+                ],
+                "source": "/run/kata-containers/sandbox/shm",
+                "type_": "bind"
+            },
+            {
+                "destination": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "options": [
+                    "rbind",
+                    "rprivate",
+                    "ro"
+                ],
+                "source": "/run/kata-containers/shared/containers/busybox-5dbf4171c7e040cb-serviceaccount",
+                "type_": "bind"
+            }
+        ],
+        "Process": {
+            "ApparmorProfile": "",
+            "Args": [
+                "/bin/sh",
+                "-c",
+                "while true; do echo Kubernetes; echo aks-nodepool1-40948945-vmss000000; sleep 10; done"
+            ],
+            "Capabilities": {
+                "Ambient": [],
+                "Bounding": [
+                    "CAP_CHOWN",
+                    "CAP_DAC_OVERRIDE",
+                    "CAP_DAC_READ_SEARCH",
+                    "CAP_FOWNER",
+                    "CAP_FSETID",
+                    "CAP_KILL",
+                    "CAP_SETGID",
+                    "CAP_SETUID",
+                    "CAP_SETPCAP",
+                    "CAP_LINUX_IMMUTABLE",
+                    "CAP_NET_BIND_SERVICE",
+                    "CAP_NET_BROADCAST",
+                    "CAP_NET_ADMIN",
+                    "CAP_NET_RAW",
+                    "CAP_IPC_LOCK",
+                    "CAP_IPC_OWNER",
+                    "CAP_SYS_MODULE",
+                    "CAP_SYS_RAWIO",
+                    "CAP_SYS_CHROOT",
+                    "CAP_SYS_PTRACE",
+                    "CAP_SYS_PACCT",
+                    "CAP_SYS_ADMIN",
+                    "CAP_SYS_BOOT",
+                    "CAP_SYS_NICE",
+                    "CAP_SYS_RESOURCE",
+                    "CAP_SYS_TIME",
+                    "CAP_SYS_TTY_CONFIG",
+                    "CAP_MKNOD",
+                    "CAP_LEASE",
+                    "CAP_AUDIT_WRITE",
+                    "CAP_AUDIT_CONTROL",
+                    "CAP_SETFCAP",
+                    "CAP_MAC_OVERRIDE",
+                    "CAP_MAC_ADMIN",
+                    "CAP_SYSLOG",
+                    "CAP_WAKE_ALARM",
+                    "CAP_BLOCK_SUSPEND",
+                    "CAP_AUDIT_READ",
+                    "CAP_PERFMON",
+                    "CAP_BPF",
+                    "CAP_CHECKPOINT_RESTORE"
+                ],
+                "Effective": [
+                    "CAP_CHOWN",
+                    "CAP_DAC_OVERRIDE",
+                    "CAP_DAC_READ_SEARCH",
+                    "CAP_FOWNER",
+                    "CAP_FSETID",
+                    "CAP_KILL",
+                    "CAP_SETGID",
+                    "CAP_SETUID",
+                    "CAP_SETPCAP",
+                    "CAP_LINUX_IMMUTABLE",
+                    "CAP_NET_BIND_SERVICE",
+                    "CAP_NET_BROADCAST",
+                    "CAP_NET_ADMIN",
+                    "CAP_NET_RAW",
+                    "CAP_IPC_LOCK",
+                    "CAP_IPC_OWNER",
+                    "CAP_SYS_MODULE",
+                    "CAP_SYS_RAWIO",
+                    "CAP_SYS_CHROOT",
+                    "CAP_SYS_PTRACE",
+                    "CAP_SYS_PACCT",
+                    "CAP_SYS_ADMIN",
+                    "CAP_SYS_BOOT",
+                    "CAP_SYS_NICE",
+                    "CAP_SYS_RESOURCE",
+                    "CAP_SYS_TIME",
+                    "CAP_SYS_TTY_CONFIG",
+                    "CAP_MKNOD",
+                    "CAP_LEASE",
+                    "CAP_AUDIT_WRITE",
+                    "CAP_AUDIT_CONTROL",
+                    "CAP_SETFCAP",
+                    "CAP_MAC_OVERRIDE",
+                    "CAP_MAC_ADMIN",
+                    "CAP_SYSLOG",
+                    "CAP_WAKE_ALARM",
+                    "CAP_BLOCK_SUSPEND",
+                    "CAP_AUDIT_READ",
+                    "CAP_PERFMON",
+                    "CAP_BPF",
+                    "CAP_CHECKPOINT_RESTORE"
+                ],
+                "Inheritable": [],
+                "Permitted": [
+                    "CAP_CHOWN",
+                    "CAP_DAC_OVERRIDE",
+                    "CAP_DAC_READ_SEARCH",
+                    "CAP_FOWNER",
+                    "CAP_FSETID",
+                    "CAP_KILL",
+                    "CAP_SETGID",
+                    "CAP_SETUID",
+                    "CAP_SETPCAP",
+                    "CAP_LINUX_IMMUTABLE",
+                    "CAP_NET_BIND_SERVICE",
+                    "CAP_NET_BROADCAST",
+                    "CAP_NET_ADMIN",
+                    "CAP_NET_RAW",
+                    "CAP_IPC_LOCK",
+                    "CAP_IPC_OWNER",
+                    "CAP_SYS_MODULE",
+                    "CAP_SYS_RAWIO",
+                    "CAP_SYS_CHROOT",
+                    "CAP_SYS_PTRACE",
+                    "CAP_SYS_PACCT",
+                    "CAP_SYS_ADMIN",
+                    "CAP_SYS_BOOT",
+                    "CAP_SYS_NICE",
+                    "CAP_SYS_RESOURCE",
+                    "CAP_SYS_TIME",
+                    "CAP_SYS_TTY_CONFIG",
+                    "CAP_MKNOD",
+                    "CAP_LEASE",
+                    "CAP_AUDIT_WRITE",
+                    "CAP_AUDIT_CONTROL",
+                    "CAP_SETFCAP",
+                    "CAP_MAC_OVERRIDE",
+                    "CAP_MAC_ADMIN",
+                    "CAP_SYSLOG",
+                    "CAP_WAKE_ALARM",
+                    "CAP_BLOCK_SUSPEND",
+                    "CAP_AUDIT_READ",
+                    "CAP_PERFMON",
+                    "CAP_BPF",
+                    "CAP_CHECKPOINT_RESTORE"
+                ]
+            },
+            "ConsoleSize": null,
+            "Cwd": "/",
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "HOSTNAME=exec-test",
+                "POD_NAME=exec-test",
+                "POD_NAMESPACE=default",
+                "POD_IP=10.244.0.19",
+                "PROXY_CONFIG={}\n",
+                "ISTIO_META_CLUSTER_ID=Kubernetes",
+                "SERVICE_ACCOUNT=default",
+                "ISTIO_META_POD_PORTS=[\n]",
+                "ISTIO_META_APP_CONTAINERS=serviceaclient",
+                "ISTIO_META_NODE_NAME=aks-nodepool1-40948945-vmss000000",
+                "KUBERNETES_SERVICE_PORT=443",
+                "KUBERNETES_SERVICE_PORT_HTTPS=443",
+                "KUBERNETES_PORT=tcp://10.0.0.1:443",
+                "KUBERNETES_PORT_443_TCP=tcp://10.0.0.1:443",
+                "KUBERNETES_PORT_443_TCP_PROTO=tcp",
+                "KUBERNETES_PORT_443_TCP_PORT=443",
+                "KUBERNETES_PORT_443_TCP_ADDR=10.0.0.1",
+                "KUBERNETES_SERVICE_HOST=10.0.0.1"
+            ],
+            "NoNewPrivileges": false,
+            "OOMScoreAdj": 1000,
+            "Rlimits": [],
+            "SelinuxLabel": "",
+            "Terminal": false,
+            "User": {
+                "AdditionalGids": [
+                    0,
+                    10
+                ],
+                "GID": 0,
+                "UID": 0,
+                "Username": ""
+            }
+        },
+        "Root": {
+            "Path": "/run/kata-containers/shared/containers/busybox",
+            "Readonly": false
+        },
+        "Solaris": null,
+        "Version": "1.1.0-rc.1",
+        "Windows": null
+    },
+    "container_id": "busybox",
+    "devices": [],
+    "exec_id": "busybox",
+    "sandbox_pidns": false,
+    "shared_mounts": [],
+    "storages": [
+        {
+            "driver": "blk",
+            "driver_options": [],
+            "fs_group": null,
+            "fstype": "tar",
+            "mount_point": "/run/kata-containers/sandbox/layers/2c342a137e693c7898aec36da1047f191dc7c1687e66198adacc439cf4adf379",
+            "options": [
+                "ro",
+                "io.katacontainers.fs-opt.block_device=file",
+                "io.katacontainers.fs-opt.is-layer",
+                "io.katacontainers.fs-opt.root-hash=8568c70c0ccfe0051092e818da769111a59882cd19dd799d3bca5ffa82791080"
+            ],
+            "source": "0001:00:02.0"
+        },
+        {
+            "driver": "blk",
+            "driver_options": [],
+            "fs_group": null,
+            "fstype": "tar",
+            "mount_point": "/run/kata-containers/sandbox/layers/2570e3a19e1bf20ddda45498a9627f61555d2d6c01479b9b76460b679b27d552",
+            "options": [
+                "ro",
+                "io.katacontainers.fs-opt.block_device=file",
+                "io.katacontainers.fs-opt.is-layer",
+                "io.katacontainers.fs-opt.root-hash=b643b6217748983830b26ac14a35a3322dd528c00963eaadd91ef55f513dc73f"
+            ],
+            "source": "0001:00:03.0"
+        },
+        {
+            "driver": "overlayfs",
+            "driver_options": [],
+            "fs_group": null,
+            "fstype": "fuse3.kata-overlay",
+            "mount_point": "/run/kata-containers/shared/containers/busybox",
+            "options": [
+                "io.katacontainers.fs-opt.layer-src-prefix=/var/lib/containerd/io.containerd.snapshotter.v1.tardev/layers",
+                "io.katacontainers.fs-opt.layer=MmMzNDJhMTM3ZTY5M2M3ODk4YWVjMzZkYTEwNDdmMTkxZGM3YzE2ODdlNjYxOThhZGFjYzQzOWNmNGFkZjM3OSx0YXIscm8saW8ua2F0YWNvbnRhaW5lcnMuZnMtb3B0LmJsb2NrX2RldmljZT1maWxlLGlvLmthdGFjb250YWluZXJzLmZzLW9wdC5pcy1sYXllcixpby5rYXRhY29udGFpbmVycy5mcy1vcHQucm9vdC1oYXNoPTg1NjhjNzBjMGNjZmUwMDUxMDkyZTgxOGRhNzY5MTExYTU5ODgyY2QxOWRkNzk5ZDNiY2E1ZmZhODI3OTEwODA=",
+                "io.katacontainers.fs-opt.layer=MjU3MGUzYTE5ZTFiZjIwZGRkYTQ1NDk4YTk2MjdmNjE1NTVkMmQ2YzAxNDc5YjliNzY0NjBiNjc5YjI3ZDU1Mix0YXIscm8saW8ua2F0YWNvbnRhaW5lcnMuZnMtb3B0LmJsb2NrX2RldmljZT1maWxlLGlvLmthdGFjb250YWluZXJzLmZzLW9wdC5pcy1sYXllcixpby5rYXRhY29udGFpbmVycy5mcy1vcHQucm9vdC1oYXNoPWI2NDNiNjIxNzc0ODk4MzgzMGIyNmFjMTRhMzVhMzMyMmRkNTI4YzAwOTYzZWFhZGQ5MWVmNTVmNTEzZGM3M2Y=",
+                "io.katacontainers.fs-opt.overlay-rw",
+                "lowerdir=2c342a137e693c7898aec36da1047f191dc7c1687e66198adacc439cf4adf379:2570e3a19e1bf20ddda45498a9627f61555d2d6c01479b9b76460b679b27d552"
+            ],
+            "source": "none"
+        }
+    ],
+    "string_user": null
+}

@@ -75,7 +75,7 @@ use tokio::{
 mod rpc;
 mod tracer;
 
-#[cfg(feature = "agent-policy")]
+// #[cfg(feature = "agent-policy")]
 mod policy;
 
 cfg_if! {

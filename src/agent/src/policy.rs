@@ -25,6 +25,57 @@ macro_rules! sl {
     };
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*; // Import the function and structs to be tested
+
+    #[tokio::test]
+    async fn test_allow_request() {
+        let mut policy = AgentPolicy::new();
+
+        // Mock endpoint and input
+        // let request = protocols::agent::CreateContainerRequest {
+        //     ..Default::default()
+        // };
+
+        // Deserialize the JSON content into the Config struct
+        // let data =
+        //     std::fs::read_to_string("../tools/genpolicy/create.json").expect("Unable to read file");
+        // let request: protocols::agent::CreateContainerRequest =
+        //     serde_json::from_str(&data).expect("JSON was not well-formatted");
+        // let request = serde_json::to_string(&request).unwrap();
+        // let ep = "CreateContainerRequest";
+
+        let data =
+            std::fs::read_to_string("../tools/genpolicy/create.json").expect("Unable to read file");
+        // println!("Data: {}", data);
+        let request: protocols::agent::CreateContainerRequest =
+            serde_json::from_str(&data).expect("JSON was not well-formatted");
+        // println!("Request: {}", request);
+        let request = serde_json::to_string(&request).unwrap();
+        let ep = "CreateContainerRequest";
+
+        // println!("Request: {}", request);
+
+        // let request = r#"{"key": "value"}"#;
+
+        // Mock policy initialization (if needed)
+        policy
+            .engine
+            .add_policy_from_file("../tools/genpolicy/exec.rego")
+            .unwrap();
+
+        // Call the function
+        let result = policy.allow_request(ep, &request).await;
+
+        // Assert the expected result
+        match result {
+            Ok((allowed, _)) => assert!(allowed, "Expected the request to be allowed"),
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+    }
+}
+
 async fn allow_request(policy: &mut AgentPolicy, ep: &str, request: &str) -> ttrpc::Result<()> {
     match policy.allow_request(ep, request).await {
         Ok((allowed, prints)) => {
@@ -204,6 +255,9 @@ impl AgentPolicy {
             Ok(p) => p.join(" "),
             Err(e) => format!("Failed to get policy log: {e}"),
         };
+
+        println!("Policy prints: {}", prints);
+        println!("allow_failures: {}", self.allow_failures);
 
         if results.result.len() != 1 {
             // Results are empty when AllowRequestsFailingPolicy is used to allow a Request that hasn't been defined in the policy
