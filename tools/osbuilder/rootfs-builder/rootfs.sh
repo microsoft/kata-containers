@@ -70,6 +70,7 @@ fi
 readonly -a systemd_units=(
 	"systemd-coredump@"
 	"systemd-journald"
+	"systemd-journald@"
 	"systemd-journald-dev-log"
 	"systemd-journal-flush"
 	"systemd-random-seed"
