@@ -55,6 +55,7 @@ readonly -a systemd_units=(
 	"systemd-journal-flush"
 	"systemd-random-seed"
 	"systemd-timesyncd"
+	"systemd-tmpfiles-clean"
 	"systemd-tmpfiles-setup"
 	"systemd-update-utmp"
 )
@@ -67,6 +68,7 @@ readonly -a systemd_files=(
 	"systemd-gpt-auto-generator"
 	"systemd-journald"
 	"systemd-random-seed"
+	"systemd-tmpfiles"
 	"systemd-tmpfiles-cleanup.timer"
 )
 
@@ -753,7 +755,7 @@ delete_unnecessary_files()
 	for u in "${systemd_units[@]}"; do
 		find "${ROOTFS_DIR}" \
 			\( -type f -o -type l \) \
-			\( -name "${u}.service" -o -name "${u}.socket" \) \
+			\( -name "${u}.service" -o -name "${u}.socket" -o -name "${u}.timer" \) \
 			-exec echo "deleting {}" \; \
 			-exec rm -f {} \;
 	done
