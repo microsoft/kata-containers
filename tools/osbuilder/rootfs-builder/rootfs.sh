@@ -90,6 +90,7 @@ readonly -a systemd_files=(
 	"systemd-getty-generator"
 	"systemd-gpt-auto-generator"
 	"systemd-journald"
+	"systemd-random-seed"
 	"systemd-tmpfiles-cleanup.timer"
 )
 
