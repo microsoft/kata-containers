@@ -84,6 +84,7 @@ readonly -a systemd_units=(
 )
 
 readonly -a systemd_files=(
+	"journalctl"
 	"systemd-bless-boot-generator"
 	"systemd-fstab-generator"
 	"systemd-getty-generator"
