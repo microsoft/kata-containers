@@ -89,6 +89,7 @@ readonly -a systemd_units=(
 	"blk-availability"
 	"systemd-ask-password-console"
 	"systemd-ask-password-wall"
+	"systemd-boot-update"
 	"systemd-coredump@"
 	"systemd-journal-catalog-update"
 	"systemd-journal-flush"
