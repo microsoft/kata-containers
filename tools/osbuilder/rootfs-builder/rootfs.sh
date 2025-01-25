@@ -53,6 +53,7 @@ readonly -a systemd_units=(
 	"systemd-ask-password-wall"
 	"systemd-boot-update"
 	"systemd-coredump@"
+	"systemd-journal-catalog-update"
 	"systemd-journald"
 	"systemd-journald@"
 	"systemd-journald-dev-log"
