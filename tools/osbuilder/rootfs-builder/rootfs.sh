@@ -92,6 +92,7 @@ readonly -a systemd_units=(
 	"systemd-tpm2-setup-early"
 	"systemd-update-utmp"
 	"systemd-update-utmp-runlevel"
+	"systemd-vconsole-setup"
 )
 
 readonly -a systemd_files=(
@@ -107,6 +108,7 @@ readonly -a systemd_files=(
 	"systemd-tmpfiles"
 	"systemd-tty-ask-password-agent"
 	"systemd-update-utmp"
+	"systemd-vconsole-setup"
 )
 
 handle_error() {
