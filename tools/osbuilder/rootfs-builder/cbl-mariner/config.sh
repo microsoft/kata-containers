@@ -13,7 +13,6 @@ PACKAGES="\
     chrony \
     cpio \
     cryptsetup \
-    curl \
     dbus \
     elfutils-libelf \
     filesystem \
