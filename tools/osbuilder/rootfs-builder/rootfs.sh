@@ -87,6 +87,7 @@ fi
 readonly -a systemd_units=(
 	"blk-availability"
 	"sys-fs-fuse-connections"
+	"sys-kernel-config"
 	"systemd-ask-password-console"
 	"systemd-ask-password-wall"
 	"systemd-boot-update"
