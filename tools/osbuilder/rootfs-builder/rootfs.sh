@@ -85,6 +85,7 @@ fi
 
 # The list of systemd units and files that are not needed in Kata Containers
 readonly -a systemd_units=(
+	"blk-availability"
 	"systemd-ask-password-console"
 	"systemd-ask-password-wall"
 	"systemd-coredump@"
@@ -119,6 +120,7 @@ readonly -a systemd_units=(
 )
 
 readonly -a systemd_files=(
+	"blkdeactivate"
 	"journalctl"
 	"systemd-bless-boot-generator"
 	"systemd-fstab-generator"
