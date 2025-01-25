@@ -48,6 +48,7 @@ TARGET_OS=${TARGET_OS:-linux}
 
 # The list of systemd units and files that are not needed in Kata Containers
 readonly -a systemd_units=(
+	"blk-availability"
 	"systemd-coredump@"
 	"systemd-journald"
 	"systemd-journald@"
@@ -62,6 +63,7 @@ readonly -a systemd_units=(
 )
 
 readonly -a systemd_files=(
+	"blkdeactivate"
 	"journalctl"
 	"systemd-bless-boot-generator"
 	"systemd-fstab-generator"
