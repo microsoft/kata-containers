@@ -77,6 +77,8 @@ readonly -a systemd_units=(
 	"systemd-pstore"
 	"systemd-network-generator"
 	"systemd-random-seed"
+	"systemd-sysupdate"
+	"systemd-sysupdate-reboot"
 	"systemd-timesyncd"
 	"systemd-tpm2-setup"
 	"systemd-tpm2-setup-early"
