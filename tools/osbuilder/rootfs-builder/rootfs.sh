@@ -114,6 +114,8 @@ readonly -a systemd_units=(
 	"systemd-pcrextend@"
 	"systemd-pstore"
 	"systemd-random-seed"
+	"systemd-sysupdate"
+	"systemd-sysupdate-reboot"
 	"systemd-timesyncd"
 	"systemd-tmpfiles-clean"
 	"systemd-tmpfiles-setup"
