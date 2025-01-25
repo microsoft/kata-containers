@@ -123,6 +123,8 @@ readonly -a systemd_units=(
 	"systemd-tmpfiles-setup"
 	"systemd-tmpfiles-setup-dev"
 	"systemd-tmpfiles-setup-dev-early"
+	"systemd-tpm2-setup"
+	"systemd-tpm2-setup-early"
 	"systemd-update-utmp"
 )
 
