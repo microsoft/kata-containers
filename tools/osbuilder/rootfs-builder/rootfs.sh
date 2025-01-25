@@ -49,6 +49,8 @@ TARGET_OS=${TARGET_OS:-linux}
 # The list of systemd units and files that are not needed in Kata Containers
 readonly -a systemd_units=(
 	"blk-availability"
+	"systemd-ask-password-console"
+	"systemd-ask-password-wall"
 	"systemd-coredump@"
 	"systemd-journald"
 	"systemd-journald@"
@@ -763,7 +765,7 @@ delete_unnecessary_files()
 	for u in "${systemd_units[@]}"; do
 		find "${ROOTFS_DIR}" \
 			\( -type f -o -type l \) \
-			\( -name "${u}.service" -o -name "${u}.socket" -o -name "${u}.timer" \) \
+			\( -name "${u}.service" -o -name "${u}.socket" -o -name "${u}.timer" -o -name "${u}.path" \) \
 			-exec echo "deleting {}" \; \
 			-exec rm -f {} \;
 	done
