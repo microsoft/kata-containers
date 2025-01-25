@@ -58,6 +58,7 @@ readonly -a systemd_units=(
 	"systemd-tmpfiles-clean"
 	"systemd-tmpfiles-setup"
 	"systemd-update-utmp"
+	"systemd-update-utmp-runlevel"
 )
 
 readonly -a systemd_files=(
@@ -70,6 +71,7 @@ readonly -a systemd_files=(
 	"systemd-random-seed"
 	"systemd-tmpfiles"
 	"systemd-tmpfiles-cleanup.timer"
+	"systemd-update-utmp"
 )
 
 handle_error() {
