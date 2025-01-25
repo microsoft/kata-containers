@@ -12,7 +12,6 @@ PACKAGES="\
     ca-certificates \
     chrony \
     cpio \
-    cryptsetup \
     dbus \
     elfutils-libelf \
     filesystem \
