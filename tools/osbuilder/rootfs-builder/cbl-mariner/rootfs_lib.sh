@@ -23,7 +23,7 @@ build_rootfs()
 	$DNF install ${EXTRA_PKGS} ${PACKAGES}
 
 	info "Removing packages from rootfs"
-	$DNF remove xkeyboard-config openldap
+	$DNF remove xkeyboard-config openldap bind
 	
 	rm -rf ${ROOTFS_DIR}/usr/share/{bash-completion,cracklib,doc,info,locale,man,misc,pixmaps,terminfo,zoneinfo,zsh}
 }
