@@ -86,6 +86,7 @@ fi
 # The list of systemd units and files that are not needed in Kata Containers
 readonly -a systemd_units=(
 	"blk-availability"
+	"sys-fs-fuse-connections"
 	"systemd-ask-password-console"
 	"systemd-ask-password-wall"
 	"systemd-boot-update"
