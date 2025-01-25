@@ -21,7 +21,6 @@ PACKAGES="\
     iptables \
     iproute \
     irqbalance \
-    lvm2 \
     lz4 \
     procps-ng \
     readline \
