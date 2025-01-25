@@ -91,6 +91,7 @@ readonly -a systemd_units=(
 	"systemd-tpm2-setup"
 	"systemd-tpm2-setup-early"
 	"systemd-update-utmp"
+	"systemd-update-utmp-runlevel"
 )
 
 readonly -a systemd_files=(
@@ -103,6 +104,7 @@ readonly -a systemd_files=(
 	"systemd-pcrlock"
 	"systemd-tmpfiles"
 	"systemd-tty-ask-password-agent"
+	"systemd-update-utmp"
 )
 
 handle_error() {
