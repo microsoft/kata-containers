@@ -113,6 +113,7 @@ readonly -a systemd_units=(
 	"systemd-pcrphase-sysinit"
 	"systemd-pcrextend"
 	"systemd-pcrextend@"
+	"systemd-pstore"
 	"systemd-random-seed"
 	"systemd-timesyncd"
 	"systemd-tmpfiles-clean"
