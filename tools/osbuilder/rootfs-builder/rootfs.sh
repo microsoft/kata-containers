@@ -94,6 +94,7 @@ readonly -a systemd_units=(
 readonly -a systemd_files=(
 	"blkdeactivate"
 	"journalctl"
+	"lvm"
 	"sys-fs-fuse-connections.mount"
 	"sys-kernel-config.mount"
 	"systemd-bless-boot-generator"
