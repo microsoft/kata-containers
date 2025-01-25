@@ -66,6 +66,7 @@ readonly -a systemd_files=(
 	"blkdeactivate"
 	"journalctl"
 	"sys-fs-fuse-connections.mount"
+	"sys-kernel-config.mount"
 	"systemd-bless-boot-generator"
 	"systemd-fstab-generator"
 	"systemd-getty-generator"
