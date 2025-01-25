@@ -31,6 +31,11 @@ PACKAGES="\
     util-linux \
     zlib"
 
-[ "$CONF_GUEST" = yes ] && PACKAGES+=" kata-packages-uvm-coco"
+[ "$CONF_GUEST" = yes ] && \
+PACKAGES+=" \
+    cifs-utils \
+    device-mapper \
+    systemd-udev"
+
 [ "$AGENT_INIT" = no ] && PACKAGES+=" systemd"
 [ "$SECCOMP" = yes ] && PACKAGES+=" libseccomp"
