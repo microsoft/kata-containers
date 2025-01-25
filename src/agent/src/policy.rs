@@ -73,6 +73,10 @@ mod tests {
             Ok((allowed, _)) => assert!(allowed, "Expected the request to be allowed"),
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
+
+        let shell_split = shell_words::split("ls -l /tmp").expect("Failed to split");
+        println!("{:?}", shell_split);
+        assert!(false, "fail");
     }
 }
 
@@ -171,6 +175,26 @@ pub struct AgentPolicy {
     engine: regorus::Engine,
 }
 
+fn map_request<'a>(ep: &str, input: &'a str) -> &'a str {
+    println!("Mapping request");
+    match ep {
+        "CreateContainerRequest" => {
+            println!("CreateContainerRequest detected");
+            let req: protocols::agent::CreateContainerRequest =
+                serde_json::from_str(input).expect("JSON was not well-formatted");
+            for arg in &req.OCI.Process.Args {
+                println!("Arg: {}", arg);
+                let arg_split = shell_words::split(arg).expect("Failed to split");
+                println!("arg_split: {:?}", arg_split);
+            }
+
+            input
+        }
+
+        _ => input,
+    }
+}
+
 #[derive(serde::Deserialize, Debug)]
 struct MetadataResponse {
     allowed: bool,
@@ -244,6 +268,9 @@ impl AgentPolicy {
     /// Ask regorus if an API call should be allowed or not.
     async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
+
+        let ep_input = map_request(ep, ep_input);
+
         self.log_request(ep, ep_input).await;
 
         let query = format!("data.agent_policy.{ep}");
@@ -256,7 +283,7 @@ impl AgentPolicy {
             Err(e) => format!("Failed to get policy log: {e}"),
         };
 
-        println!("Policy prints: {}", prints);
+        // println!("Policy prints: {}", prints);
         println!("allow_failures: {}", self.allow_failures);
 
         if results.result.len() != 1 {
