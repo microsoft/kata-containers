@@ -99,6 +99,7 @@ readonly -a systemd_files=(
 	"blkdeactivate"
 	"journalctl"
 	"lvm"
+	"named"
 	"openssl"
 	"slapd"
 	"sys-fs-fuse-connections.mount"
