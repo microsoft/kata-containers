@@ -61,6 +61,8 @@ readonly -a systemd_units=(
 	"systemd-timesyncd"
 	"systemd-tmpfiles-clean"
 	"systemd-tmpfiles-setup"
+	"systemd-tmpfiles-setup-dev"
+	"systemd-tmpfiles-setup-dev-early"
 	"systemd-update-utmp"
 	"systemd-update-utmp-runlevel"
 )
