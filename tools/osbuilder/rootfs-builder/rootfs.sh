@@ -79,13 +79,9 @@ readonly -a systemd_files=(
 	"systemd-fstab-generator"
 	"systemd-getty-generator"
 	"systemd-gpt-auto-generator"
-	"systemd-journald"
-	"systemd-network-generator"
 	"systemd-random-seed"
 	"systemd-tmpfiles"
 	"systemd-tmpfiles-cleanup.timer"
-	"systemd-update-utmp"
-	"systemd-vconsole-setup"
 )
 
 handle_error() {
@@ -771,7 +767,11 @@ delete_unnecessary_files()
 	for u in "${systemd_units[@]}"; do
 		find "${ROOTFS_DIR}" \
 			\( -type f -o -type l \) \
-			\( -name "${u}.service" -o -name "${u}.socket" -o -name "${u}.timer" -o -name "${u}.path" \) \
+			\( -name "${u}" -o \
+			   -name "${u}.service" -o \
+			   -name "${u}.socket" -o \
+			   -name "${u}.timer" -o \
+			   -name "${u}.path" \) \
 			-exec echo "deleting {}" \; \
 			-exec rm -f {} \;
 	done
