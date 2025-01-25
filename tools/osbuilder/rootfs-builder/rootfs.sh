@@ -80,6 +80,7 @@ readonly -a systemd_files=(
 	"systemd-fstab-generator"
 	"systemd-getty-generator"
 	"systemd-gpt-auto-generator"
+	"systemd-journald-audit.socket"
 	"systemd-random-seed"
 	"systemd-tmpfiles"
 	"systemd-tmpfiles-cleanup.timer"
