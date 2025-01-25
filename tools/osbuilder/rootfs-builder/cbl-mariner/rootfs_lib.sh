@@ -22,8 +22,8 @@ build_rootfs()
 	info "install packages for rootfs"
 	$DNF install ${EXTRA_PKGS} ${PACKAGES}
 
-	info "Removing packages for rootfs"
-	$DNF remove xkeyboard-config
+	info "Removing packages from rootfs"
+	$DNF remove xkeyboard-config openldap
 	
 	rm -rf ${ROOTFS_DIR}/usr/share/{bash-completion,cracklib,doc,info,locale,man,misc,pixmaps,terminfo,zoneinfo,zsh}
 }
