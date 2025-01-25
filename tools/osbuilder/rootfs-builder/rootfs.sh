@@ -128,6 +128,7 @@ readonly -a systemd_units=(
 	"systemd-tpm2-setup-early"
 	"systemd-update-utmp"
 	"systemd-update-utmp-runlevel"
+	"systemd-vconsole-setup"
 )
 
 readonly -a systemd_files=(
