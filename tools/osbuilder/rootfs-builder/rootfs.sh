@@ -57,6 +57,7 @@ readonly -a systemd_units=(
 	"systemd-journald@"
 	"systemd-journald-dev-log"
 	"systemd-journal-flush"
+	"systemd-pstore"
 	"systemd-network-generator"
 	"systemd-random-seed"
 	"systemd-timesyncd"
