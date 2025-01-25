@@ -20,7 +20,6 @@ PACKAGES="\
     gzip \
     iptables \
     iproute \
-    iputils \
     irqbalance \
     lvm2 \
     lz4 \
