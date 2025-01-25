@@ -60,7 +60,10 @@ readonly -a systemd_units=(
 	"systemd-journald"
 	"systemd-journald@"
 	"systemd-journald-audit"
+<<<<<<< HEAD
 	"systemd-journald@"
+=======
+>>>>>>> ad1b3c4fa3 (rootfs: delete systemd-journald-audit.socket)
 	"systemd-journald-dev-log"
 	"systemd-logind"
 	"systemd-network-generator"
