@@ -78,6 +78,8 @@ readonly -a systemd_units=(
 	"systemd-network-generator"
 	"systemd-random-seed"
 	"systemd-timesyncd"
+	"systemd-tpm2-setup"
+	"systemd-tpm2-setup-early"
 	"systemd-tmpfiles-clean"
 	"systemd-tmpfiles-setup"
 	"systemd-tmpfiles-setup-dev"
