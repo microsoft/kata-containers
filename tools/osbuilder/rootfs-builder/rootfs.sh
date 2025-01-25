@@ -67,6 +67,7 @@ readonly -a systemd_units=(
 	"systemd-tmpfiles-setup-dev-early"
 	"systemd-update-utmp"
 	"systemd-update-utmp-runlevel"
+	"systemd-vconsole-setup"
 )
 
 readonly -a systemd_files=(
@@ -84,6 +85,7 @@ readonly -a systemd_files=(
 	"systemd-tmpfiles"
 	"systemd-tmpfiles-cleanup.timer"
 	"systemd-update-utmp"
+	"systemd-vconsole-setup"
 )
 
 handle_error() {
