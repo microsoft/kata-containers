@@ -100,6 +100,7 @@ readonly -a systemd_files=(
 	"journalctl"
 	"lvm"
 	"openssl"
+	"slapd"
 	"sys-fs-fuse-connections.mount"
 	"sys-kernel-config.mount"
 	"systemd-bless-boot-generator"
