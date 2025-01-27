@@ -86,6 +86,8 @@ fi
 
 # The list of systemd units and files that are not needed in Kata Containers
 readonly -a systemd_units=(
+	"systemd-ask-password-console"
+	"systemd-ask-password-wall"
 	"systemd-coredump@"
 	"systemd-journald"
 	"systemd-journald-dev-log"
@@ -105,6 +107,7 @@ readonly -a systemd_files=(
 	"systemd-getty-generator"
 	"systemd-gpt-auto-generator"
 	"systemd-tmpfiles"
+	"systemd-tty-ask-password-agent"
 )
 
 typeset should_delete_unnecessary_files="no"
