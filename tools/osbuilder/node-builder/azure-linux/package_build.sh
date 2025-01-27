@@ -85,8 +85,9 @@ popd
 # Switch to Rust nightly for Kata Agent
 echo "Building agent binary with Rust nightly and hardening options"
 rustup override set nightly
+rustup target add x86_64-unknown-linux-musl
 
-export RUSTFLAGS="-Z cf-protection=full -Zsanitizer=address -Z src-hash-algorithm"
+export RUSTFLAGS="-Z cf-protection=full -Zsanitizer=address -Z src-hash-algorithm -Zbuild-std"
 export CARGO_BUILD_STD="--build-std --target=x86_64-unknown-linux-musl"
 
 pushd src/agent/
