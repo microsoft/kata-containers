@@ -86,13 +86,12 @@ popd
 echo "Building agent binary with Rust nightly and hardening options"
 rustup override set nightly
 
-# Combine all -Z options into a single RUSTFLAGS
 export RUSTFLAGS="-Z cf-protection=full -Zsanitizer=address -Z src-hash-algorithm"
-export CARGO_BUILD_STD="--build-std"
+export CARGO_BUILD_STD="--build-std --target=x86_64-unknown-linux-musl"
 
 pushd src/agent/
-make RUSTFLAGS="${RUSTFLAGS}" CARGO_BUILD_STD="${CARGO_BUILD_STD}" TARGET=x86_64-unknown-linux-musl
-make install RUSTFLAGS="${RUSTFLAGS}" CARGO_BUILD_STD="${CARGO_BUILD_STD}" TARGET=x86_64-unknown-linux-musl
+make RUSTFLAGS="${RUSTFLAGS}" CARGO_BUILD_STD="${CARGO_BUILD_STD}"
+make install RUSTFLAGS="${RUSTFLAGS}" CARGO_BUILD_STD="${CARGO_BUILD_STD}"
 popd
 
 # Switch back to Rust stable globally
