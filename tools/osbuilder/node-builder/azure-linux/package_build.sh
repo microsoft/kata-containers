@@ -34,7 +34,12 @@ if [ "${OS_VERSION}" == "3.0" ]; then
 	runtime_make_flags+=" DEFSANDBOXCGROUPONLY=true"
 fi
 
+export RUSTFLAGS="-Z cf-protection=full"
+export CARGO_BUILD_STD="--build-std"
+export CARGO_SANITIZER="-Zsanitizer=address"  # Example sanitizer, can be replaced as needed
+export CARGO_SRC_HASH="-Z src-hash-algorithm"
 agent_make_flags="LIBC=gnu OPENSSL_NO_VENDOR=Y DESTDIR=${AGENT_INSTALL_DIR} BUILD_TYPE=${AGENT_BUILD_TYPE}"
+agent_make_flags+=" RUSTFLAGS=\"${RUSTFLAGS}\" CARGO_BUILD_STD=\"${CARGO_BUILD_STD}\" CARGO_SANITIZER=\"${CARGO_SANITIZER}\" CARGO_SRC_HASH=\"${CARGO_SRC_HASH}\""
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	agent_make_flags+=" AGENT_POLICY=yes"
@@ -85,13 +90,8 @@ popd
 # Switch to Rust nightly for Kata Agent
 echo "Building agent binary with Rust nightly and hardening options"
 rustup override set nightly
-export RUSTFLAGS="-Z cf-protection=full"
-export CARGO_BUILD_STD="--build-std"
-export CARGO_SANITIZER="-Zsanitizer=address"  # Example sanitizer, can be replaced as needed
-export CARGO_SRC_HASH="-Z src-hash-algorithm"
 
 pushd src/agent/
-agent_make_flags+=" RUSTFLAGS=\"${RUSTFLAGS}\" CARGO_BUILD_STD=\"${CARGO_BUILD_STD}\" CARGO_SANITIZER=\"${CARGO_SANITIZER}\" CARGO_SRC_HASH=\"${CARGO_SRC_HASH}\""
 make ${agent_make_flags}
 make install ${agent_make_flags}
 popd
