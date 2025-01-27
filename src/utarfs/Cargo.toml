@@ -1,6 +1,3 @@
-[patch.crates-io]
-proc-macro2 = { version = "=1.0.60" }
-
 [package]
 name = "utarfs"
 version = "0.1.0"
@@ -16,3 +13,4 @@ zerocopy = "0.6.1"
 tarfs-defs = { path = "../tardev-snapshotter/tarfs-defs" }
 clap = { version = "4.3.2", features = ["derive"] }
 daemonize = "0.5.0"
+proc-macro2 = "1.0.60"
