@@ -19,15 +19,7 @@ repo_dir="${script_dir}/../../../../"
 common_file="common.sh"
 source "${common_file}"
 
-# Rust hardening flags for nightly builds
-export RUSTFLAGS="-Z cf-protection=full -Z control-flow-guard"
-export CARGO_BUILD_STD="--build-std"
-export CARGO_SANITIZER="-Zsanitizer=address"  # Example sanitizer, can be replaced as needed
-export CARGO_SRC_HASH="-Z src-hash-algorithm"
-
-# Ensure we're using the Rust nightly toolchain
-rustup override set nightly
-
+# Runtime make flags for builds other than kata-agent
 runtime_make_flags="SKIP_GO_VERSION_CHECK=1 QEMUCMD= FCCMD= ACRNCMD= STRATOVIRTCMD= DEFAULT_HYPERVISOR=cloud-hypervisor
 	DEFMEMSZ=0 DEFSTATICSANDBOXWORKLOADMEM=512 DEFVCPUS=0 DEFSTATICSANDBOXWORKLOADVCPUS=1 DEFVIRTIOFSDAEMON=${VIRTIOFSD_BINARY_LOCATION} PREFIX=${INSTALL_PATH_PREFIX}"
 
@@ -43,7 +35,6 @@ if [ "${OS_VERSION}" == "3.0" ]; then
 fi
 
 agent_make_flags="LIBC=gnu OPENSSL_NO_VENDOR=Y DESTDIR=${AGENT_INSTALL_DIR} BUILD_TYPE=${AGENT_BUILD_TYPE}"
-agent_make_flags+=" RUSTFLAGS=\"${RUSTFLAGS}\" CARGO_BUILD_STD=\"${CARGO_BUILD_STD}\" CARGO_SANITIZER=\"${CARGO_SANITIZER}\" CARGO_SRC_HASH=\"${CARGO_SRC_HASH}\""
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	agent_make_flags+=" AGENT_POLICY=yes"
@@ -91,10 +82,19 @@ if [ "${CONF_PODS}" == "yes" ]; then
 fi
 popd
 
-echo "Building agent binary and generating service files"
+# Switch to Rust nightly for Kata Agent
+echo "Building agent binary with Rust nightly and hardening options"
+rustup override set nightly
+export RUSTFLAGS="-Z cf-protection=full"
+export CARGO_BUILD_STD="--build-std"
+export CARGO_SANITIZER="-Zsanitizer=address"  # Example sanitizer, can be replaced as needed
+export CARGO_SRC_HASH="-Z src-hash-algorithm"
+
 pushd src/agent/
-make ${agent_make_flags}
+agent_make_flags+=" RUSTFLAGS=\"${RUSTFLAGS}\" CARGO_BUILD_STD=\"${CARGO_BUILD_STD}\" CARGO_SANITIZER=\"${CARGO_SANITIZER}\" CARGO_SRC_HASH=\"${CARGO_SRC_HASH}\""
 make install ${agent_make_flags}
 popd
 
+# Switch back to Rust stable globally
+rustup override set stable
 popd
