@@ -1268,7 +1268,6 @@ dependencies = [
  "serial_test",
  "sev",
  "sha2",
- "shell-words",
  "simple_asn1",
  "slog",
  "slog-scope",
@@ -1716,6 +1715,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "shell-words",
 ]
 
 [[package]]

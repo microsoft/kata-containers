@@ -81,6 +81,30 @@ impl Spec {
 
 pub type LinuxRlimit = PosixRlimit;
 
+pub fn get_tokenized_args(args: &Vec<String>) -> Vec<Vec<String>> {
+    let mut tokenized_args: Vec<Vec<String>> = Vec::new();
+    for arg in args {
+        let arg_split = shell_words::split(arg).expect("Failed to split");
+        tokenized_args.push(arg_split);
+    }
+    tokenized_args
+}
+
+pub fn get_env_map(env: &Vec<String>) -> std::collections::HashMap<String, String> {
+    let env_map: std::collections::HashMap<String, String> = env
+        .iter()
+        .filter_map(|v| {
+            let mut split = v.splitn(2, "=");
+            if let (Some(key), Some(value)) = (split.next(), split.next()) {
+                Some((key.to_string(), value.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    env_map
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Process {
     #[serde(default)]

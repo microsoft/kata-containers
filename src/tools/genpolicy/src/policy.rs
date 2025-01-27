@@ -271,6 +271,9 @@ pub struct ContainerPolicy {
     /// ExecProcessRequest. By default, all ExecProcessRequest calls are blocked
     /// by the policy.
     exec_commands: Vec<String>,
+
+    tokenized_args: Vec<Vec<String>>,
+    env_map: std::collections::HashMap<String, String>,
 }
 
 /// See Reference / Kubernetes API / Config and Storage Resources / Volume.
@@ -595,6 +598,9 @@ impl AgentPolicy {
         };
         let exec_commands = yaml_container.get_exec_commands();
 
+        let env_map = oci::get_env_map(&process.Env);
+
+        let tokenized_args = oci::get_tokenized_args(&process.Args);
         ContainerPolicy {
             OCI: KataSpec {
                 Version: version_default(),
@@ -608,6 +614,8 @@ impl AgentPolicy {
             storages,
             sandbox_pidns,
             exec_commands,
+            tokenized_args,
+            env_map,
         }
     }
 

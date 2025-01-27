@@ -74,8 +74,6 @@ mod tests {
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
 
-        let shell_split = shell_words::split("ls -l /tmp").expect("Failed to split");
-        println!("{:?}", shell_split);
         assert!(false, "fail");
     }
 }
@@ -175,6 +173,13 @@ pub struct AgentPolicy {
     engine: regorus::Engine,
 }
 
+#[derive(Debug)]
+struct PolicyCreateContainerRequest {
+    base: protocols::agent::CreateContainerRequest,
+    tokenized_args: Vec<Vec<String>>,
+    env_map: std::collections::HashMap<String, String>,
+}
+
 fn map_request<'a>(ep: &str, input: &'a str) -> &'a str {
     println!("Mapping request");
     match ep {
@@ -182,12 +187,20 @@ fn map_request<'a>(ep: &str, input: &'a str) -> &'a str {
             println!("CreateContainerRequest detected");
             let req: protocols::agent::CreateContainerRequest =
                 serde_json::from_str(input).expect("JSON was not well-formatted");
-            for arg in &req.OCI.Process.Args {
-                println!("Arg: {}", arg);
-                let arg_split = shell_words::split(arg).expect("Failed to split");
-                println!("arg_split: {:?}", arg_split);
-            }
+            let tokenized_args = oci::get_tokenized_args(&req.OCI.Process.Args);
 
+            println!("Tokenized args: {:?}", tokenized_args);
+
+            let env_map = oci::get_env_map(&req.OCI.Process.Env);
+            println!("Env: {:?}", env_map);
+
+            let req_v2 = PolicyCreateContainerRequest {
+                base: req,
+                tokenized_args,
+                env_map,
+            };
+
+            // todo: return the new request
             input
         }
 
