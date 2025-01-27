@@ -92,6 +92,7 @@ export CARGO_SRC_HASH="-Z src-hash-algorithm"
 
 pushd src/agent/
 agent_make_flags+=" RUSTFLAGS=\"${RUSTFLAGS}\" CARGO_BUILD_STD=\"${CARGO_BUILD_STD}\" CARGO_SANITIZER=\"${CARGO_SANITIZER}\" CARGO_SRC_HASH=\"${CARGO_SRC_HASH}\""
+make ${agent_make_flags}
 make install ${agent_make_flags}
 popd
 
