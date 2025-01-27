@@ -62,7 +62,7 @@ mod tests {
         // Mock policy initialization (if needed)
         policy
             .engine
-            .add_policy_from_file("../tools/genpolicy/exec.rego")
+            .add_policy_from_file("../tools/genpolicy/exec2.rego")
             .unwrap();
 
         // Call the function
@@ -173,14 +173,14 @@ pub struct AgentPolicy {
     engine: regorus::Engine,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 struct PolicyCreateContainerRequest {
     base: protocols::agent::CreateContainerRequest,
     tokenized_args: Vec<Vec<String>>,
     env_map: std::collections::HashMap<String, String>,
 }
 
-fn map_request<'a>(ep: &str, input: &'a str) -> &'a str {
+fn map_request(ep: &str, input: &str) -> String {
     println!("Mapping request");
     match ep {
         "CreateContainerRequest" => {
@@ -189,10 +189,10 @@ fn map_request<'a>(ep: &str, input: &'a str) -> &'a str {
                 serde_json::from_str(input).expect("JSON was not well-formatted");
             let tokenized_args = oci::get_tokenized_args(&req.OCI.Process.Args);
 
-            println!("Tokenized args: {:?}", tokenized_args);
+            // println!("Tokenized args: {:?}", tokenized_args);
 
             let env_map = oci::get_env_map(&req.OCI.Process.Env);
-            println!("Env: {:?}", env_map);
+            // println!("Env: {:?}", env_map);
 
             let req_v2 = PolicyCreateContainerRequest {
                 base: req,
@@ -200,11 +200,10 @@ fn map_request<'a>(ep: &str, input: &'a str) -> &'a str {
                 env_map,
             };
 
-            // todo: return the new request
-            input
+            serde_json::to_string(&req_v2).expect("failed to serialize")
         }
 
-        _ => input,
+        _ => input.to_string(),
     }
 }
 
@@ -282,7 +281,7 @@ impl AgentPolicy {
     async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
 
-        let ep_input = map_request(ep, ep_input);
+        let ep_input = &map_request(ep, ep_input);
 
         self.log_request(ep, ep_input).await;
 
@@ -296,8 +295,8 @@ impl AgentPolicy {
             Err(e) => format!("Failed to get policy log: {e}"),
         };
 
-        // println!("Policy prints: {}", prints);
-        println!("allow_failures: {}", self.allow_failures);
+        println!("Policy prints: {}", prints);
+        // println!("allow_failures: {}", self.allow_failures);
 
         if results.result.len() != 1 {
             // Results are empty when AllowRequestsFailingPolicy is used to allow a Request that hasn't been defined in the policy
