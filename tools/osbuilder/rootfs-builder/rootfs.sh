@@ -866,11 +866,13 @@ detect_host_distro()
 
 delete_unnecessary_files()
 {
-	info "Removing unneeded systemd services and sockets"
+	info "Removing unneeded systemd unit files"
 	for u in "${systemd_units[@]}"; do
 		find "${ROOTFS_DIR}" \
 			\( -type f -o -type l \) \
-			\( -name "${u}.service" -o -name "${u}.socket" \) \
+			\( -name "${u}.service" -o \
+			   -name "${u}.socket" -o \
+			   -name "${u}.timer" \) \
 			-exec echo "deleting {}" \; \
 			-exec rm -f {} \;
 	done
