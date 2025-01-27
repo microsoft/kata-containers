@@ -85,14 +85,14 @@ popd
 # Switch to Rust nightly for Kata Agent
 echo "Building agent binary with Rust nightly and hardening options"
 rustup override set nightly
-export RUSTFLAGS="-Z cf-protection=full"
+
+# Combine all -Z options into a single RUSTFLAGS
+export RUSTFLAGS="-Z cf-protection=full -Zsanitizer=address -Z src-hash-algorithm"
 export CARGO_BUILD_STD="--build-std"
-export CARGO_SANITIZER="-Zsanitizer=address"  # Example sanitizer, can be replaced as needed
-export CARGO_SRC_HASH="-Z src-hash-algorithm"
 
 pushd src/agent/
-make RUSTFLAGS="${RUSTFLAGS}" CARGO_BUILD_STD="${CARGO_BUILD_STD}" CARGO_SANITIZER="${CARGO_SANITIZER}" CARGO_SRC_HASH="${CARGO_SRC_HASH}"
-make install RUSTFLAGS="${RUSTFLAGS}" CARGO_BUILD_STD="${CARGO_BUILD_STD}" CARGO_SANITIZER="${CARGO_SANITIZER}" CARGO_SRC_HASH="${CARGO_SRC_HASH}"
+make RUSTFLAGS="${RUSTFLAGS}" CARGO_BUILD_STD="${CARGO_BUILD_STD}" TARGET=x86_64-unknown-linux-musl
+make install RUSTFLAGS="${RUSTFLAGS}" CARGO_BUILD_STD="${CARGO_BUILD_STD}" TARGET=x86_64-unknown-linux-musl
 popd
 
 # Switch back to Rust stable globally
