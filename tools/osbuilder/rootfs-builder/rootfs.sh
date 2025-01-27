@@ -877,7 +877,8 @@ delete_unnecessary_files()
 	for u in "${systemd_units[@]}"; do
 		find "${ROOTFS_DIR}" \
 			\( -type f -o -type l \) \
-			\( -name "${u}.path" -o \
+			\( -name "${u}" -o \
+			   -name "${u}.path" -o \
 			   -name "${u}.service" -o \
 			   -name "${u}.socket" -o \
 			   -name "${u}.timer" \) \
