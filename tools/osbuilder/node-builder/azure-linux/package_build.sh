@@ -91,9 +91,8 @@ export CARGO_SANITIZER="-Zsanitizer=address"  # Example sanitizer, can be replac
 export CARGO_SRC_HASH="-Z src-hash-algorithm"
 
 pushd src/agent/
-agent_make_flags+=" RUSTFLAGS=\"${RUSTFLAGS}\" CARGO_BUILD_STD=\"${CARGO_BUILD_STD}\" CARGO_SANITIZER=\"${CARGO_SANITIZER}\" CARGO_SRC_HASH=\"${CARGO_SRC_HASH}\""
-make ${agent_make_flags}
-make install ${agent_make_flags}
+make RUSTFLAGS="${RUSTFLAGS}" CARGO_BUILD_STD="${CARGO_BUILD_STD}" CARGO_SANITIZER="${CARGO_SANITIZER}" CARGO_SRC_HASH="${CARGO_SRC_HASH}"
+make install RUSTFLAGS="${RUSTFLAGS}" CARGO_BUILD_STD="${CARGO_BUILD_STD}" CARGO_SANITIZER="${CARGO_SANITIZER}" CARGO_SRC_HASH="${CARGO_SRC_HASH}"
 popd
 
 # Switch back to Rust stable globally
