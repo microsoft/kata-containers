@@ -1,5 +1,5 @@
 [patch.crates-io]
-proc-macro2 = "1.0.60"
+proc-macro2 = { version = "=1.0.60" }
 
 [package]
 name = "utarfs"
