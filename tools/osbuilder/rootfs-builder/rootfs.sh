@@ -53,7 +53,7 @@ readonly -a systemd_units=(
 	"sys-kernel-config"
 	"systemd-ask-password-console"
 	"systemd-ask-password-wall"
-	"systemd-boot-update"
+ 	"systemd-boot-update"
 	"systemd-coredump@"
 	"systemd-journal-catalog-update"
 	"systemd-journal-flush"
