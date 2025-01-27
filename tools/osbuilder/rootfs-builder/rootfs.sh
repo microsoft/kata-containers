@@ -54,7 +54,10 @@ readonly -a systemd_units=(
 	"systemd-journal-flush"
 	"systemd-random-seed"
 	"systemd-timesyncd"
+	"systemd-tmpfiles-clean"
 	"systemd-tmpfiles-setup"
+	"systemd-tmpfiles-setup-dev"
+	"systemd-tmpfiles-setup-dev-early"
 	"systemd-update-utmp"
 )
 
@@ -63,6 +66,7 @@ readonly -a systemd_files=(
 	"systemd-fstab-generator"
 	"systemd-getty-generator"
 	"systemd-gpt-auto-generator"
+	"systemd-tmpfiles"
 )
 
 handle_error() {
