@@ -88,9 +88,12 @@ readonly -a systemd_units=(
 	"systemd-ask-password-console"
 	"systemd-ask-password-wall"
 	"systemd-coredump@"
-	"systemd-journald"
-	"systemd-journald-dev-log"
+	"systemd-journal-catalog-update"
 	"systemd-journal-flush"
+	"systemd-journald"
+	"systemd-journald@"
+	"systemd-journald-audit"
+	"systemd-journald-dev-log"
 	"systemd-pcrfs@"
 	"systemd-pcrfs-root"
 	"systemd-pcrlock-firmware-code"
@@ -116,6 +119,7 @@ readonly -a systemd_units=(
 )
 
 readonly -a systemd_files=(
+	"journalctl"
 	"systemd-bless-boot-generator"
 	"systemd-fstab-generator"
 	"systemd-getty-generator"
