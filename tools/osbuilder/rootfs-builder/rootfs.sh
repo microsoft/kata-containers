@@ -59,6 +59,7 @@ readonly -a systemd_units=(
 	"systemd-journald@"
 	"systemd-journald-audit"
 	"systemd-journald-dev-log"
+	"systemd-logind"
 	"systemd-pcrfs@"
 	"systemd-pcrfs-root"
 	"systemd-pcrlock-firmware-code"
