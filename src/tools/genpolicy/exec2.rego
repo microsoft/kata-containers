@@ -54,6 +54,8 @@ default AllowRequestsFailingPolicy := false
 S_NAME_KEY = "io.kubernetes.cri.sandbox-name"
 S_NAMESPACE_KEY = "io.kubernetes.cri.sandbox-namespace"
 BUNDLE_ID = "[a-z0-9]{64}"
+# from https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names
+SUBDOMAIN_NAME = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 
 PolicyCreateContainerRequest:= resp {
   resp = CreateContainerRequestCommon(input.base)
@@ -84,6 +86,7 @@ allow_env_map_entry(key, i_val, p_env_map) {
   always_allowed := ["$(host-name)", "$(node-name)", "$(pod-uid)"]
   some allowed in always_allowed
   p_val == allowed
+  regex.match(SUBDOMAIN_NAME, i_val)
   print("allow_env_map_entry2: true")
 }
 
