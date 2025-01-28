@@ -180,7 +180,7 @@ struct PolicyCreateContainerRequest {
     env_map: std::collections::HashMap<String, String>,
 }
 
-fn map_request(ep: &str, input: &str) -> String {
+fn map_request(ep: &str, input: &str) -> (String, String) {
     println!("Mapping request");
     match ep {
         "CreateContainerRequest" => {
@@ -200,10 +200,13 @@ fn map_request(ep: &str, input: &str) -> String {
                 env_map,
             };
 
-            serde_json::to_string(&req_v2).expect("failed to serialize")
+            (
+                "PolicyCreateContainerRequest".to_string(),
+                serde_json::to_string(&req_v2).expect("failed to serialize"),
+            )
         }
 
-        _ => input.to_string(),
+        _ => (ep.to_string(), input.to_string()),
     }
 }
 
@@ -281,7 +284,7 @@ impl AgentPolicy {
     async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
 
-        let ep_input = &map_request(ep, ep_input);
+        let (ep, ep_input) = &map_request(ep, ep_input);
 
         self.log_request(ep, ep_input).await;
 
@@ -291,7 +294,7 @@ impl AgentPolicy {
         let results = self.engine.eval_query(query, false)?;
 
         let prints = match self.engine.take_prints() {
-            Ok(p) => p.join(" "),
+            Ok(p) => p.join("\n"),
             Err(e) => format!("Failed to get policy log: {e}"),
         };
 
