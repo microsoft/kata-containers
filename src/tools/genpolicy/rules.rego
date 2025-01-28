@@ -13,6 +13,7 @@ default AddSwapRequest := false
 default CloseStdinRequest := false
 default CopyFileRequest := false
 default CreateContainerRequest := false
+default PolicyCreateContainerRequest := false
 default CreateSandboxRequest := false
 default DestroySandboxRequest := true
 default ExecProcessRequest := false
@@ -53,14 +54,96 @@ default AllowRequestsFailingPolicy := false
 S_NAME_KEY = "io.kubernetes.cri.sandbox-name"
 S_NAMESPACE_KEY = "io.kubernetes.cri.sandbox-namespace"
 BUNDLE_ID = "[a-z0-9]{64}"
+# from https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names
+SUBDOMAIN_NAME = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 
-CreateContainerRequest:= {"ops": ops, "allowed": true} {
+PolicyCreateContainerRequest:= resp {
+  resp = CreateContainerRequestCommon(input.base)
+  some p_container in policy_data.containers
+  i_env_map := input.env_map
+  p_env_map := p_container.env_map  
+  allow_env_map(p_env_map, i_env_map)
+  print("PolicyCreateContainerRequest: true")
+}
+
+allow_env_map(p_env_map, i_env_map) {
+    every env_key, env_val in i_env_map {
+      print("allow_env: env_key =", env_key, "env_val =", env_val)
+      allow_env_map_entry(env_key, env_val, p_env_map)
+    }
+    print("allow_env_map: true")
+}
+
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    i_val == p_val
+    print("allow_env_map_entry: true")
+}
+
+allow_env_map_entry(key, i_val, p_env_map) {
+  p_val := p_env_map[key]
+  # TODO: should these be handled in a different way?
+  always_allowed := ["$(host-name)", "$(node-name)", "$(pod-uid)"]
+  some allowed in always_allowed
+  p_val == allowed
+  regex.match(SUBDOMAIN_NAME, i_val)
+  print("allow_env_map_entry2: true")
+}
+
+# Allow input env variables that match with a request_defaults regex.
+allow_env_map_entry(key, i_val, p_env_map) {
+    some p_regex1 in policy_data.request_defaults.CreateContainerRequest.allow_env_regex
+    p_regex2 := replace(p_regex1, "$(ipv4_a)", policy_data.common.ipv4_a)
+    p_regex3 := replace(p_regex2, "$(ip_p)", policy_data.common.ip_p)
+    p_regex4 := replace(p_regex3, "$(svc_name)", policy_data.common.svc_name)
+    p_regex5 := replace(p_regex4, "$(dns_label)", policy_data.common.dns_label)
+
+    result := concat("=", [key, i_val])
+    regex.match(p_regex5, result)
+
+    print("allow_env_map_entry 3: true")
+}
+
+# Allow fieldRef "fieldPath: status.hostIP" values.
+allow_env_map_entry(key, i_val, p_env_map) {
+    is_ip(i_val)
+
+    p_val := p_env_map[key]
+    p_var := concat("=", [key, p_val])
+    allow_pod_ip_var(key, p_var)
+    print("allow_env_map_entry 4: true")
+}
+
+# Match input with one of the policy variables, after substituting $(sandbox-name).
+allow_env_map_entry(key, i_val, p_env_map) {
+    s_name := input.base.OCI.Annotations[S_NAME_KEY]
+    p_val := p_env_map[key]
+    p_var2 := replace(p_val, "$(sandbox-name)", s_name)
+    p_var2 == i_val
+    print("allow_env_map_entry 5: true")
+}
+
+# Match input with one of the policy variables, after substituting $(sandbox-namespace).
+allow_env_map_entry(key, i_val, p_env_map) {
+    s_namespace := input.base.OCI.Annotations[S_NAMESPACE_KEY]
+    p_val := p_env_map[key]
+    p_var2 := replace(p_val, "$(sandbox-namespace)", s_namespace)
+    p_var2 == i_val
+    print("allow_env_map_entry 6: true")
+}
+
+CreateContainerRequest:= resp {
+  resp = CreateContainerRequestCommon(input)
+  print("CreateContainerRequest: true")
+}
+
+CreateContainerRequestCommon(req):= {"ops": ops, "allowed": true} {
     # Check if the input request should be rejected even before checking the
     # policy_data.containers information.
-    allow_create_container_input
+    allow_create_container_input(req)
 
-    i_oci := input.OCI
-    i_storages := input.storages
+    i_oci := req.OCI
+    i_storages := req.storages
 
     # array of possible state operations
     ops_builder := []
@@ -75,7 +158,7 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     print("======== CreateContainerRequest: trying next policy container")
 
     p_pidns := p_container.sandbox_pidns
-    i_pidns := input.sandbox_pidns
+    i_pidns := req.sandbox_pidns
     print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
     p_pidns == i_pidns
 
@@ -101,15 +184,15 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
 
     allow_linux(p_oci, i_oci)
 
-    print("CreateContainerRequest: true")
+    print("CreateContainerRequestCommon: true")
 }
 
-allow_create_container_input {
-    print("allow_create_container_input: input =", input)
-    count(input.shared_mounts) == 0
-    is_null(input.string_user)
+allow_create_container_input(req) {
+    print("allow_create_container_input: input =", req)
+    count(req.shared_mounts) == 0
+    is_null(req.string_user)
 
-    i_oci := input.OCI
+    i_oci := req.OCI
     is_null(i_oci.Hooks)
     is_null(i_oci.Solaris)
     is_null(i_oci.Windows)
