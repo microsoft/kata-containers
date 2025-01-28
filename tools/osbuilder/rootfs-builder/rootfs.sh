@@ -891,6 +891,7 @@ delete_unnecessary_files()
 		find "${ROOTFS_DIR}" \
 			\( -type f -o -type l \) \
 			\( -name "${u}" -o \
+			   -name "${u}.mount" -o \
 			   -name "${u}.path" -o \
 			   -name "${u}.service" -o \
 			   -name "${u}.socket" -o \
