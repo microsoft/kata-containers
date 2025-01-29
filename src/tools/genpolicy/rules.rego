@@ -55,15 +55,71 @@ S_NAME_KEY = "io.kubernetes.cri.sandbox-name"
 S_NAMESPACE_KEY = "io.kubernetes.cri.sandbox-namespace"
 BUNDLE_ID = "[a-z0-9]{64}"
 # from https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names
+# and https://github.com/kubernetes/kubernetes/blob/8294abc599696e0d1b5aa734afa7ae1e4f5059a0/staging/src/k8s.io/apimachinery/pkg/util/validation/validation.go#L177
 SUBDOMAIN_NAME = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+ALLOWED_SUBDOMAIN_NAMES := ["$(host-name)", "$(node-name)", "$(pod-uid)"]
+ALWAYS_ALLOWED = ["$(resource-field)", "$(todo-annotation)"]
 
 PolicyCreateContainerRequest:= resp {
   resp = CreateContainerRequestCommon(input.base)
-  some p_container in policy_data.containers
+#   resp :=  {"ops": [], "allowed": true}
   i_env_map := input.env_map
+  i_tokenized_args := input.tokenized_args
+  some p_container in policy_data.containers
   p_env_map := p_container.env_map  
   allow_env_map(p_env_map, i_env_map)
+  
+  p_tokenized_args := p_container.tokenized_args
+  allow_tokenized_args(p_tokenized_args, i_tokenized_args)
+
   print("PolicyCreateContainerRequest: true")
+}
+
+allow_tokenized_args(p_tokenized_args, i_tokenized_args) {
+    every i, i_tokenized_arg in i_tokenized_args {
+      allow_tokenized_arg(p_tokenized_args[i], i_tokenized_arg)
+    }
+    print("allow_tokenized_args: true")
+}
+
+allow_tokenized_arg(p_tokenized_arg, i_tokenized_arg) {
+    print("allow_tokenized_arg: p_tokenized_arg =", p_tokenized_arg, "i_tokenized_arg =", i_tokenized_arg)
+    every i, i_token in i_tokenized_arg {
+      # todo: why do we need to do this
+      p_token := replace(p_tokenized_arg[i], "$$", "$")
+      allow_token(p_token, i_token)
+    }
+    print("allow_tokenized_arg: true")
+}
+
+# Allow exact match
+allow_token(p_token, i_token) {
+    p_token == i_token
+    print("allow_token: true")
+}
+
+# Allow variables that should look like a subdomain name
+allow_token(p_token, i_token) {
+    some allowed in ALLOWED_SUBDOMAIN_NAMES
+    p_token == allowed
+    regex.match(SUBDOMAIN_NAME, i_token)
+    print("allow_token2: true")
+}
+
+# sandbox-name
+allow_token(p_token, i_token) {
+    s_name := input.base.OCI.Annotations[S_NAME_KEY]
+    p_var2 := replace(p_token, "$(sandbox-name)", s_name)
+    p_var2 == i_token
+    print("allow_token3: true")
+}
+
+# sandbox-namespace
+allow_token(p_token, i_token) {
+    s_namespace := input.base.OCI.Annotations[S_NAMESPACE_KEY]
+    p_var2 := replace(p_token, "$(sandbox-namespace)", s_namespace)
+    p_var2 == i_token
+    print("allow_token4: true")
 }
 
 allow_env_map(p_env_map, i_env_map) {
@@ -74,17 +130,17 @@ allow_env_map(p_env_map, i_env_map) {
     print("allow_env_map: true")
 }
 
+# Allow exact match
 allow_env_map_entry(key, i_val, p_env_map) {
     p_val := p_env_map[key]
     i_val == p_val
     print("allow_env_map_entry: true")
 }
 
+# Allow variables that should look like a subdomain name
 allow_env_map_entry(key, i_val, p_env_map) {
   p_val := p_env_map[key]
-  # TODO: should these be handled in a different way?
-  always_allowed := ["$(host-name)", "$(node-name)", "$(pod-uid)"]
-  some allowed in always_allowed
+  some allowed in ALLOWED_SUBDOMAIN_NAMES
   p_val == allowed
   regex.match(SUBDOMAIN_NAME, i_val)
   print("allow_env_map_entry2: true")
@@ -104,7 +160,7 @@ allow_env_map_entry(key, i_val, p_env_map) {
     print("allow_env_map_entry 3: true")
 }
 
-# Allow fieldRef "fieldPath: status.hostIP" values.
+# Allow fieldRef "fieldPath: status.podIP" values.
 allow_env_map_entry(key, i_val, p_env_map) {
     is_ip(i_val)
 
@@ -130,6 +186,26 @@ allow_env_map_entry(key, i_val, p_env_map) {
     p_var2 := replace(p_val, "$(sandbox-namespace)", s_namespace)
     p_var2 == i_val
     print("allow_env_map_entry 6: true")
+}
+
+# Allow fieldRef "fieldPath: status.hostIP" values.
+allow_env_map_entry(key, i_val, p_env_map) {
+    is_ip(i_val)
+
+    p_val := p_env_map[key]
+    p_var := concat("=", [key, p_val])
+    allow_host_ip_var(key, p_var)
+    print("allow_env_map_entry 7: true")
+}
+
+# Allow resourceFieldRef values (e.g., "limits.cpu").
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    # TODO: should these be handled in a different way?
+    some allowed in ALWAYS_ALLOWED
+    p_val == allowed
+    #regex.match(SUBDOMAIN_NAME, i_val)
+    print("allow_env_map_entry8: true")
 }
 
 CreateContainerRequest:= resp {
@@ -834,8 +910,7 @@ allow_var(p_process, i_process, i_var, s_name, s_namespace) {
     p_name_value[0] == name_value[0]
 
     # TODO: should these be handled in a different way?
-    always_allowed := ["$(host-name)", "$(node-name)", "$(pod-uid)"]
-    some allowed in always_allowed
+    some allowed in ALLOWED_SUBDOMAIN_NAMES
     contains(p_name_value[1], allowed)
 
     print("allow_var 5: true")
@@ -865,13 +940,13 @@ allow_var(p_process, i_process, i_var, s_name, s_namespace) {
     p_name_value[0] == name_value[0]
 
     # TODO: should these be handled in a different way?
-    always_allowed = ["$(resource-field)", "$(todo-annotation)"]
-    some allowed in always_allowed
+    some allowed in ALWAYS_ALLOWED
     contains(p_name_value[1], allowed)
 
     print("allow_var 7: true")
 }
 
+# Match input with one of the policy variables, after substituting $(sandbox-namespace).
 allow_var(p_process, i_process, i_var, s_name, s_namespace) {
     some p_var in p_process.Env
     p_var2 := replace(p_var, "$(sandbox-namespace)", s_namespace)

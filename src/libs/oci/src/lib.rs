@@ -84,7 +84,12 @@ pub type LinuxRlimit = PosixRlimit;
 pub fn get_tokenized_args(args: &Vec<String>) -> Vec<Vec<String>> {
     let mut tokenized_args: Vec<Vec<String>> = Vec::new();
     for arg in args {
-        let arg_split = shell_words::split(arg).expect("Failed to split");
+        let mut arg_split = shell_words::split(arg).expect("Failed to split");
+        for s in arg_split.iter_mut() {
+            if s.ends_with(';') {
+                s.pop(); // Remove the last character
+            }
+        }
         tokenized_args.push(arg_split);
     }
     tokenized_args
