@@ -11,7 +11,7 @@ import (
 	"context"
 	//"encoding/hex"
 	"fmt"
-	//"io/fs"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1032,6 +1032,77 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 	}
 
 	baseName := filepath.Base(m.Source)
+	srcRoot := filepath.Clean(m.Source)
+	guestPath := filepath.Join(kataGuestSharedDir(), baseName)
+
+	walk := func(srcPath string, d fs.DirEntry, err error) error {
+
+		if err != nil {
+			return err
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		if !(info.Mode().IsRegular() || info.Mode().IsDir() /*|| (info.Mode()&os.ModeSymlink) == os.ModeSymlink*/) {
+			f.Logger().WithField("ignored-file", srcPath).Debug("ShareConfigVolume: Ignoring file as FS sharing not supported")
+			if srcPath == srcRoot {
+				// Ignore the mount if this is not a regular file (excludes socket, device, ...) as it cannot be handled by
+				// a simple copy. But this should not be treated as an error, only as a limitation.
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		dstPath := filepath.Join(guestPath, srcPath[len(srcRoot):])
+
+		if info.Mode().IsRegular() {
+			f.Logger().Infof("ShareFile: sharing file from src (%s) to dest (%s)", srcPath, dstPath)
+			err = f.shareFile(ctx, nil, srcPath, dstPath)
+			if err != nil {
+				f.Logger().WithError(err).Error("ShareConfigVolume: Failed to copy file")
+				return err
+			}
+		}
+
+		if configVolRegex.MatchString(srcPath) {
+			// fsNotify doesn't add watcher recursively.
+			// So we need to add the watcher for directories under kubernetes.io~configmap, kubernetes.io~secret,
+			// kubernetes.io~downward-api and kubernetes.io~projected
+
+			// Add watcher only to the timestamped directory containing secrets to prevent
+			// multiple events received from also watching the parent directory.
+			if info.Mode().IsDir() && timestampDirRegex.MatchString(srcPath) {
+				// The cm dir is of the form /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~configmap/foo/{..data, key1, key2,...}
+				// The secret dir is of the form /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~secret/foo/{..data, key1, key2,...}
+				// The projected dir is of the form /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~projected/foo/{..data, key1, key2,...}
+				// The downward-api dir is of the form /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~downward-api/foo/{..data, key1, key2,...}
+				f.Logger().Infof("ShareConfigVolume: srcPath(%s) is a directory", srcPath)
+				err := f.watchDir(srcPath)
+				if err != nil {
+					f.Logger().WithError(err).Error("Failed to watch directory")
+					return err
+				}
+			} else {
+				f.Logger().Infof("ShareConfigVolume: srcPath(%s) is not a timestamped directory", srcPath)
+			}
+			// Add the source and destination to the global map which will be used by the event loop
+			// to copy the modified content to the destination
+			f.Logger().Infof("ShareConfigVolume: Adding srcPath(%s) dstPath(%s) to srcDstMap", srcPath, dstPath)
+			// Lock the map before adding the entry
+			f.srcDstMapLock.Lock()
+			defer f.srcDstMapLock.Unlock()
+			f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], dstPath)
+		}
+		return nil
+	}
+
+	if err := filepath.WalkDir(srcRoot, walk); err != nil {
+		c.Logger().WithField("failed-file", m.Source).Debugf("ShareConfigVolume: failed in WalkDir: %v", err)
+		return nil, err
+	}
 
 	return &SharedFile{
 		guestPath: fileTypeConfigVol + "/" + baseName,
