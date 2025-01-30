@@ -1026,12 +1026,14 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 		return nil, err
 	}
 
+	baseName := filepath.Base(m.Source)
+
 	// Lock the map before adding the entry
 	//f.srcDstMapLock.Lock()
 	//defer f.srcDstMapLock.Unlock()
 	//f.srcDstMap[m.Source] = append(f.srcDstMap[m.Source], "no-dest-path")
 
 	return &SharedFile{
-		guestPath: fileTypeConfigVol,
+		guestPath: fileTypeConfigVol + "/" + baseName,
 	}, nil
 }

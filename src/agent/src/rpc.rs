@@ -211,6 +211,18 @@ impl AgentService {
                         );
                         break;
                     }
+
+                    let components = mount.source.split('/').collect::<Vec<&str>>();
+                    if components.len() == 2 && components[0] == "config-volume" {
+                        mount.source = c_path.clone() + file_type;
+                        info!(
+                            sl(),
+                            "adjust_mounts: source {}, destination {}",
+                            &mount.source,
+                            &mount.destination
+                        );
+                        break;
+                    }
                 }
             }
         }
