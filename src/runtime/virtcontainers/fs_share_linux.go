@@ -986,6 +986,10 @@ func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, source st
 	var err error = nil
 	var b = make([]byte, 0)
 
+	f.Logger().
+		WithField("fileType", fileType).
+		Debug("shareFile: starting")
+
 	if fileType != fileTypeKubeApiAccess {
 		b, err = os.ReadFile(source)
 		if err != nil {
@@ -993,6 +997,11 @@ func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, source st
 			return fmt.Errorf("ReadFile failed %v", err)
 		}
 	}
+
+	f.Logger().
+		WithField("fileType", fileType).
+		WithField("byte_count", len(b)).
+		Debug("shareFile: calling agent.setFile")
 
 	err = f.sandbox.agent.setFile(ctx, fileType, b)
 	if err != nil {
