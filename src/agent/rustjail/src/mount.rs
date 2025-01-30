@@ -807,7 +807,7 @@ fn mount_from(
 
         let r = fs::canonicalize(&source);
         if r.is_err() {
-            return Err(anyhow!("canonicalize error: {:?}", r));
+            return Err(anyhow!("mount_from: {:?} canonicalize error: {:?}", &source, r));
         }
         let src = r.unwrap();
 

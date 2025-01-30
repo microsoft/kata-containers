@@ -934,7 +934,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 	case fileType == fileTypeKubeApiAccess:
 		return f.ShareKubeApiAccess(ctx, c, m)
 	case fileType == fileTypeConfigVol:
-		return f.ShareTimeStampedDir(ctx, c, m)
+		return f.ShareTimeConfigVolume(ctx, c, m)
 	default:
 		f.shareFile(ctx, c, m.Source, fileType)
 		return &SharedFile{
@@ -1015,14 +1015,14 @@ func (f *FilesystemShare) ShareKubeApiAccess(ctx context.Context, c *Container, 
 	}, nil
 }
 
-func (f *FilesystemShare) ShareTimeStampedDir(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+func (f *FilesystemShare) ShareTimeConfigVolume(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
 	// Add the source and destination to the global map which will be used by the event loop
 	// to copy the modified content to the destination
-	f.Logger().Infof("ShareFile: Adding srcPath(%s) to srcDstMap", m.Source)
+	f.Logger().Infof("ShareTimeConfigVolume: Adding srcPath(%s) to srcDstMap", m.Source)
 
 	err := f.watchDir(m.Source)
 	if err != nil {
-		f.Logger().WithError(err).Error("Failed to watch directory %s", m.Source)
+		f.Logger().WithError(err).Error("ShareTimeConfigVolume: Failed to watch directory %s", m.Source)
 		return nil, err
 	}
 
