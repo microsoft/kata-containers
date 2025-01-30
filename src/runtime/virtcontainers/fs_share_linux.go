@@ -1090,12 +1090,16 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, m *Mount) (*Sha
 				f.Logger().WithField("volumeDir", volumeDir).Debug("ShareConfigVolume: volumeDir is timestamped")
 
 				fileType := f.getFileType(srcPath)
+				srcBaseName := filepath.Base(srcPath)
+				destID := fileType + "/" + baseName + "/" + srcBaseName
+
 				f.Logger().
-					WithField("srcPath", srcPath).
 					WithField("fileType", fileType).
+					WithField("srcPath", srcPath).
+					WithField("destID", destID).
 					Debug("ShareConfigVolume: calling shareFile")
 
-				err = f.shareFile(ctx, srcPath, fileType + "/" + baseName)
+				err = f.shareFile(ctx, srcPath, destID)
 				if err != nil {
 					f.Logger().WithError(err).Error("ShareConfigVolume: shareFile failed")
 					return err
