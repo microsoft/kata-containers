@@ -1095,7 +1095,7 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, m *Mount) (*Sha
 					WithField("fileType", fileType).
 					Debug("ShareConfigVolume: calling shareFile")
 
-				err = f.shareFile(ctx, srcPath, fileType)
+				err = f.shareFile(ctx, srcPath, fileType + "/" + baseName)
 				if err != nil {
 					f.Logger().WithError(err).Error("ShareConfigVolume: shareFile failed")
 					return err
