@@ -935,7 +935,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 	case fileType == fileTypeKubeApiAccess:
 		return f.ShareKubeApiAccess(ctx, c, m)
 	case fileType == fileTypeConfigVol:
-		return f.ShareConfigVolume(ctx, c, m)
+		return f.ShareConfigVolume(ctx, m)
 	default:
 		f.shareFile(ctx, m.Source, fileType)
 		return &SharedFile{
@@ -1033,7 +1033,7 @@ func (f *FilesystemShare) ShareKubeApiAccess(ctx context.Context, c *Container, 
 	}, nil
 }
 
-func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, m *Mount) (*SharedFile, error) {
 	err := f.watchDir(m.Source)
 	if err != nil {
 		f.Logger().WithError(err).Error("ShareConfigVolume: Failed to watch directory %s", m.Source)
@@ -1043,6 +1043,12 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 	baseName := filepath.Base(m.Source)
 	srcRoot := filepath.Clean(m.Source)
 	guestPath := filepath.Join(kataGuestSharedDir(), baseName)
+
+	f.Logger().
+		WithField("baseName", baseName).
+		WithField("srcRoot", srcRoot).
+		WithField("guestPath", guestPath).
+		Debug("ShareConfigVolume: start walking srcRoot")
 
 	walk := func(srcPath string, d fs.DirEntry, err error) error {
 		f.Logger().WithField("srcPath", srcPath).Debug("ShareConfigVolume: walk")
@@ -1074,6 +1080,11 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 
 		if info.Mode().IsRegular() {
 			volumeDir := filepath.Dir(srcPath)
+
+			f.Logger().
+				WithField("dstPath", dstPath).
+				WithField("volumeDir", volumeDir).
+				Debug("ShareConfigVolume: regular file")
 
 			if timestampDirRegex.MatchString(volumeDir) {
 				f.Logger().WithField("volumeDir", volumeDir).Debug("ShareConfigVolume: volumeDir is timestamped")
@@ -1125,7 +1136,7 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 	}
 
 	if err := filepath.WalkDir(srcRoot, walk); err != nil {
-		c.Logger().WithField("failed-file", m.Source).Debugf("ShareConfigVolume: failed in WalkDir: %v", err)
+		f.Logger().WithField("failed-file", m.Source).Debugf("ShareConfigVolume: failed in WalkDir: %v", err)
 		return nil, err
 	}
 
