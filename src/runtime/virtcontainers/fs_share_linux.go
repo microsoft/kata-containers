@@ -921,6 +921,7 @@ var fileTypeNamespace string = "namespace"
 var fileTypeToken string = "token"
 
 var fileTypeConfigVol string = "config-volume"
+var fileTypeConfigVolData string = "..data"
 
 var fileTypeUnknown string = "unknown"
 
@@ -936,7 +937,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 	case fileType == fileTypeConfigVol:
 		return f.ShareConfigVolume(ctx, c, m)
 	default:
-		f.shareFile(ctx, c, m.Source, fileType)
+		f.shareFile(ctx, m.Source, fileType)
 		return &SharedFile{
 			guestPath: fileType,
 		}, nil
@@ -963,26 +964,32 @@ func (f *FilesystemShare) getFileType(filePath string) (string) {
 		return fileTypeUnknown
 	}
 
-	if !fi.IsDir() {
-		f.Logger().WithField("filePath", filePath).Debug("getFileType: not a directory")
+	if fi.Mode().IsRegular() {
+		f.Logger().WithField("filePath", filePath).Debug("getFileType: regular file")
 
-		if fi.Size() == 0 {
+		if strings.Contains(filePath, fileTypeConfigVolData) {
+			return fileTypeConfigVolData
+		} else if fi.Size() == 0 {
 			return fileTypeTerminationLog
 		}
-	} else if strings.Contains(filePath, fileTypeKubeApiAccess) {
-		f.Logger().WithField("filePath", filePath).Debug("getFileType: fileTypeKubeApiAccess")
-		return fileTypeKubeApiAccess
-	} else if configVolRegex.MatchString(filePath) {
-		f.Logger().WithField("filePath", filePath).Debug("getFileType: matching configVolRegex")
-		return fileTypeConfigVol
-	} else {
-		f.Logger().WithField("filePath", filePath).Debug("getFileType: unknown file type")
+	} else if fi.IsDir() {
+		f.Logger().WithField("filePath", filePath).Debug("getFileType: directory")
+
+		if strings.Contains(filePath, fileTypeKubeApiAccess) {
+			f.Logger().WithField("filePath", filePath).Debug("getFileType: fileTypeKubeApiAccess")
+			return fileTypeKubeApiAccess
+		} else if configVolRegex.MatchString(filePath) {
+			f.Logger().WithField("filePath", filePath).Debug("getFileType: matching configVolRegex")
+			return fileTypeConfigVol
+		} else {
+			f.Logger().WithField("filePath", filePath).Debug("getFileType: unknown file type")
+		}
 	}
 
 	return fileTypeUnknown
 }
 
-func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, source string, fileType string) (error) {
+func (f *FilesystemShare) shareFile(ctx context.Context, source string, fileType string) (error) {
 	var err error = nil
 	var b = make([]byte, 0)
 
@@ -1013,11 +1020,11 @@ func (f *FilesystemShare) shareFile(ctx context.Context, c *Container, source st
 }
 
 func (f *FilesystemShare) ShareKubeApiAccess(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
-	f.shareFile(ctx, c, m.Source, fileTypeKubeApiAccess)
+	f.shareFile(ctx, m.Source, fileTypeKubeApiAccess)
 
-	f.shareFile(ctx, c, m.Source + "/" + fileTypeCaCrt, fileTypeCaCrt)
-	f.shareFile(ctx, c, m.Source + "/" + fileTypeNamespace, fileTypeNamespace)
-	f.shareFile(ctx, c, m.Source + "/" + fileTypeToken, fileTypeToken)
+	f.shareFile(ctx, m.Source + "/" + fileTypeCaCrt, fileTypeCaCrt)
+	f.shareFile(ctx, m.Source + "/" + fileTypeNamespace, fileTypeNamespace)
+	f.shareFile(ctx, m.Source + "/" + fileTypeToken, fileTypeToken)
 
 	return &SharedFile{
 		guestPath: fileTypeKubeApiAccess,
@@ -1074,8 +1081,13 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 		dstPath := filepath.Join(guestPath, srcPath[len(srcRoot):])
 
 		if info.Mode().IsRegular() {
-			f.Logger().Infof("ShareConfigVolume: calling shareFile src (%s) to dest (%s)", srcPath, dstPath)
-			err = f.shareFile(ctx, nil, srcPath, dstPath)
+			fileType := f.getFileType(m.Source)
+			f.Logger().
+				WithField("srcPath", srcPath).
+				WithField("fileType", fileType).
+				Debug("ShareConfigVolume: calling shareFile")
+
+			err = f.shareFile(ctx, srcPath, fileType)
 			if err != nil {
 				f.Logger().WithError(err).Error("ShareConfigVolume: shareFile failed")
 				return err
