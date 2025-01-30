@@ -1049,7 +1049,11 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 		}
 
 		if !(info.Mode().IsRegular() || info.Mode().IsDir() /*|| (info.Mode()&os.ModeSymlink) == os.ModeSymlink*/) {
-			f.Logger().WithField("ignored-file", srcPath).Debug("ShareConfigVolume: Ignoring file as FS sharing not supported")
+			f.Logger().
+				WithField("ignored-file", srcPath).
+				WithField("symlink", info.Mode()&os.ModeSymlink == os.ModeSymlink).
+				Debug("ShareConfigVolume: ignoring file")
+
 			if srcPath == srcRoot {
 				// Ignore the mount if this is not a regular file (excludes socket, device, ...) as it cannot be handled by
 				// a simple copy. But this should not be treated as an error, only as a limitation.
@@ -1061,13 +1065,20 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 		dstPath := filepath.Join(guestPath, srcPath[len(srcRoot):])
 
 		if info.Mode().IsRegular() {
-			f.Logger().Infof("ShareFile: sharing file from src (%s) to dest (%s)", srcPath, dstPath)
+			f.Logger().Infof("ShareConfigVolume: calling shareFile src (%s) to dest (%s)", srcPath, dstPath)
 			err = f.shareFile(ctx, nil, srcPath, dstPath)
 			if err != nil {
-				f.Logger().WithError(err).Error("ShareConfigVolume: Failed to copy file")
+				f.Logger().WithError(err).Error("ShareConfigVolume: shareFile failed")
 				return err
 			}
-		}
+		} /*else {
+			f.Logger().Infof("ShareConfigVolume: calling shareConfigDir src (%s) to dest (%s)", srcPath, dstPath)
+			err = f.shareConfigDir(ctx, nil, srcPath, dstPath)
+			if err != nil {
+				f.Logger().WithError(err).Error("ShareConfigVolume: shareConfigDir failed")
+				return err
+			}
+		}*/
 
 		if configVolRegex.MatchString(srcPath) {
 			// fsNotify doesn't add watcher recursively.
@@ -1081,7 +1092,7 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 				// The secret dir is of the form /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~secret/foo/{..data, key1, key2,...}
 				// The projected dir is of the form /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~projected/foo/{..data, key1, key2,...}
 				// The downward-api dir is of the form /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~downward-api/foo/{..data, key1, key2,...}
-				f.Logger().Infof("ShareConfigVolume: srcPath(%s) is a directory", srcPath)
+				f.Logger().Infof("ShareConfigVolume: srcPath(%s) is a timestamped directory", srcPath)
 				err := f.watchDir(srcPath)
 				if err != nil {
 					f.Logger().WithError(err).Error("Failed to watch directory")
