@@ -183,6 +183,13 @@ impl AgentService {
         let c_path = "/run/kata-containers/shared/containers/".to_string();
 
         for mount in &mut oci.mounts {
+            info!(
+                sl(),
+                "adjust_mounts: before: source {}, destination {}",
+                &mount.source,
+                &mount.destination
+            );
+ 
             let mut found = false;
 
             for file_type in file_types {
@@ -209,20 +216,22 @@ impl AgentService {
                             &mount.source,
                             &mount.destination
                         );
+                        found = true;
                         break;
                     }
+                }
+            }
 
-                    let components = mount.source.split('/').collect::<Vec<&str>>();
-                    if components.len() == 2 && components[0] == "config-volume" {
-                        mount.source = c_path.clone() + file_type;
-                        info!(
-                            sl(),
-                            "adjust_mounts: source {}, destination {}",
-                            &mount.source,
-                            &mount.destination
-                        );
-                        break;
-                    }
+            if !found {
+                let components = mount.source.split('/').collect::<Vec<&str>>();
+                if components.len() == 2 && components[0] == "config-volume" {
+                    mount.source = c_path.clone() + &mount.source;
+                    info!(
+                        sl(),
+                        "adjust_mounts: source {}, destination {}",
+                        &mount.source,
+                        &mount.destination
+                    );
                 }
             }
         }
