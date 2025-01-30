@@ -907,7 +907,11 @@ func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 
 }
 
-var fileTypes = [3]string{"resolv.conf", "etc-hosts", "hostname"}
+var fileTypes = [3]string{
+	"etc-hosts",
+	"hostname",
+	"resolv.conf",
+	}
 
 var fileTypeTerminationLog string = "termination-log"
 
@@ -915,6 +919,8 @@ var fileTypeKubeApiAccess string = "kube-api-access"
 var fileTypeCaCrt string = "ca.crt"
 var fileTypeNamespace string = "namespace"
 var fileTypeToken string = "token"
+
+var fileTypeConfigVol string = "config-volume"
 
 var fileTypeUnknown string = "unknown"
 
@@ -924,9 +930,11 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 
 	switch {
 	case fileType == fileTypeUnknown:
-		f.Logger().Errorf("ShareFile: Ignoring file %s", m.Source)
+		f.Logger().Errorf("ShareFile: ignoring file %s", m.Source)
 	case fileType == fileTypeKubeApiAccess:
 		return f.ShareKubeApiAccess(ctx, c, m)
+	case fileType == fileTypeConfigVol:
+		return f.ShareTimeStampedDir(ctx, c, m)
 	default:
 		f.shareFile(ctx, c, m.Source, fileType)
 		return &SharedFile{
@@ -962,9 +970,13 @@ func (f *FilesystemShare) getFileType(filePath string) (string) {
 			return fileTypeTerminationLog
 		}
 	} else if strings.Contains(filePath, fileTypeKubeApiAccess) {
+		f.Logger().WithField("filePath", filePath).Debug("getFileType: fileTypeKubeApiAccess")
 		return fileTypeKubeApiAccess
+	} else if configVolRegex.MatchString(filePath) {
+		f.Logger().WithField("filePath", filePath).Debug("getFileType: matching configVolRegex")
+		return fileTypeConfigVol
 	} else {
-		f.Logger().WithField("filePath", filePath).Debug("getFileType: doesn't contain %s", fileTypeKubeApiAccess)
+		f.Logger().WithField("filePath", filePath).Debug("getFileType: unknown file type")
 	}
 
 	return fileTypeUnknown
@@ -1000,5 +1012,26 @@ func (f *FilesystemShare) ShareKubeApiAccess(ctx context.Context, c *Container, 
 
 	return &SharedFile{
 		guestPath: fileTypeKubeApiAccess,
+	}, nil
+}
+
+func (f *FilesystemShare) ShareTimeStampedDir(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+	// Add the source and destination to the global map which will be used by the event loop
+	// to copy the modified content to the destination
+	f.Logger().Infof("ShareFile: Adding srcPath(%s) to srcDstMap", m.Source)
+
+	err := f.watchDir(m.Source)
+	if err != nil {
+		f.Logger().WithError(err).Error("Failed to watch directory %s", m.Source)
+		return nil, err
+	}
+
+	// Lock the map before adding the entry
+	f.srcDstMapLock.Lock()
+	defer f.srcDstMapLock.Unlock()
+	f.srcDstMap[m.Source] = append(f.srcDstMap[m.Source], "no-dest-path")
+
+	return &SharedFile{
+		guestPath: fileTypeConfigVol,
 	}, nil
 }
