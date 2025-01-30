@@ -921,7 +921,7 @@ var fileTypeNamespace string = "namespace"
 var fileTypeToken string = "token"
 
 var fileTypeConfigVol string = "config-volume"
-var fileTypeConfigVolData string = "..data"
+var fileTypeConfigVolData string = "config-volume-data"
 
 var fileTypeUnknown string = "unknown"
 
