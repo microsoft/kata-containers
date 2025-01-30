@@ -1032,16 +1032,6 @@ func (f *FilesystemShare) ShareKubeApiAccess(ctx context.Context, c *Container, 
 }
 
 func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
-	// Add the source and destination to the global map which will be used by the event loop
-	// to copy the modified content to the destination
-	f.Logger().Infof("ShareConfigVolume: Adding srcPath(%s) to srcDstMap", m.Source)
-
-	/*
-	f.srcDstMapLock.Lock()
-	defer f.srcDstMapLock.Unlock()
-	f.srcDstMap[m.Source] = append(f.srcDstMap[m.Source], "no-dest-path")
-	*/
-
 	err := f.watchDir(m.Source)
 	if err != nil {
 		f.Logger().WithError(err).Error("ShareConfigVolume: Failed to watch directory %s", m.Source)
@@ -1081,25 +1071,24 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 		dstPath := filepath.Join(guestPath, srcPath[len(srcRoot):])
 
 		if info.Mode().IsRegular() {
-			fileType := f.getFileType(m.Source)
-			f.Logger().
-				WithField("srcPath", srcPath).
-				WithField("fileType", fileType).
-				Debug("ShareConfigVolume: calling shareFile")
+			volumeDir := filepath.Dir(srcPath)
 
-			err = f.shareFile(ctx, srcPath, fileType)
-			if err != nil {
-				f.Logger().WithError(err).Error("ShareConfigVolume: shareFile failed")
-				return err
+			if timestampDirRegex.MatchString(volumeDir) {
+				f.Logger().WithField("volumeDir", volumeDir).Debug("ShareConfigVolume: volumeDir is timestamped")
+
+				fileType := f.getFileType(srcPath)
+				f.Logger().
+					WithField("srcPath", srcPath).
+					WithField("fileType", fileType).
+					Debug("ShareConfigVolume: calling shareFile")
+
+				err = f.shareFile(ctx, srcPath, fileType)
+				if err != nil {
+					f.Logger().WithError(err).Error("ShareConfigVolume: shareFile failed")
+					return err
+				}
 			}
-		} /*else {
-			f.Logger().Infof("ShareConfigVolume: calling shareConfigDir src (%s) to dest (%s)", srcPath, dstPath)
-			err = f.shareConfigDir(ctx, nil, srcPath, dstPath)
-			if err != nil {
-				f.Logger().WithError(err).Error("ShareConfigVolume: shareConfigDir failed")
-				return err
-			}
-		}*/
+		}
 
 		if configVolRegex.MatchString(srcPath) {
 			// fsNotify doesn't add watcher recursively.
