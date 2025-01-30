@@ -967,7 +967,9 @@ func (f *FilesystemShare) getFileType(filePath string) (string) {
 	if fi.Mode().IsRegular() {
 		f.Logger().WithField("filePath", filePath).Debug("getFileType: regular file")
 
-		if strings.Contains(filePath, fileTypeConfigVolData) {
+		volumeDir := filepath.Dir(filePath)
+		if timestampDirRegex.MatchString(volumeDir) {
+			f.Logger().WithField("volumeDir", volumeDir).Debug("getFileType: volumeDir is timestamped")
 			return fileTypeConfigVolData
 		} else if fi.Size() == 0 {
 			return fileTypeTerminationLog
