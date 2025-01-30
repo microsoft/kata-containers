@@ -1020,6 +1020,11 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 	// to copy the modified content to the destination
 	f.Logger().Infof("ShareConfigVolume: Adding srcPath(%s) to srcDstMap", m.Source)
 
+	// Lock the map before adding the entry
+	f.srcDstMapLock.Lock()
+	defer f.srcDstMapLock.Unlock()
+	f.srcDstMap[m.Source] = append(f.srcDstMap[m.Source], "no-dest-path")
+
 	err := f.watchDir(m.Source)
 	if err != nil {
 		f.Logger().WithError(err).Error("ShareConfigVolume: Failed to watch directory %s", m.Source)
@@ -1027,11 +1032,6 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, c *Container, m
 	}
 
 	baseName := filepath.Base(m.Source)
-
-	// Lock the map before adding the entry
-	//f.srcDstMapLock.Lock()
-	//defer f.srcDstMapLock.Unlock()
-	//f.srcDstMap[m.Source] = append(f.srcDstMap[m.Source], "no-dest-path")
 
 	return &SharedFile{
 		guestPath: fileTypeConfigVol + "/" + baseName,
