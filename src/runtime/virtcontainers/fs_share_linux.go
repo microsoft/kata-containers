@@ -1089,12 +1089,10 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, m *Mount) (*Sha
 			if timestampDirRegex.MatchString(volumeDir) {
 				f.Logger().WithField("volumeDir", volumeDir).Debug("ShareConfigVolume: volumeDir is timestamped")
 
-				fileType := f.getFileType(srcPath)
 				srcBaseName := filepath.Base(srcPath)
-				destID := fileType + "/" + baseName + "/" + srcBaseName
+				destID := fileTypeConfigVol + "/" + baseName + "/" + srcBaseName
 
 				f.Logger().
-					WithField("fileType", fileType).
 					WithField("srcPath", srcPath).
 					WithField("destID", destID).
 					Debug("ShareConfigVolume: calling shareFile")
