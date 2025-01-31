@@ -29,12 +29,6 @@ spec:
                   name: kata-webhook
                   key: runtime_class
                   optional: true
-            - name: MIN_CPU_LIMIT
-              valueFrom:
-                configMapKeyRef:
-                  name: kata-webhook
-                  key: min_cpu_limit
-                  optional: true
             - name: MIN_MEMORY_LIMIT
               valueFrom:
                 configMapKeyRef:
@@ -86,5 +80,4 @@ metadata:
   name: kata-webhook
 data:
   runtime_class: kata
-  min_cpu_limit: "1"
-  min_memory_limit: "256Mi"
+  min_memory_limit: "128Mi"
