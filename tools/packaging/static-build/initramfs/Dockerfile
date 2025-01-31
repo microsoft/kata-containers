@@ -56,7 +56,7 @@ RUN apt-get update &&\
     git clone --depth 1 --branch "${cryptsetup_version}" "${cryptsetup_repo}" cryptsetup && \
     pushd cryptsetup && \
     ./autogen.sh && \
-    ./configure  --enable-static --enable-static-cryptsetup --disable-udev --disable-external-tokens --disable-ssh-token && \
+    ./configure  --enable-static --enable-static-cryptsetup --disable-external-tokens --disable-ssh-token && \
     make && make install && \
     strip /usr/sbin/veritysetup.static && \
     popd && \
