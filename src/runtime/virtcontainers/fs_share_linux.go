@@ -1062,7 +1062,7 @@ func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, m *Mount) (*Sha
 			return err
 		}
 
-		if !(info.Mode().IsRegular() || info.Mode().IsDir() /*|| (info.Mode()&os.ModeSymlink) == os.ModeSymlink*/) {
+		if !(info.Mode().IsRegular() || info.Mode().IsDir() || (info.Mode()&os.ModeSymlink) == os.ModeSymlink) {
 			f.Logger().
 				WithField("ignored-file", srcPath).
 				WithField("symlink", info.Mode()&os.ModeSymlink == os.ModeSymlink).
