@@ -90,11 +90,7 @@ func annotatePodMutator(_ context.Context, ar *kwhmodel.AdmissionReview, obj met
 		fmt.Println("min memory limit value: ", minMemoryLimitVal.Value())
 		for i := range pod.Spec.Containers {
 			if pod.Spec.Containers[i].Resources.Limits == nil {
-				fmt.Println("no limits found. Setting memory limit: ", minMemoryLimit)
-				pod.Spec.Containers[i].Resources.Limits = corev1.ResourceList{
-					"memory": resource.MustParse(minMemoryLimit),
-				}
-				fmt.Println("limits set to : ", pod.Spec.Containers[i].Resources.Limits)
+				continue
 			} else {
 				currentMemoryLimit := pod.Spec.Containers[i].Resources.Limits.Memory().Value()
 				fmt.Println("current memory limit: ", currentMemoryLimit)
