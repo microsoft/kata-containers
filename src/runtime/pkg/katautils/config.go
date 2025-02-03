@@ -62,6 +62,9 @@ const (
 	maxPCIeRootPorts   uint32 = 16
 	maxPCIeSwitchPorts uint32 = 16
 
+	// the maximum valid loglevel for the hypervisor
+	maxHypervisorLoglevel uint32 = 3
+
 	errInvalidHypervisorPrefix = "configuration file contains invalid hypervisor section"
 )
 
@@ -130,6 +133,7 @@ type hypervisor struct {
 	NetRateLimiterBwOneTimeBurst   int64                     `toml:"net_rate_limiter_bw_one_time_burst"`
 	NetRateLimiterOpsMaxRate       int64                     `toml:"net_rate_limiter_ops_max_rate"`
 	NetRateLimiterOpsOneTimeBurst  int64                     `toml:"net_rate_limiter_ops_one_time_burst"`
+	HypervisorLoglevel             uint32                    `toml:"hypervisor_loglevel"`
 	VirtioFSCacheSize              uint32                    `toml:"virtio_fs_cache_size"`
 	VirtioFSQueueSize              uint32                    `toml:"virtio_fs_queue_size"`
 	DefaultMaxVCPUs                uint32                    `toml:"default_maxvcpus"`
@@ -564,6 +568,14 @@ func (h hypervisor) defaultBridges() uint32 {
 	return h.DefaultBridges
 }
 
+func (h hypervisor) defaultHypervisorLoglevel() uint32 {
+	if h.HypervisorLoglevel > maxHypervisorLoglevel {
+		return maxHypervisorLoglevel
+	}
+
+	return h.HypervisorLoglevel
+}
+
 func (h hypervisor) defaultVirtioFSCache() string {
 	if h.VirtioFSCache == "" {
 		return defaultVirtioFSCacheMode
@@ -977,6 +989,7 @@ func newQemuHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		SharedFS:                 sharedFS,
 		VirtioFSDaemon:           h.VirtioFSDaemon,
 		VirtioFSDaemonList:       h.VirtioFSDaemonList,
+		HypervisorLoglevel:       h.defaultHypervisorLoglevel(),
 		VirtioFSCacheSize:        h.VirtioFSCacheSize,
 		VirtioFSCache:            h.defaultVirtioFSCache(),
 		VirtioFSQueueSize:        h.VirtioFSQueueSize,
@@ -1188,6 +1201,7 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		SharedFS:                       sharedFS,
 		VirtioFSDaemon:                 h.VirtioFSDaemon,
 		VirtioFSDaemonList:             h.VirtioFSDaemonList,
+		HypervisorLoglevel:             h.defaultHypervisorLoglevel(),
 		VirtioFSCacheSize:              h.VirtioFSCacheSize,
 		VirtioFSCache:                  h.VirtioFSCache,
 		MemPrealloc:                    h.MemPrealloc,
@@ -1344,6 +1358,7 @@ func newStratovirtHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		SharedFS:              sharedFS,
 		VirtioFSDaemon:        h.VirtioFSDaemon,
 		VirtioFSDaemonList:    h.VirtioFSDaemonList,
+		HypervisorLoglevel:    h.defaultHypervisorLoglevel(),
 		VirtioFSCacheSize:     h.VirtioFSCacheSize,
 		VirtioFSCache:         h.defaultVirtioFSCache(),
 		VirtioFSExtraArgs:     h.VirtioFSExtraArgs,
@@ -1566,6 +1581,7 @@ func GetDefaultHypervisorConfig() vc.HypervisorConfig {
 		GuestHookPath:            defaultGuestHookPath,
 		VhostUserStorePath:       defaultVhostUserStorePath,
 		VhostUserDeviceReconnect: defaultVhostUserDeviceReconnect,
+		HypervisorLoglevel:       defaultHypervisorLoglevel,
 		VirtioFSCache:            defaultVirtioFSCacheMode,
 		DisableImageNvdimm:       defaultDisableImageNvdimm,
 		RxRateLimiterMaxRate:     defaultRxRateLimiterMaxRate,
