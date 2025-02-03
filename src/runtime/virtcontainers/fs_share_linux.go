@@ -1034,12 +1034,6 @@ func (f *FilesystemShare) ShareKubeApiAccess(ctx context.Context, c *Container, 
 }
 
 func (f *FilesystemShare) ShareConfigVolume(ctx context.Context, m *Mount) (*SharedFile, error) {
-	err := f.watchDir(m.Source)
-	if err != nil {
-		f.Logger().WithError(err).Error("ShareConfigVolume: Failed to watch directory %s", m.Source)
-		return nil, err
-	}
-
 	baseName := filepath.Base(m.Source)
 	srcRoot := filepath.Clean(m.Source)
 	guestPath := filepath.Join(kataGuestSharedDir(), baseName)
