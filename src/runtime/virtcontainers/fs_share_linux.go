@@ -702,8 +702,12 @@ func (f *FilesystemShare) StartFileEventWatcher(ctx context.Context) error {
 	f.Logger().Debugf("StartFileEventWatcher: srcDstMap dump %v", f.srcDstMap)
 
 	for {
+		f.Logger().Debugf("StartFileEventWatcher: loop start: %v", f.srcDstMap)
+
 		select {
 		case event, ok := <-f.watcher.Events:
+			f.Logger().Debugf("StartFileEventWatcher: checking events: %v", f.srcDstMap)
+
 			if !ok {
 				return fmt.Errorf("StartFileEventWatcher: watcher events channel closed")
 			}
@@ -780,6 +784,8 @@ func (f *FilesystemShare) StartFileEventWatcher(ctx context.Context) error {
 				}
 			}
 		case err, ok := <-f.watcher.Errors:
+			f.Logger().Debugf("StartFileEventWatcher: checking errors: %v", f.srcDstMap)
+
 			if !ok {
 				return fmt.Errorf("StartFileEventWatcher: watcher error channel closed")
 			}
