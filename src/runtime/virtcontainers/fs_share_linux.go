@@ -857,26 +857,21 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 			*/
 		}
 
-		/*
-		err = f.sandbox.agent.copyFile(context.Background(), srcPath, dstPath)
-		if err != nil {
-			f.Logger().WithError(err).Error("Failed to copy file")
-			return err
-		}
-		*/
-		srcBaseName := filepath.Base(srcPath)
-		baseName := filepath.Base(srcPath)
-		destID := fileTypeConfigVol + "/" + baseName + "/" + srcBaseName
+		if info.Mode().IsRegular() {
+			srcBaseName := filepath.Base(srcPath)
+			baseName := filepath.Base(filepath.Dir(srcPath))
+			destID := fileTypeConfigVol + "/" + baseName + "/" + srcBaseName
 
-		f.Logger().
-			WithField("srcPath", srcPath).
-			WithField("destID", destID).
-			Debug("copyUpdatedFiles: calling shareFile")
+			f.Logger().
+				WithField("srcPath", srcPath).
+				WithField("destID", destID).
+				Debug("copyUpdatedFiles: calling shareFile")
 
-		err = f.shareFile(context.Background(), srcPath, destID)
-		if err != nil {
-			f.Logger().WithError(err).Error("copyUpdatedFiles: shareFile failed")
-			return err
+			err = f.shareFile(context.Background(), srcPath, destID)
+			if err != nil {
+				f.Logger().WithError(err).Error("copyUpdatedFiles: shareFile failed")
+				return err
+			}
 		}
 
 		// Create a new entry in the globalMap to be used in the event loop
