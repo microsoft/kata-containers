@@ -859,7 +859,7 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 
 		if info.Mode().IsRegular() {
 			srcBaseName := filepath.Base(srcPath)
-			baseName := filepath.Base(filepath.Dir(srcPath))
+			baseName := filepath.Base(filepath.Dir(filepath.Dir(srcPath)))
 			destID := fileTypeConfigVol + "/" + baseName + "/" + srcBaseName
 
 			f.Logger().
