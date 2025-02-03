@@ -801,11 +801,6 @@ func (f *FilesystemShare) StartFileEventWatcher(ctx context.Context) error {
 }
 
 func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
-	f.Logger().WithField("src", src).WithField("dst", dst).WithField("oldtsDir", oldtsDir).Debug("copyUpdatedFiles")
-	return nil
-}
-/*
-func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 	f.Logger().Infof("copyUpdatedFiles: Copy src:%s to dst:%s from old src:%s", src, dst, oldtsDir)
 
 	// 1. Read the symlink and get the actual data directory
@@ -827,12 +822,14 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 
 	// 4. Create a hashmap to add newly added secrets (not present in the old ts directory)
 	// for creating user visible symlinks
-	newSecrets := make(map[string]string)
+	// newSecrets := make(map[string]string)
 
 	f.Logger().Infof("copyUpdatedFiles: new src dir: %s && new dst dir:%s", srcNewTsPath, dstNewTsPath)
 
 	// 5. Copy all the files from the new timestamped directory to the guest
 	walk := func(srcPath string, d fs.DirEntry, err error) error {
+		f.Logger().WithField("srcPath", srcPath).Debug("copyUpdatedFiles: walk")
+
 		if err != nil {
 			return err
 		}
@@ -841,11 +838,13 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 		if err != nil {
 			return err
 		}
+
 		dstPath := dstNewTsPath
 		if !info.Mode().IsDir() {
 			// Construct the path for the files to be copied to.
 			dstPath = filepath.Join(dstPath, filepath.Base(srcPath))
 
+			/*
 			// Determine if this secret was present in the old timestamped directory.
 			// If not, add it to the newSecrets map to create user visible symlinks.
 			oldSecret := filepath.Join(oldtsDir, filepath.Base(srcPath))
@@ -855,11 +854,28 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 				symlinkDst := filepath.Join(filepath.Dir(dstNewTsPath), filepath.Base(srcPath))
 				newSecrets[symlinkSrc] = symlinkDst
 			}
+			*/
 		}
 
+		/*
 		err = f.sandbox.agent.copyFile(context.Background(), srcPath, dstPath)
 		if err != nil {
 			f.Logger().WithError(err).Error("Failed to copy file")
+			return err
+		}
+		*/
+		srcBaseName := filepath.Base(srcPath)
+		baseName := filepath.Base(srcPath)
+		destID := fileTypeConfigVol + "/" + baseName + "/" + srcBaseName
+
+		f.Logger().
+			WithField("srcPath", srcPath).
+			WithField("destID", destID).
+			Debug("copyUpdatedFiles: calling shareFile")
+
+		err = f.shareFile(context.Background(), srcPath, destID)
+		if err != nil {
+			f.Logger().WithError(err).Error("copyUpdatedFiles: shareFile failed")
 			return err
 		}
 
@@ -881,6 +897,7 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 		return err
 	}
 
+	/*
 	// 7. Update the '..data' symlink to fix user visible files
 	srcDataPath := filepath.Join(filepath.Dir(srcNewTsPath), "..data")
 	dstDataPath := filepath.Join(filepath.Dir(dstNewTsPath), "..data")
@@ -889,7 +906,9 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 		f.Logger().WithError(err).Errorf("copyUpdatedFiles: Failed to update data symlink")
 		return err
 	}
+	*/
 
+	/*
 	// 8. Create user visible symlinks for any newly created secrets
 	// For existing secrets, the update to '..data' symlink above will fix the user visible files.
 	// TODO: For deleted secrets, the existing symlink will point to non-existing entity after
@@ -901,10 +920,10 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 			return err
 		}
 	}
+	*/
 
 	return nil
 }
-*/
 
 func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 
