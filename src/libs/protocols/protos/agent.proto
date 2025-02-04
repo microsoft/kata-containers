@@ -541,25 +541,37 @@ message StringUser {
 }
 
 message CopyFileRequest {
-	// Path is the destination file in the guest. It must be absolute,
-	// canonical and below /run.
-	string path = 1;
+	// FileName is the destination file name in the guest, without a path.
+	// Just regular files are supported - e.g., symbolic links or directories
+	// cannot be copied.
+	string file_name = 1;
+
+	// DirectoryName is the destination file's parent directory name, without
+	// a path.
+	string directory_name = 2;
+
 	// FileSize is the expected file size, for security reasons write operations
 	// are made in a temporary file, once it has the expected size, it's moved
 	// to the destination path.
-	int64 file_size = 2;
+	int64 file_size = 3;
+
 	// FileMode is the file mode.
-	uint32 file_mode = 3;
+	uint32 file_mode = 4;
+
 	// DirMode is the mode for the parent directories of destination path.
-	uint32 dir_mode = 4;
+	uint32 dir_mode = 5;
+
 	// Uid is the numeric user id.
-	int32 uid = 5;
+	int32 uid = 6;
+
 	// Gid is the numeric group id.
-	int32 gid = 6;
+	int32 gid = 7;
+
 	// Offset for the next write operation.
-	int64 offset = 7;
+	int64 offset = 8;
+
 	// Data to write in the destination file.
-	bytes data = 8;
+	bytes data = 9;
 }
 
 message GetOOMEventRequest {}

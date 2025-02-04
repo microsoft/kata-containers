@@ -309,13 +309,24 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 			}
 
 			dstPath := filepath.Join(guestPath, srcPath[len(srcRoot):])
-			f.Logger().Infof("ShareFile: Copying file from src (%s) to dest (%s)", srcPath, dstPath)
-			//TODO: Improve the agent protocol, to handle the case for existing symlink.
-			// Currently for an existing symlink, this will fail with EEXIST.
-			err = f.sandbox.agent.copyFile(ctx, srcPath, dstPath)
-			if err != nil {
-				f.Logger().WithError(err).Error("Failed to copy file")
-				return err
+
+			if info.Mode().IsRegular() {
+				// DMFIX
+				dstDir := filepath.Base(filepath.Dir(dstPath))
+
+				f.Logger().WithFields(logrus.Fields{
+					"srcPath": srcPath,
+					"filename": filename,
+					"dstDir": dstDir,
+				}).Info("ShareFile: Copying file")
+
+				//TODO: Improve the agent protocol, to handle the case for existing symlink.
+				// Currently for an existing symlink, this will fail with EEXIST.
+				err = f.sandbox.agent.copyFile(ctx, srcPath, filename, dstDir)
+				if err != nil {
+					f.Logger().WithError(err).Error("Failed to copy file")
+					return err
+				}
 			}
 
 			if configVolRegex.MatchString(srcPath) {
@@ -829,6 +840,7 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 			return err
 		}
 		dstPath := dstNewTsPath
+
 		if !info.Mode().IsDir() {
 			// Construct the path for the files to be copied to.
 			dstPath = filepath.Join(dstPath, filepath.Base(srcPath))
@@ -844,7 +856,11 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 			}
 		}
 
-		err = f.sandbox.agent.copyFile(context.Background(), srcPath, dstPath)
+		// DMFIX
+		dstFileName := filepath.Base(dstPath)
+		dstDir := filepath.Base(filepath.Dir(dstPath))
+
+		err = f.sandbox.agent.copyFile(context.Background(), srcPath, dstFileName, dstDir)
 		if err != nil {
 			f.Logger().WithError(err).Error("Failed to copy file")
 			return err
@@ -868,6 +884,7 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 		return err
 	}
 
+	/* DMFIX
 	// 7. Update the '..data' symlink to fix user visible files
 	srcDataPath := filepath.Join(filepath.Dir(srcNewTsPath), "..data")
 	dstDataPath := filepath.Join(filepath.Dir(dstNewTsPath), "..data")
@@ -888,6 +905,7 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 			return err
 		}
 	}
+	*/
 
 	return nil
 }
