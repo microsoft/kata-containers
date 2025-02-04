@@ -173,7 +173,7 @@ type agent interface {
 	setGuestDateTime(context.Context, time.Time) error
 
 	// copyFile copies file from host to container's rootfs
-	copyFile(ctx context.Context, src, dst string) error
+	copyFile(ctx context.Context, src, requestType, dstFileName, containerId, randomBytes string) error
 
 	// Tell the agent to setup the swapfile in the guest
 	addSwap(ctx context.Context, PCIPath types.PciPath) error

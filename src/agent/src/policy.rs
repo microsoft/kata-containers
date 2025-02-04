@@ -58,7 +58,11 @@ pub async fn is_allowed(req: &(impl MessageDyn + serde::Serialize)) -> ttrpc::Re
 ///   present in PolicyCopyFileRequest, because it might be large and probably unused by OPA.
 #[derive(::serde::Serialize)]
 struct PolicyCopyFileRequest {
-    path: String,
+    request_type: String,
+    file_name: String,
+    container_id: String,
+    random_bytes: String,
+
     file_size: i64,
     file_mode: u32,
     dir_mode: u32,
@@ -81,7 +85,11 @@ pub async fn is_allowed_copy_file(req: &protocols::agent::CopyFileRequest) -> tt
     };
 
     let policy_req = PolicyCopyFileRequest {
-        path: req.path.clone(),
+        request_type: req.request_type.clone(),
+        file_name: req.file_name.clone(),
+        container_id: req.container_id.clone(),
+        random_bytes: req.random_bytes.clone(),
+
         file_size: req.file_size,
         file_mode: req.file_mode,
         dir_mode: req.dir_mode,

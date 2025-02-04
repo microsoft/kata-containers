@@ -11,7 +11,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"io/fs"
+//	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -269,6 +269,15 @@ func (f *FilesystemShare) Cleanup(ctx context.Context) error {
 }
 
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+	f.Logger().WithField("m", *m).Debug("ShareFile: checking mount")
+
+	// copy file to container's rootfs if filesystem sharing is not supported, otherwise
+	// bind mount it in the shared directory.
+	caps := f.sandbox.hypervisor.Capabilities(ctx)
+	if !caps.IsFsSharingSupported() {
+		return f.copyMountSource(ctx, c, m)
+	}
+
 	randBytes, err := utils.GenerateRandomBytes(8)
 	if err != nil {
 		return nil, err
@@ -277,8 +286,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 	filename := fmt.Sprintf("%s-%s-%s", c.id, hex.EncodeToString(randBytes), filepath.Base(m.Destination))
 	guestPath := filepath.Join(kataGuestSharedDir(), filename)
 
-	// copy file to container's rootfs if filesystem sharing is not supported, otherwise
-	// bind mount it in the shared directory.
+	/*
 	caps := f.sandbox.hypervisor.Capabilities(ctx)
 	if !caps.IsFsSharingSupported() {
 		f.Logger().Debug("filesystem sharing is not supported, files will be copied")
@@ -359,6 +367,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 		}
 
 	} else {
+	*/
 		// These mounts are created in the shared dir
 		mountDest := filepath.Join(getMountPath(f.sandbox.ID()), filename)
 		if !m.ReadOnly {
@@ -388,7 +397,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 
 		// Save HostPath mount value into the passed mount
 		m.HostPath = mountDest
-	}
+	// }
 
 	return &SharedFile{
 		guestPath: guestPath,
@@ -795,6 +804,7 @@ func (f *FilesystemShare) StartFileEventWatcher(ctx context.Context) error {
 func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 	f.Logger().Infof("copyUpdatedFiles: Copy src:%s to dst:%s from old src:%s", src, dst, oldtsDir)
 
+	/*
 	// 1. Read the symlink and get the actual data directory
 	// Get the symlink target
 	// eg. srcdir = ..2023_02_09_06_40_51.2326009790
@@ -888,6 +898,7 @@ func (f *FilesystemShare) copyUpdatedFiles(src, dst, oldtsDir string) error {
 			return err
 		}
 	}
+	*/
 
 	return nil
 }
@@ -897,4 +908,52 @@ func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 	f.Logger().Info("StopFileEventWatcher: Closing watcher")
 	close(f.watcherDoneChannel)
 
+}
+
+func (f *FilesystemShare) copyMountSource(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+	srcRoot := filepath.Clean(m.Source)
+	f.Logger().WithField("srcRoot", srcRoot).Debug("copyMountSource: starting")
+
+	s, err := os.Stat(m.Source)
+	if err != nil {
+		f.Logger().WithError(err).Debug("copyMountSource: Stat failed")
+		return nil, err
+	}
+
+	switch {
+	case s.Mode().IsRegular():
+		err = f.copyMountSourceRegularFile(ctx, c, m)
+	case s.Mode().IsDir():
+		err = f.copyMountSourceDir(ctx, c, m)
+	default:
+		f.Logger().WithField("srcRoot", srcRoot).Debug("copyMountSource: ignoring file")
+		return nil, nil		
+	}
+
+	if err != nil {
+		f.Logger().WithError(err).Debug("copyMountSource: returning error")
+		return nil, err
+	}
+
+	randBytes, err := utils.GenerateRandomBytes(8)
+	if err != nil {
+		return nil, err
+	}
+
+	filename := fmt.Sprintf("%s-%s-%s", c.id, hex.EncodeToString(randBytes), filepath.Base(m.Destination))
+	guestPath := filepath.Join(kataGuestSharedDir(), filename)
+
+	return &SharedFile{
+		guestPath: guestPath,
+	}, nil
+}
+
+func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Container, m *Mount) error {
+	c.Logger().WithField("m", *m).Debug("copyMountSourceRegularFile: starting")
+	return nil
+}
+
+func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, m *Mount) error {
+	c.Logger().WithField("m", *m).Debug("copyMountSourceDir: starting")
+	return nil
 }

@@ -2316,7 +2316,7 @@ func (k *kataAgent) setGuestDateTime(ctx context.Context, tv time.Time) error {
 	return err
 }
 
-func (k *kataAgent) copyFile(ctx context.Context, src, dst string) error {
+func (k *kataAgent) copyFile(ctx context.Context, src, requestType, dstFileName, containerId, randomBytes string) error {
 	var st unix.Stat_t
 
 	err := unix.Lstat(src, &st)
@@ -2325,11 +2325,14 @@ func (k *kataAgent) copyFile(ctx context.Context, src, dst string) error {
 	}
 
 	cpReq := &grpc.CopyFileRequest{
-		Path:     dst,
-		DirMode:  uint32(DirMode),
-		FileMode: st.Mode,
-		Uid:      int32(st.Uid),
-		Gid:      int32(st.Gid),
+		RequestType:	requestType,
+		FileName:     	dstFileName,
+		ContainerId:	containerId,
+		RandomBytes:	randomBytes,
+		DirMode:  		uint32(DirMode),
+		FileMode: 		st.Mode,
+		Uid:      		int32(st.Uid),
+		Gid:      		int32(st.Gid),
 	}
 
 	var b []byte
@@ -2343,7 +2346,7 @@ func (k *kataAgent) copyFile(ctx context.Context, src, dst string) error {
 			return fmt.Errorf("Could not read file %s: %v", src, err)
 		}
 		cpReq.FileSize = int64(len(b))
-
+/*
 	case unix.S_IFDIR:
 
 	case unix.S_IFLNK:
@@ -2352,14 +2355,17 @@ func (k *kataAgent) copyFile(ctx context.Context, src, dst string) error {
 			return fmt.Errorf("Could not read symlink %s: %v", src, err)
 		}
 		cpReq.Data = []byte(symlink)
-
+*/
 	default:
 		return fmt.Errorf("Unsupported file type: %o", sflag)
 	}
 
 	k.Logger().WithFields(logrus.Fields{
 		"source": src,
-		"dest":   dst,
+		"requestType": requestType, 
+		"dstFileName": dstFileName, 
+		"containerId": containerId, 
+		"randomBytes": randomBytes,
 	}).Debugf("Copying file from host to guest")
 
 	// Handle the special case where the file is empty

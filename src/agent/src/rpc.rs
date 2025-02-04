@@ -1761,15 +1761,17 @@ fn do_set_guest_date_time(sec: i64, usec: i64) -> Result<()> {
 }
 
 fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
-    let path = PathBuf::from(req.path.as_str());
+    info!(sl(), "do_copy_file: req = {:?}", req);
 
-    if !path.starts_with(CONTAINER_BASE) {
-        return Err(anyhow!(
-            "Path {:?} does not start with {}",
-            path,
-            CONTAINER_BASE
-        ));
+    // DMFIX
+    if req.request_type != "sandbox-file" {
+        warn!(sl(), "do_copy_file: unsupported request_type = {}", req.request_type);
+        return Ok(());
     }
+
+    let path_str = CONTAINER_BASE.to_owned() + &req.container_id + "-" + &req.random_bytes + "-" + &req.file_name;
+    let path = PathBuf::from(path_str);
+    info!(sl(), "do_copy_file: path = {:?}", path);
 
     if let Some(parent) = path.parent() {
         if !parent.exists() {
@@ -1801,7 +1803,6 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
             Some(Uid::from_raw(req.uid as u32)),
             Some(Gid::from_raw(req.gid as u32)),
         )?;
-
         return Ok(());
     }
 
@@ -1848,7 +1849,6 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
     )?;
 
     fs::rename(tmpfile, path)?;
-
     Ok(())
 }
 
