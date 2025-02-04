@@ -961,7 +961,6 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		"src": srcPath,
 		"requestType": requestType,
 		"dstFileName": dstFileName,
-		"containerId": containerId,
 		"randomBytes": randomBytes,
 	}).Debug("copyMountSourceRegularFile: sending request")
 

@@ -1769,7 +1769,7 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
         return Ok(());
     }
 
-    let path_str = CONTAINER_BASE.to_owned() + &req.container_id + "-" + &req.random_bytes + "-" + &req.file_name;
+    let path_str = "/run/kata-containers/shared/containers/".to_owned() + &req.container_id + "-" + &req.random_bytes + "-" + &req.file_name;
     let path = PathBuf::from(path_str);
     info!(sl(), "do_copy_file: path = {:?}", path);
 
@@ -1849,6 +1849,8 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
     )?;
 
     fs::rename(tmpfile, path)?;
+
+    info!(sl(), "do_copy_file: returning success");
     Ok(())
 }
 
