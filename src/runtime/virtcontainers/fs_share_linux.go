@@ -920,11 +920,17 @@ func (f *FilesystemShare) copyMountSource(ctx context.Context, c *Container, m *
 		return nil, err
 	}
 
+	randBytes, err := utils.GenerateRandomBytes(8)
+	if err != nil {
+		return nil, err
+	}
+	randomBytesStr := hex.EncodeToString(randBytes)
+
 	switch {
 	case s.Mode().IsRegular():
-		err = f.copyMountSourceRegularFile(ctx, c, m)
+		err = f.copyMountSourceRegularFile(ctx, c, m, randomBytesStr)
 	case s.Mode().IsDir():
-		err = f.copyMountSourceDir(ctx, c, m)
+		err = f.copyMountSourceDir(ctx, c, m, randomBytesStr)
 	default:
 		f.Logger().WithField("srcRoot", srcRoot).Debug("copyMountSource: ignoring file")
 		return nil, nil		
@@ -935,12 +941,7 @@ func (f *FilesystemShare) copyMountSource(ctx context.Context, c *Container, m *
 		return nil, err
 	}
 
-	randBytes, err := utils.GenerateRandomBytes(8)
-	if err != nil {
-		return nil, err
-	}
-
-	filename := fmt.Sprintf("%s-%s-%s", c.id, hex.EncodeToString(randBytes), filepath.Base(m.Destination))
+	filename := fmt.Sprintf("%s-%s-%s", c.id, randomBytesStr, filepath.Base(m.Destination))
 	guestPath := filepath.Join(kataGuestSharedDir(), filename)
 
 	return &SharedFile{
@@ -948,12 +949,21 @@ func (f *FilesystemShare) copyMountSource(ctx context.Context, c *Container, m *
 	}, nil
 }
 
-func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Container, m *Mount) error {
+func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Container, m *Mount, randomBytesStr string) error {
 	c.Logger().WithField("m", *m).Debug("copyMountSourceRegularFile: starting")
-	return nil
+	srcPath := filepath.Clean(m.Source)
+	
+	return f.sandbox.agent.copyFile(
+		ctx, 
+		srcPath, 
+		"sandbox-file",
+		filepath.Base(m.Destination),
+		c.id,
+		randomBytesStr,
+		);
 }
 
-func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, m *Mount) error {
+func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, m *Mount, randomBytesStr string) error {
 	c.Logger().WithField("m", *m).Debug("copyMountSourceDir: starting")
 	return nil
 }
