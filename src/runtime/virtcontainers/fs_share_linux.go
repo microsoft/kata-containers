@@ -949,17 +949,29 @@ func (f *FilesystemShare) copyMountSource(ctx context.Context, c *Container, m *
 	}, nil
 }
 
-func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Container, m *Mount, randomBytesStr string) error {
+func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Container, m *Mount, randomBytes string) error {
 	c.Logger().WithField("m", *m).Debug("copyMountSourceRegularFile: starting")
-	srcPath := filepath.Clean(m.Source)
 	
+	requestType := "sandbox-file"
+	srcPath := filepath.Clean(m.Source)
+	dstFileName := filepath.Base(m.Destination)
+	containerId := c.id
+	
+	c.Logger().WithFields(logrus.Fields{
+		"src": srcPath,
+		"requestType": requestType,
+		"dstFileName": dstFileName,
+		"containerId": containerId,
+		"randomBytes": randomBytes,
+	}).Debug("copyMountSourceRegularFile: sending request")
+
 	return f.sandbox.agent.copyFile(
 		ctx, 
 		srcPath, 
-		"sandbox-file",
-		filepath.Base(m.Destination),
-		c.id,
-		randomBytesStr,
+		requestType,
+		dstFileName,
+		containerId,
+		randomBytes,
 		);
 }
 
