@@ -2316,7 +2316,7 @@ func (k *kataAgent) setGuestDateTime(ctx context.Context, tv time.Time) error {
 	return err
 }
 
-func (k *kataAgent) copyFile(ctx context.Context, src, requestType, dstFileName, containerId, randomBytes string) error {
+func (k *kataAgent) copyFile(ctx context.Context, src, requestType, dstFileName, timestampedDir, containerId, randomBytes string) error {
 	var st unix.Stat_t
 
 	err := unix.Lstat(src, &st)
@@ -2324,15 +2324,29 @@ func (k *kataAgent) copyFile(ctx context.Context, src, requestType, dstFileName,
 		return fmt.Errorf("Could not get file %s information: %v", src, err)
 	}
 
+	k.Logger().WithFields(logrus.Fields{
+        "source": src,
+        "requestType": requestType,
+        "dstFileName": dstFileName,
+        "containerId": containerId,
+        "randomBytes": randomBytes,
+	}).Debugf("CopyFileRequest")
+
 	cpReq := &grpc.CopyFileRequest{
 		RequestType:	requestType,
 		FileName:     	dstFileName,
+		TimestampedDir:	timestampedDir,
 		ContainerId:	containerId,
 		RandomBytes:	randomBytes,
 		DirMode:  		uint32(DirMode),
 		FileMode: 		st.Mode,
 		Uid:      		int32(st.Uid),
 		Gid:      		int32(st.Gid),
+	}
+
+	if requestType == "update-config-timestamp" {
+		_, err := k.sendReq(ctx, cpReq)
+		return err
 	}
 
 	var b []byte
@@ -2359,14 +2373,6 @@ func (k *kataAgent) copyFile(ctx context.Context, src, requestType, dstFileName,
 	default:
 		return fmt.Errorf("Unsupported file type: %o", sflag)
 	}
-
-	k.Logger().WithFields(logrus.Fields{
-		"source": src,
-		"requestType": requestType, 
-		"dstFileName": dstFileName, 
-		"containerId": containerId, 
-		"randomBytes": randomBytes,
-	}).Debugf("Copying file from host to guest")
 
 	// Handle the special case where the file is empty
 	if cpReq.FileSize == 0 {

@@ -1764,91 +1764,116 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
     info!(sl(), "do_copy_file: req = {:?}", req);
 
     // DMFIX
-    if req.request_type != "sandbox-file" {
+    if req.request_type != "sandbox-file" && req.request_type != "update-config-timestamp" {
         warn!(sl(), "do_copy_file: unsupported request_type = {}", req.request_type);
         return Ok(());
     }
 
-    let path_str = "/run/kata-containers/shared/containers/".to_owned() + &req.container_id + "-" + &req.random_bytes + "-" + &req.file_name;
-    let path = PathBuf::from(path_str);
-    info!(sl(), "do_copy_file: path = {:?}", path);
+    let mut path_str = "/run/kata-containers/shared/containers/".to_owned() + &req.container_id + "-" + &req.random_bytes + "-" + &req.file_name;
 
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            let dir = parent.to_path_buf();
-            if let Err(e) = fs::create_dir_all(&dir) {
-                if e.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(e.into());
-                }
-            } else {
-                std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(req.dir_mode))?;
-            }
-        }
-    }
+    if req.request_type == "update-config-timestamp" {
+        let path = PathBuf::from(path_str + "/..data");
+        info!(sl(), "do_copy_file: link dest = {:?}", path);
 
-    let sflag = stat::SFlag::from_bits_truncate(req.file_mode);
+        let mut tmp_link = path.clone();
+        tmp_link.set_extension("tmp");
+        let timestamped_path = PathBuf::from(&req.timestamped_dir);
+        info!(sl(), "do_copy_file: temporary link src = {:?}, dest = {:?}", timestamped_path, tmp_link);
+        unistd::symlinkat(&timestamped_path, None, &tmp_link)?;
+        
+        //let path_str = CString::new(timestamped_path.as_os_str().as_bytes())?;
+        //let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
+        //Errno::result(ret).map(drop)?;
 
-    if sflag.contains(stat::SFlag::S_IFDIR) {
-        fs::create_dir(&path).or_else(|e| {
-            if e.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(e);
-            }
-            Ok(())
-        })?;
-
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(req.file_mode))?;
-
-        unistd::chown(
-            &path,
-            Some(Uid::from_raw(req.uid as u32)),
-            Some(Gid::from_raw(req.gid as u32)),
-        )?;
-        return Ok(());
-    }
-
-    if sflag.contains(stat::SFlag::S_IFLNK) {
-        // After kubernetes secret's volume update, the '..data' symlink should point to
-        // the new timestamped directory.
-        // TODO:The old and deleted timestamped dir still exists due to missing DELETE api in agent.
-        // Hence, Unlink the existing symlink.
         if path.is_symlink() && path.exists() {
             unistd::unlink(&path)?;
         }
-        let src = PathBuf::from(OsStr::from_bytes(&req.data));
-        unistd::symlinkat(&src, None, &path)?;
-        let path_str = CString::new(path.as_os_str().as_bytes())?;
+        fs::rename(tmp_link, path)?;
+    } else {
+        if req.timestamped_dir != "" {
+            path_str = path_str + "/" + &req.timestamped_dir;
+        }
+        
+        let path = PathBuf::from(path_str);
+        info!(sl(), "do_copy_file: path = {:?}", path);
 
-        let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
-        Errno::result(ret).map(drop)?;
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                let dir = parent.to_path_buf();
+                if let Err(e) = fs::create_dir_all(&dir) {
+                    if e.kind() != std::io::ErrorKind::AlreadyExists {
+                        return Err(e.into());
+                    }
+                } else {
+                    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(req.dir_mode))?;
+                }
+            }
+        }
 
-        return Ok(());
+        let sflag = stat::SFlag::from_bits_truncate(req.file_mode);
+
+        if sflag.contains(stat::SFlag::S_IFDIR) {
+            fs::create_dir(&path).or_else(|e| {
+                if e.kind() != std::io::ErrorKind::AlreadyExists {
+                    return Err(e);
+                }
+                Ok(())
+            })?;
+
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(req.file_mode))?;
+
+            unistd::chown(
+                &path,
+                Some(Uid::from_raw(req.uid as u32)),
+                Some(Gid::from_raw(req.gid as u32)),
+            )?;
+            return Ok(());
+        }
+
+        if sflag.contains(stat::SFlag::S_IFLNK) {
+            // After kubernetes secret's volume update, the '..data' symlink should point to
+            // the new timestamped directory.
+            // TODO:The old and deleted timestamped dir still exists due to missing DELETE api in agent.
+            // Hence, Unlink the existing symlink.
+            if path.is_symlink() && path.exists() {
+                unistd::unlink(&path)?;
+            }
+            let src = PathBuf::from(OsStr::from_bytes(&req.data));
+            unistd::symlinkat(&src, None, &path)?;
+            let path_str = CString::new(path.as_os_str().as_bytes())?;
+
+            let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
+            Errno::result(ret).map(drop)?;
+
+            return Ok(());
+        }
+
+        let mut tmpfile = path.clone();
+        tmpfile.set_extension("tmp");
+
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&tmpfile)?;
+
+        file.write_all_at(req.data.as_slice(), req.offset as u64)?;
+        let st = stat::stat(&tmpfile)?;
+
+        if st.st_size != req.file_size {
+            return Ok(());
+        }
+
+        file.set_permissions(std::fs::Permissions::from_mode(req.file_mode))?;
+
+        unistd::chown(
+            &tmpfile,
+            Some(Uid::from_raw(req.uid as u32)),
+            Some(Gid::from_raw(req.gid as u32)),
+        )?;
+
+        fs::rename(tmpfile, path)?;
     }
-
-    let mut tmpfile = path.clone();
-    tmpfile.set_extension("tmp");
-
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&tmpfile)?;
-
-    file.write_all_at(req.data.as_slice(), req.offset as u64)?;
-    let st = stat::stat(&tmpfile)?;
-
-    if st.st_size != req.file_size {
-        return Ok(());
-    }
-
-    file.set_permissions(std::fs::Permissions::from_mode(req.file_mode))?;
-
-    unistd::chown(
-        &tmpfile,
-        Some(Uid::from_raw(req.uid as u32)),
-        Some(Gid::from_raw(req.gid as u32)),
-    )?;
-
-    fs::rename(tmpfile, path)?;
 
     info!(sl(), "do_copy_file: returning success");
     Ok(())

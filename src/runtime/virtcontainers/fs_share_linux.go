@@ -956,11 +956,13 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 	srcPath := filepath.Clean(m.Source)
 	dstFileName := filepath.Base(m.Destination)
 	containerId := c.id
+	timestampedDir := ""
 	
 	c.Logger().WithFields(logrus.Fields{
 		"src": srcPath,
 		"requestType": requestType,
 		"dstFileName": dstFileName,
+		"timestampedDir": timestampedDir,
 		"randomBytes": randomBytes,
 	}).Debug("copyMountSourceRegularFile: sending request")
 
@@ -969,6 +971,7 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		srcPath, 
 		requestType,
 		dstFileName,
+		timestampedDir,
 		containerId,
 		randomBytes,
 		)
@@ -1012,6 +1015,9 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return fmt.Errorf("copyMountSourceDir: %s is not a directory", timestampedPath)
 	}
 
+	dstFileName := filepath.Base(m.Destination)
+	containerId := c.id
+
 	walk := func(srcFilePath string, d fs.DirEntry, err error) error {
 		c.Logger().WithField("srcFilePath", srcFilePath).Debug("copyMountSourceDir: walking")
 
@@ -1029,20 +1035,13 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 			return nil
 		}
 
-		randBytes, err := utils.GenerateRandomBytes(8)
-		if err != nil {
-			return err
-		}
-		randomBytesStr := hex.EncodeToString(randBytes)
-
 		requestType := "sandbox-file"
-		dstFileName := filepath.Base(m.Destination)
-		containerId := c.id
 		
 		c.Logger().WithFields(logrus.Fields{
 			"src": srcFilePath,
 			"requestType": requestType,
 			"dstFileName": dstFileName,
+			"timestampedDir": timestampedDir,
 			"randomBytes": randomBytesStr,
 		}).Debug("copyMountSourceDir: sending request")
 	
@@ -1051,6 +1050,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 			srcFilePath, 
 			requestType,
 			dstFileName,
+			timestampedDir,
 			containerId,
 			randomBytesStr,
 			)
@@ -1066,6 +1066,31 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 			WithError(err).
 			WithField("mount_source", m.Source).
 			Error("failed to copy volume data to sandbox")
+		return err
+	}
+
+	// Let the guest know that all files have been updated.
+	requestType := "update-config-timestamp"
+
+	c.Logger().WithFields(logrus.Fields{
+		"src": timestampedPath,
+		"requestType": requestType,
+		"dstFileName": dstFileName,
+		"timestampedDir": timestampedDir,
+		"randomBytes": randomBytesStr,
+	}).Debug("copyMountSourceDir: sending request")
+
+	err = f.sandbox.agent.copyFile(
+		ctx, 
+		timestampedPath,
+		requestType,
+		dstFileName,
+		timestampedDir,
+		containerId,
+		randomBytesStr,
+		)
+	if err != nil {
+		f.Logger().WithError(err).WithField("srcFilePath", timestampedPath).Debug("copyMountSourceDir: copyFile failed")
 		return err
 	}
 

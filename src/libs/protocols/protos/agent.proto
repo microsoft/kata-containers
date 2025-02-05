@@ -543,31 +543,32 @@ message StringUser {
 message CopyFileRequest {
 	string request_type = 1;
 	string file_name = 2;
-	string container_id = 3;
-	string random_bytes = 4;
+	string timestamped_dir = 3;
+	string container_id = 4;
+	string random_bytes = 5;
 
 	// FileSize is the expected file size, for security reasons write operations
 	// are made in a temporary file, once it has the expected size, it's moved
 	// to the destination path.
-	int64 file_size = 5;
+	int64 file_size = 6;
 
 	// FileMode is the file mode.
-	uint32 file_mode = 6;
+	uint32 file_mode = 7;
 
 	// DirMode is the mode for the parent directories of destination path.
-	uint32 dir_mode = 7;
+	uint32 dir_mode = 8;
 
 	// Uid is the numeric user id.
-	int32 uid = 8;
+	int32 uid = 9;
 
 	// Gid is the numeric group id.
-	int32 gid = 9;
+	int32 gid = 10;
 
 	// Offset for the next write operation.
-	int64 offset = 10;
+	int64 offset = 11;
 
 	// Data to write in the destination file.
-	bytes data = 11;
+	bytes data = 12;
 }
 
 message GetOOMEventRequest {}
