@@ -991,7 +991,7 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
         "-" +
         mountDest;
 
-	f.Logger().WithField("srcPath", srcPath).WithField("dstPath", dstPath).Info("copyUpdatedFiles: Adding (srcPath, dstPath) to srcDstMap")
+	f.Logger().WithField("srcPath", srcPath).WithField("dstPath", dstPath).Info("copyMountSourceRegularFile: Adding (srcPath, dstPath) to srcDstMap")
 	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], dstPath)
 
 	return nil
@@ -1082,21 +1082,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 			return err
 		}
 
-		dstPath :=
-			"/run/kata-containers/shared/containers/" +
-			containerId +
-			"-" +
-			randomBytesStr +
-			"-" +
-			mountDest +
-			"/" +
-			timestampedDir +
-			"/" +
-			fileName;
-
-		f.Logger().WithField("srcPath", srcFilePath).WithField("dstPath", dstPath).Info("copyUpdatedFiles: Adding (srcPath, dstPath) to srcDstMap")
-		f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], dstPath)
-
 		return nil
 	}			
 
@@ -1135,6 +1120,17 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		f.Logger().WithError(err).WithField("srcFilePath", timestampedPath).Debug("copyMountSourceDir: copyFile failed")
 		return err
 	}
+
+	dstPath :=
+		"/run/kata-containers/shared/containers/" +
+		containerId +
+		"-" +
+		randomBytesStr +
+		"-" +
+		mountDest;
+
+	f.Logger().WithField("srcPath", srcPath).WithField("dstPath", dstPath).Info("copyMountSourceDir: Adding (srcPath, dstPath) to srcDstMap")
+	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], dstPath)
 
 	f.Logger().WithField("mount_source", m.Source).Debug("copyMountSourceDir: success")
 	return nil
