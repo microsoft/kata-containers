@@ -1069,5 +1069,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return err
 	}
 
+	f.Logger().WithError(err).WithField("mount_source", m.Source).Debug("copyMountSourceDir: success")
 	return nil
 }
