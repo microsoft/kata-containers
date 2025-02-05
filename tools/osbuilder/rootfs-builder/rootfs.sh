@@ -48,22 +48,62 @@ TARGET_OS=${TARGET_OS:-linux}
 
 # The list of systemd units and files that are not needed in Kata Containers
 readonly -a systemd_units=(
+	"blk-availability"
+	"sys-fs-fuse-connections"
+	"sys-kernel-config"
+	"systemd-ask-password-console"
+	"systemd-ask-password-wall"
+	"systemd-boot-update"
 	"systemd-coredump@"
-	"systemd-journald"
-	"systemd-journald-dev-log"
+	"systemd-journal-catalog-update"
 	"systemd-journal-flush"
+	"systemd-journald"
+	"systemd-journald@"
+	"systemd-journald-audit"
+	"systemd-journald-dev-log"
+	"systemd-logind"
+	"systemd-network-generator"
+	"systemd-pcrfs@"
+	"systemd-pcrfs-root"
+	"systemd-pcrlock-firmware-code"
+	"systemd-pcrlock-firmware-config"
+	"systemd-pcrlock-file-system"
+	"systemd-pcrlock-machine-id"
+	"systemd-pcrlock-make-policy"
+	"systemd-pcrlock-secureboot-authority"
+	"systemd-pcrlock-secureboot-policy"
+	"systemd-pcrmachine"
+	"systemd-pcrphase"
+	"systemd-pcrphase-initrd"
+	"systemd-pcrphase-sysinit"
+	"systemd-pcrextend"
+	"systemd-pcrextend@"
+	"systemd-pstore"
 	"systemd-random-seed"
+	"systemd-sysupdate"
+	"systemd-sysupdate-reboot"
 	"systemd-timesyncd"
+	"systemd-tmpfiles-clean"
 	"systemd-tmpfiles-setup"
+	"systemd-tmpfiles-setup-dev"
+	"systemd-tmpfiles-setup-dev-early"
+	"systemd-tpm2-setup"
+	"systemd-tpm2-setup-early"
 	"systemd-update-utmp"
+	"systemd-update-utmp-runlevel"
+	"systemd-vconsole-setup"
 )
 
 readonly -a systemd_files=(
+	"blkdeactivate"
+	"journalctl"
 	"systemd-bless-boot-generator"
 	"systemd-fstab-generator"
 	"systemd-getty-generator"
 	"systemd-gpt-auto-generator"
-	"systemd-tmpfiles-cleanup.timer"
+	"systemd-pcrlock"
+	"systemd-tmpfiles"
+	"systemd-tty-ask-password-agent"
 )
 
 handle_error() {
@@ -745,11 +785,16 @@ detect_host_distro()
 
 delete_unnecessary_files()
 {
-	info "Removing unneeded systemd services and sockets"
+	info "Removing unneeded systemd unit files"
 	for u in "${systemd_units[@]}"; do
 		find "${ROOTFS_DIR}" \
 			\( -type f -o -type l \) \
-			\( -name "${u}.service" -o -name "${u}.socket" \) \
+			\( -name "${u}" -o \
+			   -name "${u}.mount" -o \
+			   -name "${u}.path" -o \
+			   -name "${u}.service" -o \
+			   -name "${u}.socket" -o \
+			   -name "${u}.timer" \) \
 			-exec echo "deleting {}" \; \
 			-exec rm -f {} \;
 	done
