@@ -968,7 +968,7 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		"randomBytes": randomBytes,
 	}).Debug("copyMountSourceRegularFile: sending request")
 
-	return f.sandbox.agent.copyFile(
+	err := f.sandbox.agent.copyFile(
 		ctx, 
 		srcPath, 
 		requestType,
@@ -978,6 +978,23 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		containerId,
 		randomBytes,
 		)
+	if err != nil {
+		f.Logger().WithError(err).WithField("srcPath", srcPath).Error("copyMountSourceRegularFile: agent.copyFile failed")
+		return err
+	}
+
+    dstPath :=
+        "/run/kata-containers/shared/containers/" +
+        containerId +
+        "-" +
+        randomBytes +
+        "-" +
+        mountDest;
+
+	f.Logger().WithField("srcPath", srcPath).WithField("dstPath", dstPath).Info("copyUpdatedFiles: Adding (srcPath, dstPath) to srcDstMap")
+	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], dstPath)
+
+	return nil
 }
 
 var timestampedDirRegexString = "^\\.\\.[0-9]{4}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}.[0-9]+$"
@@ -1064,6 +1081,22 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 			f.Logger().WithError(err).WithField("srcFilePath", srcFilePath).Debug("copyMountSourceDir: copyFile failed")
 			return err
 		}
+
+		dstPath :=
+			"/run/kata-containers/shared/containers/" +
+			containerId +
+			"-" +
+			randomBytesStr +
+			"-" +
+			mountDest +
+			"/" +
+			timestampedDir +
+			"/" +
+			fileName;
+
+		f.Logger().WithField("srcPath", srcFilePath).WithField("dstPath", dstPath).Info("copyUpdatedFiles: Adding (srcPath, dstPath) to srcDstMap")
+		f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], dstPath)
+
 		return nil
 	}			
 
