@@ -2404,7 +2404,7 @@ func (k *kataAgent) copyFile(
 		cpReq.Offset = offset
 
 		if _, err = k.sendReq(ctx, cpReq); err != nil {
-			return fmt.Errorf("Could not send CopyFile request: %v", err)
+			return fmt.Errorf("CopyFile sendReq failed: %v", err)
 		}
 
 		b = b[bytesToCopy:]

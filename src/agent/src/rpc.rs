@@ -1776,6 +1776,7 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
         &req.random_bytes + 
         "-" + &
         req.mount_dest;
+    let mount_dest = path_str.clone();
 
     if req.request_type == "update-config-timestamp" {
         let path = PathBuf::from(path_str + "/..data");
@@ -1882,6 +1883,21 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
         )?;
 
         fs::rename(tmpfile, path)?;
+
+        if req.timestamped_dir != "" {
+            let file_link_dest = PathBuf::from(mount_dest + "/" + &req.file_name);
+            if !file_link_dest.exists() {
+                let file_link_src = PathBuf::from("..data".to_owned() + "/" + &req.file_name);
+                info!(sl(), "do_copy_file: link src = {:?}, dest = {:?}", file_link_src, file_link_dest);
+                unistd::symlinkat(&file_link_src, None, &file_link_dest)?;
+            } else {
+                info!(sl(), "do_copy_file: link {:?} already exists", file_link_dest);
+            }
+        }
+
+        //let path_str = CString::new(timestamped_path.as_os_str().as_bytes())?;
+        //let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
+        //Errno::result(ret).map(drop)?;
     }
 
     info!(sl(), "do_copy_file: returning success");
