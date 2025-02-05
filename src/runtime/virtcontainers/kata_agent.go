@@ -2316,7 +2316,16 @@ func (k *kataAgent) setGuestDateTime(ctx context.Context, tv time.Time) error {
 	return err
 }
 
-func (k *kataAgent) copyFile(ctx context.Context, src, requestType, dstFileName, timestampedDir, containerId, randomBytes string) error {
+func (k *kataAgent) copyFile(
+	ctx context.Context, 
+	src, 
+	requestType,
+	mountDest,
+	dstFileName, 
+	timestampedDir, 
+	containerId, 
+	randomBytes string) error {
+	
 	var st unix.Stat_t
 
 	err := unix.Lstat(src, &st)
@@ -2327,6 +2336,7 @@ func (k *kataAgent) copyFile(ctx context.Context, src, requestType, dstFileName,
 	k.Logger().WithFields(logrus.Fields{
         "source": src,
         "requestType": requestType,
+		"mountDest": mountDest,
         "dstFileName": dstFileName,
         "containerId": containerId,
         "randomBytes": randomBytes,
@@ -2334,6 +2344,7 @@ func (k *kataAgent) copyFile(ctx context.Context, src, requestType, dstFileName,
 
 	cpReq := &grpc.CopyFileRequest{
 		RequestType:	requestType,
+		MountDest:		mountDest,
 		FileName:     	dstFileName,
 		TimestampedDir:	timestampedDir,
 		ContainerId:	containerId,

@@ -1769,7 +1769,13 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
         return Ok(());
     }
 
-    let mut path_str = "/run/kata-containers/shared/containers/".to_owned() + &req.container_id + "-" + &req.random_bytes + "-" + &req.file_name;
+    let mut path_str = 
+        "/run/kata-containers/shared/containers/".to_owned() + 
+        &req.container_id + 
+        "-" + 
+        &req.random_bytes + 
+        "-" + &
+        req.mount_dest;
 
     if req.request_type == "update-config-timestamp" {
         let path = PathBuf::from(path_str + "/..data");
@@ -1792,6 +1798,9 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
     } else {
         if req.timestamped_dir != "" {
             path_str = path_str + "/" + &req.timestamped_dir;
+        }
+        if req.file_name != "" {
+            path_str = path_str + "/" + &req.file_name;
         }
         
         let path = PathBuf::from(path_str);

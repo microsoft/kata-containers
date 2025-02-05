@@ -954,14 +954,16 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 	
 	requestType := "sandbox-file"
 	srcPath := filepath.Clean(m.Source)
-	dstFileName := filepath.Base(m.Destination)
+	mountDest := filepath.Base(m.Destination)
 	containerId := c.id
 	timestampedDir := ""
+	fileName := ""
 	
 	c.Logger().WithFields(logrus.Fields{
 		"src": srcPath,
 		"requestType": requestType,
-		"dstFileName": dstFileName,
+		"mountDest": mountDest,
+		"fileName": fileName,
 		"timestampedDir": timestampedDir,
 		"randomBytes": randomBytes,
 	}).Debug("copyMountSourceRegularFile: sending request")
@@ -970,7 +972,8 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		ctx, 
 		srcPath, 
 		requestType,
-		dstFileName,
+		mountDest,
+		fileName,
 		timestampedDir,
 		containerId,
 		randomBytes,
@@ -1015,7 +1018,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return fmt.Errorf("copyMountSourceDir: %s is not a directory", timestampedPath)
 	}
 
-	dstFileName := filepath.Base(m.Destination)
+	mountDest := filepath.Base(m.Destination)
 	containerId := c.id
 
 	walk := func(srcFilePath string, d fs.DirEntry, err error) error {
@@ -1036,11 +1039,13 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		}
 
 		requestType := "sandbox-file"
+		fileName := d.Name()
 		
 		c.Logger().WithFields(logrus.Fields{
 			"src": srcFilePath,
 			"requestType": requestType,
-			"dstFileName": dstFileName,
+			"mountDest": mountDest,
+			"fileName": fileName,
 			"timestampedDir": timestampedDir,
 			"randomBytes": randomBytesStr,
 		}).Debug("copyMountSourceDir: sending request")
@@ -1049,7 +1054,8 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 			ctx, 
 			srcFilePath, 
 			requestType,
-			dstFileName,
+			mountDest,
+			fileName,
 			timestampedDir,
 			containerId,
 			randomBytesStr,
@@ -1071,11 +1077,13 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 
 	// Let the guest know that all files have been updated.
 	requestType := "update-config-timestamp"
+	fileName := ""
 
 	c.Logger().WithFields(logrus.Fields{
 		"src": timestampedPath,
 		"requestType": requestType,
-		"dstFileName": dstFileName,
+		"mountDest": mountDest,
+		"fileName": fileName,
 		"timestampedDir": timestampedDir,
 		"randomBytes": randomBytesStr,
 	}).Debug("copyMountSourceDir: sending request")
@@ -1084,7 +1092,8 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		ctx, 
 		timestampedPath,
 		requestType,
-		dstFileName,
+		mountDest,
+		fileName,
 		timestampedDir,
 		containerId,
 		randomBytesStr,
@@ -1094,6 +1103,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return err
 	}
 
-	f.Logger().WithError(err).WithField("mount_source", m.Source).Debug("copyMountSourceDir: success")
+	f.Logger().WithField("mount_source", m.Source).Debug("copyMountSourceDir: success")
 	return nil
 }
