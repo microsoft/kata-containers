@@ -2324,13 +2324,14 @@ func (k *kataAgent) copyFile(
 	dstFileName, 
 	timestampedDir, 
 	containerId, 
-	randomBytes string) error {
+	randomBytes string) (string, error) {
 	
 	var st unix.Stat_t
+	guestPath := ""
 
 	err := unix.Lstat(src, &st)
 	if err != nil {
-		return fmt.Errorf("Could not get file %s information: %v", src, err)
+		return "", fmt.Errorf("Could not get file %s information: %v", src, err)
 	}
 
 	k.Logger().WithFields(logrus.Fields{
@@ -2356,19 +2357,18 @@ func (k *kataAgent) copyFile(
 	}
 
 	if requestType == "update-config-timestamp" {
-		_, err := k.sendReq(ctx, cpReq)
-		return err
+		resp, err := k.sendReq(ctx, cpReq)
+		return resp.(*grpc.CopyFileResponse).GuestPath, err
 	}
 
 	var b []byte
 
 	switch sflag := st.Mode & unix.S_IFMT; sflag {
 	case unix.S_IFREG:
-		var err error
 		// TODO: Support incremental file copying instead of loading whole file into memory
 		b, err = os.ReadFile(src)
 		if err != nil {
-			return fmt.Errorf("Could not read file %s: %v", src, err)
+			return "", fmt.Errorf("Could not read file %s: %v", src, err)
 		}
 		cpReq.FileSize = int64(len(b))
 /*
@@ -2382,13 +2382,13 @@ func (k *kataAgent) copyFile(
 		cpReq.Data = []byte(symlink)
 */
 	default:
-		return fmt.Errorf("Unsupported file type: %o", sflag)
+		return "", fmt.Errorf("Unsupported file type: %o", sflag)
 	}
 
 	// Handle the special case where the file is empty
 	if cpReq.FileSize == 0 {
-		_, err := k.sendReq(ctx, cpReq)
-		return err
+		resp, err := k.sendReq(ctx, cpReq)
+		return resp.(*grpc.CopyFileResponse).GuestPath, err
 	}
 
 	// Copy file by parts if it's needed
@@ -2403,16 +2403,19 @@ func (k *kataAgent) copyFile(
 		cpReq.Data = b[:bytesToCopy]
 		cpReq.Offset = offset
 
-		if _, err = k.sendReq(ctx, cpReq); err != nil {
-			return fmt.Errorf("CopyFile sendReq failed: %v", err)
+		resp, err := k.sendReq(ctx, cpReq)
+		if err != nil {
+			return "", fmt.Errorf("CopyFile sendReq failed: %v", err)
 		}
 
 		b = b[bytesToCopy:]
 		remainingBytes -= bytesToCopy
 		offset += grpcMaxDataSize
+
+		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
 	}
 
-	return nil
+	return guestPath, err
 }
 
 func (k *kataAgent) addSwap(ctx context.Context, PCIPath types.PciPath) error {

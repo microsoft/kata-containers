@@ -968,7 +968,7 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		"randomBytes": randomBytes,
 	}).Debug("copyMountSourceRegularFile: sending request")
 
-	err := f.sandbox.agent.copyFile(
+	dstPath, err := f.sandbox.agent.copyFile(
 		ctx, 
 		srcPath, 
 		requestType,
@@ -983,6 +983,7 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		return err
 	}
 
+	/*
     dstPath :=
         "/run/kata-containers/shared/containers/" +
         containerId +
@@ -990,6 +991,7 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
         randomBytes +
         "-" +
         mountDest;
+	*/
 
 	f.Logger().WithField("srcPath", srcPath).WithField("dstPath", dstPath).Info("copyMountSourceRegularFile: Adding (srcPath, dstPath) to srcDstMap")
 	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], dstPath)
@@ -1067,7 +1069,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 			"randomBytes": randomBytesStr,
 		}).Debug("copyMountSourceDir: sending request")
 	
-		err = f.sandbox.agent.copyFile(
+		_, err = f.sandbox.agent.copyFile(
 			ctx, 
 			srcFilePath, 
 			requestType,
@@ -1106,7 +1108,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		"randomBytes": randomBytesStr,
 	}).Debug("copyMountSourceDir: sending request")
 
-	err = f.sandbox.agent.copyFile(
+	dstPath, err := f.sandbox.agent.copyFile(
 		ctx, 
 		timestampedPath,
 		requestType,
@@ -1121,6 +1123,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return err
 	}
 
+	/*
 	dstPath :=
 		"/run/kata-containers/shared/containers/" +
 		containerId +
@@ -1128,6 +1131,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		randomBytesStr +
 		"-" +
 		mountDest;
+	*/
 
 	f.Logger().WithField("srcPath", srcPath).WithField("dstPath", dstPath).Info("copyMountSourceDir: Adding (srcPath, dstPath) to srcDstMap")
 	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], dstPath)
