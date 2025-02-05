@@ -8,9 +8,7 @@ use rustjail::{pipestream::PipeStream, process::StreamType};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 use tokio::sync::Mutex;
 
-use std::ffi::{CString, OsStr};
 use std::fmt::Debug;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
 use ttrpc::{
@@ -24,9 +22,9 @@ use cgroups::freezer::FreezerState;
 use oci::{LinuxNamespace, Root, Spec};
 use protobuf::MessageField;
 use protocols::agent::{
-    AddSwapRequest, AgentDetails, CopyFileRequest, GetIPTablesRequest, GetIPTablesResponse,
-    GuestDetailsResponse, Interfaces, Metrics, OOMEvent, ReadStreamResponse, Routes,
-    SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse, VolumeStatsRequest,
+    AddSwapRequest, AgentDetails, CopyFileRequest, CopyFileResponse, GetIPTablesRequest,
+    GetIPTablesResponse, GuestDetailsResponse, Interfaces, Metrics, OOMEvent, ReadStreamResponse,
+    Routes, SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse, VolumeStatsRequest,
     WaitProcessResponse, WriteStreamResponse,
 };
 use protocols::csi::{
@@ -1760,23 +1758,23 @@ fn do_set_guest_date_time(sec: i64, usec: i64) -> Result<()> {
     Ok(())
 }
 
-fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
+// DMFIX
+fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileResponse> {
     info!(sl(), "do_copy_file: req = {:?}", req);
+    let mut resp = CopyFileResponse::new();
 
-    // DMFIX
     if req.request_type != "sandbox-file" && req.request_type != "update-config-timestamp" {
-        warn!(sl(), "do_copy_file: unsupported request_type = {}", req.request_type);
-        return Ok(());
+        return Err(anyhow!("do_copy_file: unsupported request_type {}", req.request_type));
     }
 
-    let mut path_str = 
-        "/run/kata-containers/shared/containers/".to_owned() + 
-        &req.container_id + 
-        "-" + 
-        &req.random_bytes + 
-        "-" + &
-        req.mount_dest;
+    let mut path_str = "/run/kata-containers/shared/containers/".to_owned()
+        + &req.container_id
+        + "-"
+        + &req.random_bytes
+        + "-"
+        + &req.mount_dest;
     let mount_dest = path_str.clone();
+    resp.guest_path = path_str.clone();
 
     if req.request_type == "update-config-timestamp" {
         let path = PathBuf::from(path_str + "/..data");
@@ -1785,9 +1783,12 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
         let mut tmp_link = path.clone();
         tmp_link.set_extension("tmp");
         let timestamped_path = PathBuf::from(&req.timestamped_dir);
-        info!(sl(), "do_copy_file: temporary link src = {:?}, dest = {:?}", timestamped_path, tmp_link);
+        info!(
+            sl(),
+            "do_copy_file: temporary link src = {:?}, dest = {:?}", timestamped_path, tmp_link
+        );
         unistd::symlinkat(&timestamped_path, None, &tmp_link)?;
-        
+
         //let path_str = CString::new(timestamped_path.as_os_str().as_bytes())?;
         //let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
         //Errno::result(ret).map(drop)?;
@@ -1803,7 +1804,7 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
         if req.file_name != "" {
             path_str = path_str + "/" + &req.file_name;
         }
-        
+
         let path = PathBuf::from(path_str);
         info!(sl(), "do_copy_file: path = {:?}", path);
 
@@ -1820,6 +1821,7 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
             }
         }
 
+        /*
         let sflag = stat::SFlag::from_bits_truncate(req.file_mode);
 
         if sflag.contains(stat::SFlag::S_IFDIR) {
@@ -1857,6 +1859,7 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
 
             return Ok(());
         }
+        */
 
         let mut tmpfile = path.clone();
         tmpfile.set_extension("tmp");
@@ -1871,7 +1874,7 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
         let st = stat::stat(&tmpfile)?;
 
         if st.st_size != req.file_size {
-            return Ok(());
+            return Ok(resp);
         }
 
         file.set_permissions(std::fs::Permissions::from_mode(req.file_mode))?;
@@ -1888,10 +1891,16 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
             let file_link_dest = PathBuf::from(mount_dest + "/" + &req.file_name);
             if !file_link_dest.exists() {
                 let file_link_src = PathBuf::from("..data".to_owned() + "/" + &req.file_name);
-                info!(sl(), "do_copy_file: link src = {:?}, dest = {:?}", file_link_src, file_link_dest);
+                info!(
+                    sl(),
+                    "do_copy_file: link src = {:?}, dest = {:?}", file_link_src, file_link_dest
+                );
                 unistd::symlinkat(&file_link_src, None, &file_link_dest)?;
             } else {
-                info!(sl(), "do_copy_file: link {:?} already exists", file_link_dest);
+                info!(
+                    sl(),
+                    "do_copy_file: link {:?} already exists", file_link_dest
+                );
             }
         }
 
@@ -1901,7 +1910,7 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<()> {
     }
 
     info!(sl(), "do_copy_file: returning success");
-    Ok(())
+    Ok(resp)
 }
 
 async fn do_add_swap(_sandbox: &Arc<Mutex<Sandbox>>, _req: &AddSwapRequest) -> Result<()> {

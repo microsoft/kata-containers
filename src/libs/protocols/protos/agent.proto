@@ -572,6 +572,10 @@ message CopyFileRequest {
 	bytes data = 13;
 }
 
+message CopyFileResponse {
+	string guest_path = 1;
+}
+
 message GetOOMEventRequest {}
 
 message OOMEvent {
