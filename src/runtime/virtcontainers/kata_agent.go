@@ -2341,7 +2341,7 @@ func (k *kataAgent) copyFile(
         "dstFileName": dstFileName,
         "containerId": containerId,
         "randomBytes": randomBytes,
-	}).Debugf("CopyFileRequest")
+	}).Debug("CopyFileRequest")
 
 	cpReq := &grpc.CopyFileRequest{
 		RequestType:	requestType,
@@ -2358,7 +2358,9 @@ func (k *kataAgent) copyFile(
 
 	if requestType == "update-config-timestamp" {
 		resp, err := k.sendReq(ctx, cpReq)
-		return resp.(*grpc.CopyFileResponse).GuestPath, err
+		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
+		k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
+		return guestPath, err
 	}
 
 	var b []byte
@@ -2388,7 +2390,9 @@ func (k *kataAgent) copyFile(
 	// Handle the special case where the file is empty
 	if cpReq.FileSize == 0 {
 		resp, err := k.sendReq(ctx, cpReq)
-		return resp.(*grpc.CopyFileResponse).GuestPath, err
+		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
+		k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
+		return guestPath, err
 	}
 
 	// Copy file by parts if it's needed
@@ -2404,7 +2408,9 @@ func (k *kataAgent) copyFile(
 		cpReq.Offset = offset
 
 		resp, err := k.sendReq(ctx, cpReq)
+		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
 		if err != nil {
+			k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning error")
 			return "", fmt.Errorf("CopyFile sendReq failed: %v", err)
 		}
 
@@ -2413,8 +2419,10 @@ func (k *kataAgent) copyFile(
 		offset += grpcMaxDataSize
 
 		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
+		k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: received data")
 	}
 
+	k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
 	return guestPath, err
 }
 
