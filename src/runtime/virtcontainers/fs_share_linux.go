@@ -983,16 +983,6 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		return err
 	}
 
-	/*
-    dstPath :=
-        "/run/kata-containers/shared/containers/" +
-        containerId +
-        "-" +
-        randomBytes +
-        "-" +
-        mountDest;
-		*/
-
 	f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceRegularFile: Adding (srcPath, guestPath) to srcDstMap")
 	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
 
@@ -1122,16 +1112,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		f.Logger().WithError(err).WithField("srcFilePath", timestampedPath).Debug("copyMountSourceDir: copyFile failed")
 		return err
 	}
-
-	/*
-	dstPath :=
-		"/run/kata-containers/shared/containers/" +
-		containerId +
-		"-" +
-		randomBytesStr +
-		"-" +
-		mountDest
-	*/
 
 	f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceDir: Adding (srcPath, guestPath) to srcDstMap")
 	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)

@@ -31,6 +31,8 @@ verity = { path = "../tardev-snapshotter/verity" }
 zerocopy = "0.6.1"
 devicemapper = "0.33.1"
 proc-mounts = "0.3.0"
+rand = "^0.7.2"
+hex = "0.4.2"
 
 # Async helpers
 async-trait = "0.1.42"
@@ -84,7 +86,6 @@ clap = { version = "3.0.1", features = ["derive"] }
 
 # Policy validation
 sha2 = { version = "0.10.6", optional = true }
-hex = { version = "0.4.2", optional = true }
 sev = { git = "https://github.com/virtee/sev", version = "1.2", default-features = false, features = ["snp"], optional = true }
 
 # Agent Policy
@@ -114,7 +115,7 @@ lto = true
 default = []
 seccomp = ["rustjail/seccomp"]
 standard-oci-runtime = ["rustjail/standard-oci-runtime"]
-agent-policy = ["hex", "regorus", "sev", "sha2"]
+agent-policy = ["regorus", "sev", "sha2"]
 
 [[bin]]
 name = "kata-agent"

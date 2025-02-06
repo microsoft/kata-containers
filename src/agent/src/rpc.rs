@@ -47,6 +47,7 @@ use nix::errno::Errno;
 use nix::mount::MsFlags;
 use nix::sys::{stat, statfs};
 use nix::unistd::{self, Pid};
+use rand::RngCore;
 use rustjail::process::ProcessOperations;
 
 use crate::device::{add_devices, update_env_pci};
@@ -1765,10 +1766,19 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileRespo
         return Err(anyhow!("do_copy_file: unsupported request_type {}", req.request_type));
     }
 
+    // let random_bytes = kata_sys_util::rand::RandomBytes::new(8);
+    let mut random_bytes = vec![0u8; 8];
+    rand::thread_rng().fill_bytes(&mut random_bytes);
+    info!(sl(), "do_copy_file: random_bytes = {:?}", random_bytes);
+    
+    let random_bytes_str = hex::encode(random_bytes);
+    info!(sl(), "do_copy_file: random_bytes_str = {}", random_bytes_str);
+
     let mut path_str = "/run/kata-containers/shared/containers/".to_owned()
         + &req.container_id
         + "-"
-        + &req.random_bytes
+        // + &req.random_bytes
+        + &random_bytes_str
         + "-"
         + &req.mount_dest;
     let mount_dest = path_str.clone();
