@@ -47,7 +47,7 @@ use nix::errno::Errno;
 use nix::mount::MsFlags;
 use nix::sys::{stat, statfs};
 use nix::unistd::{self, Pid};
-use rand::RngCore;
+// use rand::RngCore;
 use rustjail::process::ProcessOperations;
 
 use crate::device::{add_devices, update_env_pci};
@@ -1771,8 +1771,9 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileRespo
     }
 
     // let random_bytes = kata_sys_util::rand::RandomBytes::new(8);
-    let mut random_bytes = vec![0u8; 8];
-    rand::thread_rng().fill_bytes(&mut random_bytes);
+    // let mut random_bytes = vec![0u8; 8];
+    let random_bytes = vec![12u8; 8];
+    // rand::thread_rng().fill_bytes(&mut random_bytes);
     info!(sl(), "do_copy_file: random_bytes = {:?}", random_bytes);
 
     let random_bytes_str = hex::encode(random_bytes);
