@@ -75,6 +75,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing::instrument;
 
 use libc::{self, c_ushort, pid_t, winsize, TIOCSWINSZ};
+//use std::{fs, result};
 use std::fs;
 use std::os::unix::prelude::PermissionsExt;
 use std::process::{Command, Stdio};
@@ -1763,16 +1764,22 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileRespo
     let mut resp = CopyFileResponse::new();
 
     if req.request_type != "sandbox-file" && req.request_type != "update-config-timestamp" {
-        return Err(anyhow!("do_copy_file: unsupported request_type {}", req.request_type));
+        return Err(anyhow!(
+            "do_copy_file: unsupported request_type {}",
+            req.request_type
+        ));
     }
 
     // let random_bytes = kata_sys_util::rand::RandomBytes::new(8);
     let mut random_bytes = vec![0u8; 8];
     rand::thread_rng().fill_bytes(&mut random_bytes);
     info!(sl(), "do_copy_file: random_bytes = {:?}", random_bytes);
-    
+
     let random_bytes_str = hex::encode(random_bytes);
-    info!(sl(), "do_copy_file: random_bytes_str = {}", random_bytes_str);
+    info!(
+        sl(),
+        "do_copy_file: random_bytes_str = {}", random_bytes_str
+    );
 
     let mut path_str = "/run/kata-containers/shared/containers/".to_owned()
         + &req.container_id
@@ -1903,7 +1910,11 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileRespo
                     sl(),
                     "do_copy_file: link src = {:?}, dest = {:?}", file_link_src, file_link_dest
                 );
-                unistd::symlinkat(&file_link_src, None, &file_link_dest)?;
+
+                match unistd::symlinkat(&file_link_src, None, &file_link_dest) {
+                    Ok(_) => info!(sl(), "do_copy_file: symlink created successfully"),
+                    Err(e) => error!(sl(), "do_copy_file: symlink failed - ignoring: {:?}", e),
+                }
             } else {
                 info!(
                     sl(),

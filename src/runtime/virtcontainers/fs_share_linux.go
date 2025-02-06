@@ -1093,7 +1093,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		"randomBytes": "",
 	}).Debug("copyMountSourceDir: sending request")
 
-	guestPath, err = f.sandbox.agent.copyFile(
+	_, err = f.sandbox.agent.copyFile(
 		ctx, 
 		timestampedPath,
 		requestType,
