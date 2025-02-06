@@ -2358,11 +2358,9 @@ func (k *kataAgent) copyFile(
 
 	if requestType == "update-config-timestamp" {
 		resp, err := k.sendReq(ctx, cpReq)
-		//_, err := k.sendReq(ctx, cpReq)
 		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
 		k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
 		return guestPath, err
-		//return "", err
 	}
 
 	var b []byte
@@ -2391,12 +2389,10 @@ func (k *kataAgent) copyFile(
 
 	// Handle the special case where the file is empty
 	if cpReq.FileSize == 0 {
-		// resp, err := k.sendReq(ctx, cpReq)
-		_, err := k.sendReq(ctx, cpReq)
-		//guestPath = resp.(*grpc.CopyFileResponse).GuestPath
-		//k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
-		//return guestPath, err
-		return "", err
+		resp, err := k.sendReq(ctx, cpReq)
+		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
+		k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
+		return guestPath, err
 	}
 
 	// Copy file by parts if it's needed
@@ -2411,11 +2407,10 @@ func (k *kataAgent) copyFile(
 		cpReq.Data = b[:bytesToCopy]
 		cpReq.Offset = offset
 
-		// resp, err := k.sendReq(ctx, cpReq)
-		_, err := k.sendReq(ctx, cpReq)
-		//guestPath = resp.(*grpc.CopyFileResponse).GuestPath
+		resp, err := k.sendReq(ctx, cpReq)
+		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
 		if err != nil {
-			//k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning error")
+			k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning error")
 			return "", fmt.Errorf("CopyFile sendReq failed: %v", err)
 		}
 
@@ -2423,13 +2418,12 @@ func (k *kataAgent) copyFile(
 		remainingBytes -= bytesToCopy
 		offset += grpcMaxDataSize
 
-		//guestPath = resp.(*grpc.CopyFileResponse).GuestPath
-		//k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: received data")
+		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
+		k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: received data")
 	}
 
-	//k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
-	//return guestPath, err
-	return "", err
+	k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
+	return guestPath, err
 }
 
 func (k *kataAgent) addSwap(ctx context.Context, PCIPath types.PciPath) error {
