@@ -1792,13 +1792,11 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileRespo
     resp.guest_path = path_str.clone();
 
     if req.request_type == "update-config-timestamp" {
-        let path = PathBuf::from(path_str + "/..data");
+        let path = PathBuf::from(path_str.to_owned() + "/..data");
         info!(sl(), "do_copy_file: link dest = {:?}", path);
 
-        let mut tmp_link = path.clone();
-        info!(sl(), "do_copy_file: before set_extention tmp_link = {:?}", tmp_link);
-        tmp_link.set_extension("tmp");
-        info!(sl(), "do_copy_file: after set_extention tmp_link = {:?}", tmp_link);
+        let tmp_link = PathBuf::from(path_str + "/..data.tmp");
+        info!(sl(), "do_copy_file: tmp_link = {:?}", tmp_link);
 
         let timestamped_path = PathBuf::from(&req.timestamped_dir);
         info!(
