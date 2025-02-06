@@ -42,7 +42,7 @@ type AgentServiceService interface {
 	GetGuestDetails(context.Context, *GuestDetailsRequest) (*GuestDetailsResponse, error)
 	MemHotplugByProbe(context.Context, *MemHotplugByProbeRequest) (*emptypb.Empty, error)
 	SetGuestDateTime(context.Context, *SetGuestDateTimeRequest) (*emptypb.Empty, error)
-	CopyFile(context.Context, *CopyFileRequest) (*emptypb.Empty, error)
+	CopyFile(context.Context, *CopyFileRequest) (*CopyFileResponse, error)
 	GetOOMEvent(context.Context, *GetOOMEventRequest) (*OOMEvent, error)
 	AddSwap(context.Context, *AddSwapRequest) (*emptypb.Empty, error)
 	GetVolumeStats(context.Context, *VolumeStatsRequest) (*VolumeStatsResponse, error)
@@ -589,8 +589,8 @@ func (c *agentserviceClient) SetGuestDateTime(ctx context.Context, req *SetGuest
 	return &resp, nil
 }
 
-func (c *agentserviceClient) CopyFile(ctx context.Context, req *CopyFileRequest) (*emptypb.Empty, error) {
-	var resp emptypb.Empty
+func (c *agentserviceClient) CopyFile(ctx context.Context, req *CopyFileRequest) (*CopyFileResponse, error) {
+	var resp CopyFileResponse
 	if err := c.client.Call(ctx, "grpc.AgentService", "CopyFile", req, &resp); err != nil {
 		return nil, err
 	}

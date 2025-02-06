@@ -1320,13 +1320,11 @@ impl agent_ttrpc::AgentService for AgentService {
         &self,
         ctx: &TtrpcContext,
         req: protocols::agent::CopyFileRequest,
-    ) -> ttrpc::Result<Empty> {
+    ) -> ttrpc::Result<CopyFileResponse> {
         trace_rpc_call!(ctx, "copy_file", req);
         is_allowed_copy_file(&req).await?;
 
-        do_copy_file(&req).map_ttrpc_err(same)?;
-
-        Ok(Empty::new())
+        return do_copy_file(&req).map_ttrpc_err(same);
     }
 
     async fn get_metrics(

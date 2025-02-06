@@ -67,7 +67,7 @@ service AgentService {
 	rpc GetGuestDetails(GuestDetailsRequest) returns (GuestDetailsResponse);
 	rpc MemHotplugByProbe(MemHotplugByProbeRequest) returns (google.protobuf.Empty);
 	rpc SetGuestDateTime(SetGuestDateTimeRequest) returns (google.protobuf.Empty);
-	rpc CopyFile(CopyFileRequest) returns (google.protobuf.Empty);
+	rpc CopyFile(CopyFileRequest) returns (CopyFileResponse);
 	rpc GetOOMEvent(GetOOMEventRequest) returns (OOMEvent);
 	rpc AddSwap(AddSwapRequest) returns (google.protobuf.Empty);
 	rpc GetVolumeStats(VolumeStatsRequest) returns (VolumeStatsResponse);

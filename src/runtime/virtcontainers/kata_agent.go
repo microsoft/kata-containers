@@ -2357,9 +2357,9 @@ func (k *kataAgent) copyFile(
 	}
 
 	if requestType == "update-config-timestamp" {
-		//resp, err := k.sendReq(ctx, cpReq)
-		_, err := k.sendReq(ctx, cpReq)
-		//guestPath = resp.(*grpc.CopyFileResponse).GuestPath
+		resp, err := k.sendReq(ctx, cpReq)
+		//_, err := k.sendReq(ctx, cpReq)
+		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
 		k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
 		return guestPath, err
 		//return "", err
