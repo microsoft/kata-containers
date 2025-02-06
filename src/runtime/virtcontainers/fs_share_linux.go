@@ -968,7 +968,7 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		"randomBytes": randomBytes,
 	}).Debug("copyMountSourceRegularFile: sending request")
 
-	_, err := f.sandbox.agent.copyFile(
+	guestPath, err := f.sandbox.agent.copyFile(
 		ctx, 
 		srcPath, 
 		requestType,
@@ -983,6 +983,7 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		return err
 	}
 
+	/*
     dstPath :=
         "/run/kata-containers/shared/containers/" +
         containerId +
@@ -990,9 +991,10 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
         randomBytes +
         "-" +
         mountDest;
+		*/
 
-	f.Logger().WithField("srcPath", srcPath).WithField("dstPath", dstPath).Info("copyMountSourceRegularFile: Adding (srcPath, dstPath) to srcDstMap")
-	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], dstPath)
+	f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceRegularFile: Adding (srcPath, guestPath) to srcDstMap")
+	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
 
 	return nil
 }
@@ -1106,7 +1108,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		"randomBytes": randomBytesStr,
 	}).Debug("copyMountSourceDir: sending request")
 
-	_, err = f.sandbox.agent.copyFile(
+	guestPath, err := f.sandbox.agent.copyFile(
 		ctx, 
 		timestampedPath,
 		requestType,
@@ -1121,6 +1123,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return err
 	}
 
+	/*
 	dstPath :=
 		"/run/kata-containers/shared/containers/" +
 		containerId +
@@ -1128,9 +1131,10 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		randomBytesStr +
 		"-" +
 		mountDest
+	*/
 
-	f.Logger().WithField("srcPath", srcPath).WithField("dstPath", dstPath).Info("copyMountSourceDir: Adding (srcPath, dstPath) to srcDstMap")
-	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], dstPath)
+	f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceDir: Adding (srcPath, guestPath) to srcDstMap")
+	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
 
 	f.Logger().WithField("mount_source", m.Source).Debug("copyMountSourceDir: success")
 	return nil

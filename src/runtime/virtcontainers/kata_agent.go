@@ -2419,7 +2419,7 @@ func (k *kataAgent) copyFile(
 		offset += grpcMaxDataSize
 
 		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
-		k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: received data")
+		k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: received response")
 	}
 
 	k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
