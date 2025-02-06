@@ -2327,7 +2327,7 @@ func (k *kataAgent) copyFile(
 	randomBytes string) (string, error) {
 	
 	var st unix.Stat_t
-	// guestPath := ""
+	guestPath := ""
 
 	err := unix.Lstat(src, &st)
 	if err != nil {
@@ -2357,12 +2357,12 @@ func (k *kataAgent) copyFile(
 	}
 
 	if requestType == "update-config-timestamp" {
-		// resp, err := k.sendReq(ctx, cpReq)
-		_, err := k.sendReq(ctx, cpReq)
-		// guestPath = resp.(*grpc.CopyFileResponse).GuestPath
-		// k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
-		//return guestPath, err
-		return "", err
+		resp, err := k.sendReq(ctx, cpReq)
+		//_, err := k.sendReq(ctx, cpReq)
+		guestPath = resp.(*grpc.CopyFileResponse).GuestPath
+		k.Logger().WithField("guestPath", guestPath).WithError(err).Debug("CopyFileRequest: returning")
+		return guestPath, err
+		//return "", err
 	}
 
 	var b []byte
