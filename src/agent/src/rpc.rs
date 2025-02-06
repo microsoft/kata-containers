@@ -1802,16 +1802,27 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileRespo
             sl(),
             "do_copy_file: temporary link src = {:?}, dest = {:?}", timestamped_path, tmp_link
         );
-        unistd::symlinkat(&timestamped_path, None, &tmp_link)?;
+
+        match unistd::symlinkat(&timestamped_path, None, &tmp_link) {
+            Ok(_) => info!(sl(), "do_copy_file: symlink created successfully"),
+            Err(e) => error!(sl(), "do_copy_file: symlinkat failed - ignoring: {:?}", e),
+        }
 
         //let path_str = CString::new(timestamped_path.as_os_str().as_bytes())?;
         //let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
         //Errno::result(ret).map(drop)?;
 
         if path.is_symlink() && path.exists() {
-            unistd::unlink(&path)?;
+            match unistd::unlink(&path) {
+                Ok(_) => info!(sl(), "do_copy_file: deleted {:?}", path),
+                Err(e) => error!(sl(), "do_copy_file: unlink failed - ignoring: {:?}", e),
+            }
         }
-        fs::rename(tmp_link, path)?;
+
+        match fs::rename(&tmp_link, &path) {
+            Ok(_) => info!(sl(), "do_copy_file: renamed {:?} to {:?}", tmp_link, path),
+            Err(e) => error!(sl(), "do_copy_file: rename failed - ignoring: {:?}", e),
+        }
     } else {
         if req.timestamped_dir != "" {
             path_str = path_str + "/" + &req.timestamped_dir;
@@ -1913,7 +1924,7 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileRespo
 
                 match unistd::symlinkat(&file_link_src, None, &file_link_dest) {
                     Ok(_) => info!(sl(), "do_copy_file: symlink created successfully"),
-                    Err(e) => error!(sl(), "do_copy_file: symlink failed - ignoring: {:?}", e),
+                    Err(e) => error!(sl(), "do_copy_file: symlinkat failed - ignoring: {:?}", e),
                 }
             } else {
                 info!(
