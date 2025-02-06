@@ -1796,7 +1796,10 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileRespo
         info!(sl(), "do_copy_file: link dest = {:?}", path);
 
         let mut tmp_link = path.clone();
+        info!(sl(), "do_copy_file: before set_extention tmp_link = {:?}", tmp_link);
         tmp_link.set_extension("tmp");
+        info!(sl(), "do_copy_file: after set_extention tmp_link = {:?}", tmp_link);
+
         let timestamped_path = PathBuf::from(&req.timestamped_dir);
         info!(
             sl(),
