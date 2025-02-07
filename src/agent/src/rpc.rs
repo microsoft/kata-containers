@@ -48,7 +48,7 @@ use nix::errno::Errno;
 use nix::mount::MsFlags;
 use nix::sys::{stat, statfs};
 use nix::unistd::{self, Pid};
-// use rand::RngCore;
+use rand::RngCore;
 use rustjail::process::ProcessOperations;
 
 use crate::device::{add_devices, update_env_pci};
