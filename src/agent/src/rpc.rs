@@ -1784,10 +1784,20 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
     if req.request_type == "update-config-timestamp" {
         let mut path = match MOUNT_STATE.lock().await.get_mapping(&req.container_id, &req.mount_source) {
             Some(p) => p,
-            None => return Err(anyhow!(
+            None => {
+                info!(
+                    sl(), 
+                    "do_copy_file: ignoring: no mapping for source {} in container {}",
+                    &req.mount_source, &req.container_id);
+                return Ok(resp);
+            }
+            
+            /*
+            return Err(anyhow!(
                 "do_copy_file: no mapping for source {} in container {}",
                 &req.mount_source, &req.container_id
                 )),
+            */
         };
 
         let mut tmp_link = path.clone();
