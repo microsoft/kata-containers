@@ -977,8 +977,8 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		return "", err
 	}
 
-	//f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceRegularFile: Adding (srcPath, guestPath) to srcDstMap")
-	//f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
+	f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceRegularFile: Adding (srcPath, guestPath) to srcDstMap")
+	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
 
 	return guestPath, nil
 }
@@ -1110,8 +1110,8 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return "", err
 	}
 
-	//f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceDir: Adding (srcPath, guestPath) to srcDstMap")
-	//f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
+	f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceDir: Adding (srcPath, guestPath) to srcDstMap")
+	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
 
 	f.Logger().WithField("mountSource", mountSource).Debug("copyMountSourceDir: success")
 	return guestPath, nil
