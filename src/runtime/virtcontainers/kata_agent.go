@@ -2483,3 +2483,96 @@ func (k *kataAgent) setPolicy(ctx context.Context, policy string) error {
 	_, err := k.sendReq(ctx, &grpc.SetPolicyRequest{Policy: policy})
 	return err
 }
+
+func (k *kataAgent) mountRequest(ctx context.Context, requestType, containerId string, mount Mount, timestampedDir, fileName string) error {
+	var st unix.Stat_t
+	
+	src := mount.Source
+	if timestampedDir != "" {
+		src += "/" + timestampedDir
+	}
+	if fileName != "" {
+		src += "/" + fileName
+	}
+
+	err := unix.Lstat(src, &st)
+	if err != nil {
+		return fmt.Errorf("mountRequest: could not get file %s information: %v", src, err)
+	}
+
+	sflag := st.Mode & unix.S_IFMT
+	if fileName != "" {
+		if sflag != unix.S_IFREG {
+			return fmt.Errorf("mountRequest: unsupported type %v for file %s", sflag, src)
+		}
+	} else if sflag != unix.S_IFDIR {
+			return fmt.Errorf("mountRequest: unsupported type %v for directory %s", sflag, src)
+	}
+
+	k.Logger().WithFields(logrus.Fields{
+        "requestType": requestType,
+		"containerId": containerId,
+		"mount": mount,
+		"timestampedDir": timestampedDir,
+        "fileName": fileName,
+	}).Debug("mountRequest")
+
+	grpcMount := &grpc.Mount {
+		Destination: mount.Destination,
+		Source: mount.Source,
+		Type: mount.Type,
+		Options: mount.Options,
+	}
+
+	req := &grpc.MountRequest{
+		RequestType:	requestType,
+		ContainerId:	containerId,
+		Mount:			grpcMount,
+		TimestampedDir:	timestampedDir,
+		FileName:     	fileName,
+		DirMode:  		uint32(DirMode),
+		FileMode: 		st.Mode,
+		Uid:      		int32(st.Uid),
+		Gid:      		int32(st.Gid),
+	}
+
+	switch requestType {
+	case "update-config-timestamp":
+		_, err = k.sendReq(ctx, req)
+		return err
+	case "sandbox-file":
+		b, err := os.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("mountRequest: could not read file %s: %v", src, err)
+		}
+		req.FileSize = int64(len(b))
+	
+		if req.FileSize == 0 {
+			_, err = k.sendReq(ctx, req)
+		} else {
+			remainingBytes := req.FileSize
+			offset := int64(0)
+			for remainingBytes > 0 {
+				bytesToCopy := int64(len(b))
+				if bytesToCopy > grpcMaxDataSize {
+					bytesToCopy = grpcMaxDataSize
+				}
+				req.Data = b[:bytesToCopy]
+				req.Offset = offset
+		
+				_, err = k.sendReq(ctx, req)
+				if err != nil {
+					return fmt.Errorf("mountRequest: request failed: %v", err)
+				}
+		
+				b = b[bytesToCopy:]
+				remainingBytes -= bytesToCopy
+				offset += grpcMaxDataSize
+			}
+		}
+
+		return err
+	default:
+		return fmt.Errorf("mountRequest: unsupported request type: %s", requestType)
+	}
+}
