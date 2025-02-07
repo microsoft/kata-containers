@@ -101,7 +101,7 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref MOUNT_STATE: Mutex<mount::MountState> = Mutex::new(MountState::new());
+    static ref MOUNT_STATE: Mutex<rpc::MountState> = Mutex::new(MountState::new());
 }
 
 #[derive(Parser)]
@@ -442,7 +442,7 @@ use std::os::unix::io::{FromRawFd, RawFd};
 #[cfg(feature = "agent-policy")]
 use crate::policy::AgentPolicy;
 
-use crate::mount::MountState;
+use crate::rpc::MountState;
 
 #[cfg(test)]
 mod tests {
