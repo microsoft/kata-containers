@@ -1772,7 +1772,7 @@ fn do_set_guest_date_time(sec: i64, usec: i64) -> Result<()> {
 // DMFIX
 async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileResponse> {
     info!(sl(), "do_copy_file: req = {:?}", req);
-    let mut resp = CopyFileResponse::new();
+    let resp = CopyFileResponse::new();
 
     if req.request_type != "sandbox-file" && req.request_type != "update-config-timestamp" {
         return Err(anyhow!(
