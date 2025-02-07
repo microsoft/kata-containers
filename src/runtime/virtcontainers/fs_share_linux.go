@@ -937,13 +937,9 @@ func (f *FilesystemShare) copyMountSource(ctx context.Context, c *Container, m *
 		return nil, err
 	}
 
-	if guestPath != "" {
-		return &SharedFile{
-			guestPath: guestPath,
-		}, nil
-	}
-
-	return nil, nil
+	return &SharedFile{
+		guestPath: guestPath,
+	}, nil
 }
 
 func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Container, m *Mount, randomBytes string) (string, error) {
@@ -986,7 +982,8 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 	//f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
 
 	//return guestPath, nil
-	return "", nil
+	//return "", nil
+	return m.Source, nil
 }
 
 var timestampedDirRegexString = "^\\.\\.[0-9]{4}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}.[0-9]+$"
@@ -1123,5 +1120,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	f.Logger().WithField("mountSource", mountSource).Debug("copyMountSourceDir: success")
 
 	//return guestPath, nil
-	return "", nil
+	//return "", nil
+	return m.Source, nil
 }

@@ -1806,7 +1806,7 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
         let path = PathBuf::from(path_str.to_owned() + "/..data");
         info!(sl(), "do_copy_file: link dest = {:?}", path);
 
-        let tmp_link = PathBuf::from(path_str + "/..data.tmp");
+        let tmp_link = PathBuf::from(path_str.to_owned() + "/..data.tmp");
         info!(sl(), "do_copy_file: tmp_link = {:?}", tmp_link);
 
         let timestamped_path = PathBuf::from(&req.timestamped_dir);
@@ -1838,7 +1838,7 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
 
         info!(sl(), 
             "do_copy_file: calling set_mapping: container_id = {}, mount_source = {:?}, guest_path = {:?}", 
-            req.container_id, &req.mount_source, path);
+            req.container_id, &req.mount_source, &path_str);
 
         MOUNT_STATE
             .lock()
