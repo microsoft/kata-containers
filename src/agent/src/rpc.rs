@@ -1837,11 +1837,6 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
         info!(sl(), 
             "do_copy_file: calling set_mapping: container_id = {}, mount_source = {}, guest_path = {:?}", 
             req.container_id, &req.mount_source, path);
-
-        MOUNT_STATE
-            .lock()
-            .await
-            .set_mapping(&req.container_id, &req.mount_source, path);
     } else {
         let mut random_bytes = vec![0u8; 8];
         rand::thread_rng().fill_bytes(&mut random_bytes);
@@ -1857,8 +1852,9 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
             + &random_bytes_str
             + "-"
             + &req.mount_destination;
-        let mount_dest = path_str.clone();
-        resp.guest_path = path_str.clone();
+        //let mount_dest = path_str.clone();
+        //resp.guest_path = path_str.clone();
+        let guest_mount_source = path_str.clone();
     
         if req.timestamped_dir != "" {
             path_str = path_str + "/" + &req.timestamped_dir;
@@ -1950,7 +1946,7 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
         fs::rename(tmpfile, path.clone())?;
 
         if req.timestamped_dir != "" {
-            let file_link_dest = PathBuf::from(mount_dest + "/" + &req.file_name);
+            let file_link_dest = PathBuf::from(guest_mount_source.clone() + "/" + &req.file_name);
             if !file_link_dest.exists() {
                 let file_link_src = PathBuf::from("..data".to_owned() + "/" + &req.file_name);
                 info!(
@@ -1968,6 +1964,18 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
                     "do_copy_file: link {:?} already exists", file_link_dest
                 );
             }
+
+            let guest_mount_source_path = PathBuf::from(&guest_mount_source);
+
+            info!(sl(), 
+                "do_copy_file: calling set_mapping: container_id = {}, mount_source = {}, guest_path = {:?}", 
+                req.container_id, &req.mount_source, guest_mount_source_path);
+
+            MOUNT_STATE
+            .lock()
+            .await
+            .set_mapping(&req.container_id, &req.mount_source, guest_mount_source_path);
+            
         } else {
             info!(sl(), 
                 "do_copy_file: calling set_mapping: container_id = {}, mount_source = {}, guest_path = {:?}", 
