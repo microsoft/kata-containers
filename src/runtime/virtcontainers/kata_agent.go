@@ -2503,10 +2503,10 @@ func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, 
 	sflag := st.Mode & unix.S_IFMT
 	if fileName != "" {
 		if sflag != unix.S_IFREG {
-			return fmt.Errorf("mountRequest: unsupported type %v for file %s", sflag, src)
+			return fmt.Errorf("mountRequest: unsupported type %x for file %s", sflag, src)
 		}
-	} else if sflag != unix.S_IFDIR {
-			return fmt.Errorf("mountRequest: unsupported type %v for directory %s", sflag, src)
+	} else if sflag != unix.S_IFREG && sflag != unix.S_IFDIR {
+			return fmt.Errorf("mountRequest: unsupported type %x for directory %s", sflag, src)
 	}
 
 	k.Logger().WithFields(logrus.Fields{
