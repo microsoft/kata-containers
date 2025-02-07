@@ -1781,28 +1781,15 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
         ));
     }
 
-    let mut random_bytes = vec![0u8; 8];
-    // let random_bytes = vec![12u8; 8];
-    rand::thread_rng().fill_bytes(&mut random_bytes);
-    info!(sl(), "do_copy_file: random_bytes = {:?}", random_bytes);
-
-    let random_bytes_str = hex::encode(random_bytes);
-    info!(
-        sl(),
-        "do_copy_file: random_bytes_str = {}", random_bytes_str
-    );
-
-    let mut path_str = "/run/kata-containers/shared/containers/".to_owned()
-        + &req.container_id
-        + "-"
-        // + &req.random_bytes
-        + &random_bytes_str
-        + "-"
-        + &req.mount_destination;
-    let mount_dest = path_str.clone();
-    resp.guest_path = path_str.clone();
-
     if req.request_type == "update-config-timestamp" {
+        let path_str = match MOUNT_STATE.lock().await.get_mapping(&req.container_id, &req.mount_source) {
+            Some(p) => p,
+            None => return Err(anyhow!(
+                "do_copy_file: no mapping for source {} in container {}",
+                &req.mount_source, &req.container_id
+                )),
+        };
+
         let path = PathBuf::from(path_str.to_owned() + "/..data");
         info!(sl(), "do_copy_file: link dest = {:?}", path);
 
@@ -1845,6 +1832,23 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
             .await
             .set_mapping(&req.container_id, &req.mount_source, path);
     } else {
+        let mut random_bytes = vec![0u8; 8];
+        rand::thread_rng().fill_bytes(&mut random_bytes);
+        let random_bytes_str = hex::encode(random_bytes);
+        info!(
+            sl(),
+            "do_copy_file: random_bytes_str = {}", random_bytes_str
+        );
+    
+        let mut path_str = "/run/kata-containers/shared/containers/".to_owned()
+            + &req.container_id
+            + "-"
+            + &random_bytes_str
+            + "-"
+            + &req.mount_destination;
+        let mount_dest = path_str.clone();
+        resp.guest_path = path_str.clone();
+    
         if req.timestamped_dir != "" {
             path_str = path_str + "/" + &req.timestamped_dir;
         }
@@ -3074,6 +3078,15 @@ impl MountState {
             c_state.set_mapping(host_path, guest_path);
             self.containers_state
                 .insert(container_id.to_string(), c_state);
+        }
+    }
+
+    pub fn get_mapping(&self, container_id: &str, host_path: &str) -> Option<PathBuf> {
+        if let Some(c_state) = self.containers_state.get(container_id) {
+            c_state.get_mapping(host_path)
+        } else {
+            warn!(sl(), "get_mapping: state not found for container {}", container_id);
+            None
         }
     }
 
