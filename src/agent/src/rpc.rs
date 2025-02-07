@@ -193,7 +193,14 @@ impl AgentService {
             }
         };
 
-        MOUNT_STATE.lock().await.update_oci_mounts(&cid, &mut oci.mounts);
+        info!(
+            sl(),
+            "do_create_container: updating mounts: {:?}", &oci.mounts
+        );
+        MOUNT_STATE
+            .lock()
+            .await
+            .update_oci_mounts(&cid, &mut oci.mounts);
 
         let container_name = k8s::container_name(&oci);
 
@@ -1774,10 +1781,10 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
         ));
     }
 
-    // let random_bytes = kata_sys_util::rand::RandomBytes::new(8);
-    // let mut random_bytes = vec![0u8; 8];
-    let random_bytes = vec![12u8; 8];
-    // rand::thread_rng().fill_bytes(&mut random_bytes);
+    let random_bytes = kata_sys_util::rand::RandomBytes::new(8);
+    let mut random_bytes = vec![0u8; 8];
+    // let random_bytes = vec![12u8; 8];
+    rand::thread_rng().fill_bytes(&mut random_bytes);
     info!(sl(), "do_copy_file: random_bytes = {:?}", random_bytes);
 
     let random_bytes_str = hex::encode(random_bytes);
@@ -1830,7 +1837,14 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
             Err(e) => error!(sl(), "do_copy_file: rename failed - ignoring: {:?}", e),
         }
 
-        MOUNT_STATE.lock().await.set_mapping(&req.container_id, &req.mount_source, path);
+        info!(sl(), 
+            "do_copy_file: calling set_mapping: container_id = {}, mount_source = {:?}, guest_path = {:?}", 
+            req.container_id, &req.mount_source, path);
+
+        MOUNT_STATE
+            .lock()
+            .await
+            .set_mapping(&req.container_id, &req.mount_source, path);
     } else {
         if req.timestamped_dir != "" {
             path_str = path_str + "/" + &req.timestamped_dir;
@@ -3011,11 +3025,14 @@ impl ContainerMountState {
     pub fn new() -> Self {
         return Self {
             path_map: HashMap::new(),
-        }
+        };
     }
 
     pub fn set_mapping(&mut self, host_path: &str, guest_path: PathBuf) {
-        info!(sl(), "set_mapping: host_path {} guest_path {:?}", host_path, guest_path);
+        info!(
+            sl(),
+            "set_mapping: host_path {} guest_path {:?}", host_path, guest_path
+        );
         self.path_map.insert(host_path.to_string(), guest_path);
     }
 
@@ -3028,14 +3045,15 @@ impl MountState {
     pub fn new() -> Self {
         return Self {
             containers_state: HashMap::new(),
-        }
+        };
     }
 
     pub fn set_mapping(&mut self, container_id: &str, host_path: &str, guest_path: PathBuf) {
         if let Some(c_state) = self.containers_state.get_mut(container_id) {
             c_state.set_mapping(host_path, guest_path);
         } else {
-            self.containers_state.insert(container_id.to_string(), ContainerMountState::new());
+            self.containers_state
+                .insert(container_id.to_string(), ContainerMountState::new());
         }
     }
 
@@ -3043,7 +3061,13 @@ impl MountState {
         if let Some(c_state) = self.containers_state.get(container_id) {
             for mount in mounts {
                 if let Some(s) = c_state.get_mapping(&mount.source) {
-                    info!(sl(), "update_oci_mounts: replacing mount source {} with {:?} for container {}", mount.source, s, container_id);
+                    info!(
+                        sl(),
+                        "update_oci_mounts: replacing mount source {} with {:?} for container {}",
+                        mount.source,
+                        s,
+                        container_id
+                    );
                     mount.source = s.to_string_lossy().to_string();
                 }
             }
