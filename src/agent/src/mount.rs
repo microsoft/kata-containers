@@ -1109,7 +1109,7 @@ impl MountState {
     }
 
     pub fn get_mapping(&self, container_id: &str, host_path: &str) -> Option<PathBuf> {
-        if let Some(c_state) = self.containers_state.get_mut(container_id) {
+        if let Some(c_state) = self.containers_state.get(container_id) {
             c_state.get_mapping(host_path)
         } else {
             None
