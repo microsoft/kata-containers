@@ -4744,7 +4744,7 @@ var file_agent_proto_rawDesc = []byte{
 	0x28, 0x05, 0x52, 0x03, 0x67, 0x69, 0x64, 0x12, 0x16, 0x0a, 0x06, 0x6f, 0x66, 0x66, 0x73, 0x65,
 	0x74, 0x18, 0x0b, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x6f, 0x66, 0x66, 0x73, 0x65, 0x74, 0x12,
 	0x12, 0x0a, 0x04, 0x64, 0x61, 0x74, 0x61, 0x18, 0x0c, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x04, 0x64,
-	0x61, 0x74, 0x61, 0x32, 0xc1, 0x14, 0x0a, 0x0c, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x53, 0x65, 0x72,
+	0x61, 0x74, 0x61, 0x32, 0xf6, 0x14, 0x0a, 0x0c, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x53, 0x65, 0x72,
 	0x76, 0x69, 0x63, 0x65, 0x12, 0x47, 0x0a, 0x0f, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x43, 0x6f,
 	0x6e, 0x74, 0x61, 0x69, 0x6e, 0x65, 0x72, 0x12, 0x1c, 0x2e, 0x67, 0x72, 0x70, 0x63, 0x2e, 0x43,
 	0x72, 0x65, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6e, 0x74, 0x61, 0x69, 0x6e, 0x65, 0x72, 0x52, 0x65,
@@ -4908,14 +4908,17 @@ var file_agent_proto_rawDesc = []byte{
 	0x74, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x12, 0x16, 0x2e, 0x67, 0x72, 0x70, 0x63, 0x2e, 0x53,
 	0x65, 0x74, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
 	0x16, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75,
-	0x66, 0x2e, 0x45, 0x6d, 0x70, 0x74, 0x79, 0x42, 0x60, 0x5a, 0x5e, 0x67, 0x69, 0x74, 0x68, 0x75,
-	0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6b, 0x61, 0x74, 0x61, 0x2d, 0x63, 0x6f, 0x6e, 0x74, 0x61,
-	0x69, 0x6e, 0x65, 0x72, 0x73, 0x2f, 0x6b, 0x61, 0x74, 0x61, 0x2d, 0x63, 0x6f, 0x6e, 0x74, 0x61,
-	0x69, 0x6e, 0x65, 0x72, 0x73, 0x2f, 0x73, 0x72, 0x63, 0x2f, 0x72, 0x75, 0x6e, 0x74, 0x69, 0x6d,
-	0x65, 0x2f, 0x76, 0x69, 0x72, 0x74, 0x63, 0x6f, 0x6e, 0x74, 0x61, 0x69, 0x6e, 0x65, 0x72, 0x73,
-	0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x63, 0x6f, 0x6c, 0x73, 0x2f, 0x67, 0x72, 0x70, 0x63, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x33,
+	0x66, 0x2e, 0x45, 0x6d, 0x70, 0x74, 0x79, 0x12, 0x33, 0x0a, 0x05, 0x4d, 0x6f, 0x75, 0x6e, 0x74,
+	0x12, 0x12, 0x2e, 0x67, 0x72, 0x70, 0x63, 0x2e, 0x4d, 0x6f, 0x75, 0x6e, 0x74, 0x52, 0x65, 0x71,
+	0x75, 0x65, 0x73, 0x74, 0x1a, 0x16, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x45, 0x6d, 0x70, 0x74, 0x79, 0x42, 0x60, 0x5a, 0x5e,
+	0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6b, 0x61, 0x74, 0x61, 0x2d,
+	0x63, 0x6f, 0x6e, 0x74, 0x61, 0x69, 0x6e, 0x65, 0x72, 0x73, 0x2f, 0x6b, 0x61, 0x74, 0x61, 0x2d,
+	0x63, 0x6f, 0x6e, 0x74, 0x61, 0x69, 0x6e, 0x65, 0x72, 0x73, 0x2f, 0x73, 0x72, 0x63, 0x2f, 0x72,
+	0x75, 0x6e, 0x74, 0x69, 0x6d, 0x65, 0x2f, 0x76, 0x69, 0x72, 0x74, 0x63, 0x6f, 0x6e, 0x74, 0x61,
+	0x69, 0x6e, 0x65, 0x72, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2f,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x6f, 0x6c, 0x73, 0x2f, 0x67, 0x72, 0x70, 0x63, 0x62, 0x06,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -5095,46 +5098,48 @@ var file_agent_proto_depIdxs = []int32{
 	64, // 78: grpc.AgentService.GetVolumeStats:input_type -> grpc.VolumeStatsRequest
 	65, // 79: grpc.AgentService.ResizeVolume:input_type -> grpc.ResizeVolumeRequest
 	66, // 80: grpc.AgentService.SetPolicy:input_type -> grpc.SetPolicyRequest
-	78, // 81: grpc.AgentService.CreateContainer:output_type -> google.protobuf.Empty
-	78, // 82: grpc.AgentService.StartContainer:output_type -> google.protobuf.Empty
-	78, // 83: grpc.AgentService.RemoveContainer:output_type -> google.protobuf.Empty
-	78, // 84: grpc.AgentService.ExecProcess:output_type -> google.protobuf.Empty
-	78, // 85: grpc.AgentService.SignalProcess:output_type -> google.protobuf.Empty
-	6,  // 86: grpc.AgentService.WaitProcess:output_type -> grpc.WaitProcessResponse
-	78, // 87: grpc.AgentService.UpdateContainer:output_type -> google.protobuf.Empty
-	78, // 88: grpc.AgentService.UpdateEphemeralMounts:output_type -> google.protobuf.Empty
-	22, // 89: grpc.AgentService.StatsContainer:output_type -> grpc.StatsContainerResponse
-	78, // 90: grpc.AgentService.PauseContainer:output_type -> google.protobuf.Empty
-	78, // 91: grpc.AgentService.ResumeContainer:output_type -> google.protobuf.Empty
-	78, // 92: grpc.AgentService.RemoveStaleVirtiofsShareMounts:output_type -> google.protobuf.Empty
-	24, // 93: grpc.AgentService.WriteStdin:output_type -> grpc.WriteStreamResponse
-	26, // 94: grpc.AgentService.ReadStdout:output_type -> grpc.ReadStreamResponse
-	26, // 95: grpc.AgentService.ReadStderr:output_type -> grpc.ReadStreamResponse
-	78, // 96: grpc.AgentService.CloseStdin:output_type -> google.protobuf.Empty
-	78, // 97: grpc.AgentService.TtyWinResize:output_type -> google.protobuf.Empty
-	73, // 98: grpc.AgentService.UpdateInterface:output_type -> types.Interface
-	34, // 99: grpc.AgentService.UpdateRoutes:output_type -> grpc.Routes
-	33, // 100: grpc.AgentService.ListInterfaces:output_type -> grpc.Interfaces
-	34, // 101: grpc.AgentService.ListRoutes:output_type -> grpc.Routes
-	78, // 102: grpc.AgentService.AddARPNeighbors:output_type -> google.protobuf.Empty
-	43, // 103: grpc.AgentService.GetIPTables:output_type -> grpc.GetIPTablesResponse
-	45, // 104: grpc.AgentService.SetIPTables:output_type -> grpc.SetIPTablesResponse
-	63, // 105: grpc.AgentService.GetMetrics:output_type -> grpc.Metrics
-	78, // 106: grpc.AgentService.CreateSandbox:output_type -> google.protobuf.Empty
-	78, // 107: grpc.AgentService.DestroySandbox:output_type -> google.protobuf.Empty
-	78, // 108: grpc.AgentService.OnlineCPUMem:output_type -> google.protobuf.Empty
-	78, // 109: grpc.AgentService.ReseedRandomDev:output_type -> google.protobuf.Empty
-	50, // 110: grpc.AgentService.GetGuestDetails:output_type -> grpc.GuestDetailsResponse
-	78, // 111: grpc.AgentService.MemHotplugByProbe:output_type -> google.protobuf.Empty
-	78, // 112: grpc.AgentService.SetGuestDateTime:output_type -> google.protobuf.Empty
-	78, // 113: grpc.AgentService.CopyFile:output_type -> google.protobuf.Empty
-	60, // 114: grpc.AgentService.GetOOMEvent:output_type -> grpc.OOMEvent
-	78, // 115: grpc.AgentService.AddSwap:output_type -> google.protobuf.Empty
-	79, // 116: grpc.AgentService.GetVolumeStats:output_type -> grpc.VolumeStatsResponse
-	78, // 117: grpc.AgentService.ResizeVolume:output_type -> google.protobuf.Empty
-	78, // 118: grpc.AgentService.SetPolicy:output_type -> google.protobuf.Empty
-	81, // [81:119] is the sub-list for method output_type
-	43, // [43:81] is the sub-list for method input_type
+	67, // 81: grpc.AgentService.Mount:input_type -> grpc.MountRequest
+	78, // 82: grpc.AgentService.CreateContainer:output_type -> google.protobuf.Empty
+	78, // 83: grpc.AgentService.StartContainer:output_type -> google.protobuf.Empty
+	78, // 84: grpc.AgentService.RemoveContainer:output_type -> google.protobuf.Empty
+	78, // 85: grpc.AgentService.ExecProcess:output_type -> google.protobuf.Empty
+	78, // 86: grpc.AgentService.SignalProcess:output_type -> google.protobuf.Empty
+	6,  // 87: grpc.AgentService.WaitProcess:output_type -> grpc.WaitProcessResponse
+	78, // 88: grpc.AgentService.UpdateContainer:output_type -> google.protobuf.Empty
+	78, // 89: grpc.AgentService.UpdateEphemeralMounts:output_type -> google.protobuf.Empty
+	22, // 90: grpc.AgentService.StatsContainer:output_type -> grpc.StatsContainerResponse
+	78, // 91: grpc.AgentService.PauseContainer:output_type -> google.protobuf.Empty
+	78, // 92: grpc.AgentService.ResumeContainer:output_type -> google.protobuf.Empty
+	78, // 93: grpc.AgentService.RemoveStaleVirtiofsShareMounts:output_type -> google.protobuf.Empty
+	24, // 94: grpc.AgentService.WriteStdin:output_type -> grpc.WriteStreamResponse
+	26, // 95: grpc.AgentService.ReadStdout:output_type -> grpc.ReadStreamResponse
+	26, // 96: grpc.AgentService.ReadStderr:output_type -> grpc.ReadStreamResponse
+	78, // 97: grpc.AgentService.CloseStdin:output_type -> google.protobuf.Empty
+	78, // 98: grpc.AgentService.TtyWinResize:output_type -> google.protobuf.Empty
+	73, // 99: grpc.AgentService.UpdateInterface:output_type -> types.Interface
+	34, // 100: grpc.AgentService.UpdateRoutes:output_type -> grpc.Routes
+	33, // 101: grpc.AgentService.ListInterfaces:output_type -> grpc.Interfaces
+	34, // 102: grpc.AgentService.ListRoutes:output_type -> grpc.Routes
+	78, // 103: grpc.AgentService.AddARPNeighbors:output_type -> google.protobuf.Empty
+	43, // 104: grpc.AgentService.GetIPTables:output_type -> grpc.GetIPTablesResponse
+	45, // 105: grpc.AgentService.SetIPTables:output_type -> grpc.SetIPTablesResponse
+	63, // 106: grpc.AgentService.GetMetrics:output_type -> grpc.Metrics
+	78, // 107: grpc.AgentService.CreateSandbox:output_type -> google.protobuf.Empty
+	78, // 108: grpc.AgentService.DestroySandbox:output_type -> google.protobuf.Empty
+	78, // 109: grpc.AgentService.OnlineCPUMem:output_type -> google.protobuf.Empty
+	78, // 110: grpc.AgentService.ReseedRandomDev:output_type -> google.protobuf.Empty
+	50, // 111: grpc.AgentService.GetGuestDetails:output_type -> grpc.GuestDetailsResponse
+	78, // 112: grpc.AgentService.MemHotplugByProbe:output_type -> google.protobuf.Empty
+	78, // 113: grpc.AgentService.SetGuestDateTime:output_type -> google.protobuf.Empty
+	78, // 114: grpc.AgentService.CopyFile:output_type -> google.protobuf.Empty
+	60, // 115: grpc.AgentService.GetOOMEvent:output_type -> grpc.OOMEvent
+	78, // 116: grpc.AgentService.AddSwap:output_type -> google.protobuf.Empty
+	79, // 117: grpc.AgentService.GetVolumeStats:output_type -> grpc.VolumeStatsResponse
+	78, // 118: grpc.AgentService.ResizeVolume:output_type -> google.protobuf.Empty
+	78, // 119: grpc.AgentService.SetPolicy:output_type -> google.protobuf.Empty
+	78, // 120: grpc.AgentService.Mount:output_type -> google.protobuf.Empty
+	82, // [82:121] is the sub-list for method output_type
+	43, // [43:82] is the sub-list for method input_type
 	43, // [43:43] is the sub-list for extension type_name
 	43, // [43:43] is the sub-list for extension extendee
 	0,  // [0:43] is the sub-list for field type_name
