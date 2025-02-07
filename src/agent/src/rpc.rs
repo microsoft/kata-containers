@@ -1781,7 +1781,6 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
         ));
     }
 
-    let random_bytes = kata_sys_util::rand::RandomBytes::new(8);
     let mut random_bytes = vec![0u8; 8];
     // let random_bytes = vec![12u8; 8];
     rand::thread_rng().fill_bytes(&mut random_bytes);
