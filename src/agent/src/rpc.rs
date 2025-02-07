@@ -3039,14 +3039,6 @@ impl MountState {
         }
     }
 
-    pub fn get_mapping(&self, container_id: &str, host_path: &str) -> Option<PathBuf> {
-        if let Some(c_state) = self.containers_state.get(container_id) {
-            c_state.get_mapping(host_path)
-        } else {
-            None
-        }
-    }
-
     pub fn update_oci_mounts(&self, container_id: &str, mounts: &mut Vec<oci::Mount>) {
         if let Some(c_state) = self.containers_state.get(container_id) {
             for mount in mounts {
