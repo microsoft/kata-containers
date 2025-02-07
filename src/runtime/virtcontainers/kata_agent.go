@@ -2539,7 +2539,6 @@ func (k *kataAgent) mountRequest(ctx context.Context, requestType, containerId s
 	switch requestType {
 	case "update-config-timestamp":
 		_, err = k.sendReq(ctx, req)
-		return err
 	case "sandbox-file":
 		b, err := os.ReadFile(src)
 		if err != nil {
@@ -2570,9 +2569,9 @@ func (k *kataAgent) mountRequest(ctx context.Context, requestType, containerId s
 				offset += grpcMaxDataSize
 			}
 		}
-
-		return err
 	default:
-		return fmt.Errorf("mountRequest: unsupported request type: %s", requestType)
+		err = fmt.Errorf("mountRequest: unsupported request type: %s", requestType)
 	}
+
+	return err
 }
