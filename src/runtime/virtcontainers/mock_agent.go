@@ -221,7 +221,7 @@ func (n *mockAgent) setGuestDateTime(context.Context, time.Time) error {
 }
 
 // copyFile is the Noop agent copy file. It does nothing.
-func (k *mockAgent) copyFile(ctx context.Context, src, requestType, mountDest, dstFileName, timestampedDir, containerId, randomBytes string) (string, error) {
+func (k *mockAgent) copyFile(ctx context.Context, src, requestType, mountSource, mountDest, dstFileName, timestampedDir, containerId string) (string, error) {
 	return "", nil
 }
 

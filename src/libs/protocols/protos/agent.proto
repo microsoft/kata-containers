@@ -542,11 +542,11 @@ message StringUser {
 
 message CopyFileRequest {
 	string request_type = 1;
-	string mount_dest = 2;
-	string timestamped_dir = 3;
-	string file_name = 4;
-	string container_id = 5;
-	string random_bytes = 6;
+	string mount_source = 2;
+	string mount_destination = 3;
+	string timestamped_dir = 4;
+	string file_name = 5;
+	string container_id = 6;
 
 	// FileSize is the expected file size, for security reasons write operations
 	// are made in a temporary file, once it has the expected size, it's moved

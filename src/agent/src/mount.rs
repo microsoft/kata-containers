@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::ops::Deref;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use kata_sys_util::mount::{get_linux_mount_info, parse_mount_options};
@@ -1065,6 +1065,54 @@ mod tests {
 
             let expected_result = (d.result.0, d.result.1.to_owned());
             assert_eq!(expected_result, result, "{}", msg);
+        }
+    }
+}
+
+pub struct ContainerMountState {
+    path_map: HashMap<String, PathBuf>,
+}
+
+pub struct MountState {
+    containers_state: HashMap<String, ContainerMountState>,
+}
+
+impl ContainerMountState {
+    pub fn new() -> Self {
+        return Self {
+            path_map: HashMap::new(),
+        }
+    }
+
+    pub fn set_mapping(&mut self, host_path: &str, guest_path: PathBuf) {
+        self.path_map.insert(host_path.to_string(), guest_path);
+    }
+
+    pub fn get_mapping(&self, host_path: &str) -> Option<PathBuf> {
+        self.path_map.get(host_path).cloned()
+    }
+}
+
+impl MountState {
+    pub fn new() -> Self {
+        return Self {
+            containers_state: HashMap::new(),
+        }
+    }
+
+    pub fn set_mapping(&mut self, container_id: &str, host_path: &str, guest_path: PathBuf) {
+        if let Some(c_state) = self.containers_state.get_mut(container_id) {
+            c_state.set_mapping(host_path, guest_path);
+        } else {
+            self.containers_state.insert(container_id.to_string(), ContainerMountState::new());
+        }
+    }
+
+    pub fn get_mapping(&self, container_id: &str, host_path: &str) -> Option<PathBuf> {
+        if let Some(c_state) = self.containers_state.get_mut(container_id) {
+            c_state.get_mapping(host_path)
+        } else {
+            None
         }
     }
 }

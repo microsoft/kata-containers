@@ -61,6 +61,7 @@ use crate::sandbox::Sandbox;
 use crate::storage::{add_storages, update_ephemeral_mounts, STORAGE_HANDLERS};
 use crate::version::{AGENT_VERSION, API_VERSION};
 use crate::AGENT_CONFIG;
+use crate::MOUNT_STATE;
 
 use crate::trace_rpc_call;
 use crate::tracer::extract_carrier_from_ttrpc;
@@ -1326,7 +1327,7 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "copy_file", req);
         is_allowed_copy_file(&req).await?;
 
-        return do_copy_file(&req).map_ttrpc_err(same);
+        return do_copy_file(&req).await.map_ttrpc_err(same);
     }
 
     async fn get_metrics(
@@ -1759,7 +1760,7 @@ fn do_set_guest_date_time(sec: i64, usec: i64) -> Result<()> {
 }
 
 // DMFIX
-fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileResponse> {
+async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileResponse> {
     info!(sl(), "do_copy_file: req = {:?}", req);
     let mut resp = CopyFileResponse::new();
 
@@ -1825,6 +1826,8 @@ fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFileRespo
             Ok(_) => info!(sl(), "do_copy_file: renamed {:?} to {:?}", tmp_link, path),
             Err(e) => error!(sl(), "do_copy_file: rename failed - ignoring: {:?}", e),
         }
+
+        MOUNT_STATE.lock().await.set_mapping(&req.container_id, &req.mount_source, path);
     } else {
         if req.timestamped_dir != "" {
             path_str = path_str + "/" + &req.timestamped_dir;

@@ -951,33 +951,34 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 	containerId := c.id
 	timestampedDir := ""
 	fileName := ""
+	mountSource := m.Source
 	
 	c.Logger().WithFields(logrus.Fields{
 		"src": srcPath,
 		"requestType": requestType,
+		"mountSource": mountSource,
 		"mountDest": mountDest,
 		"fileName": fileName,
 		"timestampedDir": timestampedDir,
-		"randomBytes": randomBytes,
 	}).Debug("copyMountSourceRegularFile: sending request")
 
 	guestPath, err := f.sandbox.agent.copyFile(
 		ctx, 
-		srcPath, 
+		srcPath,
 		requestType,
+		mountSource,
 		mountDest,
 		fileName,
 		timestampedDir,
 		containerId,
-		randomBytes,
 		)
 	if err != nil {
 		f.Logger().WithError(err).WithField("srcPath", srcPath).Error("copyMountSourceRegularFile: agent.copyFile failed")
 		return "", err
 	}
 
-	f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceRegularFile: Adding (srcPath, guestPath) to srcDstMap")
-	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
+	//f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceRegularFile: Adding (srcPath, guestPath) to srcDstMap")
+	//f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
 
 	return guestPath, nil
 }
@@ -1024,6 +1025,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 
 	mountDest := filepath.Base(m.Destination)
 	containerId := c.id
+	mountSource := m.Source
 
 	walk := func(srcFilePath string, d fs.DirEntry, err error) error {
 		c.Logger().WithField("srcFilePath", srcFilePath).Debug("copyMountSourceDir: walking")
@@ -1048,21 +1050,21 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		c.Logger().WithFields(logrus.Fields{
 			"src": srcFilePath,
 			"requestType": requestType,
+			"mountSource": mountSource,
 			"mountDest": mountDest,
 			"fileName": fileName,
 			"timestampedDir": timestampedDir,
-			"randomBytes": "",
 		}).Debug("copyMountSourceDir: sending request")
 	
 		guestPath, err = f.sandbox.agent.copyFile(
 			ctx, 
 			srcFilePath, 
 			requestType,
+			mountSource,
 			mountDest,
 			fileName,
 			timestampedDir,
 			containerId,
-			"",
 			)
 		if err != nil {
 			f.Logger().WithError(err).WithField("srcFilePath", srcFilePath).Debug("copyMountSourceDir: copyFile failed")
@@ -1075,7 +1077,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	if err = filepath.WalkDir(timestampedPath, walk); err != nil {
 		c.Logger().
 			WithError(err).
-			WithField("mount_source", m.Source).
+			WithField("mountSource", mountSource).
 			Error("failed to copy volume data to sandbox")
 		return "", err
 	}
@@ -1097,20 +1099,20 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		ctx, 
 		timestampedPath,
 		requestType,
+		mountSource,
 		mountDest,
 		fileName,
 		timestampedDir,
 		containerId,
-		"",
 		)
 	if err != nil {
 		f.Logger().WithError(err).WithField("srcFilePath", timestampedPath).Debug("copyMountSourceDir: copyFile failed")
 		return "", err
 	}
 
-	f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceDir: Adding (srcPath, guestPath) to srcDstMap")
-	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
+	//f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceDir: Adding (srcPath, guestPath) to srcDstMap")
+	//f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
 
-	f.Logger().WithField("mount_source", m.Source).Debug("copyMountSourceDir: success")
+	f.Logger().WithField("mountSource", mountSource).Debug("copyMountSourceDir: success")
 	return guestPath, nil
 }

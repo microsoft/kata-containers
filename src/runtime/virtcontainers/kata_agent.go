@@ -2320,11 +2320,11 @@ func (k *kataAgent) copyFile(
 	ctx context.Context, 
 	src, 
 	requestType,
+	mountSource,
 	mountDest,
 	dstFileName, 
 	timestampedDir, 
-	containerId, 
-	randomBytes string) (string, error) {
+	containerId string) (string, error) {
 	
 	var st unix.Stat_t
 	guestPath := ""
@@ -2337,19 +2337,19 @@ func (k *kataAgent) copyFile(
 	k.Logger().WithFields(logrus.Fields{
         "source": src,
         "requestType": requestType,
+		"mountSource": mountSource,
 		"mountDest": mountDest,
         "dstFileName": dstFileName,
         "containerId": containerId,
-        "randomBytes": randomBytes,
 	}).Debug("CopyFileRequest")
 
 	cpReq := &grpc.CopyFileRequest{
 		RequestType:	requestType,
-		MountDest:		mountDest,
+		MountSource:    mountSource,
+		MountDestination: mountDest,
 		FileName:     	dstFileName,
 		TimestampedDir:	timestampedDir,
 		ContainerId:	containerId,
-		RandomBytes:	randomBytes,
 		DirMode:  		uint32(DirMode),
 		FileMode: 		st.Mode,
 		Uid:      		int32(st.Uid),
