@@ -3058,8 +3058,20 @@ impl MountState {
 
     pub fn set_mapping(&mut self, container_id: &str, host_path: &str, guest_path: PathBuf) {
         if let Some(c_state) = self.containers_state.get_mut(container_id) {
+            info!(
+                sl(),
+                "set_mapping: adding host_path = {} guest_path = {:?} for existing container {}",
+                host_path, guest_path, container_id);
+
             c_state.set_mapping(host_path, guest_path);
         } else {
+            info!(
+                sl(),
+                "set_mapping: adding host_path = {} guest_path = {:?} for new container {}",
+                host_path, guest_path, container_id);
+
+            let mut c_state = ContainerMountState::new();
+            c_state.set_mapping(host_path, guest_path);
             self.containers_state
                 .insert(container_id.to_string(), ContainerMountState::new());
         }
