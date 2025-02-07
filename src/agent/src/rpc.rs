@@ -8,6 +8,7 @@ use rustjail::{pipestream::PipeStream, process::StreamType};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 use tokio::sync::Mutex;
 
+use std::collections::HashMap;
 use std::ffi::{CString, OsStr};
 use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
@@ -1949,6 +1950,106 @@ fn load_kernel_module(module: &protocols::agent::KernelModule) -> Result<()> {
         }
         None => Err(anyhow!("Process terminated by signal")),
     }
+}
+
+#[allow(dead_code)]
+struct ContainerMountState {
+    path_map: HashMap<String, PathBuf>,
+}
+
+#[allow(dead_code)]
+struct MountState {
+    containers_state: HashMap<String, ContainerMountState>,
+}
+
+#[allow(dead_code)]
+impl ContainerMountState {
+    pub fn new() -> Self {
+        return Self {
+            path_map: HashMap::new(),
+        };
+    }
+
+    pub fn set_mapping(&mut self, host_path: &str, guest_path: PathBuf) {
+        info!(
+            sl(),
+            "set_mapping: host_path {} guest_path {:?}", host_path, guest_path
+        );
+        self.path_map.insert(host_path.to_string(), guest_path);
+    }
+
+    pub fn get_mapping(&self, host_path: &str) -> Option<PathBuf> {
+        self.path_map.get(host_path).cloned()
+    }
+}
+
+#[allow(dead_code)]
+impl MountState {
+    pub fn new() -> Self {
+        return Self {
+            containers_state: HashMap::new(),
+        };
+    }
+
+    pub fn set_mapping(&mut self, container_id: &str, host_path: &str, guest_path: PathBuf) {
+        if let Some(c_state) = self.containers_state.get_mut(container_id) {
+            info!(
+                sl(),
+                "set_mapping: adding host_path = {} guest_path = {:?} for existing container {}",
+                host_path,
+                guest_path,
+                container_id
+            );
+
+            c_state.set_mapping(host_path, guest_path);
+        } else {
+            info!(
+                sl(),
+                "set_mapping: adding host_path = {} guest_path = {:?} for new container {}",
+                host_path,
+                guest_path,
+                container_id
+            );
+
+            let mut c_state = ContainerMountState::new();
+            c_state.set_mapping(host_path, guest_path);
+            self.containers_state
+                .insert(container_id.to_string(), c_state);
+        }
+    }
+
+    pub fn get_mapping(&self, container_id: &str, host_path: &str) -> Option<PathBuf> {
+        if let Some(c_state) = self.containers_state.get(container_id) {
+            c_state.get_mapping(host_path)
+        } else {
+            warn!(
+                sl(),
+                "get_mapping: state not found for container {}", container_id
+            );
+            None
+        }
+    }
+
+    pub fn update_oci_mounts(&self, container_id: &str, mounts: &mut Vec<oci::Mount>) {
+        if let Some(c_state) = self.containers_state.get(container_id) {
+            for mount in mounts {
+                if let Some(s) = c_state.get_mapping(&mount.source) {
+                    info!(
+                        sl(),
+                        "update_oci_mounts: replacing mount source {} with {:?} for container {}",
+                        mount.source,
+                        s,
+                        container_id
+                    );
+                    mount.source = s.to_string_lossy().to_string();
+                }
+            }
+        }
+    }
+}
+
+lazy_static! {
+    static ref MOUNT_STATE: Mutex<MountState> = Mutex::new(MountState::new());
 }
 
 #[cfg(test)]
