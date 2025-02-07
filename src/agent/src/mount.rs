@@ -1088,9 +1088,11 @@ impl ContainerMountState {
         self.path_map.insert(host_path.to_string(), guest_path);
     }
 
+    /*
     pub fn get_mapping(&self, host_path: &str) -> Option<PathBuf> {
         self.path_map.get(host_path).cloned()
     }
+    */
 }
 
 impl MountState {
