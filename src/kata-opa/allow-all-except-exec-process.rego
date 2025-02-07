@@ -13,6 +13,7 @@ default GuestDetailsRequest := true
 default ListInterfacesRequest := true
 default ListRoutesRequest := true
 default MemHotplugByProbeRequest := true
+default MountRequest := true
 default OnlineCPUMemRequest := true
 default PauseContainerRequest := true
 default PullImageRequest := true
