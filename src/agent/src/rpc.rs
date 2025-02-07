@@ -3073,7 +3073,7 @@ impl MountState {
             let mut c_state = ContainerMountState::new();
             c_state.set_mapping(host_path, guest_path);
             self.containers_state
-                .insert(container_id.to_string(), ContainerMountState::new());
+                .insert(container_id.to_string(), c_state);
         }
     }
 
