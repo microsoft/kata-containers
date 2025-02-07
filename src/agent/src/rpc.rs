@@ -3052,6 +3052,7 @@ impl MountState {
                 if let Some(s) = c_state.get_mapping(&mount.source) {
                     info!(sl(), "update_oci_mounts: replacing mount source {} with {:?} for container {}", mount.source, s, container_id);
                     mount.source = s.to_string_lossy().to_string();
+                }
             }
         }
     }
