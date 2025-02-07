@@ -269,6 +269,15 @@ func (f *FilesystemShare) Cleanup(ctx context.Context) error {
 }
 
 func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+	f.Logger().WithField("m", *m).Debug("ShareFile: checking mount")
+
+	// copy file to container's rootfs if filesystem sharing is not supported, otherwise
+	// bind mount it in the shared directory.
+	caps := f.sandbox.hypervisor.Capabilities(ctx)
+	if !caps.IsFsSharingSupported() {
+		return f.copyMountSource(ctx, c, m)
+	}
+		
 	randBytes, err := utils.GenerateRandomBytes(8)
 	if err != nil {
 		return nil, err
@@ -279,6 +288,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 
 	// copy file to container's rootfs if filesystem sharing is not supported, otherwise
 	// bind mount it in the shared directory.
+	/*
 	caps := f.sandbox.hypervisor.Capabilities(ctx)
 	if !caps.IsFsSharingSupported() {
 		f.Logger().Debug("filesystem sharing is not supported, files will be copied")
@@ -359,6 +369,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 		}
 
 	} else {
+	*/
 		// These mounts are created in the shared dir
 		mountDest := filepath.Join(getMountPath(f.sandbox.ID()), filename)
 		if !m.ReadOnly {
@@ -388,7 +399,7 @@ func (f *FilesystemShare) ShareFile(ctx context.Context, c *Container, m *Mount)
 
 		// Save HostPath mount value into the passed mount
 		m.HostPath = mountDest
-	}
+	//}
 
 	return &SharedFile{
 		guestPath: guestPath,
@@ -897,4 +908,210 @@ func (f *FilesystemShare) StopFileEventWatcher(ctx context.Context) {
 	f.Logger().Info("StopFileEventWatcher: Closing watcher")
 	close(f.watcherDoneChannel)
 
+}
+
+func (f *FilesystemShare) copyMountSource(ctx context.Context, c *Container, m *Mount) (*SharedFile, error) {
+	guestPath := ""
+
+	srcRoot := filepath.Clean(m.Source)
+	f.Logger().WithField("srcRoot", srcRoot).Debug("copyMountSource: starting")
+
+	s, err := os.Stat(m.Source)
+	if err != nil {
+		f.Logger().WithError(err).Debug("copyMountSource: Stat failed")
+		return nil, err
+	}
+
+	switch {
+	case s.Mode().IsRegular():
+		guestPath, err = f.copyMountSourceRegularFile(ctx, c, m, "")
+	case s.Mode().IsDir():
+		guestPath, err = f.copyMountSourceDir(ctx, c, m, "")
+	default:
+		f.Logger().WithField("srcRoot", srcRoot).Debug("copyMountSource: ignoring file")
+		return nil, nil		
+	}
+
+	if err != nil {
+		f.Logger().WithError(err).Debug("copyMountSource: returning error")
+		return nil, err
+	}
+
+	return &SharedFile{
+		guestPath: guestPath,
+	}, nil
+}
+
+func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Container, m *Mount, randomBytes string) (string, error) {
+	c.Logger().WithField("m", *m).Debug("copyMountSourceRegularFile: starting")
+
+	requestType := "sandbox-file"
+	srcPath := filepath.Clean(m.Source)
+	mountDest := filepath.Base(m.Destination)
+	containerId := c.id
+	timestampedDir := ""
+	fileName := ""
+	mountSource := m.Source
+
+	c.Logger().WithFields(logrus.Fields{
+		"src": srcPath,
+		"requestType": requestType,
+		"mountSource": mountSource,
+		"mountDest": mountDest,
+		"fileName": fileName,
+		"timestampedDir": timestampedDir,
+	}).Debug("copyMountSourceRegularFile: sending request")
+
+	err := f.sandbox.agent.mount(
+		ctx, 
+		requestType,
+		containerId,
+		m,
+		timestampedDir,
+		fileName)
+
+	if err != nil {
+		f.Logger().WithError(err).WithField("m", m).Error("copyMountSourceRegularFile: agent request failed")
+		return "", err
+	}
+
+	//f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceRegularFile: Adding (srcPath, guestPath) to srcDstMap")
+	//f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
+
+	//return guestPath, nil
+	//return "", nil
+	return m.Source, nil
+}
+
+var timestampedDirRegexString = "^\\.\\.[0-9]{4}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}.[0-9]+$"
+var timestampedDirRegex = regexp.MustCompile(timestampedDirRegexString)
+
+func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, m *Mount, randomBytesStr string) (string, error) {
+	//guestPath := ""
+
+	c.Logger().WithField("m", *m).Debug("copyMountSourceDir: starting")
+
+	srcPath := filepath.Clean(m.Source)
+
+	if !configVolRegex.MatchString(srcPath) {
+		f.Logger().WithField("srcPath", srcPath).Info("copyMountSourceDir: ignoring: source is not a config volume")
+		return "", nil
+	}
+
+	dataSymlink := filepath.Clean(m.Source) + "/..data"
+	timestampedDir, err := os.Readlink(dataSymlink)
+	if err != nil {
+		f.Logger().WithError(err).WithField("dataSymlink", dataSymlink).Error("copyMountSourceDir: failed to ready symlink data")
+		return "", err
+	}
+
+	if !timestampedDirRegex.MatchString(timestampedDir) {
+		f.Logger().WithError(err).WithField("timestampedDir", timestampedDir).Error("copyMountSourceDir: ..data symlink without timestamped dest")
+		return "", fmt.Errorf("copyMountSourceDir: dir name %s is not in timestamped format", timestampedDir)
+	}
+
+	timestampedPath := srcPath + "/" + timestampedDir
+
+	s, err := os.Stat(timestampedPath)
+	if err != nil {
+		f.Logger().WithError(err).WithField("timestampedPath", timestampedPath).Debug("copyMountSourceDir: Stat failed")
+		return "", err
+	}
+
+	if !s.Mode().IsDir() {
+		f.Logger().WithError(err).WithField("timestampedPath", timestampedPath).Error("copyMountSourceDir: timestampedPath is not a directory")
+		return "", fmt.Errorf("copyMountSourceDir: %s is not a directory", timestampedPath)
+	}
+
+	mountDest := filepath.Base(m.Destination)
+	containerId := c.id
+	mountSource := m.Source
+
+	walk := func(srcFilePath string, d fs.DirEntry, err error) error {
+		c.Logger().WithField("srcFilePath", srcFilePath).Debug("copyMountSourceDir: walking")
+
+		if err != nil {
+			return err
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		if !info.Mode().IsRegular() {
+			c.Logger().WithField("name", d.Name()).Warn("copyMountSourceDir: skipping unsupported file")
+			return nil
+		}
+
+		requestType := "sandbox-file"
+		fileName := d.Name()
+
+		c.Logger().WithFields(logrus.Fields{
+			"src": srcFilePath,
+			"requestType": requestType,
+			"mountSource": mountSource,
+			"mountDest": mountDest,
+			"fileName": fileName,
+			"timestampedDir": timestampedDir,
+		}).Debug("copyMountSourceDir: sending request")
+
+		err = f.sandbox.agent.mount(
+			ctx, 
+			requestType,
+			containerId,
+			m,
+			timestampedDir,
+			fileName)
+
+		if err != nil {
+			f.Logger().WithError(err).WithField("m", m).Debug("copyMountSourceDir: copyFile failed")
+			return err
+		}
+
+		return nil
+	}			
+
+	if err = filepath.WalkDir(timestampedPath, walk); err != nil {
+		c.Logger().
+			WithError(err).
+			WithField("mountSource", mountSource).
+			Error("failed to copy volume data to sandbox")
+		return "", err
+	}
+
+	// Let the guest know that all files have been updated.
+	requestType := "update-config-timestamp"
+	fileName := ""
+
+	c.Logger().WithFields(logrus.Fields{
+		"src": timestampedPath,
+		"requestType": requestType,
+		"mountDest": mountDest,
+		"fileName": fileName,
+		"timestampedDir": timestampedDir,
+		"randomBytes": "",
+	}).Debug("copyMountSourceDir: sending request")
+
+	err = f.sandbox.agent.mount(
+		ctx, 
+		requestType,
+		containerId,
+		m,
+		timestampedDir,
+		fileName)
+
+	if err != nil {
+		f.Logger().WithError(err).WithField("m", m).Debug("copyMountSourceDir: copyFile failed")
+		return "", err
+	}
+
+	//f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceDir: Adding (srcPath, guestPath) to srcDstMap")
+	//f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
+
+	f.Logger().WithField("mountSource", mountSource).Debug("copyMountSourceDir: success")
+
+	//return guestPath, nil
+	//return "", nil
+	return m.Source, nil
 }

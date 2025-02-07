@@ -2484,7 +2484,7 @@ func (k *kataAgent) setPolicy(ctx context.Context, policy string) error {
 	return err
 }
 
-func (k *kataAgent) mountRequest(ctx context.Context, requestType, containerId string, mount Mount, timestampedDir, fileName string) error {
+func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, mount *Mount, timestampedDir, fileName string) error {
 	var st unix.Stat_t
 	
 	src := mount.Source
