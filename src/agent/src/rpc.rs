@@ -1789,7 +1789,7 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
         // + &req.random_bytes
         + &random_bytes_str
         + "-"
-        + &req.mount_dest;
+        + &req.mount_destination;
     let mount_dest = path_str.clone();
     resp.guest_path = path_str.clone();
 
