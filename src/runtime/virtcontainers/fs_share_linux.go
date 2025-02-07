@@ -937,9 +937,13 @@ func (f *FilesystemShare) copyMountSource(ctx context.Context, c *Container, m *
 		return nil, err
 	}
 
-	return &SharedFile{
-		guestPath: guestPath,
-	}, nil
+	if guestPath != "" {
+		return &SharedFile{
+			guestPath: guestPath,
+		}, nil
+	}
+
+	return nil, nil
 }
 
 func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Container, m *Mount, randomBytes string) (string, error) {
@@ -962,7 +966,8 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		"timestampedDir": timestampedDir,
 	}).Debug("copyMountSourceRegularFile: sending request")
 
-	guestPath, err := f.sandbox.agent.copyFile(
+	// guestPath, err := f.sandbox.agent.copyFile(
+	_, err := f.sandbox.agent.copyFile(
 		ctx, 
 		srcPath,
 		requestType,
@@ -977,17 +982,18 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		return "", err
 	}
 
-	f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceRegularFile: Adding (srcPath, guestPath) to srcDstMap")
-	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
+	//f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceRegularFile: Adding (srcPath, guestPath) to srcDstMap")
+	//f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
 
-	return guestPath, nil
+	//return guestPath, nil
+	return "", nil
 }
 
 var timestampedDirRegexString = "^\\.\\.[0-9]{4}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}.[0-9]+$"
 var timestampedDirRegex = regexp.MustCompile(timestampedDirRegexString)
 
 func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, m *Mount, randomBytesStr string) (string, error) {
-	guestPath := ""
+	//guestPath := ""
 
 	c.Logger().WithField("m", *m).Debug("copyMountSourceDir: starting")
 
@@ -1056,7 +1062,8 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 			"timestampedDir": timestampedDir,
 		}).Debug("copyMountSourceDir: sending request")
 	
-		guestPath, err = f.sandbox.agent.copyFile(
+		// guestPath, err = f.sandbox.agent.copyFile(
+		_, err = f.sandbox.agent.copyFile(
 			ctx, 
 			srcFilePath, 
 			requestType,
@@ -1110,9 +1117,11 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return "", err
 	}
 
-	f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceDir: Adding (srcPath, guestPath) to srcDstMap")
-	f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
+	//f.Logger().WithField("srcPath", srcPath).WithField("guestPath", guestPath).Info("copyMountSourceDir: Adding (srcPath, guestPath) to srcDstMap")
+	//f.srcDstMap[srcPath] = append(f.srcDstMap[srcPath], guestPath)
 
 	f.Logger().WithField("mountSource", mountSource).Debug("copyMountSourceDir: success")
-	return guestPath, nil
+
+	//return guestPath, nil
+	return "", nil
 }

@@ -192,6 +192,8 @@ impl AgentService {
             }
         };
 
+        MOUNT_STATE.lock().await.update_oci_mounts(cid, &mut oci.mounts);
+
         let container_name = k8s::container_name(&oci);
 
         info!(sl(), "receive createcontainer, spec: {:?}", &oci);
@@ -2993,5 +2995,64 @@ COMMIT
                 .contains("INPUT -s 2001:db8:100::1/128 -i sit+ -p tcp -m tcp --sport 512:65535"),
             "We should see the resulting rule"
         );
+    }
+}
+
+pub struct ContainerMountState {
+    path_map: HashMap<String, PathBuf>,
+}
+
+pub struct MountState {
+    containers_state: HashMap<String, ContainerMountState>,
+}
+
+impl ContainerMountState {
+    pub fn new() -> Self {
+        return Self {
+            path_map: HashMap::new(),
+        }
+    }
+
+    pub fn set_mapping(&mut self, host_path: &str, guest_path: PathBuf) {
+        info!(sl(), "set_mapping: host_path {} guest_path {:?}", host_path, guest_path);
+        self.path_map.insert(host_path.to_string(), guest_path);
+    }
+
+    pub fn get_mapping(&self, host_path: &str) -> Option<PathBuf> {
+        self.path_map.get(host_path).cloned()
+    }
+}
+
+impl MountState {
+    pub fn new() -> Self {
+        return Self {
+            containers_state: HashMap::new(),
+        }
+    }
+
+    pub fn set_mapping(&mut self, container_id: &str, host_path: &str, guest_path: PathBuf) {
+        if let Some(c_state) = self.containers_state.get_mut(container_id) {
+            c_state.set_mapping(host_path, guest_path);
+        } else {
+            self.containers_state.insert(container_id.to_string(), ContainerMountState::new());
+        }
+    }
+
+    pub fn get_mapping(&self, container_id: &str, host_path: &str) -> Option<PathBuf> {
+        if let Some(c_state) = self.containers_state.get(container_id) {
+            c_state.get_mapping(host_path)
+        } else {
+            None
+        }
+    }
+
+    pub fn update_oci_mounts(&self, container_id: &str, mounts: &mut Vec<oci::Mount>) {
+        if let Some(c_state) = self.containers_state.get(container_id) {
+            for mount in mounts {
+                if let Some(s) = c_state.get_mapping(&mount.source) {
+                    info!(sl(), "update_oci_mounts: replacing mount source {} with {:?} for container {}", mount.source, s, container_id);
+                    mount.source = s.to_string_lossy().to_string();
+            }
+        }
     }
 }
