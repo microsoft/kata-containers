@@ -193,7 +193,7 @@ impl AgentService {
             }
         };
 
-        MOUNT_STATE.lock().await.update_oci_mounts(cid, &mut oci.mounts);
+        MOUNT_STATE.lock().await.update_oci_mounts(&cid, &mut oci.mounts);
 
         let container_name = k8s::container_name(&oci);
 

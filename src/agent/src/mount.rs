@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use kata_sys_util::mount::{get_linux_mount_info, parse_mount_options};
