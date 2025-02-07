@@ -1837,8 +1837,8 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
         }
 
         info!(sl(), 
-            "do_copy_file: calling set_mapping: container_id = {}, mount_source = {:?}, guest_path = {:?}", 
-            req.container_id, &req.mount_source, &path_str);
+            "do_copy_file: calling set_mapping: container_id = {}, mount_source = {}, guest_path = {:?}", 
+            req.container_id, &req.mount_source, path);
 
         MOUNT_STATE
             .lock()
@@ -1932,7 +1932,7 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
             Some(Gid::from_raw(req.gid as u32)),
         )?;
 
-        fs::rename(tmpfile, path)?;
+        fs::rename(tmpfile, path.clone())?;
 
         if req.timestamped_dir != "" {
             let file_link_dest = PathBuf::from(mount_dest + "/" + &req.file_name);
@@ -1953,6 +1953,15 @@ async fn do_copy_file(req: &CopyFileRequest) -> Result<protocols::agent::CopyFil
                     "do_copy_file: link {:?} already exists", file_link_dest
                 );
             }
+        } else {
+            info!(sl(), 
+                "do_copy_file: calling set_mapping: container_id = {}, mount_source = {}, guest_path = {:?}", 
+                req.container_id, &req.mount_source, path);
+
+            MOUNT_STATE
+            .lock()
+            .await
+            .set_mapping(&req.container_id, &req.mount_source, path);
         }
 
         //let path_str = CString::new(timestamped_path.as_os_str().as_bytes())?;
