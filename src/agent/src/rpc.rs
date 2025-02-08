@@ -1887,7 +1887,11 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
         "config-volume-updated" => _ = update_config_volume_mount(req).await,
         "mounted-file" | "config-volume-file" => _ = receive_mount_file(req),
         _ => {
-            error!(sl(), "do_mount: ignoring: unknown request type {}", req.request_type.as_str());
+            error!(
+                sl(),
+                "do_mount: ignoring: unknown request type {}",
+                req.request_type.as_str()
+            );
         }
     }
     Ok(())
@@ -1896,14 +1900,24 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
 async fn update_config_volume_mount(req: &MountRequest) -> Result<()> {
     // DMFIX - validate input.
     if req.sub_dir_base == "" {
-        error!(sl(), "do_mount: ignoring: incorrect sub_dir_base {}", &req.sub_dir_base);
+        error!(
+            sl(),
+            "do_mount: ignoring: incorrect sub_dir_base {}", &req.sub_dir_base
+        );
         return Ok(());
     }
 
-    let guest_mount_source = match MOUNT_STATE.lock().await.get_mapping(&req.container_id, &req.host_mount_source) {
+    let guest_mount_source = match MOUNT_STATE
+        .lock()
+        .await
+        .get_mapping(&req.container_id, &req.host_mount_source)
+    {
         Some(p) => p,
         None => {
-            error!(sl(), "do_mount: ignoring: no mapping for host source {}", &req.host_mount_source);
+            error!(
+                sl(),
+                "do_mount: ignoring: no mapping for host source {}", &req.host_mount_source
+            );
             return Ok(());
         }
     };
@@ -1914,12 +1928,18 @@ async fn update_config_volume_mount(req: &MountRequest) -> Result<()> {
 
     let sub_dir_base = PathBuf::from(&req.sub_dir_base);
     // DMFIX - validate timestamped input.
-    info!(sl(), "do_mount: tmp link src = {:?}, dest = {:?}", sub_dir_base, link_dest_tmp);
+    info!(
+        sl(),
+        "do_mount: tmp link src = {:?}, dest = {:?}", sub_dir_base, link_dest_tmp
+    );
 
     match unistd::symlinkat(&sub_dir_base, None, &link_dest_tmp) {
-        Ok(_) => info!(sl(), "do_mount: link {} created successfully", link_dest_tmp),
+        Ok(_) => info!(
+            sl(),
+            "do_mount: link {} created successfully", link_dest_tmp
+        ),
         Err(e) => {
-            error!(sl(), "do_mount: ignoring: symlinkat failed {:?}", e),
+            error!(sl(), "do_mount: ignoring: symlinkat failed {:?}", e);
             return Ok(());
         }
     }
@@ -1936,16 +1956,22 @@ async fn update_config_volume_mount(req: &MountRequest) -> Result<()> {
         match unistd::unlink(&link_dest) {
             Ok(_) => info!(sl(), "do_mount: deleted link {:?}", link_dest),
             Err(e) => {
-                error!(sl(), "do_mount: ignoring: unlink {:?} failed {:?}", link_dest, e),
+                error!(
+                    sl(),
+                    "do_mount: ignoring: unlink {:?} failed {:?}", link_dest, e
+                );
                 return Ok(());
             }
         }
     }
 
     match fs::rename(&link_dest_tmp, &link_dest) {
-        Ok(_) => info!(sl(), "do_mount: renamed {:?} to {:?}", link_dest_tmp, link_dest),
+        Ok(_) => info!(
+            sl(),
+            "do_mount: renamed {:?} to {:?}", link_dest_tmp, link_dest
+        ),
         Err(e) => {
-            error!(sl(), "do_mount: renaming link failed - ignoring: {:?}", e),
+            error!(sl(), "do_mount: renaming link failed - ignoring: {:?}", e);
             return Ok(());
         }
     }
@@ -1969,7 +1995,7 @@ async fn receive_mount_file(req: &MountRequest) -> Result<()> {
     ));
 
     let mut path = guest_mount_source.clone();
-    
+
     // DMFIX - validate input
     if req.sub_dir_base != "" {
         path.push(&req.sub_dir_base);
@@ -1983,12 +2009,20 @@ async fn receive_mount_file(req: &MountRequest) -> Result<()> {
         if !parent.exists() {
             if let Err(e) = fs::create_dir_all(parent) {
                 if e.kind() != std::io::ErrorKind::AlreadyExists {
-                    error!(sl(), "do_mount: create_dir_all {:?} failed = {:?}", parent, e);
+                    error!(
+                        sl(),
+                        "do_mount: create_dir_all {:?} failed = {:?}", parent, e
+                    );
                     return Err(e.into());
                 }
             } else {
-                if let Err(e) = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(req.dir_mode)) {
-                    error!(sl(), "do_mount: set_permissions {:?} failed = {:?}", parent, e);
+                if let Err(e) =
+                    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(req.dir_mode))
+                {
+                    error!(
+                        sl(),
+                        "do_mount: set_permissions {:?} failed = {:?}", parent, e
+                    );
                     return Err(e.into());
                 }
             }
@@ -2060,7 +2094,10 @@ async fn receive_mount_file(req: &MountRequest) -> Result<()> {
         if !file_link_dest.exists() {
             let mut file_link_src = PathBuf::from("..data");
             file_link_src.push(&req.file_name);
-            info!(sl(), "do_mount: link src = {:?}, dest = {:?}", file_link_src, file_link_dest);
+            info!(
+                sl(),
+                "do_mount: link src = {:?}, dest = {:?}", file_link_src, file_link_dest
+            );
 
             match unistd::symlinkat(&file_link_src, None, &file_link_dest) {
                 Ok(_) => info!(sl(), "do_mount: symlink {:?} created", file_link_dest),
