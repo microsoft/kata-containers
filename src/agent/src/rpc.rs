@@ -2225,12 +2225,14 @@ fn load_kernel_module(module: &protocols::agent::KernelModule) -> Result<()> {
     }
 }
 
+#[derive(Debug)]
 struct ContainerMountState {
     path_map: HashMap<String, PathBuf>,
 }
 
+#[derive(Debug)]
 struct MountState {
-    containers_state: HashMap<String, ContainerMountState>,
+    containers: HashMap<String, ContainerMountState>,
 }
 
 impl ContainerMountState {
@@ -2256,12 +2258,12 @@ impl ContainerMountState {
 impl MountState {
     pub fn new() -> Self {
         return Self {
-            containers_state: HashMap::new(),
+            containers: HashMap::new(),
         };
     }
 
     pub fn set_mapping(&mut self, container_id: &str, host_path: &str, guest_path: PathBuf) {
-        if let Some(c_state) = self.containers_state.get_mut(container_id) {
+        if let Some(c) = self.containers.get_mut(container_id) {
             info!(
                 sl(),
                 "set_mapping: adding host_path = {} guest_path = {:?} for existing container {}",
@@ -2270,7 +2272,7 @@ impl MountState {
                 container_id
             );
 
-            c_state.set_mapping(host_path, guest_path);
+            c.set_mapping(host_path, guest_path);
         } else {
             info!(
                 sl(),
@@ -2280,16 +2282,15 @@ impl MountState {
                 container_id
             );
 
-            let mut c_state = ContainerMountState::new();
-            c_state.set_mapping(host_path, guest_path);
-            self.containers_state
-                .insert(container_id.to_string(), c_state);
+            let mut c = ContainerMountState::new();
+            c.set_mapping(host_path, guest_path);
+            self.containers.insert(container_id.to_string(), c);
         }
     }
 
     pub fn get_mapping(&self, container_id: &str, host_path: &str) -> Option<PathBuf> {
-        if let Some(c_state) = self.containers_state.get(container_id) {
-            c_state.get_mapping(host_path)
+        if let Some(c) = self.containers.get(container_id) {
+            c.get_mapping(host_path)
         } else {
             warn!(
                 sl(),
@@ -2300,20 +2301,30 @@ impl MountState {
     }
 
     pub fn update_oci_mounts(&self, container_id: &str, mounts: &mut Vec<oci::Mount>) {
-        if let Some(c_state) = self.containers_state.get(container_id) {
+        info!(sl(), "update_oci_mounts: starting");
+        if let Some(c) = self.containers.get(container_id) {
+            info!(sl(), "update_oci_mounts: state = {:?}", c);
             for mount in mounts {
-                if let Some(s) = c_state.get_mapping(&mount.source) {
+                info!(
+                    sl(),
+                    "update_oci_mounts: looking up mapping for source = {}", &mount.source
+                );
+
+                if let Some(s) = c.get_mapping(&mount.source) {
                     info!(
                         sl(),
-                        "update_oci_mounts: replacing mount source {} with {:?} for container {}",
-                        mount.source,
-                        s,
-                        container_id
+                        "update_oci_mounts: replacing source {} with {:?}", &mount.source, s
                     );
                     mount.source = s.to_string_lossy().to_string();
+                } else {
+                    info!(
+                        sl(),
+                        "update_oci_mounts: no mapping for source = {}", &mount.source
+                    );
                 }
             }
         }
+        info!(sl(), "update_oci_mounts: returning");
     }
 }
 
