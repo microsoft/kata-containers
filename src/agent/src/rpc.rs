@@ -1936,7 +1936,7 @@ async fn update_config_volume_mount(req: &MountRequest) -> Result<()> {
     match unistd::symlinkat(&sub_dir_base, None, &link_dest_tmp) {
         Ok(_) => info!(
             sl(),
-            "do_mount: link {} created successfully", link_dest_tmp
+            "do_mount: link {:?} created successfully", link_dest_tmp
         ),
         Err(e) => {
             error!(sl(), "do_mount: ignoring: symlinkat failed {:?}", e);
@@ -2000,8 +2000,8 @@ async fn receive_mount_file(req: &MountRequest) -> Result<()> {
     if req.sub_dir_base != "" {
         path.push(&req.sub_dir_base);
     }
-    if req.file_name != "" {
-        path.push(&req.file_name);
+    if req.sub_dir_file_base != "" {
+        path.push(&req.sub_dir_file_base);
     }
     info!(sl(), "do_mount: path = {:?}", path);
 
@@ -2093,7 +2093,7 @@ async fn receive_mount_file(req: &MountRequest) -> Result<()> {
 
         if !file_link_dest.exists() {
             let mut file_link_src = PathBuf::from("..data");
-            file_link_src.push(&req.file_name);
+            file_link_src.push(&req.sub_dir_file_base);
             info!(
                 sl(),
                 "do_mount: link src = {:?}, dest = {:?}", file_link_src, file_link_dest
