@@ -980,9 +980,7 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 	return m.Source, nil
 }
 
-
-
-
+///////////////////////////////////////////////////
 var timestampedDirRegexString = "^\\.\\.[0-9]{4}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}.[0-9]+$"
 var timestampedDirRegex = regexp.MustCompile(timestampedDirRegexString)
 
@@ -997,7 +995,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return "", nil
 	}
 
-	dataSymlinkDest := filepath.Join("..data", srcPath)
+	dataSymlinkDest := filepath.Join(srcPath, "..data")
 	subDirBase, err := os.Readlink(dataSymlinkDest)
 	if err != nil {
 		f.Logger().WithError(err).WithField("dataSymlinkDest", dataSymlinkDest).
@@ -1013,7 +1011,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return "", nil
 	}
 
-	subDirPath := filepath.Join(subDirBase, srcPath)
+	subDirPath := filepath.Join(srcPath, subDirBase)
 	s, err := os.Stat(subDirPath)
 	if err != nil {
 		f.Logger().WithError(err).WithField("subDirPath", subDirPath).Warn("copyMountSourceDir: Stat failed")

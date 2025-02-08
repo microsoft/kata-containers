@@ -2493,10 +2493,10 @@ func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, 
 	
 	src := filepath.Clean(hostMountSource)
 	if subDirBase != "" {
-		src = filepath.Join(subDirBase)
+		src = filepath.Join(src, subDirBase)
 	}
 	if subDirFileBase != "" {
-		src = filepath.Join(subDirFileBase)
+		src = filepath.Join(src, subDirFileBase)
 	}
 
 	err := unix.Lstat(src, &st)
