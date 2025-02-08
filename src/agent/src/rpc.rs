@@ -1902,13 +1902,13 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
                 /*
                 return Err(anyhow!(
                     "do_mount: no mapping for source {} in container {}",
-                    &host_mount_source, &req.container_id
+                    &req.host_mount_source, &req.container_id
                     )),
                 */
                 info!(
                     sl(),
                     "do_mount: ignoring: no mapping for source {} in container {}",
-                    &host_mount_source,
+                    &req.host_mount_source,
                     &req.container_id
                 );
                 return Ok(());
@@ -1960,7 +1960,7 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
 
         let path_str = format!(
             "{KATA_GUEST_SHARE_DIR}/{}-{}-{}",
-            &req.container_id, &random_bytes_str, &req.mount.destination
+            &req.container_id, &random_bytes_str, &req.guest_mount_dest
         );
         let guest_mount_src = PathBuf::from(&path_str);
 
