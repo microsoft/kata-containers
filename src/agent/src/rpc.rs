@@ -1895,20 +1895,20 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
         let guest_mount_src = match MOUNT_STATE
             .lock()
             .await
-            .get_mapping(&req.container_id, &req.mount.source)
+            .get_mapping(&req.container_id, &req.host_mount_source)
         {
             Some(p) => p,
             None => {
                 /*
                 return Err(anyhow!(
                     "do_mount: no mapping for source {} in container {}",
-                    &req.mount_source, &req.container_id
+                    &host_mount_source, &req.container_id
                     )),
                 */
                 info!(
                     sl(),
                     "do_mount: ignoring: no mapping for source {} in container {}",
-                    &req.mount.source,
+                    &host_mount_source,
                     &req.container_id
                 );
                 return Ok(());
@@ -2070,18 +2070,18 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
 
             info!(sl(),
                 "do_mount: calling set_mapping: container_id = {}, mount_source = {}, guest_path = {:?}", 
-                req.container_id, &req.mount.source, guest_mount_src);
+                req.container_id, &req.host_mount_source, guest_mount_src);
 
             MOUNT_STATE.lock().await.set_mapping(
                 &req.container_id,
-                &req.mount.source,
+                &req.host_mount_source,
                 guest_mount_src,
             );
         } else {
             MOUNT_STATE
                 .lock()
                 .await
-                .set_mapping(&req.container_id, &req.mount.source, path);
+                .set_mapping(&req.container_id, &req.host_mount_source, path);
         }
 
         //let path_str = CString::new(timestamped_src.as_os_str().as_bytes())?;

@@ -2484,10 +2484,10 @@ func (k *kataAgent) setPolicy(ctx context.Context, policy string) error {
 	return err
 }
 
-func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, mount *Mount, timestampedDir, fileName string) error {
+func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, hostMountSource, guestMountDest, timestampedDir, fileName string) error {
 	var st unix.Stat_t
 	
-	src := mount.Source
+	src := filepath.Clean(hostMountSource)
 	if timestampedDir != "" {
 		src += "/" + timestampedDir
 	}
@@ -2503,32 +2503,26 @@ func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, 
 	sflag := st.Mode & unix.S_IFMT
 	if fileName != "" {
 		if sflag != unix.S_IFREG {
-			return fmt.Errorf("mountRequest: unsupported type %x for file %s", sflag, src)
+			return fmt.Errorf("mountRequest: unsupported type %x for file %s. Expected %x.", sflag, src, unix.S_IFREG)
 		}
 	} else if sflag != unix.S_IFREG && sflag != unix.S_IFDIR {
-			return fmt.Errorf("mountRequest: unsupported type %x for directory %s", sflag, src)
+			return fmt.Errorf("mountRequest: unsupported type %x for directory %s. Expected %x or %x", sflag, src, unix.S_IFREG, unix.S_IFDIR)
 	}
 
 	k.Logger().WithFields(logrus.Fields{
         "requestType": requestType,
 		"containerId": containerId,
-		"mount": mount,
+		"hostMountSource": hostMountSource,
+		"guestMountDest": guestMountDest,
 		"timestampedDir": timestampedDir,
         "fileName": fileName,
 	}).Debug("mountRequest")
 
-	grpcMount := &grpc.Mount {
-		Destination: mount.Destination,
-		Source: mount.Source,
-		Type: mount.Type,
-		Options: mount.Options,
-	}
-
 	req := &grpc.MountRequest{
 		RequestType:	requestType,
 		ContainerId:	containerId,
-		Mount:			grpcMount,
-		TimestampedDir:	timestampedDir,
+		HostMountSource: hostMountSource,
+		GuestMountDest:	guestMountDest,
 		FileName:     	fileName,
 		DirMode:  		uint32(DirMode),
 		FileMode: 		st.Mode,
