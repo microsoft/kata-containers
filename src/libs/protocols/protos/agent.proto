@@ -599,31 +599,29 @@ message MountRequest {
 	string container_id = 2;
 
 	string host_mount_source = 3;
-	string guest_mount_dest = 4;
-
-	string sub_dir_base = 5;
-	string sub_dir_file_base = 6;
+	string dir_base = 4;
+	string file_base = 5;
 
 	// FileSize is the expected file size. Write operations are made in a
 	// temporary file, once it has the expected size, it's moved to the
 	// destination path.
-	int64 file_size = 7;
+	int64 file_size = 6;
 
 	// FileMode is the file mode.
-	uint32 file_mode = 8;
+	uint32 file_mode = 7;
 
 	// DirMode is the mode for the parent directories of destination path.
-	uint32 dir_mode = 9;
+	uint32 dir_mode = 8;
 
 	// Uid is the numeric user id.
-	int32 uid = 10;
+	int32 uid = 9;
 
 	// Gid is the numeric group id.
-	int32 gid = 11;
+	int32 gid = 10;
 
 	// Offset for the next write operation.
-	int64 offset = 12;
+	int64 offset = 11;
 
 	// Data to write in the destination file.
-	bytes data = 13;
+	bytes data = 12;
 }

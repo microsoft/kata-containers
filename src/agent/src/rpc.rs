@@ -1899,10 +1899,10 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
 
 async fn update_config_volume_mount(req: &MountRequest) -> Result<()> {
     // DMFIX - validate input.
-    if req.sub_dir_base == "" {
+    if req.dir_base == "" {
         error!(
             sl(),
-            "do_mount: ignoring: incorrect sub_dir_base {}", &req.sub_dir_base
+            "do_mount: ignoring: incorrect dir_base {}", &req.dir_base
         );
         return Ok(());
     }
@@ -1926,14 +1926,14 @@ async fn update_config_volume_mount(req: &MountRequest) -> Result<()> {
     link_dest_tmp.push("..data.tmp");
     info!(sl(), "do_mount: link_dest_tmp = {:?}", link_dest_tmp);
 
-    let sub_dir_base = PathBuf::from(&req.sub_dir_base);
+    let dir_base = PathBuf::from(&req.dir_base);
     // DMFIX - validate timestamped input.
     info!(
         sl(),
-        "do_mount: tmp link src = {:?}, dest = {:?}", sub_dir_base, link_dest_tmp
+        "do_mount: tmp link src = {:?}, dest = {:?}", dir_base, link_dest_tmp
     );
 
-    match unistd::symlinkat(&sub_dir_base, None, &link_dest_tmp) {
+    match unistd::symlinkat(&dir_base, None, &link_dest_tmp) {
         Ok(_) => info!(
             sl(),
             "do_mount: link {:?} created successfully", link_dest_tmp
@@ -1944,7 +1944,7 @@ async fn update_config_volume_mount(req: &MountRequest) -> Result<()> {
         }
     }
 
-    //let path_str = CString::new(sub_dir_base.as_os_str().as_bytes())?;
+    //let path_str = CString::new(dir_base.as_os_str().as_bytes())?;
     //let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
     //Errno::result(ret).map(drop)?;
 
@@ -1981,27 +1981,27 @@ async fn update_config_volume_mount(req: &MountRequest) -> Result<()> {
 }
 
 async fn receive_mount_file(req: &MountRequest) -> Result<()> {
-    // match req.request_type.as_str() {
-    // "mounted-file" | "config-volume-file"
-
-    let mut random_bytes = vec![0u8; 8];
+    let mut random_bytes = vec![0u8; 16];
     rand::rng().fill_bytes(&mut random_bytes);
     let random_bytes_str = hex::encode(random_bytes);
-    info!(sl(), "do_mount: random_bytes_str = {}", random_bytes_str);
 
     let guest_mount_source = PathBuf::from(format!(
-        "{KATA_GUEST_SHARE_DIR}{}-{}-{}",
-        &req.container_id, &random_bytes_str, &req.guest_mount_dest
+        "{KATA_GUEST_SHARE_DIR}{}-{}",
+        &req.container_id, &random_bytes_str
     ));
+    info!(
+        sl(),
+        "do_mount: guest_mount_source = {:?}", guest_mount_source
+    );
 
     let mut path = guest_mount_source.clone();
 
     // DMFIX - validate input
-    if req.sub_dir_base != "" {
-        path.push(&req.sub_dir_base);
+    if req.dir_base != "" {
+        path.push(&req.dir_base);
     }
-    if req.sub_dir_file_base != "" {
-        path.push(&req.sub_dir_file_base);
+    if req.file_base != "" {
+        path.push(&req.file_base);
     }
     info!(sl(), "do_mount: path = {:?}", path);
 
@@ -2087,13 +2087,13 @@ async fn receive_mount_file(req: &MountRequest) -> Result<()> {
     )?;
     fs::rename(tmpfile, &path)?;
 
-    if req.sub_dir_base != "" {
+    if req.dir_base != "" {
         let mut file_link_dest = guest_mount_source.clone();
-        file_link_dest.push(&req.sub_dir_file_base);
+        file_link_dest.push(&req.file_base);
 
         if !file_link_dest.exists() {
             let mut file_link_src = PathBuf::from("..data");
-            file_link_src.push(&req.sub_dir_file_base);
+            file_link_src.push(&req.file_base);
             info!(
                 sl(),
                 "do_mount: link src = {:?}, dest = {:?}", file_link_src, file_link_dest
@@ -2122,7 +2122,7 @@ async fn receive_mount_file(req: &MountRequest) -> Result<()> {
             .set_mapping(&req.container_id, &req.host_mount_source, path);
     }
 
-    //let path_str = CString::new(sub_dir_base.as_os_str().as_bytes())?;
+    //let path_str = CString::new(dir_base.as_os_str().as_bytes())?;
     //let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
     //Errno::result(ret).map(drop)?;
 

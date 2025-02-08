@@ -212,5 +212,5 @@ type agent interface {
 	// setPolicy sends a new policy to the guest agent
 	setPolicy(ctx context.Context, policy string) error
 
-	mount(ctx context.Context, requestType, containerId, hostMountSource, guestMountDest, subDirBase, subDirFileBase string) error
+	mount(ctx context.Context, requestType, containerId, hostMountSource, dirBase, fileBase string) error
 }

@@ -2488,15 +2488,15 @@ func (k *kataAgent) setPolicy(ctx context.Context, policy string) error {
 	return err
 }
 
-func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, hostMountSource, guestMountDest, subDirBase, subDirFileBase string) error {
+func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, hostMountSource, dirBase, fileBase string) error {
 	var st unix.Stat_t
 	
 	src := filepath.Clean(hostMountSource)
-	if subDirBase != "" {
-		src = filepath.Join(src, subDirBase)
+	if dirBase != "" {
+		src = filepath.Join(src, dirBase)
 	}
-	if subDirFileBase != "" {
-		src = filepath.Join(src, subDirFileBase)
+	if fileBase != "" {
+		src = filepath.Join(src, fileBase)
 	}
 
 	err := unix.Lstat(src, &st)
@@ -2505,7 +2505,7 @@ func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, 
 	}
 
 	sflag := st.Mode & unix.S_IFMT
-	if subDirFileBase != "" {
+	if fileBase != "" {
 		if sflag != unix.S_IFREG {
 			return fmt.Errorf("mountRequest: unsupported type %x for file %s. Expected %x.", sflag, src, unix.S_IFREG)
 		}
@@ -2517,18 +2517,16 @@ func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, 
         "requestType": requestType,
 		"containerId": containerId,
 		"hostMountSource": hostMountSource,
-		"guestMountDest": guestMountDest,
-		"subDirBase": subDirBase,
-        "subDirFileBase": subDirFileBase,
+		"dirBase": dirBase,
+        "fileBase": fileBase,
 	}).Debug("mountRequest")
 
 	req := &grpc.MountRequest{
 		RequestType:		requestType,
 		ContainerId:		containerId,
 		HostMountSource: 	hostMountSource,
-		GuestMountDest:		guestMountDest,
-		SubDirBase: 		subDirBase,
-		SubDirFileBase:     subDirFileBase,
+		DirBase: 			dirBase,
+		FileBase:     		fileBase,
 		DirMode:  			uint32(DirMode),
 		FileMode: 			st.Mode,
 		Uid:      			int32(st.Uid),

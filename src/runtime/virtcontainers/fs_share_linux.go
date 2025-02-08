@@ -948,7 +948,6 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 	requestType := "mounted-file"
 	containerId := c.id
 	hostMountSource := m.Source
-	destBase := filepath.Base(m.Destination)
 	subDirBase := ""
 	subDirFileBase := ""
 
@@ -958,7 +957,6 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		"src": srcPath,
 		"requestType": requestType,
 		"hostMountSource": hostMountSource,
-		"destBase": destBase,
 		"subDirBase": subDirBase,
 		"subDirFileBase": subDirFileBase,
 	}).Debug("copyMountSourceRegularFile: sending request")
@@ -968,7 +966,6 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 		requestType,
 		containerId,
 		hostMountSource,
-		destBase,
 		subDirBase,
 		subDirFileBase)
 
@@ -1026,7 +1023,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	requestType := "config-volume-file"
 	containerId := c.id
 	hostMountSource := m.Source
-	destBase := filepath.Base(m.Destination)
 
 	walk := func(srcFile string, d fs.DirEntry, err error) error {
 		c.Logger().WithField("srcFile", srcFile).Debug("copyMountSourceDir: walk")
@@ -1050,7 +1046,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		c.Logger().WithFields(logrus.Fields{
 			"requestType": requestType,
 			"hostMountSource": hostMountSource,
-			"destBase": destBase,
 			"subDirBase": subDirBase,
 			"subDirFileBase": subDirFileBase,
 		}).Debug("copyMountSourceDir: sending request")
@@ -1060,7 +1055,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 			requestType,
 			containerId,
 			hostMountSource,
-			destBase,
 			subDirBase,
 			subDirFileBase)
 
@@ -1088,7 +1082,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		"src": subDirPath,
 		"requestType": requestType,
 		"hostMountSource": hostMountSource,
-		"destBase": destBase,
 		"subDirBase": subDirBase,
 		"subDirFileBase": subDirFileBase,
 	}).Debug("copyMountSourceDir: sending request")
@@ -1098,7 +1091,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		requestType,
 		containerId,
 		hostMountSource,
-		destBase,
 		subDirBase,
 		subDirFileBase)
 
