@@ -1880,216 +1880,216 @@ async fn do_add_swap(_sandbox: &Arc<Mutex<Sandbox>>, _req: &AddSwapRequest) -> R
     Err(anyhow!(nix::Error::ENOTSUP))
 }
 
-// DMFIX
 async fn do_mount(req: &MountRequest) -> Result<()> {
     info!(sl(), "do_mount: req = {:?}", req);
 
-    if req.request_type != "sandbox-file" && req.request_type != "update-config-timestamp" {
-        return Err(anyhow!(
-            "do_mount: unsupported request_type {}",
-            req.request_type
-        ));
+    match req.request_type.as_str() {
+        "config-volume-updated" => _ = update_config_volume_mount(req).await,
+        "mounted-file" | "config-volume-file" => _ = receive_mount_file(req),
+        _ => {
+            error!(sl(), "do_mount: ignoring: unknown request type {}", req.request_type.as_str());
+        }
+    }
+    Ok(())
+}
+
+async fn update_config_volume_mount(req: &MountRequest) -> Result<()> {
+    // DMFIX - validate input.
+    if req.sub_dir_base == "" {
+        error!(sl(), "do_mount: ignoring: incorrect sub_dir_base {}", &req.sub_dir_base);
+        return Ok(());
     }
 
-    if req.request_type == "update-config-timestamp" {
-        let guest_mount_src = match MOUNT_STATE
-            .lock()
-            .await
-            .get_mapping(&req.container_id, &req.host_mount_source)
-        {
-            Some(p) => p,
-            None => {
-                /*
-                return Err(anyhow!(
-                    "do_mount: no mapping for source {} in container {}",
-                    &req.host_mount_source, &req.container_id
-                    )),
-                */
-                info!(
-                    sl(),
-                    "do_mount: ignoring: no mapping for source {} in container {}",
-                    &req.host_mount_source,
-                    &req.container_id
-                );
+    let guest_mount_source = match MOUNT_STATE.lock().await.get_mapping(&req.container_id, &req.host_mount_source) {
+        Some(p) => p,
+        None => {
+            error!(sl(), "do_mount: ignoring: no mapping for host source {}", &req.host_mount_source);
+            return Ok(());
+        }
+    };
+
+    let mut link_dest_tmp = guest_mount_source.clone();
+    link_dest_tmp.push("..data.tmp");
+    info!(sl(), "do_mount: link_dest_tmp = {:?}", link_dest_tmp);
+
+    let sub_dir_base = PathBuf::from(&req.sub_dir_base);
+    // DMFIX - validate timestamped input.
+    info!(sl(), "do_mount: tmp link src = {:?}, dest = {:?}", sub_dir_base, link_dest_tmp);
+
+    match unistd::symlinkat(&sub_dir_base, None, &link_dest_tmp) {
+        Ok(_) => info!(sl(), "do_mount: link {} created successfully", link_dest_tmp),
+        Err(e) => {
+            error!(sl(), "do_mount: ignoring: symlinkat failed {:?}", e),
+            return Ok(());
+        }
+    }
+
+    //let path_str = CString::new(sub_dir_base.as_os_str().as_bytes())?;
+    //let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
+    //Errno::result(ret).map(drop)?;
+
+    let mut link_dest = guest_mount_source.clone();
+    link_dest.push("..data");
+    info!(sl(), "do_mount: link dest = {:?}", link_dest);
+
+    if link_dest.is_symlink() && link_dest.exists() {
+        match unistd::unlink(&link_dest) {
+            Ok(_) => info!(sl(), "do_mount: deleted link {:?}", link_dest),
+            Err(e) => {
+                error!(sl(), "do_mount: ignoring: unlink {:?} failed {:?}", link_dest, e),
                 return Ok(());
             }
-        };
-
-        let mut link_dest_tmp = guest_mount_src.clone();
-        link_dest_tmp.push("..data.tmp");
-        info!(sl(), "do_mount: link_dest_tmp = {:?}", link_dest_tmp);
-
-        let timestamped_src = PathBuf::from(&req.timestamped_dir);
-        info!(
-            sl(),
-            "do_mount: temporary link src = {:?}, dest = {:?}", timestamped_src, link_dest_tmp
-        );
-
-        match unistd::symlinkat(&timestamped_src, None, &link_dest_tmp) {
-            Ok(_) => info!(sl(), "do_mount: temporary link created successfully"),
-            Err(e) => error!(sl(), "do_mount: symlinkat failed - ignoring: {:?}", e),
         }
+    }
 
-        //let path_str = CString::new(timestamped_src.as_os_str().as_bytes())?;
-        //let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
-        //Errno::result(ret).map(drop)?;
-
-        let mut link_dest = guest_mount_src.clone();
-        link_dest.push("..data");
-        info!(sl(), "do_mount: link dest = {:?}", link_dest);
-
-        if link_dest.is_symlink() && link_dest.exists() {
-            match unistd::unlink(&link_dest) {
-                Ok(_) => info!(sl(), "do_mount: deleted link {:?}", link_dest),
-                Err(e) => error!(sl(), "do_mount: unlink failed - ignoring: {:?}", e),
-            }
+    match fs::rename(&link_dest_tmp, &link_dest) {
+        Ok(_) => info!(sl(), "do_mount: renamed {:?} to {:?}", link_dest_tmp, link_dest),
+        Err(e) => {
+            error!(sl(), "do_mount: renaming link failed - ignoring: {:?}", e),
+            return Ok(());
         }
+    }
 
-        match fs::rename(&link_dest_tmp, &link_dest) {
-            Ok(_) => info!(
-                sl(),
-                "do_mount: renamed {:?} to {:?}", link_dest_tmp, link_dest
-            ),
-            Err(e) => error!(sl(), "do_mount: rename failed - ignoring: {:?}", e),
-        }
-    } else {
-        let mut random_bytes = vec![0u8; 8];
-        rand::rng().fill_bytes(&mut random_bytes);
-        let random_bytes_str = hex::encode(random_bytes);
-        info!(sl(), "do_mount: random_bytes_str = {}", random_bytes_str);
+    info!(sl(), "update_config_volume_mount: returning success");
+    return Ok(());
+}
 
-        let path_str = format!(
-            "{KATA_GUEST_SHARE_DIR}/{}-{}-{}",
-            &req.container_id, &random_bytes_str, &req.guest_mount_dest
-        );
-        let guest_mount_src = PathBuf::from(&path_str);
+async fn receive_mount_file(req: &MountRequest) -> Result<()> {
+    // match req.request_type.as_str() {
+    // "mounted-file" | "config-volume-file"
 
-        let mut path = PathBuf::from(&path_str);
-        if req.timestamped_dir != "" {
-            path.push(&req.timestamped_dir);
-        }
-        if req.file_name != "" {
-            path.push(&req.file_name);
-        }
-        info!(sl(), "do_mount: path = {:?}", path);
+    let mut random_bytes = vec![0u8; 8];
+    rand::rng().fill_bytes(&mut random_bytes);
+    let random_bytes_str = hex::encode(random_bytes);
+    info!(sl(), "do_mount: random_bytes_str = {}", random_bytes_str);
 
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    if e.kind() != std::io::ErrorKind::AlreadyExists {
-                        return Err(e.into());
-                    }
-                } else {
-                    std::fs::set_permissions(
-                        parent,
-                        std::fs::Permissions::from_mode(req.dir_mode),
-                    )?;
-                }
-            }
-        }
+    let guest_mount_source = PathBuf::from(format!(
+        "{KATA_GUEST_SHARE_DIR}{}-{}-{}",
+        &req.container_id, &random_bytes_str, &req.guest_mount_dest
+    ));
 
-        /*
-        let sflag = stat::SFlag::from_bits_truncate(req.file_mode);
-        if sflag.contains(stat::SFlag::S_IFDIR) {
-            fs::create_dir(&path).or_else(|e| {
+    let mut path = guest_mount_source.clone();
+    
+    // DMFIX - validate input
+    if req.sub_dir_base != "" {
+        path.push(&req.sub_dir_base);
+    }
+    if req.file_name != "" {
+        path.push(&req.file_name);
+    }
+    info!(sl(), "do_mount: path = {:?}", path);
+
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            if let Err(e) = fs::create_dir_all(parent) {
                 if e.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(e);
+                    error!(sl(), "do_mount: create_dir_all {:?} failed = {:?}", parent, e);
+                    return Err(e.into());
                 }
-                Ok(())
-            })?;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(req.file_mode))?;
-            unistd::chown(
-                &path,
-                Some(Uid::from_raw(req.uid as u32)),
-                Some(Gid::from_raw(req.gid as u32)),
-            )?;
-            return Ok(());
-        }
-        if sflag.contains(stat::SFlag::S_IFLNK) {
-            // After kubernetes secret's volume update, the '..data' symlink should point to
-            // the new timestamped directory.
-            // TODO:The old and deleted timestamped dir still exists due to missing DELETE api in agent.
-            // Hence, Unlink the existing symlink.
-            if path.is_symlink() && path.exists() {
-                unistd::unlink(&path)?;
+            } else {
+                if let Err(e) = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(req.dir_mode)) {
+                    error!(sl(), "do_mount: set_permissions {:?} failed = {:?}", parent, e);
+                    return Err(e.into());
+                }
             }
-            let src = PathBuf::from(OsStr::from_bytes(&req.data));
-            unistd::symlinkat(&src, None, &path)?;
-            let path_str = CString::new(path.as_os_str().as_bytes())?;
-            let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
-            Errno::result(ret).map(drop)?;
-            return Ok(());
         }
-        */
+    }
 
-        let mut tmpfile = path.clone();
-        tmpfile.set_extension("tmp");
-
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&tmpfile)?;
-
-        file.write_all_at(req.data.as_slice(), req.offset as u64)?;
-        let st = stat::stat(&tmpfile)?;
-
-        if st.st_size < req.file_size {
-            return Ok(());
-        }
-
-        file.set_permissions(std::fs::Permissions::from_mode(req.file_mode))?;
-
+    /*
+    let sflag = stat::SFlag::from_bits_truncate(req.file_mode);
+    if sflag.contains(stat::SFlag::S_IFDIR) {
+        fs::create_dir(&path).or_else(|e| {
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                return Err(e);
+            }
+            Ok(())
+        })?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(req.file_mode))?;
         unistd::chown(
-            &tmpfile,
+            &path,
             Some(Uid::from_raw(req.uid as u32)),
             Some(Gid::from_raw(req.gid as u32)),
         )?;
-
-        fs::rename(tmpfile, &path)?;
-
-        if req.timestamped_dir != "" {
-            let mut file_link_dest = guest_mount_src.clone();
-            file_link_dest.push(&req.file_name);
-
-            if !file_link_dest.exists() {
-                let mut file_link_src = PathBuf::from("..data");
-                file_link_src.push(&req.file_name);
-                info!(
-                    sl(),
-                    "do_mount: link src = {:?}, dest = {:?}", file_link_src, file_link_dest
-                );
-
-                match unistd::symlinkat(&file_link_src, None, &file_link_dest) {
-                    Ok(_) => info!(sl(), "do_mount: symlink created successfully"),
-                    Err(e) => error!(sl(), "do_mount: symlinkat failed - ignoring: {:?}", e),
-                }
-            } else {
-                info!(sl(), "do_mount: link {:?} already exists", file_link_dest);
-            }
-
-            info!(sl(),
-                "do_mount: calling set_mapping: container_id = {}, mount_source = {}, guest_path = {:?}", 
-                req.container_id, &req.host_mount_source, guest_mount_src);
-
-            MOUNT_STATE.lock().await.set_mapping(
-                &req.container_id,
-                &req.host_mount_source,
-                guest_mount_src,
-            );
-        } else {
-            MOUNT_STATE
-                .lock()
-                .await
-                .set_mapping(&req.container_id, &req.host_mount_source, path);
+        return Ok(());
+    }
+    if sflag.contains(stat::SFlag::S_IFLNK) {
+        // After kubernetes secret's volume update, the '..data' symlink should point to
+        // the new timestamped directory.
+        // TODO:The old and deleted timestamped dir still exists due to missing DELETE api in agent.
+        // Hence, Unlink the existing symlink.
+        if path.is_symlink() && path.exists() {
+            unistd::unlink(&path)?;
         }
+        let src = PathBuf::from(OsStr::from_bytes(&req.data));
+        unistd::symlinkat(&src, None, &path)?;
+        let path_str = CString::new(path.as_os_str().as_bytes())?;
+        let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
+        Errno::result(ret).map(drop)?;
+        return Ok(());
+    }
+    */
 
-        //let path_str = CString::new(timestamped_src.as_os_str().as_bytes())?;
-        //let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
-        //Errno::result(ret).map(drop)?;
+    let mut tmpfile = path.clone();
+    tmpfile.set_extension("tmp");
+
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&tmpfile)?;
+
+    file.write_all_at(req.data.as_slice(), req.offset as u64)?;
+    let st = stat::stat(&tmpfile)?;
+
+    if st.st_size < req.file_size {
+        return Ok(());
     }
 
-    info!(sl(), "do_mount: returning success");
+    file.set_permissions(std::fs::Permissions::from_mode(req.file_mode))?;
+    unistd::chown(
+        &tmpfile,
+        Some(Uid::from_raw(req.uid as u32)),
+        Some(Gid::from_raw(req.gid as u32)),
+    )?;
+    fs::rename(tmpfile, &path)?;
+
+    if req.sub_dir_base != "" {
+        let mut file_link_dest = guest_mount_source.clone();
+        file_link_dest.push(&req.sub_dir_file_base);
+
+        if !file_link_dest.exists() {
+            let mut file_link_src = PathBuf::from("..data");
+            file_link_src.push(&req.file_name);
+            info!(sl(), "do_mount: link src = {:?}, dest = {:?}", file_link_src, file_link_dest);
+
+            match unistd::symlinkat(&file_link_src, None, &file_link_dest) {
+                Ok(_) => info!(sl(), "do_mount: symlink {:?} created", file_link_dest),
+                Err(e) => {
+                    error!(sl(), "do_mount: symlinkat failed - ignoring: {:?}", e);
+                    return Ok(());
+                }
+            }
+        } else {
+            info!(sl(), "do_mount: link {:?} already exists", file_link_dest);
+        }
+
+        MOUNT_STATE.lock().await.set_mapping(
+            &req.container_id,
+            &req.host_mount_source,
+            guest_mount_source,
+        );
+    } else {
+        MOUNT_STATE
+            .lock()
+            .await
+            .set_mapping(&req.container_id, &req.host_mount_source, path);
+    }
+
+    //let path_str = CString::new(sub_dir_base.as_os_str().as_bytes())?;
+    //let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
+    //Errno::result(ret).map(drop)?;
+
+    info!(sl(), "receive_mount_file: returning success");
     Ok(())
 }
 

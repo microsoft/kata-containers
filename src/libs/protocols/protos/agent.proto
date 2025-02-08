@@ -601,8 +601,8 @@ message MountRequest {
 	string host_mount_source = 3;
 	string guest_mount_dest = 4;
 
-	string timestamped_dir = 5;
-	string file_name = 6;
+	string sub_dir_base = 5;
+	string sub_dir_file_base = 6;
 
 	// FileSize is the expected file size. Write operations are made in a
 	// temporary file, once it has the expected size, it's moved to the

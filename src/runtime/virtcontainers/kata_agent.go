@@ -1689,8 +1689,8 @@ func (k *kataAgent) handleSMBMounts(c *Container, spec *specs.Spec) ([]*grpc.Sto
 		// Each device will be mounted at a unique location within the VM only once. Mounting
 		// to the container specific location is handled within the OCI spec. Let's ensure that
 		// the storage mount point is unique for each device. This is then utilized as the source
-		filename := b64.URLEncoding.EncodeToString([]byte(vol.Source))
-		path := filepath.Join(kataGuestSandboxStorageDir(), filename)
+		subDirFileBase := b64.URLEncoding.EncodeToString([]byte(vol.Source))
+		path := filepath.Join(kataGuestSandboxStorageDir(), subDirFileBase)
 
 		// Update applicable OCI mount source
 		for idx, ociMount := range spec.Mounts {
@@ -1759,8 +1759,8 @@ func (k *kataAgent) handleBlkOCIMounts(c *Container, spec *specs.Spec) ([]*grpc.
 		// the storage mount point is unique for each device. This is then utilized as the source
 		// in the OCI spec. If multiple containers mount the same block device, it's ref-counted inside
 		// the guest by Kata agent.
-		filename := b64.URLEncoding.EncodeToString([]byte(vol.Source))
-		path := filepath.Join(kataGuestSandboxStorageDir(), filename)
+		subDirFileBase := b64.URLEncoding.EncodeToString([]byte(vol.Source))
+		path := filepath.Join(kataGuestSandboxStorageDir(), subDirFileBase)
 
 		// Update applicable OCI mount source
 		for idx, ociMount := range spec.Mounts {
@@ -2488,15 +2488,15 @@ func (k *kataAgent) setPolicy(ctx context.Context, policy string) error {
 	return err
 }
 
-func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, hostMountSource, guestMountDest, timestampedDir, fileName string) error {
+func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, hostMountSource, guestMountDest, subDirBase, subDirFileBase string) error {
 	var st unix.Stat_t
 	
 	src := filepath.Clean(hostMountSource)
-	if timestampedDir != "" {
-		src += "/" + timestampedDir
+	if subDirBase != "" {
+		src = filepath.Join(subDirBase)
 	}
-	if fileName != "" {
-		src += "/" + fileName
+	if subDirFileBase != "" {
+		src = filepath.Join(subDirFileBase)
 	}
 
 	err := unix.Lstat(src, &st)
@@ -2505,7 +2505,7 @@ func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, 
 	}
 
 	sflag := st.Mode & unix.S_IFMT
-	if fileName != "" {
+	if subDirFileBase != "" {
 		if sflag != unix.S_IFREG {
 			return fmt.Errorf("mountRequest: unsupported type %x for file %s. Expected %x.", sflag, src, unix.S_IFREG)
 		}
@@ -2518,21 +2518,21 @@ func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, 
 		"containerId": containerId,
 		"hostMountSource": hostMountSource,
 		"guestMountDest": guestMountDest,
-		"timestampedDir": timestampedDir,
-        "fileName": fileName,
+		"subDirBase": subDirBase,
+        "subDirFileBase": subDirFileBase,
 	}).Debug("mountRequest")
 
 	req := &grpc.MountRequest{
-		RequestType:	requestType,
-		ContainerId:	containerId,
-		HostMountSource: hostMountSource,
-		GuestMountDest:	guestMountDest,
-		TimestampedDir: timestampedDir,
-		FileName:     	fileName,
-		DirMode:  		uint32(DirMode),
-		FileMode: 		st.Mode,
-		Uid:      		int32(st.Uid),
-		Gid:      		int32(st.Gid),
+		RequestType:		requestType,
+		ContainerId:		containerId,
+		HostMountSource: 	hostMountSource,
+		GuestMountDest:		guestMountDest,
+		SubDirBase: 		subDirBase,
+		SubDirFileBase:     subDirFileBase,
+		DirMode:  			uint32(DirMode),
+		FileMode: 			st.Mode,
+		Uid:      			int32(st.Uid),
+		Gid:      			int32(st.Gid),
 	}
 
 	switch requestType {

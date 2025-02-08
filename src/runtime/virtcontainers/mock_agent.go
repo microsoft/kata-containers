@@ -272,6 +272,6 @@ func (k *mockAgent) setPolicy(ctx context.Context, policy string) error {
 	return nil
 }
 
-func (k *mockAgent) mount(ctx context.Context, requestType, containerId, hostMountSource, guestMountDest, timestampedDir, fileName string) error {
+func (k *mockAgent) mount(ctx context.Context, requestType, containerId string, hostMountSource, guestMountDest, subDirBase, subDirFileBase string) error {
 	return nil
 }
