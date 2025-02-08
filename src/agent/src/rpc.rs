@@ -1981,18 +1981,17 @@ async fn update_config_volume_mount(req: &MountRequest) -> Result<()> {
 }
 
 async fn receive_mount_file(req: &MountRequest) -> Result<()> {
-    let mut random_bytes = vec![0u8; 16];
-    rand::rng().fill_bytes(&mut random_bytes);
-    let random_bytes_str = hex::encode(random_bytes);
-
-    let guest_mount_source = PathBuf::from(format!(
-        "{KATA_GUEST_SHARE_DIR}{}-{}",
-        &req.container_id, &random_bytes_str
-    ));
-    info!(
-        sl(),
-        "do_mount: guest_mount_source = {:?}", guest_mount_source
-    );
+    let guest_mount_source = if let Some(p) = MOUNT_STATE.lock().await.get_mapping(&req.container_id, &req.host_mount_source) {
+        info!(sl(), "do_mount: reusing guest_mount_source = {:?}", p);
+        p
+    } else {
+        let mut random_bytes = vec![0u8; 16];
+        rand::rng().fill_bytes(&mut random_bytes);
+        let random_bytes_str = hex::encode(random_bytes);
+        let p = PathBuf::from(format!("{KATA_GUEST_SHARE_DIR}{}-{}", &req.container_id, &random_bytes_str));
+        info!(sl(), "do_mount: new guest_mount_source = {:?}", p);
+        p
+    };
 
     let mut path = guest_mount_source.clone();
 
