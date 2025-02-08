@@ -2536,9 +2536,11 @@ func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, 
 	}
 
 	switch requestType {
-	case "update-config-timestamp":
+	case "config-volume-updated":
 		_, err = k.sendReq(ctx, req)
-	case "sandbox-file":
+	case "mounted-file":
+		fallthrough
+	case "config-volume-file":
 		b, err := os.ReadFile(src)
 		if err != nil {
 			return fmt.Errorf("mountRequest: could not read file %s: %v", src, err)
