@@ -1885,7 +1885,7 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
 
     match req.request_type.as_str() {
         "config-volume-updated" => _ = update_config_volume_mount(req).await,
-        "mounted-file" | "config-volume-file" => _ = receive_mount_file(req),
+        "mounted-file" | "config-volume-file" => _ = receive_mount_file(req).await,
         _ => {
             error!(
                 sl(),
