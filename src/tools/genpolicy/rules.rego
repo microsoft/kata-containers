@@ -23,6 +23,7 @@ default GuestDetailsRequest := true
 default ListInterfacesRequest := false
 default ListRoutesRequest := false
 default MemHotplugByProbeRequest := false
+default MountRequest := false
 default OnlineCPUMemRequest := true
 default PauseContainerRequest := false
 default ReadStreamRequest := false
@@ -1309,23 +1310,6 @@ allow_sandbox_storage(p_storages, i_storage) {
     print("allow_sandbox_storage: true")
 }
 
-CopyFileRequest {
-    print("CopyFileRequest: input.path =", input.path)
-
-    check_symlink_source(input.symlink_src)
-    check_directory_traversal(input.path)
-
-    some regex1 in policy_data.request_defaults.CopyFileRequest
-    regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
-    regex3 := replace(regex2, "$(cpath)", policy_data.common.cpath)
-    regex4 := replace(regex3, "$(bundle-id)", BUNDLE_ID)
-    print("CopyFileRequest: regex4 =", regex4)
-
-    regex.match(regex4, input.path)
-
-    print("CopyFileRequest: true")
-}
-
 CreateSandboxRequest {
     print("CreateSandboxRequest: input.guest_hook_path =", input.guest_hook_path)
     count(input.guest_hook_path) == 0
@@ -1428,4 +1412,45 @@ UpdateEphemeralMountsRequest {
 
 WriteStreamRequest {
     policy_data.request_defaults.WriteStreamRequest == true
+}
+
+MountRequest {
+    print("MountRequest: container_id =", input.container_id)
+    regex.match("^[a-z0-9]{64}$", input.container_id)
+
+    print("MountRequest: host_mount_source =", input.host_mount_source)
+    trim(input.host_mount_source, " ") != ""
+
+    print("MountRequest: file_size =", input.file_size)
+    input.file_size >= 0
+
+    print("MountRequest: uid =", input.uid)
+    input.uid >= 0
+
+    print("MountRequest: gid =", input.gid)
+    input.gid >= 0
+
+    print("MountRequest: offset =", input.offset)
+    input.offset >= 0
+
+    print("MountRequest: request_type =", input.request_type, "dir_base =", input.dir_base, "file_base =", input.file_base)
+    allow_mount_request_fields
+
+    print("MountRequest: true")
+}
+
+allow_mount_request_fields {
+    input.request_type == "mounted-file"
+    input.dir_base == ""
+    input.file_base == ""
+}
+allow_mount_request_fields {
+    input.request_type == "config-volume-file"
+    regex.match(policy_data.common.s_source1, input.dir_base)
+    regex.match(policy_data.common.dns_label, input.file_base)
+}
+allow_mount_request_fields {
+    input.request_type == "config-volume-updated"
+    regex.match(policy_data.common.s_source1, input.dir_base)
+    input.file_base == ""
 }
