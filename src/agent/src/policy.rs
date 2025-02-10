@@ -105,17 +105,17 @@ pub async fn is_allowed_copy_file(req: &protocols::agent::CopyFileRequest) -> tt
 struct PolicyCreateContainerRequest {
     base: protocols::agent::CreateContainerRequest,
     // a map of environment variable names to value
-    //env_map: std::collections::HashMap<String, String>,
+    env_map: std::collections::BTreeMap<String, String>,
 }
 
 pub async fn is_allowed_create_container(
     req: &protocols::agent::CreateContainerRequest,
 ) -> ttrpc::Result<()> {
-    // let env_map = get_env_map(&req.OCI.Process.Env);
+    let env_map = get_env_map(&req.OCI.Process.Env);
 
     let create_container_request = PolicyCreateContainerRequest {
         base: req.clone(),
-        // env_map,
+        env_map,
     };
 
     let request = serde_json::to_string(&create_container_request).unwrap();
@@ -356,4 +356,21 @@ pub fn check_policy_hash(policy: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+// todo: move to common crate shared with genpolicy
+fn get_env_map(env: &[String]) -> std::collections::BTreeMap<String, String> {
+    let env_map: std::collections::BTreeMap<String, String> = env
+        .iter()
+        .filter_map(|v| {
+            // split by leftmost '='
+            let split = v.split_once('=');
+            if let Some((key, value)) = split {
+                Some((key.to_string(), value.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    env_map
 }
