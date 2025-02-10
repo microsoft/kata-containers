@@ -62,9 +62,64 @@ CreateContainerRequest:= resp {
     some p_container in policy_data.containers
     p_env_map := p_container.env_map  
     allow_env_map(p_env_map, i_env_map)
+    
+    i_process := input.base.OCI.Process
+    
+    p_process := p_container.OCI.Process
+    
+    allow_args(i_process, p_process, i_env_map)
 
     resp = CreateContainerRequestCommon(input.base)
     print("CreateContainerRequest: true")
+}
+
+allow_args(i_process, p_process, i_env_map) {
+    i_args := i_process.Args
+    p_args := p_process.Args
+    print("allow_args: i_args =", i_args, "p_args =", p_args)
+    count(i_args) == count(p_args)
+    every i, i_arg in i_args {
+        print("allow_args: i_arg =", i_arg)
+        p_arg_replaced := replace_env_variables(p_args[i], i_env_map)
+        print("allow_args: p_arg_replaced =", p_arg_replaced)
+        p_arg_replaced2 := replace(p_arg_replaced, "$$", "$")
+        print("allow_args: p_arg_replaced2 =", p_arg_replaced2)
+        i_arg == p_arg_replaced2
+    }
+    print("allow_args: true")
+}
+
+allow_args(i_process, p_process, i_env_map) {
+    not i_process.Args
+    not p_process.Args
+    print("allow_args2: no args")
+}
+
+# this function replaces all the environment variables in a string, given a map of environment keys to environment values
+# eg str = "echo $(CLUSTER_ID); echo $(NODE_NAME);"
+# env_map = {"CLUSTER_ID": "abc", "NODE_NAME" : "xyz"}
+# result = "echo abc; echo xyz;"
+replace_env_variables(str, env_map) = result {
+    # make an array of the keys eg ["CLUSTER_ID", "NODE_NAME"]
+    keys := [x | some x in object.keys(env_map)]
+    result := replace_str_rec(str, env_map, keys, count(keys) - 1)
+}
+
+# base case
+replace_str_rec(str, env_map, arr_keys, i) = result {
+    i < 0
+    result := str
+}
+
+# recursive step
+replace_str_rec(str, env_map, arr_keys, i) = result {
+    i >= 0
+    key := arr_keys[i]
+    env_key1 := concat("", ["$(", key, ")"])
+    # replace $(VAR) with value
+    new_str1 := replace(str, env_key1, env_map[key])
+    # replace next environment variable
+    result = replace_str_rec(new_str1, env_map, arr_keys, i - 1)
 }
 
 allow_env_map(p_env_map, i_env_map) {
@@ -173,6 +228,11 @@ allow_env_map_entry(key, i_val, p_env_map) {
 
 CreateContainerRequest:= resp {
     not input.env_map
+    i_process = input.OCI.Process
+    s_name = input.OCI.Annotations[S_NAME_KEY]
+    some p_container in policy_data.containers
+    p_process = p_container.OCI.Process
+    allow_deprecated_args(p_process, i_process, s_name)
     resp = CreateContainerRequestCommon(input)
     print("CreateContainerRequest2: true")
 }
@@ -799,7 +859,6 @@ allow_process_common(p_process, i_process, s_name, s_namespace) {
 allow_process(p_process, i_process, s_name, s_namespace) {
     print("allow_process: start")
 
-    allow_deprecated_args(p_process, i_process, s_name)
     allow_process_common(p_process, i_process, s_name, s_namespace)
     allow_caps(p_process.Capabilities, i_process.Capabilities)
     p_process.Terminal == i_process.Terminal
