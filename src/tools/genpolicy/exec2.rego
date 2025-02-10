@@ -61,17 +61,80 @@ ALLOWED_SUBDOMAIN_NAMES := ["$(host-name)", "$(node-name)", "$(pod-uid)"]
 ALWAYS_ALLOWED = ["$(resource-field)", "$(todo-annotation)"]
 
 PolicyCreateContainerRequest:= resp {
+  # resp = {
+  #   "ops": [],
+  #   "allowed": true,
+  # }
   resp = CreateContainerRequestCommon(input.base)
   i_env_map := input.env_map
-  i_tokenized_args := input.tokenized_args
+  # i_tokenized_args := input.tokenized_args
   some p_container in policy_data.containers
   p_env_map := p_container.env_map  
   allow_env_map(p_env_map, i_env_map)
   
-  p_tokenized_args := p_container.tokenized_args
-  allow_tokenized_args(p_tokenized_args, i_tokenized_args)
+  # p_tokenized_args := p_container.tokenized_args
+  # allow_tokenized_args(p_tokenized_args, i_tokenized_args)
+
+  i_process := input.base.OCI.Process
+  p_process := p_container.OCI.Process
+
+  allow_args_by_equality(i_process, p_process, i_env_map)
 
   print("PolicyCreateContainerRequest: true")
+}
+
+allow_args_by_equality(i_process, p_process, i_env_map) {
+  not i_process.Args
+  not p_process.Args
+  print("allow_args_by_equality: no args")
+}
+
+allow_args_by_equality(i_process, p_process, i_env_map) {
+  i_args := i_process.Args
+  p_args := p_process.Args
+  print("allow_args_by_equality: i_args =", i_args, "p_args =", p_args)
+  count(i_args) == count(p_args)
+  every i, i_arg in i_args {
+    print("allow_args_by_equality: i_arg =", i_arg)
+    p_arg_replaced := replace_env_variables(p_args[i], i_env_map)
+    p_arg_replaced2 := replace(p_arg_replaced, "$$", "$")
+    print("allow_args_by_equality: p_arg_replaced2 =", p_arg_replaced2)
+    i_arg == p_arg_replaced2
+    print("allow_args_by_equality: true")
+  }
+}
+
+# this function replaces all the environment variables in a string, given a map of environment keys to environment values
+# eg str = "echo $(CLUSTER_ID); echo ${NODE_NAME};"
+# env_map = {"CLUSTER_ID": "abc", "NODE_NAME" : "xyz"}
+# result = "echo abc; echo xyz;"
+replace_env_variables(str, env_map) = result {
+  keys := [x | some x in object.keys(env_map)]
+  result := replace_str_rec(str, env_map, keys, count(keys) - 1)
+}
+
+# base case
+replace_str_rec(str, env_map, arr_keys, i) = result {
+  i < 0
+  result = str
+}
+# recursive step
+replace_str_rec(str,env_map, arr_keys, i) = result {
+  i >= 0
+  key := arr_keys[i]
+
+  # eg $(CLUSTER_ID)
+  env_key1 := concat("", ["$(", key, ")"])
+  new_str1 := replace(str, env_key1, env_map[key])
+
+  # eg ${CLUSTER_ID}
+#   env_key2 := concat("", ["${", key, "}"])
+#   new_str2 := replace(new_str1, env_key2, env_map[key])
+
+  # eg $CLUSTER_ID
+#   env_key2 := concat("", ["$", key])
+#   new_str2 := replace(new_str1, env_key2, env_map[key])
+  result = replace_str_rec(new_str1, env_map, arr_keys, i - 1)
 }
 
 allow_tokenized_args(p_tokenized_args, i_tokenized_args) {
@@ -84,7 +147,9 @@ allow_tokenized_args(p_tokenized_args, i_tokenized_args) {
 allow_tokenized_arg(p_tokenized_arg, i_tokenized_arg) {
     print("allow_tokenized_arg: p_tokenized_arg =", p_tokenized_arg, "i_tokenized_arg =", i_tokenized_arg)
     every i, i_token in i_tokenized_arg {
-      allow_token(p_tokenized_arg[i], i_token)
+      # todo: why do we need to do this
+      p_token := replace(p_tokenized_arg[i], "$$", "$")
+      allow_token(p_token, i_token)
     }
     print("allow_tokenized_arg: true")
 }
@@ -101,6 +166,22 @@ allow_token(p_token, i_token) {
     p_token == allowed
     regex.match(SUBDOMAIN_NAME, i_token)
     print("allow_token2: true")
+}
+
+# sandbox-name
+allow_token(p_token, i_token) {
+    s_name := input.base.OCI.Annotations[S_NAME_KEY]
+    p_var2 := replace(p_token, "$(sandbox-name)", s_name)
+    p_var2 == i_token
+    print("allow_token3: true")
+}
+
+# sandbox-namespace
+allow_token(p_token, i_token) {
+    s_namespace := input.base.OCI.Annotations[S_NAMESPACE_KEY]
+    p_var2 := replace(p_token, "$(sandbox-namespace)", s_namespace)
+    p_var2 == i_token
+    print("allow_token4: true")
 }
 
 allow_env_map(p_env_map, i_env_map) {
@@ -724,7 +805,7 @@ allow_process_common(p_process, i_process, s_name, s_namespace) {
 allow_process(p_process, i_process, s_name, s_namespace) {
     print("allow_process: start")
 
-    allow_args(p_process, i_process, s_name)
+    # allow_args(p_process, i_process, s_name)
     allow_process_common(p_process, i_process, s_name, s_namespace)
     allow_caps(p_process.Capabilities, i_process.Capabilities)
     p_process.Terminal == i_process.Terminal
@@ -1776,7 +1857,7 @@ policy_data := {
           "Args": [
             "/bin/sh",
             "-c",
-            "while true; do echo Kubernetes; echo $(node-name); sleep 10; done"
+            "while true; do echo $(ISTIO_META_CLUSTER_ID); echo $(ISTIO_META_NODE_NAME); sleep 10; done"
           ],
           "Env": [
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",

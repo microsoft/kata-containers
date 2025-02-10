@@ -666,7 +666,6 @@ impl AgentPolicy {
         );
 
         substitute_env_variables(&mut process.Env);
-        substitute_args_env_variables(&mut process.Args, &process.Env);
 
         c_settings.get_process_fields(&mut process);
         resource.get_process_fields(&mut process);
@@ -881,34 +880,6 @@ fn substitute_variable(
     }
 
     None
-}
-
-fn substitute_args_env_variables(args: &mut Vec<String>, env: &Vec<String>) {
-    for arg in args {
-        substitute_arg_env_variables(arg, env);
-    }
-}
-
-fn substitute_arg_env_variables(arg: &mut String, env: &Vec<String>) {
-    loop {
-        let mut substituted = false;
-
-        if let Some((start, end)) = find_subst_target(arg) {
-            if let Some(new_value) = substitute_variable(arg, start, end, env) {
-                debug!(
-                    "substitute_arg_env_variables: replacing {} with {}",
-                    &arg[start..end],
-                    &new_value
-                );
-                *arg = new_value;
-                substituted = true;
-            }
-        }
-
-        if !substituted {
-            break;
-        }
-    }
 }
 
 fn get_container_annotations(

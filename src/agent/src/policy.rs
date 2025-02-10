@@ -68,17 +68,6 @@ mod tests {
         // Call the function
         let result = policy.allow_request(ep, &request).await;
 
-        // let x = "while true; do echo Kubernetes; echo aks-nodepool1-40948945-vmss000000; sleep 10; done";
-
-        // let split = shlex::split(x).unwrap();
-        // println!("shlex split {:?}", split);
-
-        // let split = shell_words::split(x).unwrap();
-        // println!("shell_words split {:?}", split);
-
-        // let split = shellwords::split(x).unwrap();
-        // println!("shellwords split {:?}", split);
-
         // Assert the expected result
         match result {
             Ok((allowed, _)) => assert!(allowed, "Expected the request to be allowed"),
