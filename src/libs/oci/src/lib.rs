@@ -22,6 +22,50 @@ pub use serialize::{to_string, to_writer, Error, Result};
 
 pub const OCI_SPEC_CONFIG_FILE_NAME: &str = "config.json";
 
+pub fn get_env_map(env: &Vec<String>) -> std::collections::HashMap<String, String> {
+    let env_map: std::collections::HashMap<String, String> = env
+        .iter()
+        .filter_map(|v| {
+            // split by leftmost '='
+            let split = v.split_once("=");
+            if let Some((key, value)) = split {
+                Some((key.to_string(), value.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    env_map
+}
+
+#[cfg(test)]
+mod tests2 {
+    use super::*;
+
+    #[test]
+    fn test_get_env_map() {
+        let env_vars = vec![
+            "FOO=bar".to_string(),                 // valid entry
+            "BAZ=qux".to_string(),                 // valid entry
+            "INVALID".to_string(),                 // missing '=' so should be ignored
+            "EMPTY=".to_string(),                  // key with empty value
+            "=EMPTY_KEY".to_string(),              // empty key with a value
+            "MY_BEST_GUESS=guess=foo".to_string(), // multiple '='
+        ];
+
+        let result = get_env_map(&env_vars);
+
+        let mut expected = HashMap::new();
+        expected.insert("FOO".to_string(), "bar".to_string());
+        expected.insert("BAZ".to_string(), "qux".to_string());
+        expected.insert("EMPTY".to_string(), "".to_string());
+        expected.insert("".to_string(), "EMPTY_KEY".to_string());
+        expected.insert("MY_BEST_GUESS".to_string(), "guess=foo".to_string());
+
+        assert_eq!(result, expected);
+    }
+}
+
 #[allow(dead_code)]
 fn is_false(b: bool) -> bool {
     !b

@@ -271,6 +271,9 @@ pub struct ContainerPolicy {
     /// ExecProcessRequest. By default, all ExecProcessRequest calls are blocked
     /// by the policy.
     exec_commands: Vec<String>,
+
+    // a map of environment variable names to value
+    env_map: std::collections::HashMap<String, String>,
 }
 
 /// See Reference / Kubernetes API / Config and Storage Resources / Volume.
@@ -381,6 +384,12 @@ pub struct CommonData {
 
     // Regex for symlink source files similar to "..data/namespace".
     pub s_source2: String,
+
+    // Regex for DNS subdomain (e.g., node-name).
+    pub dns_subdomain: String,
+
+    // Regex for matching a pod uid (UUID) eg "f47ac10b-58cc-4372-a567-0e02b2c3d479".
+    pub pod_uid: String,
 
     /// Default capabilities for a non-privileged container.
     pub default_caps: Vec<String>,
@@ -595,6 +604,8 @@ impl AgentPolicy {
         };
         let exec_commands = yaml_container.get_exec_commands();
 
+        let env_map = oci::get_env_map(&process.Env);
+
         ContainerPolicy {
             OCI: KataSpec {
                 Version: version_default(),
@@ -608,6 +619,7 @@ impl AgentPolicy {
             storages,
             sandbox_pidns,
             exec_commands,
+            env_map,
         }
     }
 

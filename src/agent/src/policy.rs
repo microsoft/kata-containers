@@ -115,7 +115,7 @@ pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::R
 struct PolicyCreateContainerRequest {
     base: protocols::agent::CreateContainerRequest,
     // a map of environment variable names to value
-    //env_map: std::collections::HashMap<String, String>,
+    env_map: std::collections::HashMap<String, String>,
 }
 
 fn map_request(ep: &str, input: &str) -> String {
@@ -125,11 +125,9 @@ fn map_request(ep: &str, input: &str) -> String {
             let req: protocols::agent::CreateContainerRequest =
                 serde_json::from_str(input).expect("JSON was not well-formatted");
 
-            // let env_map = oci::get_env_map(&req.OCI.Process.Env);
+            let env_map = oci::get_env_map(&req.OCI.Process.Env);
 
-            let req_v2 = PolicyCreateContainerRequest {
-                base: req, // , env_map
-            };
+            let req_v2 = PolicyCreateContainerRequest { base: req, env_map };
 
             serde_json::to_string(&req_v2).expect("failed to serialize")
         }
