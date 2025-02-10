@@ -287,6 +287,9 @@ pub struct ContainerPolicy {
     /// ExecProcessRequest. By default, all ExecProcessRequest calls are blocked
     /// by the policy.
     exec_commands: Vec<Vec<String>>,
+
+    // a map of environment variable names to value
+    env_map: std::collections::BTreeMap<String, String>,
 }
 
 /// See Reference / Kubernetes API / Config and Storage Resources / Volume.
@@ -434,6 +437,12 @@ pub struct CommonData {
 
     // Regex for symlink source files similar to "..data/namespace".
     pub s_source2: String,
+
+    // Regex for DNS subdomain (e.g., node-name).
+    pub dns_subdomain: String,
+
+    // Regex for matching a pod uid (UUID).
+    pub pod_uid: String,
 
     /// Default capabilities for a non-privileged container.
     pub default_caps: Vec<String>,
@@ -687,6 +696,7 @@ impl AgentPolicy {
         for default_device in &c_settings.Linux.Devices {
             linux.Devices.push(default_device.clone())
         }
+        let env_map = get_env_map(&process.Env);
 
         linux.Sysctl.extend(c_settings.Linux.Sysctl.clone());
         for sysctl in resource.get_sysctls() {
@@ -707,6 +717,7 @@ impl AgentPolicy {
             devices,
             sandbox_pidns,
             exec_commands,
+            env_map,
         }
     }
 
@@ -1093,4 +1104,49 @@ pub fn get_kata_namespaces(
     });
 
     namespaces
+}
+
+// todo: move to common crate shared with the agent
+fn get_env_map(env: &[String]) -> std::collections::BTreeMap<String, String> {
+    let env_map: std::collections::BTreeMap<String, String> = env
+        .iter()
+        .filter_map(|v| {
+            // split by leftmost '='
+            let split = v.split_once('=');
+            if let Some((key, value)) = split {
+                Some((key.to_string(), value.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    env_map
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    #[test]
+    fn test_get_env_map() {
+        let env_vars = vec![
+            "FOO=bar".to_string(),                 // valid entry
+            "BAZ=qux".to_string(),                 // valid entry
+            "INVALID".to_string(),                 // missing '=' so should be ignored
+            "EMPTY=".to_string(),                  // key with empty value
+            "=EMPTY_KEY".to_string(),              // empty key with a value
+            "MY_BEST_GUESS=guess=foo".to_string(), // multiple '='
+        ];
+
+        let result = get_env_map(&env_vars);
+
+        let mut expected = BTreeMap::new();
+        expected.insert("FOO".to_string(), "bar".to_string());
+        expected.insert("BAZ".to_string(), "qux".to_string());
+        expected.insert("EMPTY".to_string(), "".to_string());
+        expected.insert("".to_string(), "EMPTY_KEY".to_string());
+        expected.insert("MY_BEST_GUESS".to_string(), "guess=foo".to_string());
+
+        assert_eq!(result, expected);
+    }
 }
