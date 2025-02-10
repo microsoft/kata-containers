@@ -137,7 +137,7 @@
     "volumes": {
         "emptyDir": {
             "mount_type": "local",
-            "mount_source": "^$(cpath)/$(sandbox-id)/local/",
+            "mount_source": "$(guest-local-file)",
             "mount_point": "^$(cpath)/$(sandbox-id)/local/",
             "driver": "local",
             "source": "local",

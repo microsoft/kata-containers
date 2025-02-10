@@ -220,14 +220,6 @@ fn get_empty_dir_mount_and_storage(
         });
     }
 
-    let source = if yaml_mount.subPathExpr.is_some() {
-        let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
-        let name = OsString::from(file_name).into_string().unwrap();
-        format!("{}{name}$", &settings_volumes.configMap.mount_source)
-    } else {
-        format!("{}{}$", &settings_empty_dir.mount_source, &yaml_mount.name)
-    };
-
     let mount_type = if yaml_mount.subPathExpr.is_some() {
         "bind"
     } else {
@@ -237,7 +229,7 @@ fn get_empty_dir_mount_and_storage(
     p_mounts.push(policy::KataMount {
         destination: yaml_mount.mountPath.to_string(),
         type_: mount_type.to_string(),
-        source,
+        source: "$(guest-local-file)".to_string(),
         options: vec![
             "rbind".to_string(),
             "rprivate".to_string(),

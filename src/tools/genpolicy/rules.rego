@@ -896,18 +896,27 @@ check_mount(p_mount, i_mount, bundle_id, sandbox_id) {
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
     print("mount_source_allows 1: i_mount =", i_mount, "p_mount =", p_mount)
 
+    # The caller of this function already verified p_mount.type_ == i_mount.type_.
+    #
     # i_mount.source is a path on the Host, that doesn't have to be verified
     # by the Guest policy. The Guest translates this path to a Guest path
     # generated randomly by the Guest and not communicated to the Host.
-    #
-    # Note that the caller of this function already verified
-    # p_mount.type_ == i_mount.type_.
     p_mount.source == "$(host-shared-file)"
 
     print("mount_source_allows 1: true")
 }
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
-    print("mount_source_allows 2: i_mount.source =", i_mount.source)
+    print("mount_source_allows 2: i_mount =", i_mount, "p_mount =", p_mount)
+
+    # The caller of this function already verified p_mount.type_ == i_mount.type_.
+    #
+    # DMFIX - need additional testing.
+    p_mount.source == "$(guest-local-file)"
+
+    print("mount_source_allows 2: true")
+}
+mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
+    print("mount_source_allows 3: i_mount.source =", i_mount.source)
 
     i_source_parts = split(i_mount.source, "/")
     b64_direct_vol_path = i_source_parts[count(i_source_parts) - 1]
@@ -915,17 +924,17 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
     base64.is_valid(b64_direct_vol_path)
 
     source1 := p_mount.source
-    print("mount_source_allows 2: source1 =", source1)
+    print("mount_source_allows 3: source1 =", source1)
 
     source2 := replace(source1, "$(spath)", policy_data.common.spath)
-    print("mount_source_allows 2: source2 =", source2)
+    print("mount_source_allows 3: source2 =", source2)
 
     source3 := replace(source2, "$(b64-direct-vol-path)", b64_direct_vol_path)
-    print("mount_source_allows 2: source3 =", source3)
+    print("mount_source_allows 3: source3 =", source3)
 
     source3 == i_mount.source
 
-    print("mount_source_allows 2: true")
+    print("mount_source_allows 3: true")
 }
 
 ######################################################################
