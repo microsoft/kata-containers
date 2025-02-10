@@ -65,12 +65,9 @@ Using this package, it is straightforward to assemble the UVM and then to run po
 For Kata:
 ```
 sudo dnf -y install kata-packages-uvm-build
-pushd /opt/kata-containers/uvm/tools/osbuilder
-pushd node-builder/azure-linux
-sudo make OS_VERSION=3.0 uvm
-popd
-sudo mkdir -p /usr/share/kata-containers
-sudo cp kata-containers.img /usr/share/kata-containers/
+pushd /opt/kata-containers/uvm/tools/osbuilder/node-builder/azure-linux
+sudo make uvm
+sudo make deploy-uvm
 popd
 ```
 
@@ -85,14 +82,12 @@ pushd node-builder/azure-linux
 # Note: see explanation on AGENT_POLICY_FILE below. We build with a permissive agent policy
 # as security policy annotations part of the pod metadata field are not passed to the shim.
 # This setup SHOULD NOT BE USED for Confidential Containers in production.
-sudo make OS_VERSION=3.0 AGENT_POLICY_FILE=allow-all.rego uvm-confpods
+sudo make AGENT_POLICY_FILE=allow-all.rego uvm-confpods
+sudo make deploy-confpods-uvm
 popd
-sudo mkdir -p /opt/confidential-containers/share/kata-containers
-sudo cp kata-containers.img /opt/confidential-containers/share/kata-containers/
-sudo cp kata-containers-igvm.img /opt/confidential-containers/share/kata-containers/
+popd
 # Note: currently depends on kubelet, need to manually start at every reboot.
 sudo systemctl start tardev-snapshotter
-popd
 ```
 
 You environment is ready. Continue with section *Run Kata (Confidential) Containers*
@@ -281,7 +276,7 @@ metadata:
 handler: kata-cc
 overhead:
     podFixed:
-        memory: "2Gi"
+        memory: "600Mi"
 scheduling:
   nodeSelector:
     katacontainers.io/kata-runtime: "true"
@@ -295,7 +290,7 @@ metadata:
 handler: kata
 overhead:
     podFixed:
-        memory: "2Gi"
+        memory: "600Mi"
 scheduling:
   nodeSelector:
     katacontainers.io/kata-runtime: "true"
