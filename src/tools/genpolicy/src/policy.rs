@@ -133,6 +133,10 @@ pub struct KataProcess {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub DeprecatedArgs: Vec<String>,
 
+    /// Args specifies the binary and arguments for the application to execute.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub Args: Vec<String>,
+
     /// Env populates the process environment for the process.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub Env: Vec<String>,
@@ -673,6 +677,7 @@ impl AgentPolicy {
         );
 
         substitute_env_variables(&mut process.Env);
+        process.Args = process.DeprecatedArgs.clone();
         substitute_args_env_variables(&mut process.DeprecatedArgs, &process.Env);
 
         c_settings.get_process_fields(&mut process);
