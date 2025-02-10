@@ -859,7 +859,7 @@ impl TarDevSnapshotter {
                         error!("{}", file_error);
                         anyhow::anyhow!(file_error)
                     })?;
-                    let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
+                    let mut gz_decoder = flate2::read::MultiGzDecoder::new(compressed);
 
                     if let Err(e) = std::io::copy(&mut gz_decoder, &mut file) {
                         let copy_error = format!("failed to copy payload from gz decoder {:?}", e);
