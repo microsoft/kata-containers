@@ -155,6 +155,41 @@ struct MetadataResponse {
     ops: Option<json_patch::Patch>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*; // Import the function and structs to be tested
+
+    #[tokio::test]
+    async fn test_allow_request() {
+        let mut policy = AgentPolicy::new();
+
+        let data =
+            std::fs::read_to_string("../tools/genpolicy/create.json").expect("Unable to read file");
+
+        let request: protocols::agent::CreateContainerRequest =
+            serde_json::from_str(&data).expect("JSON was not well-formatted");
+
+        let request = serde_json::to_string(&request).unwrap();
+        let ep = "CreateContainerRequest";
+
+        policy
+            .engine
+            .add_policy_from_file("../tools/genpolicy/exec2.rego")
+            .unwrap();
+
+        // Call the function
+        let result = policy.allow_request(ep, &request).await;
+
+        // Assert the expected result
+        match result {
+            Ok((allowed, _)) => assert!(allowed, "Expected the request to be allowed"),
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+
+        // assert!(false, "fail");
+    }
+}
+
 impl AgentPolicy {
     /// Create AgentPolicy object.
     pub fn new() -> Self {
@@ -233,9 +268,11 @@ impl AgentPolicy {
         let results = self.engine.eval_query(query, false)?;
 
         let prints = match self.engine.take_prints() {
-            Ok(p) => p.join(" "),
+            Ok(p) => p.join("\n"),
             Err(e) => format!("Failed to get policy log: {e}"),
         };
+
+        println!("Policy prints: {}", prints);
 
         if results.result.len() != 1 {
             // Results are empty when AllowRequestsFailingPolicy is used to allow a Request that hasn't been defined in the policy
