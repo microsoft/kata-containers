@@ -180,6 +180,9 @@ async fn get_image_layers(
 
             layer_index += 1;
         }
+        else {
+            return Err(anyhow!("Unsupported layer media type: {}", layer.media_type));
+        }
     }
 
     Ok(layers)
@@ -343,12 +346,17 @@ async fn create_decompressed_layer_file(
 ) -> Result<()> {
     match compressed_path {
         Some(compressed_path) => {
-            pull_layer_file(client, reference, layer_digest, compressed_path).await?;
-            decompress_file(compressed_path, decompressed_path)?;
+            pull_layer_file(client, reference, layer_digest, compressed_path)
+                .await
+                .context("Failed to pull layer file")?;
+            decompress_file(compressed_path, decompressed_path)
+                .context("Failed to decompress layer file")?;
         }
-        None => pull_layer_file(client, reference, layer_digest, decompressed_path).await?,
+        None => pull_layer_file(client, reference, layer_digest, decompressed_path)
+            .await
+            .context("Failed to pull layer file")?,
     }
-    attach_tarfs_index(decompressed_path)?;
+    attach_tarfs_index(decompressed_path).context("Failed to attach tarfs index")?;
 
     Ok(())
 }
@@ -381,7 +389,7 @@ fn decompress_file(compressed_path: &Path, decompressed_path: &Path) -> Result<(
         .create(true)
         .truncate(true)
         .open(decompressed_path)?;
-    let mut gz_decoder = flate2::read::GzDecoder::new(compressed_file);
+    let mut gz_decoder = flate2::read::MultiGzDecoder::new(compressed_file);
     std::io::copy(&mut gz_decoder, &mut decompressed_file).map_err(|e| anyhow!(e))?;
     decompressed_file.flush().map_err(|e| anyhow!(e))?;
 
@@ -393,9 +401,14 @@ fn attach_tarfs_index(path: &Path) -> Result<()> {
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
-        .open(path)?;
-    tarindex::append_index(&mut file).map_err(|e| anyhow!(e))?;
-    file.flush().map_err(|e| anyhow!(e))?;
+        .open(path)
+        .context("Failed to open {path} for writing")?;
+    tarindex::append_index(&mut file)
+        .map_err(|e| anyhow!(e))
+        .context("Failed to append index")?;
+    file.flush()
+        .map_err(|e| anyhow!(e))
+        .context("Failed to flush file changes")?;
 
     Ok(())
 }
