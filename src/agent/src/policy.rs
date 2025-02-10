@@ -209,31 +209,27 @@ impl AgentPolicy {
 
         if results.result.len() != 1 {
             // Results are empty when AllowRequestsFailingPolicy is used to allow a Request that hasn't been defined in the policy
-            if self.allow_failures && ep == "AllowRequestsFailingPolicy" {
+            if self.allow_failures {
                 return Ok((true, prints));
             }
 
             self.log_request(ep, &prints).await;
-            return Ok((true, prints));
+            //return Ok((true, prints));
 
-            /*
             bail!(
                 "policy check: unexpected eval_query result len {:?}",
                 results
             );
-            */
         }
 
         if results.result[0].expressions.len() != 1 {
             self.log_request(ep, &prints).await;
-            return Ok((true, prints));
+            // return Ok((true, prints));
 
-            /*
             bail!(
                 "policy check: unexpected eval_query result expressions {:?}",
                 results
             );
-            */
         }
 
         let mut allow = match &results.result[0].expressions[0].value {
