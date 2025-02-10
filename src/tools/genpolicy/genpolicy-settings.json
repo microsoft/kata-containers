@@ -118,7 +118,7 @@
             },
             {
                 "destination": "/var/run/secrets/azure/tokens",
-                "source": "$(sfprefix)tokens$",
+                "source": "$(host-shared-file)",
                 "type_": "bind",
                 "options": [
                     "rbind",
@@ -157,7 +157,7 @@
         },
         "configMap": {
             "mount_type": "bind",
-            "mount_source": "$(sfprefix)",
+            "mount_source": "$(host-shared-file)",
             "mount_point": "^$(cpath)/watchable/$(bundle-id)-[a-z0-9]{16}-",
             "driver": "watchable-bind",
             "fstype": "bind",
@@ -169,7 +169,7 @@
         },
         "confidential_configMap": {
             "mount_type": "bind",
-            "mount_source": "$(sfprefix)",
+            "mount_source": "$(host-shared-file)",
             "mount_point": "$(sfprefix)",
             "driver": "local",
             "fstype": "bind",

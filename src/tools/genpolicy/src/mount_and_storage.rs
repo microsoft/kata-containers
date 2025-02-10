@@ -46,11 +46,7 @@ pub fn get_policy_mounts(
             adjust_termination_path(&mut mount, yaml_container);
 
             if mount.source.is_empty() && mount.type_.eq("bind") {
-                if let Some(file_name) = Path::new(&mount.destination).file_name() {
-                    if let Some(file_name) = file_name.to_str() {
-                        mount.source = format!("$(sfprefix){file_name}$");
-                    }
-                }
+                mount.source = "$(host-shared-file)".to_string();
             }
 
             if let Some(policy_mount) = p_mounts
@@ -371,12 +367,10 @@ fn get_config_map_mount_and_storage(
         });
     }
 
-    let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
-    let name = OsString::from(file_name).into_string().unwrap();
     p_mounts.push(policy::KataMount {
         destination: yaml_mount.mountPath.clone(),
         type_: settings_config_map.mount_type.clone(),
-        source: format!("{}{name}$", &settings_config_map.mount_point),
+        source: "$(host-shared-file)".to_string(),
         options: settings_config_map.options.clone(),
     });
 }
@@ -386,12 +380,7 @@ fn get_shared_bind_mount(
     p_mounts: &mut Vec<policy::KataMount>,
     mount_options: (&str, &str),
 ) {
-    let mount_path = if let Some(byte_index) = str::rfind(&yaml_mount.mountPath, '/') {
-        str::from_utf8(&yaml_mount.mountPath.as_bytes()[byte_index + 1..]).unwrap()
-    } else {
-        &yaml_mount.mountPath
-    };
-    let source = format!("$(sfprefix){mount_path}$");
+    let source = "$(host-shared-file)".to_string();
 
     let dest = yaml_mount.mountPath.clone();
     let type_ = "bind".to_string();
@@ -419,12 +408,7 @@ fn get_shared_bind_mount(
 }
 
 fn get_downward_api_mount(yaml_mount: &pod::VolumeMount, p_mounts: &mut Vec<policy::KataMount>) {
-    let mount_path = if let Some(byte_index) = str::rfind(&yaml_mount.mountPath, '/') {
-        str::from_utf8(&yaml_mount.mountPath.as_bytes()[byte_index + 1..]).unwrap()
-    } else {
-        &yaml_mount.mountPath
-    };
-    let source = format!("$(sfprefix){mount_path}$");
+    let source = "$(host-shared-file)".to_string();
 
     let dest = yaml_mount.mountPath.clone();
     let type_ = "bind".to_string();
