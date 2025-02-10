@@ -13,7 +13,7 @@ struct CommandLineOptions {
     image: Option<Vec<String>>,
 
     #[clap(
-        short,
+        short = 'l',
         long,
         help = "Path to a file containing a newline-separated list of image tags"
     )]
