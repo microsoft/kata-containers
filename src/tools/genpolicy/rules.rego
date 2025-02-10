@@ -7,8 +7,6 @@ package agent_policy
 import future.keywords.in
 import future.keywords.every
 
-import input
-
 # Default values, returned by OPA when rules cannot be evaluated to true.
 default AddARPNeighborsRequest := false
 default AddSwapRequest := false
@@ -68,7 +66,63 @@ CreateContainerRequest:= resp {
     p_env_map := p_container.env_map  
     allow_env_map(p_env_map, i_env_map)
     
+    i_process := input.base.OCI.Process
+    
+    p_process := p_container.OCI.Process
+    
+    allow_args_by_equality(i_process, p_process, i_env_map)
+    
     print("PolicyCreateContainerRequest: true")
+}
+
+allow_args_by_equality(i_process, p_process, i_env_map) {
+    i_args := i_process.Args
+    p_args := p_process.Args
+    print("allow_args_by_equality: i_args =", i_args, "p_args =", p_args)
+    count(i_args) == count(p_args)
+    every i, i_arg in i_args {
+        print("allow_args_by_equality: i_arg =", i_arg)
+        p_arg_replaced := replace_env_variables(p_args[i], i_env_map)
+        print("allow_args_by_equality: p_arg_replaced =", p_arg_replaced)
+        # Double $$ are reduced to a single $, from command field description in https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.24/#container-v1-core
+        p_arg_replaced2 := replace(p_arg_replaced, "$$", "$")
+        print("allow_args_by_equality: p_arg_replaced2 =", p_arg_replaced2)
+        i_arg == p_arg_replaced2
+        print("allow_args_by_equality: true")
+    }
+}
+
+allow_args_by_equality(i_process, p_process, i_env_map) {
+    not i_process.Args
+    not p_process.Args
+    print("allow_args_by_equality2: no args")
+}
+
+# this function replaces all the environment variables in a string, given a map of environment keys to environment values
+# eg str = "echo $(CLUSTER_ID); echo $(NODE_NAME);"
+# env_map = {"CLUSTER_ID": "abc", "NODE_NAME" : "xyz"}
+# result = "echo abc; echo xyz;"
+replace_env_variables(str, env_map) = result {
+    # make an array of the keys eg ["CLUSTER_ID", "NODE_NAME"]
+    keys := [x | some x in object.keys(env_map)]
+    result := replace_str_rec(str, env_map, keys, count(keys) - 1)
+}
+
+# base case
+replace_str_rec(str, env_map, arr_keys, i) = result {
+    i < 0
+    result = str
+}
+
+# recursive step
+replace_str_rec(str, env_map, arr_keys, i) = result {
+    i >= 0
+    key := arr_keys[i]
+    env_key1 := concat("", ["$(", key, ")"])
+    # replace $(VAR) with value
+    new_str1 := replace(str, env_key1, env_map[key])
+    # replace next environment variable
+    result = replace_str_rec(new_str1, env_map, arr_keys, i - 1)
 }
 
 allow_env_map(p_env_map, i_env_map) {
@@ -711,7 +765,6 @@ allow_process_common(p_process, i_process, s_name, s_namespace) {
 allow_process(p_process, i_process, s_name, s_namespace) {
     print("allow_process: start")
 
-    allow_args(p_process, i_process, s_name)
     allow_process_common(p_process, i_process, s_name, s_namespace)
     allow_caps(p_process.Capabilities, i_process.Capabilities)
     p_process.Terminal == i_process.Terminal
@@ -758,56 +811,6 @@ allow_user(p_process, i_process) {
 
     # TODO: compare the additionalGids field too after computing its value
     # based on /etc/passwd and /etc/group from the container image.
-}
-
-allow_args(p_process, i_process, s_name) {
-    print("allow_args 1: no args")
-
-    not p_process.Args
-    not i_process.Args
-
-    print("allow_args 1: true")
-}
-allow_args(p_process, i_process, s_name) {
-    print("allow_args 2: policy args =", p_process.Args)
-    print("allow_args 2: input args =", i_process.Args)
-
-    count(p_process.Args) == count(i_process.Args)
-
-    every i, i_arg in i_process.Args {
-        allow_arg(i, i_arg, p_process, s_name)
-    }
-
-    print("allow_args 2: true")
-}
-allow_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.Args[i]
-    print("allow_arg 1: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
-
-    p_arg2 := replace(p_arg, "$$", "$")
-    p_arg2 == i_arg
-
-    print("allow_arg 1: true")
-}
-allow_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.Args[i]
-    print("allow_arg 2: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
-
-    # TODO: can $(node-name) be handled better?
-    contains(p_arg, "$(node-name)")
-
-    print("allow_arg 2: true")
-}
-allow_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.Args[i]
-    print("allow_arg 3: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
-
-    p_arg2 := replace(p_arg, "$$", "$")
-    p_arg3 := replace(p_arg2, "$(sandbox-name)", s_name)
-    print("allow_arg 3: p_arg3 =", p_arg3)
-    p_arg3 == i_arg
-
-    print("allow_arg 3: true")
 }
 
 # OCI process.Env field
