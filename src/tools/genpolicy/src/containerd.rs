@@ -31,6 +31,7 @@ pub fn get_process(privileged_container: bool, common: &policy::CommonData) -> p
         Terminal: false,
         User: Default::default(),
         DeprecatedArgs: Vec::new(),
+        Args: Vec::new(),
         Env: Vec::new(),
         Cwd: "/".to_string(),
         Capabilities: capabilities,
