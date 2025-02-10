@@ -64,7 +64,6 @@ impl Container {
             get_image_layers(use_cached_files, &manifest, &config_layer, &ctrd_client).await?;
 
         Ok(Container {
-            config_layer,
             image_layers,
         })
     }

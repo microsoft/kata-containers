@@ -13,7 +13,6 @@ use std::{
 use anyhow::{Context, Error};
 use base64::{engine::general_purpose, Engine};
 use futures::future;
-use log::debug;
 use serde::{Deserialize, Serialize};
 
 mod registry;
@@ -144,7 +143,6 @@ async fn get_container_image_root_hashes(
     image: &str,
     config: &utils::Config,
 ) -> Result<ImageInfo, Error> {
-    debug!("Getting layers for image: {}", image);
     let container = registry::get_container(&config, image)
         .await
         .context("Failed to get container image")?;

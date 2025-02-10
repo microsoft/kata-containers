@@ -26,7 +26,6 @@ use tokio::io::AsyncWriteExt;
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
 pub struct Container {
-    pub config_layer: DockerConfigLayer,
     pub image_layers: Vec<ImageLayer>,
 }
 
@@ -104,7 +103,6 @@ impl Container {
                 .unwrap();
 
                 Ok(Container {
-                    config_layer,
                     image_layers,
                 })
             }
@@ -252,6 +250,7 @@ async fn get_verity_hash(
 }
 
 // the store is a json file that matches layer hashes to verity hashes
+#[allow(unstable_name_collisions)]
 pub(crate) fn add_verity_to_store(
     cache_file: &str,
     diff_id: &str,
