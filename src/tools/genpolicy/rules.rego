@@ -56,8 +56,119 @@ BUNDLE_ID = "[a-z0-9]{64}"
 
 CreateContainerRequest:= resp {
     not is_null(input.env_map)
+    
+    i_env_map := input.env_map
+    
+    some p_container in policy_data.containers
+    p_env_map := p_container.env_map  
+    allow_env_map(p_env_map, i_env_map)
+
     resp = CreateContainerRequestCommon(input.base)
     print("CreateContainerRequest: true")
+}
+
+allow_env_map(p_env_map, i_env_map) {
+    print("allow_env_map: p_env_map =", p_env_map)
+    every env_key, env_val in i_env_map {
+        print("allow_env: env_key =", env_key, "env_val =", env_val)
+        allow_env_map_entry(env_key, env_val, p_env_map)
+    }
+    print("allow_env_map: true")
+}
+
+# Allow exact match
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    i_val == p_val
+    print("allow_env_map_entry: true")
+}
+
+# Allow resourceFieldRef values (e.g., "limits.cpu").
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    # a variable we should be validating using a regex from settings
+    p_val == "$(validate-from-settings)"
+    regex_val := policy_data.request_defaults.CreateContainerRequest.allow_env_regex_map[key]
+    regex.match(regex_val, i_val)
+    print("allow_env_map_entry 2: true")
+}
+
+# Allow node-name
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    p_val == "$(node-name)"
+    regex.match(policy_data.common.dns_subdomain , i_val)
+    print("allow_env_map_entry 3: true")
+}
+
+# Allow host-name
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    p_val == "$(host-name)"
+    regex.match(policy_data.common.dns_label , i_val)
+    print("allow_env_map_entry 4: true")
+}
+
+# Allow pod-uid
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    p_val == "$(pod-uid)"
+    regex.match(policy_data.common.pod_uid , i_val)
+    print("allow_env_map_entry 5: true")
+}
+
+# Allow fieldRef "fieldPath: status.podIP" values.
+allow_env_map_entry(key, i_val, p_env_map) {
+    is_ip(i_val)
+
+    p_val := p_env_map[key]
+    p_var := concat("=", [key, p_val])
+    allow_pod_ip_var(key, p_var)
+    print("allow_env_map_entry 6: true")
+}
+
+# Allow fieldRef "fieldPath: status.hostIP" values.
+allow_env_map_entry(key, i_val, p_env_map) {
+    is_ip(i_val)
+
+    p_val := p_env_map[key]
+    p_var := concat("=", [key, p_val])
+    allow_host_ip_var(key, p_var)
+    print("allow_env_map_entry 7: true")
+}
+
+# Match input with one of the policy variables, after substituting $(sandbox-name).
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    p_val == "$(sandbox-name)"
+    s_name := input.base.OCI.Annotations[S_NAME_KEY]
+    p_var2 := replace(p_val, "$(sandbox-name)", s_name)
+    p_var2 == i_val
+    print("allow_env_map_entry 8: true")
+}
+
+# Match input with one of the policy variables, after substituting $(sandbox-namespace).
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    p_val == "$(sandbox-namespace)"
+    s_namespace := input.base.OCI.Annotations[S_NAMESPACE_KEY]
+    p_var2 := replace(p_val, "$(sandbox-namespace)", s_namespace)
+    p_var2 == i_val
+    print("allow_env_map_entry 9: true")
+}
+
+# Allow input env variables that match with a request_defaults regex.
+allow_env_map_entry(key, i_val, p_env_map) {
+    some p_regex1 in policy_data.request_defaults.CreateContainerRequest.allow_env_regex
+    p_regex2 := replace(p_regex1, "$(ipv4_a)", policy_data.common.ipv4_a)
+    p_regex3 := replace(p_regex2, "$(ip_p)", policy_data.common.ip_p)
+    p_regex4 := replace(p_regex3, "$(svc_name)", policy_data.common.svc_name)
+    p_regex5 := replace(p_regex4, "$(dns_label)", policy_data.common.dns_label)
+
+    result := concat("=", [key, i_val])
+    regex.match(p_regex5, result)
+
+    print("allow_env_map_entry 10: true")
 }
 
 CreateContainerRequest:= resp {
@@ -917,6 +1028,7 @@ allow_var(p_process, i_process, i_var, s_name, s_namespace) {
     print("allow_var 7: true")
 }
 
+# Match input with one of the policy variables, after substituting $(sandbox-namespace).
 allow_var(p_process, i_process, i_var, s_name, s_namespace) {
     some p_var in p_process.Env
     p_var2 := replace(p_var, "$(sandbox-namespace)", s_namespace)
