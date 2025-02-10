@@ -199,7 +199,7 @@ impl AgentPolicy {
         self.engine.set_input_json(ep_input)?;
 
         let results = self.engine.eval_query(query, false)?;
-        logged_results = format!("results: {:?}", results);
+        let logged_results = format!("results: {:?}", results);
         self.log_request(ep, &logged_results).await;
 
         let prints = match self.engine.take_prints() {
