@@ -107,6 +107,37 @@ pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::R
         .map_err(|e| ttrpc_error(ttrpc::Code::INVALID_ARGUMENT, e))
 }
 
+/// PolicyCreateContainerRequest is very similar to CreateContainerRequest from src/libs/protocols, except:
+/// - It wraps the base CreateContainerRequest.
+/// - It has an env_map field which is a map of environment variable names to expanded values.
+/// This makes it easier to validate the environment variables inside the rego rules.
+#[derive(Debug, serde::Serialize)]
+struct PolicyCreateContainerRequest {
+    base: protocols::agent::CreateContainerRequest,
+    // a map of environment variable names to value
+    //env_map: std::collections::HashMap<String, String>,
+}
+
+fn map_request(ep: &str, input: &str) -> String {
+    println!("Mapping request");
+    match ep {
+        "CreateContainerRequest" => {
+            let req: protocols::agent::CreateContainerRequest =
+                serde_json::from_str(input).expect("JSON was not well-formatted");
+
+            // let env_map = oci::get_env_map(&req.OCI.Process.Env);
+
+            let req_v2 = PolicyCreateContainerRequest {
+                base: req, // , env_map
+            };
+
+            serde_json::to_string(&req_v2).expect("failed to serialize")
+        }
+
+        _ => input.to_string(),
+    }
+}
+
 /// Singleton policy object.
 #[derive(Debug, Default)]
 pub struct AgentPolicy {
@@ -193,6 +224,9 @@ impl AgentPolicy {
     /// Ask regorus if an API call should be allowed or not.
     async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
+
+        let ep_input = &map_request(ep, ep_input);
+
         self.log_request(ep, ep_input).await;
 
         let query = format!("data.agent_policy.{ep}");
