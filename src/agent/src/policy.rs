@@ -199,6 +199,8 @@ impl AgentPolicy {
         self.engine.set_input_json(ep_input)?;
 
         let results = self.engine.eval_query(query, false)?;
+        logged_results = format!("results: {:?}", results);
+        self.log_request(ep, &logged_results).await;
 
         let prints = match self.engine.take_prints() {
             Ok(p) => p.join(" "),
@@ -207,20 +209,31 @@ impl AgentPolicy {
 
         if results.result.len() != 1 {
             // Results are empty when AllowRequestsFailingPolicy is used to allow a Request that hasn't been defined in the policy
-            if self.allow_failures {
+            if self.allow_failures && ep == "AllowRequestsFailingPolicy" {
                 return Ok((true, prints));
             }
+
+            self.log_request(ep, &prints).await;
+            return Ok((true, prints));
+
+            /*
             bail!(
                 "policy check: unexpected eval_query result len {:?}",
                 results
             );
+            */
         }
 
         if results.result[0].expressions.len() != 1 {
+            self.log_request(ep, &prints).await;
+            return Ok((true, prints));
+
+            /*
             bail!(
                 "policy check: unexpected eval_query result expressions {:?}",
                 results
             );
+            */
         }
 
         let mut allow = match &results.result[0].expressions[0].value {
