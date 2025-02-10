@@ -2106,14 +2106,14 @@ async fn receive_mount_file(req: &MountRequest) -> Result<()> {
             );
 
             match unistd::symlinkat(&file_link_src, None, &file_link_dest) {
-                Ok(_) => info!(sl(), "do_mount: symlink {:?} created", file_link_dest),
+                Ok(_) => info!(sl(), "do_mount: symlink created: {:?}", file_link_dest),
                 Err(e) => {
                     error!(sl(), "do_mount: symlinkat failed - ignoring: {:?}", e);
                     return Ok(());
                 }
             }
         } else {
-            info!(sl(), "do_mount: link {:?} already exists", file_link_dest);
+            info!(sl(), "do_mount: link already exists: {:?}", file_link_dest);
         }
 
         MOUNT_STATE.lock().await.set_mapping(
