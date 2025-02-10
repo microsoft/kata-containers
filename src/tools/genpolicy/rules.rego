@@ -54,14 +54,26 @@ S_NAME_KEY = "io.kubernetes.cri.sandbox-name"
 S_NAMESPACE_KEY = "io.kubernetes.cri.sandbox-namespace"
 BUNDLE_ID = "[a-z0-9]{64}"
 
-CreateContainerRequest:= {"ops": ops, "allowed": true} {
+CreateContainerRequest:= resp {
+    not is_null(input.env_map)
+    resp = CreateContainerRequestCommon(input.base)
+    print("CreateContainerRequest: true")
+}
+
+CreateContainerRequest:= resp {
+    not input.env_map
+    resp = CreateContainerRequestCommon(input)
+    print("CreateContainerRequest2: true")
+}
+
+CreateContainerRequestCommon(req):= {"ops": ops, "allowed": true} {
     # Check if the input request should be rejected even before checking the
     # policy_data.containers information.
-    allow_create_container_input
+    allow_create_container_input(req)
 
-    i_oci := input.OCI
-    i_storages := input.storages
-    i_devices := input.devices
+    i_oci := req.OCI
+    i_storages := req.storages
+    i_devices := req.devices
 
     # array of possible state operations
     ops_builder := []
@@ -73,11 +85,11 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
 
     # Check if any element from the policy_data.containers array allows the input request.
     some p_container in policy_data.containers
-    print("======== CreateContainerRequest: trying next policy container")
+    print("======== CreateContainerRequestCommon: trying next policy container")
 
     p_pidns := p_container.sandbox_pidns
-    i_pidns := input.sandbox_pidns
-    print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
+    i_pidns := req.sandbox_pidns
+    print("CreateContainerRequestCommon: p_pidns =", p_pidns, "i_pidns =", i_pidns)
     p_pidns == i_pidns
 
     p_oci := p_container.OCI
@@ -85,14 +97,14 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # check namespace
     p_namespace := p_oci.Annotations[S_NAMESPACE_KEY]
     i_namespace := i_oci.Annotations[S_NAMESPACE_KEY]
-    print ("CreateContainerRequest: p_namespace =", p_namespace, "i_namespace =", i_namespace)
+    print ("CreateContainerRequestCommon: p_namespace =", p_namespace, "i_namespace =", i_namespace)
     add_namespace_to_state := allow_namespace(p_namespace, i_namespace)
     ops_builder2 := concat_op_if_not_null(ops_builder1, add_namespace_to_state)
 
-    print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
+    print("CreateContainerRequestCommon: p Version =", p_oci.Version, "i Version =", i_oci.Version)
     p_oci.Version == i_oci.Version
 
-    print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
+    print("CreateContainerRequestCommon: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
     p_oci.Root.Readonly == i_oci.Root.Readonly
 
     allow_anno(p_oci, i_oci)
@@ -108,16 +120,16 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
 
     ops := ret.ops
 
-    print("CreateContainerRequest: true")
+    print("CreateContainerRequestCommon: true")
 }
 
-allow_create_container_input {
-    print("allow_create_container_input: input =", input)
+allow_create_container_input(req) {
+    print("allow_create_container_input: input =", req)
 
-    count(input.shared_mounts) == 0
-    is_null(input.string_user)
+    count(req.shared_mounts) == 0
+    is_null(req.string_user)
 
-    i_oci := input.OCI
+    i_oci := req.OCI
     is_null(i_oci.Hooks)
     is_null(i_oci.Solaris)
     is_null(i_oci.Windows)
