@@ -85,6 +85,32 @@ pub async fn is_allowed_copy_file(req: &protocols::agent::CopyFileRequest) -> tt
     allow_request(&mut policy, "CopyFileRequest", &request).await
 }
 
+/// PolicyCreateContainerRequest is very similar to CreateContainerRequest from src/libs/protocols, except:
+/// - It wraps the base CreateContainerRequest.
+/// - It has an env_map field which is a map of environment variable names to expanded values.
+/// This makes it easier to validate the environment variables inside the rego rules.
+#[derive(Debug, serde::Serialize)]
+struct PolicyCreateContainerRequest {
+    base: protocols::agent::CreateContainerRequest,
+    // a map of environment variable names to value
+    //env_map: std::collections::HashMap<String, String>,
+}
+
+pub async fn is_allowed_create_container(
+    req: &protocols::agent::CreateContainerRequest,
+) -> ttrpc::Result<()> {
+    // let env_map = get_env_map(&req.OCI.Process.Env);
+
+    let create_container_request = PolicyCreateContainerRequest {
+        base: req.clone(),
+        // env_map,
+    };
+
+    let request = serde_json::to_string(&create_container_request).unwrap();
+    let mut policy = AGENT_POLICY.lock().await;
+    allow_request(&mut policy, "CreateContainerRequest", &request).await
+}
+
 pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::Result<()> {
     let request = serde_json::to_string(req).unwrap();
     let mut policy = AGENT_POLICY.lock().await;
