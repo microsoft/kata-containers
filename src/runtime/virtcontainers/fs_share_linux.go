@@ -1027,8 +1027,9 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 				WithField("m", m).
 				WithField("requestType", requestType).
 				Error("copyMountSourceDir: request failed")
-			return hostMountSource, err
+			return "", err
 		}
+		return hostMountSource, nil
 	}
 
 	if !configVolRegex.MatchString(srcPath) {
