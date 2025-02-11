@@ -1005,7 +1005,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		"fileBase": fileBase,
 	}).Debug("copyMountSourceDir: sending request")
 
-	err = f.sandbox.agent.mount(
+	err := f.sandbox.agent.mount(
 		ctx,
 		requestType,
 		containerId,
@@ -1029,7 +1029,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	}
 
 	dataSymlinkDest := filepath.Join(srcPath, "..data")
-	dirBase, err := os.Readlink(dataSymlinkDest)
+	dirBase, err = os.Readlink(dataSymlinkDest)
 	if err != nil {
 		f.Logger().WithError(err).WithField("dataSymlinkDest", dataSymlinkDest).
 			Warn("copyMountSourceDir: couldn't read ..data symlink")
@@ -1045,7 +1045,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	}
 
 	subDirPath := filepath.Join(srcPath, dirBase)
-	s, err = os.Stat(subDirPath)
+	s, err := os.Stat(subDirPath)
 	if err != nil {
 		f.Logger().WithError(err).WithField("subDirPath", subDirPath).Warn("copyMountSourceDir: Stat failed")
 		return "", nil
@@ -1056,13 +1056,13 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return "", nil
 	}
 
-	err := f.watchDir(srcPath)
+	err = f.watchDir(srcPath)
 	if err != nil {
 		f.Logger().WithError(err).Error("Failed to watch directory")
 		return "", err
 	}
 
-	requestType := "config-volume-file"
+	requestType = "config-volume-file"
 
 	walk := func(srcFile string, d fs.DirEntry, err error) error {
 		c.Logger().WithField("srcFile", srcFile).Debug("copyMountSourceDir: walk")
@@ -1116,7 +1116,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 
 	// Let the guest know that all files have been updated.
 	requestType = "config-volume-updated"
-	fileBase := ""
+	fileBase = ""
 
 	c.Logger().WithFields(logrus.Fields{
 		"src": subDirPath,
