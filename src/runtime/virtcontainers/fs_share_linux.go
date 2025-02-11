@@ -990,45 +990,36 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	}
 
 	srcPath := filepath.Clean(m.Source)
-
-	s, err := os.Stat(srcPath)
-	if err != nil {
-		f.Logger().WithError(err).WithField("srcPath", srcPath).Debug("copyMountSourceDir: Stat failed")
-		return "", err
-	}
-
 	containerId := c.id
 	hostMountSource := m.Source
 
-	if s.Mode().IsDir() {
-		// Create an empty mapping source for this bind mount.
-		requestType := "create-bind-dir"
-		dirBase := ""
-		fileBase := ""
+	// Create an empty mapping source for this bind mount.
+	requestType := "create-bind-dir"
+	dirBase := ""
+	fileBase := ""
 
-		c.Logger().WithFields(logrus.Fields{
-			"requestType": requestType,
-			"hostMountSource": hostMountSource,
-			"dirBase": dirBase,
-			"fileBase": fileBase,
-		}).Debug("copyMountSourceDir: sending request")
+	c.Logger().WithFields(logrus.Fields{
+		"requestType": requestType,
+		"hostMountSource": hostMountSource,
+		"dirBase": dirBase,
+		"fileBase": fileBase,
+	}).Debug("copyMountSourceDir: sending request")
 
-		err = f.sandbox.agent.mount(
-			ctx,
-			requestType,
-			containerId,
-			hostMountSource,
-			dirBase,
-			fileBase)
+	err = f.sandbox.agent.mount(
+		ctx,
+		requestType,
+		containerId,
+		hostMountSource,
+		dirBase,
+		fileBase)
 
-		if err != nil {
-			f.Logger().
-				WithError(err).
-				WithField("m", m).
-				WithField("requestType", requestType).
-				Error("copyMountSourceDir: request failed")
-			return "", err
-		}
+	if err != nil {
+		f.Logger().
+			WithError(err).
+			WithField("m", m).
+			WithField("requestType", requestType).
+			Error("copyMountSourceDir: request failed")
+		return "", err
 	}
 
 	if !configVolRegex.MatchString(srcPath) {
@@ -1063,6 +1054,12 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	if !s.Mode().IsDir() {
 		f.Logger().WithError(err).WithField("subDirPath", subDirPath).Warn("copyMountSourceDir: subDirPath is not a directory")
 		return "", nil
+	}
+
+	err := f.watchDir(srcPath)
+	if err != nil {
+		f.Logger().WithError(err).Error("Failed to watch directory")
+		return "", err
 	}
 
 	requestType := "config-volume-file"
