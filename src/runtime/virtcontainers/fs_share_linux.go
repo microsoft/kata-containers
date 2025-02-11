@@ -1033,8 +1033,8 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 
 	if !configVolRegex.MatchString(srcPath) {
 		f.Logger().WithField("srcPath", srcPath).
-			Info("copyMountSourceDir: ignoring: source is not a config volume")
-		return "", nil
+			Info("copyMountSourceDir: mount source is not a config volume, will be mounted as an empty directory")
+		return hostMountSource, nil
 	}
 
 	dataSymlinkDest := filepath.Join(srcPath, "..data")
