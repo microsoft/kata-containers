@@ -1027,7 +1027,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 				WithField("m", m).
 				WithField("requestType", requestType).
 				Error("copyMountSourceDir: request failed")
-			return "", err
+			return hostMountSource, err
 		}
 	}
 
