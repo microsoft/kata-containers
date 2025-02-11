@@ -2534,8 +2534,11 @@ func (k *kataAgent) mount(ctx context.Context, requestType, containerId string, 
 	}
 
 	switch requestType {
+	case "create-bind-dir":
+		fallthrough
 	case "config-volume-updated":
 		_, err = k.sendReq(ctx, req)
+
 	case "mounted-file":
 		fallthrough
 	case "config-volume-file":

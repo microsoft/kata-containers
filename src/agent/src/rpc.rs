@@ -1884,6 +1884,7 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
     info!(sl(), "do_mount: req = {:?}", req);
 
     match req.request_type.as_str() {
+        "create-bind-dir" => create_bind_source_dir(req).await,
         "config-volume-updated" => _ = update_config_volume_mount(req).await,
         "mounted-file" | "config-volume-file" => _ = receive_mount_file(req).await,
         _ => {
@@ -1894,6 +1895,40 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+async fn create_bind_source_dir(req: &MountRequest) -> Result<()> {
+    let mut random_bytes = vec![0u8; 16];
+    rand::rng().fill_bytes(&mut random_bytes);
+    let random_bytes_str = hex::encode(random_bytes);
+    let guest_mount_source = PathBuf::from(format!(
+        "{KATA_GUEST_SHARE_DIR}{}-{}",
+        &req.container_id, &random_bytes_str
+    ));
+    info!(sl(), "do_mount: new guest_mount_source = {:?}", guest_mount_source);
+
+    if !guest_mount_source.exists() {
+        if let Err(e) = fs::create_dir_all(guest_mount_source) {
+            return Err(e.into());
+        } else {
+            if let Err(e) =
+                std::fs::set_permissions(guest_mount_source, std::fs::Permissions::from_mode(req.dir_mode))
+            {
+                error!(
+                    sl(),
+                    "do_mount: set_permissions {:?} failed = {:?}", guest_mount_source, e
+                );
+                return Err(e.into());
+            }
+        }
+
+        MOUNT_STATE.lock().await.set_mapping(
+            &req.container_id,
+            &req.host_mount_source,
+            guest_mount_source,
+    }
+
     Ok(())
 }
 

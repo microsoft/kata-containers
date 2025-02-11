@@ -984,7 +984,52 @@ var timestampedDirRegex = regexp.MustCompile(timestampedDirRegexString)
 func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, m *Mount, randomBytesStr string) (string, error) {
 	c.Logger().WithField("m", *m).Debug("copyMountSourceDir: starting")
 
+	if m.Type != "bind" {
+		f.Logger().WithField("type", m.Type).Info("copyMountSourceDir: ignoring unsupported mount type")
+		return "", nil
+	}
+
 	srcPath := filepath.Clean(m.Source)
+
+	s, err := os.Stat(srcPath)
+	if err != nil {
+		f.Logger().WithError(err).WithField("srcPath", srcPath).Debug("copyMountSourceDir: Stat failed")
+		return "", err
+	}
+
+	containerId := c.id
+	hostMountSource := m.Source
+
+	if s.Mode().IsDir() {
+		// Create an empty mapping source for this bind mount.
+		requestType := "create-bind-dir"
+		dirBase := ""
+		fileBase := ""
+
+		c.Logger().WithFields(logrus.Fields{
+			"requestType": requestType,
+			"hostMountSource": hostMountSource,
+			"dirBase": dirBase,
+			"fileBase": fileBase,
+		}).Debug("copyMountSourceDir: sending request")
+
+		err = f.sandbox.agent.mount(
+			ctx,
+			requestType,
+			containerId,
+			hostMountSource,
+			dirBase,
+			fileBase)
+
+		if err != nil {
+			f.Logger().
+				WithError(err).
+				WithField("m", m).
+				WithField("requestType", requestType).
+				Error("copyMountSourceDir: request failed")
+			return "", err
+		}
+	}
 
 	if !configVolRegex.MatchString(srcPath) {
 		f.Logger().WithField("srcPath", srcPath).
@@ -1009,7 +1054,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	}
 
 	subDirPath := filepath.Join(srcPath, dirBase)
-	s, err := os.Stat(subDirPath)
+	s, err = os.Stat(subDirPath)
 	if err != nil {
 		f.Logger().WithError(err).WithField("subDirPath", subDirPath).Warn("copyMountSourceDir: Stat failed")
 		return "", nil
@@ -1021,8 +1066,6 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	}
 
 	requestType := "config-volume-file"
-	containerId := c.id
-	hostMountSource := m.Source
 
 	walk := func(srcFile string, d fs.DirEntry, err error) error {
 		c.Logger().WithField("srcFile", srcFile).Debug("copyMountSourceDir: walk")
@@ -1095,7 +1138,11 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		fileBase)
 
 	if err != nil {
-		f.Logger().WithError(err).WithField("m", m).Error("copyMountSourceDir: config-volume-updated failed")
+		f.Logger().
+			WithError(err).
+			WithField("m", m).
+			WithField("requestType", requestType).
+			Error("copyMountSourceDir: request failed")
 		return "", err
 	}
 

@@ -1445,6 +1445,11 @@ allow_mount_request_fields {
     input.file_base == ""
 }
 allow_mount_request_fields {
+    input.request_type == "create-bind-dir"
+    input.dir_base == ""
+    input.file_base == ""
+}
+allow_mount_request_fields {
     input.request_type == "config-volume-file"
     regex.match(policy_data.common.s_source1, input.dir_base)
     regex.match(policy_data.common.dns_label, input.file_base)
