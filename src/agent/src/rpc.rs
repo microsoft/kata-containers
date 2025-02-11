@@ -1927,6 +1927,7 @@ async fn create_bind_source_dir(req: &MountRequest) -> Result<()> {
             &req.container_id,
             &req.host_mount_source,
             guest_mount_source,
+        );
     }
 
     Ok(())
