@@ -1883,18 +1883,24 @@ async fn do_add_swap(_sandbox: &Arc<Mutex<Sandbox>>, _req: &AddSwapRequest) -> R
 async fn do_mount(req: &MountRequest) -> Result<()> {
     info!(sl(), "do_mount: req = {:?}", req);
 
-    match req.request_type.as_str() {
+    let result = match req.request_type.as_str() {
         "create-bind-dir" => create_bind_source_dir(req).await,
-        "config-volume-updated" => _ = update_config_volume_mount(req).await,
-        "mounted-file" | "config-volume-file" => _ = receive_mount_file(req).await,
+        "config-volume-updated" => update_config_volume_mount(req).await,
+        "mounted-file" | "config-volume-file" => receive_mount_file(req).await,
         _ => {
             error!(
                 sl(),
                 "do_mount: ignoring: unknown request type {}",
                 req.request_type.as_str()
             );
-        }
+
+            Err(anyhow!("Unknown request type {}", req.request_type))
     }
+
+    if result.is_err() {
+        warn!(sl(), "do_mount: ignoring error {:?}", result);
+    }
+
     Ok(())
 }
 
