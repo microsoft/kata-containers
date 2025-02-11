@@ -1895,6 +1895,7 @@ async fn do_mount(req: &MountRequest) -> Result<()> {
             );
 
             Err(anyhow!("Unknown request type {}", req.request_type))
+        }
     }
 
     if result.is_err() {
