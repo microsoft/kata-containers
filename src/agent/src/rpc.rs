@@ -1916,15 +1916,15 @@ async fn create_bind_source_dir(req: &MountRequest) -> Result<()> {
     info!(sl(), "do_mount: new guest_mount_source = {:?}", guest_mount_source);
 
     if !guest_mount_source.exists() {
-        if let Err(e) = fs::create_dir_all(guest_mount_source) {
+        if let Err(e) = fs::create_dir_all(&guest_mount_source) {
             return Err(e.into());
         } else {
             if let Err(e) =
-                std::fs::set_permissions(guest_mount_source, std::fs::Permissions::from_mode(req.dir_mode))
+                std::fs::set_permissions(&guest_mount_source, std::fs::Permissions::from_mode(req.dir_mode))
             {
                 error!(
                     sl(),
-                    "do_mount: set_permissions {:?} failed = {:?}", guest_mount_source, e
+                    "do_mount: set_permissions {:?} failed = {:?}", &guest_mount_source, e
                 );
                 return Err(e.into());
             }
