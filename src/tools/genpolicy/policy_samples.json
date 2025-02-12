@@ -46,8 +46,7 @@
         ],
         "incomplete_init": [
                 "kubernetes/incomplete-init/cassandra-statefulset.yaml",
-                "kubernetes/incomplete-init/controller.yaml",
-                "kubernetes/incomplete-init/cockroachdb-statefulset.yaml"
+                "kubernetes/incomplete-init/controller.yaml"
         ],
         "silently_ignored": [
                 "webhook/webhook-pod1.yaml",
