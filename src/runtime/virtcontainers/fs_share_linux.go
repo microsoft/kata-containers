@@ -776,6 +776,8 @@ func (f *FilesystemShare) StartFileEventWatcher(ctx context.Context) error {
 					f.Logger().Infof("StartFileEventWatcher: dataDir (%s)", dataDir)
 					// eg. dataDir = /var/lib/kubelet/pods/b44e3261-7cf0-48d3-83b4-6094bba95dc8/volumes/kubernetes.io~configmap/foo/..data
 
+					f.updateConfigMountSource(context.Background(), volumeDir)
+					/*
 					// Handle different destination for the same source
 					// Acquire srcDstMapLock before reading srcDstMap
 					f.srcDstMapLock.Lock()
@@ -786,6 +788,7 @@ func (f *FilesystemShare) StartFileEventWatcher(ctx context.Context) error {
 						_ = f.copyUpdatedFiles(dataDir, destination, source)
 					}
 					f.srcDstMapLock.Unlock()
+					*/
 				}
 			}
 		case err, ok := <-f.watcher.Errors:
@@ -924,9 +927,9 @@ func (f *FilesystemShare) copyMountSource(ctx context.Context, c *Container, m *
 
 	switch {
 	case s.Mode().IsRegular():
-		guestPath, err = f.copyMountSourceRegularFile(ctx, c, m, "")
-	case s.Mode().IsDir():
-		guestPath, err = f.copyMountSourceDir(ctx, c, m, "")
+		guestPath, err = f.copyMountSourceRegularFile(ctx, c, m)
+	case s.Mode().IsDir() && m.Type == "bind":
+		guestPath, err = f.copyMountSourceDir(ctx, c, m.Source)
 	default:
 		f.Logger().WithField("srcRoot", srcRoot).Debug("copyMountSource: ignoring file")
 		return nil, nil		
@@ -942,7 +945,7 @@ func (f *FilesystemShare) copyMountSource(ctx context.Context, c *Container, m *
 	}, nil
 }
 
-func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Container, m *Mount, randomBytes string) (string, error) {
+func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Container, m *Mount) (string, error) {
 	c.Logger().WithField("m", *m).Debug("copyMountSourceRegularFile: starting")
 
 	requestType := "mounted-file"
@@ -981,17 +984,12 @@ func (f *FilesystemShare) copyMountSourceRegularFile(ctx context.Context, c *Con
 var timestampedDirRegexString = "^\\.\\.[0-9]{4}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}_[0-9]{2}.[0-9]+$"
 var timestampedDirRegex = regexp.MustCompile(timestampedDirRegexString)
 
-func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, m *Mount, randomBytesStr string) (string, error) {
-	c.Logger().WithField("m", *m).Debug("copyMountSourceDir: starting")
+func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, sourceDir string) (string, error) {
+	c.Logger().WithField("sourceDir", sourceDir).Debug("copyMountSourceDir: starting")
 
-	if m.Type != "bind" {
-		f.Logger().WithField("type", m.Type).Info("copyMountSourceDir: ignoring unsupported mount type")
-		return "", nil
-	}
-
-	srcPath := filepath.Clean(m.Source)
 	containerId := c.id
-	hostMountSource := m.Source
+	hostMountSource := sourceDir
+	srcPath := filepath.Clean(sourceDir)
 
 	// Create an empty mapping source for this bind mount.
 	requestType := "create-bind-dir"
@@ -1016,7 +1014,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	if err != nil {
 		f.Logger().
 			WithError(err).
-			WithField("m", m).
+			WithField("sourceDir", sourceDir).
 			WithField("requestType", requestType).
 			Error("copyMountSourceDir: request failed")
 		return "", err
@@ -1099,7 +1097,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 			fileBase)
 
 		if err != nil {
-			f.Logger().WithError(err).WithField("m", m).Debug("copyMountSourceDir: MountRequest failed")
+			f.Logger().WithError(err).WithField("sourceDir", sourceDir).Debug("copyMountSourceDir: MountRequest failed")
 			return err
 		}
 
@@ -1109,7 +1107,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	if err = filepath.WalkDir(subDirPath, walk); err != nil {
 		c.Logger().
 			WithError(err).
-			WithField("m", m).
+			WithField("sourceDir", sourceDir).
 			Error("copyMountSourceDir: WalkDir failed")
 		return "", err
 	}
@@ -1137,12 +1135,131 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 	if err != nil {
 		f.Logger().
 			WithError(err).
-			WithField("m", m).
+			WithField("sourceDir", sourceDir).
 			WithField("requestType", requestType).
 			Error("copyMountSourceDir: request failed")
 		return "", err
 	}
 
-	f.Logger().WithField("m", m).Debug("copyMountSourceDir: success")
+	f.Logger().WithField("sourceDir", sourceDir).Debug("copyMountSourceDir: success")
 	return hostMountSource, nil
+}
+
+func (f *FilesystemShare) updateConfigMountSource(ctx context.Context, sourceDir string) error {
+	f.Logger().WithField("sourceDir", sourceDir).Debug("updateConfigMountSource: starting")
+
+	requestType := "config-volume-file"
+	containerId := ""
+	hostMountSource := sourceDir
+	fileBase := ""
+
+	dataSymlinkDest := filepath.Join(sourceDir, "..data")
+	dirBase, err := os.Readlink(dataSymlinkDest)
+	if err != nil {
+		f.Logger().WithError(err).WithField("dataSymlinkDest", dataSymlinkDest).
+			Warn("copyMountSourceDir: couldn't read ..data symlink")
+		return nil
+	}
+
+	if !timestampedDirRegex.MatchString(dirBase) {
+		f.Logger().WithError(err).WithFields(logrus.Fields{
+			"dataSymlinkDest": dataSymlinkDest,
+			"symlinkSource": dirBase,
+		}).Warn("updateConfigMountSource: ..data symlink source is not a timestamped dir")
+		return nil
+	}
+
+	subDirPath := filepath.Join(hostMountSource, dirBase)
+	s, err := os.Stat(subDirPath)
+	if err != nil {
+		f.Logger().WithError(err).WithField("subDirPath", subDirPath).Warn("updateConfigMountSource: Stat failed")
+		return nil
+	}
+
+	if !s.Mode().IsDir() {
+		f.Logger().WithError(err).WithField("subDirPath", subDirPath).Warn("updateConfigMountSource: subDirPath is not a directory")
+		return nil
+	}
+
+	walk := func(srcFile string, d fs.DirEntry, err error) error {
+		f.Logger().WithField("srcFile", srcFile).Debug("updateConfigMountSource: walk")
+
+		if err != nil {
+			return err
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		if !info.Mode().IsRegular() {
+			f.Logger().WithField("name", d.Name()).Warn("updateConfigMountSource: skipping unsupported file")
+			return nil
+		}
+
+		fileBase = d.Name()
+
+		f.Logger().WithFields(logrus.Fields{
+			"requestType": requestType,
+			"hostMountSource": hostMountSource,
+			"dirBase": dirBase,
+			"fileBase": fileBase,
+		}).Debug("updateConfigMountSource: sending request")
+
+		err = f.sandbox.agent.mount(
+			ctx, 
+			requestType,
+			containerId,
+			hostMountSource,
+			dirBase,
+			fileBase)
+
+		if err != nil {
+			f.Logger().WithError(err).WithField("sourceDir", sourceDir).Debug("updateConfigMountSource: MountRequest failed")
+			return err
+		}
+
+		return nil
+	}			
+
+	if err := filepath.WalkDir(subDirPath, walk); err != nil {
+		f.Logger().
+			WithError(err).
+			WithField("sourceDir", sourceDir).
+			Error("updateConfigMountSource: WalkDir failed")
+		return err
+	}
+
+	// Let the guest know that all files have been updated.
+	requestType = "config-volume-updated"
+	fileBase = ""
+
+	f.Logger().WithFields(logrus.Fields{
+		"src": subDirPath,
+		"requestType": requestType,
+		"hostMountSource": hostMountSource,
+		"dirBase": dirBase,
+		"fileBase": fileBase,
+	}).Debug("updateConfigMountSource: sending request")
+
+	err = f.sandbox.agent.mount(
+		ctx, 
+		requestType,
+		containerId,
+		hostMountSource,
+		dirBase,
+		fileBase)
+
+	if err != nil {
+		f.Logger().
+			WithError(err).
+			WithField("sourceDir", sourceDir).
+			WithField("requestType", requestType).
+			Error("updateConfigMountSource: request failed")
+		return err
+	}
+
+	f.Logger().WithField("sourceDir", sourceDir).Debug("updateConfigMountSource: success")
+	return nil
 }
