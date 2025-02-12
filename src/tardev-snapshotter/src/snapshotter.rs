@@ -280,7 +280,7 @@ impl Store {
         // salt.
         let salt = '0'
             .to_string()
-            .repeat(<Sha256 as OutputSizeUser>::OutputSize::USIZE);
+            .repeat(<Sha256 as OutputSizeUser>::OutputSize::USIZE * 2);
         let construction_parameters = format!(
                 "1 {path} {path} {data_block_size} {hash_block_size} {} {} sha256 {hash} {salt} 2 root_hash_sig_key_desc {signature_name}",
                 data_size / data_block_size,
