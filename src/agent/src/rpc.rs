@@ -2339,15 +2339,13 @@ impl MountState {
         } else {
             // DMFIX
             for c in self.containers {
-                if let Some(_) = c.get_mapping(host_path) {
-                    info!(
-                        sl(),
-                        "set_mapping: replacing host_path = {} guest_path = {:?} for existing container",
-                        host_path,
-                        guest_path
-                    );
-                    c.set_mapping(host_path, guest_path);
-                }
+                info!(
+                    sl(),
+                    "set_mapping: replacing host_path = {} guest_path = {:?} for existing container",
+                    host_path,
+                    guest_path
+                );
+                c.set_mapping(host_path, guest_path);
             }
         }
     }
@@ -2358,7 +2356,7 @@ impl MountState {
                 return c.get_mapping(host_path);
             }
         } else {
-            // DMFIX: Update all containers.
+            // DMFIX
             for c in self.containers {
                 if let Some(guest_path) = c.get_mapping(host_path) {
                     return Some(guest_path);
