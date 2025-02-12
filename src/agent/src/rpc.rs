@@ -2338,7 +2338,7 @@ impl MountState {
             }
         } else {
             // DMFIX
-            for mut c in &mut self.containers {
+            for c in &mut self.containers {
                 if let Some(guest_path) = c.1.get_mapping(host_path) {
                     info!(
                         sl(),
