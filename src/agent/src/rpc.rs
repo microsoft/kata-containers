@@ -2312,41 +2312,65 @@ impl MountState {
     }
 
     pub fn set_mapping(&mut self, container_id: &str, host_path: &str, guest_path: PathBuf) {
-        if let Some(c) = self.containers.get_mut(container_id) {
-            info!(
-                sl(),
-                "set_mapping: adding host_path = {} guest_path = {:?} for existing container {}",
-                host_path,
-                guest_path,
-                container_id
-            );
+        if container_id != "" {
+            if let Some(c) = self.containers.get_mut(container_id) {
+                info!(
+                    sl(),
+                    "set_mapping: adding host_path = {} guest_path = {:?} for existing container {}",
+                    host_path,
+                    guest_path,
+                    container_id
+                );
 
-            c.set_mapping(host_path, guest_path);
+                c.set_mapping(host_path, guest_path);
+            } else {
+                info!(
+                    sl(),
+                    "set_mapping: adding host_path = {} guest_path = {:?} for new container {}",
+                    host_path,
+                    guest_path,
+                    container_id
+                );
+
+                let mut c = ContainerMountState::new();
+                c.set_mapping(host_path, guest_path);
+                self.containers.insert(container_id.to_string(), c);
+            }
         } else {
-            info!(
-                sl(),
-                "set_mapping: adding host_path = {} guest_path = {:?} for new container {}",
-                host_path,
-                guest_path,
-                container_id
-            );
-
-            let mut c = ContainerMountState::new();
-            c.set_mapping(host_path, guest_path);
-            self.containers.insert(container_id.to_string(), c);
+            // DMFIX
+            for c in self.containers {
+                if let Some(_) = c.get_mapping(host_path) {
+                    info!(
+                        sl(),
+                        "set_mapping: replacing host_path = {} guest_path = {:?} for existing container",
+                        host_path,
+                        guest_path
+                    );
+                    c.set_mapping(host_path, guest_path);
+                }
+            }
         }
     }
 
     pub fn get_mapping(&self, container_id: &str, host_path: &str) -> Option<PathBuf> {
-        if let Some(c) = self.containers.get(container_id) {
-            c.get_mapping(host_path)
+        if container_id != "" {
+            if let Some(c) = self.containers.get(container_id) {
+                return c.get_mapping(host_path);
+            }
         } else {
-            warn!(
-                sl(),
-                "get_mapping: state not found for container {}", container_id
-            );
-            None
+            // DMFIX: Update all containers.
+            for c in self.containers {
+                if let Some(guest_path) = c.get_mapping(host_path) {
+                    return Some(guest_path);
+                }
+            }
         }
+
+        warn!(
+            sl(),
+            "get_mapping: state not found for container {}", container_id
+        );
+        None
     }
 
     pub fn update_oci_mounts(&self, container_id: &str, mounts: &mut Vec<oci::Mount>) {
