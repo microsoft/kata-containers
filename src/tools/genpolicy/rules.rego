@@ -1415,8 +1415,8 @@ WriteStreamRequest {
 }
 
 MountRequest {
-    print("MountRequest: container_id =", input.container_id)
-    regex.match("^[a-z0-9]{64}$", input.container_id)
+    #print("MountRequest: container_id =", input.container_id)
+    #regex.match("^[a-z0-9]{64}$", input.container_id)
 
     print("MountRequest: host_mount_source =", input.host_mount_source)
     trim(input.host_mount_source, " ") != ""
