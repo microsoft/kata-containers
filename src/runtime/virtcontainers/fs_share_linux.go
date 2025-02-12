@@ -1056,7 +1056,7 @@ func (f *FilesystemShare) copyMountSourceDir(ctx context.Context, c *Container, 
 		return "", nil
 	}
 
-	err = f.watchDir(srcPath)
+	err = f.watchDir(subDirPath)
 	if err != nil {
 		f.Logger().WithError(err).Error("Failed to watch directory")
 		return "", err
