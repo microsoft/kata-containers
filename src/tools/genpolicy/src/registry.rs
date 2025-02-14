@@ -491,6 +491,7 @@ pub fn add_verity_and_users_to_store(
     let mut writer = BufWriter::new(&file);
     writeln!(writer, "{}", serialized)?;
     writer.flush()?;
+    #[allow(unstable_name_collisions)]
     file.unlock()?;
     Ok(())
 }
