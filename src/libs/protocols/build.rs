@@ -240,6 +240,31 @@ fn real_main() -> Result<(), std::io::Error> {
         "self: ::std::boxed::Box<Self>",
     )?;
 
+    let box_pointers_files = vec![
+        "src/agent_ttrpc_async.rs",
+        "src/confidential_data_hub.rs",
+        "src/confidential_data_hub_ttrpc.rs",
+        "src/confidential_data_hub_ttrpc_async.rs",
+        "src/types.rs",
+        "src/agent.rs",
+        "src/agent_ttrpc.rs",
+        "src/csi.rs",
+        "src/empty.rs",
+        "src/gogo.rs",
+        "src/health.rs",
+        "src/health_ttrpc.rs",
+        "src/health_ttrpc_async.rs",
+        "src/oci.rs",
+    ];
+
+    for f in box_pointers_files {
+        replace_text_in_file(
+            f,
+            "#![allow(box_pointers)]",
+            "",
+        )?;
+    }
+
     Ok(())
 }
 
