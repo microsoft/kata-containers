@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde::Deserialize;
 use std::env;
