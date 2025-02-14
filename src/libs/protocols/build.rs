@@ -240,6 +240,34 @@ fn real_main() -> Result<(), std::io::Error> {
         "self: ::std::boxed::Box<Self>",
     )?;
 
+    let mut box_pointers_files = vec![
+        "src/types.rs",
+        "src/agent.rs",
+        "src/agent_ttrpc.rs",
+        "src/csi.rs",
+        "src/empty.rs",
+        "src/gogo.rs",
+        "src/health.rs",
+        "src/health_ttrpc.rs",
+        "src/oci.rs",
+        "src/confidential_data_hub_ttrpc.rs",
+        "src/remote_ttrpc.rs",
+    ];
+
+    #[cfg(feature = "async")]
+    {
+        box_pointers_files.extend(vec![
+            "src/agent_ttrpc_async.rs",
+            "src/health_ttrpc_async.rs",
+            "src/confidential_data_hub_ttrpc_async.rs",
+            "src/remote_ttrpc_async.rs",
+        ]);
+    }
+
+    for f in box_pointers_files {
+        replace_text_in_file(f, "#![allow(box_pointers)]", "")?;
+    }
+
     Ok(())
 }
 
