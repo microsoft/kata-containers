@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use crate::rpc;
 use anyhow::{bail, ensure, Context, Result};
 use serde::Deserialize;
 use std::env;
@@ -63,7 +62,6 @@ pub struct AgentConfig {
     pub server_addr: String,
     pub unified_cgroup_hierarchy: bool,
     pub tracing: bool,
-    pub supports_seccomp: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,7 +135,6 @@ impl Default for AgentConfig {
             server_addr: format!("{}:{}", VSOCK_ADDR, DEFAULT_AGENT_VSOCK_PORT),
             unified_cgroup_hierarchy: false,
             tracing: false,
-            supports_seccomp: rpc::have_seccomp(),
         }
     }
 }
