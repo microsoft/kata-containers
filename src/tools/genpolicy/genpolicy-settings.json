@@ -329,7 +329,7 @@
             "regex": []
         },
         "CloseStdinRequest": false,
-        "ReadStreamRequest": true,
+        "ReadStreamRequest": false,
         "UpdateEphemeralMountsRequest": false,
         "WriteStreamRequest": false
     }
