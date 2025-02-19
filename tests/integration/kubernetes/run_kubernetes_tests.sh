@@ -45,6 +45,7 @@ else
 		"k8s-optional-empty-secret.bats" \
 		"k8s-pid-ns.bats" \
 		"k8s-pod-quota.bats" \
+		"k8s-policy-logs.bats" \
 		"k8s-port-forward.bats" \
 		"k8s-projected-volume.bats" \
 		"k8s-qos-pods.bats" \
