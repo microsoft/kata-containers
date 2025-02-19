@@ -97,6 +97,37 @@ pub async fn is_allowed_copy_file(req: &protocols::agent::CopyFileRequest) -> tt
     allow_request(&mut policy, "CopyFileRequest", &request).await
 }
 
+pub async fn is_allowed_create_container(
+    req: &protocols::agent::CreateContainerRequest,
+) -> ttrpc::Result<()> {
+    let env_map = oci::get_env_map(&req.OCI.Process.Env);
+
+    let create_container_request = PolicyCreateContainerRequest {
+        base: req.clone(),
+        env_map,
+    };
+
+    let request = serde_json::to_string(&create_container_request).unwrap();
+    let mut policy = AGENT_POLICY.lock().await;
+    allow_request(&mut policy, "CreateContainerRequest", &request).await
+}
+
+// pub async fn is_allowed_create_container_test(
+//     req: &protocols::agent::CreateContainerRequest,
+//     mut policy: AgentPolicy,
+// ) -> ttrpc::Result<()> {
+//     let env_map = oci::get_env_map(&req.OCI.Process.Env);
+
+//     let create_container_request = PolicyCreateContainerRequest {
+//         base: req.clone(),
+//         env_map,
+//     };
+
+//     let request = serde_json::to_string(&create_container_request).unwrap();
+//     // let mut policy = AGENT_POLICY.lock().await;
+//     allow_request(&mut policy, "CreateContainerRequest", &request).await
+// }
+
 pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::Result<()> {
     let request = serde_json::to_string(req).unwrap();
     let mut policy = AGENT_POLICY.lock().await;
@@ -116,24 +147,6 @@ struct PolicyCreateContainerRequest {
     base: protocols::agent::CreateContainerRequest,
     // a map of environment variable names to value
     env_map: std::collections::HashMap<String, String>,
-}
-
-fn map_request(ep: &str, input: &str) -> String {
-    println!("Mapping request");
-    match ep {
-        "CreateContainerRequest" => {
-            let req: protocols::agent::CreateContainerRequest =
-                serde_json::from_str(input).expect("JSON was not well-formatted");
-
-            let env_map = oci::get_env_map(&req.OCI.Process.Env);
-
-            let req_v2 = PolicyCreateContainerRequest { base: req, env_map };
-
-            serde_json::to_string(&req_v2).expect("failed to serialize")
-        }
-
-        _ => input.to_string(),
-    }
 }
 
 /// Singleton policy object.
@@ -257,8 +270,6 @@ impl AgentPolicy {
     /// Ask regorus if an API call should be allowed or not.
     async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
-
-        let ep_input = &map_request(ep, ep_input);
 
         self.log_request(ep, ep_input).await;
 
