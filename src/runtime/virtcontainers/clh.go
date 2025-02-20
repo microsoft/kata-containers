@@ -960,6 +960,12 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 	clhDisk.SetPciSegment(pciSegment)
 
 	for i := 0; true; i++ {
+		clh.Logger().
+			WithField("index", drive.Index).
+			WithField("segment", pciSegment).
+			WithField("queues", queues).
+			Debug("hotplugAddBlockDevice")
+
 		pciInfo, _, err := cl.VmAddDiskPut(ctx, clhDisk)
 
 		if err == nil {
