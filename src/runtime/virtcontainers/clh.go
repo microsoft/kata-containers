@@ -959,20 +959,34 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 	pciSegment := int32(drive.Index)/31 + 1
 	clhDisk.SetPciSegment(pciSegment)
 
-	pciInfo, _, err := cl.VmAddDiskPut(ctx, clhDisk)
+	for i := 0; true; i++ {
+		pciInfo, _, err := cl.VmAddDiskPut(ctx, clhDisk)
 
-	if err != nil {
-		return fmt.Errorf("failed to hotplug block device %+v %s", drive, openAPIClientError(err))
+		if err == nil {
+			clh.devicesIds[driveID] = pciInfo.GetId()
+			drive.PCIPath, err = clhPciInfoToPath(pciInfo)
+			clh.Logger().
+				WithField("bdf", pciInfo.Bdf).
+				WithField("index", drive.Index).
+				WithField("pcipath", drive.PCIPath).
+				WithField("segment", pciSegment).
+				Debug("hotplugAddBlockDevice")
+			break
+		} else {
+			clh.Logger().
+				WithField("index", drive.Index).
+				WithField("pcipath", drive.PCIPath).
+				WithField("segment", pciSegment).
+				WithError(err).
+				Error("hotplugAddBlockDevice")
+
+			if i >= 10 {
+				return fmt.Errorf("failed to hotplug block device %+v %s", drive, openAPIClientError(err))
+			} else {
+				time.Sleep(time.Duration(1) * time.Second)
+			}
+		}
 	}
-
-	clh.devicesIds[driveID] = pciInfo.GetId()
-	drive.PCIPath, err = clhPciInfoToPath(pciInfo)
-	clh.Logger().
-		WithField("bdf", pciInfo.Bdf).
-		WithField("index", drive.Index).
-		WithField("pcipath", drive.PCIPath).
-		WithField("segment", pciSegment).
-		Debug("hotplugAddBlockDevice")
 
 	return err
 }
