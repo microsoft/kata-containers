@@ -573,6 +573,7 @@ impl Container {
         self.registry = registry::get_container(config, &self.image).await.unwrap();
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn get_env_variables(
         &self,
         dest_env: &mut Vec<String>,
@@ -581,6 +582,7 @@ impl Container {
         namespace: &str,
         annotations: &Option<BTreeMap<String, String>>,
         service_account_name: &str,
+        settings: &settings::Settings,
     ) {
         if let Some(source_env) = &self.env {
             for env_variable in source_env {
@@ -590,6 +592,7 @@ impl Container {
                     namespace,
                     annotations,
                     service_account_name,
+                    settings,
                 );
                 let src_string = format!("{}={value}", &env_variable.name);
 
@@ -730,6 +733,7 @@ impl EnvVar {
         namespace: &str,
         annotations: &Option<BTreeMap<String, String>>,
         service_account_name: &str,
+        settings: &settings::Settings,
     ) -> String {
         if let Some(value) = &self.value {
             return value.clone();
@@ -761,7 +765,8 @@ impl EnvVar {
                     "spec.nodeName" => return "$(node-name)".to_string(),
                     "spec.serviceAccountName" => return service_account_name.to_string(),
                     _ => {
-                        if let Some(value) = self.get_annotation_value(path, annotations) {
+                        if let Some(value) = self.get_annotation_value(path, annotations, settings)
+                        {
                             return value;
                         } else {
                             panic!(
@@ -774,9 +779,8 @@ impl EnvVar {
             }
 
             if value_from.resourceFieldRef.is_some() {
-                // TODO: should resource fields such as "limits.cpu" or "limits.memory"
-                // be handled in a different way?
-                return "$(resource-field)".to_string();
+                settings.panic_on_undefined_variables(&self.name);
+                return "$(validate-from-settings)".to_string();
             }
         } else {
             panic!("Environment variable without value or valueFrom!");
@@ -789,6 +793,7 @@ impl EnvVar {
         &self,
         reference: &str,
         anno: &Option<BTreeMap<String, String>>,
+        settings: &settings::Settings,
     ) -> Option<String> {
         let prefix = "metadata.annotations['";
         let suffix = "']";
@@ -808,8 +813,9 @@ impl EnvVar {
                 }
             }
 
-            // TODO: should missing annotations be handled differently?
-            return Some("$(todo-annotation)".to_string());
+            settings.panic_on_undefined_variables(&self.name);
+
+            return Some("$(validate-from-settings)".to_string());
         }
         None
     }
