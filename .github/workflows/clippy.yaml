@@ -1,0 +1,55 @@
+name: Release Static checks / Rust Clippy Check
+
+on:
+  pull_request:
+    branches:
+      - msft-main
+
+jobs:
+  clippy:
+    name: Run Clippy on Rust Components
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdevmapper-dev clang llvm
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Run Clippy on agent
+        working-directory: src/agent
+        run: |
+          echo "Running Clippy on kata agent..."
+          if ! cargo clippy -- -D warnings; then
+            echo "❌ Clippy check failed for kata agent."
+            exit 1
+          fi
+          echo "✅ Clippy check passed for kata agent."
+
+      - name: Run Clippy on overlay
+        working-directory: src/overlay
+        run: |
+          echo "Running Clippy on kata overlay..."
+          if ! cargo clippy -- -D warnings; then
+            echo "❌ Clippy check failed for kata overlay."
+            exit 1
+          fi
+          echo "✅ Clippy check passed for kata overlay."
+
+      - name: Run Clippy on tardev-snapshotter
+        working-directory: src/tardev-snapshotter
+        run: |
+          echo "Running Clippy on tardev-snapshotter..."
+          if ! cargo clippy -- -D warnings; then
+            echo "❌ Clippy check failed for tardev-snapshotter."
+            exit 1
+          fi
+          echo "✅ Clippy check passed for tardev-snapshotter."

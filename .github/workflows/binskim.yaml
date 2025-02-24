@@ -1,0 +1,128 @@
+name: Release binary hardening checks / BinSkim Scan
+
+on:
+  pull_request:
+    branches:
+      - msft-main
+
+jobs:
+  binskim:
+    name: Run BinSkim on Compiled Binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          echo "Installing dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y git golang rustc cargo build-essential protobuf-compiler libprotobuf-dev expect libssl-dev clang libseccomp-dev btrfs-progs libdevmapper-dev cmake libfuse-dev
+          sudo add-apt-repository ppa:dotnet/backports
+          sudo apt-get install -y dotnet-sdk-9.0 aspnetcore-runtime-9.0 dotnet-runtime-9.0 zlib1g
+
+      - name: Set up BinSkim
+        run: |
+          dotnet new console -n TempConsoleApp
+          cd TempConsoleApp
+          echo "Installing BinSkim version 1.9.5"
+          dotnet add package Microsoft.CodeAnalysis.BinSkim --version 1.9.5
+          ls ~/.nuget/packages/microsoft.codeanalysis.binskim/
+          sudo mv ~/.nuget/packages/microsoft.codeanalysis.binskim/ $GITHUB_WORKSPACE
+          sudo ln -sf "$GITHUB_WORKSPACE/microsoft.codeanalysis.binskim/1.9.5/tools/netcoreapp3.1/linux-x64/BinSkim" /usr/local/bin/binskim
+          
+
+      - name: Build kata/kata-cc artifacts
+        run: |
+          echo "Building kata pod sandboxing binaries"
+          pushd tools/osbuilder/node-builder/azure-linux
+          # Adapt build script for ubuntu environment
+          sed -i 's|^OS_VERSION=.*|OS_VERSION="3.0"|' common.sh
+          make package
+          popd
+
+          # Prepare go binaries for binskim
+          pushd src/runtime
+          strip --strip-unneeded containerd-shim-kata-v2
+          popd
+
+          mkdir -p artifacts/vanilla artifacts/confpods
+          KATA_AGENT_PATH=$(find src/agent/ -type f -name "kata-agent" | head -n 1)
+          KATA_SHIM_PATH=$(find src/runtime/ -type f -name "containerd-shim-kata-v2" | head -n 1)
+
+          echo "agent: ${KATA_AGENT_PATH}"
+          echo "shim: ${KATA_SHIM_PATH}"
+
+          # Move kata pod sandboxing binaries to artifacts/vanilla
+          mv "${KATA_AGENT_PATH}" "${KATA_SHIM_PATH}" artifacts/vanilla/
+
+          echo "Building kata confpod binaries"
+          pushd tools/osbuilder/node-builder/azure-linux
+          make clean
+          make package-confpods
+          popd
+
+          TARDEV_SNAPSHOTTER_PATH=$(find src/tardev-snapshotter/ -type f -name "tardev-snapshotter" | head -n 1)
+          OVERLAY_PATH=$(find src/overlay/ -type f -name "kata-overlay" | head -n 1)
+          echo "tardev: ${TARDEV_SNAPSHOTTER_PATH}"
+          echo "overlay: ${OVERLAY_PATH}"
+
+          # Prepare go binaries for binskim
+          pushd src/runtime
+          strip --strip-unneeded containerd-shim-kata-v2
+          popd
+
+          # Move kata confpod binaries to artifacts/confpods
+          mv "${KATA_AGENT_PATH}" "${KATA_SHIM_PATH}" "${TARDEV_SNAPSHOTTER_PATH}" "${OVERLAY_PATH}" artifacts/confpods/
+
+      - name: Run BinSkim on kata pod sandboxing binaries
+        run: |
+          for binary in artifacts/vanilla/*; do
+            echo "Running BinSkim on $binary"
+            binskim analyze "$binary" --level Error --kind "Pass;Fail" > "${binary}_binskim_result"
+          done
+
+      - name: Run BinSkim on kata confpod binaries
+        run: |
+          for binary in artifacts/confpods/*; do
+            echo "Running BinSkim on $binary"
+            binskim analyze "$binary" --level Error --kind "Pass;Fail" > "${binary}_binskim_result"
+          done
+
+      - name: Validate BinSkim results
+        run: |
+          # Validate pod sandboxing binaries
+          for result in artifacts/vanilla/*_binskim_result; do
+            if [ ! -f "$result" ]; then
+              echo "❌ Error: $result was not generated."
+              exit 1
+            fi
+            echo "Validating: pod sandboxing ${result}" 
+            cat "$result"
+
+            if grep -qi "fail" "$result"; then
+              echo "❌ Error: Failures detected in pod sandboxing binary: $result"
+              exit 1
+            fi
+            echo "--------------------------- End-------------------------"
+          done
+          echo "✅ All pod sandboxing binaries passed BinSkim."
+
+          # Validate confpod binaries
+          for result in artifacts/confpods/*_binskim_result; do
+            if [ ! -f "$result" ]; then
+              echo "❌ Error: $result was not generated."
+              exit 1
+            fi
+            echo "Validating: conf pod ${result}" 
+            cat "$result"
+
+            if grep -qi "fail" "$result"; then
+              echo "❌ Error: Failures detected in Confidential Pod binary: $result"
+              exit 1
+            fi
+            echo "--------------------------- End-------------------------"
+          done
+          echo "✅ All confpod binaries passed BinSkim."
+
