@@ -357,7 +357,8 @@
                 "^AZURE_FEDERATED_TOKEN_FILE=/var/run/secrets/azure/tokens/azure-identity-token$",
                 "^AZURE_AUTHORITY_HOST=https://login\\.microsoftonline\\.com/$",
                 "^TERM=xterm$"
-            ]
+            ],
+            "allow_env_regex_map": {}
         },
         "UpdateInterfaceRequest": {
             "allow_raw_flags": 128,
