@@ -58,6 +58,10 @@ next_command = "sudo chmod a+rw /var/run/containerd/containerd.sock"
 print("========== COMMAND: " + next_command)
 runCmd(next_command)
 
+print("Modifying settings for testing")
+runCmd("cp genpolicy-settings.json default-genpolicy-settings.json")
+runCmd("./tests/adapt_settings_for_tests.sh")
+
 # update files
 genpolicy_path = "./target/x86_64-unknown-linux-gnu/debug/genpolicy"
 
@@ -83,3 +87,6 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as execut
 total_end = time.time()
 
 print(f"Total time taken: {total_end - total_start} seconds")
+
+print("Restoring settings to default")
+runCmd("mv default-genpolicy-settings.json genpolicy-settings.json")
