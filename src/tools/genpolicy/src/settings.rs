@@ -86,4 +86,17 @@ impl Settings {
             &self.other_container
         }
     }
+
+    pub fn panic_on_undefined_variables(&self, var_name: &str) {
+        if !self
+            .request_defaults
+            .CreateContainerRequest
+            .allow_env_regex_map
+            .contains_key(var_name)
+        {
+            panic!(
+            "Env var: please add a regex validation entry for {} in the settings request_defaults.CreateContainerRequest.allow_env_regex_map",
+            var_name);
+        }
+    }
 }

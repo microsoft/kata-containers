@@ -307,6 +307,7 @@ pub struct PersistentVolumeClaimVolume {
 pub struct CreateContainerRequestDefaults {
     /// Allow env variables that match any of these regexes.
     allow_env_regex: Vec<String>,
+    pub allow_env_regex_map: BTreeMap<String, String>,
 }
 
 /// ExecProcessRequest settings from genpolicy-settings.json.
@@ -655,6 +656,7 @@ impl AgentPolicy {
             namespace,
             resource.get_annotations(),
             service_account_name,
+            &self.settings,
         );
 
         substitute_env_variables(&mut process.Env);
