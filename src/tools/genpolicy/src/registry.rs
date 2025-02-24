@@ -11,7 +11,7 @@ use crate::policy;
 use crate::verity;
 
 use crate::utils::Config;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use docker_credential::{CredentialRetrievalError, DockerCredential};
 use fs2::FileExt;
 use log::warn;
@@ -331,7 +331,7 @@ async fn get_verity_hash(
         if use_cached_files {
             std::fs::remove_file(cache_file)?;
         }
-        warn!("{error_message}");
+        bail!(error_message);
     }
     Ok(verity_hash)
 }
