@@ -892,10 +892,15 @@ allow_var(p_process, i_process, i_var, s_name, s_namespace) {
 
     p_name_value[0] == name_value[0]
 
-    # TODO: should these be handled in a different way?
-    always_allowed = ["$(resource-field)", "$(todo-annotation)"]
-    some allowed in always_allowed
-    contains(p_name_value[1], allowed)
+    # a variable we should be validating using a regex from settings
+    p_name_value[1] == "$(validate-from-settings)"
+
+    regex_val := policy_data.request_defaults.CreateContainerRequest.allow_env_regex_map[name_value[0]]
+
+    print("allow_var 7: val =", name_value[1])
+    print("allow_var 7: regex_val =", regex_val)
+
+    regex.match(regex_val, name_value[1])
 
     print("allow_var 7: true")
 }
