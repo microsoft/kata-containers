@@ -1069,12 +1069,53 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hash
     p_storage.driver_options   == i_storage.driver_options
     p_storage.fs_group         == i_storage.fs_group
 
+    allow_storage_source(p_storage, i_storage, layer_ids, root_hashes)
     allow_storage_options(p_storage, i_storage, layer_ids, root_hashes)
     allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids)
 
-    # TODO: validate the source field too.
-
     print("allow_storage: true")
+}
+
+allow_storage_source(p_storage, i_storage, layer_ids, root_hashes) {
+    print("allow_storage_source 1: start")
+
+    p_storage.source == i_storage.source
+
+    print("allow_storage_source 1: true")
+}
+
+allow_storage_source(p_storage, i_storage, layer_ids, root_hashes) {
+    print("allow_storage_source 2: start")
+
+    p_storage.driver == "blk"
+
+    # DDDD:BB:DD.F: Domain:Bus:Device.Function
+    # https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-bus-pci
+    regex.match(`^[a-f0-9]{4}:[a-f0-9]{2}:[a-f0-9]{2}\.[a-f0-9]$`, i_storage.source)
+
+    print("allow_storage_source 2: true")
+}
+
+allow_storage_source(p_storage, i_storage, layer_ids, root_hashes) {
+    print("allow_storage_source 3: start")
+
+    p_storage.driver == "overlayfs"
+    i_storage.source == "none"
+
+    print("allow_storage_source 3: true")
+}
+
+allow_storage_source(p_storage, i_storage, layer_ids, root_hashes) {
+    print("allow_storage_source 4: start")
+
+    p_storage.driver == "smb"
+
+    # Pattern: //<storage-account-name>.file.core.windows.net/<k8s-PVC-name>
+    # Storage account name: https://learn.microsoft.com/en-us/azure/storage/common/storage-account-overview#storage-account-name
+    # K8s PVC name: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names
+    regex.match(`^\/\/([a-z0-9]{3,24})\.file\.core\.windows\.net\/[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$`, i_storage.source)
+
+    print("allow_storage_source 4: true")
 }
 
 allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
