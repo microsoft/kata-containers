@@ -29,16 +29,21 @@ mkdir -p "${PREFIX}/${SHIM_CONFIG_PATH}"
 mkdir -p "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
 mkdir -p "${PREFIX}/${SHIM_BINARIES_PATH}"
 
-if [ "${CONF_PODS}" == "yes" ]; then
-	echo "Installing tardev-snapshotter binaries and service file"
-	mkdir -p ${PREFIX}/usr/sbin
-	cp -a --backup=numbered src/utarfs/target/release/utarfs ${PREFIX}/usr/sbin/mount.tar
-	mkdir -p ${PREFIX}/usr/bin
-	cp -a --backup=numbered src/overlay/target/release/kata-overlay ${PREFIX}/usr/bin/
-	cp -a --backup=numbered src/tardev-snapshotter/target/release/tardev-snapshotter ${PREFIX}/usr/bin/
-	mkdir -p ${PREFIX}/usr/lib/systemd/system/
-	cp -a --backup=numbered src/tardev-snapshotter/tardev-snapshotter.service ${PREFIX}/usr/lib/systemd/system/
+echo "Installing tardev-snapshotter binaries and service file"
+mkdir -p ${PREFIX}/usr/sbin
+cp -a --backup=numbered src/utarfs/target/release/utarfs ${PREFIX}/usr/sbin/mount.tar
+mkdir -p ${PREFIX}/usr/bin
+cp -a --backup=numbered src/overlay/target/release/kata-overlay ${PREFIX}/usr/bin/
+cp -a --backup=numbered src/tardev-snapshotter/target/release/tardev-snapshotter ${PREFIX}/usr/bin/
+mkdir -p ${PREFIX}/usr/lib/systemd/system/
+cp -a --backup=numbered src/tardev-snapshotter/tardev-snapshotter.service ${PREFIX}/usr/lib/systemd/system/
 
+echo "Enabling and starting snapshotter service"
+if [ "${START_SERVICES}" == "yes" ]; then
+	systemctl enable tardev-snapshotter && systemctl daemon-reload && systemctl restart tardev-snapshotter
+fi
+
+if [ "${CONF_PODS}" == "yes" ]; then
 	if [ "${SHIM_REDEPLOY_CONFIG}" == "yes" ]; then
 		echo "Installing SNP shim debug configuration"
 		cp -a --backup=numbered src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}"/"${SHIM_DBG_CONFIG_INST_FILE_NAME}"
@@ -50,11 +55,6 @@ if [ "${CONF_PODS}" == "yes" ]; then
 		# We simply override the release config with the debug config,
 		# which is probably fine when debugging.
 		ln -sf src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" src/runtime/config/"${SHIM_CONFIG_FILE_NAME}" 
-	fi
-
-	echo "Enabling and starting snapshotter service"
-	if [ "${START_SERVICES}" == "yes" ]; then
-		systemctl enable tardev-snapshotter && systemctl daemon-reload && systemctl restart tardev-snapshotter
 	fi
 fi
 

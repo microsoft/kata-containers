@@ -132,7 +132,7 @@ default_maxmemory = @DEFMAXMEMSZ@
 #   - virtio-fs (default)
 #   - virtio-fs-nydus
 #   - none
-shared_fs = "@DEFSHAREDFS_CLH_VIRTIOFS@"
+shared_fs = "none"
 
 # Path to vhost-user-fs daemon.
 virtio_fs_daemon = "@DEFVIRTIOFSDAEMON@"

@@ -41,29 +41,27 @@ fi
 
 agent_make_flags="LIBC=gnu OPENSSL_NO_VENDOR=Y DESTDIR=${AGENT_INSTALL_DIR} BUILD_TYPE=${AGENT_BUILD_TYPE}"
 
-if [ "${CONF_PODS}" == "yes" ]; then
-	agent_make_flags+=" AGENT_POLICY=yes"
-fi
+#if [ "${CONF_PODS}" == "yes" ]; then
+#	agent_make_flags+=" AGENT_POLICY=yes"
+#fi
+agent_make_flags+=" AGENT_POLICY=yes"
 
 pushd "${repo_dir}"
 
-if [ "${CONF_PODS}" == "yes" ]; then
+echo "Building utarfs binary"
+pushd src/utarfs/
+make all
+popd
 
-	echo "Building utarfs binary"
-	pushd src/utarfs/
-	make all
-	popd
+echo "Building kata-overlay binary"
+pushd src/overlay/
+make all
+popd
 
-	echo "Building kata-overlay binary"
-	pushd src/overlay/
-	make all
-	popd
-
-	echo "Building tardev-snapshotter service binary"
-	pushd src/tardev-snapshotter/
-	make all
-	popd
-fi
+echo "Building tardev-snapshotter service binary"
+pushd src/tardev-snapshotter/
+make all
+popd
 
 echo "Building shim binary and configuration"
 pushd src/runtime/
