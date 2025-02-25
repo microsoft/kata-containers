@@ -110,6 +110,7 @@ impl yaml::K8sResource for ConfigMap {
         _config: &Config,
         doc_mapping: &serde_yaml::Value,
         _silent_unsupported_fields: bool,
+        _image_pull: &str,
     ) {
         self.doc_mapping = doc_mapping.clone();
     }

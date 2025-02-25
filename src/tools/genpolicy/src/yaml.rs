@@ -48,6 +48,7 @@ pub trait K8sResource {
         config: &Config,
         doc_mapping: &serde_yaml::Value,
         silent_unsupported_fields: bool,
+        image_pull: &str,
     );
 
     fn generate_policy(&self, _agent_policy: &policy::AgentPolicy) -> String {
@@ -258,17 +259,17 @@ pub fn get_yaml_header(yaml: &str) -> anyhow::Result<YamlHeader> {
     Ok(serde_yaml::from_str(yaml)?)
 }
 
-pub async fn k8s_resource_init(spec: &mut pod::PodSpec, config: &Config) {
+pub async fn k8s_resource_init(spec: &mut pod::PodSpec, config: &Config, image_pull: &str) {
     for container in &mut spec.containers {
-        container.init(config).await;
+        container.init(config, image_pull).await;
     }
 
-    pod::add_pause_container(&mut spec.containers, config).await;
+    pod::add_pause_container(&mut spec.containers, config, image_pull).await;
 
     if let Some(init_containers) = &spec.initContainers {
         for container in init_containers {
             let mut new_container = container.clone();
-            new_container.init(config).await;
+            new_container.init(config, image_pull).await;
             spec.containers.insert(1, new_container);
         }
     }

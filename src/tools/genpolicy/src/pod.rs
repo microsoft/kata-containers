@@ -578,9 +578,9 @@ struct TopologySpreadConstraint {
 }
 
 impl Container {
-    pub async fn init(&mut self, config: &Config) {
+    pub async fn init(&mut self, config: &Config, image_pull: &str) {
         // Load container image properties from the registry.
-        self.registry = registry::get_container(config, &self.image).await.unwrap();
+        self.registry = registry::get_container(config, &self.image, image_pull).await.unwrap();
     }
 
     pub fn get_env_variables(
@@ -821,8 +821,14 @@ impl EnvVar {
 
 #[async_trait]
 impl yaml::K8sResource for Pod {
-    async fn init(&mut self, config: &Config, doc_mapping: &serde_yaml::Value, _silent: bool) {
-        yaml::k8s_resource_init(&mut self.spec, config).await;
+    async fn init(
+        &mut self, 
+        config: &Config, 
+        doc_mapping: &serde_yaml::Value, 
+        _silent: bool,
+        image_pull: &str,
+    ) {
+        yaml::k8s_resource_init(&mut self.spec, config, image_pull).await;
         self.doc_mapping = doc_mapping.clone();
     }
 
@@ -982,7 +988,7 @@ fn compress_capabilities(capabilities: &mut Vec<String>, defaults: &policy::Comm
     }
 }
 
-pub async fn add_pause_container(containers: &mut Vec<Container>, config: &Config) {
+pub async fn add_pause_container(containers: &mut Vec<Container>, config: &Config, image_pull: &str) {
     debug!("Adding pause container...");
     let mut pause_container = Container {
         image: config.settings.cluster_config.pause_container_image.clone(),
@@ -998,7 +1004,7 @@ pub async fn add_pause_container(containers: &mut Vec<Container>, config: &Confi
         }),
         ..Default::default()
     };
-    pause_container.init(config).await;
+    pause_container.init(config, image_pull).await;
     containers.insert(0, pause_container);
     debug!("pause container added.");
 }

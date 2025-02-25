@@ -39,12 +39,18 @@ impl Debug for dyn yaml::K8sResource + Send + Sync {
 
 #[async_trait]
 impl yaml::K8sResource for List {
-    async fn init(&mut self, config: &Config, _doc_mapping: &serde_yaml::Value, silent: bool) {
+    async fn init(
+        &mut self, 
+        config: &Config, 
+        _doc_mapping: &serde_yaml::Value, 
+        silent: bool,
+        image_pull: &str,
+    ) {
         // Create K8sResource objects for each item in this List.
         for item in &self.items {
             let yaml_string = serde_yaml::to_string(&item).unwrap();
             let (mut resource, _kind) = yaml::new_k8s_resource(&yaml_string, silent).unwrap();
-            resource.init(config, item, silent).await;
+            resource.init(config, item, silent, image_pull).await;
             self.resources.push(resource);
         }
     }

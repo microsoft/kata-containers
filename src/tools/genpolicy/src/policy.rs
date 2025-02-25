@@ -431,7 +431,7 @@ impl AgentPolicy {
                     }
                 }
 
-                resource.init(config, &doc_mapping, silent).await;
+                resource.init(config, &doc_mapping, silent, &config.settings.common.image_pull).await;
 
                 // ConfigMap and Secret documents contain additional input for policy generation.
                 if kind.eq("ConfigMap") {
@@ -563,9 +563,12 @@ impl AgentPolicy {
             is_pause_container,
         );
 
-        let image_layers = yaml_container.registry.get_image_layers();
         let mut storages = Default::default();
-        get_image_layer_storages(&mut storages, &image_layers, &root);
+
+        if self.config.settings.common.image_pull == "tarfs" {
+            let image_layers = yaml_container.registry.get_image_layers();
+            get_image_layer_storages(&mut storages, &image_layers, &root);
+        }
         resource.get_container_mounts_and_storages(
             &mut mounts,
             &mut storages,

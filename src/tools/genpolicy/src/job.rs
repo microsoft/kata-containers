@@ -48,8 +48,9 @@ impl yaml::K8sResource for Job {
         config: &Config,
         doc_mapping: &serde_yaml::Value,
         _silent_unsupported_fields: bool,
+        image_pull: &str,
     ) {
-        yaml::k8s_resource_init(&mut self.spec.template.spec, config).await;
+        yaml::k8s_resource_init(&mut self.spec.template.spec, config, image_pull).await;
         self.doc_mapping = doc_mapping.clone();
     }
 

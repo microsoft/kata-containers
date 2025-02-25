@@ -24,6 +24,7 @@ impl yaml::K8sResource for NoPolicyResource {
         _config: &Config,
         _doc_mapping: &serde_yaml::Value,
         _silent_unsupported_fields: bool,
+        _image_pull: &str,
     ) {
     }
 

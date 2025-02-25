@@ -111,7 +111,7 @@ const PASSWD_FILE_WHITEOUT_TAR_PATH: &str = "etc/.wh.passwd";
 const WHITEOUT_MARKER: &str = "WHITEOUT";
 
 impl Container {
-    pub async fn new(config: &Config, image: &str) -> Result<Self> {
+    pub async fn new(config: &Config, image: &str, image_pull: &str) -> Result<Self> {
         info!("============================================");
         info!("Pulling manifest and config for {image}");
         let image_string = image.to_string();
@@ -143,15 +143,19 @@ impl Container {
                     serde_json::from_str(&config_layer_str).unwrap();
                 debug!("config_layer: {:?}", &config_layer);
 
-                let image_layers = get_image_layers(
-                    config.layers_cache_file_path.clone(),
-                    &mut client,
-                    &reference,
-                    &manifest,
-                    &config_layer,
-                )
-                .await
-                .unwrap();
+                let image_layers = if image_pull != "tarfs" {
+                    Default::default()
+                } else {
+                    get_image_layers(
+                        config.layers_cache_file_path.clone(),
+                        &mut client,
+                        &reference,
+                        &manifest,
+                        &config_layer,
+                    )
+                    .await
+                    .unwrap()
+                };
 
                 Ok(Container {
                     image: image_string,
@@ -591,7 +595,7 @@ pub fn get_verity_hash_and_users(path: &Path) -> Result<(String, String)> {
     Ok((result, passwd))
 }
 
-pub async fn get_container(config: &Config, image: &str) -> Result<Container> {
+pub async fn get_container(config: &Config, image: &str, image_pull: &str) -> Result<Container> {
     if let Some(socket_path) = &config.containerd_socket_path {
         return Container::new_containerd_pull(
             config.layers_cache_file_path.clone(),
@@ -600,7 +604,7 @@ pub async fn get_container(config: &Config, image: &str) -> Result<Container> {
         )
         .await;
     }
-    Container::new(config, image).await
+    Container::new(config, image, image_pull).await
 }
 
 fn build_auth(reference: &Reference) -> RegistryAuth {

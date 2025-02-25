@@ -46,8 +46,14 @@ struct ReplicaSetSpec {
 
 #[async_trait]
 impl yaml::K8sResource for ReplicaSet {
-    async fn init(&mut self, config: &Config, doc_mapping: &serde_yaml::Value, _silent: bool) {
-        yaml::k8s_resource_init(&mut self.spec.template.spec, config).await;
+    async fn init(
+        &mut self, 
+        config: &Config, 
+        doc_mapping: &serde_yaml::Value, 
+        _silent: bool,
+        image_pull: &str,
+    ) {
+        yaml::k8s_resource_init(&mut self.spec.template.spec, config, image_pull).await;
         self.doc_mapping = doc_mapping.clone();
     }
 

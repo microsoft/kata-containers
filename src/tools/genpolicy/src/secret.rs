@@ -99,7 +99,13 @@ pub fn get_values(secret_name: &str, secrets: &Vec<Secret>) -> Option<Vec<String
 
 #[async_trait]
 impl yaml::K8sResource for Secret {
-    async fn init(&mut self, _config: &Config, doc_mapping: &serde_yaml::Value, _silent: bool) {
+    async fn init(
+        &mut self, 
+        _config: &Config, 
+        doc_mapping: &serde_yaml::Value, 
+        _silent: bool,
+        _image_pull: &str,
+    ) {
         self.doc_mapping = doc_mapping.clone();
     }
 
