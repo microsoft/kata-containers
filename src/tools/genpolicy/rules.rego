@@ -970,6 +970,7 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hash
     p_storage.driver           == i_storage.driver
     p_storage.driver_options   == i_storage.driver_options
     p_storage.fs_group         == i_storage.fs_group
+    p_storage.fstype           == i_storage.fstype
 
     allow_storage_source(p_storage, i_storage, layer_ids, root_hashes)
     allow_storage_options(p_storage, i_storage, layer_ids, root_hashes)
