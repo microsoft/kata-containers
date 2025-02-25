@@ -375,8 +375,11 @@ pub struct CommonData {
     /// Regex for a K8s service name.
     pub svc_name: String,
 
-    // Regex for a DNS label (e.g., host name).
+    /// Regex for a DNS label (e.g., host name).
     pub dns_label: String,
+
+    /// Image pull type: nydus_guest or tarfs.
+    pub image_pull: String,
 
     /// Default capabilities for a non-privileged container.
     pub default_caps: Vec<String>,

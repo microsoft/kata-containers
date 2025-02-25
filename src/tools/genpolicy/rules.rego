@@ -630,7 +630,7 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) {
     }
 
     # TODO: enable allow_storages() after fixing https://github.com/kata-containers/kata-containers/issues/8833
-    # allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
+    allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
 
     print("allow_by_bundle_or_sandbox_id: true")
 }
@@ -969,6 +969,13 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) {
     }
 
     print("allow_storages: true")
+}
+allow_storages(p_storages, i_storages, bundle_id, sandbox_id) {
+    print("allow_storages 2: image_pull =", policy_data.common.image_pull)
+
+    policy_data.common.image_pull == "nydus_guest"
+
+    print("allow_storages 2: true")
 }
 
 allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hashes) {
