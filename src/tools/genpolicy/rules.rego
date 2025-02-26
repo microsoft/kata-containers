@@ -946,6 +946,8 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
 # Create container Storages
 
 allow_storages(p_storages, i_storages, bundle_id, sandbox_id) {
+    policy_data.common.image_pull == "tarfs"
+
     p_count := count(p_storages)
     i_count := count(i_storages)
     print("allow_storages: p_count =", p_count, "i_count =", i_count)
@@ -975,6 +977,10 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) {
 
     policy_data.common.image_pull == "nydus_guest"
 
+    every i_storage in i_storages {
+        allow_storage_nydus(p_storages, i_storage, bundle_id, sandbox_id)
+    }
+
     print("allow_storages 2: true")
 }
 
@@ -994,6 +1000,26 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hash
     # TODO: validate the source field too.
 
     print("allow_storage: true")
+}
+
+allow_storage_nydus(p_storages, i_storage, bundle_id, sandbox_id) {
+    #some p_storage in p_storages
+
+    #print("allow_storage_nydus: p_storage =", p_storage)
+    print("allow_storage_nydus: i_storage =", i_storage)
+
+    #p_storage.driver           == i_storage.driver
+    #p_storage.driver_options   == i_storage.driver_options
+    #p_storage.fs_group         == i_storage.fs_group
+
+    #allow_storage_options_nydus(p_storage, i_storage)
+    #allow_mount_point_nydus(p_storage, i_storage, bundle_id, sandbox_id)
+
+    # TODO: validate the source field too.
+
+    count(p_storages) == 1
+
+    print("allow_storage_nydus: true")
 }
 
 allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
@@ -1070,6 +1096,17 @@ allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
 
     print("allow_storage_options 3: true")
 }
+
+allow_storage_options_nydus(p_storage, i_storage) {
+    print("allow_storage_options 1: start")
+
+    p_storage.driver != "blk"
+    p_storage.driver != "overlayfs"
+    p_storage.options == i_storage.options
+
+    print("allow_storage_options 1: true")
+}
+
 
 allow_overlay_layer(policy_id, policy_hash, i_option) {
     print("allow_overlay_layer: policy_id =", policy_id, "policy_hash =", policy_hash)
@@ -1163,6 +1200,51 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
 
     print("allow_mount_point 5: true")
 }
+
+
+allow_mount_point_nydus(p_storage, i_storage, bundle_id, sandbox_id) {
+    p_storage.fstype == "local"
+
+    mount1 := p_storage.mount_point
+    print("allow_mount_point 3: mount1 =", mount1)
+
+    mount2 := replace(mount1, "$(cpath)", policy_data.common.cpath)
+    print("allow_mount_point 3: mount2 =", mount2)
+
+    mount3 := replace(mount2, "$(sandbox-id)", sandbox_id)
+    print("allow_mount_point 3: mount3 =", mount3)
+
+    regex.match(mount3, i_storage.mount_point)
+
+    print("allow_mount_point 3: true")
+}
+allow_mount_point_nydus(p_storage, i_storage, bundle_id, sandbox_id) {
+    p_storage.fstype == "bind"
+
+    mount1 := p_storage.mount_point
+    print("allow_mount_point 4: mount1 =", mount1)
+
+    mount2 := replace(mount1, "$(cpath)", policy_data.common.cpath)
+    print("allow_mount_point 4: mount2 =", mount2)
+
+    mount3 := replace(mount2, "$(bundle-id)", bundle_id)
+    print("allow_mount_point 4: mount3 =", mount3)
+
+    regex.match(mount3, i_storage.mount_point)
+
+    print("allow_mount_point 4: true")
+}
+allow_mount_point_nydus(p_storage, i_storage, bundle_id, sandbox_id) {
+    p_storage.fstype == "tmpfs"
+
+    mount1 := p_storage.mount_point
+    print("allow_mount_point 5: mount1 =", mount1)
+
+    regex.match(mount1, i_storage.mount_point)
+
+    print("allow_mount_point 5: true")
+}
+
 
 # process.Capabilities
 allow_caps(p_caps, i_caps) {
