@@ -24,7 +24,7 @@ source "${common_file}"
 rootfs_make_flags="AGENT_SOURCE_BIN=${AGENT_INSTALL_DIR}/usr/bin/kata-agent OS_VERSION=${OS_VERSION}"
 
 if [ "${CONF_PODS}" == "yes" ]; then
-	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=${AGENT_POLICY_FILE}"
+	rootfs_make_flags+=" CONF_GUEST=yes"
 fi
 
 if [ "${CONF_PODS}" == "yes" ]; then
