@@ -129,9 +129,9 @@ pub struct KataProcess {
     #[serde(default)]
     pub User: KataUser,
 
-    /// Args specifies the binary and arguments for the application to execute.
+    /// DeprecatedArgs specifies the binary and arguments for the application to execute.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub Args: Vec<String>,
+    pub DeprecatedArgs: Vec<String>,
 
     /// Env populates the process environment for the process.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -639,7 +639,8 @@ impl AgentPolicy {
 
         yaml_container.apply_capabilities(&mut process.Capabilities, &self.settings.common);
 
-        let (yaml_has_command, yaml_has_args) = yaml_container.get_process_args(&mut process.Args);
+        let (yaml_has_command, yaml_has_args) =
+            yaml_container.get_process_args(&mut process.DeprecatedArgs);
         yaml_container
             .registry
             .get_process(&mut process, yaml_has_command, yaml_has_args);
@@ -672,7 +673,7 @@ impl AgentPolicy {
         );
 
         substitute_env_variables(&mut process.Env);
-        substitute_args_env_variables(&mut process.Args, &process.Env);
+        substitute_args_env_variables(&mut process.DeprecatedArgs, &process.Env);
 
         c_settings.get_process_fields(&mut process);
         resource.get_process_fields(&mut process);
@@ -699,7 +700,7 @@ impl KataSpec {
 
         process.User.AdditionalGids = self.Process.User.AdditionalGids.to_vec();
         process.User.Username = String::from(&self.Process.User.Username);
-        add_missing_strings(&self.Process.Args, &mut process.Args);
+        add_missing_strings(&self.Process.DeprecatedArgs, &mut process.DeprecatedArgs);
 
         add_missing_strings(&self.Process.Env, &mut process.Env);
     }
