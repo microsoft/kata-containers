@@ -799,7 +799,7 @@ allow_process_common(p_process, i_process, s_name, s_namespace) {
 allow_process(p_process, i_process, s_name, s_namespace) {
     print("allow_process: start")
 
-    allow_args(p_process, i_process, s_name)
+    allow_deprecated_args(p_process, i_process, s_name)
     allow_process_common(p_process, i_process, s_name, s_namespace)
     allow_caps(p_process.Capabilities, i_process.Capabilities)
     p_process.Terminal == i_process.Terminal
@@ -848,54 +848,54 @@ allow_user(p_process, i_process) {
     # based on /etc/passwd and /etc/group from the container image.
 }
 
-allow_args(p_process, i_process, s_name) {
-    print("allow_args 1: no args")
+allow_deprecated_args(p_process, i_process, s_name) {
+    print("allow_deprecated_args 1: no args")
 
-    not p_process.Args
+    not p_process.DeprecatedArgs
     not i_process.Args
 
-    print("allow_args 1: true")
+    print("allow_deprecated_args 1: true")
 }
-allow_args(p_process, i_process, s_name) {
-    print("allow_args 2: policy args =", p_process.Args)
-    print("allow_args 2: input args =", i_process.Args)
+allow_deprecated_args(p_process, i_process, s_name) {
+    print("allow_deprecated_args 2: policy args =", p_process.DeprecatedArgs)
+    print("allow_deprecated_args 2: input args =", i_process.Args)
 
-    count(p_process.Args) == count(i_process.Args)
+    count(p_process.DeprecatedArgs) == count(i_process.Args)
 
     every i, i_arg in i_process.Args {
-        allow_arg(i, i_arg, p_process, s_name)
+        allow_deprecated_arg(i, i_arg, p_process, s_name)
     }
 
-    print("allow_args 2: true")
+    print("allow_deprecated_args 2: true")
 }
-allow_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.Args[i]
-    print("allow_arg 1: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
+allow_deprecated_arg(i, i_arg, p_process, s_name) {
+    p_arg := p_process.DeprecatedArgs[i]
+    print("allow_deprecated_arg 1: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
 
     p_arg2 := replace(p_arg, "$$", "$")
     p_arg2 == i_arg
 
-    print("allow_arg 1: true")
+    print("allow_deprecated_arg 1: true")
 }
-allow_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.Args[i]
-    print("allow_arg 2: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
+allow_deprecated_arg(i, i_arg, p_process, s_name) {
+    p_arg := p_process.DeprecatedArgs[i]
+    print("allow_deprecated_arg 2: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
 
     # TODO: can $(node-name) be handled better?
     contains(p_arg, "$(node-name)")
 
-    print("allow_arg 2: true")
+    print("allow_deprecated_arg 2: true")
 }
-allow_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.Args[i]
-    print("allow_arg 3: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
+allow_deprecated_arg(i, i_arg, p_process, s_name) {
+    p_arg := p_process.DeprecatedArgs[i]
+    print("allow_deprecated_arg 3: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
 
     p_arg2 := replace(p_arg, "$$", "$")
     p_arg3 := replace(p_arg2, "$(sandbox-name)", s_name)
-    print("allow_arg 3: p_arg3 =", p_arg3)
+    print("allow_deprecated_arg 3: p_arg3 =", p_arg3)
     p_arg3 == i_arg
 
-    print("allow_arg 3: true")
+    print("allow_deprecated_arg 3: true")
 }
 
 # OCI process.Env field
