@@ -178,6 +178,7 @@ func createAllRuntimeConfigFiles(dir, hypervisor string) (testConfig testRuntime
 		GuestHookPath:         defaultGuestHookPath,
 		VhostUserStorePath:    defaultVhostUserStorePath,
 		SharedFS:              sharedFS,
+		HypervisorLoglevel:    defaultHypervisorLoglevel,
 		VirtioFSDaemon:        virtioFSdaemon,
 		VirtioFSCache:         defaultVirtioFSCacheMode,
 		PFlash:                []string{},
