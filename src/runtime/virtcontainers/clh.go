@@ -942,7 +942,7 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 	}
 
 	queues := int32(clh.config.NumVCPUs())
-	queueSize := int32(1024)
+	queueSize := int32(128)
 	clhDisk.NumQueues = &queues
 	clhDisk.QueueSize = &queueSize
 	clhDisk.SetIommu(clh.config.IOMMU)
@@ -1764,7 +1764,7 @@ func (clh *cloudHypervisor) addVolume(volume types.Volume) error {
 	// numQueues and queueSize are required, let's use the
 	// default values defined by cloud-hypervisor
 	numQueues := int32(1)
-	queueSize := int32(1024)
+	queueSize := int32(128)
 	if clh.config.VirtioFSQueueSize != 0 {
 		queueSize = int32(clh.config.VirtioFSQueueSize)
 	}
