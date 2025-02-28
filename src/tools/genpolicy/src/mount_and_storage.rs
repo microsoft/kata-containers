@@ -500,9 +500,13 @@ pub fn handle_persistent_volume_claim(
             },
             driver_options: Vec::new(),
             fs_group: None,
-            source: "$(direct-vol-path)".to_string(),
+            source: "".to_string(),
             mount_point: source.to_string(),
-            fstype: "$(fs-type)".to_string(),
+            fstype: if is_blk_mount {
+                "ext4".to_string()
+            } else {
+                "cifs".to_string()
+            },
             options: if is_smb_mount {
                 if let Some(mount_options) = smb_mount_options {
                     mount_options.clone()

@@ -561,7 +561,7 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) {
     allow_root_path(p_oci, i_oci, bundle_id)
 
     every i_mount in input.OCI.Mounts {
-        allow_mount(p_oci, i_mount, bundle_id, sandbox_id)
+        allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id)
     }
 
     allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
@@ -870,12 +870,16 @@ allow_root_path(p_oci, i_oci, bundle_id) {
 }
 
 # device mounts
-allow_mount(p_oci, i_mount, bundle_id, sandbox_id) {
+allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id) {
     print("allow_mount: i_mount =", i_mount)
 
     some p_mount in p_oci.Mounts
+    some i_storage in i_storages
+
     print("allow_mount: p_mount =", p_mount)
-    check_mount(p_mount, i_mount, bundle_id, sandbox_id)
+    print("allow_mount: i_storage =", i_storage)
+
+    check_mount(p_mount, i_mount, i_storage, bundle_id, sandbox_id)
 
     # TODO: are there any other required policy checks for mounts - e.g.,
     #       multiple mounts with same source or destination?
@@ -883,21 +887,21 @@ allow_mount(p_oci, i_mount, bundle_id, sandbox_id) {
     print("allow_mount: true")
 }
 
-check_mount(p_mount, i_mount, bundle_id, sandbox_id) {
+check_mount(p_mount, i_mount, i_storage, bundle_id, sandbox_id) {
     p_mount == i_mount
     print("check_mount 1: true")
 }
-check_mount(p_mount, i_mount, bundle_id, sandbox_id) {
+check_mount(p_mount, i_mount, i_storage, bundle_id, sandbox_id) {
     p_mount.destination == i_mount.destination
     p_mount.type_ == i_mount.type_
     p_mount.options == i_mount.options
 
-    mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id)
+    mount_source_allows(p_mount, i_mount, i_storage, bundle_id, sandbox_id)
 
     print("check_mount 2: true")
 }
 
-mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
+mount_source_allows(p_mount, i_mount, i_storage, bundle_id, sandbox_id) {
     regex1 := p_mount.source
     regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
     regex3 := replace(regex2, "$(cpath)", policy_data.common.cpath)
@@ -908,7 +912,7 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
 
     print("mount_source_allows 1: true")
 }
-mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
+mount_source_allows(p_mount, i_mount, i_storage, bundle_id, sandbox_id) {
     regex1 := p_mount.source
     regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
     regex3 := replace(regex2, "$(cpath)", policy_data.common.cpath)
@@ -919,24 +923,11 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
 
     print("mount_source_allows 2: true")
 }
-mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) {
-    print("mount_source_allows 3: i_mount.source=", i_mount.source)
+mount_source_allows(p_mount, i_mount, i_storage, bundle_id, sandbox_id) {
+    print("mount_source_allows 3: i_mount.source =", i_mount.source)
+    print("mount_source_allows 3: i_storage.mount_point =", i_storage.mount_point)
 
-    i_source_parts = split(i_mount.source, "/")
-    b64_direct_vol_path = i_source_parts[count(i_source_parts) - 1]
-
-    base64.is_valid(b64_direct_vol_path)
-
-    source1 := p_mount.source
-    print("mount_source_allows 3: source1 =", source1)
-
-    source2 := replace(source1, "$(spath)", policy_data.common.spath)
-    print("mount_source_allows 3: source2 =", source2)
-
-    source3 := replace(source2, "$(b64-direct-vol-path)", b64_direct_vol_path)
-    print("mount_source_allows 3: source3 =", source3)
-
-    source3 == i_mount.source
+    i_mount.source == i_storage.mount_point
 
     print("mount_source_allows 3: true")
 }
@@ -979,13 +970,55 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hash
     p_storage.driver           == i_storage.driver
     p_storage.driver_options   == i_storage.driver_options
     p_storage.fs_group         == i_storage.fs_group
+    p_storage.fstype           == i_storage.fstype
 
+    allow_storage_source(p_storage, i_storage, layer_ids, root_hashes)
     allow_storage_options(p_storage, i_storage, layer_ids, root_hashes)
     allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids)
 
-    # TODO: validate the source field too.
-
     print("allow_storage: true")
+}
+
+allow_storage_source(p_storage, i_storage, layer_ids, root_hashes) {
+    print("allow_storage_source 1: start")
+
+    p_storage.source == i_storage.source
+
+    print("allow_storage_source 1: true")
+}
+
+allow_storage_source(p_storage, i_storage, layer_ids, root_hashes) {
+    print("allow_storage_source 2: start")
+
+    p_storage.driver == "blk"
+
+    # DDDD:BB:DD.F: Domain:Bus:Device.Function
+    # https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-bus-pci
+    regex.match(`^[a-f0-9]{4}:[a-f0-9]{2}:[a-f0-9]{2}\.[a-f0-9]$`, i_storage.source)
+
+    print("allow_storage_source 2: true")
+}
+
+allow_storage_source(p_storage, i_storage, layer_ids, root_hashes) {
+    print("allow_storage_source 3: start")
+
+    p_storage.driver == "overlayfs"
+    i_storage.source == "none"
+
+    print("allow_storage_source 3: true")
+}
+
+allow_storage_source(p_storage, i_storage, layer_ids, root_hashes) {
+    print("allow_storage_source 4: start")
+
+    p_storage.driver == "smb"
+
+    # Pattern: //<storage-account-name>.file.core.windows.net/<k8s-PVC-name>
+    # Storage account name: https://learn.microsoft.com/en-us/azure/storage/common/storage-account-overview#storage-account-name
+    # K8s PVC name: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names
+    regex.match(`^\/\/([a-z0-9]{3,24})\.file\.core\.windows\.net\/[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$`, i_storage.source)
+
+    print("allow_storage_source 4: true")
 }
 
 allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) {
