@@ -67,7 +67,7 @@ use crate::trace_rpc_call;
 use crate::tracer::extract_carrier_from_ttrpc;
 
 #[cfg(feature = "agent-policy")]
-use crate::policy::{do_set_policy, is_allowed, is_allowed_copy_file};
+use crate::policy::{do_set_policy, is_allowed, is_allowed_copy_file, is_allowed_create_container};
 
 use opentelemetry::global;
 use tracing::span;
@@ -131,6 +131,13 @@ async fn is_allowed(_req: &impl serde::Serialize) -> ttrpc::Result<()> {
 }
 #[cfg(not(feature = "agent-policy"))]
 async fn is_allowed_copy_file(_req: &CopyFileRequest) -> ttrpc::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(feature = "agent-policy"))]
+async fn is_allowed_create_container(
+    _req: &protocols::agent::CreateContainerRequest,
+) -> ttrpc::Result<()> {
     Ok(())
 }
 
@@ -641,7 +648,7 @@ impl agent_ttrpc::AgentService for AgentService {
         req: protocols::agent::CreateContainerRequest,
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "create_container", req);
-        is_allowed(&req).await?;
+        is_allowed_create_container(&req).await?;
         self.do_create_container(req).await.map_ttrpc_err(same)?;
         Ok(Empty::new())
     }

@@ -7,8 +7,6 @@ package agent_policy
 import future.keywords.in
 import future.keywords.every
 
-import input
-
 # Default values, returned by OPA when rules cannot be evaluated to true.
 default AddARPNeighborsRequest := false
 default AddSwapRequest := false
@@ -56,13 +54,196 @@ S_NAME_KEY = "io.kubernetes.cri.sandbox-name"
 S_NAMESPACE_KEY = "io.kubernetes.cri.sandbox-namespace"
 BUNDLE_ID = "[a-z0-9]{64}"
 
-CreateContainerRequest:= {"ops": ops, "allowed": true} {
+CreateContainerRequest:= resp {
+    not is_null(input.env_map)
+    
+    i_env_map := input.env_map
+    
+    some p_container in policy_data.containers
+    p_env_map := p_container.env_map  
+    allow_env_map(p_env_map, i_env_map)
+    
+    i_process := input.base.OCI.Process
+    
+    p_process := p_container.OCI.Process
+    
+    allow_args(i_process, p_process, i_env_map)
+
+    resp = CreateContainerRequestCommon(input.base)
+    print("CreateContainerRequest: true")
+}
+
+allow_args(i_process, p_process, i_env_map) {
+    i_args := i_process.Args
+    p_args := p_process.Args
+    print("allow_args: i_args =", i_args, "p_args =", p_args)
+    count(i_args) == count(p_args)
+    every i, i_arg in i_args {
+        print("allow_args: i_arg =", i_arg)
+        p_arg_replaced := replace_env_variables(p_args[i], i_env_map)
+        print("allow_args: p_arg_replaced =", p_arg_replaced)
+        p_arg_replaced2 := replace(p_arg_replaced, "$$", "$")
+        print("allow_args: p_arg_replaced2 =", p_arg_replaced2)
+        i_arg == p_arg_replaced2
+    }
+    print("allow_args: true")
+}
+
+allow_args(i_process, p_process, i_env_map) {
+    not i_process.Args
+    not p_process.Args
+    print("allow_args2: no args")
+}
+
+# this function replaces all the environment variables in a string, given a map of environment keys to environment values
+# eg str = "echo $(CLUSTER_ID); echo $(NODE_NAME);"
+# env_map = {"CLUSTER_ID": "abc", "NODE_NAME" : "xyz"}
+# result = "echo abc; echo xyz;"
+replace_env_variables(str, env_map) = result {
+    # make an array of the keys eg ["CLUSTER_ID", "NODE_NAME"]
+    keys := [x | some x in object.keys(env_map)]
+    result := replace_str_rec(str, env_map, keys, count(keys) - 1)
+}
+
+# base case
+replace_str_rec(str, env_map, arr_keys, i) = result {
+    i < 0
+    result := str
+}
+
+# recursive step
+replace_str_rec(str, env_map, arr_keys, i) = result {
+    i >= 0
+    key := arr_keys[i]
+    env_key1 := concat("", ["$(", key, ")"])
+    # replace $(VAR) with value
+    new_str1 := replace(str, env_key1, env_map[key])
+    # replace next environment variable
+    result = replace_str_rec(new_str1, env_map, arr_keys, i - 1)
+}
+
+allow_env_map(p_env_map, i_env_map) {
+    print("allow_env_map: p_env_map =", p_env_map)
+    every env_key, env_val in i_env_map {
+        print("allow_env: env_key =", env_key, "env_val =", env_val)
+        allow_env_map_entry(env_key, env_val, p_env_map)
+    }
+    print("allow_env_map: true")
+}
+
+# Allow exact match
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    i_val == p_val
+    print("allow_env_map_entry: true")
+}
+
+# Allow resourceFieldRef values (e.g., "limits.cpu").
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    # a variable we should be validating using a regex from settings
+    p_val == "$(validate-from-settings)"
+    regex_val := policy_data.request_defaults.CreateContainerRequest.allow_env_regex_map[key]
+    regex.match(regex_val, i_val)
+    print("allow_env_map_entry 2: true")
+}
+
+# Allow node-name
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    p_val == "$(node-name)"
+    regex.match(policy_data.common.dns_subdomain , i_val)
+    print("allow_env_map_entry 3: true")
+}
+
+# Allow host-name
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    p_val == "$(host-name)"
+    regex.match(policy_data.common.dns_label , i_val)
+    print("allow_env_map_entry 4: true")
+}
+
+# Allow pod-uid
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    p_val == "$(pod-uid)"
+    regex.match(policy_data.common.pod_uid , i_val)
+    print("allow_env_map_entry 5: true")
+}
+
+# Allow fieldRef "fieldPath: status.podIP" values.
+allow_env_map_entry(key, i_val, p_env_map) {
+    is_ip(i_val)
+
+    p_val := p_env_map[key]
+    p_var := concat("=", [key, p_val])
+    allow_pod_ip_var(key, p_var)
+    print("allow_env_map_entry 6: true")
+}
+
+# Allow fieldRef "fieldPath: status.hostIP" values.
+allow_env_map_entry(key, i_val, p_env_map) {
+    is_ip(i_val)
+
+    p_val := p_env_map[key]
+    p_var := concat("=", [key, p_val])
+    allow_host_ip_var(key, p_var)
+    print("allow_env_map_entry 7: true")
+}
+
+# Match input with one of the policy variables, after substituting $(sandbox-name).
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    p_val == "$(sandbox-name)"
+    s_name := input.base.OCI.Annotations[S_NAME_KEY]
+    p_var2 := replace(p_val, "$(sandbox-name)", s_name)
+    p_var2 == i_val
+    print("allow_env_map_entry 8: true")
+}
+
+# Match input with one of the policy variables, after substituting $(sandbox-namespace).
+allow_env_map_entry(key, i_val, p_env_map) {
+    p_val := p_env_map[key]
+    p_val == "$(sandbox-namespace)"
+    s_namespace := input.base.OCI.Annotations[S_NAMESPACE_KEY]
+    p_var2 := replace(p_val, "$(sandbox-namespace)", s_namespace)
+    p_var2 == i_val
+    print("allow_env_map_entry 9: true")
+}
+
+# Allow input env variables that match with a request_defaults regex.
+allow_env_map_entry(key, i_val, p_env_map) {
+    some p_regex1 in policy_data.request_defaults.CreateContainerRequest.allow_env_regex
+    p_regex2 := replace(p_regex1, "$(ipv4_a)", policy_data.common.ipv4_a)
+    p_regex3 := replace(p_regex2, "$(ip_p)", policy_data.common.ip_p)
+    p_regex4 := replace(p_regex3, "$(svc_name)", policy_data.common.svc_name)
+    p_regex5 := replace(p_regex4, "$(dns_label)", policy_data.common.dns_label)
+
+    result := concat("=", [key, i_val])
+    regex.match(p_regex5, result)
+
+    print("allow_env_map_entry 10: true")
+}
+
+CreateContainerRequest:= resp {
+    not input.env_map
+    i_process = input.OCI.Process
+    s_name = input.OCI.Annotations[S_NAME_KEY]
+    some p_container in policy_data.containers
+    p_process = p_container.OCI.Process
+    allow_deprecated_args(p_process, i_process, s_name)
+    resp = CreateContainerRequestCommon(input)
+    print("CreateContainerRequest2: true")
+}
+
+CreateContainerRequestCommon(req):= {"ops": ops, "allowed": true} {
     # Check if the input request should be rejected even before checking the
     # policy_data.containers information.
-    allow_create_container_input
+    allow_create_container_input(req)
 
-    i_oci := input.OCI
-    i_storages := input.storages
+    i_oci := req.OCI
+    i_storages := req.storages
 
     # array of possible state operations
     ops_builder := []
@@ -74,11 +255,11 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
 
     # Check if any element from the policy_data.containers array allows the input request.
     some p_container in policy_data.containers
-    print("======== CreateContainerRequest: trying next policy container")
+    print("======== CreateContainerRequestCommon: trying next policy container")
 
     p_pidns := p_container.sandbox_pidns
-    i_pidns := input.sandbox_pidns
-    print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
+    i_pidns := req.sandbox_pidns
+    print("CreateContainerRequestCommon: p_pidns =", p_pidns, "i_pidns =", i_pidns)
     p_pidns == i_pidns
 
     p_oci := p_container.OCI
@@ -86,14 +267,14 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
     # check namespace
     p_namespace := p_oci.Annotations[S_NAMESPACE_KEY]
     i_namespace := i_oci.Annotations[S_NAMESPACE_KEY]
-    print ("CreateContainerRequest: p_namespace =", p_namespace, "i_namespace =", i_namespace)
+    print ("CreateContainerRequestCommon: p_namespace =", p_namespace, "i_namespace =", i_namespace)
     add_namespace_to_state := allow_namespace(p_namespace, i_namespace)
     ops := concat_op_if_not_null(ops_builder1, add_namespace_to_state)
 
-    print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
+    print("CreateContainerRequestCommon: p Version =", p_oci.Version, "i Version =", i_oci.Version)
     p_oci.Version == i_oci.Version
 
-    print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
+    print("CreateContainerRequestCommon: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
     p_oci.Root.Readonly == i_oci.Root.Readonly
 
     allow_anno(p_oci, i_oci)
@@ -103,16 +284,16 @@ CreateContainerRequest:= {"ops": ops, "allowed": true} {
 
     allow_linux(p_oci, i_oci)
 
-    print("CreateContainerRequest: true")
+    print("CreateContainerRequestCommon: true")
 }
 
-allow_create_container_input {
-    print("allow_create_container_input: input =", input)
+allow_create_container_input(req) {
+    print("allow_create_container_input: input =", req)
 
-    count(input.shared_mounts) == 0
-    is_null(input.string_user)
+    count(req.shared_mounts) == 0
+    is_null(req.string_user)
 
-    i_oci := input.OCI
+    i_oci := req.OCI
     is_null(i_oci.Hooks)
     is_null(i_oci.Solaris)
     is_null(i_oci.Windows)
@@ -587,7 +768,6 @@ allow_process_common(p_process, i_process, s_name, s_namespace) {
 allow_process(p_process, i_process, s_name, s_namespace) {
     print("allow_process: start")
 
-    allow_args(p_process, i_process, s_name)
     allow_process_common(p_process, i_process, s_name, s_namespace)
     allow_caps(p_process.Capabilities, i_process.Capabilities)
     p_process.Terminal == i_process.Terminal
@@ -636,54 +816,54 @@ allow_user(p_process, i_process) {
     # based on /etc/passwd and /etc/group from the container image.
 }
 
-allow_args(p_process, i_process, s_name) {
-    print("allow_args 1: no args")
+allow_deprecated_args(p_process, i_process, s_name) {
+    print("allow_deprecated_args 1: no args")
 
-    not p_process.Args
+    not p_process.DeprecatedArgs
     not i_process.Args
 
-    print("allow_args 1: true")
+    print("allow_deprecated_args 1: true")
 }
-allow_args(p_process, i_process, s_name) {
-    print("allow_args 2: policy args =", p_process.Args)
-    print("allow_args 2: input args =", i_process.Args)
+allow_deprecated_args(p_process, i_process, s_name) {
+    print("allow_deprecated_args 2: policy args =", p_process.DeprecatedArgs)
+    print("allow_deprecated_args 2: input args =", i_process.Args)
 
-    count(p_process.Args) == count(i_process.Args)
+    count(p_process.DeprecatedArgs) == count(i_process.Args)
 
     every i, i_arg in i_process.Args {
-        allow_arg(i, i_arg, p_process, s_name)
+        allow_deprecated_arg(i, i_arg, p_process, s_name)
     }
 
-    print("allow_args 2: true")
+    print("allow_deprecated_args 2: true")
 }
-allow_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.Args[i]
-    print("allow_arg 1: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
+allow_deprecated_arg(i, i_arg, p_process, s_name) {
+    p_arg := p_process.DeprecatedArgs[i]
+    print("allow_deprecated_arg 1: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
 
     p_arg2 := replace(p_arg, "$$", "$")
     p_arg2 == i_arg
 
-    print("allow_arg 1: true")
+    print("allow_deprecated_arg 1: true")
 }
-allow_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.Args[i]
-    print("allow_arg 2: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
+allow_deprecated_arg(i, i_arg, p_process, s_name) {
+    p_arg := p_process.DeprecatedArgs[i]
+    print("allow_deprecated_arg 2: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
 
     # TODO: can $(node-name) be handled better?
     contains(p_arg, "$(node-name)")
 
-    print("allow_arg 2: true")
+    print("allow_deprecated_arg 2: true")
 }
-allow_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.Args[i]
-    print("allow_arg 3: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
+allow_deprecated_arg(i, i_arg, p_process, s_name) {
+    p_arg := p_process.DeprecatedArgs[i]
+    print("allow_deprecated_arg 3: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
 
     p_arg2 := replace(p_arg, "$$", "$")
     p_arg3 := replace(p_arg2, "$(sandbox-name)", s_name)
-    print("allow_arg 3: p_arg3 =", p_arg3)
+    print("allow_deprecated_arg 3: p_arg3 =", p_arg3)
     p_arg3 == i_arg
 
-    print("allow_arg 3: true")
+    print("allow_deprecated_arg 3: true")
 }
 
 # OCI process.Env field
@@ -798,6 +978,7 @@ allow_var(p_process, i_process, i_var, s_name, s_namespace) {
     print("allow_var 7: true")
 }
 
+# Match input with one of the policy variables, after substituting $(sandbox-namespace).
 allow_var(p_process, i_process, i_var, s_name, s_namespace) {
     some p_var in p_process.Env
     p_var2 := replace(p_var, "$(sandbox-namespace)", s_namespace)
