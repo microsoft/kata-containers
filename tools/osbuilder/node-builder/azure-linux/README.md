@@ -180,7 +180,8 @@ This section describes how to build and deploy in debug mode.
  * `SHIM_USE_DEBUG_CONFIG`: Specify `no` (default) to use the production
    configuration, or `yes` to use the debug configuration (all debug
    logging enabled). In this case you'll want to enable debug logging
-   in containerd as well.
+   in containerd as well. Note that this variable has no effect if
+   `SHIM_REDEPLOY_CONFIG=no`.
 
 In general, you can specify the debug configuration for all the above
 variables by using `BUILD_TYPE=debug` as such:
