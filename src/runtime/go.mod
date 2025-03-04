@@ -50,9 +50,9 @@ require (
 	go.opentelemetry.io/otel/exporters/jaeger v1.0.0
 	go.opentelemetry.io/otel/sdk v1.14.0
 	go.opentelemetry.io/otel/trace v1.14.0
-	golang.org/x/oauth2 v0.4.0
+	golang.org/x/oauth2 v0.10.0
 	golang.org/x/sys v0.18.0
-	google.golang.org/grpc v1.53.0
+	google.golang.org/grpc v1.58.3
 	google.golang.org/protobuf v1.33.0
 	k8s.io/apimachinery v0.26.2
 	k8s.io/cri-api v0.27.1
@@ -114,11 +114,12 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/mod v0.9.0 // indirect
 	golang.org/x/net v0.23.0 // indirect
-	golang.org/x/sync v0.1.0 // indirect
+	golang.org/x/sync v0.3.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.7.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20230306155012-7f2fa6fef1f4 // indirect
+	google.golang.org/genproto v0.0.0-20230711160842-782d3b101e98 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20230711160842-782d3b101e98 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -131,6 +132,5 @@ replace (
 	github.com/stretchr/testify => github.com/stretchr/testify v1.8.0
 	github.com/uber-go/atomic => go.uber.org/atomic v1.5.1
 	golang.org/x/text => golang.org/x/text v0.7.0
-	google.golang.org/grpc => google.golang.org/grpc v1.47.0
 	gopkg.in/yaml.v3 => gopkg.in/yaml.v3 v3.0.1
 )
