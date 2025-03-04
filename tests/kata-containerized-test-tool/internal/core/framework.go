@@ -15,7 +15,7 @@ type Framework struct {
 	outputDir string
 }
 
-// NewFramework creates a new testing framework
+// Create a new testing framework
 func NewFramework(outputDir string) *Framework {
 	return &Framework{
 		tests:     make(map[string]Test),
@@ -23,17 +23,17 @@ func NewFramework(outputDir string) *Framework {
 	}
 }
 
-// RegisterTest adds a test to the framework
+// Add a test to the framework
 func (f *Framework) RegisterTest(test Test) {
 	f.tests[test.Name()] = test
 }
 
-// GetAvailableTests returns all registered tests
+// Return all registered tests
 func (f *Framework) GetAvailableTests() map[string]Test {
 	return f.tests
 }
 
-// ValidateConfiguration checks if the provided test configurations are valid
+// Check if the provided test configurations are valid
 func (f *Framework) ValidateConfiguration(testsToRun []Test,
 	getExpectedValuesFunc func(string) map[string]interface{}) []string {
 
@@ -84,12 +84,12 @@ func (f *Framework) ValidateConfiguration(testsToRun []Test,
 	return warnings
 }
 
-// RunTest executes a single test with the given expected values
+// Execute a single test with the given expected values
 func (f *Framework) RunTest(ctx context.Context, test Test, expectedValues map[string]interface{}) TestResult {
 	return test.Run(ctx, expectedValues)
 }
 
-// RunTests executes the given tests with their expected values
+// Execute the given tests with their expected values
 func (f *Framework) RunTests(ctx context.Context, testsToRun []Test,
 	getExpectedValuesFunc func(string) map[string]interface{}) ([]TestResult, error) {
 
@@ -112,7 +112,7 @@ func (f *Framework) RunTests(ctx context.Context, testsToRun []Test,
 	return results, nil
 }
 
-// SaveResults writes test results to a JSON file
+// Write test results to a JSON file
 func (f *Framework) saveResults(results []TestResult) error {
 	filename := fmt.Sprintf("%s/results_%s.json",
 		f.outputDir,

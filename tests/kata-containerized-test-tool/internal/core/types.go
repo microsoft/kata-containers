@@ -1,4 +1,3 @@
-// internal/core/types.go
 package core
 
 import (

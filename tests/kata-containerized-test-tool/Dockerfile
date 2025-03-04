@@ -12,5 +12,8 @@ RUN tdnf update -y && tdnf install -y \
 
 RUN mkdir -p /results
 
+# Default environment variables
+ENV ENABLED_TESTS=""
+
 ENTRYPOINT ["/app/kata-containerized-test-tool"]
 CMD ["--output", "/results"]
