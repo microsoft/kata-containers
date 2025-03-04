@@ -15,6 +15,8 @@ use fs2::FileExt;
 use log::warn;
 use log::{debug, info, LevelFilter};
 use oci_distribution::client::{linux_amd64_resolver, ClientConfig};
+use oci_distribution::manifest::{OciImageManifest, OciManifest};
+use oci_distribution::RegistryOperation;
 use oci_distribution::{manifest, secrets::RegistryAuth, Client, Reference};
 use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
@@ -26,6 +28,7 @@ use tokio::io::AsyncWriteExt;
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
 pub struct Container {
+    pub manifest: OciImageManifest,
     pub image_layers: Vec<ImageLayer>,
 }
 
@@ -64,10 +67,28 @@ pub struct ImageLayer {
 }
 
 impl Container {
+    pub async fn push_manifest(image: String, manifest: OciImageManifest) -> Result<String> {
+        let reference: Reference = image.parse()?;
+        let auth = build_auth(&reference);
+
+        let mut client = Client::new(ClientConfig {
+            platform_resolver: Some(Box::new(linux_amd64_resolver)),
+            ..Default::default()
+        });
+
+        let op = RegistryOperation::Push;
+        client.auth(&reference, &auth, op).await?;
+
+        client
+            .push_manifest(&reference, &OciManifest::Image(manifest))
+            .await
+            .context("Failed to push manifest")
+    }
+
     pub async fn new(use_cached_files: bool, image: &str) -> Result<Self> {
         info!("============================================");
         info!("Pulling manifest and config for {:?}", image);
-        let reference: Reference = image.to_string().parse().unwrap();
+        let reference: Reference = image.to_string().parse()?;
         let auth = build_auth(&reference);
 
         let mut client = Client::new(ClientConfig {
@@ -103,6 +124,7 @@ impl Container {
                 .unwrap();
 
                 Ok(Container {
+                    manifest: manifest,
                     image_layers,
                 })
             }
@@ -167,9 +189,11 @@ async fn get_image_layers(
             }
 
             layer_index += 1;
-        }
-        else {
-            return Err(anyhow!("Unsupported layer media type: {}", layer.media_type));
+        } else {
+            return Err(anyhow!(
+                "Unsupported layer media type: {}",
+                layer.media_type
+            ));
         }
     }
 

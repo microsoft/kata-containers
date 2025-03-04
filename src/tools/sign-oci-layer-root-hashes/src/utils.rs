@@ -3,11 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::path::PathBuf;
+use std::{
+    fmt::{Display, Formatter},
+    fs,
+    path::PathBuf,
+};
 
-use clap::Parser;
+use anyhow::{Context, Error};
+use clap::{Parser, Subcommand};
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, clap::Args, Clone)]
 #[group(required = true, multiple = false)]
 pub struct ImageGroup {
     #[clap(short = 'i', long, help = "Image tag, can be specified multiple times")]
@@ -19,6 +24,24 @@ pub struct ImageGroup {
         help = "Path to a file containing a newline-separated list of image tags"
     )]
     images: Option<PathBuf>,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+#[group(required = true, multiple = false)]
+pub struct OutputImageGroup {
+    #[clap(
+        short = 'I',
+        long,
+        help = "Image tag to repush, can be specified multiple times"
+    )]
+    pub image: Option<Vec<String>>,
+
+    #[clap(
+        short = 'L',
+        long,
+        help = "Path to a file containing a newline-separated list of image tags to repush"
+    )]
+    pub images: Option<PathBuf>,
 }
 
 #[derive(Debug, Parser)]
@@ -56,8 +79,38 @@ struct CommandLineOptions {
     #[clap(short, long, help = "OpenSSL key file pass phrase")]
     passphrase: String,
 
-    #[clap(short, long, help = "Signatures JSON file path output")]
-    output: Option<PathBuf>,
+    #[clap(subcommand)]
+    command: Commands,
+}
+
+impl Commands {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Commands::GenerateStandaloneSignaturesManifest { .. } => "standalone",
+            Commands::InjectSignaturesToImageManifest { .. } => "inject",
+        }
+    }
+}
+
+impl Display for Commands {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum Commands {
+    /// Generate a standalone JSON manifest with signatures
+    GenerateStandaloneSignaturesManifest {
+        #[clap(short, long, help = "Signatures JSON file path output")]
+        output: Option<PathBuf>,
+    },
+
+    /// Embed signatures into the image manifest and repush updated manifest
+    InjectSignaturesToImageManifest {
+        #[clap(flatten)]
+        output_image_group: OutputImageGroup,
+    },
 }
 
 /// Application configuration, derived from on command line parameters.
@@ -73,7 +126,8 @@ pub struct Config {
     pub signer: PathBuf,
     pub key: PathBuf,
     pub passphrase: String,
-    pub output: Option<PathBuf>,
+
+    pub command: Commands,
 }
 
 impl Config {
@@ -88,7 +142,28 @@ impl Config {
             signer: args.signer,
             key: args.key,
             passphrase: args.passphrase,
-            output: args.output,
+            command: args.command,
         }
     }
+}
+
+/// Get the input image tags from the configuration.
+pub fn get_image_tags(
+    images: &Option<PathBuf>,
+    image: &Option<Vec<String>>,
+) -> Result<Vec<String>, Error> {
+    let mut image_tags: Vec<String> = vec![];
+    if let Some(images) = &images {
+        image_tags.append(
+            fs::read_to_string(images)
+                .context("Failed to read image tags file")?
+                .lines()
+                .map(|line| line.to_string())
+                .collect::<Vec<String>>()
+                .as_mut(),
+        );
+    } else if let Some(images) = &image {
+        image_tags.append(images.clone().as_mut());
+    };
+    Ok(image_tags)
 }

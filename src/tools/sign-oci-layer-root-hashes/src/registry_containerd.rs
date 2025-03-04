@@ -64,6 +64,7 @@ impl Container {
             get_image_layers(use_cached_files, &manifest, &config_layer, &ctrd_client).await?;
 
         Ok(Container {
+            manifest: serde_json::from_value(manifest).context("Failed to parse manifest")?,
             image_layers,
         })
     }
