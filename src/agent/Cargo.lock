@@ -474,7 +474,7 @@ dependencies = [
  "serde_with",
  "sha2",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.11",
 ]
 
 [[package]]
@@ -906,7 +906,7 @@ dependencies = [
  "libc",
  "nix 0.24.3",
  "notify",
- "oci-spec",
+ "oci-spec 0.6.8",
  "once_cell",
  "path-clean",
  "regex",
@@ -3282,7 +3282,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.11",
  "tokio",
  "url",
  "zeroize",
@@ -3464,7 +3464,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if 1.0.0",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -4123,6 +4123,22 @@ dependencies = [
  "strum",
  "strum_macros",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "oci-spec"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da406e58efe2eb5986a6139626d611ce426e5324a824133d76367c765cf0b882"
+dependencies = [
+ "derive_builder",
+ "getset",
+ "regex",
+ "serde",
+ "serde_json",
+ "strum",
+ "strum_macros",
+ "thiserror 2.0.11",
 ]
 
 [[package]]
@@ -5192,7 +5208,7 @@ dependencies = [
 [[package]]
 name = "resource_uri"
 version = "0.1.0"
-source = "git+https://github.com/confidential-containers/guest-components?rev=v0.10.0#075b9a9ee77227d9d92b6f3649ef69de5e72d204"
+source = "git+https://github.com/confidential-containers/guest-components?rev=514c561d933cb11a0f1628621a0b930157af76cd#514c561d933cb11a0f1628621a0b930157af76cd"
 dependencies = [
  "anyhow",
  "serde",
@@ -5897,8 +5913,8 @@ dependencies = [
 
 [[package]]
 name = "sigstore"
-version = "0.9.0"
-source = "git+https://github.com/sigstore/sigstore-rs.git?rev=1b6ccf0f64d173350ec5515bd69ab48a26a9c0a3#1b6ccf0f64d173350ec5515bd69ab48a26a9c0a3"
+version = "0.10.0"
+source = "git+https://github.com/sigstore/sigstore-rs.git?rev=037b7be86a68bc63e1d2ee7f16ea8f843ddcc7d8#037b7be86a68bc63e1d2ee7f16ea8f843ddcc7d8"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5916,7 +5932,7 @@ dependencies = [
  "hex",
  "json-syntax",
  "lazy_static",
- "oci-distribution",
+ "oci-client 0.13.0",
  "olpc-cjson",
  "p256",
  "p384",
@@ -5924,6 +5940,7 @@ dependencies = [
  "pkcs1",
  "pkcs8",
  "rand",
+ "regex",
  "ring",
  "rsa",
  "rustls-webpki",
@@ -6703,9 +6720,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "ttrpc"
-version = "0.8.2"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e376927d4422245ae3e0a0d7df0e805f99652536999b5c671144de9fe4120d8c"
+checksum = "2c580c498a547b4c083ec758be543e11a0772e03013aef4cdb1fbe77c8b62cae"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -7156,7 +7173,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
