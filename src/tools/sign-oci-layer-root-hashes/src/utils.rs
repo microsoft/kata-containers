@@ -86,8 +86,8 @@ struct CommandLineOptions {
 impl Commands {
     pub fn name(&self) -> &'static str {
         match self {
-            Commands::GenerateStandaloneSignaturesManifest { .. } => "standalone",
-            Commands::InjectSignaturesToImageManifest { .. } => "inject",
+            Commands::GenerateStandaloneSignaturesManifest { .. } => "generate-standalone-signatures-manifest",
+            Commands::InjectSignaturesToImageManifest { .. } => "inject-signatures-to-image-manifest",
         }
     }
 }
