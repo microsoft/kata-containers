@@ -19,7 +19,8 @@ This tool provides a flexible framework for running tests in both standard conta
 
 ```
 git clone https://github.com/kata-containers/kata-containers.git
-cd kata-containers/testing-tool
+cd kata-containers/kata-containerized-testing-tool
+go mod tidy
 ```
 
 2. Build the binary and the container
