@@ -850,7 +850,7 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) {
 
     allow_root_path(p_oci, i_oci, bundle_id)
 
-    every i_mount in input.OCI.Mounts {
+    every i_mount in i_oci.Mounts {
         allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id)
     }
 
