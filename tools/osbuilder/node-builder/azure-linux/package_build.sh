@@ -58,11 +58,6 @@ pushd src/overlay/
 make all
 popd
 
-echo "Building tardev-snapshotter service binary"
-pushd src/tardev-snapshotter/
-make all
-popd
-
 echo "Building shim binary and configuration"
 pushd src/runtime/
 if [ "${CONF_PODS}" == "yes" ] || [ "${OS_VERSION}" == "3.0" ]; then

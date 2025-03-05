@@ -51,10 +51,10 @@ sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-containers.target ${ROO
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-agent.service ${ROOTFS_PATH}/usr/lib/systemd/system/kata-agent.service
 
 echo "Building tarfs kernel driver and installing into rootfs"
-	pushd src/tarfs
-	make KDIR=${UVM_KERNEL_HEADER_DIR}
-	sudo make KDIR=${UVM_KERNEL_HEADER_DIR} KVER=${UVM_KERNEL_VERSION} INSTALL_MOD_PATH=${ROOTFS_PATH} install
-	popd
+pushd src/tarfs
+make KDIR=${UVM_KERNEL_HEADER_DIR}
+sudo make KDIR=${UVM_KERNEL_HEADER_DIR} KVER=${UVM_KERNEL_VERSION} INSTALL_MOD_PATH=${ROOTFS_PATH} install
+popd
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building dm-verity protected image based on rootfs"

@@ -14,7 +14,6 @@ CONF_PODS=${CONF_PODS:-no}
 PREFIX=${PREFIX:-}
 SHIM_REDEPLOY_CONFIG=${SHIM_REDEPLOY_CONFIG:-yes}
 SHIM_USE_DEBUG_CONFIG=${SHIM_USE_DEBUG_CONFIG:-no}
-START_SERVICES=${START_SERVICES:-yes}
 
 script_dir="$(dirname $(readlink -f $0))"
 repo_dir="${script_dir}/../../../../"
@@ -29,19 +28,13 @@ mkdir -p "${PREFIX}/${SHIM_CONFIG_PATH}"
 mkdir -p "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
 mkdir -p "${PREFIX}/${SHIM_BINARIES_PATH}"
 
-echo "Installing tardev-snapshotter binaries and service file"
+echo "Installing utarfs and kata-overlay binaries"
 mkdir -p ${PREFIX}/usr/sbin
 cp -a --backup=numbered src/utarfs/target/release/utarfs ${PREFIX}/usr/sbin/mount.tar
 mkdir -p ${PREFIX}/usr/bin
 cp -a --backup=numbered src/overlay/target/release/kata-overlay ${PREFIX}/usr/bin/
-cp -a --backup=numbered src/tardev-snapshotter/target/release/tardev-snapshotter ${PREFIX}/usr/bin/
 mkdir -p ${PREFIX}/usr/lib/systemd/system/
-cp -a --backup=numbered src/tardev-snapshotter/tardev-snapshotter.service ${PREFIX}/usr/lib/systemd/system/
 
-echo "Enabling and starting snapshotter service"
-if [ "${START_SERVICES}" == "yes" ]; then
-	systemctl enable tardev-snapshotter && systemctl daemon-reload && systemctl restart tardev-snapshotter
-fi
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	if [ "${SHIM_REDEPLOY_CONFIG}" == "yes" ]; then
