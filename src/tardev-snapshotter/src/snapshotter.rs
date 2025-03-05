@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use async_recursion::async_recursion;
 use base64::prelude::{Engine, BASE64_STANDARD};
 use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_namespace, Client};
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
@@ -884,6 +885,7 @@ impl TarDevSnapshotter {
     }
 
     /// Fetches the OCI image manifest for the given digest.
+    #[async_recursion]
     async fn get_image_manifest(&self, digest_str: &str) -> Result<Value, Status> {
         let manifest = self
             .get_oci_manifest(digest_str)
