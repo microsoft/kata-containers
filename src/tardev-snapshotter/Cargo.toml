@@ -25,6 +25,7 @@ nix = "0.24.2"
 devicemapper = "0.33.1"
 anyhow = "=1.0.58"
 zerocopy = "0.6.1"
+oci-distribution = { version = "0.10.0" }
 
 # YAML file serialization/deserialization.
 serde = { version = "1.0.159", features = ["derive"] }

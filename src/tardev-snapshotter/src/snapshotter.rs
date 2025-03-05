@@ -4,6 +4,7 @@ use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_n
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
 use log::{debug, error, info, trace, warn};
 use nix::mount::MsFlags;
+use oci_distribution::{client, manifest::{self, OciImageManifest, OciManifest}};
 use serde::{Deserialize, Serialize};
 use sha2::{
     digest::{typenum::Unsigned, OutputSizeUser},
@@ -26,7 +27,7 @@ use zerocopy::AsBytes;
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
-const TARGET_LAYER_MEDIA_TYPE_LABEL: &str = "containerd.io/snapshot/cri.layer-media-type";
+const TARGET_MANIFEST_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.manifest-digest";
 
 const TAR_GZ_EXTENSION: &str = "tar.gz";
 const TAR_EXTENSION: &str = "tar";
@@ -86,18 +87,22 @@ impl Store {
             }
         }
 
-        self.signatures = Some(signatures);
+        if !signatures.is_empty() {
+            self.signatures = Some(signatures);
+        }
 
         Ok(())
     }
 
-    fn get_info_from_digest(&self, digest: &str) -> Result<LayerInfo> {
-        self.signatures
-            .as_ref()
-            .context("signatures not loaded")?
-            .get(digest)
-            .context("missing signature for the requested layer")
-            .cloned()
+    fn get_info_from_digest(&self, digest: &str) -> Option<LayerInfo> {
+        match self.signatures {
+            Some(ref signatures) => signatures.get(digest).map(|layer_info| LayerInfo {
+                digest: layer_info.digest.clone(),
+                root_hash: layer_info.root_hash.clone(),
+                signature: layer_info.signature.clone(),
+            }),
+            None => None,
+        }
     }
 
     fn load_signature(&self, hash: &str, signature: &str) -> Result<String> {
@@ -809,6 +814,64 @@ impl TarDevSnapshotter {
         }
     }
 
+    /// Fetches the OCI manifest for the given digest.
+    async fn get_oci_manifest(&self, digest_str: &str) -> Result<OciManifest, Status> {
+        let req = ReadContentRequest {
+            digest: digest_str.to_string(),
+            offset: 0,
+            size: 0,
+        };
+        let req = with_namespace!(req, "k8s.io");
+
+        loop {
+            let guard = self.containerd_client.read().await;
+            let Some(client) = &*guard else {
+                drop(guard);
+                trace!("Connecting to containerd at {}", self.containerd_path);
+                let c = Client::from_path(&self.containerd_path)
+                    .await
+                    .map_err(|_| Status::unknown("unable to connect to containerd"))?;
+                *self.containerd_client.write().await = Some(c);
+                continue;
+            };
+            let mut c = client.content();
+            let resp = c.read(req).await?;
+            let mut stream = resp.into_inner();
+            let mut buf = Vec::new();
+            while let Some(chunk) = stream.message().await? {
+                if chunk.offset < 0 {
+                    debug!("Containerd reported a negative offset: {}", chunk.offset);
+                    return Err(Status::invalid_argument("negative offset"));
+                }
+
+                // aggregate the chunks in memory
+                buf.extend_from_slice(&chunk.data);
+            }
+            return serde_json::from_slice(&buf)
+                .map_err(|e| Status::invalid_argument(format!("failed to parse manifest: {e}, manifest: {:?}", String::from_utf8_lossy(&buf))));
+        }
+    }
+
+    /// Fetches the OCI image manifest for the given digest.
+    async fn get_image_manifest(&self, digest_str: &str) -> Result<OciImageManifest, Status> {
+        match self.get_oci_manifest(digest_str).await.context("Failed to download oci manifest").map_err(
+            |e| {
+                error!("Failed to get OCI manifest: {:?}", e);
+                Status::invalid_argument(format!("failed to get OCI manifest: {:?}", e))
+            },
+        )? {
+            OciManifest::Image(manifest) => Ok(manifest),
+            OciManifest::ImageIndex(index_manifest) => {
+                let digest_str = client::linux_amd64_resolver(&index_manifest.manifests)
+                    .ok_or_else(|| {
+                        error!("No linux/amd64 variant found in OCI image index");
+                        Status::invalid_argument("no linux/amd64 variant found in OCI image index")
+                    })?;
+                Box::pin(self.get_image_manifest(digest_str.as_str())).await
+            }
+        }
+    }
+
     /// Fetches and processes an image layer.
     ///
     /// Downloads the layer, decompresses it if needed, appends a tar index,
@@ -908,8 +971,8 @@ impl TarDevSnapshotter {
         key: String,
         parent: String,
         mut labels: HashMap<String, String>,
-        root_hash: String,     // hex encoded
-        root_hash_sig: String, // base64 encoded
+        root_hash: Option<String>,     // hex encoded
+        root_hash_sig: Option<String>, // base64 encoded
     ) -> Result<(), Status> {
         let dir = self.store.read().await.staging_dir()?;
         let base_name = dir.path().join(name_to_hash(&key));
@@ -923,21 +986,41 @@ impl TarDevSnapshotter {
                 ));
             };
 
-            // Determine image layer media type
-            let Some(media_type) = labels.get(TARGET_LAYER_MEDIA_TYPE_LABEL) else {
-                error!("missing target layer media type label");
+            let Some(manifest_digest_str) = labels.get(TARGET_MANIFEST_DIGEST_LABEL) else {
+                error!("missing target manifest digest label");
                 return Err(Status::invalid_argument(
-                    "missing target layer media type label",
+                    "missing target manifest digest label",
                 ));
             };
 
+            let image_manifest =
+                self.get_image_manifest(manifest_digest_str)
+                    .await
+                    .map_err(|e| {
+                        error!("failed to get image manifest: {:?}", e);
+                        Status::invalid_argument(format!("failed to get image manifest: {:?}", e))
+                    })?;
+
+            let layer = image_manifest
+                .layers
+                .iter()
+                .find(|layer| &layer.digest == digest_str)
+                .ok_or_else(|| {
+                    error!("layer {} not found in image manifest", digest_str);
+                    Status::invalid_argument(format!(
+                        "layer {} not found in image manifest",
+                        digest_str
+                    ))
+                })?;
+
+            let media_type = layer.media_type.clone();
             trace!("layer digest {} media_type: {:?}", digest_str, media_type);
 
             let layer_type = match media_type.as_str() {
-                "application/vnd.docker.image.rootfs.diff.tar.gzip"
-                | "application/vnd.oci.image.layer.v1.tar+gzip" => TAR_GZ_EXTENSION,
-                "application/vnd.oci.image.layer.v1.tar"
-                | "application/vnd.docker.image.rootfs.diff.tar" => TAR_EXTENSION,
+                manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE | 
+                manifest::IMAGE_LAYER_GZIP_MEDIA_TYPE => TAR_GZ_EXTENSION,
+                manifest::IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE |
+                manifest::IMAGE_LAYER_MEDIA_TYPE => TAR_EXTENSION,
                 _ => {
                     error!("unsupported media type: {}", media_type);
                     return Err(Status::invalid_argument(format!(
@@ -984,6 +1067,49 @@ impl TarDevSnapshotter {
                     }
                 }
             }
+
+            let (root_hash, root_hash_sig) = match (root_hash, root_hash_sig) {
+                (Some(root_hash), Some(root_hash_sig)) => {
+                    (root_hash.clone(), root_hash_sig.clone())
+                }
+                (_, _) => {
+                    let layer_annotations = layer
+                        .annotations
+                        .as_ref()
+                        .context(format!(
+                            "layer annotations are missing for layer {digest_str}"
+                        ))
+                        .map_err(|e| {
+                            error!("failed to get layer annotations: {:?}", e);
+                            Status::invalid_argument(format!(
+                                "failed to get layer annotations: {:?}",
+                                e
+                            ))
+                        })?;
+
+                    // hex encoded
+                    let root_hash = layer_annotations
+                        .get(ROOT_HASH_LABEL)
+                        .ok_or_else(|| {
+                            error!("missing layer root hash in image manifest");
+                            Status::invalid_argument("missing root hash in image manifest")
+                        })?
+                        .to_string();
+
+                    // base64 encoded
+                    let root_hash_sig = layer_annotations
+                        .get(ROOT_HASH_SIG_LABEL)
+                        .ok_or_else(|| {
+                            error!("missing layer root hash signature in image manifest");
+                            Status::invalid_argument(
+                                "missing root hash signature in image manifest",
+                            )
+                        })?
+                        .to_string();
+
+                    (root_hash, root_hash_sig)
+                }
+            };
 
             // Store a label with the root hash so that we can recall it later when mounting.
             labels.insert(ROOT_HASH_LABEL.into(), root_hash);
@@ -1037,14 +1163,7 @@ impl TarDevSnapshotter {
             };
 
             trace!("Looking up layer info for {digest}");
-            let layer_info = match store.get_info_from_digest(digest) {
-                Ok(layer_info) => layer_info,
-                Err(e) => {
-                    return Err(Status::failed_precondition(format!(
-                        "signature missing for layer with digest {digest}: {e}"
-                    )));
-                }
-            };
+            let layer_info = store.get_info_from_digest(digest);
 
             (layer_info, info.parent)
         };
@@ -1053,8 +1172,12 @@ impl TarDevSnapshotter {
             name,
             parent,
             labels,
-            layer_info.root_hash,
-            layer_info.signature,
+            layer_info
+                .as_ref()
+                .map(|layer_info| layer_info.root_hash.clone()),
+            layer_info
+                .as_ref()
+                .map(|layer_info| layer_info.signature.clone()),
         )
         .await
     }
