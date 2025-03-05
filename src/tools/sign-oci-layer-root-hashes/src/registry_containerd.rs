@@ -12,7 +12,7 @@ use containerd_client::{services::v1::GetImageRequest, with_namespace};
 use docker_credential::{CredentialRetrievalError, DockerCredential};
 use k8s_cri::v1::{image_service_client::ImageServiceClient, AuthConfig};
 use log::{debug, info, warn};
-use oci_distribution::Reference;
+use oci_distribution::{manifest, Reference};
 use std::{collections::HashMap, convert::TryFrom, io::Write, path::Path};
 use tokio::{
     io,
@@ -22,11 +22,6 @@ use tokio::{
 use tonic::transport::{Endpoint, Uri};
 use tonic::Request;
 use tower::service_fn;
-
-const TAR_LAYER_TYPE: &str = "application/vnd.oci.image.layer.v1.tar";
-const TAR_DIFF_LAYER_TYPE: &str = "application/vnd.docker.image.rootfs.diff.tar";
-const TAR_GZIP_LAYER_TYPE: &str = "application/vnd.oci.image.layer.v1.tar+gzip";
-const TAR_GZIP_DIFF_LAYER_TYPE: &str = "application/vnd.docker.image.rootfs.diff.tar.gzip";
 
 impl Container {
     pub async fn new_containerd_pull(
@@ -258,10 +253,10 @@ pub async fn get_image_layers(
         let layer_media_type = layer["mediaType"]
             .as_str()
             .context("Missing mediaType attribute")?;
-        if layer_media_type.eq(TAR_GZIP_LAYER_TYPE)
-            || layer_media_type.eq(TAR_GZIP_DIFF_LAYER_TYPE)
-            || layer_media_type.eq(TAR_LAYER_TYPE)
-            || layer_media_type.eq(TAR_DIFF_LAYER_TYPE)
+        if layer_media_type.eq(manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE)
+            || layer_media_type.eq(manifest::IMAGE_LAYER_GZIP_MEDIA_TYPE)
+            || layer_media_type.eq(manifest::IMAGE_LAYER_MEDIA_TYPE)
+            || layer_media_type.eq(manifest::IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE)
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
                 let diff_id = &config_layer.rootfs.diff_ids[layer_index];
@@ -273,8 +268,8 @@ pub async fn get_image_layers(
                     layer_digest,
                     client,
                     diff_id,
-                    layer_media_type.eq(TAR_GZIP_DIFF_LAYER_TYPE)
-                        || layer_media_type.eq(TAR_GZIP_LAYER_TYPE),
+                    layer_media_type.eq(manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE)
+                        || layer_media_type.eq(manifest::IMAGE_LAYER_GZIP_MEDIA_TYPE),
                 )
                 .await?;
                 let imageLayer = ImageLayer {
