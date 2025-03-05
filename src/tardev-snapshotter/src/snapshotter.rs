@@ -4,8 +4,8 @@ use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_n
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
 use log::{debug, error, info, trace, warn};
 use nix::mount::MsFlags;
-use oci_distribution::{client, manifest::{self, OciDescriptor, OciImageManifest, OciManifest}};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{
     digest::{typenum::Unsigned, OutputSizeUser},
     Digest, Sha256,
@@ -31,6 +31,29 @@ const TARGET_MANIFEST_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.manifest-
 
 const TAR_GZ_EXTENSION: &str = "tar.gz";
 const TAR_EXTENSION: &str = "tar";
+
+// borrowed from oci-distribution crate, which alas does not build with rustc
+// 1.75, which is used by AzL3
+
+/// The mediatype for an docker v2 schema 2 manifest.
+pub const IMAGE_MANIFEST_MEDIA_TYPE: &str = "application/vnd.docker.distribution.manifest.v2+json";
+/// The mediatype for an docker v2 shema 2 manifest list.
+pub const IMAGE_MANIFEST_LIST_MEDIA_TYPE: &str =
+    "application/vnd.docker.distribution.manifest.list.v2+json";
+/// The mediatype for an OCI image index manifest.
+pub const OCI_IMAGE_INDEX_MEDIA_TYPE: &str = "application/vnd.oci.image.index.v1+json";
+/// The mediatype for an OCI image manifest.
+pub const OCI_IMAGE_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
+
+/// The mediatype for a layer.
+pub const IMAGE_LAYER_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tar";
+/// The mediatype for a layer that is gzipped.
+pub const IMAGE_LAYER_GZIP_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tar+gzip";
+/// The mediatype that Docker uses for a layer that is tarred.
+pub const IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE: &str = "application/vnd.docker.image.rootfs.diff.tar";
+/// The mediatype that Docker uses for a layer that is gzipped.
+pub const IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE: &str =
+    "application/vnd.docker.image.rootfs.diff.tar.gzip";
 
 #[derive(Serialize, Deserialize)]
 struct ImageInfo {
@@ -551,15 +574,15 @@ impl Store {
                         Some(root_hash_sig) => {
                             match self.load_signature(root_hash, root_hash_sig) {
                                 Ok(name) => Ok(Some(name)),
-                                Err(e) => Err(e)
+                                Err(e) => Err(e),
                             }
-                        },
+                        }
                         None => Ok(None),
-                    }).context("Failed to load signature")
-                    .map_err(|e| 
-                        Status::failed_precondition(format!(
-                            "Failed to load signature: {e}"
-                        )))?;
+                    })
+                    .context("Failed to load signature")
+                    .map_err(|e| {
+                        Status::failed_precondition(format!("Failed to load signature: {e}"))
+                    })?;
                     if signature_name.is_none() {
                         warn!("No signature found for layer {}", name);
                     }
@@ -819,7 +842,7 @@ impl TarDevSnapshotter {
     }
 
     /// Fetches the OCI manifest for the given digest.
-    async fn get_oci_manifest(&self, digest_str: &str) -> Result<OciManifest, Status> {
+    async fn get_oci_manifest(&self, digest_str: &str) -> Result<Value, Status> {
         let req = ReadContentRequest {
             digest: digest_str.to_string(),
             offset: 0,
@@ -851,29 +874,109 @@ impl TarDevSnapshotter {
                 // aggregate the chunks in memory
                 buf.extend_from_slice(&chunk.data);
             }
-            return serde_json::from_slice(&buf)
-                .map_err(|e| Status::invalid_argument(format!("failed to parse manifest: {e}, manifest: {:?}", String::from_utf8_lossy(&buf))));
+            return serde_json::from_slice(&buf).map_err(|e| {
+                Status::invalid_argument(format!(
+                    "failed to parse manifest: {e}, manifest: {:?}",
+                    String::from_utf8_lossy(&buf)
+                ))
+            });
         }
     }
 
     /// Fetches the OCI image manifest for the given digest.
-    async fn get_image_manifest(&self, digest_str: &str) -> Result<OciImageManifest, Status> {
-        match self.get_oci_manifest(digest_str).await.context("Failed to download oci manifest").map_err(
-            |e| {
+    async fn get_image_manifest(&self, digest_str: &str) -> Result<Value, Status> {
+        let manifest = self
+            .get_oci_manifest(digest_str)
+            .await
+            .context("Failed to download oci manifest")
+            .map_err(|e| {
                 error!("Failed to get OCI manifest: {:?}", e);
                 Status::invalid_argument(format!("failed to get OCI manifest: {:?}", e))
-            },
-        )? {
-            OciManifest::Image(manifest) => Ok(manifest),
-            OciManifest::ImageIndex(index_manifest) => {
-                let digest_str = client::linux_amd64_resolver(&index_manifest.manifests)
-                    .ok_or_else(|| {
-                        error!("No linux/amd64 variant found in OCI image index");
-                        Status::invalid_argument("no linux/amd64 variant found in OCI image index")
-                    })?;
-                Box::pin(self.get_image_manifest(digest_str.as_str())).await
+            })?;
+        let media_type = manifest
+            .as_object()
+            .and_then(|manifest| {
+                manifest
+                    .get_key_value("mediaType")
+                    .and_then(|kv| kv.1.as_str())
+            })
+            .context("Failed to deserialize OCI manifest, mediaType is missing")
+            .map_err(|e| {
+                error!("Failed to deserialize OCI manifest: {:?}", e);
+                Status::invalid_argument(format!("failed to deserialize OCI manifest: {:?}", e))
+            })?;
+        match media_type {
+            OCI_IMAGE_MEDIA_TYPE | IMAGE_MANIFEST_MEDIA_TYPE => Ok(manifest),
+            OCI_IMAGE_INDEX_MEDIA_TYPE | IMAGE_MANIFEST_LIST_MEDIA_TYPE => {
+                let digest_str = self.get_platform_manifest_digest(&manifest)?;
+                Box::pin(self.get_image_manifest(&digest_str)).await
+            }
+            _ => {
+                error!("Unsupported OCI manifest media type: {}", media_type);
+                Err(Status::invalid_argument(format!(
+                    "unsupported OCI manifest media type: {}",
+                    media_type
+                )))
             }
         }
+    }
+
+    /// Finds the linux/amd64 variant in the OCI image index and returns its digest.
+    fn get_platform_manifest_digest(&self, manifest: &Value) -> Result<String, Status> {
+        let manifests = manifest
+            .as_object()
+            .and_then(|manifest| {
+                manifest
+                    .get_key_value("manifests")
+                    .and_then(|kv| kv.1.as_array())
+            })
+            .context("Failed to deserialize OCI image index, manifests is missing")
+            .map_err(|e| {
+                error!("Failed to deserialize OCI image index: {:?}", e);
+                Status::invalid_argument(format!("failed to deserialize OCI image index: {:?}", e))
+            })?;
+
+        // Find the linux/amd64 variant
+        let manifest = manifests
+            .iter()
+            .find(|manifest| {
+                let result = manifest
+                    .as_object()
+                    .and_then(|m| m.get_key_value("platform"))
+                    .and_then(|kv| kv.1.as_object())
+                    .and_then(|platform| {
+                        Some(
+                            platform
+                                .get_key_value("os")
+                                .map(|kv| kv.1.as_str() == Some("linux"))
+                                .unwrap_or(false)
+                                && platform
+                                    .get_key_value("architecture")
+                                    .map(|kv| kv.1.as_str() == Some("amd64"))
+                                    .unwrap_or(false),
+                        )
+                    });
+                result.unwrap_or(false)
+            })
+            .ok_or_else(|| {
+                error!("No linux/amd64 variant found in OCI image index");
+                Status::invalid_argument("no linux/amd64 variant found in OCI image index")
+            })
+            .map(|manifest| manifest.to_owned())?;
+
+        manifest
+            .as_object()
+            .and_then(|manifest| {
+                manifest
+                    .get_key_value("digest")
+                    .and_then(|kv| kv.1.as_str())
+                    .and_then(|s| Some(s.to_owned()))
+            })
+            .context("Failed to deserialize OCI image index, digest is missing")
+            .map_err(|e| {
+                error!("Failed to deserialize OCI image index: {:?}", e);
+                Status::invalid_argument(format!("failed to deserialize OCI image index: {:?}", e))
+            })
     }
 
     /// Fetches and processes an image layer.
@@ -1006,9 +1109,23 @@ impl TarDevSnapshotter {
                     })?;
 
             let layer = image_manifest
-                .layers
-                .iter()
-                .find(|layer| &layer.digest == digest_str)
+                .as_object()
+                .and_then(|manifest| {
+                    manifest
+                        .get_key_value("layers")
+                        .and_then(|kv| kv.1.as_array())
+                        .and_then(|layers| {
+                            layers.iter().find(|layer| {
+                                layer
+                                    .as_object()
+                                    .and_then(|layer| {
+                                        layer.get_key_value("digest").map(|kv| kv.1.as_str())
+                                    })
+                                    .map(|s| s == Some(digest_str.as_str()))
+                                    .unwrap_or(false)
+                            })
+                        })
+                })
                 .ok_or_else(|| {
                     error!("layer {} not found in image manifest", digest_str);
                     Status::invalid_argument(format!(
@@ -1017,14 +1134,25 @@ impl TarDevSnapshotter {
                     ))
                 })?;
 
-            let media_type = layer.media_type.clone();
+            let media_type = layer
+                .as_object()
+                .and_then(|layer| {
+                    layer
+                        .get_key_value("mediaType")
+                        .and_then(|kv| kv.1.as_str())
+                })
+                .ok_or_else(|| {
+                    error!("mediaType not found in layer");
+                    Status::invalid_argument("mediaType not found in layer")
+                })?;
+
             trace!("layer digest {} media_type: {:?}", digest_str, media_type);
 
-            let layer_type = match media_type.as_str() {
-                manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE | 
-                manifest::IMAGE_LAYER_GZIP_MEDIA_TYPE => TAR_GZ_EXTENSION,
-                manifest::IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE |
-                manifest::IMAGE_LAYER_MEDIA_TYPE => TAR_EXTENSION,
+            let layer_type = match media_type {
+                IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE | IMAGE_LAYER_GZIP_MEDIA_TYPE => {
+                    TAR_GZ_EXTENSION
+                }
+                IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE | IMAGE_LAYER_MEDIA_TYPE => TAR_EXTENSION,
                 _ => {
                     error!("unsupported media type: {}", media_type);
                     return Err(Status::invalid_argument(format!(
@@ -1056,8 +1184,8 @@ impl TarDevSnapshotter {
                 {
                     Ok(root_hash) => {
                         generated_root_hash = Some(root_hash);
-                        break
-                    }, // Success; exit loop
+                        break;
+                    } // Success; exit loop
                     Err(err) => {
                         retries += 1;
                         error!(
@@ -1075,11 +1203,10 @@ impl TarDevSnapshotter {
                     }
                 }
             }
-            let generated_root_hash = generated_root_hash
-                .ok_or_else(|| {
-                    error!("failed to generate root hash");
-                    Status::invalid_argument("failed to generate root hash")
-                })?;
+            let generated_root_hash = generated_root_hash.ok_or_else(|| {
+                error!("failed to generate root hash");
+                Status::invalid_argument("failed to generate root hash")
+            })?;
 
             let (root_hash, root_hash_sig) = if root_hash.is_none() {
                 Self::get_signature_from_oci_manifest(layer)
@@ -1090,9 +1217,12 @@ impl TarDevSnapshotter {
             // Store a label with the root hash so that we can recall it later
             // when mounting.
             match (root_hash, root_hash_sig) {
-                (Some(root_hash), Some(root_hash_sig)) =>  {
+                (Some(root_hash), Some(root_hash_sig)) => {
                     if generated_root_hash != root_hash {
-                        error!("generated root hash {} does not match expected root hash {}", generated_root_hash, root_hash);
+                        error!(
+                            "generated root hash {} does not match expected root hash {}",
+                            generated_root_hash, root_hash
+                        );
                         return Err(Status::invalid_argument(format!(
                             "generated root hash {} does not match expected root hash {}",
                             generated_root_hash, root_hash
@@ -1100,7 +1230,7 @@ impl TarDevSnapshotter {
                     }
                     labels.insert(ROOT_HASH_LABEL.into(), root_hash);
                     labels.insert(ROOT_HASH_SIG_LABEL.into(), root_hash_sig);
-                },
+                }
                 _ => {
                     labels.insert(ROOT_HASH_LABEL.into(), generated_root_hash);
                 }
@@ -1120,21 +1250,21 @@ impl TarDevSnapshotter {
         Ok(())
     }
 
-    fn get_signature_from_oci_manifest(layer: &OciDescriptor) -> (Option<String>, Option<String>) {
-        let layer_annotations = layer
-            .annotations
-            .as_ref();
+    fn get_signature_from_oci_manifest(layer: &Value) -> (Option<String>, Option<String>) {
+        let layer_annotations = layer.as_object().and_then(|layer| {
+            layer
+                .get_key_value("annotations")
+                .and_then(|kv| kv.1.as_object())
+        });
 
         match layer_annotations {
             None => (None, None),
             Some(annotations) => {
                 // hex encoded
-                let root_hash = annotations
-                    .get(ROOT_HASH_LABEL).map(|s| s.to_string());
+                let root_hash = annotations.get(ROOT_HASH_LABEL).map(|s| s.to_string());
 
                 // base64 encoded
-                let root_hash_sig = annotations
-                    .get(ROOT_HASH_SIG_LABEL).map(|s| s.to_string());
+                let root_hash_sig = annotations.get(ROOT_HASH_SIG_LABEL).map(|s| s.to_string());
 
                 (root_hash, root_hash_sig)
             }
