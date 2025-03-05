@@ -327,6 +327,23 @@ pub struct ExecProcessRequestDefaults {
     regex: Vec<String>,
 }
 
+/// Interface struct schema for genpolicy-settings.json.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Interface {
+    /// Network device
+    device: String,
+
+    /// Device name
+    name: String,
+}
+
+/// UpdateInterfaceRequest settings from genpolicy-settings.json.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpdateInterfaceRequestDefaults {
+    /// Example interface configuration
+    interface: Interface,
+}
+
 /// Settings specific to each kata agent endpoint, loaded from
 /// genpolicy-settings.json.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -339,6 +356,9 @@ pub struct RequestDefaults {
 
     /// Commands allowed to be executed by the Host in all Guest containers.
     pub ExecProcessRequest: ExecProcessRequestDefaults,
+
+    /// Interfaces allowed to be updated to in all Guest sandboxes.
+    pub UpdateInterfaceRequest: UpdateInterfaceRequestDefaults,
 
     /// Allow the Host to close stdin for a container. Typically used with WriteStreamRequest.
     pub CloseStdinRequest: bool,

@@ -38,7 +38,7 @@ default StopTracingRequest := false
 default TtyWinResizeRequest := true
 default UpdateContainerRequest := false
 default UpdateEphemeralMountsRequest := false
-default UpdateInterfaceRequest := true
+default UpdateInterfaceRequest := false
 default UpdateRoutesRequest := true
 default WaitProcessRequest := true
 default WriteStreamRequest := false
@@ -1631,6 +1631,25 @@ ExecProcessRequest {
     allow_interactive_exec(p_container, input.process)
 
     print("ExecProcessRequest 3: true")
+}
+
+UpdateInterfaceRequest {
+    print("UpdateInterfaceRequest 1: input =", input)
+
+    i_interface := input.interface
+    p_interface := policy_data.request_defaults.UpdateInterfaceRequest.interface
+
+    print("UpdateInterfaceRequest 1: p_interface.device =", p_interface.device)
+    print("UpdateInterfaceRequest 1: i_interface.device =", i_interface.device)
+
+    i_interface.device == p_interface.device
+
+    print("UpdateInterfaceRequest 1: p_interface.name =", p_interface.name)
+    print("UpdateInterfaceRequest 1: i_interface.name =", i_interface.name)
+
+    i_interface.name == p_interface.name
+
+    print("UpdateInterfaceRequest 1: true")
 }
 
 CloseStdinRequest {

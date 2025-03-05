@@ -324,6 +324,12 @@
             ],
             "allow_env_regex_map": {}
         },
+        "UpdateInterfaceRequest": {
+            "interface": {
+                "device": "eth0",
+                "name": "eth0"
+            }
+        },
         "CopyFileRequest": [
             "$(sfprefix)"
         ],

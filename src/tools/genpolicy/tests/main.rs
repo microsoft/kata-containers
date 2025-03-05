@@ -9,7 +9,7 @@ use std::path;
 use std::process::Command;
 use std::str;
 
-use protocols::agent::CreateSandboxRequest;
+use protocols::agent::{CreateSandboxRequest, UpdateInterfaceRequest};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -101,4 +101,9 @@ where
 #[test]
 fn test_create_sandbox() {
     runtests::<CreateSandboxRequest>("createsandbox");
+}
+
+#[test]
+fn test_update_interface() {
+    runtests::<UpdateInterfaceRequest>("updateinterface");
 }
