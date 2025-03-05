@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{registry, utils};
 
+const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
+const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
+
 /// Aggregates per-image layer information. While the image name is not strictly
 /// necessary, it is convenient for human inspection of the manifest.
 #[derive(Serialize, Deserialize)]
@@ -87,11 +90,11 @@ async fn get_container_image_manifest_with_root_hashes(
                 .expect("Layer info not found");
             let mut annotations = layer.annotations.unwrap_or_default();
             annotations.insert(
-                "com.microsoft.image.rootfs.roothash.signature".to_string(),
+                ROOT_HASH_SIG_LABEL.to_string(),
                 layer_info.signature.clone(),
             );
             annotations.insert(
-                "com.microsoft.image.rootfs.roothash".to_string(),
+                ROOT_HASH_LABEL.to_string(),
                 layer_info.root_hash.clone(),
             );
             layer.annotations = Some(annotations);
