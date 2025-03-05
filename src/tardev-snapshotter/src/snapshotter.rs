@@ -4,7 +4,7 @@ use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_n
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
 use log::{debug, error, info, trace, warn};
 use nix::mount::MsFlags;
-use oci_distribution::{client, manifest::{self, OciImageManifest, OciManifest}};
+use oci_distribution::{client, manifest::{self, OciDescriptor, OciImageManifest, OciManifest}};
 use serde::{Deserialize, Serialize};
 use sha2::{
     digest::{typenum::Unsigned, OutputSizeUser},
@@ -249,7 +249,7 @@ impl Store {
         &self,
         path: &str,
         hash: &str,
-        signature_name: &str,
+        signature_name: Option<String>,
     ) -> Result<(u64, u64, String, String)> {
         trace!("prepare_dm_target for loop device");
         let mut file = File::open(path)?;
@@ -286,8 +286,13 @@ impl Store {
         let salt = '0'
             .to_string()
             .repeat(<Sha256 as OutputSizeUser>::OutputSize::USIZE * 2);
+        let signature_parameters = if let Some(signature_name) = signature_name {
+            format!(" 2 root_hash_sig_key_desc {signature_name}")
+        } else {
+            String::new()
+        };
         let construction_parameters = format!(
-                "1 {path} {path} {data_block_size} {hash_block_size} {} {} sha256 {hash} {salt} 2 root_hash_sig_key_desc {signature_name}",
+                "1 {path} {path} {data_block_size} {hash_block_size} {} {} sha256 {hash} {salt}{signature_parameters}",
                 data_size / data_block_size,
                 (data_size + hash_block_size - 1) / hash_block_size,
             );
@@ -300,7 +305,7 @@ impl Store {
         &self,
         layer_path: &str,
         root_hash: &str,
-        root_hash_sig_name: &str,
+        root_hash_sig_name: Option<String>,
     ) -> Result<String> {
         let dm = devicemapper::DM::new()?;
         let layer_name = Path::new(layer_path)
@@ -542,27 +547,26 @@ impl Store {
                         dm_verity_device
                     );
                 } else {
-                    let root_hash_sig = match info.labels.get(ROOT_HASH_SIG_LABEL) {
-                        Some(rh) => rh,
-                        None => {
-                            return Err(Status::failed_precondition(
-                                "parent snapshot has no root hash stored",
-                            ));
-                        }
-                    };
-
-                    let signature_name = match self.load_signature(root_hash, root_hash_sig) {
-                        Ok(name) => name,
-                        Err(e) => {
-                            return Err(Status::failed_precondition(format!(
-                                "Failed to load signature: {e}"
-                            )))
-                        }
-                    };
+                    let signature_name = (match info.labels.get(ROOT_HASH_SIG_LABEL) {
+                        Some(root_hash_sig) => {
+                            match self.load_signature(root_hash, root_hash_sig) {
+                                Ok(name) => Ok(Some(name)),
+                                Err(e) => Err(e)
+                            }
+                        },
+                        None => Ok(None),
+                    }).context("Failed to load signature")
+                    .map_err(|e| 
+                        Status::failed_precondition(format!(
+                            "Failed to load signature: {e}"
+                        )))?;
+                    if signature_name.is_none() {
+                        warn!("No signature found for layer {}", name);
+                    }
 
                     // Step 1:  Create a dm-verity device for the tarfs layer
                     let created_dm_verity_device = self
-                        .create_dm_verity_device(src.to_str().unwrap(), root_hash, &signature_name)
+                        .create_dm_verity_device(src.to_str().unwrap(), root_hash, signature_name)
                         .map_err(|e| {
                             Status::internal(format!(
                                 "Failed to create dm-verity device for source {:?}: {:?}",
@@ -882,7 +886,7 @@ impl TarDevSnapshotter {
         base_name: PathBuf,
         digest_str: &str,
         layer_type: &str,
-    ) -> Result<(), Status> {
+    ) -> Result<String, Status> {
         let layer_type = layer_type.to_string(); // Clone `layer_type` into an owned `String`
 
         info!("Fetching {} layer image to {:?}", layer_type, upstream_name);
@@ -950,7 +954,7 @@ impl TarDevSnapshotter {
             Ok(generated_root_hash) => {
                 let generated_root_hash = format!("{:x}", generated_root_hash);
                 trace!("Generated root hash: {}", generated_root_hash);
-                Ok(())
+                Ok(generated_root_hash)
             }
             Err(process_err) => {
                 error!("Failed to process layer: {:?}", process_err);
@@ -1039,6 +1043,7 @@ impl TarDevSnapshotter {
             const MAX_RETRIES: usize = 3;
             const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500); // 500ms delay
             let mut retries = 0;
+            let mut generated_root_hash = None;
             while retries < MAX_RETRIES {
                 match self
                     .fetch_and_process_layer(
@@ -1049,7 +1054,10 @@ impl TarDevSnapshotter {
                     )
                     .await
                 {
-                    Ok(_) => break, // Success; exit loop
+                    Ok(root_hash) => {
+                        generated_root_hash = Some(root_hash);
+                        break
+                    }, // Success; exit loop
                     Err(err) => {
                         retries += 1;
                         error!(
@@ -1067,53 +1075,36 @@ impl TarDevSnapshotter {
                     }
                 }
             }
+            let generated_root_hash = generated_root_hash
+                .ok_or_else(|| {
+                    error!("failed to generate root hash");
+                    Status::invalid_argument("failed to generate root hash")
+                })?;
 
-            let (root_hash, root_hash_sig) = match (root_hash, root_hash_sig) {
-                (Some(root_hash), Some(root_hash_sig)) => {
-                    (root_hash.clone(), root_hash_sig.clone())
-                }
-                (_, _) => {
-                    let layer_annotations = layer
-                        .annotations
-                        .as_ref()
-                        .context(format!(
-                            "layer annotations are missing for layer {digest_str}"
-                        ))
-                        .map_err(|e| {
-                            error!("failed to get layer annotations: {:?}", e);
-                            Status::invalid_argument(format!(
-                                "failed to get layer annotations: {:?}",
-                                e
-                            ))
-                        })?;
-
-                    // hex encoded
-                    let root_hash = layer_annotations
-                        .get(ROOT_HASH_LABEL)
-                        .ok_or_else(|| {
-                            error!("missing layer root hash in image manifest");
-                            Status::invalid_argument("missing root hash in image manifest")
-                        })?
-                        .to_string();
-
-                    // base64 encoded
-                    let root_hash_sig = layer_annotations
-                        .get(ROOT_HASH_SIG_LABEL)
-                        .ok_or_else(|| {
-                            error!("missing layer root hash signature in image manifest");
-                            Status::invalid_argument(
-                                "missing root hash signature in image manifest",
-                            )
-                        })?
-                        .to_string();
-
-                    (root_hash, root_hash_sig)
-                }
+            let (root_hash, root_hash_sig) = if root_hash.is_none() {
+                Self::get_signature_from_oci_manifest(layer)
+            } else {
+                (root_hash, root_hash_sig)
             };
 
-            // Store a label with the root hash so that we can recall it later when mounting.
-            labels.insert(ROOT_HASH_LABEL.into(), root_hash);
-            labels.insert(ROOT_HASH_SIG_LABEL.into(), root_hash_sig);
+            // Store a label with the root hash so that we can recall it later
+            // when mounting.
+            match (root_hash, root_hash_sig) {
+                (Some(root_hash), Some(root_hash_sig)) =>  {
+                    if generated_root_hash != root_hash {
+                        error!("generated root hash {} does not match expected root hash {}", generated_root_hash, root_hash);
+                        return Err(Status::invalid_argument(format!(
+                            "generated root hash {} does not match expected root hash {}",
+                            generated_root_hash, root_hash
+                        )));
+                    }
+                    labels.insert(ROOT_HASH_LABEL.into(), root_hash);
+                    labels.insert(ROOT_HASH_SIG_LABEL.into(), root_hash_sig);
+                },
+                _ => {
+                    labels.insert(ROOT_HASH_LABEL.into(), generated_root_hash);
+                }
+            }
         }
 
         // Move file to its final location and write the snapshot.
@@ -1127,6 +1118,27 @@ impl TarDevSnapshotter {
 
         trace!("Layer prepared");
         Ok(())
+    }
+
+    fn get_signature_from_oci_manifest(layer: &OciDescriptor) -> (Option<String>, Option<String>) {
+        let layer_annotations = layer
+            .annotations
+            .as_ref();
+
+        match layer_annotations {
+            None => (None, None),
+            Some(annotations) => {
+                // hex encoded
+                let root_hash = annotations
+                    .get(ROOT_HASH_LABEL).map(|s| s.to_string());
+
+                // base64 encoded
+                let root_hash_sig = annotations
+                    .get(ROOT_HASH_SIG_LABEL).map(|s| s.to_string());
+
+                (root_hash, root_hash_sig)
+            }
+        }
     }
 
     async fn commit_impl(
