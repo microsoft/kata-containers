@@ -33,6 +33,9 @@ const TARGET_MANIFEST_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.manifest-
 const TAR_GZ_EXTENSION: &str = "tar.gz";
 const TAR_EXTENSION: &str = "tar";
 
+/// Path from where to scan for .json standalone signature manifests
+const SIGNATURE_STORE: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/signatures";
+
 // borrowed from oci-distribution crate, which alas does not build with rustc
 // 1.75, which is used by AzL3
 
@@ -74,8 +77,6 @@ struct Store {
     signatures: Option<HashMap<String, LayerInfo>>, // digest to layer info
 }
 
-const SIGNATURE_STORE: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/signatures";
-
 impl Store {
     fn new(root: &Path) -> Self {
         Self {
@@ -86,7 +87,7 @@ impl Store {
 
     fn lazy_read_signatures(&mut self) -> Result<()> {
         if self.signatures == None {
-            trace!("Loading signatures");
+            debug!("Loading signatures");
             self.read_signatures()
                 .context("Failed to read signatures")?;
         }
@@ -112,6 +113,7 @@ impl Store {
         }
 
         if !signatures.is_empty() {
+            debug!("Loaded {} signatures", signatures.len());
             self.signatures = Some(signatures);
         }
 
@@ -130,6 +132,8 @@ impl Store {
     }
 
     fn load_signature(&self, hash: &str, signature: &str) -> Result<String> {
+        debug!("Loading signature {signature} for root hash {hash}");
+
         let signature_name = format!("verity:{hash}");
 
         // https://lkml.org/lkml/2019/7/17/762
@@ -186,7 +190,7 @@ impl Store {
     /// Creates the snapshot file path from its name.
     ///
     /// If `write` is `true`, it also ensures that the directory exists.
-    fn snapshot_path(&self, name: &str, write: bool) -> Result<PathBuf, Status> {
+    fn snapshot_path(&self, name: &str, write: bool) -> Result<PathBuf> {
         let path = self.root.join("snapshots").join(name_to_hash(name));
         if write {
             if let Some(parent) = path.parent() {
@@ -203,7 +207,7 @@ impl Store {
     }
 
     /// Creates the layer file path from its name and ensures that the directory exists.
-    fn layer_path_to_write(&self, name: &str) -> Result<PathBuf, Status> {
+    fn layer_path_to_write(&self, name: &str) -> Result<PathBuf> {
         let path = self.layer_path(name);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -212,16 +216,12 @@ impl Store {
     }
 
     /// Reads the information from storage for the given snapshot name.
-    fn read_snapshot(&self, name: &str) -> Result<Info, Status> {
+    fn read_snapshot(&self, name: &str) -> Result<Info> {
         let path = self.snapshot_path(name, false)?;
-        let file = fs::File::open(&path).map_err(|e| {
-            Status::unknown(format!(
-                "unable to open snapshot ('{}'): {e}",
-                path.display()
-            ))
-        })?;
+        let file = fs::File::open(&path)
+            .context(format!("unable to open snapshot ('{}')", path.display()))?;
         serde_json::from_reader(file)
-            .map_err(|_| Status::unknown(format!("unable to read snapshot ('{}')", path.display())))
+            .context(format!("unable to read snapshot ('{}')", path.display()))
     }
 
     /// Writes to storage the given snapshot information.
@@ -233,7 +233,7 @@ impl Store {
         key: String,
         parent: String,
         labels: HashMap<String, String>,
-    ) -> Result<(), Status> {
+    ) -> Result<()> {
         let info = Info {
             kind,
             name: key,
@@ -244,10 +244,7 @@ impl Store {
         let name = self.snapshot_path(&info.name, true)?;
         // TODO: How to specify the file mode (e.g., 0600)?
         let file = OpenOptions::new().write(true).create_new(true).open(name)?;
-        let foo = serde_json::to_writer_pretty(file, &info)
-            .map_err(|_| Status::internal("unable to write snapshot"));
-        foo?;
-        Ok(())
+        serde_json::to_writer_pretty(file, &info).context("unable to write snapshot")
     }
 
     /// Creates a new snapshot for use.
@@ -260,7 +257,7 @@ impl Store {
         key: String,
         parent: String,
         labels: HashMap<String, String>,
-    ) -> Result<Vec<api::types::Mount>, Status> {
+    ) -> Result<Vec<api::types::Mount>> {
         let mounts = self.mounts_from_snapshot(&parent, false)?;
         self.write_snapshot(kind, key, parent, labels)?;
         Ok(mounts)
@@ -275,7 +272,7 @@ impl Store {
         hash: &str,
         signature_name: Option<String>,
     ) -> Result<(u64, u64, String, String)> {
-        trace!("prepare_dm_target for loop device");
+        debug!("prepare_dm_target for loop device ({path}/{hash}/{signature_name:?})");
         let mut file = File::open(path)?;
         let size = file.seek(std::io::SeekFrom::End(0))?;
         if size < 4096 {
@@ -297,7 +294,7 @@ impl Store {
             .data_block_count
             .get()
             .checked_mul(data_block_size)
-            .ok_or_else(|| anyhow!("Invalid data size"))?;
+            .context("Invalid data size")?;
         if data_size > size {
             return Err(anyhow!(
                 "Data size ({data_size}) is greater than device size ({size}) for device {path}"
@@ -320,7 +317,7 @@ impl Store {
                 data_size / data_block_size,
                 (data_size + hash_block_size - 1) / hash_block_size,
             );
-        trace!("dm-verity construction params: {construction_parameters}");
+        debug!("dm-verity construction params: {construction_parameters}");
         Ok((0, data_size / 512, "verity".into(), construction_parameters))
     }
 
@@ -334,16 +331,17 @@ impl Store {
         let dm = devicemapper::DM::new()?;
         let layer_name = Path::new(layer_path)
             .file_name()
-            .ok_or_else(|| anyhow!("Unable to get file name from layer path"))?
+            .context("Unable to get file name from layer path")?
             .to_str()
-            .ok_or_else(|| anyhow!("Unable to convert file name to UTF-8 string"))?;
-        trace!("create_dm_verity_device for layer: {}", layer_name);
+            .context("Unable to convert file name to UTF-8 string")?;
+
+        debug!("create_dm_verity_device for layer: {}", layer_name);
 
         let name = devicemapper::DmName::new(&layer_name)?;
         let opts = devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY);
 
         if let Err(e) = dm.device_create(name, None, opts) {
-            warn!("Failed to create Device Mapper device: {:?}", e);
+            error!("Failed to create Device Mapper device: {:?}", e);
             return Err(e.into());
         }
         let id = devicemapper::DevId::Name(name);
@@ -354,14 +352,14 @@ impl Store {
                 .arg("-fP")
                 .arg(layer_path)
                 .output()
-                .expect("Failed to execute losetup command to create loop device");
+                .context("Failed to execute losetup command to create loop device")?;
 
             if !setup_output.status.success() {
-                warn!(
+                error!(
                     "Failed to set up loop device: {:?}",
                     String::from_utf8_lossy(&setup_output.stderr)
                 );
-                return Err(anyhow::anyhow!(
+                return Err(anyhow!(
                     "Failed to set up loop device: {:?}",
                     String::from_utf8_lossy(&setup_output.stderr)
                 ));
@@ -372,14 +370,14 @@ impl Store {
             let loop_output = Command::new("losetup")
                 .arg("-a")
                 .output()
-                .expect("Failed to list loop devices");
+                .context("Failed to list loop devices")?;
 
             let loop_output_str = String::from_utf8_lossy(&loop_output.stdout);
             let loop_device = loop_output_str
                 .lines()
                 .find(|line| line.contains(layer_path))
                 .and_then(|line| line.split(":").next())
-                .ok_or_else(|| anyhow::anyhow!("Could not find loop device for {}", layer_path))?;
+                .context(format!("Could not find loop device for {}", layer_path))?;
 
             trace!("selected newly created loop device: {}", loop_device);
 
@@ -427,10 +425,10 @@ impl Store {
                     String::from_utf8_lossy(&detach_output.stderr)
                 );
             } else {
-                trace!("Successfully detached loop device: {}", layer_path);
+                debug!("Successfully detached loop device: {}", layer_path);
             }
 
-            warn!("Error occurred during DM-Verity setup: {:?}", e);
+            error!("Error occurred during DM-Verity setup: {:?}", e);
             e
         })
     }
@@ -460,7 +458,7 @@ impl Store {
         // Ensure the target directory exists
         if !target_path.exists() {
             fs::create_dir_all(target_path)
-                .with_context(|| format!("Failed to create mount point: {}", target))?;
+                .context(format!("Failed to create mount point: {}", target))?;
         }
 
         // Attempt the mount operation
@@ -471,16 +469,12 @@ impl Store {
             flags,
             Some(options),
         )
-        .map_err(|e| anyhow!("Failed to mount {} to {} with error: {}", source, target, e))?;
+        .context(format!("Failed to mount {} to {}", source, target))?;
 
         Ok(())
     }
 
-    fn mounts_from_snapshot(
-        &self,
-        parent: &str,
-        do_mount: bool,
-    ) -> Result<Vec<api::types::Mount>, Status> {
+    fn mounts_from_snapshot(&self, parent: &str, do_mount: bool) -> Result<Vec<api::types::Mount>> {
         const PREFIX: &str = "io.katacontainers.fs-opt";
 
         // Get chain of layers.
@@ -502,17 +496,13 @@ impl Store {
                 }
             };
             if info.kind != Kind::Committed {
-                return Err(Status::failed_precondition(
-                    "parent snapshot is not committed",
-                ));
+                return Err(anyhow!("parent snapshot is not committed",));
             }
 
             let root_hash = match info.labels.get(ROOT_HASH_LABEL) {
                 Some(rh) => rh,
                 None => {
-                    return Err(Status::failed_precondition(
-                        "parent snapshot has no root hash stored",
-                    ));
+                    return Err(anyhow!("parent snapshot has no root hash stored",));
                 }
             };
 
@@ -536,9 +526,7 @@ impl Store {
                         Path::new(p).to_path_buf()
                     }
                 } else {
-                    return Err(Status::invalid_argument(
-                        "Missing source path in layer info",
-                    ));
+                    return Err(anyhow!("Missing source path in layer info",));
                 };
                 trace!("src: {}", src.display());
 
@@ -580,10 +568,7 @@ impl Store {
                         }
                         None => Ok(None),
                     })
-                    .context("Failed to load signature")
-                    .map_err(|e| {
-                        Status::failed_precondition(format!("Failed to load signature: {e}"))
-                    })?;
+                    .context("Failed to load signature")?;
                     if signature_name.is_none() {
                         warn!("No signature found for layer {}", name);
                     }
@@ -591,13 +576,11 @@ impl Store {
                     // Step 1:  Create a dm-verity device for the tarfs layer
                     let created_dm_verity_device = self
                         .create_dm_verity_device(src.to_str().unwrap(), root_hash, signature_name)
-                        .map_err(|e| {
-                            Status::internal(format!(
-                                "Failed to create dm-verity device for source {:?}: {:?}",
-                                src, e
-                            ))
-                        })?;
-                    info!(
+                        .context(format!(
+                            "Failed to create dm-verity device for source {:?}",
+                            src
+                        ))?;
+                    debug!(
                         "created dm-verity device for layer {}: {}",
                         name, created_dm_verity_device
                     );
@@ -609,7 +592,7 @@ impl Store {
                     .arg(&mount_path)
                     .status()?;
                 if mount_status.success() {
-                    info!(
+                    debug!(
                         "Mount path {:?} is already mounted, skipping mounting.",
                         mount_path
                     );
@@ -623,13 +606,11 @@ impl Store {
                         &fs_opts,
                         flags,
                     )
-                    .map_err(|e| {
-                        Status::internal(format!(
-                            "Failed to mount dm-verity device {} to {:?}: {:?}",
-                            dm_verity_device, mount_path, e
-                        ))
-                    })?;
-                    info!(
+                    .context(format!(
+                        "Failed to mount dm-verity device {} to {:?}",
+                        dm_verity_device, mount_path
+                    ))?;
+                    debug!(
                         "mounted single layer dm-verity device {} to {:?}",
                         dm_verity_device, mount_path
                     );
@@ -674,10 +655,10 @@ impl Store {
 
             // DEBUG: Validate that lowerdirs does not exceed PATH_MAX
             if lowerdirs.len() > 4096 {
-                return Err(Status::internal(format!(
+                return Err(anyhow!(
                     "Lowerdirs string exceeds allowable length: {}",
                     lowerdirs.len()
-                )));
+                ));
             }
 
             // Perform an overlay mount
@@ -694,13 +675,10 @@ impl Store {
                 MsFlags::empty(),
                 Some(opts.as_str()),
             )
-            .map_err(|e| {
-                Status::internal(format!(
-                    "Failed to mount overlay to {} with error: {}",
-                    overlay_target.display(),
-                    e
-                ))
-            })?;
+            .context(format!(
+                "Failed to mount overlay to {}",
+                overlay_target.display(),
+            ))?;
 
             trace!("Overlay mount completed at {:?}", overlay_target);
 
@@ -743,7 +721,7 @@ impl Store {
                 options: vec!["bind".into(), "rw".into()],
             };
 
-            info!(
+            debug!(
                 "mounts_from_snapshot(): returning mount struct for runc: type={}, source={}, target={}, options={:?}",
                 overlay_mount.r#type, overlay_mount.source, overlay_mount.target, overlay_mount.options
             );
@@ -791,12 +769,12 @@ impl TarDevSnapshotter {
         let extract_dir;
         {
             let mut store = self.store.write().await;
-            extract_dir = store.extract_dir_to_write(&key).map_err(|e| {
-                Status::unknown(format!("failed to extract directory to write: {e}"))
-            })?;
+            extract_dir = store
+                .extract_dir_to_write(&key)
+                .map_err(|e| Status::unknown(format!("failed to create extract dir: {e}")))?;
             store
                 .write_snapshot(Kind::Active, key.clone(), parent, labels)
-                .map_err(|e| Status::unknown(format!("failed to write the snapshot: {e}")))?;
+                .map_err(|e| Status::unknown(format!("failed to write snapshot: {e}")))?;
         }
         Ok(vec![api::types::Mount {
             r#type: "bind".into(),
@@ -822,7 +800,9 @@ impl TarDevSnapshotter {
                 trace!("Connecting to containerd at {}", self.containerd_path);
                 let c = Client::from_path(&self.containerd_path)
                     .await
-                    .map_err(|_| Status::unknown("unable to connect to containerd"))?;
+                    .map_err(|e| {
+                        Status::unknown(format!("unable to connect to containerd: {e}"))
+                    })?;
                 *self.containerd_client.write().await = Some(c);
                 continue;
             };
@@ -831,7 +811,7 @@ impl TarDevSnapshotter {
             let mut stream = resp.into_inner();
             while let Some(chunk) = stream.message().await? {
                 if chunk.offset < 0 {
-                    debug!("Containerd reported a negative offset: {}", chunk.offset);
+                    error!("Containerd reported a negative offset: {}", chunk.offset);
                     return Err(Status::invalid_argument("negative offset"));
                 }
                 file.seek(io::SeekFrom::Start(chunk.offset as u64)).await?;
@@ -858,7 +838,9 @@ impl TarDevSnapshotter {
                 trace!("Connecting to containerd at {}", self.containerd_path);
                 let c = Client::from_path(&self.containerd_path)
                     .await
-                    .map_err(|_| Status::unknown("unable to connect to containerd"))?;
+                    .map_err(|e| {
+                        Status::unknown(format!("unable to connect to containerd: {e}"))
+                    })?;
                 *self.containerd_client.write().await = Some(c);
                 continue;
             };
@@ -868,7 +850,7 @@ impl TarDevSnapshotter {
             let mut buf = Vec::new();
             while let Some(chunk) = stream.message().await? {
                 if chunk.offset < 0 {
-                    debug!("Containerd reported a negative offset: {}", chunk.offset);
+                    error!("Containerd reported a negative offset: {}", chunk.offset);
                     return Err(Status::invalid_argument("negative offset"));
                 }
 
@@ -876,10 +858,11 @@ impl TarDevSnapshotter {
                 buf.extend_from_slice(&chunk.data);
             }
             return serde_json::from_slice(&buf).map_err(|e| {
-                Status::invalid_argument(format!(
-                    "failed to parse manifest: {e}, manifest: {:?}",
-                    String::from_utf8_lossy(&buf)
-                ))
+                error!(
+                    "failed to parse manifest with digest {digest_str}: {e}, manifest: {:?}",
+                    buf
+                );
+                Status::invalid_argument(format!("failed to parse manifest: {e}"))
             });
         }
     }
@@ -890,11 +873,7 @@ impl TarDevSnapshotter {
         let manifest = self
             .get_oci_manifest(digest_str)
             .await
-            .context("Failed to download oci manifest")
-            .map_err(|e| {
-                error!("Failed to get OCI manifest: {:?}", e);
-                Status::invalid_argument(format!("failed to get OCI manifest: {:?}", e))
-            })?;
+            .map_err(|e| Status::invalid_argument(format!("failed to get OCI manifest: {e}")))?;
         let media_type = manifest
             .as_object()
             .and_then(|manifest| {
@@ -902,24 +881,19 @@ impl TarDevSnapshotter {
                     .get_key_value("mediaType")
                     .and_then(|kv| kv.1.as_str())
             })
-            .context("Failed to deserialize OCI manifest, mediaType is missing")
-            .map_err(|e| {
-                error!("Failed to deserialize OCI manifest: {:?}", e);
-                Status::invalid_argument(format!("failed to deserialize OCI manifest: {:?}", e))
-            })?;
+            .ok_or(Status::invalid_argument(format!(
+                "failed to deserialize OCI manifest, mediaType is missing"
+            )))?;
         match media_type {
             OCI_IMAGE_MEDIA_TYPE | IMAGE_MANIFEST_MEDIA_TYPE => Ok(manifest),
             OCI_IMAGE_INDEX_MEDIA_TYPE | IMAGE_MANIFEST_LIST_MEDIA_TYPE => {
                 let digest_str = self.get_platform_manifest_digest(&manifest)?;
                 Box::pin(self.get_image_manifest(&digest_str)).await
             }
-            _ => {
-                error!("Unsupported OCI manifest media type: {}", media_type);
-                Err(Status::invalid_argument(format!(
-                    "unsupported OCI manifest media type: {}",
-                    media_type
-                )))
-            }
+            _ => Err(Status::invalid_argument(format!(
+                "unsupported OCI manifest media type: {}",
+                media_type
+            ))),
         }
     }
 
@@ -932,11 +906,9 @@ impl TarDevSnapshotter {
                     .get_key_value("manifests")
                     .and_then(|kv| kv.1.as_array())
             })
-            .context("Failed to deserialize OCI image index, manifests is missing")
-            .map_err(|e| {
-                error!("Failed to deserialize OCI image index: {:?}", e);
-                Status::invalid_argument(format!("failed to deserialize OCI image index: {:?}", e))
-            })?;
+            .ok_or(Status::invalid_argument(
+                "Failed to deserialize OCI image index, manifests is missing",
+            ))?;
 
         // Find the linux/amd64 variant
         let manifest = manifests
@@ -960,10 +932,9 @@ impl TarDevSnapshotter {
                     });
                 result.unwrap_or(false)
             })
-            .ok_or_else(|| {
-                error!("No linux/amd64 variant found in OCI image index");
-                Status::invalid_argument("no linux/amd64 variant found in OCI image index")
-            })
+            .ok_or(Status::invalid_argument(
+                "No linux/amd64 variant found in OCI image index",
+            ))
             .map(|manifest| manifest.to_owned())?;
 
         manifest
@@ -974,11 +945,9 @@ impl TarDevSnapshotter {
                     .and_then(|kv| kv.1.as_str())
                     .and_then(|s| Some(s.to_owned()))
             })
-            .context("Failed to deserialize OCI image index, digest is missing")
-            .map_err(|e| {
-                error!("Failed to deserialize OCI image index: {:?}", e);
-                Status::invalid_argument(format!("failed to deserialize OCI image index: {:?}", e))
-            })
+            .ok_or(Status::invalid_argument(
+                "Failed to deserialize OCI image index, digest is missing",
+            ))
     }
 
     /// Fetches and processes an image layer.
@@ -994,13 +963,12 @@ impl TarDevSnapshotter {
     ) -> Result<String, Status> {
         let layer_type = layer_type.to_string(); // Clone `layer_type` into an owned `String`
 
-        info!("Fetching {} layer image to {:?}", layer_type, upstream_name);
+        debug!("Fetching {} layer image to {:?}", layer_type, upstream_name);
 
         // Fetch the layer image
         self.get_layer_image(&upstream_name, digest_str)
             .await
             .map_err(|download_err| {
-                error!("Failed to fetch layer image: {:?}", download_err);
                 Status::unknown(format!("Failed to fetch layer image: {:?}", download_err))
             })?;
 
@@ -1012,7 +980,7 @@ impl TarDevSnapshotter {
 
             move || -> Result<_> {
                 if layer_type == TAR_EXTENSION {
-                    info!("Renaming {:?} to {:?}", &upstream_name, &base_name);
+                    debug!("Renaming {:?} to {:?}", &upstream_name, &base_name);
                     std::fs::rename(&upstream_name, &base_name)?;
                 }
                 let mut file = OpenOptions::new()
@@ -1022,21 +990,21 @@ impl TarDevSnapshotter {
                     .truncate(layer_type == TAR_GZ_EXTENSION)
                     .open(&base_name)?;
                 if layer_type == TAR_GZ_EXTENSION {
-                    info!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
+                    debug!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
                     let compressed = fs::File::open(&upstream_name).map_err(|e| {
                         let file_error = format!(
                             "Failed to open file {:?} for decompression: {:?}",
                             &upstream_name, e
                         );
-                        error!("{}", file_error);
-                        anyhow::anyhow!(file_error)
+                        error!("{file_error}");
+                        anyhow!(file_error)
                     })?;
                     let mut gz_decoder = flate2::read::MultiGzDecoder::new(compressed);
 
                     if let Err(e) = std::io::copy(&mut gz_decoder, &mut file) {
                         let copy_error = format!("failed to copy payload from gz decoder {:?}", e);
                         error!("{}", copy_error);
-                        return Err(anyhow::anyhow!(copy_error));
+                        return Err(anyhow!(copy_error));
                     }
                 }
 
@@ -1053,7 +1021,7 @@ impl TarDevSnapshotter {
             }
         })
         .await
-        .map_err(|e| Status::unknown(format!("Error in worker task: {:?}", e)))?;
+        .map_err(|e| Status::unknown(format!("Error in fetch_and_process worker task: {:?}", e)))?;
 
         match process_result {
             Ok(generated_root_hash) => {
@@ -1061,13 +1029,10 @@ impl TarDevSnapshotter {
                 trace!("Generated root hash: {}", generated_root_hash);
                 Ok(generated_root_hash)
             }
-            Err(process_err) => {
-                error!("Failed to process layer: {:?}", process_err);
-                Err(Status::unknown(format!(
-                    "Failed to process layer: {:?}",
-                    process_err
-                )))
-            }
+            Err(process_err) => Err(Status::unknown(format!(
+                "Failed to process layer: {:?}",
+                process_err
+            ))),
         }
     }
 
@@ -1089,14 +1054,12 @@ impl TarDevSnapshotter {
 
         {
             let Some(digest_str) = labels.get(TARGET_LAYER_DIGEST_LABEL) else {
-                error!("missing target layer digest label");
                 return Err(Status::invalid_argument(
                     "missing target layer digest label",
                 ));
             };
 
             let Some(manifest_digest_str) = labels.get(TARGET_MANIFEST_DIGEST_LABEL) else {
-                error!("missing target manifest digest label");
                 return Err(Status::invalid_argument(
                     "missing target manifest digest label",
                 ));
@@ -1106,7 +1069,6 @@ impl TarDevSnapshotter {
                 self.get_image_manifest(manifest_digest_str)
                     .await
                     .map_err(|e| {
-                        error!("failed to get image manifest: {:?}", e);
                         Status::invalid_argument(format!("failed to get image manifest: {:?}", e))
                     })?;
 
@@ -1128,13 +1090,10 @@ impl TarDevSnapshotter {
                             })
                         })
                 })
-                .ok_or_else(|| {
-                    error!("layer {} not found in image manifest", digest_str);
-                    Status::invalid_argument(format!(
-                        "layer {} not found in image manifest",
-                        digest_str
-                    ))
-                })?;
+                .ok_or(Status::aborted(format!(
+                    "layer {} not found in image manifest",
+                    digest_str
+                )))?;
 
             let media_type = layer
                 .as_object()
@@ -1143,12 +1102,12 @@ impl TarDevSnapshotter {
                         .get_key_value("mediaType")
                         .and_then(|kv| kv.1.as_str())
                 })
-                .ok_or_else(|| {
-                    error!("mediaType not found in layer");
-                    Status::invalid_argument("mediaType not found in layer")
-                })?;
+                .ok_or(Status::invalid_argument(format!(
+                    "mediaType not found in layer {}",
+                    digest_str
+                )))?;
 
-            trace!("layer digest {} media_type: {:?}", digest_str, media_type);
+            debug!("layer digest {} media_type: {:?}", digest_str, media_type);
 
             let layer_type = match media_type {
                 IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE | IMAGE_LAYER_GZIP_MEDIA_TYPE => {
@@ -1156,9 +1115,8 @@ impl TarDevSnapshotter {
                 }
                 IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE | IMAGE_LAYER_MEDIA_TYPE => TAR_EXTENSION,
                 _ => {
-                    error!("unsupported media type: {}", media_type);
                     return Err(Status::invalid_argument(format!(
-                        "unsupported media type: {}",
+                        "unsupported layer media type: {}",
                         media_type
                     )));
                 }
@@ -1190,7 +1148,7 @@ impl TarDevSnapshotter {
                     } // Success; exit loop
                     Err(err) => {
                         retries += 1;
-                        error!(
+                        warn!(
                             "Failed to fetch/process layer (attempt {}/{}): {:?}",
                             retries, MAX_RETRIES, err
                         );
@@ -1200,19 +1158,19 @@ impl TarDevSnapshotter {
                                 MAX_RETRIES, err
                             )));
                         }
-                        warn!("Retrying fetch/process layer...");
+                        info!("Retrying fetch/process layer...");
                         tokio::time::sleep(RETRY_DELAY).await; // Sleep before retrying
                     }
                 }
             }
-            let generated_root_hash = generated_root_hash.ok_or_else(|| {
-                error!("failed to generate root hash");
-                Status::invalid_argument("failed to generate root hash")
-            })?;
+            let generated_root_hash = generated_root_hash
+                .ok_or(Status::invalid_argument("failed to generate root hash"))?;
 
             let (root_hash, root_hash_sig) = if root_hash.is_none() {
+                debug!("looking up root hash from the oci manifest");
                 Self::get_signature_from_oci_manifest(layer)
             } else {
+                debug!("using root hash from a standalone signatures manifest");
                 (root_hash, root_hash_sig)
             };
 
@@ -1221,19 +1179,22 @@ impl TarDevSnapshotter {
             match (root_hash, root_hash_sig) {
                 (Some(root_hash), Some(root_hash_sig)) => {
                     if generated_root_hash != root_hash {
-                        error!(
-                            "generated root hash {} does not match expected root hash {}",
-                            generated_root_hash, root_hash
-                        );
                         return Err(Status::invalid_argument(format!(
-                            "generated root hash {} does not match expected root hash {}",
+                            "the generated root hash {} does not match the expected root hash {}",
                             generated_root_hash, root_hash
                         )));
                     }
+                    info!(
+                        "found signature for layer {} with root hash {root_hash}: {root_hash_sig}",
+                        digest_str
+                    );
                     labels.insert(ROOT_HASH_LABEL.into(), root_hash);
                     labels.insert(ROOT_HASH_SIG_LABEL.into(), root_hash_sig);
                 }
                 _ => {
+                    info!(
+                        "signature not found, using generated root hash for layer {digest_str}: {generated_root_hash}"
+                    );
                     labels.insert(ROOT_HASH_LABEL.into(), generated_root_hash);
                 }
             }
@@ -1242,10 +1203,14 @@ impl TarDevSnapshotter {
         // Move file to its final location and write the snapshot.
         {
             let mut store = self.store.write().await;
-            let to = store.layer_path_to_write(&key)?;
+            let to = store
+                .layer_path_to_write(&key)
+                .map_err(|e| Status::unknown(format!("failed to create layer path: {e}")))?;
             trace!("Renaming from {:?} to {:?}", &snapshot_name, &to);
             tokio::fs::rename(snapshot_name, to).await?;
-            store.write_snapshot(Kind::Committed, key, parent, labels)?;
+            store
+                .write_snapshot(Kind::Committed, key, parent, labels)
+                .map_err(|e| Status::internal(format!("failed to write snapshot: {e}")))?;
         }
 
         trace!("Layer prepared");
@@ -1259,14 +1224,22 @@ impl TarDevSnapshotter {
                 .and_then(|kv| kv.1.as_object())
         });
 
+        trace!("layer annotations: {:?}", layer_annotations);
+
         match layer_annotations {
             None => (None, None),
             Some(annotations) => {
                 // hex encoded
-                let root_hash = annotations.get(ROOT_HASH_LABEL).map(|s| s.to_string());
+                let root_hash = annotations
+                    .get(ROOT_HASH_LABEL)
+                    .and_then(|s| s.as_str())
+                    .and_then(|s| Some(s.to_string()));
 
                 // base64 encoded
-                let root_hash_sig = annotations.get(ROOT_HASH_SIG_LABEL).map(|s| s.to_string());
+                let root_hash_sig = annotations
+                    .get(ROOT_HASH_SIG_LABEL)
+                    .and_then(|s| s.as_str())
+                    .and_then(|s| Some(s.to_string()));
 
                 (root_hash, root_hash_sig)
             }
@@ -1282,29 +1255,25 @@ impl TarDevSnapshotter {
         let (layer_info, parent) = {
             // Needs to be in the closure to release the lock
             let mut store = self.store.write().await;
-            let info = store.read_snapshot(&key)?;
+            let info = store.read_snapshot(&key).map_err(|e| {
+                Status::unknown(format!("failed to read snapshot ({name}/{key}): {e}"))
+            })?;
             if info.kind != Kind::Active {
-                return Err(Status::failed_precondition("snapshot is not active"));
+                return Err(Status::failed_precondition(format!(
+                    "snapshot {name} is not active"
+                )));
             }
 
-            let digest = match info.labels.get(TARGET_LAYER_DIGEST_LABEL) {
-                None => {
-                    return Err(Status::unimplemented(
-                        "no support for commiting arbitrary snapshots",
-                    ));
-                }
-                Some(digest) => digest,
-            };
+            let digest =
+                info.labels
+                    .get(TARGET_LAYER_DIGEST_LABEL)
+                    .ok_or(Status::unimplemented(format!(
+                "missing target layer digest label, no support for commiting arbitrary snapshots"
+            )))?;
 
-            let result = store.lazy_read_signatures();
-            match result {
-                Err(e) => {
-                    return Err(Status::failed_precondition(format!(
-                        "signature read failure: {e}"
-                    )))
-                }
-                Ok(()) => (),
-            };
+            store.lazy_read_signatures().map_err(|e| {
+                Status::failed_precondition(format!("failed to read signatures: {e}"))
+            })?;
 
             trace!("Looking up layer info for {digest}");
             let layer_info = store.get_info_from_digest(digest);
@@ -1329,7 +1298,9 @@ impl TarDevSnapshotter {
     async fn usage_impl(&self, key: String) -> Result<Usage, Status> {
         let store = self.store.read().await;
 
-        let info = store.read_snapshot(&key)?;
+        let info = store
+            .read_snapshot(&key)
+            .map_err(|e| Status::unknown(format!("failed to read snapshot ({key}): {e}")))?;
         if info.kind != Kind::Committed {
             // Only committed snapshots consume storage.
             return Ok(Usage { inodes: 0, size: 0 });
@@ -1346,12 +1317,18 @@ impl TarDevSnapshotter {
 
     async fn mounts_impl(&self, key: String) -> Result<Vec<api::types::Mount>, Status> {
         let store = self.store.read().await;
-        let info = store.read_snapshot(&key)?;
+        let info = store.read_snapshot(&key).map_err(|e| {
+            let error = format!("failed to read snapshot ({key}): {e}");
+            error!("{error}");
+            Status::unknown(error)
+        })?;
 
         if info.kind != Kind::View && info.kind != Kind::Active {
-            return Err(Status::failed_precondition(
-                "snapshot is not active nor a view",
-            ));
+            return Err(Status::failed_precondition(format!(
+                "snapshot {key} is not active nor a view, but {info:?}",
+                key = key,
+                info = info
+            )));
         }
 
         if info.labels.get(TARGET_LAYER_DIGEST_LABEL).is_some() {
@@ -1368,7 +1345,9 @@ impl TarDevSnapshotter {
                 "mounts(): snapshot: {}, ready to use, preparing itself and parents ",
                 &info.name
             );
-            store.mounts_from_snapshot(&info.parent, true)
+            store
+                .mounts_from_snapshot(&info.parent, true)
+                .map_err(|e| Status::failed_precondition(format!("failed to prepare mounts: {e}")))
         }
     }
 
@@ -1399,7 +1378,9 @@ impl TarDevSnapshotter {
             }
         }
 
-        let name = store.snapshot_path(&key, false)?;
+        let name = store
+            .snapshot_path(&key, false)
+            .map_err(|e| Status::internal(format!("Failed to get snapshot path for {key}: {e}")))?;
         fs::remove_file(name)?;
 
         Ok(())
@@ -1411,14 +1392,12 @@ impl Snapshotter for TarDevSnapshotter {
     type Error = Status;
 
     async fn stat(&self, key: String) -> Result<Info, Self::Error> {
-        trace!("stat({})", key);
-
-        let result = self.store.read().await.read_snapshot(&key);
-
-        if result.is_err() {
-            error!("stat() failed with: {:#?}", result);
-        }
-        return result;
+        info!("stat({})", key);
+        return self.store.read().await.read_snapshot(&key).map_err(|e| {
+            let error = format!("failed to read snapshot ({key}): {e}");
+            error!("stat() failed with: {:#?}", error);
+            Status::unknown(error)
+        });
     }
 
     async fn update(
@@ -1426,27 +1405,26 @@ impl Snapshotter for TarDevSnapshotter {
         info: Info,
         fieldpaths: Option<Vec<String>>,
     ) -> Result<Info, Self::Error> {
-        trace!("update({:?}, {:?})", info, fieldpaths);
-        Err(Status::unimplemented("no support for updating snapshots"))
+        info!("update({:?}, {:?})", info, fieldpaths);
+        let error = "no support for updating snapshots";
+        error!("update() failed with: {:#?}", error);
+        Err(Status::unimplemented(error))
     }
 
     async fn usage(&self, key: String) -> Result<Usage, Self::Error> {
-        trace!("usage({})", key);
-
-        let result = self.usage_impl(key).await;
-        if result.is_err() {
-            error!("usage() failed with: {:#?}", result);
-        }
-        return result;
+        debug!("usage({})", key);
+        return self.usage_impl(key).await.map_err(|e| {
+            error!("usage() failed with: {:#?}", e);
+            e
+        });
     }
 
     async fn mounts(&self, key: String) -> Result<Vec<api::types::Mount>, Self::Error> {
-        trace!("mounts({})", key);
-        let result = self.mounts_impl(key).await;
-        if result.is_err() {
-            error!("mounts() failed with: {:#?}", result);
-        }
-        return result;
+        debug!("mounts({})", key);
+        return self.mounts_impl(key).await.map_err(|e| {
+            error!("mounts() failed with: {:#?}", e);
+            e
+        });
     }
 
     async fn prepare(
@@ -1455,9 +1433,8 @@ impl Snapshotter for TarDevSnapshotter {
         parent: String,
         labels: HashMap<String, String>,
     ) -> Result<Vec<api::types::Mount>, Status> {
-        trace!("prepare({}, {}, {:?})", key, parent, labels);
-
-        let result = {
+        info!("prepare({}, {}, {:?})", key, parent, labels);
+        return {
             // There are two reasons for preparing a snapshot: to build an image and to actually use it
             // as a container image. We determine the reason by the presence of the snapshot-ref label.
             if labels.get(TARGET_LAYER_DIGEST_LABEL).is_some() {
@@ -1469,13 +1446,13 @@ impl Snapshotter for TarDevSnapshotter {
                     .write()
                     .await
                     .prepare_snapshot_for_use(Kind::Active, key, parent, labels)
+                    .map_err(|e| Status::unknown(format!("failed to prepare snapshot: {e}")))
             }
-        };
-
-        if result.is_err() {
-            error!("prepare() failed with: {:#?}", result);
         }
-        return result;
+        .map_err(|e| {
+            error!("prepare() failed with: {:#?}", e);
+            e
+        });
     }
 
     async fn view(
@@ -1484,18 +1461,17 @@ impl Snapshotter for TarDevSnapshotter {
         parent: String,
         labels: HashMap<String, String>,
     ) -> Result<Vec<api::types::Mount>, Self::Error> {
-        trace!("view({}, {}, {:?})", key, parent, labels);
-
-        let result =
-            self.store
-                .write()
-                .await
-                .prepare_snapshot_for_use(Kind::View, key, parent, labels);
-
-        if result.is_err() {
-            error!("view() failed with {:#?}", result);
-        }
-        return result;
+        info!("view({}, {}, {:?})", key, parent, labels);
+        return self
+            .store
+            .write()
+            .await
+            .prepare_snapshot_for_use(Kind::View, key, parent, labels)
+            .map_err(|e| {
+                let error = format!("failed to prepare snapshot: {e}");
+                error!("view() failed with: {:#?}", error);
+                Status::unknown(error)
+            });
     }
 
     async fn commit(
@@ -1504,27 +1480,24 @@ impl Snapshotter for TarDevSnapshotter {
         key: String,
         labels: HashMap<String, String>,
     ) -> Result<(), Self::Error> {
-        trace!("commit({}, {}, {:?})", name, key, labels);
-        let result = self.commit_impl(name, key, labels).await;
-        if result.is_err() {
-            error!("commit() failed with: {:#?}", result);
-        }
-        return result;
+        info!("commit({}, {}, {:?})", name, key, labels);
+        return self.commit_impl(name, key, labels).await.map_err(|e| {
+            error!("commit() failed with: {:#?}", e);
+            e
+        });
     }
 
     async fn remove(&self, key: String) -> Result<(), Self::Error> {
-        trace!("remove({})", key);
-
-        let result = self.remove_impl(key).await;
-        if result.is_err() {
-            error!("remove() failed with {:#?}", result);
-        }
-        return result;
+        info!("remove({})", key);
+        return self.remove_impl(key).await.map_err(|e| {
+            error!("remove() failed with: {:#?}", e);
+            e
+        });
     }
 
     type InfoStream = impl tokio_stream::Stream<Item = Result<Info, Self::Error>> + Send + 'static;
     async fn list(&self, _: String, _: Vec<String>) -> Result<Self::InfoStream, Self::Error> {
-        trace!("walk()");
+        info!("list()");
         let store = self.store.read().await;
         let snapshots_dir = store.root.join("snapshots");
         Ok(async_stream::try_stream! {
