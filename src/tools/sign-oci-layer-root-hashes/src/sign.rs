@@ -1,5 +1,8 @@
-
-use std::{path::PathBuf, process::{Command, Stdio}, io::Write};
+use std::{
+    io::Write,
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 
 use anyhow::{Context, Error};
 use base64::{engine::general_purpose, Engine};
@@ -33,16 +36,27 @@ struct LayerInfo {
     signature: String,
 }
 
+async fn get_image_root_hashes(image: &str, config: &utils::Config) -> Result<ImageInfo, Error> {
+    let container = registry::get_container(&config, image)
+        .await
+        .context("Failed to get container image")?;
+    let hash_signatures = get_container_image_root_hashes(image, config, &container)
+        .await
+        .context("Failed to get hashes")?;
+
+    Ok(hash_signatures)
+}
+
 /// Get the root hashes and their signatures for all the layers of images specified in the configuration.
 pub(super) async fn get_root_hash_signatures(
     config: &utils::Config,
     image_tags: &Vec<String>,
 ) -> Result<Vec<ImageInfo>, Error> {
-    let images = future::try_join_all(
+    let images = future::try_join_all({
         image_tags
             .iter()
-            .map(|image| get_container_image_root_hashes(&image, config)),
-    )
+            .map(|image| get_image_root_hashes(image, config))
+    })
     .await
     .context("Failed to gather signatures for requested images")?;
 
@@ -73,7 +87,7 @@ async fn get_container_image_manifest_with_root_hashes(
     let container = registry::get_container(&config, image)
         .await
         .context("Failed to get container image")?;
-    let hash_signatures = get_container_image_root_hashes(image, config)
+    let hash_signatures = get_container_image_root_hashes(image, config, &container)
         .await
         .context("Failed to get hashes")?;
 
@@ -93,10 +107,7 @@ async fn get_container_image_manifest_with_root_hashes(
                 ROOT_HASH_SIG_LABEL.to_string(),
                 layer_info.signature.clone(),
             );
-            annotations.insert(
-                ROOT_HASH_LABEL.to_string(),
-                layer_info.root_hash.clone(),
-            );
+            annotations.insert(ROOT_HASH_LABEL.to_string(), layer_info.root_hash.clone());
             layer.annotations = Some(annotations);
             layer
         })
@@ -110,10 +121,8 @@ async fn get_container_image_manifest_with_root_hashes(
 async fn get_container_image_root_hashes(
     image: &str,
     config: &utils::Config,
+    container: &registry::Container,
 ) -> Result<ImageInfo, Error> {
-    let container = registry::get_container(&config, image)
-        .await
-        .context("Failed to get container image")?;
     let layers = container.get_image_layers();
     let hash_signatures = layers
         .iter()

@@ -70,13 +70,12 @@ async fn main() -> Result<(), Error> {
         utils::Commands::InjectSignaturesToImageManifest {
             ref output_image_group,
         } => {
-            let output_image_tags =
-                utils::get_image_tags(&output_image_group.images, &output_image_group.image)
-                    .context("Failed to get output image tags")?;
-            let output_image_tags = if output_image_tags.is_empty() {
-                image_tags.clone()
-            } else {
-                output_image_tags
+            let output_image_tags = match output_image_group {
+                Some(ref output_image_group) => {
+                    utils::get_image_tags(&output_image_group.images, &output_image_group.image)
+                        .context("Failed to get output image tags")?
+                }
+                None => image_tags.clone(),
             };
 
             let manifests = sign::get_manifest_with_root_hash_signatures(&config, &image_tags)
@@ -96,18 +95,24 @@ async fn push_oci_manifests(
     image_tags: Vec<String>,
     manifests: Vec<OciImageManifest>,
 ) -> Result<(), Error> {
-    future::try_join_all(manifests.iter().zip(image_tags).map(
-        |(manifest, output_image_tag)| {
-            registry::Container::push_manifest(output_image_tag, manifest.clone())
-        },
-    ))
+    future::try_join_all(
+        manifests
+            .iter()
+            .zip(image_tags)
+            .map(|(manifest, output_image_tag)| {
+                registry::Container::push_manifest(output_image_tag, manifest.clone())
+            }),
+    )
     .await
     .context("Failed to push the updated image manifest")?;
     Ok(())
 }
 
 /// Output the signatures to a file or stdout.
-fn output_signature_manifest(images: &Vec<ImageInfo>, output: &Option<PathBuf>) -> Result<(), Error> {
+fn output_signature_manifest(
+    images: &Vec<ImageInfo>,
+    output: &Option<PathBuf>,
+) -> Result<(), Error> {
     let signatures_json =
         serde_json::to_string(&images).context("Failed to serialize hash signatures to json")?;
     match output {

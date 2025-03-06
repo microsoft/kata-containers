@@ -27,7 +27,7 @@ pub struct ImageGroup {
 }
 
 #[derive(Debug, clap::Args, Clone)]
-#[group(required = true, multiple = false)]
+#[group(required = false, multiple = false)]
 pub struct OutputImageGroup {
     #[clap(
         short = 'I',
@@ -86,8 +86,12 @@ struct CommandLineOptions {
 impl Commands {
     pub fn name(&self) -> &'static str {
         match self {
-            Commands::GenerateStandaloneSignaturesManifest { .. } => "generate-standalone-signatures-manifest",
-            Commands::InjectSignaturesToImageManifest { .. } => "inject-signatures-to-image-manifest",
+            Commands::GenerateStandaloneSignaturesManifest { .. } => {
+                "generate-standalone-signatures-manifest"
+            }
+            Commands::InjectSignaturesToImageManifest { .. } => {
+                "inject-signatures-to-image-manifest"
+            }
         }
     }
 }
@@ -109,7 +113,7 @@ pub enum Commands {
     /// Embed signatures into the image manifest and repush updated manifest
     InjectSignaturesToImageManifest {
         #[clap(flatten)]
-        output_image_group: OutputImageGroup,
+        output_image_group: Option<OutputImageGroup>,
     },
 }
 
