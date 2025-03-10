@@ -54,17 +54,29 @@ build_igvm_files()
 	# reloading the config file as various variables depend on above values
 	load_config_distro
 
-	echo "Building (debug) IGVM files and creating their reference measurement files"
 	# we could call into the installed binary '~/.local/bin/igvmgen' when adding to PATH or, better, into 'python3 -m msigvm'
 	# however, as we still need the installation directory for the ACPI tables, we leave things as is for now
 	# at the same time we seem to need to call pip3 install for invoking the tool at all
-	python3 ${IGVM_PY_FILE} $IGVM_BUILD_VARS -o $IGVM_FILE_NAME -measurement_file $IGVM_MEASUREMENT_FILE_NAME -append "$IGVM_KERNEL_PROD_PARAMS" -svn $SVN
-	python3 ${IGVM_PY_FILE} $IGVM_BUILD_VARS -o $IGVM_DBG_FILE_NAME -measurement_file $IGVM_DBG_MEASUREMENT_FILE_NAME -append "$IGVM_KERNEL_DEBUG_PARAMS" -svn $SVN
-
-	if [ "${PWD}" -ef "$(readlink -f $OUT_DIR)" ]; then
-		echo "OUT_DIR matches with current dir, not moving build artifacts"
+	if [ "${UVM_BUILD_MODE}" == "release" ]; then 
+		echo "Building release IGVM file and creating its reference measurement file"
+		python3 ${IGVM_PY_FILE} $IGVM_BUILD_VARS -o $IGVM_FILE_NAME -measurement_file $IGVM_MEASUREMENT_FILE_NAME -append "$IGVM_KERNEL_PROD_PARAMS" -svn $SVN
+		if [ "${PWD}" -ef "$(readlink -f $OUT_DIR)" ]; then
+			echo "OUT_DIR matches with current dir, not moving build artifacts"
+		else
+			echo "Moving build artifacts to ${OUT_DIR}"
+			mv $IGVM_FILE_NAME $IGVM_MEASUREMENT_FILE_NAME $OUT_DIR
+		fi
+	elif [ "${UVM_BUILD_MODE}" == "debug" ]; then
+		echo "Building debug IGVM file and creating its reference measurement file"
+		python3 ${IGVM_PY_FILE} $IGVM_BUILD_VARS -o $IGVM_DBG_FILE_NAME -measurement_file $IGVM_DBG_MEASUREMENT_FILE_NAME -append "$IGVM_KERNEL_DEBUG_PARAMS" -svn $SVN
+		if [ "${PWD}" -ef "$(readlink -f $OUT_DIR)" ]; then
+			echo "OUT_DIR matches with current dir, not moving build artifacts"
+		else
+			echo "Moving build artifacts to ${OUT_DIR}"
+			mv $IGVM_DBG_FILE_NAME $IGVM_DBG_MEASUREMENT_FILE_NAME $OUT_DIR
+		fi
 	else
-		echo "Moving build artifacts to ${OUT_DIR}"
-		mv $IGVM_FILE_NAME $IGVM_DBG_FILE_NAME $IGVM_MEASUREMENT_FILE_NAME $IGVM_DBG_MEASUREMENT_FILE_NAME $OUT_DIR
+		echo "Invalid UVM_BUILD_MODE '${UVM_BUILD_MODE}', aborting"
+		exit 1
 	fi
 }
