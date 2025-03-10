@@ -11,7 +11,7 @@ mod tests {
     use std::path;
     use std::str;
 
-    use protocols::agent::CreateSandboxRequest;
+    use protocols::agent::{CreateSandboxRequest, UpdateRoutesRequest};
     use serde::de::DeserializeOwned;
     use serde::{Deserialize, Serialize};
 
@@ -141,5 +141,10 @@ mod tests {
     #[tokio::test]
     async fn test_create_sandbox() {
         runtests::<CreateSandboxRequest>("createsandbox").await;
+    }
+
+    #[tokio::test]
+    async fn test_update_routes() {
+        runtests::<UpdateRoutesRequest>("updateroutes").await;
     }
 }
