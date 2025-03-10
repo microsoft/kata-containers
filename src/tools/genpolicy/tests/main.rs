@@ -17,7 +17,9 @@ mod tests {
     };
     use serde::{Deserialize, Serialize};
 
-    use kata_agent_policy::policy::{AgentPolicy, PolicyCopyFileRequest};
+    use kata_agent_policy::policy::{
+        AgentPolicy, PolicyCopyFileRequest, PolicyCreateContainerRequest,
+    };
 
     // Translate each test case in testcases.json
     // to one request type.
@@ -208,5 +210,14 @@ mod tests {
     #[tokio::test]
     async fn test_update_interface() {
         runtests::<UpdateInterfaceRequest>("updateinterface").await;
+    }
+    #[tokio::test]
+    async fn test_legacy_basic_create_container() {
+        runtests::<CreateContainerRequest>("createContainer/legacy").await;
+    }
+
+    #[tokio::test]
+    async fn test_basic_create_container() {
+        runtests::<PolicyCreateContainerRequest>("createContainer/basic").await;
     }
 }

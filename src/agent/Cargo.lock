@@ -3258,6 +3258,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "json-patch",
+ "protocols",
  "regorus",
  "serde",
  "serde_json",
