@@ -502,6 +502,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "data-encoding"
+version = "2.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "575f75dfd25738df5b91b8e43e14d44bda14637a58fae779fd2b064f8bf3e010"
+
+[[package]]
 name = "deranged"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1496,6 +1502,7 @@ dependencies = [
  "anyhow",
  "json-patch",
  "logging",
+ "protocols",
  "regorus",
  "serde",
  "serde_json",
@@ -2291,6 +2298,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843c3d97f07e3b5ac0955d53ad0af4c91fe4a4f8525843ece5bf014f27829b73"
 dependencies = [
  "anyhow",
+ "data-encoding",
  "lazy_static",
  "rand",
  "regex",

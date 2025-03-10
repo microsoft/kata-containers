@@ -41,6 +41,17 @@ pub struct PolicyCopyFileRequest {
     pub symlink_src: PathBuf,
 }
 
+/// PolicyCreateContainerRequest is very similar to CreateContainerRequest from src/libs/protocols, except:
+/// - It wraps the base CreateContainerRequest.
+/// - It has an env_map field which is a map of environment variable names to expanded values.
+/// This makes it easier to validate the environment variables inside the rego rules.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct PolicyCreateContainerRequest {
+    pub base: protocols::agent::CreateContainerRequest,
+    // a map of environment variable names to value
+    pub env_map: std::collections::BTreeMap<String, String>,
+}
+
 /// Singleton policy object.
 #[derive(Debug, Default)]
 pub struct AgentPolicy {

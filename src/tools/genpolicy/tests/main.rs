@@ -11,11 +11,15 @@ mod tests {
     use std::path;
     use std::str;
 
-    use protocols::agent::{CreateSandboxRequest, UpdateInterfaceRequest, UpdateRoutesRequest};
+    use protocols::agent::{
+        CreateContainerRequest, CreateSandboxRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
+    };
     use serde::de::DeserializeOwned;
     use serde::{Deserialize, Serialize};
 
-    use kata_agent_policy::policy::{AgentPolicy, PolicyCopyFileRequest};
+    use kata_agent_policy::policy::{
+        AgentPolicy, PolicyCopyFileRequest, PolicyCreateContainerRequest,
+    };
 
     #[derive(Clone, Debug, Deserialize, Serialize)]
     struct TestCase<T> {
@@ -129,6 +133,7 @@ mod tests {
     fn map_request(request: &str) -> &str {
         match request {
             "PolicyCopyFileRequest" => "CopyFileRequest",
+            "PolicyCreateContainerRequest" => "CreateContainerRequest",
             _ => request,
         }
     }
@@ -151,5 +156,14 @@ mod tests {
     #[tokio::test]
     async fn test_update_interface() {
         runtests::<UpdateInterfaceRequest>("updateinterface").await;
+    }
+    #[tokio::test]
+    async fn test_legacy_basic_create_container() {
+        runtests::<CreateContainerRequest>("createContainer/legacy").await;
+    }
+
+    #[tokio::test]
+    async fn test_basic_create_container() {
+        runtests::<PolicyCreateContainerRequest>("createContainer/basic").await;
     }
 }
