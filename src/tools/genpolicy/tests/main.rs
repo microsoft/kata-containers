@@ -166,4 +166,9 @@ mod tests {
     async fn test_basic_create_container() {
         runtests::<PolicyCreateContainerRequest>("createContainer/basic").await;
     }
+
+    #[tokio::test]
+    async fn test_create_container_generate_name() {
+        runtests::<PolicyCreateContainerRequest>("createcontainer/generate_name").await;
+    }
 }

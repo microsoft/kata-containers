@@ -462,19 +462,10 @@ allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name, s_namespace)
 }
 
 allow_sandbox_name(p_s_name, i_s_name) {
-    print("allow_sandbox_name 1: start")
+    print("allow_sandbox_name: start")
+    regex.match(p_s_name, i_s_name)
 
-    p_s_name == i_s_name
-
-    print("allow_sandbox_name 1: true")
-}
-allow_sandbox_name(p_s_name, i_s_name) {
-    print("allow_sandbox_name 2: start")
-
-    # TODO: should generated names be handled differently?
-    contains(p_s_name, "$(generated-name)")
-
-    print("allow_sandbox_name 2: true")
+    print("allow_sandbox_name: true")
 }
 
 # Check that the "io.kubernetes.cri.container-type" and
@@ -889,10 +880,18 @@ allow_var(p_process, i_process, i_var, s_name, s_namespace) {
 # Match input with one of the policy variables, after substituting $(sandbox-name).
 allow_var(p_process, i_process, i_var, s_name, s_namespace) {
     some p_var in p_process.Env
-    p_var2 := replace(p_var, "$(sandbox-name)", s_name)
+    print("allow_var 2: p_var =", p_var)
 
-    print("allow_var 2: p_var2 =", p_var2)
-    p_var2 == i_var
+    p_var_split := split(p_var, "=")
+    count(p_var_split) == 2
+
+    p_var_split[1] == "$(sandbox-name)"
+
+    i_var_split := split(i_var, "=")
+    count(i_var_split) == 2
+
+    i_var_split[0] == p_var_split[0]
+    regex.match(s_name, i_var_split[1])
 
     print("allow_var 2: true")
 }
