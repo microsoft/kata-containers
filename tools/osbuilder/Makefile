@@ -10,6 +10,8 @@ INITRD_BUILDER := $(MK_DIR)/initrd-builder/initrd_builder.sh
 IMAGE_BUILDER  := $(MK_DIR)/image-builder/image_builder.sh
 IGVM_BUILDER   := $(MK_DIR)/igvm-builder/igvm_builder.sh
 IGVM_SVN       ?= 0
+IMAGE_NAME     ?= kata-containers.img
+UVM_BUILD_MODE ?= release
 
 DISTRO                ?= ubuntu
 BUILD_METHOD          := distro
@@ -22,7 +24,7 @@ IGVM_BUILD_DEST       := $(shell pwd)
 ROOTFS_MARKER_SUFFIX   := _rootfs.done
 TARGET_ROOTFS         := $(ROOTFS_BUILD_DEST)/$(DISTRO)_rootfs
 TARGET_ROOTFS_MARKER  := $(ROOTFS_BUILD_DEST)/.$(DISTRO)$(ROOTFS_MARKER_SUFFIX)
-TARGET_IMAGE          := $(IMAGES_BUILD_DEST)/kata-containers.img
+TARGET_IMAGE          := $(IMAGES_BUILD_DEST)/$(IMAGE_NAME)
 TARGET_INITRD         := $(IMAGES_BUILD_DEST)/kata-containers-initrd.img
 TARGET_IGVM           := $(IGVM_BUILD_DEST)/kata-containers-igvm.img
 TARGET_IGVM_MSMT      := $(IGVM_BUILD_DEST)/igvm-measurement.cose
@@ -166,7 +168,7 @@ $(DRACUT_OVERLAY_DIR):
 
 .PHONY: igvm
 igvm: $(TARGET_IMAGE)
-	$(IGVM_BUILDER) -o $(IGVM_BUILD_DEST) -s $(IGVM_SVN)
+	$(IGVM_BUILDER) -o $(IGVM_BUILD_DEST) -s $(IGVM_SVN) -m $(UVM_BUILD_MODE)
 
 .PHONY: test
 test:
@@ -222,6 +224,10 @@ install-scripts:
 clean:
 	rm -rf $(TARGET_ROOTFS_MARKER) $(TARGET_ROOTFS) $(TARGET_IMAGE) $(TARGET_INITRD) $(DRACUT_OVERLAY_DIR) $(TARGET_IGVM) $(TARGET_IGVM_DEBUG) $(TARGET_IGVM_MSMT) $(TARGET_IGVM_DEBUG_MSMT) $(TARGET_IGVM_LOG)
 	rm -rf $(IGVM_TOOL_SRC)
+
+.PHONY: clean-rootfs
+clean-rootfs:
+	rm -rf $(TARGET_ROOTFS_MARKER) $(TARGET_ROOTFS)
 
 # Prints the name of the variable passed as suffix to the print- target,
 # E.g., if Makefile contains:
