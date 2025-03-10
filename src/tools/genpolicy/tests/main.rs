@@ -199,4 +199,9 @@ mod tests {
     async fn test_state_exec_process() {
         runtests("state/execprocess").await;
     }
+
+    #[tokio::test]
+    async fn test_update_routes() {
+        runtests::<UpdateRoutesRequest>("updateroutes").await;
+    }
 }
