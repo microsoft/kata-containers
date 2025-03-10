@@ -27,12 +27,14 @@ regorus = { version = "0.2.8", default-features = false, features = [
     "arc",
     "regex",
     "std",
+    "base64",
 ] }
 json-patch = "2.0.0"
 sha2 = { version = "0.10.6" }
 sev = { git = "https://github.com/virtee/sev", tag = "v1.2.0", default-features = false, features = [
     "snp",
 ] }
+protocols = { path = "../../libs/protocols" }
 
 # Note: this crate sets the slog 'max_*' features which allows the log level
 # to be modified at runtime.
