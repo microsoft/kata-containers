@@ -9,6 +9,7 @@ RUN ([ -n "$http_proxy" ] && \
     sed -i '$ a proxy='$http_proxy /etc/dnf/dnf.conf ; true) && \
     dnf install -y \
         e2fsprogs \
+        erofs-utils \
         findutils \
         gcc \
         gdisk \
