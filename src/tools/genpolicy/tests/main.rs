@@ -15,7 +15,7 @@ mod tests {
     use serde::de::DeserializeOwned;
     use serde::{Deserialize, Serialize};
 
-    use kata_agent_policy::policy::AgentPolicy;
+    use kata_agent_policy::policy::{AgentPolicy, PolicyCopyFileRequest};
 
     #[derive(Clone, Debug, Deserialize, Serialize)]
     struct TestCase<T> {
@@ -109,11 +109,10 @@ mod tests {
 
             let v = serde_json::to_value(&test_case.request).unwrap();
 
+            let request_type = map_request(any::type_name::<T>().split("::").last().unwrap());
+
             let results = pol
-                .allow_request(
-                    any::type_name::<T>().split("::").last().unwrap(),
-                    &serde_json::to_string(&v).unwrap(),
-                )
+                .allow_request(request_type, &serde_json::to_string(&v).unwrap())
                 .await;
 
             let logs = fs::read_to_string(workdir.join("policy.log")).unwrap();
@@ -127,12 +126,17 @@ mod tests {
         }
     }
 
-    // todo: fix this test
-    // CopyFileRequest need to go through is_allowed_copy_file(), so request gets transformed to PolicyCopyFileRequest
-    // #[tokio::test]
-    // async fn test_copyfile() {
-    //     runtests::<CopyFileRequest>("copyfile").await;
-    // }
+    fn map_request(request: &str) -> &str {
+        match request {
+            "PolicyCopyFileRequest" => "CopyFileRequest",
+            _ => request,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_copyfile() {
+        runtests::<PolicyCopyFileRequest>("copyfile").await;
+    }
 
     #[tokio::test]
     async fn test_create_sandbox() {
