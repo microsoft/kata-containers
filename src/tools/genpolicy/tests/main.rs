@@ -17,7 +17,7 @@ mod tests {
     };
     use serde::{Deserialize, Serialize};
 
-    use kata_agent_policy::policy::AgentPolicy;
+    use kata_agent_policy::policy::{AgentPolicy, PolicyCopyFileRequest};
 
     // Translate each test case in testcases.json
     // to one request type.

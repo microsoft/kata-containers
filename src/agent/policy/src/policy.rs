@@ -9,6 +9,7 @@
 use anyhow::{bail, Result};
 use sha2::{Digest, Sha256};
 use slog::{debug, error, warn};
+use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 
 static POLICY_LOG_FILE: &str = "/tmp/policy.txt";
@@ -18,6 +19,26 @@ macro_rules! sl {
     () => {
         slog_scope::logger()
     };
+}
+
+/// PolicyCopyFileRequest is very similar to CopyFileRequest from src/libs/protocols, except:
+/// - When creating a symbolic link, the symlink_src field is a string representation of the
+///   data bytes vector from CopyFileRequest. It's easier to verify a string compared with
+///   a bytes vector in OPA.
+/// - When not creating a symbolic link, the data bytes field from CopyFileRequest is not
+///   present in PolicyCopyFileRequest, because it might be large and probably unused by OPA.
+#[derive(::serde::Serialize, ::serde::Deserialize, Default)]
+#[serde(default)]
+pub struct PolicyCopyFileRequest {
+    pub path: String,
+    pub file_size: i64,
+    pub file_mode: u32,
+    pub dir_mode: u32,
+    pub uid: i32,
+    pub gid: i32,
+    pub offset: i64,
+
+    pub symlink_src: PathBuf,
 }
 
 /// Singleton policy object.
