@@ -498,10 +498,6 @@ create_erofs_rootfs_image() {
 		die "Invalid block size for erofs"
 	fi
 
-	if ! device="$(setup_loop_device "${image}")"; then
-		die "Could not setup loop device"
-	fi
-
 	local mount_dir=$(mktemp -p "${TMPDIR:-/tmp}" -d osbuilder-mount-dir.XXXX)
 
 	info "Copying content from rootfs to root partition"
@@ -522,6 +518,10 @@ create_erofs_rootfs_image() {
 	local img_size_mb="$(((("${img_size}" + 1048576) / 1048576) + 1 + "${rootfs_start}"))"
 
 	create_disk "${image}" "${img_size_mb}" "ext4" "${rootfs_start}"
+
+	if ! device="$(setup_loop_device "${image}")"; then
+		die "Could not setup loop device"
+	fi
 
 	dd if="${fsimage}" of="${device}p1"
 
