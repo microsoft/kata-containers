@@ -13,6 +13,7 @@ set -o errtrace
 AGENT_POLICY_FILE="${AGENT_POLICY_FILE:-allow-set-policy.rego}"
 CONF_PODS=${CONF_PODS:-no}
 IGVM_SVN=${IGVM_SVN:-0}
+UVM_BUILD_MODE=${UVM_BUILD_MODE:-release}
 
 script_dir="$(dirname $(readlink -f $0))"
 repo_dir="${script_dir}/../../../../"
@@ -38,10 +39,23 @@ fi
 
 pushd "${repo_dir}"
 
-echo "Building rootfs and including pre-built agent binary"
+if [ "${UVM_BUILD_MODE}" == "release" ]; then
+	LOCAL_IMAGE_NAME="${IMG_FILE_NAME}"
+else 
+	LOCAL_IMAGE_NAME="${IMG_DBG_FILE_NAME}"
+fi
+
+# We must clean the rootfs build to allow the next build (i.e. a debug image) to be built
+# from a clean state with a separate set of packages. 
+echo "Cleaning rootfs build"
+pushd tools/osbuilder
+sudo -E PATH=$PATH make DISTRO=cbl-mariner clean-rootfs
+popd
+
+echo "Building ${UVM_BUILD_MODE} rootfs and including pre-built agent binary"
 pushd tools/osbuilder
 # This command requires sudo because of dnf-installing packages into rootfs. As a suite, following commands require sudo as well as make clean
-sudo -E PATH=$PATH make ${rootfs_make_flags} -B DISTRO=cbl-mariner rootfs
+sudo -E PATH=$PATH UVM_BUILD_MODE=${UVM_BUILD_MODE} make ${rootfs_make_flags} -B DISTRO=cbl-mariner rootfs
 ROOTFS_PATH="$(readlink -f ./cbl-mariner_rootfs)"
 popd
 
@@ -55,21 +69,20 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	make KDIR=${UVM_KERNEL_HEADER_DIR}
 	sudo make KDIR=${UVM_KERNEL_HEADER_DIR} KVER=${UVM_KERNEL_VERSION} INSTALL_MOD_PATH=${ROOTFS_PATH} install
 	popd
-
 	echo "Building dm-verity protected image based on rootfs"
 	pushd tools/osbuilder
-	sudo -E PATH=$PATH make DISTRO=cbl-mariner MEASURED_ROOTFS=yes DM_VERITY_FORMAT=kernelinit image
+	sudo -E PATH=${PATH} IMAGE_NAME=${LOCAL_IMAGE_NAME} make DISTRO=cbl-mariner MEASURED_ROOTFS=yes DM_VERITY_FORMAT=kernelinit image
 	popd
 
 	echo "Building IGVM and UVM measurement files"
 	pushd tools/osbuilder
 	sudo chmod o+r root_hash.txt
-	sudo make igvm DISTRO=cbl-mariner IGVM_SVN=${IGVM_SVN}
+	sudo make igvm DISTRO=cbl-mariner IMAGE_NAME=${LOCAL_IMAGE_NAME} IGVM_SVN=${IGVM_SVN} UVM_BUILD_MODE=${UVM_BUILD_MODE}
 	popd
 else
 	echo "Building image based on rootfs"
 	pushd tools/osbuilder
-	sudo -E PATH=$PATH make DISTRO=cbl-mariner image
+	sudo -E PATH=$PATH IMAGE_NAME=${LOCAL_IMAGE_NAME} make DISTRO=cbl-mariner image
 	popd
 fi
 

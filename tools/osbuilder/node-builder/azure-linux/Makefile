@@ -31,12 +31,26 @@ package-confpods:
 	CONF_PODS=yes ./package_build.sh
 
 .PHONY: uvm
-uvm:
+uvm: uvm-release uvm-debug
+
+.PHONY: uvm-release
+uvm-release:
 	./uvm_build.sh
 
+.PHONY: uvm-debug
+uvm-debug:
+	UVM_BUILD_MODE=debug ./uvm_build.sh
+
 .PHONY: uvm-confpods
-uvm-confpods:
+uvm-confpods: uvm-confpods-release uvm-confpods-debug
+
+.PHONY: uvm-confpods-release
+uvm-confpods-release:
 	CONF_PODS=yes ./uvm_build.sh
+
+.PHONY: uvm-confpods-debug
+uvm-confpods-debug:
+	CONF_PODS=yes UVM_BUILD_MODE=debug ./uvm_build.sh
 
 .PHONY: clean
 clean:

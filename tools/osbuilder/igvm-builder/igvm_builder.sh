@@ -37,14 +37,17 @@ load_config_distro()
 }
 
 DISTRO="azure-linux"
-MODE="build"
+UVM_BUILD_MODE="release"
+OP="build"
 
-while getopts ":o:s:iu" OPTIONS; do
+while getopts ":o:s:m:iu" OPTIONS; do
 	case "${OPTIONS}" in
 		o ) OUT_DIR=$OPTARG ;;
 		s ) SVN=$OPTARG ;;
-		i ) MODE="install" ;;
-		u ) MODE="uninstall" ;;
+		m ) UVM_BUILD_MODE=$OPTARG ;;
+		i ) OP="install" ;;
+		u ) OP="uninstall" ;;
+		
 		\? )
 			echo "Error - Invalid Option: -$OPTARG" 1>&2
 			exit 1
@@ -56,11 +59,18 @@ while getopts ":o:s:iu" OPTIONS; do
   esac
 done
 
+# Print igvm configuration variables
+# OUT_DIR is the output directory where the image and measurement files are stored
+# SVN is the SVN of the image to be built, used by build_igvm_files
+# DISTRO is the distribution name, used to load the config file
+# OP specifies the operation to be performed, install, uninstall or build
+# UVM_BUILD_MODE specifies whether to build the igvm for debug or release images
 echo "IGVM builder script"
 echo "-- OUT_DIR -> $OUT_DIR"
 echo "-- SVN -> $SVN"
 echo "-- DISTRO -> $DISTRO"
-echo "-- MODE -> $MODE"
+echo "-- OP -> $OP"
+echo "-- UVM_BUILD_MODE -> $UVM_BUILD_MODE"
 
 if [ -n "$DISTRO" ]; then
 	load_config_distro
@@ -69,7 +79,7 @@ else
 	exit 1
 fi
 
-case "$MODE" in
+case "$OP" in
 	"install")
 		install_igvm_tool
 		;;
