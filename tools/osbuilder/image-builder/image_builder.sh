@@ -528,7 +528,7 @@ create_erofs_rootfs_image() {
 	losetup -d "${device}"
 	rm -rf "${mount_dir}"
 
-	return "${img_size_mb}"
+	#return "${img_size_mb}"
 }
 
 set_dax_header() {
@@ -623,8 +623,8 @@ main() {
 		# rather than some device, so no need to guess the device dest size first.
 		create_erofs_rootfs_image "${rootfs}" "${image}" \
 						"${block_size}" "${agent_bin}"
-		rootfs_img_size=$?
-		img_size=$((rootfs_img_size + dax_header_sz))
+		#rootfs_img_size=$?
+		#img_size=$((rootfs_img_size + dax_header_sz))
 	else
 		img_size=$(calculate_img_size "${rootfs}" "${root_free_space}" \
 			"${fs_type}" "${block_size}")
@@ -634,9 +634,10 @@ main() {
 		rootfs_img_size=$((img_size - dax_header_sz))
 		create_rootfs_image "${rootfs}" "${image}" "${rootfs_img_size}" \
 						"${fs_type}" "${block_size}" "${agent_bin}"
+
+		# insert at the beginning of the image the MBR + DAX header
+		set_dax_header "${image}" "${img_size}" "${fs_type}" "${nsdax_bin}"
 	fi
-	# insert at the beginning of the image the MBR + DAX header
-	set_dax_header "${image}" "${img_size}" "${fs_type}" "${nsdax_bin}"
 
 	chown "${USER}:${GROUP}" "${image}"
 }
