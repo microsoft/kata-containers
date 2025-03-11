@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use kata_agent_policy::policy::AgentPolicy;
+use kata_agent_policy::policy::{AgentPolicy, PolicyCopyFileRequest};
 use nix::sys::stat;
 use protobuf::MessageDyn;
 use std::ffi::OsStr;
@@ -36,25 +36,6 @@ pub async fn is_allowed(req: &(impl MessageDyn + serde::Serialize)) -> ttrpc::Re
     let request = serde_json::to_string(req).unwrap();
     let mut policy = AGENT_POLICY.lock().await;
     allow_request(&mut policy, req.descriptor_dyn().name(), &request).await
-}
-
-/// PolicyCopyFileRequest is very similar to CopyFileRequest from src/libs/protocols, except:
-/// - When creating a symbolic link, the symlink_src field is a string representation of the
-///   data bytes vector from CopyFileRequest. It's easier to verify a string compared with
-///   a bytes vector in OPA.
-/// - When not creating a symbolic link, the data bytes field from CopyFileRequest is not
-///   present in PolicyCopyFileRequest, because it might be large and probably unused by OPA.
-#[derive(::serde::Serialize)]
-struct PolicyCopyFileRequest {
-    path: String,
-    file_size: i64,
-    file_mode: u32,
-    dir_mode: u32,
-    uid: i32,
-    gid: i32,
-    offset: i64,
-
-    symlink_src: PathBuf,
 }
 
 pub async fn is_allowed_copy_file(req: &protocols::agent::CopyFileRequest) -> ttrpc::Result<()> {
