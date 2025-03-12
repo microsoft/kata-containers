@@ -97,7 +97,7 @@ lazy_static! {
 
 #[cfg(feature = "agent-policy")]
 lazy_static! {
-    static ref AGENT_POLICY: Mutex<policy::AgentPolicy> = Mutex::new(AgentPolicy::new());
+    static ref AGENT_POLICY: Mutex<AgentPolicy> = Mutex::new(AgentPolicy::new());
 }
 
 #[derive(Parser)]
@@ -417,7 +417,11 @@ async fn initialize_policy() -> Result<()> {
     AGENT_POLICY
         .lock()
         .await
-        .initialize("/etc/kata-opa/default-policy.rego")
+        .initialize(
+            AGENT_CONFIG.log_level.as_usize(),
+            "/etc/kata-opa/default-policy.rego",
+            None,
+        )
         .await
 }
 
@@ -436,7 +440,7 @@ use crate::config::AgentConfig;
 use std::os::unix::io::{FromRawFd, RawFd};
 
 #[cfg(feature = "agent-policy")]
-use crate::policy::AgentPolicy;
+use kata_agent_policy::policy::AgentPolicy;
 
 #[cfg(test)]
 mod tests {
