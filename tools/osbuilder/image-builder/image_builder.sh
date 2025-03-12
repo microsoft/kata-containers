@@ -636,8 +636,8 @@ main() {
 		#rootfs_img_size=$?
 		#img_size=$((rootfs_img_size + dax_header_sz))
 	else
-		readonly tarball=$(mktemp /tmp/XXXXX.tar)
-		readonly fsimage="$(mktemp /tmp/XXXXX.meta)"
+		local -r tarball=$(mktemp /tmp/XXXXX.tar)
+		local -r fsimage="$(mktemp /tmp/XXXXX.meta)"
 
 		create_erofs_rootfs_image "${rootfs}" "${image}" \
 						"${block_size}" "${agent_bin}" "${tarball}" "${fsimage}"
