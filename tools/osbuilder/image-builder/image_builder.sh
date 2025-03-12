@@ -494,6 +494,8 @@ create_erofs_rootfs_image() {
 	local image="$2"
 	local block_size="$3"
 	local agent_bin="$4"
+	local tarball="$5"
+	local fsimage="$6"
 
 	if [ "$block_size" -ne 4096 ]; then
 		die "Invalid block size for erofs"
@@ -513,11 +515,11 @@ create_erofs_rootfs_image() {
 	info "Setup systemd"
 	setup_systemd "${mount_dir}"
 
-	readonly fsimage="$(mktemp)"
+	#readonly fsimage="$(mktemp)"
 
 	#mkfs.erofs -Enoinline_data "${fsimage}" "${mount_dir}"
 	pushd "${mount_dir}"
-	local tarball=$(mktemp XXXXX.tar)
+	#local tarball=$(mktemp XXXXX.tar)
 	tar cvf "${tarball}" .
 	mkfs.erofs --tar=i -Enoinline_data "${fsimage}" "${tarball}"
 	cat "${tarball}" >> "${fsimage}"
@@ -634,6 +636,14 @@ main() {
 		#rootfs_img_size=$?
 		#img_size=$((rootfs_img_size + dax_header_sz))
 	else
+		readonly tarball=$(mktemp /tmp/XXXXX.tar)
+		readonly fsimage="$(mktemp /tmp/XXXXX.meta)"
+
+		create_erofs_rootfs_image "${rootfs}" "${image}" \
+						"${block_size}" "${agent_bin}" "${tarball}" "${fsimage}"
+		cp "${tarball}" "${rootfs}"/
+		cp "${fsimage}" "${rootfs}"/
+
 		img_size=$(calculate_img_size "${rootfs}" "${root_free_space}" \
 			"${fs_type}" "${block_size}")
 
