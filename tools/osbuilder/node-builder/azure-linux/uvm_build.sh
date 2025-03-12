@@ -50,6 +50,14 @@ echo "Installing agent service files into rootfs"
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-containers.target ${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-agent.service ${ROOTFS_PATH}/usr/lib/systemd/system/kata-agent.service
 
+echo "Building utarfs binary"
+pushd src/utarfs/
+make all
+
+echo "Installing utarfs into rootfs"
+sudo cp target/release/utarfs ${ROOTFS_PATH}/bin/utarfs
+popd
+
 echo "Building tarfs kernel driver and installing into rootfs"
 pushd src/tarfs
 make KDIR=${UVM_KERNEL_HEADER_DIR}
