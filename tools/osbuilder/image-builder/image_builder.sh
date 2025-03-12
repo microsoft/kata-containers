@@ -641,9 +641,9 @@ main() {
 
 		create_erofs_rootfs_image "${rootfs}" "${image}" \
 						"${block_size}" "${agent_bin}" "${tarball}" "${fsimage}"
-		cp "${tarball}" "${rootfs}"/
-		cp "${fsimage}" "${rootfs}"/
-
+		cp "${fsimage}" "${rootfs}"/erofs.img
+		cat "${tarball}" >> "${rootfs}"/erofs.img
+		
 		img_size=$(calculate_img_size "${rootfs}" "${root_free_space}" \
 			"${fs_type}" "${block_size}")
 
