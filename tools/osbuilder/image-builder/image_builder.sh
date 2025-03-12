@@ -55,7 +55,8 @@ SELINUX=${SELINUX:-no}
 SELINUXFS="/sys/fs/selinux"
 
 # Align image to 128M
-readonly mem_boundary_mb=128
+#readonly mem_boundary_mb=128
+readonly mem_boundary_mb=2
 
 # shellcheck source=../scripts/lib.sh
 source "${lib_file}"
