@@ -1,0 +1,21 @@
+#!/bin/bash
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+set -eo pipefail
+
+if [ -f Cargo.toml ]; then
+   # Run precommit checks
+   dir=$(dirname "${BASH_SOURCE[0]}")
+   "$dir/pre-commit"
+
+   # Ensure that the public API works
+   cargo test -r --doc
+   
+   # Ensure that all tests pass
+   cargo test -r
+   cargo test -r --test aci
+
+   # Ensure that OPA conformance tests don't regress.
+   cargo test -r --features opa-testutil,serde_json/arbitrary_precision --test opa -- $(tr '\n' ' ' < tests/opa.passing)
+fi

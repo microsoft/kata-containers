@@ -19,6 +19,18 @@ src/tools/log-parser/kata-log-parser
 # Microsoft-specific
 .cargo/
 vendor/
+!src/tardev-snapshotter/vendor
+!src/tardev-snapshotter/vendor/**/vendor
+!src/tardev-snapshotter/vendor/**/build
+!src/tardev-snapshotter/.cargo
+!src/agent/vendor
+!src/agent/vendor/**/vendor
+!src/agent/vendor/**/build
+!src/agent/.cargo
+!src/utarfs/vendor
+!src/utarfs/.cargo
+!src/overlay/vendor
+!src/overlay/.cargo
 src/agent/samples/policy/test-input/
 src/tarfs/**/*.cmd
 src/tarfs/**/*.ko
