@@ -520,6 +520,7 @@ create_erofs_rootfs_image() {
 	local tarball=$(mktemp XXXXX.tar)
 	tar cvf "${tarball}" .
 	mkfs.erofs --tar=i -Enoinline_data "${fsimage}" "${tarball}"
+	cat "${tarball}" >> "${fsimage}"
 
 	local img_size="$(stat -c"%s" "${fsimage}")"
 	local img_size_mb="$(((("${img_size}" + 1048576) / 1048576) + 1 + "${rootfs_start}"))"
