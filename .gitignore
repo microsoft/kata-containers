@@ -18,7 +18,6 @@ src/tools/log-parser/kata-log-parser
 
 # Microsoft-specific
 .cargo/
-vendor/
 src/agent/samples/policy/test-input/
 src/tarfs/**/*.cmd
 src/tarfs/**/*.ko
