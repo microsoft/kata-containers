@@ -2,7 +2,7 @@ package core
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"strings"
@@ -15,7 +15,7 @@ type Framework struct {
 	outputDir string
 }
 
-// Create a new testing framework
+// NewFrameworkCreate a new testing framework
 func NewFramework(outputDir string) *Framework {
 	return &Framework{
 		tests:     make(map[string]Test),
@@ -23,17 +23,17 @@ func NewFramework(outputDir string) *Framework {
 	}
 }
 
-// Add a test to the framework
+// RegisterTest adds a test to the framework
 func (f *Framework) RegisterTest(test Test) {
 	f.tests[test.Name()] = test
 }
 
-// Return all registered tests
+// GetAvailableTests returns all registered tests
 func (f *Framework) GetAvailableTests() map[string]Test {
 	return f.tests
 }
 
-// Check if the provided test configurations are valid
+// ValidateConfiguration checks if the provided test configurations are valid
 func (f *Framework) ValidateConfiguration(testsToRun []Test,
 	getExpectedValuesFunc func(string) map[string]interface{}) []string {
 
@@ -84,12 +84,12 @@ func (f *Framework) ValidateConfiguration(testsToRun []Test,
 	return warnings
 }
 
-// Execute a single test with the given expected values
+// RunTest executes a single test with the given expected values
 func (f *Framework) RunTest(ctx context.Context, test Test, expectedValues map[string]interface{}) TestResult {
 	return test.Run(ctx, expectedValues)
 }
 
-// Execute the given tests with their expected values
+// RunTests executes the given tests with their expected values
 func (f *Framework) RunTests(ctx context.Context, testsToRun []Test,
 	getExpectedValuesFunc func(string) map[string]interface{}) ([]TestResult, error) {
 
@@ -112,21 +112,104 @@ func (f *Framework) RunTests(ctx context.Context, testsToRun []Test,
 	return results, nil
 }
 
-// Write test results to a JSON file
+// saveResults saves test results in JUnit XML format
 func (f *Framework) saveResults(results []TestResult) error {
-	filename := fmt.Sprintf("%s/results_%s.json",
+	// Create the root element
+	testSuites := JUnitTestSuites{}
+
+	// Create a test suite
+	testSuite := JUnitTestSuite{
+		Name:     "KataContainerTests",
+		Tests:    len(results),
+		Failures: 0,
+		Time:     0,
+	}
+
+	// Process each test result
+	for _, result := range results {
+		// Calculate test duration
+		duration := result.EndTime.Sub(result.StartTime)
+
+		// Create test case
+		testCase := JUnitTestCase{
+			Name:      result.Name,
+			ClassName: "KataContainerTest",
+			Time:      duration.Seconds(),
+		}
+
+		// Store metrics and expected values as properties
+		var properties []JUnitProperty
+
+		// Add metrics properties
+		for key, value := range result.Metrics {
+			properties = append(properties, JUnitProperty{
+				Name:  fmt.Sprintf("metric.%s", key),
+				Value: fmt.Sprintf("%v", value),
+			})
+		}
+
+		// Add expected value properties (if any)
+		for key, value := range result.ExpectedValues {
+			properties = append(properties, JUnitProperty{
+				Name:  fmt.Sprintf("expected.%s", key),
+				Value: fmt.Sprintf("%v", value),
+			})
+		}
+
+		// Only add properties if we have any
+		if len(properties) > 0 {
+			testCase.Properties = JUnitProperties{
+				Properties: properties,
+			}
+		}
+
+		// Add failure information if test failed
+		if !result.Success {
+			testSuite.Failures++
+			testCase.Failure = &JUnitFailure{
+				Message: result.Error,
+				Type:    "AssertionFailure",
+				Value:   fmt.Sprintf("Test failed: %s", result.Error),
+			}
+		}
+
+		// Add test case to suite
+		testSuite.TestCases = append(testSuite.TestCases, testCase)
+
+		// Add to total time
+		testSuite.Time += duration.Seconds()
+	}
+
+	// Add suite to root element
+	testSuites.Suites = append(testSuites.Suites, testSuite)
+
+	// Create the XML file
+	filename := fmt.Sprintf("%s/results_%s.xml",
 		f.outputDir,
 		time.Now().Format("20060102_150405"))
 
-	data, err := json.MarshalIndent(results, "", "    ")
+	file, err := os.Create(filename)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create JUnit XML file: %v", err)
+	}
+	defer file.Close()
+
+	// Write XML header
+	file.WriteString(xml.Header)
+
+	// Create encoder with indentation for readability
+	encoder := xml.NewEncoder(file)
+	encoder.Indent("", "  ")
+
+	// Encode and write
+	if err := encoder.Encode(testSuites); err != nil {
+		return fmt.Errorf("failed to encode JUnit XML: %v", err)
 	}
 
-	return os.WriteFile(filename, data, 0644)
+	return nil
 }
 
-// Helper function to get a human-readable result string
+// getResultString is a helper function to get a human-readable result string
 func getResultString(result TestResult) string {
 	if result.Success {
 		return "PASSED"

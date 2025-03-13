@@ -73,7 +73,7 @@ func getTestsToRun(availableTests map[string]core.Test) []core.Test {
 	return testsToRun
 }
 
-// Retrieve the expected values for a specific test from environment variables
+// getExpectedValues retrieves the expected values for a specific test from environment variables
 func getExpectedValues(testName string) map[string]interface{} {
 	expectedValues := map[string]interface{}{}
 

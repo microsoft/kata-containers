@@ -10,8 +10,5 @@ RUN tdnf update -y && tdnf install -y \
     iproute \
     && tdnf clean all
 
-# Default environment variables
-ENV ENABLED_TESTS=""
-
 ENTRYPOINT ["/app/kata-containerized-test-tool"]
 CMD ["--output", "/results"]
