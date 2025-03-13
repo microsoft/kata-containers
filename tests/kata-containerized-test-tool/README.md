@@ -15,15 +15,7 @@ This tool provides a flexible framework for running tests in both standard conta
 
 ### Build Steps
 
-1. Clone the repository
-
-```
-git clone https://github.com/kata-containers/kata-containers.git
-cd kata-containers/kata-containerized-testing-tool
-go mod tidy
-```
-
-2. Build the binary and the container
+Build the binary and the container
 
 - Using Makefile
 ```
@@ -86,7 +78,7 @@ sudo ctr run \
     yourregistry.azurecr.io/kata-test-container:v1 host-test
 ```
 
-#### UVM
+#### Guest VM
 ```
 sudo ctr run \
     --cni \

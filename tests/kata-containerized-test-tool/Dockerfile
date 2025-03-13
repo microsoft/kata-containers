@@ -10,8 +10,6 @@ RUN tdnf update -y && tdnf install -y \
     iproute \
     && tdnf clean all
 
-RUN mkdir -p /results
-
 # Default environment variables
 ENV ENABLED_TESTS=""
 
