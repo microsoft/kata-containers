@@ -728,8 +728,12 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) {
     bundle_path := i_oci.Annotations["io.katacontainers.pkg.oci.bundle_path"]
     bundle_id := replace(bundle_path, "/run/containerd/io.containerd.runtime.v2.task/k8s.io/", "")
 
+    print("bundle_id =", bundle_id)
     bundle_id_format := concat("", ["^", BUNDLE_ID, "$"])
+    print("bundle_id_format =", bundle_id_format)
     regex.match(bundle_id_format, bundle_id)
+    print("how did we pass the check above!")
+    
 
     key := "io.kubernetes.cri.sandbox-id"
 

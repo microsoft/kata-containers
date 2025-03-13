@@ -197,8 +197,9 @@ impl AgentPolicy {
             }
         };
 
+        self.log_request(ep, &prints).await;
+
         if !allow {
-            self.log_request(ep, &prints).await;
             if self.allow_failures {
                 warn!(sl!(), "policy: ignoring error for {ep}");
                 allow = true;
