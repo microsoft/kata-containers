@@ -412,6 +412,7 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 			return nil, res.err
 		}
 		container := res.container
+		shimLog.WithField("cameron container", r.ID).WithField("cameron res.container", res.container).Warn("Cameron log res.container")
 		container.status = task.Status_CREATED
 
 		s.containers[r.ID] = container
