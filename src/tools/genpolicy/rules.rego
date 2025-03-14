@@ -38,8 +38,8 @@ default StopTracingRequest := false
 default TtyWinResizeRequest := true
 default UpdateContainerRequest := false
 default UpdateEphemeralMountsRequest := false
-default UpdateInterfaceRequest := true
-default UpdateRoutesRequest := true
+default UpdateInterfaceRequest := false
+default UpdateRoutesRequest := false
 default WaitProcessRequest := true
 default WriteStreamRequest := false
 
@@ -1631,6 +1631,49 @@ ExecProcessRequest {
     allow_interactive_exec(p_container, input.process)
 
     print("ExecProcessRequest 3: true")
+}
+
+UpdateRoutesRequest {
+    print("UpdateRoutesRequest: input =", input)
+    print("UpdateRoutesRequest: policy =", policy_data.request_defaults.UpdateRoutesRequest)
+
+    i_routes := input.routes.Routes
+    p_source_regex = policy_data.request_defaults.UpdateRoutesRequest.forbidden_source_regex
+    p_names = policy_data.request_defaults.UpdateRoutesRequest.forbidden_device_names
+
+    every i_route in i_routes {
+        print("i_route.source =", i_route.source)
+        every p_regex in p_source_regex {
+            print("p_regex =", p_regex)
+            not regex.match(p_regex, i_route.source)
+        }
+
+        print("i_route.device =", i_route.device)
+        not i_route.device in p_names
+    }
+
+    print("UpdateRoutesRequest: true")
+}
+
+UpdateInterfaceRequest {
+    print("UpdateInterfaceRequest: input =", input)
+    print("UpdateInterfaceRequest: policy =", policy_data.request_defaults.UpdateInterfaceRequest)
+
+    i_interface := input.interface
+    p_flags := policy_data.request_defaults.UpdateInterfaceRequest.allow_raw_flags
+
+    # Typically, just IFF_NOARP is used.
+    bits.and(i_interface.raw_flags, bits.negate(p_flags)) == 0
+
+    p_names := policy_data.request_defaults.UpdateInterfaceRequest.forbidden_names
+
+    not i_interface.name in p_names
+
+    p_hwaddrs := policy_data.request_defaults.UpdateInterfaceRequest.forbidden_hw_addrs
+
+    not i_interface.hwAddr in p_hwaddrs
+
+    print("UpdateInterfaceRequest: true")
 }
 
 CloseStdinRequest {
