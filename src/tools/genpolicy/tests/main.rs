@@ -204,4 +204,9 @@ mod tests {
     async fn test_update_routes() {
         runtests::<UpdateRoutesRequest>("updateroutes").await;
     }
+
+    #[tokio::test]
+    async fn test_update_interface() {
+        runtests::<UpdateInterfaceRequest>("updateinterface").await;
+    }
 }
