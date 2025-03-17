@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use crate::rpc::ttrpc_error;
 use crate::AGENT_POLICY;
-use kata_agent_policy::policy::{AgentPolicy, PolicyCopyFileRequest};
+use kata_agent_policy::policy::{AgentPolicy, PolicyCopyFileRequest, PolicyCreateContainerRequest};
 
 async fn allow_request(policy: &mut AgentPolicy, ep: &str, request: &str) -> ttrpc::Result<()> {
     match policy.allow_request(ep, request).await {
@@ -64,17 +64,6 @@ pub async fn is_allowed_copy_file(req: &protocols::agent::CopyFileRequest) -> tt
     let request = serde_json::to_string(&policy_req).unwrap();
     let mut policy = AGENT_POLICY.lock().await;
     allow_request(&mut policy, "CopyFileRequest", &request).await
-}
-
-/// PolicyCreateContainerRequest is very similar to CreateContainerRequest from src/libs/protocols, except:
-/// - It wraps the base CreateContainerRequest.
-/// - It has an env_map field which is a map of environment variable names to expanded values.
-/// This makes it easier to validate the environment variables inside the rego rules.
-#[derive(Debug, serde::Serialize)]
-struct PolicyCreateContainerRequest {
-    base: protocols::agent::CreateContainerRequest,
-    // a map of environment variable names to value
-    env_map: std::collections::BTreeMap<String, String>,
 }
 
 pub async fn is_allowed_create_container(

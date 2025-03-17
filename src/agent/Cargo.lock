@@ -1325,6 +1325,7 @@ dependencies = [
  "anyhow",
  "json-patch",
  "logging",
+ "protocols",
  "regorus",
  "serde",
  "serde_json",
