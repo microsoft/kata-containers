@@ -629,8 +629,8 @@ allow_user(p_process, i_process) {
     # TODO: track down the reason for registry.k8s.io/pause:3.9 being
     #       executed with gid = 0 despite having "65535:65535" in its container image
     #       config.
-    #print("allow_user: input gid =", i_user.GID, "policy gid =", p_user.GID)
-    #p_user.GID == i_user.GID
+    print("allow_user: input gid =", i_user.GID, "policy gid =", p_user.GID)
+    p_user.GID == i_user.GID
 
     # TODO: compare the additionalGids field too after computing its value
     # based on /etc/passwd and /etc/group from the container image.

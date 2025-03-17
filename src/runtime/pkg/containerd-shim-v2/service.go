@@ -410,6 +410,7 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 		return nil, errors.Errorf("create container timeout: %v", r.ID)
 	case res := <-ch:
 		if res.err != nil {
+			shimLog.WithField("cameron container", r.ID).WithField("cameron res.container", res.container).Warn("Cameron log res.container error")
 			return nil, res.err
 		}
 		container := res.container
