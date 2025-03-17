@@ -400,6 +400,7 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	}
 	ch := make(chan Result, 1)
 	go func() {
+		shimLog.WithField("cameron container goroutine", r).WithField("cameron r", r).Warn("Cameron log goroutine r")
 		container, err := create(ctx, s, r)
 		ch <- Result{container, err}
 	}()
