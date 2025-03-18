@@ -21,6 +21,7 @@ clap = { version = "4.1.8", features = ["derive"] }
 # YAML file serialization/deserialization.
 base64 = "0.21.0"
 serde = { version = "1.0.159", features = ["derive"] }
+regex = "1.10.5"
 
 # Newer serde_yaml versions are using unsafe-libyaml instead of yaml-rust,
 # and incorrectly change on serialization:
@@ -51,8 +52,6 @@ tokio = {version = "1.33.0", features = ["rt-multi-thread"]}
 # OCI container specs.
 oci = { path = "../../libs/oci" }
 
-# Kata Agent protocol.
-protocols = { path = "../../libs/protocols", features = ["with-serde"] }
 
 # dm-verity root hash support
 generic-array = "0.14.6"
@@ -70,3 +69,5 @@ containerd-client = "0.4.0"
 [dev-dependencies]
 kata-agent-policy = { path = "../../agent/policy" }
 slog = "2.5.2"
+# Kata Agent protocol.
+protocols = { path = "../../libs/protocols", features = ["with-serde"] }
