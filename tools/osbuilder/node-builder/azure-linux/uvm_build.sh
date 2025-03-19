@@ -27,14 +27,15 @@ source "${common_file}"
 rootfs_make_flags="AGENT_SOURCE_BIN=${AGENT_INSTALL_DIR}/usr/bin/kata-agent OS_VERSION=${OS_VERSION}"
 
 if [ "${CONF_PODS}" == "yes" ]; then
-	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=${agent_policy_file_abs}"
+	rootfs_make_flags+=" CONF_GUEST=yes AGENT_POLICY=yes AGENT_POLICY_FILE=${agent_policy_file_abs}"
+else
+	agent_policy_allow_all="${repo_dir}/src/kata-opa/allow-all.rego"
+	rootfs_make_flags+=" AGENT_POLICY=yes AGENT_POLICY_FILE=${agent_policy_file_allow_all}"
 fi
 
-if [ "${CONF_PODS}" == "yes" ]; then
-	set_uvm_kernel_vars
-	if [ -z "${UVM_KERNEL_HEADER_DIR}}" ]; then
-		exit 1
-	fi
+set_uvm_kernel_vars
+if [ -z "${UVM_KERNEL_HEADER_DIR}}" ]; then
+	exit 1
 fi
 
 pushd "${repo_dir}"
@@ -63,12 +64,13 @@ echo "Installing agent service files into rootfs"
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-containers.target ${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-agent.service ${ROOTFS_PATH}/usr/lib/systemd/system/kata-agent.service
 
+echo "Building tarfs kernel driver and installing into rootfs"
+pushd src/tarfs
+make KDIR=${UVM_KERNEL_HEADER_DIR}
+sudo make KDIR=${UVM_KERNEL_HEADER_DIR} KVER=${UVM_KERNEL_VERSION} INSTALL_MOD_PATH=${ROOTFS_PATH} install
+popd
+
 if [ "${CONF_PODS}" == "yes" ]; then
-	echo "Building tarfs kernel driver and installing into rootfs"
-	pushd src/tarfs
-	make KDIR=${UVM_KERNEL_HEADER_DIR}
-	sudo make KDIR=${UVM_KERNEL_HEADER_DIR} KVER=${UVM_KERNEL_VERSION} INSTALL_MOD_PATH=${ROOTFS_PATH} install
-	popd
 	echo "Building dm-verity protected image based on rootfs"
 	pushd tools/osbuilder
 	sudo -E PATH=${PATH} IMAGE_NAME=${LOCAL_IMAGE_NAME} make DISTRO=cbl-mariner MEASURED_ROOTFS=yes DM_VERITY_FORMAT=kernelinit image
