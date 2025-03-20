@@ -3,6 +3,7 @@
     "description": "generated name with valid prefix (dummyxyz)",
     "allowed": true,
     "request": {
+      "type": "CreateContainer",
       "base": {
         "OCI": {
           "Annotations": {
@@ -290,6 +291,7 @@
     "description": "generated name with invalid prefix (xyzdummy)",
     "allowed": false,
     "request": {
+      "type": "CreateContainer",
       "base": {
         "OCI": {
           "Annotations": {

@@ -3,6 +3,7 @@
     "description": "no pidns",
     "allowed": true,
     "request": {
+      "type": "CreateSandbox",
       "sandbox_pidns": false
     }
   }
