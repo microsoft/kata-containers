@@ -9,6 +9,10 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::ops::Deref;
 use std::path::Path;
+//use std::path::{Path, PathBuf};
+//extern crate sys_mount;
+//use sys_mount::{Mount, MountFlags, SupportedFilesystems, Unmount, UnmountFlags};
+use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
 use kata_sys_util::mount::{get_linux_mount_info, parse_mount_options};
@@ -67,6 +71,7 @@ lazy_static! {
 pub fn baremount(
     source: &Path,
     destination: &Path,
+//    mut fs_type: &str,
     fs_type: &str,
     flags: MsFlags,
     options: &str,
@@ -104,21 +109,94 @@ pub fn baremount(
         flags
     );
 
-    nix::mount::mount(
-        Some(source),
-        destination,
-        Some(fs_type),
-        flags,
-        Some(options),
-    )
-    .map_err(|e| {
-        anyhow!(
-            "failed to mount {} to {}, with error: {}",
-            source.display(),
-            destination.display(),
-            e
+    //if fs_type == "tar" {
+    if fs_type == "fuse.utarfs" {
+        //let mut new_destination = PathBuf::from("/tmp");
+        // Set the filename to the desired new filename
+        //new_destination.push(destination.file_name().unwrap());
+        //fs::create_dir_all(new_destination.clone())?;
+        // if let Err(e) = nix::mount::mount(
+        //     Some(source),
+        //     &new_destination,
+        //     Some("fuse.utarfs"),
+        //     flags,
+        //     Some(options),
+        // ) {
+        //     eprintln!(
+        //     "Warning: failed to mount utarfs fuse {} to {}, with error: {}",
+        //     source.display(),
+        //     new_destination.display(),
+        //     e
+        //     );
+        // }
+
+        // let mount_result = Mount::builder()
+        // .fstype(fs_type)
+        // .data("ro") // Add the 'ro' option for read-only mount
+        // .mount(Some(source), &new_destination);
+        // match mount_result {
+        //     Ok(mount) => {
+        //         info!(logger, "Mounted with utarfs!")
+        //     }
+        //     Err(why) => {
+        //         eprintln!("failed to mount device: {}", why);
+        //     }
+        // }
+
+        let output = Command::new("mount")
+            .arg("-t")
+            .arg(fs_type)
+            .arg("-o")
+            .arg("ro")
+            .arg(source)
+            //.arg(&new_destination)
+            .arg(destination)
+            .output()
+            .map_err(|e| anyhow!("Failed to execute mount command: {}", e))?;
+
+        if output.status.success() {
+            println!("UTARFS Command executed successfully: {}", String::from_utf8_lossy(&output.stdout));
+        } else {
+            eprintln!("UTARFS Command execution failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+
+        // this is actually required, otherwise /pause can't be found - I guess a sync/mount is missing or not proactive and depends on an explicity filesystem access
+        let output = Command::new("ls")
+        .arg("/run/kata-containers/sandbox/layers")
+        .output()
+        .map_err(|e| anyhow!("Failed to execute ls command: {}", e))?;
+
+        // Check if the command was successful
+        if output.status.success() {
+            // Convert the standard output to a string and print it
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            println!("Command output:\n{}", stdout);
+        } else {
+            // Convert the standard error to a string and print it
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            println!("Command failed with error:\n{}", stderr);
+        }
+
+        Ok(())
+        // NOTE: THIS MAKES BELOW MOUNT CALL WORK
+        //fs_type = "tar"
+    } else {
+        nix::mount::mount(
+            Some(source),
+            destination,
+            Some(fs_type),
+            flags,
+            Some(options),
         )
-    })
+        .map_err(|e| {
+            anyhow!(
+                "failed to mount {} to {}, with error: {}",
+                source.display(),
+                destination.display(),
+                e
+            )
+        })
+    }
 }
 
 /// Looks for `mount_point` entry in the /proc/mounts.

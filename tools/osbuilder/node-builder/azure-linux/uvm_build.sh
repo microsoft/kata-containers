@@ -41,12 +41,12 @@ pushd "${repo_dir}"
 
 if [ "${UVM_BUILD_MODE}" == "release" ]; then
 	LOCAL_IMAGE_NAME="${IMG_FILE_NAME}"
-else 
+else
 	LOCAL_IMAGE_NAME="${IMG_DBG_FILE_NAME}"
 fi
 
 # We must clean the rootfs build to allow the next build (i.e. a debug image) to be built
-# from a clean state with a separate set of packages. 
+# from a clean state with a separate set of packages.
 echo "Cleaning rootfs build"
 pushd tools/osbuilder
 sudo -E PATH=$PATH make DISTRO=cbl-mariner clean-rootfs
@@ -71,6 +71,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 
 	echo "Installing utarfs into rootfs"
 	sudo cp target/release/utarfs ${ROOTFS_PATH}/bin/utarfs
+	#sudo cp target/release/utarfs ${ROOTFS_PATH}/sbin/utarfs
 	popd
 
 	echo "Building tarfs kernel driver and installing into rootfs"

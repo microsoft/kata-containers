@@ -380,12 +380,31 @@ fn mount_storage(logger: &Logger, storage: &Storage) -> Result<()> {
         "mount-options" => options.as_str(),
     );
 
+    // snapshotter passes "tar" as mount option (src/tardev-snapshotter/src/snapshotter.rs, mounts_from_snapshot())
+    // shim parses that mount option and sets it as the RPC Mount type (src/runtime/pkg/containerd-shim-v2/create.go, copyLayersToMounts())
+    // shim sets the RPC Storage fstype based on the Mount type
+    //
+    // calling nix::mount::mount through baremount() with various options and flags always yields:
+    // failed to create device for storage, error: failed to mount /dev/mapper/5a5aad80055ff20012a50dc25f8df7a29924474324d65f7d5306ee8ee27ff71d to /run/kata-containers/sandbox/layers/5a5aad80055ff20012a50dc25f8df7a29924474324d65f7d5306ee8ee27ff71d, with error: EINVAL: Invalid argument
+    // TODO: try different method, options/flags, ..., e.g.: MsFlags::MS_RDONLY; default per logging is: options=\\\"\\\", flags=MS_RDONLY\"
+    let (fstype_mod, flags_mod, options_mod) = if storage.fstype.as_str() == "tar" {
+        //(storage.fstype.as_str(), flags, options.as_str())
+        ("fuse.utarfs", flags, options.as_str())
+        //("fuse.utarfs", nix::mount::MsFlags::empty(), "ro")
+    } else {
+        (storage.fstype.as_str(), flags, options.as_str())
+    };
+    if storage.fstype.as_str() == "tar" {
+        println!("UTARFS BOGUS")
+    }
+    //let (fstype_mod, flags_mod, options_mod) = (storage.fstype.as_str(), flags, options.as_str());
+
     baremount(
         src_path,
         mount_path,
-        storage.fstype.as_str(),
-        flags,
-        options.as_str(),
+        fstype_mod,
+        flags_mod,
+        options_mod,
         &logger,
     )
 }
