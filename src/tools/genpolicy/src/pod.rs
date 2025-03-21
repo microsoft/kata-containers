@@ -947,6 +947,10 @@ impl Container {
             if let Some(uid) = context.runAsUser {
                 process.User.UID = uid.try_into().unwrap();
             }
+            // zero out guid here (or inside condition above?)
+            // process.User.GUID = 0
+            // if some guid, set it
+
             if let Some(allow) = context.allowPrivilegeEscalation {
                 process.NoNewPrivileges = !allow
             }

@@ -674,6 +674,8 @@ impl AgentPolicy {
 
         let (yaml_has_command, yaml_has_args) =
             yaml_container.get_process_args(&mut process.DeprecatedArgs);
+
+        // this gets guid from image config
         yaml_container
             .registry
             .get_process(&mut process, yaml_has_command, yaml_has_args);
@@ -709,8 +711,11 @@ impl AgentPolicy {
         process.Args = process.DeprecatedArgs.clone();
         substitute_args_env_variables(&mut process.DeprecatedArgs, &process.Env);
 
+        // this overwrite guid from genpolicy-settings.json (if present, doesn't seem to be present by default)
         c_settings.get_process_fields(&mut process);
+        // should emulate "overwrite all" behaviour. I think this gets it from the YAML that wraps the containers
         resource.get_process_fields(&mut process);
+        // then from the container
         yaml_container.get_process_fields(&mut process);
 
         process
@@ -725,6 +730,7 @@ impl KataSpec {
     }
 
     fn get_process_fields(&self, process: &mut KataProcess) {
+        // if no uid/gid is set, use values from kataSpec
         if process.User.UID == 0 {
             process.User.UID = self.Process.User.UID;
         }

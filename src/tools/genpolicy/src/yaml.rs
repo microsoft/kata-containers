@@ -348,5 +348,8 @@ pub fn get_process_fields(
         if let Some(uid) = context.runAsUser {
             process.User.UID = uid.try_into().unwrap();
         }
+        // zero out guid here (or inside condition above?)
+        // process.User.GUID = 0
+        // if some guid, set it
     }
 }
