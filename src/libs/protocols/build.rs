@@ -255,6 +255,8 @@ fn real_main() -> Result<(), std::io::Error> {
         "src/health_ttrpc.rs",
         "src/health_ttrpc_async.rs",
         "src/oci.rs",
+        "src/remote_ttrpc.rs",
+        "src/remote_ttrpc_async.rs",
     ];
 
     for f in box_pointers_files {
