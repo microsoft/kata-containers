@@ -1,16 +1,26 @@
 [workspace]
-members = ["rustjail", "policy", "vsock-exporter"]
+members = [
+    "rustjail",
+    "policy",
+    "vsock-exporter",
+]
 
 [workspace.package]
-authors = ["The Kata Containers community <kata-dev@lists.katacontainers.io>"]
+authors = [
+    "The Kata Containers community <kata-dev@lists.katacontainers.io>",
+]
 edition = "2018"
 license = "Apache-2.0"
 rust-version = "1.80.0"
 
 [workspace.dependencies]
-oci-spec = { version = "0.6.8", features = ["runtime"] }
+oci-spec = { version = "0.6.8", features = [
+    "runtime",
+] }
 lazy_static = "1.3.0"
-ttrpc = { version = "0.8.4", features = ["async"], default-features = false }
+ttrpc = { version = "0.8.4", features = [
+    "async",
+], default-features = false }
 protobuf = "=3.7.1"
 libc = "0.2.94"
 nix = "0.24.2"
@@ -30,15 +40,18 @@ async-recursion = "0.3.2"
 futures = "0.3.30"
 
 # Async runtime
-tokio = { version = "1.39.0", features = ["full"] }
+tokio = { version = "1.39.0", features = [
+    "full",
+] }
 tokio-vsock = "0.3.4"
 
-netlink-sys = { version = "0.7.0", features = ["tokio_socket"] }
+netlink-sys = { version = "0.7.0", features = [
+    "tokio_socket",
+] }
 rtnetlink = "0.14.0"
 netlink-packet-route = "0.19.0"
 netlink-packet-core = "0.7.0"
 ipnetwork = "0.17.0"
-
 
 slog = "2.5.2"
 slog-scope = "4.1.2"
@@ -49,7 +62,9 @@ slog-stdlog = "4.0.0"
 log = "0.4.11"
 
 cfg-if = "1.0.0"
-prometheus = { version = "0.13.0", features = ["process"] }
+prometheus = { version = "0.13.0", features = [
+    "process",
+] }
 procfs = "0.12.0"
 
 anyhow = "1"
@@ -60,20 +75,28 @@ cgroups = { package = "cgroups-rs", version = "0.3.3" }
 tracing = "0.1.26"
 tracing-subscriber = "0.2.18"
 tracing-opentelemetry = "0.13.0"
-opentelemetry = { version = "0.14.0", features = ["rt-tokio-current-thread"] }
+opentelemetry = { version = "0.14.0", features = [
+    "rt-tokio-current-thread",
+] }
 
 # Configuration
-serde = { version = "1.0.129", features = ["derive"] }
+serde = { version = "1.0.129", features = [
+    "derive",
+] }
 serde_json = "1.0.39"
 toml = "0.5.8"
-clap = { version = "3.0.1", features = ["derive"] }
+clap = { version = "3.0.1", features = [
+    "derive",
+] }
 strum = "0.26.2"
 strum_macros = "0.26.2"
 
 tempfile = "3.1.0"
 which = "4.3.0"
 rstest = "0.18.0"
-async-std = { version = "1.12.0", features = ["attributes"] }
+async-std = { version = "1.12.0", features = [
+    "attributes",
+] }
 
 # Local dependencies
 kata-agent-policy = { path = "policy" }
@@ -91,7 +114,6 @@ protocols = { path = "../libs/protocols" }
 runtime-spec = { path = "../libs/runtime-spec" }
 safe-path = { path = "../libs/safe-path" }
 test-utils = { path = "../libs/test-utils" }
-
 
 [package]
 name = "kata-agent"
@@ -172,7 +194,10 @@ cdi = { git = "https://github.com/cncf-tags/container-device-interface-rs", rev 
 kata-agent-policy = { workspace = true, optional = true }
 mem-agent.workspace = true
 rustjail.workspace = true
-protocols = { workspace = true, features = ["async", "with-serde"] }
+protocols = { workspace = true, features = [
+    "async",
+    "with-serde",
+] }
 kata-sys-util.workspace = true
 kata-types.workspace = true
 runtime-spec.workspace = true
@@ -185,7 +210,10 @@ vsock-exporter.workspace = true
 # Initdata
 base64 = "0.22"
 sha2 = "0.10.8"
-async-compression = { version = "0.4.22", features = ["tokio", "gzip"] }
+async-compression = { version = "0.4.22", features = [
+    "tokio",
+    "gzip",
+] }
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -200,11 +228,20 @@ lto = true
 
 [features]
 # The default-pull feature supports all sharing images by virtio-fs, for guest-pull build with the guest-pull feature
-default-pull = []
-seccomp = ["rustjail/seccomp"]
-standard-oci-runtime = ["rustjail/standard-oci-runtime"]
-agent-policy = ["kata-agent-policy"]
-guest-pull = ["image-rs/kata-cc-rustls-tls"]
+default-pull = [
+]
+seccomp = [
+    "rustjail/seccomp",
+]
+standard-oci-runtime = [
+    "rustjail/standard-oci-runtime",
+]
+agent-policy = [
+    "kata-agent-policy",
+]
+guest-pull = [
+    "image-rs/kata-cc-rustls-tls",
+]
 
 [[bin]]
 name = "kata-agent"
