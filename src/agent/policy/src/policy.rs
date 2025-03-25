@@ -63,6 +63,8 @@ pub struct AgentPolicy {
 
     /// Regorus engine
     engine: regorus::Engine,
+
+    policy_document_version: PolicyDocumentVersion,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -127,6 +129,7 @@ impl AgentPolicy {
 
         self.engine.add_policy_from_file(default_policy_file)?;
         self.update_allow_failures_flag().await?;
+        self.update_policy_version().await?;
         Ok(())
     }
 
@@ -149,6 +152,12 @@ impl AgentPolicy {
 
     /// Ask regorus if an API call should be allowed or not.
     pub async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
+        match self.policy_document_version {
+            PolicyDocumentVersion::V1 => self.allow_request_default(ep, ep_input).await,
+        }
+    }
+
+    async fn allow_request_default(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
         self.log_request(ep, ep_input).await;
 
@@ -266,6 +275,35 @@ impl AgentPolicy {
         };
         Ok(())
     }
+
+    async fn update_policy_version(&mut self) -> Result<()> {
+        let query = format!("data.agent_policy.policy_data.version");
+        self.engine.set_input_json("{}")?;
+
+        let results = self.engine.eval_query(query.clone(), false)?;
+
+        if results.result.len() < 1 || results.result[0].expressions.len() < 1 {
+            warn!(
+                sl!(),
+                "policy: failed to parse policy version. Assuming default policy version"
+            );
+            return Ok(());
+        }
+
+        self.policy_document_version =
+            match serde_json::from_str(&results.result[0].expressions[0].value.to_string()) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(
+                    sl!(),
+                    "policy: failed to parse policy version: {e}. Assuming default policy version"
+                );
+                    PolicyDocumentVersion::default()
+                }
+            };
+
+        return Ok(());
+    }
 }
 
 pub fn check_policy_hash(policy: &str) -> Result<()> {
@@ -287,4 +325,10 @@ pub fn check_policy_hash(policy: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Default)]
+pub enum PolicyDocumentVersion {
+    #[default]
+    V1,
 }
