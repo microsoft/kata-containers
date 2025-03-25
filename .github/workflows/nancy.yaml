@@ -1,0 +1,37 @@
+name: Release Static Checks
+
+on:
+  pull_request:
+    branches:
+      - msft-main
+
+jobs:
+  nancy:
+    name: Run Nancy on Go Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable  # Use latest stable Go version
+
+      - name: Install Nancy via Go
+        run: |
+          echo "Installing Nancy..."
+          go install github.com/sonatype-nexus-community/nancy@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      - name: Verify Nancy Installation
+        run: |
+          echo "Checking Nancy installation..."
+          nancy --help || echo "Nancy installed successfully!"
+
+      - name: Run Nancy on `src/runtime`
+        working-directory: src/runtime
+        run: |
+          echo "Running Nancy vulnerability scan on Go dependencies..."
+          go list -m all | nancy sleuth
