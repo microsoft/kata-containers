@@ -38,6 +38,7 @@
                 "pod/pod-spark.yaml",
                 "pod/pod-three-containers.yaml",
                 "pod/pod-ubuntu.yaml",
+                "pod/pod-uvm-test-container.yaml",
                 "replica-set/replica-busy.yaml",
                 "replica-set/replica2.yaml",
                 "secrets/azure-file-secrets.yaml",
