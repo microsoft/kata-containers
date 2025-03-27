@@ -2492,7 +2492,6 @@ dependencies = [
 [[package]]
 name = "tarfs-defs"
 version = "0.1.0"
-source = "git+https://github.com/kata-containers/tardev-snapshotter?rev=06183a5#06183a5e2a83c3261740f4f0f6ce4aa16b14e436"
 dependencies = [
  "zerocopy 0.6.6",
 ]
@@ -2500,7 +2499,6 @@ dependencies = [
 [[package]]
 name = "tarindex"
 version = "0.1.0"
-source = "git+https://github.com/kata-containers/tardev-snapshotter?rev=06183a5#06183a5e2a83c3261740f4f0f6ce4aa16b14e436"
 dependencies = [
  "tar",
  "tarfs-defs",
