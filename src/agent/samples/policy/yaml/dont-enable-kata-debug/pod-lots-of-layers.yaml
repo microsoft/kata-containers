@@ -13,13 +13,6 @@ spec:
   restartPolicy: Never
   runtimeClassName: kata-cc
   containers:
-    # 29 layers
-    - name: azure-vote-front
-      image: "mcr.microsoft.com/azuredocs/azure-vote-front:v1"
-      command:
-        - sh
-        - "-c"
-        - while true; do echo hello; sleep 10; done
     # 11 layers
     - name: footloose
       image: "quay.io/footloose/ubuntu18.04:latest"
@@ -36,7 +29,7 @@ spec:
         - while true; do echo go; sleep 25; done
     # 6 layers
     - name: nginx
-      image: "mcr.microsoft.com/cbl-mariner/base/nginx:1.22.1-9-cm2.0.20230904-amd64"
+      image: "marinerconfpodstest.azurecr.io/azurelinux/base/nginx:1.25"
       command:
         - sh
         - "-c"
