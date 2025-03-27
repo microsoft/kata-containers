@@ -6,8 +6,10 @@
 
 # usage: ./tests/adapt_settings_for_tests.sh
 
+set -x
+
 jq '.request_defaults.CreateContainerRequest.allow_env_regex_map = {  
   "JOB_COMPLETION_INDEX": "^[0-9]*$",
   "CPU_LIMIT": "^[0-9]+$",
   "MEMORY_LIMIT": "^[0-9]+$"
-}' genpolicy-settings.json > tmp-genpolicy-settings.json && mv tmp-genpolicy-settings.json genpolicy-settings.json
+}' genpolicy-settings.json > /tmp/genpolicy-settings.json
