@@ -1,7 +1,12 @@
+// Copyright (c) 2023 Microsoft Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+
 use generic_array::{typenum::Unsigned, GenericArray};
 use sha2::Digest;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom};
 use zerocopy::byteorder::{LE, U32, U64};
 use zerocopy::AsBytes;
 
@@ -51,9 +56,7 @@ impl<T: Digest + Clone> Verity<T> {
             count
         };
 
-        let mut data = Vec::new();
-        data.resize(hash_block_size, 0);
-
+        let data = vec![0; hash_block_size];
         let mut levels = Vec::new();
         levels.resize(
             level_count,
@@ -204,8 +207,7 @@ pub fn traverse_file<T: Digest + Clone>(
     mut verity: Verity<T>,
     writer: &mut impl FnMut(&mut File, &[u8], u64) -> io::Result<()>,
 ) -> io::Result<GenericArray<u8, T::OutputSize>> {
-    let mut buf = Vec::new();
-    buf.resize(verity.data_block_size, 0);
+    let mut buf = vec![0; verity.data_block_size];
     while verity.more_blocks() {
         file.seek(SeekFrom::Start(read_offset))?;
         file.read_exact(&mut buf)?;
@@ -217,24 +219,4 @@ pub fn traverse_file<T: Digest + Clone>(
 
 pub fn no_write(_: &mut File, _: &[u8], _: u64) -> io::Result<()> {
     Ok(())
-}
-
-pub fn write_to(f: &mut File) -> impl FnMut(&mut File, &[u8], u64) -> io::Result<()> + '_ {
-    |_, data, offset| {
-        f.seek(SeekFrom::Start(offset))?;
-        f.write_all(data)
-    }
-}
-
-pub fn append_tree<T: Digest + Clone>(
-    file: &mut File,
-    salt: &[u8],
-) -> io::Result<GenericArray<u8, T::OutputSize>> {
-    let file_size = file.seek(io::SeekFrom::End(0))?;
-    file.rewind()?;
-    let verity = Verity::<T>::new(file_size, 4096, 4096, &salt, file_size)?;
-    traverse_file(file, 0, true, verity, &mut |f, data, offset| {
-        f.seek(SeekFrom::Start(offset))?;
-        f.write_all(data)
-    })
 }
