@@ -59,7 +59,7 @@ protobuf = "=3.7.1"
 # dm-verity root hash support
 generic-array = "0.14.6"
 sha2 = "0.10.6"
-tarindex = { git = "https://github.com/kata-containers/tardev-snapshotter", rev = "06183a5" }
+tarindex = { path = "../../tardev-snapshotter/tarindex" }
 tempfile = "3.5.0"
 zerocopy = "0.6.1"
 fs2 = "0.4.3"
