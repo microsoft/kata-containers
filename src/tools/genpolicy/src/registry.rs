@@ -240,24 +240,33 @@ async fn get_image_layers(
             .media_type
             .eq(manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE)
             || layer.media_type.eq(manifest::IMAGE_LAYER_GZIP_MEDIA_TYPE)
+            // add support for additional media types
+            || layer.media_type.eq(manifest::IMAGE_LAYER_MEDIA_TYPE)
+            || layer
+                .media_type
+                .eq(manifest::IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE)
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
+                // refactor to not clone diff_id twice
+                let diff_id = &config_layer.rootfs.diff_ids[layer_index];
+                let verity_hash =
+                    get_verity_hash(use_cached_files, client, reference, &layer.digest, diff_id)
+                        .await?;
                 layers.push(ImageLayer {
-                    diff_id: config_layer.rootfs.diff_ids[layer_index].clone(),
-                    verity_hash: get_verity_hash(
-                        use_cached_files,
-                        client,
-                        reference,
-                        &layer.digest,
-                        &config_layer.rootfs.diff_ids[layer_index].clone(),
-                    )
-                    .await?,
+                    diff_id: diff_id.clone(),
+                    verity_hash,
                 });
             } else {
                 return Err(anyhow!("Too many Docker gzip layers"));
             }
 
             layer_index += 1;
+        } else {
+            // panic if we find a layer we don't support
+            return Err(anyhow!(
+                "Unsupported layer media type: {}",
+                layer.media_type
+            ));
         }
     }
 
@@ -282,62 +291,64 @@ async fn get_verity_hash(
     let mut compressed_path = decompressed_path.clone();
     compressed_path.set_extension("gz");
 
-    let mut verity_hash = "".to_string();
-    let mut error_message = "".to_string();
-    let mut error = false;
-
+    // better error handling
     // get value from store and return if it exists
-    if use_cached_files {
-        verity_hash = read_verity_from_store(cache_file, diff_id)?;
+    let verity_hash = if use_cached_files {
         info!("Using cache file");
-        info!("dm-verity root hash: {verity_hash}");
-    }
+        read_verity_from_store(cache_file, diff_id)?
+    } else {
+        None
+    };
 
-    // create the layer files
-    if verity_hash.is_empty() {
-        if let Err(e) = create_decompressed_layer_file(
-            client,
-            reference,
-            layer_digest,
-            &decompressed_path,
-            &compressed_path,
-        )
-        .await
-        {
-            error_message = format!("Failed to create verity hash for {layer_digest}, error {e}");
-            error = true
-        };
+    // todo: why below fails to compile
 
-        if !error {
-            match get_verity_hash_value(&decompressed_path) {
-                Err(e) => {
-                    error_message = format!("Failed to get verity hash {e}");
-                    error = true;
-                }
-                Ok(v) => {
-                    verity_hash = v;
-                    if use_cached_files {
-                        add_verity_to_store(cache_file, diff_id, &verity_hash)?;
-                    }
-                    info!("dm-verity root hash: {verity_hash}");
-                }
-            }
-        }
-    }
+    // // create the layer files
+    // let verity_hash_result = match verity_hash {
+    //     Some(v) => Ok(v),
+    //     None => {
+    //         // create_decompressed_layer_file(
+    //         //     client,
+    //         //     reference,
+    //         //     layer_digest,
+    //         //     &decompressed_path,
+    //         //     &compressed_path,
+    //         // )
+    //         // .await
+    //         // .context("Failed to create verity hash for {layer_digest}")?;
+    //         let root_hash = "".to_string();
+    //         // get_verity_hash_value(&decompressed_path).context("Failed to get verity hash")?;
+    //         // if use_cached_files {
+    //         //     add_verity_to_store(cache_file, diff_id, &root_hash)?;
+    //         // }
 
-    temp_dir.close()?;
-    if error {
-        // remove the cache file if we're using it
-        if use_cached_files {
-            std::fs::remove_file(cache_file)?;
-        }
-        warn!("{error_message}");
-    }
-    Ok(verity_hash)
+    //         Ok(root_hash)
+    //     }
+    // };
+
+    // temp_dir.close()?;
+    // match &verity_hash_result {
+    //     Ok(root_hash) => {
+    //         info!("dm-verity root hash: {}", root_hash);
+    //     }
+    //     Err(_) => {
+    //         // remove the cache file if we're using it
+    //         if use_cached_files {
+    //             std::fs::remove_file(cache_file)?;
+    //         }
+    //     }
+    // };
+
+    // verity_hash_result
+    Ok("".to_string())
 }
 
 // the store is a json file that matches layer hashes to verity hashes
-pub fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -> Result<()> {
+// pub(crate) means it's accessible only within the current crate. It’s not available externally from other crates, providing controlled visibility
+pub(crate) fn add_verity_to_store(
+    cache_file: &str,
+    diff_id: &str,
+    verity_hash: &str,
+) -> Result<()> {
     // open the json file in read mode, create it if it doesn't exist
     let read_file = OpenOptions::new()
         .read(true)
@@ -380,13 +391,13 @@ pub fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -
 
 // helper function to read the verity hash from the store
 // returns empty string if not found or file does not exist
-pub fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<String> {
+pub(crate) fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<Option<String>> {
     match OpenOptions::new().read(true).open(cache_file) {
         Ok(file) => match serde_json::from_reader(file) {
             Result::<Vec<ImageLayer>, _>::Ok(layers) => {
                 for layer in layers {
                     if layer.diff_id == diff_id {
-                        return Ok(layer.verity_hash);
+                        return Ok(Some(layer.verity_hash));
                     }
                 }
             }
@@ -399,9 +410,10 @@ pub fn read_verity_from_store(cache_file: &str, diff_id: &str) -> Result<String>
         }
     }
 
-    Ok(String::new())
+    Ok(None)
 }
 
+// refactor to make compressed_path, as they layer might not be compressed (e.g. tar format)
 async fn create_decompressed_layer_file(
     client: &mut Client,
     reference: &Reference,

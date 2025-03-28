@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+// this file is the same for solar
+
 use generic_array::{typenum::Unsigned, GenericArray};
 use sha2::Digest;
 use std::fs::File;
