@@ -3,6 +3,7 @@
     "description": "basic request for pause container",
     "allowed": true,
     "request": {
+      "type": "CreateContainer",
       "base": {
         "OCI": {
           "Annotations": {

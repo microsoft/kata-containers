@@ -6,7 +6,7 @@
 #[cfg(test)]
 mod tests {
     use base64::prelude::*;
-    use std::any;
+    use std::fmt::{self, Display};
     use std::fs::{self, File};
     use std::path;
     use std::str;
@@ -14,18 +14,43 @@ mod tests {
     use protocols::agent::{
         CreateContainerRequest, CreateSandboxRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
     };
-    use serde::de::DeserializeOwned;
     use serde::{Deserialize, Serialize};
 
     use kata_agent_policy::policy::{
         AgentPolicy, PolicyCopyFileRequest, PolicyCreateContainerRequest,
     };
 
-    #[derive(Clone, Debug, Deserialize, Serialize)]
-    struct TestCase<T> {
+    // each test case in testcase.json will translate
+    // to one request type
+    #[derive(Deserialize, Serialize)]
+    #[serde(tag = "type")]
+    enum TestRequest {
+        LegacyCreateContainer(CreateContainerRequest),
+        CopyFile(PolicyCopyFileRequest),
+        CreateContainer(PolicyCreateContainerRequest),
+        CreateSandbox(CreateSandboxRequest),
+        UpdateInterface(UpdateInterfaceRequest),
+        UpdateRoutes(UpdateRoutesRequest),
+    }
+
+    impl Display for TestRequest {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                TestRequest::LegacyCreateContainer(_) => write!(f, "CreateContainerRequest"),
+                TestRequest::CopyFile(_) => write!(f, "CopyFileRequest"),
+                TestRequest::CreateContainer(_) => write!(f, "CreateContainerRequest"),
+                TestRequest::CreateSandbox(_) => write!(f, "CreateSandboxRequest"),
+                TestRequest::UpdateInterface(_) => write!(f, "UpdateInterfaceRequest"),
+                TestRequest::UpdateRoutes(_) => write!(f, "UpdateRoutesRequest"),
+            }
+        }
+    }
+
+    #[derive(Deserialize, Serialize)]
+    struct TestCase {
         description: String,
         allowed: bool,
-        request: T,
+        request: TestRequest,
     }
 
     /// Run tests from the given directory.
@@ -34,10 +59,7 @@ mod tests {
     /// The resources must produce a policy when fed into genpolicy, so there
     /// should be exactly one entry with a PodSpec. The test case file must contain
     /// a JSON list of [TestCase] instances appropriate for `T`.
-    async fn runtests<T>(test_case_dir: &str)
-    where
-        T: DeserializeOwned + Serialize,
-    {
+    async fn runtests(test_case_dir: &str) {
         // Prepare temp dir for running genpolicy.
         let workdir = path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(test_case_dir);
         fs::create_dir_all(&workdir)
@@ -105,7 +127,7 @@ mod tests {
 
         let case_file =
             File::open(testdata_dir.join("testcases.json")).expect("test case file should open");
-        let test_cases: Vec<TestCase<T>> =
+        let test_cases: Vec<TestCase> =
             serde_json::from_reader(case_file).expect("test case file should parse");
 
         for test_case in test_cases {
@@ -113,10 +135,11 @@ mod tests {
 
             let v = serde_json::to_value(&test_case.request).unwrap();
 
-            let request_type = map_request(any::type_name::<T>().split("::").last().unwrap());
-
             let results = pol
-                .allow_request(request_type, &serde_json::to_string(&v).unwrap())
+                .allow_request(
+                    &test_case.request.to_string(),
+                    &serde_json::to_string(&v).unwrap(),
+                )
                 .await;
 
             let logs = fs::read_to_string(workdir.join("policy.log")).unwrap();
@@ -130,45 +153,38 @@ mod tests {
         }
     }
 
-    fn map_request(request: &str) -> &str {
-        match request {
-            "PolicyCopyFileRequest" => "CopyFileRequest",
-            "PolicyCreateContainerRequest" => "CreateContainerRequest",
-            _ => request,
-        }
-    }
-
     #[tokio::test]
     async fn test_copyfile() {
-        runtests::<PolicyCopyFileRequest>("copyfile").await;
+        runtests("copyfile").await;
     }
 
     #[tokio::test]
     async fn test_create_sandbox() {
-        runtests::<CreateSandboxRequest>("createsandbox").await;
+        runtests("createsandbox").await;
     }
 
     #[tokio::test]
     async fn test_update_routes() {
-        runtests::<UpdateRoutesRequest>("updateroutes").await;
+        runtests("updateroutes").await;
     }
 
     #[tokio::test]
     async fn test_update_interface() {
-        runtests::<UpdateInterfaceRequest>("updateinterface").await;
+        runtests("updateinterface").await;
     }
+
     #[tokio::test]
     async fn test_legacy_basic_create_container() {
-        runtests::<CreateContainerRequest>("createContainer/legacy").await;
+        runtests("createContainer/legacy").await;
     }
 
     #[tokio::test]
     async fn test_basic_create_container() {
-        runtests::<PolicyCreateContainerRequest>("createContainer/basic").await;
+        runtests("createContainer/basic").await;
     }
 
     #[tokio::test]
     async fn test_create_container_generate_name() {
-        runtests::<PolicyCreateContainerRequest>("createcontainer/generate_name").await;
+        runtests("createcontainer/generate_name").await;
     }
 }

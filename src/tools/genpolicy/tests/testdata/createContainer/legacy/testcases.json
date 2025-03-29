@@ -3,6 +3,7 @@
     "description": "legacy request for pause container",
     "allowed": true,
     "request": {
+      "type": "LegacyCreateContainer",
       "OCI": {
         "Annotations": {
           "io.katacontainers.pkg.oci.bundle_path": "/run/containerd/io.containerd.runtime.v2.task/k8s.io/4bbf2a6b6b510a279cd17b2bfc8b64d39c11ebb55f855ba78a0034c4fe394246",
