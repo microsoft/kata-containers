@@ -314,7 +314,8 @@ allow_create_container_input(req) {
     i_process := i_oci.Process
     count(i_process.SelinuxLabel) == 0
     count(i_process.User.Username) == 0
-
+    count(i_process.ApparmorProfile) == 0
+    
     print("allow_create_container_input: true")
 }
 
@@ -1580,9 +1581,9 @@ allow_interactive_exec(p_container, i_process) {
     print("allow_interactive_exec: true")
 }
 
-# TODO: should other ExecProcessRequest input data fields be validated as well?
 ExecProcessRequest {
     print("ExecProcessRequest 1: input =", input)
+    allow_exec_process_input
 
     i_command = concat(" ", input.process.Args)
     print("ExecProcessRequest 1: i_command =", i_command)
@@ -1599,6 +1600,7 @@ ExecProcessRequest {
 }
 ExecProcessRequest {
     print("ExecProcessRequest 2: input =", input)
+    allow_exec_process_input
 
     # TODO: match input container ID with its corresponding container.exec_commands.
     i_command = concat(" ", input.process.Args)
@@ -1616,6 +1618,7 @@ ExecProcessRequest {
 }
 ExecProcessRequest {
     print("ExecProcessRequest 3: input =", input)
+    allow_exec_process_input
 
     i_command = concat(" ", input.process.Args)
     print("ExecProcessRequest 3: i_command =", i_command)
@@ -1630,6 +1633,16 @@ ExecProcessRequest {
     allow_interactive_exec(p_container, input.process)
 
     print("ExecProcessRequest 3: true")
+}
+
+allow_exec_process_input {
+    is_null(input.string_user)
+
+    i_process := input.process
+    count(i_process.SelinuxLabel) == 0
+    count(i_process.ApparmorProfile) == 0
+
+    print("allow_exec_process_input: true")
 }
 
 UpdateRoutesRequest {
