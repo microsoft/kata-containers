@@ -29,48 +29,13 @@ mkdir -p "${UVM_PATH}"
 
 echo "Installing UVM files to target directory"
 if [ "${CONF_PODS}" == "yes" ]; then
-	CONF_PODS_INSTALL_SUCCESS=false
-	if [ -f "${IGVM_FILE_NAME}" ]; then
-		cp -a --backup=numbered "${IGVM_FILE_NAME}" "${UVM_PATH}"
-		cp -a --backup=numbered "${UVM_MEASUREMENT_FILE_NAME}" "${UVM_PATH}"
-		CONF_PODS_INSTALL_SUCCESS=true
-	else
-		echo "release UVM files not built; skipping."
-	fi
-
-	if [ -f "${IGVM_DBG_FILE_NAME}" ]; then
-		cp -a --backup=numbered "${IGVM_DBG_FILE_NAME}" "${UVM_PATH}"
-		cp -a --backup=numbered "${UVM_DBG_MEASUREMENT_FILE_NAME}" "${UVM_PATH}"
-		CONF_PODS_INSTALL_SUCCESS=true
-	else
-		echo "debug UVM files not built; skipping."
-	fi
-
-	if [ $CONF_PODS_INSTALL_SUCCESS != true ]; then
-		echo "Failed to install ConfPods measurement/igvm files, no release or debug files present."
-		exit 1
-	fi
+	cp -a --backup=numbered "${IGVM_FILE_NAME}" "${UVM_PATH}"
+	cp -a --backup=numbered "${IGVM_DBG_FILE_NAME}" "${UVM_PATH}"
+	cp -a --backup=numbered "${UVM_MEASUREMENT_FILE_NAME}" "${UVM_PATH}"
+	cp -a --backup=numbered "${UVM_DBG_MEASUREMENT_FILE_NAME}" "${UVM_PATH}"
 fi
 
-INSTALL_SUCCESS=false
-if [ -f "${IMG_FILE_NAME}" ]; then
-	cp -a --backup=numbered "${IMG_FILE_NAME}" "${UVM_PATH}/${IMG_FILE_NAME}"
-	INSTALL_SUCCESS=true
-else
-	echo "release UVM files not built; skipping."
-fi
-
-if [ -f "${IMG_DBG_FILE_NAME}" ]; then
-	cp -a --backup=numbered "${IMG_DBG_FILE_NAME}" "${UVM_PATH}/${IMG_DBG_FILE_NAME}"
-	INSTALL_SUCCESS=true
-else
-	echo "debug UVM files not built; skipping."
-fi
-
-if [ $INSTALL_SUCCESS != true ]; then
-	echo "Failed to install UVM files, no release or debug files present."
-	exit 1
-fi
+cp -a --backup=numbered "${IMG_FILE_NAME}" "${UVM_PATH}"
 
 popd
 

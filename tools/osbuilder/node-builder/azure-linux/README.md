@@ -57,7 +57,7 @@ sudo reboot
 Note: We currently use a [forked version](https://github.com/microsoft/confidential-containers-containerd/tree/tardev-v1.7.7) of `containerd` called `containerd-cc` which is installed as part of the `kata-packages-host` package. This containerd version is based on stock containerd with patches to support the Kata-CC use case and conflicts with the `containerd` package.
 As part of the build steps below, we provide instructions on how to build `containerd-cc` from source and to replace the component on the environment.
 
-## Variant I: Utilize released components to assemble the UVMs
+## Variant I: Utilize released components to assemble the UVM
 
 While the priorly installed `kata-packages-host` package delivers all host-side components, the tools required to assemble the UVM components are delivered through the `kata-packages-uvm-build` package.
 Using this package, it is straightforward to assemble the UVM and then to run pods.
@@ -66,7 +66,6 @@ For Kata:
 ```
 sudo dnf -y install kata-packages-uvm-build
 pushd /opt/kata-containers/uvm/tools/osbuilder/node-builder/azure-linux
-
 sudo make uvm
 sudo make deploy-uvm
 popd
@@ -163,31 +162,22 @@ The `all[-confpods]` target runs the targets `package[-confpods]` and `uvm[-conf
 Notes:
   - To retrieve more detailed build output, prefix the make commands with `DEBUG=1`.
   - To build an IGVM file for CondPods with a non-default SVN of 0, prefix the `make uvm-confpods` command with `IGVM_SVN=<number>`
-  - To build just one UVM (release or debug), run `make uvm-[confpods]-[debug/release]` followed by the appropriate `make deploy-uvm-[confpods]` step. 
   - For build and deployment of both Kata and Kata-CC artifacts, first run the `make all` and `make deploy` commands to build and install the Kata Containers for AKS components followed by `make clean`, and then run `make all-confpods` and `make deploy-confpods` to build and install the Confidential Containers for AKS components - or vice versa (using `make clean-confpods`).
 
 ## Debug builds
 
 This section describes how to build and deploy in debug mode.
 
-`make all[-confpods]` takes the following variables:
+`make all-confpods` takes the following variables:
 
  * `AGENT_BUILD_TYPE`: Specify `release` (default) to build the agent in
    release mode, or `debug` to build it in debug mode.
- * (confpods only) `AGENT_POLICY_FILE`: Specify `allow-set-policy.rego` (default) to use
+ * `AGENT_POLICY_FILE`: Specify `allow-set-policy.rego` (default) to use
    a restrictive policy, or `allow-all.rego` to use a permissive policy.
 
-`make all[-confpods]` builds a pair of release and debug UVMs and IGVMs by default. For quicker development, singular UVM targets are available:
+`make deploy-confpods` takes the following variable:
 
-```
-make package[-confpods]
-# Example building just the debug UVM
-make uvm[-confpods]-debug
-```
-
-`make deploy[-confpods]` takes the following variable:
-
- * `SHIM_USE_DEBUG_CONFIG`: Specify `no` (default) to use the release
+ * `SHIM_USE_DEBUG_CONFIG`: Specify `no` (default) to use the production
    configuration, or `yes` to use the debug configuration (all debug
    logging enabled). In this case you'll want to enable debug logging
    in containerd as well. Note that this variable has no effect if
@@ -197,15 +187,15 @@ In general, you can specify the debug configuration for all the above
 variables by using `BUILD_TYPE=debug` as such:
 
 ```shell
-sudo make BUILD_TYPE=debug all[-confpods] deploy[-confpods]
+sudo make BUILD_TYPE=debug all-confpods deploy-confpods
 ```
 
 Also note that make still lets you override the other variables even
-after setting `BUILD_TYPE`. For example, you can use the release shim
+after setting `BUILD_TYPE`. For example, you can use the production shim
 config with `BUILD_TYPE=debug`:
 
 ```shell
-sudo make BUILD_TYPE=debug SHIM_USE_DEBUG_CONFIG=no all[-confpods] deploy[-confpods]
+sudo make BUILD_TYPE=debug SHIM_USE_DEBUG_CONFIG=no all-confpods deploy-confpods
 ```
 
 ### Prevent redeploying the shim configuration
@@ -216,7 +206,7 @@ file each time you redeploy binaries, you can separately specify the
 `SHIM_REDEPLOY_CONFIG` (default `yes`):
 
 ```shell
-sudo make SHIM_REDEPLOY_CONFIG=no all[-confpods] deploy[-confpods]
+sudo make SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
 ```
 
 Note that this variable is independent from the other variables
@@ -225,7 +215,7 @@ configuration AND build in debug mode, you have to use the following
 command:
 
 ```shell
-sudo make BUILD_TYPE=debug SHIM_REDEPLOY_CONFIG=no all[-confpods] deploy[-confpods]
+sudo make BUILD_TYPE=debug SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
 ```
 
 ## Optional build step: Build and deploy the containerd fork from scratch

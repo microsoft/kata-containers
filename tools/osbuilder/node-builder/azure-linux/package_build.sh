@@ -77,16 +77,13 @@ fi
 popd
 
 pushd src/runtime/config/
-
-echo "Creating shim debug configuration"
-cp "${SHIM_CONFIG_FILE_NAME}" "${SHIM_DBG_CONFIG_FILE_NAME}"
-
-sed -i '/^#enable_debug =/s|^#||g' "${SHIM_DBG_CONFIG_FILE_NAME}"
-sed -i '/^#debug_console_enabled =/s|^#||g' "${SHIM_DBG_CONFIG_FILE_NAME}"
-sed -i "s|${IMG_FILE_NAME}|${IMG_DBG_FILE_NAME}|g" "${SHIM_DBG_CONFIG_FILE_NAME}"
-
 if [ "${CONF_PODS}" == "yes" ]; then
+
+	echo "Creating SNP shim debug configuration"
+	cp "${SHIM_CONFIG_FILE_NAME}" "${SHIM_DBG_CONFIG_FILE_NAME}"
 	sed -i "s|${IGVM_FILE_NAME}|${IGVM_DBG_FILE_NAME}|g" "${SHIM_DBG_CONFIG_FILE_NAME}"
+	sed -i '/^#enable_debug =/s|^#||g' "${SHIM_DBG_CONFIG_FILE_NAME}"
+	sed -i '/^#debug_console_enabled =/s|^#||g' "${SHIM_DBG_CONFIG_FILE_NAME}"
 fi
 popd
 
