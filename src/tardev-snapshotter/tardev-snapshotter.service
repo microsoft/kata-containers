@@ -1,11 +1,16 @@
 [Unit]
 Description=tardev containerd snapshotter daemon
 After=network.target
+After=local-fs.target
+Requires=local-fs.target
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/usr/bin/tardev-snapshotter /var/lib/containerd/io.containerd.snapshotter.v1.tardev /run/containerd/tardev-snapshotter.sock
-Environment="RUST_LOG=tardev_snapshotter=trace"
-Restart=on-failure
+Environment="RUST_LOG=tardev_snapshotter=info"
+Restart=always
+RestartSec=3
+OOMScoreAdjust=-999
 
 [Install]
-WantedBy=kubelet.service
+WantedBy=multi-user.target
