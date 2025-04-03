@@ -58,6 +58,9 @@ next_command = "sudo chmod a+rw /var/run/containerd/containerd.sock"
 print("========== COMMAND: " + next_command)
 runCmd(next_command)
 
+print("Writing settings for testing to /tmp/genpolicy-settings.json")
+runCmd("./tests/adapt_settings_for_tests.sh")
+
 # update files
 genpolicy_path = "./target/x86_64-unknown-linux-gnu/debug/genpolicy"
 
@@ -68,12 +71,12 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as execut
 
     for file in default_yamls + incomplete_init + no_policy + needs_containerd_pull:
         rego_file = "/tmp/" + Path(os.path.basename(file)).stem + "-rego.txt"
-        cmd = f"{genpolicy_path} -r -d -u -y {os.path.join(file_base_path, file)} > {rego_file}"
+        cmd = f"{genpolicy_path} -r -d -u -j /tmp/genpolicy-settings.json -y {os.path.join(file_base_path, file)} > {rego_file}"
         futures.append(executor.submit(timeRunCmd, cmd))
 
     for file in silently_ignored:
         rego_file = "/tmp/" + Path(os.path.basename(file)).stem + "-rego.txt"
-        cmd = f"{genpolicy_path} -r -d -u -s -y {os.path.join(file_base_path, file)} > {rego_file}"
+        cmd = f"{genpolicy_path} -r -d -u -s -j /tmp/genpolicy-settings.json -y {os.path.join(file_base_path, file)} > {rego_file}"
         futures.append(executor.submit(timeRunCmd, cmd))
 
     for future in concurrent.futures.as_completed(futures):
