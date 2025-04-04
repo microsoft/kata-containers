@@ -1,7 +1,7 @@
 .PHONY: build docker clean
 
 BINARY_NAME=kata-containerized-test-tool
-CONTAINER_NAME=sdl-test-container:local
+CONTAINER_NAME=marinerconfpodstest.azurecr.io/sdl-test-container:v1
 
 build:
 	go build -o $(BINARY_NAME) cmd/katatest/main.go

@@ -1,0 +1,220 @@
+package sdl
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/kata-containers/tests/kata-containerized-test-tool/internal/core"
+)
+
+// getEnvOrDefault returns the value of the environment variable if set, otherwise the default value
+func getEnvOrDefault(envVar, defaultVal string) string {
+	if val := os.Getenv(envVar); val != "" {
+		return val
+	}
+	return defaultVal
+}
+
+var (
+	sourceDir   = getEnvOrDefault("KATA_SOURCE_DIR", "/kata-source")
+	binariesDir = getEnvOrDefault("KATA_BINARIES_DIR", "/kata-binaries")
+)
+
+type SDLTest struct{}
+
+func New() *SDLTest {
+	return &SDLTest{}
+}
+
+func (t *SDLTest) Name() string {
+	return "SDL & Binary Hardening Test"
+}
+
+func (t *SDLTest) Run(ctx context.Context) core.TestResult {
+	result := core.TestResult{
+		Name:      t.Name(),
+		StartTime: time.Now(),
+		Metrics:   make(map[string]interface{}),
+	}
+	result.Success = true
+
+	// Log the directories being used
+	fmt.Printf("Using source directory: %s\n", sourceDir)
+	fmt.Printf("Using binaries directory: %s\n", binariesDir)
+
+	// Run BinSkim binary hardening tests
+	binskimSuccess := t.runBinSkimTests(&result)
+
+	// Find kata-containers directory in sourceDir
+	kataDir, err := exec.Command("sh", "-c", fmt.Sprintf("find %s -maxdepth 1 -type d -name 'kata-containers-*' | head -1", sourceDir)).Output()
+	if err != nil || len(kataDir) == 0 {
+		result.Error = fmt.Sprintf("No kata-containers directory found in %s", sourceDir)
+		result.Success = false
+		result.EndTime = time.Now()
+		return result
+	}
+	kataDirStr := strings.TrimSpace(string(kataDir))
+
+	// Run Clippy Rust static analysis
+	clippySuccess := t.runClippyTests(&result, kataDirStr)
+
+	// Run Nancy Go dependency security check
+	nancySuccess := t.runNancyTests(&result, kataDirStr)
+
+	result.Success = binskimSuccess && clippySuccess && nancySuccess
+	result.EndTime = time.Now()
+	return result
+}
+
+func (t *SDLTest) runBinSkimTests(result *core.TestResult) bool {
+	binaries := []string{
+		filepath.Join(binariesDir, "kata-agent"),
+		filepath.Join(binariesDir, "kata-agent-cc"),
+		filepath.Join(binariesDir, "containerd-shim-kata-v2"),
+		filepath.Join(binariesDir, "containerd-shim-kata-cc-v2"),
+		filepath.Join(binariesDir, "tardev-snapshotter"),
+		filepath.Join(binariesDir, "kata-overlay"),
+		filepath.Join(binariesDir, "cloud-hypervisor"),
+	}
+
+	success := true
+	for _, bin := range binaries {
+		fmt.Printf("Running Binskim on %s\n", bin)
+		binskimCmd := exec.Command("binskim", "analyze", bin, "--level", "Error", "--kind", "Pass;Fail")
+		binskimOutput, err := binskimCmd.CombinedOutput()
+		outputStr := strings.TrimSpace(string(binskimOutput))
+		if err != nil {
+			result.Error = fmt.Sprintf("BinSkim failed on %s: %v", bin, err)
+			success = false
+			continue
+		}
+		if strings.Contains(strings.ToLower(outputStr), "fail") {
+			result.Error = fmt.Sprintf("Binary %s failed BinSkim checks", bin)
+			success = false
+		}
+		result.Metrics[fmt.Sprintf("binskim_%s", bin)] = outputStr
+	}
+	if success {
+		fmt.Printf("✅ Binskim tests all passed\n")
+	} else {
+		fmt.Printf("❌ Binskim tests failed\n")
+	}
+	fmt.Printf("----------------------------------------------------\n")
+	return success
+}
+
+func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir string) bool {
+	currentDir, _ := os.Getwd()
+	defer os.Chdir(currentDir)
+	os.Chdir(sourceDir)
+
+	rustProjects := []struct {
+		name string
+		path string
+	}{
+		{"kata-agent", "src/agent"},
+		{"kata-overlay", "src/overlay"},
+		{"tardev-snapshotter", "src/tardev-snapshotter"},
+	}
+	success := true
+
+	for _, project := range rustProjects {
+		projectPath := filepath.Join(kataDir, project.path)
+		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
+			fmt.Printf("Error: %s - directory not found: %s\n", project.name, projectPath)
+			success = false
+			continue
+		}
+
+		var clipOutput []byte
+		var err error
+		switch project.name {
+		case "agent":
+			fmt.Printf("Running Clippy on %s ...\n", project.name)
+			// Use the Makefile for agent
+			makeCmd := exec.Command("make", "check", "LIBC=gnu", "OPENSSL_NO_VENDOR=Y")
+			makeCmd.Dir = projectPath
+			clipOutput, err = makeCmd.CombinedOutput()
+		case "overlay":
+			fmt.Printf("Running Clippy on %s...\n", project.name)
+			clipCmd := exec.Command("cargo", "clippy")
+			clipCmd.Dir = projectPath
+			clipOutput, err = clipCmd.CombinedOutput()
+		case "tardev-snapshotter":
+			fmt.Printf("Running Clippy on %s with RUSTC_BOOTSTRAP=1...\n", project.name)
+			clipCmd := exec.Command("cargo", "clippy")
+			clipCmd.Env = append(os.Environ(), "RUSTC_BOOTSTRAP=1")
+			clipCmd.Dir = projectPath
+			clipOutput, err = clipCmd.CombinedOutput()
+		default:
+			fmt.Printf("Running Clippy on %s...\n", project.name)
+			clipCmd := exec.Command("cargo", "clippy", "--", "-D", "warnings")
+			clipCmd.Dir = projectPath
+			clipOutput, err = clipCmd.CombinedOutput()
+		}
+		outputStr := strings.TrimSpace(string(clipOutput))
+		fmt.Println(outputStr)
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Clippy found errors in %s: %s", project.name, err)
+			result.Error = errMsg
+			fmt.Println(errMsg)
+			success = false
+		}
+		result.Metrics[fmt.Sprintf("clippy_%s", project.name)] = outputStr
+	}
+	if success {
+		fmt.Printf("✅ Clippy tests all passed\n")
+	} else {
+		fmt.Printf("❌ Clippy tests failed\n")
+	}
+	fmt.Printf("----------------------------------------------------\n")
+	return success
+}
+
+func (t *SDLTest) runNancyTests(result *core.TestResult, kataDir string) bool {
+	goProjects := []struct {
+		name string
+		path string
+	}{
+		{"kata-runtime", "src/runtime"},
+	}
+	success := true
+
+	for _, project := range goProjects {
+		projectPath := filepath.Join(kataDir, project.path)
+		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
+			fmt.Printf("Error: %s - directory not found: %s\n", project.name, projectPath)
+			success = false
+			continue
+		}
+
+		fmt.Printf("Running Nancy on %s...\n", project.name)
+		cmd := exec.Command("sh", "-c", "go list -mod=mod -m all | nancy sleuth")
+		cmd.Dir = projectPath
+
+		output, err := cmd.CombinedOutput()
+		outputStr := strings.TrimSpace(string(output))
+
+		fmt.Println(outputStr)
+		result.Metrics[fmt.Sprintf("nancy_%s", project.name)] = outputStr
+		if err != nil {
+			errMsg := fmt.Sprintf("Nancy found vulnerabilities in %s: %s", project.name, err)
+			result.Error = errMsg
+			fmt.Println(errMsg)
+			success = false
+		}
+	}
+	if success {
+		fmt.Printf("✅ Nancy tests all passed\n")
+	} else {
+		fmt.Printf("❌ Nancy tests failed\n")
+	}
+	fmt.Printf("----------------------------------------------------\n")
+	return success
+}
