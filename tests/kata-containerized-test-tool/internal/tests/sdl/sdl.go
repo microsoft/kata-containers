@@ -60,8 +60,18 @@ func (t *SDLTest) Run(ctx context.Context) core.TestResult {
 	}
 	kataDirStr := strings.TrimSpace(string(kataDir))
 
+	// Find cloud-hypervisor directory in sourceDir
+	clhDir, err := exec.Command("sh", "-c", fmt.Sprintf("find %s -maxdepth 1 -type d -name 'cloud-hypervisor*' | head -1", sourceDir)).Output()
+	if err != nil || len(clhDir) == 0 {
+		result.Error = fmt.Sprintf("No cloud-hypervisor directory found in %s", sourceDir)
+		result.Success = false
+		result.EndTime = time.Now()
+		return result
+	}
+	clhDirStr := strings.TrimSpace(string(clhDir))
+
 	// Run Clippy Rust static analysis
-	clippySuccess := t.runClippyTests(&result, kataDirStr)
+	clippySuccess := t.runClippyTests(&result, kataDirStr, clhDirStr)
 
 	// Run Nancy Go dependency security check
 	nancySuccess := t.runNancyTests(&result, kataDirStr)
@@ -108,23 +118,31 @@ func (t *SDLTest) runBinSkimTests(result *core.TestResult) bool {
 	return success
 }
 
-func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir string) bool {
+func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir string) bool {
 	currentDir, _ := os.Getwd()
 	defer os.Chdir(currentDir)
 	os.Chdir(sourceDir)
 
 	rustProjects := []struct {
-		name string
-		path string
+		name    string
+		path    string
+		project string // "kata-containers" or "cloud-hypervisor"
 	}{
-		{"kata-agent", "src/agent"},
-		{"kata-overlay", "src/overlay"},
-		{"tardev-snapshotter", "src/tardev-snapshotter"},
+		{"kata-agent", "src/agent", "kata-containers"},
+		{"kata-overlay", "src/overlay", "kata-containers"},
+		{"tardev-snapshotter", "src/tardev-snapshotter", "kata-containers"},
+		{"cloud-hypervisor", "", "cloud-hypervisor"},
 	}
 	success := true
 
 	for _, project := range rustProjects {
-		projectPath := filepath.Join(kataDir, project.path)
+		var projectPath string
+		if project.project == "kata-containers" {
+			projectPath = filepath.Join(kataDir, project.path)
+		} else {
+			projectPath = clhDir
+		}
+
 		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
 			fmt.Printf("Error: %s - directory not found: %s\n", project.name, projectPath)
 			success = false
@@ -134,13 +152,13 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir string) bool {
 		var clipOutput []byte
 		var err error
 		switch project.name {
-		case "agent":
+		case "kata-agent":
 			fmt.Printf("Running Clippy on %s ...\n", project.name)
 			// Use the Makefile for agent
 			makeCmd := exec.Command("make", "check", "LIBC=gnu", "OPENSSL_NO_VENDOR=Y")
 			makeCmd.Dir = projectPath
 			clipOutput, err = makeCmd.CombinedOutput()
-		case "overlay":
+		case "kata-overlay":
 			fmt.Printf("Running Clippy on %s...\n", project.name)
 			clipCmd := exec.Command("cargo", "clippy")
 			clipCmd.Dir = projectPath
@@ -149,6 +167,11 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir string) bool {
 			fmt.Printf("Running Clippy on %s with RUSTC_BOOTSTRAP=1...\n", project.name)
 			clipCmd := exec.Command("cargo", "clippy")
 			clipCmd.Env = append(os.Environ(), "RUSTC_BOOTSTRAP=1")
+			clipCmd.Dir = projectPath
+			clipOutput, err = clipCmd.CombinedOutput()
+		case "cloud-hypervisor":
+			fmt.Printf("Running Clippy on %s with custom features...\n", project.name)
+			clipCmd := exec.Command("cargo", "clippy", "--offline", "--no-default-features", "--features", "mshv,kvm,sev_snp,igvm")
 			clipCmd.Dir = projectPath
 			clipOutput, err = clipCmd.CombinedOutput()
 		default:
