@@ -170,8 +170,8 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir string
 			clipCmd.Dir = projectPath
 			clipOutput, err = clipCmd.CombinedOutput()
 		case "cloud-hypervisor":
-			fmt.Printf("Running Clippy on %s with custom features...\n", project.name)
-			clipCmd := exec.Command("cargo", "clippy", "--offline", "--no-default-features", "--features", "mshv,kvm,sev_snp,igvm")
+			fmt.Printf("Running Clippy on %s...\n", project.name)
+			clipCmd := exec.Command("cargo", "clippy", "--no-default-features", "--features", "mshv,kvm,sev_snp,igvm")
 			clipCmd.Dir = projectPath
 			clipOutput, err = clipCmd.CombinedOutput()
 		default:
