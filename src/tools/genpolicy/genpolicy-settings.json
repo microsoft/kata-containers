@@ -287,7 +287,7 @@
         ],
         "smb_storage_classes": [
             {
-                "name": "azurefile-csi-kata-cc",
+                "name": "azurefile-csi",
                 "mount_options": [
                     "dir_mode=0777",
                     "file_mode=0777",
