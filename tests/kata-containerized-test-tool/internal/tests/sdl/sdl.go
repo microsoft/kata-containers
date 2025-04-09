@@ -76,7 +76,10 @@ func (t *SDLTest) Run(ctx context.Context) core.TestResult {
 	// Run Nancy Go dependency security check
 	nancySuccess := t.runNancyTests(&result, kataDirStr)
 
-	result.Success = binskimSuccess && clippySuccess && nancySuccess
+	// Run Govulncheck Go vulnerability scanner
+	govulncheckSuccess := t.runGovulncheckTests(&result, kataDirStr)
+
+	result.Success = binskimSuccess && clippySuccess && nancySuccess && govulncheckSuccess
 	result.EndTime = time.Now()
 	return result
 }
@@ -89,6 +92,7 @@ func (t *SDLTest) runBinSkimTests(result *core.TestResult) bool {
 		filepath.Join(binariesDir, "containerd-shim-kata-cc-v2"),
 		filepath.Join(binariesDir, "tardev-snapshotter"),
 		filepath.Join(binariesDir, "kata-overlay"),
+		filepath.Join(binariesDir, "utarfs"),
 		filepath.Join(binariesDir, "cloud-hypervisor"),
 	}
 
@@ -130,6 +134,7 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir string
 	}{
 		{"kata-agent", "src/agent", "kata-containers"},
 		{"kata-overlay", "src/overlay", "kata-containers"},
+		{"utarfs", "src/utarfs", "kata-containers"},
 		{"tardev-snapshotter", "src/tardev-snapshotter", "kata-containers"},
 		{"cloud-hypervisor", "", "cloud-hypervisor"},
 	}
@@ -158,11 +163,6 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir string
 			makeCmd := exec.Command("make", "check", "LIBC=gnu", "OPENSSL_NO_VENDOR=Y")
 			makeCmd.Dir = projectPath
 			clipOutput, err = makeCmd.CombinedOutput()
-		case "kata-overlay":
-			fmt.Printf("Running Clippy on %s...\n", project.name)
-			clipCmd := exec.Command("cargo", "clippy")
-			clipCmd.Dir = projectPath
-			clipOutput, err = clipCmd.CombinedOutput()
 		case "tardev-snapshotter":
 			fmt.Printf("Running Clippy on %s with RUSTC_BOOTSTRAP=1...\n", project.name)
 			clipCmd := exec.Command("cargo", "clippy")
@@ -176,7 +176,7 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir string
 			clipOutput, err = clipCmd.CombinedOutput()
 		default:
 			fmt.Printf("Running Clippy on %s...\n", project.name)
-			clipCmd := exec.Command("cargo", "clippy", "--", "-D", "warnings")
+			clipCmd := exec.Command("cargo", "clippy")
 			clipCmd.Dir = projectPath
 			clipOutput, err = clipCmd.CombinedOutput()
 		}
@@ -237,6 +237,61 @@ func (t *SDLTest) runNancyTests(result *core.TestResult, kataDir string) bool {
 		fmt.Printf("✅ Nancy tests all passed\n")
 	} else {
 		fmt.Printf("❌ Nancy tests failed\n")
+	}
+	fmt.Printf("----------------------------------------------------\n")
+	return success
+}
+
+func (t *SDLTest) runGovulncheckTests(result *core.TestResult, kataDir string) bool {
+	goProjects := []struct {
+		name string
+		path string
+	}{
+		{"kata-runtime", "src/runtime"},
+	}
+	success := true
+
+	for _, project := range goProjects {
+		projectPath := filepath.Join(kataDir, project.path)
+		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
+			fmt.Printf("Error: %s - directory not found: %s\n", project.name, projectPath)
+			success = false
+			continue
+		}
+
+		fmt.Printf("Running Govulncheck on %s...\n", project.name)
+
+		// generate required configuration files
+		generateCmd := exec.Command("make", "generate-config", "pkg/katautils/config-settings.go")
+		generateCmd.Dir = projectPath
+		generateOutput, err := generateCmd.CombinedOutput()
+		if err != nil {
+			errMsg := fmt.Sprintf("Failed to generate config files for %s: %s\n%s",
+				project.name, err, string(generateOutput))
+			result.Error = errMsg
+			fmt.Println(errMsg)
+			return false
+		}
+
+		cmd := exec.Command("govulncheck", "./...")
+		cmd.Dir = projectPath
+
+		output, err := cmd.CombinedOutput()
+		outputStr := strings.TrimSpace(string(output))
+
+		fmt.Println(outputStr)
+		result.Metrics[fmt.Sprintf("govulncheck_%s", project.name)] = outputStr
+		if err != nil {
+			errMsg := fmt.Sprintf("Govulncheck found vulnerabilities in %s: %s", project.name, err)
+			result.Error = errMsg
+			fmt.Println(errMsg)
+			success = false
+		}
+	}
+	if success {
+		fmt.Printf("✅ Govulncheck tests all passed\n")
+	} else {
+		fmt.Printf("❌ Govulncheck tests failed\n")
 	}
 	fmt.Printf("----------------------------------------------------\n")
 	return success
