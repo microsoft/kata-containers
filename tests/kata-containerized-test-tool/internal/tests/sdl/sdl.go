@@ -165,18 +165,18 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir string
 			clipOutput, err = makeCmd.CombinedOutput()
 		case "tardev-snapshotter":
 			fmt.Printf("Running Clippy on %s with RUSTC_BOOTSTRAP=1...\n", project.name)
-			clipCmd := exec.Command("cargo", "clippy")
+			clipCmd := exec.Command("cargo", "clippy", "--quiet")
 			clipCmd.Env = append(os.Environ(), "RUSTC_BOOTSTRAP=1")
 			clipCmd.Dir = projectPath
 			clipOutput, err = clipCmd.CombinedOutput()
 		case "cloud-hypervisor":
 			fmt.Printf("Running Clippy on %s...\n", project.name)
-			clipCmd := exec.Command("cargo", "clippy", "--no-default-features", "--features", "mshv,kvm,sev_snp,igvm")
+			clipCmd := exec.Command("cargo", "clippy", "--no-default-features", "--features", "mshv,kvm,sev_snp,igvm", "--quiet")
 			clipCmd.Dir = projectPath
 			clipOutput, err = clipCmd.CombinedOutput()
 		default:
 			fmt.Printf("Running Clippy on %s...\n", project.name)
-			clipCmd := exec.Command("cargo", "clippy")
+			clipCmd := exec.Command("cargo", "clippy", "--quiet")
 			clipCmd.Dir = projectPath
 			clipOutput, err = clipCmd.CombinedOutput()
 		}

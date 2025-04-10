@@ -6,7 +6,7 @@ RUN chmod +x /app/kata-containerized-test-tool
 
 # Install dependencies
 RUN tdnf update -y
-RUN tdnf install -y util-linux procps-ng iproute dotnet-sdk-9.0 aspnetcore-runtime-9.0 zlib icu bash curl golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel
+RUN tdnf install -y util-linux procps-ng iproute dotnet-sdk-9.0 aspnetcore-runtime-9.0 zlib icu bash curl golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel cmake fuse-devel
 
 # Install BinSkim
 RUN dotnet new console -n TempConsoleApp && \
