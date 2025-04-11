@@ -716,7 +716,7 @@ Firecracker and cloud-hypervisor don't have a UNIX socket connected to `/dev/con
 Hence, the kernel command line option `agent.debug_console` will not work for them.
 These hypervisors support `hybrid vsocks`,  which can be used for communication
 between the host and the guest. The kernel command line option `agent.debug_console_vport`
- was added to allow developers specify on which `vsock` port the debugging console should be connected.
+ was added to allow developers to specify on which `vsock` port the debugging console should be connected.
 
 
 Add the parameter `agent.debug_console_vport=1026` to the kernel command line
@@ -739,7 +739,7 @@ $ sudo su -c 'cd /var/run/vc/vm/${sandbox_id}/root/ && socat stdin unix-connect:
 CONNECT 1026
 ```
 
-**Note**: You need to type `CONNECT 1026` and press `RETURN` key after entering the `socat` command.
+**Note**: You need to type `CONNECT 1026` and press the `RETURN` key after entering the `socat` command.
 
 For firecracker, connect to the `hvsock` as shown:
 ```bash
