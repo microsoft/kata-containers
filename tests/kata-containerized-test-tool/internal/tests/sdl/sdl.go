@@ -103,11 +103,13 @@ func (t *SDLTest) runBinSkimTests(result *core.TestResult) bool {
 		binskimOutput, err := binskimCmd.CombinedOutput()
 		outputStr := strings.TrimSpace(string(binskimOutput))
 		if err != nil {
+			fmt.Printf("BinSkim failed on %s: %v", bin, err)
 			result.Error = fmt.Sprintf("BinSkim failed on %s: %v", bin, err)
 			success = false
 			continue
 		}
 		if strings.Contains(strings.ToLower(outputStr), "fail") {
+			fmt.Printf("Binary %s failed BinSkim checks", bin)
 			result.Error = fmt.Sprintf("Binary %s failed BinSkim checks", bin)
 			success = false
 		}
