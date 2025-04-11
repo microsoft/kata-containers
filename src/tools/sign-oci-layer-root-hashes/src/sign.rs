@@ -158,7 +158,6 @@ fn sign_hash(
         .stdout(Stdio::piped())
         .arg("smime")
         .arg("-sign")
-        .arg("-nocerts")
         .arg("-noattr")
         .arg("-binary")
         .arg("-inkey")
