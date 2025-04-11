@@ -100,7 +100,7 @@ first
 
 See the
 [manual installation documentation](install/README.md#manual-installation)
-for details on how to automatically install and configuration a static release
+for details on how to automatically install and configure a static release
 with containerd.
 
 # Custom assets
