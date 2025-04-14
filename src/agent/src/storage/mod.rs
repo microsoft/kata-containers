@@ -295,9 +295,38 @@ fn mount_storage_handler(logger: &Logger, storage: &Storage) -> Result<String> {
 #[instrument]
 pub(crate) fn common_storage_handler(logger: &Logger, storage: &Storage) -> Result<String> {
     const DM_VERITY: &str = "io.katacontainers.fs-opt.root-hash=";
+    // interesting observation: when bailing early through the one line code change below, we skip dm-verity but things still
+    // go sideways. The error we observe is:
+    // Failed to create pod sandbox: rpc error: code = Unknown desc = failed to create containerd task: failed to create shim task: ENOTCONN: Transport endpoint is not connected: unknown
+    // const DM_VERITY: &str = "io.katacontainers.fs-opt.root-hash=UTARFS";
+    // This one line change seems to be the wrong approach to make the workaround for dm-verity.
+    // Observing also different file/folder names: 5a5aad80055ff20012a50dc25f8df7a29924474324d65f7d5306ee8ee27ff71d\\nvdb-blk\
+    // Hence, modifying more sections in the else statement below and trying again
     let opt = if let Some(o) = storage.options.iter().find(|e| e.starts_with(DM_VERITY)) {
         o
     } else {
+        // Attempt to get away w/o dm-verity enablement, resulted in:
+        // "UTARFS mount command execution failed: Error: Os { code: 2, kind: NotFound, message: \\\"No such file or directory\\\"
+        // and:
+        // Failed to create pod sandbox: rpc error: code = Unknown desc = failed to create containerd task: failed to create shim task: the file /pause was not found: unknown
+        // looks like we really need this /dev/mapper to be created here, so no super easy wait ot fail.
+        // But: can still tinker with dm-verity activation code below... (commenting only dm suspend doesn't work, also makes the mount command fail, ..., seems like we need the flow)
+        /*
+        let mount_path = Path::new(&storage.mount_point);
+        let fname = mount_path
+        .file_name()
+        .ok_or_else(|| anyhow!("Unable to get file name from mount path: {:?}", mount_path))?
+        .to_str()
+        .ok_or_else(|| {
+            anyhow!(
+                "Unable to convert file name to utf8 string: {:?}",
+                mount_path
+            )
+        })?;
+        let mut storage = storage.clone();
+        storage.source = format!("/dev/mapper/{fname}");
+        */
+
         // No dm-verity, so just run the regular handler.
         return mount_storage_handler(logger, storage);
     };
@@ -323,9 +352,15 @@ pub(crate) fn common_storage_handler(logger: &Logger, storage: &Storage) -> Resu
     let dm = devicemapper::DM::new()?;
     let name = devicemapper::DmName::new(fname)?;
     let opts = devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY);
+    // referring back to the error message, centered around the dm device being busy and printing below context message:
+    // this message is not printed in between here, so this seems to be a rust convention where this string can be printed later.
+    // The error observed seems to actually happen in pursuit of the overlay mount of the busybox layer:
+    // {\"msg\":\"mounting storage\",\"level\":\"INFO\",\"ts\":\"2025-04-17T22:09:52.532514Z\",\"source\":\"agent\",\"subsystem\":\"mount\",\"version\":\"0.1.0\",\"name\":\"kata-agent\",\"pid\":\"123\",\"storage-type\":\"overlayfs\",\"mount-destination\":\"/run/kata-containers/shared/containers/64d4db868fb1d10e03ec7c5e0b44bf4a292bd5d2002a1fe562a06f9b2b40c2ba\",\"mount-options\":\"lowerdir=2fafb2aeef70fa3cabbb6d100389fa95a66fc1a0dc1ffee5284b83fa042bd537,upperdir=/run/kata-containers/64d4db868fb1d10e03ec7c5e0b44bf4a292bd5d2002a1fe562a06f9b2b40c2ba/upper,workdir=/run/kata-containers/64d4db868fb1d10e03ec7c5e0b44bf4a292bd5d2002a1fe562a06f9b2b40c2ba/work\",\"mount-fstype\":\"overlay\",\"mount-source\":\"none\"}"
+    info!(logger,"UTARFS RIGHT BEFORE DM DEVICE CREATE");
     dm.device_create(name, None, opts)
         .context("Unable to create dm device")?;
 
+        info!(logger,"UTARFS RIGHT AFTER DM DEVICE CREATE");
     let id = devicemapper::DevId::Name(name);
 
     (|| {
@@ -383,19 +418,15 @@ fn mount_storage(logger: &Logger, storage: &Storage) -> Result<()> {
     // snapshotter passes "tar" as mount option (src/tardev-snapshotter/src/snapshotter.rs, mounts_from_snapshot())
     // shim parses that mount option and sets it as the RPC Mount type (src/runtime/pkg/containerd-shim-v2/create.go, copyLayersToMounts())
     // shim sets the RPC Storage fstype based on the Mount type
-    //
-    // calling nix::mount::mount through baremount() with various options and flags always yields:
-    // failed to create device for storage, error: failed to mount /dev/mapper/5a5aad80055ff20012a50dc25f8df7a29924474324d65f7d5306ee8ee27ff71d to /run/kata-containers/sandbox/layers/5a5aad80055ff20012a50dc25f8df7a29924474324d65f7d5306ee8ee27ff71d, with error: EINVAL: Invalid argument
-    // TODO: try different method, options/flags, ..., e.g.: MsFlags::MS_RDONLY; default per logging is: options=\\\"\\\", flags=MS_RDONLY\"
     let (fstype_mod, flags_mod, options_mod) = if storage.fstype.as_str() == "tar" {
-        //(storage.fstype.as_str(), flags, options.as_str())
         ("fuse.utarfs", flags, options.as_str())
+        // Can play with options here or in mount.rs
         //("fuse.utarfs", nix::mount::MsFlags::empty(), "ro")
     } else {
         (storage.fstype.as_str(), flags, options.as_str())
     };
     if storage.fstype.as_str() == "tar" {
-        println!("UTARFS BOGUS")
+        info!(logger, "UTARFS modifying tar => utarfs fs_type in mod.rs");
     }
     //let (fstype_mod, flags_mod, options_mod) = (storage.fstype.as_str(), flags, options.as_str());
 

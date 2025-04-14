@@ -9,6 +9,8 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::ops::Deref;
 use std::path::Path;
+
+// Manuel: Some of these may need to be enabled depending on commented changes below
 //use std::path::{Path, PathBuf};
 //extern crate sys_mount;
 //use sys_mount::{Mount, MountFlags, SupportedFilesystems, Unmount, UnmountFlags};
@@ -109,12 +111,20 @@ pub fn baremount(
         flags
     );
 
-    //if fs_type == "tar" {
     if fs_type == "fuse.utarfs" {
+        // Can use new_destination to use utarfs to mount to /tmp. See further commented code below,
+        // thus requires to remove the else case and re-set fs_type to tar so that eventually the
+        // tarfs kernel driver does the proper mount.
         //let mut new_destination = PathBuf::from("/tmp");
-        // Set the filename to the desired new filename
         //new_destination.push(destination.file_name().unwrap());
         //fs::create_dir_all(new_destination.clone())?;
+
+        // This mount approach has not worked, I am getting EINVAL even when placing e.g.
+        // ErrorKind::PermissionDenied into the first line of the utarfs main function which
+        // indicates that the call into utarfs itself does not work this way:
+        // Error is: failed to mount /dev/mapper/<x> to /run/kata-containers/sandbox/layers/<x>, with error: EINVAL: Invalid argument
+        // Tried with various different options/flags, ..., e.g.: MsFlags::MS_RDONLY; default per logging is: options=\\\"\\\", flags=MS_RDONLY\"
+        // Should revisit (with supplying "ro,uvm" as an option, also should look at how kata-overlay invokes utarfs aka mount.tar)
         // if let Err(e) = nix::mount::mount(
         //     Some(source),
         //     &new_destination,
@@ -130,6 +140,7 @@ pub fn baremount(
         //     );
         // }
 
+        // This mount approach has not worked, I forgot why, possibly same issue as above.
         // let mount_result = Mount::builder()
         // .fstype(fs_type)
         // .data("ro") // Add the 'ro' option for read-only mount
@@ -143,42 +154,52 @@ pub fn baremount(
         //     }
         // }
 
+        // With this code, I can generally mount (see new_destination above, alongside tarfs driver mount),
+        // but when making this mount the replacement for tarfs driver, I get the following error for e.g. a busybox layer (not for the pause layer):
+        // Warning  Failed     2s               kubelet            Error: failed to create containerd task: failed to create shim task: Input/output error (os error 5): unknown
+        // Warning  Failed     0s               kubelet            Error: failed to create containerd task: failed to create shim task: Unable to create dm device
+        // Caused by: DM Core error: low-level ioctl error due to nix error; ioctl number: 3, input header: Some(DeviceInfo { version: Version { major: 4, minor: 0, patch: 0 }, data_size: 16384, data_start: 312, target_count: 0, open_count: 0, flags: DM_READONLY, event_nr: 0, dev: Device { major: 0, minor: 0 }, name: Some(DmNameBuf { inner: "<x>" }), uuid: None }), header result: Some(DeviceInfo { version: Version { major: 4, minor: 47, patch: 0 }, data_size: 16384, data_start: 312, target_count: 0, open_count: 0, flags: DM_READONLY, event_nr: 0, dev: Device { major: 0, minor: 0 }, name: Some(DmNameBuf { inner: "<x>" }), uuid: None }), error: EBUSY: Device or resource busy: unknown
+        // Sidenote: As a pursuit, even a /dev/vdd device is being brought up, seems to be a retry. No notion of vdd in case things succeed
+        // Sidenote: Error not specific to busybox, e.g. also happens with: docker.io/library/hello-world:latest
         let output = Command::new("mount")
             .arg("-t")
             .arg(fs_type)
             .arg("-o")
-            .arg("ro")
+            .arg("ro,uvm")
             .arg(source)
+            // When mapping via new_destination, seeing these mounts e.g. for the busybox layer:
+            // /dev/fuse on /tmp/2fafb2aeef70fa3cabbb6d100389fa95a66fc1a0dc1ffee5284b83fa042bd537 type fuse (ro,relatime,user_id=0,group_id=0)
+            // /dev/mapper/2fafb2aeef70fa3cabbb6d100389fa95a66fc1a0dc1ffee5284b83fa042bd537 on /run/kata-containers/sandbox/layers/2fafb2aeef70fa3cabbb6d100389fa95a66fc1a0dc1ffee5284b83fa042bd537 type tar (ro,relatime)
             //.arg(&new_destination)
             .arg(destination)
             .output()
             .map_err(|e| anyhow!("Failed to execute mount command: {}", e))?;
 
         if output.status.success() {
-            println!("UTARFS Command executed successfully: {}", String::from_utf8_lossy(&output.stdout));
+            info!(logger, "UTARFS mount command executed successfully: {}", String::from_utf8_lossy(&output.stdout));
         } else {
-            eprintln!("UTARFS Command execution failed: {}", String::from_utf8_lossy(&output.stderr));
+            error!(logger, "UTARFS mount command execution failed: {}", String::from_utf8_lossy(&output.stderr));
         }
 
-        // this is actually required, otherwise /pause can't be found - I guess a sync/mount is missing or not proactive and depends on an explicity filesystem access
+        // this is actually required, otherwise /pause can't be found!
+        // Potentially, a sync/mount is missing or not proactive, and thus depends on an explicity filesystem access
+        // Can this be related to the 'device is busy' issue above? Does not look like it as the issue also occurs
+        // if we only ls into the pause container directory, i.e., 'ls /run/kata-containers/sandbox/layers/5a...'.
         let output = Command::new("ls")
         .arg("/run/kata-containers/sandbox/layers")
         .output()
         .map_err(|e| anyhow!("Failed to execute ls command: {}", e))?;
 
-        // Check if the command was successful
         if output.status.success() {
-            // Convert the standard output to a string and print it
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            println!("Command output:\n{}", stdout);
+            info!(logger, "UTARFS ls command output:\n{}", String::from_utf8_lossy(&output.stdout));
         } else {
-            // Convert the standard error to a string and print it
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            println!("Command failed with error:\n{}", stderr);
+            error!(logger, "UTARFS ls command failed with error:\n{}", String::from_utf8_lossy(&output.stderr));
         }
 
         Ok(())
-        // NOTE: THIS MAKES BELOW MOUNT CALL WORK
+        // To use in combination with new_destination, also:
+        // - remove else condition so that nix-mount below is executed:
+        // - comment Ok(())
         //fs_type = "tar"
     } else {
         nix::mount::mount(

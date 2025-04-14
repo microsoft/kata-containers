@@ -37,6 +37,8 @@ struct Args {
 }
 
 fn main() -> io::Result<()> {
+    // Use to test whether the entry point is reached. With some mount calls, not getting even here,
+    // see comments in other files edited alongside this commit
     // return Err(Error::new(
     //     ErrorKind::PermissionDenied,
     //     "TEST",
@@ -45,12 +47,7 @@ fn main() -> io::Result<()> {
     let args = Args::parse();
     let mountpoint = std::fs::canonicalize(&args.directory)?;
     let mut file = std::fs::File::open(&args.source)?;
-
-    // Extract the file name from the input file path
-    let input_file_name = Path::new(&args.source)
-        .file_name()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid input file path"))?;
-    let input_file_name_blk = format!("{}-blk", input_file_name.to_str().unwrap());
+    let mut uvm_mode = false;
 
     // Check that the filesystem is tar.
     if let Some(t) = &args.r#type {
@@ -69,6 +66,7 @@ fn main() -> io::Result<()> {
         for opt in opts.split(',') {
             debug!("Parsing option {opt}");
             let fsopt = match opt {
+                "uvm" => MountOption::Subtype("uvm".to_string()),
                 "dev" => MountOption::Dev,
                 "nodev" => MountOption::NoDev,
                 "suid" => MountOption::Suid,
@@ -94,42 +92,61 @@ fn main() -> io::Result<()> {
                     ));
                 }
             };
-            options.push(fsopt);
+            if fsopt == MountOption::Subtype("uvm".to_string()) {
+                uvm_mode = true;
+                debug!("UTARFS UVM mode enabled");
+            } else {
+                options.push(fsopt);
+            }
         }
     }
 
-    //let options = vec![MountOption::RO];
+    let contents;
+    // This mode has a clear caveat: We dd-style read from the block device, create a temp file in memory
+    // in order to read the contents of the file into a memmap struct which the code below relies on.
+    // A solution can be to learn how the tarfs driver reads from the block device and mimic in a new implementation for fs.rs
+    if uvm_mode {
 
-    // Construct the output file path in same tmpfs folder
-    let output_file_path = Path::new("/run/kata-containers/sandbox/layers").join(input_file_name_blk);
+        // Extract the file name from the input file path
+        let input_file_name = Path::new(&args.source)
+            .file_name()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid input file path"))?;
+        let input_file_name_blk = format!("{}-blk", input_file_name.to_str().unwrap());
 
-    // Create an output file to write the data
-    let mut output_file = File::create(&output_file_path)?;
+        // Construct the output file path in same tmpfs folder
+        let output_file_path = Path::new("/run/kata-containers/sandbox/layers").join(input_file_name_blk);
 
-    // Define a buffer to read data in chunks
-    let mut buffer = vec![0u8; 1024 * 1024]; // 1 MB buffer
+        // Create an output file to write the data
+        let mut output_file = File::create(&output_file_path)?;
 
-    // Doing pretty much: dd if="/dev/mapper/xxx" of="/tmp/xxx"
-    loop {
-        // Read a chunk of data from the input file
-        let bytes_read = file.read(&mut buffer)?;
+        // Define a buffer to read data in chunks
+        let mut buffer = vec![0u8; 1024 * 1024]; // 1 MB buffer
 
-        if bytes_read == 0 {
-            // End of file reached
-            break;
+        // Doing pretty much: dd if="/dev/mapper/xxx" of="/tmp/xxx"
+        loop {
+            // Read a chunk of data from the input file
+            let bytes_read = file.read(&mut buffer)?;
+
+            if bytes_read == 0 {
+                // End of file reached
+                break;
+            }
+
+            // Write the chunk of data to the output file
+            output_file.write_all(&buffer[..bytes_read])?;
         }
 
-        // Write the chunk of data to the output file
-        output_file.write_all(&buffer[..bytes_read])?;
+        output_file.sync_all()?;
+
+        let output_file = OpenOptions::new()
+            .read(true)
+            .open(&output_file_path)?;
+
+        contents = unsafe { memmap::Mmap::map(&output_file)? };
+    } else {
+        contents = unsafe { memmap::Mmap::map(&file)? };
     }
 
-    output_file.sync_all()?;
-
-    let output_file = OpenOptions::new()
-        .read(true)
-        .open(&output_file_path)?;
-
-    let contents = unsafe { memmap::Mmap::map(&output_file)? };
     let vsb = VeritySuperBlock::read_from_prefix(&contents[contents.len() - 512..]).unwrap();
 
     debug!("Size: {}", contents.len());
@@ -137,8 +154,12 @@ fn main() -> io::Result<()> {
     debug!("Hash block size: {}", vsb.hash_block_size);
     debug!("Data block count: {}", vsb.data_block_count);
 
-    //let sb_offset = u64::from(vsb.data_block_size) * u64::from(vsb.data_block_count);
-    let sb_offset = contents.len().try_into().unwrap();
+    let sb_offset;
+    if uvm_mode {
+        sb_offset = contents.len().try_into().unwrap();
+    } else {
+        sb_offset = u64::from(vsb.data_block_size) * u64::from(vsb.data_block_count);
+    }
     let tar = fs::Tar::new(contents, sb_offset)?;
 
     daemonize::Daemonize::new()
