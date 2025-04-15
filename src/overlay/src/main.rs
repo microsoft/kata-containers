@@ -3,8 +3,9 @@ use clap::Parser;
 use std::io::{self, Error, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::{env::set_current_dir, process::Command};
-use std::fs::OpenOptions;
-use std::io::Write;
+use std::fs::{OpenOptions, File};
+use std::io::{Write, Read};
+use std::process;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -29,6 +30,102 @@ fn write_log(message: &str) -> io::Result<()> {
         .append(true)
         .open("/home/azureuser/kata-overlay.log")?;
     writeln!(file, "[{}] {}", std::process::id(), message)
+}
+
+fn get_parent_process_info() -> String {
+    // Get our own PID
+    let pid = process::id();
+    
+    // Get parent PID
+    let mut ppid = 0;
+    if let Ok(mut file) = File::open(format!("/proc/{}/stat", pid)) {
+        let mut content = String::new();
+        if file.read_to_string(&mut content).is_ok() {
+            let parts: Vec<&str> = content.split_whitespace().collect();
+            if parts.len() > 3 {
+                ppid = parts[3].parse::<u32>().unwrap_or(0);
+            }
+        }
+    }
+    
+    if ppid == 0 {
+        return "Could not determine parent process".to_string();
+    }
+    
+    // Get parent command line
+    let mut parent_cmdline = String::new();
+    if let Ok(mut file) = File::open(format!("/proc/{}/cmdline", ppid)) {
+        let mut content = Vec::new();
+        if file.read_to_end(&mut content).is_ok() {
+            parent_cmdline = content.iter()
+                .map(|&b| if b == 0 { ' ' } else { b as char })
+                .collect();
+        }
+    }
+    
+    // Get parent process name
+    let mut parent_name = String::new();
+    if let Ok(mut file) = File::open(format!("/proc/{}/comm", ppid)) {
+        let mut content = String::new();
+        if file.read_to_string(&mut content).is_ok() {
+            parent_name = content.trim().to_string();
+        }
+    }
+    
+    // Get process tree
+    let mut process_tree = Vec::new();
+    let mut current_pid = ppid;
+    let max_depth = 5; // Limit to 5 levels to avoid infinite loops
+    let mut depth = 0;
+    
+    while current_pid > 1 && depth < max_depth {
+        let mut name = String::new();
+        if let Ok(mut file) = File::open(format!("/proc/{}/comm", current_pid)) {
+            let mut content = String::new();
+            if file.read_to_string(&mut content).is_ok() {
+                name = content.trim().to_string();
+            }
+        }
+        
+        process_tree.push(format!("{}({})", name, current_pid));
+        
+        // Get the parent of this process
+        if let Ok(mut file) = File::open(format!("/proc/{}/stat", current_pid)) {
+            let mut content = String::new();
+            if file.read_to_string(&mut content).is_ok() {
+                let parts: Vec<&str> = content.split_whitespace().collect();
+                if parts.len() > 3 {
+                    if let Ok(new_pid) = parts[3].parse::<u32>() {
+                        if new_pid == current_pid {
+                            break; // Avoid infinite loops
+                        }
+                        current_pid = new_pid;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+        
+        depth += 1;
+    }
+    
+    // Reverse the process tree to show root → ... → parent
+    process_tree.reverse();
+    
+    format!(
+        "Parent process: {} (PID: {})\nParent cmdline: {}\nProcess tree: {}",
+        parent_name,
+        ppid,
+        parent_cmdline.trim(),
+        process_tree.join(" → ")
+    )
 }
 
 const LAYER: &str = "io.katacontainers.fs-opt.layer=";
@@ -131,6 +228,32 @@ fn main() -> io::Result<()> {
     write_log(&format!("kata-overlay started with args: {:?}", args))?;
     write_log(&format!("Current working directory: {:?}", std::env::current_dir()?))?;
     write_log(&format!("Environment variables: {:?}", std::env::vars().collect::<Vec<_>>()))?;
+    
+    // Log parent process information
+    write_log(&get_parent_process_info())?;
+    
+    // Try to get stack trace from parent if it's a process we're interested in
+    let parent_process_info = get_parent_process_info();
+    if parent_process_info.contains("containerd") || parent_process_info.contains("snapshotter") {
+        write_log("Attempting to get stack trace of parent process...")?;
+        
+        let ppid_str = parent_process_info.lines().next()
+            .and_then(|line| line.split_whitespace().nth(3))
+            .and_then(|pid_str| pid_str.trim_end_matches(')').parse::<u32>().ok())
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+            
+        // Try to capture stack trace using pstack if available
+        if let Ok(output) = Command::new("sh")
+            .arg("-c")
+            .arg(format!("which pstack && pstack {} || echo 'pstack not available'", ppid_str))
+            .output() {
+            
+            if let Ok(stack_output) = String::from_utf8(output.stdout) {
+                write_log(&format!("Parent process stack:\n{}", stack_output))?;
+            }
+        }
+    }
     
     let layers = parse_layers(args)?;
     let mut unmounter = Unmounter(Vec::new(), tempfile::tempdir()?);
