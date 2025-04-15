@@ -34,6 +34,7 @@ fn write_log(message: &str) -> io::Result<()> {
 const LAYER: &str = "io.katacontainers.fs-opt.layer=";
 const LAYER_SRC_PREFIX: &str = "io.katacontainers.fs-opt.layer-src-prefix=";
 
+#[derive(Debug)]
 struct Layer {
     src: PathBuf,
     fs: String,
