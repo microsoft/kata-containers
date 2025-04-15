@@ -1,11 +1,13 @@
 use clap::Parser;
 use fuser::MountOption;
-use log::debug;
-use std::io::{self, Error, ErrorKind};
+use log::{debug, info};
+use std::io::{self, Error, ErrorKind, Write};
 use zerocopy::byteorder::{LE, U32, U64};
 use zerocopy::FromBytes;
+use std::fs::OpenOptions;
 
 mod fs;
+mod custom_logger;
 
 // TODO: Remove this and import from dm-verity crate.
 #[derive(Default, zerocopy::AsBytes, zerocopy::FromBytes, zerocopy::Unaligned)]
@@ -33,9 +35,53 @@ struct Args {
     options: Vec<String>,
 }
 
+// Custom logger implementation
+mod custom_logger {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use log::{Record, Level, Metadata, LevelFilter, SetLoggerError};
+    
+    pub struct FileLogger;
+
+    impl log::Log for FileLogger {
+        fn enabled(&self, metadata: &Metadata) -> bool {
+            metadata.level() <= Level::Trace
+        }
+
+        fn log(&self, record: &Record) {
+            if self.enabled(record.metadata()) {
+                let mut file = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/home/azureuser/utarfs.log")
+                    .unwrap_or_else(|_| panic!("Failed to open log file"));
+                
+                writeln!(file, "[{}] {} - {}: {}", 
+                    std::process::id(),
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                    record.level(),
+                    record.args()
+                ).unwrap_or_else(|_| panic!("Failed to write to log file"));
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    pub fn init() -> Result<(), SetLoggerError> {
+        static LOGGER: FileLogger = FileLogger;
+        log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Trace))
+    }
+}
+
 fn main() -> io::Result<()> {
-    env_logger::init();
+    custom_logger::init().unwrap();
     let args = Args::parse();
+    
+    info!("utarfs started with args: {:?}", args);
+    info!("Current working directory: {:?}", std::env::current_dir().unwrap_or_default());
+    info!("Environment variables: {:?}", std::env::vars().collect::<Vec<_>>());
+
     let mountpoint = std::fs::canonicalize(&args.directory)?;
     let file = std::fs::File::open(&args.source)?;
 

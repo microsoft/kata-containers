@@ -3,6 +3,8 @@ use clap::Parser;
 use std::io::{self, Error, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::{env::set_current_dir, process::Command};
+use std::fs::OpenOptions;
+use std::io::Write;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -19,6 +21,14 @@ struct Args {
     /// The filesystem options.
     #[arg(short, long)]
     options: Vec<String>,
+}
+
+fn write_log(message: &str) -> io::Result<()> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/home/azureuser/kata-overlay.log")?;
+    writeln!(file, "[{}] {}", std::process::id(), message)
 }
 
 const LAYER: &str = "io.katacontainers.fs-opt.layer=";
@@ -115,13 +125,22 @@ impl Drop for Unmounter {
 
 fn main() -> io::Result<()> {
     let args = &Args::parse();
+    
+    // Log startup information
+    write_log(&format!("kata-overlay started with args: {:?}", args))?;
+    write_log(&format!("Current working directory: {:?}", std::env::current_dir()?))?;
+    write_log(&format!("Environment variables: {:?}", std::env::vars().collect::<Vec<_>>()))?;
+    
     let layers = parse_layers(args)?;
     let mut unmounter = Unmounter(Vec::new(), tempfile::tempdir()?);
+
+    write_log(&format!("Parsed layers: {:?}", layers))?;
 
     // Mount all layers.
     //
     // We use the `mount` command instead of a syscall because we want leverage the additional work
     // that `mount` does, for example, using helper binaries to mount.
+    write_log("Beginning layer mounting")?;
     for (i, layer) in layers.iter().enumerate() {
         let n = i.to_string();
         let p = unmounter.1.path().join(&n);
@@ -148,7 +167,10 @@ fn main() -> io::Result<()> {
 
     // Mount the overlay if we have multiple layers, otherwise do a bind-mount.
     let mp = std::fs::canonicalize(&args.directory)?;
+    write_log(&format!("Mounting to destination: {:?}", mp))?;
+    
     if unmounter.0.len() == 1 {
+        write_log("Performing bind mount (single layer)")?;
         let p = unmounter.1.path().join(unmounter.0.first().unwrap());
         let status = Command::new("mount")
             .arg(&p)
@@ -161,9 +183,11 @@ fn main() -> io::Result<()> {
                 format!("failed to bind mount: {status}"),
             ));
         }
+        write_log(&format!("Bind mount result: {}", status))?;
     } else {
         let saved = std::env::current_dir()?;
         set_current_dir(unmounter.1.path())?;
+        write_log(&format!("Performing overlay mount with {} layers", unmounter.0.len()))?;
 
         let lowerdirs = unmounter.0.join(":");
         let opts = format!("lowerdir={}", lowerdirs);
@@ -183,9 +207,11 @@ fn main() -> io::Result<()> {
                 format!("failed to mount overlay to {}: {}", mp.display(), e),
             )
         })?;
+        write_log("Overlay mount successful")?;
     
         set_current_dir(saved)?;
     }
-
+    
+    write_log("kata-overlay completed successfully")?;
     Ok(())
 }
