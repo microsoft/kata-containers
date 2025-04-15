@@ -1,13 +1,14 @@
 use clap::Parser;
 use fuser::MountOption;
 use log::{debug, info};
-use std::io::{self, Error, ErrorKind, Write};
+use std::io::{self, Error, ErrorKind};
 use zerocopy::byteorder::{LE, U32, U64};
 use zerocopy::FromBytes;
 use std::fs::OpenOptions;
+use std::io::Write;
+use chrono::Local;
 
 mod fs;
-mod custom_logger;
 
 // TODO: Remove this and import from dm-verity crate.
 #[derive(Default, zerocopy::AsBytes, zerocopy::FromBytes, zerocopy::Unaligned)]
@@ -36,46 +37,43 @@ struct Args {
 }
 
 // Custom logger implementation
-mod custom_logger {
-    use std::fs::OpenOptions;
-    use std::io::Write;
-    use log::{Record, Level, Metadata, LevelFilter, SetLoggerError};
-    
-    pub struct FileLogger;
+struct FileLogger;
 
-    impl log::Log for FileLogger {
-        fn enabled(&self, metadata: &Metadata) -> bool {
-            metadata.level() <= Level::Trace
-        }
+static LOGGER: FileLogger = FileLogger;
 
-        fn log(&self, record: &Record) {
-            if self.enabled(record.metadata()) {
-                let mut file = OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/home/azureuser/utarfs.log")
-                    .unwrap_or_else(|_| panic!("Failed to open log file"));
-                
-                writeln!(file, "[{}] {} - {}: {}", 
-                    std::process::id(),
-                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                    record.level(),
-                    record.args()
-                ).unwrap_or_else(|_| panic!("Failed to write to log file"));
-            }
-        }
-
-        fn flush(&self) {}
+impl log::Log for FileLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Trace
     }
 
-    pub fn init() -> Result<(), SetLoggerError> {
-        static LOGGER: FileLogger = FileLogger;
-        log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Trace))
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/home/azureuser/utarfs.log")
+                .unwrap_or_else(|_| panic!("Failed to open log file"));
+            
+            writeln!(file, "[{}] {} - {}: {}", 
+                std::process::id(),
+                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                record.level(),
+                record.args()
+            ).unwrap_or_else(|_| panic!("Failed to write to log file"));
+        }
     }
+
+    fn flush(&self) {}
+}
+
+fn init_custom_logger() -> Result<(), log::SetLoggerError> {
+    log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Trace))
 }
 
 fn main() -> io::Result<()> {
-    custom_logger::init().unwrap();
+    // Initialize our custom logger instead of env_logger
+    init_custom_logger().unwrap();
+    
     let args = Args::parse();
     
     info!("utarfs started with args: {:?}", args);
@@ -141,6 +139,9 @@ fn main() -> io::Result<()> {
 
     let sb_offset = u64::from(vsb.data_block_size) * u64::from(vsb.data_block_count);
     let tar = fs::Tar::new(contents, sb_offset)?;
+
+    // Add one more log message before daemonizing
+    info!("utarfs about to daemonize and mount at {:?}", mountpoint);
 
     daemonize::Daemonize::new()
         .start()
