@@ -159,7 +159,12 @@ impl Store {
         opts.push(format!("{PREFIX}.overlay-rw"));
         opts.push(format!("lowerdir={}", layers.join(":")));
 
-        Ok(Vec::new())
+        Ok(vec![api::types::Mount {
+            r#type: "fuse3.kata-overlay".into(),
+            source: "/".into(),
+            target: String::new(),
+            options: opts,
+        }])
     }
 }
 
