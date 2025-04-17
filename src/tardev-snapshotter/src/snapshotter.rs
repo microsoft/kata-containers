@@ -160,8 +160,8 @@ impl Store {
         opts.push(format!("lowerdir={}", layers.join(":")));
 
         Ok(vec![api::types::Mount {
-            r#type: "block".into(),  // Changed from "fuse3.kata-overlay" to "block"
-            source: "/".into(),
+            r#type: "bind".into(),
+            source: "/tmp".into(),  // Use a directory that exists on the host
             target: String::new(),
             options: opts,
         }])
