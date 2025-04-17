@@ -1034,19 +1034,15 @@ impl TarDevSnapshotter {
                     "Appending decompressed tar file {:?} to erofs image {:?}",
                     &base_name, &erofs_path
                 );
-                let status = Command::new("cat")
-                    .arg(base_name.to_str().unwrap())
-                    .arg(">>")
-                    .arg(erofs_path.to_str().unwrap())
-                    .status()
+                let mut erofs_file = OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .open(&erofs_path)
+                    .context("failed to open erofs image for appending")?;
+                let mut base_file = File::open(&base_name)
+                    .context("failed to open decompressed tar file for reading")?;
+                std::io::copy(&mut base_file, &mut erofs_file)
                     .context("failed to append decompressed tar file to erofs image")?;
-
-                if !status.success() {
-                    return Err(anyhow!(
-                        "Appending decompressed tar file failed with status: {}",
-                        status.code().unwrap_or(-1)
-                    ));
-                }
 
                 trace!("Appending dm-verity tree to {:?}", &erofs_path);
                 let mut erofs_file = OpenOptions::new()
