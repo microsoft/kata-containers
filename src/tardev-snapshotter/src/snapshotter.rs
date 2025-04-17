@@ -321,9 +321,6 @@ impl Store {
         Ok((0, data_size / 512, "verity".into(), construction_parameters))
     }
 
-    // verity device mapper
-    // veritysetup <data device > <hash device > <hash block size > <data block size > <data device size > <hash device size > <hash type > <root hash > <salt >
-
     // Creates dm-verity device for a given layer file
     fn create_dm_verity_device(
         &self,
@@ -388,7 +385,6 @@ impl Store {
             let device_path = loop_device;
 
             // Step 3: Prepare DM-Verity target
-            // {0, data_size / 512, "verity".into(), construction_parameters}
             let target = self.prepare_dm_target(device_path, root_hash, root_hash_sig_name)?;
 
             // Step 4: Load the DM table for DM-Verity
@@ -1058,11 +1054,11 @@ impl TarDevSnapshotter {
                 }
 
                 trace!("Appending dm-verity tree to {:?}", &erofs_path);
-                let mut file = OpenOptions::new()
+                let mut erofs_file = OpenOptions::new()
                     .read(true)
                     .write(true)
                     .open(&erofs_path)?;
-                let root_hash = verity::append_tree::<Sha256>(&mut file)
+                let root_hash = verity::append_tree::<Sha256>(&mut erofs_file)
                     .context("failed to append verity tree")?;
 
                 trace!("Root hash for {:?} is {:x}", &erofs_path, root_hash);
