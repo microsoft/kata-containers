@@ -1048,6 +1048,29 @@ impl TarDevSnapshotter {
                     .context("failed to open decompressed tar file for reading")?;
                 std::io::copy(&mut base_file, &mut erofs_file)
                     .context("failed to append decompressed tar file to erofs image")?;
+                
+                    // get size of erofs meta + tar
+                let erofs_file_size = erofs_file.metadata()
+                    .expect("Failed to get metadata")
+                    .len();
+                println!("Size of (erofs meta + tar, before padding): {}", erofs_file_size);
+
+                // Align the size to 4096 bytes
+                let alignment = 4096;
+                let padding = alignment - (erofs_file_size % alignment);
+
+                if padding > 0 {
+                    let padding_bytes = vec![0u8; padding as usize];
+                    erofs_file.write_all(&padding_bytes)
+                        .expect("Failed to write padding");
+                    println!("Added {} bytes of padding to align to 4096 bytes", padding);
+                }
+
+                // get size of erofs meta + tar
+                let erofs_file_size = erofs_file.metadata()
+                    .expect("Failed to get metadata")
+                    .len();
+                println!("Size of (erofs meta + tar, after padding): {}", erofs_file_size);
 
                 trace!("Appending dm-verity tree to {:?}", &erofs_path);
                 let mut erofs_file = OpenOptions::new()
