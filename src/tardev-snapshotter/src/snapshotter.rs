@@ -1057,7 +1057,7 @@ impl TarDevSnapshotter {
 
                 // Align the size to 4096 bytes
                 let alignment = 4096;
-                let padding = alignment - (erofs_file_size % alignment);
+                let padding = (alignment - (erofs_file_size % alignment)) % alignment;
 
                 if padding > 0 {
                     let padding_bytes = vec![0u8; padding as usize];
