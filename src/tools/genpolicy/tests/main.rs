@@ -166,7 +166,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_container_generate_name() {
-        runtests::<PolicyCreateContainerRequest>("createcontainer/generate_name").await;
+    async fn test_create_container_generate_name_malicious() {
+        runtests::<PolicyCreateContainerRequest>("createcontainer/generate_name/malicious").await;
+    }
+
+    #[tokio::test]
+    async fn test_create_container_generate_name_basic() {
+        runtests::<PolicyCreateContainerRequest>("createcontainer/generate_name/basic").await;
     }
 }

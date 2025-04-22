@@ -1,0 +1,20 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  generateName: dummy
+spec:
+  runtimeClassName: kata-cc
+  containers:
+    - name: dummy
+      image: "busybox:latest"
+      command:
+        - /bin/sh
+        - "-c"
+        - "echo \"$(POD_NAME)\""
+      env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
