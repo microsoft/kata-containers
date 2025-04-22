@@ -516,7 +516,7 @@ impl Store {
             );
 
             if do_mount {
-                trace!("mounts_from_snapshot(): performing tarfs mounting via dm-verity");
+                trace!("mounts_from_snapshot(): performing erofs mounting via dm-verity");
                 // Extract layer information
                 let mut fields = layer_info.split(',');
                 let src = if let Some(p) = fields.next() {
