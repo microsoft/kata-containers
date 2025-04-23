@@ -437,13 +437,15 @@ fn attach_erofs_meta(path: &Path) -> Result<()> {
 
     // TODO: need to double check how we are using -T and -U
     let status = Command::new("mkfs.erofs")
-        .arg("--tar=i")
-        .arg("-T 0") // zero out unix time
-        .arg("-U c1b9d5a2-f162-11cf-9ece-0020afc76f16") // set UUID to something specific
-        .arg(erofs_path.to_str().unwrap())
-        .arg(path.to_str().unwrap())
+        .args([
+            "--tar=i",
+            "-T", "0", // zero out unix time
+            "-U", "c1b9d5a2-f162-11cf-9ece-0020afc76f16", // set UUID to something specific
+            erofs_path.to_str().unwrap(),
+            path.to_str().unwrap(),
+        ])
         .status()
-        .context("failed to execute mkfs.erofs")?;
+        .context("Failed to execute mkfs.erofs command")?;
 
     if !status.success() {
         return Err(anyhow!(
