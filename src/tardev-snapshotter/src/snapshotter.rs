@@ -1016,7 +1016,6 @@ impl TarDevSnapshotter {
                 );
                 let status = Command::new("mkfs.erofs")
                     .arg("--tar=i")
-                    .arg("-Enoinline_data")
                     .arg(erofs_path.to_str().unwrap())
                     .arg(base_name.to_str().unwrap())
                     .status()
@@ -1048,24 +1047,24 @@ impl TarDevSnapshotter {
                 let erofs_file_size = erofs_file.metadata()
                     .expect("Failed to get metadata")
                     .len();
-                println!("Size of (erofs meta + tar, before padding): {}", erofs_file_size);
+                trace!("Size of (erofs meta + tar, before padding): {}", erofs_file_size);
 
                 // Align the size to 4096 bytes
-                let alignment = 4096;
+                let alignment = 512;
                 let padding = (alignment - (erofs_file_size % alignment)) % alignment;
 
                 if padding > 0 {
                     let padding_bytes = vec![0u8; padding as usize];
                     erofs_file.write_all(&padding_bytes)
                         .expect("Failed to write padding");
-                    println!("Added {} bytes of padding to align to 4096 bytes", padding);
+                    trace!("Added {} bytes of padding to align to {} bytes", padding, alignment);
                 }
 
                 // get size of erofs meta + tar
                 let erofs_file_size = erofs_file.metadata()
                     .expect("Failed to get metadata")
                     .len();
-                println!("Size of (erofs meta + tar, after padding): {}", erofs_file_size);
+                trace!("Size of (erofs meta + tar, after padding): {}", erofs_file_size);
 
                 trace!("Appending dm-verity tree to {:?}", &erofs_path);
                 let mut erofs_file = OpenOptions::new()
