@@ -435,9 +435,11 @@ fn attach_erofs_meta(path: &Path) -> Result<()> {
         &erofs_path, &path
     );
 
-    // TODO: need to use -T and -U here
+    // TODO: need to double check how we are using -T and -U
     let status = Command::new("mkfs.erofs")
         .arg("--tar=i")
+        .arg("-T 0") // zero out unix time
+        .arg("-U c1b9d5a2-f162-11cf-9ece-0020afc76f16") // set UUID to something specific
         .arg(erofs_path.to_str().unwrap())
         .arg(path.to_str().unwrap())
         .status()
