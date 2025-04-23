@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::fs::OpenOptions;
 use std::io::BufWriter;
-use std::{io, io::Seek, io::Write, path::Path};
+use std::{io, io::Seek, io::Write, path::Path, process::Command, fs::File};
 use tokio::io::AsyncWriteExt;
 
 /// Container image properties obtained from an OCI repository.
@@ -214,6 +214,7 @@ async fn get_verity_hash(
     // Use file names supported by both Linux and Windows.
     let file_name = str::replace(layer_digest, ":", "-");
     let mut decompressed_path = base_dir.join(file_name);
+    let erofs_path = decompressed_path.clone().with_extension("erofs");
     decompressed_path.set_extension("tar");
 
     let mut compressed_path = decompressed_path.clone();
@@ -248,7 +249,7 @@ async fn get_verity_hash(
             .context("Failed to create verity hash for {layer_digest}")?;
 
             let root_hash =
-                get_verity_hash_value(&decompressed_path).context("Failed to get verity hash")?;
+                get_verity_hash_value(&erofs_path).context("Failed to get verity hash")?;
             if use_cached_files {
                 add_verity_to_store(cache_file, diff_id, layer_digest, &root_hash)?;
             }
@@ -366,7 +367,8 @@ async fn create_decompressed_layer_file(
             .await
             .context("Failed to pull layer file")?,
     }
-    attach_tarfs_index(decompressed_path).context("Failed to attach tarfs index")?;
+    // attach_tarfs_index(decompressed_path).context("Failed to attach tarfs index")?;
+    attach_erofs_meta(decompressed_path).context("Failed to attach erofs meta")?;
 
     Ok(())
 }
@@ -406,19 +408,89 @@ fn decompress_file(compressed_path: &Path, decompressed_path: &Path) -> Result<(
     Ok(())
 }
 
-fn attach_tarfs_index(path: &Path) -> Result<()> {
-    info!("Adding tarfs index to layer");
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
+// fn attach_tarfs_index(path: &Path) -> Result<()> {
+//     info!("Adding tarfs index to layer");
+//     let mut file = std::fs::OpenOptions::new()
+//         .read(true)
+//         .write(true)
+//         .open(path)
+//         .context("Failed to open {path} for writing")?;
+//     tarindex::append_index(&mut file)
+//         .map_err(|e| anyhow!(e))
+//         .context("Failed to append index")?;
+//     file.flush()
+//         .map_err(|e| anyhow!(e))
+//         .context("Failed to flush file changes")?;
+
+//     Ok(())
+// }
+
+fn attach_erofs_meta(path: &Path) -> Result<()> {
+    info!("Creating erofs meta. Appending decompressed tar to erofs meta");
+
+    // Create an erofs image using mkfs.erofs
+    let erofs_path = path.with_extension("erofs");
+    debug!(
+        "Creating erofs meta image {:?} from {:?}",
+        &erofs_path, &path
+    );
+
+    // TODO: need to use -T and -U here
+    let status = Command::new("mkfs.erofs")
+        .arg("--tar=i")
+        .arg(erofs_path.to_str().unwrap())
+        .arg(path.to_str().unwrap())
+        .status()
+        .context("failed to execute mkfs.erofs")?;
+
+    if !status.success() {
+        return Err(anyhow!(
+            "mkfs.erofs failed with status: {}",
+            status.code().unwrap_or(-1)
+        ));
+    }
+
+    // Append the decompressed tar file to the erofs image
+    debug!(
+        "Appending decompressed tar file {:?} to erofs image {:?}",
+        &path, &erofs_path
+    );
+    let mut erofs_file = OpenOptions::new()
         .write(true)
-        .open(path)
-        .context("Failed to open {path} for writing")?;
-    tarindex::append_index(&mut file)
+        .append(true)
+        .open(&erofs_path)
+        .context("failed to open erofs image for appending")?;
+    let mut base_file = File::open(&path)
+        .context("failed to open decompressed tar file for reading")?;
+    std::io::copy(&mut base_file, &mut erofs_file)
+        .context("failed to append decompressed tar file to erofs image")?;
+
+    // get size of erofs meta + tar before padding
+    let erofs_file_size = erofs_file.metadata()
+    .expect("Failed to get metadata")
+    .len();
+    debug!("Size of (erofs meta + tar, before padding): {}", erofs_file_size);
+
+    // Align the size to 512 bytes
+    let alignment = 512;
+    let padding = (alignment - (erofs_file_size % alignment)) % alignment;
+
+    if padding > 0 {
+        let padding_bytes = vec![0u8; padding as usize];
+        erofs_file.write_all(&padding_bytes)
+            .expect("Failed to write padding");
+        debug!("Added {} bytes of padding to align to {} bytes", padding, alignment);
+    }
+
+    // get size of erofs meta + tar after padding
+    let erofs_file_size = erofs_file.metadata()
+    .expect("Failed to get metadata")
+    .len();
+    debug!("Size of (erofs meta + tar, after padding): {}", erofs_file_size);
+
+    erofs_file.flush()
         .map_err(|e| anyhow!(e))
-        .context("Failed to append index")?;
-    file.flush()
-        .map_err(|e| anyhow!(e))
-        .context("Failed to flush file changes")?;
+        .context("Failed to flush erofs file changes")?;
 
     Ok(())
 }
@@ -432,7 +504,7 @@ pub fn get_verity_hash_value(path: &Path) -> Result<String> {
     }
 
     let salt = [0u8; <Sha256 as OutputSizeUser>::OutputSize::USIZE];
-    let v = verity::Verity::<Sha256>::new(size, 4096, 4096, &salt, 0)?;
+    let v = verity::Verity::<Sha256>::new(size, 512, 512, &salt, 0)?;
     let hash = verity::traverse_file(&mut file, 0, false, v, &mut verity::no_write)?;
     let result = format!("{:x}", hash);
 
