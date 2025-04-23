@@ -1021,6 +1021,8 @@ impl TarDevSnapshotter {
                 );
                 let status = Command::new("mkfs.erofs")
                     .arg("--tar=i")
+                    .arg("-T 0") // zero out unix time
+                    .arg("-U c1b9d5a2-f162-11cf-9ece-0020afc76f16") // set UUID to something specific
                     .arg(erofs_path.to_str().unwrap())
                     .arg(base_name.to_str().unwrap())
                     .status()
