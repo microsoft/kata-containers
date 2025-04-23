@@ -1020,13 +1020,15 @@ impl TarDevSnapshotter {
                     &erofs_path, &base_name
                 );
                 let status = Command::new("mkfs.erofs")
-                    .arg("--tar=i")
-                    .arg("-T 0") // zero out unix time
-                    .arg("-U c1b9d5a2-f162-11cf-9ece-0020afc76f16") // set UUID to something specific
-                    .arg(erofs_path.to_str().unwrap())
-                    .arg(base_name.to_str().unwrap())
+                    .args([
+                        "--tar=i",
+                        "-T", "0", // zero out unix time
+                        "-U", "c1b9d5a2-f162-11cf-9ece-0020afc76f16", // set UUID to something specific
+                        erofs_path.to_str().unwrap(),
+                        base_name.to_str().unwrap(),
+                    ])
                     .status()
-                    .context("failed to execute mkfs.erofs")?;
+                    .context("Failed to execute mkfs.erofs command")?;
 
                 if !status.success() {
                     return Err(anyhow!(
@@ -1056,7 +1058,7 @@ impl TarDevSnapshotter {
                     .len();
                 trace!("Size of (erofs meta + tar, before padding): {}", erofs_file_size);
 
-                // Align the size to 4096 bytes
+                // Align the size to 512 bytes
                 let alignment = 512;
                 let padding = (alignment - (erofs_file_size % alignment)) % alignment;
 
