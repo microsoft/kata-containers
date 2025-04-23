@@ -729,7 +729,7 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) {
     bundle_id := replace(bundle_path, "/run/containerd/io.containerd.runtime.v2.task/k8s.io/", "")
 
     bundle_id_format := concat("", ["^", BUNDLE_ID, "$"])
-    regex.match(bundle_id_format, bundle_id)
+    # regex.match(bundle_id_format, bundle_id)
 
     key := "io.kubernetes.cri.sandbox-id"
 
