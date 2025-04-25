@@ -110,7 +110,7 @@ impl Settings {
             }
         }
     }
-    
+
     pub fn panic_on_undefined_variables(&self, var_name: &str) {
         if !self
             .request_defaults
