@@ -23,7 +23,10 @@ $(GENERATED_FILES): %: %.in
 .DEFAULT_GOAL := default
 default: build
 
-build: $(GENERATED_FILES)
+build-agent:
+	LIBC=gnu BUILD_TYPE= make -C ../../agent
+
+build: $(GENERATED_FILES) build-agent
 	@RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo build --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release)
 
 static-checks-build:
@@ -37,13 +40,14 @@ vendor:
 	cargo vendor
 
 # todo: --target $(TRIPLE) doesn't work
-test: $(GENERATED_FILES)
+test: $(GENERATED_FILES) build-agent
 	@RUSTFLAGS="$(EXTRA_RUSTFLAGS --deny warnings)" cargo test --all-targets --all-features
 
 install: $(GENERATED_FILES)
 	@RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo install --locked --target $(TRIPLE) --path .
 
-check:  $(GENERATED_CODE) standard_rust_check
+check:  $(GENERATED_CODE) build-agent
+	$(MAKE) standard_rust_check
 
 .PHONY: \
 	build \
