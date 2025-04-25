@@ -89,6 +89,7 @@ jobs:
             install-libseccomp: yes
           - component: genpolicy
             component-path: src/tools/genpolicy
+            install-libseccomp: yes
     steps:
       - name: Checkout the code
         uses: actions/checkout@v4
@@ -116,10 +117,10 @@ jobs:
         if: ${{ matrix.component != 'runtime' }}
         run: sudo apt-get -y install musl-tools
       - name: Install devicemapper
-        if: ${{ (matrix.command == 'make check' || matrix.command == 'make test') && matrix.component == 'agent' }}
+        if: ${{ (matrix.command == 'make check' || matrix.command == 'make test') && (matrix.component == 'agent' || matrix.component == 'genpolicy') }}
         run: sudo apt-get -y install libdevmapper-dev
       - name: Install libseccomp
-        if: ${{ matrix.command != 'make vendor'  &&  matrix.command != 'make check' &&  matrix.install-libseccomp == 'yes' }}
+        if: ${{ matrix.command != 'make vendor' &&  matrix.install-libseccomp == 'yes' }}
         run: |
           libseccomp_install_dir=$(mktemp -d -t libseccomp.XXXXXXXXXX)
           gperf_install_dir=$(mktemp -d -t gperf.XXXXXXXXXX)

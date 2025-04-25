@@ -29,6 +29,19 @@ jobs:
       run: |
         sudo apt-get -y install protobuf-compiler
 
+    - name: Install devicemapper
+      run: | 
+        sudo apt-get -y install libdevmapper-dev
+
+    - name: Install libseccomp
+      run: |
+        libseccomp_install_dir=$(mktemp -d -t libseccomp.XXXXXXXXXX)
+        gperf_install_dir=$(mktemp -d -t gperf.XXXXXXXXXX)
+        ./ci/install_libseccomp.sh "${libseccomp_install_dir}" "${gperf_install_dir}"
+        echo "Set environment variables for the libseccomp crate to link the libseccomp library statically"
+        echo "LIBSECCOMP_LINK_TYPE=static" >> $GITHUB_ENV
+        echo "LIBSECCOMP_LIB_PATH=${libseccomp_install_dir}/lib" >> $GITHUB_ENV
+
     - name: Configure containerd
       run: |
         sudo containerd config default | sudo dd of=/etc/containerd/config.toml
