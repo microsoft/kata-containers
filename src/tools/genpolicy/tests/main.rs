@@ -89,16 +89,14 @@ mod tests {
             base64_out: false,
             config_files: None,
             containerd_socket_path: None, // Some(String::from("/var/run/containerd/containerd.sock")),
-            // insecure_registries: Vec::new(),
-            // layers_cache_file_path: None,
+            insecure_registries: Vec::new(),
+            layers_cache_file_path: None,
             raw_out: false,
             rego_rules_path: workdir.join("rules.rego").to_str().unwrap().to_string(),
-            // runtime_class_names: Vec::new(),
-            json_settings_path: workdir
-                .join("genpolicy-settings.json")
-                .to_str()
-                .unwrap()
-                .to_string(),
+            runtime_class_names: Vec::new(),
+            settings: genpolicy::settings::Settings::new(
+                workdir.join("genpolicy-settings.json").to_str().unwrap(),
+            ),
             silent_unsupported_fields: false,
             use_cache: false,
             version: false,
@@ -213,11 +211,11 @@ mod tests {
     }
     #[tokio::test]
     async fn test_legacy_basic_create_container() {
-        runtests::<CreateContainerRequest>("createContainer/legacy").await;
+        runtests::<CreateContainerRequest>("createcontainer/legacy").await;
     }
 
     #[tokio::test]
     async fn test_basic_create_container() {
-        runtests::<PolicyCreateContainerRequest>("createContainer/basic").await;
+        runtests::<PolicyCreateContainerRequest>("createcontainer/basic").await;
     }
 }
