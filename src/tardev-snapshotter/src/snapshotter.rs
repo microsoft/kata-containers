@@ -6,7 +6,7 @@ use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
 use log::{debug, error, info, trace, warn};
 use nix::mount::MsFlags;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{
     digest::{typenum::Unsigned, OutputSizeUser},
     Digest, Sha256,
@@ -869,21 +869,22 @@ impl TarDevSnapshotter {
 
     /// Fetches the OCI image manifest for the given digest.
     #[async_recursion]
-    async fn get_image_manifest(&self, digest_str: &str) -> Result<Value, Status> {
+    async fn get_image_manifest(&self, digest_str: &str) -> Result<Map<String, Value>, Status> {
         let manifest = self
             .get_oci_manifest(digest_str)
             .await
-            .map_err(|e| Status::invalid_argument(format!("failed to get OCI manifest: {e}")))?;
-        let media_type = manifest
+            .map_err(|e| Status::invalid_argument(format!("failed to get OCI manifest: {e}")))?
             .as_object()
-            .and_then(|manifest| {
-                manifest
-                    .get_key_value("mediaType")
-                    .and_then(|kv| kv.1.as_str())
+            .ok_or(Status::aborted("failed to deserialize OCI manifest"))?
+            .clone();
+        let media_type = manifest
+            .get_key_value("mediaType")
+            .and_then(|kv| kv.1.as_str())
+            .or({
+                warn!("failed to deserialize OCI manifest, mediaType is missing, assuming image manifest");
+                Some(IMAGE_MANIFEST_MEDIA_TYPE)
             })
-            .ok_or(Status::invalid_argument(format!(
-                "failed to deserialize OCI manifest, mediaType is missing"
-            )))?;
+            .unwrap();
         match media_type {
             OCI_IMAGE_MEDIA_TYPE | IMAGE_MANIFEST_MEDIA_TYPE => Ok(manifest),
             OCI_IMAGE_INDEX_MEDIA_TYPE | IMAGE_MANIFEST_LIST_MEDIA_TYPE => {
@@ -898,14 +899,13 @@ impl TarDevSnapshotter {
     }
 
     /// Finds the linux/amd64 variant in the OCI image index and returns its digest.
-    fn get_platform_manifest_digest(&self, manifest: &Value) -> Result<String, Status> {
+    fn get_platform_manifest_digest(
+        &self,
+        manifest: &Map<String, Value>,
+    ) -> Result<String, Status> {
         let manifests = manifest
-            .as_object()
-            .and_then(|manifest| {
-                manifest
-                    .get_key_value("manifests")
-                    .and_then(|kv| kv.1.as_array())
-            })
+            .get_key_value("manifests")
+            .and_then(|kv| kv.1.as_array())
             .ok_or(Status::invalid_argument(
                 "Failed to deserialize OCI image index, manifests is missing",
             ))?;
@@ -1073,22 +1073,16 @@ impl TarDevSnapshotter {
                     })?;
 
             let layer = image_manifest
-                .as_object()
-                .and_then(|manifest| {
-                    manifest
-                        .get_key_value("layers")
-                        .and_then(|kv| kv.1.as_array())
-                        .and_then(|layers| {
-                            layers.iter().find(|layer| {
-                                layer
-                                    .as_object()
-                                    .and_then(|layer| {
-                                        layer.get_key_value("digest").map(|kv| kv.1.as_str())
-                                    })
-                                    .map(|s| s == Some(digest_str.as_str()))
-                                    .unwrap_or(false)
-                            })
-                        })
+                .get_key_value("layers")
+                .and_then(|kv| kv.1.as_array())
+                .and_then(|layers| {
+                    layers.iter().find(|layer| {
+                        layer
+                            .as_object()
+                            .and_then(|layer| layer.get_key_value("digest").map(|kv| kv.1.as_str()))
+                            .map(|s| s == Some(digest_str.as_str()))
+                            .unwrap_or(false)
+                    })
                 })
                 .ok_or(Status::aborted(format!(
                     "layer {} not found in image manifest",
