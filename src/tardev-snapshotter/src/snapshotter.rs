@@ -881,8 +881,13 @@ impl TarDevSnapshotter {
             .get_key_value("mediaType")
             .and_then(|kv| kv.1.as_str())
             .or({
-                warn!("failed to deserialize OCI manifest, mediaType is missing, assuming image manifest");
-                Some(IMAGE_MANIFEST_MEDIA_TYPE)
+                if manifest.get_key_value("layers").is_some() {
+                    warn!("failed to deserialize OCI manifest, 'mediaType' attribute is missing, but found 'layers' attribute, assuming image manifest");
+                    Some(IMAGE_MANIFEST_MEDIA_TYPE)
+                } else {
+                    warn!("failed to deserialize OCI manifest, 'mediaType' attribute is missing, assuming image index manifest");
+                    Some(IMAGE_MANIFEST_LIST_MEDIA_TYPE)
+                }
             })
             .unwrap();
         match media_type {
@@ -1085,8 +1090,8 @@ impl TarDevSnapshotter {
                     })
                 })
                 .ok_or(Status::aborted(format!(
-                    "layer {} not found in image manifest",
-                    digest_str
+                    "layer '{}' not found in image manifest: {:#?}",
+                    digest_str, image_manifest
                 )))?;
 
             let media_type = layer
