@@ -1013,7 +1013,7 @@ impl TarDevSnapshotter {
                     }
                 }
 
-                // Create an erofs image using mkfs.erofs
+                // Create an erofs metadata using mkfs.erofs
                 let erofs_path = base_name.with_extension("erofs");
                 debug!(
                     "Creating erofs meta image {:?} from {:?}",
@@ -1037,26 +1037,25 @@ impl TarDevSnapshotter {
                     ));
                 }
 
-                // Append the decompressed tar file to the erofs image
+                // Append the decompressed tar file to the erofs metadata
                 debug!(
-                    "Appending decompressed tar file {:?} to erofs image {:?}",
+                    "Appending decompressed tar file {:?} to erofs metadata {:?}",
                     &base_name, &erofs_path
                 );
                 let mut erofs_file = OpenOptions::new()
                     .write(true)
                     .append(true)
                     .open(&erofs_path)
-                    .context("failed to open erofs image for appending")?;
+                    .context("failed to open erofs metadata for appending")?;
                 let mut base_file = File::open(&base_name)
                     .context("failed to open decompressed tar file for reading")?;
                 std::io::copy(&mut base_file, &mut erofs_file)
-                    .context("failed to append decompressed tar file to erofs image")?;
+                    .context("failed to append decompressed tar file to erofs metadata")?;
                 
-                    // get size of erofs meta + tar
+                // get size of erofs meta + tar
                 let erofs_file_size = erofs_file.metadata()
                     .expect("Failed to get metadata")
                     .len();
-                trace!("Size of (erofs meta + tar, before padding): {}", erofs_file_size);
 
                 // Align the size to 512 bytes
                 let alignment = 512;
@@ -1073,7 +1072,7 @@ impl TarDevSnapshotter {
                 let erofs_file_size = erofs_file.metadata()
                     .expect("Failed to get metadata")
                     .len();
-                trace!("Size of (erofs meta + tar, after padding): {}", erofs_file_size);
+                trace!("Size of erofs meta + tar: {}", erofs_file_size);
 
                 trace!("Appending dm-verity tree to {:?}", &erofs_path);
                 let mut erofs_file = OpenOptions::new()
