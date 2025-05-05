@@ -24,6 +24,7 @@ use tokio::sync::RwLock;
 use tonic::Status;
 use uuid::Uuid;
 use zerocopy::AsBytes;
+use humansize;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
@@ -132,7 +133,7 @@ impl Store {
     }
 
     fn load_signature(&self, hash: &str, signature: &str) -> Result<String> {
-        debug!("Loading signature {signature} for root hash {hash}");
+        info!("Loading signature {signature} for root hash {hash}");
 
         let signature_name = format!("verity:{hash}");
 
@@ -317,7 +318,7 @@ impl Store {
                 data_size / data_block_size,
                 (data_size + hash_block_size - 1) / hash_block_size,
             );
-        debug!("dm-verity construction params: {construction_parameters}");
+        info!("dm-verity construction params: {construction_parameters}");
         Ok((0, data_size / 512, "verity".into(), construction_parameters))
     }
 
@@ -379,7 +380,7 @@ impl Store {
                 .and_then(|line| line.split(":").next())
                 .context(format!("Could not find loop device for {}", layer_path))?;
 
-            trace!("selected newly created loop device: {}", loop_device);
+            debug!("selected newly created loop device: {}", loop_device);
 
             // Use the loop device path for DM-Verity
             let device_path = loop_device;
@@ -516,7 +517,7 @@ impl Store {
             );
 
             if do_mount {
-                trace!("mounts_from_snapshot(): performing erofs mounting via dm-verity");
+                debug!("mounts_from_snapshot(): performing erofs mounting via dm-verity");
                 // Extract layer information
                 let mut fields = layer_info.split(',');
                 let src = if let Some(p) = fields.next() {
@@ -553,7 +554,7 @@ impl Store {
                 // Step 0: Check if the dm-verity device already exists
                 let dm_verity_device = format!("/dev/mapper/{}", name);
                 if Path::new(&dm_verity_device).exists() {
-                    trace!(
+                    info!(
                         "dm-verity device already exists for layer {}: {}",
                         name,
                         dm_verity_device
@@ -580,7 +581,7 @@ impl Store {
                             "Failed to create dm-verity device for source {:?}",
                             src
                         ))?;
-                    debug!(
+                    info!(
                         "created dm-verity device for layer {}: {}",
                         name, created_dm_verity_device
                     );
@@ -610,7 +611,7 @@ impl Store {
                         "Failed to mount dm-verity device {} to {:?}",
                         dm_verity_device, mount_path
                     ))?;
-                    debug!(
+                    info!(
                         "mounted single layer dm-verity device {} to {:?}",
                         dm_verity_device, mount_path
                     );
@@ -648,7 +649,7 @@ impl Store {
                 .map(|layer| layer.to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
                 .join(":");
-            trace!(
+            info!(
                 "Combining dm-verity layers into overlay lowerdirs: {}",
                 lowerdirs
             );
@@ -680,7 +681,7 @@ impl Store {
                 overlay_target.display(),
             ))?;
 
-            trace!("Overlay mount completed at {:?}", overlay_target);
+            info!("Overlay mount completed at {:?}", overlay_target);
 
             // Clean up dm-verity and loop devices
             /*for layer_path in &mounted_layers {
@@ -721,7 +722,7 @@ impl Store {
                 options: vec!["bind".into(), "rw".into()],
             };
 
-            debug!(
+            info!(
                 "mounts_from_snapshot(): returning mount struct for runc: type={}, source={}, target={}, options={:?}",
                 overlay_mount.r#type, overlay_mount.source, overlay_mount.target, overlay_mount.options
             );
@@ -963,7 +964,7 @@ impl TarDevSnapshotter {
     ) -> Result<String, Status> {
         let layer_type = layer_type.to_string(); // Clone `layer_type` into an owned `String`
 
-        debug!("Fetching {} layer image to {:?}", layer_type, upstream_name);
+        info!("Fetching {} layer image to {:?}", layer_type, upstream_name);
 
         // Fetch the layer image
         self.get_layer_image(&upstream_name, digest_str)
@@ -990,7 +991,7 @@ impl TarDevSnapshotter {
                     .truncate(layer_type == TAR_GZ_EXTENSION)
                     .open(&base_name)?;
                 if layer_type == TAR_GZ_EXTENSION {
-                    debug!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
+                    info!("Decompressing {:?} to {:?}", &upstream_name, &base_name);
                     let compressed = fs::File::open(&upstream_name).map_err(|e| {
                         let file_error = format!(
                             "Failed to open file {:?} for decompression: {:?}",
@@ -1008,10 +1009,20 @@ impl TarDevSnapshotter {
                     }
                 }
 
+                // Log the size of the decompressed tar file in a human-readable format
+                let decompressed_tar_size = fs::metadata(&base_name)
+                    .context("Failed to get metadata")?
+                    .len();
+                info!(
+                    "Size of decompressed tar file: {} ({} bytes)",
+                    humansize::format_size(decompressed_tar_size, humansize::DECIMAL),
+                    decompressed_tar_size
+                );
+
                 // Create an erofs image using mkfs.erofs
                 let erofs_path = base_name.with_extension("erofs");
-                debug!(
-                    "Creating erofs meta image {:?} from {:?}",
+                info!(
+                    "Creating erofs meta {:?} from {:?}",
                     &erofs_path, &base_name
                 );
                 let status = Command::new("mkfs.erofs")
@@ -1019,6 +1030,7 @@ impl TarDevSnapshotter {
                         "--tar=i",
                         "-T", "0", // zero out unix time
                         "-U", "c1b9d5a2-f162-11cf-9ece-0020afc76f16", // set UUID to something specific
+                        "--quiet",
                         erofs_path.to_str().unwrap(),
                         base_name.to_str().unwrap(),
                     ])
@@ -1032,9 +1044,19 @@ impl TarDevSnapshotter {
                     ));
                 }
 
+                // size of erofs meta
+                let erofs_meta_size = fs::metadata(&erofs_path)
+                    .context("Failed to get metadata")?
+                    .len();
+                info!(
+                    "Size of erofs meta: {} ({} bytes)",
+                    humansize::format_size(erofs_meta_size, humansize::DECIMAL),
+                    erofs_meta_size
+                );
+
                 // Append the decompressed tar file to the erofs image
-                debug!(
-                    "Appending decompressed tar file {:?} to erofs image {:?}",
+                info!(
+                    "Appending decompressed tar file {:?} to erofs meta {:?}",
                     &base_name, &erofs_path
                 );
                 let mut erofs_file = OpenOptions::new()
@@ -1051,7 +1073,6 @@ impl TarDevSnapshotter {
                 let erofs_file_size = erofs_file.metadata()
                     .expect("Failed to get metadata")
                     .len();
-                trace!("Size of (erofs meta + tar, before padding): {}", erofs_file_size);
 
                 // Align the size to 512 bytes
                 let alignment = 512;
@@ -1068,9 +1089,13 @@ impl TarDevSnapshotter {
                 let erofs_file_size = erofs_file.metadata()
                     .expect("Failed to get metadata")
                     .len();
-                trace!("Size of (erofs meta + tar, after padding): {}", erofs_file_size);
+                // info!(
+                //     "Size of erofs meta + tar: {} ({} bytes)",
+                //     humansize::format_size(erofs_file_size, humansize::DECIMAL),
+                //     erofs_file_size
+                // );
 
-                trace!("Appending dm-verity tree to {:?}", &erofs_path);
+                info!("Appending dm-verity tree to {:?}", &erofs_path);
                 let mut erofs_file = OpenOptions::new()
                     .read(true)
                     .write(true)
@@ -1078,7 +1103,26 @@ impl TarDevSnapshotter {
                 let root_hash = verity::append_tree::<Sha256>(&mut erofs_file)
                     .context("failed to append verity tree")?;
 
-                trace!("Root hash for {:?} is {:x}", &erofs_path, root_hash);
+                info!("Root hash for {:?} is {:x}", &erofs_path, root_hash);
+
+                // get size of erofs meta + tar + verity tree
+                let erofs_file_size_after_adding_verity_tree = erofs_file.metadata()
+                    .expect("Failed to get metadata")
+                    .len();
+
+                // size of verity tree
+                let verity_tree_size = erofs_file_size_after_adding_verity_tree - erofs_file_size;
+                info!(
+                    "Size of dm-verity tree: {} ({} bytes)",
+                    humansize::format_size(verity_tree_size, humansize::DECIMAL),
+                    verity_tree_size
+                );
+
+                info!(
+                    "Size of erofs meta + tar + dm-verity tree: {} ({} bytes)",
+                    humansize::format_size(erofs_file_size_after_adding_verity_tree, humansize::DECIMAL),
+                    erofs_file_size_after_adding_verity_tree
+                );
                 Ok(root_hash)
             }
         })
@@ -1170,7 +1214,7 @@ impl TarDevSnapshotter {
                     digest_str
                 )))?;
 
-            debug!("layer digest {} media_type: {:?}", digest_str, media_type);
+            info!("layer digest {} media_type: {:?}", digest_str, media_type);
 
             let layer_type = match media_type {
                 IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE | IMAGE_LAYER_GZIP_MEDIA_TYPE => {
@@ -1221,7 +1265,7 @@ impl TarDevSnapshotter {
                                 MAX_RETRIES, err
                             )));
                         }
-                        info!("Retrying fetch/process layer...");
+                        debug!("Retrying fetch/process layer...");
                         tokio::time::sleep(RETRY_DELAY).await; // Sleep before retrying
                     }
                 }
@@ -1247,7 +1291,7 @@ impl TarDevSnapshotter {
                             generated_root_hash, root_hash
                         )));
                     }
-                    info!(
+                    debug!(
                         "found signature for layer {} with root hash {root_hash}: {root_hash_sig}",
                         digest_str
                     );
@@ -1255,7 +1299,7 @@ impl TarDevSnapshotter {
                     labels.insert(ROOT_HASH_SIG_LABEL.into(), root_hash_sig);
                 }
                 _ => {
-                    info!(
+                    debug!(
                         "signature not found, using generated root hash for layer {digest_str}: {generated_root_hash}"
                     );
                     labels.insert(ROOT_HASH_LABEL.into(), generated_root_hash);
@@ -1276,7 +1320,7 @@ impl TarDevSnapshotter {
                 .map_err(|e| Status::internal(format!("failed to write snapshot: {e}")))?;
         }
 
-        trace!("Layer prepared");
+        info!("Layer prepared");
         Ok(())
     }
 
@@ -1338,7 +1382,7 @@ impl TarDevSnapshotter {
                 Status::failed_precondition(format!("failed to read signatures: {e}"))
             })?;
 
-            trace!("Looking up layer info for {digest}");
+            info!("Looking up layer info for {digest}");
             let layer_info = store.get_info_from_digest(digest);
 
             (layer_info, info.parent)
@@ -1455,7 +1499,7 @@ impl Snapshotter for TarDevSnapshotter {
     type Error = Status;
 
     async fn stat(&self, key: String) -> Result<Info, Self::Error> {
-        info!("stat({})", key);
+        debug!("stat({})", key);
         return self.store.read().await.read_snapshot(&key).map_err(|e| {
             let error = format!("failed to read snapshot ({key}): {e}");
             error!("stat() failed with: {:#?}", error);
@@ -1468,7 +1512,7 @@ impl Snapshotter for TarDevSnapshotter {
         info: Info,
         fieldpaths: Option<Vec<String>>,
     ) -> Result<Info, Self::Error> {
-        info!("update({:?}, {:?})", info, fieldpaths);
+        debug!("update({:?}, {:?})", info, fieldpaths);
         let error = "no support for updating snapshots";
         error!("update() failed with: {:#?}", error);
         Err(Status::unimplemented(error))
@@ -1496,7 +1540,7 @@ impl Snapshotter for TarDevSnapshotter {
         parent: String,
         labels: HashMap<String, String>,
     ) -> Result<Vec<api::types::Mount>, Status> {
-        info!("prepare({}, {}, {:?})", key, parent, labels);
+        debug!("prepare({}, {}, {:?})", key, parent, labels);
         return {
             // There are two reasons for preparing a snapshot: to build an image and to actually use it
             // as a container image. We determine the reason by the presence of the snapshot-ref label.
@@ -1524,7 +1568,7 @@ impl Snapshotter for TarDevSnapshotter {
         parent: String,
         labels: HashMap<String, String>,
     ) -> Result<Vec<api::types::Mount>, Self::Error> {
-        info!("view({}, {}, {:?})", key, parent, labels);
+        debug!("view({}, {}, {:?})", key, parent, labels);
         return self
             .store
             .write()
@@ -1543,7 +1587,7 @@ impl Snapshotter for TarDevSnapshotter {
         key: String,
         labels: HashMap<String, String>,
     ) -> Result<(), Self::Error> {
-        info!("commit({}, {}, {:?})", name, key, labels);
+        debug!("commit({}, {}, {:?})", name, key, labels);
         return self.commit_impl(name, key, labels).await.map_err(|e| {
             error!("commit() failed with: {:#?}", e);
             e
@@ -1551,7 +1595,7 @@ impl Snapshotter for TarDevSnapshotter {
     }
 
     async fn remove(&self, key: String) -> Result<(), Self::Error> {
-        info!("remove({})", key);
+        debug!("remove({})", key);
         return self.remove_impl(key).await.map_err(|e| {
             error!("remove() failed with: {:#?}", e);
             e
@@ -1560,7 +1604,7 @@ impl Snapshotter for TarDevSnapshotter {
 
     type InfoStream = impl tokio_stream::Stream<Item = Result<Info, Self::Error>> + Send + 'static;
     async fn list(&self, _: String, _: Vec<String>) -> Result<Self::InfoStream, Self::Error> {
-        info!("list()");
+        debug!("list()");
         let store = self.store.read().await;
         let snapshots_dir = store.root.join("snapshots");
         Ok(async_stream::try_stream! {
