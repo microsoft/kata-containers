@@ -70,8 +70,18 @@ func (t *SDLTest) Run(ctx context.Context) core.TestResult {
 	}
 	clhDirStr := strings.TrimSpace(string(clhDir))
 
+	// Find virtiofsd directory in sourceDir
+	virtiofsdDir, err := exec.Command("sh", "-c", fmt.Sprintf("find %s -maxdepth 1 -type d -name 'virtiofsd*' | head -1", sourceDir)).Output()
+	if err != nil || len(virtiofsdDir) == 0 {
+		result.Error = fmt.Sprintf("No virtiofsd directory found in %s", sourceDir)
+		result.Success = false
+		result.EndTime = time.Now()
+		return result
+	}
+	virtiofsdDirStr := strings.TrimSpace(string(virtiofsdDir))
+
 	// Run Clippy Rust static analysis
-	clippySuccess := t.runClippyTests(&result, kataDirStr, clhDirStr)
+	clippySuccess := t.runClippyTests(&result, kataDirStr, clhDirStr, virtiofsdDirStr)
 
 	// Run Nancy Go dependency security check
 	nancySuccess := t.runNancyTests(&result, kataDirStr)
@@ -125,7 +135,7 @@ func (t *SDLTest) runBinSkimTests(result *core.TestResult) bool {
 	return success
 }
 
-func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir string) bool {
+func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir, virtiofsdDir string) bool {
 	currentDir, _ := os.Getwd()
 	defer os.Chdir(currentDir)
 	os.Chdir(sourceDir)
@@ -133,13 +143,14 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir string
 	rustProjects := []struct {
 		name    string
 		path    string
-		project string // "kata-containers" or "cloud-hypervisor"
+		project string // "kata-containers", "cloud-hypervisor", or "virtiofsd"
 	}{
 		{"kata-agent", "src/agent", "kata-containers"},
 		{"kata-overlay", "src/overlay", "kata-containers"},
 		{"utarfs", "src/utarfs", "kata-containers"},
 		{"tardev-snapshotter", "src/tardev-snapshotter", "kata-containers"},
 		{"cloud-hypervisor", "", "cloud-hypervisor"},
+		{"virtiofsd", "", "virtiofsd"}, // Added virtiofsd
 	}
 	success := true
 
@@ -147,8 +158,10 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir string
 		var projectPath string
 		if project.project == "kata-containers" {
 			projectPath = filepath.Join(kataDir, project.path)
-		} else {
+		} else if project.project == "cloud-hypervisor" {
 			projectPath = clhDir
+		} else if project.project == "virtiofsd" {
+			projectPath = virtiofsdDir
 		}
 
 		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
