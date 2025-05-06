@@ -94,6 +94,7 @@ func (t *SDLTest) runBinSkimTests(result *core.TestResult) bool {
 		filepath.Join(binariesDir, "kata-overlay"),
 		filepath.Join(binariesDir, "utarfs"),
 		filepath.Join(binariesDir, "cloud-hypervisor"),
+		filepath.Join(binariesDir, "virtio-fsd"),
 	}
 
 	success := true
