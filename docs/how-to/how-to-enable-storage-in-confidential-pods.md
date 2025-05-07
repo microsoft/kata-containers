@@ -67,6 +67,9 @@ aks-nodepool1-38693887-vmss000000   Ready    agent   2m    v1.29.6
 
 ### 3. Grant the drivers permission to access your cluster
 
+> [!TIP]
+> This step is not required for Azure File driver.
+
 Run the following script to grant permission to the drivers to provision
 Azure volumes in your node resource group. Note that the user logged
 into the Azure CLI needs to have the permission to add such a role
@@ -228,32 +231,22 @@ experience this error.
 ## Installing the CoCo Azure Files driver
 
 > [!NOTE]  
-> We are currently in the process of upstreaming this functionality to
-> the built-in Azure Files driver, see
-> [kubernetes-sigs/azurefile-csi-driver#1971](https://github.com/kubernetes-sigs/azurefile-csi-driver/pull/1971)
-> to track status.
+> The Coco Azure Files driver functionality has been added to
+> the built-in Azure Files driver since Kubernetes version 1.32+ in AKS.
 
-Run the following command to deploy the driver in the cluster:
+You can verify that the driver containers are in the `Running` state:
 
 ```shell
-$ curl -sSf https://raw.githubusercontent.com/microsoft/kata-containers/cc-azurefile-csi-driver/latest/deploy-cc/install.sh | bash
-```
-
-You can then verify that the driver containers are properly deployed and
-in the `Running` state:
-
-```shell
-$ kubectl get pods -A | grep csi-azurefile-cc
-kube-system      csi-azurefile-cc-controller-7f84c48459-clmq4            5/5     Running       0             22s
-kube-system      csi-azurefile-cc-node-vgbb5                             3/3     Running       0             22s
+$ kubectl get pods -A | grep csi-azurefile
+kube-system         csi-azurefile-node-7zfd9                                3/3     Running     0          2d
 ```
 
 You can also verify that the storage classes are installed:
 
 ```
-$ kubectl get storageclass cc-azurefile-csi cc-azurefile-csi-premium
-cc-azurefile-csi           cc.file.csi.azure.com   Delete          Immediate              true                   52s
-cc-azurefile-csi-premium   cc.file.csi.azure.com   Delete          Immediate              true                   52s
+$ kubectl get storageclass azurefile-csi azurefile-csi-premium
+azurefile-csi           file.csi.azure.com   Delete          Immediate           true                   2d
+azurefile-csi-premium   file.csi.azure.com   Delete          Immediate           true                   2d
 ```
 
 ### Known limitations
@@ -272,11 +265,8 @@ cc-azurefile-csi-premium   cc.file.csi.azure.com   Delete          Immediate    
 First, copy the below spec to your machine. You will generate its
 security policy in the next step.
 
-This spec will create two persistent volume claims (PVCs) of 10GB each,
-one using the built-in `azurefile-csi` storage class, and the other
-using our new `cc-azurefile-csi` storage class. It will also create a
-pod that mounts the `azurefile-csi` PVC in `/mnt/persistent-broken` and
-the `cc-azurefile-csi` PVC in `/mnt/persistent-ok`.
+This spec will create a persistent volume claim (PVC) of 10GB using the built-in `azurefile-csi` storage class. It will create a
+pod that mounts the `azurefile-csi` PVC in `/mnt/persistent-ok`.
 
 <details>
   <summary>demo-cc-azurefile.yaml</summary>
@@ -287,48 +277,32 @@ the `cc-azurefile-csi` PVC in `/mnt/persistent-ok`.
   apiVersion: v1
   kind: PersistentVolumeClaim
   metadata:
-    name: pvc-cc-azurefile-csi
+    name: azurefile-pvc
   spec:
     accessModes:
-      - ReadWriteOnce
-    resources:
-      requests:
-        storage: 10Gi
-    storageClassName: cc-azurefile-csi
-  ---
-  apiVersion: v1
-  kind: PersistentVolumeClaim
-  metadata:
-    name: pvc-azurefile-csi
-  spec:
-    accessModes:
-      - ReadWriteOnce
+      - ReadWriteMany
     resources:
       requests:
         storage: 10Gi
     storageClassName: azurefile-csi
   ---
-  kind: Pod
   apiVersion: v1
+  kind: Pod
   metadata:
-    name: demo-cc-azurefile
+    name: kata-cc-writer
   spec:
     runtimeClassName: kata-cc-isolation
     containers:
-      - image: busybox:latest
-        name: busybox
-        volumeMounts:
-          - name: cc-azurefile-csi-vol
-            mountPath: /mnt/persistent-ok
-          - name: azurefile-csi-vol
-            mountPath: /mnt/persistent-broken
+    - name: busybox
+      image: busybox
+      command: ["sh", "-c", "echo 'Hello from kata-cc!' > /mnt/azurefile/hello-kata-cc.txt && sleep 3600"]
+      volumeMounts:
+      - name: azurefile-vol
+        mountPath: /mnt/azurefile
     volumes:
-      - name: cc-azurefile-csi-vol
-        persistentVolumeClaim:
-          claimName: pvc-cc-azurefile-csi
-      - name: azurefile-csi-vol
-        persistentVolumeClaim:
-          claimName: pvc-azurefile-csi
+    - name: azurefile-vol
+      persistentVolumeClaim:
+        claimName: azurefile-pvc
   ```
 </details>
 
@@ -343,18 +317,15 @@ $ kubectl apply -f demo-cc-azurefile.yaml
 
 Once the pod is deployed, you should be able to list the mounted filesystems using the command below:
 
- * `/mnt/persistent-ok`, from our driver, correctly appears as a cifs
+ * `/mnt/azurefile`, correctly appears as a cifs
    filesystem with 10GB of capacity.
- * `/mnt/persistent-broken` shows that the built-in driver is not
-   working properly and mounts a tmpfs in the guest root filesystem.
 
 ```shell
 $ kubectl exec -it demo-cc-azurefile -- df -hT
 Filesystem           Type            Size      Used Available Use% Mounted on
 ...
 //fcd8a0d3ad177481cac70bc.file.core.windows.net/pvc-72983850-8132-4673-afc8-0682bb480101
-                     cifs           10.0G         0     10.0G   0% /mnt/persistent-ok
-tmpfs                tmpfs         369.1M    232.0K    368.9M   0% /mnt/persistent-broken
+                     cifs           10.0G         0     10.0G   0% /mnt/azurefile
 ...
 ```
 
