@@ -1024,6 +1024,7 @@ impl TarDevSnapshotter {
                         "--tar=i",
                         "-T", "0", // zero out unix time
                         "-U", "c1b9d5a2-f162-11cf-9ece-0020afc76f16", // set UUID to something specific
+                        "--quiet",
                         erofs_path.to_str().unwrap(),
                         base_name.to_str().unwrap(),
                     ])
