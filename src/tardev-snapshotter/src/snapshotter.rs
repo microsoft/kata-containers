@@ -508,7 +508,7 @@ impl Store {
 
             let name = name_to_hash(&p);
             let layer_info = format!(
-                "{name},tar,ro,{PREFIX}.block_device=file,{PREFIX}.is-layer,{PREFIX}.root-hash={root_hash}");
+                "{name},erofs,ro,{PREFIX}.block_device=file,{PREFIX}.is-layer,{PREFIX}.root-hash={root_hash}");
             trace!(
                 "mounts_from_snapshot(): processing snapshots: {}, layername: {}",
                 &info.name,
@@ -516,7 +516,7 @@ impl Store {
             );
 
             if do_mount {
-                trace!("mounts_from_snapshot(): performing tarfs mounting via dm-verity");
+                trace!("mounts_from_snapshot(): performing erofs mounting via dm-verity");
                 // Extract layer information
                 let mut fields = layer_info.split(',');
                 let src = if let Some(p) = fields.next() {
@@ -1012,16 +1012,79 @@ impl TarDevSnapshotter {
                         return Err(anyhow!(copy_error));
                     }
                 }
+                file.flush()?;
 
-                trace!("Appending index to {:?}", &base_name);
-                file.rewind().context("failed to rewind the file handle")?;
-                tarindex::append_index(&mut file).context("failed to append tar index")?;
+                // Create an erofs metadata using mkfs.erofs
+                let layer_path = base_name.with_extension("erofs");
+                debug!(
+                    "Creating erofs meta image {:?} from {:?}",
+                    &layer_path, &base_name
+                );
+                let status = Command::new("mkfs.erofs")
+                    .args([
+                        "--tar=i",
+                        "-T", "0", // zero out unix time
+                        "-U", "c1b9d5a2-f162-11cf-9ece-0020afc76f16", // set UUID to something specific
+                        "--quiet",
+                        layer_path.to_str().unwrap(),
+                        base_name.to_str().unwrap(),
+                    ])
+                    .status()
+                    .context("Failed to execute mkfs.erofs command")?;
 
-                trace!("Appending dm-verity tree to {:?}", &base_name);
-                let root_hash = verity::append_tree::<Sha256>(&mut file)
+                if !status.success() {
+                    return Err(anyhow!(
+                        "mkfs.erofs failed with status: {}",
+                        status.code().unwrap_or(-1)
+                    ));
+                }
+
+                // Append the decompressed tar file to the erofs metadata
+                debug!(
+                    "Appending decompressed tar file {:?} to erofs metadata {:?}",
+                    &base_name, &layer_path
+                );
+                let mut erofs_file = OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .open(&layer_path)
+                    .context("failed to open erofs metadata for appending")?;
+                let mut base_file = File::open(&base_name)
+                    .context("failed to open decompressed tar file for reading")?;
+                std::io::copy(&mut base_file, &mut erofs_file)
+                    .context("failed to append decompressed tar file to erofs metadata")?;
+                
+                // get size of erofs meta + tar
+                let erofs_file_size = erofs_file.metadata()
+                    .expect("Failed to get metadata")
+                    .len();
+
+                // Align the size to 512 bytes
+                let alignment = 512;
+                let padding = (alignment - (erofs_file_size % alignment)) % alignment;
+
+                if padding > 0 {
+                    let padding_bytes = vec![0u8; padding as usize];
+                    erofs_file.write_all(&padding_bytes)
+                        .expect("Failed to write padding");
+                    trace!("Added {} bytes of padding to align to {} bytes", padding, alignment);
+                }
+
+                // get size of erofs meta + tar
+                let erofs_file_size = erofs_file.metadata()
+                    .expect("Failed to get metadata")
+                    .len();
+                trace!("Size of erofs meta + tar: {}", erofs_file_size);
+
+                trace!("Appending dm-verity tree to {:?}", &layer_path);
+                let mut erofs_file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&layer_path)?;
+                let root_hash = verity::append_tree::<Sha256>(&mut erofs_file)
                     .context("failed to append verity tree")?;
 
-                trace!("Root hash for {:?} is {:x}", &base_name, root_hash);
+                trace!("Root hash for {:?} is {:x}", &layer_path, root_hash);
                 Ok(root_hash)
             }
         })
@@ -1055,7 +1118,7 @@ impl TarDevSnapshotter {
     ) -> Result<(), Status> {
         let dir = self.store.read().await.staging_dir()?;
         let base_name = dir.path().join(name_to_hash(&key));
-        let snapshot_name = base_name.clone();
+        let erofs_snapshot_name = base_name.with_extension("erofs");
 
         {
             let Some(digest_str) = labels.get(TARGET_LAYER_DIGEST_LABEL) else {
@@ -1205,8 +1268,8 @@ impl TarDevSnapshotter {
             let to = store
                 .layer_path_to_write(&key)
                 .map_err(|e| Status::unknown(format!("failed to create layer path: {e}")))?;
-            trace!("Renaming from {:?} to {:?}", &snapshot_name, &to);
-            tokio::fs::rename(snapshot_name, to).await?;
+            trace!("Renaming from {:?} to {:?}", &erofs_snapshot_name, &to);
+            tokio::fs::rename(erofs_snapshot_name, to).await?;
             store
                 .write_snapshot(Kind::Committed, key, parent, labels)
                 .map_err(|e| Status::internal(format!("failed to write snapshot: {e}")))?;

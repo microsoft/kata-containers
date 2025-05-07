@@ -233,7 +233,7 @@ pub fn append_tree<T: Digest + Clone>(
     file.rewind()?;
     let mut salt = Vec::new();
     salt.resize(<T as OutputSizeUser>::OutputSize::USIZE, 0);
-    let verity = Verity::<T>::new(file_size, 4096, 4096, &salt, file_size)?;
+    let verity = Verity::<T>::new(file_size, 512, 512, &salt, file_size)?;
     traverse_file(file, 0, true, verity, &mut |f, data, offset| {
         f.seek(SeekFrom::Start(offset))?;
         f.write_all(data)
