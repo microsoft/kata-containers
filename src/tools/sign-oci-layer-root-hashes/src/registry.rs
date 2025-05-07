@@ -367,7 +367,6 @@ async fn create_decompressed_layer_file(
             .await
             .context("Failed to pull layer file")?,
     }
-    // attach_tarfs_index(decompressed_path).context("Failed to attach tarfs index")?;
     attach_erofs_meta(decompressed_path).context("Failed to attach erofs meta")?;
 
     Ok(())
@@ -407,23 +406,6 @@ fn decompress_file(compressed_path: &Path, decompressed_path: &Path) -> Result<(
 
     Ok(())
 }
-
-// fn attach_tarfs_index(path: &Path) -> Result<()> {
-//     info!("Adding tarfs index to layer");
-//     let mut file = std::fs::OpenOptions::new()
-//         .read(true)
-//         .write(true)
-//         .open(path)
-//         .context("Failed to open {path} for writing")?;
-//     tarindex::append_index(&mut file)
-//         .map_err(|e| anyhow!(e))
-//         .context("Failed to append index")?;
-//     file.flush()
-//         .map_err(|e| anyhow!(e))
-//         .context("Failed to flush file changes")?;
-
-//     Ok(())
-// }
 
 fn attach_erofs_meta(path: &Path) -> Result<()> {
     info!("Creating erofs meta. Appending decompressed tar to erofs meta");
