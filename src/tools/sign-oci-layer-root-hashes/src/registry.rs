@@ -451,11 +451,10 @@ fn attach_erofs_meta(path: &Path) -> Result<()> {
     std::io::copy(&mut base_file, &mut erofs_file)
         .context("failed to append decompressed tar file to erofs image")?;
 
-    // get size of erofs meta + tar before padding
+    // get size of erofs meta + tar
     let erofs_file_size = erofs_file.metadata()
     .expect("Failed to get metadata")
     .len();
-    debug!("Size of (erofs meta + tar, before padding): {}", erofs_file_size);
 
     // Align the size to 512 bytes
     let alignment = 512;
@@ -472,7 +471,7 @@ fn attach_erofs_meta(path: &Path) -> Result<()> {
     let erofs_file_size = erofs_file.metadata()
     .expect("Failed to get metadata")
     .len();
-    debug!("Size of (erofs meta + tar, after padding): {}", erofs_file_size);
+    debug!("Size of erofs meta + tar: {}", erofs_file_size);
 
     erofs_file.flush()
         .map_err(|e| anyhow!(e))
