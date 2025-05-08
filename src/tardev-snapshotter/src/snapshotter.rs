@@ -1015,6 +1015,7 @@ impl TarDevSnapshotter {
                     }
                 }
                 file.flush()?;
+                drop(file);
 
                 // Create an erofs metadata using mkfs.erofs
                 let layer_path = base_name.with_extension("erofs");
@@ -1026,7 +1027,9 @@ impl TarDevSnapshotter {
                     .args([
                         "--tar=i",
                         "-T", "0", // zero out unix time
+                        "--mkfs-time", // clear out mkfs time in superblock, but keep per-inode mtime
                         "-U", EROFS_METADATA_UUID, // set UUID to something specific
+                        "--aufs", // needed to convert OCI whiteouts/opaque to overlayfs metadata
                         "--quiet",
                         layer_path.to_str().unwrap(),
                         base_name.to_str().unwrap(),
