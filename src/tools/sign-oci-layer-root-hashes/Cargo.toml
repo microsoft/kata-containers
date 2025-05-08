@@ -47,6 +47,9 @@ serde_json = "1.0.39"
 serde-transcode = "1.1.1"
 tokio = {version = "1.33.0", features = ["rt-multi-thread"]}
 
+# Common erofs constants
+erofs-common = { path = "../../erofs-common" }
+
 # OCI container specs.
 oci = { path = "../../libs/oci" }
 

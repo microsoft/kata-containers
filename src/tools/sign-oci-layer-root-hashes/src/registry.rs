@@ -24,6 +24,8 @@ use std::fs::OpenOptions;
 use std::io::BufWriter;
 use std::{io, io::Seek, io::Write, path::Path, process::Command, fs::File};
 use tokio::io::AsyncWriteExt;
+use erofs_common::constants::EROFS_BLOCK_ALIGNMENT;
+use erofs_common::constants::EROFS_METADATA_UUID;
 
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
@@ -421,7 +423,7 @@ fn attach_erofs_meta(path: &Path) -> Result<()> {
         .args([
             "--tar=i",
             "-T", "0", // zero out unix time
-            "-U", "c1b9d5a2-f162-11cf-9ece-0020afc76f16", // set UUID to something specific
+            "-U", EROFS_METADATA_UUID, // set UUID to something specific
             "--quiet",
             erofs_path.to_str().unwrap(),
             path.to_str().unwrap(),
@@ -457,7 +459,7 @@ fn attach_erofs_meta(path: &Path) -> Result<()> {
     .len();
 
     // Align the size to 512 bytes
-    let alignment = 512;
+    let alignment = EROFS_BLOCK_ALIGNMENT;
     let padding = (alignment - (erofs_file_size % alignment)) % alignment;
 
     if padding > 0 {
