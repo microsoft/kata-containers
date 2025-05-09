@@ -34,12 +34,12 @@ pub fn create_erofs_metadata(
 
     let mut mkfs_cmd = Command::new("mkfs.erofs");
     mkfs_cmd.args([
-        "--tar=i",                // Process tarball as input
-        "-T", "0",                // Zero out unix time
-        "--mkfs-time",            // Clear out mkfs time in superblock, keep per-inode mtime
+        "--tar=i",                 // tar index mode
+        "-T", "0",                 // Zero out unix time
+        "--mkfs-time",             // Clear out mkfs time in superblock, keep per-inode mtime
         "-U", EROFS_METADATA_UUID, // UUID for erofs metadata
-        "--aufs",                 // Convert OCI whiteouts/opaque to overlayfs metadata
-        "--quiet",                // Reduce output verbosity
+        "--aufs",                  // Convert OCI whiteouts/opaque to overlayfs metadata
+        "--quiet",                 // Reduce output verbosity
         erofs_metadata_path.to_str().unwrap(),
         decompressed_tar_path.to_str().unwrap(),
     ]);
@@ -121,8 +121,10 @@ pub fn append_tar_to_erofs_metadata(
     drop(tar_file);
 
     // Flush to ensure all changes are written to disk
+    // Close the erofs file
     erofs_file.flush()
         .context("Failed to flush erofs file changes")?;
+    drop(erofs_file);
 
     debug!("Final size of erofs metadata + tar: {} bytes", erofs_file_size);
     
