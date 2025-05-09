@@ -339,6 +339,10 @@ dependencies = [
 [[package]]
 name = "erofs-common"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+]
 
 [[package]]
 name = "errno"
@@ -1596,6 +1600,7 @@ dependencies = [
 name = "verity"
 version = "0.1.0"
 dependencies = [
+ "erofs-common",
  "generic-array",
  "sha2",
  "zerocopy",
