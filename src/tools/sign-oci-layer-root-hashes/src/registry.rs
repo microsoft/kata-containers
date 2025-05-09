@@ -25,7 +25,7 @@ use std::io::BufWriter;
 use std::{io, io::Seek, io::Write, path::Path};
 use tokio::io::AsyncWriteExt;
 use erofs_common::constants::VERITY_BLOCK_SIZE;
-use erofs_common::utils::{create_erofs_metadata, append_tar_to_erofs_metadata};
+use erofs_common::utils;
 
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
@@ -415,10 +415,10 @@ fn attach_erofs_meta(path: &Path) -> Result<()> {
     let erofs_path = path.with_extension("erofs");
 
     // Create an erofs metadata using mkfs.erofs
-    create_erofs_metadata(&path, &erofs_path)?;
+    utils::create_erofs_metadata(&path, &erofs_path)?;
 
     // Append the decompressed tar file to the erofs metadata
-    append_tar_to_erofs_metadata(&path, &erofs_path)?;
+    utils::append_tar_to_erofs_metadata(&path, &erofs_path)?;
 
     Ok(())
 }

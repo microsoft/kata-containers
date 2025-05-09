@@ -24,7 +24,7 @@ use tokio::sync::RwLock;
 use tonic::Status;
 use uuid::Uuid;
 use zerocopy::AsBytes;
-use erofs_common::utils::{create_erofs_metadata, append_tar_to_erofs_metadata};
+use erofs_common::utils;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
@@ -1019,11 +1019,11 @@ impl TarDevSnapshotter {
                 let layer_path = PathBuf::from(format!("{}_etm", base_name.to_string_lossy())); // etm = erofs meta + tar + merkle tree
 
                 // Create an erofs metadata using mkfs.erofs
-                create_erofs_metadata(&base_name, &layer_path)?;
+                utils::create_erofs_metadata(&base_name, &layer_path)?;
 
                 // Append the decompressed tar file to the erofs metadata
-                append_tar_to_erofs_metadata(&base_name, &layer_path)?;
-                
+                utils::append_tar_to_erofs_metadata(&base_name, &layer_path)?;
+
                 // Cleanup the decompressed tar file
                 std::fs::remove_file(&base_name)
                     .context("failed to remove decompressed tar file")?;
