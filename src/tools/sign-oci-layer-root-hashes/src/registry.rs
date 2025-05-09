@@ -369,7 +369,7 @@ async fn create_decompressed_layer_file(
             .await
             .context("Failed to pull layer file")?,
     }
-    attach_erofs_meta(decompressed_path).context("Failed to attach erofs meta")?;
+    attach_erofs_meta(decompressed_path).context("Failed to attach erofs metadata")?;
 
     Ok(())
 }
@@ -410,12 +410,12 @@ fn decompress_file(compressed_path: &Path, decompressed_path: &Path) -> Result<(
 }
 
 fn attach_erofs_meta(path: &Path) -> Result<()> {
-    info!("Creating erofs meta. Appending decompressed tar to erofs meta");
+    info!("Creating erofs metadata. Appending decompressed tar to erofs metadata");
 
     // Create an erofs image using mkfs.erofs
     let erofs_path = path.with_extension("erofs");
     debug!(
-        "Creating erofs meta image {:?} from {:?}",
+        "Creating erofs metadata {:?} from {:?}",
         &erofs_path, &path
     );
 
@@ -455,7 +455,7 @@ fn attach_erofs_meta(path: &Path) -> Result<()> {
     std::io::copy(&mut base_file, &mut erofs_file)
         .context("failed to append decompressed tar file to erofs image")?;
 
-    // get size of erofs meta + tar
+    // get size of erofs metadata + tar
     let erofs_file_size = erofs_file.metadata()
     .expect("Failed to get metadata")
     .len();
@@ -471,11 +471,11 @@ fn attach_erofs_meta(path: &Path) -> Result<()> {
         debug!("Added {} bytes of padding to align to {} bytes", padding, alignment);
     }
 
-    // get size of erofs meta + tar after padding
+    // get size of erofs metadata + tar after padding
     let erofs_file_size = erofs_file.metadata()
     .expect("Failed to get metadata")
     .len();
-    debug!("Size of erofs meta + tar: {}", erofs_file_size);
+    debug!("Size of erofs metadata + tar: {}", erofs_file_size);
 
     erofs_file.flush()
         .map_err(|e| anyhow!(e))
