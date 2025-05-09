@@ -24,8 +24,7 @@ use tokio::sync::RwLock;
 use tonic::Status;
 use uuid::Uuid;
 use zerocopy::AsBytes;
-use erofs_common::constants::EROFS_BLOCK_ALIGNMENT;
-use erofs_common::constants::EROFS_METADATA_UUID;
+use erofs_common::utils::{create_erofs_metadata, append_tar_to_erofs_metadata};
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
@@ -1018,75 +1017,18 @@ impl TarDevSnapshotter {
                 drop(file);
 
                 let layer_path = PathBuf::from(format!("{}_etm", base_name.to_string_lossy())); // etm = erofs meta + tar + merkle tree
-                // Create an erofs metadata using mkfs.erofs
-                debug!(
-                    "Creating erofs metadata {:?} from {:?}",
-                    &layer_path, &base_name
-                );
-                let status = Command::new("mkfs.erofs")
-                    .args([
-                        "--tar=i",
-                        "-T", "0", // zero out unix time
-                        "--mkfs-time", // clear out mkfs time in superblock, but keep per-inode mtime
-                        "-U", EROFS_METADATA_UUID, // set UUID to something specific
-                        "--aufs", // needed to convert OCI whiteouts/opaque to overlayfs metadata
-                        "--quiet",
-                        layer_path.to_str().unwrap(),
-                        base_name.to_str().unwrap(),
-                    ])
-                    .status()
-                    .context("Failed to execute mkfs.erofs command")?;
 
-                if !status.success() {
-                    return Err(anyhow!(
-                        "mkfs.erofs failed with status: {}",
-                        status.code().unwrap_or(-1)
-                    ));
-                }
+                // Create an erofs metadata using mkfs.erofs
+                create_erofs_metadata(&base_name, &layer_path)?;
 
                 // Append the decompressed tar file to the erofs metadata
-                debug!(
-                    "Appending decompressed tar file {:?} to erofs metadata {:?}",
-                    &base_name, &layer_path
-                );
-                let mut layer_file = OpenOptions::new()
-                    .write(true)
-                    .append(true)
-                    .open(&layer_path)
-                    .context("failed to open erofs metadata for appending")?;
-                let mut base_file = File::open(&base_name)
-                    .context("failed to open decompressed tar file for reading")?;
-                std::io::copy(&mut base_file, &mut layer_file)
-                    .context("failed to append decompressed tar file to erofs metadata")?;
+                append_tar_to_erofs_metadata(&base_name, &layer_path)?;
                 
-                // Close base_file before cleanup
                 // Cleanup the decompressed tar file
-                drop(base_file);
                 std::fs::remove_file(&base_name)
                     .context("failed to remove decompressed tar file")?;
 
-                // get size of erofs metadata + tar
-                let mut layer_file_size = layer_file.metadata()
-                    .expect("Failed to get metadata")
-                    .len();
-
-                // Align the size to 512 bytes
-                let alignment = EROFS_BLOCK_ALIGNMENT;
-                let padding = (alignment - (layer_file_size % alignment)) % alignment;
-
-                if padding > 0 {
-                    let padding_bytes = vec![0u8; padding as usize];
-                    layer_file.write_all(&padding_bytes)
-                        .expect("Failed to write padding");
-                    trace!("Added {} bytes of padding to align to {} bytes", padding, alignment);
-                }
-
-                // get size of erofs metadata + tar
-                layer_file_size = layer_file.metadata()
-                    .expect("Failed to get metadata")
-                    .len();
-                trace!("Size of erofs metadata + tar: {}", layer_file_size);
-
+                // Append the dm-verity tree to the erofs metadata + tar
                 trace!("Appending dm-verity tree to {:?}", &layer_path);
                 let mut layer_file = OpenOptions::new()
                     .read(true)

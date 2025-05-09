@@ -22,10 +22,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::fs::OpenOptions;
 use std::io::BufWriter;
-use std::{io, io::Seek, io::Write, path::Path, process::Command, fs::File};
+use std::{io, io::Seek, io::Write, path::{Path, PathBuf}};
 use tokio::io::AsyncWriteExt;
-use erofs_common::constants::EROFS_BLOCK_ALIGNMENT;
-use erofs_common::constants::EROFS_METADATA_UUID;
+use erofs_common::constants::VERITY_BLOCK_SIZE;
+use erofs_common::utils::{create_erofs_metadata, append_tar_to_erofs_metadata};
 
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
@@ -412,74 +412,15 @@ fn decompress_file(compressed_path: &Path, decompressed_path: &Path) -> Result<(
 fn attach_erofs_meta(path: &Path) -> Result<()> {
     info!("Creating erofs metadata. Appending decompressed tar to erofs metadata");
 
-    // Create an erofs image using mkfs.erofs
     let erofs_path = path.with_extension("erofs");
-    debug!(
-        "Creating erofs metadata {:?} from {:?}",
-        &erofs_path, &path
-    );
 
-    let status = Command::new("mkfs.erofs")
-        .args([
-            "--tar=i",
-            "-T", "0", // zero out unix time
-            "--mkfs-time", // clear out mkfs time in superblock, but keep per-inode mtime
-            "-U", EROFS_METADATA_UUID, // set UUID to something specific
-            "--aufs", // needed to convert OCI whiteouts/opaque to overlayfs metadata
-            "--quiet",
-            erofs_path.to_str().unwrap(),
-            path.to_str().unwrap(),
-        ])
-        .status()
-        .context("Failed to execute mkfs.erofs command")?;
+    // Create an erofs metadata using mkfs.erofs
+    let path_buf = PathBuf::from(path);
+    let erofs_path_buf = PathBuf::from(&erofs_path);
+    create_erofs_metadata(&path_buf, &erofs_path_buf)?;
 
-    if !status.success() {
-        return Err(anyhow!(
-            "mkfs.erofs failed with status: {}",
-            status.code().unwrap_or(-1)
-        ));
-    }
-
-    // Append the decompressed tar file to the erofs image
-    debug!(
-        "Appending decompressed tar file {:?} to erofs image {:?}",
-        &path, &erofs_path
-    );
-    let mut erofs_file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open(&erofs_path)
-        .context("failed to open erofs image for appending")?;
-    let mut base_file = File::open(&path)
-        .context("failed to open decompressed tar file for reading")?;
-    std::io::copy(&mut base_file, &mut erofs_file)
-        .context("failed to append decompressed tar file to erofs image")?;
-
-    // get size of erofs metadata + tar
-    let erofs_file_size = erofs_file.metadata()
-    .expect("Failed to get metadata")
-    .len();
-
-    // Align the size to 512 bytes
-    let alignment = EROFS_BLOCK_ALIGNMENT;
-    let padding = (alignment - (erofs_file_size % alignment)) % alignment;
-
-    if padding > 0 {
-        let padding_bytes = vec![0u8; padding as usize];
-        erofs_file.write_all(&padding_bytes)
-            .expect("Failed to write padding");
-        debug!("Added {} bytes of padding to align to {} bytes", padding, alignment);
-    }
-
-    // get size of erofs metadata + tar after padding
-    let erofs_file_size = erofs_file.metadata()
-    .expect("Failed to get metadata")
-    .len();
-    debug!("Size of erofs metadata + tar: {}", erofs_file_size);
-
-    erofs_file.flush()
-        .map_err(|e| anyhow!(e))
-        .context("Failed to flush erofs file changes")?;
+    // Append the decompressed tar file to the erofs metadata
+    append_tar_to_erofs_metadata(&path_buf, &erofs_path_buf)?;
 
     Ok(())
 }
@@ -493,7 +434,7 @@ pub fn get_verity_hash_value(path: &Path) -> Result<String> {
     }
 
     let salt = [0u8; <Sha256 as OutputSizeUser>::OutputSize::USIZE];
-    let v = verity::Verity::<Sha256>::new(size, 512, 512, &salt, 0)?;
+    let v = verity::Verity::<Sha256>::new(size, VERITY_BLOCK_SIZE, VERITY_BLOCK_SIZE, &salt, 0)?;
     let hash = verity::traverse_file(&mut file, 0, false, v, &mut verity::no_write)?;
     let result = format!("{:x}", hash);
 

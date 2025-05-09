@@ -48,7 +48,7 @@ serde-transcode = "1.1.1"
 tokio = {version = "1.33.0", features = ["rt-multi-thread"]}
 
 # Common erofs constants
-erofs-common = { path = "../../erofs-common" }
+erofs-common = { path = "../../tardev-snapshotter/erofs-common" }
 
 # OCI container specs.
 oci = { path = "../../libs/oci" }

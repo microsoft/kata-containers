@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use zerocopy::byteorder::{LE, U32, U64};
 use zerocopy::AsBytes;
+use erofs_common::constants::VERITY_BLOCK_SIZE;
 
 #[derive(Default, zerocopy::AsBytes, zerocopy::FromBytes, zerocopy::Unaligned)]
 #[repr(C)]
@@ -233,7 +234,7 @@ pub fn append_tree<T: Digest + Clone>(
     file.rewind()?;
     let mut salt = Vec::new();
     salt.resize(<T as OutputSizeUser>::OutputSize::USIZE, 0);
-    let verity = Verity::<T>::new(file_size, 512, 512, &salt, file_size)?;
+    let verity = Verity::<T>::new(file_size, VERITY_BLOCK_SIZE, VERITY_BLOCK_SIZE, &salt, file_size)?;
     traverse_file(file, 0, true, verity, &mut |f, data, offset| {
         f.seek(SeekFrom::Start(offset))?;
         f.write_all(data)
