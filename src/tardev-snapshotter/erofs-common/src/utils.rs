@@ -48,6 +48,12 @@ fn validate_input_paths(
         return Err(anyhow!("Erofs metadata file does not exist: {:?}", erofs_metadata_path));
     }
 
+    // If we're expecting the erofs metadata file NOT to exist (when creating a new one)
+    // we should error if it already exists
+    if !check_erofs_metadata_exists && erofs_metadata_path.exists() {
+        return Err(anyhow!("Erofs metadata file already exists: {:?}", erofs_metadata_path));
+    }
+
     Ok(())
 }
 
