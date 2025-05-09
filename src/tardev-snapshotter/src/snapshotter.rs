@@ -1041,7 +1041,7 @@ impl TarDevSnapshotter {
                 debug!("Renaming {:?} to {:?}", &layer_path, &base_name);
                 std::fs::rename(&layer_path, &base_name)?;
 
-                trace!("Root hash for {:?} is {:x}", &layer_path, root_hash);
+                trace!("Root hash for {:?} is {:x}", &base_name, root_hash);
                 Ok(root_hash)
             }
         })
