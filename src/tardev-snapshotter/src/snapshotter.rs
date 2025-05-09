@@ -1017,10 +1017,10 @@ impl TarDevSnapshotter {
                 file.flush()?;
                 drop(file);
 
+                let layer_path = PathBuf::from(format!("{}_etm", base_name.to_string_lossy())); // etm = erofs meta + tar + merkle tree
                 // Create an erofs metadata using mkfs.erofs
-                let layer_path = base_name.with_extension("erofs");
                 debug!(
-                    "Creating erofs meta image {:?} from {:?}",
+                    "Creating erofs metadata {:?} from {:?}",
                     &layer_path, &base_name
                 );
                 let status = Command::new("mkfs.erofs")
@@ -1049,45 +1049,55 @@ impl TarDevSnapshotter {
                     "Appending decompressed tar file {:?} to erofs metadata {:?}",
                     &base_name, &layer_path
                 );
-                let mut erofs_file = OpenOptions::new()
+                let mut layer_file = OpenOptions::new()
                     .write(true)
                     .append(true)
                     .open(&layer_path)
                     .context("failed to open erofs metadata for appending")?;
                 let mut base_file = File::open(&base_name)
                     .context("failed to open decompressed tar file for reading")?;
-                std::io::copy(&mut base_file, &mut erofs_file)
+                std::io::copy(&mut base_file, &mut layer_file)
                     .context("failed to append decompressed tar file to erofs metadata")?;
                 
-                // get size of erofs meta + tar
-                let erofs_file_size = erofs_file.metadata()
+                // Close base_file before cleanup
+                // Cleanup the decompressed tar file
+                drop(base_file);
+                std::fs::remove_file(&base_name)
+                    .context("failed to remove decompressed tar file")?;
+
+                // get size of erofs metadata + tar
+                let mut layer_file_size = layer_file.metadata()
                     .expect("Failed to get metadata")
                     .len();
 
                 // Align the size to 512 bytes
                 let alignment = EROFS_BLOCK_ALIGNMENT;
-                let padding = (alignment - (erofs_file_size % alignment)) % alignment;
+                let padding = (alignment - (layer_file_size % alignment)) % alignment;
 
                 if padding > 0 {
                     let padding_bytes = vec![0u8; padding as usize];
-                    erofs_file.write_all(&padding_bytes)
+                    layer_file.write_all(&padding_bytes)
                         .expect("Failed to write padding");
                     trace!("Added {} bytes of padding to align to {} bytes", padding, alignment);
                 }
 
-                // get size of erofs meta + tar
-                let erofs_file_size = erofs_file.metadata()
+                // get size of erofs metadata + tar
+                layer_file_size = layer_file.metadata()
                     .expect("Failed to get metadata")
                     .len();
-                trace!("Size of erofs meta + tar: {}", erofs_file_size);
+                trace!("Size of erofs metadata + tar: {}", layer_file_size);
 
                 trace!("Appending dm-verity tree to {:?}", &layer_path);
-                let mut erofs_file = OpenOptions::new()
+                let mut layer_file = OpenOptions::new()
                     .read(true)
                     .write(true)
                     .open(&layer_path)?;
-                let root_hash = verity::append_tree::<Sha256>(&mut erofs_file)
+                let root_hash = verity::append_tree::<Sha256>(&mut layer_file)
                     .context("failed to append verity tree")?;
+
+                // rename layer_path to base_name
+                debug!("Renaming {:?} to {:?}", &layer_path, &base_name);
+                std::fs::rename(&layer_path, &base_name)?;
 
                 trace!("Root hash for {:?} is {:x}", &layer_path, root_hash);
                 Ok(root_hash)
@@ -1123,7 +1133,7 @@ impl TarDevSnapshotter {
     ) -> Result<(), Status> {
         let dir = self.store.read().await.staging_dir()?;
         let base_name = dir.path().join(name_to_hash(&key));
-        let erofs_snapshot_name = base_name.with_extension("erofs");
+        let snapshot_name = base_name.clone();
 
         {
             let Some(digest_str) = labels.get(TARGET_LAYER_DIGEST_LABEL) else {
@@ -1273,8 +1283,8 @@ impl TarDevSnapshotter {
             let to = store
                 .layer_path_to_write(&key)
                 .map_err(|e| Status::unknown(format!("failed to create layer path: {e}")))?;
-            trace!("Renaming from {:?} to {:?}", &erofs_snapshot_name, &to);
-            tokio::fs::rename(erofs_snapshot_name, to).await?;
+            trace!("Renaming from {:?} to {:?}", &snapshot_name, &to);
+            tokio::fs::rename(snapshot_name, to).await?;
             store
                 .write_snapshot(Kind::Committed, key, parent, labels)
                 .map_err(|e| Status::internal(format!("failed to write snapshot: {e}")))?;
