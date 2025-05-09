@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use log::debug;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -16,16 +16,16 @@ use crate::constants::EROFS_BLOCK_ALIGNMENT;
 ///
 /// # Arguments
 ///
-/// * `decompressed_tar_path` - Reference to PathBuf pointing to the decompressed tar file to process
-/// * `erofs_metadata_path` - Reference to PathBuf where the output erofs metadata file will be created
+/// * `decompressed_tar_path` - Path pointing to the decompressed tar file to process
+/// * `erofs_metadata_path` - Path where the output erofs metadata file will be created
 ///
 /// # Returns
 ///
 /// * `Result<()>` - Success or error
 
 pub fn create_erofs_metadata(
-    decompressed_tar_path: &PathBuf, 
-    erofs_metadata_path: &PathBuf,
+    decompressed_tar_path: &Path, 
+    erofs_metadata_path: &Path,
 ) -> Result<()> {
     debug!(
         "Creating erofs metadata {:?} from {:?}",

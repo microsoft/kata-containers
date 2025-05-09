@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::fs::OpenOptions;
 use std::io::BufWriter;
-use std::{io, io::Seek, io::Write, path::{Path, PathBuf}};
+use std::{io, io::Seek, io::Write, path::Path};
 use tokio::io::AsyncWriteExt;
 use erofs_common::constants::VERITY_BLOCK_SIZE;
 use erofs_common::utils::{create_erofs_metadata, append_tar_to_erofs_metadata};
@@ -415,12 +415,10 @@ fn attach_erofs_meta(path: &Path) -> Result<()> {
     let erofs_path = path.with_extension("erofs");
 
     // Create an erofs metadata using mkfs.erofs
-    let path_buf = PathBuf::from(path);
-    let erofs_path_buf = PathBuf::from(&erofs_path);
-    create_erofs_metadata(&path_buf, &erofs_path_buf)?;
+    create_erofs_metadata(&path, &erofs_path)?;
 
     // Append the decompressed tar file to the erofs metadata
-    append_tar_to_erofs_metadata(&path_buf, &erofs_path_buf)?;
+    append_tar_to_erofs_metadata(&path, &erofs_path)?;
 
     Ok(())
 }
