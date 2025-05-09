@@ -7,6 +7,50 @@ use std::io::Write;
 use crate::constants::EROFS_METADATA_UUID;
 use crate::constants::EROFS_BLOCK_ALIGNMENT;
 
+/// Validates the input file paths for erofs operations.
+///
+/// This function performs common validation checks on the input paths:
+/// 1. Checks if paths are empty
+/// 2. Validates that files exist
+///
+/// # Arguments
+///
+/// * `tar_path` - Path to the tar file
+/// * `erofs_metadata_path` - Path to the erofs file
+/// * `check_tar_exists` - Whether to check if tar file exists
+/// * `check_erofs_metadata_exists` - Whether to check if erofs metadata file exists
+///
+/// # Returns
+///
+/// * `Result<()>` - Success or error
+fn validate_input_paths(
+    tar_path: &Path,
+    erofs_metadata_path: &Path,
+    check_tar_exists: bool,
+    check_erofs_metadata_exists: bool,
+) -> Result<()> {
+    // Check if input parameters are empty
+    if tar_path.as_os_str().is_empty() {
+        return Err(anyhow!("Tar path is empty"));
+    }
+
+    if erofs_metadata_path.as_os_str().is_empty() {
+        return Err(anyhow!("Erofs path is empty"));
+    }
+
+    // Check if tar file exists when required
+    if check_tar_exists && !tar_path.exists() {
+        return Err(anyhow!("Tar file does not exist: {:?}", tar_path));
+    }
+
+    // Check if erofs metadata file exists when required
+    if check_erofs_metadata_exists && !erofs_metadata_path.exists() {
+        return Err(anyhow!("Erofs metadata file does not exist: {:?}", erofs_metadata_path));
+    }
+
+    Ok(())
+}
+
 /// Creates an erofs metadata file from a decompressed tar file.
 ///
 /// This function:
@@ -32,6 +76,9 @@ pub fn create_erofs_metadata(
         erofs_metadata_path, decompressed_tar_path
     );
 
+    // Validate input paths - check tar exists but don't require erofs to exist yet
+    validate_input_paths(decompressed_tar_path, erofs_metadata_path, true, false)?;
+
     let mut mkfs_cmd = Command::new("mkfs.erofs");
     mkfs_cmd.args([
         "--tar=i",                 // tar index mode
@@ -53,6 +100,11 @@ pub fn create_erofs_metadata(
             "mkfs.erofs failed with status: {}",
             status.code().unwrap_or(-1)
         ));
+    }
+
+    // Verify the output file was created
+    if !erofs_metadata_path.exists() {
+        return Err(anyhow!("mkfs.erofs completed but output file was not created: {:?}", erofs_metadata_path));
     }
     
     Ok(())
@@ -82,6 +134,9 @@ pub fn append_tar_to_erofs_metadata(
         "Appending decompressed tar file {:?} to erofs metadata {:?}",
         decompressed_tar_path, erofs_metadata_path
     );
+
+    // Validate input paths - both files must exist
+    validate_input_paths(decompressed_tar_path, erofs_metadata_path, true, true)?;
 
     // Open erofs file in append mode
     let mut erofs_file = OpenOptions::new()
@@ -117,7 +172,7 @@ pub fn append_tar_to_erofs_metadata(
         erofs_file_size = erofs_file_size + padding;
     }
 
-     // Close the tar file
+    // Close the tar file
     drop(tar_file);
 
     // Flush to ensure all changes are written to disk
