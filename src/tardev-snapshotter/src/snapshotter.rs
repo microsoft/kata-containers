@@ -24,6 +24,11 @@ use tokio::sync::RwLock;
 use tonic::Status;
 use uuid::Uuid;
 use zerocopy::AsBytes;
+use oci_client::client::Client as OCI_Client;
+use oci_client::client::ClientConfig;
+use oci_client::secrets::RegistryAuth;
+use oci_client::Reference;
+// use std::io::BufRead;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
@@ -33,8 +38,8 @@ const TARGET_MANIFEST_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.manifest-
 const TAR_GZ_EXTENSION: &str = "tar.gz";
 const TAR_EXTENSION: &str = "tar";
 
-/// Path from where to scan for .json standalone signature manifests
-const SIGNATURE_STORE: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/signatures";
+// /// Path from where to scan for .json standalone signature manifests
+// const SIGNATURE_STORE: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/signatures";
 
 // borrowed from oci-distribution crate, which alas does not build with rustc
 // 1.75, which is used by AzL3
@@ -58,6 +63,19 @@ pub const IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE: &str = "application/vnd.docker.imag
 /// The mediatype that Docker uses for a layer that is gzipped.
 pub const IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE: &str =
     "application/vnd.docker.image.rootfs.diff.tar.gzip";
+
+/// The image name from the signature manifest.
+pub const IMAGE_NAME_LABEL: &str = "image.ref.name";
+/// The image layer digest from the signature manifest.
+pub const IMAGE_LAYER_DIGEST_LABEL: &str = "image.layer.digest";
+/// The image layer root hash from the signature manifest.
+pub const IMAGE_LAYER_ROOT_HASH_LABEL: &str = "image.layer.root_hash";
+/// The image layer signature from the signature manifest.
+pub const IMAGE_LAYER_SIGNATURE_LABEL: &str = "image.layer.signature";
+/// The image layer signature artifact type.
+pub const SIGNATURE_ARTIFACT_TYPE: &str = "application/vnd.oci.mt.pkcs7";
+/// Path from where to a list of approved container references
+const APPROVED_CONTAINERS: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/approved-container-images";
 
 #[derive(Serialize, Deserialize)]
 struct ImageInfo {
@@ -85,40 +103,167 @@ impl Store {
         }
     }
 
-    fn lazy_read_signatures(&mut self) -> Result<()> {
+    async fn lazy_read_signatures(&mut self) -> Result<()> {
         if self.signatures == None {
             debug!("Loading signatures");
-            self.read_signatures()
-                .context("Failed to read signatures")?;
+            self.read_signatures().await?;
         }
 
         Ok(())
     }
 
-    fn read_signatures(&mut self) -> Result<()> {
-        let paths = std::fs::read_dir(Path::new(SIGNATURE_STORE))?;
-        let mut signatures = HashMap::new();
-        for signatures_json_path in paths {
-            let signatures_json = std::fs::read_to_string(
-                signatures_json_path
-                    .context("failed to load signature file path")?
-                    .path(),
-            )?;
-            let image_info_list = serde_json::from_str::<Vec<ImageInfo>>(signatures_json.as_str())?;
-            for image_info in image_info_list {
-                for layer_info in image_info.layers {
-                    signatures.insert(layer_info.digest.clone(), layer_info.clone());
+    async fn read_signatures(&mut self) -> Result<()> {
+    
+        // Create a client configuration
+        let config: ClientConfig = ClientConfig::default();
+    
+        // Initialize the OCI client
+        let client: OCI_Client = OCI_Client::new(config);
+    
+        // Authenticate with the registry (if needed)
+        let auth: RegistryAuth = RegistryAuth::Anonymous;
+
+        let mut signatures = <HashMap<String, LayerInfo>>::new();
+
+        let path = Path::new(APPROVED_CONTAINERS);
+        if !path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("File not found: {}", path.display()),
+            )
+            .into());
+        }
+        let approved_images = std::fs::read_to_string(path)?;
+        for image in approved_images.as_str().split('\n') {
+            println!("Image: {}", image);
+    
+        // // Loop through each line in the file
+        // for image in reader.lines() {
+            let image_ref: Reference = image.parse().map_err(|e| {
+                anyhow!("Failed to parse image reference '{}': {}", image, e)
+            })?;
+        
+            // Store authentication if needed
+            client.store_auth_if_needed(image_ref.registry(), &auth).await;
+            debug!("Processing image reference: {}", image_ref);
+            // Extract the digest from the image reference
+            if let Ok(digest) = client.fetch_manifest_digest(&image_ref, &auth).await {
+                // Construct the new reference using the with_digest() function
+                let new_ref = Reference::with_digest(image_ref.registry().to_string(), image_ref.repository().to_string(), digest.to_string());
+                if let Err(e) = self.load_referrers(&client, &new_ref, &auth, &mut signatures).await {
+                    debug!("Error processing referrers: {}", e);
                 }
+            } else {
+                debug!("Failed to fetch manifest digest for image reference: {}", image_ref);
             }
         }
-
         if !signatures.is_empty() {
             debug!("Loaded {} signatures", signatures.len());
             self.signatures = Some(signatures);
-        }
 
+            if let Some(signatures) = &self.signatures {
+                debug!("Signatures");
+                for (layer, _) in signatures {
+                    debug!("layer: {}", layer);
+                }
+            }
+        }
+    
         Ok(())
     }
+
+    async fn load_referrers(
+        &mut self,
+        client: &OCI_Client,
+        image_ref: &Reference,
+        auth: &RegistryAuth,
+        signatures: &mut HashMap<String, LayerInfo>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        
+        // Fetch the referrers list
+        match client.pull_referrers(image_ref, Some(SIGNATURE_ARTIFACT_TYPE)).await {
+            Ok(referrers) => {
+                for sig_manifest in referrers.manifests {
+                    debug!("signature manifest Digest: {}", sig_manifest.digest);
+    
+                    // Construct the reference for the sig manifest
+                    let sig_manifest_ref: Reference = Reference::with_digest(image_ref.registry().to_string(), image_ref.repository().to_string(), sig_manifest.digest.to_string());
+    
+                    // Pull the sig manifest using the constructed reference and auth
+                    match client.pull_image_manifest(&sig_manifest_ref, &auth).await {
+                        Ok(returned_manifest) => {
+                            // println!("Returned manifest: {:?}", returned_manifest);
+                            if let Some((image_ref, digest, root_hash, signature)) = returned_manifest
+                                .0
+                                .annotations
+                                .as_ref()
+                                .and_then(|annotations| {
+                                    Some((
+                                        annotations.get(IMAGE_NAME_LABEL)?,
+                                        annotations.get(IMAGE_LAYER_DIGEST_LABEL)?,
+                                        annotations.get(IMAGE_LAYER_ROOT_HASH_LABEL)?,
+                                        annotations.get(IMAGE_LAYER_SIGNATURE_LABEL)?,
+                                    ))
+                                })
+                            {
+                                // Construct the LayerInfo
+                                let layer_info = LayerInfo {
+                                    digest: digest.clone(),
+                                    root_hash: root_hash.clone(),
+                                    signature: signature.clone(),
+                                };
+                                signatures.insert(digest.clone(), layer_info.clone());
+    
+                                debug!("Layer Info:");
+                                debug!("  Image Ref: {}", image_ref);
+                                debug!("  Digest: {}", layer_info.digest);
+                                debug!("  Root Hash: {}", layer_info.root_hash);
+                                debug!("  Signature: {}", layer_info.signature);
+                            } else {
+                                return Err(Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "Required annotations not found or annotations are missing.",
+                                )));
+                            }
+                        }
+                        Err(e) => {
+                            debug!("Failed to pull manifest for digest {}: {}", sig_manifest.digest, e);
+                        }
+                    }    
+                }
+            }
+            Err(e) => {
+                debug!("Failed to fetch referrers: {}", e);
+            }
+        }
+    
+        Ok(())
+    }
+
+    // fn read_signatures(&mut self) -> Result<()> {
+    //     let paths = std::fs::read_dir(Path::new(SIGNATURE_STORE))?;
+    //     let mut signatures = HashMap::new();
+    //     for signatures_json_path in paths {
+    //         let signatures_json = std::fs::read_to_string(
+    //             signatures_json_path
+    //                 .context("failed to load signature file path")?
+    //                 .path(),
+    //         )?;
+    //         let image_info_list = serde_json::from_str::<Vec<ImageInfo>>(signatures_json.as_str())?;
+    //         for image_info in image_info_list {
+    //             for layer_info in image_info.layers {
+    //                 signatures.insert(layer_info.digest.clone(), layer_info.clone());
+    //             }
+    //         }
+    //     }
+
+    //     if !signatures.is_empty() {
+    //         debug!("Loaded {} signatures", signatures.len());
+    //         self.signatures = Some(signatures);
+    //     }
+
+    //     Ok(())
+    // }
 
     fn get_info_from_digest(&self, digest: &str) -> Option<LayerInfo> {
         match self.signatures {
@@ -1271,7 +1416,7 @@ impl TarDevSnapshotter {
                 "missing target layer digest label, no support for commiting arbitrary snapshots"
             )))?;
 
-            store.lazy_read_signatures().map_err(|e| {
+            store.lazy_read_signatures().await.map_err(|e| {
                 Status::failed_precondition(format!("failed to read signatures: {e}"))
             })?;
 

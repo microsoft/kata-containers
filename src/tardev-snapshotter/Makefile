@@ -6,3 +6,7 @@ static-checks-build:
 
 clean:
 	cargo clean
+
+
+CFLAGS += -I/usr/include
+

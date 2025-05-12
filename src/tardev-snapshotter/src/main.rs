@@ -48,7 +48,7 @@ pub async fn main() {
         }
     };
 
-    info!("Snapshotter started");
+    info!("Nan's Snapshotter started");
     if let Err(e) = Server::builder()
         .add_service(server(Arc::new(TarDevSnapshotter::new(
             Path::new(&argv[1]),
