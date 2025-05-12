@@ -148,15 +148,58 @@ pub fn baremount(
             })
             .unwrap_or_else(|_| "proc_modules_unreadable".to_string());
         
+        // Check if modprobe is available
+        let modprobe_info = {
+            // Check common locations for modprobe
+            let modprobe_paths = ["/sbin/modprobe", "/usr/sbin/modprobe", "/bin/modprobe", "/usr/bin/modprobe"];
+            let modprobe_exists = modprobe_paths.iter().any(|path| std::path::Path::new(path).exists());
+            
+            if modprobe_exists {
+                // Try to execute modprobe -h to see if it actually works
+                let modprobe_works = std::process::Command::new("modprobe")
+                    .arg("--help")
+                    .output()
+                    .map(|output| output.status.success())
+                    .unwrap_or(false);
+                
+                if modprobe_works {
+                    "modprobe_available"
+                } else {
+                    "modprobe_exists_but_not_working"
+                }
+            } else {
+                "modprobe_not_found"
+            }
+        };
+        
         // Get kernel version
         let kernel_version = std::fs::read_to_string("/proc/version")
             .ok()
             .and_then(|v| v.split_whitespace().nth(2).map(|s| s.to_string()))
             .unwrap_or_else(|| "unknown".to_string());
         
+        // Check if kmod package is installed (modprobe is part of kmod)
+        let kmod_info = if std::process::Command::new("rpm")
+            .args(&["-q", "kmod"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+        {
+            "kmod_package_installed"
+        } else if std::process::Command::new("dpkg")
+            .args(&["-l", "kmod"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)  
+        {
+            "kmod_package_installed"
+        } else {
+            "kmod_package_status_unknown"
+        };
+        
         anyhow!(
             "MOUNT_FAILED: {} -> {} | fs_type='{}' | flags={:?} | options='{}' | \
-             errno={}({}) | source=[{}] | dest=[{}] | {} | {} | kernel={}",
+             errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | {} | kernel={}",
             source.display(),
             destination.display(),
             fs_type,
@@ -168,6 +211,8 @@ pub fn baremount(
             dest_info,
             fs_support_info,
             module_info,
+            modprobe_info,
+            kmod_info,
             kernel_version
         )
     })
