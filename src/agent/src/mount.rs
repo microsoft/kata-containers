@@ -199,7 +199,7 @@ pub fn baremount(
         
         anyhow!(
             "MOUNT_FAILED: {} -> {} | fs_type='{}' | flags={:?} | options='{}' | \
-             errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | {} | {} | {} | \
+             errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | {} | \
              {} | {} | kernel={}",
             source.display(),
             destination.display(),
