@@ -200,7 +200,7 @@ pub fn baremount(
         anyhow!(
             "MOUNT_FAILED: {} -> {} | fs_type='{}' | flags={:?} | options='{}' | \
              errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | {} | {} | {} | \
-             {} | kernel={}",
+             {} | {} | kernel={}",
             source.display(),
             destination.display(),
             fs_type,
