@@ -49,9 +49,6 @@ echo "Installing agent service files into rootfs"
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-containers.target ${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-agent.service ${ROOTFS_PATH}/usr/lib/systemd/system/kata-agent.service
 
-# Add erofs module loading to kata-agent.service
-sudo sed -i '/\[Service\]/a ExecStartPre=/usr/sbin/modprobe erofs' ${ROOTFS_PATH}/usr/lib/systemd/system/kata-agent.service
-
 if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building tarfs kernel driver and installing into rootfs"
 	pushd src/tarfs

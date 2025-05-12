@@ -1,9 +1,3 @@
-#
-# Copyright (c) 2018-2019 Intel Corporation
-#
-# SPDX-License-Identifier: Apache-2.0
-#
-
 [Unit]
 Description=Kata Containers Agent
 Documentation=https://github.com/kata-containers/kata-containers
@@ -14,6 +8,8 @@ Wants=kata-containers.target
 # from a VM vsock port
 StandardOutput=tty
 Type=simple
+# Load erofs module before starting agent (- prefix means don't fail if modprobe fails)
+ExecStartPre=-/sbin/modprobe erofs
 ExecStart=@BINDIR@/@AGENT_NAME@
 LimitNOFILE=1048576
 # ExecStop is required for static agent tracing; in all other scenarios
