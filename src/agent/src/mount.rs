@@ -139,38 +139,48 @@ pub fn baremount(
             })
             .unwrap_or_else(|_| "proc_filesystems_unreadable".to_string());
         
-        // Check if module is loaded
-        let module_info = std::fs::read_to_string("/proc/modules")
+        // Check if module is loaded BEFORE trying modprobe
+        let module_info_before = std::fs::read_to_string("/proc/modules")
             .map(|content| {
                 let loaded = content.contains(&format!("{} ", fs_type)) ||
                             content.contains(&format!("{}.ko", fs_type));
-                format!("module_{}_loaded={}", fs_type, loaded)
+                format!("module_{}_loaded_before={}", fs_type, loaded)
             })
             .unwrap_or_else(|_| "proc_modules_unreadable".to_string());
         
-        // Check if modprobe is available
-        let modprobe_info = {
-            // Check common locations for modprobe
-            let modprobe_paths = ["/sbin/modprobe", "/usr/sbin/modprobe", "/bin/modprobe", "/usr/bin/modprobe"];
-            let modprobe_exists = modprobe_paths.iter().any(|path| std::path::Path::new(path).exists());
-            
-            if modprobe_exists {
-                // Try to execute modprobe -h to see if it actually works
-                let modprobe_works = std::process::Command::new("modprobe")
-                    .arg("--help")
-                    .output()
-                    .map(|output| output.status.success())
-                    .unwrap_or(false);
-                
-                if modprobe_works {
-                    "modprobe_available"
+        // Try to run modprobe for this filesystem type
+        let modprobe_result = std::process::Command::new("modprobe")
+            .arg(fs_type)
+            .output()
+            .map(|output| {
+                if output.status.success() {
+                    format!("modprobe_{}_success", fs_type)
                 } else {
-                    "modprobe_exists_but_not_working"
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    format!("modprobe_{}_failed: stdout='{}' stderr='{}'", 
+                           fs_type, stdout.trim(), stderr.trim())
                 }
-            } else {
-                "modprobe_not_found"
-            }
-        };
+            })
+            .unwrap_or_else(|err| format!("modprobe_command_error: {}", err));
+        
+        // Check if module is loaded AFTER trying modprobe
+        let module_info_after = std::fs::read_to_string("/proc/modules")
+            .map(|content| {
+                let loaded = content.contains(&format!("{} ", fs_type)) ||
+                            content.contains(&format!("{}.ko", fs_type));
+                format!("module_{}_loaded_after={}", fs_type, loaded)
+            })
+            .unwrap_or_else(|_| "proc_modules_unreadable".to_string());
+        
+        // Check if /proc/filesystems changed after modprobe
+        let fs_support_info_after = std::fs::read_to_string("/proc/filesystems")
+            .map(|content| {
+                let has_nodev = content.contains(&format!("nodev\t{}", fs_type));
+                let has_dev = content.contains(&format!("\t{}", fs_type));
+                format!("proc_fs_has_{}_after={}", fs_type, has_nodev || has_dev)
+            })
+            .unwrap_or_else(|_| "proc_filesystems_unreadable".to_string());
         
         // Get kernel version
         let kernel_version = std::fs::read_to_string("/proc/version")
@@ -178,28 +188,19 @@ pub fn baremount(
             .and_then(|v| v.split_whitespace().nth(2).map(|s| s.to_string()))
             .unwrap_or_else(|| "unknown".to_string());
         
-        // Check if kmod package is installed (modprobe is part of kmod)
-        let kmod_info = if std::process::Command::new("rpm")
-            .args(&["-q", "kmod"])
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-        {
-            "kmod_package_installed"
-        } else if std::process::Command::new("dpkg")
-            .args(&["-l", "kmod"])
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)  
-        {
-            "kmod_package_installed"
+        // Check if modprobe binary exists
+        let modprobe_binary_check = if std::path::Path::new("/sbin/modprobe").exists() {
+            "modprobe_at_/sbin/modprobe"
+        } else if std::path::Path::new("/usr/sbin/modprobe").exists() {
+            "modprobe_at_/usr/sbin/modprobe"
         } else {
-            "kmod_package_status_unknown"
+            "modprobe_binary_not_found"
         };
         
         anyhow!(
             "MOUNT_FAILED: {} -> {} | fs_type='{}' | flags={:?} | options='{}' | \
-             errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | {} | kernel={}",
+             errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | {} | {} | {} | \
+             {} | kernel={}",
             source.display(),
             destination.display(),
             fs_type,
@@ -210,9 +211,11 @@ pub fn baremount(
             source_info,
             dest_info,
             fs_support_info,
-            module_info,
-            modprobe_info,
-            kmod_info,
+            module_info_before,
+            modprobe_result,
+            module_info_after,
+            fs_support_info_after,
+            modprobe_binary_check,
             kernel_version
         )
     })
