@@ -52,26 +52,23 @@ echo "Installing agent service files into rootfs"
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-containers.target ${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-agent.service ${ROOTFS_PATH}/usr/lib/systemd/system/kata-agent.service
 
-# Add this: Install erofs module into rootfs
+# Add this: Install erofs module into rootfs (simplified approach)
 echo "Installing erofs module into rootfs"
 if [ -f "${erofs_module_source}" ]; then
-    # Get kernel version from rootfs
-    ROOTFS_KERNEL_VERSION=$(ls ${ROOTFS_PATH}/lib/modules/ | head -1)
-    
-    # Create module directory in rootfs
-    sudo mkdir -p "${ROOTFS_PATH}/lib/modules/${ROOTFS_KERNEL_VERSION}/extra"
+    # Create a simple extra modules directory
+    sudo mkdir -p "${ROOTFS_PATH}/lib/modules/extra"
     
     # Copy erofs module
-    sudo cp "${erofs_module_source}" "${ROOTFS_PATH}/lib/modules/${ROOTFS_KERNEL_VERSION}/extra/"
+    sudo cp "${erofs_module_source}" "${ROOTFS_PATH}/lib/modules/extra/"
     
-    # Update module dependencies in rootfs
-    sudo chroot ${ROOTFS_PATH} depmod -a ${ROOTFS_KERNEL_VERSION}
-    
-    # Add erofs to modules to load at boot
-    echo "erofs" | sudo tee -a "${ROOTFS_PATH}/etc/modules"
-    
-    # Optional: Create modprobe configuration if needed
-    echo "options erofs param=value" | sudo tee "${ROOTFS_PATH}/etc/modprobe.d/erofs.conf"
+    # Create a simple script to load the module
+    sudo tee "${ROOTFS_PATH}/etc/rc.local" << 'EOF'
+#!/bin/bash
+# Load erofs module
+insmod /lib/modules/extra/erofs.ko
+exit 0
+EOF
+    sudo chmod +x "${ROOTFS_PATH}/etc/rc.local"
     
     echo "EROFS module installed successfully"
 else
