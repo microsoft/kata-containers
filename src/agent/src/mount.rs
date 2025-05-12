@@ -112,11 +112,48 @@ pub fn baremount(
         Some(options),
     )
     .map_err(|e| {
+        // Get errno details
+        let errno = e.as_errno();
+        let errno_code = errno.map(|e| e as i32).unwrap_or(-1);
+        let errno_desc = errno.map(|e| e.desc()).unwrap_or("unknown");
+        
+        // Check if source device exists (for block devices)
+        let source_exists = source.exists();
+        let source_metadata = source.metadata().ok();
+        
+        // Check if destination directory exists
+        let dest_exists = destination.exists();
+        
+        // Try to get more info about the source if it's a device
+        let device_info = if source.starts_with("/dev/") {
+            format!(" | source device info: exists={}, metadata={:?}", 
+                source_exists, source_metadata)
+        } else {
+            String::new()
+        };
+        
+        // Check what filesystems are currently supported
+        let supported_fs = std::fs::read_to_string("/proc/filesystems")
+            .unwrap_or_else(|_| "unable to read /proc/filesystems".to_string());
+        let fs_supported = supported_fs.contains(&format!("\t{}", fs_type)) || 
+                          supported_fs.contains(&format!("nodev\t{}", fs_type));
+        
         anyhow!(
-            "failed to mount {} to {}, with error: {}",
+            "failed to mount {} to {} | fs_type='{}' | flags={:?} | options='{}' | \
+             errno={}({}) '{}' | source_exists={} | dest_exists={} | \
+             fs_supported_in_kernel={}{}", 
             source.display(),
             destination.display(),
-            e
+            fs_type,
+            flags,
+            options,
+            errno_code,
+            errno_desc,
+            e,
+            source_exists,
+            dest_exists,
+            fs_supported,
+            device_info
         )
     })
 }
