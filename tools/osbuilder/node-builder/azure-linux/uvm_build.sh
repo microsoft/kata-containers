@@ -17,6 +17,9 @@ IGVM_SVN=${IGVM_SVN:-0}
 script_dir="$(dirname $(readlink -f $0))"
 repo_dir="${script_dir}/../../../../"
 
+# Add this: Define the erofs module path
+erofs_module_source="${script_dir}/erofs.ko"
+
 agent_policy_file_abs="${repo_dir}/src/kata-opa/${AGENT_POLICY_FILE}"
 
 common_file="common.sh"
@@ -48,6 +51,32 @@ popd
 echo "Installing agent service files into rootfs"
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-containers.target ${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-agent.service ${ROOTFS_PATH}/usr/lib/systemd/system/kata-agent.service
+
+# Add this: Install erofs module into rootfs
+echo "Installing erofs module into rootfs"
+if [ -f "${erofs_module_source}" ]; then
+    # Get kernel version from rootfs
+    ROOTFS_KERNEL_VERSION=$(ls ${ROOTFS_PATH}/lib/modules/ | head -1)
+    
+    # Create module directory in rootfs
+    sudo mkdir -p "${ROOTFS_PATH}/lib/modules/${ROOTFS_KERNEL_VERSION}/extra"
+    
+    # Copy erofs module
+    sudo cp "${erofs_module_source}" "${ROOTFS_PATH}/lib/modules/${ROOTFS_KERNEL_VERSION}/extra/"
+    
+    # Update module dependencies in rootfs
+    sudo chroot ${ROOTFS_PATH} depmod -a ${ROOTFS_KERNEL_VERSION}
+    
+    # Add erofs to modules to load at boot
+    echo "erofs" | sudo tee -a "${ROOTFS_PATH}/etc/modules"
+    
+    # Optional: Create modprobe configuration if needed
+    echo "options erofs param=value" | sudo tee "${ROOTFS_PATH}/etc/modprobe.d/erofs.conf"
+    
+    echo "EROFS module installed successfully"
+else
+    echo "Warning: EROFS module not found at ${erofs_module_source}"
+fi
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building tarfs kernel driver and installing into rootfs"
