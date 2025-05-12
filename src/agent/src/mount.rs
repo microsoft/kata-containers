@@ -112,26 +112,12 @@ pub fn baremount(
         Some(options),
     )
     .map_err(|e| {
-        // Get errno details
         let errno_code = e as i32;
         let errno_name = format!("{:?}", e);
         
-        // Check source existence and type
+        // Simplified source checking
         let source_info = if source.exists() {
-            match source.metadata() {
-                Ok(metadata) => {
-                    if metadata.is_dir() {
-                        "directory".to_string()
-                    } else if metadata.file_type().is_block_device() {
-                        "block_device".to_string()
-                    } else if metadata.file_type().is_char_device() {
-                        "char_device".to_string()
-                    } else {
-                        "file".to_string()
-                    }
-                }
-                Err(_) => "exists_but_no_metadata".to_string()
-            }
+            "exists".to_string()
         } else {
             "does_not_exist".to_string()
         };
@@ -144,12 +130,12 @@ pub fn baremount(
                 destination.parent().map(|p| p.exists()).unwrap_or(false))
         };
         
-        // Get kernel filesystem support from /proc/filesystems
+        // Check filesystem support in /proc/filesystems
         let fs_support_info = std::fs::read_to_string("/proc/filesystems")
             .map(|content| {
                 let has_nodev = content.contains(&format!("nodev\t{}", fs_type));
                 let has_dev = content.contains(&format!("\t{}", fs_type));
-                format!("fs_in_proc_filesystems={}", has_nodev || has_dev)
+                format!("proc_fs_has_{}={}", fs_type, has_nodev || has_dev)
             })
             .unwrap_or_else(|_| "proc_filesystems_unreadable".to_string());
         
@@ -162,57 +148,19 @@ pub fn baremount(
             })
             .unwrap_or_else(|_| "proc_modules_unreadable".to_string());
         
-        // Check kernel config (if available)
+        // Get kernel version
         let kernel_version = std::fs::read_to_string("/proc/version")
-            .unwrap_or_else(|_| "unknown".to_string());
-        
-        // Attempt to get kernel config info
-        let config_info = std::process::Command::new("uname")
-            .arg("-r")
-            .output()
             .ok()
-            .and_then(|output| {
-                let kernel_ver = String::from_utf8(output.stdout).ok()?;
-                let kernel_ver = kernel_ver.trim();
-                let config_path = format!("/boot/config-{}", kernel_ver);
-                
-                std::fs::read_to_string(&config_path)
-                    .ok()
-                    .map(|content| {
-                        if content.contains(&format!("CONFIG_{}_FS=y", fs_type.to_uppercase())) {
-                            format!("config_{}_fs=builtin", fs_type.to_lowercase())
-                        } else if content.contains(&format!("CONFIG_{}_FS=m", fs_type.to_uppercase())) {
-                            format!("config_{}_fs=module", fs_type.to_lowercase())
-                        } else {
-                            format!("config_{}_fs=not_set", fs_type.to_lowercase())
-                        }
-                    })
-            })
-            .unwrap_or_else(|| "config_unavailable".to_string());
-        
-        // Try modprobe to see if module can be loaded (non-destructive check)
-        let modprobe_info = if !std::process::Command::new("modinfo")
-            .arg(fs_type)
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-        {
-            format!("modinfo_{}_failed", fs_type)
-        } else {
-            format!("modinfo_{}_exists", fs_type)
-        };
-        
-        // Get mount flags description
-        let flags_desc = format!("{:?} ({})", flags, flags.bits());
+            .and_then(|v| v.split_whitespace().nth(2).map(|s| s.to_string()))
+            .unwrap_or_else(|| "unknown".to_string());
         
         anyhow!(
-            "MOUNT_FAILED: {} -> {} | fs_type='{}' | flags=[{}] | options='{}' | \
-             ERROR: errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | {} | \
-             kernel_version={:?}",
+            "MOUNT_FAILED: {} -> {} | fs_type='{}' | flags={:?} | options='{}' | \
+             errno={}({}) | source=[{}] | dest=[{}] | {} | {} | kernel={}",
             source.display(),
             destination.display(),
             fs_type,
-            flags_desc,
+            flags,
             options,
             errno_code,
             errno_name,
@@ -220,9 +168,7 @@ pub fn baremount(
             dest_info,
             fs_support_info,
             module_info,
-            config_info,
-            modprobe_info,
-            kernel_version.split_whitespace().nth(2).unwrap_or("unknown")
+            kernel_version
         )
     })
 }
