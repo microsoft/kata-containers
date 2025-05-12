@@ -112,33 +112,117 @@ pub fn baremount(
         Some(options),
     )
     .map_err(|e| {
-        // In newer nix versions, the Error already is the errno
+        // Get errno details
         let errno_code = e as i32;
         let errno_name = format!("{:?}", e);
         
-        // Check if source device exists (for block devices)
-        let source_exists = source.exists();
-        let dest_exists = destination.exists();
+        // Check source existence and type
+        let source_info = if source.exists() {
+            match source.metadata() {
+                Ok(metadata) => {
+                    if metadata.is_dir() {
+                        "directory".to_string()
+                    } else if metadata.file_type().is_block_device() {
+                        "block_device".to_string()
+                    } else if metadata.file_type().is_char_device() {
+                        "char_device".to_string()
+                    } else {
+                        "file".to_string()
+                    }
+                }
+                Err(_) => "exists_but_no_metadata".to_string()
+            }
+        } else {
+            "does_not_exist".to_string()
+        };
         
-        // Check what filesystems are currently supported
-        let supported_fs = std::fs::read_to_string("/proc/filesystems")
-            .unwrap_or_else(|_| "unable to read /proc/filesystems".to_string());
-        let fs_supported = supported_fs.contains(&format!("\t{}", fs_type)) || 
-                          supported_fs.contains(&format!("nodev\t{}", fs_type));
+        // Check if destination exists
+        let dest_info = if destination.exists() {
+            "exists".to_string()
+        } else {
+            format!("does_not_exist(parent_exists={})", 
+                destination.parent().map(|p| p.exists()).unwrap_or(false))
+        };
+        
+        // Get kernel filesystem support from /proc/filesystems
+        let fs_support_info = std::fs::read_to_string("/proc/filesystems")
+            .map(|content| {
+                let has_nodev = content.contains(&format!("nodev\t{}", fs_type));
+                let has_dev = content.contains(&format!("\t{}", fs_type));
+                format!("fs_in_proc_filesystems={}", has_nodev || has_dev)
+            })
+            .unwrap_or_else(|_| "proc_filesystems_unreadable".to_string());
+        
+        // Check if module is loaded
+        let module_info = std::fs::read_to_string("/proc/modules")
+            .map(|content| {
+                let loaded = content.contains(&format!("{} ", fs_type)) ||
+                            content.contains(&format!("{}.ko", fs_type));
+                format!("module_{}_loaded={}", fs_type, loaded)
+            })
+            .unwrap_or_else(|_| "proc_modules_unreadable".to_string());
+        
+        // Check kernel config (if available)
+        let kernel_version = std::fs::read_to_string("/proc/version")
+            .unwrap_or_else(|_| "unknown".to_string());
+        
+        // Attempt to get kernel config info
+        let config_info = std::process::Command::new("uname")
+            .arg("-r")
+            .output()
+            .ok()
+            .and_then(|output| {
+                let kernel_ver = String::from_utf8(output.stdout).ok()?;
+                let kernel_ver = kernel_ver.trim();
+                let config_path = format!("/boot/config-{}", kernel_ver);
+                
+                std::fs::read_to_string(&config_path)
+                    .ok()
+                    .map(|content| {
+                        if content.contains(&format!("CONFIG_{}_FS=y", fs_type.to_uppercase())) {
+                            format!("config_{}_fs=builtin", fs_type.to_lowercase())
+                        } else if content.contains(&format!("CONFIG_{}_FS=m", fs_type.to_uppercase())) {
+                            format!("config_{}_fs=module", fs_type.to_lowercase())
+                        } else {
+                            format!("config_{}_fs=not_set", fs_type.to_lowercase())
+                        }
+                    })
+            })
+            .unwrap_or_else(|| "config_unavailable".to_string());
+        
+        // Try modprobe to see if module can be loaded (non-destructive check)
+        let modprobe_info = if !std::process::Command::new("modinfo")
+            .arg(fs_type)
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+        {
+            format!("modinfo_{}_failed", fs_type)
+        } else {
+            format!("modinfo_{}_exists", fs_type)
+        };
+        
+        // Get mount flags description
+        let flags_desc = format!("{:?} ({})", flags, flags.bits());
         
         anyhow!(
-            "failed to mount {} to {} | fs_type='{}' | flags={:?} | options='{}' | \
-             errno={}({}) | source_exists={} | dest_exists={} | fs_supported_in_kernel={}",
+            "MOUNT_FAILED: {} -> {} | fs_type='{}' | flags=[{}] | options='{}' | \
+             ERROR: errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | {} | \
+             kernel_version={:?}",
             source.display(),
             destination.display(),
             fs_type,
-            flags,
+            flags_desc,
             options,
             errno_code,
             errno_name,
-            source_exists,
-            dest_exists,
-            fs_supported
+            source_info,
+            dest_info,
+            fs_support_info,
+            module_info,
+            config_info,
+            modprobe_info,
+            kernel_version.split_whitespace().nth(2).unwrap_or("unknown")
         )
     })
 }
