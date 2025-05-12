@@ -25,6 +25,7 @@ nix = "0.24.2"
 devicemapper = "0.33.1"
 anyhow = "=1.0.58"
 zerocopy = "0.6.1"
+oci-client = "0.14.0"
 
 # Common erofs constants
 erofs-common = { path = "./erofs-common" }
