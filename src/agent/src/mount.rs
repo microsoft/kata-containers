@@ -149,20 +149,54 @@ pub fn baremount(
             .unwrap_or_else(|_| "proc_modules_unreadable".to_string());
         
         // Try to run modprobe for this filesystem type
-        let modprobe_result = std::process::Command::new("modprobe")
-            .arg(fs_type)
-            .output()
-            .map(|output| {
-                if output.status.success() {
+        let modprobe_result = {
+            let modprobe_output = std::process::Command::new("modprobe")
+                .arg(fs_type)
+                .output();
+            
+            match modprobe_output {
+                Ok(output) if output.status.success() => {
                     format!("modprobe_{}_success", fs_type)
-                } else {
+                }
+                Ok(output) => {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    format!("modprobe_{}_failed: stdout='{}' stderr='{}'", 
-                           fs_type, stdout.trim(), stderr.trim())
+                    let mut result = format!("modprobe_{}_failed: stdout='{}' stderr='{}'", 
+                                           fs_type, stdout.trim(), stderr.trim());
+                    
+                    // If modprobe failed, try to find and load the module manually
+                    let potential_paths = [
+                        format!("/lib/modules/extra/{}.ko", fs_type),
+                        format!("/opt/{}/{}.ko", fs_type, fs_type),
+                        format!("/usr/local/lib/{}/{}.ko", fs_type, fs_type),
+                        format!("/lib/modules/{}.ko", fs_type),
+                    ];
+                    
+                    for path in &potential_paths {
+                        if std::path::Path::new(path).exists() {
+                            match std::process::Command::new("insmod").arg(path).output() {
+                                Ok(insmod_output) if insmod_output.status.success() => {
+                                    result = format!("modprobe_failed_but_insmod_{}_success_from_{}", 
+                                                   fs_type, path);
+                                    break;
+                                }
+                                Ok(insmod_output) => {
+                                    let insmod_stderr = String::from_utf8_lossy(&insmod_output.stderr);
+                                    result += &format!(" | insmod_{}_failed: stderr='{}'", 
+                                                     path, insmod_stderr.trim());
+                                }
+                                Err(err) => {
+                                    result += &format!(" | insmod_{}_command_error: {}", path, err);
+                                }
+                            }
+                        }
+                    }
+                    
+                    result
                 }
-            })
-            .unwrap_or_else(|err| format!("modprobe_command_error: {}", err));
+                Err(err) => format!("modprobe_command_error: {}", err)
+            }
+        };
         
         // Check if module is loaded AFTER trying modprobe
         let module_info_after = std::fs::read_to_string("/proc/modules")
