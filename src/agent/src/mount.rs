@@ -130,6 +130,67 @@ pub fn baremount(
                 destination.parent().map(|p| p.exists()).unwrap_or(false))
         };
         
+        // Get kernel version and expected module paths
+        let kernel_version = std::fs::read_to_string("/proc/version")
+            .ok()
+            .and_then(|v| v.split_whitespace().nth(2).map(|s| s.to_string()))
+            .unwrap_or_else(|| "unknown".to_string());
+        
+        let uname_r = std::process::Command::new("uname")
+            .arg("-r")
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+        
+        // Check what module directories actually exist
+        let module_dirs_check = std::fs::read_dir("/lib/modules")
+            .map(|entries| {
+                let dirs: Vec<String> = entries
+                    .filter_map(|entry| entry.ok())
+                    .filter(|entry| entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
+                    .map(|entry| entry.file_name().to_string_lossy().to_string())
+                    .collect();
+                format!("available_kernel_dirs=[{}]", dirs.join(","))
+            })
+            .unwrap_or_else(|_| "module_dirs_unreadable".to_string());
+        
+        // Search for erofs modules in all possible locations
+        let erofs_search_results = {
+            let search_paths = [
+                "/lib/modules/extra/erofs.ko",
+                &format!("/lib/modules/{}/kernel/fs/erofs/erofs.ko", uname_r),
+                &format!("/lib/modules/{}/kernel/fs/erofs/erofs.ko.xz", uname_r),
+                &format!("/lib/modules/{}/extra/erofs.ko", uname_r),
+                &format!("/lib/modules/{}/updates/erofs.ko", uname_r),
+                "/opt/erofs/erofs.ko",
+                "/usr/local/lib/erofs/erofs.ko",
+            ];
+            
+            let mut found_modules = Vec::new();
+            for path in &search_paths {
+                if std::path::Path::new(path).exists() {
+                    // Get module info if possible
+                    let modinfo = std::process::Command::new("modinfo")
+                        .arg(path)
+                        .arg("-F")
+                        .arg("vermagic")
+                        .output()
+                        .map(|output| {
+                            let vermagic = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            format!("{}:vermagic='{}'", path, vermagic)
+                        })
+                        .unwrap_or_else(|_| format!("{}:no_modinfo", path));
+                    found_modules.push(modinfo);
+                }
+            }
+            
+            if found_modules.is_empty() {
+                "no_erofs_modules_found".to_string()
+            } else {
+                format!("found_modules=[{}]", found_modules.join(" | "))
+            }
+        };
+        
         // Check filesystem support in /proc/filesystems
         let fs_support_info = std::fs::read_to_string("/proc/filesystems")
             .map(|content| {
@@ -164,12 +225,13 @@ pub fn baremount(
                     let mut result = format!("modprobe_{}_failed: stdout='{}' stderr='{}'", 
                                            fs_type, stdout.trim(), stderr.trim());
                     
-                    // If modprobe failed, try to find and load the module manually
+                    // Try all potential paths we found
                     let potential_paths = [
                         format!("/lib/modules/extra/{}.ko", fs_type),
+                        format!("/lib/modules/{}/kernel/fs/{}/{}.ko", uname_r, fs_type, fs_type),
+                        format!("/lib/modules/{}/extra/{}.ko", uname_r, fs_type),
                         format!("/opt/{}/{}.ko", fs_type, fs_type),
                         format!("/usr/local/lib/{}/{}.ko", fs_type, fs_type),
-                        format!("/lib/modules/{}.ko", fs_type),
                     ];
                     
                     for path in &potential_paths {
@@ -216,25 +278,10 @@ pub fn baremount(
             })
             .unwrap_or_else(|_| "proc_filesystems_unreadable".to_string());
         
-        // Get kernel version
-        let kernel_version = std::fs::read_to_string("/proc/version")
-            .ok()
-            .and_then(|v| v.split_whitespace().nth(2).map(|s| s.to_string()))
-            .unwrap_or_else(|| "unknown".to_string());
-        
-        // Check if modprobe binary exists
-        let modprobe_binary_check = if std::path::Path::new("/sbin/modprobe").exists() {
-            "modprobe_at_/sbin/modprobe"
-        } else if std::path::Path::new("/usr/sbin/modprobe").exists() {
-            "modprobe_at_/usr/sbin/modprobe"
-        } else {
-            "modprobe_binary_not_found"
-        };
-        
         anyhow!(
             "MOUNT_FAILED: {} -> {} | fs_type='{}' | flags={:?} | options='{}' | \
-             errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | {} | \
-             {} | {} | kernel={}",
+             errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | \
+             running_kernel='{}' | uname_r='{}' | {} | {} | {} | {}",
             source.display(),
             destination.display(),
             fs_type,
@@ -247,10 +294,12 @@ pub fn baremount(
             fs_support_info,
             module_info_before,
             modprobe_result,
+            kernel_version,
+            uname_r,
+            module_dirs_check,
+            erofs_search_results,
             module_info_after,
-            fs_support_info_after,
-            modprobe_binary_check,
-            kernel_version
+            fs_support_info_after
         )
     })
 }
