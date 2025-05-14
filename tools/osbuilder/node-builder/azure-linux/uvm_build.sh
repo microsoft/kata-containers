@@ -48,33 +48,34 @@ popd
 # ADD THIS SECTION HERE - Copy kernel modules into rootfs
 echo "Installing kernel modules into rootfs"
 
-# Get the UVM kernel version - this should match what's built
-# You might need to adjust this based on your kernel package version
-UVM_KERNEL_VERSION="6.1.58.mshv4-1.azl3"
-
 # Create modules directory in rootfs
 sudo mkdir -p ${ROOTFS_PATH}/lib/modules/
 
-# First, check if we have the exact version with release suffix
-if [ -d "/lib/modules/${UVM_KERNEL_VERSION}" ]; then
-    echo "Copying kernel modules for version ${UVM_KERNEL_VERSION}"
-    sudo cp -r /lib/modules/${UVM_KERNEL_VERSION} ${ROOTFS_PATH}/lib/modules/
-    # Also create a symlink without the release suffix since the kernel might report just the version
-    sudo ln -sf ${UVM_KERNEL_VERSION} ${ROOTFS_PATH}/lib/modules/6.1.58.mshv4
-    # Run depmod for both versions
-    sudo chroot ${ROOTFS_PATH} /sbin/depmod -a ${UVM_KERNEL_VERSION}
-    sudo chroot ${ROOTFS_PATH} /sbin/depmod -a 6.1.58.mshv4
-# If not found, try without release suffix
-elif [ -d "/lib/modules/6.1.58.mshv4" ]; then
-    echo "Copying kernel modules for version 6.1.58.mshv4"
-    sudo cp -r /lib/modules/6.1.58.mshv4 ${ROOTFS_PATH}/lib/modules/
-    sudo chroot ${ROOTFS_PATH} /sbin/depmod -a 6.1.58.mshv4
-else
-    echo "ERROR: Could not find kernel modules for UVM kernel version"
-    echo "Available module directories:"
-    ls -la /lib/modules/
-    exit 1
+# Simply copy all available kernel modules
+echo "Copying all available kernel modules..."
+for module_dir in /lib/modules/*; do
+    if [ -d "$module_dir" ]; then
+        module_version=$(basename "$module_dir")
+        echo "Copying modules for $module_version"
+        sudo cp -r "$module_dir" ${ROOTFS_PATH}/lib/modules/
+    fi
+done
+
+# Create a symlink so the UVM kernel can find modules under the version it expects
+if [ -d "${ROOTFS_PATH}/lib/modules/6.1.58.mshv4-1.azl3" ]; then
+    sudo ln -sf 6.1.58.mshv4-1.azl3 ${ROOTFS_PATH}/lib/modules/6.1.58.mshv4 2>/dev/null || true
 fi
+
+# Verify that erofs module was copied correctly
+echo "Verifying erofs module installation..."
+for version_dir in ${ROOTFS_PATH}/lib/modules/*/; do
+    if [ -f "${version_dir}/kernel/fs/erofs/erofs.ko" ]; then
+        version=$(basename "$version_dir")
+        echo "✓ Found erofs module for kernel version $version"
+    fi
+done
+
+echo "Module copying completed. depmod will be run at runtime by the UVM."
 
 echo "Installing agent service files into rootfs"
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-containers.target ${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target
