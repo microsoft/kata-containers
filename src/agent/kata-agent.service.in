@@ -8,7 +8,10 @@ Wants=kata-containers.target
 # from a VM vsock port
 StandardOutput=tty
 Type=simple
-# Load erofs module before starting agent (- prefix means don't fail if modprobe fails)
+# Load kernel modules before starting agent
+# Run depmod first to ensure dependencies are up to date, then load erofs
+# The - prefix means don't fail the service if the command fails
+ExecStartPre=-/bin/bash -c '/sbin/depmod -a $(uname -r)'
 ExecStartPre=-/sbin/modprobe erofs
 ExecStart=@BINDIR@/@AGENT_NAME@
 LimitNOFILE=1048576
