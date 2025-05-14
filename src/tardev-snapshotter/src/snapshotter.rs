@@ -34,12 +34,11 @@ const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
 const TARGET_MANIFEST_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.manifest-digest";
+const TARGET_IMAGE_REF_LABEL: &str = "containerd.io/snapshot/cri.image-ref";
 
 const TAR_GZ_EXTENSION: &str = "tar.gz";
 const TAR_EXTENSION: &str = "tar";
 
-// /// Path from where to scan for .json standalone signature manifests
-// const SIGNATURE_STORE: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/signatures";
 
 // borrowed from oci-distribution crate, which alas does not build with rustc
 // 1.75, which is used by AzL3
@@ -74,8 +73,6 @@ pub const IMAGE_LAYER_ROOT_HASH_LABEL: &str = "image.layer.root_hash";
 pub const IMAGE_LAYER_SIGNATURE_LABEL: &str = "image.layer.signature";
 /// The image layer signature artifact type.
 pub const SIGNATURE_ARTIFACT_TYPE: &str = "application/vnd.oci.mt.pkcs7";
-/// Path from where to a list of approved container references
-const APPROVED_CONTAINERS: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/approved-container-images";
 
 #[derive(Serialize, Deserialize)]
 struct ImageInfo {
@@ -99,20 +96,18 @@ impl Store {
     fn new(root: &Path) -> Self {
         Self {
             root: root.into(),
-            signatures: None,
+            signatures: Some(<HashMap<String, LayerInfo>>::new()),
         }
     }
 
-    async fn lazy_read_signatures(&mut self) -> Result<()> {
-        if self.signatures == None {
-            debug!("Loading signatures");
-            self.read_signatures().await?;
-        }
+    async fn lazy_read_signatures(&mut self, image_name: String) -> Result<()> {
+        debug!("Loading signatures of image {}", image_name);
+        self.read_signatures(image_name).await?;
 
         Ok(())
     }
 
-    async fn read_signatures(&mut self) -> Result<()> {
+    async fn read_signatures(&mut self, image_name: String) -> Result<()> {
     
         // Create a client configuration
         let config: ClientConfig = ClientConfig::default();
@@ -123,49 +118,28 @@ impl Store {
         // Authenticate with the registry (if needed)
         let auth: RegistryAuth = RegistryAuth::Anonymous;
 
-        let mut signatures = <HashMap<String, LayerInfo>>::new();
-
-        let path = Path::new(APPROVED_CONTAINERS);
-        if !path.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("File not found: {}", path.display()),
-            )
-            .into());
-        }
-        let approved_images = std::fs::read_to_string(path)?;
-        for image in approved_images.as_str().split('\n') {
-            println!("Image: {}", image);
+        let image_ref: Reference = image_name.parse().map_err(|e| {
+            anyhow!("Failed to parse image reference '{}': {}", image_name, e)
+        })?;
     
-        // // Loop through each line in the file
-        // for image in reader.lines() {
-            let image_ref: Reference = image.parse().map_err(|e| {
-                anyhow!("Failed to parse image reference '{}': {}", image, e)
-            })?;
-        
-            // Store authentication if needed
-            client.store_auth_if_needed(image_ref.registry(), &auth).await;
-            debug!("Processing image reference: {}", image_ref);
-            // Extract the digest from the image reference
-            if let Ok(digest) = client.fetch_manifest_digest(&image_ref, &auth).await {
-                // Construct the new reference using the with_digest() function
-                let new_ref = Reference::with_digest(image_ref.registry().to_string(), image_ref.repository().to_string(), digest.to_string());
-                if let Err(e) = self.load_referrers(&client, &new_ref, &auth, &mut signatures).await {
-                    debug!("Error processing referrers: {}", e);
-                }
-            } else {
-                debug!("Failed to fetch manifest digest for image reference: {}", image_ref);
+        // Store authentication if needed
+        client.store_auth_if_needed(image_ref.registry(), &auth).await;
+        debug!("Processing image reference: {}", image_ref);
+        // Extract the digest from the image reference
+        if let Ok(digest) = client.fetch_manifest_digest(&image_ref, &auth).await {
+            // Construct the new reference using the with_digest() function
+            let new_ref = Reference::with_digest(image_ref.registry().to_string(), image_ref.repository().to_string(), digest.to_string());
+            if let Err(e) = self.load_referrers(&client, &new_ref, &auth).await {
+                debug!("Error processing referrers: {}", e);
             }
+        } else {
+            debug!("Failed to fetch manifest digest for image reference: {}", image_ref);
         }
-        if !signatures.is_empty() {
-            debug!("Loaded {} signatures", signatures.len());
-            self.signatures = Some(signatures);
 
-            if let Some(signatures) = &self.signatures {
-                debug!("Signatures");
-                for (layer, _) in signatures {
-                    debug!("layer: {}", layer);
-                }
+        if let Some(signatures) = &self.signatures {
+            debug!("Signatures");
+            for (layer, _) in signatures {
+                debug!("layer: {}", layer);
             }
         }
     
@@ -177,10 +151,9 @@ impl Store {
         client: &OCI_Client,
         image_ref: &Reference,
         auth: &RegistryAuth,
-        signatures: &mut HashMap<String, LayerInfo>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         
-        // Fetch the referrers list
+        // Fetch the referrers list with the specified artifact type
         match client.pull_referrers(image_ref, Some(SIGNATURE_ARTIFACT_TYPE)).await {
             Ok(referrers) => {
                 for sig_manifest in referrers.manifests {
@@ -212,7 +185,9 @@ impl Store {
                                     root_hash: root_hash.clone(),
                                     signature: signature.clone(),
                                 };
-                                signatures.insert(digest.clone(), layer_info.clone());
+                                if let Some(signatures) = self.signatures.as_mut() {
+                                    signatures.insert(digest.clone(), layer_info.clone());
+                                }
     
                                 debug!("Layer Info:");
                                 debug!("  Image Ref: {}", image_ref);
@@ -238,6 +213,13 @@ impl Store {
         }
     
         Ok(())
+    }
+
+    fn has_signature(&self, digest: &str) -> bool {
+        match &self.signatures {
+            Some(signatures) => signatures.contains_key(digest),
+            None => false,
+        }
     }
 
     fn get_info_from_digest(&self, digest: &str) -> Option<LayerInfo> {
@@ -1409,9 +1391,21 @@ impl TarDevSnapshotter {
                 "missing target layer digest label, no support for commiting arbitrary snapshots"
             )))?;
 
-            store.lazy_read_signatures().await.map_err(|e| {
-                Status::failed_precondition(format!("failed to read signatures: {e}"))
-            })?;
+            let Some(image_ref_str) = labels.get(TARGET_IMAGE_REF_LABEL) else {
+                return Err(Status::invalid_argument(
+                    "missing target image ref label",
+                ));
+            };
+
+            // Skip loading signatures if they are already present. If a layer has multiple signatures, only the first loaded one will be used.
+            // TODO: support the latest signature or signature filtering.
+            if !store.has_signature(digest) {
+                store.lazy_read_signatures(image_ref_str.to_string()).await.map_err(|e| {
+                    Status::failed_precondition(format!("failed to read signatures: {e}"))
+                })?;
+            } else {
+                debug!("Signature already exists for {digest}, skip loading the signature");
+            }
 
             trace!("Looking up layer info for {digest}");
             let layer_info = store.get_info_from_digest(digest);
