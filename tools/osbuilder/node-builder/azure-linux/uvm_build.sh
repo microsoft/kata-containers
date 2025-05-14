@@ -17,9 +17,6 @@ IGVM_SVN=${IGVM_SVN:-0}
 script_dir="$(dirname $(readlink -f $0))"
 repo_dir="${script_dir}/../../../../"
 
-# Add this: Define the erofs module path
-erofs_module_source="${script_dir}/erofs.ko"
-
 agent_policy_file_abs="${repo_dir}/src/kata-opa/${AGENT_POLICY_FILE}"
 
 common_file="common.sh"
@@ -48,32 +45,25 @@ sudo -E PATH=$PATH make ${rootfs_make_flags} -B DISTRO=cbl-mariner rootfs
 ROOTFS_PATH="$(readlink -f ./cbl-mariner_rootfs)"
 popd
 
+# ADD THIS SECTION HERE - Copy kernel modules into rootfs
+echo "Installing kernel modules into rootfs"
+# Get the kernel version that the UVM will run
+UVM_KERNEL_VERSION=$(uname -r)
+# Create modules directory in rootfs
+sudo mkdir -p ${ROOTFS_PATH}/lib/modules/
+# Copy the kernel modules from host to rootfs
+if [ -d "/lib/modules/6.1.58.mshv4" ]; then
+    echo "Copying kernel modules for version 6.1.58.mshv4"
+    sudo cp -r /lib/modules/6.1.58.mshv4 ${ROOTFS_PATH}/lib/modules/6.1.58.mshv4
+    # Run depmod to generate dependency files in the rootfs
+    sudo chroot ${ROOTFS_PATH} /sbin/depmod -a 6.1.58.mshv4
+else
+    echo "Warning: Kernel modules for 6.1.58.mshv4 not found on host"
+fi
+
 echo "Installing agent service files into rootfs"
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-containers.target ${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-agent.service ${ROOTFS_PATH}/usr/lib/systemd/system/kata-agent.service
-
-# Add this: Install erofs module into rootfs (simplified approach)
-echo "Installing erofs module into rootfs"
-if [ -f "${erofs_module_source}" ]; then
-    # Create a simple extra modules directory
-    sudo mkdir -p "${ROOTFS_PATH}/lib/modules/extra"
-    
-    # Copy erofs module
-    sudo cp "${erofs_module_source}" "${ROOTFS_PATH}/lib/modules/extra/"
-    
-    # Create a simple script to load the module
-    sudo tee "${ROOTFS_PATH}/etc/rc.local" << 'EOF'
-#!/bin/bash
-# Load erofs module
-insmod /lib/modules/extra/erofs.ko
-exit 0
-EOF
-    sudo chmod +x "${ROOTFS_PATH}/etc/rc.local"
-    
-    echo "EROFS module installed successfully"
-else
-    echo "Warning: EROFS module not found at ${erofs_module_source}"
-fi
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building tarfs kernel driver and installing into rootfs"
