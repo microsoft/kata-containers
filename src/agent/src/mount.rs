@@ -104,6 +104,11 @@ pub fn baremount(
         flags
     );
 
+    if fs_type == "tarfs" {
+    return Err(anyhow!("INTENTIONAL_TARFS_DEBUG_FAILURE: Would have mounted {} to {} with fs={}, flags={:?}, options={:?}", 
+        source.display(), destination.display(), fs_type, flags, options));
+    }
+
     nix::mount::mount(
         Some(source),
         destination,

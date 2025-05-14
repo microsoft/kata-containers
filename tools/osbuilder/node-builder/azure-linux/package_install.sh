@@ -46,10 +46,10 @@ if [ "${CONF_PODS}" == "yes" ]; then
 		echo "Skipping installation of SNP shim debug configuration"
 	fi
 
-	echo "Enabling and starting snapshotter service"
-	if [ "${START_SERVICES}" == "yes" ]; then
-		systemctl enable tardev-snapshotter && systemctl daemon-reload && systemctl restart tardev-snapshotter
-	fi
+	#echo "Enabling and starting snapshotter service"
+	#if [ "${START_SERVICES}" == "yes" ]; then
+	#	systemctl enable tardev-snapshotter && systemctl daemon-reload && systemctl restart tardev-snapshotter
+	#fi
 fi
 
 echo "Installing diagnosability binaries (monitor, runtime, collect-data script)"
