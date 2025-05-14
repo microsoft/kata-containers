@@ -114,154 +114,81 @@ pub fn baremount(
     .map_err(|e| {
         let errno_code = e as i32;
         let errno_name = format!("{:?}", e);
+    
+        // Check source type and details
+        let source_info = if let Ok(metadata) = source.metadata() {
+            let file_type = if metadata.is_file() { "regular_file" }
+            else if metadata.is_block_device() { "block_device" }
+            else if metadata.is_char_device() { "char_device" }
+            else if metadata.is_symlink() { "symlink" }
+            else { "other" };
         
-        // Simplified source checking
-        let source_info = if source.exists() {
-            "exists".to_string()
+            format!("{}(size={})", file_type, metadata.len())
         } else {
-            "does_not_exist".to_string()
+            "not_accessible".to_string()
         };
-        
-        // Check if destination exists
+    
+        // Check destination
         let dest_info = if destination.exists() {
-            "exists".to_string()
+            if destination.is_dir() { "dir_exists" } else { "file_exists" }
         } else {
-            format!("does_not_exist(parent_exists={})", 
+            format!("missing(parent={})", 
                 destination.parent().map(|p| p.exists()).unwrap_or(false))
         };
-        
-        // Get kernel version and expected module paths
-        let kernel_version = std::fs::read_to_string("/proc/version")
-            .ok()
-            .and_then(|v| v.split_whitespace().nth(2).map(|s| s.to_string()))
-            .unwrap_or_else(|| "unknown".to_string());
-        
-        let uname_r = std::process::Command::new("uname")
-            .arg("-r")
-            .output()
-            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
-        
-        // Check what module directories actually exist
-        let module_dirs_check = std::fs::read_dir("/lib/modules")
-            .map(|entries| {
-                let dirs: Vec<String> = entries
-                    .filter_map(|entry| entry.ok())
-                    .filter(|entry| entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
-                    .map(|entry| entry.file_name().to_string_lossy().to_string())
-                    .collect();
-                format!("available_kernel_dirs=[{}]", dirs.join(","))
+    
+        // Check filesystem type support
+        let fs_support = std::fs::read_to_string("/proc/filesystems")
+            .map(|content| {
+                let supported = content.lines().any(|line| 
+                    line.contains(&format!("\t{}", fs_type)) || 
+                    line.contains(&format!("nodev\t{}", fs_type))
+                );
+                if supported { "supported" } else { "not_supported" }
             })
-            .unwrap_or_else(|_| "module_dirs_unreadable".to_string());
+            .unwrap_or("unknown");
+    
+        // For device mapper, get the table info
+        let dm_info = if source.to_string_lossy().contains("/dev/mapper/") {
+            let device_name = source.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown");
         
-        // Search for erofs modules in all possible locations
-        let erofs_search_results = {
-            let search_paths = [
-                &format!("/lib/modules/{}/kernel/fs/erofs/erofs.ko", uname_r),
-                &format!("/lib/modules/{}/kernel/fs/erofs/erofs.ko.xz", uname_r),
-                &format!("/lib/modules/{}/extra/erofs.ko", uname_r),
-                &format!("/lib/modules/{}/updates/erofs.ko", uname_r),
-            ];
-            
-            let mut found_modules = Vec::new();
-            for path in &search_paths {
-                if std::path::Path::new(path).exists() {
-                    // Get module info if possible
-                    let modinfo = std::process::Command::new("modinfo")
-                        .arg(path)
-                        .arg("-F")
-                        .arg("vermagic")
-                        .output()
-                        .map(|output| {
-                            let vermagic = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                            format!("{}:vermagic='{}'", path, vermagic)
-                        })
-                        .unwrap_or_else(|_| format!("{}:no_modinfo", path));
-                    found_modules.push(modinfo);
+            match std::process::Command::new("dmsetup")
+                .args(&["table", device_name])
+                .output()
+            {
+                Ok(output) => {
+                    let table = String::from_utf8_lossy(&output.stdout);
+                    format!("dm_table='{}'", table.trim())
                 }
+                Err(_) => "dm_table=unavailable".to_string()
             }
-            
-            if found_modules.is_empty() {
-                "no_erofs_modules_found".to_string()
-            } else {
-                format!("found_modules=[{}]", found_modules.join(" | "))
-            }
+        } else {
+            "not_dm_device".to_string()
         };
-        
-        // Check filesystem support in /proc/filesystems
-        let fs_support_info = std::fs::read_to_string("/proc/filesystems")
-            .map(|content| {
-                let has_nodev = content.contains(&format!("nodev\t{}", fs_type));
-                let has_dev = content.contains(&format!("\t{}", fs_type));
-                format!("proc_fs_has_{}={}", fs_type, has_nodev || has_dev)
-            })
-            .unwrap_or_else(|_| "proc_filesystems_unreadable".to_string());
-        
-        // Check if module is loaded BEFORE trying modprobe
-        let module_info_before = std::fs::read_to_string("/proc/modules")
-            .map(|content| {
-                let loaded = content.contains(&format!("{} ", fs_type)) ||
-                            content.contains(&format!("{}.ko", fs_type));
-                format!("module_{}_loaded_before={}", fs_type, loaded)
-            })
-            .unwrap_or_else(|_| "proc_modules_unreadable".to_string());
-        
-        // Try to run modprobe for this filesystem type
-        let modprobe_result = std::process::Command::new("modprobe")
-            .arg(fs_type)
-            .output()
-            .map(|output| {
-                if output.status.success() {
-                    format!("modprobe_{}_success", fs_type)
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    format!("modprobe_{}_failed: stdout='{}' stderr='{}'", 
-                           fs_type, stdout.trim(), stderr.trim())
-                }
-            })
-            .unwrap_or_else(|err| format!("modprobe_command_error: {}", err));
-        
-        // Check if module is loaded AFTER trying modprobe
-        let module_info_after = std::fs::read_to_string("/proc/modules")
-            .map(|content| {
-                let loaded = content.contains(&format!("{} ", fs_type)) ||
-                            content.contains(&format!("{}.ko", fs_type));
-                format!("module_{}_loaded_after={}", fs_type, loaded)
-            })
-            .unwrap_or_else(|_| "proc_modules_unreadable".to_string());
-        
-        // Check if /proc/filesystems changed after modprobe
-        let fs_support_info_after = std::fs::read_to_string("/proc/filesystems")
-            .map(|content| {
-                let has_nodev = content.contains(&format!("nodev\t{}", fs_type));
-                let has_dev = content.contains(&format!("\t{}", fs_type));
-                format!("proc_fs_has_{}_after={}", fs_type, has_nodev || has_dev)
-            })
-            .unwrap_or_else(|_| "proc_filesystems_unreadable".to_string());
-        
+    
+        // Check if trying to mount a block device with a filesystem that expects files
+        let compatibility_warning = if fs_type == "erofs" && source_info.contains("block_device") {
+            " WARNING: erofs expects files, not block devices!"
+        } else if fs_type == "squashfs" && source_info.contains("block_device") {
+            " WARNING: squashfs expects files, not block devices!"
+        } else {
+            ""
+        };
+    
         anyhow!(
-            "MOUNT_FAILED: {} -> {} | fs_type='{}' | flags={:?} | options='{}' | \
-             errno={}({}) | source=[{}] | dest=[{}] | {} | {} | {} | \
-             running_kernel='{}' | uname_r='{}' | {} | {} | {} | {}",
+            "Mount failed: '{}' -> '{}' | fs='{}' | errno={}({}) | \
+            source=[{}] | dest=[{}] | fs_support={} | {}{}",
             source.display(),
             destination.display(),
             fs_type,
-            flags,
-            options,
             errno_code,
             errno_name,
             source_info,
             dest_info,
-            fs_support_info,
-            module_info_before,
-            modprobe_result,
-            kernel_version,
-            uname_r,
-            module_dirs_check,
-            erofs_search_results,
-            module_info_after,
-            fs_support_info_after
+            fs_support,
+            dm_info,
+            compatibility_warning
         )
     })
 }
