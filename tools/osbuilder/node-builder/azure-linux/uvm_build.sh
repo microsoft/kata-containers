@@ -47,18 +47,33 @@ popd
 
 # ADD THIS SECTION HERE - Copy kernel modules into rootfs
 echo "Installing kernel modules into rootfs"
-# Get the kernel version that the UVM will run
-UVM_KERNEL_VERSION=$(uname -r)
+
+# Get the UVM kernel version - this should match what's built
+# You might need to adjust this based on your kernel package version
+UVM_KERNEL_VERSION="6.1.58.mshv4-1.azl3"
+
 # Create modules directory in rootfs
 sudo mkdir -p ${ROOTFS_PATH}/lib/modules/
-# Copy the kernel modules from host to rootfs
+
+# First, check if we have the exact version with release suffix
 if [ -d "/lib/modules/${UVM_KERNEL_VERSION}" ]; then
     echo "Copying kernel modules for version ${UVM_KERNEL_VERSION}"
     sudo cp -r /lib/modules/${UVM_KERNEL_VERSION} ${ROOTFS_PATH}/lib/modules/
-    # Run depmod to generate dependency files in the rootfs
+    # Also create a symlink without the release suffix since the kernel might report just the version
+    sudo ln -sf ${UVM_KERNEL_VERSION} ${ROOTFS_PATH}/lib/modules/6.1.58.mshv4
+    # Run depmod for both versions
     sudo chroot ${ROOTFS_PATH} /sbin/depmod -a ${UVM_KERNEL_VERSION}
+    sudo chroot ${ROOTFS_PATH} /sbin/depmod -a 6.1.58.mshv4
+# If not found, try without release suffix
+elif [ -d "/lib/modules/6.1.58.mshv4" ]; then
+    echo "Copying kernel modules for version 6.1.58.mshv4"
+    sudo cp -r /lib/modules/6.1.58.mshv4 ${ROOTFS_PATH}/lib/modules/
+    sudo chroot ${ROOTFS_PATH} /sbin/depmod -a 6.1.58.mshv4
 else
-    echo "Warning: Kernel modules for ${UVM_KERNEL_VERSION} not found on host"
+    echo "ERROR: Could not find kernel modules for UVM kernel version"
+    echo "Available module directories:"
+    ls -la /lib/modules/
+    exit 1
 fi
 
 echo "Installing agent service files into rootfs"
