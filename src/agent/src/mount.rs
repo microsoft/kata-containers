@@ -105,92 +105,111 @@ pub fn baremount(
     );
 
     nix::mount::mount(
-        Some(source),
-        destination,
-        Some(fs_type),
-        flags,
-        Some(options),
-    )
-    .map_err(|e| {
-        let errno_code = e as i32;
-        let errno_name = format!("{:?}", e);
+    Some(source),
+    destination,
+    Some(fs_type),
+    flags,
+    Some(options),
+)
+.map_err(|e| {
+    let errno_code = e as i32;
+    let errno_name = format!("{:?}", e);
     
-        // Check source type and details
-        let source_info = if let Ok(metadata) = source.metadata() {
-            let file_type = if metadata.is_file() { "regular_file" }
-            else if metadata.is_block_device() { "block_device" }
-            else if metadata.is_char_device() { "char_device" }
-            else if metadata.is_symlink() { "symlink" }
-            else { "other" };
+    // Check source type and details
+    let source_info = if let Ok(metadata) = source.metadata() {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
         
-            format!("{}(size={})", file_type, metadata.len())
+        let file_type = if metadata.is_file() { 
+            "regular_file" 
+        } else if metadata.is_dir() { 
+            "directory" 
+        } else if metadata.is_symlink() { 
+            "symlink" 
         } else {
-            "not_accessible".to_string()
-        };
-    
-        // Check destination
-        let dest_info = if destination.exists() {
-            if destination.is_dir() { "dir_exists" } else { "file_exists" }
-        } else {
-            format!("missing(parent={})", 
-                destination.parent().map(|p| p.exists()).unwrap_or(false))
-        };
-    
-        // Check filesystem type support
-        let fs_support = std::fs::read_to_string("/proc/filesystems")
-            .map(|content| {
-                let supported = content.lines().any(|line| 
-                    line.contains(&format!("\t{}", fs_type)) || 
-                    line.contains(&format!("nodev\t{}", fs_type))
-                );
-                if supported { "supported" } else { "not_supported" }
-            })
-            .unwrap_or("unknown");
-    
-        // For device mapper, get the table info
-        let dm_info = if source.to_string_lossy().contains("/dev/mapper/") {
-            let device_name = source.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown");
-        
-            match std::process::Command::new("dmsetup")
-                .args(&["table", device_name])
-                .output()
+            #[cfg(unix)]
             {
-                Ok(output) => {
-                    let table = String::from_utf8_lossy(&output.stdout);
-                    format!("dm_table='{}'", table.trim())
-                }
-                Err(_) => "dm_table=unavailable".to_string()
+                let mode = metadata.mode();
+                if mode & 0o060000 == 0o060000 { "block_device" }
+                else if mode & 0o020000 == 0o020000 { "char_device" }
+                else { "other" }
             }
-        } else {
-            "not_dm_device".to_string()
+            #[cfg(not(unix))]
+            { "other" }
         };
+        
+        format!("{}(size={})", file_type, metadata.len())
+    } else {
+        "not_accessible".to_string()
+    };
     
-        // Check if trying to mount a block device with a filesystem that expects files
-        let compatibility_warning = if fs_type == "erofs" && source_info.contains("block_device") {
-            " WARNING: erofs expects files, not block devices!"
-        } else if fs_type == "squashfs" && source_info.contains("block_device") {
-            " WARNING: squashfs expects files, not block devices!"
-        } else {
-            ""
-        };
+    // Check destination (fix type compatibility)
+    let dest_info = if destination.exists() {
+        if destination.is_dir() { 
+            "dir_exists".to_string() 
+        } else { 
+            "file_exists".to_string() 
+        }
+    } else {
+        format!("missing(parent={})", 
+            destination.parent().map(|p| p.exists()).unwrap_or(false))
+    };
     
-        anyhow!(
-            "Mount failed: '{}' -> '{}' | fs='{}' | errno={}({}) | \
-            source=[{}] | dest=[{}] | fs_support={} | {}{}",
-            source.display(),
-            destination.display(),
-            fs_type,
-            errno_code,
-            errno_name,
-            source_info,
-            dest_info,
-            fs_support,
-            dm_info,
-            compatibility_warning
-        )
-    })
+    // Check filesystem type support
+    let fs_support = std::fs::read_to_string("/proc/filesystems")
+        .map(|content| {
+            let supported = content.lines().any(|line| 
+                line.contains(&format!("\t{}", fs_type)) || 
+                line.contains(&format!("nodev\t{}", fs_type))
+            );
+            if supported { "supported" } else { "not_supported" }
+        })
+        .unwrap_or("unknown");
+    
+    // For device mapper, get the table info
+    let dm_info = if source.to_string_lossy().contains("/dev/mapper/") {
+        let device_name = source.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        
+        match std::process::Command::new("dmsetup")
+            .args(&["table", device_name])
+            .output()
+        {
+            Ok(output) => {
+                let table = String::from_utf8_lossy(&output.stdout);
+                format!("dm_table='{}'", table.trim())
+            }
+            Err(_) => "dm_table=unavailable".to_string()
+        }
+    } else {
+        "not_dm_device".to_string()
+    };
+    
+    // Check if trying to mount a block device with a filesystem that expects files
+    let compatibility_warning = if fs_type == "erofs" && source_info.contains("block_device") {
+        " WARNING: erofs expects files, not block devices!"
+    } else if fs_type == "squashfs" && source_info.contains("block_device") {
+        " WARNING: squashfs expects files, not block devices!"
+    } else {
+        ""
+    };
+    
+    anyhow!(
+        "Mount failed: '{}' -> '{}' | fs='{}' | errno={}({}) | \
+         source=[{}] | dest=[{}] | fs_support={} | {}{}",
+        source.display(),
+        destination.display(),
+        fs_type,
+        errno_code,
+        errno_name,
+        source_info,
+        dest_info,
+        fs_support,
+        dm_info,
+        compatibility_warning
+    )
+})
 }
 
 /// Looks for `mount_point` entry in the /proc/mounts.
