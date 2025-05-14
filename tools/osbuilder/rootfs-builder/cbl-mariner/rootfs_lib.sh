@@ -17,7 +17,7 @@ build_rootfs()
 
 	check_root
 	mkdir -p "${ROOTFS_DIR}"
-	PKG_MANAGER="tdnf"
+	PKG_MANAGER="dnf"
 
 	DNF="${PKG_MANAGER} -y --installroot=${ROOTFS_DIR} --noplugins --releasever=${OS_VERSION}"
 
