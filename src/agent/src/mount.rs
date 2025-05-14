@@ -104,12 +104,12 @@ pub fn baremount(
         flags
     );
 
-    if fs_type == "tarfs" {
+    //if fs_type == "tarfs" {
     return Err(anyhow!("INTENTIONAL_TARFS_DEBUG_FAILURE: Would have mounted {} to {} with fs={}, flags={:?}, options={:?}", 
         source.display(), destination.display(), fs_type, flags, options));
-    }
+    //}
 
-    nix::mount::mount(
+    /*nix::mount::mount(
         Some(source),
         destination,
         Some(fs_type),
@@ -123,7 +123,7 @@ pub fn baremount(
             destination.display(),
             e
         )
-    })
+    })*/
 }
 
 /// Looks for `mount_point` entry in the /proc/mounts.
