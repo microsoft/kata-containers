@@ -86,11 +86,25 @@ mod tests {
             yaml_file: workdir.join("pod.yaml").to_str().map(|s| s.to_string()),
         };
 
-        let policy = genpolicy::policy::AgentPolicy::from_files(&config)
-            .await
-            .unwrap();
-        assert_eq!(policy.resources.len(), 1);
-        let policy = policy.resources[0].generate_policy(&policy);
+        let mut policy = String::new();
+        for i in 0..6 {
+            policy = match genpolicy::policy::AgentPolicy::from_files(&config).await {
+                Ok(policy) => {
+                    assert_eq!(policy.resources.len(), 1);
+                    policy.resources[0].generate_policy(&policy)
+                },
+                Err(e) => {
+                    if i == 5 {
+                        panic!("Failed to generate policy after 6 attempts");
+                    } else {
+                        println!("Retrying to generate policy: {}", e);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                        continue;
+                    }
+                }
+            };
+            break;
+        }
         let policy = BASE64_STANDARD.decode(&policy).unwrap();
 
         // write policy to a file
