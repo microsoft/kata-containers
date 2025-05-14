@@ -52,13 +52,13 @@ UVM_KERNEL_VERSION=$(uname -r)
 # Create modules directory in rootfs
 sudo mkdir -p ${ROOTFS_PATH}/lib/modules/
 # Copy the kernel modules from host to rootfs
-if [ -d "/lib/modules/6.1.58.mshv4" ]; then
-    echo "Copying kernel modules for version 6.1.58.mshv4"
-    sudo cp -r /lib/modules/6.1.58.mshv4 ${ROOTFS_PATH}/lib/modules/6.1.58.mshv4
+if [ -d "/lib/modules/${UVM_KERNEL_VERSION}" ]; then
+    echo "Copying kernel modules for version ${UVM_KERNEL_VERSION}"
+    sudo cp -r /lib/modules/${UVM_KERNEL_VERSION} ${ROOTFS_PATH}/lib/modules/
     # Run depmod to generate dependency files in the rootfs
-    sudo chroot ${ROOTFS_PATH} /sbin/depmod -a 6.1.58.mshv4
+    sudo chroot ${ROOTFS_PATH} /sbin/depmod -a ${UVM_KERNEL_VERSION}
 else
-    echo "Warning: Kernel modules for 6.1.58.mshv4 not found on host"
+    echo "Warning: Kernel modules for ${UVM_KERNEL_VERSION} not found on host"
 fi
 
 echo "Installing agent service files into rootfs"
