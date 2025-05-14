@@ -74,26 +74,6 @@ impl CDHClient {
         Ok(unsealed_secret.plaintext)
     }
 
-    pub async fn secure_mount(
-        &self,
-        volume_type: &str,
-        options: &std::collections::HashMap<String, String>,
-        flags: Vec<String>,
-        mount_point: &str,
-    ) -> Result<()> {
-        let req = confidential_data_hub::SecureMountRequest {
-            volume_type: volume_type.to_string(),
-            options: options.clone(),
-            flags,
-            mount_point: mount_point.to_string(),
-            ..Default::default()
-        };
-        self.secure_mount_client
-            .secure_mount(ttrpc::context::with_timeout(*CDH_API_TIMEOUT), &req)
-            .await?;
-        Ok(())
-    }
-
     pub async fn get_resource(&self, resource_path: &str) -> Result<Vec<u8>> {
         let req = GetResourceRequest {
             ResourcePath: format!("kbs://{}", resource_path),
