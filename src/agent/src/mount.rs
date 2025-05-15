@@ -9,7 +9,7 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::ops::Deref;
 use std::path::Path;
-use std::path::PathBuf
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use kata_sys_util::mount::{get_linux_mount_info, parse_mount_options};
