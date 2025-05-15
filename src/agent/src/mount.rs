@@ -123,19 +123,52 @@ pub fn baremount(
         .nth(4)
         .ok_or_else(|| anyhow!("Failed to parse dm table: '{}'", table.trim()))?;
     
-    let backing_path = format!("/dev/{}", backing_device.replace(":", "/"));
+    // Check if backing device is another dm device
+    let backing_info = std::process::Command::new("dmsetup")
+        .args(&["info", "--noheadings", "-c", "-o", "name", backing_device])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
     
-    // Check if backing device exists and try alternatives
-    let final_path = if Path::new(&backing_path).exists() {
-        backing_path
-    } else {
-        let alt_path = format!("/dev/block/{}", backing_device);
-        if Path::new(&alt_path).exists() {
-            alt_path
-        } else {
-            return Err(anyhow!("erofs backing device not found: tried {} and {}", backing_path, alt_path));
+    // Try different paths for the backing device
+    let possible_paths = vec![
+        format!("/dev/{}", backing_device.replace(":", "/")),
+        format!("/dev/block/{}", backing_device),
+        format!("/dev/mapper/{}", backing_info),
+    ];
+    
+    let mut final_path = None;
+    let mut tried_paths = Vec::new();
+    
+    for path in possible_paths {
+        tried_paths.push(path.clone());
+        if Path::new(&path).exists() {
+            final_path = Some(path);
+            break;
         }
+    }
+    
+    let final_path = final_path.ok_or_else(|| {
+        anyhow!("erofs backing device not found in any location: tried {:?}", tried_paths)
+    })?;
+    
+    // Check if the final device is a regular file or block device
+    let metadata = Path::new(&final_path).metadata()
+        .context("Failed to get backing device metadata")?;
+    
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+    
+    #[cfg(unix)]
+    let device_type = {
+        let mode = metadata.mode();
+        if metadata.is_file() { "regular_file" }
+        else if mode & 0o060000 == 0o060000 { "block_device" }
+        else { "other" }
     };
+    
+    #[cfg(not(unix))]
+    let device_type = if metadata.is_file() { "regular_file" } else { "unknown" };
     
     return nix::mount::mount(
         Some(PathBuf::from(&final_path).as_path()),
@@ -146,8 +179,10 @@ pub fn baremount(
     )
     .map_err(|e| {
         let errno_code = e as i32;
-        anyhow!("erofs mount failed: dm_device={} -> backing={} (from dm_table='{}') | errno={}({:?}) | dest={:?} | flags={:?}",
-                source.display(), final_path, table.trim(), errno_code, e, destination, flags)
+        anyhow!("erofs mount failed: dm_device={} -> backing={} (dm_info='{}', type={}) | \
+                 dm_table='{}' | errno={}({:?}) | dest={:?} | flags={:?} | tried_paths={:?}",
+                source.display(), final_path, backing_info, device_type, 
+                table.trim(), errno_code, e, destination, flags, tried_paths)
     });
 }
 
