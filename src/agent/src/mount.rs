@@ -104,6 +104,41 @@ pub fn baremount(
         flags
     );
 
+
+    // special logic for erofs
+    if fs_type == "erofs" && source.to_string_lossy().contains("/dev/mapper/") {
+    // Get the device mapper table to find the backing device
+    let device_name = source.file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| anyhow!("Invalid device mapper path"))?;
+    
+    let output = std::process::Command::new("dmsetup")
+        .args(&["table", device_name])
+        .output()
+        .context("Failed to get dm table")?;
+    
+    let table = String::from_utf8_lossy(&output.stdout);
+    
+    // Parse dm-verity table: "0 1340 verity 1 254:16 254:16 ..."
+    // The 5th field (index 4) is the backing device
+    let backing_device = table.split_whitespace()
+        .nth(4)
+        .ok_or_else(|| anyhow!("Failed to parse dm table"))?;
+    
+    // Convert from "254:16" format to "/dev/254/16"
+    let backing_path = format!("/dev/{}", backing_device.replace(":", "/"));
+    
+    // Mount the backing device with loop option
+    return nix::mount::mount(
+        Some(PathBuf::from(backing_path).as_path()),
+        destination,
+        Some("erofs"),
+        flags,
+        Some("loop"),
+    )
+    .map_err(|e| anyhow!("erofs mount failed: {}", e));
+}
+
     nix::mount::mount(
     Some(source),
     destination,
