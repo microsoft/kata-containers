@@ -108,7 +108,6 @@ pub fn baremount(
 
     // special logic for erofs
     if fs_type == "erofs" && source.to_string_lossy().contains("/dev/mapper/") {
-    // Get the device mapper table to find the backing device
     let device_name = source.file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| anyhow!("Invalid device mapper path"))?;
@@ -120,24 +119,36 @@ pub fn baremount(
     
     let table = String::from_utf8_lossy(&output.stdout);
     
-    // Parse dm-verity table: "0 1340 verity 1 254:16 254:16 ..."
-    // The 5th field (index 4) is the backing device
     let backing_device = table.split_whitespace()
         .nth(4)
-        .ok_or_else(|| anyhow!("Failed to parse dm table"))?;
+        .ok_or_else(|| anyhow!("Failed to parse dm table: '{}'", table.trim()))?;
     
-    // Convert from "254:16" format to "/dev/254/16"
     let backing_path = format!("/dev/{}", backing_device.replace(":", "/"));
     
-    // Mount the backing device with loop option
+    // Check if backing device exists and try alternatives
+    let final_path = if Path::new(&backing_path).exists() {
+        backing_path
+    } else {
+        let alt_path = format!("/dev/block/{}", backing_device);
+        if Path::new(&alt_path).exists() {
+            alt_path
+        } else {
+            return Err(anyhow!("erofs backing device not found: tried {} and {}", backing_path, alt_path));
+        }
+    };
+    
     return nix::mount::mount(
-        Some(PathBuf::from(backing_path).as_path()),
+        Some(PathBuf::from(&final_path).as_path()),
         destination,
         Some("erofs"),
         flags,
         Some("loop"),
     )
-    .map_err(|e| anyhow!("erofs mount failed: {}", e));
+    .map_err(|e| {
+        let errno_code = e as i32;
+        anyhow!("erofs mount failed: dm_device={} -> backing={} (from dm_table='{}') | errno={}({:?}) | dest={:?} | flags={:?}",
+                source.display(), final_path, table.trim(), errno_code, e, destination, flags)
+    });
 }
 
     nix::mount::mount(
