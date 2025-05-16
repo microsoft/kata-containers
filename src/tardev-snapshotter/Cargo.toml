@@ -13,7 +13,6 @@ tokio = {version = "1.26", features = ["full"]}
 tokio-stream = "0.1.8"
 containerd-snapshots = "0.3.0"
 sha2 = "0.10.6"
-tarindex = { path = "./tarindex" }
 verity = { path = "./verity" }
 log = "0.4.17"
 env_logger = "0.10.0"

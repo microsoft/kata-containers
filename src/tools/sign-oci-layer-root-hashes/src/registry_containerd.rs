@@ -22,6 +22,7 @@ use tokio::{
 use tonic::transport::{Endpoint, Uri};
 use tonic::Request;
 use tower::service_fn;
+use erofs_common::utils;
 
 impl Container {
     pub async fn new_containerd_pull(
@@ -301,6 +302,7 @@ async fn get_verity_hash(
     // Use file names supported by both Linux and Windows.
     let file_name = str::replace(layer_digest, ":", "-");
     let mut decompressed_path = base_dir.join(file_name);
+    let erofs_path = decompressed_path.clone().with_extension("erofs");
     decompressed_path.set_extension("tar");
 
     let mut compressed_path = decompressed_path.clone();
@@ -332,7 +334,7 @@ async fn get_verity_hash(
             .await
             .context(format!("Failed to create verity hash for {layer_digest}"))?;
 
-            let root_hash = registry::get_verity_hash_value(&decompressed_path)
+            let root_hash = registry::get_verity_hash_value(&erofs_path)
                 .context("Failed to get verity hash")?;
             if use_cached_files {
                 registry::add_verity_to_store(cache_file, diff_id, layer_digest, &root_hash)?;
@@ -370,19 +372,8 @@ async fn create_decompressed_layer_file(
         }
         None => pull_layer_file(client, layer_digest, decompressed_path).await?,
     }
-    attach_tarfs_index(decompressed_path)?;
+    attach_erofs_meta(decompressed_path).context("Failed to attach erofs metadata")?;
 
-    Ok(())
-}
-
-fn attach_tarfs_index(path: &Path) -> Result<()> {
-    info!("Adding tarfs index to layer");
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)?;
-    tarindex::append_index(&mut file).map_err(|e| anyhow!(e))?;
-    file.flush().map_err(|e| anyhow!(e))?;
     Ok(())
 }
 
@@ -398,6 +389,20 @@ fn decompress_file(compressed_path: &Path, decompressed_path: &Path) -> Result<(
     std::io::copy(&mut gz_decoder, &mut decompressed_file).map_err(|e| anyhow!(e))?;
 
     decompressed_file.flush().map_err(|e| anyhow!(e))?;
+    Ok(())
+}
+
+fn attach_erofs_meta(path: &Path) -> Result<()> {
+    info!("Creating erofs metadata. Appending decompressed tar to erofs metadata");
+
+    let erofs_path = path.with_extension("erofs");
+
+    // Create an erofs metadata using mkfs.erofs
+    utils::create_erofs_metadata(&path, &erofs_path)?;
+
+    // Append the decompressed tar file to the erofs metadata
+    utils::append_tar_to_erofs_metadata(&path, &erofs_path)?;
+
     Ok(())
 }
 
