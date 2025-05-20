@@ -27,6 +27,9 @@ rootfs_make_flags="AGENT_SOURCE_BIN=${AGENT_INSTALL_DIR}/usr/bin/kata-agent OS_V
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	rootfs_make_flags+=" AGENT_POLICY=yes CONF_GUEST=yes AGENT_POLICY_FILE=${agent_policy_file_abs}"
+else
+	agent_policy_allow_all="${repo_dir}/src/kata-opa/allow-all.rego"
+	rootfs_make_flags+=" AGENT_POLICY=yes AGENT_POLICY_FILE=${agent_policy_file_allow_all}"
 fi
 
 if [ "${CONF_PODS}" == "yes" ]; then

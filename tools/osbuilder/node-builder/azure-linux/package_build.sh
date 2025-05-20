@@ -39,11 +39,7 @@ if [ "${OS_VERSION}" == "3.0" ]; then
 	runtime_make_flags+=" DEFSANDBOXCGROUPONLY=true"
 fi
 
-agent_make_flags="LIBC=gnu OPENSSL_NO_VENDOR=Y DESTDIR=${AGENT_INSTALL_DIR} BUILD_TYPE=${AGENT_BUILD_TYPE}"
-
-if [ "${CONF_PODS}" == "yes" ]; then
-	agent_make_flags+=" AGENT_POLICY=yes"
-fi
+agent_make_flags="LIBC=gnu OPENSSL_NO_VENDOR=Y DESTDIR=${AGENT_INSTALL_DIR} BUILD_TYPE=${AGENT_BUILD_TYPE} AGENT_POLICY=yes"
 
 pushd "${repo_dir}"
 
