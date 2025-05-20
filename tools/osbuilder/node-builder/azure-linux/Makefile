@@ -62,7 +62,7 @@ deploy-uvm:
 	./uvm_install.sh
 
 .PHONY: deploy-confpods
-deploy-confpods: deploy-confpods-package
+deploy-confpods: deploy-confpods-package deploy-confpods-package-uvm
 
 .PHONY: deploy-confpods-package
 deploy-confpods-package:
