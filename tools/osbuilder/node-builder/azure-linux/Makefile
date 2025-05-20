@@ -89,3 +89,11 @@ deploy-confpods-package-tools:
 .PHONY: deploy-confpods-uvm
 deploy-confpods-uvm:
 	CONF_PODS=yes ./uvm_install.sh
+
+.PHONY: tardev
+tardev:
+	./package_tardev_build.sh
+
+.PHONY: deploy-tardev
+deploy-tardev:
+	./package_tardev_install.sh
