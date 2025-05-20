@@ -12,7 +12,7 @@ ifeq ($(BUILD_TYPE),debug)
 	export SHIM_USE_DEBUG_CONFIG := yes
 else
 	export AGENT_BUILD_TYPE := release
-	export AGENT_POLICY_FILE := allow-set-policy.rego
+	export AGENT_POLICY_FILE := allow-all.rego
 	export SHIM_USE_DEBUG_CONFIG := no
 endif
 
@@ -20,7 +20,7 @@ endif
 all: package uvm
 
 .PHONY: all-confpods
-all-confpods: package-confpods uvm-confpods
+all-confpods: package-confpods
 
 .PHONY: package
 package:
@@ -62,7 +62,7 @@ deploy-uvm:
 	./uvm_install.sh
 
 .PHONY: deploy-confpods
-deploy-confpods: deploy-confpods-package deploy-confpods-uvm
+deploy-confpods: deploy-confpods-package
 
 .PHONY: deploy-confpods-package
 deploy-confpods-package:
