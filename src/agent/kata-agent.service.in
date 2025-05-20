@@ -14,6 +14,9 @@ Wants=kata-containers.target
 # from a VM vsock port
 StandardOutput=tty
 Type=simple
+# Load kernel modules before starting agent
+# The - prefix means don't fail the service if the command fails
+ExecStartPre=-/sbin/modprobe erofs
 ExecStart=@BINDIR@/@AGENT_NAME@
 LimitNOFILE=1048576
 # ExecStop is required for static agent tracing; in all other scenarios

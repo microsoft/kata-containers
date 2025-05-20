@@ -3,11 +3,13 @@ use containerd_client::{services::v1::ReadContentRequest, tonic::Request, with_n
 use containerd_snapshots::{api, Info, Kind, Snapshotter, Usage};
 use log::{debug, info, trace};
 use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::{collections::HashMap, fs, fs::OpenOptions, io, io::Seek, os::unix::ffi::OsStrExt};
+use std::{collections::HashMap, fs, fs::OpenOptions, io, os::unix::ffi::OsStrExt};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 use tonic::Status;
+use erofs_common::utils;
 
 const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
@@ -145,7 +147,7 @@ impl Store {
 
             let name = name_to_hash(&p);
             let layer_info = format!(
-                "{name},tar,ro,{PREFIX}.block_device=file,{PREFIX}.is-layer,{PREFIX}.root-hash={root_hash}");
+                "{name},erofs,ro,{PREFIX}.block_device=file,{PREFIX}.is-layer,{PREFIX}.root-hash={root_hash}");
             layers.push(name);
 
             opts.push(format!(
@@ -281,14 +283,35 @@ impl TarDevSnapshotter {
                     .open(&name)?;
                 let mut gz_decoder = flate2::read::GzDecoder::new(compressed);
                 std::io::copy(&mut gz_decoder, &mut file)?;
-
-                trace!("Appending index to {:?}", &name);
-                file.rewind()?;
-                tarindex::append_index(&mut file)?;
-
-                trace!("Appending dm-verity tree to {:?}", &name);
-                let root_hash = verity::append_tree::<Sha256>(&mut file)?;
-
+                file.flush()?;
+                drop(file);
+            
+                let layer_path = PathBuf::from(format!("{}_etm", name.to_string_lossy())); // etm = erofs meta + tar + merkle tree
+                
+                // Create an erofs metadata using mkfs.erofs
+                utils::create_erofs_metadata(&name, &layer_path)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            
+                // Append the decompressed tar file to the erofs metadata
+                utils::append_tar_to_erofs_metadata(&name, &layer_path)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            
+                // Cleanup the decompressed tar file
+                std::fs::remove_file(&name)?;
+            
+                // Append the dm-verity tree to the erofs metadata + tar
+                trace!("Appending dm-verity tree to {:?}", &layer_path);
+                let mut layer_file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&layer_path)?;
+                let root_hash = verity::append_tree::<Sha256>(&mut layer_file)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            
+                // rename layer_path to base_name
+                debug!("Renaming {:?} to {:?}", &layer_path, &name);
+                std::fs::rename(&layer_path, &name)?;
+            
                 trace!("Root hash for {:?} is {:x}", &name, root_hash);
                 Ok(root_hash)
             })
