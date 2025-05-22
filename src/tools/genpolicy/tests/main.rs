@@ -169,4 +169,9 @@ mod tests {
     async fn test_create_container_generate_name() {
         runtests::<PolicyCreateContainerRequest>("createcontainer/generate_name").await;
     }
+
+    #[tokio::test]
+    async fn test_create_container_volumes_config_map() {
+        runtests::<CreateContainerRequest>("createcontainer/volumes/config_map").await;
+    }
 }
