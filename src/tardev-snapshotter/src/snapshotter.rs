@@ -39,6 +39,8 @@ const TARGET_IMAGE_REF_LABEL: &str = "containerd.io/snapshot/cri.image-ref";
 const TAR_GZ_EXTENSION: &str = "tar.gz";
 const TAR_EXTENSION: &str = "tar";
 
+/// Path from where to scan for .json standalone signature manifests
+const SIGNATURE_STORE: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/signatures";
 
 // borrowed from oci-distribution crate, which alas does not build with rustc
 // 1.75, which is used by AzL3
@@ -101,48 +103,46 @@ impl Store {
     }
 
     async fn lazy_read_signatures(&mut self, image_name: String) -> Result<()> {
-        debug!("Loading signatures of image {}", image_name);
-        self.read_signatures(image_name).await?;
-
+        let signatures_count = self.signatures.as_ref().map(|s| s.len()).unwrap_or(0);
+        if let Err(e) = self.read_signatures_from_registry(image_name.clone()).await {
+            debug!("Failed to read signatures from registry for image {}: {}", image_name, e);
+            // Load from the standalone signatures.json file if registry read fails
+            self.load_signatures_from_file(image_name).context("Failed to read signatures from signatures.json file")?;
+        }
+        debug!("Loaded {} signatures", self.signatures.as_ref().map(|s| s.len()).unwrap_or(0) - signatures_count);
         Ok(())
     }
 
-    async fn read_signatures(&mut self, image_name: String) -> Result<()> {
-    
+    async fn read_signatures_from_registry(&mut self, image_name: String) -> Result<(), Box<dyn std::error::Error>> {
         // Create a client configuration
         let config: ClientConfig = ClientConfig::default();
-    
         // Initialize the OCI client
         let client: OCI_Client = OCI_Client::new(config);
-    
         // Authenticate with the registry (if needed)
         let auth: RegistryAuth = RegistryAuth::Anonymous;
-
         let image_ref: Reference = image_name.parse().map_err(|e| {
             anyhow!("Failed to parse image reference '{}': {}", image_name, e)
         })?;
-    
         // Store authentication if needed
         client.store_auth_if_needed(image_ref.registry(), &auth).await;
-        debug!("Processing image reference: {}", image_ref);
-        // Extract the digest from the image reference
-        if let Ok(digest) = client.fetch_manifest_digest(&image_ref, &auth).await {
-            // Construct the new reference using the with_digest() function
-            let new_ref = Reference::with_digest(image_ref.registry().to_string(), image_ref.repository().to_string(), digest.to_string());
-            if let Err(e) = self.load_referrers(&client, &new_ref, &auth).await {
-                debug!("Error processing referrers: {}", e);
-            }
-        } else {
-            debug!("Failed to fetch manifest digest for image reference: {}", image_ref);
-        }
+        debug!("Loading signatures of image reference from registry: {}", image_ref);
 
-        if let Some(signatures) = &self.signatures {
-            debug!("Signatures");
-            for (layer, _) in signatures {
-                debug!("layer: {}", layer);
-            }
-        }
-    
+        // Extract the digest from the image reference
+        let digest = client.fetch_manifest_digest(&image_ref, &auth).await.map_err(|e| {
+            anyhow!("Failed to fetch manifest digest for image reference '{}': {}", image_ref, e)
+        })?;
+
+        // Construct the image reference with digest
+        let image_manifest_ref = Reference::with_digest(
+            image_ref.registry().to_string(),
+            image_ref.repository().to_string(),
+            digest.to_string(),
+        );
+
+        self.load_referrers(&client, &image_manifest_ref, &auth).await.map_err(|e| {
+            anyhow!("Error processing referrers: {}", e)
+        })?;
+
         Ok(())
     }
 
@@ -156,6 +156,12 @@ impl Store {
         // Fetch the referrers list with the specified artifact type
         match client.pull_referrers(image_ref, Some(SIGNATURE_ARTIFACT_TYPE)).await {
             Ok(referrers) => {
+                if referrers.manifests.is_empty() {
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "No signature manifests found in referrers.",
+                    )));
+                }
                 for sig_manifest in referrers.manifests {
                     debug!("signature manifest Digest: {}", sig_manifest.digest);
     
@@ -164,9 +170,8 @@ impl Store {
     
                     // Pull the sig manifest using the constructed reference and auth
                     match client.pull_image_manifest(&sig_manifest_ref, &auth).await {
-                        Ok(returned_manifest) => {
-                            // println!("Returned manifest: {:?}", returned_manifest);
-                            if let Some((image_ref, digest, root_hash, signature)) = returned_manifest
+                        Ok(sig_manifest) => {
+                            if let Some((image_ref, digest, root_hash, signature)) = sig_manifest
                                 .0
                                 .annotations
                                 .as_ref()
@@ -211,7 +216,6 @@ impl Store {
                 debug!("Failed to fetch referrers: {}", e);
             }
         }
-    
         Ok(())
     }
 
@@ -220,6 +224,27 @@ impl Store {
             Some(signatures) => signatures.contains_key(digest),
             None => false,
         }
+    }
+
+    fn load_signatures_from_file(&mut self, image_name: String) -> Result<()> {
+        debug!("Loading signatures of image from signatures.json file {}", image_name);
+        let paths = std::fs::read_dir(Path::new(SIGNATURE_STORE))?;
+        for signatures_json_path in paths {
+            let signatures_json = std::fs::read_to_string(
+                signatures_json_path
+                    .context("failed to load signature file path")?
+                    .path(),
+            )?;
+            let image_info_list = serde_json::from_str::<Vec<ImageInfo>>(signatures_json.as_str())?;
+            if let Some(image_info) = image_info_list.into_iter().find(|info| info.name == image_name) {
+                if let Some(signatures) = self.signatures.as_mut() {
+                    for layer_info in image_info.layers {
+                        signatures.insert(layer_info.digest.clone(), layer_info.clone());
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn get_info_from_digest(&self, digest: &str) -> Option<LayerInfo> {
@@ -1286,14 +1311,6 @@ impl TarDevSnapshotter {
             let generated_root_hash = generated_root_hash
                 .ok_or(Status::invalid_argument("failed to generate root hash"))?;
 
-            let (root_hash, root_hash_sig) = if root_hash.is_none() {
-                debug!("looking up root hash from the oci manifest");
-                Self::get_signature_from_oci_manifest(layer)
-            } else {
-                debug!("using root hash from a standalone signatures manifest");
-                (root_hash, root_hash_sig)
-            };
-
             // Store a label with the root hash so that we can recall it later
             // when mounting.
             match (root_hash, root_hash_sig) {
@@ -1335,35 +1352,6 @@ impl TarDevSnapshotter {
 
         trace!("Layer prepared");
         Ok(())
-    }
-
-    fn get_signature_from_oci_manifest(layer: &Value) -> (Option<String>, Option<String>) {
-        let layer_annotations = layer.as_object().and_then(|layer| {
-            layer
-                .get_key_value("annotations")
-                .and_then(|kv| kv.1.as_object())
-        });
-
-        trace!("layer annotations: {:?}", layer_annotations);
-
-        match layer_annotations {
-            None => (None, None),
-            Some(annotations) => {
-                // hex encoded
-                let root_hash = annotations
-                    .get(ROOT_HASH_LABEL)
-                    .and_then(|s| s.as_str())
-                    .and_then(|s| Some(s.to_string()));
-
-                // base64 encoded
-                let root_hash_sig = annotations
-                    .get(ROOT_HASH_SIG_LABEL)
-                    .and_then(|s| s.as_str())
-                    .and_then(|s| Some(s.to_string()));
-
-                (root_hash, root_hash_sig)
-            }
-        }
     }
 
     async fn commit_impl(
