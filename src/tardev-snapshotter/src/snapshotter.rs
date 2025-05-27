@@ -96,24 +96,27 @@ struct Store {
 
 impl Store {
     fn new(root: &Path) -> Self {
-        Self {
+        let mut store = Self {
             root: root.into(),
             signatures: Some(<HashMap<String, LayerInfo>>::new()),
+        };
+        // Load signatures from standalone signatures.json file at initialization
+        if let Err(e) = store.read_signatures_from_file() {
+            log::debug!("Failed to read signatures from file during Store::new: {}", e);
         }
+        store
     }
 
-    async fn lazy_read_signatures(&mut self, image_name: String) -> Result<()> {
+    async fn lazy_read_signatures(&mut self, image_name: &String, image_digest: &String) -> Result<()> {
         let signatures_count = self.signatures.as_ref().map(|s| s.len()).unwrap_or(0);
-        if let Err(e) = self.read_signatures_from_registry(image_name.clone()).await {
+        if let Err(e) = self.read_signatures_from_registry(image_name, image_digest).await {
             debug!("Failed to read signatures from registry for image {}: {}", image_name, e);
-            // Load from the standalone signatures.json file if registry read fails
-            self.load_signatures_from_file(image_name).context("Failed to read signatures from signatures.json file")?;
         }
-        debug!("Loaded {} signatures", self.signatures.as_ref().map(|s| s.len()).unwrap_or(0) - signatures_count);
+        debug!("Loaded {} signatures from registry", self.signatures.as_ref().map(|s| s.len()).unwrap_or(0) - signatures_count);
         Ok(())
     }
 
-    async fn read_signatures_from_registry(&mut self, image_name: String) -> Result<(), Box<dyn std::error::Error>> {
+    async fn read_signatures_from_registry(&mut self, image_name: &String, image_digest: &String) -> Result<(), Box<dyn std::error::Error>> {
         // Create a client configuration
         let config: ClientConfig = ClientConfig::default();
         // Initialize the OCI client
@@ -127,16 +130,11 @@ impl Store {
         client.store_auth_if_needed(image_ref.registry(), &auth).await;
         debug!("Loading signatures of image reference from registry: {}", image_ref);
 
-        // Extract the digest from the image reference
-        let digest = client.fetch_manifest_digest(&image_ref, &auth).await.map_err(|e| {
-            anyhow!("Failed to fetch manifest digest for image reference '{}': {}", image_ref, e)
-        })?;
-
         // Construct the image reference with digest
         let image_manifest_ref = Reference::with_digest(
             image_ref.registry().to_string(),
             image_ref.repository().to_string(),
-            digest.to_string(),
+            image_digest.to_string(),
         );
 
         self.load_referrers(&client, &image_manifest_ref, &auth).await.map_err(|e| {
@@ -166,7 +164,11 @@ impl Store {
                     debug!("signature manifest Digest: {}", sig_manifest.digest);
     
                     // Construct the reference for the sig manifest
-                    let sig_manifest_ref: Reference = Reference::with_digest(image_ref.registry().to_string(), image_ref.repository().to_string(), sig_manifest.digest.to_string());
+                    let sig_manifest_ref: Reference = Reference::with_digest(
+                        image_ref.registry().to_string(),
+                        image_ref.repository().to_string(),
+                        sig_manifest.digest.to_string(),
+                    );
     
                     // Pull the sig manifest using the constructed reference and auth
                     match client.pull_image_manifest(&sig_manifest_ref, &auth).await {
@@ -226,9 +228,9 @@ impl Store {
         }
     }
 
-    fn load_signatures_from_file(&mut self, image_name: String) -> Result<()> {
-        debug!("Loading signatures of image from signatures.json file {}", image_name);
+    fn read_signatures_from_file(&mut self) -> Result<()> {
         let paths = std::fs::read_dir(Path::new(SIGNATURE_STORE))?;
+        let mut signatures = HashMap::new();
         for signatures_json_path in paths {
             let signatures_json = std::fs::read_to_string(
                 signatures_json_path
@@ -236,14 +238,18 @@ impl Store {
                     .path(),
             )?;
             let image_info_list = serde_json::from_str::<Vec<ImageInfo>>(signatures_json.as_str())?;
-            if let Some(image_info) = image_info_list.into_iter().find(|info| info.name == image_name) {
-                if let Some(signatures) = self.signatures.as_mut() {
-                    for layer_info in image_info.layers {
-                        signatures.insert(layer_info.digest.clone(), layer_info.clone());
-                    }
+            for image_info in image_info_list {
+                for layer_info in image_info.layers {
+                    signatures.insert(layer_info.digest.clone(), layer_info.clone());
                 }
             }
         }
+
+        if !signatures.is_empty() {
+            debug!("Loaded {} signatures from signatures.json", signatures.len());
+            self.signatures = Some(signatures);
+        }
+
         Ok(())
     }
 
@@ -1384,11 +1390,16 @@ impl TarDevSnapshotter {
                     "missing target image ref label",
                 ));
             };
+            let Some(manifest_digest_str) = labels.get(TARGET_MANIFEST_DIGEST_LABEL) else {
+                return Err(Status::invalid_argument(
+                    "missing target manifest digest label",
+                ));
+            };
 
             // Skip loading signatures if they are already present. If a layer has multiple signatures, only the first loaded one will be used.
             // TODO: support the latest signature or signature filtering.
             if !store.has_signature(digest) {
-                store.lazy_read_signatures(image_ref_str.to_string()).await.map_err(|e| {
+                store.lazy_read_signatures(image_ref_str, manifest_digest_str).await.map_err(|e| {
                     Status::failed_precondition(format!("failed to read signatures: {e}"))
                 })?;
             } else {
