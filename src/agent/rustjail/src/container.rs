@@ -231,7 +231,7 @@ lazy_static! {
                 .unwrap());
         };
 
-        devices        
+        devices
     };
 
     pub static ref SYSTEMD_CGROUP_PATH_FORMAT:Regex = Regex::new(r"^[\w\-.]*:[\w\-.]*:[\w\-.]*$").unwrap();

@@ -10,7 +10,9 @@ use std::sync::Arc;
 
 use crate::storage::{common_storage_handler, new_device, StorageContext, StorageHandler};
 use anyhow::{anyhow, Context, Result};
-use kata_types::device::{DRIVER_9P_TYPE, DRIVER_OVERLAYFS_TYPE, DRIVER_SMB_TYPE, DRIVER_VIRTIOFS_TYPE};
+use kata_types::device::{
+    DRIVER_9P_TYPE, DRIVER_OVERLAYFS_TYPE, DRIVER_SMB_TYPE, DRIVER_VIRTIOFS_TYPE,
+};
 use kata_types::mount::StorageDevice;
 use protocols::agent::Storage;
 use tracing::instrument;
