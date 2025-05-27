@@ -11,6 +11,8 @@ use crate::verity;
 use crate::utils::Config;
 use anyhow::{anyhow, Context, Result};
 use docker_credential::{CredentialRetrievalError, DockerCredential};
+use erofs_common::constants::VERITY_BLOCK_SIZE;
+use erofs_common::utils;
 use fs2::FileExt;
 use log::warn;
 use log::{debug, info, LevelFilter};
@@ -24,8 +26,6 @@ use std::fs::OpenOptions;
 use std::io::BufWriter;
 use std::{io, io::Seek, io::Write, path::Path};
 use tokio::io::AsyncWriteExt;
-use erofs_common::constants::VERITY_BLOCK_SIZE;
-use erofs_common::utils;
 
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
@@ -103,18 +103,20 @@ impl Container {
                 debug!("digest_hash: {:?}", digest_hash);
                 debug!(
                     "manifest: {}",
-                    serde_json::to_string_pretty(&manifest).unwrap()
+                    serde_json::to_string_pretty(&manifest)
+                        .context("Failed to serialize OCI image manifest to a string")?
                 );
 
                 // Log the contents of the config layer.
                 if log::max_level() >= LevelFilter::Debug {
                     let mut deserializer = serde_json::Deserializer::from_str(&config_layer_str);
                     let mut serializer = serde_json::Serializer::pretty(io::stderr());
-                    serde_transcode::transcode(&mut deserializer, &mut serializer).unwrap();
+                    serde_transcode::transcode(&mut deserializer, &mut serializer)
+                        .context("Failed to transcode config layer JSON")?;
                 }
 
-                let config_layer: DockerConfigLayer =
-                    serde_json::from_str(&config_layer_str).unwrap();
+                let config_layer: DockerConfigLayer = serde_json::from_str(&config_layer_str)
+                    .context("Failed to deserialize Docker config layer")?;
                 let image_layers = get_image_layers(
                     use_cached_files,
                     &mut client,
@@ -123,7 +125,7 @@ impl Container {
                     &config_layer,
                 )
                 .await
-                .unwrap();
+                .context("Failed to get image layers")?;
 
                 Ok(Container {
                     manifest: manifest,
@@ -180,7 +182,8 @@ async fn get_image_layers(
                             .media_type
                             .eq(manifest::IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE),
                 )
-                .await?;
+                .await
+                .context("Failed to get verity hash")?;
                 layers.push(ImageLayer {
                     diff_id: diff_id.clone(),
                     digest: layer.digest.clone(),
@@ -248,12 +251,13 @@ async fn get_verity_hash(
                 },
             )
             .await
-            .context("Failed to create verity hash for {layer_digest}")?;
+            .context(format!("Failed to create verity hash for {layer_digest}"))?;
 
             let root_hash =
                 get_verity_hash_value(&erofs_path).context("Failed to get verity hash")?;
             if use_cached_files {
-                add_verity_to_store(cache_file, diff_id, layer_digest, &root_hash)?;
+                add_verity_to_store(cache_file, diff_id, layer_digest, &root_hash)
+                    .context("Failed to add verity hash to the store")?;
             }
 
             Ok(root_hash)
