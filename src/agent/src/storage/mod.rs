@@ -289,7 +289,7 @@ fn prepare_dm_target(path: &str, hash: &str) -> Result<(u64, u64, String, String
             "1 {path} {path} {data_block_size} {hash_block_size
 } {} {} sha256 {hash} 0000000000000000000000000000000000000000000000000000000000000000",
             data_size / data_block_size,
-            (data_size + hash_block_size - 1) / hash_block_size
+            data_size.div_ceil(hash_block_size)
         ),
     ))
 }
@@ -334,7 +334,7 @@ pub(crate) fn common_storage_handler(logger: &Logger, storage: &Storage) -> Resu
     let dm = devicemapper::DM::new()?;
     let name = devicemapper::DmName::new(fname)?;
     let opts = devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY);
-    dm.device_create(&name, None, opts)
+    dm.device_create(name, None, opts)
         .context("Unable to create dm device")?;
 
     let id = devicemapper::DevId::Name(name);
@@ -353,11 +353,10 @@ pub(crate) fn common_storage_handler(logger: &Logger, storage: &Storage) -> Resu
         storage.source = format!("/dev/mapper/{fname}");
         mount_storage_handler(logger, &storage)
     })()
-    .map_err(|e| {
+    .inspect_err(|_e| {
         if let Err(err) = dm.device_remove(&id, devicemapper::DmOptions::default()) {
             error!(logger, "Unable to remove dm device ({fname}): {:?}", err);
         }
-        e
     })
 }
 
@@ -425,12 +424,11 @@ pub fn set_ownership(logger: &Logger, storage: &Storage) -> Result<()> {
     let fs_group = storage.fs_group();
     let read_only = storage.options.contains(&String::from("ro"));
     let mount_path = Path::new(&storage.mount_point);
-    let metadata = mount_path.metadata().map_err(|err| {
+    let metadata = mount_path.metadata().inspect_err(|err| {
         error!(logger, "failed to obtain metadata for mount path";
             "mount-path" => mount_path.to_str(),
             "error" => err.to_string(),
         );
-        err
     })?;
 
     if fs_group.group_change_policy == FSGroupChangePolicy::OnRootMismatch.into()

@@ -44,7 +44,7 @@ pub struct PolicyCopyFileRequest {
 /// PolicyCreateContainerRequest is very similar to CreateContainerRequest from src/libs/protocols, except:
 /// - It wraps the base CreateContainerRequest.
 /// - It has an env_map field which is a map of environment variable names to expanded values.
-/// This makes it easier to validate the environment variables inside the rego rules.
+///   This makes it easier to validate the environment variables inside the rego rules.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct PolicyCreateContainerRequest {
     pub base: protocols::agent::CreateContainerRequest,

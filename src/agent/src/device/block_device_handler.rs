@@ -7,6 +7,8 @@
 #[cfg(target_arch = "s390x")]
 use crate::ccw;
 use crate::device::{DeviceContext, DeviceHandler, DeviceInfo, SpecUpdate, BLOCK};
+#[cfg(any(target_arch = "s390x", test))]
+use crate::linux_abi::create_pci_root_bus_path;
 #[cfg(target_arch = "s390x")]
 use crate::linux_abi::CCW_ROOT_BUS_PATH;
 use crate::linux_abi::SYSTEM_DEV_PATH;
