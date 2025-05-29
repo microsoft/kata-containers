@@ -1,0 +1,13 @@
+# 1) ignore everything by default
+*
+
+# 2) keep utils.mk
+!utils.mk
+
+# 3) and the entire src/ tree
+!src/
+!src/**
+
+# 4) still drop any old Rust build artifacts
+src/**/target/
+src/**/target/**
