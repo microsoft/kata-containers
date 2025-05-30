@@ -14,10 +14,10 @@ use docker_credential::{CredentialRetrievalError, DockerCredential};
 use fs2::FileExt;
 use log::warn;
 use log::{debug, info, LevelFilter};
-use oci_distribution::client::{linux_amd64_resolver, ClientConfig};
-use oci_distribution::manifest::{OciImageManifest, OciManifest};
-use oci_distribution::RegistryOperation;
-use oci_distribution::{manifest, secrets::RegistryAuth, Client, Reference};
+use oci_client::client::{linux_amd64_resolver, ClientConfig};
+use oci_client::manifest::{OciImageManifest, OciManifest};
+use oci_client::RegistryOperation;
+use oci_client::{manifest, secrets::RegistryAuth, Client, Reference};
 use serde::{Deserialize, Serialize};
 use sha2::{digest::typenum::Unsigned, digest::OutputSizeUser, Sha256};
 use std::fs::OpenOptions;
@@ -73,7 +73,7 @@ impl Container {
         let reference: Reference = image.parse()?;
         let auth = build_auth(&reference);
 
-        let mut client = Client::new(ClientConfig {
+        let client = Client::new(ClientConfig {
             platform_resolver: Some(Box::new(linux_amd64_resolver)),
             ..Default::default()
         });
@@ -130,7 +130,7 @@ impl Container {
                     image_layers,
                 })
             }
-            Err(oci_distribution::errors::OciDistributionError::AuthenticationFailure(message)) => {
+            Err(oci_client::errors::OciDistributionError::AuthenticationFailure(message)) => {
                 panic!("Container image registry authentication failure ({}). Are docker credentials set-up for current user?", &message);
             }
             Err(e) => {
@@ -452,7 +452,7 @@ pub async fn get_container(config: &Config, image: &str) -> Result<Container> {
     Container::new(config.use_cache, image).await
 }
 
-fn build_auth(reference: &Reference) -> RegistryAuth {
+pub fn build_auth(reference: &Reference) -> RegistryAuth {
     debug!("build_auth: {:?}", reference);
 
     let server = reference
