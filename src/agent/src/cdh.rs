@@ -64,6 +64,26 @@ impl CDHClient {
             .await?;
         Ok(unsealed_secret.plaintext)
     }
+
+    #[cfg(feature = "guest-pull")]
+    pub async fn secure_mount(
+        &self,
+        volume_type: &str,
+        options: &std::collections::HashMap<String, String>,
+        flags: Vec<String>,
+        mount_point: &str,
+    ) -> Result<()> {
+        let mut request = confidential_data_hub::SecureMountRequest::new();
+        request.set_volume_type(volume_type.to_string());
+        request.set_options(options.clone());
+        request.set_flags(flags);
+        request.set_mount_point(mount_point.to_string());
+
+        self.secure_mount_client
+            .secure_mount(ttrpc::context::with_timeout(*CDH_API_TIMEOUT), &request)
+            .await?;
+        Ok(())
+    }
 }
 
 pub async fn init_cdh_client(cdh_socket_uri: &str) -> Result<()> {

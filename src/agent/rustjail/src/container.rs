@@ -450,18 +450,14 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
         }
         let s = s.unwrap();
 
-        if ns
-            .path()
-            .as_ref()
-            .map_or(true, |p| p.as_os_str().is_empty())
-        {
+        if ns.path().as_ref().is_none_or(|p| p.as_os_str().is_empty()) {
             // skip the pidns since it has been done in parent process.
             if *s != CloneFlags::CLONE_NEWPID {
                 to_new.set(*s, true);
             }
         } else {
             let fd = fcntl::open(ns.path().as_ref().unwrap(), OFlag::O_CLOEXEC, Mode::empty())
-                .map_err(|e| {
+                .inspect_err(|e| {
                     log_child!(
                         cfd_log,
                         "cannot open type: {} path: {}",
@@ -469,7 +465,6 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
                         ns.path().as_ref().unwrap().display()
                     );
                     log_child!(cfd_log, "error is : {:?}", e);
-                    e
                 })?;
 
             if *s != CloneFlags::CLONE_NEWPID {
@@ -685,14 +680,12 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
             .map(|gid| Gid::from_raw(*gid))
             .collect();
 
-        unistd::setgroups(&gids).map_err(|e| {
+        unistd::setgroups(&gids).inspect_err(|e| {
             let _ = write_sync(
                 cwfd,
                 SYNC_FAILED,
                 format!("setgroups failed: {:?}", e).as_str(),
             );
-
-            e
         })?;
     }
 
@@ -1427,7 +1420,8 @@ pub fn update_namespaces(logger: &Logger, spec: &mut Spec, init_pid: RawFd) -> R
                 if namespace
                     .path()
                     .as_ref()
-                    .map_or(true, |p| p.as_os_str().is_empty())
+                    .as_ref()
+                    .is_none_or(|p| p.as_os_str().is_empty())
                 {
                     namespace.set_path(Some(PathBuf::from(&ns_path)));
                 }
@@ -1449,7 +1443,7 @@ fn get_pid_namespace(logger: &Logger, linux: &Linux) -> Result<PidNs> {
                     OFlag::O_RDONLY,
                     Mode::empty(),
                 )
-                .map_err(|e| {
+                .inspect_err(|e| {
                     error!(
                         logger,
                         "cannot open type: {} path: {}",
@@ -1457,8 +1451,6 @@ fn get_pid_namespace(logger: &Logger, linux: &Linux) -> Result<PidNs> {
                         ns_path.display()
                     );
                     error!(logger, "error is : {:?}", e);
-
-                    e
                 })?,
             };
 
@@ -1639,9 +1631,8 @@ fn write_mappings(logger: &Logger, path: &str, maps: &[LinuxIdMapping]) -> Resul
     if !data.is_empty() {
         let fd = fcntl::open(path, OFlag::O_WRONLY, Mode::empty())?;
         defer!(unistd::close(fd).unwrap());
-        unistd::write(fd, data.as_bytes()).map_err(|e| {
-            info!(logger, "cannot write mapping");
-            e
+        unistd::write(fd, data.as_bytes()).inspect_err(|e| {
+            info!(logger, "cannot write mapping: {}", e);
         })?;
     }
     Ok(())
