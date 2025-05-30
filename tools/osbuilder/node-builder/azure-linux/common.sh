@@ -39,6 +39,8 @@ else
 	SHIM_CONFIG_PATH="${INSTALL_PATH_PREFIX}/share/defaults/kata-containers"
 	SHIM_CONFIG_FILE_NAME="configuration-clh.toml"
 	SHIM_CONFIG_INST_FILE_NAME="configuration.toml"
+	SHIM_DBG_CONFIG_FILE_NAME="configuration-clh-debug.toml"
+	SHIM_DBG_CONFIG_INST_FILE_NAME="${SHIM_DBG_CONFIG_FILE_NAME}"
 	DEBUGGING_BINARIES_PATH="${INSTALL_PATH_PREFIX}/local/bin"
 	SHIM_BINARIES_PATH="${INSTALL_PATH_PREFIX}/local/bin"
 	SHIM_BINARY_NAME="containerd-shim-kata-v2"
