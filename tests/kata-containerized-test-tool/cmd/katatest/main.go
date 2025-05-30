@@ -11,6 +11,7 @@ import (
 	"github.com/kata-containers/tests/kata-containerized-test-tool/internal/core"
 	"github.com/kata-containers/tests/kata-containerized-test-tool/internal/tests/cpu"
 	"github.com/kata-containers/tests/kata-containerized-test-tool/internal/tests/memory"
+	"github.com/kata-containers/tests/kata-containerized-test-tool/internal/tests/sdl"
 )
 
 func main() {
@@ -28,6 +29,8 @@ func main() {
 	// Register all available tests
 	framework.RegisterTest(cpu.New())
 	framework.RegisterTest(memory.New())
+	framework.RegisterTest(sdl.New())
+
 
 	// Get tests to run from environment
 	testsToRun := getTestsToRun(framework.GetAvailableTests())
