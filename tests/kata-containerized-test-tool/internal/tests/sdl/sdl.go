@@ -121,16 +121,28 @@ func (t *SDLTest) Run(ctx context.Context, expectedValues map[string]interface{}
 }
 
 func (t *SDLTest) runBinSkimTests(result *core.TestResult) bool {
+	// Base binaries that are always tested (kata sandboxing)
 	binaries := []string{
 		filepath.Join(binariesDir, "kata-agent"),
-		filepath.Join(binariesDir, "kata-agent-cc"),
 		filepath.Join(binariesDir, "containerd-shim-kata-v2"),
-		filepath.Join(binariesDir, "containerd-shim-kata-cc-v2"),
-		filepath.Join(binariesDir, "tardev-snapshotter"),
-		filepath.Join(binariesDir, "kata-overlay"),
-		filepath.Join(binariesDir, "utarfs"),
 		filepath.Join(binariesDir, "cloud-hypervisor"),
 		filepath.Join(binariesDir, "virtiofsd"),
+	}
+
+	// Confpods-specific binaries (only add if confpods are enabled)
+	enableConfpods := os.Getenv("SDL_ENABLE_CONFPODS") == "true"
+	if enableConfpods {
+		fmt.Printf("Including confpods-related binaries (SDL_ENABLE_CONFPODS=true)\n")
+		confpodsBinaries := []string{
+			filepath.Join(binariesDir, "kata-agent-cc"),
+			filepath.Join(binariesDir, "containerd-shim-kata-cc-v2"),
+			filepath.Join(binariesDir, "tardev-snapshotter"),
+			filepath.Join(binariesDir, "kata-overlay"),
+			filepath.Join(binariesDir, "utarfs"),
+		}
+		binaries = append(binaries, confpodsBinaries...)
+	} else {
+		fmt.Printf("Confpods-related binaries disabled (SDL_ENABLE_CONFPODS=false)\n")
 	}
 
 	success := true
@@ -166,18 +178,32 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir, virti
 	defer os.Chdir(currentDir)
 	os.Chdir(sourceDir)
 
+	// Base Rust projects that are always tested (kata sandboxing)
 	rustProjects := []struct {
 		name    string
 		path    string
 		project string // "kata-containers", "cloud-hypervisor", or "virtiofsd"
 	}{
 		{"kata-agent", "src/agent", "kata-containers"},
-		{"kata-overlay", "src/overlay", "kata-containers"},
-		{"utarfs", "src/utarfs", "kata-containers"},
-		{"tardev-snapshotter", "src/tardev-snapshotter", "kata-containers"},
 		{"cloud-hypervisor", "", "cloud-hypervisor"},
-		{"virtiofsd", "", "virtiofsd"}, // Added virtiofsd
+		{"virtiofsd", "", "virtiofsd"},
 	}
+
+	// Confpods-specific Rust projects (only add if confpods are enabled)
+	enableConfpods := os.Getenv("SDL_ENABLE_CONFPODS") == "true"
+	if enableConfpods {
+		confpodsProjects := []struct {
+			name    string
+			path    string
+			project string
+		}{
+			{"kata-overlay", "src/overlay", "kata-containers"},
+			{"utarfs", "src/utarfs", "kata-containers"},
+			{"tardev-snapshotter", "src/tardev-snapshotter", "kata-containers"},
+		}
+		rustProjects = append(rustProjects, confpodsProjects...)
+	}
+
 	success := true
 
 	for _, project := range rustProjects {
@@ -201,7 +227,6 @@ func (t *SDLTest) runClippyTests(result *core.TestResult, kataDir, clhDir, virti
 		switch project.name {
 		case "kata-agent":
 			fmt.Printf("Running Clippy on %s ...\n", project.name)
-			// Use the Makefile for agent
 			makeCmd := exec.Command("make", "check", "LIBC=gnu", "OPENSSL_NO_VENDOR=Y")
 			makeCmd.Dir = projectPath
 			clipOutput, err = makeCmd.CombinedOutput()
