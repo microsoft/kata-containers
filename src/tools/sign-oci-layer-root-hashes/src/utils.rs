@@ -92,6 +92,9 @@ impl Commands {
             Commands::InjectSignaturesToImageManifest { .. } => {
                 "inject-signatures-to-image-manifest"
             }
+            Commands::AttachSignaturesToImageManifest { .. } => {
+                "attach-signatures-to-image-manifest"
+            }
         }
     }
 }
@@ -112,6 +115,12 @@ pub enum Commands {
 
     /// Embed signatures into the image manifest and repush updated manifest
     InjectSignaturesToImageManifest {
+        #[clap(flatten)]
+        output_image_group: Option<OutputImageGroup>,
+    },
+
+    /// Attach signatures to the image manifest as referrers without repushing the manifest
+    AttachSignaturesToImageManifest {
         #[clap(flatten)]
         output_image_group: Option<OutputImageGroup>,
     },

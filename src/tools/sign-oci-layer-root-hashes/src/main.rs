@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Error};
 use futures::future;
-use oci_distribution::manifest::OciImageManifest;
+use oci_client::manifest::OciImageManifest;
 use sign::ImageInfo;
 
 mod registry;
@@ -86,6 +86,26 @@ async fn main() -> Result<(), Error> {
                 .await
                 .context("Failed to push updated manifests")?;
         }
+        utils::Commands::AttachSignaturesToImageManifest {
+            ref output_image_group
+        } => {
+            println!("image_tags: {}", image_tags.join("\n"));
+            let output_image_tags = match output_image_group {
+                Some(ref output_image_group) => {
+                    utils::get_image_tags(&output_image_group.images, &output_image_group.image)
+                        .context("Failed to get output image tags")?
+                }
+                None => image_tags.clone(),
+            };
+            println!("output_image_tags: {}", output_image_tags.join("\n"));
+            let images = sign::get_root_hash_signatures(&config, &output_image_tags)
+                .await
+                .context("Failed to get root hashes")?;
+            attach_signatures_to_image_manifests(images)
+                .await
+                .context("Failed to attach signatures to image manifests")?;
+        }
+
     }
 
     Ok(())
@@ -131,5 +151,21 @@ fn output_signature_manifest(
         }
     }
 
+    Ok(())
+}
+
+/// Attach signatures to the image manifest as referrers without repushing the manifest
+async fn attach_signatures_to_image_manifests(
+    images: Vec<ImageInfo>,
+) -> Result<(), Error> {
+    use futures::future;
+
+    future::try_join_all(
+        images
+            .iter()
+            .map(|image| sign::attach_signatures(image))
+    )
+    .await
+    .context("Failed to attach signatures to image manifests")?;
     Ok(())
 }
