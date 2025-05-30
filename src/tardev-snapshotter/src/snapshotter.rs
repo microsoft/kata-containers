@@ -65,8 +65,6 @@ pub const IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE: &str = "application/vnd.docker.imag
 pub const IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE: &str =
     "application/vnd.docker.image.rootfs.diff.tar.gzip";
 
-/// The image name from the signature manifest.
-pub const IMAGE_NAME_LABEL: &str = "image.ref.name";
 /// The image layer digest from the signature manifest.
 pub const IMAGE_LAYER_DIGEST_LABEL: &str = "image.layer.digest";
 /// The image layer root hash from the signature manifest.
@@ -160,58 +158,53 @@ impl Store {
                         "No signature manifests found in referrers.",
                     )));
                 }
-                for sig_manifest in referrers.manifests {
-                    debug!("signature manifest Digest: {}", sig_manifest.digest);
+                // Process the first manifest in the referrers list, should pick the latest one in the future
+                let sig_manifest = referrers.manifests[0].clone();
+                debug!("signature manifest Digest: {}", sig_manifest.digest);
+                // Construct the reference for the sig manifest
+                let sig_manifest_ref: Reference = Reference::with_digest(
+                    image_ref.registry().to_string(),
+                    image_ref.repository().to_string(),
+                    sig_manifest.digest.to_string(),
+                );
     
-                    // Construct the reference for the sig manifest
-                    let sig_manifest_ref: Reference = Reference::with_digest(
-                        image_ref.registry().to_string(),
-                        image_ref.repository().to_string(),
-                        sig_manifest.digest.to_string(),
-                    );
-    
-                    // Pull the sig manifest using the constructed reference and auth
-                    match client.pull_image_manifest(&sig_manifest_ref, &auth).await {
-                        Ok(sig_manifest) => {
-                            if let Some((image_ref, digest, root_hash, signature)) = sig_manifest
-                                .0
-                                .annotations
-                                .as_ref()
-                                .and_then(|annotations| {
-                                    Some((
-                                        annotations.get(IMAGE_NAME_LABEL)?,
-                                        annotations.get(IMAGE_LAYER_DIGEST_LABEL)?,
-                                        annotations.get(IMAGE_LAYER_ROOT_HASH_LABEL)?,
-                                        annotations.get(IMAGE_LAYER_SIGNATURE_LABEL)?,
-                                    ))
-                                })
-                            {
+                // Pull the sig manifest using the constructed reference and auth
+                match client.pull_image_manifest(&sig_manifest_ref, &auth).await {
+                    Ok((sig_manifest, _)) => {
+                        for layer in sig_manifest.layers {
+                            if let Some((digest, root_hash, signature)) = layer
+                            .annotations
+                            .as_ref()
+                            .and_then(|annotations| {
+                                Some((
+                                    annotations.get(IMAGE_LAYER_DIGEST_LABEL)?,
+                                    annotations.get(IMAGE_LAYER_ROOT_HASH_LABEL)?,
+                                    annotations.get(IMAGE_LAYER_SIGNATURE_LABEL)?,
+                                ))
+                            }) {
                                 // Construct the LayerInfo
                                 let layer_info = LayerInfo {
                                     digest: digest.clone(),
                                     root_hash: root_hash.clone(),
                                     signature: signature.clone(),
                                 };
+                                // Store the LayerInfo in the signatures map
                                 if let Some(signatures) = self.signatures.as_mut() {
                                     signatures.insert(digest.clone(), layer_info.clone());
                                 }
-    
+
                                 debug!("Layer Info:");
-                                debug!("  Image Ref: {}", image_ref);
                                 debug!("  Digest: {}", layer_info.digest);
                                 debug!("  Root Hash: {}", layer_info.root_hash);
                                 debug!("  Signature: {}", layer_info.signature);
                             } else {
-                                return Err(Box::new(std::io::Error::new(
-                                    std::io::ErrorKind::InvalidData,
-                                    "Required annotations not found or annotations are missing.",
-                                )));
+                                debug!("Layer digest: {} has no annotations.", layer.digest);
                             }
                         }
-                        Err(e) => {
-                            debug!("Failed to pull manifest for digest {}: {}", sig_manifest.digest, e);
-                        }
-                    }    
+                    }
+                    Err(e) => {
+                        debug!("Failed to pull signature manifest: {}", e);
+                    }
                 }
             }
             Err(e) => {
