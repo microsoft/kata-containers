@@ -18,6 +18,11 @@ source "${common_file}"
 
 pushd "${repo_dir}"
 
+echo "Clean debug shim config"
+pushd src/runtime/config/
+rm -f "${SHIM_DBG_CONFIG_FILE_NAME}"
+popd
+
 echo "Clean runtime build"
 pushd src/runtime/
 make clean SKIP_GO_VERSION_CHECK=1
@@ -39,11 +44,6 @@ echo "Clean IGVM tool installation"
 
 
 if [ "${CONF_PODS}" == "yes" ]; then
-
-	echo "Clean SNP debug shim config"
-	pushd src/runtime/config/
-	rm -f "${SHIM_DBG_CONFIG_FILE_NAME}"
-	popd
 
 	echo "Clean tardev-snapshotter tarfs driver build"
 	pushd src/tarfs
