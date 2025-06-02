@@ -89,6 +89,13 @@ impl Store {
     fn lazy_read_signatures(&mut self) -> Result<()> {
         if self.signatures == None {
             debug!("Loading signatures");
+            // Test if the signature store directory exists
+            if !Path::new(SIGNATURE_STORE).exists() {
+                debug!("Signature store directory does not exist, skipping signature loading");
+                return Ok(());
+            }
+
+            // Read signatures from the signature store directory
             self.read_signatures()
                 .context("Failed to read signatures")?;
         }
@@ -97,14 +104,14 @@ impl Store {
     }
 
     fn read_signatures(&mut self) -> Result<()> {
-        let paths = std::fs::read_dir(Path::new(SIGNATURE_STORE))?;
+        let paths = std::fs::read_dir(Path::new(SIGNATURE_STORE)).context("Failed to read signature store directory")?;
         let mut signatures = HashMap::new();
         for signatures_json_path in paths {
             let signatures_json = std::fs::read_to_string(
                 signatures_json_path
                     .context("failed to load signature file path")?
                     .path(),
-            )?;
+            ).context("failed to read signature file")?;
             let image_info_list = serde_json::from_str::<Vec<ImageInfo>>(signatures_json.as_str())?;
             for image_info in image_info_list {
                 for layer_info in image_info.layers {
