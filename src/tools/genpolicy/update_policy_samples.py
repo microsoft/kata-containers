@@ -22,8 +22,14 @@ needs_containerd_pull = samples["needs_containerd_pull"]
 file_base_path = "../../agent/samples/policy/yaml"
 
 def runCmd(arg):
-    log = [f"========== COMMAND: {arg}"]
-    return subprocess.run([arg], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, input="", shell=True, check=True)
+    print(f"========== COMMAND: {arg}")
+    try:
+        return subprocess.run([arg], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, input="", shell=True, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Command failed: {e.cmd}")
+        print(f"Return code: {e.returncode}")
+        print(f"Output:\n{e.output}")
+        raise
 
 def timeRunCmd(arg):
     log = [f"========== COMMAND: {arg}"]
@@ -50,14 +56,10 @@ for file in default_yamls + incomplete_init + silently_ignored + no_policy:
         sys.exit(f"filepath does not exists: {filepath}")
 
 # build tool
-next_command = "LIBC=gnu BUILD_TYPE= make"
-print("========== COMMAND: " + next_command)
-runCmd(next_command)
+runCmd("LIBC=gnu BUILD_TYPE= make")
 
 # allow all users to pull container images by using containerd
-next_command = "sudo chmod a+rw /var/run/containerd/containerd.sock"
-print("========== COMMAND: " + next_command)
-runCmd(next_command)
+runCmd("sudo chmod a+rw /var/run/containerd/containerd.sock")
 
 print("Writing settings for testing to /tmp/genpolicy-settings.json")
 runCmd("./tests/adapt_settings_for_tests.sh")
