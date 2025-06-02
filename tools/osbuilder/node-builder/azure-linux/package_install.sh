@@ -59,7 +59,7 @@ if [ "${SHIM_REDEPLOY_CONFIG}" == "yes" ]; then
 	cp -a --backup=numbered src/runtime/config/"${SHIM_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_INST_FILE_NAME}"
 	cp -a --backup=numbered src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_DBG_CONFIG_INST_FILE_NAME}"
 
-	if "${SHIM_USE_DEBUG_CONFIG}" == "yes"; then
+	if [ "${SHIM_USE_DEBUG_CONFIG}" == "yes" ]; then
 		# We simply override the release config with the debug config,
 		# which is probably fine when debugging. Not symlinking as that
 		# would create cycles the next time this script is called.
