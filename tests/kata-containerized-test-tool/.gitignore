@@ -1,0 +1,4 @@
+kata-containerized-test-tool
+results/
+*.tar
+*.tar.gz
