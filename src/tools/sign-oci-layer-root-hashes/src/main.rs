@@ -89,7 +89,6 @@ async fn main() -> Result<(), Error> {
         utils::Commands::AttachSignaturesToImageManifest {
             ref output_image_group
         } => {
-            println!("image_tags: {}", image_tags.join("\n"));
             let output_image_tags = match output_image_group {
                 Some(ref output_image_group) => {
                     utils::get_image_tags(&output_image_group.images, &output_image_group.image)
@@ -97,10 +96,10 @@ async fn main() -> Result<(), Error> {
                 }
                 None => image_tags.clone(),
             };
-            println!("output_image_tags: {}", output_image_tags.join("\n"));
             let images = sign::get_root_hash_signatures(&config, &output_image_tags)
                 .await
                 .context("Failed to get root hashes")?;
+
             attach_signatures_to_image_manifests(images)
                 .await
                 .context("Failed to attach signatures to image manifests")?;
@@ -158,8 +157,6 @@ fn output_signature_manifest(
 async fn attach_signatures_to_image_manifests(
     images: Vec<ImageInfo>,
 ) -> Result<(), Error> {
-    use futures::future;
-
     future::try_join_all(
         images
             .iter()
