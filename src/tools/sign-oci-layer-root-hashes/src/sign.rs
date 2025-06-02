@@ -88,49 +88,52 @@ pub(super) async fn attach_signatures(
     };
 
     // 2. Prepare the signature blobs to be attached
-    let mut sig_descriptors: Vec<OciDescriptor> = Vec::new();
-    for layer in &image.layers {
-        let json_obj = serde_json::json!({
-            "layer_digest": layer.digest,
-            "root_hash": layer.root_hash,
-            "signature": layer.signature,
-        });
-        let file_name = format!("signature_for_layer_{}.json", layer.digest.trim_start_matches("sha256:"));
-        // let file_path = Path::new("/workspace/sig_verify").join(&file_name);
-        fs::write(&file_name, serde_json::to_string_pretty(&json_obj)?)?;
-        println!("Wrote signature info for layer {} to {}", layer.digest, file_name);
-        let blob_bytes = fs::read(file_name.clone())?;
-        let blob_digest = format!("sha256:{:x}", Sha256::digest(blob_bytes.clone()));
-        println!("Blob size and Digest: {}, {}", blob_bytes.len(), blob_digest);
+    let sig_descriptors: Vec<OciDescriptor> = future::try_join_all(
+        image.layers.iter().map(|layer| {
+            let client = &client;
+            let image_ref = &image_ref;
+            async move {
+                let json_obj = serde_json::json!({
+                    "layer_digest": layer.digest,
+                    "root_hash": layer.root_hash,
+                    "signature": layer.signature,
+                });
+                let file_name = format!("signature_for_layer_{}.json", layer.digest.trim_start_matches("sha256:"));
+                fs::write(&file_name, serde_json::to_string_pretty(&json_obj)?)?;
+                println!("Wrote signature info for layer {} to {}", layer.digest, file_name);
+                let blob_bytes = fs::read(file_name.clone())?;
+                let blob_digest = format!("sha256:{:x}", Sha256::digest(&blob_bytes));
+                println!("Blob size and Digest: {}, {}", blob_bytes.len(), blob_digest);
 
-        let mut annotations = BTreeMap::new();
-        annotations.insert(IMAGE_LAYER_DIGEST_LABEL.to_string(), layer.digest.clone());
-        annotations.insert(IMAGE_LAYER_ROOT_HASH_LABEL.to_string(), layer.root_hash.clone());
-        annotations.insert(IMAGE_LAYER_SIGNATURE_LABEL.to_string(), layer.signature.clone());
-        annotations.insert(SIGNATURE_FILE_NAME.to_string(), file_name.clone());
+                let mut annotations = BTreeMap::new();
+                annotations.insert(IMAGE_LAYER_DIGEST_LABEL.to_string(), layer.digest.clone());
+                annotations.insert(IMAGE_LAYER_ROOT_HASH_LABEL.to_string(), layer.root_hash.clone());
+                annotations.insert(IMAGE_LAYER_SIGNATURE_LABEL.to_string(), layer.signature.clone());
+                annotations.insert(SIGNATURE_FILE_NAME.to_string(), file_name.clone());
 
-        // Push each signature blob to the repository
-        client.push_blob(
-            &image_ref,
-            &blob_bytes,
-            &blob_digest.clone(),
-        ).await
-        .context("Blob pushed failed")?;
+                // Push each signature blob to the repository
+                client.push_blob(
+                    image_ref,
+                    &blob_bytes,
+                    &blob_digest,
+                ).await
+                .context("Blob pushed failed")?;
 
-        // Create the signature descriptor
-        let sig_descriptor = OciDescriptor {
-            media_type: SIGNATURE_MEDIA_TYPE.to_string(),
-            digest: blob_digest.clone(),
-            size: blob_bytes.len() as i64,
-            annotations: Some(annotations),
-            urls: None,
-            ..Default::default()
-        };
-
-        // Add the signature descriptor to the signature list
-        sig_descriptors.push(sig_descriptor);
-    }
-    // 3. Create the signature manifest with the subject descriptor, artifact type, and annotations
+                // Create the signature descriptor
+                Ok::<OciDescriptor, Error>(OciDescriptor {
+                    media_type: SIGNATURE_MEDIA_TYPE.to_string(),
+                    digest: blob_digest,
+                    size: blob_bytes.len() as i64,
+                    annotations: Some(annotations),
+                    urls: None,
+                    ..Default::default()
+                })
+            }
+        })
+    ).await?
+    .into_iter()
+    .collect();
+    // 3. Create the signature manifest with the subject descriptor, empty config, artifact type, and annotations
     let mut annotations = BTreeMap::new();
     annotations.insert(IMAGE_NAME_LABEL.to_string(), image.name.clone());
     annotations.insert(
@@ -138,13 +141,20 @@ pub(super) async fn attach_signatures(
         chrono::Utc::now().to_rfc3339(),
     );
     // Empty Descriptor for config, as per OCI spec, this is required for the manifest, refer to https://github.com/opencontainers/image-spec/blob/main/manifest.md#guidance-for-an-empty-descriptor
+    let empty_config_digest = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
     let config_descriptor = OciDescriptor {
         media_type: "application/vnd.oci.empty.v1+json".to_string(),
-            digest:"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a".to_string(),
-            size: 2,
-            annotations: None,
-            urls: None,
+        digest:empty_config_digest.to_string(),
+        size: 2,
+        annotations: None,
+        urls: None,
     };
+    // Ensure the empty config blob exists in the registry
+    client.push_blob(
+        &image_ref,
+        b"{}",
+        empty_config_digest,
+    ).await.context("Failed to push empty config blob")?;
     let sig_manifest = oci_client::manifest::OciImageManifest {
         schema_version: 2,
         media_type: Some(oci_client::manifest::OCI_IMAGE_MEDIA_TYPE.to_string()),
