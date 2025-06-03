@@ -321,15 +321,19 @@
         ],
         "smb_storage_classes": [
             {
-                "name": "azurefile-csi-kata-cc",
+                "name": "azurefile",
                 "mount_options": [
-                    "dir_mode=0777",
-                    "file_mode=0777",
                     "mfsymlinks",
                     "cache=strict",
-                    "nosharesock",
-                    "actimeo=30",
-                    "nobrl"
+                    "nosharesock"
+                ]
+            },
+            {
+                "name": "azurefile-csi",
+                "mount_options": [
+                    "mfsymlinks",
+                    "cache=strict",
+                    "nosharesock"
                 ]
             }
         ]
