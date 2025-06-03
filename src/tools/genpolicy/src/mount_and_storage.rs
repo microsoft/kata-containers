@@ -225,7 +225,7 @@ fn get_empty_dir_mount_and_storage(
             source: settings_empty_dir.source.clone(),
             fstype: settings_empty_dir.fstype.clone(),
             options: settings_empty_dir.options.clone(),
-            mount_point: format!("{}{}$", &settings_empty_dir.mount_point, &yaml_mount.name),
+            mount_point: format!("{}{}", &settings_empty_dir.mount_point, &yaml_mount.name),
             fs_group: None,
         });
     }

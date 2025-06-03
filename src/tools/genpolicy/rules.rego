@@ -1456,7 +1456,7 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
     mount3 := replace(mount2, "$(sandbox-id)", sandbox_id)
     print("allow_mount_point 3: mount3 =", mount3)
 
-    regex.match(mount3, i_storage.mount_point)
+    mount3 == i_storage.mount_point
 
     print("allow_mount_point 3: true")
 }
@@ -1482,7 +1482,7 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) {
     mount1 := p_storage.mount_point
     print("allow_mount_point 5: mount1 =", mount1)
 
-    regex.match(mount1, i_storage.mount_point)
+    mount1 == i_storage.mount_point
 
     print("allow_mount_point 5: true")
 }
