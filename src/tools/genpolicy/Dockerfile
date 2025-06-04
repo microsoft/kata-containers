@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1.4
+
+############################################
+# 1) Builder stage – compile genpolicy     #
+############################################
 FROM rust:1.84.0-slim AS builder
 
-# Install everything needed to compile both your agent and genpolicy,
-# including OpenSSL and its Perl-dependent build system.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       build-essential \
@@ -16,45 +18,39 @@ RUN apt-get update && \
       containerd \
       libssl-dev \
       zlib1g-dev \
-      cmake && \
+      cmake \
+      musl-tools && \
     rm -rf /var/lib/apt/lists/*
 
-# Your bare‐metal step
+# Ensure containerd config exists (same as before)
 RUN containerd config default >/etc/containerd/config.toml
 
-ARG LIBC=gnu
-ARG BUILD_TYPE=release
-ENV LIBC=${LIBC} BUILD_TYPE=${BUILD_TYPE}
+RUN rustup target add x86_64-unknown-linux-musl
 
-# Mirror your repo under /usr/src
+ARG BUILD_TYPE=release
+ENV BUILD_TYPE=${BUILD_TYPE}
+
+# Copy everything from your repo root (we assume Docker build context is repo root)
 WORKDIR /usr/src
-COPY utils.mk .
+COPY utils.mk . 
 COPY src src
 
-# Build from the genpolicy directory (will pull in agent, libs, etc.)
+# Now build “genpolicy” for musl:
 WORKDIR /usr/src/src/tools/genpolicy
-RUN make
+
+# If your Makefile accepts something like “TARGET=…”, set it. 
+# Otherwise replace the “make” line with a direct cargo invocation.
+# For example, if `make` just calls `cargo build --release`, replace it:
+RUN cargo build \
+      --release \
+      --target x86_64-unknown-linux-musl
 
 ############################################
-# 2) Runtime stage – standalone image     #
+# 2) Export stage – make the static binary #
 ############################################
-FROM debian:bookworm-slim AS runtime
+FROM scratch AS export
 
-# Only the libs your binary actually needs at runtime:
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      ca-certificates \
-      libseccomp2 && \
-    rm -rf /var/lib/apt/lists/*
-
-# Copy the genpolicy binary that your builder just produced:
-ARG BUILD_TYPE=release
+# Copy the musl‐linked genpolicy into /
 COPY --from=builder \
-     /usr/src/src/tools/genpolicy/target/x86_64-unknown-linux-gnu/${BUILD_TYPE}/genpolicy \
-     /usr/local/bin/genpolicy
-
-RUN chmod +x /usr/local/bin/genpolicy
-
-# Now any args you pass to the container are forwarded to genpolicy:
-ENTRYPOINT ["genpolicy"]
-CMD ["--help"]
+     /usr/src/src/tools/genpolicy/target/x86_64-unknown-linux-musl/release/genpolicy \
+     /genpolicy
