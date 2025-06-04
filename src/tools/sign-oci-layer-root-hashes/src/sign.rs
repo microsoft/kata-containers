@@ -1,18 +1,12 @@
 use std::{
-    fs,
-    io::Write,
-    path::PathBuf,
-    process::{Command, Stdio},
-    collections::BTreeMap,
+    collections::BTreeMap, io::Write,path::PathBuf, process::{Command, Stdio}
 };
 
 use anyhow::{Context, Error};
 use base64::{engine::general_purpose, Engine};
 use futures::future;
-use oci_client::manifest::{OciDescriptor, OciManifest, OciImageManifest};
-use oci_client::client::{Client, linux_amd64_resolver, ClientConfig};
-use oci_client::secrets::RegistryAuth;
-use oci_client::{RegistryOperation, Reference};
+use oci_client::manifest::{OciDescriptor, OciImageManifest};
+use oci_client::Reference;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -50,58 +44,152 @@ struct LayerInfo {
     signature: String,
 }
 
-pub(super) async fn attach_signatures(
-    image: &ImageInfo
+/// Attach signatures to the image manifests as referrers without repushing the image manifests
+pub(super) async fn attach_root_hash_signatures(
+    config: &utils::Config,
+    image_tags: &Vec<String>,
 ) -> Result<(), Error> {
-    let image_ref: Reference = image.name.to_string().parse().unwrap();
-    let client = Client::new(ClientConfig {
-            platform_resolver: Some(Box::new(linux_amd64_resolver)),
-            ..Default::default()
-        });
-    // Authenticate with the registry (if needed)
-    let auth: RegistryAuth = registry::build_auth(&image_ref);
-    let op = RegistryOperation::Push;
-    client.auth(&image_ref, &auth, op).await?;
+    future::try_join_all(
+        image_tags.iter().map(|image| attach_image_signatures(image, config))
+    ).await?;
+    Ok(())
+}
 
-    let accepted_media_types = &[
-        oci_client::manifest::OCI_IMAGE_INDEX_MEDIA_TYPE,
-        oci_client::manifest::OCI_IMAGE_MEDIA_TYPE,
-        oci_client::manifest::IMAGE_MANIFEST_LIST_MEDIA_TYPE,
-        oci_client::manifest::IMAGE_MANIFEST_MEDIA_TYPE,
-    ];
+/// This function will create a new signature manifest with the subject descriptor (which references the image manifest)
+/// and a list of signature blobs for each layer in the image. Per layer signature blob contains
+/// the layer digest, the dm-verity root hash of each layer in the image, and the root hash signature.
+/// Theoretically signature blob should contain the info needed for verification and kernel checks both root hash and signature.
+/// Now as much info as possible is included, could remove them in the future.
+/// It will then push this signature manifest to the registry with a new reference that
+/// has a ".erofs.sig-<serial number of the signer certificate>" suffix.
+/// The serial number of the signer certificate appended to the tag can ensure uniqueness
+/// and can be used by snapshotter to pick signatures for a specific signer.
+async fn attach_image_signatures(
+    image: &str,
+    config: &utils::Config
+) -> Result<(), Error> {
+    let image_ref: Reference = image.to_string().parse().unwrap();
+
     // 1. Resolve the subject descriptor
-    let (raw_bytes, subject_digest) = client
-        .pull_manifest_raw(&image_ref, &auth, accepted_media_types)
-        .await?;
-    // Parse the raw_bytes into an OCI manifest
-    let image_manifest: OciManifest = serde_json::from_slice(&raw_bytes)
-        .context("Failed to parse raw bytes into OCI manifest")?;
-    // Print the digest, raw bytes length, the manifest media type
-    println!("Subject Digest: {}", subject_digest);
-    println!("Raw bytes length: {}", raw_bytes.len());
+    let container = registry::get_container(&config, image)
+        .await
+        .context("Failed to get container image")?;
+    // Calculate the digest of the manifest (sha256 of the canonical JSON bytes)
+    let manifest_bytes = serde_json::to_vec(&container.manifest)
+        .context("Failed to serialize manifest to bytes")?;
+    let manifest_digest = format!("sha256:{:x}", Sha256::digest(&manifest_bytes));
+    // Print the image manifest digest, raw bytes length
+    println!("Subject Digest: {}", manifest_digest);
+    println!("Raw bytes length: {}", manifest_bytes.len());
 
     let subject_descriptor = OciDescriptor {
-        digest: subject_digest, // Digest of the manifest to attach
-        size: raw_bytes.len() as i64, // Size in bytes
-        media_type: image_manifest.content_type().to_string(),
+        digest: manifest_digest, // Digest of the image manifest to attach
+        size: manifest_bytes.len() as i64, // Size in bytes
+        media_type: container.manifest.media_type.clone().unwrap_or_else(|| oci_client::manifest::OCI_IMAGE_MEDIA_TYPE.to_string()), // the media type of the image manifest
         ..Default::default()
     };
 
     // 2. Prepare the signature blobs to be attached
+    let sig_descriptors = prepare_sig_descriptors(image, config, &container)
+        .await
+        .context("Failed to prepare signature descriptors")?;
+
+    // 3. Create the signature manifest with the subject descriptor, empty config, artifact type, and annotations
+    let mut annotations = BTreeMap::new();
+    annotations.insert(IMAGE_NAME_LABEL.to_string(), image.to_string());
+    annotations.insert(
+        "org.opencontainers.image.created".to_string(),
+        chrono::Utc::now().to_rfc3339(),
+    );
+    // Empty Descriptor for config, as per OCI spec, this is required for the manifest,
+    // refer to https://github.com/opencontainers/image-spec/blob/main/manifest.md#guidance-for-an-empty-descriptor
+    let empty_config_digest = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+    let config_descriptor = OciDescriptor {
+        media_type: "application/vnd.oci.empty.v1+json".to_string(),
+        digest:empty_config_digest.to_string(),
+        size: 2,
+        annotations: None,
+        urls: None,
+    };
+    // Ensure the empty config blob exists in the registry
+    registry::Container::push_blob(
+        image_ref.clone(),
+        b"{}",
+        empty_config_digest,
+    ).await.context("Failed to push empty config blob")?;
+    let sig_manifest = oci_client::manifest::OciImageManifest {
+        schema_version: 2,
+        media_type: Some(oci_client::manifest::OCI_IMAGE_MEDIA_TYPE.to_string()),
+        artifact_type: Some(SIGNATURE_ARTIFACT_TYPE.to_string()),
+        config: config_descriptor,
+        layers: sig_descriptors.clone(),
+        subject: Some(subject_descriptor.clone()),
+        annotations: Some(annotations.clone()),
+    };
+
+    // 4. Get the serial number of the signer certificate
+    let output = Command::new("openssl")
+        .arg("x509")
+        .arg("-in")
+        .arg(&config.signer)
+        .arg("-noout")
+        .arg("-serial")
+        .output()
+        .context("Failed to run openssl to get certificate serial number")?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "Failed to get certificate serial number: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let serial_line = String::from_utf8_lossy(&output.stdout);
+    // Output is like: "serial=0123456789ABCDEF\n"
+    let serial_number = serial_line
+        .trim()
+        .strip_prefix("serial=")
+        .unwrap_or(serial_line.trim())
+        .to_string();
+    println!("Signer certificate serial number: {}", serial_number);
+
+    // 5. Push the signature manifest to a new reference (e.g., with a ".erofs.sig-<serial number>" suffix)
+    let sig_ref = format!(
+        "{}/{}:{}",
+        image_ref.registry(),
+        image_ref.repository(),
+        format!("{}.erofs.sig-{}", image_ref.tag().unwrap(), serial_number)
+    );
+    if let Err(e) = registry::Container::push_manifest(sig_ref.clone(), sig_manifest.clone()).await {
+        eprintln!(
+            "Failed to push signature manifest to {}: {}",
+            sig_ref, e
+        );
+    }
+    println!("Signature manifest pushed successfully to: {}", sig_ref);
+    Ok(())
+}
+
+/// This function retrieves the root hashes and signatures for each layer of the image,
+/// serializes them to JSON, and pushes them as blobs to the registry.
+/// It returns a vector of `OciDescriptor` objects representing the signature blobs.
+/// Each descriptor contains the media type, digest, size, and annotations for the signature blob.
+/// The annotations include the layer digest, root hash, signature, and a file name for the signature blob.
+async fn prepare_sig_descriptors(
+    image: &str,
+    config: &utils::Config,
+    container: &registry::Container,
+) -> Result<Vec<OciDescriptor>, Error> {
+    let image_info = get_container_image_root_hashes(image, config, &container).await?;
     let sig_descriptors: Vec<OciDescriptor> = future::try_join_all(
-        image.layers.iter().map(|layer| {
-            let client = &client;
-            let image_ref = &image_ref;
+        image_info.layers.iter().map(|layer| {
+            let image_ref: Reference = image.to_string().parse().unwrap();
             async move {
                 let json_obj = serde_json::json!({
                     "layer_digest": layer.digest,
                     "root_hash": layer.root_hash,
                     "signature": layer.signature,
                 });
-                let file_name = format!("signature_for_layer_{}.json", layer.digest.trim_start_matches("sha256:"));
-                fs::write(&file_name, serde_json::to_string_pretty(&json_obj)?)?;
-                println!("Wrote signature info for layer {} to {}", layer.digest, file_name);
-                let blob_bytes = fs::read(file_name.clone())?;
+                // Serialize the signature info to JSON in memory
+                let blob_bytes = serde_json::to_vec_pretty(&json_obj)?;
                 let blob_digest = format!("sha256:{:x}", Sha256::digest(&blob_bytes));
                 println!("Blob size and Digest: {}, {}", blob_bytes.len(), blob_digest);
 
@@ -109,11 +197,11 @@ pub(super) async fn attach_signatures(
                 annotations.insert(IMAGE_LAYER_DIGEST_LABEL.to_string(), layer.digest.clone());
                 annotations.insert(IMAGE_LAYER_ROOT_HASH_LABEL.to_string(), layer.root_hash.clone());
                 annotations.insert(IMAGE_LAYER_SIGNATURE_LABEL.to_string(), layer.signature.clone());
-                annotations.insert(SIGNATURE_FILE_NAME.to_string(), file_name.clone());
+                annotations.insert(SIGNATURE_FILE_NAME.to_string(), format!("signature_for_layer_{}.json", layer.digest.trim_start_matches("sha256:")));
 
                 // Push each signature blob to the repository
-                client.push_blob(
-                    image_ref,
+                registry::Container::push_blob(
+                    image_ref.clone(),
                     &blob_bytes,
                     &blob_digest,
                 ).await
@@ -133,52 +221,7 @@ pub(super) async fn attach_signatures(
     ).await?
     .into_iter()
     .collect();
-    // 3. Create the signature manifest with the subject descriptor, empty config, artifact type, and annotations
-    let mut annotations = BTreeMap::new();
-    annotations.insert(IMAGE_NAME_LABEL.to_string(), image.name.clone());
-    annotations.insert(
-        "org.opencontainers.image.created".to_string(),
-        chrono::Utc::now().to_rfc3339(),
-    );
-    // Empty Descriptor for config, as per OCI spec, this is required for the manifest, refer to https://github.com/opencontainers/image-spec/blob/main/manifest.md#guidance-for-an-empty-descriptor
-    let empty_config_digest = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
-    let config_descriptor = OciDescriptor {
-        media_type: "application/vnd.oci.empty.v1+json".to_string(),
-        digest:empty_config_digest.to_string(),
-        size: 2,
-        annotations: None,
-        urls: None,
-    };
-    // Ensure the empty config blob exists in the registry
-    client.push_blob(
-        &image_ref,
-        b"{}",
-        empty_config_digest,
-    ).await.context("Failed to push empty config blob")?;
-    let sig_manifest = oci_client::manifest::OciImageManifest {
-        schema_version: 2,
-        media_type: Some(oci_client::manifest::OCI_IMAGE_MEDIA_TYPE.to_string()),
-        artifact_type: Some(SIGNATURE_ARTIFACT_TYPE.to_string()),
-        config: config_descriptor,
-        layers: sig_descriptors.clone(),
-        subject: Some(subject_descriptor.clone()),
-        annotations: Some(annotations.clone()),
-    };
-
-    // 4. Push the signature manifest to a new reference (e.g., with a ".erofs.sig" suffix)
-    let sig_ref: Reference = Reference::with_tag(
-            image_ref.registry().to_string(),
-            image_ref.repository().to_string(),
-            format!("{}.erofs.sig", image_ref.tag().unwrap()),
-        );
-    if let Err(e) = client.push_manifest(&sig_ref, &OciManifest::Image(sig_manifest)).await {
-        eprintln!(
-            "Failed to push signature manifest to {}: {}",
-            sig_ref, e
-        );
-    }
-    println!("Signature manifest pushed successfully to: {}", sig_ref);
-    Ok(())
+    Ok(sig_descriptors)
 }
 
 async fn get_image_root_hashes(image: &str, config: &utils::Config) -> Result<ImageInfo, Error> {
