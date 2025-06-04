@@ -96,13 +96,9 @@ async fn main() -> Result<(), Error> {
                 }
                 None => image_tags.clone(),
             };
-            let images = sign::get_root_hash_signatures(&config, &output_image_tags)
+            sign::attach_root_hash_signatures(&config, &output_image_tags)
                 .await
-                .context("Failed to get root hashes")?;
-
-            attach_signatures_to_image_manifests(images)
-                .await
-                .context("Failed to attach signatures to image manifests")?;
+                .context("Failed to attach root hashe sigantures")?;
         }
 
     }
@@ -150,19 +146,5 @@ fn output_signature_manifest(
         }
     }
 
-    Ok(())
-}
-
-/// Attach signatures to the image manifest as referrers without repushing the manifest
-async fn attach_signatures_to_image_manifests(
-    images: Vec<ImageInfo>,
-) -> Result<(), Error> {
-    future::try_join_all(
-        images
-            .iter()
-            .map(|image| sign::attach_signatures(image))
-    )
-    .await
-    .context("Failed to attach signatures to image manifests")?;
     Ok(())
 }

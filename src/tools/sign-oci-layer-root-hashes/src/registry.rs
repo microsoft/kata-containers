@@ -147,6 +147,24 @@ impl Container {
     pub fn get_image_layers(&self) -> Vec<ImageLayer> {
         self.image_layers.clone()
     }
+
+    pub async fn push_blob(reference: Reference, data: &[u8], digest: &str) -> Result<()> {
+        let auth: RegistryAuth = build_auth(&reference);
+
+        let client: Client = Client::new(ClientConfig {
+            platform_resolver: Some(Box::new(linux_amd64_resolver)),
+            ..Default::default()
+        });
+
+        let op: RegistryOperation = RegistryOperation::Push;
+        client.auth(&reference, &auth, op).await?;
+        client.push_blob(
+            &reference,
+            data,
+            digest,
+        ).await.context("Failed to push blob")?;
+        Ok(())
+    }
 }
 
 async fn get_image_layers(
@@ -456,7 +474,7 @@ pub async fn get_container(config: &Config, image: &str) -> Result<Container> {
     Container::new(config.use_cache, image).await
 }
 
-pub fn build_auth(reference: &Reference) -> RegistryAuth {
+fn build_auth(reference: &Reference) -> RegistryAuth {
     debug!("build_auth: {:?}", reference);
 
     let server = reference
