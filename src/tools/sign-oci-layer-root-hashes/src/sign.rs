@@ -76,7 +76,8 @@ async fn attach_image_signatures(
     let container = registry::get_container(&config, image)
         .await
         .context("Failed to get container image")?;
-    let subject_descriptor = get_subject_descriptor(&container)
+    let subject_descriptor = get_subject_descriptor(&image_ref, &container)
+        .await
         .context("Failed to get subject descriptor")?;
 
     // 2. Prepare the signature blobs to be attached
@@ -123,17 +124,13 @@ async fn attach_image_signatures(
     Ok(())
 }
 
-/// This function retrieves the subject descriptor for the signed image manifest.
-fn get_subject_descriptor(
+async fn get_subject_descriptor(
+    image_ref: &Reference,
     container: &registry::Container,
 ) -> Result<OciDescriptor, Error> {
-    // Calculate the digest of the manifest (sha256 of the canonical JSON bytes)
-    let manifest_bytes = serde_json::to_vec(&container.manifest)
-        .context("Failed to serialize manifest to bytes")?;
-    let manifest_digest = format!("sha256:{:x}", Sha256::digest(&manifest_bytes));
-    // Print the image manifest digest, raw bytes length
-    println!("Subject Digest: {}", manifest_digest);
-    println!("Raw bytes length: {}", manifest_bytes.len());
+    let (manifest_digest, manifest_bytes) = registry::Container::pull_manifest_raw(image_ref.clone())
+        .await
+        .context("Failed to pull manifest raw")?;
 
     Ok(OciDescriptor {
         digest: manifest_digest, // Digest of the image manifest to attach
