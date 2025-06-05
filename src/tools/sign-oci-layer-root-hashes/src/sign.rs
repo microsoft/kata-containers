@@ -23,6 +23,8 @@ const SIGNATURE_ARTIFACT_TYPE: &str = "application/vnd.oci.mt.pkcs7";
 const SIGNATURE_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.erofs.sig";
 const SIGNATURE_FILE_NAME: &str = "signature.blob.name";
 
+const EMPTY_CONFIG_DIGEST: &str = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+
 /// Aggregates per-image layer information. While the image name is not strictly
 /// necessary, it is convenient for human inspection of the manifest.
 #[derive(Serialize, Deserialize)]
@@ -74,20 +76,8 @@ async fn attach_image_signatures(
     let container = registry::get_container(&config, image)
         .await
         .context("Failed to get container image")?;
-    // Calculate the digest of the manifest (sha256 of the canonical JSON bytes)
-    let manifest_bytes = serde_json::to_vec(&container.manifest)
-        .context("Failed to serialize manifest to bytes")?;
-    let manifest_digest = format!("sha256:{:x}", Sha256::digest(&manifest_bytes));
-    // Print the image manifest digest, raw bytes length
-    println!("Subject Digest: {}", manifest_digest);
-    println!("Raw bytes length: {}", manifest_bytes.len());
-
-    let subject_descriptor = OciDescriptor {
-        digest: manifest_digest, // Digest of the image manifest to attach
-        size: manifest_bytes.len() as i64, // Size in bytes
-        media_type: container.manifest.media_type.clone().unwrap_or_else(|| oci_client::manifest::OCI_IMAGE_MEDIA_TYPE.to_string()), // the media type of the image manifest
-        ..Default::default()
-    };
+    let subject_descriptor = get_subject_descriptor(&container)
+        .context("Failed to get subject descriptor")?;
 
     // 2. Prepare the signature blobs to be attached
     let sig_descriptors = prepare_sig_descriptors(image, config, &container)
@@ -101,62 +91,27 @@ async fn attach_image_signatures(
         "org.opencontainers.image.created".to_string(),
         chrono::Utc::now().to_rfc3339(),
     );
-    // Empty Descriptor for config, as per OCI spec, this is required for the manifest,
-    // refer to https://github.com/opencontainers/image-spec/blob/main/manifest.md#guidance-for-an-empty-descriptor
-    let empty_config_digest = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
-    let config_descriptor = OciDescriptor {
-        media_type: "application/vnd.oci.empty.v1+json".to_string(),
-        digest:empty_config_digest.to_string(),
-        size: 2,
-        annotations: None,
-        urls: None,
-    };
-    // Ensure the empty config blob exists in the registry
-    registry::Container::push_blob(
-        image_ref.clone(),
-        b"{}",
-        empty_config_digest,
-    ).await.context("Failed to push empty config blob")?;
+    let empty_config_descriptor = get_empty_config_descriptor(image_ref.clone())
+        .await
+        .context("Failed to get empty config descriptor")?;
     let sig_manifest = oci_client::manifest::OciImageManifest {
         schema_version: 2,
         media_type: Some(oci_client::manifest::OCI_IMAGE_MEDIA_TYPE.to_string()),
         artifact_type: Some(SIGNATURE_ARTIFACT_TYPE.to_string()),
-        config: config_descriptor,
+        config: empty_config_descriptor.clone(),
         layers: sig_descriptors.clone(),
         subject: Some(subject_descriptor.clone()),
         annotations: Some(annotations.clone()),
     };
 
-    // 4. Get the serial number of the signer certificate
-    let output = Command::new("openssl")
-        .arg("x509")
-        .arg("-in")
-        .arg(&config.signer)
-        .arg("-noout")
-        .arg("-serial")
-        .output()
-        .context("Failed to run openssl to get certificate serial number")?;
-    if !output.status.success() {
-        return Err(anyhow::anyhow!(
-            "Failed to get certificate serial number: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    let serial_line = String::from_utf8_lossy(&output.stdout);
-    // Output is like: "serial=0123456789ABCDEF\n"
-    let serial_number = serial_line
-        .trim()
-        .strip_prefix("serial=")
-        .unwrap_or(serial_line.trim())
-        .to_string();
-    println!("Signer certificate serial number: {}", serial_number);
-
-    // 5. Push the signature manifest to a new reference (e.g., with a ".erofs.sig-<serial number>" suffix)
+    // 4. Push the signature manifest to a new reference (e.g., with a ".erofs.sig-<serial number>" suffix)
+    let serial_number = get_serial_number_from_cert(&config.signer)?;
     let sig_ref = format!(
-        "{}/{}:{}",
+        "{}/{}:{}.erofs.sig-{}",
         image_ref.registry(),
         image_ref.repository(),
-        format!("{}.erofs.sig-{}", image_ref.tag().unwrap(), serial_number)
+        image_ref.tag().unwrap(),
+        serial_number
     );
     if let Err(e) = registry::Container::push_manifest(sig_ref.clone(), sig_manifest.clone()).await {
         eprintln!(
@@ -166,6 +121,26 @@ async fn attach_image_signatures(
     }
     println!("Signature manifest pushed successfully to: {}", sig_ref);
     Ok(())
+}
+
+/// This function retrieves the subject descriptor for the signed image manifest.
+fn get_subject_descriptor(
+    container: &registry::Container,
+) -> Result<OciDescriptor, Error> {
+    // Calculate the digest of the manifest (sha256 of the canonical JSON bytes)
+    let manifest_bytes = serde_json::to_vec(&container.manifest)
+        .context("Failed to serialize manifest to bytes")?;
+    let manifest_digest = format!("sha256:{:x}", Sha256::digest(&manifest_bytes));
+    // Print the image manifest digest, raw bytes length
+    println!("Subject Digest: {}", manifest_digest);
+    println!("Raw bytes length: {}", manifest_bytes.len());
+
+    Ok(OciDescriptor {
+        digest: manifest_digest, // Digest of the image manifest to attach
+        size: manifest_bytes.len() as i64, // Size in bytes
+        media_type: container.manifest.media_type.clone().unwrap_or_else(|| oci_client::manifest::OCI_IMAGE_MEDIA_TYPE.to_string()), // the media type of the image manifest
+        ..Default::default()
+    })
 }
 
 /// This function retrieves the root hashes and signatures for each layer of the image,
@@ -188,6 +163,7 @@ async fn prepare_sig_descriptors(
                     "root_hash": layer.root_hash,
                     "signature": layer.signature,
                 });
+
                 // Serialize the signature info to JSON in memory
                 let blob_bytes = serde_json::to_vec_pretty(&json_obj)?;
                 let blob_digest = format!("sha256:{:x}", Sha256::digest(&blob_bytes));
@@ -222,6 +198,56 @@ async fn prepare_sig_descriptors(
     .into_iter()
     .collect();
     Ok(sig_descriptors)
+}
+
+/// This function creates an empty config descriptor for the signature manifest.
+/// It pushes an empty JSON blob to the registry and returns the descriptor.
+/// The empty config is required by the OCI spec for the manifest, even if it contains no configuration data.
+/// refer to https://github.com/opencontainers/image-spec/blob/main/manifest.md#guidance-for-an-empty-descriptor
+async fn get_empty_config_descriptor(image_ref: Reference) -> Result<OciDescriptor, Error> {
+    let empty_config_descriptor = OciDescriptor {
+        media_type: "application/vnd.oci.empty.v1+json".to_string(),
+        digest:EMPTY_CONFIG_DIGEST.to_string(),
+        size: 2,
+        annotations: None,
+        urls: None,
+    };
+    // Ensure the empty config blob exists in the registry
+    registry::Container::push_blob(
+        image_ref.clone(),
+        b"{}",
+        EMPTY_CONFIG_DIGEST,
+    ).await.context("Failed to push empty config blob")?;
+    Ok(empty_config_descriptor)
+}
+
+/// This function retrieves the serial number from the signer certificate using openssl.
+fn get_serial_number_from_cert(
+    cert_path: &PathBuf,
+) -> Result<String, Error> {
+    let output = Command::new("openssl")
+        .arg("x509")
+        .arg("-in")
+        .arg(cert_path)
+        .arg("-noout")
+        .arg("-serial")
+        .output()
+        .context("Failed to run openssl to get certificate serial number")?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "Failed to get certificate serial number: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let serial_line = String::from_utf8_lossy(&output.stdout);
+    // Output is like: "serial=0123456789ABCDEF\n"
+    let serial_number = serial_line
+        .trim()
+        .strip_prefix("serial=")
+        .unwrap_or(serial_line.trim())
+        .to_string();
+    println!("Signer certificate serial number: {}", serial_number);
+    Ok(serial_number)
 }
 
 async fn get_image_root_hashes(image: &str, config: &utils::Config) -> Result<ImageInfo, Error> {
