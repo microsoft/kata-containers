@@ -27,6 +27,13 @@ use std::io::BufWriter;
 use std::{io, io::Seek, io::Write, path::Path};
 use tokio::io::AsyncWriteExt;
 
+const ACCEPTED_MEDIA_TYPES: &[&str] = &[
+    manifest::OCI_IMAGE_INDEX_MEDIA_TYPE,
+    manifest::OCI_IMAGE_MEDIA_TYPE,
+    manifest::IMAGE_MANIFEST_LIST_MEDIA_TYPE,
+    manifest::IMAGE_MANIFEST_MEDIA_TYPE,
+];
+
 /// Container image properties obtained from an OCI repository.
 #[derive(Clone, Debug, Default)]
 pub struct Container {
@@ -164,6 +171,26 @@ impl Container {
             digest,
         ).await.context("Failed to push blob")?;
         Ok(())
+    }
+
+    /// Pulls the raw bytes and manifest digest for the given image reference.
+    /// This function is necessary because the manifest digest is not same as the one calculated from
+    /// the manifest in Container for some reason.
+    pub async fn pull_manifest_raw(image_ref: Reference) -> Result<(String, Vec<u8>)> {
+        let reference: Reference = image_ref.clone();
+        let auth = build_auth(&reference);
+
+        let client = Client::new(ClientConfig {
+            platform_resolver: Some(Box::new(linux_amd64_resolver)),
+            ..Default::default()
+        });
+
+        let (raw_bytes, manifest_digest) = client
+            .pull_manifest_raw(&image_ref, &auth, ACCEPTED_MEDIA_TYPES)
+            .await
+            .map_err(|e| anyhow!("Failed to pull manifest raw: {:?}", e))?;
+        println!("Manifest digest: {}, manifest bytes: {}", manifest_digest, raw_bytes.len());
+        Ok((manifest_digest, raw_bytes))
     }
 }
 
