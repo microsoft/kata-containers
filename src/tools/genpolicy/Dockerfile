@@ -25,10 +25,6 @@ RUN apt-get update && \
 # 1.2) Emit a default containerd config (so that any `make -C ../../agent` step still sees a config file)
 RUN containerd config default >/etc/containerd/config.toml
 
-# 1.3) Allow BUILD_TYPE override (default=release)
-ARG BUILD_TYPE=release
-ENV BUILD_TYPE=${BUILD_TYPE}
-
 # 1.4) All COPYs are relative to /usr/src from here on
 WORKDIR /usr/src
 
@@ -48,8 +44,8 @@ COPY src/ ./src/
 WORKDIR /usr/src/src/tools/genpolicy
 
 #      This "make" invocation (with LIBC=gnu) puts the final binary at:
-#        /usr/src/src/tools/genpolicy/target/x86_64-unknown-linux-gnu/release/genpolicy
-RUN make LIBC=gnu BUILD_TYPE=${BUILD_TYPE}
+#        /usr/src/src/tools/genpolicy/target/x86_64-unknown-linux-gnu/debug/genpolicy
+RUN make LIBC=gnu BUILD_TYPE=
 
 ############################################
 # 2) Export stage – grab the GNU binary   #
@@ -58,5 +54,5 @@ FROM scratch AS export
 
 # Copy the gnu‐linked binary out of the builder, from the exact path where `make` put it:
 COPY --from=builder \
-     /usr/src/src/tools/genpolicy/target/x86_64-unknown-linux-gnu/release/genpolicy \
+     /usr/src/src/tools/genpolicy/target/x86_64-unknown-linux-gnu/debug/genpolicy \
      /genpolicy
