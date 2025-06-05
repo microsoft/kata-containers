@@ -3,8 +3,9 @@
 ############################################
 # 1) Builder stage – compile genpolicy     #
 ############################################
-FROM rust:1.84.0-slim AS builder
+FROM rust:1.84.0-slim-bullseye AS builder
 
+# 1.1) Install glibc‐based build dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       build-essential \
@@ -18,39 +19,44 @@ RUN apt-get update && \
       containerd \
       libssl-dev \
       zlib1g-dev \
-      cmake \
-      musl-tools && \
+      cmake && \
     rm -rf /var/lib/apt/lists/*
 
-# Ensure containerd config exists (same as before)
+# 1.2) Emit a default containerd config (so that any `make -C ../../agent` step still sees a config file)
 RUN containerd config default >/etc/containerd/config.toml
 
-RUN rustup target add x86_64-unknown-linux-musl
-
+# 1.3) Allow BUILD_TYPE override (default=release)
 ARG BUILD_TYPE=release
 ENV BUILD_TYPE=${BUILD_TYPE}
 
-# Copy everything from your repo root (we assume Docker build context is repo root)
+# 1.4) All COPYs are relative to /usr/src from here on
 WORKDIR /usr/src
-COPY utils.mk . 
-COPY src src
 
-# Now build “genpolicy” for musl:
+# 1.5) Copy utils.mk → /usr/src/utils.mk so that
+#      genpolicy/Makefile (which does `include ../../../utils.mk`) can find it
+COPY utils.mk ./utils.mk
+
+# 1.6) Copy the entire src/ folder (including tools/genpolicy, agent, libs/…, etc.)
+#      This ensures that:
+#        - /usr/src/src/tools/genpolicy
+#        - /usr/src/src/agent
+#        - /usr/src/src/libs/kata-sys-util
+#      all exist, matching what the workspace & Makefiles expect.
+COPY src/ ./src/
+
+# 1.7) Change into genpolicy and build with GNU (glibc) linking
 WORKDIR /usr/src/src/tools/genpolicy
 
-# If your Makefile accepts something like “TARGET=…”, set it. 
-# Otherwise replace the “make” line with a direct cargo invocation.
-# For example, if `make` just calls `cargo build --release`, replace it:
-RUN cargo build \
-      --release \
-      --target x86_64-unknown-linux-musl
+#      This "make" invocation (with LIBC=gnu) puts the final binary at:
+#        /usr/src/src/tools/genpolicy/target/x86_64-unknown-linux-gnu/release/genpolicy
+RUN make LIBC=gnu BUILD_TYPE=${BUILD_TYPE}
 
 ############################################
-# 2) Export stage – make the static binary #
+# 2) Export stage – grab the GNU binary   #
 ############################################
 FROM scratch AS export
 
-# Copy the musl‐linked genpolicy into /
+# Copy the gnu‐linked binary out of the builder, from the exact path where `make` put it:
 COPY --from=builder \
-     /usr/src/src/tools/genpolicy/target/x86_64-unknown-linux-musl/release/genpolicy \
+     /usr/src/src/tools/genpolicy/target/x86_64-unknown-linux-gnu/release/genpolicy \
      /genpolicy
