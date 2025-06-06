@@ -12,18 +12,18 @@ use sha2::{Digest, Sha256};
 
 use crate::{registry, utils};
 
-const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
-const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
-
-const IMAGE_NAME_LABEL: &str = "image.ref.name";
-const IMAGE_LAYER_DIGEST_LABEL: &str = "image.layer.digest";
-const IMAGE_LAYER_ROOT_HASH_LABEL: &str = "image.layer.root_hash";
-const IMAGE_LAYER_SIGNATURE_LABEL: &str = "image.layer.signature";
-const SIGNATURE_ARTIFACT_TYPE: &str = "application/vnd.oci.mt.pkcs7";
-const SIGNATURE_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.erofs.sig";
-const SIGNATURE_FILE_NAME: &str = "signature.blob.name";
-
-const EMPTY_CONFIG_DIGEST: &str = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+use common::constants::{
+    IMAGE_NAME_LABEL,
+    IMAGE_LAYER_DIGEST_LABEL,
+    IMAGE_LAYER_ROOT_HASH_LABEL,
+    IMAGE_LAYER_SIGNATURE_LABEL,
+    SIGNATURE_MEDIA_TYPE,
+    SIGNATURE_FILE_NAME,
+    EMPTY_CONFIG_DIGEST,
+    SIGNATURE_ARTIFACT_TYPE,
+    ROOT_HASH_LABEL,
+    ROOT_HASH_SIG_LABEL,
+};
 
 /// Aggregates per-image layer information. While the image name is not strictly
 /// necessary, it is convenient for human inspection of the manifest.

@@ -53,6 +53,9 @@ erofs-common = { path = "../../tardev-snapshotter/erofs-common" }
 # OCI container specs.
 oci = { path = "../../libs/oci" }
 
+# Common constants
+common = { path = "../../common" }
+
 # dm-verity root hash support
 generic-array = "0.14.6"
 sha2 = "0.10.6"
