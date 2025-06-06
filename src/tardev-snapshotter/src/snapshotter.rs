@@ -100,7 +100,7 @@ impl Store {
         };
         // Load signatures from standalone signatures.json file at initialization
         if let Err(e) = store.read_signatures_from_file() {
-            log::debug!("Failed to read signatures from file during Store::new: {}", e);
+            panic!("Failed to read signatures from file during Store::new: {}", e);
         }
         store
     }
