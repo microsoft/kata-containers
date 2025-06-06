@@ -30,8 +30,26 @@ use oci_client::client::ClientConfig;
 use oci_client::secrets::RegistryAuth;
 use oci_client::Reference;
 
-const ROOT_HASH_LABEL: &str = "io.katacontainers.dm-verity.root-hash";
-const ROOT_HASH_SIG_LABEL: &str = "io.katacontainers.dm-verity.root-hash-sig";
+use oci_client::manifest::{
+    OCI_IMAGE_INDEX_MEDIA_TYPE, // The mediatype for an OCI image index manifest.
+    OCI_IMAGE_MEDIA_TYPE, // The mediatype for an OCI image manifest.
+    IMAGE_MANIFEST_LIST_MEDIA_TYPE, // The mediatype for an docker v2 shema 2 manifest list.
+    IMAGE_MANIFEST_MEDIA_TYPE, // The mediatype for an docker v2 schema 2 manifest.
+};
+
+use common::constants::{
+    IMAGE_LAYER_DIGEST_LABEL,
+    IMAGE_LAYER_ROOT_HASH_LABEL,
+    IMAGE_LAYER_SIGNATURE_LABEL,
+    SIGNATURE_ARTIFACT_TYPE,
+    ROOT_HASH_LABEL,
+    ROOT_HASH_SIG_LABEL,
+    IMAGE_LAYER_MEDIA_TYPE,
+    IMAGE_LAYER_GZIP_MEDIA_TYPE,
+    IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE,
+    IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE,
+};
+
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
 const TARGET_MANIFEST_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.manifest-digest";
 const TARGET_IMAGE_REF_LABEL: &str = "containerd.io/snapshot/cri.image-ref";
@@ -41,38 +59,6 @@ const TAR_EXTENSION: &str = "tar";
 
 /// Path from where to scan for .json standalone signature manifests
 const SIGNATURE_STORE: &str = "/var/lib/containerd/io.containerd.snapshotter.v1.tardev/signatures";
-
-// borrowed from oci-distribution crate, which alas does not build with rustc
-// 1.75, which is used by AzL3
-
-/// The mediatype for an docker v2 schema 2 manifest.
-pub const IMAGE_MANIFEST_MEDIA_TYPE: &str = "application/vnd.docker.distribution.manifest.v2+json";
-/// The mediatype for an docker v2 shema 2 manifest list.
-pub const IMAGE_MANIFEST_LIST_MEDIA_TYPE: &str =
-    "application/vnd.docker.distribution.manifest.list.v2+json";
-/// The mediatype for an OCI image index manifest.
-pub const OCI_IMAGE_INDEX_MEDIA_TYPE: &str = "application/vnd.oci.image.index.v1+json";
-/// The mediatype for an OCI image manifest.
-pub const OCI_IMAGE_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
-
-/// The mediatype for a layer.
-pub const IMAGE_LAYER_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tar";
-/// The mediatype for a layer that is gzipped.
-pub const IMAGE_LAYER_GZIP_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tar+gzip";
-/// The mediatype that Docker uses for a layer that is tarred.
-pub const IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE: &str = "application/vnd.docker.image.rootfs.diff.tar";
-/// The mediatype that Docker uses for a layer that is gzipped.
-pub const IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE: &str =
-    "application/vnd.docker.image.rootfs.diff.tar.gzip";
-
-/// The image layer digest from the signature manifest.
-pub const IMAGE_LAYER_DIGEST_LABEL: &str = "image.layer.digest";
-/// The image layer root hash from the signature manifest.
-pub const IMAGE_LAYER_ROOT_HASH_LABEL: &str = "image.layer.root_hash";
-/// The image layer signature from the signature manifest.
-pub const IMAGE_LAYER_SIGNATURE_LABEL: &str = "image.layer.signature";
-/// The image layer signature artifact type.
-pub const SIGNATURE_ARTIFACT_TYPE: &str = "application/vnd.oci.mt.pkcs7";
 
 #[derive(Serialize, Deserialize)]
 struct ImageInfo {

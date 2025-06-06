@@ -28,6 +28,9 @@ anyhow = "=1.0.58"
 zerocopy = "0.6.1"
 oci-client = "0.15.0"
 
+# Common constants
+common = { path = "../common" }
+
 # YAML file serialization/deserialization.
 serde = { version = "1.0.159", features = ["derive"] }
 hex = { version = "0.4.3" }
