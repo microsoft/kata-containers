@@ -98,7 +98,7 @@ async fn main() -> Result<(), Error> {
             };
             sign::attach_root_hash_signatures(&config, &output_image_tags)
                 .await
-                .context("Failed to attach root hashe sigantures")?;
+                .context("Failed to attach root hash sigantures")?;
         }
 
     }
