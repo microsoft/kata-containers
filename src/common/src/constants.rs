@@ -29,3 +29,16 @@ pub const SIGNATURE_FILE_NAME: &str = "signature.blob.name";
 
 /// Digest for the canonical empty config blob ({}).
 pub const EMPTY_CONFIG_DIGEST: &str = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+
+/// The mediatype for a layer.
+pub const IMAGE_LAYER_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tar";
+
+/// The mediatype for a layer that is gzipped.
+pub const IMAGE_LAYER_GZIP_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tar+gzip";
+
+/// The mediatype that Docker uses for a layer that is tarred.
+pub const IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE: &str = "application/vnd.docker.image.rootfs.diff.tar";
+
+/// The mediatype that Docker uses for a layer that is gzipped.
+pub const IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE: &str =
+    "application/vnd.docker.image.rootfs.diff.tar.gzip";
