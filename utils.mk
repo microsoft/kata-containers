@@ -11,8 +11,6 @@
 # Owner for installed files
 export KATA_INSTALL_OWNER     ?= root
 
-# Group for installed files
-export KATA_INSTALL_GROUP     ?= adm
 
 # Permissions for installed configuration files.
 #
