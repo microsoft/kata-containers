@@ -84,6 +84,11 @@ impl Store {
             root: root.into(),
             signatures: Some(<HashMap<String, LayerInfo>>::new()),
         };
+        // Test if the signature store directory exists
+        if !Path::new(SIGNATURE_STORE).exists() {
+            debug!("Signature store directory does not exist, skipping signature loading");
+            return store;
+        }
         // Load signatures from standalone signatures.json file at initialization
         if let Err(e) = store.read_signatures_from_file() {
             panic!("Failed to read signatures from file during Store::new: {}", e);
@@ -91,16 +96,9 @@ impl Store {
         store
     }
 
-    async fn lazy_read_signatures(&mut self, image_name: &String, image_digest: &String) -> Result<()> {
+    /// Reads signatures from the registry for the given image name and digest.
+    async fn read_signatures_from_registry(&mut self, image_name: &String, image_digest: &String) -> Result<()> {
         let signatures_count = self.signatures.as_ref().map(|s| s.len()).unwrap_or(0);
-        if let Err(e) = self.read_signatures_from_registry(image_name, image_digest).await {
-            debug!("Failed to read signatures from registry for image {}: {}", image_name, e);
-        }
-        debug!("Loaded {} signatures from registry", self.signatures.as_ref().map(|s| s.len()).unwrap_or(0) - signatures_count);
-        Ok(())
-    }
-
-    async fn read_signatures_from_registry(&mut self, image_name: &String, image_digest: &String) -> Result<(), Box<dyn std::error::Error>> {
         // Create a client configuration
         let config: ClientConfig = ClientConfig::default();
         // Initialize the OCI client
@@ -121,22 +119,24 @@ impl Store {
             image_digest.to_string(),
         );
 
-        self.load_referrers(&client, &image_manifest_ref, &auth).await.map_err(|e| {
+        self.load_referrers(&client, &image_manifest_ref, &auth, Some(SIGNATURE_ARTIFACT_TYPE)).await.map_err(|e| {
             anyhow!("Error processing referrers: {}", e)
         })?;
-
+        debug!("Loaded {} signatures from registry", self.signatures.as_ref().map(|s| s.len()).unwrap_or(0) - signatures_count);
         Ok(())
     }
 
+    /// Loads referrers from the registry for the given image reference.
+    /// If the artifact type is specified, it filters the referrers to only include those of that type.
     async fn load_referrers(
         &mut self,
         client: &OCI_Client,
         image_ref: &Reference,
         auth: &RegistryAuth,
+        artifact_type: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        
         // Fetch the referrers list with the specified artifact type
-        match client.pull_referrers(image_ref, Some(SIGNATURE_ARTIFACT_TYPE)).await {
+        match client.pull_referrers(image_ref, artifact_type).await {
             Ok(referrers) => {
                 if referrers.manifests.is_empty() {
                     return Err(Box::new(std::io::Error::new(
@@ -208,14 +208,14 @@ impl Store {
     }
 
     fn read_signatures_from_file(&mut self) -> Result<()> {
-        let paths = std::fs::read_dir(Path::new(SIGNATURE_STORE))?;
+        let paths = std::fs::read_dir(Path::new(SIGNATURE_STORE)).context("Failed to read signature store directory")?;
         let mut signatures = HashMap::new();
         for signatures_json_path in paths {
             let signatures_json = std::fs::read_to_string(
                 signatures_json_path
                     .context("failed to load signature file path")?
                     .path(),
-            )?;
+            ).context("failed to read signature file")?;
             let image_info_list = serde_json::from_str::<Vec<ImageInfo>>(signatures_json.as_str())?;
             for image_info in image_info_list {
                 for layer_info in image_info.layers {
@@ -1378,7 +1378,9 @@ impl TarDevSnapshotter {
             // Skip loading signatures if they are already present. If a layer has multiple signatures, only the first loaded one will be used.
             // TODO: support the latest signature or signature filtering.
             if !store.has_signature(digest) {
-                store.lazy_read_signatures(image_ref_str, manifest_digest_str).await.map_err(|e| {
+                store.read_signatures_from_registry(image_ref_str, manifest_digest_str)
+                .await
+                .map_err(|e| {
                     Status::failed_precondition(format!("failed to read signatures: {e}"))
                 })?;
             } else {
