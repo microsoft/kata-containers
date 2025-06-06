@@ -35,6 +35,10 @@ use oci_client::manifest::{
     OCI_IMAGE_MEDIA_TYPE, // The mediatype for an OCI image manifest.
     IMAGE_MANIFEST_LIST_MEDIA_TYPE, // The mediatype for an docker v2 shema 2 manifest list.
     IMAGE_MANIFEST_MEDIA_TYPE, // The mediatype for an docker v2 schema 2 manifest.
+    IMAGE_LAYER_MEDIA_TYPE, // The mediatype for a layer.
+    IMAGE_LAYER_GZIP_MEDIA_TYPE, // The mediatype for a layer that is gzipped.
+    IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE, // The mediatype that Docker uses for a layer that is tarred.
+    IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE, // The mediatype that Docker uses for a layer that is gzipped.
 };
 
 use common::constants::{
@@ -44,10 +48,6 @@ use common::constants::{
     SIGNATURE_ARTIFACT_TYPE,
     ROOT_HASH_LABEL,
     ROOT_HASH_SIG_LABEL,
-    IMAGE_LAYER_MEDIA_TYPE,
-    IMAGE_LAYER_GZIP_MEDIA_TYPE,
-    IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE,
-    IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE,
 };
 
 const TARGET_LAYER_DIGEST_LABEL: &str = "containerd.io/snapshot/cri.layer-digest";
