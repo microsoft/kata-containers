@@ -571,7 +571,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	}
 
 	if assetType == types.ImageAsset {
-		if clh.config.ConfidentialGuest {
+		if clh.config.DisableImageNvdimm || clh.config.ConfidentialGuest {
 			disk := chclient.NewDiskConfig(assetPath)
 			disk.SetReadonly(true)
 

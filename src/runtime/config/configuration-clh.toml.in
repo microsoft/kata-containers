@@ -22,6 +22,10 @@ image = "@IMAGEPATH@"
 #   - erofs
 rootfs_type=@DEFROOTFSTYPE@
 
+# If false and nvdimm is supported, use nvdimm device to plug guest image.
+# Otherwise virtio-block device is used.
+disable_image_nvdimm = @DEFDISABLEIMAGENVDIMM_CLH@
+
 # Enable confidential guest support.
 # Toggling that setting may trigger different hardware features, ranging
 # from memory encryption to both memory and CPU-state encryption and integrity.

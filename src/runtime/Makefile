@@ -516,6 +516,7 @@ ifneq (,$(CLHCMD))
 
     # CLH-specific options (all should be suffixed by "_CLH")
     # currently, huge pages are required for virtiofsd support
+    DEFDISABLEIMAGENVDIMM_CLH ?= false
     DEFNETWORKMODEL_CLH := tcfilter
     KERNELTYPE_CLH = uncompressed
     KERNEL_NAME_CLH = $(call MAKE_KERNEL_NAME,$(KERNELTYPE_CLH))
@@ -791,6 +792,7 @@ USER_VARS += DEFCREATECONTAINERTIMEOUT
 USER_VARS += DEFDANCONF
 USER_VARS += DEFVFIOMODE
 USER_VARS += BUILDFLAGS
+USER_VARS += DEFDISABLEIMAGENVDIMM_CLH
 
 
 V              = @
