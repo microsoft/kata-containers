@@ -51,7 +51,7 @@ tokio = {version = "1.33.0", features = ["rt-multi-thread"]}
 oci = { path = "../../libs/oci" }
 
 # Common constants
-common = { path = "../../common" }
+common = { path = "../../tardev-snapshotter/common" }
 
 # dm-verity root hash support
 generic-array = "0.14.6"
