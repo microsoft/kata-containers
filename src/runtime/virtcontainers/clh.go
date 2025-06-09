@@ -571,7 +571,8 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	}
 
 	if assetType == types.ImageAsset {
-		if clh.config.ConfidentialGuest {
+		clh.Logger().WithField("VmRootfsDriver", hypervisorConfig.VmRootfsDriver).Info("CreateVM")
+		if hypervisorConfig.VmRootfsDriver == "virtio-blk-pci" || clh.config.ConfidentialGuest {
 			disk := chclient.NewDiskConfig(assetPath)
 			disk.SetReadonly(true)
 

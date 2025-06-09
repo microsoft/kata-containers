@@ -24,6 +24,10 @@ igvm = "@IGVMPATH@"
 #   - erofs
 rootfs_type=@DEFROOTFSTYPE@
 
+# Block storage driver to be used if the VM rootfs is backed
+# by a block device.
+vm_rootfs_driver = "@DEFVMROOTFSDRIVER_CLH@"
+
 # Enable confidential guest support.
 # Toggling that setting may trigger different hardware features, ranging
 # from memory encryption to both memory and CPU-state encryption and integrity.
