@@ -54,7 +54,7 @@ erofs-common = { path = "../../tardev-snapshotter/erofs-common" }
 oci = { path = "../../libs/oci" }
 
 # Common constants
-common = { path = "../../common" }
+common = { path = "../../tardev-snapshotter/common" }
 
 # dm-verity root hash support
 generic-array = "0.14.6"
