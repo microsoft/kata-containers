@@ -531,7 +531,9 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Set initial amount of cpu's for the virtual machine
 	clh.vmconfig.Cpus = chclient.NewCpusConfig(int32(clh.config.NumVCPUs()), int32(clh.config.DefaultMaxVCPUs))
 
-	params, err := GetKernelRootParams(hypervisorConfig.RootfsType, clh.config.ConfidentialGuest, !clh.config.ConfidentialGuest)
+	disableNvdimm := (clh.config.DisableImageNvdimm || clh.config.ConfidentialGuest)
+	enableDax := !disableNvdimm
+	params, err := GetKernelRootParams(hypervisorConfig.RootfsType, disableNvdimm, enableDax)
 	if err != nil {
 		return err
 	}
