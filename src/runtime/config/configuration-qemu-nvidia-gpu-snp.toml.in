@@ -354,7 +354,7 @@ pflashes = []
 # nvdimm is not supported when `confidential_guest = true`.
 #
 # Default is false
-disable_image_nvdimm = true
+#disable_image_nvdimm = true
 
 # VFIO devices are hotplugged on a bridge by default.
 # Enable hotplugging on root bus. This may be required for devices with
