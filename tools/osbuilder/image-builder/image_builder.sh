@@ -12,7 +12,6 @@ set -o pipefail
 
 DOCKER_RUNTIME=${DOCKER_RUNTIME:-runc}
 MEASURED_ROOTFS=${MEASURED_ROOTFS:-no}
-IMAGE_SIZE_ALIGNMENT_MB=${IMAGE_SIZE_ALIGNMENT_MB:-2}
 
 #For cross build
 CROSS_BUILD=${CROSS_BUILD:-false}
@@ -54,6 +53,9 @@ readonly dax_alignment=2
 AGENT_INIT=${AGENT_INIT:-no}
 SELINUX=${SELINUX:-no}
 SELINUXFS="/sys/fs/selinux"
+
+# Align image to 128M
+readonly mem_boundary_mb=128
 
 # shellcheck source=../scripts/lib.sh
 source "${lib_file}"
@@ -306,9 +308,9 @@ calculate_img_size() {
 		img_size="$((img_size + root_free_space_mb))"
 	fi
 
-	remaining="$((img_size % ${IMAGE_SIZE_ALIGNMENT_MB}))"
+	remaining="$((img_size % mem_boundary_mb))"
 	if [ "${remaining}" != "0" ]; then
-		img_size=$((img_size + ${IMAGE_SIZE_ALIGNMENT_MB} - remaining))
+		img_size=$((img_size + mem_boundary_mb - remaining))
 	fi
 
 	echo "${img_size}"
