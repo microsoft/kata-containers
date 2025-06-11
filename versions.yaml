@@ -74,8 +74,8 @@ assets:
       description: "Cloud Hypervisor is an open source Virtual Machine Monitor"
       url: "https://github.com/cloud-hypervisor/cloud-hypervisor"
       uscan-url: >-
-        https://github.com/cloud-hypervisor/cloud-hypervisor/tags.*/v?(\d\S+)\.tar\.gz
-      version: "v41.0"
+        https://github.com/microsoft/cloud-hypervisor/tags.*/v?(\d\S+)\.tar\.gz
+      version: "v41.0.139"
 
     firecracker:
       description: "Firecracker micro-VMM"

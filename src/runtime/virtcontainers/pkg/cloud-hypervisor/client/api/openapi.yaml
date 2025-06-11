@@ -600,6 +600,7 @@ components:
             - oem_strings
             tdx: false
             serial_number: serial_number
+            sev_snp: false
             uuid: uuid
           pmem:
           - pci_segment: 3
@@ -617,7 +618,9 @@ components:
           iommu: false
           payload:
             cmdline: cmdline
+            igvm: igvm
             kernel: kernel
+            host_data: host_data
             initramfs: initramfs
             firmware: firmware
           rate_limit_groups:
@@ -1039,6 +1042,7 @@ components:
           - oem_strings
           tdx: false
           serial_number: serial_number
+          sev_snp: false
           uuid: uuid
         pmem:
         - pci_segment: 3
@@ -1056,7 +1060,9 @@ components:
         iommu: false
         payload:
           cmdline: cmdline
+          igvm: igvm
           kernel: kernel
+          host_data: host_data
           initramfs: initramfs
           firmware: firmware
         rate_limit_groups:
