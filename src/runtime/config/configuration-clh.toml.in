@@ -210,6 +210,12 @@ block_device_driver = "virtio-blk"
 # Default 1
 #hypervisor_loglevel = 1
 
+# If false and nvdimm is supported, use nvdimm device to plug guest image.
+# Otherwise virtio-block device is used.
+#
+# nvdimm is not supported when `confidential_guest = true`.
+disable_image_nvdimm = @DEFDISABLEIMAGENVDIMM@
+
 # Enable hot-plugging of VFIO devices to a root-port.
 # The default setting is  "no-port"
 #hot_plug_vfio = "root-port"
@@ -302,12 +308,6 @@ block_device_driver = "virtio-blk"
 # This is *optional* and only takes effect if disk_rate_limiter_bw_max_rate is
 # set to a non zero value.
 #disk_rate_limiter_ops_one_time_burst = 0
-
-# If false and nvdimm is supported, use nvdimm device to plug guest image.
-# Otherwise virtio-block device is used.
-#
-# Default is false
-disable_image_nvdimm = true
 
 [agent.@PROJECT_TYPE@]
 # If enabled, make the agent display debug-level messages.

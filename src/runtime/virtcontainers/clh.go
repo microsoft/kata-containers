@@ -452,6 +452,37 @@ func (clh *cloudHypervisor) enableProtection() error {
 	}
 }
 
+func getNonUserDefinedKernelParams(rootfstype string, disableNvdimm bool, dax bool, debug bool, confidential bool, iommu bool) ([]Param, error) {
+	params, err := GetKernelRootParams(rootfstype, disableNvdimm, dax)
+	if err != nil {
+		return []Param{}, err
+	}
+	params = append(params, clhKernelParams...)
+
+	if iommu {
+		params = append(params, Param{"iommu", "pt"})
+	}
+
+	if !debug {
+		// start the guest kernel with 'quiet' in non-debug mode
+		params = append(params, Param{"quiet", ""})
+		return params, nil
+	}
+
+	// In case of debug ...
+
+	// Followed by extra debug parameters if debug enabled in configuration file
+	if confidential {
+		params = append(params, clhDebugConfidentialGuestKernelParams...)
+	} else if runtime.GOARCH == "arm64" {
+		params = append(params, clhArmDebugKernelParams...)
+	} else {
+		params = append(params, clhDebugKernelParams...)
+	}
+	params = append(params, clhDebugKernelParamsCommon...)
+	return params, nil
+}
+
 // For cloudHypervisor this call only sets the internal structure up.
 // The VM will be created and started through StartVM().
 func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Network, hypervisorConfig *HypervisorConfig) error {
@@ -460,11 +491,6 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	span, newCtx := katatrace.Trace(clh.ctx, clh.Logger(), "CreateVM", clhTracingTags, map[string]string{"sandbox_id": clh.id})
 	clh.ctx = newCtx
 	defer span.End()
-
-	clh.Logger().
-		WithField("DisableImageNvdimm", hypervisorConfig.DisableImageNvdimm).
-		WithField("ConfidentialGuest", hypervisorConfig.ConfidentialGuest).
-		Info("CreateVM")
 
 	if err := clh.setConfig(hypervisorConfig); err != nil {
 		return err
@@ -537,31 +563,12 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.vmconfig.Cpus = chclient.NewCpusConfig(int32(clh.config.NumVCPUs()), int32(clh.config.DefaultMaxVCPUs))
 
 	disableNvdimm := (clh.config.DisableImageNvdimm || clh.config.ConfidentialGuest)
-	enableDax := false
-	params, err := GetKernelRootParams(hypervisorConfig.RootfsType, disableNvdimm, enableDax)
+	enableDax := !disableNvdimm
+
+	params, err := getNonUserDefinedKernelParams(hypervisorConfig.RootfsType, disableNvdimm, enableDax, clh.config.Debug, clh.config.ConfidentialGuest, clh.config.IOMMU)
 	if err != nil {
 		return err
 	}
-	params = append(params, clhKernelParams...)
-
-	// Followed by extra debug parameters if debug enabled in configuration file
-	if clh.config.Debug {
-		if clh.config.ConfidentialGuest {
-			params = append(params, clhDebugConfidentialGuestKernelParams...)
-		} else if runtime.GOARCH == "arm64" {
-			params = append(params, clhArmDebugKernelParams...)
-		} else {
-			params = append(params, clhDebugKernelParams...)
-		}
-		params = append(params, clhDebugKernelParamsCommon...)
-	} else {
-		// start the guest kernel with 'quiet' in non-debug mode
-		params = append(params, Param{"quiet", ""})
-	}
-	if clh.config.IOMMU {
-		params = append(params, Param{"iommu", "pt"})
-	}
-
 	// Followed by extra kernel parameters defined in the configuration file
 	params = append(params, clh.config.KernelParams...)
 
@@ -578,7 +585,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	}
 
 	if assetType == types.ImageAsset {
-		if disableNvdimm {
+		if clh.config.DisableImageNvdimm || clh.config.ConfidentialGuest {
 			disk := chclient.NewDiskConfig(assetPath)
 			disk.SetReadonly(true)
 
