@@ -23,6 +23,7 @@ source "${common_file}"
 runtime_make_flags="SKIP_GO_VERSION_CHECK=1 QEMUCMD= FCCMD= ACRNCMD= STRATOVIRTCMD= DEFAULT_HYPERVISOR=cloud-hypervisor"
 runtime_make_flags+=" DEFMEMSZ=0 DEFSTATICSANDBOXWORKLOADMEM=512 DEFVCPUS=0 DEFSTATICSANDBOXWORKLOADVCPUS=1"
 runtime_make_flags+=" DEFVIRTIOFSDAEMON=${VIRTIOFSD_BINARY_LOCATION} PREFIX=${INSTALL_PATH_PREFIX}"
+runtime_make_flags+=" DEFDISABLEIMAGENVDIMM=true"
 
 # - for vanilla Kata we use the kernel binary. For ConfPods we use IGVM, so no need to provide kernel path.
 # - for vanilla Kata we explicitly set DEFSTATICRESOURCEMGMT_CLH. For ConfPods,
