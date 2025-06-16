@@ -246,7 +246,8 @@
                 ],
                 "mount_point": "/run/kata-containers/sandbox/shm",
                 "fs_group": null
-            }
+            },
+            {"driver":"virtio-fs","driver_options":[],"fs_group":null,"fstype":"virtiofs","mount_point":"/run/kata-containers/shared/containers/","options":[],"source":"kataShared"}
         ]
     },
     "common": {
@@ -371,7 +372,7 @@
         },
         "CloseStdinRequest": false,
         "ReadStreamRequest": false,
-        "UpdateEphemeralMountsRequest": false,
+        "UpdateEphemeralMountsRequest": true,
         "WriteStreamRequest": false
     }
 }
