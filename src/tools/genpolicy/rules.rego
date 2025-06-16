@@ -58,7 +58,7 @@ S_NAMESPACE_KEY = "io.kubernetes.cri.sandbox-namespace"
 CreateContainerRequest := {"ops": ops, "allowed": true} if {
     # Check if the input request should be rejected even before checking the
     # policy_data.containers information.
-    allow_create_container_input
+    allow_ccr
 
     i_oci := input.OCI
     i_storages := input.storages
@@ -68,17 +68,17 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     ops_builder := []
 
     # check sandbox name
-    sandbox_name = i_oci.Annotations[S_NAME_KEY]
-    add_sandbox_name_to_state := state_allows("sandbox_name", sandbox_name)
-    ops_builder1 := concat_op_if_not_null(ops_builder, add_sandbox_name_to_state)
+    s_name = i_oci.Annotations[S_NAME_KEY]
+    op1 := state_allows("s_name", s_name)
+    ops_builder1 := add_op(ops_builder, op1)
 
     # Check if any element from the policy_data.containers array allows the input request.
     some idx, p_container in policy_data.containers
-    print("======== CreateContainerRequest: trying next policy container")
+    print("======== CCR: trying next policy container")
 
     p_pidns := p_container.sandbox_pidns
     i_pidns := input.sandbox_pidns
-    print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
+    print("CCR: p_pidns =", p_pidns, "i_pidns =", i_pidns)
     p_pidns == i_pidns
 
     p_oci := p_container.OCI
@@ -86,14 +86,14 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     # check namespace
     p_namespace := p_oci.Annotations[S_NAMESPACE_KEY]
     i_namespace := i_oci.Annotations[S_NAMESPACE_KEY]
-    print("CreateContainerRequest: p_namespace =", p_namespace, "i_namespace =", i_namespace)
-    add_namespace_to_state := allow_namespace(p_namespace, i_namespace)
-    ops_builder2 := concat_op_if_not_null(ops_builder1, add_namespace_to_state)
+    print("CCR: p_namespace =", p_namespace, "i_namespace =", i_namespace)
+    op2 := allow_namespace(p_namespace, i_namespace)
+    ops_builder2 := add_op(ops_builder1, op2)
 
-    print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
+    print("CCR: p Version =", p_oci.Version, "i Version =", i_oci.Version)
     p_oci.Version == i_oci.Version
 
-    print("CreateContainerRequest: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
+    print("CCR: p Readonly =", p_oci.Root.Readonly, "i Readonly =", i_oci.Root.Readonly)
     p_oci.Root.Readonly == i_oci.Root.Readonly
 
     allow_anno(p_oci, i_oci)
@@ -105,21 +105,16 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     allow_devices(p_devices, i_devices)
 
     ret := allow_linux(ops_builder2, p_oci, i_oci)
-    ret.allowed
 
-    # save to policy state
-    # key: input.container_id
-    # val: index of p_container in the policy_data.containers array
-    print("CreateContainerRequest: addding container_id=", input.container_id, " to state")
-    add_p_container_to_state := state_allows(input.container_id, idx)
+    print("CCR: adding container_id=", input.container_id)
+    op3 := state_allows(input.container_id, idx)
+    ops := add_op(ret.ops, op3)
 
-    ops := concat_op_if_not_null(ret.ops, add_p_container_to_state)
-
-    print("CreateContainerRequest: true")
+    print("CCR: true")
 }
 
-allow_create_container_input if {
-    print("allow_create_container_input: input =", input)
+allow_ccr if {
+    print("allow_ccr: input =", input)
 
     count(input.shared_mounts) == 0
     is_null(input.string_user)
@@ -145,7 +140,7 @@ allow_create_container_input if {
     count(i_process.SelinuxLabel) == 0
     count(i_process.User.Username) == 0
 
-    print("allow_create_container_input: true")
+    print("allow_ccr: true")
 }
 
 allow_namespace(p_namespace, i_namespace) = add_namespace if {
@@ -212,12 +207,12 @@ get_state_path(key) = path if {
 }
 
 # Helper functions to conditionally concatenate op is not null
-concat_op_if_not_null(ops, op) = result if {
+add_op(ops, op) = result if {
     op == null
     result := ops
 }
 
-concat_op_if_not_null(ops, op) = result if {
+add_op(ops, op) = result if {
     op != null
     result := array.concat(ops, [op])
 }
@@ -273,7 +268,7 @@ allow_by_anno(p_oci, i_oci, p_storages, i_storages) if {
     i_s_namespace := i_oci.Annotations[S_NAMESPACE_KEY]
     print("allow_by_anno 1: i_s_namespace =", i_s_namespace)
 
-    allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, i_s_name, i_s_namespace)
+    allow_by_s_name(p_oci, i_oci, p_storages, i_storages, i_s_name, i_s_namespace)
 
     print("allow_by_anno 1: true")
 }
@@ -284,18 +279,18 @@ allow_by_anno(p_oci, i_oci, p_storages, i_storages) if {
     i_s_name := i_oci.Annotations[S_NAME_KEY]
     print("allow_by_anno 2: i_s_name =", i_s_name, "p_s_name =", p_s_name)
 
-    allow_sandbox_name(p_s_name, i_s_name)
+    allow_s_name(p_s_name, i_s_name)
 
     i_s_namespace := i_oci.Annotations[S_NAMESPACE_KEY]
     print("allow_by_anno 2: i_s_namespace =", i_s_namespace)
 
-    allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, i_s_name, i_s_namespace)
+    allow_by_s_name(p_oci, i_oci, p_storages, i_storages, i_s_name, i_s_namespace)
 
     print("allow_by_anno 2: true")
 }
 
-allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name, s_namespace) if {
-    print("allow_by_sandbox_name: start")
+allow_by_s_name(p_oci, i_oci, p_storages, i_storages, s_name, s_namespace) if {
+    print("allow_by_s_name: start")
 
     i_namespace := i_oci.Annotations[S_NAMESPACE_KEY]
 
@@ -303,14 +298,14 @@ allow_by_sandbox_name(p_oci, i_oci, p_storages, i_storages, s_name, s_namespace)
     allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages)
     allow_process(p_oci.Process, i_oci.Process, s_name, s_namespace)
 
-    print("allow_by_sandbox_name: true")
+    print("allow_by_s_name: true")
 }
 
-allow_sandbox_name(p_s_name, i_s_name) if {
-    print("allow_sandbox_name: start")
+allow_s_name(p_s_name, i_s_name) if {
+    print("allow_s_name: start")
     regex.match(p_s_name, i_s_name)
 
-    print("allow_sandbox_name: true")
+    print("allow_s_name: true")
 }
 
 # Check that the "io.kubernetes.cri.container-type" and
@@ -520,8 +515,8 @@ allow_network_namespace(state_ops, network_ns) := {"ops": ops, "allowed": true} 
 
     network_ns_path = ""
 
-    add_network_namespace_to_state := state_allows("network_namespace", network_ns_path)
-    ops := concat_op_if_not_null(state_ops, add_network_namespace_to_state)
+    op := state_allows("network_namespace", network_ns_path)
+    ops := add_op(state_ops, op)
 
     print("allow_network_namespace 1: true")
 }
@@ -530,8 +525,8 @@ allow_network_namespace(state_ops, network_ns) := {"ops": ops, "allowed": true} 
 allow_network_namespace(state_ops, network_ns) := {"ops": ops, "allowed": true} if {
     count(network_ns) == 1
 
-    add_network_namespace_to_state := state_allows("network_namespace", network_ns[0].Path)
-    ops := concat_op_if_not_null(state_ops, add_network_namespace_to_state)
+    op := state_allows("network_namespace", network_ns[0].Path)
+    ops := add_op(state_ops, op)
 
     print("allow_network_namespace 2: true")
 }
@@ -667,9 +662,9 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
 
     # Match each input mount with a Policy mount.
     # Reject possible attempts to match multiple input mounts with a single Policy mount.
-    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, input.OCI.Mounts[i_index], bundle_id, sandbox_id) }
+    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, i_oci.Mounts[i_index], bundle_id, sandbox_id) }
 
-    count(p_matches) == count(input.OCI.Mounts)
+    count(p_matches) == count(i_oci.Mounts)
 
     # TODO: enable allow_storages() after fixing https://github.com/kata-containers/kata-containers/issues/8833
     # allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
@@ -691,7 +686,6 @@ allow_process_common(p_process, i_process, s_name, s_namespace) if {
     print("allow_process_common: true")
 }
 
-# Compare the OCI Process field of a policy container with the input OCI Process from a CreateContainerRequest
 allow_process(p_process, i_process, s_name, s_namespace) if {
     print("allow_process: start")
 
@@ -834,11 +828,13 @@ allow_var(p_process, i_process, i_var, s_name, s_namespace) if {
 
 # Allow input env variables that match with a request_defaults regex.
 allow_var(p_process, i_process, i_var, s_name, s_namespace) if {
+    p_common := policy_data.common
+
     some p_regex1 in policy_data.request_defaults.CreateContainerRequest.allow_env_regex
-    p_regex2 := replace(p_regex1, "$(ipv4_a)", policy_data.common.ipv4_a)
-    p_regex3 := replace(p_regex2, "$(ip_p)", policy_data.common.ip_p)
-    p_regex4 := replace(p_regex3, "$(svc_name_downward_env)", policy_data.common.svc_name_downward_env)
-    p_regex5 := replace(p_regex4, "$(dns_label)", policy_data.common.dns_label)
+    p_regex2 := replace(p_regex1, "$(ipv4_a)", p_common.ipv4_a)
+    p_regex3 := replace(p_regex2, "$(ip_p)", p_common.ip_p)
+    p_regex4 := replace(p_regex3, "$(svc_name_downward_env)", p_common.svc_name_downward_env)
+    p_regex5 := replace(p_regex4, "$(dns_label)", p_common.dns_label)
 
     print("allow_var 3: p_regex5 =", p_regex5)
     regex.match(p_regex5, i_var)
@@ -1006,9 +1002,11 @@ check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
 }
 
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
+    p_common := policy_data.common
+
     regex1 := p_mount.source
-    regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
-    regex3 := replace(regex2, "$(cpath)", policy_data.common.mount_source_cpath)
+    regex2 := replace(regex1, "$(sfprefix)", p_common.sfprefix)
+    regex3 := replace(regex2, "$(cpath)", p_common.mount_source_cpath)
     regex4 := replace(regex3, "$(bundle-id)", bundle_id)
 
     print("mount_source_allows 1: regex4 =", regex4)
@@ -1017,9 +1015,11 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
     print("mount_source_allows 1: true")
 }
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
+    p_common := policy_data.common
+
     regex1 := p_mount.source
-    regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
-    regex3 := replace(regex2, "$(cpath)", policy_data.common.mount_source_cpath)
+    regex2 := replace(regex1, "$(sfprefix)", p_common.sfprefix)
+    regex3 := replace(regex2, "$(cpath)", p_common.mount_source_cpath)
     regex4 := replace(regex3, "$(sandbox-id)", sandbox_id)
 
     print("mount_source_allows 2: regex4 =", regex4)
@@ -1288,8 +1288,9 @@ match_caps(p_caps, i_caps) if {
     count(p_caps) == 1
     p_caps[0] == "$(default_caps)"
 
-    print("match_caps 2: default_caps =", policy_data.common.default_caps)
-    policy_data.common.default_caps == i_caps
+    p_common := policy_data.common
+    print("match_caps 2: default_caps =", p_common.default_caps)
+    p_common.default_caps == i_caps
 
     print("match_caps 2: true")
 }
@@ -1299,8 +1300,9 @@ match_caps(p_caps, i_caps) if {
     count(p_caps) == 1
     p_caps[0] == "$(privileged_caps)"
 
-    print("match_caps 3: privileged_caps =", policy_data.common.privileged_caps)
-    policy_data.common.privileged_caps == i_caps
+    p_common := policy_data.common
+    print("match_caps 3: privileged_caps =", p_common.privileged_caps)
+    p_common.privileged_caps == i_caps
 
     print("match_caps 3: true")
 }
@@ -1336,10 +1338,11 @@ CopyFileRequest if {
     print("CopyFileRequest: input.path =", input.path)
 
     check_directory_traversal(input.path)
+    p_common := policy_data.common
 
     some regex1 in policy_data.request_defaults.CopyFileRequest
-    regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
-    regex3 := replace(regex2, "$(cpath)", policy_data.common.mount_source_cpath)
+    regex2 := replace(regex1, "$(sfprefix)", p_common.sfprefix)
+    regex3 := replace(regex2, "$(cpath)", p_common.mount_source_cpath)
     regex4 := replace(regex3, "$(bundle-id)", "[a-z0-9]{64}")
     print("CopyFileRequest: regex4 =", regex4)
 
@@ -1511,7 +1514,7 @@ RemoveContainerRequest:= {"ops": ops, "allowed": true} if {
     # Delete input.container_id from p_state
     ops_builder1 := []
     del_container := state_del_key(input.container_id)
-    ops := concat_op_if_not_null(ops_builder1, del_container)
+    ops := add_op(ops_builder1, del_container)
 
     print("RemoveContainerRequest: true")
 }
