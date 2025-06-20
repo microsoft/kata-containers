@@ -119,10 +119,14 @@ impl Store {
             image_digest.to_string(),
         );
 
-        self.load_referrers(&client, &image_manifest_ref, &auth, Some(SIGNATURE_ARTIFACT_TYPE)).await.map_err(|e| {
+        if let Err(e) = self.load_referrers(&client, &image_manifest_ref, &auth, Some(SIGNATURE_ARTIFACT_TYPE)).await.map_err(|e| {
             anyhow!("Error processing referrers: {}", e)
-        })?;
-        debug!("Loaded {} signatures from registry", self.signatures.as_ref().map(|s| s.len()).unwrap_or(0) - signatures_count);
+        }) {
+            debug!("Failed to load referrers: {}", e);
+        }
+        else {
+            debug!("Loaded {} signatures from registry", self.signatures.as_ref().map(|s| s.len()).unwrap_or(0) - signatures_count);
+        }
         Ok(())
     }
 
@@ -1393,16 +1397,26 @@ impl TarDevSnapshotter {
             (layer_info, info.parent)
         };
 
+        let (root_hash, signature) = match layer_info {
+            Some(info) => {
+                trace!("Found layer info for {name}");
+                (
+                    Some(info.root_hash),
+                    Some(info.signature),
+                )
+            }
+            None => {
+                trace!("No layer info found for {name}, using empty root hash and signature");
+                (None, None)
+            }
+        };
+
         self.prepare_image_layer(
             name,
             parent,
             labels,
-            layer_info
-                .as_ref()
-                .map(|layer_info| layer_info.root_hash.clone()),
-            layer_info
-                .as_ref()
-                .map(|layer_info| layer_info.signature.clone()),
+            root_hash,
+            signature
         )
         .await
     }
