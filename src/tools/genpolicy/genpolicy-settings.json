@@ -332,7 +332,8 @@
                     "nobrl"
                 ]
             }
-        ]
+        ],
+        "image_layer_verification": "host-tarfs-dm-verity"
     },
     "kata_config": {
         "confidential_guest": true,

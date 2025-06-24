@@ -313,7 +313,6 @@ pub fn get_container_mounts_and_storages(
             mount_and_storage::get_image_mount_and_storage(
                 settings,
                 policy_mounts,
-                storages,
                 volume.0,
             );
         }
