@@ -45,6 +45,9 @@ const (
 	// ClhHypervisor is the ICH hypervisor.
 	ClhHypervisor HypervisorType = "clh"
 
+	// OpenvmmHypervisor is the OpenVMM hypervisor.
+	OpenvmmHypervisor HypervisorType = "openvmm"
+
 	// StratovirtHypervisor is the StratoVirt hypervisor.
 	StratovirtHypervisor HypervisorType = "stratovirt"
 
@@ -235,6 +238,9 @@ func (hType *HypervisorType) Set(value string) error {
 	case "clh":
 		*hType = ClhHypervisor
 		return nil
+	case "openvmm":
+		*hType = OpenvmmHypervisor
+		return nil
 	case "dragonball":
 		*hType = DragonballHypervisor
 		return nil
@@ -261,6 +267,8 @@ func (hType *HypervisorType) String() string {
 		return string(FirecrackerHypervisor)
 	case ClhHypervisor:
 		return string(ClhHypervisor)
+	case OpenvmmHypervisor:
+		return string(OpenvmmHypervisor)
 	case StratovirtHypervisor:
 		return string(StratovirtHypervisor)
 	case RemoteHypervisor:

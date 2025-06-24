@@ -49,6 +49,7 @@ const (
 	// supported hypervisor component types
 	firecrackerHypervisorTableType = "firecracker"
 	clhHypervisorTableType         = "clh"
+	openvmmHypervisorTableType     = "openvmm"
 	qemuHypervisorTableType        = "qemu"
 	dragonballHypervisorTableType  = "dragonball"
 	stratovirtHypervisorTableType  = "stratovirt"
@@ -1121,6 +1122,134 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 	}, nil
 }
 
+func newOpenvmmHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
+	hypervisor, err := h.path()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	kernel, err := h.kernel()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	initrd, err := h.initrd()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	image, err := h.image()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	if initrd == "" {
+		return vc.HypervisorConfig{},
+			errors.New("initrd must be defined in the configuration file")
+	}
+
+	rootfsType, err := h.rootfsType()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	firmware, err := h.firmware()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	machineAccelerators := h.machineAccelerators()
+	kernelParams := h.kernelParams()
+	machineType := h.machineType()
+
+	blockDriver, err := h.blockDeviceDriver()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	sharedFS, err := h.sharedFS()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	if sharedFS != config.VirtioFS && sharedFS != config.VirtioFSNydus && sharedFS != config.NoSharedFS {
+		return vc.HypervisorConfig{},
+			// todo figure out openvmm limitations w.r.t. shared fs
+			fmt.Errorf("Cloud Hypervisor does not support %s shared filesystem option", sharedFS)
+	}
+
+	if (sharedFS == config.VirtioFS || sharedFS == config.VirtioFSNydus) && h.VirtioFSDaemon == "" {
+		return vc.HypervisorConfig{},
+			// todo figure out openvmm limitations w.r.t. virtiofsd
+			fmt.Errorf("cannot enable %s without daemon path in configuration file", sharedFS)
+	}
+
+	return vc.HypervisorConfig{
+		HypervisorPath:                 hypervisor,
+		HypervisorPathList:             h.HypervisorPathList,
+		KernelPath:                     kernel,
+		InitrdPath:                     initrd,
+		ImagePath:                      image,
+		RootfsType:                     rootfsType,
+		FirmwarePath:                   firmware,
+		MachineAccelerators:            machineAccelerators,
+		KernelParams:                   vc.DeserializeParams(vc.KernelParamFields(kernelParams)),
+		HypervisorMachineType:          machineType,
+		NumVCPUsF:                      h.defaultVCPUs(),
+		DefaultMaxVCPUs:                h.defaultMaxVCPUs(),
+		MemorySize:                     h.defaultMemSz(),
+		MemSlots:                       h.defaultMemSlots(),
+		MemOffset:                      h.defaultMemOffset(),
+		DefaultMaxMemorySize:           h.defaultMaxMemSz(),
+		VirtioMem:                      h.VirtioMem,
+		EntropySource:                  h.GetEntropySource(),
+		EntropySourceList:              h.EntropySourceList,
+		DefaultBridges:                 h.defaultBridges(),
+		DisableBlockDeviceUse:          h.DisableBlockDeviceUse,
+		SharedFS:                       sharedFS,
+		VirtioFSDaemon:                 h.VirtioFSDaemon,
+		VirtioFSDaemonList:             h.VirtioFSDaemonList,
+		HypervisorLoglevel:             h.defaultHypervisorLoglevel(),
+		VirtioFSCacheSize:              h.VirtioFSCacheSize,
+		VirtioFSCache:                  h.VirtioFSCache,
+		MemPrealloc:                    h.MemPrealloc,
+		ReclaimGuestFreedMemory:        h.ReclaimGuestFreedMemory,
+		HugePages:                      h.HugePages,
+		FileBackedMemRootDir:           h.FileBackedMemRootDir,
+		FileBackedMemRootList:          h.FileBackedMemRootList,
+		Debug:                          h.Debug,
+		DisableNestingChecks:           h.DisableNestingChecks,
+		BlockDeviceDriver:              blockDriver,
+		BlockDeviceCacheSet:            h.BlockDeviceCacheSet,
+		BlockDeviceCacheDirect:         h.BlockDeviceCacheDirect,
+		EnableIOThreads:                h.EnableIOThreads,
+		Msize9p:                        h.msize9p(),
+		DisableImageNvdimm:             h.DisableImageNvdimm,
+		ColdPlugVFIO:                   h.coldPlugVFIO(),
+		HotPlugVFIO:                    h.hotPlugVFIO(),
+		PCIeRootPort:                   h.pcieRootPort(),
+		PCIeSwitchPort:                 h.pcieSwitchPort(),
+		DisableVhostNet:                true,
+		GuestHookPath:                  h.guestHookPath(),
+		VirtioFSExtraArgs:              h.VirtioFSExtraArgs,
+		SGXEPCSize:                     defaultSGXEPCSize,
+		EnableAnnotations:              h.EnableAnnotations,
+		DisableSeccomp:                 h.DisableSeccomp,
+		ConfidentialGuest:              h.ConfidentialGuest,
+		Rootless:                       h.Rootless,
+		DisableSeLinux:                 h.DisableSeLinux,
+		DisableGuestSeLinux:            h.DisableGuestSeLinux,
+		NetRateLimiterBwMaxRate:        h.getNetRateLimiterBwMaxRate(),
+		NetRateLimiterBwOneTimeBurst:   h.getNetRateLimiterBwOneTimeBurst(),
+		NetRateLimiterOpsMaxRate:       h.getNetRateLimiterOpsMaxRate(),
+		NetRateLimiterOpsOneTimeBurst:  h.getNetRateLimiterOpsOneTimeBurst(),
+		DiskRateLimiterBwMaxRate:       h.getDiskRateLimiterBwMaxRate(),
+		DiskRateLimiterBwOneTimeBurst:  h.getDiskRateLimiterBwOneTimeBurst(),
+		DiskRateLimiterOpsMaxRate:      h.getDiskRateLimiterOpsMaxRate(),
+		DiskRateLimiterOpsOneTimeBurst: h.getDiskRateLimiterOpsOneTimeBurst(),
+	}, nil
+}
+
 func newDragonballHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 	kernel, err := h.kernel()
 	if err != nil {
@@ -1300,6 +1429,9 @@ func updateRuntimeConfigHypervisor(configPath string, tomlConf tomlConfig, confi
 		case clhHypervisorTableType:
 			config.HypervisorType = vc.ClhHypervisor
 			hConfig, err = newClhHypervisorConfig(hypervisor)
+		case openvmmHypervisorTableType:
+			config.HypervisorType = vc.OpenvmmHypervisor
+			hConfig, err = newOpenvmmHypervisorConfig(hypervisor)
 		case dragonballHypervisorTableType:
 			config.HypervisorType = vc.DragonballHypervisor
 			hConfig, err = newDragonballHypervisorConfig(hypervisor)
@@ -1848,8 +1980,9 @@ func checkConfig(config oci.RuntimeConfig) error {
 // Only allow one of the following settings for cold-plug:
 // no-port, root-port, switch-port
 func checkPCIeConfig(coldPlug config.PCIePort, hotPlug config.PCIePort, machineType string, hypervisorType virtcontainers.HypervisorType) error {
-	if hypervisorType != virtcontainers.QemuHypervisor && hypervisorType != virtcontainers.ClhHypervisor {
-		kataUtilsLogger.Warn("Advanced PCIe Topology only available for QEMU/CLH hypervisor, ignoring hot(cold)_vfio_port setting")
+	// todo assuming openvmm supports this for now..
+	if hypervisorType != virtcontainers.QemuHypervisor && hypervisorType != virtcontainers.ClhHypervisor && hypervisorType != virtcontainers.OpenvmmHypervisor{
+		kataUtilsLogger.Warn("Advanced PCIe Topology only available for QEMU/CLH/OpenVMM hypervisor, ignoring hot(cold)_vfio_port setting")
 		return nil
 	}
 

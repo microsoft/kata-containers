@@ -84,6 +84,8 @@ func setCPUtype(hypervisorType vc.HypervisorType) error {
 			fallthrough
 		case vc.ClhHypervisor:
 			fallthrough
+		case vc.OpenvmmHypervisor:
+			fallthrough
 		case vc.DragonballHypervisor:
 			fallthrough
 		case vc.QemuHypervisor:
@@ -195,6 +197,8 @@ func archHostCanCreateVMContainer(hypervisorType vc.HypervisorType) error {
 	case vc.QemuHypervisor:
 		fallthrough
 	case vc.ClhHypervisor:
+		fallthrough
+	case vc.OpenvmmHypervisor:
 		fallthrough
 	case vc.StratovirtHypervisor:
 		fallthrough

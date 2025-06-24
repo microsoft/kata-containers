@@ -26,5 +26,10 @@ CLHCMD := cloud-hypervisor
 
 DEFSTATICRESOURCEMGMT_CLH := false
 
+# openvmm binary name
+OPENVMMCMD := openvmm
+
+DEFSTATICRESOURCEMGMT_OPENVMM := false
+
 # stratovirt binary name
 STRATOVIRTCMD := stratovirt
