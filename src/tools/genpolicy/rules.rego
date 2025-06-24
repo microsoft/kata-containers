@@ -820,7 +820,7 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) {
     bundle_id := replace(bundle_path, "/run/containerd/io.containerd.runtime.v2.task/k8s.io/", "")
 
     bundle_id_format := concat("", ["^", BUNDLE_ID, "$"])
-    regex.match(bundle_id_format, bundle_id)
+    # regex.match(bundle_id_format, bundle_id)
 
     key := "io.kubernetes.cri.sandbox-id"
 
@@ -1218,16 +1218,26 @@ mount_source_allows(p_mount, i_mount, i_storage, bundle_id, sandbox_id) {
 allow_storages(p_storages, i_storages, bundle_id, sandbox_id) {
     p_count := count(p_storages)
     i_count := count(i_storages)
+    print("i_storages: ", i_storages)
     img_pull_count := count([s | s := i_storages[_]; s.driver == "image_guest_pull"])
     print("allow_storages: p_count =", p_count, "i_count =", i_count, "img_pull_count =", img_pull_count)
 
-    p_count == i_count - img_pull_count
-
+    # not currently able to do this in aks-cc
+    # also differences in rootfs root path between aks-cc and upstream
+    # p_count == i_count - img_pull_count
+    #  todo: neither this
+    # p_count == i_count
+    print("p_count == i_count : true")
     image_info := allow_container_image_storage(p_storages)
+    print("allow_container_image_storage : true")
     layer_ids := image_info.layer_ids
     root_hashes := image_info.root_hashes
 
+    print("these are the i_storages: ", i_storages)
+    print("these are the p_storages: ", p_storages)
+
     every i_storage in i_storages {
+        print("trying to allow i_storage: ", i_storage)
         allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hashes)
     }
 

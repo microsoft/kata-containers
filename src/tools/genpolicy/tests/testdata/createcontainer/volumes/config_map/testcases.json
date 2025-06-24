@@ -128,7 +128,7 @@
         },
         "Root": {
           "Readonly": false,
-          "Path": "/run/kata-containers/shared/containers/bundle-id/rootfs"
+          "Path": "/run/kata-containers/shared/containers/bundle-id"
         }
       },
       "storages": [

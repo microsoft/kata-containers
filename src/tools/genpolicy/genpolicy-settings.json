@@ -191,8 +191,8 @@
         "confidential_configMap": {
             "mount_type": "bind",
             "mount_source": "$(sfprefix)",
-            "mount_point": "$(sfprefix)",
-            "driver": "local",
+            "mount_point": "^$(cpath)/watchable/$(bundle-id)-[a-z0-9]{16}-",
+            "driver": "watchable-bind",
             "fstype": "bind",
             "options": [
                 "rbind",

@@ -158,7 +158,7 @@ impl AgentPolicy {
         let results = self.engine.eval_query(query, false)?;
 
         let prints = match self.engine.take_prints() {
-            Ok(p) => p.join(" "),
+            Ok(p) => p.join("\n"),
             Err(e) => format!("Failed to get policy log: {e}"),
         };
 

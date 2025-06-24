@@ -370,7 +370,7 @@ fn get_config_map_mount_and_storage(
     };
     debug!("Settings configMap: {:?}", settings_config_map);
 
-    if !settings.kata_config.confidential_guest {
+    // if !settings.kata_config.confidential_guest {
         let mount_path = Path::new(&yaml_mount.mountPath).file_name().unwrap();
         let mount_path_str = OsString::from(mount_path).into_string().unwrap();
 
@@ -383,7 +383,7 @@ fn get_config_map_mount_and_storage(
             mount_point: format!("{}{mount_path_str}$", &settings_config_map.mount_point),
             fs_group: None,
         });
-    }
+    // }
 
     let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
     let name = OsString::from(file_name).into_string().unwrap();
