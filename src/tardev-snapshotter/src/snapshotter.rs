@@ -918,10 +918,10 @@ impl TarDevSnapshotter {
             let mut store = self.store.write().await;
             extract_dir = store
                 .extract_dir_to_write(&key)
-                .map_err(|e| Status::unknown(format!("failed to create extract dir: {e}")))?;
+                .map_err(|e| Status::unknown(format!("failed to create extract dir: {e:#}")))?;
             store
                 .write_snapshot(Kind::Active, key.clone(), parent, labels)
-                .map_err(|e| Status::unknown(format!("failed to write snapshot: {e}")))?;
+                .map_err(|e| Status::unknown(format!("failed to write snapshot: {e:#}")))?;
         }
         Ok(vec![api::types::Mount {
             r#type: "bind".into(),
@@ -948,7 +948,7 @@ impl TarDevSnapshotter {
                 let c = Client::from_path(&self.containerd_path)
                     .await
                     .map_err(|e| {
-                        Status::unknown(format!("unable to connect to containerd: {e}"))
+                        Status::unknown(format!("unable to connect to containerd: {e:#}"))
                     })?;
                 *self.containerd_client.write().await = Some(c);
                 continue;
@@ -986,7 +986,7 @@ impl TarDevSnapshotter {
                 let c = Client::from_path(&self.containerd_path)
                     .await
                     .map_err(|e| {
-                        Status::unknown(format!("unable to connect to containerd: {e}"))
+                        Status::unknown(format!("unable to connect to containerd: {e:#}"))
                     })?;
                 *self.containerd_client.write().await = Some(c);
                 continue;
@@ -1006,10 +1006,10 @@ impl TarDevSnapshotter {
             }
             return serde_json::from_slice(&buf).map_err(|e| {
                 error!(
-                    "failed to parse manifest with digest {digest_str}: {e}, manifest: {:?}",
+                    "failed to parse manifest with digest {digest_str}: {e:#}, manifest: {:?}",
                     buf
                 );
-                Status::invalid_argument(format!("failed to parse manifest: {e}"))
+                Status::invalid_argument(format!("failed to parse manifest: {e:#}"))
             });
         }
     }
@@ -1020,7 +1020,7 @@ impl TarDevSnapshotter {
         let manifest = self
             .get_oci_manifest(digest_str)
             .await
-            .map_err(|e| Status::invalid_argument(format!("failed to get OCI manifest: {e}")))?
+            .map_err(|e| Status::invalid_argument(format!("failed to get OCI manifest: {e:#}")))?
             .as_object()
             .ok_or(Status::aborted("failed to deserialize OCI manifest"))?
             .clone();
@@ -1221,7 +1221,7 @@ impl TarDevSnapshotter {
                 self.get_image_manifest(manifest_digest_str)
                     .await
                     .map_err(|e| {
-                        Status::invalid_argument(format!("failed to get image manifest: {:?}", e))
+                        Status::invalid_argument(format!("failed to get image manifest: {e:#}"))
                     })?;
 
             let layer = image_manifest
@@ -1295,12 +1295,12 @@ impl TarDevSnapshotter {
                     Err(err) => {
                         retries += 1;
                         warn!(
-                            "Failed to fetch/process layer (attempt {}/{}): {:?}",
+                            "Failed to fetch/process layer (attempt {}/{}): {:#}",
                             retries, MAX_RETRIES, err
                         );
                         if retries >= MAX_RETRIES {
                             return Err(Status::unknown(format!(
-                                "Failed to fetch/process layer after {} attempts: {:?}",
+                                "Failed to fetch/process layer after {} attempts: {:#}",
                                 MAX_RETRIES, err
                             )));
                         }
@@ -1343,12 +1343,12 @@ impl TarDevSnapshotter {
             let mut store = self.store.write().await;
             let to = store
                 .layer_path_to_write(&key)
-                .map_err(|e| Status::unknown(format!("failed to create layer path: {e}")))?;
+                .map_err(|e| Status::unknown(format!("failed to create layer path: {e:#}")))?;
             trace!("Renaming from {:?} to {:?}", &snapshot_name, &to);
             tokio::fs::rename(snapshot_name, to).await?;
             store
                 .write_snapshot(Kind::Committed, key, parent, labels)
-                .map_err(|e| Status::internal(format!("failed to write snapshot: {e}")))?;
+                .map_err(|e| Status::internal(format!("failed to write snapshot: {e:#}")))?;
         }
 
         trace!("Layer prepared");
@@ -1365,7 +1365,7 @@ impl TarDevSnapshotter {
             // Needs to be in the closure to release the lock
             let mut store = self.store.write().await;
             let info = store.read_snapshot(&key).map_err(|e| {
-                Status::unknown(format!("failed to read snapshot ({name}/{key}): {e}"))
+                Status::unknown(format!("failed to read snapshot ({name}/{key}): {e:#}"))
             })?;
             if info.kind != Kind::Active {
                 return Err(Status::failed_precondition(format!(
@@ -1396,7 +1396,7 @@ impl TarDevSnapshotter {
                     .read_signatures_from_registry(image_ref_str, manifest_digest_str)
                     .await
                     .map_err(|e| {
-                        Status::failed_precondition(format!("failed to read signatures: {e}"))
+                        Status::failed_precondition(format!("failed to read signatures: {e:#}"))
                     })?;
             } else {
                 debug!("Signature already exists for {digest}, skip loading the signature");
@@ -1428,7 +1428,7 @@ impl TarDevSnapshotter {
 
         let info = store
             .read_snapshot(&key)
-            .map_err(|e| Status::unknown(format!("failed to read snapshot ({key}): {e}")))?;
+            .map_err(|e| Status::unknown(format!("failed to read snapshot ({key}): {e:#}")))?;
         if info.kind != Kind::Committed {
             // Only committed snapshots consume storage.
             return Ok(Usage { inodes: 0, size: 0 });
@@ -1446,7 +1446,7 @@ impl TarDevSnapshotter {
     async fn mounts_impl(&self, key: String) -> Result<Vec<api::types::Mount>, Status> {
         let store = self.store.read().await;
         let info = store.read_snapshot(&key).map_err(|e| {
-            let error = format!("failed to read snapshot ({key}): {e}");
+            let error = format!("failed to read snapshot ({key}): {e:#}");
             error!("{error}");
             Status::unknown(error)
         })?;
@@ -1473,9 +1473,9 @@ impl TarDevSnapshotter {
                 "mounts(): snapshot: {}, ready to use, preparing itself and parents ",
                 &info.name
             );
-            store
-                .mounts_from_snapshot(&info.parent, true)
-                .map_err(|e| Status::failed_precondition(format!("failed to prepare mounts: {e}")))
+            store.mounts_from_snapshot(&info.parent, true).map_err(|e| {
+                Status::failed_precondition(format!("failed to prepare mounts: {e:#}"))
+            })
         }
     }
 
@@ -1506,9 +1506,9 @@ impl TarDevSnapshotter {
             }
         }
 
-        let name = store
-            .snapshot_path(&key, false)
-            .map_err(|e| Status::internal(format!("Failed to get snapshot path for {key}: {e}")))?;
+        let name = store.snapshot_path(&key, false).map_err(|e| {
+            Status::internal(format!("Failed to get snapshot path for {key}: {e:#}"))
+        })?;
         fs::remove_file(name)?;
 
         Ok(())
@@ -1574,7 +1574,7 @@ impl Snapshotter for TarDevSnapshotter {
                     .write()
                     .await
                     .prepare_snapshot_for_use(Kind::Active, key, parent, labels)
-                    .map_err(|e| Status::unknown(format!("failed to prepare snapshot: {e}")))
+                    .map_err(|e| Status::unknown(format!("failed to prepare snapshot: {e:#}")))
             }
         }
         .map_err(|e| {
@@ -1596,7 +1596,7 @@ impl Snapshotter for TarDevSnapshotter {
             .await
             .prepare_snapshot_for_use(Kind::View, key, parent, labels)
             .map_err(|e| {
-                let error = format!("failed to prepare snapshot: {e}");
+                let error = format!("failed to prepare snapshot: {e:#}");
                 error!("view() failed with: {:#?}", error);
                 Status::unknown(error)
             });
