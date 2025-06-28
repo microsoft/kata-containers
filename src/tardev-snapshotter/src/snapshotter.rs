@@ -8,6 +8,7 @@ use log::{debug, error, info, trace, warn};
 use nix::mount::MsFlags;
 use oci_client::client::Client as OCI_Client;
 use oci_client::client::ClientConfig;
+use oci_client::errors::OciDistributionError;
 use oci_client::secrets::RegistryAuth;
 use oci_client::Reference;
 use serde::{Deserialize, Serialize};
@@ -164,10 +165,18 @@ impl Store {
         artifact_type: Option<&str>,
     ) -> Result<Vec<LayerInfo>> {
         // Fetch the referrers list with the specified artifact type
-        let referrers = client
-            .pull_referrers(image_ref, artifact_type)
-            .await
-            .context("Failed to fetch referrers")?;
+        let referrers = match client.pull_referrers(image_ref, artifact_type).await {
+            Ok(referrers) => referrers,
+            Err(OciDistributionError::UnauthorizedError { url }) => {
+                // Docker Hub requires authentication for referrers, will skip
+                // that for now
+                debug!("Not authorized to fetch referrers from {url}, skipping.");
+                return Ok(Vec::new());
+            }
+            Err(e) => {
+                return Err(anyhow!("Failed to fetch referrers {e:#?}: {e:#}"));
+            }
+        };
         if referrers.manifests.is_empty() {
             debug!("No signature manifests found in referrers.");
             return Ok(Vec::new());
