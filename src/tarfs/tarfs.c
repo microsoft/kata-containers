@@ -319,9 +319,17 @@ static struct inode *tarfs_iget(struct super_block *sb, u64 ino)
 
 	set_nlink(inode, 1);
 
-	inode->i_mtime.tv_sec = inode->i_atime.tv_sec = inode->i_ctime.tv_sec =
-		(((u64)disk_inode.hmtime & 0xf) << 32) | le32_to_cpu(disk_inode.lmtime);
-	inode->i_mtime.tv_nsec = inode->i_atime.tv_nsec = inode->i_ctime.tv_nsec = 0;
+	u64 mtime_sec = (((u64)disk_inode.hmtime & 0xf) << 32) | le32_to_cpu(disk_inode.lmtime);
+
+	inode->i_mtime.tv_sec = mtime_sec;
+	inode->i_atime.tv_sec = mtime_sec;
+	inode->i_mtime.tv_nsec = 0;
+	inode->i_atime.tv_nsec = 0;
+
+	inode_set_ctime_to_ts(inode, (struct timespec64){
+		.tv_sec = mtime_sec,
+		.tv_nsec = 0
+	});
 
 	inode->i_mode = mode;
 	inode->i_size = le64_to_cpu(disk_inode.size);
