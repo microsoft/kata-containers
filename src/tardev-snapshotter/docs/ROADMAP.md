@@ -1,7 +1,7 @@
-# Roadmap: Code Integrity for OCI/containerd Containers
+# Roadmap: Code Integrity for OCI/containerd Containers using erofs-snapshotter
 
 This document outlines the strategic roadmap for enhancing code integrity in OCI
-Containers.
+Containers through erofs-snapshotter.
 
 ## Objective
 
