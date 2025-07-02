@@ -34,6 +34,8 @@ func NewHypervisor(hType HypervisorType) (Hypervisor, error) {
 		return &firecracker{}, nil
 	case ClhHypervisor:
 		return &cloudHypervisor{}, nil
+	case OpenvmmHypervisor:
+		return &openvmm{}, nil
 	case StratovirtHypervisor:
 		return &stratovirt{}, nil
 	case DragonballHypervisor:
