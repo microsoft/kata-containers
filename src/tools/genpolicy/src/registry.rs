@@ -374,6 +374,7 @@ pub fn add_verity_to_store(cache_file: &str, diff_id: &str, verity_hash: &str) -
     let mut writer = BufWriter::new(&file);
     writeln!(writer, "{}", serialized)?;
     writer.flush()?;
+    #[allow(unstable_name_collisions)]
     file.unlock()?;
     Ok(())
 }
