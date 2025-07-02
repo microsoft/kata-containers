@@ -767,12 +767,6 @@ EOF
 	if [ "${AGENT_INIT}" == "yes" ]; then
 		setup_agent_init "${AGENT_DEST}" "${init}"
 	else
-		info "Setup systemd-base environment for kata-agent"
-		# Setup systemd-based environment for kata-agent
-		mkdir -p "${ROOTFS_DIR}/etc/systemd/system/basic.target.wants"
-		ln -sf "/usr/lib/systemd/system/kata-containers.target" "${ROOTFS_DIR}/etc/systemd/system/basic.target.wants/kata-containers.target"
-		mkdir -p "${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants"
-		ln -sf "/usr/lib/systemd/system/dbus.socket" "${ROOTFS_DIR}/etc/systemd/system/kata-containers.target.wants/dbus.socket"
 		chmod g+rx,o+x "${ROOTFS_DIR}"
 
 		if [ "${CONFIDENTIAL_GUEST}" == "yes" ]; then
