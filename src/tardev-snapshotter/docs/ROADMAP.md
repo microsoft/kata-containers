@@ -121,10 +121,11 @@ publishing and consuming native EROFS+dm-verity layers.
 
 Currently, containerd selects the appropriate image manifest based on OS and
 architecture via the image index. The plan is to extend this mechanism to
-consider OS features, allowing the registry to serve both EROFS and legacy
-layers concurrently. Containerd will select the optimal layer type based on host
-OS features and registry offerings. If native EROFS layers are unavailable, the
-solutions from Milestones 2 and 1 will serve as fallbacks.
+consider [OS features](https://github.com/containerd/platforms/pull/20),
+allowing the registry to serve both EROFS and legacy layers concurrently.
+Containerd will select the optimal layer type based on host OS features and
+registry offerings. If native EROFS layers are unavailable, the solutions from
+Milestones 2 and 1 will serve as fallbacks.
 
 This approach streamlines artifact retrieval, further accelerating container
 startup.
