@@ -10,3 +10,10 @@ LIBC="gnu"
 PACKAGES="kata-packages-uvm"
 [ "$AGENT_INIT" = no ] && PACKAGES+=" systemd"
 [ "$SECCOMP" = yes ] && PACKAGES+=" libseccomp"
+
+PACKAGES+=" hyperv-daemons"
+
+PACKAGES+=" ca-certificates"
+PACKAGES+=" cronie-anacron"
+PACKAGES+=" logrotate"
+PACKAGES+=" core-packages-base-image"
