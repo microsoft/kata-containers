@@ -192,6 +192,9 @@ assets:
         nvidia-gpu-confidential:
           name: "ubuntu"
           version: "noble"  # 24.04 LTS
+        mariner:
+          name: "cbl-mariner"
+          version: "3.0"
 
   kernel:
     description: "Linux kernel optimised for virtual machines"

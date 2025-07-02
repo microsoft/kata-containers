@@ -128,6 +128,7 @@ options:
 	rootfs-image
 	rootfs-image-confidential
 	rootfs-image-mariner
+	rootfs-initrd-mariner
 	rootfs-initrd
 	rootfs-initrd-confidential
 	runk
@@ -436,6 +437,11 @@ install_image_confidential() {
 install_image_mariner() {
 	export IMAGE_SIZE_ALIGNMENT_MB=2
 	install_image "mariner"
+}
+
+#Install cbl-mariner initrd guest image
+install_initrd_mariner() {
+	install_initrd "mariner"
 }
 
 #Install guest initrd
@@ -1183,6 +1189,7 @@ handle_build() {
 		install_image_confidential
 		install_initrd
 		install_initrd_confidential
+		install_image_mariner
 		install_initrd_mariner
 		install_kata_ctl
 		install_kata_manager
@@ -1260,6 +1267,8 @@ handle_build() {
 	rootfs-image-confidential) install_image_confidential ;;
 
 	rootfs-image-mariner) install_image_mariner ;;
+
+	rootfs-initrd-mariner) install_initrd_mariner ;;
 
 	rootfs-initrd) install_initrd ;;
 
@@ -1461,9 +1470,10 @@ main() {
 		stratovirt
 		rootfs-image
 		rootfs-image-confidential
+		rootfs-image-mariner
+		rootfs-initrd-mariner
 		rootfs-initrd
 		rootfs-initrd-confidential
-		rootfs-initrd-mariner
 		runk
 		shim-v2
 		trace-forwarder
