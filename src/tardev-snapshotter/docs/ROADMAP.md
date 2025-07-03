@@ -1,7 +1,9 @@
-# Roadmap: Code Integrity for OCI/containerd Containers using erofs-snapshotter
+# RFC: Code Integrity for OCI/containerd Containers using erofs-snapshotter
 
 This document outlines the strategic roadmap for enhancing code integrity in OCI
-Containers through erofs-snapshotter.
+Containers through erofs-snapshotter. The purpose of this document to seek
+feedback from the community and align on the path forward for implementing the
+outlined milestones.
 
 ## Objective
 
@@ -143,3 +145,5 @@ erDiagram
     IMAGE-LAYER-MANIFEST ||..|{ IMAGE-LAYER-SIGNATURE-MANIFEST: subject
     IMAGE-LAYER-SIGNATURE-MANIFEST ||--|| IMAGE-LAYER-SIGNATURE: layers
 ```
+
+Please let me know if you had any questions or suggestions regarding this proposal.
