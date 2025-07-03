@@ -6,17 +6,16 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
-use crate::agent;
 use crate::obj_meta;
 use crate::pod;
 use crate::pod_template;
 use crate::policy;
-use crate::pvc;
 use crate::settings;
 use crate::utils::Config;
 use crate::yaml;
 
 use async_trait::async_trait;
+use protocols::agent;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -94,14 +93,12 @@ impl yaml::K8sResource for DaemonSet {
         &self,
         policy_mounts: &mut Vec<policy::KataMount>,
         storages: &mut Vec<agent::Storage>,
-        persistent_volume_claims: &[pvc::PersistentVolumeClaim],
         container: &pod::Container,
         settings: &settings::Settings,
     ) {
         yaml::get_container_mounts_and_storages(
             policy_mounts,
             storages,
-            persistent_volume_claims,
             container,
             settings,
             &self.spec.template.spec.volumes,
@@ -151,8 +148,12 @@ impl yaml::K8sResource for DaemonSet {
             .or_else(|| Some(String::new()))
     }
 
-    fn get_process_fields(&self, process: &mut policy::KataProcess) {
-        yaml::get_process_fields(process, &self.spec.template.spec.securityContext);
+    fn get_process_fields(&self, process: &mut policy::KataProcess, must_check_passwd: &mut bool) {
+        yaml::get_process_fields(
+            process,
+            &self.spec.template.spec.securityContext,
+            must_check_passwd,
+        );
     }
 
     fn get_sysctls(&self) -> Vec<pod::Sysctl> {

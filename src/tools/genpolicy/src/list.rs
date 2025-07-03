@@ -6,16 +6,15 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
-use crate::agent;
 use crate::pod;
 use crate::policy;
-use crate::pvc;
 use crate::settings;
 use crate::utils::Config;
 use crate::yaml;
 
 use async_trait::async_trait;
 use core::fmt::Debug;
+use protocols::agent;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::boxed;
@@ -50,15 +49,10 @@ impl yaml::K8sResource for List {
         }
     }
 
-    fn get_sandbox_name(&self) -> Option<String> {
-        panic!("Unsupported");
-    }
-
     fn get_container_mounts_and_storages(
         &self,
         _policy_mounts: &mut Vec<policy::KataMount>,
         _storages: &mut Vec<agent::Storage>,
-        _persistent_volume_claims: &[pvc::PersistentVolumeClaim],
         _container: &pod::Container,
         _settings: &settings::Settings,
     ) {

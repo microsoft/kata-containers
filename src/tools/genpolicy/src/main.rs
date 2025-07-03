@@ -5,23 +5,22 @@
 
 use log::{debug, info};
 
-mod agent;
 mod config_map;
 mod containerd;
 mod cronjob;
 mod daemon_set;
 mod deployment;
 mod job;
+mod layers_cache;
 mod list;
 mod mount_and_storage;
 mod no_policy;
 mod obj_meta;
+mod persistent_volume_claim;
 mod pod;
 mod pod_template;
 mod policy;
-mod pvc;
 mod registry;
-#[cfg(target_os = "linux")]
 mod registry_containerd;
 mod replica_set;
 mod replication_controller;
@@ -54,5 +53,6 @@ async fn main() {
 
     debug!("Exporting policy to yaml file...");
     policy.export_policy();
+    config.layers_cache.persist();
     info!("Success!");
 }

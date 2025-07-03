@@ -36,9 +36,8 @@ clean:
 vendor:
 	cargo vendor
 
-# todo: --target $(TRIPLE) doesn't work
 test: $(GENERATED_FILES)
-	@RUSTFLAGS="$(EXTRA_RUSTFLAGS --deny warnings)" cargo test --all-targets --all-features
+	@RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo test --all-targets --all-features --target $(TRIPLE)
 
 install: $(GENERATED_FILES)
 	@RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo install --locked --target $(TRIPLE) --path .

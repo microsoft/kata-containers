@@ -6,21 +6,20 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
-use crate::agent;
-use crate::mount_and_storage;
 use crate::obj_meta;
+use crate::persistent_volume_claim;
 use crate::pod;
 use crate::pod_template;
 use crate::policy;
-use crate::pvc;
 use crate::settings;
 use crate::utils::Config;
 use crate::yaml;
 
 use async_trait::async_trait;
-use log::debug;
+use protocols::agent;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::Path;
 
 /// See Reference / Kubernetes API / Workload Resources / StatefulSet.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -47,7 +46,7 @@ struct StatefulSetSpec {
     template: pod_template::PodTemplateSpec,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    volumeClaimTemplates: Option<Vec<pvc::PersistentVolumeClaim>>,
+    volumeClaimTemplates: Option<Vec<persistent_volume_claim::PersistentVolumeClaim>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     updateStrategy: Option<StatefulSetUpdateStrategy>,
@@ -114,19 +113,9 @@ impl yaml::K8sResource for StatefulSet {
         &self,
         policy_mounts: &mut Vec<policy::KataMount>,
         storages: &mut Vec<agent::Storage>,
-        persistent_volume_claims: &[pvc::PersistentVolumeClaim],
         container: &pod::Container,
         settings: &settings::Settings,
     ) {
-        yaml::get_container_mounts_and_storages(
-            policy_mounts,
-            storages,
-            persistent_volume_claims,
-            container,
-            settings,
-            &self.spec.template.spec.volumes,
-        );
-
         // Example:
         //
         // containers:
@@ -148,15 +137,17 @@ impl yaml::K8sResource for StatefulSet {
         //           storage: 1Gi
         if let Some(volume_mounts) = &container.volumeMounts {
             if let Some(claims) = &self.spec.volumeClaimTemplates {
-                StatefulSet::get_mounts_and_storages(
-                    policy_mounts,
-                    storages,
-                    settings,
-                    volume_mounts,
-                    claims,
-                );
+                StatefulSet::get_mounts_and_storages(policy_mounts, volume_mounts, claims);
             }
         }
+
+        yaml::get_container_mounts_and_storages(
+            policy_mounts,
+            storages,
+            container,
+            settings,
+            &self.spec.template.spec.volumes,
+        );
     }
 
     fn generate_policy(&self, agent_policy: &policy::AgentPolicy) -> String {
@@ -202,8 +193,12 @@ impl yaml::K8sResource for StatefulSet {
             .or_else(|| Some(String::new()))
     }
 
-    fn get_process_fields(&self, process: &mut policy::KataProcess) {
-        yaml::get_process_fields(process, &self.spec.template.spec.securityContext);
+    fn get_process_fields(&self, process: &mut policy::KataProcess, must_check_passwd: &mut bool) {
+        yaml::get_process_fields(
+            process,
+            &self.spec.template.spec.securityContext,
+            must_check_passwd,
+        );
     }
 
     fn get_sysctls(&self) -> Vec<pod::Sysctl> {
@@ -214,41 +209,35 @@ impl yaml::K8sResource for StatefulSet {
 impl StatefulSet {
     fn get_mounts_and_storages(
         policy_mounts: &mut Vec<policy::KataMount>,
-        storages: &mut Vec<agent::Storage>,
-        settings: &settings::Settings,
         volume_mounts: &Vec<pod::VolumeMount>,
-        claims: &[pvc::PersistentVolumeClaim],
+        claims: &Vec<persistent_volume_claim::PersistentVolumeClaim>,
     ) {
-        debug!("StatefulSet::get_mounts_and_storages");
         for mount in volume_mounts {
             for claim in claims {
                 if let Some(claim_name) = &claim.metadata.name {
                     if claim_name.eq(&mount.name) {
-                        let storage_class = claim.spec.storageClassName.as_ref();
-                        let (is_blk_mount, is_smb_mount, smb_mount_options) =
-                            mount_and_storage::get_mount_info(storage_class, settings);
-
-                        let propagation = match &mount.mountPropagation {
-                            Some(p) if p == "Bidirectional" => "rshared",
-                            _ => "rprivate",
-                        };
-
-                        let access = if let Some(true) = mount.readOnly {
-                            "ro"
-                        } else {
-                            "rw"
-                        };
-
-                        let mount_options = (propagation, access);
-                        mount_and_storage::handle_persistent_volume_claim(
-                            is_blk_mount,
-                            is_smb_mount,
-                            mount,
-                            policy_mounts,
-                            storages,
-                            mount_options,
-                            smb_mount_options,
-                        );
+                        let file_name = Path::new(&mount.mountPath)
+                            .file_name()
+                            .unwrap()
+                            .to_str()
+                            .unwrap();
+                        // TODO:
+                        // - Get the source path below from the settings file.
+                        // - Generate proper options value.
+                        policy_mounts.push(policy::KataMount {
+                            destination: mount.mountPath.clone(),
+                            type_: "bind".to_string(),
+                            source:
+                                "^/run/kata-containers/shared/containers/$(bundle-id)-[a-z0-9]{16}-"
+                                    .to_string()
+                                    + file_name
+                                    + "$",
+                            options: vec![
+                                "rbind".to_string(),
+                                "rprivate".to_string(),
+                                "rw".to_string(),
+                            ],
+                        });
                     }
                 }
             }
