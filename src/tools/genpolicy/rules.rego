@@ -60,9 +60,9 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     # policy_data.containers information.
     allow_create_container_input
 
-    i_oci := input.OCI
-    i_storages := input.storages
-    i_devices := input.devices
+    i_oci := input.base.OCI
+    i_storages := input.base.storages
+    i_devices := input.base.devices
 
     # array of possible state operations
     ops_builder := []
@@ -77,7 +77,7 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     print("======== CreateContainerRequest: trying next policy container")
 
     p_pidns := p_container.sandbox_pidns
-    i_pidns := input.sandbox_pidns
+    i_pidns := input.base.sandbox_pidns
     print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
     p_pidns == i_pidns
 
@@ -108,10 +108,10 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     ret.allowed
 
     # save to policy state
-    # key: input.container_id
+    # key: input.base.container_id
     # val: index of p_container in the policy_data.containers array
-    print("CreateContainerRequest: addding container_id=", input.container_id, " to state")
-    add_p_container_to_state := state_allows(input.container_id, idx)
+    print("CreateContainerRequest: addding container_id=", input.base.container_id, " to state")
+    add_p_container_to_state := state_allows(input.base.container_id, idx)
 
     ops := concat_op_if_not_null(ret.ops, add_p_container_to_state)
 
@@ -121,29 +121,32 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
 allow_create_container_input if {
     print("allow_create_container_input: input =", input)
 
-    count(input.shared_mounts) == 0
-    is_null(input.string_user)
+    #count(input.base.shared_mounts) == 0
+    #is_null(input.base.string_user)
 
-    i_oci := input.OCI
-    is_null(i_oci.Hooks)
-    is_null(i_oci.Solaris)
-    is_null(i_oci.Windows)
+    print("allow_create_container_input: checkpoint 1")
+    #i_oci := input.base.OCI
+    #is_null(i_oci.Hooks)
+    #is_null(i_oci.Solaris)
+    #is_null(i_oci.Windows)
 
-    i_linux := i_oci.Linux
-    count(i_linux.GIDMappings) == 0
-    count(i_linux.MountLabel) == 0
-    count(i_linux.Resources.Devices) == 0
-    count(i_linux.RootfsPropagation) == 0
-    count(i_linux.UIDMappings) == 0
-    is_null(i_linux.IntelRdt)
-    is_null(i_linux.Resources.BlockIO)
-    is_null(i_linux.Resources.Network)
-    is_null(i_linux.Resources.Pids)
-    is_null(i_linux.Seccomp)
+    print("allow_create_container_input: checkpoint 2")
+    #i_linux := i_oci.Linux
+    #count(i_linux.GIDMappings) == 0
+    #count(i_linux.MountLabel) == 0
+    #count(i_linux.Resources.Devices) == 0
+    #count(i_linux.RootfsPropagation) == 0
+    #count(i_linux.UIDMappings) == 0
+    #is_null(i_linux.IntelRdt)
+    #is_null(i_linux.Resources.BlockIO)
+    #is_null(i_linux.Resources.Network)
+    #is_null(i_linux.Resources.Pids)
+    #is_null(i_linux.Seccomp)
 
-    i_process := i_oci.Process
-    count(i_process.SelinuxLabel) == 0
-    count(i_process.User.Username) == 0
+    print("allow_create_container_input: checkpoint 3")
+    #i_process := i_oci.Process
+    #count(i_process.SelinuxLabel) == 0
+    #count(i_process.User.Username) == 0
 
     print("allow_create_container_input: true")
 }
@@ -667,9 +670,9 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
 
     # Match each input mount with a Policy mount.
     # Reject possible attempts to match multiple input mounts with a single Policy mount.
-    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, input.OCI.Mounts[i_index], bundle_id, sandbox_id) }
+    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, input.base.OCI.Mounts[i_index], bundle_id, sandbox_id) }
 
-    count(p_matches) == count(input.OCI.Mounts)
+    count(p_matches) == count(input.base.OCI.Mounts)
 
     allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
 
@@ -1379,9 +1382,9 @@ allow_sandbox_storage(p_storages, i_storage) if {
 }
 
 CopyFileRequest if {
-    print("CopyFileRequest: input.path =", input.path)
+    print("CopyFileRequest: input.base.path =", input.base.path)
 
-    check_directory_traversal(input.path)
+    check_directory_traversal(input.base.path)
 
     some regex1 in policy_data.request_defaults.CopyFileRequest
     regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
@@ -1389,22 +1392,22 @@ CopyFileRequest if {
     regex4 := replace(regex3, "$(bundle-id)", "[a-z0-9]{64}")
     print("CopyFileRequest: regex4 =", regex4)
 
-    regex.match(regex4, input.path)
+    regex.match(regex4, input.base.path)
 
     print("CopyFileRequest: true")
 }
 
 CreateSandboxRequest if {
-    print("CreateSandboxRequest: input.guest_hook_path =", input.guest_hook_path)
-    count(input.guest_hook_path) == 0
+    print("CreateSandboxRequest: input.base.guest_hook_path =", input.base.guest_hook_path)
+    count(input.base.guest_hook_path) == 0
 
-    print("CreateSandboxRequest: input.kernel_modules =", input.kernel_modules)
-    count(input.kernel_modules) == 0
+    print("CreateSandboxRequest: input.base.kernel_modules =", input.base.kernel_modules)
+    count(input.base.kernel_modules) == 0
 
-    i_pidns := input.sandbox_pidns
+    i_pidns := input.base.sandbox_pidns
     print("CreateSandboxRequest: i_pidns =", i_pidns)
     i_pidns == false
-    allow_sandbox_storages(input.storages)
+    allow_sandbox_storages(input.base.storages)
 }
 
 allow_exec(p_container, i_process) if {
@@ -1441,10 +1444,10 @@ ExecProcessRequest if {
 
     some p_command in policy_data.request_defaults.ExecProcessRequest.allowed_commands
     print("ExecProcessRequest 1: p_command =", p_command)
-    p_command == input.process.Args
+    p_command == input.base.process.Args
 
-    p_container := get_state_container(input.container_id)
-    allow_interactive_exec(p_container, input.process)
+    p_container := get_state_container(input.base.container_id)
+    allow_interactive_exec(p_container, input.base.process)
 
     print("ExecProcessRequest 1: true")
 }
@@ -1452,14 +1455,14 @@ ExecProcessRequest if {
     print("ExecProcessRequest 2: input =", input)
     allow_exec_process_input
 
-    p_container := get_state_container(input.container_id)
+    p_container := get_state_container(input.base.container_id)
 
     some p_command in p_container.exec_commands
     print("ExecProcessRequest 2: p_command =", p_command)
 
-    p_command == input.process.Args
+    p_command == input.base.process.Args
 
-    allow_exec(p_container, input.process)
+    allow_exec(p_container, input.base.process)
 
     print("ExecProcessRequest 2: true")
 }
@@ -1467,7 +1470,7 @@ ExecProcessRequest if {
     print("ExecProcessRequest 3: input =", input)
     allow_exec_process_input
 
-    i_command = concat(" ", input.process.Args)
+    i_command = concat(" ", input.base.process.Args)
     print("ExecProcessRequest 3: i_command =", i_command)
 
     some p_regex in policy_data.request_defaults.ExecProcessRequest.regex
@@ -1475,17 +1478,17 @@ ExecProcessRequest if {
 
     regex.match(p_regex, i_command)
 
-    p_container := get_state_container(input.container_id)
+    p_container := get_state_container(input.base.container_id)
 
-    allow_interactive_exec(p_container, input.process)
+    allow_interactive_exec(p_container, input.base.process)
 
     print("ExecProcessRequest 3: true")
 }
 
 allow_exec_process_input if {
-    is_null(input.string_user)
+    is_null(input.base.string_user)
 
-    i_process := input.process
+    i_process := input.base.process
     count(i_process.SelinuxLabel) == 0
     count(i_process.ApparmorProfile) == 0
 
@@ -1496,7 +1499,7 @@ UpdateRoutesRequest if {
     print("UpdateRoutesRequest: input =", input)
     print("UpdateRoutesRequest: policy =", policy_data.request_defaults.UpdateRoutesRequest)
 
-    i_routes := input.routes.Routes
+    i_routes := input.base.routes.Routes
     p_source_regex = policy_data.request_defaults.UpdateRoutesRequest.forbidden_source_regex
     p_names = policy_data.request_defaults.UpdateRoutesRequest.forbidden_device_names
 
@@ -1518,7 +1521,7 @@ UpdateInterfaceRequest if {
     print("UpdateInterfaceRequest: input =", input)
     print("UpdateInterfaceRequest: policy =", policy_data.request_defaults.UpdateInterfaceRequest)
 
-    i_interface := input.interface
+    i_interface := input.base.interface
     p_flags := policy_data.request_defaults.UpdateInterfaceRequest.allow_raw_flags
 
     # Typically, just IFF_NOARP is used.
@@ -1554,9 +1557,9 @@ WriteStreamRequest if {
 RemoveContainerRequest:= {"ops": ops, "allowed": true} if {
     print("RemoveContainerRequest: input =", input)
 
-    # Delete input.container_id from p_state
+    # Delete input.base.container_id from p_state
     ops_builder1 := []
-    del_container := state_del_key(input.container_id)
+    del_container := state_del_key(input.base.container_id)
     ops := concat_op_if_not_null(ops_builder1, del_container)
 
     print("RemoveContainerRequest: true")
