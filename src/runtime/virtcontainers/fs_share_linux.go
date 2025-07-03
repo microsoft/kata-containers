@@ -545,6 +545,7 @@ func (f *FilesystemShare) shareRootFilesystemWithVirtualVolume(ctx context.Conte
 // func (c *Container) shareRootfs(ctx context.Context) (*grpc.Storage, string, error) {
 func (f *FilesystemShare) ShareRootFilesystem(ctx context.Context, c *Container) (*SharedFile, error) {
 	f.Logger().WithField("c.rootFs", c.rootFs).Debug("ShareRootFilesystem")
+	f.Logger().WithField("c.rootFs.options", c.rootFs.options).Debug("ShareRootFilesystem")
 
 	if HasOptionPrefix(c.rootFs.Options, VirtualVolumePrefix) {
 		return f.shareRootFilesystemWithVirtualVolume(ctx, c)
@@ -554,6 +555,7 @@ func (f *FilesystemShare) ShareRootFilesystem(ctx context.Context, c *Container)
 		return f.shareRootFilesystemWithNydus(ctx, c)
 	}
 	rootfsGuestPath := filepath.Join(kataGuestSharedDir(), c.id, c.rootfsSuffix)
+	f.Logger().WithField("rootfsGuestPath", rootfsGuestPath).Debug("ShareRootFilesystem")
 
 	if HasOptionPrefix(c.rootFs.Options, annotations.FileSystemLayer) {
 		if err := os.MkdirAll(filepath.Join(getMountPath(f.sandbox.ID()), c.id, c.rootfsSuffix), DirMode); err != nil {
