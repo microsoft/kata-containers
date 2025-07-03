@@ -584,6 +584,11 @@ impl AgentPolicy {
             .settings
             .get_container_settings(is_pause_container);
         let mut root = c_settings.Root.clone();
+
+        if self.config.settings.cluster_config.guest_pull {
+            root.Path += "/rootfs";
+        }
+
         root.Readonly = yaml_container.read_only_root_filesystem();
 
         let namespace = resource.get_namespace().unwrap_or_default();

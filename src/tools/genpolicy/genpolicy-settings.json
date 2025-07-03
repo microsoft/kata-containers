@@ -1,7 +1,7 @@
 {
     "pause_container": {
         "Root": {
-            "Path": "$(cpath)/$(bundle-id)/rootfs",
+            "Path": "$(cpath)/$(bundle-id)",
             "Readonly": true
         },
         "Mounts": [
