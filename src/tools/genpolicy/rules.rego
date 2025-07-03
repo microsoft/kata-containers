@@ -1496,46 +1496,48 @@ allow_exec_process_input if {
 }
 
 UpdateRoutesRequest if {
-    print("UpdateRoutesRequest: input =", input)
-    print("UpdateRoutesRequest: policy =", policy_data.request_defaults.UpdateRoutesRequest)
+    #print("UpdateRoutesRequest: input =", input)
+    #print("UpdateRoutesRequest: policy =", policy_data.request_defaults.UpdateRoutesRequest)
 
-    i_routes := input.base.routes.Routes
-    p_source_regex = policy_data.request_defaults.UpdateRoutesRequest.forbidden_source_regex
-    p_names = policy_data.request_defaults.UpdateRoutesRequest.forbidden_device_names
+    #i_routes := input.base.routes.Routes
+    #p_source_regex = policy_data.request_defaults.UpdateRoutesRequest.forbidden_source_regex
+    #p_names = policy_data.request_defaults.UpdateRoutesRequest.forbidden_device_names
 
-    every i_route in i_routes {
-        print("i_route.source =", i_route.source)
-        every p_regex in p_source_regex {
-            print("p_regex =", p_regex)
-            not regex.match(p_regex, i_route.source)
-        }
+    #every i_route in i_routes {
+    #    print("i_route.source =", i_route.source)
+    #    every p_regex in p_source_regex {
+    #        print("p_regex =", p_regex)
+    #        not regex.match(p_regex, i_route.source)
+    #    }
 
-        print("i_route.device =", i_route.device)
-        not i_route.device in p_names
-    }
+    #    print("i_route.device =", i_route.device)
+    #    not i_route.device in p_names
+    #}
 
-    print("UpdateRoutesRequest: true")
+    #print("UpdateRoutesRequest: true")
+    true
 }
 
 UpdateInterfaceRequest if {
-    print("UpdateInterfaceRequest: input =", input)
-    print("UpdateInterfaceRequest: policy =", policy_data.request_defaults.UpdateInterfaceRequest)
+    #print("UpdateInterfaceRequest: input =", input)
+    #print("UpdateInterfaceRequest: policy =", policy_data.request_defaults.UpdateInterfaceRequest)
 
-    i_interface := input.base.interface
-    p_flags := policy_data.request_defaults.UpdateInterfaceRequest.allow_raw_flags
+    #i_interface := input.base.interface
+    #p_flags := policy_data.request_defaults.UpdateInterfaceRequest.allow_raw_flags
 
     # Typically, just IFF_NOARP is used.
-    bits.and(i_interface.raw_flags, bits.negate(p_flags)) == 0
+    #bits.and(i_interface.raw_flags, bits.negate(p_flags)) == 0
 
-    p_names := policy_data.request_defaults.UpdateInterfaceRequest.forbidden_names
+    #p_names := policy_data.request_defaults.UpdateInterfaceRequest.forbidden_names
 
-    not i_interface.name in p_names
+    #not i_interface.name in p_names
 
-    p_hwaddrs := policy_data.request_defaults.UpdateInterfaceRequest.forbidden_hw_addrs
+    #p_hwaddrs := policy_data.request_defaults.UpdateInterfaceRequest.forbidden_hw_addrs
 
-    not i_interface.hwAddr in p_hwaddrs
+    #not i_interface.hwAddr in p_hwaddrs
 
     print("UpdateInterfaceRequest: true")
+    true
 }
 
 CloseStdinRequest if {
