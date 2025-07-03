@@ -545,7 +545,7 @@ func (f *FilesystemShare) shareRootFilesystemWithVirtualVolume(ctx context.Conte
 // func (c *Container) shareRootfs(ctx context.Context) (*grpc.Storage, string, error) {
 func (f *FilesystemShare) ShareRootFilesystem(ctx context.Context, c *Container) (*SharedFile, error) {
 	f.Logger().WithField("c.rootFs", c.rootFs).Debug("ShareRootFilesystem")
-	f.Logger().WithField("c.rootFs.options", c.rootFs.options).Debug("ShareRootFilesystem")
+	f.Logger().WithField("c.rootFs.Options", c.rootFs.Options).Debug("ShareRootFilesystem")
 
 	if HasOptionPrefix(c.rootFs.Options, VirtualVolumePrefix) {
 		return f.shareRootFilesystemWithVirtualVolume(ctx, c)
