@@ -375,6 +375,7 @@ fn get_downward_api_mount(yaml_mount: &pod::VolumeMount, p_mounts: &mut Vec<poli
 pub fn get_image_mount_and_storage(
     settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
+    storages: &mut Vec<agent::Storage>,
     destination: &str,
 ) {
     // https://github.com/kubernetes/examples/blob/master/cassandra/image/Dockerfile
@@ -406,6 +407,19 @@ pub fn get_image_mount_and_storage(
     let file_name = Path::new(&destination_string).file_name().unwrap();
     let name = OsString::from(file_name).into_string().unwrap();
     let source = format!("{}{name}$", &settings_image.mount_source);
+
+    if !settings.cluster_config.guest_pull {
+        storages.push(agent::Storage {
+            driver: settings_image.driver.clone(),
+            driver_options: Vec::new(),
+            source: settings_image.source.clone(),
+            fstype: settings_image.fstype.clone(),
+            options: settings_image.options.clone(),
+            mount_point: destination_string.clone(),
+            fs_group: protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        });
+    }
 
     p_mounts.push(policy::KataMount {
         destination: destination_string,
