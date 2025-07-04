@@ -73,7 +73,7 @@
     },
     "other_container": {
         "Root": {
-            "Path": "$(cpath)/$(bundle-id)/rootfs"
+            "Path": "$(cpath)/$(bundle-id)"
         },
         "Mounts": [
             {
