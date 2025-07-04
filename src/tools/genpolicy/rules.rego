@@ -672,6 +672,7 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
     # Reject possible attempts to match multiple input mounts with a single Policy mount.
     p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, input.base.OCI.Mounts[i_index], bundle_id, sandbox_id) }
 
+    print("allow_by_bundle_or_sandbox_id: p_matches =", p_matches)
     count(p_matches) == count(input.base.OCI.Mounts)
 
     allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
@@ -984,7 +985,7 @@ allow_root_path(p_oci, i_oci, bundle_id) if {
 # device mounts
 # allow_mount returns the policy index (p_index) if a given input mount matches a policy mount.
 allow_mount(p_oci, i_mount, bundle_id, sandbox_id):= p_index if {
-    print("allow_mount: i_mount =", i_mount)
+    print("=== allow_mount: i_mount =", i_mount)
 
     p_mount := p_oci.Mounts[p_index]
     print("allow_mount: p_mount =", p_mount)
@@ -995,7 +996,7 @@ allow_mount(p_oci, i_mount, bundle_id, sandbox_id):= p_index if {
 
 check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
     p_mount == i_mount
-    print("check_mount 1: true")
+    print("check_mount: true (1)")
 }
 check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
     p_mount.destination == i_mount.destination
@@ -1004,7 +1005,7 @@ check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
 
     mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id)
 
-    print("check_mount 2: true")
+    print("check_mount: true (2)")
 }
 
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
@@ -1016,7 +1017,7 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
     print("mount_source_allows 1: regex4 =", regex4)
     regex.match(regex4, i_mount.source)
 
-    print("mount_source_allows 1: true")
+    print("mount_source_allows: true (1)")
 }
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
     regex1 := p_mount.source
@@ -1027,7 +1028,7 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
     print("mount_source_allows 2: regex4 =", regex4)
     regex.match(regex4, i_mount.source)
 
-    print("mount_source_allows 2: true")
+    print("mount_source_allows: true (2)")
 }
 
 ######################################################################
