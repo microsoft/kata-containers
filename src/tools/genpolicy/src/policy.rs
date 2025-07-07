@@ -424,7 +424,7 @@ pub struct CommonData {
     pub privileged_caps: Vec<String>,
 
     /// Parse Container image as a storage object
-    pub image_layer_verification: String,
+    pub image_layers_format: String,
 }
 
 /// Configuration from "kubectl config".
@@ -432,10 +432,6 @@ pub struct CommonData {
 pub struct ClusterConfig {
     /// Pause container image reference.
     pub pause_container_image: String,
-    /// Whether or not the cluster uses the guest pull mechanism
-    /// In guest pull, host can't look into layers to determine GID.
-    /// See issue https://github.com/kata-containers/kata-containers/issues/11162
-    pub guest_pull: bool,
 }
 
 /// Struct used to read data from the settings file and copy that data into the policy.
@@ -638,7 +634,7 @@ impl AgentPolicy {
         let image_layers = yaml_container.registry.get_image_layers();
         let mut storages = Default::default();
         const HOST_TARFS_DM_VERITY: &str = "host-tarfs-dm-verity";
-        if self.config.settings.common.image_layer_verification == HOST_TARFS_DM_VERITY {
+        if self.config.settings.common.image_layers_format == HOST_TARFS_DM_VERITY {
             get_image_layer_storages(&mut storages, &image_layers, &root);
         }
         resource.get_container_mounts_and_storages(

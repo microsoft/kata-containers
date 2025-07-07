@@ -345,15 +345,14 @@
             "CAP_BPF",
             "CAP_CHECKPOINT_RESTORE"
         ],
-        "image_layer_verification": "none"
+        "image_layers_format": "guest-pull"
     },
     "kata_config": {
         "confidential_guest": true,
         "oci_version": "1.1.0"
     },
     "cluster_config": {
-        "pause_container_image": "mcr.microsoft.com/oss/kubernetes/pause:3.6",
-        "guest_pull": true
+        "pause_container_image": "mcr.microsoft.com/oss/kubernetes/pause:3.6"
     },
     "request_defaults": {
         "CreateContainerRequest": {
