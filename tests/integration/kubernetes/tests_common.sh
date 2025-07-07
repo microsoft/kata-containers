@@ -93,19 +93,17 @@ adapt_common_policy_settings_for_coco() {
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
 
-# adapt common policy settings for pod VMs using "shared_fs = virtio-fs" (https://github.com/kata-containers/kata-containers/issues/10189)
-adapt_common_policy_settings_for_virtio_fs() {
+adapt_common_policy_settings_for_non_coco() {
 	local settings_dir=$1
 
-	info "Adapting common policy settings for shared_fs=virtio-fs"
-	jq '.request_defaults.UpdateEphemeralMountsRequest = true' "${settings_dir}/genpolicy-settings.json" > temp.json && sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
-	jq '.sandbox.storages += [{"driver":"virtio-fs","driver_options":[],"fs_group":null,"fstype":"virtiofs","mount_point":"/run/kata-containers/shared/containers/","options":[],"source":"kataShared"}]' \
-	"${settings_dir}/genpolicy-settings.json" > temp.json && sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
-}
+	info "Adapting common policy settings for non-CoCo guest"
 
-# adapt common policy settings for CBL-Mariner Hosts
-adapt_common_policy_settings_for_cbl_mariner() {
-	jq '.kata_config.confidential_guest = false' "${settings_dir}/genpolicy-settings.json" > temp.json
+	jq '.kata_config.confidential_guest = false | .request_defaults.UpdateEphemeralMountsRequest = true' \
+		"${settings_dir}/genpolicy-settings.json" > temp.json
+	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
+
+	jq '.sandbox.storages += [{"driver":"virtio-fs","driver_options":[],"fs_group":null,"fstype":"virtiofs","mount_point":"/run/kata-containers/shared/containers/","options":[],"source":"kataShared"}]' \
+		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
 
@@ -127,19 +125,7 @@ adapt_common_policy_settings() {
 			adapt_common_policy_settings_for_coco "${settings_dir}"
 			;;
 		*)
-			# AUTO_GENERATE_POLICY=yes is currently supported by this script when testing:
-			# - The SEV, SNP, or TDX platforms above, that are using "shared_fs = none".
-			# - Other platforms that are using "shared_fs = virtio-fs".
-			# Attempting to test using AUTO_GENERATE_POLICY=yes on platforms that are not
-			# supported yet is likely to result in test failures due to incorrectly auto-
-			# generated policies.
-			adapt_common_policy_settings_for_virtio_fs "${settings_dir}"
-			;;
-	esac
-
-	case "${KATA_HOST_OS}" in
-		"cbl-mariner")
-			adapt_common_policy_settings_for_cbl_mariner "${settings_dir}"
+			adapt_common_policy_settings_for_non_coco "${settings_dir}"
 			;;
 	esac
 
