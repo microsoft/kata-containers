@@ -85,12 +85,13 @@ auto_generate_policy_enabled() {
 	[[ "${AUTO_GENERATE_POLICY}" == "yes" ]]
 }
 
-# adapt common policy settings for tdx or snp
-adapt_common_policy_settings_for_tdx() {
+adapt_common_policy_settings_for_coco() {
 	local settings_dir=$1
 
 	info "Adapting common policy settings for TDX, SNP, or the non-TEE development environment"
-	jq '.kata_config.confidential_guest = true | .common.cpath = "/run/kata-containers" | .volumes.configMap.mount_point = "^$(cpath)/$(bundle-id)-[a-z0-9]{16}-"' "${settings_dir}/genpolicy-settings.json" > temp.json && sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
+	jq '.common.cpath = "/run/kata-containers" | .volumes.configMap.mount_point = "^$(cpath)/$(bundle-id)-[a-z0-9]{16}-"' \
+		"${settings_dir}/genpolicy-settings.json" > temp.json
+	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
 
 # adapt common policy settings for pod VMs using "shared_fs = virtio-fs" (https://github.com/kata-containers/kata-containers/issues/10189)
@@ -105,7 +106,8 @@ adapt_common_policy_settings_for_virtio_fs() {
 
 # adapt common policy settings for CBL-Mariner Hosts
 adapt_common_policy_settings_for_cbl_mariner() {
-	true
+	jq '.kata_config.confidential_guest = false' "${settings_dir}/genpolicy-settings.json" > temp.json
+	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
 
 # adapt common policy settings for guest-pull Hosts
@@ -123,7 +125,7 @@ adapt_common_policy_settings() {
 
 	case "${KATA_HYPERVISOR}" in
   		"qemu-tdx"|"qemu-snp"|"qemu-coco-dev")
-			adapt_common_policy_settings_for_tdx "${settings_dir}"
+			adapt_common_policy_settings_for_coco "${settings_dir}"
 			;;
 		*)
 			# AUTO_GENERATE_POLICY=yes is currently supported by this script when testing:

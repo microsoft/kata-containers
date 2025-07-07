@@ -319,7 +319,7 @@
         "image_layer_verification" : "none"
     },
     "kata_config": {
-        "confidential_guest": false,
+        "confidential_guest": true,
         "oci_version": "1.1.0"
     },
     "cluster_config": {
