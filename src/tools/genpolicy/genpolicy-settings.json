@@ -353,7 +353,7 @@
     },
     "cluster_config": {
         "pause_container_image": "mcr.microsoft.com/oss/kubernetes/pause:3.6",
-        "guest_pull": false
+        "guest_pull": true
     },
     "request_defaults": {
         "CreateContainerRequest": {
