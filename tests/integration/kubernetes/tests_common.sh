@@ -85,14 +85,6 @@ auto_generate_policy_enabled() {
 	[[ "${AUTO_GENERATE_POLICY}" == "yes" ]]
 }
 
-adapt_common_policy_settings_for_coco() {
-	local settings_dir=$1
-
-	info "Adapting common policy settings for TDX, SNP, or CoCo non-TEE"
-	jq '.common.cpath = "/run/kata-containers"' "${settings_dir}/genpolicy-settings.json" > temp.json
-	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
-}
-
 adapt_common_policy_settings_for_non_coco() {
 	local settings_dir=$1
 
@@ -118,7 +110,7 @@ adapt_common_policy_settings() {
 
 	case "${KATA_HYPERVISOR}" in
   		"qemu-tdx"|"qemu-snp"|"qemu-coco-dev")
-			adapt_common_policy_settings_for_coco "${settings_dir}"
+			true
 			;;
 		*)
 			adapt_common_policy_settings_for_non_coco "${settings_dir}"
