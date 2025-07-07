@@ -89,8 +89,7 @@ adapt_common_policy_settings_for_coco() {
 	local settings_dir=$1
 
 	info "Adapting common policy settings for TDX, SNP, or the non-TEE development environment"
-	jq '.common.cpath = "/run/kata-containers" | .volumes.configMap.mount_point = "^$(cpath)/$(bundle-id)-[a-z0-9]{16}-"' \
-		"${settings_dir}/genpolicy-settings.json" > temp.json
+	jq '.common.cpath = "/run/kata-containers"' "${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
 
