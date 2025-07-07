@@ -88,7 +88,7 @@ auto_generate_policy_enabled() {
 adapt_common_policy_settings_for_coco() {
 	local settings_dir=$1
 
-	info "Adapting common policy settings for TDX, SNP, or the non-TEE development environment"
+	info "Adapting common policy settings for TDX, SNP, or CoCo non-TEE"
 	jq '.common.cpath = "/run/kata-containers"' "${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
@@ -99,10 +99,6 @@ adapt_common_policy_settings_for_non_coco() {
 	info "Adapting common policy settings for non-CoCo guest"
 
 	jq '.kata_config.confidential_guest = false | .request_defaults.UpdateEphemeralMountsRequest = true' \
-		"${settings_dir}/genpolicy-settings.json" > temp.json
-	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
-
-	jq '.sandbox.storages += [{"driver":"virtio-fs","driver_options":[],"fs_group":null,"fstype":"virtiofs","mount_point":"/run/kata-containers/shared/containers/","options":[],"source":"kataShared"}]' \
 		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }

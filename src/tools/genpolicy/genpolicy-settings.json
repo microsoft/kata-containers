@@ -249,6 +249,34 @@
             }
         ]
     },
+    "confidential_sandbox": {
+        "storages": [
+            {
+                "driver": "ephemeral",
+                "driver_options": [],
+                "source": "shm",
+                "fstype": "tmpfs",
+                "options": [
+                    "noexec",
+                    "nosuid",
+                    "nodev",
+                    "mode=1777",
+                    "size=67108864"
+                ],
+                "mount_point": "/run/kata-containers/sandbox/shm",
+                "fs_group": null
+            },
+            {
+                "driver": "virtio-fs",
+                "driver_options": [],
+                "fs_group": null,
+                "fstype": "virtiofs",
+                "mount_point": "/run/kata-containers/shared/containers/",
+                "options": [],
+                "source": "kataShared"
+            }
+        ]
+    },
     "common": {
         "cpath": "/run/kata-containers/shared/containers",
         "mount_source_cpath": "/run/kata-containers/shared/containers",
@@ -316,7 +344,7 @@
             "CAP_BPF",
             "CAP_CHECKPOINT_RESTORE"
         ],
-        "image_layer_verification" : "none"
+        "image_layer_verification": "none"
     },
     "kata_config": {
         "confidential_guest": true,

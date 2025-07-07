@@ -558,11 +558,18 @@ impl AgentPolicy {
             policy_containers.push(self.get_container_policy(resource, yaml_container, i == 0));
         }
 
+        let settings = &self.config.settings;
+        let sandbox = if settings.kata_config.confidential_guest {
+            settings.confidential_sandbox.clone()
+        } else {
+            settings.sandbox.clone()
+        };
+
         let policy_data = policy::PolicyData {
             containers: policy_containers,
-            request_defaults: self.config.settings.request_defaults.clone(),
-            common: self.config.settings.common.clone(),
-            sandbox: self.config.settings.sandbox.clone(),
+            request_defaults: settings.request_defaults.clone(),
+            common: settings.common.clone(),
+            sandbox
         };
 
         let json_data = serde_json::to_string_pretty(&policy_data).unwrap();

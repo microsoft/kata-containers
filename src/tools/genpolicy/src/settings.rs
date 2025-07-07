@@ -25,6 +25,7 @@ pub struct Settings {
     pub common: policy::CommonData,
     pub mount_destinations: Vec<String>,
     pub sandbox: policy::SandboxData,
+    pub confidential_sandbox: policy::SandboxData,
 }
 
 /// Volume settings loaded from genpolicy-settings.json.
