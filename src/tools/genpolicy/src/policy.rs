@@ -568,6 +568,8 @@ impl AgentPolicy {
         let mut common = settings.common.clone();
         if settings.kata_config.confidential_guest {
             common.cpath = common.confidential_cpath.clone();
+        } else {
+            common.image_layers_format = "none".to_string();
         }
 
         // confidential_cpath doesn't get serialized if it's empty.

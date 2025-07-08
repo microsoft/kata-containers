@@ -1073,6 +1073,14 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
 
     print("allow_storages 2: true")
 }
+allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
+    layers_format = policy_data.common.image_layers_format
+    print("allow_storages 3: layers_format =", layers_format)
+
+    layers_format == "none"
+
+    print("allow_storages 3: true")
+}
 
 allow_image_storage_tarfs(p_storages) = { "layer_ids": layer_ids, "root_hashes": root_hashes } if {
     policy_data.common.image_layers_format == "host-tarfs-dm-verity"
