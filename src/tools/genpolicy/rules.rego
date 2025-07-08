@@ -1258,9 +1258,12 @@ allow_overlay_layer(policy_id, policy_hash, i_option) if {
 }
 
 allow_mount_point_tarfs(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+    print("allow_mount_point_tarfs 1: p_storage =", p_storage, "i_storage =", i_storage)
     allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id)
+    print("allow_mount_point_tarfs 1: success")
 }
 allow_mount_point_tarfs(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+    print("allow_mount_point_tarfs 2: p_storage =", p_storage, "i_storage =", i_storage)
     p_storage.fstype == "tar"
 
     startswith(p_storage.mount_point, "$(layer")
@@ -1269,31 +1272,33 @@ allow_mount_point_tarfs(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) 
     endswith(mount_suffix, ")")
     layer_index := trim_right(mount_suffix, ")")
     i := to_number(layer_index)
-    print("allow_mount_point_tarfs 1: i =", i)
+    print("allow_mount_point_tarfs 2: i =", i)
 
     layer_id := layer_ids[i]
-    print("allow_mount_point_tarfs 1: layer_id =", layer_id)
+    print("allow_mount_point_tarfs 2: layer_id =", layer_id)
 
     p_mount := concat("/", ["/run/kata-containers/sandbox/layers", layer_id])
-    print("allow_mount_point_tarfs 1: p_mount =", p_mount)
+    print("allow_mount_point_tarfs 2: p_mount =", p_mount)
 
     p_mount == i_storage.mount_point
 
-    print("allow_mount_point_tarfs 1: true")
+    print("allow_mount_point_tarfs 2: true")
 }
 allow_mount_point_tarfs(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+    print("allow_mount_point_tarfs 3: p_storage =", p_storage, "i_storage =", i_storage)
     p_storage.fstype == "fuse3.kata-overlay"
 
     mount1 := replace(p_storage.mount_point, "$(cpath)", policy_data.common.cpath)
     mount2 := replace(mount1, "$(bundle-id)", bundle_id)
-    print("allow_mount_point_tarfs 2: mount2 =", mount2)
+    print("allow_mount_point_tarfs 3: mount2 =", mount2)
 
     mount2 == i_storage.mount_point
 
-    print("allow_mount_point_tarfs 2: true")
+    print("allow_mount_point_tarfs 3: true")
 }
 
 allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
+    print("allow_mount_point 1: p_storage =", p_storage, "i_storage =", i_storage)
     p_storage.fstype == "local"
 
     mount1 := p_storage.mount_point
@@ -1310,6 +1315,7 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
     print("allow_mount_point 1: true")
 }
 allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
+    print("allow_mount_point 2: p_storage =", p_storage, "i_storage =", i_storage)
     p_storage.fstype == "bind"
 
     mount1 := p_storage.mount_point
@@ -1326,6 +1332,7 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
     print("allow_mount_point 2: true")
 }
 allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
+    print("allow_mount_point 3: p_storage =", p_storage, "i_storage =", i_storage)
     p_storage.fstype == "tmpfs"
 
     mount1 := p_storage.mount_point
