@@ -7,7 +7,6 @@
 #![allow(non_snake_case)]
 
 use crate::containerd;
-use crate::layers_cache::ImageLayersCache;
 use crate::policy;
 use crate::utils::Config;
 use crate::verity;
@@ -162,7 +161,7 @@ impl Container {
                 debug!("config_layer: {:?}", &config_layer);
 
                 let image_layers = get_image_layers(
-                    &config.layers_cache,
+                    &config,
                     &mut client,
                     &reference,
                     &manifest,
@@ -436,7 +435,7 @@ impl Container {
 }
 
 async fn get_image_layers(
-    layers_cache: &ImageLayersCache,
+    config: &Config,
     client: &mut Client,
     reference: &Reference,
     manifest: &manifest::OciImageManifest,
@@ -453,7 +452,7 @@ async fn get_image_layers(
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
                 let mut imageLayer = get_verity_and_users(
-                    layers_cache,
+                    config,
                     client,
                     reference,
                     &layer.digest,
@@ -474,12 +473,13 @@ async fn get_image_layers(
 }
 
 async fn get_verity_and_users(
-    layers_cache: &ImageLayersCache,
+    config: &Config,
     client: &mut Client,
     reference: &Reference,
     layer_digest: &str,
     diff_id: &str,
 ) -> Result<ImageLayer> {
+    let layers_cache = &config.layers_cache;
     if let Some(layer) = layers_cache.get_layer(diff_id) {
         info!("Using cache file");
         info!("dm-verity root hash: {}", layer.verity_hash);
@@ -507,11 +507,11 @@ async fn get_verity_and_users(
     {
         temp_dir.close()?;
         bail!(format!(
-            "Failed to create verity hash for {layer_digest}, error {e}"
+            "Failed to decompress layer for digest {layer_digest}, error {e}"
         ));
     };
 
-    match get_verity_hash_and_users(&decompressed_path) {
+    match get_verity_hash_and_users(config, &decompressed_path) {
         Err(e) => {
             temp_dir.close()?;
             bail!(format!("Failed to get verity hash {e}"));
@@ -566,18 +566,22 @@ async fn create_decompressed_layer_file(
     Ok(())
 }
 
-pub fn get_verity_hash_and_users(path: &Path) -> Result<(String, String, String)> {
-    info!("Calculating dm-verity root hash");
+pub fn get_verity_hash_and_users(config: &Config, path: &Path) -> Result<(String, String, String)> {
+    let mut verity_hash = String::new();
     let mut file = std::fs::File::open(path)?;
-    let size = file.seek(std::io::SeekFrom::End(0))?;
-    if size < 4096 {
-        return Err(anyhow!("Block device {:?} is too small: {size}", &path));
-    }
 
-    let salt = [0u8; <Sha256 as OutputSizeUser>::OutputSize::USIZE];
-    let v = verity::Verity::<Sha256>::new(size, 4096, 4096, &salt, 0)?;
-    let hash = verity::traverse_file(&mut file, 0, false, v, &mut verity::no_write)?;
-    let result = format!("{:x}", hash);
+    if config.settings.common.image_layer_verification == "host-tarfs-dm-verity" {
+        info!("Calculating dm-verity root hash");
+        let size = file.seek(std::io::SeekFrom::End(0))?;
+        if size < 4096 {
+            return Err(anyhow!("Block device {:?} is too small: {size}", &path));
+        }
+
+        let salt = [0u8; <Sha256 as OutputSizeUser>::OutputSize::USIZE];
+        let v = verity::Verity::<Sha256>::new(size, 4096, 4096, &salt, 0)?;
+        let hash = verity::traverse_file(&mut file, 0, false, v, &mut verity::no_write)?;
+        verity_hash = format!("{:x}", hash);
+    }
 
     file.seek(std::io::SeekFrom::Start(0))?;
 
@@ -615,7 +619,7 @@ pub fn get_verity_hash_and_users(path: &Path) -> Result<(String, String, String)
         }
     }
 
-    Ok((result, passwd, group))
+    Ok((verity_hash, passwd, group))
 }
 
 pub async fn get_container(config: &Config, image: &str) -> Result<Container> {

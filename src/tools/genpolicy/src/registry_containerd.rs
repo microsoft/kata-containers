@@ -5,7 +5,6 @@
 
 // Allow Docker image config field names.
 #![allow(non_snake_case)]
-use crate::layers_cache::ImageLayersCache;
 use crate::registry::{
     get_verity_hash_and_users, Container, DockerConfigLayer, ImageLayer, WHITEOUT_MARKER,
 };
@@ -61,7 +60,7 @@ impl Container {
             .await
             .unwrap();
         let image_layers =
-            get_image_layers(&config.layers_cache, &manifest, &config_layer, &ctrd_client).await?;
+            get_image_layers(&config, &manifest, &config_layer, &ctrd_client).await?;
 
         // Find the last layer with an /etc/* file, respecting whiteouts.
         let mut passwd = String::new();
@@ -270,7 +269,7 @@ pub fn build_auth(reference: &Reference) -> Option<AuthConfig> {
 }
 
 pub async fn get_image_layers(
-    layers_cache: &ImageLayersCache,
+    config: &Config,
     manifest: &serde_json::Value,
     config_layer: &DockerConfigLayer,
     client: &containerd_client::Client,
@@ -287,7 +286,7 @@ pub async fn get_image_layers(
         {
             if layer_index < config_layer.rootfs.diff_ids.len() {
                 let mut imageLayer = get_verity_and_users(
-                    layers_cache,
+                    config,
                     layer["digest"].as_str().unwrap(),
                     client,
                     &config_layer.rootfs.diff_ids[layer_index].clone(),
@@ -306,11 +305,12 @@ pub async fn get_image_layers(
 }
 
 async fn get_verity_and_users(
-    layers_cache: &ImageLayersCache,
+    config: &Config,
     layer_digest: &str,
     client: &containerd_client::Client,
     diff_id: &str,
 ) -> Result<ImageLayer> {
+    let layers_cache = &config.layers_cache;
     if let Some(layer) = layers_cache.get_layer(diff_id) {
         info!("Using cache file");
         info!("dm-verity root hash: {}", layer.verity_hash);
@@ -338,7 +338,7 @@ async fn get_verity_and_users(
         ));
     }
 
-    match get_verity_hash_and_users(&decompressed_path) {
+    match get_verity_hash_and_users(config, &decompressed_path) {
         Err(e) => {
             temp_dir.close()?;
             bail!(format!("Failed to get verity hash {e}"));
