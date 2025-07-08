@@ -1031,10 +1031,10 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
 # Create container Storages
 
 allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
-    layers_format = policy_data.common.image_layers_format
-    print("allow_storages 1: layers_format =", layers_format, "p_storages =", p_storages, "i_storages =", i_storages)
+    layers_verification = policy_data.common.image_layer_verification
+    print("allow_storages 1: layers_verification =", layers_verification, "p_storages =", p_storages, "i_storages =", i_storages)
 
-    policy_data.common.image_layers_format == "guest-pull"
+    policy_data.common.image_layer_verification == "guest-pull"
 
     p_count := count(p_storages)
     i_count := count(i_storages)
@@ -1050,10 +1050,10 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
     print("allow_storages 1: true")
 }
 allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
-    layers_format = policy_data.common.image_layers_format
-    print("allow_storages 2: layers_format =", layers_format, "p_storages =", p_storages, "i_storages =", i_storages)
+    layers_verification = policy_data.common.image_layer_verification
+    print("allow_storages 2: layers_verification =", layers_verification, "p_storages =", p_storages, "i_storages =", i_storages)
 
-    policy_data.common.image_layers_format == "host-tarfs-dm-verity"
+    policy_data.common.image_layer_verification == "host-tarfs-dm-verity"
     p_count := count(p_storages)
     i_count := count(i_storages)
 
@@ -1074,17 +1074,15 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
     print("allow_storages 2: true")
 }
 allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
-    layers_format = policy_data.common.image_layers_format
-    print("allow_storages 3: layers_format =", layers_format)
+    layers_verification = policy_data.common.image_layer_verification
+    print("allow_storages 3: layers_verification =", layers_verification)
 
-    layers_format == "none"
+    layers_verification == "none"
 
-    print("allow_storages 3: true")
+    print("allow_storages 3: true - any storages are allowed due to image layer verification being disabled")
 }
 
 allow_image_storage_tarfs(p_storages) = { "layer_ids": layer_ids, "root_hashes": root_hashes } if {
-    policy_data.common.image_layers_format == "host-tarfs-dm-verity"
-
     some overlay_storage in p_storages
     overlay_storage.driver == "overlayfs"
     count(overlay_storage.options) == 2

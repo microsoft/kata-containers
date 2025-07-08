@@ -345,7 +345,7 @@
             "CAP_BPF",
             "CAP_CHECKPOINT_RESTORE"
         ],
-        "image_layers_format": "guest-pull"
+        "image_layer_verification": "guest-pull"
     },
     "kata_config": {
         "confidential_guest": true,

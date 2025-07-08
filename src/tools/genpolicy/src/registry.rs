@@ -176,7 +176,7 @@ impl Container {
                 let mut group = String::new();
                 // Nydus/guest_pull doesn't make available passwd/group files from layers properly.
                 // See issue https://github.com/kata-containers/kata-containers/issues/11162
-                if config.settings.common.image_layers_format != "guest-pull" {
+                if config.settings.common.image_layer_verification != "guest-pull" {
                     for layer in &image_layers {
                         if layer.passwd == WHITEOUT_MARKER {
                             passwd = String::new();

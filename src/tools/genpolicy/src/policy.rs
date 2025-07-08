@@ -423,8 +423,8 @@ pub struct CommonData {
     /// Default capabilities for a privileged container.
     pub privileged_caps: Vec<String>,
 
-    /// Parse Container image as a storage object
-    pub image_layers_format: String,
+    /// "guest-pull", "host-tarfs-dm-verity", or "none" to allow any input storages.
+    pub image_layer_verification: String,
 }
 
 /// Configuration from "kubectl config".
@@ -569,7 +569,7 @@ impl AgentPolicy {
         if settings.kata_config.confidential_guest {
             common.cpath = common.confidential_cpath.clone();
         } else {
-            common.image_layers_format = "none".to_string();
+            common.image_layer_verification = "none".to_string();
         }
 
         // confidential_cpath doesn't get serialized if it's empty.
@@ -636,7 +636,7 @@ impl AgentPolicy {
         let image_layers = yaml_container.registry.get_image_layers();
         let mut storages = Default::default();
         const HOST_TARFS_DM_VERITY: &str = "host-tarfs-dm-verity";
-        if self.config.settings.common.image_layers_format == HOST_TARFS_DM_VERITY {
+        if self.config.settings.common.image_layer_verification == HOST_TARFS_DM_VERITY {
             get_image_layer_storages(&mut storages, &image_layers, &root);
         }
         resource.get_container_mounts_and_storages(

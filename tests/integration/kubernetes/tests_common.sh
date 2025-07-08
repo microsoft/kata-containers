@@ -95,7 +95,7 @@ adapt_common_policy_settings_for_non_coco() {
 
 	if [[ "${KATA_HOST_OS}" == "cbl-mariner" ]]; then
 		info "Adapting common policy settings for cbl-mariner to test genpolicy tarfs support"
-		jq '.common.image_layers_format = "host-tarfs-dm-verity"' "${settings_dir}/genpolicy-settings.json" > temp.json
+		jq '.common.image_layer_verification = "host-tarfs-dm-verity"' "${settings_dir}/genpolicy-settings.json" > temp.json
 		sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 	fi
 }
