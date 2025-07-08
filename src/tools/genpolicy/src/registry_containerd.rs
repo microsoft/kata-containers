@@ -59,8 +59,7 @@ impl Container {
         let config_layer = get_config_layer(image_ref_str, k8_cri_image_client)
             .await
             .unwrap();
-        let image_layers =
-            get_image_layers(&config, &manifest, &config_layer, &ctrd_client).await?;
+        let image_layers = get_image_layers(config, &manifest, &config_layer, &ctrd_client).await?;
 
         // Find the last layer with an /etc/* file, respecting whiteouts.
         let mut passwd = String::new();

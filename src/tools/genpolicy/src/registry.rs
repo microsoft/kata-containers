@@ -160,15 +160,10 @@ impl Container {
                     serde_json::from_str(&config_layer_str).unwrap();
                 debug!("config_layer: {:?}", &config_layer);
 
-                let image_layers = get_image_layers(
-                    &config,
-                    &mut client,
-                    &reference,
-                    &manifest,
-                    &config_layer,
-                )
-                .await
-                .unwrap();
+                let image_layers =
+                    get_image_layers(config, &mut client, &reference, &manifest, &config_layer)
+                        .await
+                        .unwrap();
 
                 // Find the last layer with an /etc/* file, respecting whiteouts.
                 let mut passwd = String::new();
