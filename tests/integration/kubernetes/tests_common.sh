@@ -90,22 +90,30 @@ adapt_common_policy_settings_for_non_coco() {
 
 	info "Adapting common policy settings for non-CoCo guest"
 
-	jq '.request_defaults.UpdateEphemeralMountsRequest = true | .common.cpath = "/run/kata-containers/shared/containers"' \
-		"${settings_dir}/genpolicy-settings.json" > temp.json
+	# Using UpdateEphemeralMountsRequest - instead of CopyFileRequest.
+	jq '.request_defaults.UpdateEphemeralMountsRequest = true' "${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
+	# Using a different path to container image layers.
+	jq '.common.cpath = "/run/kata-containers/shared/containers"' "${settings_dir}/genpolicy-settings.json" > temp.json
+	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
+
+	# Using Storage input structs for configMap volumes - instead of CopyFileRequest.
 	jq '.volumes.configMap_storages = true' \
 		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
-	jq 'volumes.configMap.mount_point = "^$(cpath)/watchable/$(bundle-id)-[a-z0-9]{16}-" | volumes.configMap.driver = "watchable-bind"' \
+	# Using watchable binds for configMap volumes - instead of CopyFileRequest.
+	jq '.volumes.configMap.mount_point = "^$(cpath)/watchable/$(bundle-id)-[a-z0-9]{16}-" | .volumes.configMap.driver = "watchable-bind"' \
 		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
+	# Using a Storage input struct for paths shared with the Host using virtio-fs.
 	jq '.sandbox.storages += [{"driver":"virtio-fs","driver_options":[],"fs_group":null,"fstype":"virtiofs","mount_point":"/run/kata-containers/shared/containers/","options":[],"source":"kataShared"}]' \
 		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
+	# Disable allow_storage() because it doesn't work when neither "guest-pull" nor "host-tarfs-dm-verity" image layers are enabled.
 	jq '.common.image_layer_verification = "none"' "${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
