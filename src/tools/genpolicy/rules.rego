@@ -1031,32 +1031,50 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
 # Create container Storages
 
 allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
-    print("allow_storages: p_storages =", p_storages, "i_storages =", i_storages)
+    layers_format = policy_data.common.image_layers_format
+    print("allow_storages 1: layers_format =", layers_format, "p_storages =", p_storages, "i_storages =", i_storages)
+
+    policy_data.common.image_layers_format == "guest-pull"
 
     p_count := count(p_storages)
     i_count := count(i_storages)
-    img_pull_count := count([s | s := i_storages[_]; s.driver == "image_guest_pull"])
-    print("allow_storages: p_count =", p_count, "i_count =", i_count, "img_pull_count =", img_pull_count)
+    img_layers_count := count([s | s := i_storages[_]; s.driver == "image_guest_pull"])
 
-    p_count == i_count - img_pull_count
+    print("allow_storages 1: img_layers_count =", img_layers_count)
+    p_count == i_count - img_layers_count
 
-    image_info := allow_container_image_storage(p_storages)
+    every i_storage in i_storages {
+        allow_storage_guest_pull(p_storages, i_storage, bundle_id, sandbox_id)
+    }
+
+    print("allow_storages 1: true")
+}
+allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
+    layers_format = policy_data.common.image_layers_format
+    print("allow_storages 2: layers_format =", layers_format, "p_storages =", p_storages, "i_storages =", i_storages)
+
+    policy_data.common.image_layers_format == "host-tarfs-dm-verity"
+    p_count := count(p_storages)
+    i_count := count(i_storages)
+
+    img_layers_count := count([s | s := i_storages[_]; s.fstype == "tar"])
+    overlay_layers_count := count([s | s := i_storages[_]; s.fstype == "fuse3.kata-overlay"])
+    print("allow_storages 2: img_layers_count =", img_layers_count, "overlay_layers_count =", overlay_layers_count)
+
+    p_count == i_count - img_layers_count - overlay_layers_count
+
+    image_info := allow_image_storage_tarfs(p_storages)
     layer_ids := image_info.layer_ids
     root_hashes := image_info.root_hashes
 
     every i_storage in i_storages {
-        allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hashes)
+        allow_storage_tarfs(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hashes)
     }
 
-    print("allow_storages: true")
+    print("allow_storages 2: true")
 }
 
-# Currently, Image Layer Integrity Verification through Policy is only required for Guest VMs
-# that use container image layers provided as dm-verity-protected block device images created on the Host.
-allow_container_image_storage(p_storages) = { "layer_ids": [], "root_hashes": [] } if {
-    policy_data.common.image_layers_format != "host-tarfs-dm-verity"
-}
-allow_container_image_storage(p_storages) = { "layer_ids": layer_ids, "root_hashes": root_hashes } if {
+allow_image_storage_tarfs(p_storages) = { "layer_ids": layer_ids, "root_hashes": root_hashes } if {
     policy_data.common.image_layers_format == "host-tarfs-dm-verity"
 
     some overlay_storage in p_storages
@@ -1067,11 +1085,40 @@ allow_container_image_storage(p_storages) = { "layer_ids": layer_ids, "root_hash
     root_hashes := split(overlay_storage.options[1], ":")
 }
 
-allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hashes) if {
+allow_storage_guest_pull(p_storages, i_storage, bundle_id, sandbox_id) if {
     some p_storage in p_storages
+    print("allow_storage_guest_pull 1: p_storage =", p_storage, "i_storage =", i_storage)
 
-    print("allow_storage: p_storage =", p_storage)
-    print("allow_storage: i_storage =", i_storage)
+    allow_storage_common(p_storage, i_storage, bundle_id)
+    allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id)
+
+    print("allow_storage_guest_pull 1: true")
+}
+allow_storage_guest_pull(p_storages, i_storage, bundle_id, sandbox_id) if {
+    print("allow_storage_guest_pull 2: i_storage.driver =", i_storage.driver)
+
+    i_storage.driver == "image_guest_pull"
+    i_storage.fstype == "overlay"
+    i_storage.fs_group == null
+    count(i_storage.options) == 0
+
+    # TODO: Check Mount Point, Source, Driver Options, etc.
+    print("allow_storage_guest_pull 2: true")
+}
+
+allow_storage_tarfs(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hashes) if {
+    some p_storage in p_storages
+    print("allow_storage_tarfs: p_storage =", p_storage, "i_storage =", i_storage)
+
+    allow_storage_common(p_storage, i_storage, bundle_id)
+    allow_storage_options(p_storage, i_storage, layer_ids, root_hashes)
+    allow_mount_point_tarfs(p_storage, i_storage, bundle_id, sandbox_id, layer_ids)
+
+    print("allow_storage_tarfs: true")
+}
+
+allow_storage_common(p_storage, i_storage, bundle_id) if {
+    print("allow_storage_common: p_storage =", p_storage, "i_storage =", i_storage)
 
     p_storage.driver           == i_storage.driver
     p_storage.driver_options   == i_storage.driver_options
@@ -1079,19 +1126,7 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hash
     p_storage.fstype           == i_storage.fstype
 
     allow_storage_source(p_storage, i_storage, bundle_id)
-    allow_storage_options(p_storage, i_storage, layer_ids, root_hashes)
-    allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids)
-
-    print("allow_storage: true")
-}
-allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hashes) if {
-    i_storage.driver == "image_guest_pull"
-    print("allow_storage with image_guest_pull: start")
-    i_storage.fstype == "overlay"
-    i_storage.fs_group == null
-    count(i_storage.options) == 0
-    # TODO: Check Mount Point, Source, Driver Options, etc.
-    print("allow_storage with image_guest_pull: true")
+    print("allow_storage_common: true")
 }
 
 allow_storage_source(p_storage, i_storage, bundle_id) if {
@@ -1216,7 +1251,10 @@ allow_overlay_layer(policy_id, policy_hash, i_option) if {
     print("allow_overlay_layer: true")
 }
 
-allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+allow_mount_point_tarfs(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+    allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id)
+}
+allow_mount_point_tarfs(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
     p_storage.fstype == "tar"
 
     startswith(p_storage.mount_point, "$(layer")
@@ -1225,70 +1263,71 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
     endswith(mount_suffix, ")")
     layer_index := trim_right(mount_suffix, ")")
     i := to_number(layer_index)
-    print("allow_mount_point 1: i =", i)
+    print("allow_mount_point_tarfs 1: i =", i)
 
     layer_id := layer_ids[i]
-    print("allow_mount_point 1: layer_id =", layer_id)
+    print("allow_mount_point_tarfs 1: layer_id =", layer_id)
 
     p_mount := concat("/", ["/run/kata-containers/sandbox/layers", layer_id])
-    print("allow_mount_point 1: p_mount =", p_mount)
+    print("allow_mount_point_tarfs 1: p_mount =", p_mount)
 
     p_mount == i_storage.mount_point
 
-    print("allow_mount_point 1: true")
+    print("allow_mount_point_tarfs 1: true")
 }
-allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+allow_mount_point_tarfs(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
     p_storage.fstype == "fuse3.kata-overlay"
 
     mount1 := replace(p_storage.mount_point, "$(cpath)", policy_data.common.cpath)
     mount2 := replace(mount1, "$(bundle-id)", bundle_id)
-    print("allow_mount_point 2: mount2 =", mount2)
+    print("allow_mount_point_tarfs 2: mount2 =", mount2)
 
     mount2 == i_storage.mount_point
 
-    print("allow_mount_point 2: true")
+    print("allow_mount_point_tarfs 2: true")
 }
+
 allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
     p_storage.fstype == "local"
 
     mount1 := p_storage.mount_point
-    print("allow_mount_point 3: mount1 =", mount1)
+    print("allow_mount_point 1: mount1 =", mount1)
 
     mount2 := replace(mount1, "$(cpath)", policy_data.common.mount_source_cpath)
-    print("allow_mount_point 3: mount2 =", mount2)
+    print("allow_mount_point 1: mount2 =", mount2)
 
     mount3 := replace(mount2, "$(sandbox-id)", sandbox_id)
-    print("allow_mount_point 3: mount3 =", mount3)
+    print("allow_mount_point 1: mount3 =", mount3)
 
     regex.match(mount3, i_storage.mount_point)
 
-    print("allow_mount_point 3: true")
+    print("allow_mount_point 1: true")
 }
 allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
     p_storage.fstype == "bind"
 
     mount1 := p_storage.mount_point
-    print("allow_mount_point 4: mount1 =", mount1)
+    print("allow_mount_point 2: mount1 =", mount1)
 
     mount2 := replace(mount1, "$(cpath)", policy_data.common.cpath)
-    print("allow_mount_point 4: mount2 =", mount2)
+    print("allow_mount_point 2: mount2 =", mount2)
 
     mount3 := replace(mount2, "$(bundle-id)", bundle_id)
-    print("allow_mount_point 4: mount3 =", mount3)
+    print("allow_mount_point 2: mount3 =", mount3)
 
     regex.match(mount3, i_storage.mount_point)
 
-    print("allow_mount_point 4: true")
+    print("allow_mount_point 2: true")
 }
 allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
     p_storage.fstype == "tmpfs"
 
     mount1 := p_storage.mount_point
-    print("allow_mount_point 5: mount1 =", mount1)
+    print("allow_mount_point 3: mount1 =", mount1)
 
     regex.match(mount1, i_storage.mount_point)
 
-    print("allow_mount_point 5: true")
+    print("allow_mount_point 3: true")
 }
 
 # ExecProcessRequest.process.Capabilities
