@@ -1293,7 +1293,7 @@ allow_mount_point_tarfs(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) 
     print("allow_mount_point_tarfs 2: true")
 }
 
-allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
     p_storage.fstype == "local"
 
     mount1 := p_storage.mount_point
@@ -1309,7 +1309,7 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
 
     print("allow_mount_point 1: true")
 }
-allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
     p_storage.fstype == "bind"
 
     mount1 := p_storage.mount_point
@@ -1325,7 +1325,7 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
 
     print("allow_mount_point 2: true")
 }
-allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
     p_storage.fstype == "tmpfs"
 
     mount1 := p_storage.mount_point
