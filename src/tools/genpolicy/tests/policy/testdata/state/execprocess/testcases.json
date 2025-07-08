@@ -152,7 +152,7 @@
           },
           {
             "destination": "/etc/hosts",
-            "source": "/run/kata-containers/shared/containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-e9bb691ee0df3258-hosts",
+            "source": "/run/kata-containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-e9bb691ee0df3258-hosts",
             "type_": "bind",
             "options": [
               "rbind",
@@ -162,7 +162,7 @@
           },
           {
             "destination": "/dev/termination-log",
-            "source": "/run/kata-containers/shared/containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-c57801af2d60a6e8-termination-log",
+            "source": "/run/kata-containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-c57801af2d60a6e8-termination-log",
             "type_": "bind",
             "options": [
               "rbind",
@@ -172,7 +172,7 @@
           },
           {
             "destination": "/etc/hostname",
-            "source": "/run/kata-containers/shared/containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-ca728aaeede4bb80-hostname",
+            "source": "/run/kata-containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-ca728aaeede4bb80-hostname",
             "type_": "bind",
             "options": [
               "rbind",
@@ -182,7 +182,7 @@
           },
           {
             "destination": "/etc/resolv.conf",
-            "source": "/run/kata-containers/shared/containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-cfc6eca9fd2d0cce-resolv.conf",
+            "source": "/run/kata-containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-cfc6eca9fd2d0cce-resolv.conf",
             "type_": "bind",
             "options": [
               "rbind",
@@ -200,7 +200,7 @@
           },
           {
             "destination": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "source": "/run/kata-containers/shared/containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-bbb1a5bd88623ac4-serviceaccount",
+            "source": "/run/kata-containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-bbb1a5bd88623ac4-serviceaccount",
             "type_": "bind",
             "options": [
               "rbind",
@@ -287,7 +287,7 @@
           }
         },
         "Root": {
-          "Path": "/run/kata-containers/shared/containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9/rootfs",
+          "Path": "/run/kata-containers/88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9/rootfs",
           "Readonly": false
         },
         "Solaris": null,
@@ -456,7 +456,7 @@
           },
           {
             "destination": "/etc/hosts",
-            "source": "/run/kata-containers/shared/containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-e9bb691ee0df3258-hosts",
+            "source": "/run/kata-containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-e9bb691ee0df3258-hosts",
             "type_": "bind",
             "options": [
               "rbind",
@@ -466,7 +466,7 @@
           },
           {
             "destination": "/dev/termination-log",
-            "source": "/run/kata-containers/shared/containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-c57801af2d60a6e8-termination-log",
+            "source": "/run/kata-containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-c57801af2d60a6e8-termination-log",
             "type_": "bind",
             "options": [
               "rbind",
@@ -476,7 +476,7 @@
           },
           {
             "destination": "/etc/hostname",
-            "source": "/run/kata-containers/shared/containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-ca728aaeede4bb80-hostname",
+            "source": "/run/kata-containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-ca728aaeede4bb80-hostname",
             "type_": "bind",
             "options": [
               "rbind",
@@ -486,7 +486,7 @@
           },
           {
             "destination": "/etc/resolv.conf",
-            "source": "/run/kata-containers/shared/containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-cfc6eca9fd2d0cce-resolv.conf",
+            "source": "/run/kata-containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-cfc6eca9fd2d0cce-resolv.conf",
             "type_": "bind",
             "options": [
               "rbind",
@@ -504,7 +504,7 @@
           },
           {
             "destination": "/var/run/secrets/kubernetes.io/serviceaccount",
-            "source": "/run/kata-containers/shared/containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-bbb1a5bd88623ac4-serviceaccount",
+            "source": "/run/kata-containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9-bbb1a5bd88623ac4-serviceaccount",
             "type_": "bind",
             "options": [
               "rbind",
@@ -591,7 +591,7 @@
           }
         },
         "Root": {
-          "Path": "/run/kata-containers/shared/containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9/rootfs",
+          "Path": "/run/kata-containers/22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9/rootfs",
           "Readonly": false
         },
         "Solaris": null,

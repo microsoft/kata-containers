@@ -163,7 +163,7 @@
               "rprivate",
               "rw"
             ],
-            "source": "/run/kata-containers/shared/containers/gid-4a4c20d48254d738-hosts",
+            "source": "/run/kata-containers/gid-4a4c20d48254d738-hosts",
             "type_": "bind"
           },
           {
@@ -173,7 +173,7 @@
               "rprivate",
               "rw"
             ],
-            "source": "/run/kata-containers/shared/containers/gid-72cfcc0e64a0d1af-termination-log",
+            "source": "/run/kata-containers/gid-72cfcc0e64a0d1af-termination-log",
             "type_": "bind"
           },
           {
@@ -183,7 +183,7 @@
               "rprivate",
               "rw"
             ],
-            "source": "/run/kata-containers/shared/containers/gid-89f0faae823d569c-hostname",
+            "source": "/run/kata-containers/gid-89f0faae823d569c-hostname",
             "type_": "bind"
           },
           {
@@ -193,7 +193,7 @@
               "rprivate",
               "rw"
             ],
-            "source": "/run/kata-containers/shared/containers/gid-8c0d97703dbbb30e-resolv.conf",
+            "source": "/run/kata-containers/gid-8c0d97703dbbb30e-resolv.conf",
             "type_": "bind"
           },
           {
@@ -211,7 +211,7 @@
               "rprivate",
               "ro"
             ],
-            "source": "/run/kata-containers/shared/containers/gid-be44d3a46e427870-serviceaccount",
+            "source": "/run/kata-containers/gid-be44d3a46e427870-serviceaccount",
             "type_": "bind"
           }
         ],
@@ -301,7 +301,7 @@
           }
         },
         "Root": {
-          "Path": "/run/kata-containers/shared/containers/gid/rootfs",
+          "Path": "/run/kata-containers/gid/rootfs",
           "Readonly": false
         },
         "Solaris": null,
@@ -496,7 +496,7 @@
               "rprivate",
               "rw"
             ],
-            "source": "/run/kata-containers/shared/containers/gid-4a4c20d48254d738-hosts",
+            "source": "/run/kata-containers/gid-4a4c20d48254d738-hosts",
             "type_": "bind"
           },
           {
@@ -506,7 +506,7 @@
               "rprivate",
               "rw"
             ],
-            "source": "/run/kata-containers/shared/containers/gid-72cfcc0e64a0d1af-termination-log",
+            "source": "/run/kata-containers/gid-72cfcc0e64a0d1af-termination-log",
             "type_": "bind"
           },
           {
@@ -516,7 +516,7 @@
               "rprivate",
               "rw"
             ],
-            "source": "/run/kata-containers/shared/containers/gid-89f0faae823d569c-hostname",
+            "source": "/run/kata-containers/gid-89f0faae823d569c-hostname",
             "type_": "bind"
           },
           {
@@ -526,7 +526,7 @@
               "rprivate",
               "rw"
             ],
-            "source": "/run/kata-containers/shared/containers/gid-8c0d97703dbbb30e-resolv.conf",
+            "source": "/run/kata-containers/gid-8c0d97703dbbb30e-resolv.conf",
             "type_": "bind"
           },
           {
@@ -544,7 +544,7 @@
               "rprivate",
               "ro"
             ],
-            "source": "/run/kata-containers/shared/containers/gid-be44d3a46e427870-serviceaccount",
+            "source": "/run/kata-containers/gid-be44d3a46e427870-serviceaccount",
             "type_": "bind"
           }
         ],
@@ -635,7 +635,7 @@
           }
         },
         "Root": {
-          "Path": "/run/kata-containers/shared/containers/gid/rootfs",
+          "Path": "/run/kata-containers/gid/rootfs",
           "Readonly": false
         },
         "Solaris": null,

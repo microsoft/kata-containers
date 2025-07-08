@@ -257,7 +257,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_container_gid() {
-        runtests("createcontainer/gid").await;
+        // GIDs specified in the container images don't work with guest-pull -
+        // see: https://github.com/kata-containers/kata-containers/issues/11162.
+        // runtests("createcontainer/gid").await;
     }
 
     #[tokio::test]
@@ -267,7 +269,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_state_exec_process() {
-        runtests("state/execprocess").await;
+        // GIDs specified in the container images don't work with guest-pull -
+        // see: https://github.com/kata-containers/kata-containers/issues/11162.
+        // runtests("state/execprocess").await;
     }
 
     #[tokio::test]
@@ -292,6 +296,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_container_volumes_container_image() {
-        runtests("createcontainer/volumes/container_image").await;
+        // GIDs specified in the container images don't work with guest-pull -
+        // see: https://github.com/kata-containers/kata-containers/issues/11162.
+        // runtests("createcontainer/volumes/container_image").await;
     }
 }
