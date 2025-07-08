@@ -392,12 +392,8 @@ pub struct RequestDefaults {
 /// Struct used to read data from the settings file and copy that data into the policy.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommonData {
-    /// Path to the shared container files for non-CoCo guests - e.g., "/run/kata-containers/shared/containers".
+    /// Path to the shared container files - e.g., "/run/kata-containers/shared/containers".
     pub cpath: String,
-
-    /// Path to the shared container files for CoCo guests - e.g., "/run/kata-containers".
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub confidential_cpath: String,
 
     /// Path to the shared container files for mount sources - e.g., "/run/kata-containers/shared/containers".
     pub mount_source_cpath: String,
@@ -559,27 +555,11 @@ impl AgentPolicy {
         }
 
         let settings = &self.config.settings;
-        let sandbox = if settings.kata_config.confidential_guest {
-            settings.confidential_sandbox.clone()
-        } else {
-            settings.sandbox.clone()
-        };
-
-        let mut common = settings.common.clone();
-        if settings.kata_config.confidential_guest {
-            common.cpath = common.confidential_cpath.clone();
-        } else {
-            common.image_layer_verification = "none".to_string();
-        }
-
-        // confidential_cpath doesn't get serialized if it's empty.
-        common.confidential_cpath = String::new();
-
         let policy_data = policy::PolicyData {
             containers: policy_containers,
             request_defaults: settings.request_defaults.clone(),
-            common,
-            sandbox
+            common: settings.common.clone(),
+            sandbox: settings.sandbox.clone(),
         };
 
         let json_data = serde_json::to_string_pretty(&policy_data).unwrap();

@@ -25,17 +25,15 @@ pub struct Settings {
     pub common: policy::CommonData,
     pub mount_destinations: Vec<String>,
     pub sandbox: policy::SandboxData,
-    pub confidential_sandbox: policy::SandboxData,
 }
 
 /// Volume settings loaded from genpolicy-settings.json.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Volumes {
     pub emptyDir: EmptyDirVolume,
-    pub confidential_emptyDir: EmptyDirVolume,
     pub emptyDir_memory: EmptyDirVolume,
+    pub configMap_storages: bool,
     pub configMap: ConfigMapVolume,
-    pub confidential_configMap: ConfigMapVolume,
     pub image_volume: ImageVolume,
 }
 
@@ -77,7 +75,6 @@ pub struct ImageVolume {
 /// genpolicy-settings.json.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KataConfig {
-    pub confidential_guest: bool,
     pub oci_version: String,
 }
 

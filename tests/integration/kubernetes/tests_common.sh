@@ -89,15 +89,25 @@ adapt_common_policy_settings_for_non_coco() {
 	local settings_dir=$1
 
 	info "Adapting common policy settings for non-CoCo guest"
-	jq '.kata_config.confidential_guest = false | .request_defaults.UpdateEphemeralMountsRequest = true' \
+
+	jq '.request_defaults.UpdateEphemeralMountsRequest = true | .common.cpath = "/run/kata-containers/shared/containers"' \
 		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
-	if [[ "${KATA_HOST_OS}" == "cbl-mariner" ]]; then
-		info "Adapting common policy settings for cbl-mariner to test genpolicy tarfs support"
-		jq '.common.image_layer_verification = "host-tarfs-dm-verity"' "${settings_dir}/genpolicy-settings.json" > temp.json
-		sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
-	fi
+	jq '.volumes.configMap_storages = true' \
+		"${settings_dir}/genpolicy-settings.json" > temp.json
+	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
+
+	jq 'volumes.configMap.mount_point = "^$(cpath)/watchable/$(bundle-id)-[a-z0-9]{16}-" | volumes.configMap.driver = "watchable-bind"' \
+		"${settings_dir}/genpolicy-settings.json" > temp.json
+	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
+
+	jq '.sandbox.storages += [{"driver":"virtio-fs","driver_options":[],"fs_group":null,"fstype":"virtiofs","mount_point":"/run/kata-containers/shared/containers/","options":[],"source":"kataShared"}]' \
+		"${settings_dir}/genpolicy-settings.json" > temp.json
+	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
+
+	jq '.common.image_layer_verification = "none"' "${settings_dir}/genpolicy-settings.json" > temp.json
+	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
 
 # adapt common policy settings if needed for the target platform

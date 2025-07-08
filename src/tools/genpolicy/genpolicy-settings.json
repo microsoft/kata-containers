@@ -163,17 +163,6 @@
                 "mode=0777"
             ]
         },
-        "confidential_emptyDir": {
-            "mount_type": "local",
-            "mount_source": "^$(cpath)/$(sandbox-id)/rootfs/local/",
-            "mount_point": "^$(cpath)/$(sandbox-id)/rootfs/local/",
-            "driver": "local",
-            "source": "local",
-            "fstype": "local",
-            "options": [
-                "mode=0777"
-            ]
-        },
         "emptyDir_memory": {
             "mount_type": "bind",
             "mount_source": "^/run/kata-containers/sandbox/ephemeral/",
@@ -183,19 +172,8 @@
             "fstype": "tmpfs",
             "options": []
         },
+        "configMap_storages": false,
         "configMap": {
-            "mount_type": "bind",
-            "mount_source": "$(sfprefix)",
-            "mount_point": "^$(cpath)/watchable/$(bundle-id)-[a-z0-9]{16}-",
-            "driver": "watchable-bind",
-            "fstype": "bind",
-            "options": [
-                "rbind",
-                "rprivate",
-                "ro"
-            ]
-        },
-        "confidential_configMap": {
             "mount_type": "bind",
             "mount_source": "$(sfprefix)",
             "mount_point": "$(sfprefix)",
@@ -246,40 +224,11 @@
                 ],
                 "mount_point": "/run/kata-containers/sandbox/shm",
                 "fs_group": null
-            },
-            {
-                "driver": "virtio-fs",
-                "driver_options": [],
-                "fs_group": null,
-                "fstype": "virtiofs",
-                "mount_point": "/run/kata-containers/shared/containers/",
-                "options": [],
-                "source": "kataShared"
-            }
-        ]
-    },
-    "confidential_sandbox": {
-        "storages": [
-            {
-                "driver": "ephemeral",
-                "driver_options": [],
-                "source": "shm",
-                "fstype": "tmpfs",
-                "options": [
-                    "noexec",
-                    "nosuid",
-                    "nodev",
-                    "mode=1777",
-                    "size=67108864"
-                ],
-                "mount_point": "/run/kata-containers/sandbox/shm",
-                "fs_group": null
             }
         ]
     },
     "common": {
-        "confidential_cpath": "/run/kata-containers",
-        "cpath": "/run/kata-containers/shared/containers",
+        "cpath": "/run/kata-containers",
         "mount_source_cpath": "/run/kata-containers/shared/containers",
         "sfprefix": "^$(cpath)/$(bundle-id)-[a-z0-9]{16}-",
         "ip_p": "[0-9]{1,5}",
@@ -348,7 +297,6 @@
         "image_layer_verification": "guest-pull"
     },
     "kata_config": {
-        "confidential_guest": true,
         "oci_version": "1.1.0"
     },
     "cluster_config": {
