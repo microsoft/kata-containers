@@ -60,9 +60,9 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     # policy_data.containers information.
     allow_create_container_input
 
-    i_oci := input.OCI
-    i_storages := input.storages
-    i_devices := input.devices
+    i_oci := input.base.OCI
+    i_storages := input.base.storages
+    i_devices := input.base.devices
 
     # array of possible state operations
     ops_builder := []
@@ -77,7 +77,7 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     print("======== CreateContainerRequest: trying next policy container")
 
     p_pidns := p_container.sandbox_pidns
-    i_pidns := input.sandbox_pidns
+    i_pidns := input.base.sandbox_pidns
     print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
     p_pidns == i_pidns
 
@@ -108,10 +108,10 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     ret.allowed
 
     # save to policy state
-    # key: input.container_id
+    # key: input.base.container_id
     # val: index of p_container in the policy_data.containers array
-    print("CreateContainerRequest: addding container_id=", input.container_id, " to state")
-    add_p_container_to_state := state_allows(input.container_id, idx)
+    print("CreateContainerRequest: addding container_id=", input.base.container_id, " to state")
+    add_p_container_to_state := state_allows(input.base.container_id, idx)
 
     ops := concat_op_if_not_null(ret.ops, add_p_container_to_state)
 
@@ -121,10 +121,10 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
 allow_create_container_input if {
     print("allow_create_container_input: input =", input)
 
-    count(input.shared_mounts) == 0
-    is_null(input.string_user)
+    count(input.base.shared_mounts) == 0
+    is_null(input.base.string_user)
 
-    i_oci := input.OCI
+    i_oci := input.base.OCI
     is_null(i_oci.Hooks)
     is_null(i_oci.Solaris)
     is_null(i_oci.Windows)
@@ -667,9 +667,9 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
 
     # Match each input mount with a Policy mount.
     # Reject possible attempts to match multiple input mounts with a single Policy mount.
-    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, input.OCI.Mounts[i_index], bundle_id, sandbox_id) }
+    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, input.base.OCI.Mounts[i_index], bundle_id, sandbox_id) }
 
-    count(p_matches) == count(input.OCI.Mounts)
+    count(p_matches) == count(input.base.OCI.Mounts)
 
     allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
 
@@ -1056,12 +1056,7 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
     policy_data.common.image_layer_verification == "host-tarfs-dm-verity"
     p_count := count(p_storages)
     i_count := count(i_storages)
-
-    img_layers_count := count([s | s := i_storages[_]; s.fstype == "tar"])
-    overlay_layers_count := count([s | s := i_storages[_]; s.fstype == "fuse3.kata-overlay"])
-    print("allow_storages 2: img_layers_count =", img_layers_count, "overlay_layers_count =", overlay_layers_count)
-
-    p_count == i_count - img_layers_count - overlay_layers_count
+    p_count == i_count
 
     image_info := allow_image_storage_tarfs(p_storages)
     layer_ids := image_info.layer_ids
