@@ -6,29 +6,27 @@
 // Allow OCI spec field names.
 #![allow(non_snake_case)]
 
-use crate::agent;
 use crate::config_map;
 use crate::containerd;
 use crate::mount_and_storage;
 use crate::no_policy;
 use crate::pod;
 use crate::policy;
-use crate::pvc;
 use crate::registry;
 use crate::secret;
 use crate::utils;
 use crate::yaml;
 
-use anyhow::anyhow;
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use log::debug;
-use protocols::oci;
+use oci_spec::runtime as oci;
+use protocols::agent;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use sha2::{Digest, Sha256};
 use std::boxed;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::read_to_string;
 use std::io::Write;
 
@@ -43,9 +41,6 @@ pub struct AgentPolicy {
 
     /// K8s Secret resources, containing additional pod settings.
     secrets: Vec<secret::Secret>,
-
-    /// K8s Persistent volume claim resources
-    persistent_volume_claims: Vec<pvc::PersistentVolumeClaim>,
 
     /// Rego rules read from a file (rules.rego).
     pub rules: String,
@@ -120,10 +115,6 @@ pub struct KataProcess {
     #[serde(default)]
     pub User: KataUser,
 
-    /// DeprecatedArgs specifies the binary and arguments for the application to execute.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub DeprecatedArgs: Vec<String>,
-
     /// Args specifies the binary and arguments for the application to execute.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub Args: Vec<String>,
@@ -159,7 +150,7 @@ pub struct KataUser {
     pub GID: u32,
 
     /// AdditionalGids are additional group ids set for the container's process.
-    pub AdditionalGids: Vec<u32>,
+    pub AdditionalGids: BTreeSet<u32>,
 
     /// Username is the user name.
     pub Username: String,
@@ -291,9 +282,6 @@ pub struct ContainerPolicy {
     /// ExecProcessRequest. By default, all ExecProcessRequest calls are blocked
     /// by the policy.
     exec_commands: Vec<Vec<String>>,
-
-    // a map of environment variable names to value
-    env_map: std::collections::BTreeMap<String, String>,
 }
 
 /// See Reference / Kubernetes API / Config and Storage Resources / Volume.
@@ -330,7 +318,6 @@ pub struct PersistentVolumeClaimVolume {
 pub struct CreateContainerRequestDefaults {
     /// Allow env variables that match any of these regexes.
     allow_env_regex: Vec<String>,
-    pub allow_env_regex_map: BTreeMap<String, String>,
 }
 
 /// ExecProcessRequest settings from genpolicy-settings.json.
@@ -402,13 +389,6 @@ pub struct RequestDefaults {
     pub WriteStreamRequest: bool,
 }
 
-// SMB storage class settings from genpolicy-settings.json.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SmbStorageClass {
-    pub name: String,
-    pub mount_options: Vec<String>,
-}
-
 /// Struct used to read data from the settings file and copy that data into the policy.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommonData {
@@ -421,32 +401,17 @@ pub struct CommonData {
     /// Regex prefix for shared file paths - e.g., "^$(cpath)/$(bundle-id)-[a-z0-9]{16}-".
     pub sfprefix: String,
 
-    /// Path to the shared sandbox storage - e.g., "/run/kata-containers/sandbox/storage".
-    pub spath: String,
-
     /// Regex for an IPv4 address.
     pub ipv4_a: String,
 
     /// Regex for an IP port number.
     pub ip_p: String,
 
-    /// Regex for a K8s service name.
-    pub svc_name: String,
+    /// Regex for a K8s service name (RFC 1035), after downward API transformation.
+    pub svc_name_downward_env: String,
 
     // Regex for a DNS label (e.g., host name).
     pub dns_label: String,
-
-    // Regex for symlink source files similar to "..2024_12_18_17_38_13.2593682734".
-    pub s_source1: String,
-
-    // Regex for symlink source files similar to "..data/namespace".
-    pub s_source2: String,
-
-    // Regex for DNS subdomain (e.g., node-name).
-    pub dns_subdomain: String,
-
-    // Regex for matching a pod uid (UUID).
-    pub pod_uid: String,
 
     /// Default capabilities for a non-privileged container.
     pub default_caps: Vec<String>,
@@ -454,11 +419,8 @@ pub struct CommonData {
     /// Default capabilities for a privileged container.
     pub privileged_caps: Vec<String>,
 
-    /// Storage classes which mounts should be handled as virtio-blk devices.
-    pub virtio_blk_storage_classes: Vec<String>,
-
-    /// Storage classes which mounts should be handled as smb mounts
-    pub smb_storage_classes: Vec<SmbStorageClass>,
+    /// "guest-pull", "host-tarfs-dm-verity", or "none" to allow any input storages.
+    pub image_layer_verification: String,
 }
 
 /// Configuration from "kubectl config".
@@ -475,16 +437,14 @@ pub struct SandboxData {
     pub storages: Vec<agent::Storage>,
 }
 
-enum K8sResourceEnum {
+enum K8sEnvFromSource {
     ConfigMap(config_map::ConfigMap),
-    PersistentVolumeClaim(pvc::PersistentVolumeClaim),
     Secret(secret::Secret),
 }
 
 impl AgentPolicy {
     pub async fn from_files(config: &utils::Config) -> Result<AgentPolicy> {
         let mut config_maps = Vec::new();
-        let mut pvcs = Vec::new();
         let mut secrets = Vec::new();
         let mut resources = Vec::new();
         let yaml_contents = yaml::get_input_yaml(&config.yaml_file)?;
@@ -522,10 +482,6 @@ impl AgentPolicy {
                     let secret: secret::Secret = serde_yaml::from_str(&yaml_string)?;
                     debug!("{:#?}", &secret);
                     secrets.push(secret);
-                } else if kind.eq("PersistentVolumeClaim") {
-                    let pvc: pvc::PersistentVolumeClaim = serde_yaml::from_str(&yaml_string)?;
-                    debug!("{:#?}", &pvc);
-                    pvcs.push(pvc);
                 }
 
                 // Although copies of ConfigMap and Secret resources get created above,
@@ -538,10 +494,15 @@ impl AgentPolicy {
 
         if let Some(config_files) = &config.config_files {
             for resource_file in config_files {
-                match parse_config_file(resource_file.clone()).await? {
-                    K8sResourceEnum::ConfigMap(config_map) => config_maps.push(config_map),
-                    K8sResourceEnum::PersistentVolumeClaim(pvc) => pvcs.push(pvc),
-                    K8sResourceEnum::Secret(secret) => secrets.push(secret),
+                for config_resource in parse_config_file(resource_file.to_string(), config).await? {
+                    match config_resource {
+                        K8sEnvFromSource::ConfigMap(config_map) => {
+                            config_maps.push(config_map);
+                        }
+                        K8sEnvFromSource::Secret(secret) => {
+                            secrets.push(secret);
+                        }
+                    }
                 }
             }
         }
@@ -552,7 +513,6 @@ impl AgentPolicy {
                 rules,
                 config_maps,
                 secrets,
-                persistent_volume_claims: pvcs,
                 config: config.clone(),
             })
         } else {
@@ -594,11 +554,12 @@ impl AgentPolicy {
             policy_containers.push(self.get_container_policy(resource, yaml_container, i == 0));
         }
 
+        let settings = &self.config.settings;
         let policy_data = policy::PolicyData {
             containers: policy_containers,
-            request_defaults: self.config.settings.request_defaults.clone(),
-            common: self.config.settings.common.clone(),
-            sandbox: self.config.settings.sandbox.clone(),
+            request_defaults: settings.request_defaults.clone(),
+            common: settings.common.clone(),
+            sandbox: settings.sandbox.clone(),
         };
 
         let json_data = serde_json::to_string_pretty(&policy_data).unwrap();
@@ -654,11 +615,13 @@ impl AgentPolicy {
 
         let image_layers = yaml_container.registry.get_image_layers();
         let mut storages = Default::default();
-        get_image_layer_storages(&mut storages, &image_layers, &root);
+        const HOST_TARFS_DM_VERITY: &str = "host-tarfs-dm-verity";
+        if self.config.settings.common.image_layer_verification == HOST_TARFS_DM_VERITY {
+            get_image_layer_storages(&mut storages, &image_layers, &root);
+        }
         resource.get_container_mounts_and_storages(
             &mut mounts,
             &mut storages,
-            &self.persistent_volume_claims,
             yaml_container,
             &self.config.settings,
         );
@@ -685,10 +648,8 @@ impl AgentPolicy {
         let mut devices: Vec<agent::Device> = vec![];
         if let Some(volumeDevices) = &yaml_container.volumeDevices {
             for volumeDevice in volumeDevices {
-                let device = agent::Device {
-                    container_path: volumeDevice.devicePath.clone(),
-                    ..Default::default()
-                };
+                let mut device = agent::Device::new();
+                device.set_container_path(volumeDevice.devicePath.clone());
                 devices.push(device);
 
                 linux.Devices.push(KataLinuxDevice {
@@ -700,7 +661,6 @@ impl AgentPolicy {
         for default_device in &c_settings.Linux.Devices {
             linux.Devices.push(default_device.clone())
         }
-        let env_map = get_env_map(&process.Env);
 
         linux.Sysctl.extend(c_settings.Linux.Sysctl.clone());
         for sysctl in resource.get_sysctls() {
@@ -721,7 +681,6 @@ impl AgentPolicy {
             devices,
             sandbox_pidns,
             exec_commands,
-            env_map,
         }
     }
 
@@ -740,8 +699,7 @@ impl AgentPolicy {
 
         yaml_container.apply_capabilities(&mut process.Capabilities, &self.config.settings.common);
 
-        let (yaml_has_command, yaml_has_args) =
-            yaml_container.get_process_args(&mut process.DeprecatedArgs);
+        let (yaml_has_command, yaml_has_args) = yaml_container.get_process_args(&mut process.Args);
         yaml_container
             .registry
             .get_process(&mut process, yaml_has_command, yaml_has_args);
@@ -770,16 +728,31 @@ impl AgentPolicy {
             namespace,
             resource.get_annotations(),
             service_account_name,
-            &self.config.settings,
         );
 
         substitute_env_variables(&mut process.Env);
-        process.Args = process.DeprecatedArgs.clone();
-        substitute_args_env_variables(&mut process.DeprecatedArgs, &process.Env);
+        substitute_args_env_variables(&mut process.Args, &process.Env);
 
         c_settings.get_process_fields(&mut process);
-        resource.get_process_fields(&mut process);
+        let mut must_check_passwd = false;
+        resource.get_process_fields(&mut process, &mut must_check_passwd);
+
+        // The actual GID of the process run by the CRI
+        // Depends on the contents of /etc/passwd in the container
+        if must_check_passwd {
+            process.User.GID = yaml_container
+                .registry
+                .get_gid_from_passwd_uid(process.User.UID)
+                .unwrap_or(0);
+        }
         yaml_container.get_process_fields(&mut process);
+
+        // The last step containerd always does is add the User.GID to AdditionalGids
+        // The sandbox path does not respect the securityContext fsGroup/supplementalGroups
+        if is_pause_container {
+            process.User.AdditionalGids.clear();
+        }
+        process.User.AdditionalGids.insert(process.User.GID);
 
         process
     }
@@ -800,9 +773,9 @@ impl KataSpec {
             process.User.GID = self.Process.User.GID;
         }
 
-        process.User.AdditionalGids = self.Process.User.AdditionalGids.to_vec();
+        process.User.AdditionalGids = self.Process.User.AdditionalGids.clone();
         process.User.Username = String::from(&self.Process.User.Username);
-        add_missing_strings(&self.Process.DeprecatedArgs, &mut process.DeprecatedArgs);
+        add_missing_strings(&self.Process.Args, &mut process.Args);
 
         add_missing_strings(&self.Process.Env, &mut process.Env);
     }
@@ -846,7 +819,8 @@ fn get_image_layer_storages(
             fstype: "tar".to_string(),
             options: vec![format!("$(hash{layer_index})")],
             mount_point: format!("$(layer{layer_index})"),
-            fs_group: None,
+            fs_group: protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
         });
     }
 
@@ -865,33 +839,42 @@ fn get_image_layer_storages(
         fstype: "fuse3.kata-overlay".to_string(),
         options: vec![layer_names.join(":"), layer_hashes.join(":")],
         mount_point: root.Path.clone(),
-        fs_group: None,
+        fs_group: protobuf::MessageField::none(),
+        special_fields: ::protobuf::SpecialFields::new(),
     };
 
     storages.push(overlay_storage);
 }
 
-async fn parse_config_file(yaml_file: String) -> Result<K8sResourceEnum> {
+async fn parse_config_file(
+    yaml_file: String,
+    config: &utils::Config,
+) -> Result<Vec<K8sEnvFromSource>> {
+    let mut k8sRes = Vec::new();
     let yaml_contents = yaml::get_input_yaml(&Some(yaml_file))?;
-    let document = serde_yaml::Deserializer::from_str(&yaml_contents);
-    let doc_mapping = Value::deserialize(document)?;
-    let kind = doc_mapping
-        .get("kind")
-        .and_then(|v| v.as_str())
-        .ok_or(anyhow!("no kind"))?;
+    for document in serde_yaml::Deserializer::from_str(&yaml_contents) {
+        let doc_mapping = Value::deserialize(document)?;
+        if doc_mapping != Value::Null {
+            let yaml_string = serde_yaml::to_string(&doc_mapping)?;
+            let silent = config.silent_unsupported_fields;
+            let (mut resource, kind) = yaml::new_k8s_resource(&yaml_string, silent)?;
 
-    match kind {
-        "ConfigMap" => Ok(K8sResourceEnum::ConfigMap(serde_yaml::from_value(
-            doc_mapping,
-        )?)),
-        "PersistentVolumeClaim" => Ok(K8sResourceEnum::PersistentVolumeClaim(
-            serde_yaml::from_value(doc_mapping)?,
-        )),
-        "Secret" => Ok(K8sResourceEnum::Secret(serde_yaml::from_value(
-            doc_mapping,
-        )?)),
-        k => Err(anyhow!("unsupported attached resource kind '{k}'")),
+            resource.init(config, &doc_mapping, silent).await;
+
+            // ConfigMap and Secret documents contain additional input for policy generation.
+            if kind.eq("ConfigMap") {
+                let config_map: config_map::ConfigMap = serde_yaml::from_str(&yaml_string)?;
+                debug!("{:#?}", &config_map);
+                k8sRes.push(K8sEnvFromSource::ConfigMap(config_map));
+            } else if kind.eq("Secret") {
+                let secret: secret::Secret = serde_yaml::from_str(&yaml_string)?;
+                debug!("{:#?}", &secret);
+                k8sRes.push(K8sEnvFromSource::Secret(secret));
+            }
+        }
     }
+
+    Ok(k8sRes)
 }
 
 /// Converts the given name to a string representation of its sha256 hash.
@@ -1110,49 +1093,4 @@ pub fn get_kata_namespaces(
     });
 
     namespaces
-}
-
-// todo: move to common crate shared with the agent
-fn get_env_map(env: &[String]) -> std::collections::BTreeMap<String, String> {
-    let env_map: std::collections::BTreeMap<String, String> = env
-        .iter()
-        .filter_map(|v| {
-            // split by leftmost '='
-            let split = v.split_once('=');
-            if let Some((key, value)) = split {
-                Some((key.to_string(), value.to_string()))
-            } else {
-                None
-            }
-        })
-        .collect();
-    env_map
-}
-
-#[cfg(test)]
-mod policy_tests {
-    use super::*;
-    use std::collections::BTreeMap;
-    #[test]
-    fn test_get_env_map() {
-        let env_vars = vec![
-            "FOO=bar".to_string(),                 // valid entry
-            "BAZ=qux".to_string(),                 // valid entry
-            "INVALID".to_string(),                 // missing '=' so should be ignored
-            "EMPTY=".to_string(),                  // key with empty value
-            "=EMPTY_KEY".to_string(),              // empty key with a value
-            "MY_BEST_GUESS=guess=foo".to_string(), // multiple '='
-        ];
-
-        let result = get_env_map(&env_vars);
-
-        let mut expected = BTreeMap::new();
-        expected.insert("FOO".to_string(), "bar".to_string());
-        expected.insert("BAZ".to_string(), "qux".to_string());
-        expected.insert("EMPTY".to_string(), "".to_string());
-        expected.insert("".to_string(), "EMPTY_KEY".to_string());
-        expected.insert("MY_BEST_GUESS".to_string(), "guess=foo".to_string());
-
-        assert_eq!(result, expected);
-    }
 }

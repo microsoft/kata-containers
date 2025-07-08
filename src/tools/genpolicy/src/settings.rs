@@ -31,10 +31,9 @@ pub struct Settings {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Volumes {
     pub emptyDir: EmptyDirVolume,
-    pub confidential_emptyDir: EmptyDirVolume,
     pub emptyDir_memory: EmptyDirVolume,
+    pub configMap_storages: bool,
     pub configMap: ConfigMapVolume,
-    pub confidential_configMap: ConfigMapVolume,
     pub image_volume: ImageVolume,
 }
 
@@ -76,7 +75,6 @@ pub struct ImageVolume {
 /// genpolicy-settings.json.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KataConfig {
-    pub confidential_guest: bool,
     pub oci_version: String,
 }
 
@@ -108,19 +106,6 @@ impl Settings {
                 panic!("The settings field <request_defaults.ExecProcessRequest.commands> has been deprecated. \
                     Please use <request_defaults.ExecProcessRequest.allowed_commands> instead.");
             }
-        }
-    }
-    
-    pub fn panic_on_undefined_variables(&self, var_name: &str) {
-        if !self
-            .request_defaults
-            .CreateContainerRequest
-            .allow_env_regex_map
-            .contains_key(var_name)
-        {
-            panic!(
-            "Env var: please add a regex validation entry for {} in the settings request_defaults.CreateContainerRequest.allow_env_regex_map",
-            var_name);
         }
     }
 }

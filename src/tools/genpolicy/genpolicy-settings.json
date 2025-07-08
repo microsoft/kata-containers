@@ -1,7 +1,7 @@
 {
     "pause_container": {
         "Root": {
-            "Path": "$(cpath)/$(bundle-id)",
+            "Path": "$(cpath)/$(bundle-id)/rootfs",
             "Readonly": true
         },
         "Mounts": [
@@ -34,6 +34,13 @@
             "io.katacontainers.pkg.oci.bundle_path": "/run/containerd/io.containerd.runtime.v2.task/k8s.io/$(bundle-id)"
         },
         "Process": {
+            "NoNewPrivileges": true,
+            "User": {
+                "UID": 65535,
+                "GID": 65535,
+                "AdditionalGids": [],
+                "Username": ""
+            },
             "Args": [
                 "/pause"
             ]
@@ -66,7 +73,7 @@
     },
     "other_container": {
         "Root": {
-            "Path": "$(cpath)/$(bundle-id)"
+            "Path": "$(cpath)/$(bundle-id)/rootfs"
         },
         "Mounts": [
             {
@@ -148,18 +155,7 @@
         "emptyDir": {
             "mount_type": "local",
             "mount_source": "^$(cpath)/$(sandbox-id)/rootfs/local/",
-            "mount_point": "^$(cpath)/$(sandbox-id)/local/",
-            "driver": "local",
-            "source": "local",
-            "fstype": "local",
-            "options": [
-                "mode=0777"
-            ]
-        },
-        "confidential_emptyDir": {
-            "mount_type": "local",
-            "mount_source": "^$(cpath)/$(sandbox-id)/local/",
-            "mount_point": "^$(cpath)/$(sandbox-id)/local/",
+            "mount_point": "^$(cpath)/$(sandbox-id)/rootfs/local/",
             "driver": "local",
             "source": "local",
             "fstype": "local",
@@ -176,19 +172,8 @@
             "fstype": "tmpfs",
             "options": []
         },
+        "configMap_storages": false,
         "configMap": {
-            "mount_type": "bind",
-            "mount_source": "$(sfprefix)",
-            "mount_point": "^$(cpath)/watchable/$(bundle-id)-[a-z0-9]{16}-",
-            "driver": "watchable-bind",
-            "fstype": "bind",
-            "options": [
-                "rbind",
-                "rprivate",
-                "ro"
-            ]
-        },
-        "confidential_configMap": {
             "mount_type": "bind",
             "mount_source": "$(sfprefix)",
             "mount_point": "$(sfprefix)",
@@ -243,18 +228,13 @@
         ]
     },
     "common": {
-        "cpath": "/run/kata-containers/shared/containers",
+        "cpath": "/run/kata-containers",
         "mount_source_cpath": "/run/kata-containers/shared/containers",
         "sfprefix": "^$(cpath)/$(bundle-id)-[a-z0-9]{16}-",
-        "spath": "/run/kata-containers/sandbox/storage",
         "ip_p": "[0-9]{1,5}",
         "ipv4_a": "(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])",
-        "svc_name": "[A-Z_\\.\\-]+",
+        "svc_name_downward_env": "[A-Z](?:[A-Z0-9_]{0,61}[A-Z0-9])?",
         "dns_label": "[a-zA-Z0-9_\\.\\-]+",
-        "s_source1": "^..2[0-9]{3}_[0-1][0-9]_[0-3][0-9]_[0-2][0-9]_[0-5][0-9]_[0-5][0-9]\\.[0-9]{1,10}$",
-        "s_source2": "^..data/",
-        "dns_subdomain": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
-        "pod_uid": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
         "default_caps": [
             "CAP_CHOWN",
             "CAP_DAC_OVERRIDE",
@@ -314,29 +294,10 @@
             "CAP_BPF",
             "CAP_CHECKPOINT_RESTORE"
         ],
-        "virtio_blk_storage_classes": [
-            "cc-local-csi",
-            "cc-managed-csi",
-            "cc-managed-premium-csi"
-        ],
-        "smb_storage_classes": [
-            {
-                "name": "azurefile-csi-kata-cc",
-                "mount_options": [
-                    "dir_mode=0777",
-                    "file_mode=0777",
-                    "mfsymlinks",
-                    "cache=strict",
-                    "nosharesock",
-                    "actimeo=30",
-                    "nobrl"
-                ]
-            }
-        ]
+        "image_layer_verification": "guest-pull"
     },
     "kata_config": {
-        "confidential_guest": true,
-        "oci_version": "1.1.0-rc.1"
+        "oci_version": "1.1.0"
     },
     "cluster_config": {
         "pause_container_image": "mcr.microsoft.com/oss/kubernetes/pause:3.6"
@@ -345,21 +306,20 @@
         "CreateContainerRequest": {
             "allow_env_regex": [
                 "^HOSTNAME=$(dns_label)$",
-                "^$(svc_name)_PORT_$(ip_p)_TCP=tcp://$(ipv4_a):$(ip_p)$",
-                "^$(svc_name)_PORT_$(ip_p)_TCP_PROTO=tcp$",
-                "^$(svc_name)_PORT_$(ip_p)_TCP_PORT=$(ip_p)$",
-                "^$(svc_name)_PORT_$(ip_p)_TCP_ADDR=$(ipv4_a)$",
-                "^$(svc_name)_SERVICE_HOST=$(ipv4_a)$",
-                "^$(svc_name)_SERVICE_PORT=$(ip_p)$",
-                "^$(svc_name)_SERVICE_PORT_$(dns_label)=$(ip_p)$",
-                "^$(svc_name)_PORT=tcp://$(ipv4_a):$(ip_p)$",
+                "^$(svc_name_downward_env)_PORT_$(ip_p)_TCP=tcp://$(ipv4_a):$(ip_p)$",
+                "^$(svc_name_downward_env)_PORT_$(ip_p)_TCP_PROTO=tcp$",
+                "^$(svc_name_downward_env)_PORT_$(ip_p)_TCP_PORT=$(ip_p)$",
+                "^$(svc_name_downward_env)_PORT_$(ip_p)_TCP_ADDR=$(ipv4_a)$",
+                "^$(svc_name_downward_env)_SERVICE_HOST=$(ipv4_a)$",
+                "^$(svc_name_downward_env)_SERVICE_PORT=$(ip_p)$",
+                "^$(svc_name_downward_env)_SERVICE_PORT_$(dns_label)=$(ip_p)$",
+                "^$(svc_name_downward_env)_PORT=tcp://$(ipv4_a):$(ip_p)$",
                 "^AZURE_CLIENT_ID=[A-Fa-f0-9-]*$",
                 "^AZURE_TENANT_ID=[A-Fa-f0-9-]*$",
                 "^AZURE_FEDERATED_TOKEN_FILE=/var/run/secrets/azure/tokens/azure-identity-token$",
                 "^AZURE_AUTHORITY_HOST=https://login\\.microsoftonline\\.com/$",
                 "^TERM=xterm$"
-            ],
-            "allow_env_regex_map": {}
+            ]
         },
         "UpdateInterfaceRequest": {
             "allow_raw_flags": 128,

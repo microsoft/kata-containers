@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use crate::layers_cache;
 use crate::settings;
 use clap::Parser;
 
@@ -15,7 +16,17 @@ struct CommandLineOptions {
     )]
     yaml_file: Option<String>,
 
-    #[clap(short, long, help = "Optional Kubernetes YAML input file path")]
+    #[clap(
+        short,
+        long,
+        help = "Optional Kubernetes config map YAML input file path. DEPRECATED: use --config-file instead"
+    )]
+    config_map_file: Option<String>,
+
+    #[clap(
+        long,
+        help = "Optional Kubernetes YAML input file path containing config resources such as ConfigMaps and Secrets"
+    )]
     config_file: Option<Vec<String>>,
 
     #[clap(
@@ -113,13 +124,24 @@ pub struct Config {
     pub raw_out: bool,
     pub base64_out: bool,
     pub containerd_socket_path: Option<String>,
-    pub layers_cache_file_path: Option<String>,
+    pub layers_cache: layers_cache::ImageLayersCache,
     pub version: bool,
 }
 
 impl Config {
     pub fn new() -> Self {
         let args = CommandLineOptions::parse();
+
+        // Migrate all files from the old `config_map_file` to the new `config_files` field
+        let config_files = args
+            .config_file
+            .unwrap_or_default()
+            .into_iter()
+            .chain(args.config_map_file.iter().cloned())
+            .collect::<Vec<_>>();
+
+        let config_files = (!config_files.is_empty()).then_some(config_files);
+
         let mut layers_cache_file_path = args.layers_cache_file_path;
         // preserve backwards compatibility for only using the `use_cached_files` flag
         if args.use_cached_files && layers_cache_file_path.is_none() {
@@ -135,12 +157,12 @@ impl Config {
             yaml_file: args.yaml_file,
             rego_rules_path: args.rego_rules_path,
             settings,
-            config_files: args.config_file,
+            config_files,
             silent_unsupported_fields: args.silent_unsupported_fields,
             raw_out: args.raw_out,
             base64_out: args.base64_out,
             containerd_socket_path: args.containerd_socket_path,
-            layers_cache_file_path,
+            layers_cache: layers_cache::ImageLayersCache::new(&layers_cache_file_path),
             version: args.version,
         }
     }

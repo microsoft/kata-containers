@@ -6,14 +6,13 @@
 // Allow OCI spec field names.
 #![allow(non_snake_case)]
 
-use crate::agent;
 use crate::pod;
 use crate::policy;
-use crate::pvc;
 use crate::settings;
 use crate::volume;
 
-use log::{debug, warn};
+use log::debug;
+use protocols::agent;
 use std::ffi::OsString;
 use std::path::Path;
 use std::str;
@@ -100,60 +99,17 @@ fn adjust_termination_path(mount: &mut policy::KataMount, yaml_container: &pod::
     }
 }
 
-pub fn get_mount_info(
-    storage_class: Option<&String>,
-    settings: &settings::Settings,
-) -> (bool, bool, Option<Vec<String>>) {
-    if let Some(storage_class) = storage_class {
-        let is_blk_mount = settings
-            .common
-            .virtio_blk_storage_classes
-            .contains(storage_class);
-
-        let is_smb_mount = settings
-            .common
-            .smb_storage_classes
-            .iter()
-            .any(|smb_class| &smb_class.name == storage_class);
-
-        let smb_mount_options = if is_smb_mount {
-            settings
-                .common
-                .smb_storage_classes
-                .iter()
-                .find(|sc| &sc.name == storage_class)
-                .map(|sc| sc.mount_options.clone())
-        } else {
-            None
-        };
-
-        (is_blk_mount, is_smb_mount, smb_mount_options)
-    } else {
-        warn!("Storage class is None. Defaulting to no mounts.");
-        (false, false, None)
-    }
-}
-
 pub fn get_mount_and_storage(
     settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
     storages: &mut Vec<agent::Storage>,
-    persistent_volume_claims: &[pvc::PersistentVolumeClaim],
     yaml_volume: &volume::Volume,
     yaml_mount: &pod::VolumeMount,
 ) {
-    let propagation = match &yaml_mount.mountPropagation {
-        Some(p) if p == "Bidirectional" => "rshared",
-        _ => "rprivate",
-    };
-
-    let access = if let Some(true) = yaml_mount.readOnly {
-        "ro"
-    } else {
-        "rw"
-    };
-
-    let mount_options = (propagation, access);
+    debug!(
+        "get_mount_and_storage: adding mount and storage for: {:?}",
+        &yaml_volume
+    );
 
     if let Some(emptyDir) = &yaml_volume.emptyDir {
         let settings_volumes = &settings.volumes;
@@ -166,44 +122,20 @@ pub fn get_mount_and_storage(
         }
 
         if volume.is_none() {
-            volume = if settings.kata_config.confidential_guest {
-                Some(&settings_volumes.confidential_emptyDir)
-            } else {
-                Some(&settings_volumes.emptyDir)
-            }
+            volume = Some(&settings_volumes.emptyDir);
         }
 
         get_empty_dir_mount_and_storage(settings, p_mounts, storages, yaml_mount, volume.unwrap());
-    } else if yaml_volume.persistentVolumeClaim.is_some() {
-        get_persistent_volume_claim_mount(
-            settings,
-            yaml_mount,
-            yaml_volume,
-            p_mounts,
-            storages,
-            persistent_volume_claims,
-            mount_options,
-        );
-    } else if yaml_volume.azureFile.is_some() {
-        get_shared_bind_mount(yaml_mount, p_mounts, mount_options);
+    } else if yaml_volume.persistentVolumeClaim.is_some() || yaml_volume.azureFile.is_some() {
+        get_shared_bind_mount(yaml_mount, p_mounts, "rprivate", "rw");
     } else if yaml_volume.hostPath.is_some() {
-        get_host_path_mount(yaml_mount, yaml_volume, p_mounts, mount_options);
+        get_host_path_mount(yaml_mount, yaml_volume, p_mounts);
     } else if yaml_volume.configMap.is_some() || yaml_volume.secret.is_some() {
         get_config_map_mount_and_storage(settings, p_mounts, storages, yaml_mount);
     } else if yaml_volume.projected.is_some() {
-        // Projected mounts are always read-only.
-        get_shared_bind_mount(yaml_mount, p_mounts, ("rprivate", "ro"));
+        get_shared_bind_mount(yaml_mount, p_mounts, "rprivate", "ro");
     } else if yaml_volume.downwardAPI.is_some() {
         get_downward_api_mount(yaml_mount, p_mounts);
-    } else if yaml_volume.ephemeral.is_some() {
-        get_ephemeral_mount(
-            settings,
-            yaml_mount,
-            yaml_volume,
-            p_mounts,
-            storages,
-            mount_options,
-        );
     } else {
         todo!("Unsupported volume type {:?}", yaml_volume);
     }
@@ -226,7 +158,8 @@ fn get_empty_dir_mount_and_storage(
             fstype: settings_empty_dir.fstype.clone(),
             options: settings_empty_dir.options.clone(),
             mount_point: format!("{}{}$", &settings_empty_dir.mount_point, &yaml_mount.name),
-            fs_group: None,
+            fs_group: protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
         });
     }
 
@@ -264,60 +197,29 @@ fn get_empty_dir_mount_and_storage(
     });
 }
 
-fn get_persistent_volume_claim_mount(
-    settings: &settings::Settings,
-    yaml_mount: &pod::VolumeMount,
-    yaml_volume: &volume::Volume,
-    p_mounts: &mut Vec<policy::KataMount>,
-    storages: &mut Vec<agent::Storage>,
-    persistent_volume_claims: &[pvc::PersistentVolumeClaim],
-    mount_options: (&str, &str),
-) {
-    let volume_pvc = yaml_volume.persistentVolumeClaim.as_ref().unwrap();
-    let pvc_name = &volume_pvc.claimName;
-    let pvc_resource = persistent_volume_claims
-        .iter()
-        .find(|pvc_resource| pvc_resource.metadata.name.as_ref() == Some(pvc_name));
-
-    if pvc_resource.is_none() {
-        warn!(
-            "Unable to determine backing storage of persistent volume claim '{pvc_name}'. \
-            Pass `-c <pvc.yaml>` to get rid of this warning."
-        );
-    }
-
-    let storage_class = if let Some(pvc_resource) = pvc_resource {
-        pvc_resource.spec.storageClassName.as_ref()
-    } else {
-        None
-    };
-
-    if storage_class.is_none() {
-        warn!("Storage class is missing for persistent volume claim '{pvc_name}'.");
-    }
-
-    let (is_blk_mount, is_smb_mount, smb_mount_options) = get_mount_info(storage_class, settings);
-
-    handle_persistent_volume_claim(
-        is_blk_mount,
-        is_smb_mount,
-        yaml_mount,
-        p_mounts,
-        storages,
-        mount_options,
-        smb_mount_options,
-    );
-}
-
 fn get_host_path_mount(
     yaml_mount: &pod::VolumeMount,
     yaml_volume: &volume::Volume,
     p_mounts: &mut Vec<policy::KataMount>,
-    mount_options: (&str, &str),
 ) {
     let host_path = yaml_volume.hostPath.as_ref().unwrap().path.clone();
     let path = Path::new(&host_path);
 
+    let mut biderectional = false;
+    if let Some(mount_propagation) = &yaml_mount.mountPropagation {
+        if mount_propagation.eq("Bidirectional") {
+            debug!("get_host_path_mount: Bidirectional");
+            biderectional = true;
+        }
+    }
+
+    let access = match yaml_mount.readOnly {
+        Some(true) => {
+            debug!("setting read only access for host path mount");
+            "ro"
+        }
+        _ => "rw",
+    };
     // TODO:
     //
     // - When volume.hostPath.path: /dev/ttyS0
@@ -328,14 +230,15 @@ fn get_host_path_mount(
     // What is the reason for this source path difference in the Guest OS?
     if !path.starts_with("/dev/") && !path.starts_with("/sys/") {
         debug!("get_host_path_mount: calling get_shared_bind_mount");
-        get_shared_bind_mount(yaml_mount, p_mounts, mount_options);
+        let propagation = if biderectional { "rshared" } else { "rprivate" };
+        get_shared_bind_mount(yaml_mount, p_mounts, propagation, access);
     } else {
         let dest = yaml_mount.mountPath.clone();
         let type_ = "bind".to_string();
-        let (propagation, access) = mount_options;
+        let mount_option = if biderectional { "rshared" } else { "rprivate" };
         let options = vec![
             "rbind".to_string(),
-            propagation.to_string(),
+            mount_option.to_string(),
             access.to_string(),
         ];
 
@@ -363,14 +266,10 @@ fn get_config_map_mount_and_storage(
     yaml_mount: &pod::VolumeMount,
 ) {
     let settings_volumes = &settings.volumes;
-    let settings_config_map = if settings.kata_config.confidential_guest {
-        &settings_volumes.confidential_configMap
-    } else {
-        &settings_volumes.configMap
-    };
+    let settings_config_map = &settings_volumes.configMap;
     debug!("Settings configMap: {:?}", settings_config_map);
 
-    if !settings.kata_config.confidential_guest {
+    if settings_volumes.configMap_storages {
         let mount_path = Path::new(&yaml_mount.mountPath).file_name().unwrap();
         let mount_path_str = OsString::from(mount_path).into_string().unwrap();
 
@@ -381,7 +280,8 @@ fn get_config_map_mount_and_storage(
             fstype: settings_config_map.fstype.clone(),
             options: settings_config_map.options.clone(),
             mount_point: format!("{}{mount_path_str}$", &settings_config_map.mount_point),
-            fs_group: None,
+            fs_group: protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
         });
     }
 
@@ -398,7 +298,8 @@ fn get_config_map_mount_and_storage(
 fn get_shared_bind_mount(
     yaml_mount: &pod::VolumeMount,
     p_mounts: &mut Vec<policy::KataMount>,
-    mount_options: (&str, &str),
+    propagation: &str,
+    access: &str,
 ) {
     let mount_path = if let Some(byte_index) = str::rfind(&yaml_mount.mountPath, '/') {
         str::from_utf8(&yaml_mount.mountPath.as_bytes()[byte_index + 1..]).unwrap()
@@ -409,7 +310,6 @@ fn get_shared_bind_mount(
 
     let dest = yaml_mount.mountPath.clone();
     let type_ = "bind".to_string();
-    let (propagation, access) = mount_options;
     let options = vec![
         "rbind".to_string(),
         propagation.to_string(),
@@ -467,7 +367,6 @@ fn get_downward_api_mount(yaml_mount: &pod::VolumeMount, p_mounts: &mut Vec<poli
 pub fn get_image_mount_and_storage(
     settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
-    storages: &mut Vec<agent::Storage>,
     destination: &str,
 ) {
     // https://github.com/kubernetes/examples/blob/master/cassandra/image/Dockerfile
@@ -496,16 +395,6 @@ pub fn get_image_mount_and_storage(
         settings_image
     );
 
-    storages.push(agent::Storage {
-        driver: settings_image.driver.clone(),
-        driver_options: Vec::new(),
-        source: settings_image.source.clone(),
-        fstype: settings_image.fstype.clone(),
-        options: settings_image.options.clone(),
-        mount_point: destination_string.clone(),
-        fs_group: None,
-    });
-
     let file_name = Path::new(&destination_string).file_name().unwrap();
     let name = OsString::from(file_name).into_string().unwrap();
     let source = format!("{}{name}$", &settings_image.mount_source);
@@ -516,100 +405,4 @@ pub fn get_image_mount_and_storage(
         source,
         options: settings_image.options.clone(),
     });
-}
-
-fn get_ephemeral_mount(
-    settings: &settings::Settings,
-    yaml_mount: &pod::VolumeMount,
-    yaml_volume: &volume::Volume,
-    p_mounts: &mut Vec<policy::KataMount>,
-    storages: &mut Vec<agent::Storage>,
-    mount_options: (&str, &str),
-) {
-    let storage_class = yaml_volume
-        .ephemeral
-        .as_ref()
-        .unwrap()
-        .volumeClaimTemplate
-        .spec
-        .storageClassName
-        .as_ref();
-
-    let (is_blk_mount, is_smb_mount, smb_mount_options) = get_mount_info(storage_class, settings);
-
-    handle_persistent_volume_claim(
-        is_blk_mount,
-        is_smb_mount,
-        yaml_mount,
-        p_mounts,
-        storages,
-        mount_options,
-        smb_mount_options,
-    );
-}
-
-pub fn handle_persistent_volume_claim(
-    is_blk_mount: bool,
-    is_smb_mount: bool,
-    yaml_mount: &pod::VolumeMount,
-    p_mounts: &mut Vec<policy::KataMount>,
-    storages: &mut Vec<agent::Storage>,
-    mount_options: (&str, &str),
-    smb_mount_options: Option<Vec<String>>, // Pass SMB mount options
-) {
-    if is_blk_mount || is_smb_mount {
-        let source = "$(spath)/$(b64-direct-vol-path)".to_string();
-
-        storages.push(agent::Storage {
-            driver: if is_blk_mount {
-                "blk".to_string()
-            } else {
-                "smb".to_string()
-            },
-            driver_options: Vec::new(),
-            fs_group: None,
-            source: "".to_string(),
-            mount_point: source.to_string(),
-            fstype: if is_blk_mount {
-                "ext4".to_string()
-            } else {
-                "cifs".to_string()
-            },
-            options: if is_smb_mount {
-                if let Some(mount_options) = smb_mount_options {
-                    mount_options.clone()
-                } else {
-                    Vec::new()
-                }
-            } else {
-                Vec::new()
-            },
-        });
-
-        let dest = yaml_mount.mountPath.clone();
-        let type_ = "bind".to_string();
-        let (propagation, access) = mount_options;
-        let options = vec![
-            "rbind".to_string(),
-            propagation.to_string(),
-            access.to_string(),
-        ];
-
-        if let Some(policy_mount) = p_mounts.iter_mut().find(|m| m.destination == dest) {
-            debug!("handle_persistent_volume_claim: updating dest = {dest}, source = {source}");
-            policy_mount.type_ = type_;
-            policy_mount.source = source;
-            policy_mount.options = options;
-        } else {
-            debug!("handle_persistent_volume_claim: adding dest = {dest}, source = {source}");
-            p_mounts.push(policy::KataMount {
-                destination: dest,
-                type_,
-                source,
-                options,
-            });
-        }
-    } else {
-        get_shared_bind_mount(yaml_mount, p_mounts, mount_options);
-    }
 }

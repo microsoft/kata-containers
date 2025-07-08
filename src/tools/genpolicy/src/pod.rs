@@ -6,11 +6,9 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
-use crate::agent;
 use crate::config_map;
 use crate::obj_meta;
 use crate::policy;
-use crate::pvc;
 use crate::registry;
 use crate::secret;
 use crate::settings;
@@ -20,6 +18,7 @@ use crate::yaml;
 
 use async_trait::async_trait;
 use log::{debug, warn};
+use protocols::agent;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -298,6 +297,9 @@ struct SecurityContext {
     runAsUser: Option<i64>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    runAsGroup: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     seccompProfile: Option<SeccompProfile>,
 }
 
@@ -319,7 +321,18 @@ pub struct PodSecurityContext {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sysctls: Option<Vec<Sysctl>>,
-    // TODO: additional fields.
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runAsGroup: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fsGroup: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supplementalGroups: Option<Vec<u32>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowPrivilegeEscalation: Option<bool>,
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
@@ -594,7 +607,6 @@ impl Container {
         self.registry = registry::get_container(config, &self.image).await.unwrap();
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn get_env_variables(
         &self,
         dest_env: &mut Vec<String>,
@@ -603,7 +615,6 @@ impl Container {
         namespace: &str,
         annotations: &Option<BTreeMap<String, String>>,
         service_account_name: &str,
-        settings: &settings::Settings,
     ) {
         if let Some(source_env) = &self.env {
             for env_variable in source_env {
@@ -613,7 +624,6 @@ impl Container {
                     namespace,
                     annotations,
                     service_account_name,
-                    settings,
                 );
                 let src_string = format!("{}={value}", &env_variable.name);
 
@@ -754,7 +764,6 @@ impl EnvVar {
         namespace: &str,
         annotations: &Option<BTreeMap<String, String>>,
         service_account_name: &str,
-        settings: &settings::Settings,
     ) -> String {
         if let Some(value) = &self.value {
             return value.clone();
@@ -786,8 +795,7 @@ impl EnvVar {
                     "spec.nodeName" => return "$(node-name)".to_string(),
                     "spec.serviceAccountName" => return service_account_name.to_string(),
                     _ => {
-                        if let Some(value) = self.get_annotation_value(path, annotations, settings)
-                        {
+                        if let Some(value) = self.get_annotation_value(path, annotations) {
                             return value;
                         } else {
                             panic!(
@@ -800,8 +808,9 @@ impl EnvVar {
             }
 
             if value_from.resourceFieldRef.is_some() {
-                settings.panic_on_undefined_variables(&self.name);
-                return "$(validate-from-settings)".to_string();
+                // TODO: should resource fields such as "limits.cpu" or "limits.memory"
+                // be handled in a different way?
+                return "$(resource-field)".to_string();
             }
         } else {
             panic!("Environment variable without value or valueFrom!");
@@ -814,7 +823,6 @@ impl EnvVar {
         &self,
         reference: &str,
         anno: &Option<BTreeMap<String, String>>,
-        settings: &settings::Settings,
     ) -> Option<String> {
         let prefix = "metadata.annotations['";
         let suffix = "']";
@@ -834,9 +842,8 @@ impl EnvVar {
                 }
             }
 
-            settings.panic_on_undefined_variables(&self.name);
-
-            return Some("$(validate-from-settings)".to_string());
+            // TODO: should missing annotations be handled differently?
+            return Some("$(todo-annotation)".to_string());
         }
         None
     }
@@ -865,14 +872,12 @@ impl yaml::K8sResource for Pod {
         &self,
         policy_mounts: &mut Vec<policy::KataMount>,
         storages: &mut Vec<agent::Storage>,
-        persistent_volume_claims: &[pvc::PersistentVolumeClaim],
         container: &Container,
         settings: &settings::Settings,
     ) {
         yaml::get_container_mounts_and_storages(
             policy_mounts,
             storages,
-            persistent_volume_claims,
             container,
             settings,
             &self.spec.volumes,
@@ -917,8 +922,8 @@ impl yaml::K8sResource for Pod {
             .or_else(|| Some(String::new()))
     }
 
-    fn get_process_fields(&self, process: &mut policy::KataProcess) {
-        yaml::get_process_fields(process, &self.spec.securityContext);
+    fn get_process_fields(&self, process: &mut policy::KataProcess, must_check_passwd: &mut bool) {
+        yaml::get_process_fields(process, &self.spec.securityContext, must_check_passwd);
     }
 
     fn get_sysctls(&self) -> Vec<Sysctl> {
@@ -976,10 +981,37 @@ impl Container {
         if let Some(context) = &self.securityContext {
             if let Some(uid) = context.runAsUser {
                 process.User.UID = uid.try_into().unwrap();
+                // Changing the UID can break the GID mapping
+                // if a /etc/passwd file is present.
+                // The proper GID is determined, in order of preference:
+                // 1. the securityContext runAsGroup field (applied last in code)
+                // 2. lacking an explicit runAsGroup, /etc/passwd (get_gid_from_passwd_uid)
+                // 3. fall back to pod-level GID if there is one (unwrap_or)
+                //
+                // This behavior comes from the containerd runtime implementation:
+                // WithUser https://github.com/containerd/containerd/blob/main/pkg/oci/spec_opts.go#L592
+                process.User.GID = self
+                    .registry
+                    .get_gid_from_passwd_uid(process.User.UID)
+                    .unwrap_or(process.User.GID);
             }
+
+            if let Some(gid) = context.runAsGroup {
+                process.User.GID = gid.try_into().unwrap();
+            }
+
             if let Some(allow) = context.allowPrivilegeEscalation {
                 process.NoNewPrivileges = !allow
             }
+        }
+
+        // Handle AdditionalGids here as this is the last time the UID can be updated.
+        for gid in self
+            .registry
+            .get_additional_groups_from_uid(process.User.UID)
+            .unwrap_or_default()
+        {
+            process.User.AdditionalGids.insert(gid);
         }
     }
 }
@@ -1023,6 +1055,7 @@ pub async fn add_pause_container(containers: &mut Vec<Container>, config: &Confi
             privileged: None,
             capabilities: None,
             runAsUser: None,
+            runAsGroup: None,
             seccompProfile: None,
         }),
         ..Default::default()

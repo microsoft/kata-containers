@@ -6,7 +6,6 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
-use crate::agent;
 use crate::config_map;
 use crate::cronjob;
 use crate::daemon_set;
@@ -17,7 +16,6 @@ use crate::mount_and_storage;
 use crate::no_policy;
 use crate::pod;
 use crate::policy;
-use crate::pvc;
 use crate::replica_set;
 use crate::replication_controller;
 use crate::secret;
@@ -29,6 +27,7 @@ use crate::volume;
 use async_trait::async_trait;
 use core::fmt::Debug;
 use log::debug;
+use protocols::agent;
 use serde::{Deserialize, Serialize};
 use std::boxed;
 use std::collections::BTreeMap;
@@ -58,8 +57,11 @@ pub trait K8sResource {
     fn serialize(&mut self, _policy: &str) -> String {
         panic!("Unsupported");
     }
-    
-    fn get_sandbox_name(&self) -> Option<String>;
+
+    fn get_sandbox_name(&self) -> Option<String> {
+        panic!("Unsupported");
+    }
+
     fn get_namespace(&self) -> Option<String> {
         panic!("Unsupported");
     }
@@ -68,7 +70,6 @@ pub trait K8sResource {
         &self,
         _policy_mounts: &mut Vec<policy::KataMount>,
         _storages: &mut Vec<agent::Storage>,
-        _persistent_volume_claims: &[pvc::PersistentVolumeClaim],
         _container: &pod::Container,
         _settings: &settings::Settings,
     ) {
@@ -95,7 +96,11 @@ pub trait K8sResource {
         None
     }
 
-    fn get_process_fields(&self, _process: &mut policy::KataProcess) {
+    fn get_process_fields(
+        &self,
+        _process: &mut policy::KataProcess,
+        _must_check_passwd: &mut bool,
+    ) {
         // No need to implement support for securityContext or similar fields
         // for some of the K8s resource types.
     }
@@ -280,7 +285,6 @@ pub async fn k8s_resource_init(spec: &mut pod::PodSpec, config: &Config) {
 pub fn get_container_mounts_and_storages(
     policy_mounts: &mut Vec<policy::KataMount>,
     storages: &mut Vec<agent::Storage>,
-    persistent_volume_claims: &[pvc::PersistentVolumeClaim],
     container: &pod::Container,
     settings: &settings::Settings,
     volumes_option: &Option<Vec<volume::Volume>>,
@@ -294,7 +298,6 @@ pub fn get_container_mounts_and_storages(
                             settings,
                             policy_mounts,
                             storages,
-                            persistent_volume_claims,
                             volume,
                             volume_mount,
                         );
@@ -310,12 +313,7 @@ pub fn get_container_mounts_and_storages(
         for volume in volumes {
             debug!("get_container_mounts_and_storages: {:?}", &volume);
 
-            mount_and_storage::get_image_mount_and_storage(
-                settings,
-                policy_mounts,
-                storages,
-                volume.0,
-            );
+            mount_and_storage::get_image_mount_and_storage(settings, policy_mounts, volume.0);
         }
     }
 }
@@ -387,10 +385,49 @@ fn handle_unused_field(path: &str, silent_unsupported_fields: bool) {
 pub fn get_process_fields(
     process: &mut policy::KataProcess,
     security_context: &Option<pod::PodSecurityContext>,
+    must_check_passwd: &mut bool,
 ) {
     if let Some(context) = security_context {
         if let Some(uid) = context.runAsUser {
             process.User.UID = uid.try_into().unwrap();
+            // Changing the UID can break the GID mapping
+            // if a /etc/passwd file is present.
+            // The proper GID is determined, in order of preference:
+            // 1. the securityContext runAsGroup field (applied last in code)
+            // 2. lacking an explicit runAsGroup, /etc/passwd
+            //      (parsed in policy::get_container_process())
+            // 3. lacking an /etc/passwd, 0 (unwrap_or)
+            //
+            // This behavior comes from the containerd runtime implementation:
+            // WithUser https://github.com/containerd/containerd/blob/main/pkg/oci/spec_opts.go#L592
+            //
+            // We can't parse the /etc/passwd file here because
+            // we are in the resource context. Defer execution to outside
+            // the resource context, in policy::get_container_process()
+            // IFF the UID is changed by the resource securityContext but not the GID.
+            *must_check_passwd = true;
+        }
+
+        if let Some(gid) = context.runAsGroup {
+            process.User.GID = gid.try_into().unwrap();
+            *must_check_passwd = false;
+        }
+
+        if let Some(fs_group) = context.fsGroup {
+            process
+                .User
+                .AdditionalGids
+                .insert(fs_group.try_into().unwrap());
+        }
+
+        if let Some(supplemental_groups) = &context.supplementalGroups {
+            supplemental_groups.iter().for_each(|g| {
+                process.User.AdditionalGids.insert(*g);
+            });
+        }
+
+        if let Some(allow) = context.allowPrivilegeEscalation {
+            process.NoNewPrivileges = !allow
         }
     }
 }

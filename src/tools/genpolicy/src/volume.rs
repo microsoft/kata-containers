@@ -6,7 +6,7 @@
 // Allow K8s YAML field names.
 #![allow(non_snake_case)]
 
-use crate::{obj_meta, pod, pvc};
+use crate::pod;
 
 use serde::{Deserialize, Serialize};
 
@@ -37,11 +37,7 @@ pub struct Volume {
     pub secret: Option<SecretVolumeSource>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub downwardAPI: Option<DownwardAPIVolumeSource>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ephemeral: Option<EphemeralVolumeSource>,
-    // TODO: additional fields.
+    pub downwardAPI: Option<DownwardAPIVolumeSource>, // TODO: additional fields.
 }
 
 /// See Reference / Kubernetes API / Config and Storage Resources / Volume.
@@ -132,19 +128,4 @@ pub struct DownwardAPIVolumeFile {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fieldRef: Option<pod::ObjectFieldSelector>,
-}
-
-/// See Reference / Kubernetes API / Config and Storage Resources / Volume.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct EphemeralVolumeSource {
-    pub volumeClaimTemplate: PersistentVolumeClaimTemplate,
-}
-
-/// See Reference / Kubernetes API / Config and Storage Resources / Volume.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PersistentVolumeClaimTemplate {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<obj_meta::ObjectMeta>,
-
-    pub spec: pvc::PersistentVolumeClaimSpec,
 }
