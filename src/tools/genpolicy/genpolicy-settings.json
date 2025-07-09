@@ -227,7 +227,7 @@
         ]
     },
     "common": {
-        "cpath": "/run/kata-containers/shared/containers",
+        "cpath": "/run/kata-containers",
         "mount_source_cpath": "/run/kata-containers/shared/containers",
         "sfprefix": "^$(cpath)/$(bundle-id)-[a-z0-9]{16}-",
         "ip_p": "[0-9]{1,5}",
@@ -300,7 +300,7 @@
     },
     "cluster_config": {
         "pause_container_image": "mcr.microsoft.com/oss/kubernetes/pause:3.6",
-        "guest_pull": false
+        "guest_pull": true
     },
     "request_defaults": {
         "CreateContainerRequest": {
