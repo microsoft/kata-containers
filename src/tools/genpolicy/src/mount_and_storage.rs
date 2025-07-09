@@ -122,11 +122,7 @@ pub fn get_mount_and_storage(
         }
 
         if volume.is_none() {
-            volume = if settings.kata_config.confidential_guest {
-                Some(&settings_volumes.confidential_emptyDir)
-            } else {
-                Some(&settings_volumes.emptyDir)
-            }
+            volume = Some(&settings_volumes.emptyDir);
         }
 
         get_empty_dir_mount_and_storage(settings, p_mounts, storages, yaml_mount, volume.unwrap());
@@ -135,7 +131,7 @@ pub fn get_mount_and_storage(
     } else if yaml_volume.hostPath.is_some() {
         get_host_path_mount(yaml_mount, yaml_volume, p_mounts);
     } else if yaml_volume.configMap.is_some() || yaml_volume.secret.is_some() {
-        get_config_map_mount_and_storage(settings, p_mounts, storages, yaml_mount);
+        get_config_map_mount_and_storage(settings, p_mounts, yaml_mount);
     } else if yaml_volume.projected.is_some() {
         get_shared_bind_mount(yaml_mount, p_mounts, "rprivate", "ro");
     } else if yaml_volume.downwardAPI.is_some() {
@@ -266,32 +262,11 @@ fn get_host_path_mount(
 fn get_config_map_mount_and_storage(
     settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
-    storages: &mut Vec<agent::Storage>,
     yaml_mount: &pod::VolumeMount,
 ) {
     let settings_volumes = &settings.volumes;
-    let settings_config_map = if settings.kata_config.confidential_guest {
-        &settings_volumes.confidential_configMap
-    } else {
-        &settings_volumes.configMap
-    };
+    let settings_config_map = &settings_volumes.configMap;
     debug!("Settings configMap: {:?}", settings_config_map);
-
-    if !settings.kata_config.confidential_guest {
-        let mount_path = Path::new(&yaml_mount.mountPath).file_name().unwrap();
-        let mount_path_str = OsString::from(mount_path).into_string().unwrap();
-
-        storages.push(agent::Storage {
-            driver: settings_config_map.driver.clone(),
-            driver_options: Vec::new(),
-            source: format!("{}{}$", &settings_config_map.mount_source, &yaml_mount.name),
-            fstype: settings_config_map.fstype.clone(),
-            options: settings_config_map.options.clone(),
-            mount_point: format!("{}{mount_path_str}$", &settings_config_map.mount_point),
-            fs_group: protobuf::MessageField::none(),
-            special_fields: ::protobuf::SpecialFields::new(),
-        });
-    }
 
     let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
     let name = OsString::from(file_name).into_string().unwrap();

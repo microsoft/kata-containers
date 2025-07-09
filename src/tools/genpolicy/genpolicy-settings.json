@@ -163,17 +163,6 @@
                 "mode=0777"
             ]
         },
-        "confidential_emptyDir": {
-            "mount_type": "local",
-            "mount_source": "^$(cpath)/$(sandbox-id)/rootfs/local/",
-            "mount_point": "^$(cpath)/$(sandbox-id)/rootfs/local/",
-            "driver": "local",
-            "source": "local",
-            "fstype": "local",
-            "options": [
-                "mode=0777"
-            ]
-        },
         "emptyDir_memory": {
             "mount_type": "bind",
             "mount_source": "^/run/kata-containers/sandbox/ephemeral/",
@@ -184,18 +173,6 @@
             "options": []
         },
         "configMap": {
-            "mount_type": "bind",
-            "mount_source": "$(sfprefix)",
-            "mount_point": "^$(cpath)/watchable/$(bundle-id)-[a-z0-9]{16}-",
-            "driver": "watchable-bind",
-            "fstype": "bind",
-            "options": [
-                "rbind",
-                "rprivate",
-                "ro"
-            ]
-        },
-        "confidential_configMap": {
             "mount_type": "bind",
             "mount_source": "$(sfprefix)",
             "mount_point": "$(sfprefix)",
@@ -319,7 +296,6 @@
         "image_layer_verification" : "none"
     },
     "kata_config": {
-        "confidential_guest": false,
         "oci_version": "1.1.0"
     },
     "cluster_config": {

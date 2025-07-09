@@ -31,10 +31,8 @@ pub struct Settings {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Volumes {
     pub emptyDir: EmptyDirVolume,
-    pub confidential_emptyDir: EmptyDirVolume,
     pub emptyDir_memory: EmptyDirVolume,
     pub configMap: ConfigMapVolume,
-    pub confidential_configMap: ConfigMapVolume,
     pub image_volume: ImageVolume,
 }
 
