@@ -74,7 +74,6 @@ pub struct ImageVolume {
 /// genpolicy-settings.json.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KataConfig {
-    pub confidential_guest: bool,
     pub oci_version: String,
 }
 
