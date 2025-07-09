@@ -1056,12 +1056,7 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
     policy_data.common.image_layer_verification == "host-tarfs-dm-verity"
     p_count := count(p_storages)
     i_count := count(i_storages)
-
-    img_layers_count := count([s | s := i_storages[_]; s.fstype == "tar"])
-    overlay_layers_count := count([s | s := i_storages[_]; s.fstype == "fuse3.kata-overlay"])
-    print("allow_storages 2: img_layers_count =", img_layers_count, "overlay_layers_count =", overlay_layers_count)
-
-    p_count == i_count - img_layers_count - overlay_layers_count
+    p_count == i_count
 
     image_info := allow_image_storage_tarfs(p_storages)
     layer_ids := image_info.layer_ids
