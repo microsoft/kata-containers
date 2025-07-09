@@ -495,10 +495,7 @@ async fn get_users_from_layer(
     )
     .await
     {
-        temp_dir.close()?;
-        bail!(format!(
-            "Failed to decompress image layer, error {e}"
-        ));
+        bail!(format!("Failed to decompress image layer, error {e}"));
     };
 
     match get_users_from_decompressed_layer(&decompressed_path) {
