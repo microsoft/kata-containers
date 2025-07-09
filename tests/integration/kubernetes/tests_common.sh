@@ -99,7 +99,8 @@ adapt_common_policy_settings_for_non_coco() {
 	local settings_dir=$1
 
 	info "Adapting common policy settings for non-CoCo guest"
-	jq '.request_defaults.UpdateEphemeralMountsRequest = true' "${settings_dir}/genpolicy-settings.json" > temp.json
+	jq '.request_defaults.UpdateEphemeralMountsRequest = true | .cluster_config.guest_pull = false' \
+		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
 
