@@ -126,6 +126,10 @@ adapt_common_policy_settings_for_non_coco() {
 	# Disable allow_storage() because it doesn't work when neither "guest-pull" nor "host-tarfs-dm-verity" image layers are enabled.
 	jq '.common.image_layer_verification = "none"' "${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
+
+	# Disable guest pull.
+	jq ''.cluster_config.guest_pull = false' "${settings_dir}/genpolicy-settings.json" > temp.json
+	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
 
 # adapt common policy settings for various platforms
