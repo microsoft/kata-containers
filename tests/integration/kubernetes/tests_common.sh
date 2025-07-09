@@ -98,7 +98,7 @@ is_coco_platform() {
 adapt_common_policy_settings_for_non_coco() {
 	local settings_dir=$1
 
-	info "Adapting common policy settings for non-CoCo guest"
+	info "Adapting common policy settings from ${settings_dir} for non-CoCo guest"
 
 	# Using UpdateEphemeralMountsRequest - instead of CopyFileRequest.
 	jq '.request_defaults.UpdateEphemeralMountsRequest = true' "${settings_dir}/genpolicy-settings.json" > temp.json
