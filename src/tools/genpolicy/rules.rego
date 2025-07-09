@@ -733,11 +733,11 @@ allow_user(p_process, i_process) if {
     print("allow_user: input uid =", i_user.UID, "policy uid =", p_user.UID)
     p_user.UID == i_user.UID
 
-    print("allow_user: input gid =", i_user.GID, "policy gid =", p_user.GID)
-    p_user.GID == i_user.GID
+    #print("allow_user: input gid =", i_user.GID, "policy gid =", p_user.GID)
+    #p_user.GID == i_user.GID
 
-    print("allow_user: input additionalGids =", i_user.AdditionalGids, "policy additionalGids =", p_user.AdditionalGids)
-    {e | some e in p_user.AdditionalGids} == {e | some e in i_user.AdditionalGids}
+    #print("allow_user: input additionalGids =", i_user.AdditionalGids, "policy additionalGids =", p_user.AdditionalGids)
+    #{e | some e in p_user.AdditionalGids} == {e | some e in i_user.AdditionalGids}
 }
 
 allow_args(p_process, i_process, s_name) if {
