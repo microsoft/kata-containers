@@ -1045,7 +1045,7 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
     print("allow_storages: true")
 }
 
-allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hashes) if {
+allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
     some p_storage in p_storages
 
     print("allow_storage: p_storage =", p_storage)
@@ -1057,12 +1057,12 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hash
     p_storage.fstype           == i_storage.fstype
 
     allow_storage_source(p_storage, i_storage, bundle_id)
-    allow_storage_options(p_storage, i_storage, layer_ids, root_hashes)
-    allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids)
+    allow_storage_options(p_storage, i_storage)
+    allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id)
 
     print("allow_storage: true")
 }
-allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hashes) if {
+allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
     i_storage.driver == "image_guest_pull"
     print("allow_storage with image_guest_pull: start")
     i_storage.fstype == "overlay"
@@ -1101,7 +1101,7 @@ allow_storage_source(p_storage, i_storage, bundle_id) if {
     print("allow_storage_source 3: true")
 }
 
-allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) if {
+allow_storage_options(p_storage, i_storage) if {
     print("allow_storage_options 1: start")
 
     p_storage.driver != "blk"
@@ -1111,7 +1111,7 @@ allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) if {
     print("allow_storage_options 1: true")
 }
 
-allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
     p_storage.fstype == "local"
 
     mount1 := p_storage.mount_point
@@ -1127,7 +1127,7 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
 
     print("allow_mount_point 3: true")
 }
-allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
     p_storage.fstype == "bind"
 
     mount1 := p_storage.mount_point
@@ -1143,7 +1143,7 @@ allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
 
     print("allow_mount_point 4: true")
 }
-allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids) if {
+allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id) if {
     p_storage.fstype == "tmpfs"
 
     mount1 := p_storage.mount_point
