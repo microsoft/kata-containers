@@ -154,8 +154,8 @@
     "volumes": {
         "emptyDir": {
             "mount_type": "local",
-            "mount_source": "^$(cpath)/$(sandbox-id)/rootfs/local/",
-            "mount_point": "^$(cpath)/$(sandbox-id)/rootfs/local/",
+            "mount_source": "^$(cpath)/$(sandbox-id)/local/",
+            "mount_point": "^$(cpath)/$(sandbox-id)/local/",
             "driver": "local",
             "source": "local",
             "fstype": "local",
@@ -228,7 +228,7 @@
     },
     "common": {
         "cpath": "/run/kata-containers/shared/containers",
-        "root_path": "/run/kata-containers/$(bundle-id)/rootfs",
+        "root_path": "/run/kata-containers/shared/containers/$(bundle-id)",
         "sfprefix": "^$(cpath)/$(bundle-id)-[a-z0-9]{16}-",
         "ip_p": "[0-9]{1,5}",
         "ipv4_a": "(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])",
@@ -292,16 +292,15 @@
             "CAP_PERFMON",
             "CAP_BPF",
             "CAP_CHECKPOINT_RESTORE"
-        ],
-        "image_layer_verification" : "none"
+        ]
     },
     "kata_config": {
-        "oci_version": "1.1.0",
+        "oci_version": "1.1.0-rc.1",
         "enable_configmap_secret_storages": false
     },
     "cluster_config": {
         "pause_container_image": "mcr.microsoft.com/oss/kubernetes/pause:3.6",
-        "guest_pull": true
+        "guest_pull": false
     },
     "request_defaults": {
         "CreateContainerRequest": {
