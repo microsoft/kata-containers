@@ -26,5 +26,6 @@ pub mod secret;
 pub mod settings;
 pub mod stateful_set;
 pub mod utils;
+pub mod verity;
 pub mod volume;
 pub mod yaml;
