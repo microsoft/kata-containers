@@ -1,0 +1,44 @@
+[
+  {
+    "diff_id": "sha256:107cbdaeec042e6154640c94972c638f4e2fee795902b149e8ce9acbd03d59d7",
+    "verity_hash": "017bb6c44afb9a127362209151653f10ca4894036dad7632d0befcca809c991e",
+    "passwd": "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nsync:x:4:65534:sync:/bin:/bin/sync\ngames:x:5:60:games:/usr/games:/usr/sbin/nologin\nman:x:6:12:man:/var/cache/man:/usr/sbin/nologin\nlp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin\nmail:x:8:8:mail:/var/mail:/usr/sbin/nologin\nnews:x:9:9:news:/var/spool/news:/usr/sbin/nologin\nuucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin\nproxy:x:13:13:proxy:/bin:/usr/sbin/nologin\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nbackup:x:34:34:backup:/var/backups:/usr/sbin/nologin\nlist:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin\nirc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin\n_apt:x:42:65534::/nonexistent:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\nubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash\n",
+    "group": "root:x:0:\ndaemon:x:1:\nbin:x:2:\nsys:x:3:\nadm:x:4:ubuntu\ntty:x:5:\ndisk:x:6:\nlp:x:7:\nmail:x:8:\nnews:x:9:\nuucp:x:10:\nman:x:12:\nproxy:x:13:\nkmem:x:15:\ndialout:x:20:ubuntu\nfax:x:21:\nvoice:x:22:\ncdrom:x:24:ubuntu\nfloppy:x:25:ubuntu\ntape:x:26:\nsudo:x:27:ubuntu\naudio:x:29:ubuntu\ndip:x:30:ubuntu\nwww-data:x:33:\nbackup:x:34:\noperator:x:37:\nlist:x:38:\nirc:x:39:\nsrc:x:40:\nshadow:x:42:\nutmp:x:43:\nvideo:x:44:ubuntu\nsasl:x:45:\nplugdev:x:46:ubuntu\nstaff:x:50:\ngames:x:60:\nusers:x:100:\nnogroup:x:65534:\nubuntu:x:1000:\n"
+  },
+  {
+    "diff_id": "sha256:ca503704e0afea1b30c62525ca260048738c326a519c60bdc57c5ee48fb7437c",
+    "verity_hash": "a861db3cfeb06230e4b337c92bc1826b4a544a3113e40130e4373df5a514120d",
+    "passwd": "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nsync:x:4:65534:sync:/bin:/bin/sync\ngames:x:5:60:games:/usr/games:/usr/sbin/nologin\nman:x:6:12:man:/var/cache/man:/usr/sbin/nologin\nlp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin\nmail:x:8:8:mail:/var/mail:/usr/sbin/nologin\nnews:x:9:9:news:/var/spool/news:/usr/sbin/nologin\nuucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin\nproxy:x:13:13:proxy:/bin:/usr/sbin/nologin\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nbackup:x:34:34:backup:/var/backups:/usr/sbin/nologin\nlist:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin\nirc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin\n_apt:x:42:65534::/nonexistent:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\nubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash\ntcpdump:x:100:102::/nonexistent:/usr/sbin/nologin\n",
+    "group": "root:x:0:\ndaemon:x:1:\nbin:x:2:\nsys:x:3:\nadm:x:4:ubuntu\ntty:x:5:\ndisk:x:6:\nlp:x:7:\nmail:x:8:\nnews:x:9:\nuucp:x:10:\nman:x:12:\nproxy:x:13:\nkmem:x:15:\ndialout:x:20:ubuntu\nfax:x:21:\nvoice:x:22:\ncdrom:x:24:ubuntu\nfloppy:x:25:ubuntu\ntape:x:26:\nsudo:x:27:ubuntu\naudio:x:29:ubuntu\ndip:x:30:ubuntu\nwww-data:x:33:\nbackup:x:34:\noperator:x:37:\nlist:x:38:\nirc:x:39:\nsrc:x:40:\nshadow:x:42:\nutmp:x:43:\nvideo:x:44:ubuntu\nsasl:x:45:\nplugdev:x:46:ubuntu\nstaff:x:50:\ngames:x:60:\nusers:x:100:\nnogroup:x:65534:\nubuntu:x:1000:\nrdma:x:101:\ntcpdump:x:102:\n"
+  },
+  {
+    "diff_id": "sha256:bfc14a952ed1cebe1b626a7ab7dd219c6a89bf03ab1771c9627049f877f3f46e",
+    "verity_hash": "50a73ef8b1299b3e1685178bc6be53d725e2be4d479aa3a776768c90dc7fa2dd",
+    "passwd": "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nsync:x:4:65534:sync:/bin:/bin/sync\ngames:x:5:60:games:/usr/games:/usr/sbin/nologin\nman:x:6:12:man:/var/cache/man:/usr/sbin/nologin\nlp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin\nmail:x:8:8:mail:/var/mail:/usr/sbin/nologin\nnews:x:9:9:news:/var/spool/news:/usr/sbin/nologin\nuucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin\nproxy:x:13:13:proxy:/bin:/usr/sbin/nologin\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nbackup:x:34:34:backup:/var/backups:/usr/sbin/nologin\nlist:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin\nirc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin\n_apt:x:42:65534::/nonexistent:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\nubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash\ntcpdump:x:100:102::/nonexistent:/usr/sbin/nologin\nistio-proxy:x:1337:1337::/home/istio-proxy:/bin/sh\n",
+    "group": "root:x:0:\ndaemon:x:1:\nbin:x:2:\nsys:x:3:\nadm:x:4:ubuntu\ntty:x:5:\ndisk:x:6:\nlp:x:7:\nmail:x:8:\nnews:x:9:\nuucp:x:10:\nman:x:12:\nproxy:x:13:\nkmem:x:15:\ndialout:x:20:ubuntu\nfax:x:21:\nvoice:x:22:\ncdrom:x:24:ubuntu\nfloppy:x:25:ubuntu\ntape:x:26:\nsudo:x:27:ubuntu\naudio:x:29:ubuntu\ndip:x:30:ubuntu\nwww-data:x:33:\nbackup:x:34:\noperator:x:37:\nlist:x:38:\nirc:x:39:\nsrc:x:40:\nshadow:x:42:\nutmp:x:43:\nvideo:x:44:ubuntu\nsasl:x:45:\nplugdev:x:46:ubuntu\nstaff:x:50:\ngames:x:60:\nusers:x:100:\nnogroup:x:65534:\nubuntu:x:1000:\nrdma:x:101:\ntcpdump:x:102:\nistio-proxy:x:1337:\n"
+  },
+  {
+    "diff_id": "sha256:4e21a6cabdcd25b66e06f9b4254831b979a5da0e2e631f34c6b5569a098b8bfe",
+    "verity_hash": "f5ad5780c861912a1e0c48178ab61c08d6c240cdc621e01251bd92b9ecad9cf1",
+    "passwd": "",
+    "group": ""
+  },
+  {
+    "diff_id": "sha256:b54aa56ad01614e449e022a548faa24ea7529cfd93985d92213d91b09ffcfd22",
+    "verity_hash": "11c8bcafbf3743508d9e276f582b71135e510b3f1be90bd1fd37df5ce9c605ed",
+    "passwd": "",
+    "group": ""
+  },
+  {
+    "diff_id": "sha256:6e7bb90416b338ab89163423caccbeea1436a0e633541e3d1aca7a08b849f50a",
+    "verity_hash": "f39f9ccc89fc641b4dce0337ee17632212d7c2e1b454da09973bd91c4c7a31e3",
+    "passwd": "",
+    "group": ""
+  },
+  {
+    "diff_id": "sha256:9760f55e20e3f4eb6b837e1b323b3c6f29b1ef4a4617fe98625ead879e91b1c1",
+    "verity_hash": "817250f1a3e336da76f5bd3fa784e1b26d959b9c131876815ba2604048b70c18",
+    "passwd": "",
+    "group": ""
+  }
+]

@@ -1,0 +1,173 @@
+{
+    "HypervisorType": "clh",
+    "AgentConfig": {
+        "KernelModules": null,
+        "ContainerPipeSize": 0,
+        "DialTimeout": 45,
+        "CdhApiTimeout": 0,
+        "LongLiveConn": true,
+        "Debug": true,
+        "Trace": false,
+        "EnableDebugConsole": true,
+        "Policy": ""
+    },
+    "HypervisorConfig": {
+        "Groups": null,
+        "KernelPath": "/usr/share/cloud-hypervisor/vmlinux.bin",
+        "ImagePath": "/usr/share/kata-containers/kata-containers.img",
+        "InitrdPath": "",
+        "RootfsType": "ext4",
+        "FirmwarePath": "",
+        "FirmwareVolumePath": "",
+        "MachineAccelerators": "",
+        "CPUFeatures": "",
+        "HypervisorPath": "/usr/bin/cloud-hypervisor",
+        "JailerPath": "",
+        "BlockDeviceDriver": "virtio-blk",
+        "HypervisorMachineType": "q35",
+        "MemoryPath": "",
+        "DevicesStatePath": "",
+        "EntropySource": "/dev/urandom",
+        "SharedFS": "virtio-fs",
+        "SharedPath": "",
+        "VirtioFSDaemon": "/usr/libexec/virtiofsd",
+        "VirtioFSCache": "auto",
+        "FileBackedMemRootDir": "",
+        "VhostUserStorePath": "",
+        "VhostUserDeviceReconnect": 0,
+        "GuestMemoryDumpPath": "",
+        "GuestHookPath": "",
+        "VMid": "",
+        "VMStorePath": "",
+        "RunStorePath": "",
+        "SELinuxProcessLabel": "",
+        "HypervisorPathList": [
+            "/usr/bin/cloud-hypervisor"
+        ],
+        "JailerPathList": null,
+        "EntropySourceList": null,
+        "VirtioFSDaemonList": [
+            "/usr/libexec/virtiofsd"
+        ],
+        "VirtioFSExtraArgs": [
+            "--thread-pool-size=1",
+            "--announce-submounts"
+        ],
+        "EnableAnnotations": [
+            "enable_iommu",
+            "virtio_fs_extra_args",
+            "kernel_params"
+        ],
+        "FileBackedMemRootList": null,
+        "PFlash": null,
+        "VhostUserStorePathList": null,
+        "SeccompSandbox": "",
+        "BlockDeviceAIO": "",
+        "RemoteHypervisorSocket": "",
+        "SandboxName": "",
+        "SandboxNamespace": "",
+        "User": "",
+        "SnpIdBlock": "",
+        "SnpIdAuth": "",
+        "KernelParams": [
+            {
+                "Key": "systemd.unit",
+                "Value": "kata-containers.target"
+            },
+            {
+                "Key": "systemd.mask",
+                "Value": "systemd-networkd.service"
+            },
+            {
+                "Key": "systemd.mask",
+                "Value": "systemd-networkd.socket"
+            },
+            {
+                "Key": "agent.log",
+                "Value": "debug"
+            },
+            {
+                "Key": "agent.debug_console",
+                "Value": ""
+            },
+            {
+                "Key": "agent.debug_console_vport",
+                "Value": "1026"
+            },
+            {
+                "Key": "cgroup_no_v1",
+                "Value": "all"
+            },
+            {
+                "Key": "systemd.unified_cgroup_hierarchy",
+                "Value": "1"
+            }
+        ],
+        "HypervisorParams": null,
+        "SGXEPCSize": 0,
+        "DiskRateLimiterBwMaxRate": 0,
+        "DiskRateLimiterBwOneTimeBurst": 0,
+        "DiskRateLimiterOpsMaxRate": 0,
+        "DiskRateLimiterOpsOneTimeBurst": 0,
+        "RxRateLimiterMaxRate": 0,
+        "TxRateLimiterMaxRate": 0,
+        "NetRateLimiterBwMaxRate": 0,
+        "NetRateLimiterBwOneTimeBurst": 0,
+        "NetRateLimiterOpsMaxRate": 0,
+        "NetRateLimiterOpsOneTimeBurst": 0,
+        "MemOffset": 0,
+        "VFIODevices": null,
+        "VhostUserBlkDevices": null,
+        "HotPlugVFIO": "no-port",
+        "ColdPlugVFIO": "no-port",
+        "PCIeRootPort": 0,
+        "PCIeSwitchPort": 0,
+        "NumVCPUsF": 0,
+        "DefaultMaxVCPUs": 8,
+        "MemorySize": 0,
+        "DefaultMaxMemorySize": 127429,
+        "DefaultBridges": 1,
+        "Msize9p": 8192,
+        "MemSlots": 10,
+        "VirtioFSCacheSize": 0,
+        "VirtioFSQueueSize": 0,
+        "Uid": 0,
+        "Gid": 0,
+        "RemoteHypervisorTimeout": 0,
+        "BlockDeviceCacheSet": false,
+        "BlockDeviceCacheDirect": false,
+        "BlockDeviceCacheNoflush": false,
+        "DisableBlockDeviceUse": false,
+        "EnableIOThreads": false,
+        "Debug": true,
+        "HypervisorLoglevel": 1,
+        "MemPrealloc": false,
+        "ReclaimGuestFreedMemory": false,
+        "HugePages": false,
+        "VirtioMem": false,
+        "IOMMU": false,
+        "IOMMUPlatform": false,
+        "DisableNestingChecks": false,
+        "DisableImageNvdimm": false,
+        "GuestMemoryDumpPaging": false,
+        "ConfidentialGuest": false,
+        "SevSnpGuest": false,
+        "BootToBeTemplate": false,
+        "BootFromTemplate": false,
+        "DisableVhostNet": true,
+        "EnableVhostUserStore": false,
+        "GuestSwap": false,
+        "Rootless": false,
+        "DisableSeccomp": false,
+        "DisableSeLinux": false,
+        "DisableGuestSeLinux": true,
+        "LegacySerial": false,
+        "ExtraMonitorSocket": "",
+        "QgsPort": 0,
+        "Initdata": "",
+        "InitdataDigest": null,
+        "InitdataImage": "",
+        "DefaultGPUs": 0,
+        "DefaultGPUModel": ""
+    }
+}

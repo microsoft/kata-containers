@@ -1,0 +1,69 @@
+{
+    "console": {
+        "iommu": false,
+        "mode": "Off"
+    },
+    "cpus": {
+        "boot_vcpus": 1,
+        "kvm_hyperv": false,
+        "max_vcpus": 8,
+        "topology": {
+            "cores_per_die": 8,
+            "dies_per_package": 1,
+            "packages": 1,
+            "threads_per_core": 1
+        }
+    },
+    "fs": [
+        {
+            "num_queues": 1,
+            "pci_segment": 1,
+            "queue_size": 1024,
+            "socket": "/run/vc/vm/269a2911-12c6-46e5-938b-97fbf1908655/virtiofsd.sock",
+            "tag": "kataShared"
+        }
+    ],
+    "iommu": false,
+    "landlock_enable": false,
+    "memory": {
+        "hotplug_method": "Acpi",
+        "hotplug_size": 133618991104,
+        "hugepages": false,
+        "mergeable": false,
+        "prefault": false,
+        "shared": true,
+        "size": 134217728,
+        "thp": true
+    },
+    "payload": {
+        "cmdline": "root=/dev/pmem0p1 rootflags=dax,data=ordered,errors=remount-ro ro rootfstype=ext4 panic=1 no_timer_check noreplace-smp console=ttyS0,115200n8 systemd.log_target=console systemd.unit=kata-containers.target systemd.mask=systemd-networkd.service systemd.mask=systemd-networkd.socket agent.log=debug agent.debug_console agent.debug_console_vport=1026 cgroup_no_v1=all systemd.unified_cgroup_hierarchy=1",
+        "kernel": "/usr/share/cloud-hypervisor/vmlinux.bin"
+    },
+    "platform": {
+        "num_pci_segments": 2,
+        "sev_snp": false,
+        "tdx": false
+    },
+    "pmem": [
+        {
+            "discard_writes": true,
+            "file": "/usr/share/kata-containers/kata-containers.img",
+            "iommu": false
+        }
+    ],
+    "pvpanic": false,
+    "rng": {
+        "iommu": false,
+        "src": "/dev/urandom"
+    },
+    "serial": {
+        "iommu": false,
+        "mode": "Tty"
+    },
+    "vsock": {
+        "cid": 3,
+        "iommu": false,
+        "socket": "/run/vc/vm/269a2911-12c6-46e5-938b-97fbf1908655/clh.sock"
+    },
+    "watchdog": false
+}
