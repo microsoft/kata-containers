@@ -108,9 +108,8 @@ adapt_common_policy_settings_for_non_coco() {
 	jq '.common.cpath = "/run/kata-containers/shared/containers"' "${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
-	# Using Storage input structs for configMap volumes - instead of CopyFileRequest.
-	jq '.volumes.configMap_storages = true' \
-		"${settings_dir}/genpolicy-settings.json" > temp.json
+	# Using CreateContainer Storage input structs for configMap & secret volumes - instead of using CopyFile like CoCo.
+	jq '.kata_config.enable_configmap_secret_storages = true' "${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
 	# Using watchable binds for configMap volumes - instead of CopyFileRequest.

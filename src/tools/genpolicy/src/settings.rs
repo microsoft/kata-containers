@@ -75,6 +75,7 @@ pub struct ImageVolume {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KataConfig {
     pub oci_version: String,
+    pub enable_configmap_secret_storages: bool,
 }
 
 impl Settings {
