@@ -327,8 +327,13 @@ func (clh *cloudHypervisor) createVirtiofsDaemon(sharedPath string) (VirtiofsDae
 		return nil, err
 	}
 
-	// Ensure the shared path exists, needed for factory-created VMs which don't have
+	// Ensure the shared and socket paths exists, needed for factory-created VMs which don't have
 	// the shared path created by the sandbox setup steps.
+	clh.Logger().Warnf("Creating socket path %s for virtiofsd", virtiofsdSocketPath)
+	if err := utils.MkdirAllWithInheritedOwner(filepath.Dir(virtiofsdSocketPath), DirMode); err != nil {
+		clh.Logger().WithError(err).Errorf("failed to create socket path %s", virtiofsdSocketPath)
+		return nil, err
+	}
 	clh.Logger().Warnf("Creating shared path %s for virtiofsd", sharedPath)
 	if err := utils.MkdirAllWithInheritedOwner(sharedPath, DirMode); err != nil {
 		clh.Logger().WithError(err).Errorf("failed to create shared path %s", sharedPath)
