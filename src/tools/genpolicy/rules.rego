@@ -669,6 +669,7 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
     # Reject possible attempts to match multiple input mounts with a single Policy mount.
     p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, input.OCI.Mounts[i_index], bundle_id, sandbox_id) }
 
+    print("allow_by_bundle_or_sandbox_id: p_matches =", p_matches)
     count(p_matches) == count(input.OCI.Mounts)
 
     allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
