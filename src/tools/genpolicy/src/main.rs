@@ -28,6 +28,7 @@ mod secret;
 mod settings;
 mod stateful_set;
 mod utils;
+mod verity;
 mod version;
 mod volume;
 mod yaml;
