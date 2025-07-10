@@ -327,6 +327,13 @@ func (clh *cloudHypervisor) createVirtiofsDaemon(sharedPath string) (VirtiofsDae
 		return nil, err
 	}
 
+	// Ensure the shared path exists, needed for factory-created VMs which don't have
+	// the shared path created by the sandbox setup steps.
+	if err := utils.MkdirAllWithInheritedOwner(sharedPath, DirMode); err != nil {
+		clh.Logger().WithError(err).Errorf("failed to create shared path %s", sharedPath)
+		return nil, err
+	}
+
 	if clh.config.SharedFS == config.VirtioFSNydus {
 		apiSockPath, err := clh.nydusdAPISocketPath(clh.id)
 		if err != nil {
