@@ -60,9 +60,9 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     # policy_data.containers information.
     allow_create_container_input
 
-    i_oci := input.OCI
-    i_storages := input.storages
-    i_devices := input.devices
+    i_oci := input.base.OCI
+    i_storages := input.base.storages
+    i_devices := input.base.devices
 
     # array of possible state operations
     ops_builder := []
@@ -77,7 +77,7 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     print("======== CreateContainerRequest: trying next policy container")
 
     p_pidns := p_container.sandbox_pidns
-    i_pidns := input.sandbox_pidns
+    i_pidns := input.base.sandbox_pidns
     print("CreateContainerRequest: p_pidns =", p_pidns, "i_pidns =", i_pidns)
     p_pidns == i_pidns
 
@@ -108,10 +108,10 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     ret.allowed
 
     # save to policy state
-    # key: input.container_id
+    # key: input.base.container_id
     # val: index of p_container in the policy_data.containers array
-    print("CreateContainerRequest: addding container_id=", input.container_id, " to state")
-    add_p_container_to_state := state_allows(input.container_id, idx)
+    print("CreateContainerRequest: addding container_id=", input.base.container_id, " to state")
+    add_p_container_to_state := state_allows(input.base.container_id, idx)
 
     ops := concat_op_if_not_null(ret.ops, add_p_container_to_state)
 
@@ -121,10 +121,10 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
 allow_create_container_input if {
     print("allow_create_container_input: input =", input)
 
-    count(input.shared_mounts) == 0
-    is_null(input.string_user)
+    count(input.base.shared_mounts) == 0
+    is_null(input.base.string_user)
 
-    i_oci := input.OCI
+    i_oci := input.base.OCI
     is_null(i_oci.Hooks)
     is_null(i_oci.Solaris)
     is_null(i_oci.Windows)
@@ -667,10 +667,10 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
 
     # Match each input mount with a Policy mount.
     # Reject possible attempts to match multiple input mounts with a single Policy mount.
-    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, input.OCI.Mounts[i_index], bundle_id, sandbox_id) }
+    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, input.base.OCI.Mounts[i_index], bundle_id, sandbox_id) }
 
     print("allow_by_bundle_or_sandbox_id: p_matches =", p_matches)
-    count(p_matches) == count(input.OCI.Mounts)
+    count(p_matches) == count(input.base.OCI.Mounts)
 
     allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
 
@@ -734,11 +734,11 @@ allow_user(p_process, i_process) if {
     print("allow_user: input uid =", i_user.UID, "policy uid =", p_user.UID)
     p_user.UID == i_user.UID
 
-    print("allow_user: input gid =", i_user.GID, "policy gid =", p_user.GID)
-    p_user.GID == i_user.GID
+    #print("allow_user: input gid =", i_user.GID, "policy gid =", p_user.GID)
+    #p_user.GID == i_user.GID
 
-    print("allow_user: input additionalGids =", i_user.AdditionalGids, "policy additionalGids =", p_user.AdditionalGids)
-    {e | some e in p_user.AdditionalGids} == {e | some e in i_user.AdditionalGids}
+    #print("allow_user: input additionalGids =", i_user.AdditionalGids, "policy additionalGids =", p_user.AdditionalGids)
+    #{e | some e in p_user.AdditionalGids} == {e | some e in i_user.AdditionalGids}
 }
 
 allow_args(p_process, i_process, s_name) if {
@@ -1045,10 +1045,8 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
 allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
     p_count := count(p_storages)
     i_count := count(i_storages)
-    img_pull_count := count([s | s := i_storages[_]; s.driver == "image_guest_pull"])
-    print("allow_storages: p_count =", p_count, "i_count =", i_count, "img_pull_count =", img_pull_count)
-
-    p_count == i_count - img_pull_count
+    print("allow_storages: p_count =", p_count, "i_count =", i_count)
+    p_count == i_count
 
     image_info := allow_container_image_storage(p_storages)
     layer_ids := image_info.layer_ids
@@ -1061,14 +1059,7 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
     print("allow_storages: true")
 }
 
-# Currently, Image Layer Integrity Verification through Policy is only required for Guest VMs
-# that use container image layers provided as dm-verity-protected block device images created on the Host.
-allow_container_image_storage(p_storages) = { "layer_ids": [], "root_hashes": [] } if {
-    policy_data.common.image_layer_verification != "host-tarfs-dm-verity"
-}
 allow_container_image_storage(p_storages) = { "layer_ids": layer_ids, "root_hashes": root_hashes } if {
-    policy_data.common.image_layer_verification == "host-tarfs-dm-verity"
-
     some overlay_storage in p_storages
     overlay_storage.driver == "overlayfs"
     count(overlay_storage.options) == 2
@@ -1093,15 +1084,6 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hash
     allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id, layer_ids)
 
     print("allow_storage: true")
-}
-allow_storage(p_storages, i_storage, bundle_id, sandbox_id, layer_ids, root_hashes) if {
-    i_storage.driver == "image_guest_pull"
-    print("allow_storage with image_guest_pull: start")
-    i_storage.fstype == "overlay"
-    i_storage.fs_group == null
-    count(i_storage.options) == 0
-    # TODO: Check Mount Point, Source, Driver Options, etc.
-    print("allow_storage with image_guest_pull: true")
 }
 
 allow_storage_source(p_storage, i_storage, bundle_id) if {
@@ -1194,7 +1176,7 @@ allow_storage_options(p_storage, i_storage, layer_ids, root_hashes) if {
     endswith(hash_suffix, ")")
     hash_index := trim_right(hash_suffix, ")")
     i := to_number(hash_index)
-    print("allow_storage_options 3: i =", i)
+    print("allow_storage_options 3: i =", i, "root_hashes[i] =", root_hashes[i])
 
     hash_option := concat("=", ["io.katacontainers.fs-opt.root-hash", root_hashes[i]])
     print("allow_storage_options 3: hash_option =", hash_option)
