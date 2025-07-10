@@ -984,7 +984,7 @@ allow_mount(p_oci, i_mount, bundle_id, sandbox_id):= p_index if {
     print("allow_mount: i_mount =", i_mount)
 
     some p_index, p_mount in p_oci.Mounts
-    print("allow_mount: p_index =", p_index, p_mount =", p_mount)
+    print("allow_mount: p_index =", p_index, "p_mount =", p_mount)
     check_mount(p_mount, i_mount, bundle_id, sandbox_id)
 
     print("allow_mount: true, p_index =", p_index)
