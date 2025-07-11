@@ -108,6 +108,9 @@ func NewVM(ctx context.Context, config VMConfig) (*VM, error) {
 		return nil, err
 	}
 
+	config.HypervisorConfig.VMStorePath = store.RunVMStoragePath()
+	config.HypervisorConfig.RunStorePath = store.RunStoragePath()
+
 	defer func() {
 		if err != nil {
 			virtLog.WithField("vm", id).WithError(err).Error("failed to create new vm")
