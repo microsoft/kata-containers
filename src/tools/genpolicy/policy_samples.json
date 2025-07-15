@@ -31,6 +31,7 @@
                 "kubernetes/fixtures2/rc-service.yaml",
                 "kubernetes/fixtures2/valid-pod.yaml",
                 "pod/pod-exec.yaml",
+                "pod/pod-init-apt.yaml",
                 "pod/pod-lifecycle.yaml",
                 "pod/pod-one-container.yaml",
                 "pod/pod-persistent-volumes.yaml",
