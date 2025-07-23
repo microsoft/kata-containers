@@ -49,6 +49,35 @@ echo "Installing agent service files into rootfs"
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-containers.target ${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target
 sudo cp ${AGENT_INSTALL_DIR}/usr/lib/systemd/system/kata-agent.service ${ROOTFS_PATH}/usr/lib/systemd/system/kata-agent.service
 
+echo "Setting up getty service for serial console login"
+sudo mkdir -p "${ROOTFS_PATH}/etc/systemd/system/getty.target.wants"
+
+# Detect architecture and set up appropriate serial console
+ARCH=$(uname -m)
+case "${ARCH}" in
+    x86_64)
+        CONSOLE_TTY="ttyS0"
+        ;;
+    aarch64|arm64)
+        CONSOLE_TTY="ttyAMA0"
+        ;;
+    *)
+        echo "Warning: Unknown architecture ${ARCH}, defaulting to ttyS0"
+        CONSOLE_TTY="ttyS0"
+        ;;
+esac
+
+echo "Setting up getty service for ${CONSOLE_TTY} (architecture: ${ARCH})"
+sudo ln -sf "/lib/systemd/system/getty@.service" "${ROOTFS_PATH}/etc/systemd/system/getty.target.wants/getty@${CONSOLE_TTY}.service"
+
+echo "Adding getty.target to kata-containers.target dependencies"
+sudo mkdir -p "${ROOTFS_PATH}/etc/systemd/system/kata-containers.target.wants"
+sudo ln -sf "/lib/systemd/system/getty.target" "${ROOTFS_PATH}/etc/systemd/system/kata-containers.target.wants/getty.target"
+
+echo "Setting up root login without password for debugging"
+sudo sed -i 's/root:[^:]*:/root::/' "${ROOTFS_PATH}/etc/passwd" || true
+sudo sed -i 's/^root:[^:]*:/root::/' "${ROOTFS_PATH}/etc/shadow" || true
+
 if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building tarfs kernel driver and installing into rootfs"
 	pushd src/tarfs
