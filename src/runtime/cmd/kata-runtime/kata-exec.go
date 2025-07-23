@@ -154,6 +154,10 @@ func (s *iostream) Read(data []byte) (n int, err error) {
 }
 
 func getConn(sandboxID string, port uint64) (net.Conn, error) {
+	// DEBUG: Hard-coded Unix socket connection
+	// Connect directly to the specified Unix domain socket
+	return net.DialTimeout("unix", "/tmp/cameronvsock.sock", defaultTimeout)
+	
 	client, err := shimclient.BuildShimClient(sandboxID, defaultTimeout)
 	if err != nil {
 		return nil, err
