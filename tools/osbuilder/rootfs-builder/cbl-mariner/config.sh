@@ -7,6 +7,6 @@
 OS_NAME=cbl-mariner
 OS_VERSION=${OS_VERSION:-3.0}
 LIBC="gnu"
-PACKAGES="kata-packages-uvm bash util-linux shadow-utils"
+PACKAGES="bash util-linux shadow-utils ca-certificates chrony cryptsetup dbus elfutils-libelf filesystem iptables irqbalance systemd tzdata zlib sudo tdnf binutils"
 [ "$AGENT_INIT" = no ] && PACKAGES+=" systemd"
 [ "$SECCOMP" = yes ] && PACKAGES+=" libseccomp"

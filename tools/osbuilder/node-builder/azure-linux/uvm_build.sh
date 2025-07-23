@@ -74,7 +74,7 @@ echo "Adding getty.target to kata-containers.target dependencies"
 sudo mkdir -p "${ROOTFS_PATH}/etc/systemd/system/kata-containers.target.wants"
 sudo ln -sf "/lib/systemd/system/getty.target" "${ROOTFS_PATH}/etc/systemd/system/kata-containers.target.wants/getty.target"
 
-echo "Creating test user with password"
+echo "Creating test user with password and configuring sudo access"
 # Create and configure user in a single chroot session
 sudo chroot "${ROOTFS_PATH}" /bin/bash -c '
     # Create testuser with home directory and bash shell
@@ -85,9 +85,17 @@ sudo chroot "${ROOTFS_PATH}" /bin/bash -c '
     
     # Clear root password for direct login
     /usr/bin/passwd -d root 2>/dev/null || true
+    
+    # Enable wheel group for sudo access
+    if [ -f /etc/sudoers ]; then
+        # Uncomment the wheel group line if it exists
+        sed -i "s/^# %wheel ALL=(ALL) ALL$/%wheel ALL=(ALL) ALL/" /etc/sudoers 2>/dev/null || true
+        # If the line doesn'\''t exist, add it
+        grep -q "^%wheel ALL=(ALL) ALL$" /etc/sudoers || echo "%wheel ALL=(ALL) ALL" >> /etc/sudoers
+    fi
 '
 
-echo "User 'testuser' created with password 'p@ssw0rd'"
+echo "User 'testuser' created with password 'p@ssw0rd' and sudo access"
 echo "Root password has been cleared for direct login"
 
 if [ "${CONF_PODS}" == "yes" ]; then
