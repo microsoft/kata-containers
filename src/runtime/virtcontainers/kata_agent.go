@@ -393,6 +393,9 @@ func (k *kataAgent) init(ctx context.Context, sandbox *Sandbox, config KataAgent
 }
 
 func (k *kataAgent) agentURL() (string, error) {
+	// DEBUG: Hard-coded socket path for debugging purposes
+	return "unix:///tmp/cameronvsock.sock", nil
+	
 	switch s := k.vmSocket.(type) {
 	case types.VSock:
 		return s.String(), nil
