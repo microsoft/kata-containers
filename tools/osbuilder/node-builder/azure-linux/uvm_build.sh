@@ -74,9 +74,21 @@ echo "Adding getty.target to kata-containers.target dependencies"
 sudo mkdir -p "${ROOTFS_PATH}/etc/systemd/system/kata-containers.target.wants"
 sudo ln -sf "/lib/systemd/system/getty.target" "${ROOTFS_PATH}/etc/systemd/system/kata-containers.target.wants/getty.target"
 
-echo "Setting up root login without password for debugging"
-sudo sed -i 's/root:[^:]*:/root::/' "${ROOTFS_PATH}/etc/passwd" || true
-sudo sed -i 's/^root:[^:]*:/root::/' "${ROOTFS_PATH}/etc/shadow" || true
+echo "Creating test user with password"
+# Create and configure user in a single chroot session
+sudo chroot "${ROOTFS_PATH}" /bin/bash -c '
+    # Create testuser with home directory and bash shell
+    /usr/sbin/useradd -m -s /bin/bash -G wheel testuser 2>/dev/null || true
+    
+    # Set password for testuser
+    echo "testuser:<your-pw-here>" | /usr/sbin/chpasswd 2>/dev/null || true
+    
+    # Clear root password for direct login
+    /usr/bin/passwd -d root 2>/dev/null || true
+'
+
+echo "User 'testuser' created with password 'p@ssw0rd'"
+echo "Root password has been cleared for direct login"
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building tarfs kernel driver and installing into rootfs"
