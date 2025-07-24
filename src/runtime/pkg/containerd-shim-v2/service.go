@@ -409,7 +409,9 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("create").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var createTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("create").Observe(createTime)
+		rpcDurationsGauge.Set(createTime)
 	}()
 
 	s.mu.Lock()
