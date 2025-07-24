@@ -411,7 +411,7 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 		err = toGRPC(err)
 		var createTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
 		rpcDurationsHistogram.WithLabelValues("create").Observe(createTime)
-		rpcDurationsGauge.Set(createTime)
+		rpcDurationsGauge.WithLabelValues("create").Set(createTime)
 	}()
 
 	s.mu.Lock()
