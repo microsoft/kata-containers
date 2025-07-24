@@ -445,16 +445,105 @@ async fn start_sandbox(
         _ort = Some(rt);
     }
 
-    // vsock:///dev/vsock, port
-    let mut server =
-        rpc::start(sandbox.clone(), config.server_addr.as_str(), init_mode, oma).await?;
-
-    server.start().await?;
+    // Simple vsock listener for debugging - log any data received
+    simple_vsock_listener(&logger, config.server_addr.as_str()).await?;
 
     rx.await?;
-    server.shutdown().await?;
 
     Ok(())
+}
+
+// Simple vsock listener that logs any incoming data
+async fn simple_vsock_listener(logger: &Logger, server_address: &str) -> Result<()> {
+    use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, VsockAddr};
+    use tokio::io::AsyncReadExt;
+    
+    info!(logger, "Starting simple vsock listener on: {}", server_address);
+    
+    // Parse vsock address - expect format like "vsock://-1:1024"
+    let port = if server_address.starts_with("vsock://") {
+        let addr_part = &server_address[8..]; // Remove "vsock://"
+        let parts: Vec<&str> = addr_part.split(':').collect();
+        if parts.len() == 2 {
+            parts[1].parse::<u32>().unwrap_or(1024)
+        } else {
+            1024
+        }
+    } else {
+        1024
+    };
+    
+    info!(logger, "Creating vsock listener on port: {}", port);
+    
+    // Create vsock listener socket
+    let listen_fd = socket::socket(
+        AddressFamily::Vsock,
+        SockType::Stream,
+        SockFlag::SOCK_CLOEXEC,
+        None,
+    )?;
+    
+    let addr = VsockAddr::new(libc::VMADDR_CID_ANY, port);
+    socket::bind(listen_fd, &addr)?;
+    socket::listen(listen_fd, 10)?;
+    
+    info!(logger, "✅ Vsock listener bound and listening on port {}", port);
+    
+    loop {
+        info!(logger, "🔍 Waiting for vsock connection...");
+        
+        // Accept connection
+        match socket::accept(listen_fd) {
+            Ok(client_fd) => {
+                info!(logger, "🎉 NEW VSOCK CONNECTION accepted! fd={}", client_fd);
+                
+                // Convert to tokio stream
+                let mut stream = unsafe {
+                    use std::os::unix::io::FromRawFd;
+                    tokio::net::UnixStream::from_std(std::os::unix::net::UnixStream::from_raw_fd(client_fd))?
+                };
+                
+                // Read data in a loop
+                let mut buffer = [0u8; 4096];
+                let mut total_bytes = 0;
+                
+                loop {
+                    match stream.read(&mut buffer).await {
+                        Ok(0) => {
+                            info!(logger, "📭 Connection closed. Total bytes received: {}", total_bytes);
+                            break;
+                        }
+                        Ok(n) => {
+                            total_bytes += n;
+                            info!(logger, "📡 VSOCK RAW DATA RECEIVED: {} bytes (total: {})", n, total_bytes);
+                            info!(logger, "📊 Raw bytes: {:?}", &buffer[..n]);
+                            
+                            // Also log as hex string for easier reading
+                            let hex_string: String = buffer[..n].iter()
+                                .map(|b| format!("{:02x}", b))
+                                .collect::<Vec<String>>()
+                                .join(" ");
+                            info!(logger, "🔍 Hex dump: {}", hex_string);
+                            
+                            // Try to show as ASCII if printable
+                            let ascii_string: String = buffer[..n].iter()
+                                .map(|&b| if b >= 32 && b <= 126 { b as char } else { '.' })
+                                .collect();
+                            info!(logger, "📝 ASCII: '{}'", ascii_string);
+                        }
+                        Err(e) => {
+                            warn!(logger, "❌ Error reading from vsock: {:?}", e);
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(logger, "❌ Error accepting vsock connection: {:?}", e);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+    }
 }
 
 // Check if required attestation binaries are available on the rootfs.
