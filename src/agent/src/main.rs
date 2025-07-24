@@ -445,7 +445,7 @@ async fn start_sandbox(
                 .context("start mem-agent")?;
         #[allow(unused_assignments)]
         {
-            oma = Some(ma);
+            _oma = Some(ma);
             _ort = Some(rt);
         }
     }
