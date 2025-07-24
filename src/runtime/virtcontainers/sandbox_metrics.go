@@ -74,6 +74,14 @@ var (
 		[]string{"action"},
 	)
 
+	agentRPCDurations = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespaceKatashim,
+		Name:      "agent_rpc_durations_gauge_milliseconds",
+		Help:      "RPC latency values",
+	},
+		[]string{"action"},
+	)
+
 	// virtiofsd
 	virtiofsdThreads = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespaceVirtiofsd,
@@ -122,6 +130,7 @@ func RegisterMetrics() {
 	prometheus.MustRegister(hypervisorOpenFDs)
 	// agent
 	prometheus.MustRegister(agentRPCDurationsHistogram)
+	prometheus.MustRegister(agentRPCDurations)
 	// virtiofsd
 	prometheus.MustRegister(virtiofsdThreads)
 	prometheus.MustRegister(virtiofsdProcStatus)
