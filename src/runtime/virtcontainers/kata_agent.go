@@ -2424,7 +2424,9 @@ func (k *kataAgent) sendReq(spanCtx context.Context, request interface{}) (inter
 	k.Logger().WithField("name", msgName).WithField("req", string(jsonStr)).Trace("sending request")
 
 	defer func() {
-		agentRPCDurationsHistogram.WithLabelValues(msgName).Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var operationTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		agentRPCDurationsHistogram.WithLabelValues(msgName).Observe(operationTime)
+		agentRPCDurations.WithLabelValues(msgName).Set(operationTime)
 	}()
 	return handler(ctx, request)
 }
