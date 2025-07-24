@@ -21,17 +21,19 @@ var (
 	rpcDurationsHistogram = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespaceKatashim,
 		Name:      "rpc_durations_histogram_milliseconds",
-		Help:      "RPC latency distributions.",
+		Help:      "RPC latency distributions MODIFIED",
 		Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
 	},
 		[]string{"action"},
 	)
 
-	rpcDurationsGauge = prometheus.NewGauge(prometheus.GaugeOpts{
+	rpcDurationsGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespaceKatashim,
 		Name:      "rpc_durations_gauge_milliseconds",
 		Help:      "RPC latency values",
-	})
+	},
+		[]string{"action"},
+	)
 
 	katashimThreads = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespaceKatashim,
