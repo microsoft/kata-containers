@@ -27,6 +27,12 @@ var (
 		[]string{"action"},
 	)
 
+	rpcDurationsGauge = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespaceKatashim,
+		Name:      "rpc_durations_gauge_milliseconds",
+		Help:      "RPC latency values",
+	})
+
 	katashimThreads = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespaceKatashim,
 		Name:      "threads",
@@ -85,6 +91,7 @@ func registerMetrics() {
 	prometheus.MustRegister(katashimOpenFDs)
 	prometheus.MustRegister(katashimPodOverheadCPU)
 	prometheus.MustRegister(katashimPodOverheadMemory)
+	prometheus.MustRegister(rpcDurationsGauge)
 }
 
 // updateShimMetrics will update metrics for kata shim process itself
