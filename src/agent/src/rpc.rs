@@ -1634,6 +1634,7 @@ impl agent_ttrpc::AgentService for AgentService {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct HealthService;
 
 #[async_trait]
@@ -1770,6 +1771,7 @@ async fn read_stream(reader: &Mutex<ReadHalf<PipeStream>>, l: usize) -> Result<V
     Ok(content)
 }
 
+#[allow(dead_code)]
 pub async fn start(
     s: Arc<Mutex<Sandbox>>,
     server_address: &str,

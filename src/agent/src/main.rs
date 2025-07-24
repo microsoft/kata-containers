@@ -431,7 +431,9 @@ async fn start_sandbox(
         }
     }
 
+    #[allow(unused_assignments)]
     let mut oma = None;
+    #[allow(unused_assignments)]
     let mut _ort = None;
     if let Some(c) = &config.mem_agent {
         let (ma, rt) =
@@ -441,8 +443,11 @@ async fn start_sandbox(
                     e
                 })
                 .context("start mem-agent")?;
-        oma = Some(ma);
-        _ort = Some(rt);
+        #[allow(unused_assignments)]
+        {
+            oma = Some(ma);
+            _ort = Some(rt);
+        }
     }
 
     // Simple vsock listener for debugging - log any data received
