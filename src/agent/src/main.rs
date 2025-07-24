@@ -432,7 +432,7 @@ async fn start_sandbox(
     }
 
     #[allow(unused_assignments)]
-    let mut oma = None;
+    let mut _oma = None;
     #[allow(unused_assignments)]
     let mut _ort = None;
     if let Some(c) = &config.mem_agent {
