@@ -98,6 +98,44 @@ sudo chroot "${ROOTFS_PATH}" /bin/bash -c '
 echo "User 'testuser' created with password 'p@ssw0rd' and sudo access"
 echo "Root password has been cleared for direct login"
 
+# Install audit rules for vsock communication kata-runtime <-> kata-agent
+echo "Creating audit rules files in rootfs"
+sudo mkdir -p "${ROOTFS_PATH}/etc/audit/rules.d"
+
+# Create audit rules file that will be loaded at boot
+sudo tee "${ROOTFS_PATH}/etc/audit/rules.d/vsock.rules" > /dev/null << 'EOF'
+# Delete all existing rules
+-D
+
+# Socket creation and management (AF_VSOCK = 40)
+-a always,exit -F arch=b64 -S socket -F a0=40 -k vsocket_create
+-a always,exit -F arch=b64 -S bind -F a0=40 -k vsocket_bind
+-a always,exit -F arch=b64 -S connect -F a0=40 -k vsocket_connect
+-a always,exit -F arch=b64 -S accept -k vsocket_accept
+-a always,exit -F arch=b64 -S listen -k vsocket_listen
+
+# Data transfer on vsockets
+-a always,exit -F arch=b64 -S read,write,send,recv,sendto,recvfrom -k vsocket_data
+-a always,exit -F arch=b64 -S sendmsg,recvmsg -k vsocket_msg
+
+# Device access
+-w /dev/vsock -p rwxa -k vsocket_dev
+-w /dev/vhost-vsock -p rwxa -k vhost_vsock_dev
+
+# kata-agent all operations
+-a always,exit -F arch=b64 -S all -F exe=/usr/bin/kata-agent -k kata_agent_all
+
+EOF
+
+# Enable audit daemon to start at boot
+echo "Enabling audit daemon in rootfs"
+sudo chroot "${ROOTFS_PATH}" /bin/bash -c '
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl enable auditd 2>/dev/null || true
+    fi
+'
+echo "Finished installing audit rules for vsock communication and kata-agent"
+
 if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building tarfs kernel driver and installing into rootfs"
 	pushd src/tarfs
