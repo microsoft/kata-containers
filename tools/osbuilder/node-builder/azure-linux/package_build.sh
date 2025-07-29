@@ -29,9 +29,9 @@ runtime_make_flags="SKIP_GO_VERSION_CHECK=1 QEMUCMD= FCCMD= ACRNCMD= STRATOVIRTC
 # - for ConfPods we explicitly set the cloud-hypervisor path. The path is independent of the PREFIX variable
 #   as we have a single CLH binary for both vanilla Kata and ConfPods
 if [ "${CONF_PODS}" == "no" ]; then
-	runtime_make_flags+=" DEFSTATICRESOURCEMGMT_CLH=true KERNELPATH_CLH=${KERNEL_BINARY_LOCATION}"
+	runtime_make_flags+=" DEFSTATICRESOURCEMGMT_CLH=true KERNELPATH_CLH=${KERNEL_BINARY_LOCATION} DEFSANDBOXWORKLOADMEMMIN=128"
 else
-	runtime_make_flags+=" CLHPATH=${CLOUD_HYPERVISOR_LOCATION}"
+	runtime_make_flags+=" CLHPATH=${CLOUD_HYPERVISOR_LOCATION} DEFSANDBOXWORKLOADMEMMIN=192"
 fi
 
 # On Mariner 3.0 we use cgroupsv2 with a single sandbox cgroup
