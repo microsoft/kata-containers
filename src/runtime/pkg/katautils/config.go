@@ -198,6 +198,7 @@ type runtime struct {
 	StaticSandboxResourceMgmt bool     `toml:"static_sandbox_resource_mgmt"`
 	StaticSandboxWorkloadDefaultMem uint32   `toml:"static_sandbox_default_workload_mem"`
 	StaticSandboxWorkloadDefaultVcpus float32  `toml:"static_sandbox_default_workload_vcpus"`
+	SandboxWorkloadMemMin             uint32   `toml:"sandbox_workload_mem_min"`
 	EnablePprof               bool     `toml:"enable_pprof"`
 	DisableGuestEmptyDir      bool     `toml:"disable_guest_empty_dir"`
 	CreateContainerTimeout    uint64   `toml:"create_container_timeout"`
@@ -1617,6 +1618,7 @@ func LoadConfiguration(configPath string, ignoreLogging bool) (resolvedConfigPat
 	config.GuestSeLinuxLabel = tomlConf.Runtime.GuestSeLinuxLabel
 	config.StaticSandboxResourceMgmt = tomlConf.Runtime.StaticSandboxResourceMgmt
 	config.StaticSandboxWorkloadDefaultMem = tomlConf.Runtime.StaticSandboxWorkloadDefaultMem
+	config.SandboxWorkloadMemMin = tomlConf.Runtime.SandboxWorkloadMemMin
 	config.StaticSandboxWorkloadDefaultVcpus = tomlConf.Runtime.StaticSandboxWorkloadDefaultVcpus
 	config.SandboxCgroupOnly = tomlConf.Runtime.SandboxCgroupOnly
 	config.DisableNewNetNs = tomlConf.Runtime.DisableNewNetNs
