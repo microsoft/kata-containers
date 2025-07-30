@@ -8,7 +8,7 @@ on:
   # https://github.com/ossf/scorecard/blob/main/docs/checks.md#branch-protection
   branch_protection_rule:
   push:
-    branches: [ "main" ]
+    branches: [ "msft-main" ]
   workflow_dispatch:
 
 concurrency:
