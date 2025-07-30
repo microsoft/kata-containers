@@ -13,6 +13,8 @@ shimv2
 SPDK
 upcall
 virtcontainers
+MSRC
+msrc
 
 # Open source projects
 bootc
