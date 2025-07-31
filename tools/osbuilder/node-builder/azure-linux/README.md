@@ -14,7 +14,7 @@ The guide provides the steps for two different environments:
 
 # Steps for Azure Linux 3 based environments
 
-## Set up environment
+## Set up AzL3 environment
 
 While build can happen in any Azure Linux 3 based environment, the stack can only be evaluated on environments with proper virtualization support and, for Kata-CC, on top of AMD SEV-SNP. An example of such environment are Azure Linux 3 based Azure VMs using a proper SKU:
 - Deploy an Azure Linux 3 VM via `az vm create` using a [CC vm size SKU](https://learn.microsoft.com/en-us/azure/virtual-machines/dcasccv5-dcadsccv5-series)
@@ -94,7 +94,7 @@ You environment is ready. Continue with section *Run Kata (Confidential) Contain
 
 ## Variant II: Build components from source
 
-### Install build dependencies
+### Install AzL3 build dependencies
 
 ```
 sudo dnf -y install git golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel cmake fuse-devel kata-packages-uvm-build
@@ -104,7 +104,7 @@ Continue with the section *Build the Kata(-CC) host and guest components from so
 
 # Steps for AKS nodes
 
-## Set up environment
+## Set up AKS environment
 
 - Deploy a [Confidential Containers for AKS cluster](https://learn.microsoft.com/en-us/azure/aks/deploy-confidential-containers-default-policy) via `az aks create` (using `AzureLinux` as `os-sku`). Note, this way the bits built in this guide will already be present on the cluster's Azure Linux based nodes.
 - Deploy a debugging pod onto one of the nodes
@@ -112,7 +112,7 @@ Continue with the section *Build the Kata(-CC) host and guest components from so
 
 As released components are already pre-installed onto AKS nodes, the remainder of this section focuses on how to (re-)build the components from source.
 
-## Install build dependencies
+## Install AKS build dependencies
 
 ```
 sudo dnf -y makecache
