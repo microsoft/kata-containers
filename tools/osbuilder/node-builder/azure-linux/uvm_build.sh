@@ -31,7 +31,7 @@ fi
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	set_uvm_kernel_vars
-	if [ -z "${UVM_KERNEL_HEADER_DIR}}" ]; then
+	if [ -z "${UVM_KERNEL_HEADER_DIR}" ]; then
 		exit 1
 	fi
 fi
