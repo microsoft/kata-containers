@@ -12,13 +12,13 @@ Wants=kata-containers.target
 [Service]
 # Send agent output to tty to allow capture debug logs
 # from a VM vsock port
-StandardOutput=tty
+StandardOutput=file:/tmp/agent.log
+StandardError=file:/tmp/agenterr.log
 Type=simple
 ExecStart=@BINDIR@/@AGENT_NAME@
 LimitNOFILE=1073741824
 # ExecStop is required for static agent tracing; in all other scenarios
 # the runtime handles shutting down the VM.
-ExecStop=/bin/sync ; /usr/bin/systemctl --force poweroff
-FailureAction=poweroff
+ExecStop=/bin/sync
 # Discourage OOM-killer from touching the agent
 OOMScoreAdjust=-997
