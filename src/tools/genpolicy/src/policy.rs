@@ -17,7 +17,6 @@ use crate::utils;
 use crate::yaml;
 
 use anyhow::Result;
-use base64::{engine::general_purpose, Engine as _};
 use log::debug;
 use oci_spec::runtime as oci;
 use protocols::agent;
@@ -578,7 +577,10 @@ impl AgentPolicy {
         if self.config.raw_out {
             std::io::stdout().write_all(policy.as_bytes()).unwrap();
         }
-        general_purpose::STANDARD.encode(policy.as_bytes())
+        let mut init_data = kata_types::initdata::InitData::new("sha256", "0.1.0");
+        init_data.insert_data("policy.rego", policy);
+
+        encode_init_data(&init_data)
     }
 
     pub fn get_container_policy(
@@ -1027,4 +1029,21 @@ pub fn get_kata_namespaces(
     });
 
     namespaces
+}
+
+fn encode_init_data(init_data: &kata_types::initdata::InitData) -> String {
+    // from https://github.com/microsoft/kata-containers/blob/7cd4e3278a21e2b2499e1380f5c4d81fa6ebf8d6/src/runtime/pkg/oci/utils.go#L939C1-L984C2
+    // init_data decoding process is:
+    // - base64 decode
+    // - gzip uncompress
+    // - toml decode
+    // in other words, cat init_data_encoded | base64 --decode | gunzip > init_data_decoded
+
+    // so to encode init_data:
+    // - toml encode
+    let toml_str = toml::to_string(&init_data).unwrap();
+
+    // - gzip compress
+    // - base64 encode
+    kata_types::initdata::create_encoded_input(&toml_str)
 }
