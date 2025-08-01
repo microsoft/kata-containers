@@ -159,6 +159,9 @@ type RuntimeConfig struct {
 	// vcpus to allocate for workloads within the sandbox when workload vcpus is unspecified
 	StaticSandboxWorkloadDefaultVcpus float32
 
+	// Minimum memory (in MiB) to enforce is allocated for workloads within the sandbox when workload memory is specified
+	SandboxWorkloadMemMin uint32
+
 	// Determines if create a netns for hypervisor process
 	DisableNewNetNs bool
 
@@ -1200,6 +1203,10 @@ func SandboxConfig(ocispec specs.Spec, runtime RuntimeConfig, bundlePath, cid st
 			"default mem":        sandboxConfig.SandboxResources.BaseMemMB,
 		}).Debugf("static resources set")
 
+	}
+
+	if sandboxConfig.SandboxResources.WorkloadMemMB < runtime.SandboxWorkloadMemMin {
+		return vc.SandboxConfig{}, fmt.Errorf("pod memory limit too low: minimum %dMiB, got %dMiB", runtime.SandboxWorkloadMemMin, sandboxConfig.SandboxResources.WorkloadMemMB)
 	}
 
 	return sandboxConfig, nil
