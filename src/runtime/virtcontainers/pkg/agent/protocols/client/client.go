@@ -386,7 +386,7 @@ func HybridVSockDialer(sock string, timeout time.Duration) (net.Conn, error) {
 	}
 
 	dialFunc := func() (net.Conn, error) {
-		handshakeTimeout := 10 * time.Second
+		handshakeTimeout := 10000 * time.Second
 		conn, err := net.DialTimeout("unix", udsPath, timeout)
 		if err != nil {
 			return nil, err
