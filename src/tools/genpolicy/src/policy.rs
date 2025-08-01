@@ -565,7 +565,11 @@ impl AgentPolicy {
         if self.config.raw_out {
             std::io::stdout().write_all(policy.as_bytes()).unwrap();
         }
-        general_purpose::STANDARD.encode(policy.as_bytes())
+        let base64_policy = general_purpose::STANDARD.encode(policy.as_bytes());
+        let mut init_data = kata_types::initdata::InitData::new("sha256", "0.1.0");
+        init_data.insert_data("policy", base64_policy);
+        let init_data_str = init_data.to_string().unwrap();
+        general_purpose::STANDARD.encode(init_data_str.as_bytes());
     }
 
     pub fn get_container_policy(
