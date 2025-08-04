@@ -1643,8 +1643,10 @@ impl health_ttrpc::Health for HealthService {
         _ctx: &TtrpcContext,
         _req: protocols::health::CheckRequest,
     ) -> ttrpc::Result<HealthCheckResponse> {
+        info!(sl(), "ttrpc health check request received");
         let mut resp = HealthCheckResponse::new();
         resp.set_status(HealthCheckResponse_ServingStatus::SERVING);
+        info!(sl(), "ttrpc health check response sent: SERVING");
 
         Ok(resp)
     }
@@ -1654,10 +1656,11 @@ impl health_ttrpc::Health for HealthService {
         _ctx: &TtrpcContext,
         req: protocols::health::CheckRequest,
     ) -> ttrpc::Result<VersionCheckResponse> {
-        info!(sl(), "version {:?}", req);
+        info!(sl(), "ttrpc version check request received: {:?}", req);
         let mut rep = protocols::health::VersionCheckResponse::new();
         rep.agent_version = AGENT_VERSION.to_string();
         rep.grpc_version = API_VERSION.to_string();
+        info!(sl(), "ttrpc version check response sent - agent: {}, grpc: {}", AGENT_VERSION, API_VERSION);
 
         Ok(rep)
     }
