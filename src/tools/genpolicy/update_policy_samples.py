@@ -50,7 +50,7 @@ for file in default_yamls + incomplete_init + silently_ignored + no_policy:
         sys.exit(f"filepath does not exists: {filepath}")
 
 # build tool
-next_command = "LIBC=gnu BUILD_TYPE= make"
+next_command = "LIBC=gnu BUILD_TYPE=debug make"
 print("========== COMMAND: " + next_command)
 runCmd(next_command)
 
