@@ -226,9 +226,9 @@ async fn real_main(init_mode: bool) -> std::result::Result<(), Box<dyn std::erro
     }
 
     let config = &AGENT_CONFIG;
-    let _log_vport = config.log_vport as u32;
+    let log_vport = config.log_vport as u32;
 
-    let log_handle = tokio::spawn(create_logger_task(rfd, 0, shutdown_rx.clone()));
+    let log_handle = tokio::spawn(create_logger_task(rfd, log_vport, shutdown_rx.clone()));
 
     tasks.push(log_handle);
 
