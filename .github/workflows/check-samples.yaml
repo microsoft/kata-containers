@@ -22,12 +22,12 @@ jobs:
 
     - name: Install Rust
       run: |
-        ./tests/install_rust.sh
+        ./tests/install_rust.sh 1.85.0
         echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
 
-    - name: Install protobuf-compiler
+    - name: Install build dependencies
       run: |
-        sudo apt-get -y install protobuf-compiler
+        sudo apt-get -y install protobuf-compiler libdevmapper-dev libseccomp-dev
 
     - name: Configure containerd
       run: |
@@ -35,9 +35,15 @@ jobs:
         sudo systemctl restart containerd
         sudo systemctl is-active containerd
 
+    - name: Build agent
+      working-directory: ./src/agent
+      run: |
+        LIBC=gnu BUILD_TYPE=debug  OPENSSL_NO_VENDOR=Y make
+
     - name: Update policy samples
       working-directory: ./src/tools/genpolicy
       run: |
+        LIBC=gnu BUILD_TYPE=debug make
         python3 update_policy_samples.py
 
     - name: Show diff
