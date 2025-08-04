@@ -77,7 +77,7 @@ const (
 
 	// This is the first usable vsock context ID. All the vsocks can use the same
 	// ID, since it's only used in the guest.
-	defaultGuestVSockCID = int64(0x3)
+	defaultGuestVSockCID = int64(0x11)
 
 	// This is related to firecracker logging scheme
 	fcLogFifo     = "logs.fifo"
