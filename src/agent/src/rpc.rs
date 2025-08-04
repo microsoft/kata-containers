@@ -1660,7 +1660,10 @@ impl health_ttrpc::Health for HealthService {
         let mut rep = protocols::health::VersionCheckResponse::new();
         rep.agent_version = AGENT_VERSION.to_string();
         rep.grpc_version = API_VERSION.to_string();
-        info!(sl(), "ttrpc version check response sent - agent: {}, grpc: {}", AGENT_VERSION, API_VERSION);
+        info!(
+            sl(),
+            "ttrpc version check response sent - agent: {}, grpc: {}", AGENT_VERSION, API_VERSION
+        );
 
         Ok(rep)
     }
@@ -1794,7 +1797,7 @@ pub async fn start(
         .register_service(aservice)
         .register_service(hservice);
 
-    info!(sl(), "ttRPC server started"; "address" => server_address);
+    info!(sl(), "ttRPC server started camerondebug"; "address" => server_address);
 
     Ok(server)
 }
