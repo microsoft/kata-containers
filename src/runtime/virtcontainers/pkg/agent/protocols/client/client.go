@@ -385,10 +385,6 @@ func HybridVSockDialer(sock string, timeout time.Duration) (net.Conn, error) {
 		return nil, err
 	}
 
-	// Debug: infinite loop to sleep the thread
-	for {
-		time.Sleep(1 * time.Second)
-	}
 	dialFunc := func() (net.Conn, error) {
 		handshakeTimeout := 10000 * time.Second
 		conn, err := net.DialTimeout("unix", udsPath, timeout)
