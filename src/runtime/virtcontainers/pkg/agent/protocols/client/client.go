@@ -84,6 +84,10 @@ func NewAgentClient(ctx context.Context, sock string, timeout uint32) (*AgentCli
 
 	var conn net.Conn
 	var d = agentDialer(parsedAddr)
+	agentClientLog.Warn("cameron debug entering sleep loop before dialing agent gRPC server")
+	for {
+		time.Sleep(1000 * time.Second)
+	}
 	conn, err = d(grpcAddr, dialTimeout)
 	if err != nil {
 		agentClientLog.WithField("conn", conn).Error("error dialing agent gRPC server")
