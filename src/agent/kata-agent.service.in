@@ -12,8 +12,7 @@ Wants=kata-containers.target
 [Service]
 # Send agent output to tty to allow capture debug logs
 # from a VM vsock port
-StandardOutput=/tmp/agent.log
-StandardError=file:/tmp/agenterr.log
+StandardOutput=tty
 Type=simple
 ExecStart=@BINDIR@/@AGENT_NAME@
 LimitNOFILE=1073741824
