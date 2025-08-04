@@ -86,9 +86,11 @@ func NewAgentClient(ctx context.Context, sock string, timeout uint32) (*AgentCli
 	var d = agentDialer(parsedAddr)
 	conn, err = d(grpcAddr, dialTimeout)
 	if err != nil {
+		agentClientLog.WithField("conn", conn).Error("error dialing agent gRPC server")
 		return nil, err
 	}
 
+	agentClientLog.WithField("conn", conn).Debug("successfully dialed agent gRPC server")
 	client := ttrpc.NewClient(conn, ttrpc.WithUnaryClientInterceptor(TraceUnaryClientInterceptor()))
 
 	return &AgentClient{
@@ -385,8 +387,10 @@ func HybridVSockDialer(sock string, timeout time.Duration) (net.Conn, error) {
 		return nil, err
 	}
 
+	agentClientLog.WithField("udsPath", udsPath).Warn("HybridVSockDialer: using hybrid vsock dialer")
+
 	dialFunc := func() (net.Conn, error) {
-		handshakeTimeout := 10000 * time.Second
+		handshakeTimeout := 10 * time.Second
 		conn, err := net.DialTimeout("unix", udsPath, timeout)
 		if err != nil {
 			return nil, err
@@ -400,6 +404,7 @@ func HybridVSockDialer(sock string, timeout time.Duration) (net.Conn, error) {
 		// Once the connection is opened, the following command MUST BE sent,
 		// the hypervisor needs to know the port number where the agent is listening in order to
 		// create the connection
+		agentClientLog.WithField("port", port).Warn("HybridVSockDialer: sending port to hypervisor")
 		if _, err = conn.Write([]byte(fmt.Sprintf("CONNECT %d\n", port))); err != nil {
 			conn.Close()
 			return nil, err
@@ -415,7 +420,7 @@ func HybridVSockDialer(sock string, timeout time.Duration) (net.Conn, error) {
 				return
 			}
 
-			agentClientLog.WithField("response", response).Debug("HybridVsock trivial handshake")
+			agentClientLog.WithField("response", response).Warn("HybridVsock trivial handshake")
 
 			if strings.Contains(response, "OK") {
 				errChan <- nil
@@ -433,7 +438,7 @@ func HybridVSockDialer(sock string, timeout time.Duration) (net.Conn, error) {
 				// skip logging some of these failures to avoid flooding the log.
 				errorsCount := hybridVSockErrors
 				if errorsCount%hybridVSockErrorsSkip == 0 {
-					agentClientLog.WithField("Error", err).WithField("count", errorsCount).Debug("HybridVsock trivial handshake failed")
+					agentClientLog.WithField("Error", err).WithField("count", errorsCount).Warn("HybridVsock trivial handshake failed")
 				}
 				hybridVSockErrors = errorsCount + 1
 
