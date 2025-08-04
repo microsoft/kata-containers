@@ -446,10 +446,13 @@ async fn start_sandbox(
     }
 
     // vsock:///dev/vsock, port
+    info!(logger, "cameron debug: starting ttrpc server at address: {}", config.server_addr.as_str());
     let mut server =
         rpc::start(sandbox.clone(), config.server_addr.as_str(), init_mode, oma).await?;
 
+    info!(logger, "cameron debug: ttrpc server created, calling start");
     server.start().await?;
+    info!(logger, "cameron debug: ttrpc server started successfully");
 
     rx.await?;
     server.shutdown().await?;

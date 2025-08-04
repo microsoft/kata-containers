@@ -1792,6 +1792,7 @@ pub async fn start(
     let health_service = Box::new(HealthService {});
     let hservice = health_ttrpc::create_health(Arc::new(*health_service));
 
+    info!(sl(), "cameron debug: binding ttrpc server to address: {}", server_address);
     let server = TtrpcServer::new()
         .bind(server_address)?
         .register_service(aservice)
