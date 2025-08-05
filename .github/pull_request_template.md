@@ -19,7 +19,6 @@ Feel free to delete sections of the template which do not apply to your PR, or a
 <!-- Link to Github issues if possible. -->
 
 ###### Links to CVEs  <!-- optional -->
-<!-- https://nvd.nist.gov/vuln/detail/CVE-YYYY-XXXX -->
 
 ###### Test Methodology
 <!-- How was this test validated? i.e. local build, pipeline build etc. -->
