@@ -1391,7 +1391,7 @@ func (clh *cloudHypervisor) launchClh() error {
 
 	args := []string{cscAPIsocket, clh.state.apiSocket}
 
-	args = append(args, "--console", "pty")
+	// args = append(args, "--console", "pty")
 
 	if clh.config.Debug && clh.config.HypervisorLoglevel > 0 {
 		// Cloud hypervisor log levels
