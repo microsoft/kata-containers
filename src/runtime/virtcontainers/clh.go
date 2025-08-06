@@ -1390,6 +1390,10 @@ func (clh *cloudHypervisor) launchClh() error {
 	}
 
 	args := []string{cscAPIsocket, clh.state.apiSocket}
+
+	args = append(args, "--serial", "off")
+	args = append(args, "--console", "pty")
+
 	if clh.config.Debug && clh.config.HypervisorLoglevel > 0 {
 		// Cloud hypervisor log levels
 		// 'v' occurrences increase the level
@@ -1419,9 +1423,6 @@ func (clh *cloudHypervisor) launchClh() error {
 	if clh.config.DisableSeccomp {
 		args = append(args, "--seccomp", "false")
 	}
-
-	args = append(args, "--serial", "off")
-	args = append(args, "--console", "pty")
 
 	clh.Logger().WithField("path", clhPath).Info()
 	clh.Logger().WithField("args", strings.Join(args, " ")).Info()
