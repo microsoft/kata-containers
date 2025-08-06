@@ -159,7 +159,6 @@ func (c *clhClientApi) VmRemoveDevicePut(ctx context.Context, vmRemoveDevice chc
 // This is done in order to be able to override such a function as part of
 // our unit tests, as when testing bootVM we're on a mocked scenario already.
 var vmAddNetPutRequest = func(clh *cloudHypervisor) error {
-	return nil
 	if clh.netDevices == nil {
 		clh.Logger().Info("No network device has been configured by the upper layer")
 		return nil
@@ -1392,7 +1391,7 @@ func (clh *cloudHypervisor) launchClh() error {
 
 	args := []string{cscAPIsocket, clh.state.apiSocket}
 
-	args = append(args, "--console", "pty")
+	// args = append(args, "--console", "pty")
 
 	if clh.config.Debug && clh.config.HypervisorLoglevel > 0 {
 		// Cloud hypervisor log levels
