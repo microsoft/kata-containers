@@ -1420,6 +1420,9 @@ func (clh *cloudHypervisor) launchClh() error {
 		args = append(args, "--seccomp", "false")
 	}
 
+	args = append(args, "--serial", "off")
+	args = append(args, "--console", "pty")
+
 	clh.Logger().WithField("path", clhPath).Info()
 	clh.Logger().WithField("args", strings.Join(args, " ")).Info()
 
