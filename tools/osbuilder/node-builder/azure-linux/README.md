@@ -54,9 +54,6 @@ EOF
 sudo reboot
 ```
 
-Note: We currently use a [forked version](https://github.com/microsoft/confidential-containers-containerd/tree/tardev-v1.7.7) of `containerd` called `containerd-cc` which is installed as part of the `kata-packages-host` package. This containerd version is based on stock containerd with patches to support the Kata-CC use case and conflicts with the `containerd` package.
-As part of the build steps below, we provide instructions on how to build `containerd-cc` from source and to replace the component on the environment.
-
 ## Variant I: Utilize released components to assemble the UVM
 
 While the priorly installed `kata-packages-host` package delivers all host-side components, the tools required to assemble the UVM components are delivered through the `kata-packages-uvm-build` package.
@@ -216,21 +213,6 @@ command:
 
 ```shell
 sudo make BUILD_TYPE=debug SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
-```
-
-## Optional build step: Build and deploy the containerd fork from scratch
-
-```
-git clone --depth 1 --branch tardev-v1.7.7 https://github.com/microsoft/confidential-containers-containerd.git
-pushd confidential-containers-containerd/
-GODEBUG=1 make
-popd
-```
-
-Overwrite existing containerd binary, restart service:
-```
-sudo cp -a --backup=numbered confidential-containers-containerd/bin/containerd /usr/bin/containerd
-sudo systemctl restart containerd
 ```
 
 # Run Kata (Confidential) Containers
