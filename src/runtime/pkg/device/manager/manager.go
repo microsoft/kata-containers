@@ -139,13 +139,13 @@ func (dm *deviceManager) createDevice(devInfo config.DeviceInfo) (dev api.Device
 		devInfo.DriverOptions[config.BlockDriverOpt] = dm.blockDriver
 		devInfo.DriverOptions[config.VhostUserReconnectTimeOutOpt] = fmt.Sprintf("%d", dm.vhostUserReconnectTimeout)
 		return drivers.NewVhostUserBlkDevice(&devInfo), nil
-	} else if isBlock(devInfo) {
+	} else /*if isBlock(devInfo) {
 		if devInfo.DriverOptions == nil {
 			devInfo.DriverOptions = make(map[string]string)
 		}
 		devInfo.DriverOptions[config.BlockDriverOpt] = dm.blockDriver
 		return drivers.NewBlockDevice(&devInfo), nil
-	} else {
+	} else*/ {
 		deviceLogger().WithField("device", devInfo.HostPath).Info("Device has not been passed to the container")
 		return drivers.NewGenericDevice(&devInfo), nil
 	}
