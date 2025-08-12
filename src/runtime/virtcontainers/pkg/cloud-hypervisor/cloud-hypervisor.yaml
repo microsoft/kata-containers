@@ -722,9 +722,6 @@ components:
           items:
             type: integer
             format: int16
-        iommu_address_width:
-          type: integer
-          format: uint8
         serial_number:
           type: string
         uuid:
