@@ -16,14 +16,13 @@ import (
 
 // PlatformConfig struct for PlatformConfig
 type PlatformConfig struct {
-	NumPciSegments    *int32    `json:"num_pci_segments,omitempty"`
-	IommuSegments     *[]int32  `json:"iommu_segments,omitempty"`
-	IommuAddressWidth *int32    `json:"iommu_address_width,omitempty"`
-	SerialNumber      *string   `json:"serial_number,omitempty"`
-	Uuid              *string   `json:"uuid,omitempty"`
-	OemStrings        *[]string `json:"oem_strings,omitempty"`
-	Tdx               *bool     `json:"tdx,omitempty"`
-	SevSnp            *bool     `json:"sev_snp,omitempty"`
+	NumPciSegments *int32    `json:"num_pci_segments,omitempty"`
+	IommuSegments  *[]int32  `json:"iommu_segments,omitempty"`
+	SerialNumber   *string   `json:"serial_number,omitempty"`
+	Uuid           *string   `json:"uuid,omitempty"`
+	OemStrings     *[]string `json:"oem_strings,omitempty"`
+	Tdx            *bool     `json:"tdx,omitempty"`
+	SevSnp         *bool     `json:"sev_snp,omitempty"`
 }
 
 // NewPlatformConfig instantiates a new PlatformConfig object
@@ -113,38 +112,6 @@ func (o *PlatformConfig) HasIommuSegments() bool {
 // SetIommuSegments gets a reference to the given []int32 and assigns it to the IommuSegments field.
 func (o *PlatformConfig) SetIommuSegments(v []int32) {
 	o.IommuSegments = &v
-}
-
-// GetIommuAddressWidth returns the IommuAddressWidth field value if set, zero value otherwise.
-func (o *PlatformConfig) GetIommuAddressWidth() int32 {
-	if o == nil || o.IommuAddressWidth == nil {
-		var ret int32
-		return ret
-	}
-	return *o.IommuAddressWidth
-}
-
-// GetIommuAddressWidthOk returns a tuple with the IommuAddressWidth field value if set, nil otherwise
-// and a boolean to check if the value has been set.
-func (o *PlatformConfig) GetIommuAddressWidthOk() (*int32, bool) {
-	if o == nil || o.IommuAddressWidth == nil {
-		return nil, false
-	}
-	return o.IommuAddressWidth, true
-}
-
-// HasIommuAddressWidth returns a boolean if a field has been set.
-func (o *PlatformConfig) HasIommuAddressWidth() bool {
-	if o != nil && o.IommuAddressWidth != nil {
-		return true
-	}
-
-	return false
-}
-
-// SetIommuAddressWidth gets a reference to the given int32 and assigns it to the IommuAddressWidth field.
-func (o *PlatformConfig) SetIommuAddressWidth(v int32) {
-	o.IommuAddressWidth = &v
 }
 
 // GetSerialNumber returns the SerialNumber field value if set, zero value otherwise.
@@ -314,9 +281,6 @@ func (o PlatformConfig) MarshalJSON() ([]byte, error) {
 	}
 	if o.IommuSegments != nil {
 		toSerialize["iommu_segments"] = o.IommuSegments
-	}
-	if o.IommuAddressWidth != nil {
-		toSerialize["iommu_address_width"] = o.IommuAddressWidth
 	}
 	if o.SerialNumber != nil {
 		toSerialize["serial_number"] = o.SerialNumber
