@@ -6,7 +6,6 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **NumPciSegments** | Pointer to **int32** |  | [optional] 
 **IommuSegments** | Pointer to **[]int32** |  | [optional] 
-**IommuAddressWidth** | Pointer to **int32** |  | [optional] 
 **SerialNumber** | Pointer to **string** |  | [optional] 
 **Uuid** | Pointer to **string** |  | [optional] 
 **OemStrings** | Pointer to **[]string** |  | [optional] 
@@ -81,31 +80,6 @@ SetIommuSegments sets IommuSegments field to given value.
 `func (o *PlatformConfig) HasIommuSegments() bool`
 
 HasIommuSegments returns a boolean if a field has been set.
-
-### GetIommuAddressWidth
-
-`func (o *PlatformConfig) GetIommuAddressWidth() int32`
-
-GetIommuAddressWidth returns the IommuAddressWidth field if non-nil, zero value otherwise.
-
-### GetIommuAddressWidthOk
-
-`func (o *PlatformConfig) GetIommuAddressWidthOk() (*int32, bool)`
-
-GetIommuAddressWidthOk returns a tuple with the IommuAddressWidth field if it's non-nil, zero value otherwise
-and a boolean to check if the value has been set.
-
-### SetIommuAddressWidth
-
-`func (o *PlatformConfig) SetIommuAddressWidth(v int32)`
-
-SetIommuAddressWidth sets IommuAddressWidth field to given value.
-
-### HasIommuAddressWidth
-
-`func (o *PlatformConfig) HasIommuAddressWidth() bool`
-
-HasIommuAddressWidth returns a boolean if a field has been set.
 
 ### GetSerialNumber
 
