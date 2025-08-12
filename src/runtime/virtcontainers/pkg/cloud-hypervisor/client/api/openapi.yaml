@@ -466,7 +466,7 @@ components:
     VmInfo:
       description: Virtual Machine information
       example:
-        memory_actual_size: 7
+        memory_actual_size: 4
         state: Created
         config:
           memory:
@@ -595,7 +595,6 @@ components:
             - 1
             - 1
             num_pci_segments: 4
-            iommu_address_width: 4
             oem_strings:
             - oem_strings
             - oem_strings
@@ -1038,7 +1037,6 @@ components:
           - 1
           - 1
           num_pci_segments: 4
-          iommu_address_width: 4
           oem_strings:
           - oem_strings
           - oem_strings
@@ -1445,7 +1443,6 @@ components:
         - 1
         - 1
         num_pci_segments: 4
-        iommu_address_width: 4
         oem_strings:
         - oem_strings
         - oem_strings
@@ -1462,9 +1459,6 @@ components:
             format: int16
             type: integer
           type: array
-        iommu_address_width:
-          format: uint8
-          type: integer
         serial_number:
           type: string
         uuid:
