@@ -20,8 +20,19 @@ common_file="common.sh"
 source "${common_file}"
 
 # these options ensure we produce the proper CLH config file
-runtime_make_flags="SKIP_GO_VERSION_CHECK=1 QEMUCMD= FCCMD= ACRNCMD= STRATOVIRTCMD= DEFAULT_HYPERVISOR=cloud-hypervisor
-	DEFMEMSZ=0 DEFSTATICSANDBOXWORKLOADMEM=512 DEFVCPUS=0 DEFSTATICSANDBOXWORKLOADVCPUS=1 DEFVIRTIOFSDAEMON=${VIRTIOFSD_BINARY_LOCATION} PREFIX=${INSTALL_PATH_PREFIX}"
+runtime_make_flags="SKIP_GO_VERSION_CHECK=1 \
+	QEMUCMD= \
+	FCCMD= \
+	ACRNCMD= \
+	STRATOVIRTCMD= \
+	DEFAULT_HYPERVISOR=cloud-hypervisor \
+	DEFMEMSZ=0 \
+	DEFSTATICSANDBOXWORKLOADMEM=512 \
+	DEFVCPUS=0 \
+	DEFSTATICSANDBOXWORKLOADVCPUS=1 \
+	DEFDISABLEIMAGENVDIMM=true \
+	DEFVIRTIOFSDAEMON=${VIRTIOFSD_BINARY_LOCATION} \
+	PREFIX=${INSTALL_PATH_PREFIX}"
 
 # - for vanilla Kata we use the kernel binary. For ConfPods we use IGVM, so no need to provide kernel path.
 # - for vanilla Kata we explicitly set DEFSTATICRESOURCEMGMT_CLH. For ConfPods,
