@@ -77,6 +77,7 @@
         "common_images": [
                 "mcr.microsoft.com/azurelinux/busybox:1.36",
                 "mcr.microsoft.com/azurelinux/base/nginx:1.25",
-                "mcr.microsoft.com/mirror/docker/library/ubuntu:noble"
+                "mcr.microsoft.com/mirror/docker/library/ubuntu:noble",
+                "mcr.microsoft.com/mirror/docker/library/debian:bookworm-slim"
         ]
 }
