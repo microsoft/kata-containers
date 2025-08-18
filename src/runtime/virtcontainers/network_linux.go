@@ -1492,6 +1492,6 @@ func validGuestRoute(route netlink.Route) bool {
 }
 
 func validGuestNeighbor(neigh netlink.Neigh) bool {
-	// We add only static ARP entries
-	return neigh.State == netlink.NUD_PERMANENT
+	// We add only static or reachable ARP entries
+	return neigh.State == netlink.NUD_PERMANENT || neigh.State == netlink.NUD_REACHABLE
 }
