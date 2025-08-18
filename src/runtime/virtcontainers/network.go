@@ -326,6 +326,19 @@ func generateVCNetworkStructures(ctx context.Context, network Network) ([]*pbTyp
 
 			neighs = append(neighs, &n)
 		}
+		// add static entry such that
+		// arp
+		// ? (169.254.1.1) at aa:aa:aa:aa:aa:aa [ether]  on eth0
+		neighs = append(neighs, &pbTypes.ARPNeighbor{
+			Device: "eth0",
+			State:  int32(0),
+			Flags:  int32(0),
+			Lladdr: "aa:aa:aa:aa:aa:aa",
+			ToIPAddress: &pbTypes.IPAddress{
+				Family:  pbTypes.IPFamily_v4,
+				Address: "169.254.1.1",
+			},
+		})
 	}
 
 	return ifaces, routes, neighs, nil

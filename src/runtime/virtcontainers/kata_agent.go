@@ -772,7 +772,7 @@ func (k *kataAgent) startSandbox(ctx context.Context, sandbox *Sandbox) error {
 				return err
 			}
 		}
-
+		// we should be hitting this for every sandbox created
 		// Setup network interfaces and routes
 		interfaces, routes, neighs, err := generateVCNetworkStructures(ctx, sandbox.network)
 		if err != nil {
