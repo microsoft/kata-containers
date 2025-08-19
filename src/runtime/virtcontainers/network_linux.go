@@ -1490,8 +1490,34 @@ func removeTxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 func validGuestRoute(route netlink.Route) bool {
 	return route.Protocol != unix.RTPROT_KERNEL
 }
+func validGuestNeighbor(neigh netlink.Neigh, gwSet map[string]struct{}) bool {
+	// need a MAC for the guest
+	if neigh.HardwareAddr == nil {
+		return false
+	}
+	// Keep all static entries
+	if neigh.State == netlink.NUD_PERMANENT {
+		return true
+	}
+	// Gateway-only exception: allow the default-gateway IP
+	_, isGw := gwSet[neigh.IP.String()]
+	return isGw
+}
 
-func validGuestNeighbor(neigh netlink.Neigh) bool {
-	// We add only static ARP entries
-	return neigh.State == netlink.NUD_PERMANENT
+// helper: default routes => set of gateway IP strings
+func gwSetFromRoutes(rs []netlink.Route) map[string]struct{} {
+	gw := make(map[string]struct{})
+	for _, r := range rs {
+		if r.Gw == nil {
+			continue
+		}
+		if r.Dst == nil {
+			gw[r.Gw.String()] = struct{}{}
+			continue
+		}
+		if ones, _ := r.Dst.Mask.Size(); ones == 0 { // 0.0.0.0/0 or ::/0
+			gw[r.Gw.String()] = struct{}{}
+		}
+	}
+	return gw
 }

@@ -301,12 +301,16 @@ func generateVCNetworkStructures(ctx context.Context, network Network) ([]*pbTyp
 			routes = append(routes, &r)
 		}
 
-		for _, neigh := range endpoint.Properties().Neighbors {
-			var n pbTypes.ARPNeighbor
+		// Build default-gateway set for th endpoint
+		gwSet := gwSetFromRoutes(endpoint.Properties().Routes)
 
-			if !validGuestNeighbor(neigh) {
+		for _, neigh := range endpoint.Properties().Neighbors {
+
+			if !validGuestNeighbor(neigh, gwSet) {
 				continue
 			}
+
+			var n pbTypes.ARPNeighbor
 
 			n.Device = endpoint.Name()
 			n.State = int32(neigh.State)
