@@ -159,7 +159,9 @@ func (c *clhClientApi) VmRemoveDevicePut(ctx context.Context, vmRemoveDevice chc
 // This is done in order to be able to override such a function as part of
 // our unit tests, as when testing bootVM we're on a mocked scenario already.
 var vmAddNetPutRequest = func(clh *cloudHypervisor) error {
+	clh.Logger().Info("Cameron debug: Entering vmAddNetPutRequest function")
 	if clh.netDevices == nil {
+		clh.Logger().Info("Cameron debug: No network device has been configured by the upper layer")
 		clh.Logger().Info("No network device has been configured by the upper layer")
 		return nil
 	}
@@ -176,6 +178,7 @@ var vmAddNetPutRequest = func(clh *cloudHypervisor) error {
 	defer conn.Close()
 
 	for _, netDevice := range *clh.netDevices {
+		clh.Logger().Infof("Cameron debug: Adding the net device to the Cloud Hypervisor VM configuration: %+v", netDevice)
 		clh.Logger().Infof("Adding the net device to the Cloud Hypervisor VM configuration: %+v", netDevice)
 
 		netDeviceAsJson, err := json.Marshal(netDevice)
@@ -227,11 +230,15 @@ var vmAddNetPutRequest = func(clh *cloudHypervisor) error {
 		resp.Body = io.NopCloser(bytes.NewBuffer(respBody))
 
 		if resp.StatusCode != 200 && resp.StatusCode != 204 {
+			clh.Logger().Errorf("Cameron debug: vmAddNetPut failed with error '%d'. Response: %+v", resp.StatusCode, resp)
 			clh.Logger().Errorf("vmAddNetPut failed with error '%d'. Response: %+v", resp.StatusCode, resp)
 			return fmt.Errorf("Failed to add the network device '%+v' to Cloud Hypervisor: %v", netDevice, resp.StatusCode)
+		} else {
+			clh.Logger().Infof("Cameron debug: Successfully added network device '%+v' with status code %d", netDevice, resp.StatusCode)
 		}
 	}
 
+	clh.Logger().Info("Cameron debug: Successfully completed vmAddNetPutRequest for all network devices")
 	return nil
 }
 
@@ -968,12 +975,22 @@ func (clh *cloudHypervisor) hotPlugVFIODevice(device *config.VFIODev) error {
 }
 
 func (clh *cloudHypervisor) hotplugAddNetDevice(e Endpoint) error {
+	clh.Logger().Infof("Cameron debug: Entering hotplugAddNetDevice for endpoint: %+v", e)
+
 	err := clh.addNet(e)
 	if err != nil {
+		clh.Logger().Errorf("Cameron debug: Failed to add network endpoint in hotplugAddNetDevice: %v", err)
 		return err
 	}
 
-	return clh.vmAddNetPut()
+	clh.Logger().Info("Cameron debug: Calling vmAddNetPut from hotplugAddNetDevice")
+	err = clh.vmAddNetPut()
+	if err != nil {
+		clh.Logger().Errorf("Cameron debug: vmAddNetPut failed in hotplugAddNetDevice: %v", err)
+	} else {
+		clh.Logger().Info("Cameron debug: Successfully completed hotplugAddNetDevice")
+	}
+	return err
 }
 
 func (clh *cloudHypervisor) HotplugAddDevice(ctx context.Context, devInfo interface{}, devType DeviceType) (interface{}, error) {
@@ -988,8 +1005,15 @@ func (clh *cloudHypervisor) HotplugAddDevice(ctx context.Context, devInfo interf
 		device := devInfo.(*config.VFIODev)
 		return nil, clh.hotPlugVFIODevice(device)
 	case NetDev:
+		clh.Logger().Infof("Cameron debug: HotplugAddDevice called with NetDev device: %+v", devInfo)
 		device := devInfo.(Endpoint)
-		return nil, clh.hotplugAddNetDevice(device)
+		err := clh.hotplugAddNetDevice(device)
+		if err != nil {
+			clh.Logger().Errorf("Cameron debug: Failed to hotplug add network device: %v", err)
+		} else {
+			clh.Logger().Info("Cameron debug: Successfully hotplug added network device")
+		}
+		return nil, err
 	default:
 		return nil, fmt.Errorf("cannot hotplug device: unsupported device type '%v'", devType)
 	}
@@ -1249,9 +1273,12 @@ func (clh *cloudHypervisor) AddDevice(ctx context.Context, devInfo interface{}, 
 
 	switch v := devInfo.(type) {
 	case Endpoint:
+		clh.Logger().Infof("Cameron debug: AddDevice called with Endpoint device: %+v", v)
 		if err := clh.addNet(v); err != nil {
+			clh.Logger().Errorf("Cameron debug: Failed to add network device in AddDevice: %v", err)
 			return err
 		}
+		clh.Logger().Info("Cameron debug: Successfully added network device in AddDevice")
 	case types.HybridVSock:
 		clh.addVSock(defaultGuestVSockCID, v.UdsPath)
 	case types.Volume:
@@ -1563,7 +1590,14 @@ func openAPIClientError(err error) error {
 }
 
 func (clh *cloudHypervisor) vmAddNetPut() error {
-	return vmAddNetPutRequest(clh)
+	clh.Logger().Info("Cameron debug: Entering vmAddNetPut function")
+	err := vmAddNetPutRequest(clh)
+	if err != nil {
+		clh.Logger().Errorf("Cameron debug: vmAddNetPut failed: %v", err)
+	} else {
+		clh.Logger().Info("Cameron debug: vmAddNetPut completed successfully")
+	}
+	return err
 }
 
 func (clh *cloudHypervisor) bootVM(ctx context.Context) error {
@@ -1593,10 +1627,13 @@ func (clh *cloudHypervisor) bootVM(ctx context.Context) error {
 		return fmt.Errorf("VM state is not 'Created' after 'CreateVM'")
 	}
 
+	clh.Logger().Info("Cameron debug: Calling vmAddNetPut from bootVM")
 	err = clh.vmAddNetPut()
 	if err != nil {
+		clh.Logger().Errorf("Cameron debug: vmAddNetPut failed in bootVM: %v", err)
 		return err
 	}
+	clh.Logger().Info("Cameron debug: vmAddNetPut completed successfully in bootVM")
 
 	clh.Logger().Debug("Booting VM")
 	_, err = cl.BootVM(ctx)
@@ -1675,17 +1712,22 @@ func (clh *cloudHypervisor) getDiskRateLimiterConfig() *chclient.RateLimiterConf
 }
 
 func (clh *cloudHypervisor) addNet(e Endpoint) error {
+	clh.Logger().WithField("endpoint", e).Debugf("Cameron debug: Entering addNet function with Endpoint of type %v", e.Type())
 	clh.Logger().WithField("endpoint", e).Debugf("Adding Endpoint of type %v", e.Type())
 
 	mac := e.HardwareAddr()
+	clh.Logger().Infof("Cameron debug: Network device MAC address: %s", mac)
 	netPair := e.NetworkPair()
 	if netPair == nil {
+		clh.Logger().Error("Cameron debug: net Pair to be added is nil, needed to get TAP file descriptors")
 		return errors.New("net Pair to be added is nil, needed to get TAP file descriptors")
 	}
 
 	if len(netPair.TapInterface.VMFds) == 0 {
+		clh.Logger().Error("Cameron debug: The file descriptors for the network pair are not present")
 		return errors.New("The file descriptors for the network pair are not present")
 	}
+	clh.Logger().Infof("Cameron debug: Network pair has %d file descriptors", len(netPair.TapInterface.VMFds))
 	clh.netDevicesFiles[mac] = netPair.TapInterface.VMFds
 
 	netRateLimiterConfig := clh.getNetRateLimiterConfig()
@@ -1699,10 +1741,13 @@ func (clh *cloudHypervisor) addNet(e Endpoint) error {
 
 	if clh.netDevices != nil {
 		*clh.netDevices = append(*clh.netDevices, *net)
+		clh.Logger().Infof("Cameron debug: Appended network device to existing list, now have %d devices", len(*clh.netDevices))
 	} else {
 		clh.netDevices = &[]chclient.NetConfig{*net}
+		clh.Logger().Info("Cameron debug: Created new network devices list with first device")
 	}
 
+	clh.Logger().Infof("Cameron debug: Storing the Cloud Hypervisor network configuration: %+v", net)
 	clh.Logger().Infof("Storing the Cloud Hypervisor network configuration: %+v", net)
 
 	return nil
