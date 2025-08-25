@@ -29,6 +29,7 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/oci"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/utils"
 	vc "github.com/kata-containers/kata-containers/src/runtime/virtcontainers"
+	vf "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/factory"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/compatoci"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -86,6 +87,9 @@ func New(ctx context.Context, id string, publisher cdshim.Publisher, shutdown fu
 	}
 	vci.SetLogger(ctx, shimLog)
 	katautils.SetLogger(ctx, shimLog, shimLog.Logger.Level)
+
+	// Set factory logger to match other loggers
+	vf.SetLogger(ctx, shimLog)
 
 	ns, found := namespaces.Namespace(ctx)
 	if !found {
