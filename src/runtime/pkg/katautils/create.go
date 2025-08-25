@@ -78,7 +78,7 @@ func HandleFactory(ctx context.Context, vci vc.VC, runtimeConfig *oci.RuntimeCon
 		},
 	}
 
-	kataUtilsLogger.WithField("factory", factoryConfig).Info("load vm factory")
+	kataUtilsLogger.WithField("factory", factoryConfig).Info("Cameron debug: load vm factory")
 
 	f, err := vf.NewFactory(ctx, factoryConfig, true)
 	if err != nil && !factoryConfig.VMCache {

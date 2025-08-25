@@ -19,6 +19,7 @@ import (
 // of 'Info', which is rather noisy.
 var originalLoggerLevel = logrus.WarnLevel
 var kataUtilsLogger = logrus.NewEntry(logrus.New())
+var factoryLogger = logrus.FieldLogger(logrus.New())
 
 // SYSLOGTAG is for a consistently named syslog identifier
 const SYSLOGTAG = "kata"
