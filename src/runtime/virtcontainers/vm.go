@@ -335,6 +335,7 @@ func (v *VM) assignSandbox(s *Sandbox) error {
 	// - link vm socket from sandbox dir (/run/vc/vm/sbid/<kata.sock>) to vm dir (/run/vc/vm/vmid/<kata.sock>)
 	// - link 9pfs share path from sandbox dir (/run/kata-containers/shared/sandboxes/sbid/) to vm dir (/run/vc/vm/vmid/shared/)
 
+	s.Logger().Infof("Cameron debug: assign vm %s to sandbox %s", v.id, s.id)
 	vmSharePath := buildVMSharePath(v.id, v.store.RunVMStoragePath())
 	vmSockDir := filepath.Join(v.store.RunVMStoragePath(), v.id)
 	sbSharePath := getMountPath(s.id)
@@ -366,6 +367,8 @@ func (v *VM) assignSandbox(s *Sandbox) error {
 
 	s.hypervisor = v.hypervisor
 	s.config.HypervisorConfig.VMid = v.id
+
+	s.Logger().Infof("Cameron debug: vm %s assigned to sandbox %s", v.id, s.id)
 
 	return nil
 }

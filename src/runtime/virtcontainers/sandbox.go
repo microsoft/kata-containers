@@ -1421,9 +1421,12 @@ func (s *Sandbox) startVM(ctx context.Context, prestartHookFunc func(context.Con
 			return err
 		}
 	}
+	s.Logger().Infof("Cameron debug: before s.network.Run with network %v", s.network)
+	s.Logger().Infof("Cameron debug: check s.factory %v", s.factory)
 
 	if err := s.network.Run(ctx, func() error {
 		if s.factory != nil {
+			s.Logger().Infof("Cameron debug: calling s.factory.GetVM: %v with HypervisorType %v HypervisorConfig %v", s.factory, s.config.HypervisorType, s.config.HypervisorConfig)
 			vm, err := s.factory.GetVM(ctx, VMConfig{
 				HypervisorType:   s.config.HypervisorType,
 				HypervisorConfig: s.config.HypervisorConfig,
@@ -1432,7 +1435,7 @@ func (s *Sandbox) startVM(ctx context.Context, prestartHookFunc func(context.Con
 			if err != nil {
 				return err
 			}
-
+			s.Logger().Infof("Cameron debug: returned from s.factory.GetVM: %v", vm)
 			return vm.assignSandbox(s)
 		}
 
