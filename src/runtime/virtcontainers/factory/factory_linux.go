@@ -7,6 +7,7 @@ package factory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/katautils/katatrace"
@@ -99,7 +100,14 @@ func checkVMConfig(baseConfig, newConfig vc.VMConfig) error {
 	resetHypervisorConfig(&newConfig)
 
 	if !utils.DeepCompare(baseConfig, newConfig) {
-		return fmt.Errorf("hypervisor config does not match, base: %+v. new: %+v", baseConfig, newConfig)
+		// Pretty print configs for comparison
+		baseJSON, _ := json.MarshalIndent(baseConfig, "", "  ")
+		newJSON, _ := json.MarshalIndent(newConfig, "", "  ")
+		
+		factoryLogger.WithField("baseConfig", string(baseJSON)).Info("Cameron debug: base config")
+		factoryLogger.WithField("newConfig", string(newJSON)).Info("Cameron debug: new config")
+		
+		return fmt.Errorf("hypervisor config does not match")
 	}
 
 	return nil
@@ -107,6 +115,7 @@ func checkVMConfig(baseConfig, newConfig vc.VMConfig) error {
 
 func (f *factory) checkConfig(config vc.VMConfig) error {
 	baseConfig := f.base.Config()
+
 
 	return checkVMConfig(baseConfig, config)
 }
