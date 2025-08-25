@@ -29,6 +29,8 @@ func NewFactory(ctx context.Context, config Config, fetchOnly bool) (vc.Factory,
 	span, _ := katatrace.Trace(ctx, nil, "NewFactory", factoryTracingTags)
 	defer span.End()
 
+	factoryLogger.WithField("factoryConfig", config).Info("Cameron debug: NewFactory")
+
 	err := config.VMConfig.Valid()
 	if err != nil {
 		return nil, err
@@ -41,12 +43,14 @@ func NewFactory(ctx context.Context, config Config, fetchOnly bool) (vc.Factory,
 	var b base.FactoryBase
 	if config.VMCache && config.Cache == 0 {
 		// For VMCache client
+		factoryLogger.Info("Cameron debug: using VMCache factory")
 		b, err = grpccache.New(ctx, config.VMCacheEndpoint)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		if config.Template {
+			factoryLogger.Info("Cameron debug: using Template factory")
 			if fetchOnly {
 				b, err = template.Fetch(config.VMConfig, config.TemplatePath)
 				if err != nil {
@@ -59,10 +63,12 @@ func NewFactory(ctx context.Context, config Config, fetchOnly bool) (vc.Factory,
 				}
 			}
 		} else {
+			factoryLogger.Info("Cameron debug: using Direct factory")
 			b = direct.New(ctx, config.VMConfig)
 		}
 
 		if config.Cache > 0 {
+			factoryLogger.Info("Cameron debug: adding Cache layer to factory")
 			b = cache.New(ctx, config.Cache, b)
 		}
 	}
@@ -110,12 +116,14 @@ func (f *factory) GetVM(ctx context.Context, config vc.VMConfig) (*vc.VM, error)
 	span, ctx := katatrace.Trace(ctx, f.log(), "GetVM", factoryTracingTags)
 	defer span.End()
 
+	f.log().Infof("Cameron debug: start s.factory.GetVM with config %v", config)
 	hypervisorConfig := config.HypervisorConfig
 	if err := config.Valid(); err != nil {
 		f.log().WithError(err).Error("invalid hypervisor config")
 		return nil, err
 	}
 
+	f.log().Infof("Cameron debug: before f.checkConfig with config %v", config)
 	err := f.checkConfig(config)
 	if err != nil {
 		f.log().WithError(err).Info("fallback to direct factory vm")
