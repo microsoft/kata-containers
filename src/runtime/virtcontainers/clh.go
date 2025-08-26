@@ -1310,9 +1310,12 @@ func (clh *cloudHypervisor) StopVM(ctx context.Context, waitOnly bool) (err erro
 }
 
 type clhGrpc struct {
-	id       string
-	state    CloudHypervisorState
-	vmconfig chclient.VmConfig
+	ID                string            `json:"id"`
+	APISocket         string            `json:"apiSocket"`
+	PID               int               `json:"pid"`
+	VirtiofsDaemonPid int               `json:"virtiofsDaemonPid"`
+	State             clhState          `json:"state"`
+	VMConfig          chclient.VmConfig `json:"vmconfig"`
 }
 
 func (clh *cloudHypervisor) fromGrpc(ctx context.Context, hypervisorConfig *HypervisorConfig, j []byte) error {
@@ -1321,11 +1324,14 @@ func (clh *cloudHypervisor) fromGrpc(ctx context.Context, hypervisorConfig *Hype
 	if err != nil {
 		return err
 	}
-	clh.id = cp.id
+	clh.id = cp.ID
 	clh.config = *hypervisorConfig
 	clh.ctx = ctx
-	clh.state = cp.state
-	clh.vmconfig = cp.vmconfig
+	clh.state.apiSocket = cp.APISocket
+	clh.state.PID = cp.PID
+	clh.state.VirtiofsDaemonPid = cp.VirtiofsDaemonPid
+	clh.state.state = cp.State
+	clh.vmconfig = cp.VMConfig
 
 	cfg := chclient.NewConfiguration()
 	cfg.HTTPClient = &http.Client{
@@ -1350,9 +1356,12 @@ func (clh *cloudHypervisor) fromGrpc(ctx context.Context, hypervisorConfig *Hype
 
 func (clh *cloudHypervisor) toGrpc(ctx context.Context) ([]byte, error) {
 	cp := clhGrpc{
-		id:       clh.id,
-		state:    clh.state,
-		vmconfig: clh.vmconfig,
+		ID:                clh.id,
+		APISocket:         clh.state.apiSocket,
+		PID:               clh.state.PID,
+		VirtiofsDaemonPid: clh.state.VirtiofsDaemonPid,
+		State:             clh.state.state,
+		VMConfig:          clh.vmconfig,
 	}
 	clh.Logger().Infof("Cameron debug: toGrpc with payload: %+v", cp)
 	return json.Marshal(&cp)
