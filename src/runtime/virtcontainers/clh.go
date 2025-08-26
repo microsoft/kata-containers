@@ -1005,6 +1005,58 @@ func (clh *cloudHypervisor) hotplugAddNetDevice(e Endpoint) error {
 	return err
 }
 
+func (clh *cloudHypervisor) hotplugAddCPUs(ctx context.Context, vcpus uint32) (interface{}, error) {
+	// Get current vCPU count
+	info, err := clh.vmInfo()
+	if err != nil {
+		clh.Logger().Errorf("Failed to get VM info for CPU hotplug: %v", err)
+		return nil, openAPIClientError(err)
+	}
+
+	currentVCPUs := uint32(info.Config.Cpus.BootVcpus)
+	newVCPUs := currentVCPUs + vcpus
+
+	// Use ResizeVCPUs to handle the actual hotplug
+	_, actualNew, err := clh.ResizeVCPUs(ctx, newVCPUs)
+	if err != nil {
+		clh.Logger().Errorf("Failed to hotplug add CPUs: %v", err)
+		return nil, err
+	}
+
+	clh.Logger().Infof("Successfully hotplug added CPUs. Before: %d, After: %d", currentVCPUs, actualNew)
+
+	// Return the number of CPUs actually added
+	return actualNew - currentVCPUs, nil
+}
+
+func (clh *cloudHypervisor) hotplugAddMemory(ctx context.Context, memdev *MemoryDevice) (interface{}, error) {
+	clh.Logger().Infof("Entering hotplugAddMemory with device: %+v", memdev)
+
+	// Get current memory size
+	info, err := clh.vmInfo()
+	if err != nil {
+		clh.Logger().Errorf("Failed to get VM info for memory hotplug: %v", err)
+		return nil, openAPIClientError(err)
+	}
+
+	currentMemMB := uint32((utils.MemUnit(info.Config.Memory.Size) * utils.Byte).ToMiB())
+	newMemMB := currentMemMB + uint32(memdev.SizeMB)
+
+	// Use ResizeMemory to handle the actual hotplug
+	// Use a default memory block size if not specified
+	memoryBlockSizeMB := uint32(128) // Default 128MB blocks
+	actualMemMB, actualMemDev, err := clh.ResizeMemory(ctx, newMemMB, memoryBlockSizeMB, memdev.Probe)
+	if err != nil {
+		clh.Logger().Errorf("Failed to hotplug add memory: %v", err)
+		return nil, err
+	}
+
+	clh.Logger().Infof("Successfully hotplug added memory. Current: %dMB, Added: %dMB", currentMemMB, actualMemMB-currentMemMB)
+
+	// Return the actual memory device that was added
+	return &actualMemDev, nil
+}
+
 func (clh *cloudHypervisor) HotplugAddDevice(ctx context.Context, devInfo interface{}, devType DeviceType) (interface{}, error) {
 	span, _ := katatrace.Trace(ctx, clh.Logger(), "HotplugAddDevice", clhTracingTags, map[string]string{"sandbox_id": clh.id})
 	defer span.End()
@@ -1026,6 +1078,12 @@ func (clh *cloudHypervisor) HotplugAddDevice(ctx context.Context, devInfo interf
 			clh.Logger().Info("Cameron debug: Successfully hotplug added network device")
 		}
 		return nil, err
+	case CpuDev:
+		vcpus := devInfo.(uint32)
+		return clh.hotplugAddCPUs(ctx, vcpus)
+	case MemoryDev:
+		memdev := devInfo.(*MemoryDevice)
+		return clh.hotplugAddMemory(ctx, memdev)
 	default:
 		return nil, fmt.Errorf("cannot hotplug device: unsupported device type '%v'", devType)
 	}
