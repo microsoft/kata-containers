@@ -1196,12 +1196,34 @@ func (clh *cloudHypervisor) StopVM(ctx context.Context, waitOnly bool) (err erro
 	return clh.terminate(ctx, waitOnly)
 }
 
+type clhGrpc struct {
+	id       string
+	state    CloudHypervisorState
+	vmconfig chclient.VmConfig
+}
+
 func (clh *cloudHypervisor) fromGrpc(ctx context.Context, hypervisorConfig *HypervisorConfig, j []byte) error {
-	return errors.New("cloudHypervisor is not supported by VM cache")
+	var cp clhGrpc
+	err := json.Unmarshal(j, &cp)
+	if err != nil {
+		return err
+	}
+	clh.id = cp.id
+	clh.config = *hypervisorConfig
+	clh.ctx = ctx
+	clh.state = cp.state
+	clh.vmconfig = cp.vmconfig
+
+	return nil
 }
 
 func (clh *cloudHypervisor) toGrpc(ctx context.Context) ([]byte, error) {
-	return nil, errors.New("cloudHypervisor is not supported by VM cache")
+	cp := clhGrpc{
+		id:       clh.id,
+		state:    clh.state,
+		vmconfig: clh.vmconfig,
+	}
+	return json.Marshal(cp)
 }
 
 func (clh *cloudHypervisor) Save() (s hv.HypervisorState) {
