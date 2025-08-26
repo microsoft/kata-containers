@@ -1345,6 +1345,24 @@ func (clh *cloudHypervisor) fromGrpc(ctx context.Context, hypervisorConfig *Hype
 	clh.state = cp.state
 	clh.vmconfig = cp.vmconfig
 
+	cfg := chclient.NewConfiguration()
+	cfg.HTTPClient = &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, path string) (net.Conn, error) {
+				addr, err := net.ResolveUnixAddr("unix", clh.state.apiSocket)
+				if err != nil {
+					return nil, err
+				}
+
+				return net.DialUnix("unix", nil, addr)
+			},
+		},
+	}
+
+	clh.APIClient = &clhClientApi{
+		ApiInternal: chclient.NewAPIClient(cfg).DefaultApi,
+	}
+
 	return nil
 }
 
