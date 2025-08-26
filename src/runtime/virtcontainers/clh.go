@@ -1374,6 +1374,7 @@ func (clh *cloudHypervisor) toGrpc(ctx context.Context) ([]byte, error) {
 		state:    clh.state,
 		vmconfig: clh.vmconfig,
 	}
+	clh.Logger().Infof("Cameron debug: toGrpc with payload: %+v", cp)
 	return json.Marshal(cp)
 }
 
