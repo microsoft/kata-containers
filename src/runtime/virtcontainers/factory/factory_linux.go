@@ -148,6 +148,8 @@ func (f *factory) GetVM(ctx context.Context, config vc.VMConfig) (*vc.VM, error)
 		return nil, err
 	}
 
+	f.log().Infof("Cameron debug: after GetBaseVM %v", vm)
+
 	// cleanup upon error
 	defer func() {
 		if err != nil {
@@ -161,17 +163,23 @@ func (f *factory) GetVM(ctx context.Context, config vc.VMConfig) (*vc.VM, error)
 		return nil, err
 	}
 
+	f.log().Infof("Cameron debug: after Resume")
+
 	// reseed RNG so that shared memory VMs do not generate same random numbers.
 	err = vm.ReseedRNG(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	f.log().Infof("Cameron debug: after ReseedRNG")
+
 	// sync guest time since we might have paused it for a long time.
 	err = vm.SyncTime(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	f.log().Infof("Cameron debug: after SyncTime")
 
 	online := false
 	baseConfig := f.base.Config().HypervisorConfig
@@ -183,6 +191,8 @@ func (f *factory) GetVM(ctx context.Context, config vc.VMConfig) (*vc.VM, error)
 		online = true
 	}
 
+	f.log().Infof("Cameron debug: after AddCPUs")
+
 	if baseConfig.MemorySize < hypervisorConfig.MemorySize {
 		err = vm.AddMemory(ctx, hypervisorConfig.MemorySize-baseConfig.MemorySize)
 		if err != nil {
@@ -191,12 +201,16 @@ func (f *factory) GetVM(ctx context.Context, config vc.VMConfig) (*vc.VM, error)
 		online = true
 	}
 
+	f.log().Infof("Cameron debug: after AddMemory")
+
 	if online {
 		err = vm.OnlineCPUMemory(ctx)
 		if err != nil {
 			return nil, err
 		}
 	}
+
+	f.log().Infof("Cameron debug: after OnlineCPUMemory")
 
 	return vm, nil
 }
