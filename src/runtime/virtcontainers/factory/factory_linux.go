@@ -79,6 +79,7 @@ func NewFactory(ctx context.Context, config Config, fetchOnly bool) (vc.Factory,
 
 func resetHypervisorConfig(config *vc.VMConfig) {
 	config.HypervisorConfig.NumVCPUsF = 0
+	config.HypervisorConfig.DefaultMaxVCPUs = 0
 	config.HypervisorConfig.MemorySize = 0
 	config.HypervisorConfig.BootToBeTemplate = false
 	config.HypervisorConfig.BootFromTemplate = false
@@ -87,6 +88,8 @@ func resetHypervisorConfig(config *vc.VMConfig) {
 	config.HypervisorConfig.SharedPath = ""
 	config.HypervisorConfig.VMStorePath = ""
 	config.HypervisorConfig.RunStorePath = ""
+	config.HypervisorConfig.SandboxName = ""
+	config.HypervisorConfig.SandboxNamespace = ""
 }
 
 // It's important that baseConfig and newConfig are passed by value!
@@ -103,10 +106,10 @@ func checkVMConfig(baseConfig, newConfig vc.VMConfig) error {
 		// Pretty print configs for comparison
 		baseJSON, _ := json.MarshalIndent(baseConfig, "", "  ")
 		newJSON, _ := json.MarshalIndent(newConfig, "", "  ")
-		
+
 		factoryLogger.WithField("baseConfig", string(baseJSON)).Info("Cameron debug: base config")
 		factoryLogger.WithField("newConfig", string(newJSON)).Info("Cameron debug: new config")
-		
+
 		return fmt.Errorf("hypervisor config does not match")
 	}
 
@@ -115,7 +118,6 @@ func checkVMConfig(baseConfig, newConfig vc.VMConfig) error {
 
 func (f *factory) checkConfig(config vc.VMConfig) error {
 	baseConfig := f.base.Config()
-
 
 	return checkVMConfig(baseConfig, config)
 }
