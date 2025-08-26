@@ -1345,6 +1345,8 @@ func (clh *cloudHypervisor) fromGrpc(ctx context.Context, hypervisorConfig *Hype
 	clh.state = cp.state
 	clh.vmconfig = cp.vmconfig
 
+	clh.Logger().Infof("Cameron debug: Configuring clh api socket with state: %+v", clh.state)
+
 	cfg := chclient.NewConfiguration()
 	cfg.HTTPClient = &http.Client{
 		Transport: &http.Transport{
