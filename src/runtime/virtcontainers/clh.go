@@ -1274,11 +1274,18 @@ func (clh *cloudHypervisor) ResumeVM(ctx context.Context) error {
 	}
 
 	cl := clh.client()
+	if cl == nil {
+		clh.Logger().WithField("function", "ResumeVM").Info("Cameron debug: client is nil")
+		return fmt.Errorf("client is nil")
+	}
+
 	_, err := cl.ResumeVM(ctx)
 	if err != nil {
+		clh.Logger().Errorf("Cameron debug: Failed to resume VM: %v", err)
 		return openAPIClientError(err)
 	}
 
+	clh.Logger().Info("Cameron debug: Successfully resumed VM")
 	return nil
 }
 
