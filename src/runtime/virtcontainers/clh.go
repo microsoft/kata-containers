@@ -113,6 +113,10 @@ type clhClient interface {
 	VmAddDiskPut(ctx context.Context, diskConfig chclient.DiskConfig) (chclient.PciDeviceInfo, *http.Response, error)
 	// Remove a device from the VM
 	VmRemoveDevicePut(ctx context.Context, vmRemoveDevice chclient.VmRemoveDevice) (*http.Response, error)
+	// Pause the VM
+	PauseVM(ctx context.Context) (*http.Response, error)
+	// Resume the VM
+	ResumeVM(ctx context.Context) (*http.Response, error)
 }
 
 type clhClientApi struct {
@@ -154,6 +158,14 @@ func (c *clhClientApi) VmAddDiskPut(ctx context.Context, diskConfig chclient.Dis
 
 func (c *clhClientApi) VmRemoveDevicePut(ctx context.Context, vmRemoveDevice chclient.VmRemoveDevice) (*http.Response, error) {
 	return c.ApiInternal.VmRemoveDevicePut(ctx).VmRemoveDevice(vmRemoveDevice).Execute()
+}
+
+func (c *clhClientApi) PauseVM(ctx context.Context) (*http.Response, error) {
+	return c.ApiInternal.PauseVM(ctx).Execute()
+}
+
+func (c *clhClientApi) ResumeVM(ctx context.Context) (*http.Response, error) {
+	return c.ApiInternal.ResumeVM(ctx).Execute()
 }
 
 // This is done in order to be able to override such a function as part of
@@ -1162,7 +1174,22 @@ func (clh *cloudHypervisor) Cleanup(ctx context.Context) error {
 }
 
 func (clh *cloudHypervisor) PauseVM(ctx context.Context) error {
+	span, _ := katatrace.Trace(ctx, clh.Logger(), "PauseVM", clhTracingTags, map[string]string{"sandbox_id": clh.id})
+	defer span.End()
+
 	clh.Logger().WithField("function", "PauseVM").Info("Pause Sandbox")
+
+	// Check if VM is already stopped
+	if atomic.LoadInt32(&clh.stopped) == 1 {
+		return fmt.Errorf("VM is not running, cannot pause")
+	}
+
+	cl := clh.client()
+	_, err := cl.PauseVM(ctx)
+	if err != nil {
+		return openAPIClientError(err)
+	}
+
 	return nil
 }
 
@@ -1172,7 +1199,22 @@ func (clh *cloudHypervisor) SaveVM() error {
 }
 
 func (clh *cloudHypervisor) ResumeVM(ctx context.Context) error {
+	span, _ := katatrace.Trace(ctx, clh.Logger(), "ResumeVM", clhTracingTags, map[string]string{"sandbox_id": clh.id})
+	defer span.End()
+
 	clh.Logger().WithField("function", "ResumeVM").Info("Resume Sandbox")
+
+	// Check if VM is already stopped
+	if atomic.LoadInt32(&clh.stopped) == 1 {
+		return fmt.Errorf("VM is not running, cannot resume")
+	}
+
+	cl := clh.client()
+	_, err := cl.ResumeVM(ctx)
+	if err != nil {
+		return openAPIClientError(err)
+	}
+
 	return nil
 }
 
