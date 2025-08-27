@@ -183,6 +183,9 @@ func NewVMFromGrpc(ctx context.Context, v *pb.GrpcVM, config VMConfig) (*VM, err
 		return nil, err
 	}
 
+	config.HypervisorConfig.VMStorePath = store.RunVMStoragePath()
+	config.HypervisorConfig.RunStorePath = store.RunStoragePath()
+
 	defer func() {
 		if err != nil {
 			virtLog.WithField("vm", v.Id).WithError(err).Error("failed to create new vm from Grpc")
