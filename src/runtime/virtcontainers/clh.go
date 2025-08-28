@@ -1888,6 +1888,7 @@ func (clh *cloudHypervisor) addNet(e Endpoint) error {
 	}
 	clh.Logger().Infof("Cameron debug: Network pair has %d file descriptors", len(netPair.TapInterface.VMFds))
 	clh.netDevicesFiles[mac] = netPair.TapInterface.VMFds
+	clh.Logger().Infof("Cameron debug: check if we got here lmao")
 
 	netRateLimiterConfig := clh.getNetRateLimiterConfig()
 
