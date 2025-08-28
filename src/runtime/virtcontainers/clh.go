@@ -1351,6 +1351,12 @@ func (clh *cloudHypervisor) fromGrpc(ctx context.Context, hypervisorConfig *Hype
 		ApiInternal: chclient.NewAPIClient(cfg).DefaultApi,
 	}
 
+	// These are normally initialized in StartVM which doesn't get called
+	// In the factory GetVM path. Must initialize these maps now to avoid
+	// nil map errors during later hotplugging steps.
+	clh.devicesIds = make(map[string]string)
+	clh.netDevicesFiles = make(map[string][]*os.File)
+
 	return nil
 }
 
