@@ -586,10 +586,13 @@ func newSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Factor
 		return nil, err
 	}
 
+	virtLog.Infof("Cameron debug: Creating network with config: %+v", sandboxConfig.NetworkConfig)
 	network, err := NewNetwork(&sandboxConfig.NetworkConfig)
 	if err != nil {
+		virtLog.WithError(err).Error("Cameron debug: Failed to create network")
 		return nil, err
 	}
+	virtLog.Infof("Cameron debug: Successfully created network: %+v", network)
 
 	s := &Sandbox{
 		id:              sandboxConfig.ID,
@@ -997,8 +1000,12 @@ func (s *Sandbox) Delete(ctx context.Context) error {
 }
 
 func (s *Sandbox) createNetwork(ctx context.Context) error {
+	s.Logger().Infof("Cameron debug: createNetwork starting with NetworkConfig: %+v", s.config.NetworkConfig)
+	s.Logger().Infof("Cameron debug: Network ID: %s, DisableNewNetwork: %v", s.config.NetworkConfig.NetworkID, s.config.NetworkConfig.DisableNewNetwork)
+
 	if s.config.NetworkConfig.DisableNewNetwork ||
 		s.config.NetworkConfig.NetworkID == "" {
+		s.Logger().Info("Cameron debug: Skipping network creation - DisableNewNetwork or empty NetworkID")
 		return nil
 	}
 
@@ -1006,9 +1013,12 @@ func (s *Sandbox) createNetwork(ctx context.Context) error {
 	// which means that the hypervisor has to support network device hotplug so that docker
 	// can use the prestart hooks to set up container netns.
 	caps := s.hypervisor.Capabilities(ctx)
+	s.Logger().Infof("Cameron debug: Hypervisor network hotplug supported: %v", caps.IsNetworkDeviceHotplugSupported())
+
 	if !caps.IsNetworkDeviceHotplugSupported() {
 		spec := s.GetPatchedOCISpec()
 		if utils.IsDockerContainer(spec) {
+			s.Logger().Error("Cameron debug: Docker container needs network device hotplug but hypervisor doesn't support it")
 			return errors.New("docker container needs network device hotplug but the configured hypervisor does not support it")
 		}
 	}
@@ -1020,38 +1030,54 @@ func (s *Sandbox) createNetwork(ctx context.Context) error {
 	// In case there is a factory, network interfaces are hotplugged
 	// after the vm is started.
 	if s.factory != nil {
+		s.Logger().Info("Cameron debug: Factory present, deferring network interface hotplug")
 		return nil
 	}
 
 	// Add all the networking endpoints.
-	if _, err := s.network.AddEndpoints(ctx, s, nil, false); err != nil {
+	s.Logger().Infof("Cameron debug: Adding endpoints to network: %+v", s.network)
+	endpoints, err := s.network.AddEndpoints(ctx, s, nil, false)
+	if err != nil {
+		s.Logger().WithError(err).Error("Cameron debug: Failed to add endpoints to network")
 		return err
 	}
+	s.Logger().Infof("Cameron debug: Successfully added %d endpoints to network", len(endpoints))
 
 	return nil
 }
 
 func (s *Sandbox) postCreatedNetwork(ctx context.Context) error {
+	s.Logger().Info("Cameron debug: postCreatedNetwork starting")
+
 	if s.factory != nil {
+		s.Logger().Info("Cameron debug: Factory present, skipping postCreatedNetwork")
 		return nil
 	}
 
 	if s.network.Endpoints() == nil {
+		s.Logger().Info("Cameron debug: No network endpoints, skipping postCreatedNetwork")
 		return nil
 	}
 
-	for _, endpoint := range s.network.Endpoints() {
+	endpointCount := len(s.network.Endpoints())
+	s.Logger().Infof("Cameron debug: Processing %d network endpoints in postCreatedNetwork", endpointCount)
+
+	for i, endpoint := range s.network.Endpoints() {
+		s.Logger().Infof("Cameron debug: Processing endpoint %d of %d, type: %v", i+1, endpointCount, endpoint.Type())
 		netPair := endpoint.NetworkPair()
 		if netPair == nil {
+			s.Logger().Infof("Cameron debug: Endpoint %d has no network pair", i+1)
 			continue
 		}
 		if netPair.VhostFds != nil {
+			s.Logger().Infof("Cameron debug: Closing %d VhostFds for endpoint %d", len(netPair.VhostFds), i+1)
 			for _, VhostFd := range netPair.VhostFds {
 				VhostFd.Close()
 			}
 		}
 	}
 
+	s.Logger().Info("Cameron debug: postCreatedNetwork completed")
 	return nil
 }
 
@@ -1059,27 +1085,40 @@ func (s *Sandbox) removeNetwork(ctx context.Context) error {
 	span, ctx := katatrace.Trace(ctx, s.Logger(), "removeNetwork", sandboxTracingTags, map[string]string{"sandbox_id": s.id})
 	defer span.End()
 
-	return s.network.RemoveEndpoints(ctx, s, nil, false)
+	s.Logger().Infof("Cameron debug: removeNetwork starting, removing endpoints from network: %+v", s.network)
+	err := s.network.RemoveEndpoints(ctx, s, nil, false)
+	if err != nil {
+		s.Logger().WithError(err).Error("Cameron debug: Failed to remove network endpoints")
+		return err
+	}
+	s.Logger().Info("Cameron debug: Successfully removed network endpoints")
+	return nil
 }
 
 func (s *Sandbox) generateNetInfo(inf *pbTypes.Interface) (NetworkInfo, error) {
+	s.Logger().Infof("Cameron debug: generateNetInfo for interface: %+v", inf)
+
 	hw, err := net.ParseMAC(inf.HwAddr)
 	if err != nil {
+		s.Logger().WithError(err).Errorf("Cameron debug: Failed to parse MAC address: %s", inf.HwAddr)
 		return NetworkInfo{}, err
 	}
+	s.Logger().Infof("Cameron debug: Parsed MAC address: %s", hw.String())
 
 	var addrs []netlink.Addr
 	for _, addr := range inf.IPAddresses {
 		netlinkAddrStr := fmt.Sprintf("%s/%s", addr.Address, addr.Mask)
+		s.Logger().Infof("Cameron debug: Parsing netlink address: %s", netlinkAddrStr)
 		netlinkAddr, err := netlink.ParseAddr(netlinkAddrStr)
 		if err != nil {
+			s.Logger().WithError(err).Errorf("Cameron debug: Failed to parse netlink address: %s", netlinkAddrStr)
 			return NetworkInfo{}, fmt.Errorf("could not parse %q: %v", netlinkAddrStr, err)
 		}
 
 		addrs = append(addrs, *netlinkAddr)
 	}
 
-	return NetworkInfo{
+	netInfo := NetworkInfo{
 		Iface: NetlinkIface{
 			LinkAttrs: netlink.LinkAttrs{
 				Name:         inf.Name,
@@ -1089,79 +1128,122 @@ func (s *Sandbox) generateNetInfo(inf *pbTypes.Interface) (NetworkInfo, error) {
 			Type: inf.Type,
 		},
 		Addrs: addrs,
-	}, nil
+	}
+
+	s.Logger().Infof("Cameron debug: Generated NetworkInfo: %+v", netInfo)
+	return netInfo, nil
 }
 
 // AddInterface adds new nic to the sandbox.
 func (s *Sandbox) AddInterface(ctx context.Context, inf *pbTypes.Interface) (*pbTypes.Interface, error) {
+	s.Logger().Infof("Cameron debug: AddInterface called with interface: %+v", inf)
+
 	netInfo, err := s.generateNetInfo(inf)
 	if err != nil {
+		s.Logger().WithError(err).Error("Cameron debug: Failed to generate network info")
 		return nil, err
 	}
 
+	s.Logger().Infof("Cameron debug: Adding endpoint with netInfo: %+v", netInfo)
 	endpoints, err := s.network.AddEndpoints(ctx, s, []NetworkInfo{netInfo}, true)
 	if err != nil {
+		s.Logger().WithError(err).Error("Cameron debug: Failed to add endpoints")
 		return nil, err
 	}
+	s.Logger().Infof("Cameron debug: Successfully added %d endpoints", len(endpoints))
 
 	defer func() {
 		if err != nil {
+			s.Logger().Info("Cameron debug: Error occurred, rolling back network interface addition")
 			eps := s.network.Endpoints()
 			// The newly added endpoint is last.
 			added_ep := eps[len(eps)-1]
+			s.Logger().Infof("Cameron debug: Removing endpoint type: %v", added_ep.Type())
 			if errDetach := s.network.RemoveEndpoints(ctx, s, []Endpoint{added_ep}, true); err != nil {
-				s.Logger().WithField("endpoint-type", added_ep.Type()).WithError(errDetach).Error("rollback hot attaching endpoint failed")
+				s.Logger().WithField("endpoint-type", added_ep.Type()).WithError(errDetach).Error("Cameron debug: rollback hot attaching endpoint failed")
 			}
 		}
 	}()
 
 	// Add network for vm
 	inf.DevicePath = endpoints[0].PciPath().String()
+	s.Logger().Infof("Cameron debug: Updating interface with device path: %s", inf.DevicePath)
 	result, err := s.agent.updateInterface(ctx, inf)
 	if err != nil {
+		s.Logger().WithError(err).Error("Cameron debug: Failed to update interface in agent")
 		return nil, err
 	}
 
 	// Update the sandbox storage
 	if err = s.Save(); err != nil {
+		s.Logger().WithError(err).Error("Cameron debug: Failed to save sandbox after adding interface")
 		return nil, err
 	}
 
+	s.Logger().Infof("Cameron debug: Successfully added interface, result: %+v", result)
 	return result, nil
 }
 
 // RemoveInterface removes a nic of the sandbox.
 func (s *Sandbox) RemoveInterface(ctx context.Context, inf *pbTypes.Interface) (*pbTypes.Interface, error) {
+	s.Logger().Infof("Cameron debug: RemoveInterface called with interface: %+v", inf)
+
 	for _, endpoint := range s.network.Endpoints() {
 		if endpoint.HardwareAddr() == inf.HwAddr {
-			s.Logger().WithField("endpoint-type", endpoint.Type()).Info("Hot detaching endpoint")
+			s.Logger().WithField("endpoint-type", endpoint.Type()).Info("Cameron debug: Hot detaching endpoint")
 			if err := s.network.RemoveEndpoints(ctx, s, []Endpoint{endpoint}, true); err != nil {
+				s.Logger().WithError(err).Error("Cameron debug: Failed to remove endpoint")
 				return inf, err
 			}
+			s.Logger().Info("Cameron debug: Successfully removed endpoint")
 
 			if err := s.Save(); err != nil {
+				s.Logger().WithError(err).Error("Cameron debug: Failed to save sandbox after removing interface")
 				return inf, err
 			}
+			s.Logger().Info("Cameron debug: Successfully saved sandbox after removing interface")
 
 			break
 		}
 	}
+	s.Logger().Info("Cameron debug: RemoveInterface completed")
 	return nil, nil
 }
 
 // ListInterfaces lists all nics and their configurations in the sandbox.
 func (s *Sandbox) ListInterfaces(ctx context.Context) ([]*pbTypes.Interface, error) {
-	return s.agent.listInterfaces(ctx)
+	s.Logger().Info("Cameron debug: ListInterfaces called")
+	interfaces, err := s.agent.listInterfaces(ctx)
+	if err != nil {
+		s.Logger().WithError(err).Error("Cameron debug: Failed to list interfaces")
+		return nil, err
+	}
+	s.Logger().Infof("Cameron debug: Successfully listed %d interfaces", len(interfaces))
+	return interfaces, nil
 }
 
 // UpdateRoutes updates the sandbox route table (e.g. for portmapping support).
 func (s *Sandbox) UpdateRoutes(ctx context.Context, routes []*pbTypes.Route) ([]*pbTypes.Route, error) {
-	return s.agent.updateRoutes(ctx, routes)
+	s.Logger().Infof("Cameron debug: UpdateRoutes called with %d routes: %+v", len(routes), routes)
+	result, err := s.agent.updateRoutes(ctx, routes)
+	if err != nil {
+		s.Logger().WithError(err).Error("Cameron debug: Failed to update routes")
+		return nil, err
+	}
+	s.Logger().Infof("Cameron debug: Successfully updated routes, result: %+v", result)
+	return result, nil
 }
 
 // ListRoutes lists all routes and their configurations in the sandbox.
 func (s *Sandbox) ListRoutes(ctx context.Context) ([]*pbTypes.Route, error) {
-	return s.agent.listRoutes(ctx)
+	s.Logger().Info("Cameron debug: ListRoutes called")
+	routes, err := s.agent.listRoutes(ctx)
+	if err != nil {
+		s.Logger().WithError(err).Error("Cameron debug: Failed to list routes")
+		return nil, err
+	}
+	s.Logger().Infof("Cameron debug: Successfully listed %d routes", len(routes))
+	return routes, nil
 }
 
 const (
@@ -1460,9 +1542,13 @@ func (s *Sandbox) startVM(ctx context.Context, prestartHookFunc func(context.Con
 	if !s.config.NetworkConfig.DisableNewNetwork &&
 		caps.IsNetworkDeviceHotplugSupported() &&
 		(s.factory != nil || prestartHookFunc != nil) {
-		if _, err := s.network.AddEndpoints(ctx, s, nil, true); err != nil {
+		s.Logger().Infof("Cameron debug: Post-VM start, adding endpoints for factory=%v, prestartHook=%v", s.factory != nil, prestartHookFunc != nil)
+		endpoints, err := s.network.AddEndpoints(ctx, s, nil, true)
+		if err != nil {
+			s.Logger().WithError(err).Error("Cameron debug: Failed to add endpoints after VM start")
 			return err
 		}
+		s.Logger().Infof("Cameron debug: Successfully added %d endpoints after VM start", len(endpoints))
 	}
 
 	s.Logger().Info("VM started")
