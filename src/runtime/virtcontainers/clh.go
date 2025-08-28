@@ -193,6 +193,13 @@ var vmAddNetPutRequest = func(clh *cloudHypervisor) error {
 		clh.Logger().Infof("Cameron debug: Adding the net device to the Cloud Hypervisor VM configuration: %+v", netDevice)
 		clh.Logger().Infof("Adding the net device to the Cloud Hypervisor VM configuration: %+v", netDevice)
 
+		netDeviceJSON, err := json.MarshalIndent(netDevice, "", "  ")
+		if err != nil {
+			clh.Logger().WithError(err).Warn("Cameron debug: failed to marshal netDevice for debug logging")
+		} else {
+			clh.Logger().Infof("Cameron debug: netDevice JSON:\n%s", string(netDeviceJSON))
+		}
+
 		netDeviceAsJson, err := json.Marshal(netDevice)
 		if err != nil {
 			return err
@@ -242,6 +249,11 @@ var vmAddNetPutRequest = func(clh *cloudHypervisor) error {
 		resp.Body = io.NopCloser(bytes.NewBuffer(respBody))
 
 		if resp.StatusCode != 200 && resp.StatusCode != 204 {
+			clh.Logger().WithFields(log.Fields{
+				"status":   resp.StatusCode,
+				"response": string(respBody),
+			}).Errorf("Cameron debug: vmAddNetPut failed for netDevice")
+
 			clh.Logger().Errorf("Cameron debug: vmAddNetPut failed with error '%d'. Response: %+v", resp.StatusCode, resp)
 			clh.Logger().Errorf("vmAddNetPut failed with error '%d'. Response: %+v", resp.StatusCode, resp)
 			return fmt.Errorf("Failed to add the network device '%+v' to Cloud Hypervisor: %v", netDevice, resp.StatusCode)
