@@ -672,6 +672,15 @@ func getLinkForEndpoint(endpoint Endpoint, netHandle *netlink.Handle) (netlink.L
 func getLinkByName(netHandle *netlink.Handle, name string, expectedLink netlink.Link) (netlink.Link, error) {
 	link, err := netHandle.LinkByName(name)
 	if err != nil {
+		// Debug: Show the exact error and available links
+		links, listErr := netHandle.LinkList()
+		var availableLinks []string
+		if listErr == nil {
+			for _, l := range links {
+				availableLinks = append(availableLinks, l.Attrs().Name)
+			}
+		}
+		networkLogger().WithField("requested_name", name).WithField("available_links", availableLinks).WithError(err).Error("getLinkByName: failed to find network interface")
 		return nil, fmt.Errorf("LinkByName() failed for %s name %s: %s", expectedLink.Type(), name, err)
 	}
 
@@ -941,11 +950,25 @@ func setupTCFiltering(ctx context.Context, endpoint Endpoint, queues int, disabl
 	span, _ := networkTrace(ctx, "setupTCFiltering", endpoint)
 	defer span.End()
 
+	// Debug: Check current namespace
+	currentNS, _ := os.Readlink("/proc/self/ns/net")
+	networkLogger().WithField("current_ns", currentNS).WithField("endpoint_name", endpoint.NetworkPair().VirtIface.Name).Info("Cameron debug setupTCFiltering: starting in namespace")
+
 	netHandle, err := netlink.NewHandle()
 	if err != nil {
 		return err
 	}
 	defer netHandle.Close()
+
+	// Debug: List all links visible in current namespace
+	links, err := netHandle.LinkList()
+	if err == nil {
+		var linkNames []string
+		for _, link := range links {
+			linkNames = append(linkNames, link.Attrs().Name)
+		}
+		networkLogger().WithField("visible_links", linkNames).WithField("looking_for", endpoint.NetworkPair().VirtIface.Name).Info("Cameron debug setupTCFiltering: visible network interfaces")
+	}
 
 	netPair := endpoint.NetworkPair()
 
