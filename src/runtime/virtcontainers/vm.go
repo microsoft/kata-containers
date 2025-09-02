@@ -376,6 +376,21 @@ func (v *VM) assignSandbox(s *Sandbox) error {
 	s.hypervisor = v.hypervisor
 	s.config.HypervisorConfig.VMid = v.id
 
+	// Update hypervisor network configuration for factory VMs
+	// Factory VMs are created with a template network configuration, but need
+	// to be updated with the current sandbox's network configuration
+	if s.network != nil {
+		s.Logger().WithField("network_id", s.network.NetworkID()).Info("Cameron debug: updating hypervisor network configuration from factory VM")
+		
+		// For Cloud Hypervisor, update the network field directly
+		if clh, ok := s.hypervisor.(*cloudHypervisor); ok {
+			clh.network = s.network
+			s.Logger().WithField("network_id", s.network.NetworkID()).Info("Cameron debug: updated Cloud Hypervisor network configuration")
+		}
+	} else {
+		s.Logger().Info("Cameron debug: no network configuration to update")
+	}
+
 	s.Logger().Infof("Cameron debug: vm %s assigned to sandbox %s", v.id, s.id)
 
 	return nil

@@ -536,6 +536,14 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.ctx = ctx
 	clh.network = network
 
+	// Debug logging for network configuration
+	if network != nil {
+		networkID := network.NetworkID()
+		clh.Logger().WithField("network_not_nil", true).WithField("network_id", networkID).Info("Cameron debug CreateVM: network configuration")
+	} else {
+		clh.Logger().Info("Cameron debug CreateVM: network is nil")
+	}
+
 	span, newCtx := katatrace.Trace(clh.ctx, clh.Logger(), "CreateVM", clhTracingTags, map[string]string{"sandbox_id": clh.id})
 	clh.ctx = newCtx
 	defer span.End()
@@ -1666,6 +1674,7 @@ func (clh *cloudHypervisor) launchClh() error {
 	var netnsPath string
 	if clh.network != nil {
 		netnsPath = clh.network.NetworkID()
+		clh.Logger().WithField("network_not_nil", true).WithField("network_id", netnsPath).Info("Cameron debug launchClh: checking network configuration")
 		if netnsPath != "" {
 			// Get current namespace for logging
 			currentNS, err := ns.GetCurrentNS()
@@ -1675,7 +1684,11 @@ func (clh *cloudHypervisor) launchClh() error {
 				defer currentNS.Close()
 				clh.Logger().WithField("current_ns", currentNS.Path()).WithField("target_ns", netnsPath).Info("Cameron debug launchClh: setting network namespace for Cloud Hypervisor process")
 			}
+		} else {
+			clh.Logger().Info("Cameron debug launchClh: network is set but NetworkID is empty")
 		}
+	} else {
+		clh.Logger().Info("Cameron debug launchClh: network is nil")
 	}
 
 	cmdHypervisor := exec.Command(clhPath, args...)
