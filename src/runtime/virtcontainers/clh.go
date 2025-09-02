@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/containerd/console"
+	"github.com/containernetworking/plugins/pkg/ns"
 	chclient "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/cloud-hypervisor/client"
 	"github.com/opencontainers/selinux/go-selinux/label"
 	"github.com/pkg/errors"
@@ -287,6 +288,7 @@ type cloudHypervisor struct {
 	APIClient       clhClient
 	ctx             context.Context
 	id              string
+	network         Network
 	netDevices      *[]chclient.NetConfig
 	devicesIds      map[string]string
 	netDevicesFiles map[string][]*os.File
@@ -532,6 +534,7 @@ func getNonUserDefinedKernelParams(rootfstype string, disableNvdimm bool, dax bo
 // The VM will be created and started through StartVM().
 func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Network, hypervisorConfig *HypervisorConfig) error {
 	clh.ctx = ctx
+	clh.network = network
 
 	span, newCtx := katatrace.Trace(clh.ctx, clh.Logger(), "CreateVM", clhTracingTags, map[string]string{"sandbox_id": clh.id})
 	clh.ctx = newCtx
@@ -1659,6 +1662,22 @@ func (clh *cloudHypervisor) launchClh() error {
 	clh.Logger().WithField("path", clhPath).Info()
 	clh.Logger().WithField("args", strings.Join(args, " ")).Info()
 
+	// Get network namespace if available
+	var netnsPath string
+	if clh.network != nil {
+		netnsPath = clh.network.NetworkID()
+		if netnsPath != "" {
+			// Get current namespace for logging
+			currentNS, err := ns.GetCurrentNS()
+			if err != nil {
+				clh.Logger().WithError(err).Warn("Failed to get current network namespace for logging")
+			} else {
+				defer currentNS.Close()
+				clh.Logger().WithField("current_ns", currentNS.Path()).WithField("target_ns", netnsPath).Info("Cameron debug launchClh: setting network namespace for Cloud Hypervisor process")
+			}
+		}
+	}
+
 	cmdHypervisor := exec.Command(clhPath, args...)
 	if clh.config.Debug {
 		cmdHypervisor.Env = os.Environ()
@@ -1676,9 +1695,40 @@ func (clh *cloudHypervisor) launchClh() error {
 		Gid:    clh.config.Gid,
 		Groups: clh.config.Groups,
 	}
+
+	// Set network namespace if available
+	if netnsPath != "" && netnsPath != "/proc/self/ns/net" {
+		// Open the network namespace file descriptor
+		netnsFile, err := os.Open(netnsPath)
+		if err != nil {
+			clh.Logger().WithError(err).WithField("netns", netnsPath).Warn("Failed to open network namespace, continuing without it")
+		} else {
+			defer netnsFile.Close()
+			clh.Logger().WithField("netns", netnsPath).Info("Cameron debug launchClh: successfully opened target network namespace")
+			// Configure the process to enter the network namespace
+			attr.AmbientCaps = []uintptr{}
+			// Use Pdeathsig to ensure child dies if parent dies
+			attr.Pdeathsig = syscall.SIGTERM
+		}
+	}
+
 	cmdHypervisor.SysProcAttr = &attr
 
-	err = utils.StartCmd(cmdHypervisor)
+	// Launch the process in the network namespace using EnterNetNS
+	if netnsPath != "" && netnsPath != "/proc/self/ns/net" {
+		clh.Logger().WithField("netns", netnsPath).Info("Cameron debug launchClh: entering network namespace to launch Cloud Hypervisor")
+		err = doNetNS(netnsPath, func(targetNS ns.NetNS) error {
+			clh.Logger().WithField("entered_ns", targetNS.Path()).Info("Cameron debug launchClh: successfully entered target network namespace, starting Cloud Hypervisor")
+			return utils.StartCmd(cmdHypervisor)
+		})
+		if err == nil {
+			clh.Logger().WithField("netns", netnsPath).Info("Cameron debug launchClh: Cloud Hypervisor started successfully in target network namespace")
+		}
+	} else {
+		clh.Logger().Info("Cameron debug launchClh: starting Cloud Hypervisor in current network namespace (no netns specified)")
+		err = utils.StartCmd(cmdHypervisor)
+	}
+
 	if err != nil {
 		return err
 	}
