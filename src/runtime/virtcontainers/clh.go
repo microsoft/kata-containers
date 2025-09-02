@@ -35,6 +35,7 @@ import (
 	"github.com/opencontainers/selinux/go-selinux/label"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/config"
 	hv "github.com/kata-containers/kata-containers/src/runtime/pkg/hypervisors"
@@ -1001,7 +1002,25 @@ func (clh *cloudHypervisor) hotPlugVFIODevice(device *config.VFIODev) error {
 func (clh *cloudHypervisor) hotplugAddNetDevice(e Endpoint) error {
 	clh.Logger().Infof("Cameron debug: Entering hotplugAddNetDevice for endpoint: %+v", e)
 
-	err := clh.addNet(e)
+	// Debug: Check current namespace and available links
+	currentNS, _ := os.Readlink("/proc/self/ns/net")
+	clh.Logger().WithField("current_ns", currentNS).WithField("endpoint_name", e.NetworkPair().VirtIface.Name).Info("Cameron debug hotplugAddNetDevice: checking namespace")
+
+	// Debug: List all links visible in current namespace
+	netHandle, err := netlink.NewHandle()
+	if err == nil {
+		links, err := netHandle.LinkList()
+		if err == nil {
+			var linkNames []string
+			for _, link := range links {
+				linkNames = append(linkNames, fmt.Sprintf("%s(%s)", link.Attrs().Name, link.Attrs().HardwareAddr.String()))
+			}
+			clh.Logger().WithField("visible_links", linkNames).WithField("looking_for", e.NetworkPair().VirtIface.Name).Info("Cameron debug hotplugAddNetDevice: visible network interfaces")
+		}
+		netHandle.Close()
+	}
+
+	err = clh.addNet(e)
 	if err != nil {
 		clh.Logger().Errorf("Cameron debug: Failed to add network endpoint in hotplugAddNetDevice: %v", err)
 		return err

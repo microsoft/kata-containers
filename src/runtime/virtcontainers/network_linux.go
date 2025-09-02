@@ -653,6 +653,8 @@ func createLink(netHandle *netlink.Handle, name string, expectedLink netlink.Lin
 func getLinkForEndpoint(endpoint Endpoint, netHandle *netlink.Handle) (netlink.Link, error) {
 	var link netlink.Link
 
+	networkLogger().WithField("endpoint_type", endpoint.Type()).WithField("interface_name", endpoint.NetworkPair().VirtIface.Name).WithField("expected_mac", endpoint.NetworkPair().VirtIface.HardAddr).Info("Cameron debug getLinkForEndpoint: called")
+
 	switch ep := endpoint.(type) {
 	case *VethEndpoint:
 		link = &netlink.Veth{}
@@ -666,10 +668,13 @@ func getLinkForEndpoint(endpoint Endpoint, netHandle *netlink.Handle) (netlink.L
 		return nil, fmt.Errorf("Unexpected endpointType %s", ep.Type())
 	}
 
+	networkLogger().WithField("expected_link_type", link.Type()).WithField("interface_name", endpoint.NetworkPair().VirtIface.Name).Info("Cameron debug getLinkForEndpoint: about to call getLinkByName")
 	return getLinkByName(netHandle, endpoint.NetworkPair().VirtIface.Name, link)
 }
 
 func getLinkByName(netHandle *netlink.Handle, name string, expectedLink netlink.Link) (netlink.Link, error) {
+	networkLogger().WithField("requested_name", name).WithField("expected_type", expectedLink.Type()).Info("Cameron debug getLinkByName: starting")
+
 	link, err := netHandle.LinkByName(name)
 	if err != nil {
 		// Debug: Show the exact error and available links
@@ -680,9 +685,11 @@ func getLinkByName(netHandle *netlink.Handle, name string, expectedLink netlink.
 				availableLinks = append(availableLinks, l.Attrs().Name)
 			}
 		}
-		networkLogger().WithField("requested_name", name).WithField("available_links", availableLinks).WithError(err).Error("getLinkByName: failed to find network interface")
+		networkLogger().WithField("requested_name", name).WithField("available_links", availableLinks).WithError(err).Error("Cameron debug getLinkByName: failed to find network interface")
 		return nil, fmt.Errorf("LinkByName() failed for %s name %s: %s", expectedLink.Type(), name, err)
 	}
+
+	networkLogger().WithField("found_name", link.Attrs().Name).WithField("found_type", link.Type()).WithField("expected_type", expectedLink.Type()).WithField("found_mac", link.Attrs().HardwareAddr.String()).Info("Cameron debug getLinkByName: found link, checking type")
 
 	switch expectedLink.Type() {
 	case (&netlink.Tuntap{}).Type():
@@ -991,6 +998,7 @@ func setupTCFiltering(ctx context.Context, endpoint Endpoint, queues int, disabl
 
 	link, err = getLinkForEndpoint(endpoint, netHandle)
 	if err != nil {
+		networkLogger().WithField("endpoint_name", endpoint.NetworkPair().VirtIface.Name).WithError(err).Error("Cameron debug setupTCFiltering: getLinkForEndpoint failed")
 		return err
 	}
 
