@@ -59,6 +59,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building dm-verity protected image based on rootfs"
 	pushd tools/osbuilder
 	sudo -E PATH=$PATH make DISTRO=cbl-mariner MEASURED_ROOTFS=yes DM_VERITY_FORMAT=kernelinit IMAGE_SIZE_ALIGNMENT_MB=2 image
+	sudo -E PATH=$PATH make DISTRO=cbl-mariner MEASURED_ROOTFS=yes DM_VERITY_FORMAT=kernelinit IMAGE_SIZE_ALIGNMENT_MB=2 initrd
 	popd
 
 	echo "Building IGVM and UVM measurement files"
@@ -70,6 +71,7 @@ else
 	echo "Building image based on rootfs"
 	pushd tools/osbuilder
 	sudo -E PATH=$PATH make DISTRO=cbl-mariner IMAGE_SIZE_ALIGNMENT_MB=2 image
+	sudo -E PATH=$PATH make DISTRO=cbl-mariner initrd
 	popd
 fi
 

@@ -36,6 +36,7 @@ if [ "${CONF_PODS}" == "yes" ]; then
 fi
 
 cp -a --backup=numbered "${IMG_FILE_NAME}" "${UVM_PATH}"
+cp -a --backup=numbered "${INITRD_FILE_NAME}" "${UVM_PATH}"
 
 popd
 
