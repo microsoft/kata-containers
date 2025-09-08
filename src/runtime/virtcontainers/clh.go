@@ -222,11 +222,11 @@ var vmAddNetPutRequest = func(clh *cloudHypervisor) error {
 			return err
 		}
 
-		files := clh.netDevicesFiles[*netDevice.Mac]
+		// files := clh.netDevicesFiles[*netDevice.Mac]
 		var fds []int
-		for _, f := range files {
-			fds = append(fds, int(f.Fd()))
-		}
+		// for _, f := range files {
+		// 	fds = append(fds, int(f.Fd()))
+		// }
 		oob := syscall.UnixRights(fds...)
 		payloadn, oobn, err := conn.WriteMsgUnix([]byte(payload), oob, nil)
 		if err != nil {
