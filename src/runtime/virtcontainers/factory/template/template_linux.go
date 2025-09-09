@@ -138,6 +138,8 @@ func (t *template) createTemplateVM(ctx context.Context) error {
 	config.HypervisorConfig.MemoryPath = t.statePath + "/memory"
 	config.HypervisorConfig.DevicesStatePath = t.statePath + "/state"
 
+	// TODO find actual source of this 128MB default
+	config.HypervisorConfig.MemorySize = 256 // Cameron debug: set to 256MB for testing
 	t.Logger().Infof("Cameron debug: createTemplateVM config.HypervisorConfig.MemorySize: %+v", config.HypervisorConfig.MemorySize)
 	vm, err := vc.NewVM(ctx, config)
 	if err != nil {
