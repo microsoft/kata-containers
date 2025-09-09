@@ -1180,6 +1180,11 @@ type consoleWatcher struct {
 	consoleURL string
 }
 
+// consoleWatched returns true if the watcher is already watching a console.
+func (cw *consoleWatcher) consoleWatched() bool {
+	return cw.conn != nil || cw.ptyConsole != nil
+}
+
 func newConsoleWatcher(ctx context.Context, s *Sandbox) (*consoleWatcher, error) {
 	var (
 		err error
@@ -1244,22 +1249,53 @@ func (cw *consoleWatcher) start(s *Sandbox) (err error) {
 	return nil
 }
 
-// Check if the console watcher has already watched the vm console.
-func (cw *consoleWatcher) consoleWatched() bool {
-	return cw.conn != nil || cw.ptyConsole != nil
-}
-
-// stop the console watcher.
-func (cw *consoleWatcher) stop() {
-	if cw.conn != nil {
-		cw.conn.Close()
-		cw.conn = nil
+// startStandalone starts the console watcher without a Sandbox, using virtLog for logging.
+func (cw *consoleWatcher) startStandalone() error {
+	if cw.consoleWatched() {
+		return fmt.Errorf("console watcher has already watched (standalone)")
 	}
 
-	if cw.ptyConsole != nil {
-		cw.ptyConsole.Close()
-		cw.ptyConsole = nil
+	var scanner *bufio.Scanner
+
+	switch cw.proto {
+	case consoleProtoUnix:
+		var err error
+		cw.conn, err = net.Dial("unix", cw.consoleURL)
+		if err != nil {
+			return err
+		}
+		scanner = bufio.NewScanner(cw.conn)
+	case consoleProtoPty:
+		// read-only
+		cw.ptyConsole, _ = os.Open(cw.consoleURL)
+		scanner = bufio.NewScanner(cw.ptyConsole)
+	default:
+		return fmt.Errorf("unknown console proto %s", cw.proto)
 	}
+
+	go func() {
+		for scanner.Scan() {
+			text := scanner.Text()
+			if text != "" {
+				virtLog.WithFields(logrus.Fields{
+					"console-protocol": cw.proto,
+					"console-url":      cw.consoleURL,
+					"vmconsole":        text,
+				}).Debug("reading guest console (standalone)")
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			virtLog.WithError(err).WithFields(logrus.Fields{
+				"console-protocol": cw.proto,
+				"console-url":      cw.consoleURL,
+			}).Error("Failed to read guest console logs (standalone)")
+		} else {
+			virtLog.Info("console watcher quits (standalone)")
+		}
+	}()
+
+	return nil
 }
 
 func (s *Sandbox) addSwap(ctx context.Context, swapID string, size int64) (*config.BlockDrive, error) {
@@ -1467,7 +1503,6 @@ func (s *Sandbox) startVM(ctx context.Context, prestartHookFunc func(context.Con
 	if s.cw != nil {
 		s.Logger().Debug("console watcher starts")
 		if err := s.cw.start(s); err != nil {
-			s.cw.stop()
 			return err
 		}
 	}
@@ -1952,8 +1987,7 @@ func (s *Sandbox) Stop(ctx context.Context, force bool) error {
 
 	// shutdown console watcher if exists
 	if s.cw != nil {
-		s.Logger().Debug("stop the console watcher")
-		s.cw.stop()
+		s.Logger().Debug("stop the console watcher (noop, no stop method)")
 	}
 
 	if err := s.setSandboxState(types.StateStopped); err != nil {

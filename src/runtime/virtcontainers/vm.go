@@ -159,6 +159,31 @@ func NewVM(ctx context.Context, config VMConfig) (*VM, error) {
 	}
 	virtLog.Info("Cameron debug: NewVM after StartVM")
 
+	// Set up console watcher for the hypervisor (factory/template path)
+	if hypervisor != nil {
+		idStr := id
+		proto, consoleURL, cerr := hypervisor.GetVMConsole(ctx, idStr)
+		if cerr != nil {
+			virtLog.WithError(cerr).Warn("Cameron debug: NewVM GetVMConsole failed")
+		} else {
+			var cw *consoleWatcher
+			if proto == consoleProtoUnix {
+				cw = &consoleWatcher{conn: nil, proto: proto, consoleURL: consoleURL}
+			} else if proto == consoleProtoPty {
+				cw = &consoleWatcher{ptyConsole: nil, proto: proto, consoleURL: consoleURL}
+			}
+			if cw != nil {
+				go func() {
+					if err := cw.startStandalone(); err != nil {
+						virtLog.WithError(err).Warn("Cameron debug: NewVM consoleWatcher start failed")
+					} else {
+						virtLog.Info("Cameron debug: NewVM consoleWatcher started")
+					}
+				}()
+			}
+		}
+	}
+
 	defer func() {
 		if err != nil {
 			virtLog.WithField("vm", id).WithError(err).Info("Cameron debug: clean up vm")
