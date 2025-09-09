@@ -151,14 +151,6 @@ func NewVM(ctx context.Context, config VMConfig) (*VM, error) {
 	}
 	virtLog.Info("Cameron debug: NewVM after agent.setAgentURL")
 
-	// 3. boot up guest vm
-	virtLog.Info("Cameron debug: NewVM before StartVM")
-	if err = hypervisor.StartVM(ctx, VmStartTimeout); err != nil {
-		virtLog.WithError(err).Error("Cameron debug: NewVM StartVM failed")
-		return nil, err
-	}
-	virtLog.Info("Cameron debug: NewVM after StartVM")
-
 	// Set up console watcher for the hypervisor (factory/template path)
 	if hypervisor != nil {
 		idStr := id
@@ -183,6 +175,14 @@ func NewVM(ctx context.Context, config VMConfig) (*VM, error) {
 			}
 		}
 	}
+
+	// 3. boot up guest vm
+	virtLog.Info("Cameron debug: NewVM before StartVM")
+	if err = hypervisor.StartVM(ctx, VmStartTimeout); err != nil {
+		virtLog.WithError(err).Error("Cameron debug: NewVM StartVM failed")
+		return nil, err
+	}
+	virtLog.Info("Cameron debug: NewVM after StartVM")
 
 	defer func() {
 		if err != nil {
