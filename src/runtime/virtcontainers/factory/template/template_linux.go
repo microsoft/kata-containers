@@ -30,39 +30,50 @@ var templateWaitForAgent = 2 * time.Second
 // TODO: save template metadata and fetch from storage.
 func Fetch(config vc.VMConfig, templatePath string) (base.FactoryBase, error) {
 	t := &template{templatePath, config}
+	t.Logger().Info("Cameron debug: Fetch called")
 
 	err := t.checkTemplateVM()
 	if err != nil {
+		t.Logger().WithError(err).Error("Cameron debug: Fetch checkTemplateVM failed")
 		return nil, err
 	}
 
+	t.Logger().Info("Cameron debug: Fetch returning template")
 	return t, nil
 }
 
 // New creates a new VM template factory.
 func New(ctx context.Context, config vc.VMConfig, templatePath string) (base.FactoryBase, error) {
 	t := &template{templatePath, config}
+	t.Logger().Info("Cameron debug: New called")
 
 	err := t.checkTemplateVM()
 	if err == nil {
+		t.Logger().Error("Cameron debug: New found existing template")
 		return nil, fmt.Errorf("There is already a VM template in %s", templatePath)
 	}
 
+	t.Logger().Info("Cameron debug: New preparing template files")
 	err = t.prepareTemplateFiles()
 	if err != nil {
+		t.Logger().WithError(err).Error("Cameron debug: New prepareTemplateFiles failed")
 		return nil, err
 	}
 	defer func() {
 		if err != nil {
+			t.Logger().WithError(err).Error("Cameron debug: New defer close on error")
 			t.close()
 		}
 	}()
 
+	t.Logger().Info("Cameron debug: New creating template VM")
 	err = t.createTemplateVM(ctx)
 	if err != nil {
+		t.Logger().WithError(err).Error("Cameron debug: New createTemplateVM failed")
 		return nil, err
 	}
 
+	t.Logger().Info("Cameron debug: New returning template")
 	return t, nil
 }
 
@@ -119,6 +130,7 @@ func (t *template) prepareTemplateFiles() error {
 }
 
 func (t *template) createTemplateVM(ctx context.Context) error {
+	t.Logger().Info("Cameron debug: createTemplateVM called")
 	// create the template vm
 	config := t.config
 	config.HypervisorConfig.BootToBeTemplate = true
@@ -128,11 +140,13 @@ func (t *template) createTemplateVM(ctx context.Context) error {
 
 	vm, err := vc.NewVM(ctx, config)
 	if err != nil {
+		t.Logger().WithError(err).Error("Cameron debug: createTemplateVM NewVM failed")
 		return err
 	}
 	defer vm.Stop(ctx)
 
 	if err = vm.Disconnect(ctx); err != nil {
+		t.Logger().WithError(err).Error("Cameron debug: createTemplateVM Disconnect failed")
 		return err
 	}
 
@@ -146,13 +160,16 @@ func (t *template) createTemplateVM(ctx context.Context) error {
 	time.Sleep(templateWaitForAgent)
 
 	if err = vm.Pause(ctx); err != nil {
+		t.Logger().WithError(err).Error("Cameron debug: createTemplateVM Pause failed")
 		return err
 	}
 
 	if err = vm.Save(); err != nil {
+		t.Logger().WithError(err).Error("Cameron debug: createTemplateVM Save failed")
 		return err
 	}
 
+	t.Logger().Info("Cameron debug: createTemplateVM success")
 	return nil
 }
 
