@@ -521,6 +521,8 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 		return err
 	}
 
+	clh.Logger().Infof("Cameron debug: CreateVM with memory size %d MB", hypervisorConfig.MemorySize)
+
 	clh.id = id
 	clh.state.state = clhNotReady
 	clh.devicesIds = make(map[string]string)
@@ -547,6 +549,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Create the VM config via the constructor to ensure default values are properly assigned
 	clh.vmconfig = *chclient.NewVmConfig(*chclient.NewPayloadConfig())
 
+	clh.Logger().Infof("Cameron debug: CreateVM with vmconfig memory size %d MB", clh.vmconfig.Memory.Size)
 	// Make sure the kernel path is valid
 	kernelPath, err := clh.config.KernelAssetPath()
 	if err != nil {
@@ -569,6 +572,8 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 	// Create the VM memory config via the constructor to ensure default values are properly assigned
 	clh.vmconfig.Memory = chclient.NewMemoryConfig(int64((utils.MemUnit(clh.config.MemorySize) * utils.MiB).ToBytes()))
+	clh.Logger().Infof("Cameron debug: CreateVM with vmconfig memory size %d MB after NewMemoryConfig", clh.vmconfig.Memory.Size)
+
 	// Memory config shared is to be enabled when using vhost_user backends, ex. virtio-fs
 	// or when using HugePages.
 	// If such features are disabled, turn off shared memory config.
