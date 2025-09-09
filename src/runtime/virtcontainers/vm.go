@@ -85,26 +85,32 @@ func GrpcToVMConfig(j *pb.GrpcVMConfig) (*VMConfig, error) {
 // NewVM creates a new VM based on provided VMConfig.
 func NewVM(ctx context.Context, config VMConfig) (*VM, error) {
 	// 1. setup hypervisor
+	virtLog.Info("Cameron debug: NewVM called")
 	hypervisor, err := NewHypervisor(config.HypervisorType)
 	if err != nil {
+		virtLog.WithError(err).Error("Cameron debug: NewVM NewHypervisor failed")
 		return nil, err
 	}
 
+	virtLog.Info("Cameron debug: NewVM after NewHypervisor")
 	network, err := NewNetwork()
 	if err != nil {
+		virtLog.WithError(err).Error("Cameron debug: NewVM NewNetwork failed")
 		return nil, err
 	}
 
+	virtLog.Info("Cameron debug: NewVM after NewNetwork")
 	if err = config.Valid(); err != nil {
+		virtLog.WithError(err).Error("Cameron debug: NewVM config.Valid failed")
 		return nil, err
 	}
 
 	id := uuid.Generate().String()
-
-	virtLog.WithField("vm", id).WithField("config", config).Info("create new vm")
+	virtLog.WithField("vm", id).WithField("config", config).Info("Cameron debug: create new vm")
 
 	store, err := persist.GetDriver()
 	if err != nil {
+		virtLog.WithError(err).Error("Cameron debug: NewVM persist.GetDriver failed")
 		return nil, err
 	}
 
@@ -113,38 +119,49 @@ func NewVM(ctx context.Context, config VMConfig) (*VM, error) {
 
 	defer func() {
 		if err != nil {
-			virtLog.WithField("vm", id).WithError(err).Error("failed to create new vm")
-			virtLog.WithField("vm", id).Errorf("Deleting store for %s", id)
+			virtLog.WithField("vm", id).WithError(err).Error("Cameron debug: failed to create new vm")
+			virtLog.WithField("vm", id).Errorf("Cameron debug: Deleting store for %s", id)
 			store.Destroy(id)
 		}
 	}()
 
+	virtLog.Info("Cameron debug: NewVM before CreateVM")
 	if err = hypervisor.CreateVM(ctx, id, network, &config.HypervisorConfig); err != nil {
+		virtLog.WithError(err).Error("Cameron debug: NewVM CreateVM failed")
 		return nil, err
 	}
+	virtLog.Info("Cameron debug: NewVM after CreateVM")
 
 	// 2. setup agent
 	newAagentFunc := getNewAgentFunc(ctx)
 	agent := newAagentFunc()
 
 	vmSharePath := buildVMSharePath(id, store.RunVMStoragePath())
+	virtLog.Info("Cameron debug: NewVM before agent.configure")
 	err = agent.configure(ctx, hypervisor, id, vmSharePath, config.AgentConfig)
 	if err != nil {
+		virtLog.WithError(err).Error("Cameron debug: NewVM agent.configure failed")
 		return nil, err
 	}
+	virtLog.Info("Cameron debug: NewVM after agent.configure")
 	err = agent.setAgentURL()
 	if err != nil {
+		virtLog.WithError(err).Error("Cameron debug: NewVM agent.setAgentURL failed")
 		return nil, err
 	}
+	virtLog.Info("Cameron debug: NewVM after agent.setAgentURL")
 
 	// 3. boot up guest vm
+	virtLog.Info("Cameron debug: NewVM before StartVM")
 	if err = hypervisor.StartVM(ctx, VmStartTimeout); err != nil {
+		virtLog.WithError(err).Error("Cameron debug: NewVM StartVM failed")
 		return nil, err
 	}
+	virtLog.Info("Cameron debug: NewVM after StartVM")
 
 	defer func() {
 		if err != nil {
-			virtLog.WithField("vm", id).WithError(err).Info("clean up vm")
+			virtLog.WithField("vm", id).WithError(err).Info("Cameron debug: clean up vm")
 			hypervisor.StopVM(ctx, false)
 		}
 	}()
@@ -152,13 +169,15 @@ func NewVM(ctx context.Context, config VMConfig) (*VM, error) {
 	// 4. Check agent aliveness
 	// VMs booted from template are paused, do not Check
 	if !config.HypervisorConfig.BootFromTemplate {
-		virtLog.WithField("vm", id).Info("Check agent status")
+		virtLog.WithField("vm", id).Info("Cameron debug: Check agent status")
 		err = agent.check(ctx)
 		if err != nil {
+			virtLog.WithError(err).Error("Cameron debug: NewVM agent.check failed")
 			return nil, err
 		}
 	}
 
+	virtLog.WithField("vm", id).Info("Cameron debug: NewVM success")
 	return &VM{
 		id:         id,
 		hypervisor: hypervisor,
