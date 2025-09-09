@@ -549,7 +549,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Create the VM config via the constructor to ensure default values are properly assigned
 	clh.vmconfig = *chclient.NewVmConfig(*chclient.NewPayloadConfig())
 
-	clh.Logger().Infof("Cameron debug: CreateVM with vmconfig memory size %d MB", clh.vmconfig.Memory.Size)
+	clh.Logger().Infof("Cameron debug: CreateVM with vmconfig memory %+v", clh.vmconfig.Memory)
 	// Make sure the kernel path is valid
 	kernelPath, err := clh.config.KernelAssetPath()
 	if err != nil {
