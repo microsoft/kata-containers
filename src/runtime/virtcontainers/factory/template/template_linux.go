@@ -20,16 +20,17 @@ import (
 )
 
 type template struct {
-	statePath string
-	config    vc.VMConfig
+	statePath   string
+	config      vc.VMConfig
+	useSnapshot bool
 }
 
 var templateWaitForAgent = 2 * time.Second
 
 // Fetch finds and returns a pre-built template factory.
 // TODO: save template metadata and fetch from storage.
-func Fetch(config vc.VMConfig, templatePath string) (base.FactoryBase, error) {
-	t := &template{templatePath, config}
+func Fetch(config vc.VMConfig, templatePath string, useSnapshot bool) (base.FactoryBase, error) {
+	t := &template{templatePath, config, useSnapshot}
 	t.Logger().Info("Cameron debug: Fetch called")
 
 	err := t.checkTemplateVM()
@@ -43,8 +44,8 @@ func Fetch(config vc.VMConfig, templatePath string) (base.FactoryBase, error) {
 }
 
 // New creates a new VM template factory.
-func New(ctx context.Context, config vc.VMConfig, templatePath string) (base.FactoryBase, error) {
-	t := &template{templatePath, config}
+func New(ctx context.Context, config vc.VMConfig, templatePath string, useSnapshot bool) (base.FactoryBase, error) {
+	t := &template{templatePath, config, useSnapshot}
 	t.Logger().Info("Cameron debug: New called")
 
 	err := t.checkTemplateVM()
@@ -135,9 +136,14 @@ func (t *template) createTemplateVM(ctx context.Context) error {
 	config := t.config
 	config.HypervisorConfig.BootToBeTemplate = true
 	config.HypervisorConfig.BootFromTemplate = false
-	// todo invesitgate missing memorypath and devicesstatepath
-	config.HypervisorConfig.MemoryPath = t.statePath + ""
-	config.HypervisorConfig.DevicesStatePath = t.statePath + ""
+	if t.useSnapshot {
+		config.HypervisorConfig.SnapshotPath = t.statePath
+		config.HypervisorConfig.MemoryPath = t.statePath + "/memory-ranges"
+		config.HypervisorConfig.DevicesStatePath = t.statePath + "/state.json"
+	} else {
+		config.HypervisorConfig.MemoryPath = t.statePath + "/memory"
+		config.HypervisorConfig.DevicesStatePath = t.statePath + "/state"
+	}
 
 	t.Logger().Infof("Cameron debug: createTemplateVM config.HypervisorConfig.MemorySize: %+v", config.HypervisorConfig.MemorySize)
 	vm, err := vc.NewVM(ctx, config)
@@ -179,21 +185,44 @@ func (t *template) createFromTemplateVM(ctx context.Context, c vc.VMConfig) (*vc
 	config := t.config
 	config.HypervisorConfig.BootToBeTemplate = false
 	config.HypervisorConfig.BootFromTemplate = true
-	config.HypervisorConfig.MemoryPath = t.statePath + "/memory"
-	config.HypervisorConfig.DevicesStatePath = t.statePath + "/state"
 	config.HypervisorConfig.SharedPath = c.HypervisorConfig.SharedPath
 	config.HypervisorConfig.VMStorePath = c.HypervisorConfig.VMStorePath
 	config.HypervisorConfig.RunStorePath = c.HypervisorConfig.RunStorePath
+
+	if t.useSnapshot {
+		config.HypervisorConfig.SnapshotPath = t.statePath
+		config.HypervisorConfig.MemoryPath = t.statePath + "/memory-ranges"
+		config.HypervisorConfig.DevicesStatePath = t.statePath + "/state.json"
+	} else {
+		config.HypervisorConfig.MemoryPath = t.statePath + "/memory"
+		config.HypervisorConfig.DevicesStatePath = t.statePath + "/state"
+	}
 
 	return vc.NewVM(ctx, config)
 }
 
 func (t *template) checkTemplateVM() error {
-	_, err := os.Stat(t.statePath + "/memory")
-	if err != nil {
-		return err
+	if t.useSnapshot {
+		_, err := os.Stat(t.statePath + "/memory-ranges")
+		if err != nil {
+			return err
+		}
+
+		_, err = os.Stat(t.statePath + "/state.json")
+		if err != nil {
+			return err
+		}
+	} else {
+		_, err := os.Stat(t.statePath + "/memory")
+		if err != nil {
+			return err
+		}
+
+		_, err = os.Stat(t.statePath + "/state")
+		if err != nil {
+			return err
+		}
 	}
 
-	_, err = os.Stat(t.statePath + "/state")
-	return err
+	return nil
 }

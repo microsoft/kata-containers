@@ -1281,12 +1281,12 @@ func (clh *cloudHypervisor) SaveVM() error {
 		return fmt.Errorf("CLH Save/Restore feature is only intended for use with templating factory")
 	}
 
-	if clh.config.MemoryPath == "" {
-		return fmt.Errorf("BootToBeTemplate is set but MemoryPath is not configured")
+	if clh.config.SnapshotPath == "" {
+		return fmt.Errorf("BootToBeTemplate is set but SnapshotPath is not configured")
 	}
 
-	// Normalize MemoryPath to an absolute file:// URL
-	absDest, err := filepath.Abs(clh.config.MemoryPath)
+	// Normalize SnapshotPath to an absolute file:// URL
+	absDest, err := filepath.Abs(clh.config.SnapshotPath)
 	if err != nil {
 		return err
 	}

@@ -372,6 +372,11 @@ type HypervisorConfig struct {
 	// BootFromTemplate is true.
 	DevicesStatePath string
 
+	// SnapshotPath is an optional path where hypervisor-level snapshots should be stored
+	// (e.g. used by cloud-hypervisor snapshot API). Empty means no explicit snapshot path
+	// is configured and the hypervisor/runtime should fall back to defaults.
+	SnapshotPath string
+
 	// EntropySource is the path to a host source of
 	// entropy (/dev/random, /dev/urandom or real hardware RNG device)
 	EntropySource string

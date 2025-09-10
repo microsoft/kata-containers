@@ -54,7 +54,7 @@ func NewFactory(ctx context.Context, config Config, fetchOnly bool) (vc.Factory,
 			factoryLogger.Info("Cameron debug: using Template factory (entry)")
 			if fetchOnly {
 				factoryLogger.WithField("fetchOnly", fetchOnly).Info("Cameron debug: before template.Fetch")
-				b, err = template.Fetch(config.VMConfig, config.TemplatePath)
+				b, err = template.Fetch(config.VMConfig, config.TemplatePath, config.UseSnapshot)
 				factoryLogger.WithField("fetchOnly", fetchOnly).WithField("err", err).Info("Cameron debug: after template.Fetch")
 				if err != nil {
 					factoryLogger.WithError(err).Error("Cameron debug: template.Fetch failed")
@@ -62,7 +62,7 @@ func NewFactory(ctx context.Context, config Config, fetchOnly bool) (vc.Factory,
 				}
 			} else {
 				factoryLogger.WithField("fetchOnly", fetchOnly).Info("Cameron debug: before template.New")
-				b, err = template.New(ctx, config.VMConfig, config.TemplatePath)
+				b, err = template.New(ctx, config.VMConfig, config.TemplatePath, config.UseSnapshot)
 				factoryLogger.WithField("fetchOnly", fetchOnly).WithField("err", err).Info("Cameron debug: after template.New")
 				if err != nil {
 					factoryLogger.WithError(err).Error("Cameron debug: template.New failed")

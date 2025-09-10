@@ -7,6 +7,7 @@ package factory
 
 import (
 	"context"
+
 	vc "github.com/kata-containers/kata-containers/src/runtime/virtcontainers"
 	"github.com/sirupsen/logrus"
 )
@@ -29,8 +30,9 @@ type Config struct {
 
 	Cache uint
 
-	Template bool
-	VMCache  bool
+	Template    bool
+	VMCache     bool
+	UseSnapshot bool
 }
 
 // SetLogger sets the logger for the factory.

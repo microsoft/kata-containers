@@ -104,6 +104,11 @@ type FactoryConfig struct {
 
 	// Template enables VM templating support in VM factory.
 	Template bool
+
+	// UseSnapshot enables saving a snapshot via the hypervisor snapshot API
+	// when creating templates. This option is only valid when using the
+	// Cloud Hypervisor (clh) hypervisor.
+	UseSnapshot bool
 }
 
 // RuntimeConfig aggregates all runtime specific settings

@@ -79,6 +79,7 @@ type factory struct {
 	VMCacheEndpoint string `toml:"vm_cache_endpoint"`
 	VMCacheNumber   uint   `toml:"vm_cache_number"`
 	Template        bool   `toml:"enable_template"`
+	UseSnapshot     bool   `toml:"use_snapshot"`
 }
 
 type hypervisor struct {
@@ -147,6 +148,7 @@ type hypervisor struct {
 	VhostUserDeviceReconnect       uint32                    `toml:"vhost_user_reconnect_timeout_sec"`
 	DisableBlockDeviceUse          bool                      `toml:"disable_block_device_use"`
 	MemPrealloc                    bool                      `toml:"enable_mem_prealloc"`
+	SnapshotPath                   string                    `toml:"snapshot_path"`
 	ReclaimGuestFreedMemory        bool                      `toml:"reclaim_guest_freed_memory"`
 	HugePages                      bool                      `toml:"enable_hugepages"`
 	VirtioMem                      bool                      `toml:"enable_virtio_mem"`
@@ -1285,6 +1287,7 @@ func newFactoryConfig(f factory) (oci.FactoryConfig, error) {
 		TemplatePath:    f.TemplatePath,
 		VMCacheNumber:   f.VMCacheNumber,
 		VMCacheEndpoint: f.VMCacheEndpoint,
+		UseSnapshot:     f.UseSnapshot,
 	}, nil
 }
 
@@ -1914,6 +1917,11 @@ func checkFactoryConfig(config oci.RuntimeConfig) error {
 		if config.HypervisorConfig.InitrdPath == "" {
 			return errors.New("Factory option enable_template requires an initrd image")
 		}
+	}
+
+	// 'use_snapshot' is only valid for cloud-hypervisor (clh).
+	if config.FactoryConfig.UseSnapshot && config.HypervisorType != vc.ClhHypervisor {
+		return errors.New("Factory option use_snapshot is only supported for cloud-hypervisor (clh)")
 	}
 
 	return nil

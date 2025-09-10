@@ -165,6 +165,7 @@ var initFactoryCommand = cli.Command{
 			TemplatePath: runtimeConfig.FactoryConfig.TemplatePath,
 			Cache:        runtimeConfig.FactoryConfig.VMCacheNumber,
 			VMCache:      runtimeConfig.FactoryConfig.VMCacheNumber > 0,
+			UseSnapshot:  runtimeConfig.FactoryConfig.UseSnapshot,
 			VMConfig: vc.VMConfig{
 				HypervisorType:   runtimeConfig.HypervisorType,
 				HypervisorConfig: runtimeConfig.HypervisorConfig,
@@ -257,6 +258,7 @@ var destroyFactoryCommand = cli.Command{
 					HypervisorConfig: runtimeConfig.HypervisorConfig,
 					AgentConfig:      runtimeConfig.AgentConfig,
 				},
+				UseSnapshot: runtimeConfig.FactoryConfig.UseSnapshot,
 			}
 			kataLog.WithField("factory", factoryConfig).Info("load vm factory")
 			f, err := vf.NewFactory(ctx, factoryConfig, true)
@@ -312,6 +314,7 @@ var statusFactoryCommand = cli.Command{
 					HypervisorConfig: runtimeConfig.HypervisorConfig,
 					AgentConfig:      runtimeConfig.AgentConfig,
 				},
+				UseSnapshot: runtimeConfig.FactoryConfig.UseSnapshot,
 			}
 			kataLog.WithField("factory", factoryConfig).Info("load vm factory")
 			_, err := vf.NewFactory(ctx, factoryConfig, true)
