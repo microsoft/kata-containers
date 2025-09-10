@@ -125,12 +125,12 @@ func NewVM(ctx context.Context, config VMConfig) (*VM, error) {
 		}
 	}()
 
-	virtLog.Info("Cameron debug: NewVM before CreateVM")
+	virtLog.Infof("Cameron debug: NewVM before CreateVM, %d", config.HypervisorConfig.MemorySize)
 	if err = hypervisor.CreateVM(ctx, id, network, &config.HypervisorConfig); err != nil {
 		virtLog.WithError(err).Error("Cameron debug: NewVM CreateVM failed")
 		return nil, err
 	}
-	virtLog.Info("Cameron debug: NewVM after CreateVM")
+	virtLog.Infof("Cameron debug: NewVM after CreateVM, %d", config.HypervisorConfig.MemorySize)
 
 	// 2. setup agent
 	newAagentFunc := getNewAgentFunc(ctx)
