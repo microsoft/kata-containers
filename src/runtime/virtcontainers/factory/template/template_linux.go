@@ -135,8 +135,9 @@ func (t *template) createTemplateVM(ctx context.Context) error {
 	config := t.config
 	config.HypervisorConfig.BootToBeTemplate = true
 	config.HypervisorConfig.BootFromTemplate = false
-	config.HypervisorConfig.MemoryPath = t.statePath + "/memory"
-	config.HypervisorConfig.DevicesStatePath = t.statePath + "/state"
+	// todo invesitgate missing memorypath and devicesstatepath
+	config.HypervisorConfig.MemoryPath = t.statePath + ""
+	config.HypervisorConfig.DevicesStatePath = t.statePath + ""
 
 	// TODO find actual source of this 128MB default
 	config.HypervisorConfig.MemorySize = 256 // Cameron debug: set to 256MB for testing
