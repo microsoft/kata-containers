@@ -117,6 +117,8 @@ type clhClient interface {
 	PauseVM(ctx context.Context) (*http.Response, error)
 	// Resume the VM
 	ResumeVM(ctx context.Context) (*http.Response, error)
+	// Snapshot the VM to the provided destination (destination_url supports file:// URLs)
+	SnapshotVM(ctx context.Context, vmSnapshotConfig chclient.VmSnapshotConfig) (*http.Response, error)
 }
 
 type clhClientApi struct {
@@ -166,6 +168,10 @@ func (c *clhClientApi) PauseVM(ctx context.Context) (*http.Response, error) {
 
 func (c *clhClientApi) ResumeVM(ctx context.Context) (*http.Response, error) {
 	return c.ApiInternal.ResumeVM(ctx).Execute()
+}
+
+func (c *clhClientApi) SnapshotVM(ctx context.Context, vmSnapshotConfig chclient.VmSnapshotConfig) (*http.Response, error) {
+	return c.ApiInternal.VmSnapshotPut(ctx).VmSnapshotConfig(vmSnapshotConfig).Execute()
 }
 
 // This is done in order to be able to override such a function as part of
@@ -1263,7 +1269,46 @@ func (clh *cloudHypervisor) PauseVM(ctx context.Context) error {
 }
 
 func (clh *cloudHypervisor) SaveVM() error {
-	clh.Logger().WithField("function", "saveSandboxC").Info("Save Sandbox")
+	clh.Logger().WithField("function", "SaveVM").Info("Save Sandbox")
+
+	cl := clh.client()
+	if cl == nil {
+		return fmt.Errorf("client is nil")
+	}
+
+	// This Save/Restore functionality is intended for the templating factory.
+	if !clh.config.BootToBeTemplate {
+		return fmt.Errorf("CLH Save/Restore feature is only intended for use with templating factory")
+	}
+
+	if clh.config.MemoryPath == "" {
+		return fmt.Errorf("BootToBeTemplate is set but MemoryPath is not configured")
+	}
+
+	// Normalize MemoryPath to an absolute file:// URL
+	absDest, err := filepath.Abs(clh.config.MemoryPath)
+	if err != nil {
+		return err
+	}
+	destUrl := absDest
+	if !strings.Contains(destUrl, "://") {
+		destUrl = "file://" + destUrl
+	}
+
+	// Build snapshot config and call the API with a reasonable timeout
+	snapCfg := *chclient.NewVmSnapshotConfig()
+	snapCfg.SetDestinationUrl(destUrl)
+
+	ctx, cancel := context.WithTimeout(context.Background(), clh.getClhAPITimeout()*time.Second)
+	defer cancel()
+
+	_, err = cl.SnapshotVM(ctx, snapCfg)
+	if err != nil {
+		clh.Logger().WithError(err).WithField("destination", destUrl).Error("Failed to snapshot VM via Cloud Hypervisor API")
+		return openAPIClientError(err)
+	}
+
+	clh.Logger().WithField("destination", destUrl).Info("VM snapshot saved via Cloud Hypervisor API")
 	return nil
 }
 
