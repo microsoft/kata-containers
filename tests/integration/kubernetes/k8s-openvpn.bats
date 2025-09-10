@@ -10,6 +10,8 @@ load "${BATS_TEST_DIRNAME}/tests_common.sh"
 
 setup() {
     ([ "$(uname -m)" == "aarch64" ] || [ "$(uname -m)" == "s390x" ]) && skip "openvpn tests for aarch64 and s390x. The container images don't support these platforms."
+    # Cannot pull image kylemanna/openvpn, error unpacking image: failed to extract layer sha256:<XXX>: failed to get reader from content store: content digest sha256:<XXX>: not found
+    [[ "${SNAPSHOTTER:-}" == "nydus" ]] && skip "openvpn tests not supported with nydus snapshotter"
 
     setup_common
     get_pod_config_dir
@@ -67,6 +69,7 @@ setup() {
 
 teardown() {
     ([ "$(uname -m)" == "aarch64" ] || [ "$(uname -m)" == "s390x" ]) && skip "openvpn tests for aarch64 and s390x"
+    [[ "${SNAPSHOTTER:-}" == "nydus" ]] && skip "openvpn tests not supported with nydus snapshotter"
 
     # Debugging information
     echo "=== OpenVPN Init Pod Logs ==="
