@@ -1295,6 +1295,8 @@ func (clh *cloudHypervisor) SaveVM() error {
 		destUrl = "file://" + destUrl
 	}
 
+	clh.Logger().WithField("destination", destUrl).Info("Saving VM snapshot via Cloud Hypervisor API")
+
 	// Build snapshot config and call the API with a reasonable timeout
 	snapCfg := *chclient.NewVmSnapshotConfig()
 	snapCfg.SetDestinationUrl(destUrl)
