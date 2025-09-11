@@ -38,9 +38,10 @@ type VM struct {
 
 // VMConfig is a collection of all info that a new blackbox VM needs.
 type VMConfig struct {
-	HypervisorType   HypervisorType
-	AgentConfig      KataAgentConfig
-	HypervisorConfig HypervisorConfig
+	HypervisorType     HypervisorType
+	AgentConfig        KataAgentConfig
+	HypervisorConfig   HypervisorConfig
+	FactoryUseSnapshot bool
 }
 
 func (c *VMConfig) Valid() error {

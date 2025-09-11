@@ -165,12 +165,13 @@ var initFactoryCommand = cli.Command{
 			TemplatePath: runtimeConfig.FactoryConfig.TemplatePath,
 			Cache:        runtimeConfig.FactoryConfig.VMCacheNumber,
 			VMCache:      runtimeConfig.FactoryConfig.VMCacheNumber > 0,
-			UseSnapshot:  runtimeConfig.FactoryConfig.UseSnapshot,
 			VMConfig: vc.VMConfig{
 				HypervisorType:   runtimeConfig.HypervisorType,
 				HypervisorConfig: runtimeConfig.HypervisorConfig,
 				AgentConfig:      runtimeConfig.AgentConfig,
+				FactoryUseSnapshot: runtimeConfig.FactoryConfig.UseSnapshot,
 			},
+			UseSnapshot:  runtimeConfig.FactoryConfig.UseSnapshot,
 		}
 
 		if runtimeConfig.FactoryConfig.VMCacheNumber > 0 {
@@ -257,6 +258,7 @@ var destroyFactoryCommand = cli.Command{
 					HypervisorType:   runtimeConfig.HypervisorType,
 					HypervisorConfig: runtimeConfig.HypervisorConfig,
 					AgentConfig:      runtimeConfig.AgentConfig,
+					FactoryUseSnapshot: runtimeConfig.FactoryConfig.UseSnapshot,
 				},
 				UseSnapshot: runtimeConfig.FactoryConfig.UseSnapshot,
 			}
@@ -313,6 +315,7 @@ var statusFactoryCommand = cli.Command{
 					HypervisorType:   runtimeConfig.HypervisorType,
 					HypervisorConfig: runtimeConfig.HypervisorConfig,
 					AgentConfig:      runtimeConfig.AgentConfig,
+					FactoryUseSnapshot: runtimeConfig.FactoryConfig.UseSnapshot,
 				},
 				UseSnapshot: runtimeConfig.FactoryConfig.UseSnapshot,
 			}

@@ -30,6 +30,7 @@ var templateWaitForAgent = 2 * time.Second
 // Fetch finds and returns a pre-built template factory.
 // TODO: save template metadata and fetch from storage.
 func Fetch(config vc.VMConfig, templatePath string, useSnapshot bool) (base.FactoryBase, error) {
+	config.FactoryUseSnapshot = useSnapshot
 	t := &template{templatePath, config, useSnapshot}
 	t.Logger().Info("Cameron debug: Fetch called")
 
@@ -45,6 +46,7 @@ func Fetch(config vc.VMConfig, templatePath string, useSnapshot bool) (base.Fact
 
 // New creates a new VM template factory.
 func New(ctx context.Context, config vc.VMConfig, templatePath string, useSnapshot bool) (base.FactoryBase, error) {
+	config.FactoryUseSnapshot = useSnapshot
 	t := &template{templatePath, config, useSnapshot}
 	t.Logger().Info("Cameron debug: New called")
 
