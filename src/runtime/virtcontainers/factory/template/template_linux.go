@@ -202,6 +202,8 @@ func (t *template) createFromTemplateVM(ctx context.Context, c vc.VMConfig) (*vc
 }
 
 func (t *template) checkTemplateVM() error {
+	t.Logger().Infof("Cameron debug: t.useSnapshot %d", t.useSnapshot)
+
 	if t.useSnapshot {
 		_, err := os.Stat(t.statePath + "/memory-ranges")
 		if err != nil {
