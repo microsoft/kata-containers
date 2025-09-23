@@ -448,7 +448,7 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 		return nil, err
 	}
 
-	ns, pod, cname := k8sLabels(ociSpec)
+	// ns, pod, cname := k8sLabels(ociSpec)
 	kind := kindFrom(ctype)
 
 	start := time.Now()
@@ -456,8 +456,8 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 		err = toGRPC(err)
 		var createTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
 		rpcDurationsHistogram.WithLabelValues("create").Observe(createTime)
-		labels := []string{"create", kind, ns, pod, cname}
-		rpcDurationsGauge.WithLabelValues(labels...).Set(createTime)
+		// labels := []string{"create", kind, ns, pod, cname}
+		rpcDurationsGauge.WithLabelValues(kind).Set(createTime)
 	}()
 
 	s.mu.Lock()

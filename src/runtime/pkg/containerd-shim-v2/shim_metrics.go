@@ -32,7 +32,8 @@ var (
 		Name:      "shim_rpc_durations_gauge_milliseconds",
 		Help:      "RPC latency values",
 	},
-		[]string{"action", "kind", "ns", "pod", "container"},
+		// []string{"action", "kind", "ns", "pod", "container"},
+		[]string{"action"},
 	)
 
 	katashimThreads = prometheus.NewGauge(prometheus.GaugeOpts{
