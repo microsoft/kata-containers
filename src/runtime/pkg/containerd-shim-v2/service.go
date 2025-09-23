@@ -473,7 +473,10 @@ func (s *service) Start(ctx context.Context, r *taskAPI.StartRequest) (_ *taskAP
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("start").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("start").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var startTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("start").Observe(startTime)
+		rpcDurationsGauge.WithLabelValues("start").Set(startTime)
 	}()
 
 	s.mu.Lock()
@@ -526,7 +529,10 @@ func (s *service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (_ *task
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("delete").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("delete").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var deleteTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("delete").Observe(deleteTime)
+		rpcDurationsGauge.WithLabelValues("delete").Set(deleteTime)
 	}()
 
 	s.mu.Lock()
@@ -579,8 +585,11 @@ func (s *service) Exec(ctx context.Context, r *taskAPI.ExecProcessRequest) (_ *e
 
 	start := time.Now()
 	defer func() {
-		rpcDurationsHistogram.WithLabelValues("exec").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("exec").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 		err = toGRPC(err)
+		var execTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("exec").Observe(execTime)
+		rpcDurationsGauge.WithLabelValues("exec").Set(execTime)
 	}()
 
 	s.mu.Lock()
@@ -661,7 +670,10 @@ func (s *service) State(ctx context.Context, r *taskAPI.StateRequest) (_ *taskAP
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("state").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("state").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var stateTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("state").Observe(stateTime)
+		rpcDurationsGauge.WithLabelValues("state").Set(stateTime)
 	}()
 
 	s.mu.Lock()
@@ -717,7 +729,10 @@ func (s *service) Pause(ctx context.Context, r *taskAPI.PauseRequest) (_ *emptyp
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("pause").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("pause").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var pauseTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("pause").Observe(pauseTime)
+		rpcDurationsGauge.WithLabelValues("pause").Set(pauseTime)
 	}()
 
 	s.mu.Lock()
@@ -758,7 +773,10 @@ func (s *service) Resume(ctx context.Context, r *taskAPI.ResumeRequest) (_ *empt
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("resume").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("resume").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var resumeTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("resume").Observe(resumeTime)
+		rpcDurationsGauge.WithLabelValues("resume").Set(resumeTime)
 	}()
 
 	s.mu.Lock()
@@ -797,7 +815,10 @@ func (s *service) Kill(ctx context.Context, r *taskAPI.KillRequest) (_ *emptypb.
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("kill").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("kill").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var killTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("kill").Observe(killTime)
+		rpcDurationsGauge.WithLabelValues("kill").Set(killTime)
 	}()
 
 	s.mu.Lock()
@@ -967,7 +988,10 @@ func (s *service) Shutdown(ctx context.Context, r *taskAPI.ShutdownRequest) (_ *
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("shutdown").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("shutdown").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var shutdownTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("shutdown").Observe(shutdownTime)
+		rpcDurationsGauge.WithLabelValues("shutdown").Set(shutdownTime)
 	}()
 
 	s.mu.Lock()
@@ -1014,7 +1038,10 @@ func (s *service) Stats(ctx context.Context, r *taskAPI.StatsRequest) (_ *taskAP
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("stats").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("stats").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var statsTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("stats").Observe(statsTime)
+		rpcDurationsGauge.WithLabelValues("stats").Set(statsTime)
 	}()
 
 	s.mu.Lock()
@@ -1045,7 +1072,10 @@ func (s *service) Update(ctx context.Context, r *taskAPI.UpdateTaskRequest) (_ *
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("update").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("update").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var updateTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("update").Observe(updateTime)
+		rpcDurationsGauge.WithLabelValues("update").Set(updateTime)
 	}()
 
 	s.mu.Lock()
@@ -1081,7 +1111,10 @@ func (s *service) Wait(ctx context.Context, r *taskAPI.WaitRequest) (_ *taskAPI.
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
-		rpcDurationsHistogram.WithLabelValues("wait").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		// rpcDurationsHistogram.WithLabelValues("wait").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
+		var waitTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
+		rpcDurationsHistogram.WithLabelValues("wait").Observe(waitTime)
+		rpcDurationsGauge.WithLabelValues("wait").Set(waitTime)
 	}()
 
 	s.mu.Lock()

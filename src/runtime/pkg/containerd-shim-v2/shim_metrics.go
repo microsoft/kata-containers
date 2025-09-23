@@ -29,7 +29,7 @@ var (
 
 	rpcDurationsGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespaceKatashim,
-		Name:      "rpc_durations_gauge_milliseconds",
+		Name:      "shim_rpc_durations_gauge_milliseconds",
 		Help:      "RPC latency values",
 	},
 		[]string{"action"},
