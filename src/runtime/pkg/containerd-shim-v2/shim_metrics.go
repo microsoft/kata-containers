@@ -22,7 +22,7 @@ var (
 		Namespace: namespaceKatashim,
 		Name:      "rpc_durations_histogram_milliseconds",
 		Help:      "RPC latency distributions MODIFIED",
-		Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
+		Buckets:   prometheus.ExponentialBuckets(5, 2, 12),
 	},
 		[]string{"action"},
 	)
@@ -32,7 +32,7 @@ var (
 		Name:      "shim_rpc_durations_gauge_milliseconds",
 		Help:      "RPC latency values",
 	},
-		[]string{"action"},
+		[]string{"action", "kind", "ns", "pod", "container"},
 	)
 
 	katashimThreads = prometheus.NewGauge(prometheus.GaugeOpts{

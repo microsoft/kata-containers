@@ -402,16 +402,62 @@ func (s *service) Cleanup(ctx context.Context) (_ *taskAPI.DeleteResponse, err e
 	}, nil
 }
 
+// Minimal set of common CRI/K8s annotations
+const (
+	annSandboxNS   = "io.kubernetes.cri.sandbox-namespace"
+	annSandboxName = "io.kubernetes.cri.sandbox-name"
+	annContName    = "io.kubernetes.cri.container-name"
+)
+
+// from an OCI spec (or request), get labels
+func k8sLabels(oci *specs.Spec) (ns, pod, container string) {
+	if oci == nil {
+		return "", "", ""
+	}
+	a := oci.Annotations
+	ns = a[annSandboxNS]
+	pod = a[annSandboxName]
+	container = a[annContName]
+	return
+}
+
+func kindFrom(containerType vc.ContainerType) string {
+	switch containerType {
+	case vc.PodContainer:
+		return "container"
+	case vc.PodSandbox, vc.SingleContainer:
+		return "sandbox"
+	default:
+		return "unknown"
+	}
+}
+
 // Create a new sandbox or container with the underlying OCI runtime
 func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *taskAPI.CreateTaskResponse, err error) {
 	shimLog.WithField("container", r.ID).Debug("Create() start")
 	defer shimLog.WithField("container", r.ID).Debug("Create() end")
+
+	ociSpec, _, err := loadSpec(r)
+
+	if err != nil {
+		return nil, err
+	}
+
+	ctype, err := oci.ContainerType(*ociSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	ns, pod, cname := k8sLabels(ociSpec)
+	kind := kindFrom(ctype)
+
 	start := time.Now()
 	defer func() {
 		err = toGRPC(err)
 		var createTime = float64(time.Since(start).Nanoseconds() / int64(time.Millisecond))
 		rpcDurationsHistogram.WithLabelValues("create").Observe(createTime)
-		rpcDurationsGauge.WithLabelValues("create").Set(createTime)
+		labels := []string{"create", kind, ns, pod, cname}
+		rpcDurationsGauge.WithLabelValues(labels...).Set(createTime)
 	}()
 
 	s.mu.Lock()
