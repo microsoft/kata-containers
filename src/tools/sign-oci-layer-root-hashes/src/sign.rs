@@ -63,7 +63,7 @@ pub(super) async fn attach_root_hash_signatures(
 /// Theoretically signature blob should contain the info needed for verification and kernel checks both root hash and signature.
 /// Now as much info as possible is included, could remove them in the future.
 /// It will then push this signature manifest to the registry with a new reference that
-/// has a ".erofs.sig-<serial number of the signer certificate>" suffix.
+/// has a ".tardev.sig-<serial number of the signer certificate>" suffix.
 /// The serial number of the signer certificate appended to the tag can ensure uniqueness
 /// and can be used by snapshotter to pick signatures for a specific signer.
 async fn attach_image_signatures(
@@ -105,10 +105,10 @@ async fn attach_image_signatures(
         annotations: Some(annotations.clone()),
     };
 
-    // 4. Push the signature manifest to a new reference (e.g., with a ".erofs.sig-<serial number>" suffix)
+    // 4. Push the signature manifest to a new reference (e.g., with a ".tardev.sig-<serial number>" suffix)
     let serial_number = get_serial_number_from_cert(&config.signer)?;
     let sig_ref = format!(
-        "{}/{}:{}.erofs.sig-{}",
+        "{}/{}:{}.tardev.sig-{}",
         image_ref.registry(),
         image_ref.repository(),
         image_ref.tag().unwrap(),
