@@ -14,9 +14,9 @@ setup() {
 	get_pod_config_dir
 
 	# Creates ssh-key
-	key_path=$(mktemp --tmpdir)
+	key_path=$(mktemp footloose.XXXXX)
 	public_key_path="${key_path}.pub"
-	echo -e 'y\n' | sudo ssh-keygen -t rsa -N "" -f "$key_path"
+	echo -e 'y\n' | ssh-keygen -t rsa -N "" -f "$key_path"
 
 	# Create ConfigMap.yaml
 	configmap_yaml="${pod_config_dir}/footloose-rsa-configmap.yaml"
@@ -24,13 +24,16 @@ setup() {
 		"${pod_config_dir}/footloose-configmap.yaml" > "$configmap_yaml"
 	sed -i 's/ssh-rsa/      ssh-rsa/' "$configmap_yaml"
 
-	# Add an "allow all" policy to the pod yaml file.
+	# Add policy to the pod yaml file.
 	pod_yaml="${pod_config_dir}/pod-footloose.yaml"
-	add_allow_all_policy_to_yaml "${pod_yaml}"
+	cmd="uname -r"
+	exec_command=(sh -c "${cmd}")
+	pod_policy_settings_dir="$(create_tmp_policy_settings_dir "${pod_config_dir}")"
+	add_exec_to_policy_settings "${pod_policy_settings_dir}" "${exec_command[@]}"
+	auto_generate_policy "${pod_policy_settings_dir}" "${pod_yaml}" "${configmap_yaml}"
 }
 
 @test "Footloose pod" {
-	cmd="uname -r"
 	sleep_connect="10"
 
 	# Create ConfigMap
@@ -46,7 +49,7 @@ setup() {
 	pod_ip=$(kubectl get pod $pod_name --template={{.status.podIP}})
 
 	# Exec to the pod
-	kubectl exec $pod_name -- sh -c "$cmd"
+	kubectl exec $pod_name -- "${exec_command[@]}"
 
 	# Connect to the VM
 	sleep "$sleep_connect"
@@ -59,4 +62,5 @@ teardown() {
 	sudo rm -rf "$public_key_path"
 	sudo rm -rf "$key_path"
 	sudo rm -rf "$configmap_yaml"
+	delete_tmp_policy_settings_dir "${pod_policy_settings_dir}"
 }
