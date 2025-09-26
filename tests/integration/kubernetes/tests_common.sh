@@ -210,7 +210,7 @@ auto_generate_policy() {
 
 	# Retry if genpolicy fails, because typical failures of this tool are caused by
 	# transient network errors.
-	for _ in {1..6}; do
+	for _ in {1..1}; do
 		info "Executing: ${genpolicy_command}"
 		eval "${genpolicy_command}" && return 0
 		info "Sleeping after command failed..."
