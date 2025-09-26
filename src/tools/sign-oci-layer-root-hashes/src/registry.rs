@@ -11,8 +11,6 @@ use crate::verity;
 use crate::utils::Config;
 use anyhow::{anyhow, Context, Result};
 use docker_credential::{CredentialRetrievalError, DockerCredential};
-use erofs_common::constants::VERITY_BLOCK_SIZE;
-use erofs_common::utils;
 use fs2::FileExt;
 use log::warn;
 use log::{debug, info, LevelFilter};

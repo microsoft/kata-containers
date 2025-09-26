@@ -30,11 +30,6 @@ use tonic::Status;
 use uuid::Uuid;
 use zerocopy::AsBytes;
 
-use oci_client::client::Client as OCI_Client;
-use oci_client::client::ClientConfig;
-use oci_client::secrets::RegistryAuth;
-use oci_client::Reference;
-
 use oci_client::manifest::{
     IMAGE_DOCKER_LAYER_GZIP_MEDIA_TYPE, // The mediatype that Docker uses for a layer that is gzipped.
     IMAGE_DOCKER_LAYER_TAR_MEDIA_TYPE, // The mediatype that Docker uses for a layer that is tarred.
