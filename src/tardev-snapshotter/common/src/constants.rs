@@ -22,7 +22,7 @@ pub const IMAGE_LAYER_SIGNATURE_LABEL: &str = "image.layer.signature";
 pub const SIGNATURE_ARTIFACT_TYPE: &str = "application/vnd.oci.mt.pkcs7";
 
 /// Media type for signature blobs.
-pub const SIGNATURE_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.erofs.sig";
+pub const SIGNATURE_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tardev.sig";
 
 /// Default file name for signature blobs.
 pub const SIGNATURE_FILE_NAME: &str = "signature.blob.name";
