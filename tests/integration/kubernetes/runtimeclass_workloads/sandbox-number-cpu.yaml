@@ -1,0 +1,18 @@
+#
+# Copyright (c) 2025 Microsoft
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cpu-test
+  annotations:
+    io.katacontainers.config.hypervisor.default_vcpus: "4"
+spec:
+  terminationGracePeriodSeconds: 0
+  runtimeClassName: kata
+  containers:
+  - name: c1
+    image: quay.io/prometheus/busybox:latest
+    command: ["tail", "-f", "/dev/null"]

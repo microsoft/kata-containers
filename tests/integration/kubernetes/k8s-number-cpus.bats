@@ -12,10 +12,15 @@ setup() {
 	[ "${KATA_HYPERVISOR}" = "cloud-hypervisor" ] && skip "test not working https://github.com/kata-containers/kata-containers/issues/9039"
 	[ "${KATA_HYPERVISOR}" = "qemu-runtime-rs" ] && skip "Requires CPU hotplug which isn't supported on ${KATA_HYPERVISOR} yet"
 	[ "${KATA_HYPERVISOR}" = "qemu-se-runtime-rs" ] && skip "Requires CPU hotplug which isn't supported on ${KATA_HYPERVISOR} yet"
+	
+	# Both pod-number-cpu.yaml and sandbox-number-cpu.yaml are using this pod name,
+	# for the two test cases from this file.
 	pod_name="cpu-test"
+	
 	container_name="c1"
 	get_pod_config_dir
 	yaml_file="${pod_config_dir}/pod-number-cpu.yaml"
+	sandbox_test_yaml_file="${pod_config_dir}/sandbox-number-cpu.yaml"
 
 	policy_settings_dir="$(create_tmp_policy_settings_dir "${pod_config_dir}")"
 
@@ -24,7 +29,7 @@ setup() {
 	add_exec_to_policy_settings "${policy_settings_dir}" "${exec_command[@]}"
 
 	add_requests_to_policy_settings "${policy_settings_dir}" "ReadStreamRequest"
-	auto_generate_policy "${policy_settings_dir}" "${yaml_file}"
+	auto_generate_policy "${policy_settings_dir}" "${sandbox_test_yaml_file}"
 }
 
 # Skip on aarch64 due to missing cpu hotplug related functionality.
@@ -49,6 +54,16 @@ setup() {
 		fi
 		sleep 1
 	done
+}
+
+@test "Check the number of cpus when using the default_vcpus annotation" {
+	local number_cpus=""
+
+	kubectl create -f "${sandbox_test_yaml_file}"
+	kubectl wait --for=condition=Ready "--timeout=${timeout}" pod "${pod_name}"
+
+	number_cpus=$(container_exec_with_retries "$pod_name" "$container_name" "${exec_command[@]}")
+	[ "$number_cpus" -eq "4" ]
 }
 
 teardown() {
