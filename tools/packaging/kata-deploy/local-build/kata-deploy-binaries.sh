@@ -240,6 +240,8 @@ install_cached_shim_v2_tarball_compare_root_hashes() {
 }
 
 install_cached_tarball_component() {
+	info "================= install_cached_tarball_component: USE_CACHE=${USE_CACHE}"
+
 	if [ "${USE_CACHE}" != "yes" ]; then
 		return 1
 	fi
@@ -252,6 +254,9 @@ install_cached_tarball_component() {
 	# extra_tarballs must be in the following format:
 	# "tarball1_name:tarball1_path tarball2_name:tarball2_path ... tarballN_name:tarballN_path"
 	local extra_tarballs="${6:-}"
+
+	info "================= install_cached_tarball_component: component_tarball_path=${component_tarball_path}"
+	info "================= install_cached_tarball_component: existing file: $(ls -l ${component_tarball_path})"
 
 	if [ "${component}" = "shim-v2" ]; then
 		install_cached_shim_v2_tarball_get_root_hash
