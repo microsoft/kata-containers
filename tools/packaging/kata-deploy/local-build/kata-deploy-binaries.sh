@@ -555,6 +555,11 @@ install_initrd_confidential() {
 	install_initrd "confidential"
 }
 
+install_initrd_mariner() {
+	export MEASURED_ROOTFS=no
+	install_initrd "mariner"
+}
+
 # For all nvidia_gpu targets we can customize the stack that is enbled
 # in the VM by setting the NVIDIA_GPU_STACK= environment variable
 #
@@ -1304,6 +1309,8 @@ handle_build() {
 	rootfs-initrd) install_initrd ;;
 
 	rootfs-initrd-confidential) install_initrd_confidential ;;
+
+	rootfs-initrd-mariner) install_initrd_mariner ;;
 
 	rootfs-image-nvidia-gpu) install_image_nvidia_gpu ;;
 
