@@ -249,6 +249,7 @@ pub async fn add_devices(
     update_spec_devices(logger, spec, dev_updates)
 }
 
+/*
 #[instrument]
 pub async fn handle_cdi_devices(
     logger: &Logger,
@@ -316,6 +317,7 @@ pub async fn handle_cdi_devices(
         cdi_timeout.as_secs()
     ))
 }
+*/
 
 #[instrument]
 async fn validate_device(
@@ -1198,6 +1200,7 @@ mod tests {
         assert_eq!(name.unwrap(), devname);
     }
 
+    /*
     #[tokio::test]
     async fn test_handle_cdi_devices() {
         let logger = slog::Logger::root(slog::Discard, o!());
@@ -1294,4 +1297,5 @@ mod tests {
         let inner_env = env.iter().find(|e| e.starts_with("TEST_INNER_ENV"));
         assert!(inner_env.is_some(), "TEST_INNER_ENV not found in env");
     }
+    */
 }
