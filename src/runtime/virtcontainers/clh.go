@@ -83,6 +83,7 @@ const (
 	clhHotPlugAPITimeout                   = 5
 	clhStopSandboxTimeout                  = 3
 	clhStopSandboxTimeoutConfidentialGuest = 10
+	clhSnapshotTimeout                     = 120
 	clhSocket                              = "clh.sock"
 	clhAPISocket                           = "clh-api.sock"
 	virtioFsSocket                         = "virtiofsd.sock"
@@ -1301,7 +1302,7 @@ func (clh *cloudHypervisor) SaveVM() error {
 	snapCfg := *chclient.NewVmSnapshotConfig()
 	snapCfg.SetDestinationUrl(destUrl)
 
-	ctx, cancel := context.WithTimeout(context.Background(), clh.getClhAPITimeout()*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), clhSnapshotTimeout*time.Second)
 	defer cancel()
 
 	_, err = cl.SnapshotVM(ctx, snapCfg)
