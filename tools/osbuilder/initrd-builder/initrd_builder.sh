@@ -67,10 +67,12 @@ IMAGE_NAME=$(basename ${INITRD_IMAGE})
 init="${ROOTFS}/sbin/init"
 [ -x "${init}" ] || [ -L ${init} ] || die "/sbin/init is not installed in ${ROOTFS}"
 OK "init is installed"
+
 [ "${AGENT_INIT}" == "yes" ] || [ -x "${ROOTFS}/usr/bin/${AGENT_BIN}" ] || \
 	die "/usr/bin/${AGENT_BIN} is not installed in ${ROOTFS}
 	use AGENT_BIN env variable to change the expected agent binary name"
 OK "Agent is installed"
+info "ROOTFS=${ROOTFS}/usr/bin/${AGENT_BIN}"
 
 # initramfs expects /init, create symlink only if ${ROOTFS}/init does not exist
 # Init may be provided by other packages, e.g. systemd or GPU initrd/rootfs
