@@ -10,3 +10,5 @@ LIBC="gnu"
 PACKAGES="kata-packages-uvm"
 [ "$AGENT_INIT" = no ] && PACKAGES+=" systemd"
 [ "$SECCOMP" = yes ] && PACKAGES+=" libseccomp"
+
+PACKAGES+=" pciutils awk tar gzip"
