@@ -125,6 +125,9 @@ $(TARGET_PATH): show-summary
 $(GENERATED_FILES): %: %.in VERSION
 	@sed $(foreach r,$(GENERATED_REPLACEMENTS),-e 's|@$r@|$($r)|g') "$<" > "$@"
 
+$(GENERATED_CODE): %: %.in VERSION
+	@sed $(foreach r,$(GENERATED_REPLACEMENTS),-e 's|@$r@|$($r)|g') "$<" > "$@"
+
 ##TARGET optimize: optimized  build
 optimize: show-summary show-header
 	@RUSTFLAGS="-C link-arg=-s $(EXTRA_RUSTFLAGS) --deny warnings" cargo build --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release) $(EXTRA_RUSTFEATURES)
