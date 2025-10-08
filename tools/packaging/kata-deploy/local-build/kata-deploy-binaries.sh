@@ -242,10 +242,6 @@ install_cached_shim_v2_tarball_compare_root_hashes() {
 install_cached_tarball_component() {
 	info "================= install_cached_tarball_component: USE_CACHE=${USE_CACHE}"
 
-	if [ "${USE_CACHE}" != "yes" ]; then
-		return 1
-	fi
-
 	local component="${1}"
 	local current_version="${2}-$(git log -1 --abbrev=9 --pretty=format:"%h" ${repo_root_dir}/tools/packaging/kata-deploy/local-build)"
 	local current_image_version="${3}"
@@ -257,6 +253,10 @@ install_cached_tarball_component() {
 
 	info "================= install_cached_tarball_component: component_tarball_path=${component_tarball_path}"
 	info "================= install_cached_tarball_component: existing file: $(ls -l ${component_tarball_path})"
+
+	if [ "${USE_CACHE}" != "yes" ]; then
+		return 1
+	fi
 
 	if [ "${component}" = "shim-v2" ]; then
 		install_cached_shim_v2_tarball_get_root_hash
