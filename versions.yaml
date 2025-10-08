@@ -197,6 +197,9 @@ assets:
         confidential:
           name: "ubuntu"
           version: "noble"  # 24.04 LTS
+        mariner:
+          name: "cbl-mariner"
+          version: "3.0"
         nvidia-gpu:
           name: "ubuntu"
           version: "noble"  # 24.04 LTS
