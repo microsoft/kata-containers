@@ -764,6 +764,9 @@ EOF
 	[ -x "${AGENT_DEST}" ] || die "${AGENT_DEST} is not installed in ${ROOTFS_DIR}"
 	OK "Agent installed"
 
+	info "AGENT_DEST=${AGENT_DEST} version: $(${AGENT_DEST} --version)"
+	info "ROOTFS_DIR=${ROOTFS_DIR}/usr/bin/kata-agent version: $(${ROOTFS_DIR}/usr/bin/kata-agent --version)"
+
 	if [ "${AGENT_INIT}" == "yes" ]; then
 		setup_agent_init "${AGENT_DEST}" "${init}"
 	else
