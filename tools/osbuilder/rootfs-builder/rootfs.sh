@@ -38,6 +38,8 @@ DNF_CONF=${DNF_CONF:-""}
 DISTRO_REPO=${DISTRO_REPO:-""}
 PKG_MANAGER=${PKG_MANAGER:-""}
 
+DMIHAI_TARBALL="${DMIHAI_TARBALL:-}"
+
 lib_file="${script_dir}/../scripts/lib.sh"
 source "$lib_file"
 
@@ -530,6 +532,11 @@ build_rootfs_distro()
 			engine_run_args+=" -v $(dirname ${GUEST_HOOKS_TARBALL}):$(dirname ${GUEST_HOOKS_TARBALL})"
 		fi
 
+        if [[ -n "${DMIHAI_TARBALL}" ]]; then
+            engine_run_args+=" --env DMIHAI_TARBALL=${DMIHAI_TARBALL}"
+            engine_run_args+=" -v $(dirname ${DMIHAI_TARBALL}):$(dirname ${DMIHAI_TARBALL})"
+        fi
+
 		engine_run_args+=" -v ${GOPATH_LOCAL}:${GOPATH_LOCAL} --env GOPATH=${GOPATH_LOCAL}"
 
 		engine_run_args+=" $(docker_extra_args $distro)"
@@ -808,6 +815,16 @@ EOF
 		info "Install the ${GUEST_HOOKS_TARBALL} guest hooks"
 		tar --zstd -xvf "${GUEST_HOOKS_TARBALL}" -C "${ROOTFS_DIR}"
 	fi
+
+       if [[ -n "${DMIHAI_TARBALL}" ]]; then
+               info "============ Install ${DMIHAI_TARBALL} into ${ROOTFS_DIR}"
+               cp "${DMIHAI_TARBALL}" "${ROOTFS_DIR}"
+
+               #pushd ${ROOTFS_DIR}
+               #export TERM=xterm
+               #sh NVIDIA-Linux-x86_64-550.90.05-vgpu-kvm-aie.run
+               #popd
+       fi
 
 	info "Check init is installed"
 	[ -x "${init}" ] || [ -L "${init}" ] || die "/sbin/init is not installed in ${ROOTFS_DIR}"
