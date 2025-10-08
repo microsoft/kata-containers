@@ -12,3 +12,8 @@ PACKAGES="kata-packages-uvm"
 [ "$SECCOMP" = yes ] && PACKAGES+=" libseccomp"
 
 PACKAGES+=" pciutils awk tar gzip"
+
+PACKAGES+=" ca-certificates"
+PACKAGES+=" cronie-anacron"
+PACKAGES+=" logrotate"
+PACKAGES+=" core-packages-base-image"
