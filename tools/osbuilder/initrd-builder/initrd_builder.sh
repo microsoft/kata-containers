@@ -72,7 +72,7 @@ OK "init is installed"
 	die "/usr/bin/${AGENT_BIN} is not installed in ${ROOTFS}
 	use AGENT_BIN env variable to change the expected agent binary name"
 OK "Agent is installed"
-info "ROOTFS=${ROOTFS}/usr/bin/${AGENT_BIN}"
+info "ROOTFS=${ROOTFS}/usr/bin/${AGENT_BIN} version: ${ROOTFS}/usr/bin/${AGENT_BIN} --version"
 
 # initramfs expects /init, create symlink only if ${ROOTFS}/init does not exist
 # Init may be provided by other packages, e.g. systemd or GPU initrd/rootfs
