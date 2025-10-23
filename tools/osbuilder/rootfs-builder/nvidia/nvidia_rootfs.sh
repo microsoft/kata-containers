@@ -22,7 +22,7 @@ script_dir="$(dirname "$(readlink -f "$0")")"
 readonly SCRIPT_DIR="${script_dir}/nvidia"
 
 # This will control how much output the inird/image will produce
-DEBUG=""
+#DEBUG=""
 KBUILD_SIGN_PIN=${KBUILD_SIGN_PIN:-}
 AGENT_POLICY="${AGENT_POLICY:-no}"
 
