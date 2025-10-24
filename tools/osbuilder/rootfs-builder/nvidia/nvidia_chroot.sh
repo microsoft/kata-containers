@@ -29,6 +29,8 @@ supported_gpu_devids="/supported-gpu.devids"
 base_os="noble"
 
 APT_INSTALL="apt -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' -yqq --no-install-recommends install"
+APT_REMOVE="apt -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' -yqq --no-install-recommends remove"
+APT_CLEAN="apt -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' clean"
 
 export KBUILD_SIGN_PIN="${6:-}"
 
@@ -231,7 +233,8 @@ prepare_distribution_drivers() {
 		libnvidia-decode-"${driver_version}" \
 		libnvidia-fbc1-"${driver_version}"   \
 		libnvidia-encode-"${driver_version}" \
-		libnvidia-nscq
+		libnvidia-nscq \
+		bash
 }
 
 prepare_nvidia_drivers() {
@@ -379,6 +382,11 @@ install_nvidia_dcgm() {
 		datacenter-gpu-manager-exporter
 }
 
+bash_final_steps() {
+       eval "${APT_REMOVE}" make gcc
+       eval "${APT_CLEAN}"
+}
+
 # Start of script
 echo "chroot: Setup NVIDIA GPU rootfs stage one"
 
@@ -393,3 +401,5 @@ install_nvidia_fabricmanager
 install_nvidia_ctk
 export_driver_version
 install_nvidia_dcgm
+
+bash_final_steps

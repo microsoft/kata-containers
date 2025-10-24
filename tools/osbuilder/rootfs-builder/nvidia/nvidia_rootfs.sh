@@ -129,7 +129,16 @@ setup_nvidia_gpu_rootfs_stage_one() {
 	rm ./nvidia_chroot.sh
 	rm ./*.deb
 
-	tar cfa "${BUILD_DIR}"/kata-static-rootfs-"${VARIANT}"-stage-one.tar.zst --remove-files -- *
+	# tar cfa "${BUILD_DIR}"/kata-static-rootfs-"${VARIANT}"-stage-one.tar.zst --remove-files -- *
+	rm -rf lib/debug/lib/modules/6.12.47-nvidia-gpu
+	rm -rf lib/gcc
+	rm -rf libexec/gcc
+	rm -rf lib/x86_64-linux-gnu/nvidia
+	rm -rf lib/x86_64-linux-gnu/perl-base
+	rm -rf share/nvidia-validation-suite
+	rm -rf src
+	tar cfa "${BUILD_DIR}"/kata-static-rootfs-"${VARIANT}".tar.zst -- *
+	return 0
 
 	popd  >> /dev/null
 
@@ -140,6 +149,8 @@ setup_nvidia_gpu_rootfs_stage_one() {
 }
 
 chisseled_iptables() {
+	return 0
+
 	echo "nvidia: chisseling iptables"
 	cp -a "${stage_one}"/usr/sbin/xtables-nft-multi sbin/.
 
@@ -157,6 +168,8 @@ chisseled_iptables() {
 # <= NVLINK4 nv-fabrimanager
 # >= NVLINK5 nv-fabricmanager + nvlsm (TODO)
 chisseled_nvswitch() {
+	return 0
+
 	echo "nvidia: chisseling NVSwitch"
 
 	mkdir -p usr/share/nvidia/nvswitch
@@ -175,6 +188,8 @@ chisseled_nvswitch() {
 }
 
 chisseled_dcgm() {
+	return 0
+
 	echo "nvidia: chisseling DCGM"
 
 	mkdir -p etc/dcgm-exporter
@@ -187,6 +202,8 @@ chisseled_dcgm() {
 
 # copute always includes utility per default
 chisseled_compute() {
+	return 0
+
 	echo "nvidia: chisseling GPU"
 
 	cp -a "${stage_one}"/nvidia_driver_version .
@@ -235,40 +252,47 @@ chisseled_gpudirect() {
 
 chisseled_init() {
 	echo "nvidia: chisseling init"
-	tar --zstd -xvf "${BUILD_DIR}"/kata-static-busybox.tar.zst -C .
+	#tar --zstd -xvf "${BUILD_DIR}"/kata-static-busybox.tar.zst -C .
 
-	mkdir -p dev etc proc run/cdi sys tmp usr var lib/modules lib/firmware \
-		 usr/share/nvidia lib/"${machine_arch}"-linux-gnu lib64        \
-		 usr/bin etc/modprobe.d etc/ssl/certs
+	#mkdir -p dev etc proc run/cdi sys tmp usr var lib/modules lib/firmware \
+	#	 usr/share/nvidia lib/"${machine_arch}"-linux-gnu lib64        \
+	#	 usr/bin etc/modprobe.d etc/ssl/certs
 
 	ln -sf ../run var/run
 
 	# Needed for various RUST static builds with LIBC=gnu
 	libdir=lib/"${machine_arch}"-linux-gnu
-	cp -a "${stage_one}"/"${libdir}"/libgcc_s.so.1*    "${libdir}"/.
+	#cp -a "${stage_one}"/"${libdir}"/libgcc_s.so.1*    "${libdir}"/.
 
 	tar xvf "${BUILD_DIR}"/kata-static-nvidia-nvrc.tar.zst -C .
+
+	mv bin/* usr/bin/
+	rmdir bin
+	ln -sf /usr/bin bin
+
 	# make sure NVRC is the init process for the initrd and image case
 	ln -sf  /bin/NVRC init
 	ln -sf  /bin/NVRC sbin/init
 
-	cp -a "${stage_one}"/usr/bin/kata-agent   usr/bin/.
-	if [[ "${AGENT_POLICY}" == "yes" ]]; then
-		cp -a "${stage_one}"/etc/kata-opa etc/.
-	fi
-	cp -a "${stage_one}"/etc/resolv.conf      etc/.
-	cp -a "${stage_one}"/supported-gpu.devids .
+	#cp -a "${stage_one}"/usr/bin/kata-agent   usr/bin/.
+	#if [[ "${AGENT_POLICY}" == "yes" ]]; then
+	#	cp -a "${stage_one}"/etc/kata-opa etc/.
+	#fi
+	#cp -a "${stage_one}"/etc/resolv.conf      etc/.
+	#cp -a "${stage_one}"/supported-gpu.devids .
 
-	cp -a "${stage_one}"/lib/firmware/nvidia  lib/firmware/.
-	cp -a "${stage_one}"/sbin/ldconfig.real   sbin/ldconfig
+	#cp -a "${stage_one}"/lib/firmware/nvidia  lib/firmware/.
+	#cp -a "${stage_one}"/sbin/ldconfig.real   sbin/ldconfig
 
-	cp -a "${stage_one}"/etc/ssl/certs/ca-certificates.crt etc/ssl/certs/.
+	#cp -a "${stage_one}"/etc/ssl/certs/ca-certificates.crt etc/ssl/certs/.
 
 	local conf_file="etc/modprobe.d/0000-nvidia.conf"
 	echo 'options nvidia NVreg_DeviceFileMode=0660' > "${conf_file}"
 }
 
 compress_rootfs() {
+	return 0
+
 	echo "nvidia: compressing rootfs"
 
 	# For some unobvious reason libc has executable bit set
@@ -338,7 +362,7 @@ setup_nvidia_gpu_rootfs_stage_two() {
 	[[ -e "${stage_one}" ]] && rm -rf "${stage_one}"
 	[[ ! -e "${stage_one}" ]] && mkdir -p "${stage_one}"
 
-	tar -C "${stage_one}" -xf "${BUILD_DIR}"/kata-static-rootfs-"${VARIANT}"-stage-one.tar.zst
+	#tar -C "${stage_one}" -xf "${BUILD_DIR}"/kata-static-rootfs-"${VARIANT}"-stage-one.tar.zst
 
 
 	pushd "${stage_two}" >> /dev/null
