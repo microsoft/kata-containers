@@ -62,7 +62,7 @@ var sandboxTracingTags = map[string]string{
 const (
 	// VmStartTimeout represents the time in seconds a sandbox can wait before
 	// to consider the VM starting operation failed.
-	VmStartTimeout = 10
+	VmStartTimeout = 1000
 
 	// DirMode is the permission bits used for creating a directory
 	DirMode = os.FileMode(0750) | os.ModeDir
