@@ -265,14 +265,17 @@ chisseled_init() {
 	#cp -a "${stage_one}"/"${libdir}"/libgcc_s.so.1*    "${libdir}"/.
 
 	tar xvf "${BUILD_DIR}"/kata-static-nvidia-nvrc.tar.zst -C .
-
 	mv bin/* usr/bin/
 	rmdir bin
 	ln -sf /usr/bin bin
 
 	# make sure NVRC is the init process for the initrd and image case
-	ln -sf  /bin/NVRC init
-	ln -sf  /bin/NVRC sbin/init
+	#ln -sf  /bin/NVRC init
+	#ln -sf  /bin/NVRC sbin/init
+
+	tar xvf "${BUILD_DIR}"/kata-static-agent.tar.zst -C .
+	mv usr/bin/kata-agent init
+	ln -sf /init sbin/init
 
 	#cp -a "${stage_one}"/usr/bin/kata-agent   usr/bin/.
 	#if [[ "${AGENT_POLICY}" == "yes" ]]; then
