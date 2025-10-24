@@ -9,23 +9,23 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::{os::unix::fs::FileTypeExt, path::Path};
+//use std::{os::unix::fs::FileTypeExt, path::Path};
 
-use anyhow::{bail, Context, Result};
-use async_compression::tokio::bufread::GzipDecoder;
-use base64::{engine::general_purpose::STANDARD, Engine};
+use anyhow::Result;
+//use async_compression::tokio::bufread::GzipDecoder;
+//use base64::{engine::general_purpose::STANDARD, Engine};
 use const_format::concatcp;
-use kata_types::initdata::InitData;
-use sha2::{Digest, Sha256, Sha384, Sha512};
+//use kata_types::initdata::InitData;
+//use sha2::{Digest, Sha256, Sha384, Sha512};
 use slog::Logger;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+//use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 /// This is the target directory to store the extracted initdata.
 pub const INITDATA_PATH: &str = "/run/confidential-containers/initdata";
 
-const AA_CONFIG_KEY: &str = "aa.toml";
-const CDH_CONFIG_KEY: &str = "cdh.toml";
-const POLICY_KEY: &str = "policy.rego";
+//const AA_CONFIG_KEY: &str = "aa.toml";
+//const CDH_CONFIG_KEY: &str = "cdh.toml";
+//const POLICY_KEY: &str = "policy.rego";
 
 /// The path of initdata toml
 pub const INITDATA_TOML_PATH: &str = concatcp!(INITDATA_PATH, "/initdata.toml");
@@ -37,8 +37,9 @@ pub const AA_CONFIG_PATH: &str = concatcp!(INITDATA_PATH, "/aa.toml");
 pub const CDH_CONFIG_PATH: &str = concatcp!(INITDATA_PATH, "/cdh.toml");
 
 /// Magic number of initdata device
-pub const INITDATA_MAGIC_NUMBER: &[u8] = b"initdata";
+//pub const INITDATA_MAGIC_NUMBER: &[u8] = b"initdata";
 
+/*
 async fn detect_initdata_device(logger: &Logger) -> Result<Option<String>> {
     let dev_dir = Path::new("/dev");
     let mut read_dir = tokio::fs::read_dir(dev_dir).await?;
@@ -96,6 +97,7 @@ pub async fn read_initdata(device_path: &str) -> Result<Vec<u8>> {
     let _ = gzip_decoder.read_to_end(&mut initdata).await?;
     Ok(initdata)
 }
+*/
 
 pub struct InitdataReturnValue {
     pub _digest: Vec<u8>,
@@ -104,6 +106,12 @@ pub struct InitdataReturnValue {
 
 pub async fn initialize_initdata(logger: &Logger) -> Result<Option<InitdataReturnValue>> {
     let logger = logger.new(o!("subsystem" => "initdata"));
+    warn!(
+        logger,
+        "Initdata is disabled, skip initdata initialization"
+    );
+    Ok(None)
+    /*
     let Some(initdata_device) = detect_initdata_device(&logger).await? else {
         info!(
             logger,
@@ -158,6 +166,7 @@ pub async fn initialize_initdata(logger: &Logger) -> Result<Option<InitdataRetur
     };
 
     Ok(Some(res))
+    */
 }
 
 #[cfg(test)]
