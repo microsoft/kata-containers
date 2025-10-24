@@ -62,10 +62,10 @@ const MEM_AGENT_COMPACT_THRESHOLD: &str = "agent.mem_agent_compact_threshold";
 const MEM_AGENT_COMPACT_FORCE_TIMES: &str = "agent.mem_agent_compact_force_times";
 
 const DEFAULT_LOG_LEVEL: slog::Level = slog::Level::Info;
-const DEFAULT_HOTPLUG_TIMEOUT: time::Duration = time::Duration::from_secs(3);
+const DEFAULT_HOTPLUG_TIMEOUT: time::Duration = time::Duration::from_secs(300);
 const DEFAULT_CDH_API_TIMEOUT: time::Duration = time::Duration::from_secs(50);
 const DEFAULT_IMAGE_PULL_TIMEOUT: time::Duration = time::Duration::from_secs(1200);
-const DEFAULT_CDI_TIMEOUT: time::Duration = time::Duration::from_secs(100);
+const DEFAULT_CDI_TIMEOUT: time::Duration = time::Duration::from_secs(1000);
 const DEFAULT_CONTAINER_PIPE_SIZE: i32 = 0;
 const VSOCK_ADDR: &str = "vsock://-1";
 
