@@ -12,10 +12,10 @@ use crate::pci;
 use crate::sandbox::PciHostGuestMapping;
 use crate::sandbox::Sandbox;
 use anyhow::{anyhow, Context, Result};
-use cdi::annotations::parse_annotations;
-use cdi::cache::{new_cache, with_auto_refresh, CdiOption};
-use cdi::spec_dirs::with_spec_dirs;
-use container_device_interface as cdi;
+//use cdi::annotations::parse_annotations;
+//use cdi::cache::{new_cache, with_auto_refresh, CdiOption};
+//use cdi::spec_dirs::with_spec_dirs;
+//use container_device_interface as cdi;
 use kata_types::device::DeviceHandlerManager;
 use nix::sys::stat;
 use oci::{LinuxDeviceCgroup, Spec};
@@ -31,7 +31,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time;
-use tokio::time::Duration;
+//use tokio::time::Duration;
 use tracing::instrument;
 
 pub mod block_device_handler;
@@ -253,10 +253,13 @@ pub async fn add_devices(
 #[instrument]
 pub async fn handle_cdi_devices(
     logger: &Logger,
-    spec: &mut Spec,
-    spec_dir: &str,
-    cdi_timeout: time::Duration,
+    _spec: &mut Spec,
+    _spec_dir: &str,
+    _cdi_timeout: time::Duration,
 ) -> Result<()> {
+    warn!(logger, "handle_cdi_devices: disabled");
+    Ok(())
+    /*
     if let Some(container_type) = spec
         .annotations()
         .as_ref()
@@ -316,6 +319,7 @@ pub async fn handle_cdi_devices(
         "failed to inject devices after CDI timeout of {} seconds",
         cdi_timeout.as_secs()
     ))
+    */
 }
 
 #[instrument]
