@@ -94,6 +94,7 @@ impl StorageHandler for VirtioBlkPciHandler {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct VirtioBlkCcwHandler {}
 
 #[async_trait::async_trait]
