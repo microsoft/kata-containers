@@ -12,6 +12,7 @@ RUN tdnf -y install \
     git \
     tar \
     xz \
+    wget \
     zstd
 
 @INSTALL_RUST@

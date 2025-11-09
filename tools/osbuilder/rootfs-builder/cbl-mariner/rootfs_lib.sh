@@ -4,6 +4,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+set -x
+set -e
+
 build_rootfs()
 {
 	# Mandatory
@@ -25,4 +28,18 @@ build_rootfs()
 	$DNF install ${EXTRA_PKGS} ${PACKAGES}
 
 	rm -rf ${ROOTFS_DIR}/usr/share/{bash-completion,cracklib,doc,info,locale,man,misc,pixmaps,terminfo,zoneinfo,zsh}
+
+
+	script_dir="$(dirname "$(readlink -f "$0")")"
+	readonly SCRIPT_DIR="${script_dir}/cbl-mariner"
+
+	pushd "${ROOTFS_DIR}"
+	run_file_name="NVIDIA-Linux-x86_64-580.95.05.run"
+	wget "https://us.download.nvidia.com/tesla/580.95.05/${run_file_name}"
+	popd
+
+	readonly CHROOT_SCRIPT="azl_chroot.sh"
+	cp "${SCRIPT_DIR}/${CHROOT_SCRIPT}" "${ROOTFS_DIR}"
+	chmod +x "${ROOTFS_DIR}/${CHROOT_SCRIPT}"
+	chroot "${ROOTFS_DIR}" /bin/bash -c "/${CHROOT_SCRIPT}"
 }
