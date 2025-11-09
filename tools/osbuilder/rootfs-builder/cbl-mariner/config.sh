@@ -11,9 +11,17 @@ PACKAGES="kata-packages-uvm"
 [ "$AGENT_INIT" = no ] && PACKAGES+=" systemd"
 [ "$SECCOMP" = yes ] && PACKAGES+=" libseccomp"
 
-PACKAGES+=" pciutils awk tar gzip"
-
 PACKAGES+=" ca-certificates"
 PACKAGES+=" cronie-anacron"
 PACKAGES+=" logrotate"
 PACKAGES+=" core-packages-base-image"
+
+PACKAGES+=" pciutils"
+PACKAGES+=" awk"
+PACKAGES+=" tar"
+PACKAGES+=" gzip"
+PACKAGES+=" zstd"
+
+PACKAGES+=" build-essential"
+PACKAGES+=" elfutils-libelf-devel"
+PACKAGES+=" kernel-devel-6.6.104.2"
