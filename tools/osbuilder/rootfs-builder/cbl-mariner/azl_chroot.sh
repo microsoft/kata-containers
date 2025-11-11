@@ -7,24 +7,21 @@
 set -x
 set -e
 
-
 prepare_run_file_drivers() {
 	echo "chroot: Prepare NVIDIA run file drivers"
 	pushd / >> /dev/null
 	chmod +x "${run_file_name}"
 	./"${run_file_name}" -x
 
-	mkdir -p /usr/share/nvidia/rim/
+	# DMFIX
+	sed -i 's/\/dev\/null//g' NVIDIA-Linux-x86_64-580.95.05/kernel-open/Kbuild
 
-	# Sooner or later RIM files will be only available remotely
-	RIMFILE=$(ls NVIDIA-*/RIM_GH100PROD.swidtag)
-	if [[ -e "${RIMFILE}" ]]; then
-		cp NVIDIA-*/RIM_GH100PROD.swidtag /usr/share/nvidia/rim/.
-	fi
 	popd >> /dev/null
 }
 
 build_nvidia_drivers() {
+	driver_source_files="NVIDIA-Linux-x86_64-580.95.05/kernel-open"
+
 	echo "chroot: Build NVIDIA drivers"
 	pushd "${driver_source_files}" >> /dev/null
 
@@ -62,19 +59,8 @@ build_nvidia_drivers() {
 
 
 driver_type="-open"
-run_file_name="NVIDIA-Linux-x86_64-580.95.05.run"
+run_file_name="driver.run"
 prepare_run_file_drivers
-
-ls -l
-
-for source_dir in /NVIDIA-*; do
-    if [[ -d "${source_dir}" ]]; then
-        driver_source_files="${source_dir}"/kernel${driver_type}
-        driver_source_dir="${source_dir}"
-        break
-    fi
-done
-
 build_nvidia_drivers
 
 #wget https://developer.download.nvidia.cn/compute/cuda/redist/fabricmanager/linux-x86_64/fabricmanager-linux-x86_64-580.95.05-archive.tar.xz

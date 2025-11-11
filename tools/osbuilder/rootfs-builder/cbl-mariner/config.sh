@@ -16,6 +16,8 @@ PACKAGES+=" cronie-anacron"
 PACKAGES+=" logrotate"
 PACKAGES+=" core-packages-base-image"
 
+PACKAGES+=" nano"
+
 PACKAGES+=" pciutils"
 PACKAGES+=" awk"
 PACKAGES+=" tar"
@@ -24,4 +26,5 @@ PACKAGES+=" zstd"
 
 PACKAGES+=" build-essential"
 PACKAGES+=" elfutils-libelf-devel"
+PACKAGES+=" kernel-6.6.104.2"
 PACKAGES+=" kernel-devel-6.6.104.2"
