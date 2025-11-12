@@ -10,6 +10,21 @@ set -e
 setup_nvidia-nvrc() {
 	git clone https://github.com/NVIDIA/nvrc.git
 	pushd nvrc
+
+	cat <<EOF | tee src/supported.rs
+use anyhow::Result;
+use std::path::Path;
+
+use super::NVRC;
+
+impl NVRC {
+    pub fn check_gpu_supported(&mut self, _supported: Option<&Path>) -> Result<()> {
+		self.gpu_supported = true;
+		Ok(())
+	}
+}
+EOF
+
 	cargo build --release
 	popd
 }
