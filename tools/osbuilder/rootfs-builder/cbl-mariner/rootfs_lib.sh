@@ -57,6 +57,12 @@ build_rootfs()
 
 	pushd "${ROOTFS_DIR}"
 
+	#mkdir nvidia-ctk
+	#pushd nvidia-ctk
+	#wget https://github.com/NVIDIA/nvidia-container-toolkit/releases/download/v1.18.0/nvidia-container-toolkit_1.18.0_rpm_x86_64.tar.gz
+	#tar xvf nvidia-container-toolkit_1.18.0_rpm_x86_64.tar.gz
+	#popd
+
 	setup_nvidia-nvrc
 
 	mkdir CBL-Mariner-Linux-Kernel
@@ -65,6 +71,7 @@ build_rootfs()
 	run_file_name="NVIDIA-Linux-x86_64-580.95.05.run"
 	wget "https://us.download.nvidia.com/tesla/580.95.05/${run_file_name}"
 	mv "${run_file_name}" driver.run
+
 	popd
 
 	readonly CHROOT_SCRIPT="azl_chroot.sh"

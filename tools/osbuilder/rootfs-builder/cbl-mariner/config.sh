@@ -52,3 +52,5 @@ PACKAGES+=" python3-devel"
 PACKAGES+=" sed"
 PACKAGES+=" slang-devel"
 PACKAGES+=" pciutils-devel"
+
+#PACKAGES+=" libseccomp2"

@@ -58,7 +58,14 @@ install_userspace_components() {
 	popd
 }
 
+setup_nvidia-ctk() {
+	pushd /nvidia-ctk/release-v1.18.0-stable/packages/centos7/x86_64/
+	sudo rpm -i *.rpm
+	popd
+}
 
+
+#setup_nvidia-ctk
 setup_nvidia-nvrc
 
 driver_type="-open"
