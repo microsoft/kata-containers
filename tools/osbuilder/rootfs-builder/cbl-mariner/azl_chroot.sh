@@ -52,11 +52,20 @@ setup_nvidia-nvrc() {
 	mv /nvrc/target/release/NVRC /usr/bin/
 }
 
+install_userspace_components() {
+	pushd /NVIDIA-Linux-x86_64-580.95.05
+	./nvidia-installer --no-kernel-modules --no-systemd --no-nvidia-modprobe -s --x-prefix=/root
+	popd
+}
+
+
 setup_nvidia-nvrc
 
 driver_type="-open"
 run_file_name="driver.run"
 prepare_run_file_drivers
 build_nvidia_drivers
+
+install_userspace_components
 
 azl_clean_up
