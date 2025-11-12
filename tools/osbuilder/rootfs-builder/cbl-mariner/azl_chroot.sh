@@ -42,13 +42,21 @@ openssl-devel
 
 	tdnf clean -y all
 
-	rm /driver.run
-	rm -r /NVIDIA-*
+	rm -f /driver.run
+	rm -rf /NVIDIA-*
 	rm -rf /CBL-Mariner*
+	rm -rf /nvrc
 }
+
+setup_nvidia-nvrc() {
+	mv /nvrc/target/release/NVRC /usr/bin/
+}
+
+setup_nvidia-nvrc
 
 driver_type="-open"
 run_file_name="driver.run"
 prepare_run_file_drivers
 build_nvidia_drivers
+
 azl_clean_up

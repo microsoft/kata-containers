@@ -13,6 +13,7 @@ RUN tdnf -y install \
     tar \
     xz \
     wget \
-    zstd
+    zstd \
+    rust
 
-@INSTALL_RUST@
+# @INSTALL_RUST@

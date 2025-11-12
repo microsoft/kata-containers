@@ -7,6 +7,13 @@
 set -x
 set -e
 
+setup_nvidia-nvrc() {
+	git clone https://github.com/NVIDIA/nvrc.git
+	pushd nvrc
+	cargo build --release
+	popd
+}
+
 build_rootfs()
 {
 	# Mandatory
@@ -34,6 +41,8 @@ build_rootfs()
 	readonly SCRIPT_DIR="${script_dir}/cbl-mariner"
 
 	pushd "${ROOTFS_DIR}"
+
+	setup_nvidia-nvrc
 
 	mkdir CBL-Mariner-Linux-Kernel
 	cp -R "${SCRIPT_DIR}"/CBL-Mariner-Linux-Kernel/* CBL-Mariner-Linux-Kernel/
