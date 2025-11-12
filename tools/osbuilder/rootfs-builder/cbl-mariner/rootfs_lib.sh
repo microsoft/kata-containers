@@ -34,6 +34,10 @@ build_rootfs()
 	readonly SCRIPT_DIR="${script_dir}/cbl-mariner"
 
 	pushd "${ROOTFS_DIR}"
+
+	mkdir CBL-Mariner-Linux-Kernel
+	cp -R "${SCRIPT_DIR}"/CBL-Mariner-Linux-Kernel/* CBL-Mariner-Linux-Kernel/
+
 	run_file_name="NVIDIA-Linux-x86_64-580.95.05.run"
 	wget "https://us.download.nvidia.com/tesla/580.95.05/${run_file_name}"
 	mv "${run_file_name}" driver.run
@@ -42,6 +46,5 @@ build_rootfs()
 	readonly CHROOT_SCRIPT="azl_chroot.sh"
 	cp "${SCRIPT_DIR}/${CHROOT_SCRIPT}" "${ROOTFS_DIR}"
 	chmod +x "${ROOTFS_DIR}/${CHROOT_SCRIPT}"
-
 	chroot "${ROOTFS_DIR}" /bin/bash -c "/${CHROOT_SCRIPT}"
 }
