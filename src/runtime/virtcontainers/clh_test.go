@@ -119,6 +119,11 @@ func (c *clhClientMock) VmRemoveDevicePut(ctx context.Context, vmRemoveDevice ch
 	return nil, nil
 }
 
+//nolint:golint
+func (c *clhClientMock) VmCoredumpPut(ctx context.Context, coredumpData chclient.VmCoredumpData) (*http.Response, error) {
+	return nil, nil
+}
+
 func TestCloudHypervisorAddVSock(t *testing.T) {
 	assert := assert.New(t)
 	clh := cloudHypervisor{}

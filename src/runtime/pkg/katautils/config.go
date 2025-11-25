@@ -1110,6 +1110,7 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		EnableAnnotations:              h.EnableAnnotations,
 		DisableSeccomp:                 h.DisableSeccomp,
 		ConfidentialGuest:              h.ConfidentialGuest,
+		GuestMemoryDumpPath:            h.GuestMemoryDumpPath,
 		Rootless:                       h.Rootless,
 		DisableSeLinux:                 h.DisableSeLinux,
 		DisableGuestSeLinux:            h.DisableGuestSeLinux,
