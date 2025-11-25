@@ -37,7 +37,10 @@ setup() {
 
     policy_settings_dir="$(create_tmp_policy_settings_dir "${pod_config_dir}")"
     add_requests_to_policy_settings "${policy_settings_dir}" "ReadStreamRequest"
-    auto_generate_policy "${policy_settings_dir}" "$server_pod_yaml"
+
+    #auto_generate_policy "${policy_settings_dir}" "$server_pod_yaml"
+    add_allow_all_policy_to_yaml "$server_pod_yaml"
+
     auto_generate_policy "${policy_settings_dir}" "$client_pod_yaml"
 }
 
