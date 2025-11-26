@@ -32,7 +32,7 @@ impl Container {
         config: &Config,
         image: &str,
         containerd_socket_path: &str,
-        is_pause_container: bool,
+        _is_pause_container: bool,
     ) -> Result<Self> {
         info!("============================================");
         info!("Using containerd socket: {:?}", containerd_socket_path);
@@ -72,7 +72,9 @@ impl Container {
         // Nydus/guest_pull doesn't make available passwd/group files from layers properly.
         // See issue https://github.com/kata-containers/kata-containers/issues/11162
         let v1_policy = config.settings.cluster_config.pause_container_id_policy == "v1";
-        if config.settings.cluster_config.guest_pull && (v1_policy || !is_pause_container) {
+        if config.settings.cluster_config.guest_pull
+            && (v1_policy || config_layer.config.User.is_some())
+        {
             info!("Guest pull is enabled, skipping passwd/group file parsing");
         } else {
             let image_layers =
