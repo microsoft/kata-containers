@@ -54,6 +54,8 @@ agent_make_flags="LIBC=gnu OPENSSL_NO_VENDOR=Y DESTDIR=${AGENT_INSTALL_DIR} BUIL
 
 if [ "${CONF_PODS}" == "yes" ]; then
 	agent_make_flags+=" AGENT_POLICY=yes"
+else
+	agent_make_flags+=" INIT_DATA=no"
 fi
 
 pushd "${repo_dir}"
