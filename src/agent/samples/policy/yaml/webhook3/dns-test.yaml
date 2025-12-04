@@ -5,6 +5,12 @@ metadata:
   name: dns-9988
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-sa
+  namespace: dns-9988
+---
+apiVersion: v1
 kind: Pod
 metadata:
   creationTimestamp: "2023-09-18T23:08:02Z"
@@ -76,8 +82,8 @@ spec:
   runtimeClassName: kata-cc
   schedulerName: default-scheduler
   securityContext: {}
-  serviceAccount: default
-  serviceAccountName: default
+  serviceAccount: my-sa
+  serviceAccountName: my-sa
   subdomain: dns-test-service
   terminationGracePeriodSeconds: 0
   tolerations:

@@ -5,6 +5,12 @@ metadata:
   name: var-expansion-6653
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-sa
+  namespace: var-expansion-6653
+---
+apiVersion: v1
 kind: Pod
 metadata:
   annotations:
@@ -111,8 +117,8 @@ spec:
   runtimeClassName: kata-cc
   schedulerName: default-scheduler
   securityContext: {}
-  serviceAccount: default
-  serviceAccountName: default
+  serviceAccount: my-sa
+  serviceAccountName: my-sa
   terminationGracePeriodSeconds: 30
   tolerations:
     - effect: NoExecute

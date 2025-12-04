@@ -5,6 +5,12 @@ metadata:
   name: emptydir-wrapper-9641
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-sa
+  namespace: emptydir-wrapper-9641
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: emptydir-wrapper-test-434a02c7-a53e-4aaa-aa85-90213274e068
@@ -106,8 +112,8 @@ spec:
   restartPolicy: Always
   schedulerName: default-scheduler
   securityContext: {}
-  serviceAccount: default
-  serviceAccountName: default
+  serviceAccount: my-sa
+  serviceAccountName: my-sa
   terminationGracePeriodSeconds: 30
   tolerations:
     - effect: NoExecute

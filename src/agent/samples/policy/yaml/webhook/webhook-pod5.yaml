@@ -5,6 +5,12 @@ metadata:
   name: secrets-7426
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-sa
+  namespace: secrets-7426
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: secret-test-3ce4e77c-45b6-4058-ab6e-3a8bf03d410e
@@ -80,8 +86,8 @@ spec:
   runtimeClassName: kata-cc
   schedulerName: default-scheduler
   securityContext: {}
-  serviceAccount: default
-  serviceAccountName: default
+  serviceAccount: my-sa
+  serviceAccountName: my-sa
   terminationGracePeriodSeconds: 30
   tolerations:
     - effect: NoExecute

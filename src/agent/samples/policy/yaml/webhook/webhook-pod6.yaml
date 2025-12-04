@@ -5,6 +5,12 @@ metadata:
   name: projected-943
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-sa
+  namespace: projected-943
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: projected-secret-test-cf8fb82d-d193-47d2-9cce-189dbef9414c
@@ -83,8 +89,8 @@ spec:
   runtimeClassName: kata-cc
   schedulerName: default-scheduler
   securityContext: {}
-  serviceAccount: default
-  serviceAccountName: default
+  serviceAccount: my-sa
+  serviceAccountName: my-sa
   terminationGracePeriodSeconds: 30
   tolerations:
     - effect: NoExecute
