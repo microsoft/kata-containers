@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -276,6 +277,32 @@ fn mount_storage(logger: &Logger, storage: &Storage) -> Result<()> {
     let src_path = Path::new(&storage.source);
     create_mount_destination(src_path, mount_path, "", &storage.fstype)
         .context("Could not create mountpoint")?;
+
+    // DEBUG: If mounting /dev/vdb, create ext4 filesystem without journal first
+    if storage.source == "/dev/vdb" {
+        info!(
+            logger,
+            "DEBUG: creating ext4 filesystem without journal on /dev/vdb"
+        );
+
+        let output = Command::new("mkfs.ext4")
+            .arg("-F")
+            .arg("-O")
+            .arg("^has_journal")
+            .arg("-E")
+            .arg("assume_storage_prezeroed=1")
+            .arg("/dev/vdb")
+            .output()
+            .context("Failed to execute mkfs.ext4")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            error!(logger, "failed to create ext4 filesystem on /dev/vdb";
+                "stderr" => stderr.as_ref(),
+            );
+            return Err(anyhow!("mkfs.ext4 failed: {}", stderr));
+        }
+    }
 
     info!(logger, "mounting storage";
         "mount-source" => src_path.display(),

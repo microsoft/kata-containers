@@ -893,15 +893,6 @@ func (c *Container) createEphemeralDisks(_ context.Context) error {
 			return err
 		}
 
-		mkfs := exec.Command("mkfs.ext4", "-F", diskPath)
-		if output, err := mkfs.CombinedOutput(); err != nil {
-			c.Logger().WithError(err).WithFields(logrus.Fields{
-				"output":   string(output),
-				"exitCode": mkfs.ProcessState.ExitCode(),
-			}).Error("failed to create filesystem on disk")
-			return err
-		}
-
 		if err := volume.AddMountInfo(c.mounts[i].Source, volume.MountInfo{
 			VolumeType: "blk",
 			Device:     diskPath,
