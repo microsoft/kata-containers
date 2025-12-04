@@ -117,9 +117,9 @@ function kubectl_retry() {
 }
 
 function waitForProcess() {
-	wait_time="$1"
-	sleep_time="$2"
-	cmd="$3"
+	local wait_time="$1"
+	local -r sleep_time="$2"
+	local -r cmd="$3"
 	while [ "$wait_time" -gt 0 ]; do
 		if eval "$cmd"; then
 			return 0
@@ -132,10 +132,10 @@ function waitForProcess() {
 }
 
 function waitForCmdWithAbortCmd() {
-	wait_time="$1"
-	sleep_time="$2"
-	cmd="$3"
-	abort_cmd="$4"
+	local wait_time="$1"
+	local -r sleep_time="$2"
+	local -r cmd="$3"
+	local -r abort_cmd="$4"
 	while [ "$wait_time" -gt 0 ]; do
 		if eval "$cmd"; then
 			return 0

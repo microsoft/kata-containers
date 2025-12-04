@@ -66,8 +66,22 @@ setup_common() {
 }
 
 get_pod_config_dir() {
-	export pod_config_dir="${BATS_TEST_DIRNAME}/runtimeclass_workloads_work"
+	local -r pod_config_dir=$(common_config_dir)
+	export pod_config_dir
 	info "k8s configured to use runtimeclass"
+}
+
+common_config_dir() {
+	echo "${BATS_TEST_DIRNAME}/runtimeclass_workloads_work"
+}
+common_sleep_time() {
+	echo "${sleep_time}"
+}
+common_timeout() {
+	echo "${timeout}"
+}
+common_wait_time() {
+	echo "${wait_time}"
 }
 
 # Return the first worker found that is kata-runtime labeled.

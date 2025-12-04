@@ -5,13 +5,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+BATS_TEST_DIRNAME="${BATS_TEST_DIRNAME:-}"
+
 load "${BATS_TEST_DIRNAME}/../../common.bash"
 load "${BATS_TEST_DIRNAME}/tests_common.sh"
 
 setup() {
 	replicas="3"
 	deployment="nginx-deployment"
-	get_pod_config_dir
+	local -r pod_config_dir=$(common_config_dir)
 
 	# Create the yaml file
 	test_yaml="${pod_config_dir}/test-${deployment}.yaml"
@@ -24,17 +26,21 @@ setup() {
 }
 
 @test "Scale nginx deployment" {
+	local -r sleep_time=$(common_sleep_time)
+	local -r timeout=$(common_timeout)
+	local -r wait_time=$(common_wait_time)
+
 	kubectl create -f "${test_yaml}"
-	kubectl wait --for=condition=Available --timeout=$timeout deployment/${deployment}
-	kubectl expose deployment/${deployment}
-	kubectl scale deployment/${deployment} --replicas=${replicas}
+	kubectl wait --for=condition=Available --timeout="${timeout}" deployment/"${deployment}"
+	kubectl expose deployment/"${deployment}"
+	kubectl scale deployment/"${deployment}" --replicas="${replicas}"
 	cmd="kubectl get deployment/${deployment} -o yaml | grep 'availableReplicas: ${replicas}'"
-	waitForProcess "$wait_time" "$sleep_time" "$cmd"
+	waitForProcess "${wait_time}" "${sleep_time}" "${cmd}"
 }
 
 teardown() {
 	rm -f "${test_yaml}"
-	kubectl delete deployment "$deployment"
-	kubectl delete service "$deployment"
+	kubectl delete deployment "${deployment}"
+	kubectl delete service "${deployment}"
 	delete_tmp_policy_settings_dir "${policy_settings_dir}"
 }
