@@ -8,7 +8,8 @@
 # are being used by our metrics and integration tests
 
 this_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export repo_root_dir="$(cd "${this_script_dir}/../" && pwd)"
+repo_root_dir="$(cd "${this_script_dir}/../" && pwd)"
+export repo_root_dir
 
 source "${this_script_dir}/error.sh"
 
@@ -240,15 +241,16 @@ function extract_kata_env() {
 
 # Checks that processes are not running
 function check_processes() {
+	local vsock_configured, vsock_supported
 	extract_kata_env
 
 	# Only check the kata-env if we have managed to find the kata executable...
 	if [ -x "$RUNTIME_PATH" ]; then
-		local vsock_configured=$($RUNTIME_PATH env | awk '/UseVSock/ {print $3}')
-		local vsock_supported=$($RUNTIME_PATH env | awk '/SupportVSock/ {print $3}')
+		vsock_configured=$($RUNTIME_PATH env | awk '/UseVSock/ {print $3}')
+		vsock_supported=$($RUNTIME_PATH env | awk '/SupportVSock/ {print $3}')
 	else
-		local vsock_configured="false"
-		local vsock_supported="false"
+		vsock_configured="false"
+		vsock_supported="false"
 	fi
 
 	general_processes=( ${HYPERVISOR_PATH} ${SHIM_PATH} )
@@ -283,12 +285,14 @@ function clean_env()
 
 function clean_env_ctr()
 {
-	local count_running="$(sudo ctr c list -q | wc -l)"
+	local count_running
+	count_running="$(sudo ctr c list -q | wc -l)"
 	local remaining_attempts=10
 	declare -a running_tasks=()
 	local count_tasks=0
 	local sleep_time=1
 	local time_out=10
+	local cmd
 
 	[ "$count_running" -eq "0" ] && return 0
 
@@ -302,7 +306,7 @@ function clean_env_ctr()
 	done
 
 	# do not stop if the command fails, it will be evaluated by waitForProcess
-	local cmd="[[ $(sudo ctr tasks list | grep -c "STOPPED") == "$count_running" ]]" || true
+	cmd="[[ $(sudo ctr tasks list | grep -c "STOPPED") == "$count_running" ]]" || true
 
 	local res="ok"
 	waitForProcess "${time_out}" "${sleep_time}" "$cmd" || res="fail"
@@ -334,15 +338,16 @@ function clean_env_ctr()
 # Returns 0 on success, 1 otherwise
 function restart_systemd_service_with_no_burst_limit() {
 	local service=$1
+	local active, start_burst, start_burst_set, state, unit_file
 	info "restart $service service"
 
-	local active=$(systemctl show "$service.service" -p ActiveState | cut -d'=' -f2)
+	active=$(systemctl show "$service.service" -p ActiveState | cut -d'=' -f2)
 	[ "$active" == "active" ] || warn "Service $service is not active"
 
-	local start_burst=$(systemctl show "$service".service -p StartLimitBurst | cut -d'=' -f2)
+	start_burst=$(systemctl show "$service".service -p StartLimitBurst | cut -d'=' -f2)
 	if [ "$start_burst" -ne 0 ]
 	then
-		local unit_file=$(systemctl show "$service.service" -p FragmentPath | cut -d'=' -f2)
+		unit_file=$(systemctl show "$service.service" -p FragmentPath | cut -d'=' -f2)
 		[ -f "$unit_file" ] || { warn "Can't find $service's unit file: $unit_file"; return 1; }
 
 		# If the unit file is in /lib or /usr/lib, copy it to /etc
@@ -352,7 +357,7 @@ function restart_systemd_service_with_no_burst_limit() {
 			unit_file="$tmp_unit_file"
 		fi
 
-		local start_burst_set=$(sudo grep StartLimitBurst $unit_file | wc -l)
+		start_burst_set=$(sudo grep StartLimitBurst $unit_file | wc -l)
 		if [ "$start_burst_set" -eq 0 ]
 		then
 			sudo sed -i '/\[Service\]/a StartLimitBurst=0' "$unit_file"
@@ -365,7 +370,7 @@ function restart_systemd_service_with_no_burst_limit() {
 
 	sudo systemctl restart "$service"
 
-	local state=$(systemctl show "$service.service" -p SubState | cut -d'=' -f2)
+	state=$(systemctl show "$service.service" -p SubState | cut -d'=' -f2)
 	[ "$state" == "running" ] || { warn "Can't restart the $service service"; return 1; }
 
 	start_burst=$(systemctl show "$service.service" -p StartLimitBurst | cut -d'=' -f2)
@@ -531,7 +536,8 @@ function check_containerd_config_for_kata() {
 	declare -r line2="runtime_type = \"io.containerd.kata.v2\""
 	declare -r num_lines_containerd=2
 	declare -r containerd_path="/etc/containerd/config.toml"
-	local count_matches=$(grep -ic  "$line1\|$line2" "${containerd_path}")
+	local count_matches
+	count_matches=$(grep -ic  "$line1\|$line2" "${containerd_path}")
 
 	if [ "${count_matches}" = "${num_lines_containerd}" ]; then
 		info "containerd ok"
@@ -952,7 +958,7 @@ function get_test_version(){
         local cidir
 
         # directory of this script, not the caller
-        local cidir=$(dirname "${BASH_SOURCE[0]}")
+        cidir=$(dirname "${BASH_SOURCE[0]}")
 
         db="${cidir}/../versions.yaml"
 
