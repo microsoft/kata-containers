@@ -873,8 +873,9 @@ func (c *Container) createEphemeralDisks(_ context.Context) error {
 
 		// Create the disk file in the same folder as the original
 		// emptyDir mount so that we use the same backing storage.
-		emptyDirFolder := filepath.Dir(c.mounts[i].Source)
-		diskPath := filepath.Join(emptyDirFolder, fmt.Sprintf("%s-disk.img", emptyDirName))
+		// emptyDirFolder := filepath.Dir(c.mounts[i].Source)
+		// diskPath := filepath.Join(emptyDirFolder, fmt.Sprintf("%s-disk.img", emptyDirName))
+		diskPath := "/foo.img"
 		f, err := os.Create(diskPath)
 		if err != nil {
 			c.Logger().WithError(err).Errorf("failed to create disk file at %s", diskPath)
