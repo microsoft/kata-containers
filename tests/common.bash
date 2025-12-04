@@ -34,7 +34,7 @@ export branch="${target_branch:-"$(git remote show origin | sed -n '/HEAD branch
 function die() {
 	local msg="$*"
 
-	if [ -z "${KATA_TEST_VERBOSE:-}" ]; then
+	if [[ -z "${KATA_TEST_VERBOSE:-}" ]]; then
 		echo -e "[$(basename $0):${BASH_LINENO[0]}] ERROR: $msg" >&2
 		exit 1
 	fi
@@ -111,7 +111,7 @@ function kubectl_retry() {
 	while true; do
 		kubectl "$@" && return 0 || true
 		i=$((i + 1))
-		[ $i -lt $max_tries ] && echo "'kubectl $*' failed, retrying in $interval seconds" 1>&2 || break
+		[[ $i -lt $max_tries ]] && echo "'kubectl $*' failed, retrying in $interval seconds" 1>&2 || break
 		sleep $interval
 	done
 	echo "'kubectl $*' failed after $max_tries tries" 1>&2 && return 1
@@ -121,7 +121,7 @@ function waitForProcess() {
 	wait_time="$1"
 	sleep_time="$2"
 	cmd="$3"
-	while [ "$wait_time" -gt 0 ]; do
+	while [[ "$wait_time" -gt 0 ]]; do
 		if eval "$cmd"; then
 			return 0
 		else
@@ -137,7 +137,7 @@ function waitForCmdWithAbortCmd() {
 	sleep_time="$2"
 	cmd="$3"
 	abort_cmd="$4"
-	while [ "$wait_time" -gt 0 ]; do
+	while [[ "$wait_time" -gt 0 ]]; do
 		if eval "$cmd"; then
 			return 0
 		elif eval "$abort_cmd"; then
@@ -155,7 +155,7 @@ function waitForCmdWithAbortCmd() {
 # want in reality, but this function knows the names of the default
 # and recommended Kata docker runtime install names.
 function is_a_kata_runtime() {
-	if [ "$1" = "containerd-shim-kata-v2" ] || [ "$1" = "io.containerd.kata.v2" ]; then
+	if [[ "$1" = "containerd-shim-kata-v2" ]] || [[ "$1" = "io.containerd.kata.v2" ]]; then
 		echo "1"
 	else
 		echo "0"
@@ -221,7 +221,7 @@ function extract_kata_env() {
 
 	# Shimv2 path is being affected by https://github.com/kata-containers/kata-containers/issues/1151
 	SHIM_PATH=$(command -v containerd-shim-kata-v2)
-	[ -L ${SHIM_PATH} ] && SHIM_PATH=$(readlink ${SHIM_PATH})
+	[[ -L ${SHIM_PATH} ]] && SHIM_PATH=$(readlink ${SHIM_PATH})
 
 	SHIM_VERSION=${RUNTIME_VERSION}
 
@@ -230,8 +230,8 @@ function extract_kata_env() {
 	INITRD_PATH=$(echo "${kata_env}" | jq -r ${initrd_path})
 
 	# TODO: there is no ${cmd} of rust version currently
-	if [ "${KATA_HYPERVISOR}" != "dragonball" ]; then
-		if [ "${KATA_HYPERVISOR}" = "stratovirt" ]; then
+	if [[ "${KATA_HYPERVISOR}" != "dragonball" ]]; then
+		if [[ "${KATA_HYPERVISOR}" = "stratovirt" ]]; then
 			HYPERVISOR_VERSION=$(sudo -E ${HYPERVISOR_PATH} -version | head -n1)
 		else
 			HYPERVISOR_VERSION=$(sudo -E ${HYPERVISOR_PATH} --version | head -n1)
@@ -245,7 +245,7 @@ function check_processes() {
 	extract_kata_env
 
 	# Only check the kata-env if we have managed to find the kata executable...
-	if [ -x "$RUNTIME_PATH" ]; then
+	if [[ -x "$RUNTIME_PATH" ]]; then
 		vsock_configured=$($RUNTIME_PATH env | awk '/UseVSock/ {print $3}')
 		vsock_supported=$($RUNTIME_PATH env | awk '/SupportVSock/ {print $3}')
 	else
@@ -272,7 +272,7 @@ function clean_env()
 	KATA_DOCKER_TIMEOUT=${KATA_DOCKER_TIMEOUT:-30}
 	containers_running=$(sudo timeout ${KATA_DOCKER_TIMEOUT} docker ps -q)
 
-	if [ ! -z "$containers_running" ]; then
+	if [[ ! -z "$containers_running" ]]; then
 		# First stop all containers that are running
 		# Use kill, as the containers are generally benign, and most
 		# of the time our 'stop' request ends up doing a `kill` anyway
@@ -294,7 +294,7 @@ function clean_env_ctr()
 	local time_out=10
 	local cmd
 
-	[ "$count_running" -eq "0" ] && return 0
+	[[ "$count_running" -eq "0" ]] && return 0
 
 	readarray -t running_tasks < <(sudo ctr t list -q)
 
@@ -311,15 +311,15 @@ function clean_env_ctr()
 	local res="ok"
 	waitForProcess "${time_out}" "${sleep_time}" "$cmd" || res="fail"
 
-	[ "$res" == "ok" ] || sudo systemctl restart containerd
+	[[ "$res" == "ok" ]] || sudo systemctl restart containerd
 
 	while (( remaining_attempts > 0 )); do
-		[ "${RUNTIME}" == "runc" ] && sudo ctr tasks rm -f $(sudo ctr task list -q)
+		[[ "${RUNTIME}" == "runc" ]] && sudo ctr tasks rm -f $(sudo ctr task list -q)
 		sudo ctr c rm $(sudo ctr c list -q) >/dev/null 2>&1
 
 		count_running="$(sudo ctr c list -q | wc -l)"
 
-		[ "$count_running" -eq 0 ] && break
+		[[ "$count_running" -eq 0 ]] && break
 
 		remaining_attempts=$((remaining_attempts-1))
 		sleep 0.5
@@ -342,13 +342,13 @@ function restart_systemd_service_with_no_burst_limit() {
 	info "restart $service service"
 
 	active=$(systemctl show "$service.service" -p ActiveState | cut -d'=' -f2)
-	[ "$active" == "active" ] || warn "Service $service is not active"
+	[[ "$active" == "active" ]] || warn "Service $service is not active"
 
 	start_burst=$(systemctl show "$service".service -p StartLimitBurst | cut -d'=' -f2)
-	if [ "$start_burst" -ne 0 ]
+	if [[ "$start_burst" -ne 0 ]]
 	then
 		unit_file=$(systemctl show "$service.service" -p FragmentPath | cut -d'=' -f2)
-		[ -f "$unit_file" ] || { warn "Can't find $service's unit file: $unit_file"; return 1; }
+		[[ -f "$unit_file" ]] || { warn "Can't find $service's unit file: $unit_file"; return 1; }
 
 		# If the unit file is in /lib or /usr/lib, copy it to /etc
 		if [[ $unit_file =~ ^/(usr/)?lib/ ]]; then
@@ -358,7 +358,7 @@ function restart_systemd_service_with_no_burst_limit() {
 		fi
 
 		start_burst_set=$(sudo grep StartLimitBurst $unit_file | wc -l)
-		if [ "$start_burst_set" -eq 0 ]
+		if [[ "$start_burst_set" -eq 0 ]]
 		then
 			sudo sed -i '/\[Service\]/a StartLimitBurst=0' "$unit_file"
 		else
@@ -371,10 +371,10 @@ function restart_systemd_service_with_no_burst_limit() {
 	sudo systemctl restart "$service"
 
 	state=$(systemctl show "$service.service" -p SubState | cut -d'=' -f2)
-	[ "$state" == "running" ] || { warn "Can't restart the $service service"; return 1; }
+	[[ "$state" == "running" ]] || { warn "Can't restart the $service service"; return 1; }
 
 	start_burst=$(systemctl show "$service.service" -p StartLimitBurst | cut -d'=' -f2)
-	[ "$start_burst" -eq 0 ] || { warn "Can't set start burst limit for $service service"; return 1; }
+	[[ "$start_burst" -eq 0 ]] || { warn "Can't set start burst limit for $service service"; return 1; }
 
 	return 0
 }
@@ -384,13 +384,13 @@ function restart_containerd_service() {
 
 	local retries=5
 	local counter=0
-	until [ "$counter" -ge "$retries" ] || sudo ctr --connect-timeout 1s version > /dev/null 2>&1
+	until [[ "$counter" -ge "$retries" ]] || sudo ctr --connect-timeout 1s version > /dev/null 2>&1
 	do
 		info "Waiting for containerd socket..."
 		((counter++))
 	done
 
-	[ "$counter" -ge "$retries" ] && { warn "Can't connect to containerd socket"; return 1; }
+	[[ "$counter" -ge "$retries" ]] && { warn "Can't connect to containerd socket"; return 1; }
 
 	clean_env_ctr
 	return 0
@@ -493,7 +493,7 @@ function install_kata() {
 		sudo ln -sf "${b}" "${local_bin_dir}/$(basename $b)"
 	done
 
-	if [ "${CONTAINER_ENGINE:=containerd}" = "containerd" ]; then
+	if [[ "${CONTAINER_ENGINE:=containerd}" = "containerd" ]]; then
 		check_containerd_config_for_kata
 		restart_containerd_service
 	else
@@ -539,7 +539,7 @@ function check_containerd_config_for_kata() {
 	local count_matches
 	count_matches=$(grep -ic  "$line1\|$line2" "${containerd_path}")
 
-	if [ "${count_matches}" = "${num_lines_containerd}" ]; then
+	if [[ "${count_matches}" = "${num_lines_containerd}" ]]; then
 		info "containerd ok"
 	else
 		info "overwriting containerd configuration w/ a valid one"
@@ -585,7 +585,7 @@ function get_from_kata_deps() {
         command -v yq &>/dev/null || die 'yq command is not in your $PATH'
 
         yq_version=$(yq --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | cut -d. -f1)
-        if [ "$yq_version" -eq 3 ]; then
+        if [[ "$yq_version" -eq 3 ]]; then
           dependency=$(echo "$1" | sed "s/^\.//g")
           result=$("yq" read "$versions_file" "$dependency")
         else
@@ -593,7 +593,7 @@ function get_from_kata_deps() {
           result=$("yq" "$dependency | explode (.)" "$versions_file")
         fi
 
-        [ "$result" = "null" ] && result=""
+        [[ "$result" = "null" ]] && result=""
         echo "$result"
 }
 
@@ -655,7 +655,7 @@ function install_cni_plugins() {
 	rm -f "${tarball_name}"
 
 	cni_config="/etc/cni/net.d/10-containerd-net.conflist"
-	if [ ! -f ${cni_config} ];then
+	if [[ ! -f ${cni_config} ]];then
 		sudo mkdir -p /etc/cni/net.d
 		sudo tee "${cni_config}" << EOF
 {
@@ -700,7 +700,7 @@ function install_runc() {
 	project="opencontainers/runc"
 	version=$(get_latest_patch_release_from_a_github_project "${project}" "${base_version}")
 
-	if [ -f /usr/local/sbin/runc ]; then
+	if [[ -f /usr/local/sbin/runc ]]; then
 		return
 	fi
 
@@ -724,7 +724,7 @@ function install_cri_containerd() {
 	download_github_project_tarball "${project}" "${version}" "${tarball_name}"
 	#add the "--keep-directory-symlink" option to make sure the untar wouldn't override the
 	#system rootfs's bin/sbin directory which would be a symbol link to /usr/bin or /usr/sbin.
-	if [ ! -f /usr/local ]; then
+	if [[ ! -f /usr/local ]]; then
 		sudo mkdir -p /usr/local
 	fi
 	sudo tar --keep-directory-symlink -xvf "${tarball_name}" -C /usr/local/
@@ -735,7 +735,7 @@ function install_cri_containerd() {
 
 	containerd_service="/etc/systemd/system/containerd.service"
 
-	if [ ! -f ${containerd_service} ]; then
+	if [[ ! -f ${containerd_service} ]]; then
 		sudo mkdir -p /etc/systemd/system
 		sudo tee ${containerd_service}  <<EOF
 [Unit]
@@ -942,12 +942,12 @@ function get_dep_from_yaml_db(){
         local versions_file="$1"
         local dependency="$2"
 
-        [ ! -f "$versions_file" ] && die "cannot find $versions_file"
+        [[ ! -f "$versions_file" ]] && die "cannot find $versions_file"
 
         "${repo_root_dir}/ci/install_yq.sh" >&2
 
         result=$("${GOPATH}/bin/yq" "$dependency" "$versions_file")
-        [ "$result" = "null" ] && result=""
+        [[ "$result" = "null" ]] && result=""
         echo "$result"
 }
 
@@ -1010,7 +1010,7 @@ function version_greater_than_equal() {
 	local current_version=$1
 	local target_version=$2
 	smaller_version=$(echo -e "$current_version\n$target_version" | sort -V | head -1)
-	if [ "${smaller_version}" = "${target_version}" ]; then
+	if [[ "${smaller_version}" = "${target_version}" ]]; then
 		return 0
 	else
 		return 1
