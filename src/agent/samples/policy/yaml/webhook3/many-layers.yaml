@@ -5,6 +5,12 @@ metadata:
   name: dns-1370
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-sa
+  namespace: dns-1370
+---
+apiVersion: v1
 kind: List
 items:
   - apiVersion: v1
@@ -81,8 +87,8 @@ items:
       runtimeClassName: kata-cc
       schedulerName: default-scheduler
       securityContext: {}
-      serviceAccount: default
-      serviceAccountName: default
+      serviceAccount: my-sa
+      serviceAccountName: my-sa
       subdomain: dns-test-service
       terminationGracePeriodSeconds: 0
       tolerations:

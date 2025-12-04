@@ -5,6 +5,12 @@ metadata:
   name: configmap-7431
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-sa
+  namespace: configmap-7431
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: configmap-test-f61a3180-8242-43d0-be72-659de4f65498
@@ -80,8 +86,8 @@ spec:
   runtimeClassName: kata-cc
   schedulerName: default-scheduler
   securityContext: {}
-  serviceAccount: default
-  serviceAccountName: default
+  serviceAccount: my-sa
+  serviceAccountName: my-sa
   terminationGracePeriodSeconds: 30
   tolerations:
     - effect: NoExecute
