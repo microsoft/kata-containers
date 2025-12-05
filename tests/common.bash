@@ -35,7 +35,7 @@ function die() {
 	local msg="$*"
 
 	if [[ -z "${KATA_TEST_VERBOSE:-}" ]]; then
-		echo -e "[$(basename $0):${BASH_LINENO[0]}] ERROR: $msg" >&2
+		echo -e "[$(basename "$0"):${BASH_LINENO[0]}] ERROR: $msg" >&2
 		exit 1
 	fi
 
@@ -67,24 +67,24 @@ function die() {
 
 function warn() {
 	local msg="$*"
-	echo -e "[$(basename $0):${BASH_LINENO[0]}] WARNING: $msg"
+	echo -e "[$(basename "$0"):${BASH_LINENO[0]}] WARNING: $msg"
 }
 
 function info() {
 	local msg="$*"
-	echo -e "[$(basename $0):${BASH_LINENO[0]}] INFO: $msg"
+	echo -e "[$(basename "$0"):${BASH_LINENO[0]}] INFO: $msg"
 }
 
 function bats_unbuffered_info() {
 	local msg="$*"
 	# Ask bats to print this text immediately rather than buffering until the end of a test case.
-	echo -e "[$(basename $0):${BASH_LINENO[0]}] UNBUFFERED: INFO: $msg" >&3
+	echo -e "[$(basename "$0"):${BASH_LINENO[0]}] UNBUFFERED: INFO: $msg" >&3
 }
 
 function handle_error() {
 	local exit_code="${?}"
 	local line_number="${1:-}"
-	echo -e "[$(basename $0):$line_number] ERROR: $(eval echo "$BASH_COMMAND")"
+	echo -e "[$(basename "$0"):$line_number] ERROR: $(eval echo "$BASH_COMMAND")"
 	exit "${exit_code}"
 }
 trap 'handle_error $LINENO' ERR
@@ -112,7 +112,7 @@ function kubectl_retry() {
 		kubectl "$@" && return 0 || true
 		i=$((i + 1))
 		[[ $i -lt $max_tries ]] && echo "'kubectl $*' failed, retrying in $interval seconds" 1>&2 || break
-		sleep $interval
+		sleep "$interval"
 	done
 	echo "'kubectl $*' failed after $max_tries tries" 1>&2 && return 1
 }
@@ -215,13 +215,13 @@ function extract_kata_env() {
 	SHARED_FS="$(echo "${kata_env}" | jq -r ${shared_fs})"
 
 	# get the requested memory and num of vcpus from the kata config file.
-	config_content="$(cat ${RUNTIME_CONFIG_PATH} | grep -vE "^#")"
+	config_content="$(cat "${RUNTIME_CONFIG_PATH}" | grep -vE "^#")"
 	REQ_MEMORY="$(echo "${config_content}" | grep -i 'default_memory =' | cut -d  "=" -f2 | awk '{print $1}')"
 	REQ_NUM_VCPUS="$(echo "${config_content}" | grep -i 'default_vcpus =' | cut -d  "=" -f2 | awk '{print $1}')"
 
 	# Shimv2 path is being affected by https://github.com/kata-containers/kata-containers/issues/1151
 	SHIM_PATH=$(command -v containerd-shim-kata-v2)
-	[[ -L ${SHIM_PATH} ]] && SHIM_PATH=$(readlink ${SHIM_PATH})
+	[[ -L ${SHIM_PATH} ]] && SHIM_PATH=$(readlink "${SHIM_PATH}")
 
 	SHIM_VERSION=${RUNTIME_VERSION}
 
@@ -232,9 +232,9 @@ function extract_kata_env() {
 	# TODO: there is no ${cmd} of rust version currently
 	if [[ "${KATA_HYPERVISOR}" != "dragonball" ]]; then
 		if [[ "${KATA_HYPERVISOR}" = "stratovirt" ]]; then
-			HYPERVISOR_VERSION=$(sudo -E ${HYPERVISOR_PATH} -version | head -n1)
+			HYPERVISOR_VERSION=$(sudo -E "${HYPERVISOR_PATH}" -version | head -n1)
 		else
-			HYPERVISOR_VERSION=$(sudo -E ${HYPERVISOR_PATH} --version | head -n1)
+			HYPERVISOR_VERSION=$(sudo -E "${HYPERVISOR_PATH}" --version | head -n1)
 		fi
 	fi
 }
@@ -270,16 +270,16 @@ function clean_env()
 	# Docker has a built in 10s default timeout, so make ours
 	# longer than that.
 	KATA_DOCKER_TIMEOUT=${KATA_DOCKER_TIMEOUT:-30}
-	containers_running=$(sudo timeout ${KATA_DOCKER_TIMEOUT} docker ps -q)
+	containers_running=$(sudo timeout "${KATA_DOCKER_TIMEOUT}" docker ps -q)
 
 	if [[ ! -z "$containers_running" ]]; then
 		# First stop all containers that are running
 		# Use kill, as the containers are generally benign, and most
 		# of the time our 'stop' request ends up doing a `kill` anyway
-		sudo timeout ${KATA_DOCKER_TIMEOUT} docker kill $containers_running
+		sudo timeout "${KATA_DOCKER_TIMEOUT}" docker kill "$containers_running"
 
 		# Remove all containers
-		sudo timeout ${KATA_DOCKER_TIMEOUT} docker rm -f $(docker ps -qa)
+		sudo timeout "${KATA_DOCKER_TIMEOUT}" docker rm -f $(docker ps -qa)
 	fi
 }
 
@@ -301,7 +301,7 @@ function clean_env_ctr()
 	info "Wait until the containers gets removed"
 
 	for task_id in "${running_tasks[@]}"; do
-		sudo timeout -s SIGKILL 30s ctr t kill -a -s SIGKILL ${task_id} >/dev/null 2>&1 || true
+		sudo timeout -s SIGKILL 30s ctr t kill -a -s SIGKILL "${task_id}" >/dev/null 2>&1 || true
 		sleep 0.5
 	done
 
@@ -357,7 +357,7 @@ function restart_systemd_service_with_no_burst_limit() {
 			unit_file="$tmp_unit_file"
 		fi
 
-		start_burst_set=$(sudo grep StartLimitBurst $unit_file | wc -l)
+		start_burst_set=$(sudo grep StartLimitBurst "$unit_file" | wc -l)
 		if [[ "$start_burst_set" -eq 0 ]]
 		then
 			sudo sed -i '/\[Service\]/a StartLimitBurst=0' "$unit_file"
@@ -490,7 +490,7 @@ function install_kata() {
 
 	# create symbolic links to kata components
 	for b in "${katadir}"/bin/* ; do
-		sudo ln -sf "${b}" "${local_bin_dir}/$(basename $b)"
+		sudo ln -sf "${b}" "${local_bin_dir}/$(basename "$b")"
 	done
 
 	if [[ "${CONTAINER_ENGINE:=containerd}" = "containerd" ]]; then
@@ -628,7 +628,7 @@ function clone_cri_containerd() {
 	version=$(get_latest_patch_release_from_a_github_project "${project}" "${base_version}")
 
 	rm -rf containerd
-	git clone -b ${version} https://github.com/${project}
+	git clone -b "${version}" https://github.com/${project}
 }
 
 # project: org/repo format
@@ -639,7 +639,7 @@ function download_github_project_tarball() {
 	version="${2}"
 	tarball_name="${3}"
 
-	wget https://github.com/${project}/releases/download/${version}/${tarball_name}
+	wget https://github.com/"${project}"/releases/download/"${version}"/"${tarball_name}"
 }
 
 # version: The version to be intalled
@@ -647,7 +647,7 @@ function install_cni_plugins() {
 	version="${1}"
 
 	project="containernetworking/plugins"
-	tarball_name="cni-plugins-linux-$(${repo_root_dir}/tests/kata-arch.sh -g)-${version}.tgz"
+	tarball_name="cni-plugins-linux-$("${repo_root_dir}"/tests/kata-arch.sh -g)-${version}.tgz"
 
 	download_github_project_tarball "${project}" "${version}" "${tarball_name}"
 	sudo mkdir -p /opt/cni/bin
@@ -704,11 +704,11 @@ function install_runc() {
 		return
 	fi
 
-	binary_name="runc.$(${repo_root_dir}/tests/kata-arch.sh -g)"
+	binary_name="runc.$("${repo_root_dir}"/tests/kata-arch.sh -g)"
 	download_github_project_tarball "${project}" "${version}" "${binary_name}"
 
 	sudo mkdir -p /usr/local/sbin
-	sudo mv $binary_name /usr/local/sbin/runc
+	sudo mv "$binary_name" /usr/local/sbin/runc
 	sudo chmod +x /usr/local/sbin/runc
 }
 
@@ -719,7 +719,7 @@ function install_cri_containerd() {
 	project="containerd/containerd"
 	version=$(get_latest_patch_release_from_a_github_project "${project}" "${base_version}" "true")
 
-	tarball_name="containerd-${version//v}-linux-$(${repo_root_dir}/tests/kata-arch.sh -g).tar.gz"
+	tarball_name="containerd-${version//v}-linux-$("${repo_root_dir}"/tests/kata-arch.sh -g).tar.gz"
 
 	download_github_project_tarball "${project}" "${version}" "${tarball_name}"
 	#add the "--keep-directory-symlink" option to make sure the untar wouldn't override the
@@ -737,7 +737,7 @@ function install_cri_containerd() {
 
 	if [[ ! -f ${containerd_service} ]]; then
 		sudo mkdir -p /etc/systemd/system
-		sudo tee ${containerd_service}  <<EOF
+		sudo tee "${containerd_service}"  <<EOF
 [Unit]
 Description=containerd container runtime
 Documentation=https://containerd.io
@@ -775,7 +775,7 @@ function install_cri_tools() {
 	project="kubernetes-sigs/cri-tools"
 	version=$(get_latest_patch_release_from_a_github_project "${project}" "${base_version}")
 
-	tarball_name="crictl-${version}-linux-$(${repo_root_dir}/tests/kata-arch.sh -g).tar.gz"
+	tarball_name="crictl-${version}-linux-$("${repo_root_dir}"/tests/kata-arch.sh -g).tar.gz"
 
 	download_github_project_tarball "${project}" "${version}" "${tarball_name}"
 	sudo tar -xvf "${tarball_name}" -C /usr/local/bin
@@ -786,7 +786,7 @@ function install_nydus() {
 	version="${1}"
 
 	project="dragonflyoss/image-service"
-	tarball_name="nydus-static-${version}-linux-$(${repo_root_dir}/tests/kata-arch.sh -g).tgz"
+	tarball_name="nydus-static-${version}-linux-$("${repo_root_dir}"/tests/kata-arch.sh -g).tgz"
 
 	download_github_project_tarball "${project}" "${version}" "${tarball_name}"
 	sudo tar xfz "${tarball_name}" -C /usr/local/bin --strip-components=1
@@ -797,7 +797,7 @@ function install_nydus_snapshotter() {
 	version="${1}"
 
 	project="containerd/nydus-snapshotter"
-	tarball_name="nydus-snapshotter-${version}-$(uname -s| tr A-Z a-z)-$(${repo_root_dir}/tests/kata-arch.sh -g).tar.gz"
+	tarball_name="nydus-snapshotter-${version}-$(uname -s| tr A-Z a-z)-$("${repo_root_dir}"/tests/kata-arch.sh -g).tar.gz"
 
 	download_github_project_tarball "${project}" "${version}" "${tarball_name}"
 	sudo tar xfz "${tarball_name}" -C /usr/local/bin --strip-components=1
@@ -811,7 +811,7 @@ function install_crio() {
 	sudo mkdir -p /etc/apt/keyrings
 	sudo mkdir -p /etc/apt/sources.list.d
 
-	curl -fsSL https://pkgs.k8s.io/addons:/cri-o:/stable:/v${version}/deb/Release.key | \
+	curl -fsSL https://pkgs.k8s.io/addons:/cri-o:/stable:/v"${version}"/deb/Release.key | \
 		sudo gpg --dearmor -o /etc/apt/keyrings/cri-o-apt-keyring.gpg
 	echo "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] https://pkgs.k8s.io/addons:/cri-o:/stable:/v${version}/deb/ /" | \
 		sudo tee /etc/apt/sources.list.d/cri-o.list
