@@ -272,7 +272,7 @@ fn mount_storage(logger: &Logger, storage: &Storage) -> Result<()> {
         return Ok(());
     }
 
-    let (flags, options) = parse_mount_options(&storage.options)?;
+    let (flags, mut options) = parse_mount_options(&storage.options)?;
     let mount_path = Path::new(&storage.mount_point);
     let src_path = Path::new(&storage.source);
     create_mount_destination(src_path, mount_path, "", &storage.fstype)
@@ -302,6 +302,11 @@ fn mount_storage(logger: &Logger, storage: &Storage) -> Result<()> {
             );
             return Err(anyhow!("mkfs.ext4 failed: {}", stderr));
         }
+
+        if !options.is_empty() {
+            options.push(',');
+        }
+        options.push_str("discard");
     }
 
     info!(logger, "mounting storage";

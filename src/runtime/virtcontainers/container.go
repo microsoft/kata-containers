@@ -24,11 +24,9 @@ import (
 	volume "github.com/kata-containers/kata-containers/src/runtime/pkg/direct-volume"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/katautils/katatrace"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/agent/protocols/grpc"
-	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/annotations"
 	vcAnnotations "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/annotations"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
-	"k8s.io/apimachinery/pkg/api/resource"
 
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/sirupsen/logrus"
@@ -835,19 +833,14 @@ func (c *Container) createVirtualVolumeDevices() ([]config.DeviceInfo, error) {
 	return deviceInfos, nil
 }
 
-// ParseEmptyDirSizeLimit reads the size limit for the given emptyDir
-// volume from the provided annotations map.
-func parseEmptyDirSizeLimit(annots map[string]string, emptyDirName string) (int64, error) {
-	annotKey := annotations.EmptyDirSizeLimitPrefix + emptyDirName
-	annotValue, ok := annots[annotKey]
-	if !ok {
-		return 0, fmt.Errorf("missing size limit annotation for emptyDir volume %q (%s)", emptyDirName, annotKey)
-	}
-	quantity, err := resource.ParseQuantity(annotValue)
-	if err != nil {
+// getFilesystemCapacity return the total size in bytes of the filesystem
+// under path.
+func getFilesystemCapacity(path string) (uint64, error) {
+	var stat unix.Statfs_t
+	if err := unix.Statfs(path, &stat); err != nil {
 		return 0, err
 	}
-	return quantity.Value(), nil
+	return stat.Blocks * uint64(stat.Bsize), nil
 }
 
 func (c *Container) createEphemeralDisks(_ context.Context) error {
@@ -865,17 +858,13 @@ func (c *Container) createEphemeralDisks(_ context.Context) error {
 			continue
 		}
 
-		emptyDirName := filepath.Base(c.mounts[i].Source)
-		sizeLimit, err := parseEmptyDirSizeLimit(c.GetPatchedOCISpec().Annotations, emptyDirName)
-		if err != nil {
-			return err
-		}
-
 		// Create the disk file in the same folder as the original
 		// emptyDir mount so that we use the same backing storage.
 		// emptyDirFolder := filepath.Dir(c.mounts[i].Source)
-		// diskPath := filepath.Join(emptyDirFolder, fmt.Sprintf("%s-disk.img", emptyDirName))
-		diskPath := "/foo.img"
+		// emptyDirFolder := filepath.Dir(c.mounts[i].Source)
+		// emptyDirName := filepath.Base(c.mounts[i].Source)
+		// diskPath := filepath.Join(c.mounts[i].Source, "disk.img")
+		diskPath := "/disk.img" // DEBUG
 		f, err := os.Create(diskPath)
 		if err != nil {
 			c.Logger().WithError(err).Errorf("failed to create disk file at %s", diskPath)
@@ -888,7 +877,13 @@ func (c *Container) createEphemeralDisks(_ context.Context) error {
 			}
 		}()
 
-		if err := f.Truncate(sizeLimit); err != nil {
+		emptyDirFsCapacity, err := getFilesystemCapacity(c.mounts[i].Source)
+		if err != nil {
+			c.Logger().WithError(err).Errorf("failed to get filesystem capacity for mount %s", c.mounts[i].Source)
+			return err
+		}
+
+		if err := f.Truncate(int64(emptyDirFsCapacity)); err != nil {
 			c.Logger().WithError(err).Errorf("failed to truncate disk file")
 			return err
 		}

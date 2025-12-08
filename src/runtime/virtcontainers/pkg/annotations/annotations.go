@@ -288,13 +288,6 @@ const (
 	ForceGuestPull = kataAnnotRuntimePrefix + "experimental_force_guest_pull"
 )
 
-// Volume related annotations
-const (
-	kataVolumesAnnotPrefix = kataAnnotationsPrefix + "volumes."
-
-	EmptyDirSizeLimitPrefix = kataVolumesAnnotPrefix + "emptydir_sizelimit."
-)
-
 // Agent related annotations
 const (
 	kataAnnotAgentPrefix = kataConfAnnotationsPrefix + "agent."
