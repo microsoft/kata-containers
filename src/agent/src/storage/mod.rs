@@ -291,6 +291,8 @@ fn mount_storage(logger: &Logger, storage: &Storage) -> Result<()> {
             .arg("^has_journal")
             .arg("-E")
             .arg("assume_storage_prezeroed=1")
+            .arg("-m")
+            .arg("0")
             .arg("/dev/vdb")
             .output()
             .context("Failed to execute mkfs.ext4")?;
