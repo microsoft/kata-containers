@@ -130,41 +130,62 @@ build_nvidia_drivers() {
 	local certs_dir
 	local kernel_version
 	local ARCH
-	for version in /lib/modules/*; do
-		kernel_version=$(basename "${version}")
-		certs_dir=/lib/modules/"${kernel_version}"/build/certs
-		signing_key=${certs_dir}/signing_key.pem
+	# for version in /lib/modules/*; do
+		# kernel_version=$(basename "${version}")
+		kernel_version="6.6.104.2+"
+		# certs_dir=/lib/modules/"${kernel_version}"/build/certs
+		# signing_key=${certs_dir}/signing_key.pem
 
-	        echo "chroot: Building GPU modules for: ${kernel_version}"
-		cp /boot/System.map-"${kernel_version}" /lib/modules/"${kernel_version}"/build/System.map
+	        # echo "chroot: Building GPU modules for: ${kernel_version}"
+		# cp /boot/System.map-"${kernel_version}" /lib/modules/"${kernel_version}"/build/System.map
 
-		if [[ "${arch_target}" == "aarch64" ]]; then
-			ln -sf /lib/modules/"${kernel_version}"/build/arch/arm64 /lib/modules/"${kernel_version}"/build/arch/aarch64
-			ARCH=arm64
-		fi
 
+		# if [[ "${arch_target}" == "aarch64" ]]; then
+		# 	ln -sf /lib/modules/"${kernel_version}"/build/arch/arm64 /lib/modules/"${kernel_version}"/build/arch/aarch64
+		# 	ARCH=arm64
+		# fi
+
+		# if [[ "${arch_target}" == "x86_64" ]]; then
+		# 	ln -sf /lib/modules/"${kernel_version}"/build/arch/x86 /lib/modules/"${kernel_version}"/build/arch/amd64
+		# 	ARCH=x86_64
+		# fi
 		if [[ "${arch_target}" == "x86_64" ]]; then
+			mkdir -p /lib/modules/"${kernel_version}"/build/arch/x86
+			mkdir -p /lib/modules/"${kernel_version}"/build/arch/amd64
 			ln -sf /lib/modules/"${kernel_version}"/build/arch/x86 /lib/modules/"${kernel_version}"/build/arch/amd64
 			ARCH=x86_64
 		fi
 
-		echo "chroot: Building GPU modules for: ${kernel_version} ${ARCH}"
+		# echo "chroot: Building GPU modules for: ${kernel_version} ${ARCH}"
 
-		make -j "$(nproc)" CC=gcc SYSSRC=/lib/modules/"${kernel_version}"/build > /dev/null
+		#make -j "$(nproc)" CC=gcc SYSSRC=/lib/modules/"${kernel_version}"/build > /dev/null
+		ls -ltr /CBL-Mariner-Linux-Kernel
+		pwd
+		sed -i 's/\/dev\/null//g' /NVIDIA-Linux-x86_64-580.95.05/kernel/Kbuild
+		cp /CBL-Mariner-Linux-Kernel/Module.symvers /NVIDIA-Linux-x86_64-580.95.05/kernel/
+		cp /CBL-Mariner-Linux-Kernel/modules* /lib/modules/"${kernel_version}"/
+		# pushd /CBL-Mariner-Linux-Kernel && make -j$(nproc) ARCH=x86_64 modules_install && popd
+		make -j "$(nproc)" CC=gcc SYSSRC=/CBL-Mariner-Linux-Kernel > /dev/null
+		# sleep 15
+		# if [[ -n "${KBUILD_SIGN_PIN}" ]]; then
+		# 	mkdir -p "${certs_dir}" && mv /signing_key.* "${certs_dir}"/.
+		# 	check_kernel_sig_config
+		# fi
 
-		if [[ -n "${KBUILD_SIGN_PIN}" ]]; then
-			mkdir -p "${certs_dir}" && mv /signing_key.* "${certs_dir}"/.
-			check_kernel_sig_config
-		fi
-
-		make INSTALL_MOD_STRIP=1 -j "$(nproc)" CC=gcc SYSSRC=/lib/modules/"${kernel_version}"/build modules_install
-		make -j "$(nproc)" CC=gcc SYSSRC=/lib/modules/"${kernel_version}"/build clean > /dev/null
+		#make INSTALL_MOD_STRIP=1 -j "$(nproc)" CC=gcc SYSSRC=/lib/modules/"${kernel_version}"/build modules_install
+		make INSTALL_MOD_STRIP=1 -j "$(nproc)" CC=gcc SYSSRC=/CBL-Mariner-Linux-Kernel modules_install
+		sleep 10
+		#make -j "$(nproc)" CC=gcc SYSSRC=/lib/modules/"${kernel_version}"/build clean > /dev/null
+		
+		# make -j "$(nproc)" CC=gcc SYSSRC=/CBL-Mariner-Linux-Kernel clean > /dev/null
+		
 		# The make clean above should clear also the certs directory but just in case something
 		# went wroing make sure the signing_key.pem is removed
-		[[ -e "${signing_key}" ]] && rm -f "${signing_key}"
-	done
+		# [[ -e "${signing_key}" ]] && rm -f "${signing_key}"
+	# done
 
 	# Save the modules for later so that a linux-image purge does not remove them
+
 	tar cvfa /lib/modules.save_from_purge.tar.zst /lib/modules
 
 	popd >> /dev/null
@@ -265,7 +286,7 @@ prepare_nvidia_drivers() {
 
 install_build_dependencies() {
 	echo "chroot: Install NVIDIA drivers build dependencies"
-	eval "${APT_INSTALL}" make gcc gawk kmod libvulkan1 pciutils jq zstd linuxptp xz-utils
+	eval "${APT_INSTALL}" make gcc gawk kmod libvulkan1 pciutils jq zstd linuxptp xz-utils bison build-essential dwarves flex git less libelf-dev libncurses-dev libssl-dev nano python3 bc cpio
 }
 
 setup_apt_repositories() {
@@ -397,11 +418,11 @@ cleanup_rootfs() {
 			linuxptp libnftnl11
 	fi
 
-	kernel_headers=$(dpkg --get-selections | cut -f1 | grep linux-headers)
-	linux_images=$(dpkg --get-selections | cut -f1 | grep linux-image)
-	for i in ${kernel_headers} ${linux_images}; do
-		apt purge -yqq "${i}"
-	done
+	# kernel_headers=$(dpkg --get-selections | cut -f1 | grep linux-headers)
+	# linux_images=$(dpkg --get-selections | cut -f1 | grep linux-image)
+	# for i in ${kernel_headers} ${linux_images}; do
+	# 	apt purge -yqq "${i}"
+	# done
 
 	apt purge -yqq jq make gcc xz-utils linux-libc-dev
 
@@ -419,9 +440,13 @@ cleanup_rootfs() {
 		ln -sf "${modules_version}" /lib/modules/"$(uname -r)"
 		touch  "${modules_version}"/modules.order
 		touch  "${modules_version}"/modules.builtin
-		depmod -a
+		depmod -av
+		# modprobe --dump-modversions
+		# modprobe --force 
+		# sleep 40
 	done
 
+	rm -rf /CBL-Mariner-Linux-Kernel*
 	rm -rf /var/lib/apt/lists/* /var/cache/apt/* /var/log/apt /var/cache/debconf
 	rm -f /etc/apt/sources.list
 	rm -f /usr/bin/nvidia-ngx-updater /usr/bin/nvidia-container-runtime
@@ -440,7 +465,7 @@ echo "chroot: Setup NVIDIA GPU rootfs stage one"
 
 set_driver_version_type
 setup_apt_repositories
-install_kernel_dependencies
+# install_kernel_dependencies
 install_build_dependencies
 prepare_nvidia_drivers
 build_nvidia_drivers

@@ -78,6 +78,11 @@ setup_nvidia_gpu_rootfs_stage_one() {
 
 	info "nvidia: Setup GPU rootfs type=${rootfs_type}"
 	cp "${SCRIPT_DIR}/nvidia_chroot.sh" ./nvidia_chroot.sh
+	mkdir -p ./CBL-Mariner-Linux-Kernel
+	# cp --preserve=timestamps -R "${SCRIPT_DIR}/CBL-Mariner-Linux-Kernel/." ./CBL-Mariner-Linux-Kernel/ 
+	cp -a /kata-containers/tools/osbuilder/rootfs-builder/nvidia/CBL-Mariner-Linux-Kernel/. ./CBL-Mariner-Linux-Kernel/
+	# cp --preserve=timestamps -R "${SCRIPT_DIR}/CBL-Mariner-Linux-Kernel/.*" ./CBL-Mariner-Linux-Kernel/ 
+	ls -ltr ./CBL-Mariner-Linux-Kernel 
 
 	chmod +x ./nvidia_chroot.sh
 
@@ -93,9 +98,9 @@ setup_nvidia_gpu_rootfs_stage_one() {
     		appendix="-dragonball-experimental"
 	fi
 
-	# We need the kernel packages for building the drivers cleanly will be
-	# deinstalled and removed from the roofs once the build finishes.
-	tar --zstd -xvf "${BUILD_DIR}"/kata-static-kernel-nvidia-gpu"${appendix}"-headers.tar.zst -C .
+	# # We need the kernel packages for building the drivers cleanly will be
+	# # deinstalled and removed from the roofs once the build finishes.
+	# tar --zstd -xvf "${BUILD_DIR}"/kata-static-kernel-nvidia-gpu"${appendix}"-headers.tar.zst -C .
 
 	# If we find a local downloaded run file build the kernel modules
 	# with it, otherwise use the distribution packages. Run files may have
@@ -121,7 +126,7 @@ setup_nvidia_gpu_rootfs_stage_one() {
 	umount ./proc
 
 	rm ./nvidia_chroot.sh
-	rm ./*.deb
+	# rm ./*.deb
 
 	tar cfa "${stage_one}.tar.zst" --remove-files -- *
 
@@ -344,6 +349,7 @@ setup_nvidia_gpu_rootfs_stage_two() {
 	# If devkit flag is set, skip chisseling, use stage_one
 	if echo "${stack}" | grep -q '\<devkit\>'; then
 		echo "nvidia: devkit mode enabled - skip chisseling"
+		sleep 5
 
 		tar -C "${stage_two}" -xf "${stage_one}".tar.zst
 
