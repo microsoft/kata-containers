@@ -233,8 +233,10 @@ setup_nvrc_init_symlinks() {
 	local target=${machine_arch}-unknown-linux-musl
 
 	# make sure NVRC is the init process for the initrd and image case
-	ln -sf /bin/"${bin}-${target}" init
-	ln -sf /bin/"${bin}-${target}" sbin/init
+	# ln -sf /bin/"${bin}-${target}" init
+	# ln -sf /bin/"${bin}-${target}" sbin/init
+	ln -sf /usr/bin/kata-agent init
+	ln -sf /usr/bin/kata-agent sbin/init
 }
 
 chisseled_init() {
