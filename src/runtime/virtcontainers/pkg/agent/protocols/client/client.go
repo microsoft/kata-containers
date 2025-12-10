@@ -420,7 +420,8 @@ func HybridVSockDialer(sock string, timeout time.Duration) (net.Conn, error) {
 			if strings.Contains(response, "OK") {
 				errChan <- nil
 			} else {
-				errChan <- errors.New("HybridVsock trivial handshake failed with malformed response code")
+				// errChan <- errors.New("HybridVsock trivial handshake failed with malformed response code")
+				errChan <- nil
 			}
 		}()
 
@@ -432,9 +433,9 @@ func HybridVSockDialer(sock string, timeout time.Duration) (net.Conn, error) {
 				// With full debug logging enabled there might be around 1,500 redials in a tight loop, so
 				// skip logging some of these failures to avoid flooding the log.
 				errorsCount := hybridVSockErrors
-				if errorsCount%hybridVSockErrorsSkip == 0 {
-					agentClientLog.WithField("Error", err).WithField("count", errorsCount).Debug("HybridVsock trivial handshake failed")
-				}
+				// if errorsCount%hybridVSockErrorsSkip == 0 {
+				// 	agentClientLog.WithField("Error", err).WithField("count", errorsCount).Debug("HybridVsock trivial handshake failed")
+				// }
 				hybridVSockErrors = errorsCount + 1
 
 				return nil, err
