@@ -1448,6 +1448,8 @@ func (s *Sandbox) startVM(ctx context.Context, prestartHookFunc func(context.Con
 		}
 	}
 
+	s.Logger().Info("about to start sandbox")
+
 	// Once the hypervisor is done starting the sandbox,
 	// we want to guarantee that it is manageable.
 	// For that we need to ask the agent to start the
