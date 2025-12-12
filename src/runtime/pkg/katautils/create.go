@@ -167,6 +167,8 @@ func CreateSandbox(ctx context.Context, vci vc.VC, ociSpec specs.Spec, runtimeCo
 	delete(ociSpec.Annotations, vcAnnotations.Policy)
 	delete(sandboxConfig.Annotations, vcAnnotations.Policy)
 
+	kataUtilsLogger.Info("about to vci.CreateSandbox")
+
 	sandbox, err := vci.CreateSandbox(ctx, sandboxConfig, func(ctx context.Context) error {
 		// Run pre-start OCI hooks, in the runtime namespace.
 		if err := PreStartHooks(ctx, ociSpec, containerID, bundlePath); err != nil {

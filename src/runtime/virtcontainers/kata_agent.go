@@ -585,7 +585,7 @@ func (k *kataAgent) updateInterface(ctx context.Context, ifc *pbTypes.Interface)
 		k.Logger().WithFields(logrus.Fields{
 			"interface-requested": fmt.Sprintf("%+v", ifc),
 			"resulting-interface": fmt.Sprintf("%+v", resultingInterface),
-		}).WithError(err).Error("update interface request failed")
+		}).WithError(err).Error("MOD update interface request failed")
 	}
 	if resultInterface, ok := resultingInterface.(*pbTypes.Interface); ok {
 		return resultInterface, err
@@ -739,6 +739,7 @@ func (k *kataAgent) getDNS(sandbox *Sandbox) ([]string, error) {
 }
 
 func (k *kataAgent) startSandbox(ctx context.Context, sandbox *Sandbox) error {
+	k.Logger().Info("startSandbox")
 	span, ctx := katatrace.Trace(ctx, k.Logger(), "StartVM", kataAgentTracingTags)
 	defer span.End()
 
@@ -758,7 +759,10 @@ func (k *kataAgent) startSandbox(ctx context.Context, sandbox *Sandbox) error {
 
 	var kmodules []*grpc.KernelModule
 
+	k.Logger().Info("sandbox.config.HypervisorType == RemoteHypervisor")
+
 	if sandbox.config.HypervisorType == RemoteHypervisor {
+		k.Logger().Info("context.WithValue(ctx, customRequestTimeoutKey, remoteRequestTimeout)")
 		ctx = context.WithValue(ctx, customRequestTimeoutKey, remoteRequestTimeout)
 	} else {
 		// Check grpc server is serving
@@ -766,11 +770,23 @@ func (k *kataAgent) startSandbox(ctx context.Context, sandbox *Sandbox) error {
 			return err
 		}
 
+		k.Logger().Info("len(sandbox.config.AgentConfig.Policy) > 0")
+
 		// If a Policy has been specified, send it to the agent.
 		if len(sandbox.config.AgentConfig.Policy) > 0 {
+			k.Logger().WithFields(logrus.Fields{
+				"policy": fmt.Sprintf("%+v", sandbox.config.AgentConfig.Policy),
+			}).Info("setting policy")
 			if err := sandbox.agent.setPolicy(ctx, sandbox.config.AgentConfig.Policy); err != nil {
+				k.Logger().WithFields(logrus.Fields{
+					"error": fmt.Sprintf("%+v", err),
+				}).Error("error setting policy")
 				return err
+			} else {
+				k.Logger().Info("policy set successfully")
 			}
+		} else {
+			k.Logger().Info("no policy to set")
 		}
 
 		// Setup network interfaces and routes
