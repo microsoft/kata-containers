@@ -1022,6 +1022,8 @@ func SandboxConfig(ocispec specs.Spec, runtime RuntimeConfig, bundlePath, cid st
 		Experimental: runtime.Experimental,
 	}
 
+	ociLog.Infof("SandboxConfig: ocispec.Annotations(policy annotation should be here!): %+v", ocispec.Annotations)
+
 	if err := addAnnotations(ocispec, &sandboxConfig, runtime); err != nil {
 		return vc.SandboxConfig{}, err
 	}

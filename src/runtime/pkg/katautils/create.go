@@ -18,7 +18,6 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/oci"
 	vc "github.com/kata-containers/kata-containers/src/runtime/virtcontainers"
 	vf "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/factory"
-	vcAnnotations "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/annotations"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -117,6 +116,9 @@ func CreateSandbox(ctx context.Context, vci vc.VC, ociSpec specs.Spec, runtimeCo
 	katatrace.AddTags(span, "container_id", containerID)
 	defer span.End()
 
+	kataUtilsLogger.Infof("CreateSandbox ociSpec: %+v", ociSpec)
+	kataUtilsLogger.Infof("CreateSandbox ociSpec.Annotations: %+v", ociSpec.Annotations)
+	kataUtilsLogger.Info("below the policy annotation gets read from ociSpec.Annotations and added to agent config")
 	sandboxConfig, err := oci.SandboxConfig(ociSpec, runtimeConfig, bundlePath, containerID, disableOutput, systemdCgroup)
 	if err != nil {
 		return nil, vc.Process{}, err
@@ -164,8 +166,8 @@ func CreateSandbox(ctx context.Context, vci vc.VC, ociSpec specs.Spec, runtimeCo
 	sandboxConfig.Annotations["nerdctl/network-namespace"] = ociSpec.Annotations["nerdctl/network-namespace"]
 
 	// The value of this annotation is sent to the sandbox using SetPolicy.
-	delete(ociSpec.Annotations, vcAnnotations.Policy)
-	delete(sandboxConfig.Annotations, vcAnnotations.Policy)
+	// delete(ociSpec.Annotations, vcAnnotations.Policy)
+	// delete(sandboxConfig.Annotations, vcAnnotations.Policy)
 
 	kataUtilsLogger.Info("about to vci.CreateSandbox")
 
@@ -236,7 +238,7 @@ func CreateContainer(ctx context.Context, sandbox vc.VCSandbox, ociSpec specs.Sp
 	defer span.End()
 
 	// The value of this annotation is sent to the sandbox using SetPolicy.
-	delete(ociSpec.Annotations, vcAnnotations.Policy)
+	// delete(ociSpec.Annotations, vcAnnotations.Policy)
 
 	ociSpec = SetEphemeralStorageType(ociSpec, disableGuestEmptyDir)
 
