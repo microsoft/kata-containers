@@ -773,6 +773,10 @@ func (k *kataAgent) startSandbox(ctx context.Context, sandbox *Sandbox) error {
 		k.Logger().Info("len(sandbox.config.AgentConfig.Policy) > 0")
 
 		// If a Policy has been specified, send it to the agent.
+		k.Logger().WithFields(logrus.Fields{
+			"config: ": fmt.Sprintf("%+v", sandbox.config.AgentConfig),
+		}).Info("checking config")
+
 		if len(sandbox.config.AgentConfig.Policy) > 0 {
 			k.Logger().WithFields(logrus.Fields{
 				"policy": fmt.Sprintf("%+v", sandbox.config.AgentConfig.Policy),

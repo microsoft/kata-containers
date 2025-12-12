@@ -920,14 +920,22 @@ func addAgentConfigOverrides(ocispec specs.Spec, config *vc.SandboxConfig) error
 		c.KernelModules = modules
 		updateConfig = true
 	}
-
+	ociLog.Infof("checking ocispec.Annotations[vcAnnotations.Policy]")
 	if value, ok := ocispec.Annotations[vcAnnotations.Policy]; ok {
+		ociLog.Infof("checking ocispec.Annotations[vcAnnotations.Policy]; ok")
 		if decoded_rules, err := base64.StdEncoding.DecodeString(value); err == nil {
+			ociLog.Infof("decoded and setting")
 			c.Policy = string(decoded_rules)
 			updateConfig = true
 		} else {
+			ociLog.Infof("error decoding policy: %v", err)
 			return err
 		}
+	} else {
+		ociLog.Infof("ocispec.Annotations[vcAnnotations.Policy] not set")
+		ociLog.Infof("ocispec.Annotations: %v", ocispec.Annotations)
+		ociLog.Infof("vcAnnotations.Policy: %s", vcAnnotations.Policy)
+		ociLog.Infof("ocispec: %v", ocispec)
 	}
 
 	if updateConfig {
