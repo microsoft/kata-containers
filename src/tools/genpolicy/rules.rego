@@ -226,17 +226,6 @@ allow_env_map_entry(key, i_val, p_env_map) {
     print("allow_env_map_entry 10: true")
 }
 
-CreateContainerRequest:= resp {
-    not input.env_map
-    i_process = input.OCI.Process
-    s_name = input.OCI.Annotations[S_NAME_KEY]
-    some p_container in policy_data.containers
-    p_process = p_container.OCI.Process
-    allow_deprecated_args(p_process, i_process, s_name)
-    resp = CreateContainerRequestCommon(input)
-    print("CreateContainerRequest2: true")
-}
-
 CreateContainerRequestCommon(req):= {"ops": ops, "allowed": true} {
     # Check if the input request should be rejected even before checking the
     # policy_data.containers information.
@@ -905,56 +894,6 @@ allow_user(p_process, i_process) {
 
     # TODO: compare the additionalGids field too after computing its value
     # based on /etc/passwd and /etc/group from the container image.
-}
-
-allow_deprecated_args(p_process, i_process, s_name) {
-    print("allow_deprecated_args 1: no args")
-
-    not p_process.DeprecatedArgs
-    not i_process.Args
-
-    print("allow_deprecated_args 1: true")
-}
-allow_deprecated_args(p_process, i_process, s_name) {
-    print("allow_deprecated_args 2: policy args =", p_process.DeprecatedArgs)
-    print("allow_deprecated_args 2: input args =", i_process.Args)
-
-    count(p_process.DeprecatedArgs) == count(i_process.Args)
-
-    every i, i_arg in i_process.Args {
-        allow_deprecated_arg(i, i_arg, p_process, s_name)
-    }
-
-    print("allow_deprecated_args 2: true")
-}
-allow_deprecated_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.DeprecatedArgs[i]
-    print("allow_deprecated_arg 1: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
-
-    p_arg2 := replace(p_arg, "$$", "$")
-    p_arg2 == i_arg
-
-    print("allow_deprecated_arg 1: true")
-}
-allow_deprecated_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.DeprecatedArgs[i]
-    print("allow_deprecated_arg 2: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
-
-    # TODO: can $(node-name) be handled better?
-    contains(p_arg, "$(node-name)")
-
-    print("allow_deprecated_arg 2: true")
-}
-allow_deprecated_arg(i, i_arg, p_process, s_name) {
-    p_arg := p_process.DeprecatedArgs[i]
-    print("allow_deprecated_arg 3: i =", i, "i_arg =", i_arg, "p_arg =", p_arg)
-
-    p_arg2 := replace(p_arg, "$$", "$")
-    p_arg3 := replace(p_arg2, "$(sandbox-name)", s_name)
-    print("allow_deprecated_arg 3: p_arg3 =", p_arg3)
-    p_arg3 == i_arg
-
-    print("allow_deprecated_arg 3: true")
 }
 
 # OCI process.Env field

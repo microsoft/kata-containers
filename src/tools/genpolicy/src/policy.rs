@@ -120,10 +120,6 @@ pub struct KataProcess {
     #[serde(default)]
     pub User: KataUser,
 
-    /// DeprecatedArgs specifies the binary and arguments for the application to execute.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub DeprecatedArgs: Vec<String>,
-
     /// Args specifies the binary and arguments for the application to execute.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub Args: Vec<String>,
@@ -741,7 +737,7 @@ impl AgentPolicy {
         yaml_container.apply_capabilities(&mut process.Capabilities, &self.config.settings.common);
 
         let (yaml_has_command, yaml_has_args) =
-            yaml_container.get_process_args(&mut process.DeprecatedArgs);
+            yaml_container.get_process_args(&mut process.Args);
         yaml_container
             .registry
             .get_process(&mut process, yaml_has_command, yaml_has_args);
@@ -774,8 +770,6 @@ impl AgentPolicy {
         );
 
         substitute_env_variables(&mut process.Env);
-        process.Args = process.DeprecatedArgs.clone();
-        substitute_args_env_variables(&mut process.DeprecatedArgs, &process.Env);
 
         c_settings.get_process_fields(&mut process);
         resource.get_process_fields(&mut process);
@@ -802,7 +796,6 @@ impl KataSpec {
 
         process.User.AdditionalGids = self.Process.User.AdditionalGids.to_vec();
         process.User.Username = String::from(&self.Process.User.Username);
-        add_missing_strings(&self.Process.DeprecatedArgs, &mut process.DeprecatedArgs);
 
         add_missing_strings(&self.Process.Env, &mut process.Env);
     }
@@ -990,34 +983,6 @@ fn substitute_variable(
     }
 
     None
-}
-
-fn substitute_args_env_variables(args: &mut Vec<String>, env: &Vec<String>) {
-    for arg in args {
-        substitute_arg_env_variables(arg, env);
-    }
-}
-
-fn substitute_arg_env_variables(arg: &mut String, env: &Vec<String>) {
-    loop {
-        let mut substituted = false;
-
-        if let Some((start, end)) = find_subst_target(arg) {
-            if let Some(new_value) = substitute_variable(arg, start, end, env) {
-                debug!(
-                    "substitute_arg_env_variables: replacing {} with {}",
-                    &arg[start..end],
-                    &new_value
-                );
-                *arg = new_value;
-                substituted = true;
-            }
-        }
-
-        if !substituted {
-            break;
-        }
-    }
 }
 
 fn get_container_annotations(

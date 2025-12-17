@@ -277,7 +277,7 @@ impl Container {
             containerd::get_default_unix_env(&mut process.Env);
         }
 
-        let policy_args = &mut process.DeprecatedArgs;
+        let policy_args = &mut process.Args;
         debug!("Already existing policy args: {:?}", policy_args);
 
         if let Some(entry_points) = &docker_config.Entrypoint {
