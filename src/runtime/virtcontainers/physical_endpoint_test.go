@@ -70,6 +70,7 @@ func TestIsPhysicalIface(t *testing.T) {
 			MTU:          testMTU,
 			HardwareAddr: hwAddr,
 			TxQLen:       -1,
+			ParentDevBus: "pci",
 		},
 	}
 
@@ -90,9 +91,8 @@ func TestIsPhysicalIface(t *testing.T) {
 
 	var isPhysical bool
 	err = doNetNS(n.Path(), func(_ ns.NetNS) error {
-		var err error
-		isPhysical, err = isPhysicalIface(testNetIface)
-		return err
+		isPhysical = isPhysicalIface(link)
+		return nil
 	})
 	assert.NoError(err)
 	assert.False(isPhysical)
