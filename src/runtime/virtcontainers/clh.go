@@ -13,6 +13,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/containerd/continuity/fs"
+	"github.com/fsnotify/fsnotify"
+	"golang.org/x/sys/unix"
 	"io"
 	"net"
 	"net/http"
@@ -83,10 +86,16 @@ const (
 	clhHotPlugAPITimeout                   = 5
 	clhStopSandboxTimeout                  = 3
 	clhStopSandboxTimeoutConfidentialGuest = 10
-	clhSocket                              = "clh.sock"
-	clhAPISocket                           = "clh-api.sock"
-	virtioFsSocket                         = "virtiofsd.sock"
-	defaultClhPath                         = "/usr/local/bin/cloud-hypervisor"
+	// Timeout for coredump operation - memory dumps can take significant time
+	clhCoredumpTimeout = 300 // 5 minutes
+	// Timeout for waiting for event monitor file to be created
+	clhEventMonitorFileTimeout = 30
+	clhSocket                  = "clh.sock"
+	clhAPISocket               = "clh-api.sock"
+	virtioFsSocket             = "virtiofsd.sock"
+	clhEventMonitorFile        = "clh-event-monitor.log"
+	defaultClhPath             = "/usr/local/bin/cloud-hypervisor"
+	clhMemoryDumpFormat        = "elf"
 )
 
 // Interface that hides the implementation of openAPI client
@@ -113,6 +122,8 @@ type clhClient interface {
 	VmAddDiskPut(ctx context.Context, diskConfig chclient.DiskConfig) (chclient.PciDeviceInfo, *http.Response, error)
 	// Remove a device from the VM
 	VmRemoveDevicePut(ctx context.Context, vmRemoveDevice chclient.VmRemoveDevice) (*http.Response, error)
+	// Dump guest memory to file
+	VmCoredumpPut(ctx context.Context, coredumpData chclient.VmCoredumpData) (*http.Response, error)
 }
 
 type clhClientApi struct {
@@ -154,6 +165,10 @@ func (c *clhClientApi) VmAddDiskPut(ctx context.Context, diskConfig chclient.Dis
 
 func (c *clhClientApi) VmRemoveDevicePut(ctx context.Context, vmRemoveDevice chclient.VmRemoveDevice) (*http.Response, error) {
 	return c.ApiInternal.VmRemoveDevicePut(ctx).VmRemoveDevice(vmRemoveDevice).Execute()
+}
+
+func (c *clhClientApi) VmCoredumpPut(ctx context.Context, coredumpData chclient.VmCoredumpData) (*http.Response, error) {
+	return c.ApiInternal.VmCoredumpPut(ctx).VmCoredumpData(coredumpData).Execute()
 }
 
 // This is done in order to be able to override such a function as part of
@@ -238,6 +253,7 @@ var vmAddNetPutRequest = func(clh *cloudHypervisor) error {
 // Cloud hypervisor state
 type CloudHypervisorState struct {
 	apiSocket         string
+	eventMonitorPath  string
 	PID               int
 	VirtiofsDaemonPid int
 	state             clhState
@@ -263,10 +279,24 @@ type cloudHypervisor struct {
 	config          HypervisorConfig
 	stopped         int32
 	mu              sync.Mutex
+	memoryDumpFlag  sync.Mutex
+	eventStopCh     chan struct{}
+	eventStopOnce   sync.Once
+}
+
+// CLHEvent represents an event from Cloud Hypervisor event monitor
+type CLHEvent struct {
+	Timestamp struct {
+		Secs  int64 `json:"secs"`
+		Nanos int64 `json:"nanos"`
+	} `json:"timestamp"`
+	Source     string            `json:"source"`
+	Event      string            `json:"event"`
+	Properties map[string]string `json:"properties,omitempty"`
 }
 
 var clhKernelParams = []Param{
-	{"panic", "1"},         // upon kernel panic wait 1 second before reboot
+	{"panic", "1"},         // default: reboot after 1 second (overridden if crashdump enabled)
 	{"no_timer_check", ""}, // do not Check broken timer IRQ resources
 	{"noreplace-smp", ""},  // do not replace SMP instructions
 }
@@ -452,11 +482,21 @@ func (clh *cloudHypervisor) enableProtection() error {
 	}
 }
 
-func getNonUserDefinedKernelParams(rootfstype string, disableNvdimm bool, dax bool, debug bool, confidential bool, iommu bool) ([]Param, error) {
+func getNonUserDefinedKernelParams(rootfstype string, disableNvdimm bool, dax bool, debug bool, confidential bool, iommu bool, crashdumpEnabled bool) ([]Param, error) {
 	params, err := GetKernelRootParams(rootfstype, disableNvdimm, dax)
 	if err != nil {
 		return []Param{}, err
 	}
+
+	// Set panic behavior based on crashdump configuration
+	if crashdumpEnabled {
+		// Don't reboot on panic - wait for crashdump collection
+		params = append(params, Param{"panic", "0"})
+	} else {
+		// Reboot after 1 second on panic (normal behavior)
+		params = append(params, Param{"panic", "1"})
+	}
+
 	params = append(params, clhKernelParams...)
 
 	if iommu {
@@ -500,6 +540,8 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.state.state = clhNotReady
 	clh.devicesIds = make(map[string]string)
 	clh.netDevicesFiles = make(map[string][]*os.File)
+	clh.eventStopCh = make(chan struct{})
+	clh.eventStopOnce = sync.Once{}
 
 	clh.Logger().WithField("function", "CreateVM").Info("creating Sandbox")
 
@@ -573,7 +615,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	disableNvdimm := (clh.config.DisableImageNvdimm || clh.config.ConfidentialGuest)
 	enableDax := !disableNvdimm
 
-	params, err := getNonUserDefinedKernelParams(hypervisorConfig.RootfsType, disableNvdimm, enableDax, clh.config.Debug, clh.config.ConfidentialGuest, clh.config.IOMMU)
+	params, err := getNonUserDefinedKernelParams(hypervisorConfig.RootfsType, disableNvdimm, enableDax, clh.config.Debug, clh.config.ConfidentialGuest, clh.config.IOMMU, clh.config.IfPVPanicEnabled())
 	if err != nil {
 		return err
 	}
@@ -585,6 +627,11 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// set random device generator to hypervisor
 	clh.vmconfig.Rng = chclient.NewRngConfig(clh.config.EntropySource)
 	clh.vmconfig.Rng.SetIommu(clh.config.IOMMU)
+
+	// Add pvpanic device if crashdump is enabled
+	if clh.config.IfPVPanicEnabled() {
+		clh.vmconfig.SetPvpanic(true)
+	}
 
 	// set the initial root/boot disk of hypervisor
 	assetPath, assetType, err := clh.config.ImageOrInitrdAssetPath()
@@ -754,6 +801,11 @@ func (clh *cloudHypervisor) StartVM(ctx context.Context, timeout int) error {
 
 	if err := clh.bootVM(ctx); err != nil {
 		return err
+	}
+
+	if clh.state.eventMonitorPath != "" {
+		clh.Logger().Info("Starting CLH event monitoring")
+		go clh.loopCLHEvent(clh.state.eventMonitorPath)
 	}
 
 	clh.state.state = clhReady
@@ -1286,6 +1338,9 @@ func (clh *cloudHypervisor) terminate(ctx context.Context, waitOnly bool) (err e
 		pidRunning = false
 	}
 
+	// Safely stop event monitoring - uses sync.Once to prevent double-close panic
+	clh.stopEventMonitor()
+
 	defer func() {
 		clh.Logger().Debug("Cleanup VM")
 		if err1 := clh.cleanupVM(true); err1 != nil {
@@ -1350,6 +1405,10 @@ func (clh *cloudHypervisor) apiSocketPath(id string) (string, error) {
 	return utils.BuildSocketPath(clh.config.VMStorePath, id, clhAPISocket)
 }
 
+func (clh *cloudHypervisor) eventMonitorPath(id string) (string, error) {
+	return utils.BuildSocketPath(clh.config.VMStorePath, id, clhEventMonitorFile)
+}
+
 func (clh *cloudHypervisor) waitVMM(timeout uint) error {
 	clhRunning, err := clh.isClhRunning(timeout)
 	if err != nil {
@@ -1390,6 +1449,17 @@ func (clh *cloudHypervisor) launchClh() error {
 	}
 
 	args := []string{cscAPIsocket, clh.state.apiSocket}
+
+	// Configure event monitor if crashdump is enabled
+	if clh.config.IfPVPanicEnabled() {
+		eventMonitorPath, err := clh.eventMonitorPath(clh.id)
+		if err != nil {
+			return err
+		}
+		clh.state.eventMonitorPath = eventMonitorPath
+		args = append(args, "--event-monitor", fmt.Sprintf("path=%s", eventMonitorPath))
+	}
+
 	if clh.config.Debug && clh.config.HypervisorLoglevel > 0 {
 		// Cloud hypervisor log levels
 		// 'v' occurrences increase the level
@@ -1454,6 +1524,259 @@ func (clh *cloudHypervisor) launchClh() error {
 		return err
 	}
 
+	return nil
+}
+
+// waitForEventMonitorFile waits for the event monitor file to be created by CLH
+func (clh *cloudHypervisor) waitForEventMonitorFile(eventMonitorPath string, timeout time.Duration) error {
+	timeoutChan := time.After(timeout)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeoutChan:
+			return fmt.Errorf("Timed out waiting for event monitor file: %s", eventMonitorPath)
+		case <-ticker.C:
+			// Check if file exists and is a regular file (not socket)
+			fileInfo, err := os.Stat(eventMonitorPath)
+			if err == nil && fileInfo.Mode().IsRegular() {
+				clh.Logger().WithField("path", eventMonitorPath).Debug("Event monitor file ready")
+				return nil
+			}
+		}
+	}
+}
+
+// readCLHEvents reads from the event monitor file and notify when an event is added to the file
+func (clh *cloudHypervisor) readCLHEvents(ctx context.Context, filePath string) {
+	clh.Logger().WithField("event-file", filePath).Info("Starting to monitor CLH events from file")
+
+	// Create fsnotify watcher
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		clh.Logger().WithError(err).Error("Failed to create fsnotify watcher")
+		return
+	}
+	defer watcher.Close()
+
+	// Add file to watcher
+	if err := watcher.Add(filePath); err != nil {
+		clh.Logger().WithError(err).Error("Failed to watch event file")
+		return
+	}
+
+	// Open the event monitor file
+	file, err := os.Open(filePath)
+	if err != nil {
+		clh.Logger().WithError(err).Error("Failed to open CLH event monitor file")
+		return
+	}
+	defer file.Close()
+
+	// Seek to end to only read new events
+	if _, err := file.Seek(0, io.SeekEnd); err != nil {
+		clh.Logger().WithError(err).Error("Failed to seek to end of event file")
+		return
+	}
+
+	reader := bufio.NewReader(file)
+	var eventBuilder strings.Builder
+
+	for {
+		select {
+		case <-ctx.Done():
+			clh.Logger().Info("CLH event monitoring stopped via context")
+			return
+		case <-clh.eventStopCh:
+			clh.Logger().Info("CLH event monitoring stopped via stop channel")
+			return
+		case event := <-watcher.Events:
+			if event.Op&fsnotify.Write == fsnotify.Write {
+				// File was written to, read new data
+				for {
+					line, err := reader.ReadString('\n')
+					if err != nil {
+						if err == io.EOF {
+							// No more data available right now
+							break
+						}
+						clh.Logger().WithError(err).Error("Error reading event file")
+						return
+					}
+
+					eventBuilder.WriteString(line)
+
+					// Events in CLH are separated by double newlines (\n\n)
+					// When we read a lone newline and have content, we have a complete event
+					if line == "\n" && eventBuilder.Len() > 1 {
+						eventJSON := strings.TrimSpace(eventBuilder.String())
+						if eventJSON != "" {
+							clh.handleCLHEvent(eventJSON)
+						}
+						eventBuilder.Reset()
+					}
+				}
+			}
+		case err := <-watcher.Errors:
+			clh.Logger().WithError(err).Warn("fsnotify watcher error")
+		}
+	}
+}
+
+// loopCLHEvent monitors CLH events and handles guest panics
+func (clh *cloudHypervisor) loopCLHEvent(eventMonitorPath string) {
+	clh.Logger().WithField("eventMonitorPath", eventMonitorPath).Info("Starting CLH event monitoring loop")
+	defer clh.Logger().Info("CLH event monitoring loop exited")
+
+	// Wait for the event monitor file to be created
+	if err := clh.waitForEventMonitorFile(eventMonitorPath, clhEventMonitorFileTimeout*time.Second); err != nil {
+		clh.Logger().WithError(err).Error("Failed to wait for event monitor file")
+		return
+	}
+
+	// Create context for event reading
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start reading events (this blocks until context is cancelled or error occurs)
+	clh.readCLHEvents(ctx, eventMonitorPath)
+}
+
+// handleCLHEvent processes a single CLH event and takes action if it's a panic
+func (clh *cloudHypervisor) handleCLHEvent(eventJSON string) {
+	clh.Logger().WithField("event", eventJSON).Debug("Received CLH event")
+
+	var event CLHEvent
+	if err := json.Unmarshal([]byte(eventJSON), &event); err != nil {
+		clh.Logger().WithError(err).WithField("eventJSON", eventJSON).Error("Failed to parse CLH event")
+		return
+	}
+
+	// Check for guest panic event
+	if event.Source == "guest" && event.Event == "panic" {
+		clh.Logger().WithFields(log.Fields{
+			"source":     event.Source,
+			"event":      event.Event,
+			"properties": event.Properties,
+		}).Warn("Guest panic detected, initiating memory dump")
+
+		go func() {
+			if err := clh.dumpGuestMemory(clh.config.GuestMemoryDumpPath); err != nil {
+				clh.Logger().WithError(err).Error("Failed to dump guest memory")
+			}
+		}()
+	}
+}
+
+// stopEventMonitor safely stops the event monitoring goroutine
+// This ensures the stop channel is closed only once
+func (clh *cloudHypervisor) stopEventMonitor() {
+	clh.eventStopOnce.Do(func() {
+		if clh.eventStopCh != nil {
+			close(clh.eventStopCh)
+			clh.Logger().Debug("Event monitor stop channel closed")
+		}
+	})
+}
+
+func (clh *cloudHypervisor) canDumpGuestMemory(dumpSavePath string) error {
+	fs := unix.Statfs_t{}
+	if err := unix.Statfs(dumpSavePath, &fs); err != nil {
+		clh.Logger().WithError(err).WithField("dumpSavePath", dumpSavePath).Error("failed to call Statfs")
+		return nil
+	}
+	// Calculate in MiB for better readability and precision
+	availableSpaceMiB := (fs.Bavail * uint64(fs.Bsize)) >> utils.MibToBytesShift
+	guestMemorySizeMiB := uint64(clh.config.MemorySize)
+	expectedMemorySizeMiB := guestMemorySizeMiB * 2
+
+	clh.Logger().WithFields(log.Fields{
+		"dumpSavePath":          dumpSavePath,
+		"availableSpaceMiB":     availableSpaceMiB,
+		"guestMemorySizeMiB":    guestMemorySizeMiB,
+		"expectedMemorySizeMiB": expectedMemorySizeMiB,
+	}).Info("Checking disk space for memory dump")
+
+	if availableSpaceMiB >= expectedMemorySizeMiB {
+		return nil
+	}
+
+	return fmt.Errorf("not enough free space to store memory dump. Required: %d MiB (2x guest memory), available: %d MiB",
+		expectedMemorySizeMiB, availableSpaceMiB)
+}
+
+func (clh *cloudHypervisor) dumpSandboxMetaInfo(dumpSavePath string) {
+	dumpStatePath := filepath.Join(dumpSavePath, "state")
+
+	// Copy state from /run/vc/sbs to memory dump directory
+	statePath := filepath.Join(clh.config.RunStorePath, clh.id)
+	clh.Logger().WithFields(log.Fields{"source": statePath, "destination": dumpStatePath}).Info("Copying sandbox state")
+	if err := fs.CopyDir(dumpStatePath, statePath); err != nil {
+		clh.Logger().WithError(err).Error("Failed to copy sandbox state")
+	}
+
+	// Save hypervisor meta information
+	fileName := filepath.Join(dumpSavePath, "hypervisor.conf")
+	data, _ := json.MarshalIndent(clh.config, "", " ")
+	if err := os.WriteFile(fileName, data, defaultFilePerms); err != nil {
+		clh.Logger().WithError(err).WithField("hypervisor.conf", data).Error("write to hypervisor.conf file failed")
+	}
+
+	// Save hypervisor version
+	hyperVisorVersion, err := pkgUtils.RunCommand([]string{clh.config.HypervisorPath, "--version"})
+	if err != nil {
+		clh.Logger().WithError(err).WithField("HypervisorPath", data).Error("failed to get hypervisor version")
+	}
+
+	fileName = filepath.Join(dumpSavePath, "hypervisor.version")
+	if err := os.WriteFile(fileName, []byte(hyperVisorVersion), defaultFilePerms); err != nil {
+		clh.Logger().WithError(err).WithField("hypervisor.version", data).Error("write to hypervisor.version file failed")
+	}
+}
+
+func (clh *cloudHypervisor) dumpGuestMemory(dumpSavePath string) error {
+	if dumpSavePath == "" {
+		return nil
+	}
+
+	clh.memoryDumpFlag.Lock()
+	defer clh.memoryDumpFlag.Unlock()
+
+	clh.Logger().WithField("dumpSavePath", dumpSavePath).Info("Trying to dump guest memory")
+
+	dumpSavePath = filepath.Join(dumpSavePath, clh.id)
+	dumpStatePath := filepath.Join(dumpSavePath, "state")
+	if err := pkgUtils.EnsureDir(dumpStatePath, DirMode); err != nil {
+		return err
+	}
+
+	// Save meta information for sandbox
+	clh.dumpSandboxMetaInfo(dumpSavePath)
+	clh.Logger().Info("Dumping sandbox meta information completed")
+
+	// Check device free space and estimated dump size
+	if err := clh.canDumpGuestMemory(dumpSavePath); err != nil {
+		clh.Logger().WithError(err).Warn("Can't dump guest memory")
+		return err
+	}
+
+	// dump guest memory
+	dumpFile := filepath.Join(dumpSavePath, fmt.Sprintf("vmcore-%s.%s", time.Now().Format("20060102150405.999"), clhMemoryDumpFormat))
+	clh.Logger().Infof("Trying to dump guest memory to %s", dumpFile)
+
+	coredumpData := chclient.NewVmCoredumpData()
+	coredumpData.SetDestinationUrl(fmt.Sprintf("file://%s", dumpFile))
+	ctx, cancel := context.WithTimeout(context.Background(), clhCoredumpTimeout*time.Second)
+	defer cancel()
+
+	_, err := clh.APIClient.VmCoredumpPut(ctx, *coredumpData)
+	if err != nil {
+		clh.Logger().WithError(err).Error("Dump guest memory operation failed")
+		return err
+	}
+
+	clh.Logger().Info("Dump guest memory completed")
 	return nil
 }
 
@@ -1735,6 +2058,21 @@ func (clh *cloudHypervisor) cleanupVM(force bool) error {
 	if err == nil {
 		if err := os.Remove(path); err != nil {
 			clh.Logger().WithError(err).WithField("path", path).Warn("removing vm socket failed")
+		}
+	}
+
+	eventMonitorPath, err := clh.eventMonitorPath(clh.id)
+	if err != nil {
+		clh.Logger().WithError(err).Debug("Failed to construct event monitor path")
+	} else {
+		if err := os.Remove(eventMonitorPath); err != nil {
+			if os.IsNotExist(err) {
+				clh.Logger().WithField("path", eventMonitorPath).Debug("Event monitor file already removed")
+			} else {
+				clh.Logger().WithError(err).WithField("path", eventMonitorPath).Warn("Failed to remove event monitor file")
+			}
+		} else {
+			clh.Logger().WithField("path", eventMonitorPath).Debug("Event monitor file removed successfully")
 		}
 	}
 

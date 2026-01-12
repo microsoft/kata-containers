@@ -247,6 +247,16 @@ disable_image_nvdimm = @DEFDISABLEIMAGENVDIMM@
 # but it will not abort container execution.
 #guest_hook_path = "/usr/share/oci/hooks"
 #
+# Set where to save the guest memory dump file.
+# If set, when a panic event is received from the guest via the event monitor,
+# guest memory will be dumped to host filesystem under guest_memory_dump_path.
+# This directory will be created automatically if it does not exist.
+# The dumped file (also called vmcore) can be processed with crash or gdb.
+# WARNING:
+#   Dump guest's memory can take very long depending on the amount of guest memory
+#   and use much disk space.
+#guest_memory_dump_path="/var/crash/kata"
+#
 # These options are related to network rate limiter at the VMM level, and are
 # based on the Cloud Hypervisor I/O throttling.  Those are disabled by default
 # and we strongly advise users to refer the Cloud Hypervisor official
