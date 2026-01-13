@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -342,6 +343,10 @@ type Container struct {
 	rootFs RootFs
 
 	systemMountsInfo SystemMountsInfo
+
+	// ephemeralDisks holds a list of ephemeral disk paths used for
+	// block-based emptyDir mounts.
+	ephemeralDisks []string
 }
 
 // ID returns the container identifier string.
@@ -629,6 +634,12 @@ func (c *Container) createBlockDevices(ctx context.Context) error {
 				c.Logger().WithError(err).Error("error writing sandbox info")
 			}
 
+			// When using direct volume assignment, we assume the source file is a raw disk image even if it's a regular file.
+			fileInfo, err := os.Stat(mntInfo.Device)
+			if err == nil && fileInfo.Mode().IsRegular() {
+				isBlockFile = true
+			}
+
 			readonly := false
 			for _, flag := range mntInfo.Options {
 				if flag == "ro" {
@@ -639,7 +650,9 @@ func (c *Container) createBlockDevices(ctx context.Context) error {
 
 			c.mounts[i].Source = mntInfo.Device
 			c.mounts[i].Type = mntInfo.FsType
-			c.mounts[i].Options = mntInfo.Options
+			c.mounts[i].Options = slices.DeleteFunc(mntInfo.Options, func(opt string) bool {
+				return opt == "bind"
+			})
 			c.mounts[i].ReadOnly = readonly
 
 			for key, value := range mntInfo.Metadata {
@@ -751,6 +764,10 @@ func newContainer(ctx context.Context, sandbox *Sandbox, contConfig *ContainerCo
 		return nil, err
 	}
 
+	if err := c.createEphemeralDisks(ctx); err != nil {
+		return nil, err
+	}
+
 	// If mounts are block devices, add to devmanager
 	if err := c.createMounts(ctx); err != nil {
 		return nil, err
@@ -814,6 +831,77 @@ func (c *Container) createVirtualVolumeDevices() ([]config.DeviceInfo, error) {
 		}
 	}
 	return deviceInfos, nil
+}
+
+// getFilesystemCapacity return the total size in bytes of the filesystem
+// under path.
+func getFilesystemCapacity(path string) (uint64, error) {
+	var stat unix.Statfs_t
+	if err := unix.Statfs(path, &stat); err != nil {
+		return 0, err
+	}
+	return stat.Blocks * uint64(stat.Bsize), nil
+}
+
+func (c *Container) createEphemeralDisks(_ context.Context) error {
+	for i := range c.mounts {
+		if !(Isk8sHostEmptyDir(c.mounts[i].Source) && c.mounts[i].Type == KataLocalDevType) {
+			continue
+		}
+
+		// Reset the mount type so that we don't handle it as a shared filesystem.
+		c.mounts[i].Type = "bind"
+
+		if mounted, err := volume.IsVolumeMounted(c.mounts[i].Source); err != nil {
+			return err
+		} else if mounted {
+			continue
+		}
+
+		// Create the disk file in the same folder as the original
+		// emptyDir mount so that we use the same backing storage.
+		// emptyDirFolder := filepath.Dir(c.mounts[i].Source)
+		// emptyDirFolder := filepath.Dir(c.mounts[i].Source)
+		// emptyDirName := filepath.Base(c.mounts[i].Source)
+		// diskPath := filepath.Join(c.mounts[i].Source, "disk.img")
+		diskPath := "/disk.img" // DEBUG
+		f, err := os.Create(diskPath)
+		if err != nil {
+			c.Logger().WithError(err).Errorf("failed to create disk file at %s", diskPath)
+			return err
+		}
+
+		defer func() {
+			if err := f.Close(); err != nil {
+				c.Logger().WithError(err).Errorf("failed to close disk file, continuing")
+			}
+		}()
+
+		emptyDirFsCapacity, err := getFilesystemCapacity(c.mounts[i].Source)
+		if err != nil {
+			c.Logger().WithError(err).Errorf("failed to get filesystem capacity for mount %s", c.mounts[i].Source)
+			return err
+		}
+
+		if err := f.Truncate(int64(emptyDirFsCapacity)); err != nil {
+			c.Logger().WithError(err).Errorf("failed to truncate disk file")
+			return err
+		}
+
+		if err := volume.AddMountInfo(c.mounts[i].Source, volume.MountInfo{
+			VolumeType: "blk",
+			Device:     diskPath,
+			FsType:     "ext4",
+			Options:    nil,
+		}); err != nil {
+			c.Logger().WithError(err).Errorf("failed to assign direct volume for mount %s", c.mounts[i].Source)
+			return err
+		}
+
+		c.ephemeralDisks = append(c.ephemeralDisks, diskPath)
+	}
+
+	return nil
 }
 
 func (c *Container) createMounts(ctx context.Context) error {
@@ -1284,6 +1372,10 @@ func (c *Container) stop(ctx context.Context, force bool) error {
 		return err
 	}
 
+	if err := c.deleteEphemeralDisks(ctx); err != nil && !force {
+		return err
+	}
+
 	// container was killed by force, container MUST change its state
 	// as soon as possible just in case one of below operations fail leaving
 	// the containers in a bad state.
@@ -1584,6 +1676,20 @@ func (c *Container) removeDrive(ctx context.Context) (err error) {
 		}
 	}
 
+	return nil
+}
+
+func (c *Container) deleteEphemeralDisks(_ context.Context) error {
+	for _, diskPath := range c.ephemeralDisks {
+		if err := os.Remove(diskPath); err != nil && !os.IsNotExist(err) {
+			c.Logger().WithError(err).Errorf("failed to remove disk %s", diskPath)
+			return err
+		}
+		if err := volume.Remove(diskPath); err != nil && !os.IsNotExist(err) {
+			c.Logger().WithError(err).Errorf("failed to remove direct volume info for disk %s", diskPath)
+			return err
+		}
+	}
 	return nil
 }
 
