@@ -18,7 +18,15 @@ The guide provides the steps for two different environments:
 
 While build can happen in any Azure Linux 3 based environment, the stack can only be evaluated on environments with proper virtualization support and, for Kata-CC, on top of AMD SEV-SNP. An example of such environment are Azure Linux 3 based Azure VMs using a proper SKU:
 - Deploy an Azure Linux 3 VM via `az vm create` using a [CC vm size SKU](https://learn.microsoft.com/en-us/azure/virtual-machines/dcasccv5-dcadsccv5-series)
-  - Example: `az vm create --resource-group <rg_name> --name <vm_name> --os-disk-size-gb <e.g. 60> --public-ip-sku Standard --size <e.g. Standard_DC4as_cc_v5> --admin-username azureuser --ssh-key-values <ssh_pubkey> --image <MicrosoftCBLMariner:azure-linux-3:azure-linux-3-gen2:latest>`
+  - Example: 
+  ```
+  az vm create --resource-group <rg_name> --name <vm_name> \
+  --os-disk-size-gb <e.g. 60> --public-ip-sku Standard \
+  --size <e.g. Standard_DC4as_cc_v5> \
+  --admin-username azureuser --ssh-key-values <ssh_pubkey> \
+  --image <MicrosoftCBLMariner:azure-linux-3:azure-linux-3-gen2:latest> \
+  --security-type Standard
+  ```
 - SSH onto the VM
 
 Not validated for evaluation: Install [Azure Linux 3](https://github.com/microsoft/azurelinux) on a bare metal machine supporting AMD SEV-SNP.
