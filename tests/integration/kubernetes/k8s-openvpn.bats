@@ -36,7 +36,7 @@ setup() {
 
     # See issue https://github.com/kata-containers/kata-containers/issues/11162 and
     # other references to this issue in the genpolicy source folder.
-    if [[ "${SNAPSHOTTER:-}" == "nydus" ]]; then
+    if [[ "${SNAPSHOTTER:-}" == "nydus" || "${KATA_HOST_OS:-}" == "cbl-mariner" ]]; then
         add_allow_all_policy_to_yaml "$server_pod_yaml"
         add_allow_all_policy_to_yaml "$client_pod_yaml"
     else
@@ -92,7 +92,7 @@ teardown() {
     echo "=== OpenVPN Client Pod Logs ==="
     kubectl logs "$client_pod_name" || true
 
-    if [[ "${SNAPSHOTTER:-}" != "nydus" ]]; then
+    if [[ "${SNAPSHOTTER:-}" != "nydus" && "${KATA_HOST_OS:-}" != "cbl-mariner" ]]; then
         delete_tmp_policy_settings_dir "${policy_settings_dir}"
     fi
     teardown_common "${node}" "${node_start_time:-}"

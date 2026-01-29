@@ -63,7 +63,7 @@ add_annotations_to_yaml() {
 
 	case "${resource_kind}" in
 
-	Pod)
+	Pod|Service)
 		info "Adding \"${annotation_name}=${annotation_value}\" to ${resource_kind} from ${yaml_file}"
 		yq -i \
 		  ".metadata.annotations.\"${annotation_name}\" = \"${annotation_value}\"" \
@@ -88,7 +88,7 @@ add_annotations_to_yaml() {
 		info "Issue #7765: adding annotations to ${resource_kind} from ${yaml_file} is not implemented yet"
 		;;
 
-	ConfigMap|LimitRange|Namespace|PersistentVolume|PersistentVolumeClaim|PriorityClass|RuntimeClass|Secret|Service)
+	ConfigMap|LimitRange|Namespace|PersistentVolume|PersistentVolumeClaim|PriorityClass|RuntimeClass|Secret)
 		info "Annotations are not required for ${resource_kind} from ${yaml_file}"
 		;;
 
@@ -99,51 +99,72 @@ add_annotations_to_yaml() {
 	esac
 }
 
-add_cbl_mariner_specific_annotations() {
+add_mariner_annotations_to_yaml() {
+	local -r yaml_file="$1"
+
+	info "Adding cbl-mariner specific annotations"
+	local mariner_annotation_kernel="io.katacontainers.config.hypervisor.kernel"
+	local mariner_kernel_path="/usr/share/cloud-hypervisor/vmlinux.bin"
+
+	local mariner_annotation_image="io.katacontainers.config.hypervisor.image"
+	local mariner_image_path="/opt/kata/share/kata-containers/kata-containers-mariner.img"
+
+	local mariner_annotation_disable_image_nvdimm="io.katacontainers.config.hypervisor.disable_image_nvdimm"
+	local mariner_disable_image_nvdimm=true
+
+	add_annotations_to_yaml "${yaml_file}" "${mariner_annotation_kernel}" "${mariner_kernel_path}"
+	add_annotations_to_yaml "${yaml_file}" "${mariner_annotation_image}" "${mariner_image_path}"
+	add_annotations_to_yaml "${yaml_file}" "${mariner_annotation_disable_image_nvdimm}" "${mariner_disable_image_nvdimm}"
+}
+
+add_mariner_annotations() {
 	if [[ "${KATA_HOST_OS}" = "cbl-mariner" ]]; then
-		info "Add kernel and image path and annotations for cbl-mariner"
-		local mariner_annotation_kernel="io.katacontainers.config.hypervisor.kernel"
-		local mariner_kernel_path="/usr/share/cloud-hypervisor/vmlinux.bin"
-
-		local mariner_annotation_image="io.katacontainers.config.hypervisor.image"
-		local mariner_image_path="/opt/kata/share/kata-containers/kata-containers-mariner.img"
-
-		local mariner_annotation_disable_image_nvdimm="io.katacontainers.config.hypervisor.disable_image_nvdimm"
-		local mariner_disable_image_nvdimm=true
-
 		for K8S_TEST_YAML in runtimeclass_workloads_work/*.yaml
 		do
-			add_annotations_to_yaml "${K8S_TEST_YAML}" "${mariner_annotation_kernel}" "${mariner_kernel_path}"
-			add_annotations_to_yaml "${K8S_TEST_YAML}" "${mariner_annotation_image}" "${mariner_image_path}"
-			add_annotations_to_yaml "${K8S_TEST_YAML}" "${mariner_annotation_disable_image_nvdimm}" "${mariner_disable_image_nvdimm}"
+			add_mariner_annotations_to_yaml "${K8S_TEST_YAML}"
+		done
+
+		for K8S_TEST_YAML in runtimeclass_workloads_work/openvpn/*.yaml
+		do
+			add_mariner_annotations_to_yaml "${K8S_TEST_YAML}"
 		done
 	fi
 }
 
-add_runtime_handler_annotations() {
+add_runtime_handler_annotations_to_yaml() {
+	local -r yaml_file="$1"
 	local handler_annotation="io.containerd.cri.runtime-handler"
-
-	if [ "$PULL_TYPE" != "guest-pull" ]; then
-		info "Not adding $handler_annotation annotation for $PULL_TYPE pull type"
-		return
-	fi
 
 	case "${KATA_HYPERVISOR}" in
 		qemu-coco-dev | qemu-snp | qemu-tdx | qemu-coco-dev-runtime-rs)
 			info "Add runtime handler annotations for ${KATA_HYPERVISOR}"
 			local handler_value="kata-${KATA_HYPERVISOR}"
-			for K8S_TEST_YAML in runtimeclass_workloads_work/*.yaml
-			do
-				add_annotations_to_yaml "${K8S_TEST_YAML}" "${handler_annotation}" "${handler_value}"
-			done
+			add_annotations_to_yaml "${yaml_file}" "${handler_annotation}" "${handler_value}"
 			;;
 	esac
+}
+
+add_runtime_handler_annotations() {
+	if [ "$PULL_TYPE" != "guest-pull" ]; then
+		info "Not adding runtime-handler annotation for $PULL_TYPE pull type"
+		return
+	fi
+
+	for K8S_TEST_YAML in runtimeclass_workloads_work/*.yaml
+	do
+		add_annotations_to_yaml "${K8S_TEST_YAML}" "${handler_annotation}" "${handler_value}"
+	done
+
+	for K8S_TEST_YAML in runtimeclass_workloads_work/openvpn/*.yaml
+	do
+		add_runtime_handler_annotations_to_yaml "${K8S_TEST_YAML}" "${handler_annotation}" "${handler_value}"
+	done
 }
 
 main() {
 	ensure_yq
 	reset_workloads_work_dir
-	add_cbl_mariner_specific_annotations
+	add_mariner_annotations
 	add_runtime_handler_annotations
 }
 
