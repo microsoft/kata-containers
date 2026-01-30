@@ -63,7 +63,7 @@ add_annotations_to_yaml() {
 
 	case "${resource_kind}" in
 
-	Pod)
+	Pod|Service)
 		info "Adding \"${annotation_name}=${annotation_value}\" to ${resource_kind} from ${yaml_file}"
 		yq -i \
 		  ".metadata.annotations.\"${annotation_name}\" = \"${annotation_value}\"" \
@@ -88,7 +88,7 @@ add_annotations_to_yaml() {
 		info "Issue #7765: adding annotations to ${resource_kind} from ${yaml_file} is not implemented yet"
 		;;
 
-	ConfigMap|LimitRange|Namespace|PersistentVolume|PersistentVolumeClaim|PriorityClass|RuntimeClass|Secret|Service)
+	ConfigMap|LimitRange|Namespace|PersistentVolume|PersistentVolumeClaim|PriorityClass|RuntimeClass|Secret)
 		info "Annotations are not required for ${resource_kind} from ${yaml_file}"
 		;;
 
