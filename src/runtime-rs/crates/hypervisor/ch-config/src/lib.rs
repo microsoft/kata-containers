@@ -498,6 +498,8 @@ pub struct NamedHypervisorConfig {
     // - The hardware supports guest protection.
     // - The user has requested that guest protection be used.
     pub guest_protection_to_use: GuestProtection,
+
+    pub initdata_image_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]

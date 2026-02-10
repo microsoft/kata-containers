@@ -196,7 +196,7 @@ impl VirtSandbox {
 
         // prepare protection device config
         let init_data = if let Some(initdata) = self
-            .prepare_initdata_device_config(&self.hypervisor.hypervisor_config().await)
+            .prepare_initdata_device_config(&mut self.hypervisor.hypervisor_config().await)
             .await
             .context("failed to prepare initdata device config")?
         {
@@ -507,7 +507,7 @@ impl VirtSandbox {
 
     async fn prepare_initdata_device_config(
         &self,
-        hypervisor_config: &HypervisorConfig,
+        hypervisor_config: &mut HypervisorConfig,
     ) -> Result<Option<InitDataConfig>> {
         let initdata = hypervisor_config.security_info.initdata.clone();
         if initdata.is_empty() {
@@ -538,6 +538,14 @@ impl VirtSandbox {
             .join(&self.sid)
             .join(KATA_INIT_DATA_IMAGE);
         initdata_block::push_data(&image_path, &initdata)?;
+
+        hypervisor_config.init_data_image_path = image_path.display().to_string();
+
+        info!(
+            sl!(),
+            "hypervisor_config.init_data_image_path: {:?}", &hypervisor_config.init_data_image_path
+        );
+
         info!(
             sl!(),
             "initdata push data into compressed block: {:?}", &image_path

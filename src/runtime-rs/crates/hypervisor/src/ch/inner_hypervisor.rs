@@ -210,6 +210,12 @@ impl CloudHypervisorInner {
 
         let kernel_params = self.get_kernel_params().await?;
 
+        // I could also build the potential initdata image path here using self.id
+
+        info!(sl!(), "this is the sandbox id: {}", self.id);
+        let initdata_image_path = get_initdata_image_path(&self.id);
+        info!(sl!(), "initdata image path: {:?}", initdata_image_path);
+
         let named_cfg = NamedHypervisorConfig {
             kernel_params,
             sandbox_path,
@@ -218,6 +224,7 @@ impl CloudHypervisorInner {
             guest_protection_to_use: self.guest_protection_to_use.clone(),
             shared_fs_devices,
             host_devices,
+            initdata_image_path,
             ..Default::default()
         };
 
@@ -960,6 +967,20 @@ impl CloudHypervisorInner {
         .context("resize memory")?;
 
         Ok((new_mem_mb, MemoryConfig::default()))
+    }
+}
+
+/// Returns "/run/kata-containers/shared/initdata/<id>/initdata.image"
+/// if the file exists, otherwise returns None.
+pub fn get_initdata_image_path(id: &str) -> Option<String> {
+    let image_path = std::path::PathBuf::from("/run/kata-containers/shared/initdata")
+        .join(id)
+        .join("initdata.image");
+
+    if image_path.exists() {
+        Some(image_path.to_string_lossy().into_owned())
+    } else {
+        None
     }
 }
 
