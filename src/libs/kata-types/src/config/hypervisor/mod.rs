@@ -1468,6 +1468,12 @@ pub struct Hypervisor {
     /// Disable applying SELinux on the VMM process.
     #[serde(default)]
     pub disable_selinux: bool,
+
+    /// Path to the init data image.
+    /// If set, the hypervisor can add it as a disk  
+    /// Example: `/run/kata-containers/shared/initdata/<uid>/initdata.image`
+    #[serde(default)]
+    pub init_data_image_path: String,
 }
 
 fn yes() -> bool {

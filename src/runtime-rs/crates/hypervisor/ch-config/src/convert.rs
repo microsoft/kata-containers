@@ -111,10 +111,10 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
         let net = n.network_devices;
         let host_devices = n.host_devices;
 
-        let cpus = CpusConfig::try_from((cfg.cpu_info, guest_protection_to_use.clone()))
+        let cpus = CpusConfig::try_from((cfg.cpu_info.clone(), guest_protection_to_use.clone()))
             .map_err(VmConfigError::CPUError)?;
 
-        let rng = RngConfig::from(cfg.machine_info);
+        let rng = RngConfig::from(cfg.machine_info.clone());
 
         // Note how CH handles the different image types:
         //
@@ -127,7 +127,7 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
         //   firmware.
         //
         // [1] - https://github.com/confidential-containers/td-shim
-        let boot_info = cfg.boot_info;
+        let boot_info = &cfg.boot_info;
 
         let use_initrd = !boot_info.initrd.is_empty();
         let use_image = !boot_info.image.is_empty();
@@ -143,7 +143,7 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
         let pmem = if use_initrd || guest_protection_is_tdx(guest_protection_to_use.clone()) {
             None
         } else {
-            let pmem = PmemConfig::try_from(&boot_info).map_err(VmConfigError::PmemError)?;
+            let pmem = PmemConfig::try_from(boot_info).map_err(VmConfigError::PmemError)?;
 
             Some(vec![pmem])
         };
@@ -160,10 +160,19 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
         let mut disks: Vec<DiskConfig> = vec![];
 
         if use_image && guest_protection_is_tdx(guest_protection_to_use.clone()) {
-            let disk = DiskConfig::try_from(boot_info).map_err(VmConfigError::DiskError)?;
+            let disk = DiskConfig::try_from(boot_info.clone()).map_err(VmConfigError::DiskError)?;
 
             disks.push(disk);
         };
+
+        if !cfg.init_data_image_path.is_empty() {
+            // Determine vCPU count. Use whatever accessor your CpusConfig exposes.
+            // Common patterns: cpus.boot_vcpus / cpus.max_vcpus / cpus.count()
+            let vcpus = cpus.boot_vcpus as usize; // <-- adjust to your actual field
+
+            let initdata_disk = build_initdata_disk_config(&cfg.init_data_image_path, vcpus, &cfg);
+            disks.push(initdata_disk);
+        }
 
         let disks = if !disks.is_empty() { Some(disks) } else { None };
 
@@ -211,6 +220,39 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
 
         Ok(cfg)
     }
+}
+
+fn build_initdata_disk_config(
+    initdata_image: &str,
+    num_vcpus: usize,          // or usize/u32 depending on your cpus config
+    hv_cfg: &HypervisorConfig, // to read IOMMU/cache/ratelimit settings, if available
+) -> DiskConfig {
+    let mut disk = DiskConfig::default();
+
+    // Required
+    disk.path = Some(initdata_image.to_string().into());
+
+    // Read-only
+    disk.readonly = true;
+
+    // virtio-blk (not vhost-user)
+    disk.vhost_user = false;
+
+    // One queue per vCPU, queue size 1024
+    disk.num_queues = num_vcpus; // or u32 depending on type
+    disk.queue_size = 1024;
+
+    // Honor runtime settings (names are illustrative—use whatever your config provides)
+
+    disk.direct = hv_cfg.blockdev_info.block_device_cache_set;
+
+    disk.iommu = hv_cfg.device_info.enable_iommu;
+
+    // if let Some(rl) = hv_cfg.disk_rate_limiter_config() {
+    //     disk.rate_limiter_config = Some(rl);
+    // }
+
+    disk
 }
 
 impl TryFrom<(String, u64)> for VsockConfig {
