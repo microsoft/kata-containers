@@ -165,12 +165,12 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
             disks.push(disk);
         };
 
-        if !cfg.init_data_image_path.is_empty() {
+        if let Some(initdata_image_path) = n.initdata_image_path {
             // Determine vCPU count. Use whatever accessor your CpusConfig exposes.
             // Common patterns: cpus.boot_vcpus / cpus.max_vcpus / cpus.count()
             let vcpus = cpus.boot_vcpus as usize; // <-- adjust to your actual field
 
-            let initdata_disk = build_initdata_disk_config(&cfg.init_data_image_path, vcpus, &cfg);
+            let initdata_disk = build_initdata_disk_config(&initdata_image_path, vcpus, &cfg);
             disks.push(initdata_disk);
         }
 
