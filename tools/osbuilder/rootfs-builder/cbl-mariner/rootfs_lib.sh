@@ -25,4 +25,10 @@ build_rootfs()
 	$DNF install ${EXTRA_PKGS} ${PACKAGES}
 
 	rm -rf ${ROOTFS_DIR}/usr/share/{bash-completion,cracklib,doc,info,locale,man,misc,pixmaps,terminfo,zoneinfo,zsh}
+
+	# Add udev rule for Hyper-V PTP clock source
+	mkdir -p "${ROOTFS_DIR}/etc/udev/rules.d"
+	cat > "${ROOTFS_DIR}/etc/udev/rules.d/51-ptp-hyperv.rules" <<-EOF
+	ACTION=="add", SUBSYSTEM=="ptp", ATTR{clock_name}=="hyperv", TAG+="systemd"
+	EOF
 }
