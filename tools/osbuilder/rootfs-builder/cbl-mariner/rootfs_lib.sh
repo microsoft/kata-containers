@@ -28,47 +28,47 @@ build_rootfs()
 
 	# Write Azure-optimized chrony NTP configuration
 	cat > "${ROOTFS_DIR}/etc/chrony.conf" <<-'EOF'
-	# Azure-optimized NTP configuration for Microsoft time services
-	# Use Microsoft's public NTP service optimized for Azure
-	server time.windows.com iburst prefer
-	server time.microsoft.com iburst
+# Azure-optimized NTP configuration for Microsoft time services
+# Use Microsoft's public NTP service optimized for Azure
+server time.windows.com iburst prefer
+server time.microsoft.com iburst
 
-	# Backup with Azure-region servers
-	server time.windows.com iburst
+# Backup with Azure-region servers
+server time.windows.com iburst
 
-	# Record the rate at which the system clock gains/losses time.
-	driftfile /var/lib/chrony/drift
+# Record the rate at which the system clock gains/losses time.
+driftfile /var/lib/chrony/drift
 
-	# Allow the system clock to be stepped in the first three updates
-	# if its offset is larger than 1 second.
-	makestep 1.0 3
+# Allow the system clock to be stepped in the first three updates
+# if its offset is larger than 1 second.
+makestep 1.0 3
 
-	# Enable kernel synchronization of the real-time clock (RTC).
-	rtcsync
+# Enable kernel synchronization of the real-time clock (RTC).
+rtcsync
 
-	# Specify file containing keys for NTP authentication.
-	keyfile /etc/chrony.keys
+# Specify file containing keys for NTP authentication.
+keyfile /etc/chrony.keys
 
-	# Save NTS keys and cookies.
-	ntsdumpdir /var/lib/chrony
+# Save NTS keys and cookies.
+ntsdumpdir /var/lib/chrony
 
-	# Get TAI-UTC offset and leap seconds from the system tz database.
-	leapsectz right/UTC
+# Get TAI-UTC offset and leap seconds from the system tz database.
+leapsectz right/UTC
 
-	# Specify directory for log files.
-	logdir /var/log/chrony
+# Specify directory for log files.
+logdir /var/log/chrony
 
-	# Setting larger 'maxdistance' to tolerate Azure network latency
-	maxdistance 16.0
+# Setting larger 'maxdistance' to tolerate Azure network latency
+maxdistance 16.0
 
-	# Disable listening on UDP port (leaving only Unix socket interface).
-	cmdport 0
+# Disable listening on UDP port (leaving only Unix socket interface).
+cmdport 0
 
-	# REMOVED: refclock PHC /dev/ptp0 (PTP device not available in kata VMs)
-	# Using Microsoft NTP services optimized for Azure instead
+# REMOVED: refclock PHC /dev/ptp0 (PTP device not available in kata VMs)
+# Using Microsoft NTP services optimized for Azure instead
 
-	# Step the system clock instead of slewing it if the adjustment is larger than
-	# one second, at any time (critical for VMs with large initial offset)
-	makestep 1 -1
+# Step the system clock instead of slewing it if the adjustment is larger than
+# one second, at any time (critical for VMs with large initial offset)
+makestep 1 -1
 	EOF
 }
