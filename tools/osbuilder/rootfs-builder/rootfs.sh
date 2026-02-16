@@ -746,7 +746,6 @@ EOF
 		# its nonexistent, this broke the service on boot previously
 		# due to the directory not being present "(code=exited, status=226/NAMESPACE)"
 		sed -i -e 's/^\(ExecStart=.*\)-u [[:alnum:]]*/\1/g' \
-#		       -e '/^\[Unit\]/a ConditionPathExists=\/dev\/ptp0' \
 		       -e 's/^ReadWritePaths=\(.\+\) \/var\/lib\/chrony \(.\+\)$/ReadWritePaths=\1 -\/var\/lib\/chrony \2/m' \
 		       ${chrony_systemd_service}
 		# Disable automatic directory creation
