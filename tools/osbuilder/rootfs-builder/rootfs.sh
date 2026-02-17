@@ -701,7 +701,7 @@ EOF
 		cat > "${chrony_conf_file}" <<-'CHRONYEOF'
 		# Azure-optimized NTP configuration for Microsoft time services
 		# Use Microsoft's public NTP service optimized for Azure
-		server time.windows.com iburst prefer
+		server 168.61.215.74 iburst prefer
 
 		# Record the rate at which the system clock gains/losses time.
 		driftfile /var/lib/chrony/drift
