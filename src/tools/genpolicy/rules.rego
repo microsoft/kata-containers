@@ -1118,6 +1118,7 @@ allow_mount(p_oci, i_mount, bundle_id, sandbox_id):= p_index if {
     check_mount(p_mount, i_mount, bundle_id, sandbox_id)
 
     print("allow_mount: true, p_index =", p_index)
+    print("true allow_mount: i_mount =", i_mount)
 }
 
 check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
@@ -1178,9 +1179,18 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
     i_count := count(i_storages)
     img_pull_count := count([s | s := i_storages[_]; s.driver == "image_guest_pull"])
     print("allow_storages: p_count =", p_count, "i_count =", i_count, "img_pull_count =", img_pull_count)
+     
+    
+    # K8S_TEST_UNION="k8s-optional-empty-configmap.bats k8s-optional-empty-secret.bats"
+    # agent_policy:1243: allow_storages: p_storages = [{\\\\\\\"driver\\\\\\\": \\\\\\\"watchable-bind\\\\\\\", \\\\\\\"driver_options\\\\\\\": [], \\\\\\\"fs_group\\\\\\\": null, \\\\\\\"fstype\\\\\\\": \\\\\\\"bind\\\\\\\", \\\\\\\"mount_point\\\\\\\": \\\\\\\"^$(cpath)/(watchable/)?$(bundle-id)-[a-z0-9]{8,16}-empty-config$\\\\\\\", \\\\\\\"options\\\\\\\": [\\\\\\\"rbind\\\\\\\", \\\\\\\"rprivate\\\\\\\", \\\\\\\"ro\\\\\\\"], \\\\\\\"source\\\\\\\": \\\\\\\"$(sfprefix)empty-config$\\\\\\\"}, {\\\\\\\"driver\\\\\\\": \\\\\\\"watchable-bind\\\\\\\", \\\\\\\"driver_options\\\\\\\": [], \\\\\\\"fs_group\\\\\\\": null, \\\\\\\"fstype\\\\\\\": \\\\\\\"bind\\\\\\\", \\\\\\\"mount_point\\\\\\\": \\\\\\\"^$(cpath)/(watchable/)?$(bundle-id)-[a-z0-9]{8,16}-optional-missing-config$\\\\\\\", \\\\\\\"options\\\\\\\": [\\\\\\\"rbind\\\\\\\", \\\\\\\"rprivate\\\\\\\", \\\\\\\"ro\\\\\\\"], \\\\\\\"source\\\\\\\": \\\\\\\"$(sfprefix)optional-missing-config$\\\\\\\"}] 
+    # agent_policy:1244: allow_storages: i_storages = [] 
+    # agent_policy:1249: allow_storages: p_count = 2 i_count = 0 img_pull_count = 0\\\"\", details: [], special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } }")
+    
+    # agent_policy:1181: allow_storages: p_storages = [{\\\\\\\"driver\\\\\\\": \\\\\\\"watchable-bind\\\\\\\", \\\\\\\"driver_options\\\\\\\": [], \\\\\\\"fs_group\\\\\\\": null, \\\\\\\"fstype\\\\\\\": \\\\\\\"bind\\\\\\\", \\\\\\\"mount_point\\\\\\\": \\\\\\\"^$(cpath)/(watchable/)?$(bundle-id)-[a-z0-9]{8,16}-empty-config$\\\\\\\", \\\\\\\"options\\\\\\\": [\\\\\\\"rbind\\\\\\\", \\\\\\\"rprivate\\\\\\\", \\\\\\\"ro\\\\\\\"], \\\\\\\"source\\\\\\\": \\\\\\\"$(sfprefix)empty-config$\\\\\\\"}, {\\\\\\\"driver\\\\\\\": \\\\\\\"watchable-bind\\\\\\\", \\\\\\\"driver_options\\\\\\\": [], \\\\\\\"fs_group\\\\\\\": null, \\\\\\\"fstype\\\\\\\": \\\\\\\"bind\\\\\\\", \\\\\\\"mount_point\\\\\\\": \\\\\\\"^$(cpath)/(watchable/)?$(bundle-id)-[a-z0-9]{8,16}-optional-missing-config$\\\\\\\", \\\\\\\"options\\\\\\\": [\\\\\\\"rbind\\\\\\\", \\\\\\\"rprivate\\\\\\\", \\\\\\\"ro\\\\\\\"], \\\\\\\"source\\\\\\\": \\\\\\\"$(sfprefix)optional-missing-config$\\\\\\\"}] 
+    # agent_policy:1182: allow_storages: i_storages = [] 
+    p_count >= (i_count - img_pull_count)
 
-    p_count == i_count - img_pull_count
-
+    print("p_count >= (i_count - img_pull_count) true")
     every i_storage in i_storages {
         allow_storage(p_storages, i_storage, bundle_id, sandbox_id)
     }

@@ -108,6 +108,8 @@ is_aks_cluster() {
 }
 
 adapt_common_policy_settings_for_non_coco() {
+	# we might need runtime-rs vs runtime-go settings here
+
 	local settings_dir=$1
 
 	info "Adapting common policy settings from ${settings_dir} for non-CoCo guest"
@@ -117,20 +119,30 @@ adapt_common_policy_settings_for_non_coco() {
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
 	# Using a different path to container container root.
-	jq '.common.root_path = "/run/kata-containers/shared/containers/$(bundle-id)/rootfs"' "${settings_dir}/genpolicy-settings.json" > temp.json
+	jq '.common.root_path = "/run/kata-containers/shared/containers/passthrough/$(bundle-id)/rootfs"' "${settings_dir}/genpolicy-settings.json" > temp.json
+	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
+
+	# Using a different path for shared failed in runtime-rs
+	jq '.common.sfprefix = "^$(cpath)/sandbox-[a-z0-9]{8}-"' "${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
 	# Using CreateContainer Storage input structs for configMap & secret volumes - instead of using CopyFile like CoCo.
+	# looks like runtime-rs also behaves like coco for these test cases
+	# K8S_TEST_UNION="k8s-optional-empty-configmap.bats k8s-optional-empty-secret.bats"
+
 	jq '.kata_config.enable_configmap_secret_storages = true' "${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
 	# Using watchable binds for configMap volumes - instead of CopyFileRequest.
-	jq '.volumes.configMap.mount_point = "^$(cpath)/watchable/$(bundle-id)-[a-z0-9]{16}-" | .volumes.configMap.driver = "watchable-bind"' \
+	# WHY do we need this? (probably runtime-rs uses 8 hex instead of 16 hex)
+	# not always watchable since K8S_TEST_UNION="k8s-optional-empty-configmap.bats" treats configmaps as coco (must likely copyFiles them)
+	jq '.volumes.configMap.mount_point = "^$(cpath)/(watchable/)?sandbox-[a-z0-9]{8}-" | .volumes.configMap.driver = "watchable-bind"' \
 		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
 	# Using a Storage input struct for paths shared with the Host using virtio-fs.
-	jq '.sandbox.storages += [{"driver":"virtio-fs","driver_options":[],"fs_group":null,"fstype":"virtiofs","mount_point":"/run/kata-containers/shared/containers/","options":[],"source":"kataShared"}]' \
+	# runtime-rs uses "options":["nodev"]. This seems to be a safer default
+	jq '.sandbox.storages += [{"driver":"virtio-fs","driver_options":[],"fs_group":null,"fstype":"virtiofs","mount_point":"/run/kata-containers/shared/containers/","options":["nodev"],"source":"kataShared"}]' \
 		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 

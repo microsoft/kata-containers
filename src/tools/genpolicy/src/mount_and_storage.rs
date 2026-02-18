@@ -10,7 +10,6 @@ use crate::pod;
 use crate::policy;
 use crate::settings;
 use crate::volume;
-
 use log::debug;
 use protocols::agent;
 use std::ffi::OsString;
@@ -321,6 +320,8 @@ fn get_shared_bind_mount(
     // The Kata Shim filepath.Base() to extract the last element of this path, in
     // https://github.com/kata-containers/kata-containers/blob/5e46f814dd79ab6b34588a83825260413839735a/src/runtime/virtcontainers/fs_share_linux.go#L305
     // In Rust, Path::file_name() has a similar behavior.
+    // in runtime-rs, we use the source base, as opposed to the destination base https://github.com/kata-containers/kata-containers/blob/3ea23528a52a75116e1bde9c7b248f657c4a451b/src/runtime-rs/crates/resource/src/volume/share_fs_volume.rs#L423
+
     let path = Path::new(&yaml_mount.mountPath);
     let mount_path = path.file_name().unwrap().to_str().unwrap();
 

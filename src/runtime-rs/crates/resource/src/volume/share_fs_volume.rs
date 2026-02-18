@@ -333,6 +333,7 @@ impl VolumeManager {
         }
 
         // Create a new volume state
+        // CI scheme is used for volumes(?)
         let guest_path =
             generate_guest_path(container_id, mount_destination).context("generate path failed")?;
 
@@ -419,13 +420,18 @@ impl ShareFsVolume {
         agent: Arc<dyn Agent>,
         volume_manager: Arc<VolumeManager>,
     ) -> Result<Self> {
+        // THIS IS IMPORTANT!
         // The file_name is in the format of "sandbox-{uuid}-{file_name}"
+
         let source_path = get_mount_path(m.source());
-        let file_name = Path::new(&source_path)
+        // just setting the filename to the mount destination's name passes all tests
+        let destination_path = get_mount_path(&Some(m.destination().clone()));
+        let file_name = Path::new(&destination_path)
             .file_name()
             .unwrap()
             .to_str()
             .unwrap();
+        // THIS IS WHY EVERYTHING HAS SANDBOX IN IT
         let file_name = generate_mount_path("sandbox", file_name);
 
         let mut volume = Self {
@@ -458,6 +464,7 @@ impl ShareFsVolume {
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
                     // Generate guest path
+                    // CI scheme is used for copy files
                     let guest_path = generate_guest_path(cid, m.destination())
                         .context("generate path failed")?;
                     // Copy a single file
@@ -468,6 +475,7 @@ impl ShareFsVolume {
                     oci_mount.set_source(Some(PathBuf::from(&guest_path)));
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
+                    // THIS IS PROBABLY WHY KUBE-API-ACCESS had issues
                     // We allow directory copying wildly
                     // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
                     info!(sl!(), "copying directory {:?} to guest", &src);
@@ -937,6 +945,7 @@ fn is_system_mount(src: &str) -> bool {
     false
 }
 
+// THIS IS IMPORTANT!
 // Note, don't generate random name, attaching rafs depends on the predictable name.
 pub fn generate_mount_path(id: &str, file_name: &str) -> String {
     let mut nid = String::from(id);
@@ -977,6 +986,8 @@ fn generate_guest_path(cid: &str, mount_destination: &Path) -> Result<String> {
         .and_then(|n| n.to_str())
         .ok_or_else(|| anyhow!("get mount destination failed"))?;
 
+    // and CI uses this when not using shareFS, this may be copy file
+    // cid + 16 hex + basename
     Ok(format!(
         "{}{}-{}-{}",
         kata_guest_share_dir(),

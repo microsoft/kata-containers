@@ -18,6 +18,7 @@ use crate::yaml;
 
 use anyhow::Result;
 use log::debug;
+use log::info;
 use oci_spec::runtime as oci;
 use protocols::agent;
 use serde::{Deserialize, Serialize};
@@ -625,6 +626,7 @@ impl AgentPolicy {
         if self.config.raw_out {
             std::io::stdout().write_all(policy.as_bytes()).unwrap();
         }
+        info!("policy data:\n{json_data}");
         let mut initdata = self.config.initdata.clone();
         initdata.insert_data("policy.rego", policy);
 
