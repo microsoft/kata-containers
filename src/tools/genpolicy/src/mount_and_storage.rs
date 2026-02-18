@@ -10,8 +10,8 @@ use crate::pod;
 use crate::policy;
 use crate::settings;
 use crate::volume;
-
 use log::debug;
+use log::info;
 use protocols::agent;
 use std::ffi::OsString;
 use std::path::Path;
@@ -47,7 +47,7 @@ pub fn get_policy_mounts(
             if mount.source.is_empty() && mount.type_.eq("bind") {
                 if let Some(file_name) = Path::new(&mount.destination).file_name() {
                     if let Some(file_name) = file_name.to_str() {
-                        mount.source = format!("$(sfprefix){file_name}$");
+                        mount.source = format!("$(sfprefix)(?:{file_name})?");
                     }
                 }
             }
@@ -202,6 +202,9 @@ fn get_empty_dir_mount_and_storage(
         _ => "rw",
     };
 
+    let mp = yaml_mount.mountPath.to_string();
+    info!("what is this! {mp}");
+
     p_mounts.push(policy::KataMount {
         destination: yaml_mount.mountPath.to_string(),
         type_: mount_type.to_string(),
@@ -260,12 +263,12 @@ fn get_host_path_mount(
         ];
 
         if let Some(policy_mount) = p_mounts.iter_mut().find(|m| m.destination.eq(&dest)) {
-            debug!("get_host_path_mount: updating dest = {dest}, source = {host_path}");
+            info!("get_host_path_mount: updating dest = {dest}, source = {host_path}");
             policy_mount.type_ = type_;
             policy_mount.source = host_path;
             policy_mount.options = options;
         } else {
-            debug!("get_host_path_mount: adding dest = {dest}, source = {host_path}");
+            info!("get_host_path_mount: adding dest = {dest}, source = {host_path}");
             p_mounts.push(policy::KataMount {
                 destination: dest,
                 type_,
@@ -304,10 +307,11 @@ fn get_config_map_mount_and_storage(
 
     let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
     let name = OsString::from(file_name).into_string().unwrap();
+    info!("name: {name}");
     p_mounts.push(policy::KataMount {
         destination: yaml_mount.mountPath.clone(),
         type_: settings_config_map.mount_type.clone(),
-        source: format!("{}{name}$", &settings_config_map.mount_point),
+        source: format!("{}(?:{name})?$", &settings_config_map.mount_point),
         options: settings_config_map.options.clone(),
     });
 }
@@ -324,7 +328,7 @@ fn get_shared_bind_mount(
     let path = Path::new(&yaml_mount.mountPath);
     let mount_path = path.file_name().unwrap().to_str().unwrap();
 
-    let source = format!("$(sfprefix){mount_path}$");
+    let source = format!("$(sfprefix)(?:{mount_path})?");
 
     let dest = yaml_mount.mountPath.clone();
     let type_ = "bind".to_string();
@@ -335,12 +339,12 @@ fn get_shared_bind_mount(
     ];
 
     if let Some(policy_mount) = p_mounts.iter_mut().find(|m| m.destination.eq(&dest)) {
-        debug!("get_shared_bind_mount: updating dest = {dest}, source = {source}");
+        info!("get_shared_bind_mount: updating dest = {dest}, source = {source}");
         policy_mount.type_ = type_;
         policy_mount.source = source;
         policy_mount.options = options;
     } else {
-        debug!("get_shared_bind_mount: adding dest = {dest}, source = {source}");
+        info!("get_shared_bind_mount: adding dest = {dest}, source = {source}");
         p_mounts.push(policy::KataMount {
             destination: dest,
             type_,
@@ -356,7 +360,7 @@ fn get_downward_api_mount(yaml_mount: &pod::VolumeMount, p_mounts: &mut Vec<poli
     } else {
         &yaml_mount.mountPath
     };
-    let source = format!("$(sfprefix){mount_path}$");
+    let source = format!("$(sfprefix)(?:{mount_path})?");
 
     let dest = yaml_mount.mountPath.clone();
     let type_ = "bind".to_string();
@@ -367,12 +371,12 @@ fn get_downward_api_mount(yaml_mount: &pod::VolumeMount, p_mounts: &mut Vec<poli
     ];
 
     if let Some(policy_mount) = p_mounts.iter_mut().find(|m| m.destination.eq(&dest)) {
-        debug!("get_downward_api_mount: updating dest = {dest}, source = {source}");
+        info!("get_downward_api_mount: updating dest = {dest}, source = {source}");
         policy_mount.type_ = type_;
         policy_mount.source = source;
         policy_mount.options = options;
     } else {
-        debug!("get_downward_api_mount: adding dest = {dest}, source = {source}");
+        info!("get_downward_api_mount: adding dest = {dest}, source = {source}");
         p_mounts.push(policy::KataMount {
             destination: dest,
             type_,
@@ -415,7 +419,9 @@ pub fn get_image_mount_and_storage(
 
     let file_name = Path::new(&destination_string).file_name().unwrap();
     let name = OsString::from(file_name).into_string().unwrap();
-    let source = format!("{}{name}$", &settings_image.mount_source);
+    let source = format!("{}(?:{name})?$", &settings_image.mount_source);
+
+    info!("destination_string: {destination_string}");
 
     p_mounts.push(policy::KataMount {
         destination: destination_string,

@@ -117,7 +117,7 @@ adapt_common_policy_settings_for_non_coco() {
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
 	# Using a different path to container container root.
-	jq '.common.root_path = "/run/kata-containers/shared/containers/$(bundle-id)/rootfs"' "${settings_dir}/genpolicy-settings.json" > temp.json
+	jq '.common.root_path = "/run/kata-containers/shared/containers(?:/passthrough)?/$(bundle-id)/rootfs"' "${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
 	# Using CreateContainer Storage input structs for configMap & secret volumes - instead of using CopyFile like CoCo.
@@ -125,14 +125,20 @@ adapt_common_policy_settings_for_non_coco() {
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
 	# Using watchable binds for configMap volumes - instead of CopyFileRequest.
-	jq '.volumes.configMap.mount_point = "^$(cpath)/watchable/$(bundle-id)-[a-z0-9]{16}-" | .volumes.configMap.driver = "watchable-bind"' \
+	# apparently it can be $bundle-id OR sandbox
+	jq '.volumes.configMap.mount_point = "^$(cpath)/(watchable/)?$(bundle-id)-[a-z0-9]{8,16}-" | .volumes.configMap.driver = "watchable-bind"' \
 		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
 	# Using a Storage input struct for paths shared with the Host using virtio-fs.
-	jq '.sandbox.storages += [{"driver":"virtio-fs","driver_options":[],"fs_group":null,"fstype":"virtiofs","mount_point":"/run/kata-containers/shared/containers/","options":[],"source":"kataShared"}]' \
+	# apparently only mariner/runtime-rs uses "options":["nodev"]
+	jq '.sandbox.storages += [{"driver":"virtio-fs","driver_options":[],"fs_group":null,"fstype":"virtiofs","mount_point":"/run/kata-containers/shared/containers/","options":["nodev"],"source":"kataShared"}]' \
 		"${settings_dir}/genpolicy-settings.json" > temp.json
 	sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
+
+	# we might need this
+	# jq '.other_container.Root.Readonly = true' "${settings_dir}/genpolicy-settings.json" > temp.json
+	# sudo mv temp.json "${settings_dir}/genpolicy-settings.json"
 
 	# Disable guest pull.
 	jq '.cluster_config.guest_pull = false' "${settings_dir}/genpolicy-settings.json" > temp.json
