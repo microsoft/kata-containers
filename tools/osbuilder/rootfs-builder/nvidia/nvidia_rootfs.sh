@@ -15,7 +15,7 @@ die() {
   exit 1
 }
 
-readonly BUILD_DIR="/kata-containers/tools/packaging/kata-deploy/local-build/build/"
+readonly BUILD_DIR="${BUILD_DIR:-/kata-containers/build/}"
 # catch errors and then assign
 script_dir="$(dirname "$(readlink -f "$0")")"
 readonly SCRIPT_DIR="${script_dir}/nvidia"
