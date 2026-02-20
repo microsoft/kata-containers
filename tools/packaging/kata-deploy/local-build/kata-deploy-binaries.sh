@@ -177,7 +177,18 @@ get_kernel_modules_dir() {
 		numeric_final_version="${numeric_final_version%-*}+"
 	fi
 
-	local kernel_modules_dir="${repo_root_dir}/tools/packaging/kata-deploy/local-build/build/${kernel_name}/builddir/kata-linux-${version}-${kernel_kata_config_version}/lib/modules/${numeric_final_version}"
+	local kernel_modules_dir="${workdir}/${kernel_name}/builddir/kata-linux-${version}-${kernel_kata_config_version}/lib/modules/${numeric_final_version}"
+	case ${kernel_name} in
+		kernel-nvidia-gpu)
+			kernel_modules_dir+="-nvidia-gpu"
+			;;
+		kernel-nvidia-gpu-confidential)
+			kernel_modules_dir+="-nvidia-gpu-confidential"
+			;;
+		*)
+			;;
+	esac
+
 	echo "${kernel_modules_dir}"
 }
 
@@ -682,9 +693,28 @@ install_image_nvidia_gpu() {
 	export MEASURED_ROOTFS="yes"
 	export FS_TYPE="erofs"
 	export SKIP_DAX_HEADER="yes"
+	# Add free space to the rootfs partition so the deployed image-nvidia.img
+	# has headroom for in-place dev-time modifications (NVRC binary swaps,
+	# diagnostic /init wrappers, strace runs from /var/log, fabricmanager.log
+	# growth, etc.). 512 MiB matches the upper bound seen across the rebuilt
+	# rootfs flavors (chiseled ~470 MiB + debug tools ~10 MiB + future growth)
+	# while staying well under typical host disk budgets.
+	export ROOT_FREE_SPACE="${ROOT_FREE_SPACE:-512}"
 	local version
 	version=$(get_latest_nvidia_driver_version)
-	EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
+	local os_name
+	os_name=$(get_from_kata_deps ".assets.image.architecture.${ARCH}.nvidia-gpu.name")
+	if [[ "${os_name}" == "cbl-mariner" ]]; then
+		# Azure Linux: the in-rootfs nvidia_chroot.sh installs the NVIDIA
+		# userspace with tdnf (not apt) and uses curl to fetch the CUDA repo
+		# file; the chroot is entered via /bin/bash. azurelinux-repos provides
+		# /etc/yum.repos.d + the base repo definitions the in-chroot tdnf needs
+		# to resolve NVIDIA package dependencies. None are guaranteed by the
+		# minimal kata-packages-uvm set, and 'apt' does not exist on azl.
+		EXTRA_PKGS="tdnf curl bash azurelinux-repos ${EXTRA_PKGS}"
+	else
+		EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
+	fi
 	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
 	install_image "nvidia-gpu"
 }
@@ -698,7 +728,13 @@ install_image_nvidia_gpu_confidential() {
 	export SKIP_DAX_HEADER="yes"
 	local version
 	version=$(get_latest_nvidia_driver_version)
-	EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
+	local os_name
+	os_name=$(get_from_kata_deps ".assets.image.architecture.${ARCH}.nvidia-gpu-confidential.name")
+	if [[ "${os_name}" == "cbl-mariner" ]]; then
+		EXTRA_PKGS="tdnf curl bash azurelinux-repos ${EXTRA_PKGS}"
+	else
+		EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
+	fi
 	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
 	install_image "nvidia-gpu-confidential"
 }
@@ -1413,6 +1449,11 @@ handle_build() {
 	final_tarball_name="$(basename "${final_tarball_path}")"
 	export final_tarball_name
 	rm -f "${final_tarball_name}"
+
+	# Export BUILD_DIR for use inside Docker containers (nvidia rootfs builds).
+	# The repo is bind-mounted at /kata-containers, so translate the host workdir
+	# to the corresponding Docker-internal path.
+	export BUILD_DIR="/kata-containers/${workdir#${repo_root_dir}/}"
 
 	case "${build_target}" in
 	all)

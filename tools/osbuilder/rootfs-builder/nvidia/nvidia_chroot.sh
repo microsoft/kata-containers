@@ -3,41 +3,127 @@
 # Copyright (c) 2024 NVIDIA Corporation
 #
 # SPDX-License-Identifier: Apache-2.0
+#
+# Azure Linux 3.0 (CBL-Mariner / azl3) port of the NVIDIA GPU UVM chroot
+# stage. This runs INSIDE the freshly-built Azure Linux rootfs (via
+# `chroot . /nvidia_chroot.sh ...` from nvidia_rootfs.sh) and installs the
+# NVIDIA userspace stack with tdnf against the NVIDIA azl3 CUDA repository.
+#
+# The kernel module (nvidia.ko) is NOT installed here: it is built by the
+# kata kernel-nvidia-gpu build and dropped into ./lib/modules by
+# nvidia_rootfs.sh, so we deliberately do NOT pull kmod-nvidia-open-dkms.
 
 set -euo pipefail
-[[ -n "${DEBUG}" ]] && set -x
-
-shopt -s nullglob
-shopt -s extglob
+[[ -n "${DEBUG:-}" ]] && set -x
 
 # Error helpers
 trap 'echo "chroot: ERROR at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 die() {
-  local msg="${*:-fatal error}"
-  echo "chroot: ${msg}" >&2
-  exit 1
+	local msg="${*:-fatal error}"
+	echo "chroot: ${msg}" >&2
+	exit 1
 }
+
 arch_target="${1:?arch_target not specified}"
 nvidia_gpu_stack="${2:?nvidia_gpu_stack not specified}"
+# cuda_repo_osv is the base-OS version string (e.g. "3.0"); kept for call
+# compatibility with the Ubuntu variant but unused for tdnf repo setup.
 cuda_repo_osv="${3:?cuda_repo_osv not specified}"
+# azl3 CUDA repo base URL (ends in a slash), e.g.
+#   https://developer.download.nvidia.com/compute/cuda/repos/azl3/sbsa/
 cuda_repo_url="${4:?cuda_repo_url not specified}"
+# .repo file name at that base URL, e.g. "cuda-azl3.repo"
 cuda_repo_pkg="${5:?cuda_repo_pkg not specified}"
-tools_repo_url="${6:?tools_repo_url not specified}"
-tools_repo_pkg="${7:?tools_repo_pkg not specified}"
-ctk_version="${8:?ctk_version not specified}"
-APT_INSTALL="apt -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' -yqq --no-install-recommends install"
+# tools_repo_url / tools_repo_pkg are unused on Azure Linux: the single azl3
+# CUDA repo also ships the container toolkit, DCGM, fabricmanager and imex.
+# They are still accepted for call compatibility with the Ubuntu variant.
+tools_repo_url="${6:-}"
+tools_repo_pkg="${7:-}"
+# ctk_version comes from versions.yaml in Ubuntu (deb-revisioned) form and does
+# not map to the azl3 revisions, so it is not used to pin the toolkit here.
+ctk_version="${8:-}"
 
-export DEBIAN_FRONTEND=noninteractive
+# --releasever bypasses tdnf's distroverpkg lookup: the Azure Linux release
+# package (the distroverpkg target) is not installed in the minimal rootfs, so
+# tdnf errors 1022 without it. Matches how the base rootfs install is invoked.
+TDNF_INSTALL="tdnf install -y --releasever=${cuda_repo_osv}"
 
 is_feature_enabled() {
 	local feature="$1"
 	[[ ",${nvidia_gpu_stack}," == *",${feature},"* ]]
 }
 
-install_nvidia_ctk() {
-	echo "chroot: Installing NVIDIA GPU container runtime"
-	# Base  gives a nvidia-ctk and the nvidia-container-runtime
-	eval "${APT_INSTALL}" nvidia-container-toolkit-base="${ctk_version}"
+# Echo the driver version parsed from the 'driver=<ver>' NVIDIA_GPU_STACK
+# token (e.g. "610.43.02"), or die if it is missing.
+get_driver_version() {
+	local driver_version=""
+	if [[ "${nvidia_gpu_stack}" =~ driver=([^,]+) ]]; then
+		driver_version="${BASH_REMATCH[1]}"
+	fi
+	[[ -z "${driver_version}" ]] && die "NVIDIA_GPU_STACK must include 'driver=<version>' (e.g. 'driver=610.43.02')"
+	echo "${driver_version}"
+}
+
+setup_repositories() {
+	echo "chroot: Setup NVIDIA azl3 CUDA repository"
+
+	# Drop the NVIDIA azl3 CUDA repo definition. cuda_repo_url already ends
+	# in a slash and cuda_repo_pkg is the per-arch .repo file name. The repo
+	# dir is created by the azurelinux-repos package, but mkdir defensively in
+	# case the base set did not pull it.
+	mkdir -p /etc/yum.repos.d
+	curl -fsSL -o /etc/yum.repos.d/cuda-azl3.repo "${cuda_repo_url}${cuda_repo_pkg}"
+
+	# The NVIDIA driver packages depend on packages in the Azure Linux
+	# "extended" repo (e.g. ocl-icd, required by nvidia-driver-cuda). The
+	# minimal rootfs (azurelinux-repos) only ships the base repo, so add the
+	# extended repo here. $releasever/$basearch are expanded by tdnf.
+	cat > /etc/yum.repos.d/azurelinux-extended.repo <<-'EOF'
+	[azurelinux-official-extended]
+	name=Azure Linux Official Extended $releasever $basearch
+	baseurl=https://packages.microsoft.com/azurelinux/$releasever/prod/extended/$basearch
+	gpgkey=file:///etc/pki/rpm-gpg/MICROSOFT-RPM-GPG-KEY
+	gpgcheck=1
+	repo_gpgcheck=1
+	enabled=1
+	skip_if_unavailable=True
+	sslverify=1
+	EOF
+
+	# The CUDA repo file carries a gpgkey= directive; tdnf imports it on demand
+	# at install time (gpgme is present), so no rpm --import is needed -- rpm is
+	# not in the minimal rootfs. --releasever bypasses the distroverpkg lookup.
+	tdnf -y --releasever="${cuda_repo_osv}" makecache || true
+}
+
+install_userspace_components() {
+	local driver_version
+	driver_version="$(get_driver_version)"
+	echo "chroot: driver_version: ${driver_version}"
+
+	# On azl3 the driver userspace ships as a small set of versioned RPMs.
+	# nvidia-driver-cuda-libs carries libcuda.so.1 + the libnvidia-* set,
+	# nvidia-kmod-common carries the GSP firmware (the equivalent of the
+	# Ubuntu 'nvidia-firmware' package), and nvidia-imex is required for
+	# the GB200 NVLink fabric bring-up. Pin every one to the exact driver
+	# version so tdnf never floats them onto a newer branch published in
+	# the repo.
+	local -a driver_pkgs=(
+		"nvidia-driver-cuda-libs-${driver_version}"
+		"nvidia-driver-cuda-${driver_version}"
+		"nvidia-driver-common-${driver_version}"
+		"nvidia-kmod-common-${driver_version}"
+		"nvidia-persistenced-${driver_version}"
+		"nvidia-modprobe-${driver_version}"
+		"nvidia-imex-${driver_version}"
+	)
+	# shellcheck disable=SC2086
+	${TDNF_INSTALL} "${driver_pkgs[@]}"
+
+	# Needed for confidential-data-hub and NVAT runtime dependencies. These
+	# resolve from the Azure Linux base repositories.
+	# shellcheck disable=SC2086
+	${TDNF_INSTALL} cryptsetup device-mapper libxml2 e2fsprogs
 }
 
 install_nvidia_fabricmanager() {
@@ -46,101 +132,42 @@ install_nvidia_fabricmanager() {
 		return
 	}
 	echo "chroot: Install NVIDIA fabricmanager"
-	eval "${APT_INSTALL}" nvidia-fabricmanager libnvidia-nscq nvlsm
-	apt-mark hold nvidia-fabricmanager libnvidia-nscq nvlsm
-}
 
-install_userspace_components() {
-	# Extract the driver=XXX part first, then get the value
-	if [[ "${nvidia_gpu_stack}" =~ driver=([^,]+) ]]; then
-		driver_version="${BASH_REMATCH[1]}"
-	fi
-	echo "chroot: driver_version: ${driver_version}"
+	local driver_version
+	driver_version="$(get_driver_version)"
 
-	eval "${APT_INSTALL}" nvidia-driver-pinning-"${driver_version}"
-	eval "${APT_INSTALL}" nvidia-imex nvidia-firmware    \
-		libnvidia-cfg1 libnvidia-gl libnvidia-extra      \
-		libnvidia-decode libnvidia-fbc1 libnvidia-encode \
-		libnvidia-nscq libnvidia-compute nvidia-settings
-
-	apt-mark hold nvidia-imex nvidia-firmware            \
-		libnvidia-cfg1 libnvidia-gl libnvidia-extra      \
-		libnvidia-decode libnvidia-fbc1 libnvidia-encode \
-		libnvidia-nscq libnvidia-compute nvidia-settings
-
-	# Needed for confidential-data-hub and NVAT runtime dependencies
-	eval "${APT_INSTALL}" cryptsetup-bin dmsetup         \
-		libargon2-1 e2fsprogs libxml2
-
-	apt-mark hold cryptsetup-bin dmsetup libargon2-1     \
-		e2fsprogs libxml2
-}
-
-setup_apt_repositories() {
-	echo "chroot: Setup APT repositories"
-
-	# Architecture to mirror mapping
-	declare -A arch_to_mirror=(
-		["x86_64"]="us.archive.ubuntu.com/ubuntu"
-		["aarch64"]="ports.ubuntu.com/ubuntu-ports"
+	local -a pkgs=(
+		"nvidia-fabricmanager-${driver_version}"
+		"libnvidia-nscq-${driver_version}"
 	)
 
-	local mirror="${arch_to_mirror[${arch_target}]}"
-	[[ -z "${mirror}" ]] && die "Unknown arch_target: ${arch_target}"
+	# nvlsm is the NVLink Subnet Manager, required only by multi-node
+	# NVSwitch products (e.g. GB200 NVL72). It is date-versioned on azl3
+	# (e.g. nvlsm-2025.10.14-1), independent of the driver major, so it is
+	# gated on its own token and pinned via 'nvlsm_version=<ver>'.
+	if is_feature_enabled "nvlsm"; then
+		local nvlsm_version=""
+		if [[ "${nvidia_gpu_stack}" =~ nvlsm_version=([^,]+) ]]; then
+			nvlsm_version="${BASH_REMATCH[1]}"
+		fi
+		if [[ -n "${nvlsm_version}" ]]; then
+			pkgs+=("nvlsm-${nvlsm_version}")
+		else
+			pkgs+=("nvlsm")
+		fi
+	fi
 
-	local deb_arch="amd64"
-	[[ "${arch_target}" == "aarch64" ]] && deb_arch="arm64"
+	# shellcheck disable=SC2086
+	${TDNF_INSTALL} "${pkgs[@]}"
+}
 
-	mkdir -p /var/cache/apt/archives/partial /var/log/apt                  \
-		/var/lib/dpkg/{info,updates,alternatives,triggers,parts}
-
-	touch /var/lib/dpkg/status
-
-	rm -f /etc/apt/sources.list.d/*
-
-	key="/usr/share/keyrings/ubuntu-archive-keyring.gpg"
-	comp="main restricted universe multiverse"
-
-	cat <<-CHROOT_EOF > /etc/apt/sources.list.d/"${cuda_repo_osv}".list
-		deb [arch=${deb_arch} signed-by=${key}] http://${mirror} ${cuda_repo_osv} ${comp}
-		deb [arch=${deb_arch} signed-by=${key}] http://${mirror} ${cuda_repo_osv}-updates ${comp}
-		deb [arch=${deb_arch} signed-by=${key}] http://${mirror} ${cuda_repo_osv}-security ${comp}
-		deb [arch=${deb_arch} signed-by=${key}] http://${mirror} ${cuda_repo_osv}-backports ${comp}
-	CHROOT_EOF
-
-	# Tools repository is always needed for toolkit, DCGM and other helpers
-	curl -fsSL -O "${tools_repo_url}/${tools_repo_pkg}"
-	dpkg -i "${tools_repo_pkg}" && rm -f "${tools_repo_pkg}"
-
-	# Remote or local CUDA repository
-	curl -fsSL -O "${cuda_repo_url}/${cuda_repo_pkg}"
-	dpkg -i "${cuda_repo_pkg}" && rm -f "${cuda_repo_pkg}"
-
-	# Copy keyring if local repo was installed
-	keyring="/var/cuda-repo-*-local/cuda-*-keyring.gpg"
-	# shellcheck disable=SC2128 # Intentional: expect exactly one match
-	[[ -e "${keyring}" ]] && cp "${keyring}" /usr/share/keyrings/
-
-	# Set priorities: CUDA repos highest, Ubuntu non-driver next, Ubuntu blocked for driver packages
-	cat <<-CHROOT_EOF > /etc/apt/preferences.d/nvidia-priority
-		Package: *
-		Pin: origin $(dirname "${mirror}")
-		Pin-Priority: 400
-
-		Package: nvidia-* libnvidia-*
-		Pin: origin $(dirname "${mirror}")
-		Pin-Priority: -1
-
-		Package: *
-		Pin: origin developer.download.nvidia.com
-		Pin-Priority: 800
-
-		Package: *
-		Pin: origin ""
-		Pin-Priority: 900
-	CHROOT_EOF
-
-	apt update
+install_nvidia_ctk() {
+	echo "chroot: Installing NVIDIA GPU container runtime"
+	# nvidia-container-toolkit-base provides nvidia-ctk and the CDI hook.
+	# The azl3 revision (1.20.x) differs from the Ubuntu ctk_version, so it
+	# is installed unpinned and left to the repo's latest.
+	# shellcheck disable=SC2086
+	${TDNF_INSTALL} nvidia-container-toolkit-base
 }
 
 install_nvidia_dcgm() {
@@ -151,7 +178,10 @@ install_nvidia_dcgm() {
 
 	echo "chroot: Install NVIDIA DCGM"
 
-	eval "${APT_INSTALL}" datacenter-gpu-manager \
+	# DCGM 4.x is split into CUDA-runtime flavors on azl3. Driver 610 pairs
+	# with the CUDA 13 runtime.
+	# shellcheck disable=SC2086
+	${TDNF_INSTALL} datacenter-gpu-manager-4-cuda13 \
 		datacenter-gpu-manager-exporter
 }
 
@@ -163,36 +193,51 @@ install_devkit_packages() {
 
 	echo "chroot: Install devkit packages"
 
-	eval "${APT_INSTALL}" kmod
-	apt-mark hold kmod
+	# shellcheck disable=SC2086
+	${TDNF_INSTALL} kmod
+}
+
+# Install debug binaries that the rootfs builder will carry into the GPU UVM
+# image: a real bash (the kata-static-busybox omits the `sh` applet) and
+# strace (the canonical "what syscall failed?" tool for silent
+# fabricmanager / NVRC failures). Installed unconditionally; the size cost is
+# trivial against the UVM free-space headroom.
+install_debug_tools() {
+	echo "chroot: Install debug tools (bash + strace)"
+
+	# shellcheck disable=SC2086
+	${TDNF_INSTALL} bash strace
 }
 
 cleanup_rootfs() {
 	echo "chroot: Cleanup NVIDIA GPU rootfs"
 
-	apt-mark hold libstdc++6 libzstd1 libgnutls30t64 pciutils linuxptp libnftnl11
-	apt autoremove -yqq
+	tdnf clean all || true
 
-	apt clean
-	apt autoclean
+	# tdnf's repo-key import spawns a gpg-agent that leaves live sockets under
+	# /root/.gnupg. Those sockets make the later `tar --remove-files` fail to
+	# rmdir the tree, so kill the agent and drop the homedir (rm can unlink
+	# sockets; tar cannot).
+	gpgconf --kill all 2>/dev/null || true
+	rm -rf /root/.gnupg
 
-	rm -rf /var/lib/apt/lists/* /var/cache/apt/* /var/log/apt /var/cache/debconf
-	rm -f /etc/apt/sources.list
+	rm -rf /var/cache/tdnf/* /var/log/tdnf.log
 	rm -f /usr/bin/nvidia-ngx-updater /usr/bin/nvidia-container-runtime
-	rm -f /var/log/{nvidia-installer.log,dpkg.log,alternatives.log}
 
-	# Clear and regenerate the ld cache
+	# Clear and regenerate the ld cache so the freshly installed
+	# libcuda / libnvidia-* libraries are resolvable.
 	rm -f /etc/ld.so.cache
 	ldconfig
 }
 
 # Start of script
-echo "chroot: Setup NVIDIA GPU rootfs stage one"
+echo "chroot: Setup NVIDIA GPU rootfs stage one (Azure Linux / tdnf)"
 
-setup_apt_repositories
+setup_repositories
 install_userspace_components
 install_nvidia_fabricmanager
 install_nvidia_ctk
 install_nvidia_dcgm
 install_devkit_packages
+install_debug_tools
 cleanup_rootfs

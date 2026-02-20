@@ -361,6 +361,19 @@ ifneq (,$(QEMUCMD))
 
     CONFIGS += $(CONFIG_QEMU)
 
+    # Fork-only GB200 "manifold" variant of the qemu config.
+    # TODO(openvmm-upstream): drop this block and
+    # config/configuration-qemu-manifold.toml.in once upstream ships an
+    # official GB200/NVIDIA configuration for this stack.
+    CONFIG_FILE_QEMU_MANIFOLD = configuration-qemu-manifold.toml
+    CONFIG_QEMU_MANIFOLD = config/$(CONFIG_FILE_QEMU_MANIFOLD)
+    CONFIG_QEMU_MANIFOLD_IN = $(CONFIG_QEMU_MANIFOLD).in
+    CONFIG_PATH_QEMU_MANIFOLD = $(abspath $(CONFDIR)/$(CONFIG_FILE_QEMU_MANIFOLD))
+    CONFIG_PATHS += $(CONFIG_PATH_QEMU_MANIFOLD)
+    SYSCONFIG_QEMU_MANIFOLD = $(abspath $(SYSCONFDIR)/$(CONFIG_FILE_QEMU_MANIFOLD))
+    SYSCONFIG_PATHS += $(SYSCONFIG_QEMU_MANIFOLD)
+    CONFIGS += $(CONFIG_QEMU_MANIFOLD)
+
     # Begin configuration-qemu-coco-dev
     CONFIG_FILE_QEMU_COCO_DEV = configuration-qemu-coco-dev.toml
     CONFIG_QEMU_COCO_DEV = config/$(CONFIG_FILE_QEMU_COCO_DEV)
@@ -541,6 +554,19 @@ ifneq (,$(CLHCMD))
 
     CONFIGS += $(CONFIG_CLH)
 
+    # Fork-only GB200 "manifold" variant of the clh config.
+    # TODO(openvmm-upstream): drop this block and
+    # config/configuration-clh-manifold.toml.in once upstream ships an
+    # official GB200/NVIDIA configuration for this stack.
+    CONFIG_FILE_CLH_MANIFOLD = configuration-clh-manifold.toml
+    CONFIG_CLH_MANIFOLD = config/$(CONFIG_FILE_CLH_MANIFOLD)
+    CONFIG_CLH_MANIFOLD_IN = $(CONFIG_CLH_MANIFOLD).in
+    CONFIG_PATH_CLH_MANIFOLD = $(abspath $(CONFDIR)/$(CONFIG_FILE_CLH_MANIFOLD))
+    CONFIG_PATHS += $(CONFIG_PATH_CLH_MANIFOLD)
+    SYSCONFIG_CLH_MANIFOLD = $(abspath $(SYSCONFDIR)/$(CONFIG_FILE_CLH_MANIFOLD))
+    SYSCONFIG_PATHS += $(SYSCONFIG_CLH_MANIFOLD)
+    CONFIGS += $(CONFIG_CLH_MANIFOLD)
+
     CONFIG_FILE_CLH_AZURE = configuration-clh-azure.toml
     CONFIG_CLH_AZURE = config/$(CONFIG_FILE_CLH_AZURE)
     CONFIG_CLH_AZURE_IN = $(CONFIG_CLH_AZURE).in
@@ -662,10 +688,12 @@ SHAREDIR := $(SHAREDIR)
 USER_VARS += ARCH
 USER_VARS += BINDIR
 USER_VARS += CONFIG_CLH_IN
+USER_VARS += CONFIG_CLH_MANIFOLD_IN
 USER_VARS += CONFIG_FC_IN
 USER_VARS += CONFIG_STRATOVIRT_IN
 USER_VARS += CONFIG_PATH
 USER_VARS += CONFIG_QEMU_IN
+USER_VARS += CONFIG_QEMU_MANIFOLD_IN
 USER_VARS += CONFIG_REMOTE_IN
 USER_VARS += DESTDIR
 USER_VARS += DEFAULT_HYPERVISOR

@@ -633,6 +633,23 @@ shims:
     containerd:
       snapshotter: ""
 
+  # openvmm-manifold: the GB200/Grace-Blackwell NVIDIA UVM flavor of the
+  # openvmm shim. Same shim binary as openvmm, but its
+  # configuration-openvmm-manifold.toml points at the NVIDIA guest kernel +
+  # rootfs (vmlinux-nvidia-gpu.container / kata-containers-nvidia-gpu.img).
+  # A full block (not just enabled/supportedArches) is required so that when
+  # this shim is enabled the rendered per-shim config carries containerd
+  # snapshotter/annotation fields; enabling it via a partial override left
+  # kata-deploy CrashLooping.
+  openvmm-manifold:
+    enabled: ~
+    supportedArches:
+      - amd64
+      - arm64
+    allowedHypervisorAnnotations: []
+    containerd:
+      snapshotter: ""
+
 # Default shim per architecture
 defaultShim:
   amd64: qemu

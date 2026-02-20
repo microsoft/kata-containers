@@ -231,8 +231,12 @@ function deploy_kata() {
 	export HELM_IMAGE_REFERENCE="${DOCKER_REGISTRY}/${DOCKER_REPO}"
 	export HELM_IMAGE_TAG="${DOCKER_TAG}"
 	export HELM_DEBUG="true"
-	export HELM_SHIMS="${KATA_HYPERVISOR}"
-	export HELM_DEFAULT_SHIM="${KATA_HYPERVISOR}"
+	# Honor a caller-provided shim list/default so extra shims (e.g. the GB200
+	# NVIDIA "<vmm>-manifold" flavor) can be installed in a single deploy. Fall
+	# back to KATA_HYPERVISOR when unset, preserving the default single-shim
+	# behavior used by the CI workflows.
+	export HELM_SHIMS="${HELM_SHIMS:-${KATA_HYPERVISOR}}"
+	export HELM_DEFAULT_SHIM="${HELM_DEFAULT_SHIM:-${KATA_HYPERVISOR}}"
 	export HELM_CREATE_DEFAULT_RUNTIME_CLASS="true"
 	export HELM_ALLOWED_HYPERVISOR_ANNOTATIONS="${ANNOTATIONS}"
 	export HELM_SNAPSHOTTER_HANDLER_MAPPING="${SNAPSHOTTER_HANDLER_MAPPING}"

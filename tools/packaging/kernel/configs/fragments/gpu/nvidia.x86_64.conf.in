@@ -19,6 +19,21 @@ CONFIG_MEMORY_FAILURE=y
 CONFIG_MTRR=y
 CONFIG_X86_PAT=y
 
+# NVIDIA UVM enables UVM_IS_CONFIG_HMM only when both CONFIG_HMM_MIRROR and
+# CONFIG_DEVICE_PRIVATE are set. HMM_MIRROR is a promptless, select-only symbol
+# (mm/Kconfig), so a bare CONFIG_HMM_MIRROR=y is silently dropped; enable an
+# in-tree selector that does `select HMM_MIRROR`. TEST_HMM is the lightest one
+# (needs TRANSPARENT_HUGEPAGE + DEVICE_PRIVATE, pulls in no GPU/DRM stack); its
+# module is built but never loaded. kata builds the config with
+# `merge_config.sh -r -n` (allnoconfig base), which forces every prompted symbol
+# and menuconfig gate off unless a fragment sets it. TEST_HMM lives under
+# `if RUNTIME_TESTING_MENU`, so that gate must be enabled here or TEST_HMM is
+# dropped and nothing selects HMM_MIRROR.
+CONFIG_TRANSPARENT_HUGEPAGE=y
+CONFIG_DEVICE_PRIVATE=y
+CONFIG_RUNTIME_TESTING_MENU=y
+CONFIG_TEST_HMM=m
+
 # CC related configs
 CONFIG_CRYPTO_ECC=y
 CONFIG_CRYPTO_ECDH=y
@@ -27,10 +42,24 @@ CONFIG_CRYPTO_ECDSA=y
 # Dependency of _CRYPTO_
 CONFIG_MODULE_SIG=y
 
-# HGX/DGX platform
-CONFIG_INFINIBAND=m
-CONFIG_INFINIBAND_USER_MAD=m
+# Mellanox ConnectX (mlx5) + InfiniBand/RoCE are provided built-in (=y) by
+# fragments/common/mlx5.conf, which is merged into every kernel build. Do NOT
+# redefine those symbols here: build-kernel.sh's merge_config check dies on a
+# redundant/redefined CONFIG (the previous =m block here conflicted with
+# common's =y once common/mlx5.conf was added). Built-in means cold-plugged
+# CX5/CX6 VFs bind at guest PCI enumeration and expose /dev/infiniband without
+# NVRC having to modprobe them (an IB-only pod dispatches to NVRC's no-op cpu
+# mode).
 
-CONFIG_NET_VENDOR_MELLANOX=y
-CONFIG_MLX5_CORE=m
-CONFIG_MLX5_INFINIBAND=m
+# Build requirement of the Microsoft Azure Linux (CBL-Mariner) x86_64 kernel
+# (mirrors the same fix in nvidia.arm64.conf.in). Its
+# arch/x86/kernel/cpu/mshyperv.c defines hv_resvd_ranges[HV_MAX_RESVD_RANGES]
+# at file scope and calls hv_dump_mshv_memory() / references hv_mshv_res[],
+# all of which asm-generic/mshyperv.h declares only inside
+# `#if IS_ENABLED(CONFIG_HYPERV)`. With Hyper-V off the UVM kernel fails to
+# compile (arch/x86/kernel/cpu/mshyperv.o: 'HV_MAX_RESVD_RANGES' /
+# 'hv_mshv_res' undeclared, implicit 'hv_dump_mshv_memory'). Enable the Hyper-V
+# guest enlightenments so the build succeeds; they are inert under OpenVMM
+# (vmbus probes, finds no Hyper-V, stays dormant). Not needed for the upstream
+# NVIDIA/mainline tree, only the MS Azure Linux source.
+CONFIG_HYPERV=y

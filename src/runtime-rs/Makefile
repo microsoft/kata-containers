@@ -617,6 +617,18 @@ ifeq ($(USE_OPENVMM),true)
     SYSCONFIG_OPENVMM = $(abspath $(SYSCONFDIR)/$(CONFIG_FILE_OPENVMM))
     SYSCONFIG_PATHS += $(SYSCONFIG_OPENVMM)
     CONFIGS += $(CONFIG_OPENVMM)
+    # Fork-only GB200 "manifold" variant of the openvmm config.
+    # TODO(openvmm-upstream): drop this block (and
+    # config/configuration-openvmm-manifold.toml.in) once upstream ships an
+    # official openvmm NVIDIA GPU configuration.
+    CONFIG_FILE_OPENVMM_MANIFOLD = configuration-openvmm-manifold.toml
+    CONFIG_OPENVMM_MANIFOLD = config/$(CONFIG_FILE_OPENVMM_MANIFOLD)
+    CONFIG_OPENVMM_MANIFOLD_IN = $(CONFIG_OPENVMM_MANIFOLD).in
+    CONFIG_PATH_OPENVMM_MANIFOLD = $(abspath $(CONFDIR)/$(CONFIG_FILE_OPENVMM_MANIFOLD))
+    CONFIG_PATHS += $(CONFIG_PATH_OPENVMM_MANIFOLD)
+    SYSCONFIG_OPENVMM_MANIFOLD = $(abspath $(SYSCONFDIR)/$(CONFIG_FILE_OPENVMM_MANIFOLD))
+    SYSCONFIG_PATHS += $(SYSCONFIG_OPENVMM_MANIFOLD)
+    CONFIGS += $(CONFIG_OPENVMM_MANIFOLD)
     # openvmm-specific options (all should be suffixed by "_OPENVMM")
     VMROOTFSDRIVER_OPENVMM := virtio-blk-pci
     DEFBLOCKSTORAGEDRIVER_OPENVMM := virtio-blk-pci
@@ -662,6 +674,7 @@ USER_VARS += BINDIR
 USER_VARS += CONFIG_DB_IN
 USER_VARS += CONFIG_FC_IN
 USER_VARS += CONFIG_OPENVMM_IN
+USER_VARS += CONFIG_OPENVMM_MANIFOLD_IN
 USER_VARS += CONFIG_PATH
 USER_VARS += CONFIG_QEMU_IN
 USER_VARS += CONFIG_QEMU_SE_IN
