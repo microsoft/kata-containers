@@ -177,7 +177,18 @@ get_kernel_modules_dir() {
 		numeric_final_version="${numeric_final_version%-*}+"
 	fi
 
-	local kernel_modules_dir="${repo_root_dir}/tools/packaging/kata-deploy/local-build/build/${kernel_name}/builddir/kata-linux-${version}-${kernel_kata_config_version}/lib/modules/${numeric_final_version}"
+	local kernel_modules_dir="${workdir}/${kernel_name}/builddir/kata-linux-${version}-${kernel_kata_config_version}/lib/modules/${numeric_final_version}"
+	case ${kernel_name} in
+		kernel-nvidia-gpu)
+			kernel_modules_dir+="-nvidia-gpu"
+			;;
+		kernel-nvidia-gpu-confidential)
+			kernel_modules_dir+="-nvidia-gpu-confidential"
+			;;
+		*)
+			;;
+	esac
+
 	echo "${kernel_modules_dir}"
 }
 
@@ -682,6 +693,13 @@ install_image_nvidia_gpu() {
 	export MEASURED_ROOTFS="yes"
 	export FS_TYPE="erofs"
 	export SKIP_DAX_HEADER="yes"
+	# Add free space to the rootfs partition so the deployed image-nvidia.img
+	# has headroom for in-place dev-time modifications (NVRC binary swaps,
+	# diagnostic /init wrappers, strace runs from /var/log, fabricmanager.log
+	# growth, etc.). 512 MiB matches the upper bound seen across the rebuilt
+	# rootfs flavors (chiseled ~470 MiB + debug tools ~10 MiB + future growth)
+	# while staying well under typical host disk budgets.
+	export ROOT_FREE_SPACE="${ROOT_FREE_SPACE:-512}"
 	local version
 	version=$(get_latest_nvidia_driver_version)
 	EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
@@ -1413,6 +1431,11 @@ handle_build() {
 	final_tarball_name="$(basename "${final_tarball_path}")"
 	export final_tarball_name
 	rm -f "${final_tarball_name}"
+
+	# Export BUILD_DIR for use inside Docker containers (nvidia rootfs builds).
+	# The repo is bind-mounted at /kata-containers, so translate the host workdir
+	# to the corresponding Docker-internal path.
+	export BUILD_DIR="/kata-containers/${workdir#${repo_root_dir}/}"
 
 	case "${build_target}" in
 	all)
