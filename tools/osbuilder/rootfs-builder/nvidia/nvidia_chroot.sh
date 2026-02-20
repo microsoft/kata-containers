@@ -7,7 +7,15 @@
 set -euo pipefail
 [[ -n "${DEBUG}" ]] && set -x
 
-shopt -s nullglob
+# NOTE: nullglob must stay OFF. resolve_driver_pkg() emits apt version-glob
+# specs like "libnvidia-compute=595.58.03-*" (the un-suffixed form used on the
+# aarch64 'sbsa' 590/595/610 branches). These are passed through `eval
+# "${APT_INSTALL}" ...`, whose re-parse performs pathname expansion on every
+# token. With nullglob enabled, those unmatched globs are silently DROPPED,
+# so the real driver/firmware/compute packages never get installed and the
+# build later dies with "cp: cannot stat '.../lib/firmware/nvidia'". Keeping
+# nullglob off lets the "-*" survive verbatim so apt resolves the version.
+shopt -u nullglob
 shopt -s extglob
 
 # Error helpers
@@ -34,6 +42,72 @@ is_feature_enabled() {
 	[[ ",${nvidia_gpu_stack}," == *",${feature},"* ]]
 }
 
+# apt-mark hold only the packages from "$@" that are actually installed.
+#
+# Some NVIDIA packages (notably nvidia-imex and libnvidia-nscq) dropped
+# their -${driver_major} branch suffix starting with the 580 driver: the
+# CUDA repo still ships the suffixed name as a Provides: alias, so
+# `apt install nvidia-imex-580` succeeds and pulls in the real binary
+# package `nvidia-imex`, but `apt-mark hold nvidia-imex-580` fails with
+# "Can't select installed nor candidate version" because apt-mark does
+# not follow Provides:. That non-zero exit trips `set -e` and aborts the
+# rootfs build. Filter the list to what dpkg actually has installed so
+# the hold succeeds regardless of which alias name apt resolved.
+hold_if_installed() {
+	local pkg
+	local -a installed=()
+	for pkg in "$@"; do
+		if dpkg-query -W -f='${Status}\n' "${pkg}" 2>/dev/null \
+			| grep -q '^install ok installed$'; then
+			installed+=("${pkg}")
+		fi
+	done
+	[[ "${#installed[@]}" -eq 0 ]] && return 0
+	apt-mark hold "${installed[@]}"
+}
+
+# apt_has_candidate <pkg>: true if apt-cache knows an installable version.
+# Distinguishes a package that exists in the repo (has a Candidate other
+# than "(none)") from one that is only referenced by another package's
+# Depends/Provides.
+apt_has_candidate() {
+	local pkg="$1" cand
+	cand="$(apt-cache policy "${pkg}" 2>/dev/null \
+		| awk '/Candidate:/ {print $2; exit}')"
+	[[ -n "${cand}" && "${cand}" != "(none)" ]]
+}
+
+# resolve_driver_pkg <base> <driver_major> <driver_version>: echo the
+# concrete apt package spec to install for a driver-branch userspace
+# component, coping with NVIDIA's two naming conventions:
+#
+#   * Branch-suffixed  (<= 580 branch): "<base>-<major>" (e.g.
+#     libnvidia-compute-580). apt resolves it directly to the branch's
+#     binary package. Preferred when it has a candidate.
+#   * Un-suffixed      (>= 590/595/610 feature branches on the aarch64
+#     'sbsa' CUDA repo): the "<base>-<major>" name has NO candidate;
+#     the component ships under the bare "<base>" (e.g. libnvidia-compute)
+#     with a Candidate equal to the driver version. In that case pin the
+#     bare name to the exact driver version ("<base>=<driver_version>-*")
+#     so apt does not float it to a newer branch.
+#
+# Prints the chosen spec on stdout, or dies if neither form is installable.
+resolve_driver_pkg() {
+	local base="$1" driver_major="$2" driver_version="$3"
+	if apt_has_candidate "${base}-${driver_major}"; then
+		echo "${base}-${driver_major}"
+		return 0
+	fi
+	if apt_has_candidate "${base}"; then
+		# Pin to the driver version so we track this branch, not the
+		# newest one in the repo. The trailing '*' matches the distro
+		# revision suffix (e.g. 595.58.03-1ubuntu1).
+		echo "${base}=${driver_version}-*"
+		return 0
+	fi
+	die "no apt candidate for '${base}-${driver_major}' or '${base}' (driver ${driver_version})"
+}
+
 install_nvidia_ctk() {
 	echo "chroot: Installing NVIDIA GPU container runtime"
 	# Base  gives a nvidia-ctk and the nvidia-container-runtime
@@ -46,27 +120,122 @@ install_nvidia_fabricmanager() {
 		return
 	}
 	echo "chroot: Install NVIDIA fabricmanager"
-	eval "${APT_INSTALL}" nvidia-fabricmanager libnvidia-nscq nvlsm
-	apt-mark hold nvidia-fabricmanager libnvidia-nscq nvlsm
+
+	# Pin fabricmanager / nscq / nvlsm to the same driver MAJOR version
+	# (see the rationale in install_userspace_components). Without the
+	# -${driver_major} suffix apt resolves the unversioned names to
+	# whatever the latest driver branch is in the CUDA repo, which can
+	# pull in a mismatched nvidia-persistenced and break the build.
+	local driver_version=""
+	if [[ "${nvidia_gpu_stack}" =~ driver=([^,]+) ]]; then
+		driver_version="${BASH_REMATCH[1]}"
+	fi
+	[[ -z "${driver_version}" ]] && die "NVIDIA_GPU_STACK must include 'driver=<version>'"
+	local driver_major="${driver_version%%.*}"
+
+	# nvlsm is the NVIDIA Subnet Manager for NVSwitch fabric. It is only
+	# required by certain multi-node NVSwitch products (e.g. GB200 NVL72);
+	# single-node NVSwitch hosts (e.g. HGX A100, HGX H100) do not need it,
+	# and pulling it in unconditionally drags an extra ~100 MB of NVLSM
+	# tooling into every fabricmanager-enabled UVM. Gate it on a dedicated
+	# NVIDIA_GPU_STACK token so consumers opt in only when they need it.
+	# On the aarch64 'sbsa' 590/595/610 feature branches the -${driver_major}
+	# suffix was dropped, so nvidia-fabricmanager-595 / libnvidia-nscq-595 have
+	# no apt candidate. resolve_driver_pkg() falls back to the bare name pinned
+	# to the driver version (nvidia-fabricmanager=595.58.03-*) in that case.
+	local pkgs="$(resolve_driver_pkg "nvidia-fabricmanager" "${driver_major}" "${driver_version}") $(resolve_driver_pkg "libnvidia-nscq" "${driver_major}" "${driver_version}")"
+	# nvlsm (NVLink Subnet Manager) is NOT suffixed with the driver major on
+	# the aarch64 'sbsa' CUDA repo: it ships under the bare name 'nvlsm' with a
+	# date-based version (e.g. nvlsm_2025.10.14-1_arm64.deb), so 'nvlsm-580' has
+	# no apt candidate. When the caller pins a version via the
+	# 'nvlsm_version=<ver>' token in NVIDIA_GPU_STACK (mirrors the 'driver=<ver>'
+	# token), install 'nvlsm=<ver>'; otherwise fall back to the bare 'nvlsm'.
+	if is_feature_enabled "nvlsm"; then
+		local nvlsm_version=""
+		if [[ "${nvidia_gpu_stack}" =~ nvlsm_version=([^,]+) ]]; then
+			nvlsm_version="${BASH_REMATCH[1]}"
+		fi
+		if [[ -n "${nvlsm_version}" ]]; then
+			pkgs+=" nvlsm=${nvlsm_version}"
+		else
+			pkgs+=" nvlsm"
+		fi
+	fi
+
+	# shellcheck disable=SC2086 # pkgs is an intentionally word-split list
+	eval "${APT_INSTALL}" ${pkgs}
+	# Include the unversioned aliases: on driver 580+ libnvidia-nscq
+	# no longer ships with a -${driver_major} suffix, so apt resolves
+	# the request via Provides: to the bare name. See hold_if_installed.
+	# apt-mark hold takes bare package names, so hold 'nvlsm' (not 'nvlsm=<ver>').
+	# shellcheck disable=SC2086
+	hold_if_installed nvidia-fabricmanager-${driver_major} libnvidia-nscq-${driver_major} libnvidia-nscq nvlsm
 }
 
 install_userspace_components() {
 	# Extract the driver=XXX part first, then get the value
+	local driver_version=""
 	if [[ "${nvidia_gpu_stack}" =~ driver=([^,]+) ]]; then
 		driver_version="${BASH_REMATCH[1]}"
 	fi
+	[[ -z "${driver_version}" ]] && die "NVIDIA_GPU_STACK must include 'driver=<version>' (e.g. 'driver=570')"
 	echo "chroot: driver_version: ${driver_version}"
 
 	eval "${APT_INSTALL}" nvidia-driver-pinning-"${driver_version}"
-	eval "${APT_INSTALL}" nvidia-imex nvidia-firmware    \
-		libnvidia-cfg1 libnvidia-gl libnvidia-extra      \
-		libnvidia-decode libnvidia-fbc1 libnvidia-encode \
-		libnvidia-nscq libnvidia-compute nvidia-settings
 
-	apt-mark hold nvidia-imex nvidia-firmware            \
-		libnvidia-cfg1 libnvidia-gl libnvidia-extra      \
-		libnvidia-decode libnvidia-fbc1 libnvidia-encode \
-		libnvidia-nscq libnvidia-compute nvidia-settings
+	# Pin every libnvidia-* / nvidia-imex / nvidia-firmware install to
+	# the driver MAJOR version (e.g. "580" from "580.159.04"). The
+	# nvidia-driver-pinning-${driver_version} package above drops a pin
+	# that covers binary packages produced by src:nvidia-graphics-drivers-
+	# ${driver_major} (i.e. libnvidia-compute-580, libnvidia-gl-580, ...),
+	# but it does NOT cover the unversioned metapackage names
+	# (libnvidia-compute, libnvidia-gl, ...). As soon as the CUDA repo
+	# ships a newer driver branch (e.g. 610), those unversioned metas
+	# resolve to the new branch and apt fails with unmet dependencies
+	# like:
+	#   libnvidia-compute : Depends: nvidia-persistenced (= 610.43.02-1ubuntu1)
+	# Installing the versioned binary names directly sidesteps the
+	# resolver entirely. nvidia-settings is intentionally left unversioned
+	# because it is not part of the driver-branch closure.
+	#
+	# NOTE (aarch64 'sbsa' 590/595/610 feature branches): NVIDIA dropped the
+	# -${driver_major} suffix on these newer branches, so libnvidia-compute-595
+	# etc. have NO apt candidate and the whole userspace install fails with
+	# "has no installation candidate". resolve_driver_pkg() detects that and
+	# falls back to the bare name pinned to the exact driver version
+	# (libnvidia-compute=595.58.03-*), keeping <=580 (suffixed) working too.
+	local driver_major="${driver_version%%.*}"
+	local -a userspace_bases=(
+		"nvidia-imex"
+		"nvidia-firmware"
+		"libnvidia-cfg1"
+		"libnvidia-gl"
+		"libnvidia-extra"
+		"libnvidia-decode"
+		"libnvidia-fbc1"
+		"libnvidia-encode"
+		"libnvidia-nscq"
+		"libnvidia-compute"
+	)
+	local -a userspace_pkgs=()
+	local base
+	for base in "${userspace_bases[@]}"; do
+		userspace_pkgs+=("$(resolve_driver_pkg "${base}" "${driver_major}" "${driver_version}")")
+	done
+	# nvidia-settings is not part of the driver-branch closure; keep it
+	# unversioned.
+	userspace_pkgs+=("nvidia-settings")
+
+	eval "${APT_INSTALL}" "${userspace_pkgs[@]}"
+	# hold_if_installed takes bare package names (not name=version specs)
+	# and filters to whatever apt actually resolved, so pass both the
+	# suffixed and un-suffixed forms of every base and let it keep the
+	# ones dpkg reports as installed.
+	local -a hold_pkgs=("nvidia-settings")
+	for base in "${userspace_bases[@]}"; do
+		hold_pkgs+=("${base}-${driver_major}" "${base}")
+	done
+	hold_if_installed "${hold_pkgs[@]}"
 
 	# Needed for confidential-data-hub and NVAT runtime dependencies
 	eval "${APT_INSTALL}" cryptsetup-bin dmsetup         \
@@ -74,6 +243,35 @@ install_userspace_components() {
 
 	apt-mark hold cryptsetup-bin dmsetup libargon2-1     \
 		e2fsprogs libxml2
+}
+
+# Install debug binaries that the chiseled rootfs builder will cherry-pick
+# into the GPU UVM image. Specifically:
+#
+#   bash    -- a real POSIX shell. The kata-static-busybox shipped to the
+#              chiseled rootfs is a minimized build that intentionally
+#              omits the `sh` applet (saving ~100 KiB at the cost of any
+#              shebang-based scripting being broken). Carrying a real bash
+#              binary in the chiseled rootfs lets dev-time /init wrappers
+#              (e.g. dev-swap-nvrc.sh P5 diagnostic init script) just work
+#              with `#!/bin/bash`. ~1 MiB binary + libtinfo dep.
+#
+#   strace  -- the canonical "what syscall failed?" tool. Several silent
+#              fabricmanager / NVRC failures (exit 255 with no useful
+#              stderr, hung IOCTLs on /dev/nvidia*) are only diagnosable
+#              by tracing the actual syscall sequence inside the UVM. The
+#              5 MiB strace + libdw/libelf/libz/libzstd/liblzma deps are
+#              negligible against the new ROOT_FREE_SPACE=512 MiB headroom.
+#
+# These are installed unconditionally (no `is_feature_enabled` gate)
+# because the size cost is trivial and the debugging upside is high. If a
+# future production tenant cares about the ~10 MiB they can be gated
+# behind a new `debug-tools` NVIDIA_GPU_STACK token.
+install_debug_tools() {
+	echo "chroot: Install debug tools (bash + strace) for chiseled rootfs to pick up"
+
+	eval "${APT_INSTALL}" bash strace
+	apt-mark hold bash strace
 }
 
 setup_apt_repositories() {
@@ -195,4 +393,5 @@ install_nvidia_fabricmanager
 install_nvidia_ctk
 install_nvidia_dcgm
 install_devkit_packages
+install_debug_tools
 cleanup_rootfs

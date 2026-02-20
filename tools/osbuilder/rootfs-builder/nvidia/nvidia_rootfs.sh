@@ -15,7 +15,7 @@ die() {
   exit 1
 }
 
-readonly BUILD_DIR="/kata-containers/tools/packaging/kata-deploy/local-build/build/"
+readonly BUILD_DIR="${BUILD_DIR:-/kata-containers/build/}"
 # catch errors and then assign
 script_dir="$(dirname "$(readlink -f "$0")")"
 readonly SCRIPT_DIR="${script_dir}/nvidia"
@@ -26,6 +26,7 @@ AGENT_POLICY="${AGENT_POLICY:-no}"
 NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:?NVIDIA_GPU_STACK must be set}
 BUILD_VARIANT=${BUILD_VARIANT:?BUILD_VARIANT must be set}
 ARCH=${ARCH:?ARCH must be set}
+INSTALL_NVLSM=${INSTALL_NVLSM:-yes}
 
 machine_arch="${ARCH}"
 
@@ -125,6 +126,42 @@ setup_nvidia_gpu_rootfs_stage_one() {
 	popd  >> /dev/null
 }
 
+# Copy every regular file / symlink that a stage-one dpkg package owns into the
+# chiseled image, recreating its directory tree, by reading the package's dpkg
+# file list (/var/lib/dpkg/info/<pkg>.list). This is more robust than
+# hand-picking individual paths: a file the daemon needs -- e.g. nvidia-imex's
+# /etc/nvidia-imex/config.cfg + nodes_config.cfg -- is shipped automatically
+# instead of being silently dropped, and it keeps working if a package update
+# adds files. Shared-library dependencies that live in OTHER packages (libc,
+# libnvidia-*) are still provided by the explicit copies in the chisseled_*
+# helpers, so this only needs to ship the package's own files. Runs with CWD =
+# the image root (like every chisseled_* helper).
+chisseled_from_deb() {
+	local pkg="$1"
+	local list
+	list=$(ls "${stage_one}/var/lib/dpkg/info/${pkg}.list" \
+	          "${stage_one}/var/lib/dpkg/info/${pkg}":*.list 2>/dev/null | head -1 || true)
+	if [[ -z "${list}" || ! -f "${list}" ]]; then
+		echo "nvidia: warning: dpkg package '${pkg}' not found in stage-one; skipping"
+		return 0
+	fi
+	echo "nvidia: chisseling package ${pkg} ($(basename "${list}"))"
+	local path src
+	while IFS= read -r path; do
+		[[ -z "${path}" ]] && continue
+		src="${stage_one}${path}"
+		if [[ -L "${src}" ]]; then
+			install -d "$(dirname "./${path}")"
+			cp -a "${src}" "./${path}"
+		elif [[ -d "${src}" ]]; then
+			install -d "./${path}"
+		elif [[ -e "${src}" ]]; then
+			install -d "$(dirname "./${path}")"
+			cp -a "${src}" "./${path}"
+		fi
+	done < "${list}"
+}
+
 chisseled_iptables() {
 	echo "nvidia: chisseling iptables"
 	cp -a "${stage_one}"/usr/sbin/xtables-nft-multi sbin/.
@@ -153,13 +190,26 @@ chisseled_nvswitch() {
 	libdir=usr/lib/"${machine_arch}"-linux-gnu
 	cp -a "${stage_one}/${libdir}"/libnvidia-nscq.so.* lib/"${machine_arch}"-linux-gnu/.
 
-	# NVLINK SubnetManager dependencies
-	local nvlsm=usr/share/nvidia/nvlsm
-	mkdir -p "${nvlsm}"
+	# NVLINK SubnetManager dependencies are only needed on multi-node racks.
+	# Force-disable NVLSM when it is not explicitly present in the requested stack
+	# so stage-two does not depend on external env propagation.
+	local install_nvlsm="${INSTALL_NVLSM}"
+	if [[ ",${NVIDIA_GPU_STACK}," != *",nvlsm,"* ]]; then
+		install_nvlsm="no"
+	fi
 
-	cp -a "${stage_one}"/opt/nvidia/nvlsm/lib/libgrpc_mgr.so	lib/.
-	cp -a "${stage_one}"/opt/nvidia/nvlsm/sbin/nvlsm			sbin/.
-	cp -a "${stage_one}/${nvlsm}"/*.conf						"${nvlsm}"/.
+	if [[ "${install_nvlsm}" == "yes" ]]; then
+		local nvlsm=usr/share/nvidia/nvlsm
+		mkdir -p "${nvlsm}"
+
+		if [[ -f "${stage_one}/opt/nvidia/nvlsm/lib/libgrpc_mgr.so" && -f "${stage_one}/opt/nvidia/nvlsm/sbin/nvlsm" ]]; then
+			cp -a "${stage_one}"/opt/nvidia/nvlsm/lib/libgrpc_mgr.so	lib/.
+			cp -a "${stage_one}"/opt/nvidia/nvlsm/sbin/nvlsm		sbin/.
+			cp -a "${stage_one}/${nvlsm}"/*.conf					"${nvlsm}"/.
+		else
+			echo "nvidia: warning: nvlsm requested but nvlsm artifacts are missing in stage-one; skipping nvlsm userspace copy"
+		fi
+	fi
 	# Redirect all the logs to syslog instead of logging to file
 	sed -i 's|^LOG_USE_SYSLOG=.*|LOG_USE_SYSLOG=1|' usr/share/nvidia/nvswitch/fabricmanager.cfg
 }
@@ -215,7 +265,60 @@ chisseled_compute() {
 	cp -a "${stage_one}"/usr/bin/nvidia-smi           bin/.
 	cp -a "${stage_one}"/usr/bin/nvidia-ctk           bin/.
 	cp -a "${stage_one}"/usr/bin/nvidia-cdi-hook      bin/.
-	ln -s ../bin usr/bin
+	# nv-fabricmanager and nvidia-imex both execve /usr/bin/nvidia-modprobe
+	# (the path is hard-coded in their .data section via
+	# libnvidia-modprobe-utils) to create the /dev/nvidia* device nodes and
+	# load the nvidia kernel module on demand. Without it both daemons exit
+	# at startup before fabric init can run.
+	#
+	# Ship the binary into BOTH /bin and /usr/bin so the hard-coded
+	# /usr/bin/nvidia-modprobe path always resolves, regardless of whether
+	# the surrounding chisseled_* helpers materialised usr/bin/ as a real
+	# directory (e.g. chisseled_init dropping kata-agent into usr/bin/, which
+	# turns a subsequent `ln -s ../bin usr/bin` into a no-op that creates
+	# usr/bin/bin -> ../bin instead of replacing the directory).
+	cp -a "${stage_one}"/usr/bin/nvidia-modprobe      bin/.
+	install -d -m 0755 usr/bin
+	cp -a "${stage_one}"/usr/bin/nvidia-modprobe      usr/bin/.
+
+	# nvidia-imex: on Blackwell coherent-NVLink parts (GB200) the GPU
+	# fabric/clique readiness that gates cuInit is brought up by nvidia-imex,
+	# NOT nv-fabricmanager. The 'compute' feature apt-installs nvidia-imex into
+	# stage-one at the pinned driver version, but no chisel step shipped it, so
+	# it was silently absent -> the fabric never reached a ready state (cuInit
+	# 802 / CliqueId 32766). Ship the WHOLE package (binaries + /etc/nvidia-imex/
+	# config.cfg + nodes_config.cfg + ...) from its dpkg file list so we cannot
+	# miss a file the daemon needs (config.cfg is mandatory -- without it the
+	# daemon exits at startup). Starting it at boot is a separate NVRC concern
+	# (the .deb's systemd nvidia-imex.service never runs under the NVRC-PID1 UVM).
+	chisseled_from_deb "nvidia-imex"
+
+	# The nvidia-imex .deb ships config.cfg but NOT nodes_config.cfg (the node
+	# list is deployment-specific). config.cfg's IMEX_NODE_CONFIG_FILE points at
+	# /etc/nvidia-imex/nodes_config.cfg, and imex needs that file to form its
+	# IMEX domain. For the single-node UVM (one GPU clique per VM) the domain has
+	# exactly one member -- this node via loopback -- so write a one-line node
+	# list. Without it imex cannot reach "Domain State: UP" and the GPU fabric
+	# never becomes ready. Only written when imex was actually shipped (config.cfg
+	# present) so non-compute images are unaffected.
+	if [[ -f etc/nvidia-imex/config.cfg && ! -f etc/nvidia-imex/nodes_config.cfg ]]; then
+		echo "127.0.0.1" > etc/nvidia-imex/nodes_config.cfg
+	fi
+
+	# Tune the shipped config.cfg for the NVRC-PID1 UVM so NVRC can run imex as
+	# a tracked, observable daemon: DAEMONIZE=0 keeps it in the foreground (the
+	# .deb default is 1, which would fork and detach -- NVRC's background()
+	# would then track a dead parent PID and lose the log pipe), and
+	# LOG_FILE_NAME=/dev/stderr routes its log to background()'s stderr->/dev/kmsg
+	# wiring so it shows up on the openvmm-guest console (the UVM has no syslog
+	# and the default /var/log path is invisible during triage). Mirrors how
+	# chisseled_nvswitch rewrites fabricmanager.cfg's LOG_USE_SYSLOG.
+	if [[ -f etc/nvidia-imex/config.cfg ]]; then
+		sed -i \
+			-e 's|^DAEMONIZE=.*|DAEMONIZE=0|' \
+			-e 's|^LOG_FILE_NAME=.*|LOG_FILE_NAME=/dev/stderr|' \
+			etc/nvidia-imex/config.cfg
+	fi
 }
 
 chisseled_gpudirect() {
@@ -290,6 +393,58 @@ chisseled_init() {
 	echo 'options nvidia NVreg_DeviceFileMode=0660' > "${conf_file}"
 }
 
+# Ship debug tools (bash + strace) and their .so deps into the chiseled
+# rootfs. apt-installed by install_debug_tools() in nvidia_chroot.sh so the
+# stage_one tree already has them.
+#
+# Why these two:
+#   * bash    -- the kata-static-busybox shipped to the chiseled rootfs
+#                is a minimized build (no `sh` applet). Without bash any
+#                shebang-based scripting is broken, including the
+#                dev-time /init wrappers used by debug tooling.
+#   * strace  -- the canonical "what syscall failed?" tool. Several
+#                silent fabricmanager / NVRC failures (exit 255 with no
+#                useful stderr, hung IOCTLs on /dev/nvidia*) are only
+#                diagnosable by tracing the actual syscall sequence
+#                inside the UVM.
+#
+# Lib copies match the runtime deps that the Ubuntu noble packages of
+# bash + strace actually pull in (verified by apt install output 2026-06-25):
+#   bash    -> libtinfo + libreadline + libncursesw  (terminal + line editing)
+#   strace  -> libunwind                              (stack trace symbols)
+# libc + ld-linux are already shipped by chisseled_init / chisseled_compute.
+# Other libs sometimes seen in `ldd strace` on richer distros (libdw,
+# libelf, libz, libzstd, liblzma, libbz2) are NOT linked by Ubuntu's strace,
+# so we don't try to copy them.
+chisseled_debug_tools() {
+	echo "nvidia: chisseling debug tools (bash + strace)"
+
+	local libdir="lib/${machine_arch}-linux-gnu"
+
+	# bash + its terminal-handling deps. Bash imports libreadline +
+	# libncursesw at startup (DT_NEEDED) even for non-interactive script
+	# execution; missing either makes /bin/bash fail to exec.
+	cp -a "${stage_one}"/usr/bin/bash             bin/.
+	cp -a "${stage_one}/${libdir}"/libtinfo.so.6*       "${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libreadline.so.8*    "${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libncursesw.so.6*    "${libdir}"/.
+
+	# strace + (on some arches) libunwind.
+	#
+	# On Ubuntu noble x86_64 the strace 6.8 package links libunwind for
+	# symbolic backtraces and apt pulls libunwind8 in as a hard dep.
+	# On Ubuntu noble arm64 the same strace 6.8 package does NOT link
+	# libunwind (aarch64 uses a different unwind path), so apt doesn't
+	# install libunwind8 and the stage_one tree has no libunwind.so.8.
+	# Guard the copy with compgen so the build doesn't abort there.
+	cp -a "${stage_one}"/usr/bin/strace           bin/.
+	if compgen -G "${stage_one}/${libdir}/libunwind.so.8*" >/dev/null; then
+		cp -a "${stage_one}/${libdir}"/libunwind.so.8*  "${libdir}"/.
+	else
+		echo "nvidia: strace has no libunwind dep on this arch, skipping libunwind.so.8 copy"
+	fi
+}
+
 compress_rootfs() {
 	echo "nvidia: compressing rootfs"
 
@@ -315,7 +470,14 @@ compress_rootfs() {
 			continue
 		fi
 		strip "${file}"
-		"${BUILD_DIR}"/upx-4.2.4-"${distro_arch}"_linux/upx --best --lzma "${file}"
+		# UPX refuses to compress some ELF binaries with a non-zero exit
+		# (NotCompressibleException, typically on Go binaries with large
+		# embedded sections). Treat that as a benign skip instead of aborting
+		# the whole rootfs build -- the file is already stripped and remains
+		# fully usable, just not compressed.
+		if ! "${BUILD_DIR}"/upx-4.2.4-"${distro_arch}"_linux/upx --best --lzma "${file}"; then
+			echo "nvidia: skip compressing (UPX refused): ${file}"
+		fi
 	done
 
  	# While I was playing with compression the executable flag on
@@ -421,6 +583,7 @@ setup_nvidia_gpu_rootfs_stage_two() {
 
 		chisseled_init
 		chisseled_iptables
+		chisseled_debug_tools
 
 		IFS=',' read -r -a stack_components <<< "${NVIDIA_GPU_STACK}"
 
