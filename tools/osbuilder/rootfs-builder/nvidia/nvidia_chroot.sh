@@ -52,9 +52,11 @@ install_nvidia_fabricmanager() {
 
 install_userspace_components() {
 	# Extract the driver=XXX part first, then get the value
+	local driver_version=""
 	if [[ "${nvidia_gpu_stack}" =~ driver=([^,]+) ]]; then
 		driver_version="${BASH_REMATCH[1]}"
 	fi
+	[[ -z "${driver_version}" ]] && die "NVIDIA_GPU_STACK must include 'driver=<version>' (e.g. 'driver=570')"
 	echo "chroot: driver_version: ${driver_version}"
 
 	eval "${APT_INSTALL}" nvidia-driver-pinning-"${driver_version}"
