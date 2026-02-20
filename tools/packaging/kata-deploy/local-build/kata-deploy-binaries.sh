@@ -183,7 +183,18 @@ get_kernel_modules_dir() {
 		numeric_final_version="${numeric_final_version%-*}+"
 	fi
 
-	local kernel_modules_dir="${repo_root_dir}/tools/packaging/kata-deploy/local-build/build/${kernel_name}/builddir/kata-linux-${version}-${kernel_kata_config_version}/lib/modules/${numeric_final_version}"
+	local kernel_modules_dir="${workdir}/${kernel_name}/builddir/kata-linux-${version}-${kernel_kata_config_version}/lib/modules/${numeric_final_version}"
+	case ${kernel_name} in
+		kernel-nvidia-gpu)
+			kernel_modules_dir+="-nvidia-gpu"
+			;;
+		kernel-nvidia-gpu-confidential)
+			kernel_modules_dir+="-nvidia-gpu-confidential"
+			;;
+		*)
+			;;
+	esac
+
 	echo "${kernel_modules_dir}"
 }
 
@@ -1609,6 +1620,11 @@ handle_build() {
 	final_tarball_name="$(basename "${final_tarball_path}")"
 	export final_tarball_name
 	rm -f "${final_tarball_name}"
+
+	# Export BUILD_DIR for use inside Docker containers (nvidia rootfs builds).
+	# The repo is bind-mounted at /kata-containers, so translate the host workdir
+	# to the corresponding Docker-internal path.
+	export BUILD_DIR="/kata-containers/${workdir#${repo_root_dir}/}"
 
 	case "${build_target}" in
 	all)
