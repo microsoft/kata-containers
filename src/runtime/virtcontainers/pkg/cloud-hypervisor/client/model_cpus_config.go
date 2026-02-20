@@ -21,6 +21,7 @@ type CpusConfig struct {
 	Topology    *CpuTopology   `json:"topology,omitempty"`
 	KvmHyperv   *bool          `json:"kvm_hyperv,omitempty"`
 	MaxPhysBits *int32         `json:"max_phys_bits,omitempty"`
+	Nested      *bool          `json:"nested,omitempty"`
 	Affinity    *[]CpuAffinity `json:"affinity,omitempty"`
 	Features    *CpuFeatures   `json:"features,omitempty"`
 }
@@ -35,6 +36,8 @@ func NewCpusConfig(bootVcpus int32, maxVcpus int32) *CpusConfig {
 	this.MaxVcpus = maxVcpus
 	var kvmHyperv bool = false
 	this.KvmHyperv = &kvmHyperv
+	var nested bool = true
+	this.Nested = &nested
 	return &this
 }
 
@@ -45,6 +48,8 @@ func NewCpusConfigWithDefaults() *CpusConfig {
 	this := CpusConfig{}
 	var kvmHyperv bool = false
 	this.KvmHyperv = &kvmHyperv
+	var nested bool = true
+	this.Nested = &nested
 	return &this
 }
 
@@ -192,6 +197,38 @@ func (o *CpusConfig) SetMaxPhysBits(v int32) {
 	o.MaxPhysBits = &v
 }
 
+// GetNested returns the Nested field value if set, zero value otherwise.
+func (o *CpusConfig) GetNested() bool {
+	if o == nil || o.Nested == nil {
+		var ret bool
+		return ret
+	}
+	return *o.Nested
+}
+
+// GetNestedOk returns a tuple with the Nested field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *CpusConfig) GetNestedOk() (*bool, bool) {
+	if o == nil || o.Nested == nil {
+		return nil, false
+	}
+	return o.Nested, true
+}
+
+// HasNested returns a boolean if a field has been set.
+func (o *CpusConfig) HasNested() bool {
+	if o != nil && o.Nested != nil {
+		return true
+	}
+
+	return false
+}
+
+// SetNested gets a reference to the given bool and assigns it to the Nested field.
+func (o *CpusConfig) SetNested(v bool) {
+	o.Nested = &v
+}
+
 // GetAffinity returns the Affinity field value if set, zero value otherwise.
 func (o *CpusConfig) GetAffinity() []CpuAffinity {
 	if o == nil || o.Affinity == nil {
@@ -272,6 +309,9 @@ func (o CpusConfig) MarshalJSON() ([]byte, error) {
 	}
 	if o.MaxPhysBits != nil {
 		toSerialize["max_phys_bits"] = o.MaxPhysBits
+	}
+	if o.Nested != nil {
+		toSerialize["nested"] = o.Nested
 	}
 	if o.Affinity != nil {
 		toSerialize["affinity"] = o.Affinity
