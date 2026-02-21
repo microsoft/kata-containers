@@ -156,14 +156,6 @@ adapt_common_policy_settings_for_aks() {
 	mv temp.json "${settings_dir}/genpolicy-settings.json"
 }
 
-# adapt common policy settings for CBL-Mariner Hosts
-adapt_common_policy_settings_for_cbl_mariner() {
-	local settings_dir=$1
-
-	info "Adapting common policy settings for KATA_HOST_OS=cbl-mariner"
-	jq '.kata_config.oci_version = "1.2.0"' "${settings_dir}/genpolicy-settings.json" > temp.json && mv temp.json "${settings_dir}/genpolicy-settings.json"
-}
-
 # Adapt common policy settings for NVIDIA GPU platforms (CI runners use containerd 2.x).
 adapt_common_policy_settings_for_nvidia_gpu() {
 	local settings_dir=$1
@@ -180,11 +172,7 @@ adapt_common_policy_settings() {
 	is_aks_cluster && adapt_common_policy_settings_for_aks "${settings_dir}"
 	is_nvidia_gpu_platform && adapt_common_policy_settings_for_nvidia_gpu "${settings_dir}"
 
-	case "${KATA_HOST_OS}" in
-		"cbl-mariner")
-			adapt_common_policy_settings_for_cbl_mariner "${settings_dir}"
-			;;
-	esac
+	return 0
 }
 
 # If auto-generated policy testing is enabled, make a copy of the genpolicy settings,
