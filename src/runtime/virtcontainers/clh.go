@@ -587,6 +587,11 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Set initial amount of cpu's for the virtual machine
 	clh.vmconfig.Cpus = chclient.NewCpusConfig(int32(clh.config.NumVCPUs()), int32(clh.config.DefaultMaxVCPUs))
 
+	if pathExists("/dev/mshv") {
+		// The nested property is true by default, but is not supported yet on MSHV.
+		clh.vmconfig.Cpus.SetNested(false)
+	}
+
 	disableNvdimm := true
 	enableDax := false
 
@@ -1970,5 +1975,12 @@ func (clh *cloudHypervisor) vmInfo() (chclient.VmInfo, error) {
 }
 
 func (clh *cloudHypervisor) IsRateLimiterBuiltin() bool {
+	return true
+}
+
+func pathExists(path string) bool {
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
 	return true
 }
