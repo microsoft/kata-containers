@@ -526,6 +526,7 @@ components:
             rate_limit_group: rate_limit_group
             queue_size: 6
             direct: false
+            backing_files: false
             rate_limiter_config:
               ops:
                 size: 0
@@ -550,12 +551,15 @@ components:
             iommu: false
             vhost_socket: vhost_socket
             serial: serial
+            sparse: true
             vhost_user: false
             id: id
+            image_type: FixedVhd
           - num_queues: 9
             rate_limit_group: rate_limit_group
             queue_size: 6
             direct: false
+            backing_files: false
             rate_limiter_config:
               ops:
                 size: 0
@@ -580,8 +584,10 @@ components:
             iommu: false
             vhost_socket: vhost_socket
             serial: serial
+            sparse: true
             vhost_user: false
             id: id
+            image_type: FixedVhd
           fs:
           - pci_segment: 6
             num_queues: 6
@@ -735,6 +741,7 @@ components:
             max_phys_bits: 7
             boot_vcpus: 1
             max_vcpus: 1
+            nested: true
             affinity:
             - vcpu: 9
               host_cpus:
@@ -775,6 +782,7 @@ components:
             pci_segments:
             - 5
             - 5
+            device_id: device_id
             cpus:
             - 3
             - 3
@@ -790,6 +798,7 @@ components:
             pci_segments:
             - 5
             - 5
+            device_id: device_id
             cpus:
             - 3
             - 3
@@ -962,6 +971,7 @@ components:
           rate_limit_group: rate_limit_group
           queue_size: 6
           direct: false
+          backing_files: false
           rate_limiter_config:
             ops:
               size: 0
@@ -986,12 +996,15 @@ components:
           iommu: false
           vhost_socket: vhost_socket
           serial: serial
+          sparse: true
           vhost_user: false
           id: id
+          image_type: FixedVhd
         - num_queues: 9
           rate_limit_group: rate_limit_group
           queue_size: 6
           direct: false
+          backing_files: false
           rate_limiter_config:
             ops:
               size: 0
@@ -1016,8 +1029,10 @@ components:
           iommu: false
           vhost_socket: vhost_socket
           serial: serial
+          sparse: true
           vhost_user: false
           id: id
+          image_type: FixedVhd
         fs:
         - pci_segment: 6
           num_queues: 6
@@ -1171,6 +1186,7 @@ components:
           max_phys_bits: 7
           boot_vcpus: 1
           max_vcpus: 1
+          nested: true
           affinity:
           - vcpu: 9
             host_cpus:
@@ -1211,6 +1227,7 @@ components:
           pci_segments:
           - 5
           - 5
+          device_id: device_id
           cpus:
           - 3
           - 3
@@ -1226,6 +1243,7 @@ components:
           pci_segments:
           - 5
           - 5
+          device_id: device_id
           cpus:
           - 3
           - 3
@@ -1388,6 +1406,7 @@ components:
         max_phys_bits: 7
         boot_vcpus: 1
         max_vcpus: 1
+        nested: true
         affinity:
         - vcpu: 9
           host_cpus:
@@ -1411,6 +1430,9 @@ components:
           type: boolean
         max_phys_bits:
           type: integer
+        nested:
+          default: true
+          type: boolean
         affinity:
           items:
             $ref: '#/components/schemas/CpuAffinity'
@@ -1698,6 +1720,7 @@ components:
         rate_limit_group: rate_limit_group
         queue_size: 6
         direct: false
+        backing_files: false
         rate_limiter_config:
           ops:
             size: 0
@@ -1722,8 +1745,10 @@ components:
         iommu: false
         vhost_socket: vhost_socket
         serial: serial
+        sparse: true
         vhost_user: false
         id: id
+        image_type: FixedVhd
       properties:
         path:
           type: string
@@ -1762,6 +1787,20 @@ components:
           items:
             $ref: '#/components/schemas/VirtQueueAffinity'
           type: array
+        backing_files:
+          default: false
+          type: boolean
+        sparse:
+          default: true
+          type: boolean
+        image_type:
+          enum:
+          - FixedVhd
+          - Qcow2
+          - Raw
+          - Vhdx
+          - Unknown
+          type: string
       type: object
     NetConfig:
       example:
@@ -2092,6 +2131,7 @@ components:
         pci_segments:
         - 5
         - 5
+        device_id: device_id
         cpus:
         - 3
         - 3
@@ -2121,6 +2161,8 @@ components:
             format: int32
             type: integer
           type: array
+        device_id:
+          type: string
       required:
       - guest_numa_id
       type: object
