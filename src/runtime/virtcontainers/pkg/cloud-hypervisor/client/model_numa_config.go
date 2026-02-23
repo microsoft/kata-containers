@@ -21,6 +21,7 @@ type NumaConfig struct {
 	Distances   *[]NumaDistance `json:"distances,omitempty"`
 	MemoryZones *[]string       `json:"memory_zones,omitempty"`
 	PciSegments *[]int32        `json:"pci_segments,omitempty"`
+	DeviceId    *string         `json:"device_id,omitempty"`
 }
 
 // NewNumaConfig instantiates a new NumaConfig object
@@ -193,6 +194,38 @@ func (o *NumaConfig) SetPciSegments(v []int32) {
 	o.PciSegments = &v
 }
 
+// GetDeviceId returns the DeviceId field value if set, zero value otherwise.
+func (o *NumaConfig) GetDeviceId() string {
+	if o == nil || o.DeviceId == nil {
+		var ret string
+		return ret
+	}
+	return *o.DeviceId
+}
+
+// GetDeviceIdOk returns a tuple with the DeviceId field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *NumaConfig) GetDeviceIdOk() (*string, bool) {
+	if o == nil || o.DeviceId == nil {
+		return nil, false
+	}
+	return o.DeviceId, true
+}
+
+// HasDeviceId returns a boolean if a field has been set.
+func (o *NumaConfig) HasDeviceId() bool {
+	if o != nil && o.DeviceId != nil {
+		return true
+	}
+
+	return false
+}
+
+// SetDeviceId gets a reference to the given string and assigns it to the DeviceId field.
+func (o *NumaConfig) SetDeviceId(v string) {
+	o.DeviceId = &v
+}
+
 func (o NumaConfig) MarshalJSON() ([]byte, error) {
 	toSerialize := map[string]interface{}{}
 	if true {
@@ -209,6 +242,9 @@ func (o NumaConfig) MarshalJSON() ([]byte, error) {
 	}
 	if o.PciSegments != nil {
 		toSerialize["pci_segments"] = o.PciSegments
+	}
+	if o.DeviceId != nil {
+		toSerialize["device_id"] = o.DeviceId
 	}
 	return json.Marshal(toSerialize)
 }
