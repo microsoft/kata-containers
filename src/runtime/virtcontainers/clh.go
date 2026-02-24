@@ -613,6 +613,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 		disk := chclient.NewDiskConfig()
 		disk.Path = &assetPath
 		disk.SetReadonly(true)
+		disk.SetImageType("Raw")
 
 		diskRateLimiterConfig := clh.getDiskRateLimiterConfig()
 		if diskRateLimiterConfig != nil {
@@ -883,6 +884,7 @@ func clhPciInfoToPath(pciInfo chclient.PciDeviceInfo) (types.PciPath, error) {
 func (clh *cloudHypervisor) addInitdataDisk(initdataImage string) {
 	disk := chclient.NewDiskConfig()
 	disk.Path = &initdataImage
+	disk.SetImageType("Raw")
 
 	ro := true
 	disk.Readonly = &ro
