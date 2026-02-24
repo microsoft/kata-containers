@@ -948,7 +948,7 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 	clhDisk.Readonly = &drive.ReadOnly
 
 	clh.Logger().Info("clh: SetImageType(Raw)")
-	disk.SetImageType("Raw")
+	clhDisk.SetImageType("Raw")
 
 	clhDisk.VhostUser = func(b bool) *bool { return &b }(false)
 	if clh.config.BlockDeviceCacheSet {
