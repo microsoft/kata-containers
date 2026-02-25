@@ -110,6 +110,16 @@ pub struct DeviceConfig {
     pub pci_segment: u16,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ImageType {
+    FixedVhd,
+    Qcow2,
+    Raw,
+    Vhdx,
+    #[default]
+    Unknown,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct DiskConfig {
     pub path: Option<PathBuf>,
@@ -135,6 +145,8 @@ pub struct DiskConfig {
     pub disable_io_uring: bool,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub image_type: ImageType,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
