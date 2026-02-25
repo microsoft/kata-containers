@@ -613,6 +613,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 		disk := chclient.NewDiskConfig()
 		disk.Path = &assetPath
 		disk.SetReadonly(true)
+		disk.SetImageType("Raw")
 
 		diskRateLimiterConfig := clh.getDiskRateLimiterConfig()
 		if diskRateLimiterConfig != nil {
@@ -902,6 +903,7 @@ func (clh *cloudHypervisor) addInitdataDisk(initdataImage string) {
 		disk.Direct = &clh.config.BlockDeviceCacheDirect
 	}
 	disk.SetIommu(clh.config.IOMMU)
+	disk.SetImageType("Raw")
 
 	if rl := clh.getDiskRateLimiterConfig(); rl != nil {
 		disk.SetRateLimiterConfig(*rl)
@@ -940,6 +942,7 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 	clhDisk := *chclient.NewDiskConfig()
 	clhDisk.Path = &drive.File
 	clhDisk.Readonly = &drive.ReadOnly
+	clhDisk.SetImageType("Raw")
 	clhDisk.VhostUser = func(b bool) *bool { return &b }(false)
 	if clh.config.BlockDeviceCacheSet {
 		clhDisk.Direct = &clh.config.BlockDeviceCacheDirect
