@@ -27,6 +27,7 @@ use ch_config::ch_api::{
 };
 use ch_config::convert::DEFAULT_NUM_PCI_SEGMENTS;
 use ch_config::DiskConfig;
+use ch_config::ImageType;
 use ch_config::{net_util::MacAddr, DeviceConfig, FsConfig, NetConfig, VsockConfig};
 use kata_sys_util::netns::NetnsGuard;
 use kata_types::config::hypervisor::RateLimiterConfig;
@@ -550,6 +551,7 @@ impl TryFrom<BlockConfig> for DiskConfig {
             readonly: blkcfg.is_readonly,
             num_queues: blkcfg.num_queues,
             queue_size: blkcfg.queue_size as u16,
+            image_type: ImageType::Raw,
             ..Default::default()
         };
 
