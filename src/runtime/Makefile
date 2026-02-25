@@ -220,7 +220,7 @@ DEFBRIDGES := 1
 DEFENABLEANNOTATIONS := [\"enable_iommu\", \"virtio_fs_extra_args\", \"kernel_params\", \"kernel_verity_params\"]
 DEFENABLEANNOTATIONS_COCO := [\"enable_iommu\", \"virtio_fs_extra_args\", \"kernel_params\", \"kernel_verity_params\", \"default_vcpus\", \"default_memory\", \"cc_init_data\"]
 DEFDISABLEGUESTSECCOMP := true
-DEFDISABLEGUESTEMPTYDIR := true
+DEFDISABLEGUESTEMPTYDIR ?= true
 #Default experimental features enabled
 DEFAULTEXPFEATURES := []
 
