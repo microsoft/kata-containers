@@ -1111,7 +1111,7 @@ allow_root_path(p_oci, i_oci, bundle_id) if {
 # device mounts
 # allow_mount returns the policy index (p_index) if a given input mount matches a policy mount.
 allow_mount(p_oci, i_mount, bundle_id, sandbox_id):= p_index if {
-    print("allow_mount: i_mount =", i_mount)
+    print("-------- allow_mount: i_mount =", i_mount)
 
     some p_index, p_mount in p_oci.Mounts
     print("allow_mount: p_index =", p_index, "p_mount =", p_mount)
@@ -1176,8 +1176,11 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
 
     regex4 := replace(regex3, "$(sandbox-id)", sandbox_id)
     print("mount_source_allows 2: regex4 =", regex4)
-    regex.match(regex4, i_mount.source)
 
+    regex5 := replace(regex4, "$(bundle-id)", bundle_id)
+    print("mount_source_allows 2: regex5 =", regex5)
+
+    regex.match(regex5, i_mount.source)
     print("mount_source_allows 2: true")
 }
 
