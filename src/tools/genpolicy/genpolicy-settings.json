@@ -154,7 +154,7 @@
     "volumes": {
         "emptyDir": {
             "mount_type": "local",
-            "mount_source": "^$(cpath)/$(sandbox-id)/rootfs/local/",
+            "mount_source": "$(sfprefix)",
             "mount_point": "^$(cpath)/$(sandbox-id)/rootfs/local/",
             "driver": "local",
             "source": "local",

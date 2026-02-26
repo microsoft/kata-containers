@@ -114,25 +114,23 @@ pub fn get_mount_and_storage(
 
     if let Some(emptyDir) = &yaml_volume.emptyDir {
         let settings_volumes = &settings.volumes;
-        let mut volume: Option<&settings::EmptyDirVolume> = None;
+        let mut volume = &settings_volumes.emptyDir;
+        let mut is_memory = false;
 
         if let Some(medium) = &emptyDir.medium {
             if medium == "Memory" {
-                volume = Some(&settings_volumes.emptyDir_memory);
+                volume = &settings_volumes.emptyDir_memory;
+                is_memory = true;
             }
         }
 
-        if volume.is_none() {
-            volume = Some(&settings_volumes.emptyDir);
-        }
-
         get_empty_dir_mount_and_storage(
-            settings,
             p_mounts,
             storages,
             yaml_mount,
-            volume.unwrap(),
+            volume,
             pod_security_context,
+            is_memory,
         );
     } else if yaml_volume.persistentVolumeClaim.is_some() || yaml_volume.azureFile.is_some() {
         get_shared_bind_mount(yaml_mount, p_mounts, "rprivate", "rw");
@@ -150,16 +148,16 @@ pub fn get_mount_and_storage(
 }
 
 fn get_empty_dir_mount_and_storage(
-    settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
     storages: &mut Vec<agent::Storage>,
     yaml_mount: &pod::VolumeMount,
     settings_empty_dir: &settings::EmptyDirVolume,
     pod_security_context: &Option<pod::PodSecurityContext>,
+    is_memory: bool,
 ) {
     debug!("Settings emptyDir: {:?}", settings_empty_dir);
 
-    if yaml_mount.subPathExpr.is_none() {
+    if is_memory && yaml_mount.subPathExpr.is_none() {
         let mut options = settings_empty_dir.options.clone();
         if let Some(gid) = pod_security_context.as_ref().and_then(|sc| sc.fsGroup) {
             // This matches the runtime behavior of only setting the fsgid if the mountpoint GID is not 0.
@@ -180,19 +178,15 @@ fn get_empty_dir_mount_and_storage(
         });
     }
 
-    let source = if yaml_mount.subPathExpr.is_some() {
+    let name = if is_memory {
+        yaml_mount.name.to_string()
+    } else {
         let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
-        let name = OsString::from(file_name).into_string().unwrap();
-        format!("{}{name}$", &settings.volumes.configMap.mount_source)
-    } else {
-        format!("{}{}$", &settings_empty_dir.mount_source, &yaml_mount.name)
+        OsString::from(file_name).into_string().unwrap()
     };
+    let source = format!("{}{name}$", &settings_empty_dir.mount_source);
 
-    let mount_type = if yaml_mount.subPathExpr.is_some() {
-        "bind"
-    } else {
-        &settings_empty_dir.mount_type
-    };
+    let mount_type = "bind";
 
     let access = match yaml_mount.readOnly {
         Some(true) => {
