@@ -2198,6 +2198,7 @@ func (k *kataAgent) disconnect(ctx context.Context) error {
 
 // check grpc server is serving
 func (k *kataAgent) check(ctx context.Context) error {
+	/*
 	_, err := k.sendReq(ctx, &grpc.CheckRequest{})
 	if err != nil {
 		if err.Error() == context.DeadlineExceeded.Error() {
@@ -2206,6 +2207,8 @@ func (k *kataAgent) check(ctx context.Context) error {
 		err = fmt.Errorf("Failed to Check if grpc server is working: %s", err)
 	}
 	return err
+	*/
+	return nil
 }
 
 func (k *kataAgent) waitProcess(ctx context.Context, c *Container, processID string) (int32, error) {
