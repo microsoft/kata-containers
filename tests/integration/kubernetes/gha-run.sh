@@ -556,21 +556,7 @@ function main() {
 	export KATA_HOST_OS="${KATA_HOST_OS:-}"
 	export K8S_TEST_HOST_TYPE="${K8S_TEST_HOST_TYPE:-}"
 
-	AUTO_GENERATE_POLICY="${AUTO_GENERATE_POLICY:-}"
-
-	# Auto-generate policy on some Host types, if the caller didn't specify an AUTO_GENERATE_POLICY value.
-	if [[ -z "${AUTO_GENERATE_POLICY}" ]]; then
-		if [[ "${KATA_HOST_OS}" = "cbl-mariner" ]]; then
-			AUTO_GENERATE_POLICY="yes"
-		elif [[ "${KATA_HYPERVISOR}" = qemu-coco-dev* && \
-		        "${TARGET_ARCH}" = "x86_64" && \
-		        "${PULL_TYPE}" != "experimental-force-guest-pull" ]]; then
-			AUTO_GENERATE_POLICY="yes"
-		elif [[ "${KATA_HYPERVISOR}" = qemu-nvidia-gpu-* ]]; then
-			AUTO_GENERATE_POLICY="yes"
-		fi
-	fi
-
+	AUTO_GENERATE_POLICY="no"
 	info "Exporting AUTO_GENERATE_POLICY=${AUTO_GENERATE_POLICY}"
 	export AUTO_GENERATE_POLICY
 
