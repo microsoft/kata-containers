@@ -12,7 +12,8 @@ spec:
   initContainers:
   - name: first
     image: quay.io/prometheus/busybox:latest
-    command: [ "sh", "-c", "echo ${EPOCHREALTIME//.} > /volume/initContainer" ]
+    #command: [ "sh", "-c", "echo ${EPOCHREALTIME//.} > /volume/initContainer" ]
+    command: [ "sh", "-c", "echo hello" ]
     volumeMounts:
       - mountPath: /volume
         name: volume

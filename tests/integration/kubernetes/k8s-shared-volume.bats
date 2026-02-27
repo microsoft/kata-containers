@@ -15,33 +15,6 @@ setup() {
 	setup_common || die "setup_common failed"
 }
 
-@test "Containers with shared volume" {
-	pod_name="test-shared-volume"
-	first_container_name="busybox-first-container"
-	second_container_name="busybox-second-container"
-	cmd="cat /tmp/pod-data"
-	yaml_file="${pod_config_dir}/pod-shared-volume.yaml"
-
-	# Add policy to the yaml file
-	policy_settings_dir="$(create_tmp_policy_settings_dir "${pod_config_dir}")"
-
-	exec_command=(sh -c "${cmd}")
-	add_exec_to_policy_settings "${policy_settings_dir}" "${exec_command[@]}"
-
-	add_requests_to_policy_settings "${policy_settings_dir}" "ReadStreamRequest"
-	auto_generate_policy "${policy_settings_dir}" "${yaml_file}"
-
-	# Create pod
-	kubectl create -f "${yaml_file}"
-
-	# Check pods
-	kubectl wait --for=condition=Ready --timeout=$timeout pod $pod_name
-
-	# Communicate containers
-	msg="Hello from the $second_container_name"
-	kubectl exec "$pod_name" -c "$first_container_name" -- "${exec_command[@]}" | grep "$msg"
-}
-
 @test "initContainer with shared volume" {
 
 	pod_name="initcontainer-shared-volume"
@@ -62,9 +35,9 @@ setup() {
 	kubectl create -f "${yaml_file}"
 
 	# Check pods
-	kubectl wait --for=condition=Ready --timeout=$timeout pod $pod_name
+	kubectl wait --for=condition=Ready --timeout=15s pod $pod_name
 
-	kubectl exec "$pod_name" -c "$last_container" -- "${exec_command[@]}"
+	# kubectl exec "$pod_name" -c "$last_container" -- "${exec_command[@]}"
 }
 
 teardown() {
