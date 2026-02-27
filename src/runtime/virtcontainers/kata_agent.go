@@ -974,6 +974,11 @@ func (k *kataAgent) replaceOCIMountSource(spec *specs.Spec, guestMounts map[stri
 
 	for index, m := range ociMounts {
 		if guestMount, ok := guestMounts[m.Destination]; ok {
+			oci_source := ociMounts[index].Source
+			if !mountSourceExists(oci_source) {
+				k.Logger().Error("OCI mount source doesn't exist: %s", oci_source)
+			}
+
 			k.Logger().Debugf("Replacing OCI mount (%s) source %s with %s", m.Destination, m.Source, guestMount.Source)
 			ociMounts[index].Source = guestMount.Source
 		}
@@ -2766,4 +2771,11 @@ func parseErofsRootFsOptions(options []string) ([]string, string) {
 		}
 	}
 	return lowerdirs, upperdir
+}
+
+func mountSourceExists(path string) bool {
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	return true
 }
