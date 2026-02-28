@@ -56,10 +56,12 @@ struct Storage {
     watch: bool,
 
     /// The list of files, directories, symlinks to watch from the source mount point and updated in the target one.
+    #[allow(dead_code)]
     watched_files: HashMap<PathBuf, SystemTime>,
 }
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum WatcherError {
     #[error(
         "Too many file system entries within to watch within: {mnt} ({count} must be < {})",
@@ -85,6 +87,7 @@ impl Drop for Storage {
     }
 }
 
+#[allow(dead_code)]
 async fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
     let metadata = fs::symlink_metadata(&from).await?;
     if metadata.file_type().is_symlink() {
@@ -107,6 +110,7 @@ async fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 impl Storage {
     async fn new(storage: protos::Storage) -> Result<Storage> {
         let entry = Storage {
@@ -178,8 +182,10 @@ impl Storage {
     }
 
     async fn scan(&mut self, logger: &Logger) -> Result<usize> {
-        debug!(logger, "Scanning for changes");
+        debug!(logger, "NOT Scanning for changes");
+        Ok(0)
 
+        /*
         let mut remove_list = Vec::new();
         let mut updated_files: Vec<PathBuf> = Vec::new();
 
@@ -227,6 +233,7 @@ impl Storage {
         }
 
         Ok(updated_files.len())
+        */
     }
 
     #[async_recursion]
