@@ -114,7 +114,19 @@ pub fn get_mount_and_storage(
 
     if let Some(emptyDir) = &yaml_volume.emptyDir {
         let settings_volumes = &settings.volumes;
-        let mut volume = &settings_volumes.emptyDir;
+        let emptydir_config = &settings.kata_config.emptydir_path;
+
+        let mut volume = match emptydir_config.as_str() {
+            "sandbox-local" => {
+                if yaml_mount.subPathExpr.is_some() {
+                    &settings_volumes.emptyDir_host_bundle
+                } else {
+                    &settings_volumes.emptyDir_sandbox_local
+                }
+            }
+            "host-bundle" => &settings_volumes.emptyDir_host_bundle,
+            _ => panic!("Unsupported emptydir settings value: {emptydir_config}")
+        };
 
         if let Some(medium) = &emptyDir.medium {
             if medium == "Memory" {
@@ -123,7 +135,6 @@ pub fn get_mount_and_storage(
         }
 
         get_empty_dir_mount_and_storage(
-            settings,
             p_mounts,
             storages,
             yaml_mount,
@@ -146,7 +157,6 @@ pub fn get_mount_and_storage(
 }
 
 fn get_empty_dir_mount_and_storage(
-    settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
     storages: &mut Vec<agent::Storage>,
     yaml_mount: &pod::VolumeMount,
@@ -176,19 +186,13 @@ fn get_empty_dir_mount_and_storage(
         });
     }
 
-    let source = if yaml_mount.subPathExpr.is_some() {
+    let source_name = if yaml_mount.subPathExpr.is_some() {
         let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
-        let name = OsString::from(file_name).into_string().unwrap();
-        format!("{}{name}$", &settings.volumes.configMap.mount_source)
+        OsString::from(file_name).into_string().unwrap()
     } else {
-        format!("{}{}$", &settings_empty_dir.mount_source, &yaml_mount.name)
+        yaml_mount.name.to_string()
     };
-
-    let mount_type = if yaml_mount.subPathExpr.is_some() {
-        "bind"
-    } else {
-        &settings_empty_dir.mount_type
-    };
+    let source = format!("{}{source_name}$", &settings_empty_dir.mount_source);
 
     let access = match yaml_mount.readOnly {
         Some(true) => {
@@ -200,7 +204,7 @@ fn get_empty_dir_mount_and_storage(
 
     p_mounts.push(policy::KataMount {
         destination: yaml_mount.mountPath.to_string(),
-        type_: mount_type.to_string(),
+        type_: settings_empty_dir.mount_type.to_string(),
         source,
         options: vec![
             "rbind".to_string(),
