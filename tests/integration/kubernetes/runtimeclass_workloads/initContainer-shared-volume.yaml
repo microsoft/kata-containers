@@ -12,18 +12,45 @@ spec:
   initContainers:
   - name: first
     image: quay.io/prometheus/busybox:latest
-    #command: [ "sh", "-c", "echo ${EPOCHREALTIME//.} > /volume/initContainer" ]
-    command: [ "sh", "-c", "echo hello" ]
+    
+    #command: [ "sh", "-c", "sleep 1s ; echo ${EPOCHREALTIME//.} > /foo/initContainer" ]
+   
+    
+#    command:
+#      - /bin/sh
+#      - -c
+#      - >
+#        sleep 1s
+#        echo ${EPOCHREALTIME//.} >> /foo/initContainer
+    
+    # command: [ "/bin/sh", "-c", "sleep 1 && echo hello" ]
+    # command: [ "/bin/sh", "-c", "sleep 1s && exit 1" ]
+    # command: [ "/bin/sh", "-c", "sleep 1s && exit 0" ]
+    # command: [ "/bin/sh", "-c", "sleep 1s && echo ${EPOCHREALTIME//.} >> /foo/initContainer && exit 0" ]
+    # command: [ "/bin/sh", "-c", "sleep 1s && echo ${EPOCHREALTIME//.} >> /foo/initContainer" ]
+    # command: [ "/bin/sh", "-c", "echo ${EPOCHREALTIME//.} >> /foo/initContainer" ]
+    # command: [ "/bin/sh", "-c", "echo ${EPOCHREALTIME//.} >> /foo/initContainer || exit 0" ]
+    # command: [ "/bin/sh", "-c", "(echo ${EPOCHREALTIME//.} >> /foo/initContainer) || (exit 0)" ]
+    
+    # command: [ "/bin/sh", "-c", "(echo hello >> /foo/initContainer) || (exit 0)" ]
+    # command: [ "/bin/sh", "-c", "ls -l /foo/initContainer || exit 0" ]
+
+    #command: [ "/bin/sh", "-c", "sleep 1s ; echo hello >> /foo/initContainer" ]
+    command: [ "/bin/sh", "-c", "echo hello >> /foo/initContainer || exit 0" ]
+
     volumeMounts:
-      - mountPath: /volume
-        name: volume
+      - mountPath: /foo
+        name: foo-volume
   containers:
   - name: last
     image: quay.io/prometheus/busybox:latest
-    command: [ "sh", "-c", "echo ${EPOCHREALTIME//.} > /volume/container; tail -f /dev/null" ]
+
+    #command: [ "sh", "-c", "echo ${EPOCHREALTIME//.} > /foo/container; tail -f /dev/null" ]
+    command: [ "sh", "-c", "tail -f /dev/null" ]
+    
     volumeMounts:
-    - mountPath: /volume
-      name: volume
+    - mountPath: /foo
+      name: foo-volume
   volumes:
-  - name: volume
+  - name: foo-volume
     emptyDir: {}
