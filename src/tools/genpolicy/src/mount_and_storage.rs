@@ -116,21 +116,32 @@ pub fn get_mount_and_storage(
         let settings_volumes = &settings.volumes;
         let emptydir_config = &settings.kata_config.emptydir_path;
 
-        let mut volume = match emptydir_config.as_str() {
+        let (mut settings_volume, mut mount_source_name, mut add_kata_storage) = match emptydir_config.as_str() {
             "sandbox-local" => {
                 if yaml_mount.subPathExpr.is_some() {
-                    &settings_volumes.emptyDir_host_bundle
+                    let volume = &settings_volumes.emptyDir_host_bundle;
+                    let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
+                    let source_name = OsString::from(file_name).into_string().unwrap();
+                    (volume, source_name, false)
                 } else {
-                    &settings_volumes.emptyDir_sandbox_local
+                    let volume = &settings_volumes.emptyDir_sandbox_local;
+                    (volume, yaml_mount.name.clone(), true)
                 }
             }
-            "host-bundle" => &settings_volumes.emptyDir_host_bundle,
+            "host-bundle" => {
+                let volume = &settings_volumes.emptyDir_host_bundle;
+                let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
+                let source_name = OsString::from(file_name).into_string().unwrap();
+                (volume, source_name, false)
+            }
             _ => panic!("Unsupported emptydir settings value: {emptydir_config}"),
         };
 
         if let Some(medium) = &emptyDir.medium {
             if medium == "Memory" {
-                volume = &settings_volumes.emptyDir_memory;
+                settings_volume = &settings_volumes.emptyDir_memory;
+                mount_source_name = yaml_mount.name.clone();
+                add_kata_storage = true;
             }
         }
 
@@ -138,7 +149,9 @@ pub fn get_mount_and_storage(
             p_mounts,
             storages,
             yaml_mount,
-            volume,
+            settings_volume,
+            &mount_source_name,
+            add_kata_storage,
             pod_security_context,
         );
     } else if yaml_volume.persistentVolumeClaim.is_some() || yaml_volume.azureFile.is_some() {
@@ -161,11 +174,13 @@ fn get_empty_dir_mount_and_storage(
     storages: &mut Vec<agent::Storage>,
     yaml_mount: &pod::VolumeMount,
     settings_empty_dir: &settings::EmptyDirVolume,
+    mount_source_name: &str,
+    add_kata_storage: bool,
     pod_security_context: &Option<pod::PodSecurityContext>,
 ) {
     debug!("Settings emptyDir: {:?}", settings_empty_dir);
 
-    if yaml_mount.subPathExpr.is_none() {
+    if add_kata_storage {
         let mut options = settings_empty_dir.options.clone();
         if let Some(gid) = pod_security_context.as_ref().and_then(|sc| sc.fsGroup) {
             // This matches the runtime behavior of only setting the fsgid if the mountpoint GID is not 0.
@@ -186,14 +201,7 @@ fn get_empty_dir_mount_and_storage(
         });
     }
 
-    let source_name = if yaml_mount.subPathExpr.is_some() {
-        let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
-        OsString::from(file_name).into_string().unwrap()
-    } else {
-        yaml_mount.name.to_string()
-    };
-    let source = format!("{}{source_name}$", &settings_empty_dir.mount_source);
-
+    let source = format!("{}{mount_source_name}$", &settings_empty_dir.mount_source);
     let access = match yaml_mount.readOnly {
         Some(true) => {
             debug!("setting read only access for emptyDir mount");
