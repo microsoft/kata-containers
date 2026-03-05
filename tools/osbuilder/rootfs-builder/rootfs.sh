@@ -699,12 +699,12 @@ EOF
 	if [ "${distro}" == "cbl-mariner" ]; then
 		info "Overwrite chrony.conf with Azure-optimized PTP configuration"
 		cat > "${chrony_conf_file}" <<-'CHRONYEOF'
-driftfile /var/lib/chrony/drift
+driftfile /tmp/chrony.drift
 rtcsync
 makestep 0.1 3
 cmdport 0
 refclock PHC /dev/ptp0:nocrossts poll 0 dpoll -2 offset -0.25 trust prefer
-logdir /var/log/chrony
+logdir /tmp
 log measurements statistics tracking
 		CHRONYEOF
 	fi
