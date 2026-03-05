@@ -685,60 +685,15 @@ EOF
 
 	info "Configure chrony file ${chrony_conf_file}"
 	cat >> "${chrony_conf_file}" <<EOF
-refclock PHC /dev/ptp0 poll 3 dpoll -2 offset 0
+refclock PHC /dev/ptp0 poll 0 dpoll -2 offset 0 trust prefer
 # Step the system clock instead of slewing it if the adjustment is larger than
 # one second, at any time
-makestep 1 -1
+makestep 0.1 3
 EOF
 
 	# Comment out ntp sources for chrony to be extra careful
 	# Reference:  https://chrony.tuxfamily.org/doc/3.4/chrony.conf.html
 	sed -i 's/^\(server \|pool \|peer \)/# &/g'  ${chrony_conf_file}
-
-	# For cbl-mariner, overwrite chrony.conf with Azure-optimized NTP config
-	if [ "${distro}" == "cbl-mariner" ]; then
-		info "Overwrite chrony.conf with Azure-optimized NTP configuration"
-		cat > "${chrony_conf_file}" <<-'CHRONYEOF'
-		# Azure-optimized NTP configuration for Microsoft time services
-		# Use Microsoft's public NTP service optimized for Azure
-		server 168.61.215.74 iburst prefer
-
-		# Record the rate at which the system clock gains/losses time.
-		driftfile /var/lib/chrony/drift
-
-		# Allow the system clock to be stepped in the first three updates
-		# if its offset is larger than 1 second.
-		makestep 1.0 3
-
-		# Enable kernel synchronization of the real-time clock (RTC).
-		rtcsync
-
-		# Specify file containing keys for NTP authentication.
-		keyfile /etc/chrony.keys
-
-		# Save NTS keys and cookies.
-		ntsdumpdir /var/lib/chrony
-
-		# Get TAI-UTC offset and leap seconds from the system tz database.
-		leapsectz right/UTC
-
-		# Specify directory for log files.
-		logdir /var/log/chrony
-
-		# Setting larger 'maxdistance' to tolerate Azure network latency
-		maxdistance 16.0
-
-		# Disable listening on UDP port (leaving only Unix socket interface).
-		cmdport 0
-
-		# REMOVED: refclock PHC /dev/ptp0 (PTP device not available in kata VMs)
-		# Using Microsoft NTP services optimized for Azure instead
-
-		# Step the system clock instead of slewing it if the adjustment is larger than
-		# one second, at any time (critical for VMs with large initial offset)
-		makestep 1 -1
-		CHRONYEOF
-	fi
 
 	if [ -f "$chrony_systemd_service" ]; then
 		# Remove user option, user could not exist in the rootfs
