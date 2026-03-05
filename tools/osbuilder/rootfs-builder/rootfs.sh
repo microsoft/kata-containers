@@ -683,9 +683,10 @@ EOF
 			;;
 	esac
 
+	sed -i 's/^\(makestep \|pool \|peer \)/# &/g'  ${chrony_conf_file}
 	info "Configure chrony file ${chrony_conf_file}"
 	cat >> "${chrony_conf_file}" <<EOF
-refclock PHC /dev/ptp0 poll 0 dpoll -2 offset 0 trust prefer
+refclock PHC /dev/ptp0:nocrossts poll 1 offset 0.25 trust prefer
 # Step the system clock instead of slewing it if the adjustment is larger than
 # one second, at any time
 makestep 0.1 3
