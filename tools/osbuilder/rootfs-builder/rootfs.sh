@@ -683,18 +683,31 @@ EOF
 			;;
 	esac
 
-	sed -i 's/^\(makestep \|pool \|peer \)/# &/g'  ${chrony_conf_file}
 	info "Configure chrony file ${chrony_conf_file}"
 	cat >> "${chrony_conf_file}" <<EOF
-refclock PHC /dev/ptp0:nocrossts poll 1 offset -0.25 trust prefer
+refclock PHC /dev/ptp0 poll 0 dpoll -2 offset 0 trust prefer
 # Step the system clock instead of slewing it if the adjustment is larger than
 # one second, at any time
-#makestep 0.1 3
+makestep 0.1 3
 EOF
 
 	# Comment out ntp sources for chrony to be extra careful
 	# Reference:  https://chrony.tuxfamily.org/doc/3.4/chrony.conf.html
 	sed -i 's/^\(server \|pool \|peer \)/# &/g'  ${chrony_conf_file}
+
+	# For cbl-mariner, overwrite chrony.conf with Azure-optimized PTP configuration
+	if [ "${distro}" == "cbl-mariner" ]; then
+		info "Overwrite chrony.conf with Azure-optimized PTP configuration"
+		cat > "${chrony_conf_file}" <<-'CHRONYEOF'
+driftfile /var/lib/chrony/drift
+rtcsync
+makestep 0.1 3
+cmdport 0
+refclock PHC /dev/ptp0:nocrossts poll 0 dpoll -2 offset -0.25 trust prefer
+logdir /var/log/chrony
+log measurements statistics tracking
+		CHRONYEOF
+	fi
 
 	if [ -f "$chrony_systemd_service" ]; then
 		# Remove user option, user could not exist in the rootfs
