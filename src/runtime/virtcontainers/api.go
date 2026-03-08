@@ -57,58 +57,64 @@ func createSandboxFromConfig(ctx context.Context, sandboxConfig SandboxConfig, f
 	span, ctx := katatrace.Trace(ctx, virtLog, "createSandboxFromConfig", apiTracingTags)
 	defer span.End()
 
-	// Create the sandbox.
-	s, err := createSandbox(ctx, sandboxConfig, factory)
-	if err != nil {
-		return nil, err
-	}
+	var s *Sandbox
 
-	// Cleanup sandbox resources in case of any failure
-	defer func() {
+	for i := 0; i < 2; i++ {
+		virtLog.WithField("i", i).Info("DM: createSandboxFromConfig")
+
+		// Create the sandbox.
+		s, err := createSandbox(ctx, sandboxConfig, factory)
 		if err != nil {
-			s.Delete(ctx)
+			return nil, err
 		}
-	}()
 
-	// network rollback
-	defer func() {
-		if err != nil {
-			virtLog.Info("Removing network after failure in createSandbox")
-			s.removeNetwork(ctx)
+		// Cleanup sandbox resources in case of any failure
+		defer func() {
+			if err != nil {
+				s.Delete(ctx)
+			}
+		}()
+
+		// network rollback
+		defer func() {
+			if err != nil {
+				virtLog.Info("Removing network after failure in createSandbox")
+				s.removeNetwork(ctx)
+			}
+		}()
+
+		// Create the sandbox network
+		if err = s.createNetwork(ctx); err != nil {
+			return nil, err
 		}
-	}()
 
-	// Create the sandbox network
-	if err = s.createNetwork(ctx); err != nil {
-		return nil, err
-	}
-
-	// Set the sandbox host cgroups.
-	if err := s.setupResourceController(); err != nil {
-		return nil, err
-	}
-
-	// Start the VM
-	if err = s.startVM(ctx, prestartHookFunc); err != nil {
-		return nil, err
-	}
-
-	// rollback to stop VM if error occurs
-	defer func() {
-		if err != nil {
-			s.stopVM(ctx)
+		// Set the sandbox host cgroups.
+		if err := s.setupResourceController(); err != nil {
+			return nil, err
 		}
-	}()
 
-	s.postCreatedNetwork(ctx)
+		// Start the VM
+		if err = s.startVM(ctx, prestartHookFunc); err != nil {
+			return nil, err
+		}
 
-	if err = s.getAndStoreGuestDetails(ctx); err != nil {
-		return nil, err
-	}
+		// rollback to stop VM if error occurs
+		defer func() {
+			if err != nil {
+				s.stopVM(ctx)
+			}
+		}()
 
-	// Create Containers
-	if err = s.createContainers(ctx); err != nil {
-		return nil, err
+		s.postCreatedNetwork(ctx)
+
+		if err = s.getAndStoreGuestDetails(ctx); err != nil {
+			return nil, err
+		}
+
+		// Create Containers
+		if err = s.createContainers(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	return s, nil

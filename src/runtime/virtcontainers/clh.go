@@ -382,20 +382,31 @@ func (clh *cloudHypervisor) setupVirtiofsDaemon(ctx context.Context) error {
 		return errors.New("cloud-hypervisor only supports virtio based file sharing")
 	}
 
-	// virtioFS or virtioFsNydus
-	clh.Logger().WithField("function", "setupVirtiofsDaemon").Info("Starting virtiofsDaemon")
+	// TODO: start virtiofsd for the other sandboxes.
+	if clh.state.VirtiofsDaemonPid == 0 {
+		// virtioFS or virtioFsNydus
+		clh.Logger().WithField("function", "setupVirtiofsDaemon").Info("Starting virtiofsDaemon")
 
-	if clh.virtiofsDaemon == nil {
-		return errors.New("Missing virtiofsDaemon configuration")
-	}
+		if clh.virtiofsDaemon == nil {
+			return errors.New("Missing virtiofsDaemon configuration")
+		}
 
-	pid, err := clh.virtiofsDaemon.Start(ctx, func() {
-		clh.StopVM(ctx, false)
-	})
-	if err != nil {
-		return err
+		clh.Logger().WithField("virtiofsDaemon", clh.virtiofsDaemon).Info("setupVirtiofsDaemon")
+
+		pid, err := clh.virtiofsDaemon.Start(ctx, func() {
+			clh.StopVM(ctx, false)
+		})
+		if err != nil {
+			return err
+		}
+
+		clh.state.VirtiofsDaemonPid = pid
+	} else {
+		clh.Logger().
+			WithField("function", "setupVirtiofsDaemon").
+			WithField("PID", clh.state.VirtiofsDaemonPid).
+			Info("virtiofsDaemon is already running")
 	}
-	clh.state.VirtiofsDaemonPid = pid
 
 	return nil
 }
@@ -509,6 +520,13 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.ctx = newCtx
 	defer span.End()
 
+	if clh.state.state != clhReady {
+		clh.Logger().WithField("clh-state", clh.state.state).Info("CreateVM: CLH is not ready yet")
+	} else {
+		clh.Logger().Info("StartVM: CLH started already")
+		return nil
+	}
+
 	if err := clh.setConfig(hypervisorConfig); err != nil {
 		return err
 	}
@@ -520,6 +538,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 	clh.Logger().WithField("function", "CreateVM").Info("creating Sandbox")
 
+	/*
 	if clh.state.PID > 0 {
 		clh.Logger().WithField("function", "CreateVM").Info("Sandbox already exist, loading from state")
 
@@ -531,6 +550,7 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 		return nil
 	}
+	*/
 
 	// No need to return an error from there since there might be nothing
 	// to fetch if this is the first time the hypervisor is created.
@@ -759,23 +779,30 @@ func (clh *cloudHypervisor) StartVM(ctx context.Context, timeout int) error {
 		}
 	}()
 
-	err = clh.launchClh()
-	if err != nil {
-		return fmt.Errorf("failed to launch cloud-hypervisor: %q", err)
+	if clh.state.state != clhReady {
+		clh.Logger().WithField("clh-state", clh.state.state).Info("StartVM: starting CLH")
+
+		err = clh.launchClh()
+		if err != nil {
+			return fmt.Errorf("failed to launch cloud-hypervisor: %q", err)
+		}
+
+		bootTimeout := clh.getClhAPITimeout()
+		if bootTimeout < clhCreateAndBootVMMinimumTimeout {
+			bootTimeout = clhCreateAndBootVMMinimumTimeout
+		}
+		ctx, cancel := context.WithTimeout(ctx, bootTimeout*time.Second)
+		defer cancel()
+
+		if err := clh.bootVM(ctx); err != nil {
+			return err
+		}
+
+		clh.state.state = clhReady
+	} else {
+		clh.Logger().Info("StartVM: CLH started already")
 	}
 
-	bootTimeout := clh.getClhAPITimeout()
-	if bootTimeout < clhCreateAndBootVMMinimumTimeout {
-		bootTimeout = clhCreateAndBootVMMinimumTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, bootTimeout*time.Second)
-	defer cancel()
-
-	if err := clh.bootVM(ctx); err != nil {
-		return err
-	}
-
-	clh.state.state = clhReady
 	return nil
 }
 
