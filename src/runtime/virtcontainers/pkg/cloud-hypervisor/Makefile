@@ -26,7 +26,7 @@ ifndef YQ
 	$(MK_DIR)/../../../../../ci//install_yq.sh
 endif
 	clh_version=$(shell yq .assets.hypervisor.cloud_hypervisor.version $(VERSIONS_FILE)); \
-	curl -OL https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/$$clh_version/vmm/src/api/openapi/cloud-hypervisor.yaml
+	curl -OL https://raw.githubusercontent.com/microsoft/cloud-hypervisor/refs/tags/msft/$$clh_version/vmm/src/api/openapi/cloud-hypervisor.yaml
 
 clean-generated-code:
 	rm "./client" -rf
