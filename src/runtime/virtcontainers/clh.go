@@ -1438,11 +1438,40 @@ func (clh *cloudHypervisor) virtioFsSocketPath(id string) (string, error) {
 	return utils.BuildSocketPath(clh.config.VMStorePath, id, virtioFsSocket)
 }
 
+func existingClhSocketPath(socketName string) (string, error) {
+	// Reuse a pre-existing CLH socket if one is already present.
+	pattern := filepath.Join("/run/vc/vm", "*", socketName)
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", err
+	}
+
+	for _, match := range matches {
+		if _, err := os.Stat(match); err == nil {
+			return match, nil
+		}
+	}
+
+	return "", nil
+}
+
 func (clh *cloudHypervisor) vsockSocketPath(id string) (string, error) {
+	if path, err := existingClhSocketPath(clhSocket); err != nil {
+		return "", err
+	} else if path != "" {
+		return path, nil
+	}
+
 	return utils.BuildSocketPath(clh.config.VMStorePath, id, clhSocket)
 }
 
 func (clh *cloudHypervisor) apiSocketPath(id string) (string, error) {
+	if path, err := existingClhSocketPath(clhAPISocket); err != nil {
+		return "", err
+	} else if path != "" {
+		return path, nil
+	}
+
 	return utils.BuildSocketPath(clh.config.VMStorePath, id, clhAPISocket)
 }
 
@@ -1479,6 +1508,26 @@ func (clh *cloudHypervisor) clhPath() (string, error) {
 func (clh *cloudHypervisor) launchClh() error {
 
 	clh.state.PID = -1
+
+	vsockPath, err := existingClhSocketPath(clhSocket)
+	if err != nil {
+		return err
+	}
+	apiPath, err := existingClhSocketPath(clhAPISocket)
+	if err != nil {
+		return err
+	}
+
+	if vsockPath != "" && apiPath != "" {
+		clh.state.apiSocket = apiPath
+		clh.state.PID = 0x1234
+		clh.Logger().WithFields(log.Fields{
+			"vsock": vsockPath,
+			"api":   apiPath,
+			"pid":   clh.state.PID,
+		}).Info("found existing cloud-hypervisor sockets, skipping launch")
+		return nil
+	}
 
 	clhPath, err := clh.clhPath()
 	if err != nil {
