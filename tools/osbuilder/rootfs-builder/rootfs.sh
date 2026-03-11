@@ -913,7 +913,7 @@ main()
 	init="${ROOTFS_DIR}/sbin/init"
 	setup_rootfs
 
-	if [ "${BUILD_VARIANT}" = "nvidia-gpu" ]; then
+	if [ "${BUILD_VARIANT}" = "nvidia-gpu" ] || [ "${BUILD_VARIANT}" = "nvidia-gpu-mariner" ]; then
 		setup_nvidia_gpu_rootfs_stage_one
 		setup_nvidia_gpu_rootfs_stage_two
 		return $?

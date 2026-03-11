@@ -203,6 +203,12 @@ rootfs-image-nvidia-gpu-confidential-tarball: agent-tarball busybox-tarball paus
 rootfs-initrd-nvidia-gpu-confidential-tarball: agent-tarball busybox-tarball pause-image-tarball coco-guest-components-tarball kernel-nvidia-gpu-tarball
 	${MAKE} $@-build
 
+rootfs-image-nvidia-gpu-mariner-tarball: agent-tarball busybox-tarball kernel-nvidia-gpu-tarball
+	${MAKE} $@-build
+
+rootfs-initrd-nvidia-gpu-mariner-tarball: agent-tarball busybox-tarball kernel-nvidia-gpu-tarball
+	${MAKE} $@-build
+
 rootfs-cca-confidential-image-tarball: agent-tarball pause-image-tarball coco-guest-components-tarball kernel-cca-confidential-tarball
 	${MAKE} $@-build
 

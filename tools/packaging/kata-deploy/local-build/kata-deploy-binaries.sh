@@ -132,8 +132,10 @@ options:
 	rootfs-image
 	rootfs-image-confidential
 	rootfs-image-mariner
+	rootfs-image-nvidia-gpu-mariner
 	rootfs-initrd
 	rootfs-initrd-confidential
+	rootfs-initrd-nvidia-gpu-mariner
 	shim-v2
 	trace-forwarder
 	virtiofsd
@@ -176,7 +178,7 @@ get_kernel_modules_dir() {
 }
 
 cleanup_and_fail_shim_v2_specifics() {
-	for variant in confidential nvidia-gpu nvidia-gpu-confidential; do
+	for variant in confidential nvidia-gpu nvidia-gpu-confidential nvidia-gpu-mariner; do
 		local root_hash_file="${repo_root_dir}/tools/packaging/kata-deploy/local-build/build/shim-v2-root_hash_${variant}.txt"
 		[[ -f "${root_hash_file}" ]] && rm -f "${root_hash_file}"
 	done
@@ -206,7 +208,7 @@ install_cached_shim_v2_tarball_get_root_hash() {
 	local tarball_dir="${repo_root_dir}/tools/packaging/kata-deploy/local-build/build"
 	local root_hash_basedir="./opt/kata/share/kata-containers/"
 
-	for variant in confidential nvidia-gpu nvidia-gpu-confidential; do
+	for variant in confidential nvidia-gpu nvidia-gpu-confidential nvidia-gpu-mariner; do
 		local image_conf_tarball="kata-static-rootfs-image-${variant}.tar.zst"
 		local tarball_path="${tarball_dir}/${image_conf_tarball}"
 		local root_hash_path="${root_hash_basedir}root_hash_${variant}.txt"
@@ -226,7 +228,7 @@ install_cached_shim_v2_tarball_compare_root_hashes() {
 	local found_any=""
 	local tarball_dir="${repo_root_dir}/tools/packaging/kata-deploy/local-build/build"
 
-	for variant in confidential nvidia-gpu nvidia-gpu-confidential; do
+	for variant in confidential nvidia-gpu nvidia-gpu-confidential nvidia-gpu-mariner; do
 		# Skip if one or the other does not exist.
 		[[ ! -f "${tarball_dir}/root_hash_${variant}.txt" ]] && continue
 
@@ -406,7 +408,7 @@ install_image() {
 		latest_artefact+="-$(get_latest_pause_image_artefact_and_builder_image_version)"
 	fi
 
-	if [[ "${variant}" == "nvidia-gpu" ]]; then
+	if [[ "${variant}" == "nvidia-gpu" ]] || [[ "${variant}" == "nvidia-gpu-mariner" ]]; then
 		# If we bump the kernel we need to rebuild the image
 		latest_artefact+="-$(get_latest_kernel_nvidia_artefact_and_builder_image_version)"
 		latest_artefact+="-$(get_latest_ctk_version)"
@@ -513,7 +515,7 @@ install_initrd() {
 		latest_artefact+="-$(get_latest_pause_image_artefact_and_builder_image_version)"
 	fi
 
-	if [[ "${variant}" == "nvidia-gpu" ]]; then
+	if [[ "${variant}" == "nvidia-gpu" ]] || [[ "${variant}" == "nvidia-gpu-mariner" ]]; then
 		# If we bump the kernel we need to rebuild the initrd as well
 		latest_artefact+="-$(get_latest_kernel_nvidia_artefact_and_builder_image_version)"
 		latest_artefact+="-$(get_latest_ctk_version)"
@@ -638,6 +640,26 @@ install_initrd_nvidia_gpu_confidential() {
 	EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
 	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
 	install_initrd "nvidia-gpu-confidential"
+}
+
+# Install NVIDIA GPU mariner image
+install_image_nvidia_gpu_mariner() {
+	export AGENT_POLICY
+	export MEASURED_ROOTFS="yes"
+	local version=$(get_from_kata_deps .externals.nvidia.driver.version)
+	EXTRA_PKGS="dnf curl ${EXTRA_PKGS}"
+	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
+	install_image "nvidia-gpu-mariner"
+}
+
+# Install NVIDIA GPU mariner initrd
+install_initrd_nvidia_gpu_mariner() {
+	export AGENT_POLICY
+	export MEASURED_ROOTFS="no"
+	local version=$(get_from_kata_deps .externals.nvidia.driver.version)
+	EXTRA_PKGS="dnf curl ${EXTRA_PKGS}"
+	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
+	install_initrd "nvidia-gpu-mariner"
 }
 
 
@@ -1394,6 +1416,10 @@ handle_build() {
 	rootfs-image-nvidia-gpu-confidential) install_image_nvidia_gpu_confidential ;;
 
 	rootfs-initrd-nvidia-gpu-confidential) install_initrd_nvidia_gpu_confidential ;;
+
+	rootfs-image-nvidia-gpu-mariner) install_image_nvidia_gpu_mariner ;;
+
+	rootfs-initrd-nvidia-gpu-mariner) install_initrd_nvidia_gpu_mariner ;;
 
 	rootfs-cca-confidential-image) install_image_confidential ;;
 

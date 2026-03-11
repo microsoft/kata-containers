@@ -357,9 +357,9 @@ setup_nvidia_gpu_rootfs_stage_two() {
 	readonly stack="${NVIDIA_GPU_STACK:?}"
 	readonly type=${1:-""}
 
-	# If devkit flag is set, skip chisseling, use stage_one
-	if echo "${stack}" | grep -q '\<devkit\>'; then
-		echo "nvidia: devkit mode enabled - skip chisseling"
+	# If devkit flag is set or RPM-based build, skip chisseling, use stage_one
+	if echo "${stack}" | grep -q '\<devkit\>' || [[ "${BUILD_VARIANT}" == *"mariner"* ]]; then
+		echo "nvidia: skip chisseling (variant=${BUILD_VARIANT})"
 
 		tar -C "${stage_two}" -xf "${stage_one}".tar.zst
 
