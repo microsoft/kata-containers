@@ -269,8 +269,19 @@ chisseled_init() {
 	fi
 	cp -a "${stage_one}"/etc/resolv.conf      etc/.
 
-	cp -a "${stage_one}"/lib/firmware/nvidia  lib/firmware/.
-	cp -a "${stage_one}"/sbin/ldconfig.real   sbin/ldconfig
+	# Firmware path differs: deb uses /lib/firmware/, rpm uses /usr/lib/firmware/
+	if [[ -d "${stage_one}/lib/firmware/nvidia" ]]; then
+		cp -a "${stage_one}"/lib/firmware/nvidia  lib/firmware/.
+	elif [[ -d "${stage_one}/usr/lib/firmware/nvidia" ]]; then
+		cp -a "${stage_one}"/usr/lib/firmware/nvidia  lib/firmware/.
+	fi
+
+	# ldconfig binary: Debian ships ldconfig.real, RPM systems use ldconfig
+	if [[ -f "${stage_one}/sbin/ldconfig.real" ]]; then
+		cp -a "${stage_one}"/sbin/ldconfig.real   sbin/ldconfig
+	elif [[ -f "${stage_one}/sbin/ldconfig" ]]; then
+		cp -a "${stage_one}"/sbin/ldconfig         sbin/ldconfig
+	fi
 
 	cp -a "${stage_one}"/etc/ssl/certs/ca-certificates.crt etc/ssl/certs/.
 
