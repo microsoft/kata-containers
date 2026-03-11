@@ -74,9 +74,11 @@ setup_nvidia_gpu_rootfs_stage_one() {
 	pushd "${ROOTFS_DIR:?}" >> /dev/null
 
 	info "nvidia: Setup GPU rootfs type=${rootfs_type}"
-	cp "${SCRIPT_DIR}/nvidia_chroot.sh" ./nvidia_chroot.sh
+	local chroot_script="nvidia_chroot.sh"
+	[[ "${BUILD_VARIANT}" == *"mariner"* ]] && chroot_script="nvidia_chroot_rpm.sh"
 
-	chmod +x ./nvidia_chroot.sh
+	cp "${SCRIPT_DIR}/${chroot_script}" ./"${chroot_script}"
+	chmod +x ./"${chroot_script}"
 
 	local nvrc=NVRC-${machine_arch}-unknown-linux-musl
 	if [[ ! -e  "${BUILD_DIR}/${nvrc}.tar.xz" ]]; then
@@ -98,22 +100,25 @@ setup_nvidia_gpu_rootfs_stage_one() {
 	mount -t proc /proc ./proc
 
 	local cuda_repo_url cuda_repo_pkg gpu_base_os_version ctk_version
-	cuda_repo_url=$(get_package_version_from_kata_yaml "externals.nvidia.cuda.repo.${machine_arch}.url")
-	cuda_repo_pkg=$(get_package_version_from_kata_yaml "externals.nvidia.cuda.repo.${machine_arch}.pkg")
-	gpu_base_os_version=$(get_package_version_from_kata_yaml "assets.image.architecture.x86_64.nvidia-gpu.version")
+	local pkg_format="deb"
+	[[ "${BUILD_VARIANT}" == *"mariner"* ]] && pkg_format="rpm"
 
-	tools_repo_url=$(get_package_version_from_kata_yaml "externals.nvidia.tools.repo.${machine_arch}.url")
-	tools_repo_pkg=$(get_package_version_from_kata_yaml "externals.nvidia.tools.repo.${machine_arch}.pkg")
+	cuda_repo_url=$(get_package_version_from_kata_yaml "externals.nvidia.cuda.repo.${machine_arch}.${pkg_format}.url")
+	cuda_repo_pkg=$(get_package_version_from_kata_yaml "externals.nvidia.cuda.repo.${machine_arch}.${pkg_format}.pkg")
+	gpu_base_os_version=$(get_package_version_from_kata_yaml "assets.image.architecture.x86_64.${BUILD_VARIANT}.version")
+
+	tools_repo_url=$(get_package_version_from_kata_yaml "externals.nvidia.tools.repo.${machine_arch}.${pkg_format}.url")
+	tools_repo_pkg=$(get_package_version_from_kata_yaml "externals.nvidia.tools.repo.${machine_arch}.${pkg_format}.pkg")
 
 	ctk_version=$(get_package_version_from_kata_yaml "externals.nvidia.ctk.version")
 
-	chroot . /bin/bash -c "/nvidia_chroot.sh ${machine_arch} ${NVIDIA_GPU_STACK} \
+	chroot . /bin/bash -c "/${chroot_script} ${machine_arch} ${NVIDIA_GPU_STACK} \
 		 ${gpu_base_os_version} ${cuda_repo_url} ${cuda_repo_pkg} ${tools_repo_url} ${tools_repo_pkg} ${ctk_version}"
 
 	umount -R ./dev
 	umount ./proc
 
-	rm ./nvidia_chroot.sh
+	rm ./"${chroot_script}"
 
 	tar cfa "${stage_one}.tar.zst" --remove-files -- *
 

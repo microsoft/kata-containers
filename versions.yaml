@@ -161,6 +161,9 @@ assets:
         nvidia-gpu-confidential:
           name: "ubuntu"
           version: "noble"  # 24.04 LTS
+        nvidia-gpu-mariner:
+          name: "cbl-mariner"
+          version: "3.0"
 
   initrd:
     description: |
@@ -203,6 +206,9 @@ assets:
         nvidia-gpu-confidential:
           name: "ubuntu"
           version: "noble"  # 24.04 LTS
+        nvidia-gpu-mariner:
+          name: "cbl-mariner"
+          version: "3.0"
 
   kernel:
     description: "Linux kernel optimised for virtual machines"
@@ -248,24 +254,40 @@ externals:
       desc: "NVIDIA CUDA repository"
       repo:
         x86_64:
-          # yamllint disable-line rule:line-length
-          url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/"
-          pkg: "cuda-keyring_1.1-1_all.deb"
+          deb:
+            # yamllint disable-line rule:line-length
+            url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/"
+            pkg: "cuda-keyring_1.1-1_all.deb"
+          rpm:
+            # yamllint disable-line rule:line-length
+            url: "https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/"
+            pkg: "cuda-rhel9.repo"
         aarch64:
-          # yamllint disable-line rule:line-length
-          url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/"
-          pkg: "cuda-keyring_1.1-1_all.deb"
+          deb:
+            # yamllint disable-line rule:line-length
+            url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/"
+            pkg: "cuda-keyring_1.1-1_all.deb"
     tools:
       desc: "NVIDIA container toolkit and tools repository"
       repo:
         x86_64:
-          # yamllint disable-line rule:line-length
-          url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/"
-          pkg: "cuda-keyring_1.1-1_all.deb"
+          deb:
+            # yamllint disable-line rule:line-length
+            url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/"
+            pkg: "cuda-keyring_1.1-1_all.deb"
+          rpm:
+            # yamllint disable-line rule:line-length
+            url: "https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/"
+            pkg: "cuda-rhel9.repo"
         aarch64:
-          # yamllint disable-line rule:line-length
-          url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/"
-          pkg: "cuda-keyring_1.1-1_all.deb"
+          deb:
+            # yamllint disable-line rule:line-length
+            url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/"
+            pkg: "cuda-keyring_1.1-1_all.deb"
+          rpm:
+            # yamllint disable-line rule:line-length
+            url: "https://developer.download.nvidia.com/compute/cuda/repos/rhel9/sbsa/"
+            pkg: "cuda-rhel9.repo"
     ctk:
       version: "1.18.1-1"
       url: "https://github.com/NVIDIA/nvidia-container-toolkit"
