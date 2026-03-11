@@ -103,7 +103,7 @@ func New(ctx context.Context, id string, publisher cdshim.Publisher, shutdown fu
 		namespace:  ns,
 	}
 
-	if err := s.initForwardTaskClient(); err != nil {
+	if err := s.initForwardTaskClient(id); err != nil {
 		return nil, err
 	}
 
@@ -160,6 +160,7 @@ type service struct {
 
 	forwardTaskClient taskAPI.TaskService
 	forwardAddress    string
+	forwardShimCmd    *sysexec.Cmd
 }
 
 func newCommand(ctx context.Context, id, containerdBinary, containerdAddress string) (*sysexec.Cmd, error) {
@@ -1030,6 +1031,9 @@ func (s *service) Shutdown(ctx context.Context, r *taskAPI.ShutdownRequest) (_ *
 	if s.hasForwardTaskClient() {
 		if _, err := s.forwardTaskClient.Shutdown(ctx, r); err != nil {
 			return nil, err
+		}
+		if s.forwardShimCmd != nil && s.forwardShimCmd.Process != nil {
+			_ = s.forwardShimCmd.Process.Kill()
 		}
 		s.cancel()
 		os.Exit(0)
