@@ -103,6 +103,10 @@ func New(ctx context.Context, id string, publisher cdshim.Publisher, shutdown fu
 		namespace:  ns,
 	}
 
+	if err := s.initForwardTaskClient(); err != nil {
+		return nil, err
+	}
+
 	go s.processExits()
 
 	forwarder := s.newEventsForwarder(ctx, publisher)
@@ -153,6 +157,9 @@ type service struct {
 
 	// shim's pid
 	pid uint32
+
+	forwardTaskClient taskAPI.TaskService
+	forwardAddress    string
 }
 
 func newCommand(ctx context.Context, id, containerdBinary, containerdAddress string) (*sysexec.Cmd, error) {
@@ -412,6 +419,10 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 		rpcDurationsHistogram.WithLabelValues("create").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
 
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Create(ctx, r)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -474,6 +485,10 @@ func (s *service) Start(ctx context.Context, r *taskAPI.StartRequest) (_ *taskAP
 		rpcDurationsHistogram.WithLabelValues("start").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
 
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Start(ctx, r)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -526,6 +541,10 @@ func (s *service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (_ *task
 		err = toGRPC(err)
 		rpcDurationsHistogram.WithLabelValues("delete").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
+
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Delete(ctx, r)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -581,6 +600,10 @@ func (s *service) Exec(ctx context.Context, r *taskAPI.ExecProcessRequest) (_ *e
 		err = toGRPC(err)
 	}()
 
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Exec(ctx, r)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -620,6 +643,10 @@ func (s *service) ResizePty(ctx context.Context, r *taskAPI.ResizePtyRequest) (_
 		err = toGRPC(err)
 		rpcDurationsHistogram.WithLabelValues("resize_pty").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
+
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.ResizePty(ctx, r)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -661,6 +688,10 @@ func (s *service) State(ctx context.Context, r *taskAPI.StateRequest) (_ *taskAP
 		err = toGRPC(err)
 		rpcDurationsHistogram.WithLabelValues("state").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
+
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.State(ctx, r)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -718,6 +749,10 @@ func (s *service) Pause(ctx context.Context, r *taskAPI.PauseRequest) (_ *emptyp
 		rpcDurationsHistogram.WithLabelValues("pause").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
 
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Pause(ctx, r)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -759,6 +794,10 @@ func (s *service) Resume(ctx context.Context, r *taskAPI.ResumeRequest) (_ *empt
 		rpcDurationsHistogram.WithLabelValues("resume").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
 
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Resume(ctx, r)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -797,6 +836,10 @@ func (s *service) Kill(ctx context.Context, r *taskAPI.KillRequest) (_ *emptypb.
 		err = toGRPC(err)
 		rpcDurationsHistogram.WithLabelValues("kill").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
+
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Kill(ctx, r)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -865,6 +908,10 @@ func (s *service) Pids(ctx context.Context, r *taskAPI.PidsRequest) (_ *taskAPI.
 		rpcDurationsHistogram.WithLabelValues("pids").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
 
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Pids(ctx, r)
+	}
+
 	pInfo := task.ProcessInfo{
 		Pid: s.hpid,
 	}
@@ -887,6 +934,10 @@ func (s *service) CloseIO(ctx context.Context, r *taskAPI.CloseIORequest) (_ *em
 		err = toGRPC(err)
 		rpcDurationsHistogram.WithLabelValues("close_io").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
+
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.CloseIO(ctx, r)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -931,6 +982,10 @@ func (s *service) Checkpoint(ctx context.Context, r *taskAPI.CheckpointTaskReque
 		rpcDurationsHistogram.WithLabelValues("checkpoint").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
 
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Checkpoint(ctx, r)
+	}
+
 	return nil, errdefs.ToGRPCf(errdefs.ErrNotImplemented, "service Checkpoint")
 }
 
@@ -946,6 +1001,10 @@ func (s *service) Connect(ctx context.Context, r *taskAPI.ConnectRequest) (_ *ta
 		err = toGRPC(err)
 		rpcDurationsHistogram.WithLabelValues("connect").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
+
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Connect(ctx, r)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -967,6 +1026,15 @@ func (s *service) Shutdown(ctx context.Context, r *taskAPI.ShutdownRequest) (_ *
 		err = toGRPC(err)
 		rpcDurationsHistogram.WithLabelValues("shutdown").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
+
+	if s.hasForwardTaskClient() {
+		if _, err := s.forwardTaskClient.Shutdown(ctx, r); err != nil {
+			return nil, err
+		}
+		s.cancel()
+		os.Exit(0)
+		return empty, nil
+	}
 
 	s.mu.Lock()
 	if len(s.containers) != 0 {
@@ -1015,6 +1083,10 @@ func (s *service) Stats(ctx context.Context, r *taskAPI.StatsRequest) (_ *taskAP
 		rpcDurationsHistogram.WithLabelValues("stats").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
 
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Stats(ctx, r)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1045,6 +1117,10 @@ func (s *service) Update(ctx context.Context, r *taskAPI.UpdateTaskRequest) (_ *
 		err = toGRPC(err)
 		rpcDurationsHistogram.WithLabelValues("update").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
+
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Update(ctx, r)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1081,6 +1157,10 @@ func (s *service) Wait(ctx context.Context, r *taskAPI.WaitRequest) (_ *taskAPI.
 		err = toGRPC(err)
 		rpcDurationsHistogram.WithLabelValues("wait").Observe(float64(time.Since(start).Nanoseconds() / int64(time.Millisecond)))
 	}()
+
+	if s.hasForwardTaskClient() {
+		return s.forwardTaskClient.Wait(ctx, r)
+	}
 
 	s.mu.Lock()
 	c, err := s.getContainer(r.ID)
