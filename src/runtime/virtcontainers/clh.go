@@ -759,6 +759,23 @@ func (clh *cloudHypervisor) StartVM(ctx context.Context, timeout int) error {
 		}
 	}()
 
+	vsockPath, err := existingClhSocketPath(clhSocket)
+	if err != nil {
+		return err
+	}
+	apiPath, err := existingClhSocketPath(clhAPISocket)
+	if err != nil {
+		return err
+	}
+	if vsockPath != "" && apiPath != "" {
+		clh.Logger().WithFields(log.Fields{
+			"vsock": vsockPath,
+			"api":   apiPath,
+		}).Info("found existing cloud-hypervisor sockets, skipping boot")
+		clh.state.state = clhReady
+		return nil
+	}
+
 	err = clh.launchClh()
 	if err != nil {
 		return fmt.Errorf("failed to launch cloud-hypervisor: %q", err)
