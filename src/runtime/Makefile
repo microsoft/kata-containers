@@ -209,7 +209,9 @@ DEFVCPUS := 1
 # Default maximum number of vCPUs
 DEFMAXVCPUS := 0
 # Default memory size in MiB
-DEFMEMSZ ?= 2048
+# DEFMEMSZ ?= 2048
+DEFMEMSZ ?= 0
+
 # Default memory slots
 # Cases to consider :
 # - nvdimm rootfs image
@@ -285,14 +287,16 @@ DEFMSIZE9P := 8192
 DEFVFIOMODE := guest-kernel
 
 # Default cgroup model
-DEFSANDBOXCGROUPONLY ?= false
+# DEFSANDBOXCGROUPONLY ?= false
+DEFSANDBOXCGROUPONLY ?= true
 
 DEFSTATICRESOURCEMGMT ?= false
 DEFSTATICRESOURCEMGMT_TEE = true
 DEFSTATICRESOURCEMGMT_NV = true
 
 # Default memory for use for workloads within the sandbox if no specific workload memory value is requested
-DEFSTATICSANDBOXWORKLOADMEM ?= 2048
+# DEFSTATICSANDBOXWORKLOADMEM ?= 2048
+DEFSTATICSANDBOXWORKLOADMEM ?= 512
 
 DEFDISABLEIMAGENVDIMM ?= false
 DEFDISABLEIMAGENVDIMM_NV = true
