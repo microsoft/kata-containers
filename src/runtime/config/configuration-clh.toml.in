@@ -430,7 +430,8 @@ sandbox_cgroup_only = @DEFSANDBOXCGROUPONLY@
 # - When running with pods, sandbox sizing information will only be available if using Kubernetes >= 1.23 and containerd >= 1.6. CRI-O
 #   does not yet support sandbox sizing annotations.
 # - When running single containers using a tool like ctr, container sizing information will be available.
-static_sandbox_resource_mgmt = @DEFSTATICRESOURCEMGMT_CLH@
+# static_sandbox_resource_mgmt = @DEFSTATICRESOURCEMGMT_CLH@
+static_sandbox_resource_mgmt = true
 
 # If set, the runtime will use the value as the default workload memory in MB for the sandbox when no workload memory request is passed
 # down to the shim via the OCI when static sandbox resource management is enabled. With this, we ensure that workloads have a proper
