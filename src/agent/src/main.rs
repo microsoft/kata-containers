@@ -456,11 +456,8 @@ async fn start_sandbox(
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let log_content = format!("{}{}", stdout, stderr);
                 info!(logger, "systemd-analyze: {}", stdout.trim());
-                let shared_path = "/run/kata-containers/shared/containers/systemd-analyze.log";
-                if let Err(e) = std::fs::write(shared_path, &log_content) {
-                    warn!(logger, "failed to write systemd-analyze log to shared dir: {}", e);
-                    // Fall back to /tmp
-                    let _ = std::fs::write("/tmp/systemd-analyze.log", &log_content);
+                if let Err(e) = std::fs::write("/tmp/systemd-analyze.log", &log_content) {
+                    warn!(logger, "failed to write systemd-analyze log: {}", e);
                 }
             }
             Err(e) => {

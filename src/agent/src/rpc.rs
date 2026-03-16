@@ -274,6 +274,14 @@ impl AgentService {
         // restore the cwd for kata-agent process.
         defer!(unistd::chdir(&olddir).unwrap());
 
+        // Copy systemd-analyze output into the container rootfs if available
+        if let Some(root) = oci.root() {
+            let dest = root.path().join("tmp/systemd-analyze.log");
+            if let Err(e) = std::fs::copy("/tmp/systemd-analyze.log", &dest) {
+                info!(sl(), "could not copy systemd-analyze.log into container: {}", e);
+            }
+        }
+
         // determine which cgroup driver to take and then assign to use_systemd_cgroup
         // systemd: "[slice]:[prefix]:[name]"
         // fs: "/path_a/path_b"
