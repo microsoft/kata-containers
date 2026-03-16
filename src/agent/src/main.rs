@@ -448,6 +448,24 @@ async fn start_sandbox(
     let mut server =
         rpc::start(sandbox.clone(), config.server_addr.as_str(), init_mode, oma).await?;
 
+    // Log systemd boot timing information when running under systemd
+    if !init_mode {
+        match std::process::Command::new("systemd-analyze").output() {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let log_content = format!("{}{}", stdout, stderr);
+                info!(logger, "systemd-analyze: {}", stdout.trim());
+                if let Err(e) = std::fs::write("/tmp/systemd-analyze.log", &log_content) {
+                    warn!(logger, "failed to write systemd-analyze log: {}", e);
+                }
+            }
+            Err(e) => {
+                warn!(logger, "failed to run systemd-analyze: {}", e);
+            }
+        }
+    }
+
     server.start().await?;
 
     rx.await?;
