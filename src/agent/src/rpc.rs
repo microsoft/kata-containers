@@ -274,9 +274,10 @@ impl AgentService {
         // restore the cwd for kata-agent process.
         defer!(unistd::chdir(&olddir).unwrap());
 
-        // Copy systemd-analyze output into the container rootfs if available
+        // Copy systemd-analyze output into the container rootfs if available.
+        // Write to / instead of /tmp because /tmp often gets a tmpfs overlay.
         if let Some(root) = oci.root() {
-            let dest = root.path().join("tmp/systemd-analyze.log");
+            let dest = root.path().join("systemd-analyze.log");
             if let Err(e) = std::fs::copy("/tmp/systemd-analyze.log", &dest) {
                 info!(sl(), "could not copy systemd-analyze.log into container: {}", e);
             }
