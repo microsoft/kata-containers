@@ -54,13 +54,18 @@ setup_nvidia-nvrc() {
 	local oidc="https://token.actions.githubusercontent.com"
 
 	# Only allow releases from the NVIDIA/nvrc main branch and build by github actions
-	cosign verify-blob                                 \
-	  --rekor-url https://rekor.sigstore.dev           \
-	  --certificate "${BUILD_DIR}/${nvrc}.tar.xz.cert" \
-	  --signature   "${BUILD_DIR}/${nvrc}.tar.xz.sig"  \
-	  --certificate-identity-regexp "${id}"            \
-	  --certificate-oidc-issuer "${oidc}"              \
-	  "${BUILD_DIR}/${nvrc}.tar.xz"
+	# cosign is not available on azl3-based builds, skip verification for mariner variants
+	if [[ "${BUILD_VARIANT}" == *"mariner"* ]]; then
+		echo "nvidia: skipping cosign verification (not available on mariner)"
+	else
+		cosign verify-blob                                 \
+		  --rekor-url https://rekor.sigstore.dev           \
+		  --certificate "${BUILD_DIR}/${nvrc}.tar.xz.cert" \
+		  --signature   "${BUILD_DIR}/${nvrc}.tar.xz.sig"  \
+		  --certificate-identity-regexp "${id}"            \
+		  --certificate-oidc-issuer "${oidc}"              \
+		  "${BUILD_DIR}/${nvrc}.tar.xz"
+	fi
 }
 
 setup_nvidia_gpu_rootfs_stage_one() {
@@ -98,6 +103,9 @@ setup_nvidia_gpu_rootfs_stage_one() {
 	mount --rbind /dev ./dev
 	mount --make-rslave ./dev
 	mount -t proc /proc ./proc
+
+	# Ensure DNS resolution works inside the chroot
+	cp --remove-destination /etc/resolv.conf ./etc/resolv.conf
 
 	local cuda_repo_url cuda_repo_pkg gpu_base_os_version ctk_version
 	local pkg_format="deb"

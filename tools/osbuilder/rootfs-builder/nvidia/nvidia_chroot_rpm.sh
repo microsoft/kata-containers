@@ -26,7 +26,8 @@ cuda_repo_pkg="${5:?cuda_repo_pkg not specified}"
 tools_repo_url="${6:?tools_repo_url not specified}"
 tools_repo_pkg="${7:?tools_repo_pkg not specified}"
 ctk_version="${8:?ctk_version not specified}"
-DNF_INSTALL="dnf install -y --setopt=install_weak_deps=False"
+DNF_OPTS="--releasever=${cuda_repo_osv}"
+DNF_INSTALL="dnf install -y --setopt=install_weak_deps=False ${DNF_OPTS}"
 
 is_feature_enabled() {
 	local feature="$1"
@@ -38,6 +39,32 @@ setup_dnf_repositories() {
 
 	mkdir -p /etc/yum.repos.d /var/cache/dnf /var/log/dnf
 
+	# The base rootfs was populated by tdnf --installroot from outside
+	# the chroot.  Rebuild the RPM database so that DNF inside the chroot
+	# recognises already-installed packages (bash, glibc, etc.) and can
+	# resolve scriptlet dependencies like /bin/sh.
+	rpm --rebuilddb
+
+	if ! grep -q module_hotfixes /etc/dnf/dnf.conf 2>/dev/null; then
+		echo "module_hotfixes=True" >> /etc/dnf/dnf.conf
+	fi
+
+	# The build container is Ubuntu, so no AZL3 base repos exist.
+	# Create the base repo inline so DNF can resolve dependencies (glibc, bash, etc.).
+	if [[ ! -f /etc/yum.repos.d/azurelinux-official-base.repo ]]; then
+		cat > /etc/yum.repos.d/azurelinux-official-base.repo <<-'EOF'
+		[azurelinux-official-base]
+		name=Azure Linux Official Base $releasever $basearch
+		baseurl=https://packages.microsoft.com/azurelinux/$releasever/prod/base/$basearch
+		gpgkey=file:///etc/pki/rpm-gpg/MICROSOFT-RPM-GPG-KEY
+		gpgcheck=1
+		repo_gpgcheck=1
+		enabled=1
+		skip_if_unavailable=True
+		sslverify=1
+		EOF
+	fi
+
 	# Install the CUDA .repo file for NVIDIA packages
 	curl -fsSL -o /etc/yum.repos.d/cuda.repo "${cuda_repo_url}/${cuda_repo_pkg}"
 
@@ -48,14 +75,18 @@ setup_dnf_repositories() {
 		curl -fsSL -o /etc/yum.repos.d/nvidia-tools.repo "${tools_repo_url}/${tools_repo_pkg}"
 	fi
 
-	# Set highest priority (1) on all NVIDIA repo sections so they win over
-	# base repos (default priority=99).
-	for repo_file in /etc/yum.repos.d/cuda.repo /etc/yum.repos.d/nvidia-tools.repo; do
-		[[ -f "${repo_file}" ]] || continue
-		sed -i '/^\[/a priority=1' "${repo_file}"
-	done
+	# Set priority and disable modular filtering on NVIDIA repo sections.
+	# module_hotfixes=1 tells DNF to skip modular filtering for these third-party repos.
+	# cuda.repo (azl3) gets priority=1 (highest) so its packages are preferred
+	# over nvidia-tools.repo (rhel9, priority=10) when both provide the same package.
+	if [[ -f /etc/yum.repos.d/cuda.repo ]]; then
+		sed -i '/^\[/a priority=1\nmodule_hotfixes=1' /etc/yum.repos.d/cuda.repo
+	fi
+	if [[ -f /etc/yum.repos.d/nvidia-tools.repo ]]; then
+		sed -i '/^\[/a priority=10\nmodule_hotfixes=1' /etc/yum.repos.d/nvidia-tools.repo
+	fi
 
-	dnf makecache
+	dnf ${DNF_OPTS} makecache
 }
 
 install_userspace_components() {
@@ -76,7 +107,7 @@ install_userspace_components() {
 		"nvidia-imex-${driver_version}" \
 		"libnvidia-nscq-${driver_version}"
 
-	dnf versionlock add \
+	dnf ${DNF_OPTS} versionlock add \
 		"nvidia-driver-cuda-libs-${driver_version}" \
 		"nvidia-kmod-common-${driver_version}" \
 		"nvidia-imex-${driver_version}" \
@@ -96,7 +127,7 @@ install_nvidia_fabricmanager() {
 		"libnvidia-nscq" \
 		"nvlsm"
 
-	dnf versionlock add \
+	dnf ${DNF_OPTS} versionlock add \
 		"nvidia-fabricmanager" \
 		"libnvidia-nscq" \
 		2>/dev/null || true
@@ -128,7 +159,7 @@ install_devkit_packages() {
 	echo "chroot: Install devkit packages"
 
 	eval "${DNF_INSTALL}" kmod
-	dnf versionlock add kmod 2>/dev/null || true
+	dnf ${DNF_OPTS} versionlock add kmod 2>/dev/null || true
 }
 
 cleanup_rootfs() {
@@ -139,14 +170,14 @@ cleanup_rootfs() {
 	eval "${DNF_INSTALL}" \
 		libstdc++ zstd-libs gnutls pciutils linuxptp libnftnl
 
-	dnf mark install \
+	dnf ${DNF_OPTS} mark install \
 		libstdc++ zstd-libs gnutls pciutils linuxptp libnftnl
-	dnf versionlock add \
+	dnf ${DNF_OPTS} versionlock add \
 		libstdc++ zstd-libs gnutls pciutils linuxptp libnftnl \
 		2>/dev/null || true
-	dnf autoremove -y
+	dnf ${DNF_OPTS} autoremove -y
 
-	dnf clean all
+	dnf ${DNF_OPTS} clean all
 	rm -rf /var/cache/dnf/* /var/log/dnf
 	rm -f /usr/bin/nvidia-ngx-updater /usr/bin/nvidia-container-runtime
 	rm -f /var/log/nvidia-installer.log
