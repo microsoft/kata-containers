@@ -75,3 +75,9 @@ tracing = "0.1.41"
 tracing-opentelemetry = "0.18.0"
 ttrpc = "0.8.4"
 url = "2.5.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+strip = "symbols"
