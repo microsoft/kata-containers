@@ -29,6 +29,8 @@ mkdir -p "${PREFIX}/${SHIM_CONFIG_PATH}"
 mkdir -p "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
 mkdir -p "${PREFIX}/${SHIM_BINARIES_PATH}"
 
+runtime_rs_target="src/runtime-rs/target/x86_64-unknown-linux-gnu/release"
+
 if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Installing tardev-snapshotter binaries and service file"
 	mkdir -p ${PREFIX}/usr/sbin
@@ -45,26 +47,24 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	fi
 fi
 
-echo "Installing diagnosability binaries (monitor, runtime, collect-data script)"
-cp -a --backup=numbered src/runtime/kata-monitor "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
-cp -a --backup=numbered src/runtime/kata-runtime "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
+echo "Installing diagnosability binaries (collect-data script)"
 chmod +x src/runtime/data/kata-collect-data.sh
 cp -a --backup=numbered src/runtime/data/kata-collect-data.sh "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
 
 echo "Installing shim binary"
-cp -a --backup=numbered src/runtime/containerd-shim-kata-v2 "${PREFIX}/${SHIM_BINARIES_PATH}"/"${SHIM_BINARY_NAME}"
+cp -a --backup=numbered "${runtime_rs_target}/containerd-shim-kata-v2" "${PREFIX}/${SHIM_BINARIES_PATH}"/"${SHIM_BINARY_NAME}"
 
 if [ "${SHIM_REDEPLOY_CONFIG}" == "yes" ]; then
 	echo "Installing shim configuration"
-	cp -a --backup=numbered src/runtime/config/"${SHIM_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_INST_FILE_NAME}"
-	cp -a --backup=numbered src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_DBG_CONFIG_INST_FILE_NAME}"
+	cp -a --backup=numbered src/runtime-rs/config/"${SHIM_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_INST_FILE_NAME}"
+	cp -a --backup=numbered src/runtime-rs/config/"${SHIM_DBG_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_DBG_CONFIG_INST_FILE_NAME}"
 
 	if [ "${SHIM_USE_DEBUG_CONFIG}" == "yes" ]; then
 		# We simply override the release config with the debug config,
 		# which is probably fine when debugging. Not symlinking as that
 		# would create cycles the next time this script is called.
 		echo "Overriding shim configuration with debug configuration"
-		cp -a --backup=numbered src/runtime/config/"${SHIM_DBG_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_INST_FILE_NAME}"
+		cp -a --backup=numbered src/runtime-rs/config/"${SHIM_DBG_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_INST_FILE_NAME}"
 	fi
 else
 	echo "Skipping installation of shim configuration"
