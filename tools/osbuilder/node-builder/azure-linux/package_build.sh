@@ -32,7 +32,8 @@ runtime_make_flags="SKIP_GO_VERSION_CHECK=1 \
 	DEFSTATICSANDBOXWORKLOADVCPUS=1 \
 	DEFDISABLEIMAGENVDIMM=true \
 	DEFVIRTIOFSDAEMON=${VIRTIOFSD_BINARY_LOCATION} \
-	PREFIX=${INSTALL_PATH_PREFIX}"
+	PREFIX=${INSTALL_PATH_PREFIX} \
+	STRIP=yes"
 
 # - for vanilla Kata we use the kernel binary. For ConfPods we use IGVM, so no need to provide kernel path.
 # - for vanilla Kata we explicitly set DEFSTATICRESOURCEMGMT_CLH. For ConfPods,
@@ -99,10 +100,10 @@ if [ "${CONF_PODS}" == "yes" ]; then
 fi
 popd
 
-echo "Building agent binary and generating service files"
-pushd src/agent/
-make ${agent_make_flags}
-make install ${agent_make_flags}
-popd
+# echo "Building agent binary and generating service files"
+# pushd src/agent/
+# make ${agent_make_flags}
+# make install ${agent_make_flags}
+# popd
 
 popd
