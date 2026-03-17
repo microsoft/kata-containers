@@ -17,6 +17,12 @@ CONTAINERD_RUNTIME_NAME = io.containerd.kata.v2
 
 include ../../utils.mk
 
+# Accept common typo used in local invocation: `LIC=gnu make optimize`.
+ifneq ($(origin LIC), undefined)
+override LIBC := $(LIC)
+$(warning "LIC is deprecated; use LIBC=<musl|gnu>")
+endif
+
 ARCH_DIR = arch
 ARCH_FILE_SUFFIX = -options.mk
 ARCH_FILE = $(ARCH_DIR)/$(ARCH)$(ARCH_FILE_SUFFIX)
@@ -742,8 +748,13 @@ $(GENERATED_FILES): %: %.in
         $< > $@
 
 ##TARGET optimize: optimized  build
-optimize: $(SOURCES) | show-summary show-header
-	@RUSTFLAGS="-C link-arg=-s $(EXTRA_RUSTFLAGS) --deny warnings" cargo build --target $(TRIPLE) --$(BUILD_TYPE) $(EXTRA_RUSTFEATURES)
+optimize: $(GENERATED_FILES) $(SOURCES) | show-summary show-header
+	@CARGO_PROFILE_RELEASE_STRIP=symbols \
+	CARGO_PROFILE_RELEASE_LTO=true \
+	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+	CARGO_PROFILE_RELEASE_OPT_LEVEL=z \
+	RUSTFLAGS="-C link-arg=-s $(EXTRA_RUSTFLAGS) --deny warnings" \
+	cargo build --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release) $(EXTRA_RUSTFEATURES)
 
 ##TARGET clean: clean build
 clean: clean-generated-files
