@@ -360,7 +360,7 @@ where
         })
     }
 
-    fn device(&self) -> MutexGuard<VhostUserNetDevice> {
+    fn device(&self) -> MutexGuard<'_, VhostUserNetDevice> {
         // Do not expect poisoned lock.
         self.device.lock().unwrap()
     }
@@ -466,7 +466,7 @@ where
     Q: QueueT + Send + 'static,
     R: GuestMemoryRegion + Sync + Send + 'static,
 {
-    fn device(&self) -> MutexGuard<VhostUserNetDevice> {
+    fn device(&self) -> MutexGuard<'_, VhostUserNetDevice> {
         // Do not expect poisoned lock here
         self.device.lock().unwrap()
     }
