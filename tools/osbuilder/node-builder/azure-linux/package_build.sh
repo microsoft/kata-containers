@@ -77,11 +77,11 @@ fi
 echo "Building runtime-rs shim binary and configuration"
 pushd src/runtime-rs/
 if [ "${CONF_PODS}" == "yes" ] || [ "${OS_VERSION}" == "3.0" ]; then
-	make optimize ${runtime_make_flags}
+	OPENSSL_NO_VENDOR=1 make optimize ${runtime_make_flags}
 else
 	# Mariner 2 pod sandboxing uses cgroupsv1 - note: cannot add the kernelparams in above assignments,
 	# leads to quotation issue. Hence, implementing the conditional check right here at the time of the make command
-	make optimize ${runtime_make_flags} KERNELPARAMS="systemd.legacy_systemd_cgroup_controller=yes systemd.unified_cgroup_hierarchy=0"
+	OPENSSL_NO_VENDOR=1 make optimize ${runtime_make_flags} KERNELPARAMS="systemd.legacy_systemd_cgroup_controller=yes systemd.unified_cgroup_hierarchy=0"
 fi
 popd
 
