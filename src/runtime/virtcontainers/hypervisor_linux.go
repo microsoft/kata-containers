@@ -1,3 +1,5 @@
+//go:build linux && !ch_only
+
 // Copyright (c) 2021 Apple Inc.
 //
 // SPDX-License-Identifier: Apache-2.0

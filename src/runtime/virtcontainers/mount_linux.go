@@ -138,16 +138,7 @@ func bindUnmountContainerSnapshotDir(ctx context.Context, sharedDir, cID string)
 }
 
 func getVirtiofsDaemonForNydus(sandbox *Sandbox) (VirtiofsDaemon, error) {
-	var virtiofsDaemon VirtiofsDaemon
-	switch sandbox.GetHypervisorType() {
-	case string(QemuHypervisor):
-		virtiofsDaemon = sandbox.hypervisor.(*qemu).virtiofsDaemon
-	case string(ClhHypervisor):
-		virtiofsDaemon = sandbox.hypervisor.(*cloudHypervisor).virtiofsDaemon
-	default:
-		return nil, errNydusdNotSupport
-	}
-	return virtiofsDaemon, nil
+	return getVirtiofsDaemonForNydusHypervisor(sandbox)
 }
 
 func nydusContainerCleanup(ctx context.Context, sharedDir string, c *Container) error {

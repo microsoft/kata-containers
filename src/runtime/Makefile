@@ -765,6 +765,7 @@ USER_VARS += DEFFORCEGUESTPULL
 USER_VARS += DEFVFIOMODE
 USER_VARS += DEFVFIOMODE_SE
 USER_VARS += BUILDFLAGS
+USER_VARS += CH_ONLY
 USER_VARS += DEFDISABLEIMAGENVDIMM
 
 
@@ -778,6 +779,13 @@ QUIET_INST     = $(Q:@=@echo    '     INSTALL  '$@;)
 QUIET_TEST     = $(Q:@=@echo    '     TEST     '$@;)
 
 BUILDTAGS :=
+
+##VAR CH_ONLY=yes|no build a Cloud Hypervisor-only runtime binary
+CH_ONLY ?= no
+
+ifeq ($(CH_ONLY),yes)
+BUILDTAGS += -tags ch_only
+endif
 
 # go build common flags
 BUILDFLAGS := -buildmode=pie -mod=vendor ${BUILDTAGS}

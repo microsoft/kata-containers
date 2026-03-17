@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !ch_only
 
 // Copyright (c) 2016 Intel Corporation
 //

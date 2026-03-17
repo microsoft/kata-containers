@@ -21,6 +21,7 @@ source "${common_file}"
 
 # these options ensure we produce the proper CLH config file
 runtime_make_flags="SKIP_GO_VERSION_CHECK=1 \
+	CH_ONLY=yes \
 	QEMUCMD= \
 	FCCMD= \
 	ACRNCMD= \

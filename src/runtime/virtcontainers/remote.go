@@ -1,3 +1,5 @@
+//go:build !ch_only
+
 // Copyright (c) 2022 IBM Corporation
 // SPDX-License-Identifier: Apache-2.0
 
