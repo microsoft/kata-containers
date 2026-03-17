@@ -17,12 +17,6 @@ CONTAINERD_RUNTIME_NAME = io.containerd.kata.v2
 
 include ../../utils.mk
 
-# Accept common typo used in local invocation: `LIC=gnu make optimize`.
-ifneq ($(origin LIC), undefined)
-override LIBC := $(LIC)
-$(warning "LIC is deprecated; use LIBC=<musl|gnu>")
-endif
-
 ARCH_DIR = arch
 ARCH_FILE_SUFFIX = -options.mk
 ARCH_FILE = $(ARCH_DIR)/$(ARCH)$(ARCH_FILE_SUFFIX)
@@ -748,6 +742,22 @@ $(GENERATED_FILES): %: %.in
         $< > $@
 
 ##TARGET optimize: optimized  build
+##this saves about 3mb. Removed debug symbols that may be used in a debuggerlist a
+##@CARGO_PROFILE_RELEASE_STRIP=symbols
+
+## CARGO_PROFILE_RELEASE_LTO=true: enables link optimization
+# Effect: optimizer can remove/merge code across crate boundaries, often reducing size and sometimes improving speed.
+# Tradeoff: slower compile/link time, more memory use during build.
+
+# CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1": Forces rustc to compile in a single codegen unit.
+# Effect: better whole-crate optimization opportunities, usually smaller/faster output than many units.
+# Tradeoff: slower compilation (parallelism reduced).
+
+# CARGO_PROFILE_RELEASE_OPT_LEVEL=z: Sets size-first optimization level (z).
+# Effect: strongest size reduction focus (more than s), may sacrifice some runtime performance.
+# Tradeoff: can be slightly slower at runtime vs opt-level=3 (speed-optimized).
+
+# these save us about 20MB!
 optimize: $(GENERATED_FILES) $(SOURCES) | show-summary show-header
 	@CARGO_PROFILE_RELEASE_STRIP=symbols \
 	CARGO_PROFILE_RELEASE_LTO=true \

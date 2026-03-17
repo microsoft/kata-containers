@@ -19,9 +19,35 @@ repo_dir="${script_dir}/../../../../"
 common_file="common.sh"
 source "${common_file}"
 
-# these options ensure we produce the proper CLH config file
-runtime_make_flags="SKIP_GO_VERSION_CHECK=1 QEMUCMD= FCCMD= ACRNCMD= STRATOVIRTCMD= DEFAULT_HYPERVISOR=cloud-hypervisor
-	DEFMEMSZ=0 DEFSTATICSANDBOXWORKLOADMEM=512 DEFVCPUS=0 DEFSTATICSANDBOXWORKLOADVCPUS=1 DEFVIRTIOFSDAEMON=${VIRTIOFSD_BINARY_LOCATION} PREFIX=${INSTALL_PATH_PREFIX}"
+# these options ensure we produce a compact runtime-rs CLH shim and config file
+# LIBC=gnu dynamically linked c libraries. small effect on binary size (still 13M without using it), but technically should produce a smaller and better performance binary in azl
+# LIBC=musl is better for portability as it statically links c libraries
+
+# USE_BUILDIN_DB=false should avoid building dragonball support. However building without it yields openssl build error for some reason:
+# warning: openssl-sys@0.9.109: Could not find directory of OpenSSL installation, and this `-sys` crate cannot proceed without this knowledge. If OpenSSL is installed and this crate had trouble finding it,  you can set the `OPENSSL_DIR` environment variable for the compilation process. See stderr section below for further information.
+# error: failed to run custom build command for `openssl-sys v0.9.109`
+
+# something about DB bringing in openssl but also passing OPENSSL_NO_VENDOR=1. If we don't pass that either, we build
+
+# if we build without USE_BUILDIN_DB=false and OPENSSL_NO_VENDOR=1, then we build and increase by 10mb ! we don't need dragonball support!
+# ➜  runtime-rs git:(saul/preview-runtime-rs) ✗ ls -lh ../../target/x86_64-unknown-linux-musl/release/containerd-shim-kata-v2
+# -rwxrwxr-x 2 saulparedes saulparedes 27M Mar 18 09:44 ../../target/x86_64-unknown-linux-musl/release/containerd-shim-kata-v2
+# OPENSSL_NO_VENDOR=1 we want to save size and benefit from azl openssl CVE coverage. Looks like building without this does not affects size much from baseline (still 16M)
+# ls -lh ../../target/x86_64-unknown-linux-musl/release/containerd-shim-kata-v2
+# -rwxrwxr-x 2 saulparedes saulparedes 16M Mar 18 09:49 ../../target/x86_64-unknown-linux-musl/release/containerd-shim-kata-v2
+
+runtime_make_flags="BUILD_TYPE=release \
+	LIBC=gnu \
+	HYPERVISOR=cloud-hypervisor \
+	USE_BUILDIN_DB=false \
+	QEMUCMD= \
+	FCCMD= \
+	DEFMEMSZ=0 \
+	DEFSTATICSANDBOXWORKLOADMEM=512 \
+	DEFVCPUS=0 \
+	DEFSTATICSANDBOXWORKLOADVCPUS=1 \
+	DEFVIRTIOFSDAEMON=${VIRTIOFSD_BINARY_LOCATION} \
+	PREFIX=${INSTALL_PATH_PREFIX}"
 
 # - for vanilla Kata we use the kernel binary. For ConfPods we use IGVM, so no need to provide kernel path.
 # - for vanilla Kata we explicitly set DEFSTATICRESOURCEMGMT_CLH. For ConfPods,
@@ -65,18 +91,19 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	popd
 fi
 
-echo "Building shim binary and configuration"
-pushd src/runtime/
+echo "Building runtime-rs shim binary and configuration"
+pushd src/runtime-rs/
+make clean-generated-files
 if [ "${CONF_PODS}" == "yes" ] || [ "${OS_VERSION}" == "3.0" ]; then
-	make ${runtime_make_flags}
+	OPENSSL_NO_VENDOR=1 make optimize ${runtime_make_flags}
 else
 	# Mariner 2 pod sandboxing uses cgroupsv1 - note: cannot add the kernelparams in above assignments,
 	# leads to quotation issue. Hence, implementing the conditional check right here at the time of the make command
-	make ${runtime_make_flags} KERNELPARAMS="systemd.legacy_systemd_cgroup_controller=yes systemd.unified_cgroup_hierarchy=0"
+	OPENSSL_NO_VENDOR=1 make optimize ${runtime_make_flags} KERNELPARAMS="systemd.legacy_systemd_cgroup_controller=yes systemd.unified_cgroup_hierarchy=0"
 fi
 popd
 
-pushd src/runtime/config/
+pushd src/runtime-rs/config/
 echo "Creating shim debug configuration"
 cp "${SHIM_CONFIG_FILE_NAME}" "${SHIM_DBG_CONFIG_FILE_NAME}"
 sed -i '/^#enable_debug =/s|^#||g' "${SHIM_DBG_CONFIG_FILE_NAME}"
