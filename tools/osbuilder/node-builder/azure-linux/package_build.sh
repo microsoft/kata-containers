@@ -19,9 +19,19 @@ repo_dir="${script_dir}/../../../../"
 common_file="common.sh"
 source "${common_file}"
 
-# these options ensure we produce the proper CLH config file
-runtime_make_flags="SKIP_GO_VERSION_CHECK=1 QEMUCMD= FCCMD= ACRNCMD= STRATOVIRTCMD= DEFAULT_HYPERVISOR=cloud-hypervisor
-	DEFMEMSZ=0 DEFSTATICSANDBOXWORKLOADMEM=512 DEFVCPUS=0 DEFSTATICSANDBOXWORKLOADVCPUS=1 DEFVIRTIOFSDAEMON=${VIRTIOFSD_BINARY_LOCATION} PREFIX=${INSTALL_PATH_PREFIX}"
+# these options ensure we produce a compact runtime-rs CLH shim and config file
+runtime_make_flags="BUILD_TYPE=release \
+	LIBC=gnu \
+	HYPERVISOR=cloud-hypervisor \
+	USE_BUILDIN_DB=false \
+	QEMUCMD= \
+	FCCMD= \
+	DEFMEMSZ=0 \
+	DEFSTATICSANDBOXWORKLOADMEM=512 \
+	DEFVCPUS=0 \
+	DEFSTATICSANDBOXWORKLOADVCPUS=1 \
+	DEFVIRTIOFSDAEMON=${VIRTIOFSD_BINARY_LOCATION} \
+	PREFIX=${INSTALL_PATH_PREFIX}"
 
 # - for vanilla Kata we use the kernel binary. For ConfPods we use IGVM, so no need to provide kernel path.
 # - for vanilla Kata we explicitly set DEFSTATICRESOURCEMGMT_CLH. For ConfPods,
@@ -65,18 +75,19 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	popd
 fi
 
-echo "Building shim binary and configuration"
-pushd src/runtime/
+echo "Building runtime-rs shim binary and configuration"
+pushd src/runtime-rs/
+make clean-generated-files
 if [ "${CONF_PODS}" == "yes" ] || [ "${OS_VERSION}" == "3.0" ]; then
-	make ${runtime_make_flags}
+	OPENSSL_NO_VENDOR=1 make optimize ${runtime_make_flags}
 else
 	# Mariner 2 pod sandboxing uses cgroupsv1 - note: cannot add the kernelparams in above assignments,
 	# leads to quotation issue. Hence, implementing the conditional check right here at the time of the make command
-	make ${runtime_make_flags} KERNELPARAMS="systemd.legacy_systemd_cgroup_controller=yes systemd.unified_cgroup_hierarchy=0"
+	OPENSSL_NO_VENDOR=1 make optimize ${runtime_make_flags} KERNELPARAMS="systemd.legacy_systemd_cgroup_controller=yes systemd.unified_cgroup_hierarchy=0"
 fi
 popd
 
-pushd src/runtime/config/
+pushd src/runtime-rs/config/
 echo "Creating shim debug configuration"
 cp "${SHIM_CONFIG_FILE_NAME}" "${SHIM_DBG_CONFIG_FILE_NAME}"
 sed -i '/^#enable_debug =/s|^#||g' "${SHIM_DBG_CONFIG_FILE_NAME}"
