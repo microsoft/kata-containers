@@ -7,7 +7,7 @@
 //! Policy evaluation for the kata-agent.
 
 use anyhow::{bail, Result};
-use slog::{debug, error, info, warn};
+use slog::{error, info, warn};
 use tokio::io::AsyncWriteExt;
 
 static POLICY_LOG_FILE: &str = "/tmp/policy.jsonl";
@@ -90,7 +90,7 @@ impl AgentPolicy {
                     .open(&log_file_path)
                     .await?,
             );
-            debug!(sl!(), "policy: log file: {}", log_file_path);
+            info!(sl!(), "policy: log file: {}", log_file_path);
         }
 
         // Check if policy file has been set via AgentConfig
@@ -125,7 +125,7 @@ impl AgentPolicy {
 
     /// Ask regorus if an API call should be allowed or not.
     pub async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
-        debug!(sl!(), "policy check: {ep}");
+        info!(sl!(), "policy check: {ep}");
         self.log_eval_input(ep, ep_input).await;
 
         let query = format!("data.agent_policy.{ep}");
