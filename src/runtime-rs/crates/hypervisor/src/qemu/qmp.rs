@@ -21,8 +21,10 @@ use qapi_qmp::{MigrationCapability, MigrationCapabilityStatus};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Error, Formatter};
+use std::fs;
 use std::io::BufReader;
 use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::UnixStream;
 use std::str::FromStr;
 use std::time::Duration;
@@ -69,6 +71,7 @@ impl Debug for Qmp {
 impl Qmp {
     pub fn new(qmp_sock_path: &str) -> Result<Self> {
         let try_new_once_fn = || -> Result<Qmp> {
+            info!(sl!(), "QMP: connecting to {qmp_sock_path}");
             let stream = UnixStream::connect(qmp_sock_path)?;
 
             stream
@@ -1022,4 +1025,35 @@ pub fn get_qmp_socket_path(sid: &str) -> String {
     } else {
         QMP_SOCKET_FILE.to_string()
     }
+}
+
+pub fn get_existing_qmp_socket_path() -> Option<String> {
+    let path = std::path::Path::new("/run/containerd/io.containerd.runtime.v2.task/k8s.io");
+    if !path.is_dir() {
+        return None;
+    }
+
+    if let Ok(dir) = path.read_dir() {
+        for entity in dir {
+            if let Ok(e) = entity {
+                let entity_path = e.path();
+                if entity_path.is_dir() {
+                    let socket_path = entity_path.join(QMP_SOCKET_FILE);
+
+                    if let Ok(metadata) = fs::metadata(&socket_path) {
+                        if metadata.file_type().is_socket() {
+                            info!(sl!(), "QMP: found existing QMP socket at {:?}", &socket_path);
+                            return Some(socket_path.to_str().unwrap_or_default().to_string());
+                        } else {
+                            info!(sl!(), "QMP: {:?} is not a socket", &socket_path);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        info!(sl!(), "QMP: failed to read directory {:?}", &path);
+    }
+
+    None
 }

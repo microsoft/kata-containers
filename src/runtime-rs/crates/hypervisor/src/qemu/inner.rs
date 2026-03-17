@@ -6,7 +6,7 @@
 use super::cmdline_generator::{get_network_device, QemuCmdLine};
 use super::qmp::Qmp;
 use crate::device::topology::PCIePort;
-use crate::qemu::qmp::get_qmp_socket_path;
+use crate::qemu::qmp::{get_existing_qmp_socket_path, get_qmp_socket_path};
 use crate::{
     device::driver::ProtectionDeviceConfig, hypervisor_persist::HypervisorState, selinux,
     HypervisorConfig, MemoryConfig, VcpuThreadIds, VsockDevice, HYPERVISOR_QEMU,
@@ -103,7 +103,15 @@ impl QemuInner {
     }
 
     pub(crate) async fn start_vm(&mut self, _timeout: i32) -> Result<()> {
+        let (already_started, existing_socket) = if let Some(socket_path) = get_existing_qmp_socket_path() {
+            info!(sl!(), "start_vm: socket already exists at {:?}, assuming VM is already running", &socket_path);
+            (true, socket_path)
+        } else {
+            (false, String::new())
+        };
+
         info!(sl!(), "Starting QEMU VM");
+
         let netns = self.netns.clone().unwrap_or_default();
 
         // CAUTION: since 'cmdline' contains file descriptors that have to stay
@@ -210,6 +218,7 @@ impl QemuInner {
                 _ => info!(sl!(), "qemu cmdline: unsupported device: {:?}", device),
             }
         }
+
         // To get access to the VM console for debugging, enable the following
         // line and replace its argument appropriately (open a terminal, run
         // `tty` in it to get its device file path and use it as the argument).
@@ -217,6 +226,7 @@ impl QemuInner {
 
         // Add a console to the devices of the cmdline
         let console_socket_path = Path::new(&self.get_jailer_root().await?).join("console.sock");
+
         cmdline.add_console(console_socket_path.to_str().unwrap());
 
         info!(sl!(), "qemu args: {}", cmdline.build().await?.join(" "));
@@ -270,20 +280,24 @@ impl QemuInner {
             });
         }
 
-        let mut qemu_process = command.stderr(Stdio::piped()).spawn()?;
-        let stderr = qemu_process.stderr.take().unwrap();
-        self.qemu_process = Mutex::new(Some(qemu_process));
+        let qmp_socket_path = if already_started {
+            existing_socket
+        } else {
+            let mut qemu_process = command.stderr(Stdio::piped()).spawn()?;
+            let stderr = qemu_process.stderr.take().unwrap();
+            self.qemu_process = Mutex::new(Some(qemu_process));
 
-        info!(sl!(), "qemu process started");
+            info!(sl!(), "qemu process started");
 
-        let exit_notify: mpsc::Sender<()> = self
-            .exit_notify
-            .take()
-            .ok_or_else(|| anyhow!("no exit notify"))?;
+            let exit_notify: mpsc::Sender<()> = self
+                .exit_notify
+                .take()
+                .ok_or_else(|| anyhow!("no exit notify"))?;
 
-        tokio::spawn(log_qemu_stderr(stderr, exit_notify));
+            tokio::spawn(log_qemu_stderr(stderr, exit_notify));
 
-        let qmp_socket_path = get_qmp_socket_path(self.id.as_str());
+            get_qmp_socket_path(self.id.as_str())
+        };
 
         match Qmp::new(&qmp_socket_path) {
             Ok(mut qmp) => {
