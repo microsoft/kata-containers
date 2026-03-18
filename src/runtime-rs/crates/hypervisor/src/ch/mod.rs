@@ -213,6 +213,11 @@ impl Hypervisor for CloudHypervisor {
     async fn get_passfd_listener_addr(&self) -> Result<(String, u32)> {
         Err(anyhow::anyhow!("Not yet supported"))
     }
+
+    async fn reusing_vm(&self) -> bool {
+        let inner = self.inner.read().await;
+        inner.reusing_vm()
+    }
 }
 
 #[async_trait]

@@ -613,65 +613,72 @@ impl Sandbox for VirtSandbox {
 
         // start vm
         self.hypervisor.start_vm(10_000).await.context("start vm")?;
-        info!(sl!(), "start vm");
+        info!(sl!(), "Sandbox: started vm");
 
-        // execute pre-start hook functions, including Prestart Hooks and CreateRuntime Hooks
-        let (prestart_hooks, create_runtime_hooks) =
-            if let Some(hooks) = sandbox_config.hooks.as_ref() {
-                (
-                    hooks.prestart().clone().unwrap_or_default(),
-                    hooks.create_runtime().clone().unwrap_or_default(),
-                )
-            } else {
-                (Vec::new(), Vec::new())
-            };
+        if !self.hypervisor.reusing_vm().await {
+            // execute pre-start hook functions, including Prestart Hooks and CreateRuntime Hooks
+            let (prestart_hooks, create_runtime_hooks) =
+                if let Some(hooks) = sandbox_config.hooks.as_ref() {
+                    (
+                        hooks.prestart().clone().unwrap_or_default(),
+                        hooks.create_runtime().clone().unwrap_or_default(),
+                    )
+                } else {
+                    (Vec::new(), Vec::new())
+                };
 
-        self.execute_oci_hook_functions(
-            &prestart_hooks,
-            &create_runtime_hooks,
-            &sandbox_config.state,
-        )
-        .await?;
+            self.execute_oci_hook_functions(
+                &prestart_hooks,
+                &create_runtime_hooks,
+                &sandbox_config.state,
+            )
+            .await?;
 
-        // 1. if there are pre-start hook functions, network config might have been changed.
-        //    We need to rescan the netns to handle the change.
-        // 2. Do not scan the netns if we want no network for the VM.
-        // TODO In case of vm factory, scan the netns to hotplug interfaces after the VM is started.
-        let config = self.resource_manager.config().await;
-        if self.has_prestart_hooks(&prestart_hooks, &create_runtime_hooks)
-            && !config.runtime.disable_new_netns
-            && !dan_config_path(&config, &self.sid).exists()
-        {
-            if let Some(netns_path) = &sandbox_config.network_env.netns {
-                let network_resource = NetworkConfig::NetNs(NetworkWithNetNsConfig {
-                    network_model: config.runtime.internetworking_model.clone(),
-                    netns_path: netns_path.to_owned(),
-                    queues: self
-                        .hypervisor
-                        .hypervisor_config()
+            // 1. if there are pre-start hook functions, network config might have been changed.
+            //    We need to rescan the netns to handle the change.
+            // 2. Do not scan the netns if we want no network for the VM.
+            // TODO In case of vm factory, scan the netns to hotplug interfaces after the VM is started.
+            let config = self.resource_manager.config().await;
+            if self.has_prestart_hooks(&prestart_hooks, &create_runtime_hooks)
+                && !config.runtime.disable_new_netns
+                && !dan_config_path(&config, &self.sid).exists()
+            {
+                if let Some(netns_path) = &sandbox_config.network_env.netns {
+                    let network_resource = NetworkConfig::NetNs(NetworkWithNetNsConfig {
+                        network_model: config.runtime.internetworking_model.clone(),
+                        netns_path: netns_path.to_owned(),
+                        queues: self
+                            .hypervisor
+                            .hypervisor_config()
+                            .await
+                            .network_info
+                            .network_queues as usize,
+                        network_created: sandbox_config.network_env.network_created,
+                    });
+                    self.resource_manager
+                        .handle_network(network_resource)
                         .await
-                        .network_info
-                        .network_queues as usize,
-                    network_created: sandbox_config.network_env.network_created,
-                });
-                self.resource_manager
-                    .handle_network(network_resource)
-                    .await
-                    .context("set up device after start vm")?;
+                        .context("set up device after start vm")?;
+                }
             }
         }
 
         // connect agent
         // set agent socket
+        info!(sl!(), "Sandbox: getting agent socket path");
         let address = self
             .hypervisor
             .get_agent_socket()
             .await
             .context("get agent socket")?;
+
+        info!(sl!(), "Sandbox: connecting to agent socket path {address}");
         self.agent
             .start(&address)
             .await
             .context(format!("connect to address {:?}", &address))?;
+
+        info!(sl!(), "Sandbox: settings policy");
         self.set_agent_policy().await.context("set agent policy")?;
 
         self.resource_manager
@@ -680,6 +687,7 @@ impl Sandbox for VirtSandbox {
             .context("setup device after start vm")?;
 
         // create sandbox in vm
+        info!(sl!(), "Sandbox: creating CreateSandboxRequest");
         let agent_config = self.agent.agent_config().await;
         let kernel_modules = KernelModule::set_kernel_modules(agent_config.kernel_modules)?;
         let req = agent::CreateSandboxRequest {
@@ -701,6 +709,7 @@ impl Sandbox for VirtSandbox {
             kernel_modules,
         };
 
+        info!(sl!(), "Sandbox: sending CreateSandboxRequest");
         self.agent
             .create_sandbox(req)
             .await

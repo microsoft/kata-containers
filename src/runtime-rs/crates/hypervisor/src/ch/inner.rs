@@ -78,6 +78,10 @@ pub struct CloudHypervisorInner {
     pub(crate) guest_memory_block_size_mb: u32,
 
     pub(crate) exit_notify: Option<mpsc::Sender<i32>>,
+
+    pub(crate) reuse_guest: bool,
+    pub(crate) api_socket_path: String,
+    pub(crate) vsock_path: String,
 }
 
 const CH_DEFAULT_TIMEOUT_SECS: u32 = 10;
@@ -120,6 +124,10 @@ impl CloudHypervisorInner {
             guest_memory_block_size_mb: 0,
 
             exit_notify,
+
+            reuse_guest: false,
+            api_socket_path: String::new(),
+            vsock_path: String::new(),
         }
     }
 
@@ -134,6 +142,10 @@ impl CloudHypervisorInner {
 
     pub fn hypervisor_config(&self) -> HypervisorConfig {
         self.config.clone()
+    }
+
+    pub fn reusing_vm(&self) -> bool {
+        self.reuse_guest
     }
 }
 

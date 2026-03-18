@@ -4,9 +4,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::inner::CloudHypervisorInner;
-use crate::ch::utils::get_api_socket_path;
+use crate::ch::utils::{get_api_socket_path, get_api_socket_path_already_existing};
 use crate::ch::utils::get_rootless_symlink_sandbox_path;
-use crate::ch::utils::get_vsock_path;
+use crate::ch::utils::{get_vsock_path , get_vsock_path_already_existing};
 use crate::kernel_param::KernelParams;
 use crate::selinux;
 use crate::utils::create_dir_all_with_inherit_owner;
@@ -199,7 +199,20 @@ impl CloudHypervisorInner {
         create_dir_all_with_inherit_owner(sandbox_path.clone(), 0o750)
             .context("failed to create sandbox path")?;
 
-        let vsock_socket_path = get_vsock_path(&self.id)?;
+        let vsock_socket_path = if let Some(existing) = get_vsock_path_already_existing() {
+            info!(sl!(), "CLH: already existing vsock_path = {existing}");
+            existing
+        } else {
+            let new_path = get_vsock_path(&self.id)?;
+            info!(sl!(), "CLH: new vsock_path = {new_path}");
+            new_path
+        };
+        self.vsock_path = vsock_socket_path.clone();
+
+        if self.reuse_guest {
+            info!(sl!(), "CLH: reusing Guest VM");
+            return Ok(());
+        }
 
         debug!(
             sl!(),
@@ -271,7 +284,8 @@ impl CloudHypervisorInner {
     }
 
     async fn cloud_hypervisor_setup_comms(&mut self) -> Result<()> {
-        let api_socket_path = get_api_socket_path(&self.id)?;
+        // let api_socket_path = get_api_socket_path(&self.id)?;
+        let api_socket_path = self.api_socket_path.clone();
 
         // The hypervisor has just been spawned, but may not yet have created
         // the API socket, so repeatedly try to connect for up to
@@ -346,123 +360,131 @@ impl CloudHypervisorInner {
 
         let disable_seccomp = cfg.security_info.disable_seccomp;
 
-        let api_socket_path = get_api_socket_path(&self.id)?;
-
-        let _ = std::fs::remove_file(api_socket_path.clone());
-
-        let binary_path = cfg.path.to_string();
-
-        let path = Path::new(&binary_path).canonicalize()?;
-
-        let mut cmd = Command::new(path);
-
-        cmd.current_dir("/");
-
-        cmd.stdin(Stdio::null());
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
-
-        cmd.env("RUST_BACKTRACE", "full");
-
-        cmd.args(["--api-socket", &api_socket_path]);
-
-        if let Some(extra_args) = &self.extra_args {
-            cmd.args(extra_args);
-        }
-
-        if debug {
-            // Note that with TDX enabled, this results in a lot of additional
-            // CH output, particularly if the user adds "earlyprintk" to the
-            // guest kernel command line (by modifying "kernel_params=").
-            cmd.arg("-v");
-        }
-
-        if disable_seccomp {
-            cmd.args(["--seccomp", "false"]);
-        }
-
-        let netns = self.netns.clone();
-        if self.netns.is_some() {
-            info!(
-                sl!(),
-                "set netns for vmm : {:?}",
-                self.netns.as_ref().unwrap()
-            );
-        }
-
-        let user: Option<RootlessUser> = if is_rootless() {
-            Some(
-                self.config
-                    .security_info
-                    .rootless_user
-                    .clone()
-                    .ok_or_else(|| {
-                        anyhow!("rootless user must be specified for rootless cloud-hypervisor")
-                    })?,
-            )
+        let api_socket_path = if let Some(already_existing) = get_api_socket_path_already_existing() {
+            self.reuse_guest = true;
+            already_existing
         } else {
-            None
+            get_api_socket_path(&self.id)?
         };
+        self.api_socket_path = api_socket_path.clone();
 
-        unsafe {
-            let selinux_label = self.config.security_info.selinux_label.clone();
-            let _pre = cmd.pre_exec(move || {
-                if let Some(netns_path) = &netns {
-                    let netns_fd = std::fs::File::open(netns_path);
-                    let _ = setns(netns_fd?.as_raw_fd(), CloneFlags::CLONE_NEWNET)
-                        .context("set netns failed");
-                }
-                if let Some(label) = selinux_label.as_ref() {
-                    if let Err(e) = selinux::set_exec_label(label) {
-                        error!(sl!(), "Failed to set SELinux label in child process: {}", e);
-                        // Don't return error here to avoid breaking the process startup
-                        // Log the error and continue
-                    } else {
-                        info!(
-                            sl!(),
-                            "Successfully set SELinux label in child process: {}", &label
-                        );
+        if !self.reuse_guest {
+            let _ = std::fs::remove_file(api_socket_path.clone());
+
+            let binary_path = cfg.path.to_string();
+
+            let path = Path::new(&binary_path).canonicalize()?;
+
+            let mut cmd = Command::new(path);
+
+            cmd.current_dir("/");
+
+            cmd.stdin(Stdio::null());
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
+
+            cmd.env("RUST_BACKTRACE", "full");
+
+            cmd.args(["--api-socket", &api_socket_path]);
+
+            if let Some(extra_args) = &self.extra_args {
+                cmd.args(extra_args);
+            }
+
+            if debug {
+                // Note that with TDX enabled, this results in a lot of additional
+                // CH output, particularly if the user adds "earlyprintk" to the
+                // guest kernel command line (by modifying "kernel_params=").
+                cmd.arg("-v");
+            }
+
+            if disable_seccomp {
+                cmd.args(["--seccomp", "false"]);
+            }
+
+            let netns = self.netns.clone();
+            if self.netns.is_some() {
+                info!(
+                    sl!(),
+                    "set netns for vmm : {:?}",
+                    self.netns.as_ref().unwrap()
+                );
+            }
+
+            let user: Option<RootlessUser> = if is_rootless() {
+                Some(
+                    self.config
+                        .security_info
+                        .rootless_user
+                        .clone()
+                        .ok_or_else(|| {
+                            anyhow!("rootless user must be specified for rootless cloud-hypervisor")
+                        })?,
+                )
+            } else {
+                None
+            };
+
+            unsafe {
+                let selinux_label = self.config.security_info.selinux_label.clone();
+                let _pre = cmd.pre_exec(move || {
+                    if let Some(netns_path) = &netns {
+                        let netns_fd = std::fs::File::open(netns_path);
+                        let _ = setns(netns_fd?.as_raw_fd(), CloneFlags::CLONE_NEWNET)
+                            .context("set netns failed");
                     }
-                }
-                if let Some(user) = &user {
-                    let groups = user.groups.clone();
-                    let gid = Gid::from_raw(user.gid);
-                    let uid = Uid::from_raw(user.uid);
+                    if let Some(label) = selinux_label.as_ref() {
+                        if let Err(e) = selinux::set_exec_label(label) {
+                            error!(sl!(), "Failed to set SELinux label in child process: {}", e);
+                            // Don't return error here to avoid breaking the process startup
+                            // Log the error and continue
+                        } else {
+                            info!(
+                                sl!(),
+                                "Successfully set SELinux label in child process: {}", &label
+                            );
+                        }
+                    }
+                    if let Some(user) = &user {
+                        let groups = user.groups.clone();
+                        let gid = Gid::from_raw(user.gid);
+                        let uid = Uid::from_raw(user.uid);
 
-                    let _ = set_groups(&groups);
-                    let _ = setgid(gid).context("setgid failed");
-                    let _ = setuid(uid).context("setuid failed");
-                }
+                        let _ = set_groups(&groups);
+                        let _ = setgid(gid).context("setgid failed");
+                        let _ = setuid(uid).context("setuid failed");
+                    }
 
-                Ok(())
-            });
+                    Ok(())
+                });
+            }
+
+            debug!(sl!(), "launching {} as: {:?}", CH_NAME, cmd);
+
+            let child = cmd.spawn().context(format!("{CH_NAME} spawn failed"))?;
+
+            // Save process PID
+            self.pid = child.id();
+
+            let shutdown = self
+                .shutdown_rx
+                .as_ref()
+                .ok_or("no receiver channel")
+                .map_err(|e| anyhow!(e))?
+                .clone();
+
+            let exit_notify: mpsc::Sender<i32> = self
+                .exit_notify
+                .take()
+                .ok_or_else(|| anyhow!("no exit notify"))?;
+
+            let ch_outputlogger_task =
+                tokio::spawn(cloud_hypervisor_log_output(child, shutdown, exit_notify));
+
+            let tasks = vec![ch_outputlogger_task];
+
+            self.tasks = Some(tasks);
         }
-
-        debug!(sl!(), "launching {} as: {:?}", CH_NAME, cmd);
-
-        let child = cmd.spawn().context(format!("{CH_NAME} spawn failed"))?;
-
-        // Save process PID
-        self.pid = child.id();
-
-        let shutdown = self
-            .shutdown_rx
-            .as_ref()
-            .ok_or("no receiver channel")
-            .map_err(|e| anyhow!(e))?
-            .clone();
-
-        let exit_notify: mpsc::Sender<i32> = self
-            .exit_notify
-            .take()
-            .ok_or_else(|| anyhow!("no exit notify"))?;
-
-        let ch_outputlogger_task =
-            tokio::spawn(cloud_hypervisor_log_output(child, shutdown, exit_notify));
-
-        let tasks = vec![ch_outputlogger_task];
-
-        self.tasks = Some(tasks);
 
         Ok(())
     }
@@ -597,6 +619,12 @@ impl CloudHypervisorInner {
         selinux_label: Option<String>,
     ) -> Result<()> {
         self.id = id.to_string();
+
+        if self.reuse_guest {
+            info!(sl!(), "CLH: prepare_vm skip prepare, set state to VmRunning");
+            self.state = VmmState::VmRunning;
+            return Ok(());
+        }
         self.state = VmmState::NotReady;
 
         self.setup_environment().await?;
@@ -727,7 +755,8 @@ impl CloudHypervisorInner {
     pub(crate) async fn get_agent_socket(&self) -> Result<String> {
         const HYBRID_VSOCK_SCHEME: &str = "hvsock";
 
-        let vsock_path = get_vsock_path(&self.id)?;
+        // let vsock_path = get_vsock_path(&self.id)?;
+        let vsock_path = self.vsock_path.clone();
 
         let uri = format!("{HYBRID_VSOCK_SCHEME}://{vsock_path}");
 
