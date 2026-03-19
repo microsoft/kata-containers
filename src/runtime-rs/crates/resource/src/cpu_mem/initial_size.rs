@@ -173,6 +173,14 @@ impl InitialSizeManager {
     pub fn get_orig_toml_default_mem(&self) -> u32 {
         self.resource.orig_toml_default_mem
     }
+
+    /// Returns the effective workload memory for the pod/container (in MiB).
+    /// This may be either explicitly requested in the spec or defaulted by static
+    /// sandbox resource management. 0 means no explicit limit was set and no default
+    /// workload memory was applied.
+    pub fn workload_mem_mb(&self) -> u32 {
+        self.resource.mem_mb
+    }
 }
 
 fn get_nr_vcpu(resource: &LinuxContainerCpuResources) -> f32 {

@@ -132,6 +132,12 @@ pub struct Runtime {
     #[serde(default)]
     pub static_sandbox_default_workload_vcpus: f32,
 
+    /// Minimum memory (in MiB) to enforce for pods that explicitly set a memory limit via
+    /// resources.limits.memory. If the requested memory is below this value the sandbox
+    /// creation will fail with a descriptive error. 0 (the default) disables the check.
+    #[serde(default)]
+    pub sandbox_workload_mem_min: u32,
+
     /// Determines whether container seccomp profiles are passed to the virtual machine and
     /// applied by the kata agent. If set to true, seccomp is not applied within the guest.
     #[serde(default)]

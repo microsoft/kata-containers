@@ -33,13 +33,13 @@ use netns_rs::{Env, NetNs};
 use nix::{sys::statfs, unistd::User};
 use oci_spec::runtime as oci;
 use persist::sandbox_persist::Persist;
+use protobuf::Message as ProtobufMessage;
 use resource::{
     cpu_mem::initial_size::InitialSizeManager,
     network::{dan_config_path, generate_netns_name},
 };
 use runtime_spec as spec;
 use shim_interface::shim_mgmt::ERR_NO_SHIM_SERVER;
-use protobuf::Message as ProtobufMessage;
 use std::{
     collections::HashMap,
     env,
@@ -217,6 +217,16 @@ impl RuntimeHandlerManagerInner {
         initial_size_manager
             .setup_config(&mut config)
             .context("failed to setup static resource mgmt config")?;
+
+        let mem_min = config.runtime.sandbox_workload_mem_min;
+        let workload_mem = initial_size_manager.workload_mem_mb();
+        if workload_mem < mem_min {
+            return Err(anyhow!(
+                "pod memory limit too low: minimum {}MiB, got {}MiB",
+                mem_min,
+                workload_mem
+            ));
+        }
 
         update_component_log_level(&config);
 
