@@ -5,6 +5,7 @@
 //
 
 use std::{
+    collections::HashSet,
     convert::TryFrom,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
@@ -42,6 +43,12 @@ impl NetworkInfoFromLink {
     ) -> Result<Self> {
         let attrs = link.attrs();
         let name = &attrs.name;
+        let routes = handle_routes(handle, attrs)
+            .await
+            .context("handle routes")?;
+        let neighs = handle_neighbors(handle, attrs, &routes)
+            .await
+            .context("handle neighbours")?;
 
         Ok(Self {
             interface: Interface {
@@ -54,12 +61,8 @@ impl NetworkInfoFromLink {
                 field_type: link.r#type().to_string(),
                 raw_flags: attrs.flags & libc::IFF_NOARP as u32,
             },
-            neighs: handle_neighbors(handle, attrs)
-                .await
-                .context("handle neighbours")?,
-            routes: handle_routes(handle, attrs)
-                .await
-                .context("handle routes")?,
+            neighs,
+            routes,
         })
     }
 }
@@ -147,11 +150,49 @@ fn generate_neigh(name: &str, n: &NeighbourMessage) -> Result<ARPNeighbor> {
     Ok(neigh)
 }
 
+fn gateway_set_from_routes(routes: &[Route]) -> HashSet<String> {
+    let mut gateway_set = HashSet::new();
+    for route in routes {
+        if route.gateway.is_empty() {
+            continue;
+        }
+
+        // Default routes may be represented with an empty destination string or
+        // an all-zero destination.
+        if route.dest.is_empty() || route.dest == "0.0.0.0" || route.dest == "::" {
+            gateway_set.insert(route.gateway.clone());
+        }
+    }
+
+    gateway_set
+}
+
+fn valid_guest_neighbor(neigh: &ARPNeighbor, gateway_set: &HashSet<String>) -> bool {
+    // We need a MAC address in the guest ARP table.
+    if neigh.ll_addr.is_empty() {
+        return false;
+    }
+
+    // Keep all static entries.
+    if neigh.state == libc::NUD_PERMANENT as i32 {
+        return true;
+    }
+
+    // Gateway-only exception: allow default-gateway neighbors.
+    neigh
+        .to_ip_address
+        .as_ref()
+        .map(|ip| gateway_set.contains(&ip.address))
+        .unwrap_or(false)
+}
+
 async fn handle_neighbors(
     handle: &rtnetlink::Handle,
     attrs: &LinkAttrs,
+    routes: &[Route],
 ) -> Result<Vec<ARPNeighbor>> {
     let name = &attrs.name;
+    let gateway_set = gateway_set_from_routes(routes);
     let mut neighs = vec![];
     let mut neigh_msg_list = handle.neighbours().get().execute();
     while let Some(neigh) = neigh_msg_list
@@ -161,7 +202,10 @@ async fn handle_neighbors(
     {
         // get neigh filter with index
         if neigh.header.ifindex == attrs.index {
-            neighs.push(generate_neigh(name, &neigh).context("generate neigh")?)
+            let neigh = generate_neigh(name, &neigh).context("generate neigh")?;
+            if valid_guest_neighbor(&neigh, &gateway_set) {
+                neighs.push(neigh);
+            }
         }
     }
     Ok(neighs)
