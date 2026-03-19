@@ -106,10 +106,14 @@ message CreateContainerRequest {
 	uint32 stdin_port = 9;
 	uint32 stdout_port = 10;
 	uint32 stderr_port = 11;
+
+	string sandbox_id = 12;
 }
 
 message StartContainerRequest {
 	string container_id = 1;
+
+	string sandbox_id = 2;
 }
 
 message RemoveContainerRequest {
@@ -121,6 +125,8 @@ message RemoveContainerRequest {
 	// Setting timeout to 0 means RemoveContainer will
 	// wait for ever.
 	uint32 timeout = 2;
+
+	string sandbox_id = 3;
 }
 
 message ExecProcessRequest {
@@ -136,6 +142,8 @@ message ExecProcessRequest {
 	uint32 stdin_port = 5;
 	uint32 stdout_port = 6;
 	uint32 stderr_port = 7;
+
+	string sandbox_id = 8;
 }
 
 message SignalProcessRequest {
@@ -146,11 +154,15 @@ message SignalProcessRequest {
 	// Other APIs with exec_id should treat empty exec_id as an invalid request.
 	string exec_id = 2;
 	uint32 signal = 3;
+
+	string sandbox_id = 4;
 }
 
 message WaitProcessRequest {
 	string container_id = 1;
 	string exec_id = 2;
+
+	string sandbox_id = 3;
 }
 
 message WaitProcessResponse {
@@ -164,6 +176,8 @@ message UpdateContainerRequest {
 
 message StatsContainerRequest {
     string container_id = 1;
+
+	string sandbox_id = 2;
 }
 
 message PauseContainerRequest {
@@ -268,6 +282,8 @@ message WriteStreamRequest {
 	string container_id = 1;
 	string exec_id = 2;
 	bytes data = 3;
+
+	string sandbox_id = 4;
 }
 
 message WriteStreamResponse {
@@ -278,6 +294,8 @@ message ReadStreamRequest {
 	string container_id = 1;
 	string exec_id = 2;
 	uint32 len = 3;
+
+	string sandbox_id = 4;
 }
 
 message ReadStreamResponse {
@@ -294,6 +312,8 @@ message TtyWinResizeRequest {
 	string exec_id = 2;
 	uint32 row = 3;
 	uint32 column = 4;
+
+	string sandbox_id = 5;
 }
 
 message KernelModule {
@@ -326,6 +346,7 @@ message CreateSandboxRequest {
 }
 
 message DestroySandboxRequest {
+	string sandbox_id = 1;
 }
 
 message RemoveStaleVirtiofsShareMountsRequest {}
@@ -340,10 +361,14 @@ message Routes {
 
 message UpdateInterfaceRequest {
 	types.Interface interface = 1;
+
+	string sandbox_id = 2;
 }
 
 message UpdateRoutesRequest {
 	Routes routes = 1;
+
+	string sandbox_id = 2;
 }
 
 message UpdateEphemeralMountsRequest {
@@ -351,6 +376,7 @@ message UpdateEphemeralMountsRequest {
 }
 
 message ListInterfacesRequest {
+	string sandbox_id = 1;
 }
 
 message ListRoutesRequest {
@@ -586,7 +612,9 @@ message CopyFileRequest {
 	bytes data = 8;
 }
 
-message GetOOMEventRequest {}
+message GetOOMEventRequest {
+	string sandbox_id = 1;
+}
 
 message OOMEvent {
 	string container_id = 1;

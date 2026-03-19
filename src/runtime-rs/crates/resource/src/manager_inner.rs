@@ -309,15 +309,17 @@ impl ResourceManagerInner {
                 .context("setup share fs device after start vm")?;
         }
 
-        if let Some(network) = self.network.as_ref() {
-            let network = network.as_ref();
-            self.handle_interfaces(network)
-                .await
-                .context("handle interfaces")?;
-            self.handle_neighbours(network)
-                .await
-                .context("handle neighbors")?;
-            self.handle_routes(network).await.context("handle routes")?;
+        if self.hypervisor.reusing_vm().await {
+            info!(sl!(), "Manager: skipping network init")
+        } else if let Some(network) = self.network.as_ref() {
+                let network = network.as_ref();
+                self.handle_interfaces(network)
+                    .await
+                    .context("handle interfaces")?;
+                self.handle_neighbours(network)
+                    .await
+                    .context("handle neighbors")?;
+                self.handle_routes(network).await.context("handle routes")?;
         }
 
         if let Some(swap) = self.swap_resource.as_ref() {

@@ -3,12 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![allow(unused)]
+
 use async_trait::async_trait;
 use rustjail::{pipestream::PipeStream, process::StreamType};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::ffi::{CString, OsStr};
 use std::fmt::Debug;
@@ -46,7 +49,10 @@ use protocols::health::{
 use protocols::types::Interface;
 use protocols::{agent_ttrpc_async as agent_ttrpc, health_ttrpc_async as health_ttrpc};
 use rustjail::cgroups::notifier;
-use rustjail::container::{BaseContainer, Container, LinuxContainer, SYSTEMD_CGROUP_PATH_FORMAT};
+
+// use rustjail::container::{BaseContainer, Container, LinuxContainer, SYSTEMD_CGROUP_PATH_FORMAT};
+use rustjail::container::{BaseContainer, LinuxContainer, SYSTEMD_CGROUP_PATH_FORMAT};
+
 use rustjail::mount::parse_mount_table;
 use rustjail::process::Process;
 use rustjail::specconv::CreateOpts;
@@ -73,9 +79,14 @@ use crate::namespace::{NSTYPEIPC, NSTYPEPID, NSTYPEUTS};
 use crate::network::setup_guest_dns;
 use crate::passfd_io;
 use crate::pci;
-use crate::random;
+
+// use crate::random;
+
 use crate::sandbox::{Sandbox, SandboxError};
-use crate::storage::{add_storages, update_ephemeral_mounts, STORAGE_HANDLERS};
+
+// use crate::storage::{add_storages, update_ephemeral_mounts, STORAGE_HANDLERS};
+use crate::storage::{add_storages, STORAGE_HANDLERS};
+
 use crate::util;
 use crate::version::{AGENT_VERSION, API_VERSION};
 use crate::AGENT_CONFIG;
@@ -189,7 +200,7 @@ impl<T> OptionToTtrpcResult<T> for Option<T> {
 
 #[derive(Clone, Debug)]
 pub struct AgentService {
-    sandbox: Arc<Mutex<Sandbox>>,
+    sandboxes: Arc<Mutex<BTreeMap<String, Sandbox>>>,
     init_mode: bool,
     oma: Option<mem_agent::agent::MemAgent>,
 }
@@ -235,7 +246,13 @@ impl AgentService {
         // updates the devices listed in the OCI spec, so that they actually
         // match real devices inside the VM. This step is necessary since we
         // cannot predict everything from the caller.
-        add_devices(&cid, &sl(), &req.devices, &mut oci, &self.sandbox).await?;
+        
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut s = sandboxes.get_mut(&req.sandbox_id).unwrap();
+
+        warn!(sl(), "do_create_container: skipping add_devices");
+        //add_devices(&cid, &sl(), &req.devices, &mut oci, &self.sandbox).await?;
+        //add_devices(&cid, &sl(), &req.devices, &mut oci, &s).await?;
 
         // In guest-kernel mode some devices need extra handling. Taking the
         // GPU as an example the shim will inject CDI annotations that will
@@ -258,21 +275,27 @@ impl AgentService {
         // After all those storages have been processed, no matter the order
         // here, the agent will rely on rustjail (using the oci.Mounts
         // list) to bind mount all of them inside the container.
+
+        warn!(sl(), "do_create_container: skipping add_storages");
+        /*
         let m = add_storages(
             sl(),
             req.storages.clone(),
-            &self.sandbox,
+            // &self.sandbox,
+            &s,
             Some(req.container_id),
         )
         .await?;
+        */
 
         // Handle sealed secrets after storage is mounted
         cdh_handler_sealed_secrets(&mut oci)
             .await
             .map_err(|e| anyhow!("failed to handle sealed secrets: {}", e))?;
 
-        let mut s = self.sandbox.lock().await;
-        s.container_mounts.insert(cid.clone(), m);
+        warn!(sl(), "do_create_container: skipping container_mounts.insert");
+        // let mut s = self.sandbox.lock().await;
+        // s.container_mounts.insert(cid.clone(), m);
 
         update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
 
@@ -354,7 +377,9 @@ impl AgentService {
 
     #[instrument]
     async fn do_start_container(&self, req: protocols::agent::StartContainerRequest) -> Result<()> {
-        let mut s = self.sandbox.lock().await;
+        // let mut s = self.sandbox.lock().await;
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut s = sandboxes.get_mut(&req.sandbox_id).unwrap();
         let sid = s.id.clone();
         let cid = req.container_id.clone();
 
@@ -388,7 +413,9 @@ impl AgentService {
         // PCI slots for the next containers
 
         if req.timeout == 0 {
-            let mut sandbox = self.sandbox.lock().await;
+            // let mut sandbox = self.sandbox.lock().await;
+            let mut sandboxes = self.sandboxes.lock().await;
+            let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
             sandbox.bind_watcher.remove_container(&cid).await;
             sandbox
                 .get_container(&cid)
@@ -400,6 +427,9 @@ impl AgentService {
         }
 
         // timeout != 0
+        error!(sl(), "do_remove_container: timeout not implemented yet");
+        return Ok(());
+        /*
         let s = self.sandbox.clone();
         let cid2 = cid.clone();
         let handle = tokio::spawn(async move {
@@ -418,6 +448,7 @@ impl AgentService {
             .map_err(|_| anyhow!(nix::Error::ETIME))???;
 
         remove_container_resources(&mut *self.sandbox.lock().await, &cid).await
+        */
     }
 
     #[instrument]
@@ -435,7 +466,9 @@ impl AgentService {
             None
         };
 
-        let mut sandbox = self.sandbox.lock().await;
+        // let mut sandbox = self.sandbox.lock().await;
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
         let mut process = req
             .process
             .into_option()
@@ -470,7 +503,9 @@ impl AgentService {
 
         let mut sig: libc::c_int = req.signal as libc::c_int;
         {
-            let mut sandbox = self.sandbox.lock().await;
+            // let mut sandbox = self.sandbox.lock().await;
+            let mut sandboxes = self.sandboxes.lock().await;
+            let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
             let p = sandbox
                 .find_container_process(cid.as_str(), eid.as_str())
                 .map_err(sandbox_err_to_ttrpc)?;
@@ -517,7 +552,7 @@ impl AgentService {
                 );
             }
 
-            let pids = self.get_pids(&cid).await?;
+            let pids = self.get_pids(&cid, &req.sandbox_id).await?;
             for pid in pids.iter() {
                 let res = unsafe { libc::kill(*pid, sig) };
                 if let Err(err) = Errno::result(res).map(drop) {
@@ -546,15 +581,21 @@ impl AgentService {
     }
 
     async fn freeze_cgroup(&self, cid: &str, state: FreezerState) -> Result<()> {
+        error!(sl(), "freeze_cgroup: not implemented yet");
+        Ok(())
+        /*
         let mut sandbox = self.sandbox.lock().await;
         let ctr = sandbox
             .get_container(cid)
             .ok_or_else(|| anyhow!("Invalid container id {}", cid))?;
         ctr.cgroup_manager.as_ref().freeze(state)
+        */
     }
 
-    async fn get_pids(&self, cid: &str) -> Result<Vec<i32>> {
-        let mut sandbox = self.sandbox.lock().await;
+    async fn get_pids(&self, cid: &str, sandbox_id: &str) -> Result<Vec<i32>> {
+        // let mut sandbox = self.sandbox.lock().await;
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut sandbox = sandboxes.get_mut(sandbox_id).unwrap();
         let ctr = sandbox
             .get_container(cid)
             .ok_or_else(|| anyhow!("Invalid container id {}", cid))?;
@@ -580,7 +621,9 @@ impl AgentService {
         let pid: pid_t;
         let (exit_send, mut exit_recv) = tokio::sync::mpsc::channel(100);
         let exit_rx = {
-            let mut sandbox = self.sandbox.lock().await;
+            // let mut sandbox = self.sandbox.lock().await;
+            let mut sandboxes = self.sandboxes.lock().await;
+            let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
             let p = sandbox
                 .find_container_process(cid.as_str(), eid.as_str())
                 .map_err(sandbox_err_to_ttrpc)?;
@@ -597,7 +640,9 @@ impl AgentService {
             info!(sl(), "cid {} eid {} received exit signal", &cid, &eid);
         }
 
-        let mut sandbox = self.sandbox.lock().await;
+        // let mut sandbox = self.sandbox.lock().await;
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
         let ctr = sandbox
             .get_container(&cid)
             .ok_or_else(|| anyhow!("Invalid container id"))?;
@@ -643,14 +688,17 @@ impl AgentService {
         let mut resp = WriteStreamResponse::new();
         resp.set_len(req.data.len() as u32);
 
-        // EOF of stdin
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+
+            // EOF of stdin
         if req.data.is_empty() {
-            let mut sandbox = self.sandbox.lock().await;
+            // let mut sandbox = self.sandbox.lock().await;
             let p = sandbox.find_container_process(cid.as_str(), eid.as_str())?;
             p.close_stdin().await;
         } else {
             let writer = {
-                let mut sandbox = self.sandbox.lock().await;
+                // let mut sandbox = self.sandbox.lock().await;
                 let p = sandbox.find_container_process(cid.as_str(), eid.as_str())?;
 
                 // use ptmx io
@@ -679,7 +727,9 @@ impl AgentService {
 
         let term_exit_notifier;
         let reader = {
-            let mut sandbox = self.sandbox.lock().await;
+            // let mut sandbox = self.sandbox.lock().await;
+            let mut sandboxes = self.sandboxes.lock().await;
+            let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
             let p = sandbox
                 .find_container_process(cid.as_str(), eid.as_str())
                 .map_err(sandbox_err_to_ttrpc)?;
@@ -869,6 +919,8 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::UpdateContainerRequest,
     ) -> ttrpc::Result<Empty> {
+        error!(sl(), "update_container: not implemented yet");
+        /*
         trace_rpc_call!(ctx, "update_container", req);
         is_allowed(&req).await?;
 
@@ -880,7 +932,7 @@ impl agent_ttrpc::AgentService for AgentService {
             let oci_res = res.clone().into();
             ctr.set(oci_res).map_ttrpc_err(same)?;
         }
-
+        */
         Ok(Empty::new())
     }
 
@@ -892,7 +944,9 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "stats_container", req);
         is_allowed(&req).await?;
 
-        let mut sandbox = self.sandbox.lock().await;
+        // let mut sandbox = self.sandbox.lock().await;
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
         let ctr = sandbox
             .get_container(&req.container_id)
             .map_ttrpc_err(ttrpc::Code::INVALID_ARGUMENT, "invalid container id")?;
@@ -904,6 +958,8 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::PauseContainerRequest,
     ) -> ttrpc::Result<protocols::empty::Empty> {
+        error!(sl(), "pause_container: not implemented yet");
+        /*
         trace_rpc_call!(ctx, "pause_container", req);
         is_allowed(&req).await?;
 
@@ -912,6 +968,7 @@ impl agent_ttrpc::AgentService for AgentService {
             .get_container(&req.container_id)
             .map_ttrpc_err(ttrpc::Code::INVALID_ARGUMENT, "invalid container id")?;
         ctr.pause().map_ttrpc_err(same)?;
+        */
         Ok(Empty::new())
     }
 
@@ -920,6 +977,8 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::ResumeContainerRequest,
     ) -> ttrpc::Result<protocols::empty::Empty> {
+        error!(sl(), "resume_container: not implemented yet");
+        /*
         trace_rpc_call!(ctx, "resume_container", req);
         is_allowed(&req).await?;
 
@@ -928,6 +987,7 @@ impl agent_ttrpc::AgentService for AgentService {
             .get_container(&req.container_id)
             .map_ttrpc_err(ttrpc::Code::INVALID_ARGUMENT, "invalid container id")?;
         ctr.resume().map_ttrpc_err(same)?;
+        */
         Ok(Empty::new())
     }
 
@@ -993,6 +1053,8 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::CloseStdinRequest,
     ) -> ttrpc::Result<Empty> {
+        error!(sl(), "close_stdin: not implemented yet");
+        /*
         // The stdin will be closed when EOF is got in rpc `write_stdin`[runtime-rs]
         // so this rpc will not be called anymore by runtime-rs.
 
@@ -1008,7 +1070,7 @@ impl agent_ttrpc::AgentService for AgentService {
             .map_err(sandbox_err_to_ttrpc)?;
 
         p.close_stdin().await;
-
+        */
         Ok(Empty::new())
     }
 
@@ -1020,7 +1082,9 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "tty_win_resize", req);
         is_allowed(&req).await?;
 
-        let mut sandbox = self.sandbox.lock().await;
+        // let mut sandbox = self.sandbox.lock().await;
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
         let p = sandbox
             .find_container_process(req.container_id(), req.exec_id())
             .map_err(sandbox_err_to_ttrpc)?;
@@ -1061,6 +1125,8 @@ impl agent_ttrpc::AgentService for AgentService {
         if !interface.devicePath.is_empty() {
             #[cfg(not(target_arch = "s390x"))]
             {
+                warn!(sl(), "update_interface: skipping wait_for_pci_net_interface");
+                /*
                 let (root_complex, pcipath) = pcipath_from_dev_tree_path(&interface.devicePath)
                     .map_ttrpc_err(|e| {
                         format!("Invalid PCI path for network interface: {:?}", e)
@@ -1068,18 +1134,26 @@ impl agent_ttrpc::AgentService for AgentService {
                 wait_for_pci_net_interface(&self.sandbox, root_complex, &pcipath)
                     .await
                     .map_ttrpc_err(|e| format!("interface not available: {e:?}"))?;
+                    */
             }
             #[cfg(target_arch = "s390x")]
             {
+                warn!(sl(), "update_interface: skipping wait_for_ccw_net_interface");
+                /*
                 let ccw_dev = ccw::Device::from_str(&interface.devicePath).map_ttrpc_err(|e| {
                     format!("Unexpected CCW path for network interface: {e:?}")
                 })?;
                 wait_for_ccw_net_interface(&self.sandbox, &ccw_dev)
                     .await
                     .map_ttrpc_err(|e| format!("interface not available: {e:?}"))?;
+                    */
             }
         }
 
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        sandbox.rtnl.update_interface(&interface).await.map_ttrpc_err(|e| format!("update interface: {e:?}"))?;
+        /*
         self.sandbox
             .lock()
             .await
@@ -1087,6 +1161,7 @@ impl agent_ttrpc::AgentService for AgentService {
             .update_interface(&interface)
             .await
             .map_ttrpc_err(|e| format!("update interface: {e:?}"))?;
+        */
 
         Ok(interface)
     }
@@ -1105,7 +1180,9 @@ impl agent_ttrpc::AgentService for AgentService {
             .map(|r| r.Routes)
             .map_ttrpc_err(ttrpc::Code::INVALID_ARGUMENT, "empty update routes request")?;
 
-        let mut sandbox = self.sandbox.lock().await;
+        // let mut sandbox = self.sandbox.lock().await;
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
 
         sandbox
             .rtnl
@@ -1130,12 +1207,16 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::UpdateEphemeralMountsRequest,
     ) -> ttrpc::Result<Empty> {
+        error!(sl(), "update_ephemeral_mounts: not implemented yet");
+
+        /*
         trace_rpc_call!(ctx, "update_mounts", req);
         is_allowed(&req).await?;
 
         update_ephemeral_mounts(sl(), &req.storages, &self.sandbox)
             .await
             .map_ttrpc_err(|e| format!("Failed to update mounts: {e:?}"))?;
+            */
         Ok(Empty::new())
     }
 
@@ -1144,6 +1225,11 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: GetIPTablesRequest,
     ) -> ttrpc::Result<GetIPTablesResponse> {
+        error!(sl(), "update_ephemeral_mounts: not implemented yet");
+        Ok(GetIPTablesResponse {
+            ..Default::default()
+        })
+        /*
         trace_rpc_call!(ctx, "get_iptables", req);
         is_allowed(&req).await?;
 
@@ -1173,6 +1259,7 @@ impl agent_ttrpc::AgentService for AgentService {
             data: output.stdout,
             ..Default::default()
         })
+        */
     }
 
     async fn set_ip_tables(
@@ -1180,6 +1267,12 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: SetIPTablesRequest,
     ) -> ttrpc::Result<SetIPTablesResponse> {
+        error!(sl(), "set_ip_tables: not implemented yet");
+        Ok(SetIPTablesResponse {
+            ..Default::default()
+        })
+
+        /*
         trace_rpc_call!(ctx, "set_iptables", req);
         is_allowed(&req).await?;
 
@@ -1269,6 +1362,7 @@ impl agent_ttrpc::AgentService for AgentService {
             data: output.stdout,
             ..Default::default()
         })
+        */
     }
 
     async fn list_interfaces(
@@ -1279,6 +1373,10 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "list_interfaces", req);
         is_allowed(&req).await?;
 
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let list = sandbox.rtnl.list_interfaces().await.map_ttrpc_err(|e| format!("Failed to list interfaces: {e:?}"))?;
+        /*
         let list = self
             .sandbox
             .lock()
@@ -1287,6 +1385,7 @@ impl agent_ttrpc::AgentService for AgentService {
             .list_interfaces()
             .await
             .map_ttrpc_err(|e| format!("Failed to list interfaces: {e:?}"))?;
+        */
 
         Ok(protocols::agent::Interfaces {
             Interfaces: list,
@@ -1299,6 +1398,12 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::ListRoutesRequest,
     ) -> ttrpc::Result<Routes> {
+        error!(sl(), "list_routes: not implemented yet");
+        Ok(protocols::agent::Routes {
+            ..Default::default()
+        })
+
+        /*
         trace_rpc_call!(ctx, "list_routes", req);
         is_allowed(&req).await?;
 
@@ -1315,6 +1420,7 @@ impl agent_ttrpc::AgentService for AgentService {
             Routes: list,
             ..Default::default()
         })
+        */
     }
 
     async fn create_sandbox(
@@ -1325,8 +1431,10 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "create_sandbox", req);
         is_allowed(&req).await?;
 
+        let logger = sl().new(o!("subsystem" => "rpc"));
+        let mut s = Sandbox::new(&logger).unwrap();
         {
-            let mut s = self.sandbox.lock().await;
+            // let mut s = self.sandbox.lock().await;
 
             let _ = fs::remove_dir_all(CONTAINER_BASE);
             let _ = fs::create_dir_all(CONTAINER_BASE);
@@ -1345,15 +1453,19 @@ impl agent_ttrpc::AgentService for AgentService {
             s.setup_shared_namespaces().await.map_ttrpc_err(same)?;
         }
 
-        let m = add_storages(sl(), req.storages.clone(), &self.sandbox, None)
+        warn!(sl(), "create_sandbox: skipping add_storages");
+        /*
+        // let m = add_storages(sl(), req.storages.clone(), &self.sandbox, None)
+        let m = add_storages(sl(), req.storages.clone(), &s, None)
             .await
             .map_ttrpc_err(same)?;
         self.sandbox.lock().await.mounts = m;
+        */
 
         // Scan guest hooks upon creating new sandbox and append
         // them to guest OCI spec before running containers.
         {
-            let mut s = self.sandbox.lock().await;
+            // let mut s = self.sandbox.lock().await;
             if !req.guest_hook_path.is_empty() {
                 let _ = s.add_hooks(&req.guest_hook_path).map_err(|e| {
                     error!(
@@ -1366,11 +1478,13 @@ impl agent_ttrpc::AgentService for AgentService {
 
         setup_guest_dns(sl(), &req.dns).map_ttrpc_err(same)?;
         {
-            let mut s = self.sandbox.lock().await;
+            // let mut s = self.sandbox.lock().await;
             for dns in req.dns {
                 s.network.set_dns(dns);
             }
         }
+
+        self.sandboxes.lock().await.insert(req.sandbox_id.clone(), s);
 
         Ok(Empty::new())
     }
@@ -1383,7 +1497,10 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "destroy_sandbox", req);
         is_allowed(&req).await?;
 
-        let mut sandbox = self.sandbox.lock().await;
+        // let mut sandbox = self.sandbox.lock().await;
+        let mut sandboxes = self.sandboxes.lock().await;
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+
         // destroy all containers, clean up, notify agent to exit etc.
         sandbox.destroy().await.map_ttrpc_err(same)?;
         // Close get_oom_event connection,
@@ -1408,6 +1525,9 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::AddARPNeighborsRequest,
     ) -> ttrpc::Result<Empty> {
+        error!(sl(), "add_arp_neighbors: not implemented yet");
+
+        /*
         trace_rpc_call!(ctx, "add_arp_neighbors", req);
         is_allowed(&req).await?;
 
@@ -1427,6 +1547,7 @@ impl agent_ttrpc::AgentService for AgentService {
             .add_arp_neighbors(neighs)
             .await
             .map_ttrpc_err(|e| format!("Failed to add ARP neighbours: {e:?}"))?;
+        */
 
         Ok(Empty::new())
     }
@@ -1436,11 +1557,14 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::OnlineCPUMemRequest,
     ) -> ttrpc::Result<Empty> {
+        error!(sl(), "online_cpu_mem: not implemented yet");
+        /*
         trace_rpc_call!(ctx, "online_cpu_mem", req);
         is_allowed(&req).await?;
         let sandbox = self.sandbox.lock().await;
 
         sandbox.online_cpu_memory(&req).map_ttrpc_err(same)?;
+        */
 
         Ok(Empty::new())
     }
@@ -1450,10 +1574,14 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::ReseedRandomDevRequest,
     ) -> ttrpc::Result<Empty> {
+        error!(sl(), "reseed_random_dev: not implemented yet");
+
+        /*
         trace_rpc_call!(ctx, "reseed_random_dev", req);
         is_allowed(&req).await?;
 
         random::reseed_rng(req.data.as_slice()).map_ttrpc_err(same)?;
+        */
 
         Ok(Empty::new())
     }
@@ -1546,10 +1674,15 @@ impl agent_ttrpc::AgentService for AgentService {
         req: protocols::agent::GetOOMEventRequest,
     ) -> ttrpc::Result<OOMEvent> {
         is_allowed(&req).await?;
-        let s = self.sandbox.lock().await;
+        
+        // let s = self.sandbox.lock().await;
+        let mut sandboxes = self.sandboxes.lock().await;
+        let s = sandboxes.get(&req.sandbox_id).unwrap();
+        
         let event_rx = &s.event_rx.clone();
         let mut event_rx = event_rx.lock().await;
-        drop(s);
+        // drop(s);
+        drop(sandboxes);
 
         let container_id = event_rx
             .recv()
@@ -1603,11 +1736,13 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::AddSwapRequest,
     ) -> ttrpc::Result<Empty> {
+        error!(sl(), "add_swap: not implemented yet");
+        /*
         trace_rpc_call!(ctx, "add_swap", req);
         is_allowed(&req).await?;
 
         do_add_swap(&self.sandbox, &req).await.map_ttrpc_err(same)?;
-
+        */
         Ok(Empty::new())
     }
 
@@ -1616,11 +1751,13 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::AddSwapPathRequest,
     ) -> ttrpc::Result<Empty> {
+        error!(sl(), "add_swap_path: not implemented yet");
+        /*
         trace_rpc_call!(ctx, "add_swap_path", req);
         is_allowed(&req).await?;
 
         do_add_swap_path(&req).await.map_ttrpc_err(same)?;
-
+        */
         Ok(Empty::new())
     }
 
@@ -1642,6 +1779,8 @@ impl agent_ttrpc::AgentService for AgentService {
         _ctx: &::ttrpc::r#async::TtrpcContext,
         config: protocols::agent::MemAgentMemcgConfig,
     ) -> ::ttrpc::Result<Empty> {
+        error!(sl(), "mem_agent_memcg_set: not implemented yet");
+        /*
         if let Some(ma) = &self.oma {
             ma.memcg_set_config_async(mem_agent_memcgconfig_to_memcg_optionconfig(&config))
                 .await
@@ -1658,6 +1797,7 @@ impl agent_ttrpc::AgentService for AgentService {
                 estr,
             )));
         }
+        */
         Ok(Empty::new())
     }
 
@@ -1666,6 +1806,8 @@ impl agent_ttrpc::AgentService for AgentService {
         _ctx: &::ttrpc::r#async::TtrpcContext,
         config: protocols::agent::MemAgentCompactConfig,
     ) -> ::ttrpc::Result<Empty> {
+        error!(sl(), "mem_agent_compact_set: not implemented yet");
+        /*
         if let Some(ma) = &self.oma {
             ma.compact_set_config_async(mem_agent_compactconfig_to_compact_optionconfig(&config))
                 .await
@@ -1682,6 +1824,7 @@ impl agent_ttrpc::AgentService for AgentService {
                 estr,
             )));
         }
+        */
         Ok(Empty::new())
     }
 }
@@ -1825,11 +1968,21 @@ pub async fn start(
     init_mode: bool,
     oma: Option<mem_agent::agent::MemAgent>,
 ) -> Result<TtrpcServer> {
+    warn!(sl(), "start: ignoring sandbox parameter");
+    
+    /*
     let agent_service = Box::new(AgentService {
         sandbox: s,
         init_mode,
         oma,
     });
+    */
+    let agent_service = Box::new(AgentService {
+        sandboxes: Arc::new(Mutex::new(BTreeMap::new())),
+        init_mode,
+        oma,
+    });
+
     let aservice = agent_ttrpc::create_agent_service(Arc::new(*agent_service));
 
     let health_service = Box::new(HealthService {});
