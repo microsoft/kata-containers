@@ -123,39 +123,34 @@ func (n *LinuxNetwork) addSingleEndpoint(ctx context.Context, s *Sandbox, netInf
 
 	// Check if interface is a physical interface. Do not create
 	// tap interface/bridge if it is.
-	isPhysical, err := isPhysicalIface(netInfo.Iface.Name)
-	if err != nil {
-		return nil, err
+	isPhysical := isPhysicalIface(netInfo.Link)
+	var err error
+	idx := len(n.eps)
+
+	// Avoid endpoint naming conflicts
+	// When creating a new endpoint, we check existing endpoint names and automatically adjust the naming of the new endpoint to ensure uniqueness.
+	lastIdx := -1
+	if len(n.eps) > 0 {
+		lastEndpoint := n.eps[len(n.eps)-1]
+		re := regexp.MustCompile("[0-9]+")
+		matchStr := re.FindString(lastEndpoint.Name())
+		n, err := strconv.ParseInt(matchStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		lastIdx = int(n)
+	}
+	if idx <= lastIdx {
+		idx = lastIdx + 1
 	}
 
 	if isPhysical {
-		if s.config.HypervisorConfig.ColdPlugVFIO == config.NoPort {
-			// When `cold_plug_vfio` is set to "no-port", the PhysicalEndpoint's VFIO device cannot be attached to the guest VM.
-			// Fail early to prevent the VF interface from being unbound and rebound to the VFIO driver.
-			return nil, fmt.Errorf("unable to add PhysicalEndpoint %s because cold_plug_vfio is disabled", netInfo.Iface.Name)
-		}
 		networkLogger().WithField("interface", netInfo.Iface.Name).Info("Physical network interface found")
-		endpoint, err = createPhysicalEndpoint(netInfo)
+		isFVIODisabled := (s.config.HypervisorConfig.ColdPlugVFIO == config.NoPort)
+		endpoint, err = createPhysicalEndpoint(idx, netInfo, isFVIODisabled, n.interworkingModel)
 	} else {
 		var socketPath string
-		idx := len(n.eps)
 
-		// Avoid endpoint naming conflicts
-		// When creating a new endpoint, we check existing endpoint names and automatically adjust the naming of the new endpoint to ensure uniqueness.
-		lastIdx := -1
-		if len(n.eps) > 0 {
-			lastEndpoint := n.eps[len(n.eps)-1]
-			re := regexp.MustCompile("[0-9]+")
-			matchStr := re.FindString(lastEndpoint.Name())
-			n, err := strconv.ParseInt(matchStr, 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			lastIdx = int(n)
-		}
-		if idx <= lastIdx {
-			idx = lastIdx + 1
-		}
 		// Check if this is a dummy interface which has a vhost-user socket associated with it
 		socketPath, err = vhostUserSocketPath(netInfo)
 		if err != nil {
@@ -240,7 +235,7 @@ func (n *LinuxNetwork) addSingleEndpoint(ctx context.Context, s *Sandbox, netInf
 }
 
 func (n *LinuxNetwork) removeSingleEndpoint(ctx context.Context, s *Sandbox, endpoint Endpoint, hotplug bool) error {
-	idx := len(n.eps)
+	var idx int = len(n.eps)
 	for i, val := range n.eps {
 		if val.HardwareAddr() == endpoint.HardwareAddr() {
 			idx = i
@@ -293,7 +288,7 @@ func (n *LinuxNetwork) endpointAlreadyAdded(netInfo *NetworkInfo) bool {
 		}
 		pair := ep.NetworkPair()
 		// Existing virtual endpoints
-		if pair != nil && (pair.Name == netInfo.Iface.Name || pair.TAPIface.Name == netInfo.Iface.Name || pair.VirtIface.Name == netInfo.Iface.Name) {
+		if pair != nil && (pair.TapInterface.Name == netInfo.Iface.Name || pair.TapInterface.TAPIface.Name == netInfo.Iface.Name || pair.VirtIface.Name == netInfo.Iface.Name) {
 			return true
 		}
 	}
@@ -654,6 +649,8 @@ func getLinkForEndpoint(endpoint Endpoint, netHandle *netlink.Handle) (netlink.L
 	var link netlink.Link
 
 	switch ep := endpoint.(type) {
+	case *PhysicalEndpoint:
+		link = &netlink.Device{}
 	case *VethEndpoint:
 		link = &netlink.Veth{}
 	case *MacvlanEndpoint:
@@ -676,6 +673,10 @@ func getLinkByName(netHandle *netlink.Handle, name string, expectedLink netlink.
 	}
 
 	switch expectedLink.Type() {
+	case (&netlink.Device{}).Type():
+		if l, ok := link.(*netlink.Device); ok {
+			return l, nil
+		}
 	case (&netlink.Tuntap{}).Type():
 		if l, ok := link.(*netlink.Tuntap); ok {
 			return l, nil
@@ -1299,7 +1300,7 @@ func addRxRateLimiter(endpoint Endpoint, maxRate uint64) error {
 	switch ep := endpoint.(type) {
 	case *VethEndpoint, *IPVlanEndpoint, *TuntapEndpoint, *MacvlanEndpoint:
 		netPair := endpoint.NetworkPair()
-		linkName = netPair.TAPIface.Name
+		linkName = netPair.TapInterface.TAPIface.Name
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
 	default:
@@ -1467,7 +1468,7 @@ func addTxRateLimiter(endpoint Endpoint, maxRate uint64) error {
 			}
 			return addHTBQdisc(link.Attrs().Index, maxRate)
 		case NetXConnectMacVtapModel, NetXConnectNoneModel:
-			linkName = netPair.TAPIface.Name
+			linkName = netPair.TapInterface.TAPIface.Name
 		default:
 			return fmt.Errorf("Unsupported inter-networking model %v for adding tx rate limiter", netPair.NetInterworkingModel)
 		}
@@ -1502,7 +1503,7 @@ func addTxRateLimiter(endpoint Endpoint, maxRate uint64) error {
 func removeHTBQdisc(linkName string) error {
 	link, err := netlink.LinkByName(linkName)
 	if err != nil {
-		return fmt.Errorf("get link %s by name failed: %v", linkName, err)
+		return fmt.Errorf("Get link %s by name failed: %v", linkName, err)
 	}
 
 	qdiscs, err := netlink.QdiscList(link)
@@ -1529,7 +1530,7 @@ func removeRxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 	switch ep := endpoint.(type) {
 	case *VethEndpoint, *IPVlanEndpoint, *TuntapEndpoint, *MacvlanEndpoint:
 		netPair := endpoint.NetworkPair()
-		linkName = netPair.TAPIface.Name
+		linkName = netPair.TapInterface.TAPIface.Name
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
 	default:
@@ -1560,7 +1561,7 @@ func removeTxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 			}
 			return nil
 		case NetXConnectMacVtapModel, NetXConnectNoneModel:
-			linkName = netPair.TAPIface.Name
+			linkName = netPair.TapInterface.TAPIface.Name
 		}
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
@@ -1571,7 +1572,7 @@ func removeTxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 	if err := doNetNS(networkNSPath, func(_ ns.NetNS) error {
 		link, err := netlink.LinkByName(linkName)
 		if err != nil {
-			return fmt.Errorf("get link %s by name failed: %v", linkName, err)
+			return fmt.Errorf("Get link %s by name failed: %v", linkName, err)
 		}
 
 		if err := removeRedirectTCFilter(link); err != nil {
@@ -1591,7 +1592,7 @@ func removeTxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 		// remove ifb interface
 		ifbLink, err := netlink.LinkByName("ifb0")
 		if err != nil {
-			return fmt.Errorf("get link %s by name failed: %v", linkName, err)
+			return fmt.Errorf("Get link %s by name failed: %v", linkName, err)
 		}
 
 		if err := netHandle.LinkSetDown(ifbLink); err != nil {
