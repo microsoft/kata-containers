@@ -51,6 +51,7 @@ pub struct Container {
     resource_manager: Arc<ResourceManager>,
     logger: slog::Logger,
     pub(crate) passfd_listener_addr: Option<(String, u32)>,
+    sandbox_id: String,
 }
 
 impl Container {
@@ -61,6 +62,7 @@ impl Container {
         agent: Arc<dyn Agent>,
         resource_manager: Arc<ResourceManager>,
         passfd_listener_addr: Option<(String, u32)>,
+        sandbox_id: &str,
     ) -> Result<Self> {
         let container_id = ContainerID::new(&config.container_id).context("new container id")?;
         let logger = sl!().new(o!("container_id" => config.container_id.clone()));
@@ -73,6 +75,7 @@ impl Container {
             config.stdout.clone(),
             config.stderr.clone(),
             config.terminal,
+            sandbox_id,
         );
         let linux_resources = spec
             .linux()
@@ -89,11 +92,13 @@ impl Container {
                 init_process,
                 logger.clone(),
                 linux_resources,
+                sandbox_id,
             ))),
             agent,
             resource_manager,
             logger,
             passfd_listener_addr,
+            sandbox_id: sandbox_id.to_string(),
         })
     }
 
@@ -279,6 +284,7 @@ impl Container {
                 .passfd_io
                 .as_ref()
                 .and_then(|io| io.stderr_port),
+            sandbox_id: self.sandbox_id.clone(),
             ..Default::default()
         };
 
@@ -475,6 +481,7 @@ impl Container {
             stdout,
             stderr,
             terminal,
+            &self.sandbox_id,
         );
         let exec = Exec {
             process,
@@ -591,7 +598,11 @@ impl Container {
     pub async fn stats(&self) -> Result<Option<agent::StatsContainerResponse>> {
         let stats_resp = self
             .agent
-            .stats_container(self.container_id.clone().into())
+            .stats_container(agent::StatsContainerRequest {
+                container_id: self.container_id.container_id.clone(),
+                sandbox_id: self.sandbox_id.clone(),
+            }
+            )
             .await
             .context("agent stats container")?;
         Ok(Some(stats_resp))

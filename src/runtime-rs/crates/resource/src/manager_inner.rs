@@ -253,7 +253,7 @@ impl ResourceManagerInner {
             // update interface
             info!(sl!(), "update interface {:?}", i);
             self.agent
-                .update_interface(agent::UpdateInterfaceRequest { interface: Some(i) })
+                .update_interface(agent::UpdateInterfaceRequest { interface: Some(i), sandbox_id: self.sid.clone() })
                 .await
                 .context("update interface")?;
         }
@@ -289,6 +289,7 @@ impl ResourceManagerInner {
             self.agent
                 .update_routes(agent::UpdateRoutesRequest {
                     route: Some(agent::Routes { routes }),
+                    sandbox_id: self.sid.clone(),
                 })
                 .await
                 .context("update routes")?;

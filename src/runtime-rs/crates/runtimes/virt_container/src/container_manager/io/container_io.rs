@@ -29,13 +29,13 @@ pub struct ContainerIo {
 }
 
 impl ContainerIo {
-    pub fn new(agent: Arc<dyn Agent>, process: ContainerProcess) -> Self {
+    pub fn new(agent: Arc<dyn Agent>, process: ContainerProcess, sandbox_id: &str) -> Self {
         let info = Arc::new(ContainerIoInfo { agent, process });
 
         Self {
-            stdin: Box::new(ContainerIoWrite::new(info.clone())),
-            stdout: Box::new(ContainerIoRead::new(info.clone(), true)),
-            stderr: Box::new(ContainerIoRead::new(info, false)),
+            stdin: Box::new(ContainerIoWrite::new(info.clone(), sandbox_id)),
+            stdout: Box::new(ContainerIoRead::new(info.clone(), true, sandbox_id)),
+            stderr: Box::new(ContainerIoRead::new(info, false, sandbox_id)),
         }
     }
 }
@@ -46,14 +46,16 @@ struct ContainerIoWrite<'inner> {
         Option<Pin<Box<dyn Future<Output = Result<agent::WriteStreamResponse>> + Send + 'inner>>>,
     shutdown_future:
         Option<Pin<Box<dyn Future<Output = Result<agent::WriteStreamResponse>> + Send + 'inner>>>,
+    pub sandbox_id: String,
 }
 
 impl<'inner> ContainerIoWrite<'inner> {
-    pub fn new(info: Arc<ContainerIoInfo>) -> Self {
+    pub fn new(info: Arc<ContainerIoInfo>, sandbox_id: &str) -> Self {
         Self {
             info,
             write_future: Default::default(),
             shutdown_future: Default::default(),
+            sandbox_id: sandbox_id.to_string(),
         }
     }
 
@@ -67,6 +69,7 @@ impl<'inner> ContainerIoWrite<'inner> {
             let req = agent::WriteStreamRequest {
                 process_id: self.info.process.clone().into(),
                 data: buf.to_vec(),
+                sandbox_id: self.sandbox_id.clone(),
             };
             write_future = Some(Box::pin(self.info.agent.write_stdin(req)));
         }
@@ -91,6 +94,7 @@ impl<'inner> ContainerIoWrite<'inner> {
             let req = agent::WriteStreamRequest {
                 process_id: self.info.process.clone().into(),
                 data: Vec::with_capacity(0),
+                sandbox_id: self.sandbox_id.clone(),
             };
             shutdown_future = Some(Box::pin(self.info.agent.write_stdin(req)));
         }
@@ -142,14 +146,16 @@ struct ContainerIoRead<'inner> {
     pub info: Arc<ContainerIoInfo>,
     is_stdout: bool,
     read_future: Option<Pin<Box<dyn Future<Output = ResultBuffer> + Send + 'inner>>>,
+    pub sandbox_id: String,
 }
 
 impl<'inner> ContainerIoRead<'inner> {
-    pub fn new(info: Arc<ContainerIoInfo>, is_stdout: bool) -> Self {
+    pub fn new(info: Arc<ContainerIoInfo>, is_stdout: bool, sandbox_id: &str) -> Self {
         Self {
             info,
             is_stdout,
             read_future: Default::default(),
+            sandbox_id: sandbox_id.to_string(),
         }
     }
     fn poll_read_inner(
@@ -162,6 +168,7 @@ impl<'inner> ContainerIoRead<'inner> {
             let req = agent::ReadStreamRequest {
                 process_id: self.info.process.clone().into(),
                 len: buf.remaining() as u32,
+                sandbox_id: self.sandbox_id.clone(),
             };
             read_future = if self.is_stdout {
                 Some(Box::pin(self.info.agent.read_stdout(req)))

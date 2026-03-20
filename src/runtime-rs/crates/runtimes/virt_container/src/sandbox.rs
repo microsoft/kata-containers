@@ -724,11 +724,13 @@ impl Sandbox for VirtSandbox {
 
         let agent = self.agent.clone();
         let sender = self.msg_sender.clone();
+        let sandbox_id = self.sid.clone();
+
         info!(sl!(), "oom watcher start");
         tokio::spawn(async move {
             loop {
                 match agent
-                    .get_oom_event(agent::Empty::new())
+                    .get_oom_event(agent::GetOOMEventRequest { sandbox_id: sandbox_id.clone() })
                     .await
                     .context("get oom event")
                 {
@@ -998,6 +1000,10 @@ impl Sandbox for VirtSandbox {
             .context("sandbox: failed to set policy")?;
 
         Ok(())
+    }
+
+    async fn get_sandbox_id(&self) -> String {
+        self.get_sid()
     }
 }
 

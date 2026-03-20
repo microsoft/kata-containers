@@ -77,6 +77,8 @@ pub struct Process {
 
     // io streams using vsock fd passthrough feature
     pub passfd_io: Option<PassfdIo>,
+
+    pub sandbox_id: String,
 }
 
 fn open_fifo(path: &str, is_read: bool, is_write: bool) -> Result<File> {
@@ -106,6 +108,7 @@ impl Process {
         stdout: Option<String>,
         stderr: Option<String>,
         terminal: bool,
+        sandbox_id: &str,
     ) -> Process {
         let (sender, receiver) = watch::channel(false);
 
@@ -128,6 +131,7 @@ impl Process {
             exit_watcher_rx: Some(receiver),
             exit_watcher_tx: Some(sender),
             passfd_io: None,
+            sandbox_id: sandbox_id.to_string(),
         }
     }
 
@@ -185,10 +189,12 @@ impl Process {
         let exit_status = self.exit_status.clone();
         let exit_notifier = self.exit_watcher_tx.take();
         let status = self.status.clone();
+        let sandbox_id = self.sandbox_id.clone();
 
         tokio::spawn(async move {
             let req = agent::WaitProcessRequest {
                 process_id: process.clone().into(),
+                sandbox_id,
             };
 
             info!(logger, "begin passfd io wait process");
@@ -354,6 +360,7 @@ impl Process {
         let exit_status = self.exit_status.clone();
         let exit_notifier = self.exit_watcher_tx.take();
         let status = self.status.clone();
+        let sandbox_id = self.sandbox_id.clone();
 
         tokio::spawn(async move {
             // wait on all of the container's io stream terminated
@@ -363,6 +370,7 @@ impl Process {
 
             let req = agent::WaitProcessRequest {
                 process_id: process.clone().into(),
+                sandbox_id,
             };
 
             info!(logger, "begin wait process");

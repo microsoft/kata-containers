@@ -484,9 +484,10 @@ impl RuntimeHandlerManager {
 
             let bundle = container_config.bundle.clone();
             let container_id = container_config.container_id.clone();
+            let sandbox_id = instance.sandbox.get_sandbox_id().await;
             let shim_pid = instance
                 .container_manager
-                .create_container(container_config, spec)
+                .create_container(container_config, spec, &sandbox_id)
                 .await
                 .context("create container")?;
 

@@ -57,4 +57,6 @@ pub trait Sandbox: Send + Sync {
 
     // set agent policy
     async fn set_policy(&self, policy: &str) -> Result<()>;
+
+    async fn get_sandbox_id(&self) -> String;
 }

@@ -34,6 +34,7 @@ pub struct ContainerInner {
     pub(crate) rootfs: Vec<Arc<dyn Rootfs>>,
     pub(crate) volumes: Vec<Arc<dyn Volume>>,
     pub(crate) linux_resources: Option<LinuxResources>,
+    sandbox_id: String,
 }
 
 impl ContainerInner {
@@ -42,6 +43,7 @@ impl ContainerInner {
         init_process: Process,
         logger: slog::Logger,
         linux_resources: Option<LinuxResources>,
+        sandbox_id: &str,
     ) -> Self {
         Self {
             agent,
@@ -51,6 +53,7 @@ impl ContainerInner {
             rootfs: vec![],
             volumes: vec![],
             linux_resources,
+            sandbox_id: sandbox_id.to_string(),
         }
     }
 
@@ -98,6 +101,7 @@ impl ContainerInner {
                     .passfd_io
                     .as_ref()
                     .and_then(|io| io.stderr_port),
+                sandbox_id: self.sandbox_id.clone(),
             })
             .await
             .context("exec process")?;
@@ -120,6 +124,7 @@ impl ContainerInner {
                 process_id: process.clone().into(),
                 row: height,
                 column: width,
+                sandbox_id: self.sandbox_id.clone(),
             })
             .await?;
         Ok(())
@@ -144,8 +149,9 @@ impl ContainerInner {
             .context("check state")?;
 
         self.agent
-            .start_container(agent::ContainerID {
+            .start_container(agent::StartContainerRequest {
                 container_id: cid.container_id.clone(),
+                sandbox_id: self.sandbox_id.clone(),
             })
             .await
             .context("start container")?;
@@ -191,6 +197,7 @@ impl ContainerInner {
         info!(self.logger, "container terminated");
         let remove_request = agent::RemoveContainerRequest {
             container_id: cid.to_string(),
+            sandbox_id: self.sandbox_id.clone(),
             ..Default::default()
         };
         self.agent
@@ -286,7 +293,7 @@ impl ContainerInner {
         };
 
         self.agent
-            .signal_process(agent::SignalProcessRequest { process_id, signal })
+            .signal_process(agent::SignalProcessRequest { process_id, signal, sandbox_id: self.sandbox_id.clone() })
             .await
             .map_err(convert_agent_error)?;
 
@@ -294,7 +301,7 @@ impl ContainerInner {
     }
 
     pub async fn new_container_io(&self, process: &ContainerProcess) -> Result<ContainerIo> {
-        Ok(ContainerIo::new(self.agent.clone(), process.clone()))
+        Ok(ContainerIo::new(self.agent.clone(), process.clone(), &self.sandbox_id))
     }
 
     pub async fn close_io(&mut self, process: &ContainerProcess) -> Result<()> {

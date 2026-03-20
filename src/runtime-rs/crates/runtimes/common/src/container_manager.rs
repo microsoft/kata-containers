@@ -16,7 +16,7 @@ use oci_spec::runtime as oci;
 #[async_trait]
 pub trait ContainerManager: Send + Sync {
     // container lifecycle
-    async fn create_container(&self, config: ContainerConfig, spec: oci::Spec) -> Result<PID>;
+    async fn create_container(&self, config: ContainerConfig, spec: oci::Spec, sandbox_id: &str) -> Result<PID>;
     async fn pause_container(&self, container_id: &ContainerID) -> Result<()>;
     async fn resume_container(&self, container_id: &ContainerID) -> Result<()>;
     async fn stats_container(&self, container_id: &ContainerID) -> Result<StatsInfo>;

@@ -102,6 +102,7 @@ pub struct ContainerProcess {
     pub container_id: ContainerID,
     pub exec_id: String,
     pub process_type: ProcessType,
+    // pub sandbox_id: String,
 }
 
 impl fmt::Display for ContainerProcess {
@@ -111,7 +112,7 @@ impl fmt::Display for ContainerProcess {
 }
 
 impl ContainerProcess {
-    pub fn new(container_id: &str, exec_id: &str) -> Result<Self> {
+    pub fn new(container_id: &str, exec_id: &str/*, sandbox_id: &str*/) -> Result<Self> {
         let (exec_id, process_type) = if exec_id.is_empty() || container_id == exec_id {
             ("".to_string(), ProcessType::Container)
         } else {
@@ -122,6 +123,7 @@ impl ContainerProcess {
             container_id: ContainerID::new(container_id)?,
             exec_id,
             process_type,
+            //sandbox_id: sandbox_id.to_string(),
         })
     }
 

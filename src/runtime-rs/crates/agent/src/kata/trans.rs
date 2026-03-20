@@ -27,6 +27,8 @@ use crate::{
         TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
         VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
         WriteStreamRequest,
+        ListInterfacesRequest, DestroySandboxRequest, GetOOMEventRequest,
+        StartContainerRequest, StatsContainerRequest,
     },
     GetGuestDetailsRequest, OomEventResponse, SetPolicyRequest, WaitProcessResponse,
     WriteStreamResponse,
@@ -293,24 +295,27 @@ impl From<RemoveContainerRequest> for agent::RemoveContainerRequest {
         Self {
             container_id: from.container_id,
             timeout: from.timeout,
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
 }
 
-impl From<ContainerID> for agent::StartContainerRequest {
-    fn from(from: ContainerID) -> Self {
+impl From<StartContainerRequest> for agent::StartContainerRequest {
+    fn from(from: StartContainerRequest) -> Self {
         Self {
             container_id: from.container_id,
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
 }
 
-impl From<ContainerID> for agent::StatsContainerRequest {
-    fn from(from: ContainerID) -> Self {
+impl From<StatsContainerRequest> for agent::StatsContainerRequest {
+    fn from(from: StatsContainerRequest) -> Self {
         Self {
             container_id: from.container_id,
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
@@ -340,6 +345,7 @@ impl From<SignalProcessRequest> for agent::SignalProcessRequest {
             container_id: from.process_id.container_id(),
             exec_id: from.process_id.exec_id(),
             signal: from.signal,
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
@@ -350,6 +356,7 @@ impl From<WaitProcessRequest> for agent::WaitProcessRequest {
         Self {
             container_id: from.process_id.container_id(),
             exec_id: from.process_id.exec_id(),
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
@@ -371,6 +378,7 @@ impl From<WriteStreamRequest> for agent::WriteStreamRequest {
             container_id: from.process_id.container_id(),
             exec_id: from.process_id.exec_id(),
             data: from.data,
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
@@ -427,6 +435,7 @@ impl From<ExecProcessRequest> for agent::ExecProcessRequest {
             stdin_port: from.stdin_port.unwrap_or_default(),
             stdout_port: from.stdout_port.unwrap_or_default(),
             stderr_port: from.stderr_port.unwrap_or_default(),
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
@@ -574,6 +583,7 @@ impl From<ReadStreamRequest> for agent::ReadStreamRequest {
         Self {
             container_id: from.process_id.container_id(),
             exec_id: from.process_id.exec_id(),
+            sandbox_id: from.sandbox_id.clone(),
             len: from.len,
             ..Default::default()
         }
@@ -603,6 +613,7 @@ impl From<TtyWinResizeRequest> for agent::TtyWinResizeRequest {
             exec_id: from.process_id.exec_id(),
             row: from.row,
             column: from.column,
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
@@ -612,14 +623,16 @@ impl From<UpdateInterfaceRequest> for agent::UpdateInterfaceRequest {
     fn from(from: UpdateInterfaceRequest) -> Self {
         Self {
             interface: from_option(from.interface),
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
 }
 
-impl From<Empty> for agent::ListInterfacesRequest {
-    fn from(_: Empty) -> Self {
+impl From<ListInterfacesRequest> for agent::ListInterfacesRequest {
+    fn from(from: ListInterfacesRequest) -> Self {
         Self {
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
@@ -629,6 +642,7 @@ impl From<UpdateRoutesRequest> for agent::UpdateRoutesRequest {
     fn from(from: UpdateRoutesRequest) -> Self {
         Self {
             routes: from_option(from.route),
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
@@ -680,7 +694,7 @@ impl From<CreateSandboxRequest> for agent::CreateSandboxRequest {
             dns: trans_vec(from.dns),
             storages: trans_vec(from.storages),
             sandbox_pidns: from.sandbox_pidns,
-            sandbox_id: from.sandbox_id,
+            sandbox_id: from.sandbox_id.clone(),
             guest_hook_path: from.guest_hook_path,
             kernel_modules: trans_vec(from.kernel_modules),
             ..Default::default()
@@ -688,9 +702,10 @@ impl From<CreateSandboxRequest> for agent::CreateSandboxRequest {
     }
 }
 
-impl From<Empty> for agent::DestroySandboxRequest {
-    fn from(_: Empty) -> Self {
+impl From<DestroySandboxRequest> for agent::DestroySandboxRequest {
+    fn from(from: DestroySandboxRequest) -> Self {
         Self {
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
@@ -809,9 +824,10 @@ impl From<Empty> for agent::GetMetricsRequest {
     }
 }
 
-impl From<Empty> for agent::GetOOMEventRequest {
-    fn from(_: Empty) -> Self {
+impl From<GetOOMEventRequest> for agent::GetOOMEventRequest {
+    fn from(from: GetOOMEventRequest) -> Self {
         Self {
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }

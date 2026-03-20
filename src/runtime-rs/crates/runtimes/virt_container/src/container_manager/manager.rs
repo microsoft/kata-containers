@@ -80,7 +80,7 @@ impl VirtContainerManager {
 #[async_trait]
 impl ContainerManager for VirtContainerManager {
     #[instrument]
-    async fn create_container(&self, config: ContainerConfig, spec: oci::Spec) -> Result<PID> {
+    async fn create_container(&self, config: ContainerConfig, spec: oci::Spec, sandbox_id: &str) -> Result<PID> {
         let mut container = Container::new(
             self.pid,
             config.clone(),
@@ -88,6 +88,7 @@ impl ContainerManager for VirtContainerManager {
             self.agent.clone(),
             self.resource_manager.clone(),
             self.hypervisor.get_passfd_listener_addr().await.ok(),
+            sandbox_id,
         )
         .await
         .context("new container")?;

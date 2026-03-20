@@ -135,6 +135,7 @@ pub struct CreateContainerRequest {
     pub stdin_port: Option<u32>,
     pub stdout_port: Option<u32>,
     pub stderr_port: Option<u32>,
+    pub sandbox_id: String,
 }
 
 #[derive(PartialEq, Clone, Default)]
@@ -177,12 +178,14 @@ impl ContainerProcessID {
 pub struct RemoveContainerRequest {
     pub container_id: String,
     pub timeout: u32,
+    pub sandbox_id: String,
 }
 
 impl RemoveContainerRequest {
-    pub fn new(id: &str, timeout: u32) -> Self {
+    pub fn new(id: &str, sandbox_id: &str, timeout: u32) -> Self {
         Self {
             container_id: id.to_string(),
+            sandbox_id: sandbox_id.to_string(),
             timeout,
         }
     }
@@ -192,6 +195,7 @@ impl std::default::Default for RemoveContainerRequest {
     fn default() -> Self {
         Self {
             container_id: "".to_string(),
+            sandbox_id: "".to_string(),
             timeout: DEFAULT_REMOVE_CONTAINER_REQUEST_TIMEOUT,
         }
     }
@@ -201,11 +205,13 @@ impl std::default::Default for RemoveContainerRequest {
 pub struct SignalProcessRequest {
     pub process_id: ContainerProcessID,
     pub signal: u32,
+    pub sandbox_id: String,
 }
 
 #[derive(PartialEq, Clone, Default)]
 pub struct WaitProcessRequest {
     pub process_id: ContainerProcessID,
+    pub sandbox_id: String,
 }
 
 #[derive(PartialEq, Clone, Default)]
@@ -247,6 +253,7 @@ pub struct SetIPTablesResponse {
 pub struct WriteStreamRequest {
     pub process_id: ContainerProcessID,
     pub data: Vec<u8>,
+    pub sandbox_id: String,
 }
 
 #[derive(PartialEq, Clone, Default)]
@@ -262,6 +269,7 @@ pub struct ExecProcessRequest {
     pub stdin_port: Option<u32>,
     pub stdout_port: Option<u32>,
     pub stderr_port: Option<u32>,
+    pub sandbox_id: String,
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
@@ -380,6 +388,7 @@ pub struct WaitProcessResponse {
 pub struct ReadStreamRequest {
     pub process_id: ContainerProcessID,
     pub len: u32,
+    pub sandbox_id: String,
 }
 
 #[derive(PartialEq, Clone, Default)]
@@ -397,16 +406,19 @@ pub struct TtyWinResizeRequest {
     pub process_id: ContainerProcessID,
     pub row: u32,
     pub column: u32,
+    pub sandbox_id: String,
 }
 
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct UpdateInterfaceRequest {
     pub interface: Option<Interface>,
+    pub sandbox_id: String,
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
 pub struct UpdateRoutesRequest {
     pub route: Option<Routes>,
+    pub sandbox_id: String,
 }
 
 #[derive(Deserialize, PartialEq, Clone, Default, Debug)]
@@ -618,6 +630,35 @@ pub struct AddSwapPathRequest {
 #[derive(PartialEq, Clone, Default, Debug)]
 pub struct SetPolicyRequest {
     pub policy: String,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct ListInterfacesRequest {
+    pub container_id: String,
+    pub sandbox_id: String,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct DestroySandboxRequest {
+    pub container_id: String,
+    pub sandbox_id: String,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct GetOOMEventRequest {
+    pub sandbox_id: String,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct StartContainerRequest {
+    pub container_id: String,
+    pub sandbox_id: String,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct StatsContainerRequest {
+    pub container_id: String,
+    pub sandbox_id: String,
 }
 
 #[cfg(test)]
