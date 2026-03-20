@@ -3,6 +3,15 @@
 version = 4
 
 [[package]]
+name = "aarch64defs"
+version = "0.0.0"
+dependencies = [
+ "bitfield-struct",
+ "open_enum",
+ "zerocopy",
+]
+
+[[package]]
 name = "actix-macros"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -673,9 +682,8 @@ dependencies = [
 
 [[package]]
 name = "bitvec"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c"
+version = "1.1.0"
+source = "git+https://github.com/smalis-msft/bitvec?branch=set-aliased-previous-val#d0aea0cf9e71323f41f1732634edb3aff2bf70f2"
 dependencies = [
  "funty",
  "radium",
@@ -768,6 +776,10 @@ dependencies = [
  "regex-automata",
  "serde",
 ]
+
+[[package]]
+name = "build_rs_guest_arch"
+version = "0.0.0"
 
 [[package]]
 name = "bumpalo"
@@ -2183,6 +2195,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs-err"
+version = "3.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73fde052dbfc920003cfd2c8e2c6e6d4cc7c1091538c3a24226cec0665ab08c0"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "fuchsia-cprng"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2459,6 +2480,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "guestmem"
+version = "0.0.0"
+dependencies = [
+ "inspect",
+ "pal_event",
+ "sparse_mmap",
+ "thiserror 2.0.12",
+ "trycopy",
+ "zerocopy",
+]
+
+[[package]]
 name = "h2"
 version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2549,6 +2582,10 @@ checksum = "e7f66481bfee273957b1f20485a4ff3362987f85b2c236580d81b4eb7a326429"
 dependencies = [
  "http 0.2.12",
 ]
+
+[[package]]
+name = "headervec"
+version = "0.0.0"
 
 [[package]]
 name = "heck"
@@ -2917,6 +2954,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "iced-x86"
+version = "1.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c447cff8c7f384a7d4f741cfcff32f75f3ad02b406432e8d6c878d56b1edf6b"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "icu_collections"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3243,6 +3289,47 @@ checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
 dependencies = [
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "jiff"
+version = "0.2.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a3546dc96b6d42c5f24902af9e2538e82e39ad350b0c766eb3fbf2d8f3d8359"
+dependencies = [
+ "jiff-static",
+ "jiff-tzdb-platform",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "jiff-static"
+version = "0.2.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a8c8b344124222efd714b73bb41f8b5120b27a7cc1c75593a6ff768d9d05aa4"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "jiff-tzdb"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c900ef84826f1338a557697dc8fc601df9ca9af4ac137c7fb61d4c6f2dfd3076"
+
+[[package]]
+name = "jiff-tzdb-platform"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
+dependencies = [
+ "jiff-tzdb",
 ]
 
 [[package]]
@@ -3776,6 +3863,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "landlock"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49fefd6652c57d68aaa32544a4c0e642929725bdc1fd929367cdeb673ab81088"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3903,6 +4001,10 @@ name = "litemap"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
+
+[[package]]
+name = "loan_cell"
+version = "0.0.0"
 
 [[package]]
 name = "lock_api"
@@ -4095,6 +4197,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29e871a9861f3664f18b7e04e9301d4edd55090c2dadb4b1c602e26ab32b1f5b"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "mshv-bindings"
+version = "0.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cbfd4f32d185152003679339751839da77c17e18fa8882a11051a236f841426"
+dependencies = [
+ "libc",
+ "num_enum",
+ "serde",
+ "serde_derive",
+ "vmm-sys-util 0.15.0",
+ "zerocopy",
+]
+
+[[package]]
+name = "mshv-ioctls"
+version = "0.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f035616abe1e4cbc026a1a8094ff8d3900f5063fe6608309098bc745926fdfd8"
+dependencies = [
+ "libc",
+ "mshv-bindings",
+ "thiserror 2.0.12",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -4489,6 +4617,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_enum"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d0bca838442ec211fa11de3a8b0e0e8f3a4522575b5c4c06ed722e005036f26"
+dependencies = [
+ "num_enum_derive",
+ "rustversion",
+]
+
+[[package]]
+name = "num_enum_derive"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "nydus-api"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4703,6 +4852,10 @@ name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
+
+[[package]]
+name = "open_enum"
+version = "0.0.0"
 
 [[package]]
 name = "openssl"
@@ -4954,6 +5107,75 @@ checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "pal"
+version = "0.0.0"
+dependencies = [
+ "caps",
+ "fs-err",
+ "getrandom 0.3.3",
+ "headervec",
+ "landlock",
+ "libc",
+ "ntapi",
+ "pal_event",
+ "seccompiler",
+ "socket2 0.6.1",
+ "thiserror 2.0.12",
+ "tracing",
+ "widestring",
+ "winapi",
+ "windows 0.62.2",
+ "windows-result 0.4.1",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "pal_async"
+version = "0.0.0"
+dependencies = [
+ "async-channel 2.5.0",
+ "async-task",
+ "cfg-if 1.0.0",
+ "futures 0.3.32",
+ "getrandom 0.3.3",
+ "headervec",
+ "libc",
+ "loan_cell",
+ "once_cell",
+ "pal",
+ "pal_async_test",
+ "pal_event",
+ "parking_lot",
+ "slab",
+ "smallbox",
+ "socket2 0.6.1",
+ "unicycle",
+ "unix_socket",
+ "windows-result 0.4.1",
+ "windows-sys 0.61.2",
+ "zerocopy",
+]
+
+[[package]]
+name = "pal_async_test"
+version = "0.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "pal_event"
+version = "0.0.0"
+dependencies = [
+ "getrandom 0.3.3",
+ "libc",
+ "mesh_protobuf",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5262,6 +5484,21 @@ dependencies = [
  "pin-project-lite",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "portable-atomic"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
+
+[[package]]
+name = "portable-atomic-util"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "091397be61a01d4be58e7841595bd4bfedb15f1cd54977d79b8271e94ed799a3"
+dependencies = [
+ "portable-atomic",
 ]
 
 [[package]]
@@ -6682,6 +6919,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe_intrinsics"
+version = "0.0.0"
+dependencies = [
+ "cfg-if 1.0.0",
+]
+
+[[package]]
+name = "safeatomic"
+version = "0.0.0"
+dependencies = [
+ "zerocopy",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7283,6 +7534,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "smallbox"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aca054fd9f8c2ebe8557a2433f307e038c0716124efd045daa0388afa5172189"
+
+[[package]]
 name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7534,6 +7791,30 @@ dependencies = [
  "filetime",
  "libc",
  "xattr 1.6.1",
+]
+
+[[package]]
+name = "tdisp"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bitfield-struct",
+ "parking_lot",
+ "prost 0.11.9",
+ "static_assertions",
+ "tdisp_proto",
+ "tracing",
+ "zerocopy",
+]
+
+[[package]]
+name = "tdisp_proto"
+version = "0.0.0"
+dependencies = [
+ "inspect",
+ "prost 0.11.9",
+ "prost-build 0.11.9",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -8088,6 +8369,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
+name = "tracelimit"
+version = "0.0.0"
+dependencies = [
+ "parking_lot",
+ "tracing",
+]
+
+[[package]]
 name = "tracing"
 version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8189,6 +8478,16 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "trycopy"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "thiserror 2.0.12",
+ "windows-sys 0.61.2",
+ "zerocopy",
+]
 
 [[package]]
 name = "ttrpc"
@@ -8294,6 +8593,33 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unicycle"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53ccbaf192caef9a758b9cd7ea2e5d98ffd0e40eb62e5e3fbaa50049df8b841f"
+dependencies = [
+ "futures-core",
+ "lock_api",
+ "parking_lot",
+ "uniset",
+]
+
+[[package]]
+name = "uniset"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40789245bbff5f31eb773c9ac4ee5c4e15eab9640d975e124d6ce4c34a6410d7"
+
+[[package]]
+name = "unix_socket"
+version = "0.0.0"
+dependencies = [
+ "getrandom 0.3.3",
+ "socket2 0.6.1",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "unix_socket2"
@@ -8449,6 +8775,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "virt"
+version = "0.0.0"
+dependencies = [
+ "aarch64defs",
+ "anyhow",
+ "build_rs_guest_arch",
+ "guestmem",
+ "hvdef",
+ "inspect",
+ "memory_range",
+ "mesh_protobuf",
+ "pal_event",
+ "parking_lot",
+ "pci_core",
+ "slab",
+ "thiserror 2.0.12",
+ "tracelimit",
+ "tracing",
+ "vm_topology",
+ "vmcore",
+ "x86defs",
+ "zerocopy",
+]
+
+[[package]]
 name = "virt_container"
 version = "0.1.0"
 dependencies = [
@@ -8480,6 +8831,54 @@ dependencies = [
  "tracing",
  "url",
  "uuid 1.23.1",
+]
+
+[[package]]
+name = "virt_mshv"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "arrayvec",
+ "build_rs_guest_arch",
+ "guestmem",
+ "hv1_emulator",
+ "hv1_hypercall",
+ "hvdef",
+ "inspect",
+ "libc",
+ "mshv-bindings",
+ "mshv-ioctls",
+ "pal",
+ "pal_event",
+ "parking_lot",
+ "pci_core",
+ "signal-hook",
+ "static_assertions",
+ "thiserror 2.0.12",
+ "tracelimit",
+ "tracing",
+ "virt",
+ "virt_support_x86emu",
+ "vmcore",
+ "x86defs",
+ "x86emu",
+ "zerocopy",
+]
+
+[[package]]
+name = "virt_support_x86emu"
+version = "0.0.0"
+dependencies = [
+ "guestmem",
+ "hvdef",
+ "thiserror 2.0.12",
+ "tracelimit",
+ "tracing",
+ "virt",
+ "vm_topology",
+ "x86defs",
+ "x86emu",
+ "zerocopy",
 ]
 
 [[package]]
@@ -8524,6 +8923,56 @@ name = "vm-superio"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69c376a9b84afdf97bddd2628096cf3554208b2a676cf06b4532e0f433a54e02"
+
+[[package]]
+name = "vm_resource"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "inspect",
+ "linkme",
+ "mesh",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "vm_topology"
+version = "0.0.0"
+dependencies = [
+ "aarch64defs",
+ "build_rs_guest_arch",
+ "cfg-if 1.0.0",
+ "inspect",
+ "memory_range",
+ "safe_intrinsics",
+ "thiserror 2.0.12",
+ "x86defs",
+]
+
+[[package]]
+name = "vmcore"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures 0.3.32",
+ "futures-concurrency",
+ "hvdef",
+ "inspect",
+ "jiff",
+ "linkme",
+ "mesh",
+ "pal_async",
+ "pal_event",
+ "parking_lot",
+ "save_restore_derive",
+ "slab",
+ "thiserror 2.0.12",
+ "tracelimit",
+ "tracing",
+ "vm_resource",
+ "zerocopy",
+]
 
 [[package]]
 name = "vmm-sys-util"
@@ -8821,6 +9270,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "widestring"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8857,8 +9312,29 @@ version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12342cb4d8e3b046f3d80effd474a7a02447231330ef77d71daa6fbc40681143"
 dependencies = [
- "windows-core",
+ "windows-core 0.57.0",
  "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows"
+version = "0.62.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
+dependencies = [
+ "windows-collections",
+ "windows-core 0.62.2",
+ "windows-future",
+ "windows-numerics",
+]
+
+[[package]]
+name = "windows-collections"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b2d95af1a8a14a3c7367e1ed4fc9c20e0a26e79551b1454d72583c97cc6610"
+dependencies = [
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -8874,6 +9350,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-core"
+version = "0.62.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
+dependencies = [
+ "windows-implement 0.60.2",
+ "windows-interface 0.59.3",
+ "windows-link",
+ "windows-result 0.4.1",
+ "windows-strings",
+]
+
+[[package]]
+name = "windows-future"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb"
+dependencies = [
+ "windows-core 0.62.2",
+ "windows-link",
+ "windows-threading",
+]
+
+[[package]]
 name = "windows-implement"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8885,6 +9385,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-implement"
+version = "0.60.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "windows-interface"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8893,6 +9404,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "windows-interface"
+version = "0.59.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -9030,6 +9552,15 @@ dependencies = [
  "windows_x86_64_gnu 0.53.1",
  "windows_x86_64_gnullvm 0.53.1",
  "windows_x86_64_msvc 0.53.1",
+]
+
+[[package]]
+name = "windows-threading"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37"
+dependencies = [
+ "windows-link",
 ]
 
 [[package]]
@@ -9310,6 +9841,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
 dependencies = [
  "tap",
+]
+
+[[package]]
+name = "x86defs"
+version = "0.0.0"
+dependencies = [
+ "bitfield-struct",
+ "open_enum",
+ "static_assertions",
+ "zerocopy",
+]
+
+[[package]]
+name = "x86emu"
+version = "0.0.0"
+dependencies = [
+ "iced-x86",
+ "thiserror 2.0.12",
+ "tracing",
+ "x86defs",
 ]
 
 [[package]]
