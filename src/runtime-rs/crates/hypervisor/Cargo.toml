@@ -66,6 +66,9 @@ dragonball = { workspace = true, features = [
 ], optional = true }
 dbs-utils = { workspace = true }
 
+# OpenVMM dependencies
+virt_mshv = { workspace = true, optional = true }
+
 [features]
 default = []
 
@@ -73,6 +76,9 @@ dragonball = ["dep:dragonball"]
 # Feature is not yet complete, so not enabled by default.
 # See https://github.com/kata-containers/kata-containers/issues/6264.
 cloud-hypervisor = ["ch-config"]
+
+# Enable the built-in OpenVMM (MSHV-backed) hypervisor
+openvmm = ["dep:virt_mshv"]
 
 [dev-dependencies]
 serial_test = "2.0.0"

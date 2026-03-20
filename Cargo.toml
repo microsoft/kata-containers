@@ -97,6 +97,9 @@ linux_container = { path = "src/runtime-rs/crates/runtimes/linux_container" }
 virt_container = { path = "src/runtime-rs/crates/runtimes/virt_container" }
 wasm_container = { path = "src/runtime-rs/crates/runtimes/wasm_container" }
 
+# OpenVMM dependencies (path to local openvmm-repo checkout)
+virt_mshv = { path = "../openvmm-repo/vmm_core/virt_mshv" }
+
 # Local dependencies from `src/lib`
 kata-sys-util = { path = "src/libs/kata-sys-util" }
 kata-types = { path = "src/libs/kata-types", features = ["safe-path"] }
@@ -138,3 +141,8 @@ tracing = "0.1.41"
 tracing-opentelemetry = "0.18.0"
 ttrpc = "0.8.4"
 url = "2.5.4"
+
+# Patches required for OpenVMM dependencies
+[patch.crates-io]
+# Pending <https://github.com/ferrilab/bitvec/pull/273>
+bitvec = { git = "https://github.com/smalis-msft/bitvec", branch = "set-aliased-previous-val" }
