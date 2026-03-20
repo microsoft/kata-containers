@@ -80,6 +80,7 @@ HYPERVISOR_QEMU = qemu
 HYPERVISOR_CLH = clh-runtime-rs
 HYPERVISOR_NAME_CLH = clh
 HYPERVISOR_REMOTE = remote
+HYPERVISOR_OPENVMM = openvmm
 
 ARCH_SUPPORT_DB := x86_64 aarch64
 ifneq ($(filter $(ARCH),$(ARCH_SUPPORT_DB)),)
@@ -89,6 +90,24 @@ else
     USE_BUILTIN_DB := false
     $(info Dragonball does not support ARCH $(ARCH), disabled. \
         Specify "USE_BUILTIN_DB=true" to force enable.)
+endif
+
+ARCH_SUPPORT_OPENVMM := x86_64 aarch64
+ifneq ($(filter $(ARCH),$(ARCH_SUPPORT_OPENVMM)),)
+    USE_OPENVMM := true
+else
+    USE_OPENVMM := false
+    $(info OpenVMM does not support ARCH $(ARCH), disabled. \
+        Specify "USE_OPENVMM=true" to force enable.)
+endif
+
+ARCH_SUPPORT_OPENVMM := x86_64 aarch64
+ifneq ($(filter $(ARCH),$(ARCH_SUPPORT_OPENVMM)),)
+    USE_OPENVMM := true
+else
+    USE_OPENVMM := false
+    $(info OpenVMM does not support ARCH $(ARCH), disabled. \
+        Specify "USE_OPENVMM=true" to force enable.)
 endif
 
 HYPERVISOR ?= $(HYPERVISOR_QEMU)
@@ -580,6 +599,7 @@ USER_VARS += CONFIG_QEMU_NVIDIA_GPU_IN
 USER_VARS += DESTDIR
 USER_VARS += HYPERVISOR
 USER_VARS += USE_BUILTIN_DB
+USER_VARS += USE_OPENVMM
 USER_VARS += DBCMD
 USER_VARS += DBCTLCMD
 USER_VARS += FCCTLCMD
@@ -787,11 +807,19 @@ EXTRA_RUSTFEATURES :=
 
 # if use dragonball hypervisor, add the feature to build dragonball in runtime
 ifeq ($(USE_BUILTIN_DB),true)
-    EXTRA_RUSTFEATURES +=  dragonball
+    EXTRA_RUSTFEATURES += dragonball
+endif
+
+# if use openvmm hypervisor, add the feature to build openvmm in runtime
+ifeq ($(USE_OPENVMM),true)
+    EXTRA_RUSTFEATURES += openvmm
 endif
 
 ifneq ($(EXTRA_RUSTFEATURES),)
-    override EXTRA_RUSTFEATURES := --features $(EXTRA_RUSTFEATURES)
+    comma := ,
+    empty :=
+    space := $(empty) $(empty)
+    override EXTRA_RUSTFEATURES := --features $(subst $(space),$(comma),$(strip $(EXTRA_RUSTFEATURES)))
 endif
 
 
