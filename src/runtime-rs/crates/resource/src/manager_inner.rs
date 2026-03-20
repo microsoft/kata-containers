@@ -251,7 +251,7 @@ impl ResourceManagerInner {
     async fn handle_interfaces(&self, network: &dyn Network) -> Result<()> {
         for i in network.interfaces().await.context("get interfaces")? {
             // update interface
-            info!(sl!(), "update interface {:?}", i);
+            info!(sl!(), "update interface {:?}, sid = {}", i, &self.sid);
             self.agent
                 .update_interface(agent::UpdateInterfaceRequest { interface: Some(i), sandbox_id: self.sid.clone() })
                 .await

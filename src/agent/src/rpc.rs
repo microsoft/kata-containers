@@ -1232,16 +1232,20 @@ impl agent_ttrpc::AgentService for AgentService {
             }
         }
 
+        /*
         info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
         let mut s = sandboxes.get_mut(&req.sandbox_id);
         if s.is_none() {
             error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
-            return Err(anyhow!("No sandbox")).map_ttrpc_err(same);
+            return Err(anyhow!("No sandbox for ID {}", req.sandbox_id)).map_ttrpc_err(same);
         }
         let mut sandbox = s.unwrap();
+        */
 
-        sandbox.rtnl.update_interface(&interface).await.map_ttrpc_err(|e| format!("update interface: {e:?}"))?;
+        // sandbox.rtnl.update_interface(&interface).await.map_ttrpc_err(|e| format!("update interface: {e:?}"))?;
+        let mut rtnl = crate::netlink::Handle::new().map_ttrpc_err(same)?;
+        rtnl.update_interface(&interface).await.map_ttrpc_err(|e| format!("update interface: {e:?}"))?;
         /*
         self.sandbox
             .lock()
@@ -1252,6 +1256,7 @@ impl agent_ttrpc::AgentService for AgentService {
             .map_ttrpc_err(|e| format!("update interface: {e:?}"))?;
         */
 
+        info!(sl(), "update_interface: success");
         Ok(interface)
     }
 
@@ -1270,6 +1275,7 @@ impl agent_ttrpc::AgentService for AgentService {
             .map_ttrpc_err(ttrpc::Code::INVALID_ARGUMENT, "empty update routes request")?;
 
         // let mut sandbox = self.sandbox.lock().await;
+        /*
         info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
         let mut s = sandboxes.get_mut(&req.sandbox_id);
@@ -1278,15 +1284,17 @@ impl agent_ttrpc::AgentService for AgentService {
             return Err(anyhow!("No sandbox")).map_ttrpc_err(same);
         }
         let mut sandbox = s.unwrap();
+        */
+        let mut rtnl = crate::netlink::Handle::new().map_ttrpc_err(same)?;
 
-        sandbox
-            .rtnl
+        //sandbox
+        rtnl
             .update_routes(new_routes)
             .await
             .map_ttrpc_err(|e| format!("Failed to update routes: {e:?}"))?;
 
-        let list = sandbox
-            .rtnl
+        //let list = sandbox
+        let list = rtnl
             .list_routes()
             .await
             .map_ttrpc_err(|e| format!("Failed to list routes after update: {e:?}"))?;
@@ -2083,7 +2091,7 @@ pub async fn start(
     oma: Option<mem_agent::agent::MemAgent>,
 ) -> Result<TtrpcServer> {
     warn!(sl(), "start: ignoring sandbox parameter");
-    
+
     /*
     let agent_service = Box::new(AgentService {
         sandbox: s,
