@@ -27,7 +27,7 @@ use ttrpc::{
     r#async::{Server as TtrpcServer, TtrpcContext},
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use cgroups::freezer::FreezerState;
 use oci::{Hooks, LinuxNamespace, Spec};
 use oci_spec::runtime as oci;
@@ -247,8 +247,14 @@ impl AgentService {
         // match real devices inside the VM. This step is necessary since we
         // cannot predict everything from the caller.
         
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut s = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id);
+        if sandbox.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox"));
+        }
+        let mut s = sandbox.unwrap();
 
         warn!(sl(), "do_create_container: skipping add_devices");
         //add_devices(&cid, &sl(), &req.devices, &mut oci, &self.sandbox).await?;
@@ -378,8 +384,15 @@ impl AgentService {
     #[instrument]
     async fn do_start_container(&self, req: protocols::agent::StartContainerRequest) -> Result<()> {
         // let mut s = self.sandbox.lock().await;
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut s = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(&req.sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox"));
+        }
+        let mut s = s.unwrap();
+
         let sid = s.id.clone();
         let cid = req.container_id.clone();
 
@@ -414,8 +427,15 @@ impl AgentService {
 
         if req.timeout == 0 {
             // let mut sandbox = self.sandbox.lock().await;
+            info!(sl(), "rpc: locking sandboxes");
             let mut sandboxes = self.sandboxes.lock().await;
-            let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+            let mut s = sandboxes.get_mut(&req.sandbox_id);
+            if s.is_none() {
+                error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+                return Err(anyhow!("No sandbox"));
+            }
+            let mut sandbox = s.unwrap();
+
             sandbox.bind_watcher.remove_container(&cid).await;
             sandbox
                 .get_container(&cid)
@@ -467,8 +487,15 @@ impl AgentService {
         };
 
         // let mut sandbox = self.sandbox.lock().await;
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(&req.sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox"));
+        }
+        let mut sandbox = s.unwrap();
+
         let mut process = req
             .process
             .into_option()
@@ -504,8 +531,15 @@ impl AgentService {
         let mut sig: libc::c_int = req.signal as libc::c_int;
         {
             // let mut sandbox = self.sandbox.lock().await;
+            info!(sl(), "rpc: locking sandboxes");
             let mut sandboxes = self.sandboxes.lock().await;
-            let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+            let mut s = sandboxes.get_mut(&req.sandbox_id);
+            if s.is_none() {
+                error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+                return Err(anyhow!("No sandbox"));
+            }
+            let mut sandbox = s.unwrap();
+
             let p = sandbox
                 .find_container_process(cid.as_str(), eid.as_str())
                 .map_err(sandbox_err_to_ttrpc)?;
@@ -594,8 +628,15 @@ impl AgentService {
 
     async fn get_pids(&self, cid: &str, sandbox_id: &str) -> Result<Vec<i32>> {
         // let mut sandbox = self.sandbox.lock().await;
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut sandbox = sandboxes.get_mut(sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {sandbox_id}");
+            return Err(anyhow!("No sandbox"));
+        }
+        let mut sandbox = s.unwrap();
+
         let ctr = sandbox
             .get_container(cid)
             .ok_or_else(|| anyhow!("Invalid container id {}", cid))?;
@@ -622,8 +663,15 @@ impl AgentService {
         let (exit_send, mut exit_recv) = tokio::sync::mpsc::channel(100);
         let exit_rx = {
             // let mut sandbox = self.sandbox.lock().await;
+            info!(sl(), "rpc: locking sandboxes");
             let mut sandboxes = self.sandboxes.lock().await;
-            let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+            let mut s = sandboxes.get_mut(&req.sandbox_id);
+            if s.is_none() {
+                error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+                return Err(anyhow!("No sandbox"));
+            }
+            let mut sandbox = s.unwrap();
+
             let p = sandbox
                 .find_container_process(cid.as_str(), eid.as_str())
                 .map_err(sandbox_err_to_ttrpc)?;
@@ -641,8 +689,15 @@ impl AgentService {
         }
 
         // let mut sandbox = self.sandbox.lock().await;
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(&req.sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox"));
+        }
+        let mut sandbox = s.unwrap();
+
         let ctr = sandbox
             .get_container(&cid)
             .ok_or_else(|| anyhow!("Invalid container id"))?;
@@ -688,8 +743,14 @@ impl AgentService {
         let mut resp = WriteStreamResponse::new();
         resp.set_len(req.data.len() as u32);
 
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(&req.sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox"));
+        }
+        let mut sandbox = s.unwrap();
 
             // EOF of stdin
         if req.data.is_empty() {
@@ -728,8 +789,15 @@ impl AgentService {
         let term_exit_notifier;
         let reader = {
             // let mut sandbox = self.sandbox.lock().await;
+            info!(sl(), "rpc: locking sandboxes");
             let mut sandboxes = self.sandboxes.lock().await;
-            let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+            let mut s = sandboxes.get_mut(&req.sandbox_id);
+            if s.is_none() {
+                error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+                return Err(anyhow!("No sandbox"));
+            }
+            let mut sandbox = s.unwrap();
+
             let p = sandbox
                 .find_container_process(cid.as_str(), eid.as_str())
                 .map_err(sandbox_err_to_ttrpc)?;
@@ -945,8 +1013,15 @@ impl agent_ttrpc::AgentService for AgentService {
         is_allowed(&req).await?;
 
         // let mut sandbox = self.sandbox.lock().await;
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(&req.sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox")).map_ttrpc_err(same);
+        }
+        let mut sandbox = s.unwrap();
+
         let ctr = sandbox
             .get_container(&req.container_id)
             .map_ttrpc_err(ttrpc::Code::INVALID_ARGUMENT, "invalid container id")?;
@@ -1083,8 +1158,15 @@ impl agent_ttrpc::AgentService for AgentService {
         is_allowed(&req).await?;
 
         // let mut sandbox = self.sandbox.lock().await;
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(&req.sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox")).map_ttrpc_err(same);
+        }
+        let mut sandbox = s.unwrap();
+
         let p = sandbox
             .find_container_process(req.container_id(), req.exec_id())
             .map_err(sandbox_err_to_ttrpc)?;
@@ -1150,8 +1232,15 @@ impl agent_ttrpc::AgentService for AgentService {
             }
         }
 
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(&req.sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox")).map_ttrpc_err(same);
+        }
+        let mut sandbox = s.unwrap();
+
         sandbox.rtnl.update_interface(&interface).await.map_ttrpc_err(|e| format!("update interface: {e:?}"))?;
         /*
         self.sandbox
@@ -1181,8 +1270,14 @@ impl agent_ttrpc::AgentService for AgentService {
             .map_ttrpc_err(ttrpc::Code::INVALID_ARGUMENT, "empty update routes request")?;
 
         // let mut sandbox = self.sandbox.lock().await;
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(&req.sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox")).map_ttrpc_err(same);
+        }
+        let mut sandbox = s.unwrap();
 
         sandbox
             .rtnl
@@ -1373,8 +1468,15 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "list_interfaces", req);
         is_allowed(&req).await?;
 
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(&req.sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox")).map_ttrpc_err(same);
+        }
+        let mut sandbox = s.unwrap();
+
         let list = sandbox.rtnl.list_interfaces().await.map_ttrpc_err(|e| format!("Failed to list interfaces: {e:?}"))?;
         /*
         let list = self
@@ -1498,8 +1600,14 @@ impl agent_ttrpc::AgentService for AgentService {
         is_allowed(&req).await?;
 
         // let mut sandbox = self.sandbox.lock().await;
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let mut sandbox = sandboxes.get_mut(&req.sandbox_id).unwrap();
+        let mut s = sandboxes.get_mut(&req.sandbox_id);
+        if s.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox")).map_ttrpc_err(same);
+        }
+        let mut sandbox = s.unwrap();
 
         // destroy all containers, clean up, notify agent to exit etc.
         sandbox.destroy().await.map_ttrpc_err(same)?;
@@ -1676,8 +1784,14 @@ impl agent_ttrpc::AgentService for AgentService {
         is_allowed(&req).await?;
         
         // let s = self.sandbox.lock().await;
+        info!(sl(), "rpc: locking sandboxes");
         let mut sandboxes = self.sandboxes.lock().await;
-        let s = sandboxes.get(&req.sandbox_id).unwrap();
+        let mut sandbox = sandboxes.get_mut(&req.sandbox_id);
+        if sandbox.is_none() {
+            error!(sl(), "No sandbox for ID {}", &req.sandbox_id);
+            return Err(anyhow!("No sandbox")).map_ttrpc_err(same);
+        }
+        let mut s = sandbox.unwrap();
         
         let event_rx = &s.event_rx.clone();
         let mut event_rx = event_rx.lock().await;
