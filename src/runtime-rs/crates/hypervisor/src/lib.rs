@@ -17,6 +17,8 @@ use device::DeviceType;
 pub mod dragonball;
 pub mod firecracker;
 mod kernel_param;
+#[cfg(feature = "openvmm")]
+pub mod openvmm;
 pub mod qemu;
 pub mod remote;
 pub mod selinux;
@@ -37,6 +39,9 @@ use kata_types::capabilities::{Capabilities, CapabilityBits};
 use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
 
 pub use kata_types::config::hypervisor::HYPERVISOR_NAME_CH;
+
+#[cfg(feature = "openvmm")]
+pub use kata_types::config::hypervisor::HYPERVISOR_NAME_OPENVMM;
 
 // Config which driver to use as vm root dev
 const VM_ROOTFS_DRIVER_BLK: &str = "virtio-blk-pci";

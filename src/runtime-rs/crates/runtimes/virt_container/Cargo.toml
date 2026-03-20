@@ -48,3 +48,6 @@ cloud-hypervisor = ["hypervisor/cloud-hypervisor"]
 
 # Enable the build-in VMM Dragtonball
 dragonball = ["hypervisor/dragonball"]
+
+# Enable the built-in OpenVMM (MSHV-backed) hypervisor
+openvmm = ["hypervisor/openvmm"]
