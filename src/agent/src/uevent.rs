@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![allow(unused)]
+
 use crate::device::online_device;
 use crate::linux_abi::*;
 use crate::sandbox::Sandbox;
@@ -113,13 +115,15 @@ impl Uevent {
 
 #[instrument]
 pub async fn wait_for_uevent(
-    sandbox: &Arc<Mutex<Sandbox>>,
+    // sandbox: &Arc<Mutex<Sandbox>>,
+    sandbox: &mut Sandbox,
     matcher: impl UeventMatcher,
 ) -> Result<Uevent> {
     let logprefix = format!("Waiting for {:?}", &matcher);
 
     info!(sl(), "{}", logprefix);
-    let mut sb = sandbox.lock().await;
+    // let mut sb = sandbox.lock().await;
+    let sb = sandbox;
     for uev in sb.uevent_map.values() {
         if matcher.is_match(uev) {
             info!(sl(), "{}: found {:?} in uevent map", logprefix, &uev);
@@ -135,7 +139,7 @@ pub async fn wait_for_uevent(
     let (tx, rx) = tokio::sync::oneshot::channel::<Uevent>();
     let idx = sb.uevent_watchers.len();
     sb.uevent_watchers.push(Some((Box::new(matcher), tx)));
-    drop(sb); // unlock
+    //drop(sb); // unlock
 
     info!(sl(), "{}: waiting on channel", logprefix);
 
@@ -144,7 +148,7 @@ pub async fn wait_for_uevent(
     let uev = match tokio::time::timeout(hotplug_timeout, rx).await {
         Ok(v) => v?,
         Err(_) => {
-            let mut sb = sandbox.lock().await;
+            //let mut sb = sandbox.lock().await;
             let matcher = sb.uevent_watchers[idx].take().unwrap().0;
 
             return Err(anyhow!(

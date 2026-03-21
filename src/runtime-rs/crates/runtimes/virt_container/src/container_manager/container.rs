@@ -64,6 +64,8 @@ impl Container {
         passfd_listener_addr: Option<(String, u32)>,
         sandbox_id: &str,
     ) -> Result<Self> {
+        info!(sl!(), "Container::new: sandbox_id = {sandbox_id}");
+
         let container_id = ContainerID::new(&config.container_id).context("new container id")?;
         let logger = sl!().new(o!("container_id" => config.container_id.clone()));
         let process = ContainerProcess::new(&config.container_id, "")?;
@@ -257,8 +259,9 @@ impl Container {
 
         info!(
             sl!(),
-            "OCI Spec {:?} within CreateContainerRequest.",
-            spec.clone()
+            "OCI Spec {:?} within CreateContainerRequest, sandbox_id = {} .",
+            spec.clone(),
+            &self.sandbox_id,
         );
 
         // create container
@@ -287,6 +290,7 @@ impl Container {
             sandbox_id: self.sandbox_id.clone(),
             ..Default::default()
         };
+        info!(sl!(), "Container::create: sending request, sandbox_id = {}", r.sandbox_id);
 
         self.agent
             .create_container(r)

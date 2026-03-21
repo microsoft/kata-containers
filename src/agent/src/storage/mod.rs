@@ -23,11 +23,11 @@ use tokio::sync::Mutex;
 use tracing::instrument;
 
 use self::bind_watcher_handler::BindWatcherHandler;
-use self::block_handler::{PmemHandler, ScsiHandler, VirtioBlkMmioHandler, VirtioBlkPciHandler};
+//use self::block_handler::{PmemHandler, ScsiHandler, VirtioBlkMmioHandler, VirtioBlkPciHandler};
 use self::ephemeral_handler::EphemeralHandler;
-use self::fs_handler::{OverlayfsHandler, Virtio9pHandler, VirtioFsHandler};
-use self::image_pull_handler::ImagePullHandler;
-use self::local_handler::LocalHandler;
+use self::fs_handler::{/*OverlayfsHandler, Virtio9pHandler,*/ VirtioFsHandler};
+//use self::image_pull_handler::ImagePullHandler;
+//use self::local_handler::LocalHandler;
 use crate::mount::{baremount, is_mounted, remove_mounts};
 use crate::sandbox::Sandbox;
 
@@ -49,7 +49,8 @@ const MODE_SETGID: u32 = 0o2000;
 pub struct StorageContext<'a> {
     cid: &'a Option<String>,
     logger: &'a Logger,
-    sandbox: &'a Arc<Mutex<Sandbox>>,
+    // sandbox: &'a Arc<Mutex<Sandbox>>,
+    sandbox: &'a mut Sandbox,
 }
 
 /// An implementation of generic storage device.
@@ -136,19 +137,19 @@ lazy_static! {
     pub static ref STORAGE_HANDLERS: StorageHandlerManager<Arc<dyn StorageHandler>> = {
         let mut manager: StorageHandlerManager<Arc<dyn StorageHandler>> = StorageHandlerManager::new();
         let handlers: Vec<Arc<dyn StorageHandler>> = vec![
-            Arc::new(Virtio9pHandler {}),
-            Arc::new(VirtioBlkMmioHandler {}),
-            Arc::new(VirtioBlkPciHandler {}),
+            //Arc::new(Virtio9pHandler {}),
+            //Arc::new(VirtioBlkMmioHandler {}),
+            //Arc::new(VirtioBlkPciHandler {}),
             Arc::new(EphemeralHandler {}),
-            Arc::new(LocalHandler {}),
-            Arc::new(PmemHandler {}),
-            Arc::new(OverlayfsHandler {}),
-            Arc::new(ScsiHandler {}),
+            //Arc::new(LocalHandler {}),
+            //Arc::new(PmemHandler {}),
+            //Arc::new(OverlayfsHandler {}),
+            //Arc::new(ScsiHandler {}),
             Arc::new(VirtioFsHandler {}),
-            Arc::new(BindWatcherHandler {}),
-            #[cfg(target_arch = "s390x")]
-            Arc::new(self::block_handler::VirtioBlkCcwHandler {}),
-            Arc::new(ImagePullHandler {}),
+            //Arc::new(BindWatcherHandler {}),
+            //#[cfg(target_arch = "s390x")]
+            //Arc::new(self::block_handler::VirtioBlkCcwHandler {}),
+            //Arc::new(ImagePullHandler {}),
         ];
 
         for handler in handlers {
@@ -167,14 +168,16 @@ lazy_static! {
 pub async fn add_storages(
     logger: Logger,
     storages: Vec<Storage>,
-    sandbox: &Arc<Mutex<Sandbox>>,
+    // sandbox: &Arc<Mutex<Sandbox>>,
+    sandbox: &mut Sandbox,
     cid: Option<String>,
 ) -> Result<Vec<String>> {
     let mut mount_list = Vec::new();
 
     for storage in storages {
         let path = storage.mount_point.clone();
-        let state = sandbox.lock().await.add_sandbox_storage(&path).await;
+        // let state = sandbox.lock().await.add_sandbox_storage(&path).await;
+        let state = sandbox.add_sandbox_storage(&path).await;
         if state.ref_count().await > 1 {
             if let Some(path) = state.path() {
                 if !path.is_empty() {
@@ -197,8 +200,8 @@ pub async fn add_storages(
             match handler.create_device(storage, &mut ctx).await {
                 Ok(device) => {
                     match sandbox
-                        .lock()
-                        .await
+                        //.lock()
+                        //.await
                         .update_sandbox_storage(&path, device.clone())
                     {
                         Ok(d) => {
@@ -211,7 +214,8 @@ pub async fn add_storages(
                         }
                         Err(device) => {
                             error!(logger, "failed to update device for storage");
-                            if let Err(e) = sandbox.lock().await.remove_sandbox_storage(&path).await
+                            // if let Err(e) = sandbox.lock().await.remove_sandbox_storage(&path).await
+                            if let Err(e) = sandbox.remove_sandbox_storage(&path).await
                             {
                                 warn!(logger, "failed to remove dummy sandbox storage {:?}", e);
                             }
@@ -227,7 +231,8 @@ pub async fn add_storages(
                 }
                 Err(e) => {
                     error!(logger, "failed to create device for storage, error: {e:?}");
-                    if let Err(e) = sandbox.lock().await.remove_sandbox_storage(&path).await {
+                    // if let Err(e) = sandbox.lock().await.remove_sandbox_storage(&path).await {
+                    if let Err(e) = sandbox.remove_sandbox_storage(&path).await {
                         warn!(logger, "failed to remove dummy sandbox storage {e:?}");
                     }
                     return Err(e);

@@ -81,6 +81,7 @@ impl VirtContainerManager {
 impl ContainerManager for VirtContainerManager {
     #[instrument]
     async fn create_container(&self, config: ContainerConfig, spec: oci::Spec, sandbox_id: &str) -> Result<PID> {
+        info!(sl!(), "VirtContainerManager: sandbox_id = {sandbox_id}");
         let mut container = Container::new(
             self.pid,
             config.clone(),

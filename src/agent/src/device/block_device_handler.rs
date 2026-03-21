@@ -128,7 +128,8 @@ pub async fn get_virtio_blk_pci_device_name(
 
 #[instrument]
 pub async fn get_virtio_blk_mmio_device_name(
-    sandbox: &Arc<Mutex<Sandbox>>,
+    // sandbox: &Arc<Mutex<Sandbox>>,
+    sandbox: &mut Sandbox,
     devpath: &str,
 ) -> Result<()> {
     let devname = devpath

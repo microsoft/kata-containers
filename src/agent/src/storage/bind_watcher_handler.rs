@@ -31,8 +31,8 @@ impl StorageHandler for BindWatcherHandler {
     ) -> Result<Arc<dyn StorageDevice>> {
         if let Some(cid) = ctx.cid {
             ctx.sandbox
-                .lock()
-                .await
+                //.lock()
+                //.await
                 .bind_watcher
                 .add_container(cid.to_string(), iter::once(storage.clone()), ctx.logger)
                 .await?;
