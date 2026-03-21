@@ -4,6 +4,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![allow(unused)]
+
 use std::collections::{HashMap, HashSet};
 use std::process;
 
@@ -141,6 +143,9 @@ impl CgroupsResourceInner {
     }
 
     async fn move_vcpus_to_sandbox_cgroup(&mut self, hypervisor: &dyn Hypervisor) -> Result<usize> {
+        warn!(sl!(), "move_vcpus_to_sandbox_cgroup: ignoring");
+        Ok(0)
+        /*
         let hv_pids = hypervisor.get_thread_ids().await?;
         let mut pids = hv_pids.vcpus.values();
 
@@ -166,6 +171,7 @@ impl CgroupsResourceInner {
         }
 
         Ok(hv_pids.vcpus.len())
+        */
     }
 
     async fn update_sandbox_cgroups(&mut self, hypervisor: &dyn Hypervisor) -> Result<bool> {

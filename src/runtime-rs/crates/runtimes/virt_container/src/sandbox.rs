@@ -681,10 +681,12 @@ impl Sandbox for VirtSandbox {
         info!(sl!(), "Sandbox: settings policy");
         self.set_agent_policy().await.context("set agent policy")?;
 
-        self.resource_manager
-            .setup_after_start_vm()
-            .await
-            .context("setup device after start vm")?;
+        if !self.hypervisor.reusing_vm().await {
+            self.resource_manager
+                .setup_after_start_vm()
+                .await
+                .context("setup device after start vm")?;
+        }
 
         // create sandbox in vm
         info!(sl!(), "Sandbox: creating CreateSandboxRequest");

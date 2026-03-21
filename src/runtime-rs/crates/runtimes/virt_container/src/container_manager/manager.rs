@@ -98,8 +98,13 @@ impl ContainerManager for VirtContainerManager {
         // * should be run in vmm namespace (hook path in runtime namespace)
         // * should be run after the vm is started, before container is created, and after CreateRuntime Hooks
         // * spec details: https://github.com/opencontainers/runtime-spec/blob/c1662686cff159595277b79322d0272f5182941b/config.md#createcontainer-hooks
-        let vmm_master_tid = self.hypervisor.get_vmm_master_tid().await?;
-        let vmm_ns_path = self.hypervisor.get_ns_path().await?;
+
+        warn!(sl!(), "create_container: hacked PID = {} and namespace, for hooks", std::process::id());
+        // let vmm_master_tid = self.hypervisor.get_vmm_master_tid().await?;
+        let vmm_master_tid = std::process::id();
+        // let vmm_ns_path = self.hypervisor.get_ns_path().await?;
+        let vmm_ns_path = format!("/proc/{vmm_master_tid}/ns");
+
         let vmm_netns_path = format!("{}/{}", vmm_ns_path, "net");
         let state = spec::State {
             version: spec.version().clone(),
@@ -331,7 +336,11 @@ impl ContainerManager for VirtContainerManager {
         // * should be run after user-specific command is executed but before start operation returns
         // * spec details: https://github.com/opencontainers/runtime-spec/blob/c1662686cff159595277b79322d0272f5182941b/config.md#poststart
         let c_spec = c.spec().await;
-        let vmm_master_tid = self.hypervisor.get_vmm_master_tid().await?;
+
+        warn!(sl!(), "start_process: setting vmm_master_tid = 0 for hooks");
+        // let vmm_master_tid = self.hypervisor.get_vmm_master_tid().await?;
+        let vmm_master_tid = 0;
+
         let state = spec::State {
             version: c_spec.version().clone(),
             id: c.container_id.to_string(),

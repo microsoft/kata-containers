@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![allow(unused)]
+
 use anyhow::{anyhow, Result};
 use nix::mount::MsFlags;
 use nix::sched::{unshare, CloneFlags};
@@ -80,6 +82,8 @@ impl Namespace {
     #[instrument]
     #[allow(clippy::question_mark)]
     pub async fn setup(mut self) -> Result<Self> {
+        warn!(self.logger, "Namespace::setup: ignoring");
+        /*
         fs::create_dir_all(&self.persistent_ns_dir)?;
 
         let ns_path = PathBuf::from(&self.persistent_ns_dir);
@@ -138,7 +142,7 @@ impl Namespace {
         new_thread
             .join()
             .map_err(|e| anyhow!("Failed to join thread {:?}!", e))??;
-
+        */
         Ok(self)
     }
 }
