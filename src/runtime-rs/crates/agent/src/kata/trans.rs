@@ -285,6 +285,7 @@ impl From<CreateContainerRequest> for agent::CreateContainerRequest {
             stdin_port: from.stdin_port.unwrap_or_default(),
             stdout_port: from.stdout_port.unwrap_or_default(),
             stderr_port: from.stderr_port.unwrap_or_default(),
+            sandbox_id: from.sandbox_id.clone(),
             ..Default::default()
         }
     }
