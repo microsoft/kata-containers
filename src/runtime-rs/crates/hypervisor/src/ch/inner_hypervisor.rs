@@ -382,11 +382,11 @@ impl CloudHypervisorInner {
         }
 
         let netns = self.netns.clone();
-        if self.netns.is_some() {
+        if let Some(ref ns) = self.netns {
             info!(
                 sl!(),
                 "set netns for vmm : {:?}",
-                self.netns.as_ref().unwrap()
+                ns
             );
         }
 
