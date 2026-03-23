@@ -301,9 +301,12 @@ impl<T> Node<T> {
         } else if key.max < self.0.key.min && self.0.left.is_some() {
             // Safe to unwrap() because we have just checked it.
             self.0.left.as_ref().unwrap().search_superset(key)
-        } else if key.min > self.0.key.max && self.0.right.is_some() {
-            // Safe to unwrap() because we have just checked it.
-            self.0.right.as_ref().unwrap().search_superset(key)
+        } else if let Some(right) = self.0.right.as_ref() {
+            if key.min > self.0.key.max {
+                right.search_superset(key)
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -316,9 +319,12 @@ impl<T> Node<T> {
         } else if key.max < self.0.key.min && self.0.left.is_some() {
             // Safe to unwrap() because we have just checked it.
             self.0.left.as_mut().unwrap().search_superset_mut(key)
-        } else if key.min > self.0.key.max && self.0.right.is_some() {
-            // Safe to unwrap() because we have just checked it.
-            self.0.right.as_mut().unwrap().search_superset_mut(key)
+        } else if let Some(right) = self.0.right.as_mut() {
+            if key.min > self.0.key.max {
+                right.search_superset_mut(key)
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -514,8 +520,8 @@ impl<T> Node<T> {
     }
 
     fn first_match(&self, constraint: &Constraint) -> Option<&Self> {
-        let mut candidate = if self.0.left.is_some() {
-            self.0.left.as_ref().unwrap().first_match(constraint)
+        let mut candidate = if let Some(left) = self.0.left.as_ref() {
+            left.first_match(constraint)
         } else {
             None
         };
@@ -523,8 +529,10 @@ impl<T> Node<T> {
         if candidate.is_none() && self.check_constraint(constraint) {
             candidate = Some(self);
         }
-        if candidate.is_none() && self.0.right.is_some() {
-            candidate = self.0.right.as_ref().unwrap().first_match(constraint);
+        if candidate.is_none() {
+            if let Some(right) = self.0.right.as_ref() {
+                candidate = right.first_match(constraint);
+            }
         }
         candidate
     }
