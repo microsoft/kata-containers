@@ -84,6 +84,7 @@ dragonball = { workspace = true, features = [
 ], optional = true }
 
 # OpenVMM dependencies
+ovmm_virt = { workspace = true, optional = true }
 virt_mshv = { workspace = true, optional = true }
 
 [features]
@@ -93,7 +94,7 @@ dragonball = ["dep:dragonball"]
 cloud-hypervisor = ["ch-config"]
 
 # Enable the built-in OpenVMM (MSHV-backed) hypervisor
-openvmm = ["dep:virt_mshv"]
+openvmm = ["dep:virt_mshv", "dep:ovmm_virt"]
 
 [dev-dependencies]
 serial_test = "2.0.0"
