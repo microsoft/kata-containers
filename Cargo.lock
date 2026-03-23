@@ -3094,6 +3094,7 @@ dependencies = [
  "tracing",
  "ttrpc",
  "ttrpc-codegen",
+ "virt",
  "virt_mshv",
  "vmm-sys-util 0.15.0",
 ]
