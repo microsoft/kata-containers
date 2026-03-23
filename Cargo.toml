@@ -120,8 +120,8 @@ virt_container = { path = "src/runtime-rs/crates/runtimes/virt_container" }
 wasm_container = { path = "src/runtime-rs/crates/runtimes/wasm_container" }
 
 # OpenVMM dependencies (path to local openvmm-repo checkout)
-# virt_mshv = { path = "../openvmm-repo/vmm_core/virt_mshv" }
-virt_mshv = {git = "https://github.com/danmihai1/openvmm.git", rev = "97f57f46476e129a8eb21ce4c6f43af0cc0da8a5" }
+ovmm_virt = { git = "https://github.com/danmihai1/openvmm.git", rev = "97f57f46476e129a8eb21ce4c6f43af0cc0da8a5", package = "virt" }
+virt_mshv = { git = "https://github.com/danmihai1/openvmm.git", rev = "97f57f46476e129a8eb21ce4c6f43af0cc0da8a5"}
 
 # Local dependencies from `src/lib`
 kata-sys-util = { path = "src/libs/kata-sys-util" }
