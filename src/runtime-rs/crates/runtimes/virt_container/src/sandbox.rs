@@ -4,6 +4,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![allow(unused)]
+
 use crate::health_check::HealthCheck;
 use agent::kata::KataAgent;
 use agent::types::{KernelModule, SetPolicyRequest};
@@ -678,8 +680,8 @@ impl Sandbox for VirtSandbox {
             .await
             .context(format!("connect to address {:?}", &address))?;
 
-        info!(sl!(), "Sandbox: settings policy");
-        self.set_agent_policy().await.context("set agent policy")?;
+        warn!(sl!(), "Sandbox: skipping set_agent_policy");
+        // self.set_agent_policy().await.context("set agent policy")?;
 
         if !self.hypervisor.reusing_vm().await {
             self.resource_manager
