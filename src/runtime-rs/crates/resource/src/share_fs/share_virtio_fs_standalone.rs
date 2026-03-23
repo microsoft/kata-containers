@@ -74,6 +74,8 @@ impl ShareVirtioFsStandalone {
 
     fn virtiofsd_args(&self, sock_path: &str, disable_guest_selinux: bool) -> Result<Vec<String>> {
         let source_path = get_host_ro_shared_path(&self.config.id);
+        info!(sl!(), "virtiofsd_args: source_path = {:?}", source_path);
+
         ensure_dir_exist(&source_path)?;
         let shared_dir = source_path
             .to_str()
