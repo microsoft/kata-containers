@@ -16,10 +16,7 @@ use kata_types::{
 use std::collections::HashSet;
 use tokio::sync::mpsc;
 
-// Prove that virt_mshv links: import the MSHV hypervisor entry point.
-// This will be used in start_vm() once the full implementation is done.
-#[allow(unused_imports)]
-use virt_mshv::LinuxMshv as _MshvBackend;
+use virt_mshv::LinuxMshv;
 
 /// Inner state for the OpenVMM hypervisor.
 #[derive(Debug)]
@@ -46,6 +43,8 @@ pub(crate) struct OpenVmmInner {
     pub(crate) guest_memory_block_size_mb: u32,
     /// exit notification channel
     pub(crate) _exit_notify: mpsc::Sender<i32>,
+    /// MSHV hypervisor handle
+    pub(crate) mshv: LinuxMshv,
 }
 
 impl OpenVmmInner {
@@ -67,6 +66,7 @@ impl OpenVmmInner {
             capabilities,
             guest_memory_block_size_mb: 0,
             _exit_notify: exit_notify,
+            mshv: LinuxMshv,
         }
     }
 
