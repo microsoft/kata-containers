@@ -72,9 +72,30 @@ impl ShareVirtioFsStandalone {
         })
     }
 
+    /*
+    fn hack_shared_directory(original_path: &std::path::PathBuf) -> Result<()> {
+        info!(sl!(), "hack_shared_directory: creating symlink instead of source_path = {:?}", original_path);
+
+        let parent = original_path.parent().unwrap();
+        info!(sl!(), "hack_shared_directory: parent = {:?}", parent);
+
+        let dan_path = Path::new("/run/kata-containers/shared/dan1");
+        info!(sl!(), "hack_shared_directory: dan_path = {:?}", dan_path);
+
+        if let Err(e) = std::os::unix::fs::symlink(&dan_path, &parent) {
+            error!(sl!(), "hack_shared_directory: {:?} symlink creation failed: {e}", parent);
+            // return Err(anyhow!("{e}"));
+        } else {
+            info!(sl!(), "hack_shared_directory: created {:?} -> {:?}", dan_path, parent);
+        }
+
+        Ok(())
+    }
+        */
+
     fn virtiofsd_args(&self, sock_path: &str, disable_guest_selinux: bool) -> Result<Vec<String>> {
         let source_path = get_host_ro_shared_path(&self.config.id);
-        info!(sl!(), "virtiofsd_args: source_path = {:?}", source_path);
+        // Self::hack_shared_directory(&source_path)?;
 
         ensure_dir_exist(&source_path)?;
         let shared_dir = source_path

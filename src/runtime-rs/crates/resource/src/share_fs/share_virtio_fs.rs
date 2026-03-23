@@ -4,6 +4,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![allow(unused)]
+
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -34,6 +36,31 @@ pub(crate) fn generate_sock_path(root: &str) -> String {
     socket_path.to_str().unwrap().to_string()
 }
 
+fn hack_shared_directory(original_path: &std::path::PathBuf) -> Result<()> {
+    info!(sl!(), "hack_shared_directory: creating symlink instead of source_path = {:?}", original_path);
+
+    let sanboxes_path = Path::new("/run/kata-containers/shared/sandboxes");
+    info!(sl!(), "hack_shared_directory: sanboxes_path = {:?}", sanboxes_path);
+
+    utils::ensure_dir_exist(&sanboxes_path)?;
+    info!(sl!(), "hack_shared_directory: created sanboxes_path = {:?}", sanboxes_path);
+
+    let dan_path = Path::new("/run/kata-containers/shared/dan1");
+    info!(sl!(), "hack_shared_directory: dan_path = {:?}", dan_path);
+
+    let parent_path = original_path.parent().unwrap();
+    info!(sl!(), "hack_shared_directory: symlink destination parent_path = {:?}", parent_path);
+
+    if let Err(e) = std::os::unix::fs::symlink(&dan_path, &parent_path) {
+        error!(sl!(), "hack_shared_directory: {:?} symlink creation failed: {e}", parent_path);
+        // return Err(anyhow!("{e}"));
+    } else {
+        info!(sl!(), "hack_shared_directory: created {:?} -> {:?}", dan_path, parent_path);
+    }
+
+    Ok(())
+}
+
 pub(crate) async fn prepare_virtiofs(
     d: &RwLock<DeviceManager>,
     fs_type: &str,
@@ -41,6 +68,9 @@ pub(crate) async fn prepare_virtiofs(
     root: &str,
 ) -> Result<()> {
     let host_ro_dest = utils::get_host_ro_shared_path(id);
+    // DMFIX
+    hack_shared_directory(&host_ro_dest)?;
+
     utils::ensure_dir_exist(&host_ro_dest)?;
 
     let host_rw_dest = utils::get_host_rw_shared_path(id);
