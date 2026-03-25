@@ -3374,6 +3374,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "logging",
+ "memory_range",
  "mesh",
  "mesh_worker",
  "net_backend_resources",
