@@ -845,7 +845,7 @@ vendor:
 standard_rust_check:
 	@echo "standard rust check..."
 	cargo fmt -- --check
-	cargo clippy --all-targets $(EXTRA_RUSTFEATURES) --release \
+	cargo clippy --all-targets $(EXTRA_RUSTFEATURES) --release --locked \
 		-- \
 		-D warnings
 
