@@ -1,0 +1,154 @@
+# Copyright (c) 2024 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# XXX: WARNING: this file is auto-generated.
+# XXX:
+# XXX: Source file: "@CONFIG_OPENVMM_IN@"
+# XXX: Project:
+# XXX:   Name: @PROJECT_NAME@
+# XXX:   Type: @PROJECT_TYPE@
+
+[hypervisor.openvmm]
+path = ""
+kernel = "@KERNELPATH_OPENVMM@"
+image = "@IMAGEPATH@"
+
+# rootfs filesystem type:
+#   - ext4 (default)
+#   - xfs
+#   - erofs
+rootfs_type = @DEFROOTFSTYPE@
+
+# Block storage driver to be used for the VM rootfs is backed
+# by a block device.
+vm_rootfs_driver = "@VMROOTFSDRIVER_OPENVMM@"
+
+# List of valid annotation names for the hypervisor
+enable_annotations = @DEFENABLEANNOTATIONS@
+
+# List of valid annotations values for the hypervisor
+valid_hypervisor_paths = []
+
+# List of valid annotations values for ctlpath
+valid_ctlpaths = []
+
+# Optional space-separated list of options to pass to the guest kernel.
+kernel_params = "@KERNELPARAMS_OPENVMM@"
+
+# Path to the firmware.
+firmware = "@FIRMWAREPATH@"
+
+# Default number of vCPUs per SB/VM:
+default_vcpus = @DEFVCPUS@
+
+# Default maximum number of vCPUs per SB/VM:
+default_maxvcpus = @DEFMAXVCPUS@
+
+# Default number of bridges per SB/VM:
+# OpenVMM uses PCIe root complexes, not PCI bridges.
+default_bridges = 0
+
+# Default memory size in MiB for SB/VM.
+default_memory = @DEFMEMSZ@
+
+# Default maximum memory in MiB per SB / VM
+default_maxmemory = @DEFMAXMEMSZ@
+
+# Shared file system type:
+#   - inline-virtio-fs (default for OpenVMM - built-in, no external virtiofsd)
+#   - virtio-fs
+#   - none
+shared_fs = "@DEFSHAREDFS_OPENVMM@"
+
+# Default size of DAX cache in MiB
+virtio_fs_cache_size = @DEFVIRTIOFSCACHESIZE@
+
+# Extra args for virtiofsd daemon (not used with inline-virtio-fs)
+virtio_fs_extra_args = @DEFVIRTIOFSEXTRAARGS@
+
+# Cache mode:
+virtio_fs_cache = "@DEFVIRTIOFSCACHE@"
+
+# Block device driver to be used by the hypervisor
+block_device_driver = "@DEFBLOCKSTORAGEDRIVER_OPENVMM@"
+
+# Specifies cache-related options for block devices.
+block_device_cache_direct = false
+
+# Virtio queue size. Size: byte. default 128
+queue_size = 128
+
+# Block device multi-queue, default 1
+num_queues = 1
+
+# network_queues
+network_queues = @DEFNETQUEUES@
+
+# This option changes the default hypervisor and kernel parameters
+# to enable debug output where available.
+enable_debug = true
+
+# Disable the customizations done in the runtime when it detects
+# that it is running on top a VMM.
+disable_nesting_checks = false
+
+# Disable the 'seccomp' feature
+disable_seccomp = false
+
+# Disable guest selinux
+disable_guest_selinux = true
+
+# Reclaim guest freed memory.
+reclaim_guest_freed_memory = false
+
+# Enable swap in the guest. Default false.
+enable_guest_swap = false
+
+[agent.@PROJECT_TYPE@]
+container_pipe_size = @PIPESIZE@
+enable_debug = true
+enable_tracing = false
+debug_console_enabled = false
+
+# Agent dial timeout in millisecond.
+dial_timeout_ms = 10
+
+# Agent reconnect timeout in millisecond.
+reconnect_timeout_ms = 3000
+
+# Create Container Request Timeout
+create_container_timeout = @DEFCREATECONTAINERTIMEOUT@
+
+[runtime]
+enable_debug = true
+keep_abnormal = false
+
+# Internetworking model
+internetworking_model = "@DEFNETWORKMODEL_OPENVMM@"
+
+name = "@RUNTIMENAME@"
+hypervisor_name = "@HYPERVISOR_OPENVMM@"
+agent_name = "@PROJECT_TYPE@"
+
+# disable guest seccomp
+disable_guest_seccomp = @DEFDISABLEGUESTSECCOMP@
+
+enable_tracing = false
+jaeger_endpoint = ""
+jaeger_user = ""
+jaeger_password = ""
+
+disable_new_netns = false
+
+sandbox_cgroup_only = @DEFSANDBOXCGROUPONLY_OPENVMM@
+
+experimental = @DEFAULTEXPFEATURES@
+
+enable_pprof = false
+
+static_sandbox_resource_mgmt = @DEFSTATICRESOURCEMGMT_OPENVMM@
+
+sandbox_bind_mounts = @DEFBINDMOUNTS@
+
+dan_conf = "@DEFDANCONF@"
