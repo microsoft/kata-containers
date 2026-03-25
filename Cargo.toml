@@ -141,7 +141,7 @@ vm_manifest_builder = { path = "../openvmm-repo/vmm_core/vm_manifest_builder" }
 ovmm_mesh = { path = "../openvmm-repo/support/mesh", package = "mesh" }
 ovmm_mesh_worker = { path = "../openvmm-repo/support/mesh/mesh_worker", package = "mesh_worker" }
 ovmm_pal_async = { path = "../openvmm-repo/support/pal/pal_async", package = "pal_async" }
-ovmm_unix_socket = { path = "../openvmm-repo/support/unix_socket", package = "unix_socket" }
+ovmm_unix_socket = { path = "../openvmm-repo/support/unix_socket", package = "unix_socket", features = ["mesh"] }
 storvsp_resources = { path = "../openvmm-repo/vm/devices/storage/storvsp_resources" }
 scsidisk_resources = { path = "../openvmm-repo/vm/devices/storage/scsidisk_resources" }
 netvsp_resources = { path = "../openvmm-repo/vm/devices/net/netvsp_resources" }
