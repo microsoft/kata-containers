@@ -69,6 +69,24 @@ dbs-utils = { workspace = true }
 # OpenVMM dependencies
 ovmm_virt = { workspace = true, optional = true }
 virt_mshv = { workspace = true, optional = true }
+openvmm_core = { workspace = true, optional = true }
+openvmm_defs = { workspace = true, optional = true }
+openvmm_resources = { workspace = true, optional = true }
+openvmm_helpers = { workspace = true, optional = true }
+vm_manifest_builder = { workspace = true, optional = true }
+ovmm_mesh = { workspace = true, optional = true }
+ovmm_mesh_worker = { workspace = true, optional = true }
+ovmm_pal_async = { workspace = true, optional = true }
+ovmm_unix_socket = { workspace = true, optional = true }
+storvsp_resources = { workspace = true, optional = true }
+scsidisk_resources = { workspace = true, optional = true }
+netvsp_resources = { workspace = true, optional = true }
+net_backend_resources = { workspace = true, optional = true }
+virtio_resources = { workspace = true, optional = true }
+vm_resource = { workspace = true, optional = true }
+disk_backend_resources = { workspace = true, optional = true }
+ovmm_vmm_core_defs = { workspace = true, optional = true }
+ovmm_guid = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -79,7 +97,28 @@ dragonball = ["dep:dragonball"]
 cloud-hypervisor = ["ch-config"]
 
 # Enable the built-in OpenVMM (MSHV-backed) hypervisor
-openvmm = ["dep:virt_mshv", "dep:ovmm_virt"]
+openvmm = [
+    "dep:virt_mshv",
+    "dep:ovmm_virt",
+    "dep:openvmm_core",
+    "dep:openvmm_defs",
+    "dep:openvmm_resources",
+    "dep:openvmm_helpers",
+    "dep:vm_manifest_builder",
+    "dep:ovmm_mesh",
+    "dep:ovmm_mesh_worker",
+    "dep:ovmm_pal_async",
+    "dep:ovmm_unix_socket",
+    "dep:storvsp_resources",
+    "dep:scsidisk_resources",
+    "dep:netvsp_resources",
+    "dep:net_backend_resources",
+    "dep:virtio_resources",
+    "dep:vm_resource",
+    "dep:disk_backend_resources",
+    "dep:ovmm_vmm_core_defs",
+    "dep:ovmm_guid",
+]
 
 [dev-dependencies]
 serial_test = "2.0.0"
