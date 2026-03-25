@@ -4,9 +4,6 @@
 //
 
 //! VmmInstance wrapper for OpenVMM's in-process VM worker.
-//!
-//! Analogous to dragonball's VmmInstance, this wraps the mesh_worker
-//! WorkerHandle and VmRpc channels for controlling the VM lifecycle.
 
 use anyhow::{Context, Result};
 use openvmm_defs::config::Config;
@@ -18,20 +15,15 @@ use ovmm_vmm_core_defs::HaltReason;
 use tokio::sync::mpsc;
 
 // Force linker to include openvmm_resources which registers the VmWorker
-// via linkme::distributed_slice. Without this, the worker factory won't
-// find the "VmWorker" entry.
+// via linkme::distributed_slice.
 extern crate openvmm_resources as _;
 
 /// Wrapper around OpenVMM's VmWorker, providing VM lifecycle control.
 #[allow(dead_code)]
 pub(crate) struct VmmInstance {
-    /// Handle to the running worker (for stop/join)
     worker_handle: Option<ovmm_mesh_worker::WorkerHandle>,
-    /// Channel for sending VmRpc commands (pause, resume, etc.)
     worker_rpc: Option<ovmm_mesh::Sender<VmRpc>>,
-    /// Channel for receiving VM halt notifications
     _notify_recv: Option<ovmm_mesh::Receiver<HaltReason>>,
-    /// Exit notification channel (kata-side)
     exit_notify: Option<mpsc::Sender<i32>>,
 }
 
@@ -56,70 +48,100 @@ impl VmmInstance {
 
     /// Launch the VmWorker with the given configuration.
     ///
-    /// This spawns the VM in a separate thread via mesh_worker.
-    /// After this call, the VM is created but paused — call resume() to boot.
-    pub(crate) async fn launch(&mut self, config: Config) -> Result<()> {
+    /// If `hvsock_path` is Some, the hvsock listener will be bound inside
+    /// the worker host thread (same pal_async context as the VmWorker) to
+    /// avoid FD transfer issues with mesh channels across runtimes.
+    pub(crate) async fn launch(&mut self, mut config: Config, hvsock_path: Option<String>, log_dir: Option<String>) -> Result<()> {
         let (rpc_send, rpc_recv) = ovmm_mesh::channel();
         let (notify_send, notify_recv) = ovmm_mesh::channel();
 
-        // Create a worker host and spawn its runner as a detached task.
-        // The runner listens for worker launch requests and spawns OS threads.
-        let (host, runner) = ovmm_mesh_worker::worker_host();
+        // Use a oneshot channel to get the worker handle from the pal_async thread.
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
 
-        // We need a pal_async driver to spawn the runner task.
-        // Use a dedicated thread for the worker host event loop.
-        let runner_thread = std::thread::Builder::new()
+        // Run everything in a single pal_async thread: bind listener, create
+        // worker host, launch worker. This ensures the UnixListener FD stays
+        // in the same async runtime as the VmWorker.
+        std::thread::Builder::new()
             .name("ovmm-worker-host".to_string())
             .spawn(move || {
+                // Set up tracing for the VmWorker thread.
+                // Write openvmm tracing output to a log file for debugging.
+                if let Some(ref dir) = log_dir {
+                    let log_file_path = format!("{}/openvmm-worker.log", dir);
+                    if let Ok(file) = std::fs::File::create(&log_file_path) {
+                        let subscriber = tracing_subscriber::fmt()
+                            .with_writer(std::sync::Mutex::new(file))
+                            .with_ansi(false)
+                            .finish();
+                        // Use set_default (thread-local) not set_global_default
+                        let _guard = tracing::subscriber::set_default(subscriber);
+                    }
+                }
+
+                // Bind hvsock listener inside this thread context
+                if let Some(ref path) = hvsock_path {
+                    let _ = std::fs::remove_file(path);
+                    match ovmm_unix_socket::UnixListener::bind(path) {
+                        Ok(listener) => {
+                            if let Some(ref mut vmbus) = config.vmbus {
+                                vmbus.vsock_listener = Some(listener);
+                            }
+                        }
+                        Err(e) => {
+                            let _ = result_tx.send(Err(anyhow::anyhow!(
+                                "failed to bind hvsock listener at {}: {}",
+                                path,
+                                e
+                            )));
+                            return;
+                        }
+                    }
+                }
+
                 ovmm_pal_async::DefaultPool::run_with(|driver: ovmm_pal_async::DefaultDriver| async move {
                     use ovmm_pal_async::task::Spawn;
+
+                    let (host, runner) = ovmm_mesh_worker::worker_host();
                     driver
                         .spawn("worker-host-runner", runner.run(RegisteredWorkers))
                         .detach();
 
-                    // Keep the pool alive; it will be dropped when the worker stops.
+                    let result = host
+                        .launch_worker(
+                            VM_WORKER,
+                            VmWorkerParameters {
+                                hypervisor: None,
+                                cfg: config,
+                                saved_state: None,
+                                rpc: rpc_recv,
+                                notify: notify_send,
+                            },
+                        )
+                        .await;
+
+                    let _ = result_tx.send(result.context("failed to launch VM worker"));
+
+                    // Keep the pool alive for the VM's lifetime.
                     std::future::pending::<()>().await;
                 });
             })
             .context("failed to spawn worker host thread")?;
 
-        // Give the worker host thread a moment to start
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-        // Launch the VM worker. This sends parameters to the runner thread,
-        // which spawns a new OS thread for the VmWorker.
-        info!(sl!(), "openvmm: VmmInstance: calling launch_worker");
-        let worker = host
-            .launch_worker(
-                VM_WORKER,
-                VmWorkerParameters {
-                    hypervisor: None, // Auto-detect (will find MSHV)
-                    cfg: config,
-                    saved_state: None,
-                    shared_memory: None,
-                    rpc: rpc_recv,
-                    notify: notify_send,
-                },
-            )
+        // Wait for the worker to start from the tokio context.
+        let worker = result_rx
             .await
-            .context("failed to launch VM worker")?;
+            .context("worker host thread died")??;
 
         self.worker_handle = Some(worker);
         self.worker_rpc = Some(rpc_send);
         self._notify_recv = Some(notify_recv);
 
-        // Forget the runner thread handle — it runs for the lifetime of the VM
-        std::mem::forget(runner_thread);
-
         Ok(())
     }
 
-    /// Resume (boot) the VM. Must be called after launch().
+    /// Resume (boot) the VM.
     pub(crate) async fn resume(&self) -> Result<()> {
-        let rpc = self
-            .worker_rpc
-            .as_ref()
-            .context("VM not launched")?;
+        let rpc = self.worker_rpc.as_ref().context("VM not launched")?;
         let result = rpc.call(VmRpc::Resume, ()).await;
         match result {
             Ok(true) => Ok(()),
@@ -130,10 +152,7 @@ impl VmmInstance {
 
     /// Pause the VM.
     pub(crate) async fn pause(&self) -> Result<()> {
-        let rpc = self
-            .worker_rpc
-            .as_ref()
-            .context("VM not launched")?;
+        let rpc = self.worker_rpc.as_ref().context("VM not launched")?;
         let result = rpc.call(VmRpc::Pause, ()).await;
         match result {
             Ok(true) => Ok(()),
@@ -147,16 +166,12 @@ impl VmmInstance {
         if let Some(mut worker_handle) = self.worker_handle.take() {
             worker_handle.stop();
             if let Err(err) = worker_handle.join().await {
-                warn!(
-                    sl!(),
-                    "openvmm: VM worker failed during shutdown: {:?}", err
-                );
+                warn!(sl!(), "openvmm: VM worker failed during shutdown: {:?}", err);
             }
         }
         self.worker_rpc = None;
         self._notify_recv = None;
 
-        // Notify kata of exit
         if let Some(exit_notify) = &self.exit_notify {
             let _ = exit_notify.try_send(0);
         }

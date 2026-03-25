@@ -112,11 +112,12 @@ enable_tracing = false
 debug_console_enabled = false
 
 # Agent dial timeout in millisecond.
-dial_timeout_ms = 10
+# Use longer timeout to give the hvsock relay time to complete VMBus handshake.
+dial_timeout_ms = 1000
 
 # Agent reconnect timeout in millisecond.
 # OpenVMM needs more time for guest to boot and kata-agent to start.
-reconnect_timeout_ms = 45000
+reconnect_timeout_ms = 60000
 
 # Create Container Request Timeout
 create_container_timeout = @DEFCREATECONTAINERTIMEOUT@
