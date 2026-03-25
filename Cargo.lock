@@ -3636,6 +3636,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "linux_net_bindings"
+version = "0.0.0"
+dependencies = [
+ "nix 0.30.1",
+]
+
+[[package]]
 name = "litemap"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4119,6 +4126,28 @@ dependencies = [
  "tracing",
  "vm_resource",
  "vmswitch",
+]
+
+[[package]]
+name = "net_tap"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "futures 0.3.32",
+ "inspect",
+ "libc",
+ "linux_net_bindings",
+ "net_backend",
+ "net_backend_resources",
+ "open_enum",
+ "pal_async",
+ "parking_lot",
+ "thiserror 2.0.12",
+ "tracing",
+ "vm_resource",
+ "zerocopy",
 ]
 
 [[package]]
@@ -5027,6 +5056,7 @@ dependencies = [
  "missing_dev",
  "net_backend",
  "net_dio",
+ "net_tap",
  "netvsp",
  "nvme",
  "nvme_test",
