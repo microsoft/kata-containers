@@ -7,8 +7,45 @@ name = "aarch64defs"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 dependencies = [
- "bitfield-struct",
+ "bitfield-struct 0.11.0",
  "open_enum",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "aarch64emu"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "aarch64defs",
+ "inspect",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "acpi"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "acpi_spec",
+ "cxl_spec",
+ "guid",
+ "memory_range",
+ "thiserror 2.0.18",
+ "x86defs",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "acpi_spec"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "open_enum",
+ "static_assertions",
+ "thiserror 2.0.18",
  "zerocopy 0.8.54",
 ]
 
@@ -40,6 +77,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b"
 dependencies = [
  "gimli",
+]
+
+[[package]]
+name = "address_filter"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -102,6 +148,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "amd_iommu"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "chipset_device",
+ "guestmem",
+ "inspect",
+ "iommu_common",
+ "open_enum",
+ "parking_lot",
+ "pci_core",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vmcore",
+ "zerocopy 0.8.54",
 ]
 
 [[package]]
@@ -192,6 +258,11 @@ checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
 dependencies = [
  "rustversion",
 ]
+
+[[package]]
+name = "arc_cyclic_builder"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 
 [[package]]
 name = "arrayref"
@@ -605,6 +676,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64-serde"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c6d128af408d8ebd08331f0331cf2cf20d19e6c44a7aec58791641ecc8c0b5"
+
+[[package]]
+name = "base64ct"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
+
+[[package]]
 name = "bilge"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -656,6 +739,17 @@ name = "bit-vec"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
+
+[[package]]
+name = "bitfield-struct"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2be5a46ba01b60005ae2c51a36a29cfe134bcacae2dd5cedcd4615fbaad1494b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "bitfield-struct"
@@ -734,6 +828,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
 dependencies = [
  "generic-array",
+]
+
+[[package]]
+name = "block-buffer"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
+dependencies = [
+ "hybrid-array",
 ]
 
 [[package]]
@@ -864,6 +967,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "cache_topology"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "fs-err",
+ "thiserror 2.0.18",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "capctl"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -980,6 +1093,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "chipset"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "chipset_device",
+ "chipset_device_resources",
+ "chipset_resources",
+ "futures",
+ "input_core",
+ "inspect",
+ "inspect_counters",
+ "jiff",
+ "local_clock",
+ "mesh",
+ "open_enum",
+ "power_resources",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vm_resource",
+ "vmcore",
+ "x86defs",
+]
+
+[[package]]
 name = "chipset_device"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
@@ -1002,6 +1142,79 @@ dependencies = [
  "tdisp",
  "vm_resource",
  "vmcore",
+]
+
+[[package]]
+name = "chipset_device_worker"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chipset_device",
+ "chipset_device_resources",
+ "chipset_device_worker_defs",
+ "futures",
+ "guestmem",
+ "inspect",
+ "mesh",
+ "mesh_worker",
+ "pal_async",
+ "parking_lot",
+ "slab",
+ "thiserror 2.0.18",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "chipset_device_worker_defs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "mesh_worker",
+ "vm_resource",
+]
+
+[[package]]
+name = "chipset_legacy"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "chipset",
+ "chipset_device",
+ "chipset_device_resources",
+ "chipset_resources",
+ "floppy",
+ "floppy_pcat_stub",
+ "guestmem",
+ "inspect",
+ "local_clock",
+ "memory_range",
+ "mesh",
+ "open_enum",
+ "pci_bus",
+ "pci_core",
+ "power_resources",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "chipset_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
+ "local_clock",
+ "memory_range",
+ "mesh",
+ "vm_resource",
 ]
 
 [[package]]
@@ -1059,12 +1272,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "closeable_mutex"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "parking_lot",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "cms"
+version = "0.3.0-pre.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "986e7713348fbe5322df18082d73a0ad53a2946dbb7a02452cf3622b83b91e7c"
+dependencies = [
+ "const-oid",
+ "der",
+ "spki",
+ "x509-cert",
 ]
 
 [[package]]
@@ -1131,6 +1364,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-oid"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
 name = "const_format"
 version = "0.2.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1149,6 +1388,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-xid",
+]
+
+[[package]]
+name = "const_panic"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e262cdaac42494e3ae34c43969f9cdeb7da178bdb4b66fa6a1ea2edb4c8ae652"
+dependencies = [
+ "typewit",
 ]
 
 [[package]]
@@ -1364,6 +1612,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
+name = "crypto"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "cms",
+ "der",
+ "openssl",
+ "openssl_kdf",
+ "pkcs1",
+ "pkcs8",
+ "signature 3.0.0",
+ "symcrypt",
+ "thiserror 2.0.18",
+ "wchar",
+ "windows 0.62.2",
+ "windows-result 0.4.1",
+ "x509-cert",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1371,6 +1641,15 @@ checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
 dependencies = [
  "generic-array",
  "typenum",
+]
+
+[[package]]
+name = "crypto-common"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
+dependencies = [
+ "hybrid-array",
 ]
 
 [[package]]
@@ -1419,7 +1698,7 @@ version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 dependencies = [
  "anyhow",
- "bitfield-struct",
+ "bitfield-struct 0.11.0",
  "chipset_device",
  "inspect",
  "mesh",
@@ -1635,7 +1914,7 @@ dependencies = [
  "serde",
  "test-utils",
  "thiserror 1.0.69",
- "vfio-bindings",
+ "vfio-bindings 0.6.2",
  "vfio-ioctls",
  "virtio-queue",
  "vm-memory",
@@ -1718,6 +1997,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "debug_ptr"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+
+[[package]]
 name = "defmt"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1746,6 +2030,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e"
 dependencies = [
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "der"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a69dedd701da44b0536442edf09c81a64b0ab97a7a4a5e3d1971f00027cbc63d"
+dependencies = [
+ "const-oid",
+ "der_derive",
+ "flagset",
+ "zeroize",
+]
+
+[[package]]
+name = "der_derive"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59600e2c2d636fde9b65e99cc6445ac770c63d3628195ff39932b8d6d7409903"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1832,6 +2139,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "device_emulators"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+
+[[package]]
 name = "device_tree"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1859,8 +2171,195 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer 0.10.4",
- "crypto-common",
+ "crypto-common 0.1.7",
  "subtle",
+]
+
+[[package]]
+name = "digest"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
+dependencies = [
+ "block-buffer 0.12.1",
+ "crypto-common 0.2.2",
+]
+
+[[package]]
+name = "disk_backend"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "futures",
+ "guestmem",
+ "inspect",
+ "scsi_buffers",
+ "stackfuture",
+ "thiserror 2.0.18",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "disk_backend_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
+]
+
+[[package]]
+name = "disk_blockdevice"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "blocking",
+ "disk_backend",
+ "disk_backend_resources",
+ "event-listener 5.4.1",
+ "fs-err",
+ "guestmem",
+ "inspect",
+ "io-uring 0.7.13",
+ "libc",
+ "nix 0.30.1",
+ "nvme_common",
+ "nvme_spec",
+ "open_enum",
+ "pal",
+ "pal_async",
+ "scsi_buffers",
+ "thiserror 2.0.18",
+ "tracing",
+ "uevent",
+ "vm_resource",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "disk_delay"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "disk_backend",
+ "disk_backend_resources",
+ "inspect",
+ "mesh",
+ "pal_async",
+ "scsi_buffers",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "disk_file"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "blocking",
+ "disk_backend",
+ "disk_backend_resources",
+ "guestmem",
+ "inspect",
+ "scsi_buffers",
+ "thiserror 2.0.18",
+ "vm_resource",
+]
+
+[[package]]
+name = "disk_layered"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "disk_backend",
+ "disk_backend_resources",
+ "futures",
+ "guestmem",
+ "inspect",
+ "scsi_buffers",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "disk_prwrap"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "disk_backend",
+ "disk_backend_resources",
+ "inspect",
+ "parking_lot",
+ "scsi_buffers",
+ "thiserror 2.0.18",
+ "tracing",
+ "vm_resource",
+]
+
+[[package]]
+name = "disk_vhd1"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "disk_backend",
+ "disk_backend_resources",
+ "disk_file",
+ "guid",
+ "inspect",
+ "scsi_buffers",
+ "thiserror 2.0.18",
+ "vhd1_defs",
+ "vm_resource",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "disk_vhdmp"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "disk_backend",
+ "disk_file",
+ "futures",
+ "guid",
+ "inspect",
+ "mesh",
+ "scsi_buffers",
+ "thiserror 2.0.18",
+ "vm_resource",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "disklayer_ram"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "disk_backend",
+ "disk_backend_resources",
+ "disk_layered",
+ "event-listener 5.4.1",
+ "futures",
+ "guestmem",
+ "inspect",
+ "parking_lot",
+ "scsi_buffers",
+ "thiserror 2.0.18",
+ "tracing",
+ "vm_resource",
 ]
 
 [[package]]
@@ -1933,7 +2432,7 @@ dependencies = [
  "test-utils",
  "thiserror 1.0.69",
  "tracing",
- "vfio-bindings",
+ "vfio-bindings 0.6.2",
  "vfio-ioctls",
  "virtio-queue",
  "vm-memory",
@@ -2135,6 +2634,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+
+[[package]]
 name = "fancy-regex"
 version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2143,6 +2654,14 @@ dependencies = [
  "bit-set",
  "regex-automata",
  "regex-syntax",
+]
+
+[[package]]
+name = "fast_select"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "parking_lot",
 ]
 
 [[package]]
@@ -2161,6 +2680,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
+name = "fdt"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "thiserror 2.0.18",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "filepath"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f81dd23d67f94e07ac941a8da9bd0c2a82d3ea063b7d8a921d1dd05f9052a407"
+dependencies = [
+ "libc",
+ "windows 0.58.0",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2175,6 +2713,95 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "firmware_pcat"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "chipset_device",
+ "generation_id",
+ "getrandom 0.4.3",
+ "guestmem",
+ "guid",
+ "inspect",
+ "memory_range",
+ "mesh",
+ "open_enum",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vm_topology",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "firmware_uefi"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "chipset_device",
+ "chipset_device_resources",
+ "chipset_resources",
+ "crypto",
+ "der",
+ "firmware_uefi_custom_vars",
+ "firmware_uefi_resources",
+ "generation_id",
+ "getrandom 0.4.3",
+ "guestmem",
+ "guid",
+ "hcl_compat_uefi_nvram_storage",
+ "inspect",
+ "jiff",
+ "local_clock",
+ "mesh",
+ "open_enum",
+ "pal_async",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "ucs2",
+ "uefi_nvram_specvars",
+ "uefi_nvram_storage",
+ "uefi_specs",
+ "vm_resource",
+ "vmcore",
+ "vmm_core",
+ "watchdog_core",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "firmware_uefi_custom_vars"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guid",
+ "mesh_protobuf",
+ "thiserror 2.0.18",
+ "uefi_specs",
+]
+
+[[package]]
+name = "firmware_uefi_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "chipset_resources",
+ "firmware_uefi_custom_vars",
+ "hcl_compat_uefi_nvram_resources",
+ "inspect",
+ "mesh",
+ "mesh_protobuf",
+ "uefi_specs",
+ "vm_resource",
+ "watchdog_core",
+]
 
 [[package]]
 name = "fixedbitset"
@@ -2195,6 +2822,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
+name = "flagset"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7ac824320a75a52197e8f2d787f6a38b6718bb6897a35142d749af3c0e8f4fe"
+
+[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2203,6 +2836,51 @@ dependencies = [
  "crc32fast",
  "libz-sys",
  "miniz_oxide",
+]
+
+[[package]]
+name = "floppy"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "arrayvec",
+ "bitfield-struct 0.11.0",
+ "chipset_device",
+ "disk_backend",
+ "guestmem",
+ "inspect",
+ "mesh",
+ "open_enum",
+ "scsi_buffers",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vmcore",
+]
+
+[[package]]
+name = "floppy_pcat_stub"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "arrayvec",
+ "bitfield-struct 0.11.0",
+ "chipset_device",
+ "inspect",
+ "mesh",
+ "open_enum",
+ "tracelimit",
+ "tracing",
+ "vmcore",
+]
+
+[[package]]
+name = "floppy_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
 ]
 
 [[package]]
@@ -2230,6 +2908,12 @@ name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
+
+[[package]]
+name = "foldhash"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "foreign-types"
@@ -2263,6 +2947,26 @@ checksum = "e076045bb43dac435333ed5f04caf35c7463631d0dae2deb2638d94dd0a5b872"
 dependencies = [
  "lazy_static",
  "num",
+]
+
+[[package]]
+name = "framebuffer"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chipset_device",
+ "guestmem",
+ "inspect",
+ "memory_range",
+ "mesh",
+ "parking_lot",
+ "sparse_mmap",
+ "tracing",
+ "video_core",
+ "vm_resource",
+ "vmcore",
 ]
 
 [[package]]
@@ -2310,6 +3014,20 @@ name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
+
+[[package]]
+name = "fuse"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "libc",
+ "lx",
+ "parking_lot",
+ "thiserror 2.0.18",
+ "tracing",
+ "zerocopy 0.8.54",
+]
 
 [[package]]
 name = "fuse-backend-rs"
@@ -2468,6 +3186,71 @@ dependencies = [
 ]
 
 [[package]]
+name = "gdma"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chipset_device",
+ "device_emulators",
+ "futures",
+ "gdma_defs",
+ "gdma_resources",
+ "guestmem",
+ "inspect",
+ "net_backend",
+ "net_backend_resources",
+ "parking_lot",
+ "pci_core",
+ "pci_resources",
+ "slab",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vm_resource",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "gdma_defs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "guestmem",
+ "inspect",
+ "open_enum",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "gdma_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "net_backend_resources",
+ "vm_resource",
+]
+
+[[package]]
+name = "generation_id"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "getrandom 0.4.3",
+ "guestmem",
+ "inspect",
+ "mesh",
+ "tracelimit",
+ "tracing",
+ "vmcore",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2512,6 +3295,32 @@ dependencies = [
  "tokio",
  "tonic 0.9.2",
  "tower 0.4.13",
+]
+
+[[package]]
+name = "get_protocol"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "guid",
+ "open_enum",
+ "serde",
+ "serde_helpers",
+ "static_assertions",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "get_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
+ "mesh",
+ "thiserror 2.0.18",
+ "vm_resource",
+ "vmgs_resources",
 ]
 
 [[package]]
@@ -2598,6 +3407,103 @@ dependencies = [
 ]
 
 [[package]]
+name = "guest_crash_device"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "get_protocol",
+ "get_resources",
+ "guestmem",
+ "guid",
+ "inspect",
+ "mesh",
+ "task_control",
+ "tracing",
+ "vm_resource",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "guest_emulation_device"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "disk_backend",
+ "futures",
+ "get_protocol",
+ "get_resources",
+ "guestmem",
+ "guid",
+ "inspect",
+ "jiff",
+ "mesh",
+ "power_resources",
+ "scsi_buffers",
+ "serde_json",
+ "task_control",
+ "test_igvm_agent_lib",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "video_core",
+ "vm_resource",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmbus_ring",
+ "vmcore",
+ "vmgs_resources",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "guest_emulation_log"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "get_protocol",
+ "get_resources",
+ "guestmem",
+ "inspect",
+ "serde",
+ "serde_json",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracing",
+ "vm_resource",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmbus_ring",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "guest_watchdog"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "chipset_device",
+ "chipset_device_resources",
+ "chipset_resources",
+ "inspect",
+ "mesh",
+ "open_enum",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "vm_resource",
+ "vmcore",
+ "watchdog_core",
+]
+
+[[package]]
 name = "guestmem"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
@@ -2607,6 +3513,21 @@ dependencies = [
  "sparse_mmap",
  "thiserror 2.0.18",
  "trycopy",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "guid"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "getrandom 0.4.3",
+ "inspect",
+ "mesh_protobuf",
+ "thiserror 2.0.18",
+ "win_etw_provider",
+ "windows 0.62.2",
+ "windows-sys 0.61.2",
  "zerocopy 0.8.54",
 ]
 
@@ -2665,9 +3586,57 @@ checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 
 [[package]]
 name = "hashbrown"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
+dependencies = [
+ "foldhash",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
+name = "hashlink"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
+dependencies = [
+ "hashbrown 0.15.5",
+]
+
+[[package]]
+name = "hcl_compat_uefi_nvram_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
+ "mesh_protobuf",
+]
+
+[[package]]
+name = "hcl_compat_uefi_nvram_storage"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "cvm_tracing",
+ "guid",
+ "hcl_compat_uefi_nvram_resources",
+ "inspect",
+ "open_enum",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tracing",
+ "ucs2",
+ "uefi_nvram_storage",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
 
 [[package]]
 name = "headers"
@@ -2681,7 +3650,7 @@ dependencies = [
  "http 0.2.12",
  "httpdate",
  "mime",
- "sha1",
+ "sha1 0.10.7",
 ]
 
 [[package]]
@@ -2898,10 +3867,41 @@ name = "hvdef"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 dependencies = [
- "bitfield-struct",
+ "bitfield-struct 0.11.0",
  "open_enum",
  "static_assertions",
  "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "hvs_file"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "crc32fast",
+ "open_enum",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "hybrid-array"
+version = "0.4.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "818356c5132c1fede50f837ca96afbe78ff42413047f4abb886217845e1b6c8c"
+dependencies = [
+ "typenum",
+]
+
+[[package]]
+name = "hybrid_vsock"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "fs-err",
+ "guid",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3048,6 +4048,67 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyperv_dump"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "hvdef",
+ "hvs_file",
+ "memory_range",
+ "static_assertions",
+ "virt",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "hyperv_ic"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "futures-concurrency",
+ "guestmem",
+ "hyperv_ic_protocol",
+ "hyperv_ic_resources",
+ "inspect",
+ "jiff",
+ "mesh",
+ "pal_async",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vm_resource",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "hyperv_ic_protocol"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "guid",
+ "jiff",
+ "open_enum",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "hyperv_ic_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
+]
+
+[[package]]
 name = "hypervisor"
 version = "0.1.0"
 dependencies = [
@@ -3057,9 +4118,11 @@ dependencies = [
  "ch-config",
  "crossbeam-channel",
  "dbs-utils",
+ "disk_backend_resources",
  "dragonball",
  "futures",
  "go-flag",
+ "guid",
  "hyper 0.14.32",
  "hyperlocal",
  "hypervisor",
@@ -3068,8 +4131,17 @@ dependencies = [
  "lazy_static",
  "libc",
  "logging",
+ "mesh",
+ "mesh_worker",
+ "net_backend_resources",
+ "netvsp_resources",
  "nix 0.26.4",
  "once_cell",
+ "openvmm_core",
+ "openvmm_defs",
+ "openvmm_helpers",
+ "openvmm_resources",
+ "pal_async",
  "path-clean",
  "persist",
  "protocols",
@@ -3080,12 +4152,14 @@ dependencies = [
  "regex",
  "rust-ini",
  "safe-path 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "scsidisk_resources",
  "seccompiler",
  "serde",
  "serde_json",
  "serial_test 2.0.0",
  "slog",
  "slog-scope",
+ "storvsp_resources",
  "tempfile",
  "test-utils",
  "tests_utils",
@@ -3094,9 +4168,25 @@ dependencies = [
  "tracing",
  "ttrpc",
  "ttrpc-codegen",
+ "unix_socket",
  "virt",
  "virt_mshv",
+ "virtio_resources",
+ "vm_manifest_builder",
+ "vm_resource",
  "vmm-sys-util 0.15.0",
+ "vmm_core_defs",
+]
+
+[[package]]
+name = "hypervisor_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "linkme",
+ "mesh",
+ "vm_resource",
 ]
 
 [[package]]
@@ -3215,6 +4305,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "ide"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "chipset_device",
+ "disk_backend",
+ "guestmem",
+ "ide_resources",
+ "inspect",
+ "mesh",
+ "open_enum",
+ "pci_core",
+ "safeatomic",
+ "scsi_buffers",
+ "scsi_core",
+ "scsi_defs",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "tracing_helpers",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "ide_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
+ "mesh",
+ "scsidisk_resources",
+ "vm_resource",
+]
+
+[[package]]
 name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3239,6 +4367,36 @@ checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+]
+
+[[package]]
+name = "igvm"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67578b05ebcdfa1aa0fe13f77a13bdd7d87036128898a327f1bf8e7356cf09cd"
+dependencies = [
+ "bitfield-struct 0.10.1",
+ "crc32fast",
+ "hex",
+ "igvm_defs",
+ "open-enum",
+ "range_map_vec",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tracing",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "igvm_defs"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eedd8c64460676101062f9f2ecdeb52d8f43e622da6a6c5bf5158f4ef08b0906"
+dependencies = [
+ "bitfield-struct 0.10.1",
+ "open-enum",
+ "static_assertions",
+ "zerocopy 0.8.54",
 ]
 
 [[package]]
@@ -3298,14 +4456,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "input_core"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "futures",
+ "mesh",
+ "vm_resource",
+]
+
+[[package]]
 name = "inspect"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 dependencies = [
- "bitfield-struct",
+ "bitfield-struct 0.11.0",
+ "filepath",
  "inspect_derive",
  "mesh",
  "parking_lot",
+]
+
+[[package]]
+name = "inspect_counters"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
 ]
 
 [[package]]
@@ -3370,6 +4547,16 @@ dependencies = [
  "bitflags 2.13.1",
  "cfg-if 1.0.4",
  "libc",
+]
+
+[[package]]
+name = "iommu_common"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guestmem",
+ "pci_core",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3645,7 +4832,7 @@ dependencies = [
  "js-sys",
  "serde",
  "serde_json",
- "signature",
+ "signature 2.2.0",
  "zeroize",
 ]
 
@@ -4041,6 +5228,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kvm"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "kvm-bindings",
+ "libc",
+ "nix 0.30.1",
+ "pal",
+ "parking_lot",
+ "signal-hook",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "kvm-bindings"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4101,6 +5302,17 @@ name = "libseccomp-sys"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a7cbbd4ad467251987c6e5b47d53b11a5a05add08f2447a9e2d70aef1e0d138"
+
+[[package]]
+name = "libsqlite3-sys"
+version = "0.35.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "133c182a6a2c87864fe97778797e46c7e999672690dc9fa3ee8e241aa4a9c13f"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
 
 [[package]]
 name = "libsystemd"
@@ -4198,15 +5410,74 @@ dependencies = [
 ]
 
 [[package]]
+name = "linux_net_bindings"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "nix 0.30.1",
+]
+
+[[package]]
 name = "litemap"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
+name = "loader"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "aarch64defs",
+ "anyhow",
+ "bitfield-struct 0.11.0",
+ "build_rs_guest_arch",
+ "crc32fast",
+ "guid",
+ "hvdef",
+ "igvm",
+ "loader_defs",
+ "memory_range",
+ "object",
+ "open_enum",
+ "page_table",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tracing",
+ "vm_topology",
+ "x86defs",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "loader_defs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "hvdef",
+ "igvm_defs",
+ "memory_range",
+ "mesh_protobuf",
+ "open_enum",
+ "static_assertions",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
 name = "loan_cell"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+
+[[package]]
+name = "local_clock"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
+ "jiff",
+ "parking_lot",
+]
 
 [[package]]
 name = "lock_api"
@@ -4247,6 +5518,36 @@ name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
+
+[[package]]
+name = "lx"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "lxutil"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "arrayvec",
+ "bitfield-struct 0.11.0",
+ "headervec",
+ "libc",
+ "lx",
+ "pal",
+ "parking_lot",
+ "static_assertions",
+ "tracing",
+ "widestring",
+ "windows 0.62.2",
+ "zerocopy 0.8.54",
+]
 
 [[package]]
 name = "lz4"
@@ -4305,6 +5606,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "membacking"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "futures",
+ "getrandom 0.4.3",
+ "guestmem",
+ "hvdef",
+ "inspect",
+ "memory_range",
+ "mesh",
+ "pal_async",
+ "parking_lot",
+ "slab",
+ "sparse_mmap",
+ "thiserror 2.0.18",
+ "tracing",
+ "virt",
+ "vmcore",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4343,6 +5667,7 @@ version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 dependencies = [
  "inspect",
+ "mesh_protobuf",
  "thiserror 2.0.18",
 ]
 
@@ -4400,7 +5725,7 @@ name = "mesh_node"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 dependencies = [
- "bitfield-struct",
+ "bitfield-struct 0.11.0",
  "futures",
  "getrandom 0.4.3",
  "mesh_derive",
@@ -4421,8 +5746,24 @@ dependencies = [
  "fs-err",
  "heck 0.5.0",
  "mesh_derive",
+ "socket2 0.6.5",
  "thiserror 2.0.18",
  "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "mesh_worker"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "futures",
+ "futures-concurrency",
+ "inspect",
+ "linkme",
+ "mesh",
+ "tracing",
+ "unicycle",
 ]
 
 [[package]]
@@ -4481,6 +5822,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "missing_dev"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "chipset_device",
+ "chipset_device_resources",
+ "inspect",
+ "missing_dev_resources",
+ "pci_core",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "missing_dev_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
+]
+
+[[package]]
 name = "mshv-bindings"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4536,6 +5900,83 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
+]
+
+[[package]]
+name = "net_backend"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "futures",
+ "futures-concurrency",
+ "guestmem",
+ "inspect",
+ "inspect_counters",
+ "memory_range",
+ "mesh",
+ "net_backend_resources",
+ "pal_async",
+ "parking_lot",
+ "thiserror 2.0.18",
+ "tracing",
+ "vm_resource",
+ "vm_topology",
+]
+
+[[package]]
+name = "net_backend_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guid",
+ "inspect",
+ "mesh",
+ "thiserror 2.0.18",
+ "vm_resource",
+]
+
+[[package]]
+name = "net_dio"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "guid",
+ "inspect",
+ "net_backend",
+ "net_backend_resources",
+ "pal_async",
+ "parking_lot",
+ "tracing",
+ "vm_resource",
+ "vmswitch",
+]
+
+[[package]]
+name = "net_tap"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "futures",
+ "inspect",
+ "libc",
+ "linux_net_bindings",
+ "net_backend",
+ "net_backend_resources",
+ "open_enum",
+ "pal_async",
+ "parking_lot",
+ "thiserror 2.0.18",
+ "tracing",
+ "vm_resource",
+ "zerocopy 0.8.54",
 ]
 
 [[package]]
@@ -4657,6 +6098,52 @@ checksum = "23541694f1d7d18cd1a0da3a1352a6ea48b01cbb4a8e7a6e547963823fd5276e"
 dependencies = [
  "nix 0.23.2",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "netvsp"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "futures",
+ "futures-concurrency",
+ "guestmem",
+ "guid",
+ "hvdef",
+ "inspect",
+ "inspect_counters",
+ "mesh",
+ "net_backend",
+ "net_backend_resources",
+ "netvsp_resources",
+ "open_enum",
+ "pal_async",
+ "safeatomic",
+ "static_assertions",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vm_resource",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmbus_ring",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "netvsp_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guid",
+ "mesh",
+ "net_backend_resources",
+ "vm_resource",
 ]
 
 [[package]]
@@ -4939,6 +6426,110 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvme"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chipset_device",
+ "device_emulators",
+ "disk_backend",
+ "futures",
+ "futures-concurrency",
+ "guestmem",
+ "guid",
+ "inspect",
+ "mesh",
+ "nvme_common",
+ "nvme_resources",
+ "nvme_spec",
+ "pal_async",
+ "parking_lot",
+ "pci_core",
+ "pci_resources",
+ "scsi_buffers",
+ "slab",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "unicycle",
+ "vm_resource",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "nvme_common"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "disk_backend",
+ "nvme_spec",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "nvme_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guid",
+ "mesh",
+ "nvme_spec",
+ "vm_resource",
+]
+
+[[package]]
+name = "nvme_spec"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "inspect",
+ "mesh",
+ "open_enum",
+ "static_assertions",
+ "storage_string",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "nvme_test"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "chipset_device",
+ "device_emulators",
+ "disk_backend",
+ "futures",
+ "futures-concurrency",
+ "guestmem",
+ "guid",
+ "inspect",
+ "mesh",
+ "nvme_common",
+ "nvme_resources",
+ "nvme_spec",
+ "pal_async",
+ "parking_lot",
+ "pci_core",
+ "pci_resources",
+ "scsi_buffers",
+ "task_control",
+ "tdisp",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "unicycle",
+ "vm_resource",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
 name = "nydus-api"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4997,7 +6588,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "sha1",
+ "sha1 0.10.7",
  "tar",
  "tokio",
  "url",
@@ -5172,9 +6763,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
+name = "open-enum"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb2508143a400b3361812094d987dd5adc81f0f5294a46491be648d6c94cab5"
+dependencies = [
+ "open-enum-derive",
+]
+
+[[package]]
+name = "open-enum-derive"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d1296fab5231654a5aec8bf9e87ba4e3938c502fc4c3c0425a00084c78944be"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "open_enum"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+
+[[package]]
+name = "openhcl_attestation_protocol"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "base64 0.22.1",
+ "base64-serde",
+ "bitfield-struct 0.11.0",
+ "guid",
+ "hex",
+ "hvdef",
+ "mesh",
+ "open_enum",
+ "serde",
+ "serde_helpers",
+ "serde_json",
+ "x86defs",
+ "zerocopy 0.8.54",
+]
 
 [[package]]
 name = "openssl"
@@ -5227,6 +6858,17 @@ dependencies = [
  "openssl-src",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "openssl_kdf"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "libc",
+ "openssl",
+ "openssl-sys",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5375,6 +7017,228 @@ dependencies = [
 ]
 
 [[package]]
+name = "openvmm_core"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "aarch64defs",
+ "acpi",
+ "amd_iommu",
+ "anyhow",
+ "async-trait",
+ "build_rs_guest_arch",
+ "cache_topology",
+ "cfg-if 1.0.4",
+ "chipset_device",
+ "chipset_device_resources",
+ "chipset_device_worker",
+ "chipset_legacy",
+ "chipset_resources",
+ "closeable_mutex",
+ "crc32fast",
+ "cxl_spec",
+ "debug_ptr",
+ "disk_backend",
+ "fdt",
+ "firmware_pcat",
+ "firmware_uefi_custom_vars",
+ "firmware_uefi_resources",
+ "floppy",
+ "floppy_resources",
+ "framebuffer",
+ "futures",
+ "futures-concurrency",
+ "get_resources",
+ "getrandom 0.4.3",
+ "guestmem",
+ "guid",
+ "hvdef",
+ "hyperv_dump",
+ "hypervisor_resources",
+ "ide",
+ "ide_resources",
+ "igvm",
+ "igvm_defs",
+ "input_core",
+ "inspect",
+ "iommu_common",
+ "loader",
+ "membacking",
+ "memory_range",
+ "mesh",
+ "mesh_worker",
+ "missing_dev",
+ "openvmm_defs",
+ "openvmm_pcat_locator",
+ "pal",
+ "pal_async",
+ "pci_bus",
+ "pci_core",
+ "pci_resource_assignment",
+ "pci_resources",
+ "pcie",
+ "range_map_vec",
+ "scsi_core",
+ "scsidisk",
+ "serial_16550_resources",
+ "smmu",
+ "sparse_mmap",
+ "state_unit",
+ "storvsp",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "uefi_specs",
+ "vfio_assigned_device",
+ "vfio_assigned_device_resources",
+ "virt",
+ "virtio",
+ "vm_loader",
+ "vm_resource",
+ "vm_topology",
+ "vmbus_channel",
+ "vmbus_core",
+ "vmbus_server",
+ "vmcore",
+ "vmgs",
+ "vmgs_broker",
+ "vmgs_resources",
+ "vmm_core",
+ "vmm_core_defs",
+ "vmotherboard",
+ "vmswitch",
+ "vpci",
+ "watchdog_core",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "openvmm_defs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "firmware_uefi_custom_vars",
+ "floppy_resources",
+ "framebuffer",
+ "get_resources",
+ "guid",
+ "hypervisor_resources",
+ "ide_resources",
+ "input_core",
+ "memory_range",
+ "mesh",
+ "mesh_worker",
+ "net_backend_resources",
+ "openvmm_pcat_locator",
+ "thiserror 2.0.18",
+ "unix_socket",
+ "virt",
+ "virt_whp",
+ "vm_resource",
+ "vmbus_proxy",
+ "vmgs_resources",
+ "vmm_core_defs",
+ "vmotherboard",
+]
+
+[[package]]
+name = "openvmm_helpers"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "disk_backend_resources",
+ "disk_vhd1",
+ "disk_vhdmp",
+ "fs-err",
+ "get_resources",
+ "hypervisor_resources",
+ "libc",
+ "mesh",
+ "openvmm_defs",
+ "sparse_mmap",
+ "tracing",
+ "vm_resource",
+]
+
+[[package]]
+name = "openvmm_pcat_locator"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "fs-err",
+ "mesh",
+ "resource_dll_parser",
+ "tracing",
+]
+
+[[package]]
+name = "openvmm_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "build_rs_guest_arch",
+ "chipset",
+ "chipset_legacy",
+ "chipset_resources",
+ "cxl_spec",
+ "disk_blockdevice",
+ "disk_delay",
+ "disk_file",
+ "disk_layered",
+ "disk_prwrap",
+ "disk_vhd1",
+ "disk_vhdmp",
+ "disklayer_ram",
+ "firmware_uefi",
+ "gdma",
+ "guest_crash_device",
+ "guest_emulation_device",
+ "guest_emulation_log",
+ "guest_watchdog",
+ "hyperv_ic",
+ "hypervisor_resources",
+ "mesh_worker",
+ "missing_dev",
+ "net_backend",
+ "net_dio",
+ "net_tap",
+ "netvsp",
+ "nvme",
+ "nvme_test",
+ "openvmm_core",
+ "rusqlite",
+ "scsidisk",
+ "serial_16550",
+ "serial_core",
+ "serial_debugcon",
+ "serial_pl011",
+ "serial_socket",
+ "storvsp",
+ "uidevices",
+ "vhost_user_frontend",
+ "virt_kvm",
+ "virt_mshv",
+ "virtio",
+ "virtio_blk",
+ "virtio_console",
+ "virtio_net",
+ "virtio_p9",
+ "virtio_pmem",
+ "virtio_rng",
+ "virtio_vsock",
+ "virtiofs",
+ "vm_resource",
+ "vmbfs",
+ "vmbus_serial_host",
+ "vmcore",
+ "vmgs_broker",
+ "vnc_worker",
+]
+
+[[package]]
 name = "ordered-float"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5419,6 +7283,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
+name = "oversized_box"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+
+[[package]]
 name = "page_size"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5426,6 +7295,18 @@ checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "page_table"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tracing",
+ "zerocopy 0.8.54",
 ]
 
 [[package]]
@@ -5575,12 +7456,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "pci_bus"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "chipset_device",
+ "inspect",
+ "mesh",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
 name = "pci_core"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 dependencies = [
  "anyhow",
- "bitfield-struct",
+ "bitfield-struct 0.11.0",
  "chipset_device",
  "guestmem",
  "inspect",
@@ -5596,6 +7493,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pci_resource_assignment"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "memory_range",
+ "pci_core",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "pci_resources"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
@@ -5606,6 +7514,28 @@ dependencies = [
  "pci_core",
  "vm_resource",
  "vmcore",
+]
+
+[[package]]
+name = "pcie"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "chipset_device",
+ "cxl_spec",
+ "inspect",
+ "memory_range",
+ "mesh",
+ "pal_async",
+ "pal_event",
+ "pci_bus",
+ "pci_core",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vmcore",
+ "zerocopy 0.8.54",
 ]
 
 [[package]]
@@ -5781,10 +7711,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "pkcs1"
+version = "0.8.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "986d2e952779af96ea048f160fd9194e1751b4faea78bcf3ceb456efe008088e"
+dependencies = [
+ "der",
+ "spki",
+]
+
+[[package]]
+name = "pkcs8"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "451913da69c775a56034ea8d9003d27ee8948e12443eae7c038ba100a4f21cb7"
+dependencies = [
+ "der",
+ "spki",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+
+[[package]]
+name = "plan9"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "lx",
+ "lxutil",
+ "parking_lot",
+ "tracing",
+]
 
 [[package]]
 name = "pod-resources-rs"
@@ -5858,6 +7819,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0103b1cef7ec0cf76490e969665504990193874ea05c85ff9bab8b911d0a0564"
 dependencies = [
  "zerovec",
+]
+
+[[package]]
+name = "power_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
 ]
 
 [[package]]
@@ -6534,6 +8504,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "range_map_vec"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cc2191ec1fd850e3ede4cf09ccfd40a33df561111f73e96e1b7c3f9eee31328"
+
+[[package]]
 name = "rdrand"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6781,6 +8757,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "resource_dll_parser"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "fs-err",
+ "object",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7008,6 +8994,20 @@ dependencies = [
  "url",
  "virt_container",
  "wasm_container",
+]
+
+[[package]]
+name = "rusqlite"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "165ca6e57b20e1351573e3729b958bc62f0e48025386970b6e4d29e7a7e71f3f"
+dependencies = [
+ "bitflags 2.13.1",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "smallvec",
 ]
 
 [[package]]
@@ -7331,6 +9331,82 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "scsi_buffers"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "event-listener 5.4.1",
+ "guestmem",
+ "safeatomic",
+ "smallvec",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "scsi_core"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
+ "mesh",
+ "scsi_buffers",
+ "scsi_defs",
+ "stackfuture",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "scsi_defs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "open_enum",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "scsidisk"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "disk_backend",
+ "futures",
+ "guestmem",
+ "guid",
+ "inspect",
+ "mesh",
+ "pal_async",
+ "parking_lot",
+ "scsi_buffers",
+ "scsi_core",
+ "scsi_defs",
+ "scsidisk_resources",
+ "stackfuture",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "tracing_helpers",
+ "vm_resource",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "scsidisk_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
+ "mesh",
+ "storage_string",
+ "vm_resource",
+]
+
+[[package]]
 name = "seahash"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7464,6 +9540,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_helpers"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "base64 0.22.1",
+ "guid",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "serde_ignored"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7563,6 +9650,128 @@ dependencies = [
 ]
 
 [[package]]
+name = "serial_16550"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "chipset_device",
+ "chipset_device_resources",
+ "futures",
+ "inspect",
+ "inspect_counters",
+ "mesh",
+ "open_enum",
+ "serial_16550_resources",
+ "serial_core",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "serial_16550_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
+]
+
+[[package]]
+name = "serial_core"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "futures",
+ "inspect",
+ "mesh",
+ "pal_async",
+ "parking_lot",
+ "vm_resource",
+]
+
+[[package]]
+name = "serial_debugcon"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "chipset_device",
+ "chipset_device_resources",
+ "futures",
+ "inspect",
+ "serial_core",
+ "serial_debugcon_resources",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "serial_debugcon_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
+]
+
+[[package]]
+name = "serial_pl011"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "chipset_device",
+ "chipset_device_resources",
+ "futures",
+ "inspect",
+ "inspect_counters",
+ "mesh",
+ "open_enum",
+ "serial_core",
+ "serial_pl011_resources",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "serial_pl011_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
+]
+
+[[package]]
+name = "serial_socket"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "futures",
+ "inspect",
+ "mesh",
+ "pal",
+ "pal_async",
+ "serial_core",
+ "socket2 0.6.5",
+ "tracing",
+ "unix_socket",
+ "vm_resource",
+]
+
+[[package]]
 name = "serial_test"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7639,6 +9848,17 @@ dependencies = [
  "cfg-if 1.0.4",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "sha1"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
+dependencies = [
+ "cfg-if 1.0.4",
+ "cpufeatures 0.3.0",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -7762,6 +9982,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "signature"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
+dependencies = [
+ "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -7905,6 +10134,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
+name = "smmu"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "bitfield-struct 0.11.0",
+ "chipset_device",
+ "guestmem",
+ "inspect",
+ "iommu_common",
+ "mesh",
+ "open_enum",
+ "pal_event",
+ "parking_lot",
+ "pci_core",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
 name = "socket2"
 version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7956,16 +10207,125 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
 
 [[package]]
+name = "spki"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d9efca8738c78ee9484207732f728b1ef517bbb1833d6fc0879ca898a522f6f"
+dependencies = [
+ "base64ct",
+ "der",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "stackfuture"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115beb9c69db2393ff10b75a1b8587a51716e5551d015001e55320ed279d32f9"
+dependencies = [
+ "const_panic",
+]
+
+[[package]]
+name = "state_unit"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "event-listener 5.4.1",
+ "futures",
+ "futures-concurrency",
+ "inspect",
+ "mesh",
+ "pal_async",
+ "parking_lot",
+ "thiserror 2.0.18",
+ "tracing",
+ "vmcore",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "storage_string"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
+ "mesh_protobuf",
+ "thiserror 2.0.18",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "storvsp"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "event-listener 5.4.1",
+ "fast_select",
+ "futures",
+ "guestmem",
+ "guid",
+ "inspect",
+ "inspect_counters",
+ "mesh",
+ "oversized_box",
+ "pal_async",
+ "parking_lot",
+ "scsi_buffers",
+ "scsi_core",
+ "scsi_defs",
+ "scsidisk",
+ "slab",
+ "storvsp_protocol",
+ "storvsp_resources",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "tracing_helpers",
+ "unicycle",
+ "vm_resource",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmbus_core",
+ "vmbus_ring",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "storvsp_protocol"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guid",
+ "open_enum",
+ "scsi_defs",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "storvsp_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guid",
+ "mesh",
+ "vm_resource",
+]
 
 [[package]]
 name = "strsim"
@@ -8047,6 +10407,23 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "symcrypt"
+version = "0.6.0"
+source = "git+https://github.com/microsoft/rust-symcrypt.git?branch=release%2F0.6.0#2d83888206139cb8cc522ea3617a1870674ac8a0"
+dependencies = [
+ "libc",
+ "symcrypt-sys",
+]
+
+[[package]]
+name = "symcrypt-sys"
+version = "0.4.0"
+source = "git+https://github.com/microsoft/rust-symcrypt.git?branch=release%2F0.6.0#2d83888206139cb8cc522ea3617a1870674ac8a0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "syn"
@@ -8178,12 +10555,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "task_control"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "fast_select",
+ "inspect",
+ "pal_async",
+ "parking_lot",
+]
+
+[[package]]
 name = "tdisp"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 dependencies = [
  "anyhow",
- "bitfield-struct",
+ "bitfield-struct 0.11.0",
  "parking_lot",
  "prost 0.11.9",
  "static_assertions",
@@ -8246,6 +10634,23 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "nix 0.26.4",
+]
+
+[[package]]
+name = "test_igvm_agent_lib"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "base64 0.22.1",
+ "crypto",
+ "get_resources",
+ "getrandom 0.4.3",
+ "inspect",
+ "openhcl_attestation_protocol",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "zerocopy 0.8.54",
 ]
 
 [[package]]
@@ -8860,6 +11265,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing_helpers"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8932,10 +11347,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
+name = "typewit"
+version = "1.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "214ca0b2191785cbc06209b9ca1861e048e39b5ba33574b3cedd58363d5bb5f6"
+
+[[package]]
 name = "ucd-trie"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
+
+[[package]]
+name = "ucs2"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "uds_windows"
@@ -8946,6 +11375,105 @@ dependencies = [
  "memoffset 0.9.1",
  "tempfile",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "uefi_nvram_specvars"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guid",
+ "thiserror 2.0.18",
+ "ucs2",
+ "uefi_specs",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "uefi_nvram_storage"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "guid",
+ "inspect",
+ "mesh_protobuf",
+ "thiserror 2.0.18",
+ "ucs2",
+ "uefi_specs",
+ "vmcore",
+ "wchar",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "uefi_specs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "guid",
+ "inspect",
+ "open_enum",
+ "static_assertions",
+ "ucs2",
+ "wchar",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "uevent"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "fs-err",
+ "futures",
+ "futures-concurrency",
+ "libc",
+ "mesh",
+ "pal_async",
+ "socket2 0.6.5",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "uidevices"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "guestmem",
+ "guid",
+ "input_core",
+ "inspect",
+ "mesh",
+ "static_assertions",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "uidevices_resources",
+ "video_core",
+ "vm_resource",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmbus_ring",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "uidevices_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "video_core",
+ "vm_resource",
 ]
 
 [[package]]
@@ -9005,6 +11533,7 @@ version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 dependencies = [
  "getrandom 0.4.3",
+ "mesh_protobuf",
  "socket2 0.6.5",
  "windows-sys 0.61.2",
 ]
@@ -9128,6 +11657,12 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vfio-bindings"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7adc40b84dd8c9c8838758ea7611413a30a0f6c8c31aa865a6c13ac0ed089990"
+
+[[package]]
+name = "vfio-bindings"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "188dac3057a0cbc94470085204c84b82ff7ec5dac629a514323cd133d1f9abe0"
@@ -9144,9 +11679,94 @@ dependencies = [
  "libc",
  "log",
  "thiserror 2.0.18",
- "vfio-bindings",
+ "vfio-bindings 0.6.2",
  "vm-memory",
  "vmm-sys-util 0.15.0",
+]
+
+[[package]]
+name = "vfio_assigned_device"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chipset_device",
+ "guestmem",
+ "inspect",
+ "membacking",
+ "memory_range",
+ "mesh",
+ "nix 0.30.1",
+ "pal_async",
+ "parking_lot",
+ "pci_core",
+ "pci_resources",
+ "smmu",
+ "tracelimit",
+ "tracing",
+ "vfio-bindings 0.4.0",
+ "vfio_assigned_device_resources",
+ "vfio_sys",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "vfio_assigned_device_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
+]
+
+[[package]]
+name = "vfio_sys"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "bitfield-struct 0.11.0",
+ "headervec",
+ "libc",
+ "memory_range",
+ "nix 0.30.1",
+ "pal_async",
+ "tracelimit",
+ "tracing",
+ "vfio-bindings 0.4.0",
+]
+
+[[package]]
+name = "vga"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "chipset_device",
+ "framebuffer",
+ "guestmem",
+ "inspect",
+ "memory_range",
+ "open_enum",
+ "pal_async",
+ "parking_lot",
+ "pci_core",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracing",
+ "video_core",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vhd1_defs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guid",
+ "zerocopy 0.8.54",
 ]
 
 [[package]]
@@ -9160,6 +11780,54 @@ dependencies = [
  "uuid 1.24.0",
  "vm-memory",
  "vmm-sys-util 0.15.0",
+]
+
+[[package]]
+name = "vhost_user_frontend"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "guestmem",
+ "inspect",
+ "pal_async",
+ "pal_event",
+ "tracelimit",
+ "tracing",
+ "unix_socket",
+ "vhost_user_protocol",
+ "virtio",
+ "virtio_resources",
+ "vm_resource",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vhost_user_protocol"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "libc",
+ "open_enum",
+ "pal_async",
+ "parking_lot",
+ "thiserror 2.0.18",
+ "unix_socket",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "video_core"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "inspect",
+ "mesh",
+ "vm_resource",
 ]
 
 [[package]]
@@ -9223,6 +11891,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "virt_kvm"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "aarch64defs",
+ "anyhow",
+ "bitfield-struct 0.11.0",
+ "build_rs_guest_arch",
+ "cfg-if 1.0.4",
+ "guestmem",
+ "hv1_emulator",
+ "hv1_hypercall",
+ "hvdef",
+ "inspect",
+ "jiff",
+ "kvm",
+ "memory_range",
+ "open_enum",
+ "pal_event",
+ "parking_lot",
+ "pci_core",
+ "safe_intrinsics",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "virt",
+ "vm_topology",
+ "vmcore",
+ "x86defs",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
 name = "virt_mshv"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
@@ -9258,6 +11959,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "virt_support_aarch64emu"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "aarch64defs",
+ "aarch64emu",
+ "cvm_tracing",
+ "guestmem",
+ "hvdef",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "virt",
+ "vm_topology",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "virt_support_apic"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "hvdef",
+ "inspect",
+ "inspect_counters",
+ "parking_lot",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "virt",
+ "vm_topology",
+ "vmcore",
+ "x86defs",
+]
+
+[[package]]
 name = "virt_support_x86emu"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
@@ -9272,6 +12010,75 @@ dependencies = [
  "vm_topology",
  "x86defs",
  "x86emu",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "virt_whp"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "aarch64defs",
+ "anyhow",
+ "arrayvec",
+ "build_rs_guest_arch",
+ "chipset_device",
+ "guestmem",
+ "hv1_emulator",
+ "hv1_hypercall",
+ "hv1_structs",
+ "hvdef",
+ "inspect",
+ "inspect_counters",
+ "memory_range",
+ "mesh",
+ "pal_event",
+ "parking_lot",
+ "pci_core",
+ "range_map_vec",
+ "sparse_mmap",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "tracing_helpers",
+ "virt",
+ "virt_support_aarch64emu",
+ "virt_support_apic",
+ "virt_support_x86emu",
+ "vm_topology",
+ "vmcore",
+ "whp",
+ "windows-result 0.4.1",
+ "windows-sys 0.61.2",
+ "x86defs",
+ "x86emu",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "virtio"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chipset_device",
+ "device_emulators",
+ "futures",
+ "guestmem",
+ "inspect",
+ "mesh",
+ "pal_async",
+ "pal_event",
+ "parking_lot",
+ "pci_core",
+ "pci_resources",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "virtio_resources",
+ "virtio_spec",
+ "vm_resource",
+ "vmcore",
  "zerocopy 0.8.54",
 ]
 
@@ -9292,6 +12099,214 @@ dependencies = [
  "virtio-bindings",
  "vm-memory",
  "vmm-sys-util 0.15.0",
+]
+
+[[package]]
+name = "virtio_blk"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "disk_backend",
+ "futures",
+ "guestmem",
+ "inspect",
+ "inspect_counters",
+ "pal_async",
+ "scsi_buffers",
+ "task_control",
+ "tracelimit",
+ "unicycle",
+ "virtio",
+ "virtio_resources",
+ "vm_resource",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "virtio_console"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "futures-concurrency",
+ "guestmem",
+ "inspect",
+ "pal_async",
+ "parking_lot",
+ "serial_core",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "virtio",
+ "virtio_resources",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "virtio_net"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "guestmem",
+ "inspect",
+ "inspect_counters",
+ "net_backend",
+ "net_backend_resources",
+ "open_enum",
+ "pal_async",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "virtio",
+ "virtio_resources",
+ "vm_resource",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "virtio_p9"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "futures",
+ "guestmem",
+ "inspect",
+ "pal_async",
+ "plan9",
+ "task_control",
+ "tracing",
+ "virtio",
+ "virtio_resources",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "virtio_pmem"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "fs-err",
+ "futures",
+ "guestmem",
+ "inspect",
+ "pal_async",
+ "sparse_mmap",
+ "task_control",
+ "tracing",
+ "virtio",
+ "virtio_resources",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "virtio_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "net_backend_resources",
+ "unix_socket",
+ "vm_resource",
+]
+
+[[package]]
+name = "virtio_rng"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "futures",
+ "getrandom 0.4.3",
+ "guestmem",
+ "inspect",
+ "pal_async",
+ "task_control",
+ "tracelimit",
+ "virtio",
+ "virtio_resources",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "virtio_spec"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "inspect",
+ "open_enum",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "virtio_vsock"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "bitfield-struct 0.11.0",
+ "futures",
+ "guestmem",
+ "hybrid_vsock",
+ "inspect",
+ "mesh",
+ "open_enum",
+ "pal_async",
+ "parking_lot",
+ "smallvec",
+ "task_control",
+ "tracelimit",
+ "tracing",
+ "unicycle",
+ "unix_socket",
+ "virtio",
+ "virtio_resources",
+ "vm_resource",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "virtiofs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "fuse",
+ "futures",
+ "guestmem",
+ "inspect",
+ "lx",
+ "lxutil",
+ "ntapi",
+ "pal",
+ "pal_async",
+ "parking_lot",
+ "task_control",
+ "tracing",
+ "virtio",
+ "virtio_resources",
+ "vm_resource",
+ "vmcore",
+ "windows-sys 0.61.2",
+ "zerocopy 0.8.54",
 ]
 
 [[package]]
@@ -9319,6 +12334,45 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69c376a9b84afdf97bddd2628096cf3554208b2a676cf06b4532e0f433a54e02"
 
 [[package]]
+name = "vm_loader"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "build_rs_guest_arch",
+ "guestmem",
+ "hvdef",
+ "loader",
+ "memory_range",
+ "range_map_vec",
+ "tracing",
+ "virt",
+ "vm_topology",
+]
+
+[[package]]
+name = "vm_manifest_builder"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "chipset_resources",
+ "firmware_uefi_custom_vars",
+ "firmware_uefi_resources",
+ "getrandom 0.4.3",
+ "input_core",
+ "mesh",
+ "missing_dev_resources",
+ "serial_16550_resources",
+ "serial_core",
+ "serial_debugcon_resources",
+ "serial_pl011_resources",
+ "thiserror 2.0.18",
+ "vm_resource",
+ "vmm_core_defs",
+ "vmotherboard",
+]
+
+[[package]]
 name = "vm_resource"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
@@ -9341,9 +12395,210 @@ dependencies = [
  "cxl_spec",
  "inspect",
  "memory_range",
+ "mesh_protobuf",
  "safe_intrinsics",
  "thiserror 2.0.18",
  "x86defs",
+]
+
+[[package]]
+name = "vmbfs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "guestmem",
+ "guid",
+ "inspect",
+ "open_enum",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracing",
+ "vm_resource",
+ "vmbfs_resources",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vmbfs_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
+]
+
+[[package]]
+name = "vmbus_async"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "futures",
+ "guestmem",
+ "inspect",
+ "inspect_counters",
+ "pal_async",
+ "thiserror 2.0.18",
+ "vmbus_channel",
+ "vmbus_ring",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vmbus_channel"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "guestmem",
+ "guid",
+ "inspect",
+ "mesh",
+ "pal_async",
+ "pal_event",
+ "parking_lot",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vm_resource",
+ "vmbus_core",
+ "vmbus_ring",
+ "vmcore",
+]
+
+[[package]]
+name = "vmbus_core"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "futures",
+ "guid",
+ "hvdef",
+ "inspect",
+ "mesh",
+ "open_enum",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vmbus_proxy"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "futures",
+ "guestmem",
+ "guid",
+ "mesh",
+ "pal",
+ "pal_async",
+ "pal_event",
+ "tracing",
+ "vmbus_core",
+ "widestring",
+ "windows 0.62.2",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vmbus_ring"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guestmem",
+ "inspect",
+ "safeatomic",
+ "thiserror 2.0.18",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vmbus_serial_host"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "guestmem",
+ "inspect",
+ "inspect_counters",
+ "serial_core",
+ "task_control",
+ "thiserror 2.0.18",
+ "tracing",
+ "vm_resource",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmbus_ring",
+ "vmbus_serial_protocol",
+ "vmbus_serial_resources",
+ "vmcore",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vmbus_serial_protocol"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guid",
+ "open_enum",
+ "static_assertions",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vmbus_serial_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
+]
+
+[[package]]
+name = "vmbus_server"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "futures-concurrency",
+ "guestmem",
+ "guid",
+ "hvdef",
+ "hybrid_vsock",
+ "inspect",
+ "mesh",
+ "pal_async",
+ "pal_event",
+ "parking_lot",
+ "safeatomic",
+ "slab",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "unicycle",
+ "unix_socket",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmbus_core",
+ "vmbus_proxy",
+ "vmbus_ring",
+ "vmcore",
+ "windows 0.62.2",
+ "zerocopy 0.8.54",
 ]
 
 [[package]]
@@ -9374,6 +12629,70 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmgs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "crc32fast",
+ "crypto",
+ "cvm_tracing",
+ "disk_backend",
+ "getrandom 0.4.3",
+ "guestmem",
+ "inspect",
+ "inspect_counters",
+ "mesh_protobuf",
+ "scsi_buffers",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "vmgs_format",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vmgs_broker"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "inspect",
+ "mesh",
+ "pal_async",
+ "thiserror 2.0.18",
+ "tracing",
+ "vm_resource",
+ "vmcore",
+ "vmgs",
+ "vmgs_format",
+ "vmgs_resources",
+]
+
+[[package]]
+name = "vmgs_format"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "inspect",
+ "open_enum",
+ "serde",
+ "static_assertions",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vmgs_resources"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "mesh",
+ "vm_resource",
+ "vmgs_format",
+]
+
+[[package]]
 name = "vmm-sys-util"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9391,6 +12710,237 @@ checksum = "506c62fdf617a5176827c2f9afbcf1be155b03a9b4bf9617a60dbc07e3a1642f"
 dependencies = [
  "bitflags 1.3.2",
  "libc",
+]
+
+[[package]]
+name = "vmm_core"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "aarch64defs",
+ "acpi",
+ "acpi_spec",
+ "anyhow",
+ "async-trait",
+ "build_rs_guest_arch",
+ "cache_topology",
+ "chipset",
+ "chipset_device_resources",
+ "chipset_resources",
+ "closeable_mutex",
+ "cvm_tracing",
+ "futures",
+ "futures-concurrency",
+ "guestmem",
+ "hcl_compat_uefi_nvram_storage",
+ "hvdef",
+ "hyperv_dump",
+ "input_core",
+ "inspect",
+ "memory_range",
+ "mesh",
+ "pal_async",
+ "parking_lot",
+ "pci_core",
+ "pci_resources",
+ "power_resources",
+ "slab",
+ "state_unit",
+ "thiserror 2.0.18",
+ "tracing",
+ "virt",
+ "vm_resource",
+ "vm_topology",
+ "vmbus_channel",
+ "vmbus_server",
+ "vmcore",
+ "vmm_core_defs",
+ "vmotherboard",
+ "vpci",
+ "x86defs",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vmm_core_defs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "inspect",
+ "mesh",
+ "virt",
+]
+
+[[package]]
+name = "vmotherboard"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "address_filter",
+ "anyhow",
+ "arc_cyclic_builder",
+ "async-trait",
+ "chipset",
+ "chipset_device",
+ "chipset_device_resources",
+ "chipset_legacy",
+ "chipset_resources",
+ "closeable_mutex",
+ "cvm_tracing",
+ "firmware_pcat",
+ "floppy",
+ "framebuffer",
+ "futures",
+ "generation_id",
+ "guestmem",
+ "ide",
+ "inspect",
+ "inspect_counters",
+ "mesh",
+ "missing_dev",
+ "pal_async",
+ "parking_lot",
+ "paste",
+ "pci_bus",
+ "pcie",
+ "range_map_vec",
+ "state_unit",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vga",
+ "vm_resource",
+ "vmcore",
+]
+
+[[package]]
+name = "vmsocket"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "cfg-if 1.0.4",
+ "guid",
+ "libc",
+ "mesh",
+ "pal_async",
+ "socket2 0.6.5",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "vmswitch"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "futures",
+ "getrandom 0.4.3",
+ "guid",
+ "pal",
+ "pal_async",
+ "pal_event",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "widestring",
+ "windows-sys 0.61.2",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vnc"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-channel",
+ "bitvec",
+ "flate2",
+ "futures",
+ "pal_async",
+ "socket2 0.6.5",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "video_core",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vnc_worker"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "framebuffer",
+ "futures",
+ "input_core",
+ "inspect",
+ "mesh",
+ "mesh_worker",
+ "pal_async",
+ "parking_lot",
+ "socket2 0.6.5",
+ "tracing",
+ "tracing_helpers",
+ "unicycle",
+ "video_core",
+ "vmsocket",
+ "vnc",
+ "vnc_worker_defs",
+]
+
+[[package]]
+name = "vnc_worker_defs"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "framebuffer",
+ "input_core",
+ "mesh",
+ "mesh_worker",
+ "video_core",
+ "vmsocket",
+]
+
+[[package]]
+name = "vpci"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chipset_device",
+ "closeable_mutex",
+ "device_emulators",
+ "guestmem",
+ "guid",
+ "hvdef",
+ "inspect",
+ "mesh",
+ "parking_lot",
+ "pci_core",
+ "task_control",
+ "tdisp",
+ "thiserror 2.0.18",
+ "tracelimit",
+ "tracing",
+ "vmbus_async",
+ "vmbus_channel",
+ "vmbus_ring",
+ "vmcore",
+ "vpci_protocol",
+ "zerocopy 0.8.54",
+]
+
+[[package]]
+name = "vpci_protocol"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "guid",
+ "open_enum",
+ "zerocopy 0.8.54",
 ]
 
 [[package]]
@@ -9564,6 +13114,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "watchdog_core"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "async-trait",
+ "bitfield-struct 0.11.0",
+ "cvm_tracing",
+ "inspect",
+ "mesh",
+ "pal_async",
+ "parking_lot",
+ "thiserror 2.0.18",
+ "tracing",
+ "vm_resource",
+ "vmcore",
+ "watchdog_vmgs_format",
+]
+
+[[package]]
+name = "watchdog_vmgs_format"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "thiserror 2.0.18",
+ "vmcore",
+]
+
+[[package]]
+name = "wchar"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8be48fe4c433c0d4aa71bb8759c5f7b1da6dacb1b99998566ebe16503f6a59c"
+dependencies = [
+ "wchar-impl",
+]
+
+[[package]]
+name = "wchar-impl"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "075c93156fed21f9dab57af5e81604d0fdb67432c919a8c1f78bb979f06a3d25"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "web-sys"
 version = "0.3.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9626,10 +13224,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "whp"
+version = "0.0.0"
+source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+dependencies = [
+ "guid",
+ "pal",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "widestring"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
+
+[[package]]
+name = "win_etw_metadata"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5113ede807966842887ba64b2bba9e1079e19efaea612b6e83449af29b4b194"
+dependencies = [
+ "bitflags 2.13.1",
+]
+
+[[package]]
+name = "win_etw_provider"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d57b25caee8f665da0fb8c9b47b3b0d34752c90436ea9c6c97030e3bf80ca527"
+dependencies = [
+ "widestring",
+ "win_etw_metadata",
+ "windows-sys 0.61.2",
+ "zerocopy 0.8.54",
+]
 
 [[package]]
 name = "winapi"
@@ -9674,6 +13303,16 @@ dependencies = [
 
 [[package]]
 name = "windows"
+version = "0.58.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd04d41d93c4992d421894c18c8b43496aa748dd4c081bac0dc93eb0489272b6"
+dependencies = [
+ "windows-core 0.58.0",
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
@@ -9707,6 +13346,19 @@ dependencies = [
 
 [[package]]
 name = "windows-core"
+version = "0.58.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba6d44ec8c2591c134257ce647b7ea6b20335bf6379a27dac5f1641fcf59f99"
+dependencies = [
+ "windows-implement 0.58.0",
+ "windows-interface 0.58.0",
+ "windows-result 0.2.0",
+ "windows-strings 0.1.0",
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-core"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
@@ -9715,7 +13367,7 @@ dependencies = [
  "windows-interface 0.59.3",
  "windows-link",
  "windows-result 0.4.1",
- "windows-strings",
+ "windows-strings 0.5.1",
 ]
 
 [[package]]
@@ -9742,6 +13394,17 @@ dependencies = [
 
 [[package]]
 name = "windows-implement"
+version = "0.58.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bbd5b46c938e506ecbce286b6628a02171d56153ba733b6c741fc627ec9579b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "windows-implement"
 version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
@@ -9756,6 +13419,17 @@ name = "windows-interface"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29bee4b38ea3cde66011baa44dba677c432a78593e202392d1e9070cf2a7fca7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "windows-interface"
+version = "0.58.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "053c4c462dc91d3b1504c6fe5a726dd15e216ba718e84a0e46a88fbe5ded3515"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9797,7 +13471,7 @@ checksum = "02752bf7fbdcce7f2a27a742f798510f3e5ad88dbe84871e5168e2120c3d5720"
 dependencies = [
  "windows-link",
  "windows-result 0.4.1",
- "windows-strings",
+ "windows-strings 0.5.1",
 ]
 
 [[package]]
@@ -9811,11 +13485,30 @@ dependencies = [
 
 [[package]]
 name = "windows-result"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d1043d8214f791817bab27572aaa8af63732e11bf84aa21a45a78d6c317ae0e"
+dependencies = [
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-result"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "windows-strings"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cd9b125c486025df0eabcb585e62173c6c9eddcec5d117d3b6e8c30e2ee4d10"
+dependencies = [
+ "windows-result 0.2.0",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -10122,11 +13815,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "x509-cert"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "105ef4642d9cb137ef83d623d0e4bf08b8adf69e9918ca904a174adb6d3d038b"
+dependencies = [
+ "const-oid",
+ "der",
+ "sha1 0.11.0",
+ "signature 3.0.0",
+ "spki",
+]
+
+[[package]]
 name = "x86defs"
 version = "0.0.0"
 source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
 dependencies = [
- "bitfield-struct",
+ "bitfield-struct 0.11.0",
  "open_enum",
  "static_assertions",
  "zerocopy 0.8.54",
@@ -10234,7 +13940,7 @@ dependencies = [
  "rand 0.8.7",
  "serde",
  "serde_repr",
- "sha1",
+ "sha1 0.10.7",
  "static_assertions",
  "tracing",
  "uds_windows",
