@@ -5,8 +5,7 @@
 
 //! OpenVMM hypervisor lifecycle management (stubs).
 
-use anyhow::{anyhow, Context, Result};
-use ovmm_virt::Hypervisor as _;
+use anyhow::{anyhow, Result};
 
 use super::inner::OpenVmmInner;
 use crate::utils::{get_jailer_root, get_sandbox_path};
@@ -105,17 +104,12 @@ impl OpenVmmInner {
     }
 
     pub(crate) async fn check(&self) -> Result<()> {
-        // Verify the MSHV hypervisor device is accessible.
-        self.mshv
-            .is_available()
-            .context("failed to query MSHV availability")
-            .and_then(|available| {
-                if available {
-                    Ok(())
-                } else {
-                    Err(anyhow!("MSHV hypervisor is not available on this host"))
-                }
-            })
+        // OpenVMM uses MSHV; just check that /dev/mshv exists.
+        if std::path::Path::new("/dev/mshv").exists() {
+            Ok(())
+        } else {
+            Err(anyhow!("MSHV hypervisor is not available on this host"))
+        }
     }
 
     pub(crate) async fn get_jailer_root(&self) -> Result<String> {

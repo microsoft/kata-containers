@@ -5,9 +5,7 @@
 
 //! Inner state for the OpenVMM hypervisor integration.
 
-use crate::{
-    device::DeviceType, hypervisor_persist::HypervisorState, VmmState,
-};
+use crate::{device::DeviceType, hypervisor_persist::HypervisorState, VmmState};
 use anyhow::Result;
 use kata_types::{
     capabilities::{Capabilities, CapabilityBits},
@@ -16,47 +14,43 @@ use kata_types::{
 use std::collections::HashSet;
 use tokio::sync::mpsc;
 
-use virt_mshv::LinuxMshv;
+use super::vmm_instance::VmmInstance;
 
 /// Inner state for the OpenVMM hypervisor.
-#[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct OpenVmmInner {
-    /// sandbox id
     pub(crate) id: String,
-    /// vm path
     pub(crate) vm_path: String,
-    /// netns
+    pub(crate) jailer_root: String,
     pub(crate) netns: Option<String>,
-    /// hypervisor config
     pub(crate) config: HypervisorConfig,
-    /// vmm state
     pub(crate) state: VmmState,
-    /// hypervisor run dir
     pub(crate) run_dir: String,
-    /// pending devices (queued before VM boot)
     pub(crate) pending_devices: Vec<DeviceType>,
-    /// cached block device IDs
     pub(crate) cached_block_devices: HashSet<String>,
-    /// openvmm capabilities
     pub(crate) capabilities: Capabilities,
-    /// guest memory block size in MB
     pub(crate) guest_memory_block_size_mb: u32,
-    /// exit notification channel
-    pub(crate) _exit_notify: mpsc::Sender<i32>,
-    /// MSHV hypervisor handle
-    pub(crate) mshv: LinuxMshv,
+    pub(crate) vmm_instance: VmmInstance,
+}
+
+impl std::fmt::Debug for OpenVmmInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenVmmInner")
+            .field("id", &self.id)
+            .field("state", &self.state)
+            .finish()
+    }
 }
 
 impl OpenVmmInner {
     pub(crate) fn new(exit_notify: mpsc::Sender<i32>) -> Self {
         let mut capabilities = Capabilities::new();
-        capabilities.set(
-            CapabilityBits::BlockDeviceSupport | CapabilityBits::FsSharingSupport,
-        );
+        capabilities.set(CapabilityBits::BlockDeviceSupport | CapabilityBits::FsSharingSupport);
 
         OpenVmmInner {
             id: String::new(),
             vm_path: String::new(),
+            jailer_root: String::new(),
             netns: None,
             config: HypervisorConfig::default(),
             state: VmmState::NotReady,
@@ -65,8 +59,7 @@ impl OpenVmmInner {
             cached_block_devices: HashSet::new(),
             capabilities,
             guest_memory_block_size_mb: 0,
-            _exit_notify: exit_notify,
-            mshv: LinuxMshv,
+            vmm_instance: VmmInstance::new(exit_notify),
         }
     }
 
