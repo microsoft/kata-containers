@@ -39,7 +39,7 @@ ARCH_FILE = $(ARCH_DIR)/$(ARCH)$(ARCH_FILE_SUFFIX)
 default: runtime show-header
 ##TARGET test: run cargo tests for runtime-rs and all its sub-crates.
 test: static-checks-build
-	@cargo test $(PACKAGE_FLAGS) --target $(TRIPLE) $(EXTRA_RUSTFEATURES) -- --nocapture  --skip bindgen
+	@cargo test --workspace --target $(TRIPLE) $(EXTRA_RUSTFEATURES) $(DBS_TEST_EXCLUDES) -- --nocapture  --skip bindgen
 install: install-runtime install-configs
 
 ifeq (,$(realpath $(ARCH_FILE)))
@@ -101,6 +101,28 @@ else
     USE_OPENVMM := false
     $(info OpenVMM does not support ARCH $(ARCH), disabled. \
         Specify "USE_OPENVMM=true" to force enable.)
+endif
+
+# When openvmm is enabled, exclude dragonball crates from tests due to
+# kvm-ioctls version conflict (dragonball uses 0.12, openvmm pulls in 0.14).
+DBS_TEST_EXCLUDES :=
+ifeq ($(USE_OPENVMM),true)
+    DBS_TEST_EXCLUDES := --exclude dbs-virtio-devices --exclude dragonball \
+        --exclude dbs-interrupt --exclude dbs-pci --exclude dbs-utils \
+        --exclude dbs-boot --exclude dbs-arch --exclude dbs-legacy-devices \
+        --exclude dbs-upcall --exclude dbs-acpi --exclude dbs-address-space \
+        --exclude dbs-allocator --exclude dbs-device --exclude dbs-tdx
+endif
+
+# When openvmm is enabled, exclude dragonball crates from tests due to
+# kvm-ioctls version conflict (dragonball uses 0.12, openvmm pulls in 0.14).
+DBS_TEST_EXCLUDES :=
+ifeq ($(USE_OPENVMM),true)
+    DBS_TEST_EXCLUDES := --exclude dbs-virtio-devices --exclude dragonball \
+        --exclude dbs-interrupt --exclude dbs-pci --exclude dbs-utils \
+        --exclude dbs-boot --exclude dbs-arch --exclude dbs-legacy-devices \
+        --exclude dbs-upcall --exclude dbs-acpi --exclude dbs-address-space \
+        --exclude dbs-allocator --exclude dbs-device --exclude dbs-tdx
 endif
 
 ARCH_SUPPORT_OPENVMM := x86_64 aarch64
@@ -971,6 +993,20 @@ clean: clean-generated-files
 clean-generated-files:
 	@rm -f $(GENERATED_FILES)
 
+vendor:
+	@cargo vendor
+
+# Override standard_rust_check from utils.mk to use explicit features
+# instead of --all-features, since dragonball and openvmm have incompatible
+# transitive dependencies (kvm-ioctls 0.12 vs 0.14).
+standard_rust_check:
+	@echo "standard rust check..."
+	cargo fmt -- --check
+	cargo clippy --all-targets $(EXTRA_RUSTFEATURES) --release --locked \
+		-- \
+		-D warnings
+
+ifeq ($(ARCH),x86_64)
 ##TARGET check: run test
 check: $(GENERATED_FILES) standard_rust_check
 
