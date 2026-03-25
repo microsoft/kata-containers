@@ -118,6 +118,7 @@ jobs:
       QUAY_DEPLOYER_PASSWORD: ${{ secrets.QUAY_DEPLOYER_PASSWORD }}
 
   build-kata-static-tarball-s390x:
+    if: false # msft-preview doesn't have these runners
     permissions:
       contents: read
       packages: write
@@ -133,6 +134,7 @@ jobs:
       QUAY_DEPLOYER_PASSWORD: ${{ secrets.QUAY_DEPLOYER_PASSWORD }}
 
   build-kata-static-tarball-ppc64le:
+    if: false # msft-preview doesn't have these runners
     permissions:
       contents: read
       packages: write
@@ -182,6 +184,7 @@ jobs:
 
   build-and-publish-tee-confidential-unencrypted-image:
     name: build-and-publish-tee-confidential-unencrypted-image
+    if: false # msft-preview can't push to GHCR
     permissions:
       contents: read
       packages: write
@@ -232,7 +235,7 @@ jobs:
       target-branch: ${{ inputs.target-branch }}
 
   run-k8s-tests-on-aks:
-    if: ${{ inputs.skip-test != 'yes' }}
+    if: false # msft-preview doesn't test on AKS yet
     needs: publish-kata-deploy-payload-amd64
     uses: ./.github/workflows/run-k8s-tests-on-aks.yaml
 
@@ -268,7 +271,7 @@ jobs:
       target-branch: ${{ inputs.target-branch }}
 
   run-k8s-tests-on-arm64:
-    if: ${{ inputs.skip-test != 'yes' }}
+    if: false # msft-preview doesn't have these runners
     needs: publish-kata-deploy-payload-arm64
     uses: ./.github/workflows/run-k8s-tests-on-arm64.yaml
     with:
@@ -297,7 +300,7 @@ jobs:
       AUTHENTICATED_IMAGE_PASSWORD: ${{ secrets.AUTHENTICATED_IMAGE_PASSWORD }}
 
   run-k8s-tests-on-nvidia-gpu:
-    if: ${{ inputs.skip-test != 'yes' }}
+    if: false # msft-preview doesn't have these runners
     needs: publish-kata-deploy-payload-amd64
     uses: ./.github/workflows/run-k8s-tests-on-nvidia-gpu.yaml
     with:
@@ -353,7 +356,7 @@ jobs:
       AUTHENTICATED_IMAGE_PASSWORD: ${{ secrets.AUTHENTICATED_IMAGE_PASSWORD }}
 
   run-k8s-tests-on-ppc64le:
-    if: ${{ inputs.skip-test != 'yes' }}
+    if: false # msft-preview doesn't have these runners
     needs: publish-kata-deploy-payload-ppc64le
     uses: ./.github/workflows/run-k8s-tests-on-ppc64le.yaml
     with:
