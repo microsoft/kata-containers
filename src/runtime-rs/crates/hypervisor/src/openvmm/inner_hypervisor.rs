@@ -13,12 +13,13 @@ use crate::utils::{get_hvsock_path, get_jailer_root, get_sandbox_path};
 use crate::{MemoryConfig, VcpuThreadIds, VmmState};
 
 use openvmm_defs::config::{
-    Config, HypervisorConfig as OvmmHypervisorConfig,
+    Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig,
     LinuxDirectBootMode, LoadMode, MemoryConfig as OvmmMemoryConfig,
     PcieDeviceConfig, PcieRootComplexConfig, PcieRootPortConfig,
     ProcessorTopologyConfig, VmbusConfig, DEFAULT_MMIO_GAPS_X86,
 };
 use vm_resource::IntoResource;
+use vm_resource::kind::VmbusDeviceHandleKind;
 
 const KATA_PATH: &str = "/run/kata";
 
@@ -89,7 +90,7 @@ impl OpenVmmInner {
         // PCIe root complex with one port for virtio-blk rootfs
         // PCIe root complex: ECAM range must match bus count.
         // 128MB ECAM = 128 buses (0..127), each bus has 256 devfns * 4KB config = 1MB.
-        let pcie_root_complexes = vec![PcieRootComplexConfig {
+        let mut pcie_root_complexes = vec![PcieRootComplexConfig {
             index: 0,
             name: "rc0".to_string(),
             segment: 0,
@@ -131,17 +132,89 @@ impl OpenVmmInner {
             });
         }
 
-        // Drain pending devices (vsock, virtiofs, network etc.)
+        // Process pending devices into the VM config
         let pending = std::mem::take(&mut self.pending_devices);
+        let mut vmbus_devices: Vec<(DeviceVtl, vm_resource::Resource<VmbusDeviceHandleKind>)> = Vec::new();
+        let mut need_extra_pcie_port = false;
+
         for dev in &pending {
-            info!(sl!(), "openvmm: pending device (not yet wired): {}", dev);
+            match dev {
+                crate::DeviceType::HybridVsock(hvsock_dev) => {
+                    info!(sl!(), "openvmm: wiring HybridVsock device, uds_path={}", hvsock_dev.config.uds_path);
+                    // hvsock is configured via vmbus_config.vsock_path below
+                }
+                crate::DeviceType::Vsock(vsock_dev) => {
+                    info!(sl!(), "openvmm: wiring Vsock device, guest_cid={}", vsock_dev.config.guest_cid);
+                    // vsock is configured via vmbus_config.vsock_path below
+                }
+                crate::DeviceType::Network(net_dev) => {
+                    info!(sl!(), "openvmm: wiring Network device, tap={}", net_dev.config.host_dev_name);
+                    let endpoint = net_backend_resources::tap::TapHandle {
+                        name: net_dev.config.host_dev_name.clone(),
+                    }
+                    .into_resource();
+                    let mac = net_dev.config.guest_mac.as_ref()
+                        .map(|m| format!("{:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
+                            m.0[0], m.0[1], m.0[2], m.0[3], m.0[4], m.0[5]))
+                        .unwrap_or_default();
+                    let nic = netvsp_resources::NetvspHandle {
+                        instance_id: ovmm_guid::Guid::new_random(),
+                        mac_address: mac.parse().unwrap_or_else(|_| {
+                            net_backend_resources::mac_address::MacAddress::from([0u8; 6])
+                        }),
+                        endpoint,
+                        max_queues: None,
+                    };
+                    vmbus_devices.push((DeviceVtl::Vtl0, nic.into_resource()));
+                }
+                crate::DeviceType::ShareFs(fs_dev) => {
+                    info!(sl!(), "openvmm: wiring ShareFs device, tag={}, path={}",
+                        fs_dev.config.mount_tag, fs_dev.config.host_shared_path);
+                    let fs_handle = virtio_resources::fs::VirtioFsHandle {
+                        tag: fs_dev.config.mount_tag.clone(),
+                        fs: virtio_resources::fs::VirtioFsBackend::HostFs {
+                            root_path: fs_dev.config.host_shared_path.clone(),
+                            mount_options: String::new(),
+                        },
+                    };
+                    // Use PCIe for virtio-fs (needs an extra root port)
+                    need_extra_pcie_port = true;
+                    pcie_devices.push(PcieDeviceConfig {
+                        port_name: "rp1".to_string(),
+                        resource: virtio_resources::VirtioPciDeviceHandle(
+                            fs_handle.into_resource(),
+                        )
+                        .into_resource(),
+                    });
+                }
+                crate::DeviceType::Block(blk_dev) => {
+                    // Block device for rootfs is already added above via config.boot_info.image
+                    info!(sl!(), "openvmm: skipping duplicate Block device (already added as rootfs): {}",
+                        blk_dev.config.path_on_host);
+                }
+                other => {
+                    warn!(sl!(), "openvmm: unsupported pending device type: {}", other);
+                }
+            }
+        }
+
+        // Add extra PCIe root port for virtio-fs if needed
+        if need_extra_pcie_port {
+            pcie_root_complexes[0].ports.push(PcieRootPortConfig {
+                name: "rp1".to_string(),
+                hotplug: false,
+            });
         }
 
         // Set up hvsocket for agent communication
         let hvsock_path = get_hvsock_path(&self.id);
-        info!(sl!(), "openvmm: hvsock path: {}", hvsock_path);
+        info!(sl!(), "openvmm: binding hvsock listener at: {}", hvsock_path);
+        // Remove stale socket file if it exists
+        let _ = std::fs::remove_file(&hvsock_path);
+        let listener = ovmm_unix_socket::UnixListener::bind(&hvsock_path)
+            .with_context(|| format!("failed to bind hvsock listener: {}", hvsock_path))?;
         let vmbus_config = VmbusConfig {
-            vsock_listener: None,
+            vsock_listener: Some(listener),
             vsock_path: Some(hvsock_path),
             ..Default::default()
         };
@@ -190,7 +263,7 @@ impl OpenVmmInner {
             custom_uefi_vars: Default::default(),
             firmware_event_send: None,
             debugger_rpc: None,
-            vmbus_devices: vec![],
+            vmbus_devices,
             chipset_devices: chipset.chipset_devices,
             generation_id_recv: None,
             rtc_delta_milliseconds: 0,
