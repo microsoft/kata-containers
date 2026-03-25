@@ -115,7 +115,8 @@ debug_console_enabled = false
 dial_timeout_ms = 10
 
 # Agent reconnect timeout in millisecond.
-reconnect_timeout_ms = 3000
+# OpenVMM needs more time for guest to boot and kata-agent to start.
+reconnect_timeout_ms = 45000
 
 # Create Container Request Timeout
 create_container_timeout = @DEFCREATECONTAINERTIMEOUT@

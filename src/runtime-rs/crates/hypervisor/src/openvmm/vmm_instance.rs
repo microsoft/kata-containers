@@ -84,10 +84,11 @@ impl VmmInstance {
             .context("failed to spawn worker host thread")?;
 
         // Give the worker host thread a moment to start
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         // Launch the VM worker. This sends parameters to the runner thread,
         // which spawns a new OS thread for the VmWorker.
+        info!(sl!(), "openvmm: VmmInstance: calling launch_worker");
         let worker = host
             .launch_worker(
                 VM_WORKER,
