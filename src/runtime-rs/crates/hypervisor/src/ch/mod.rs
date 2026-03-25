@@ -64,11 +64,11 @@ impl Hypervisor for CloudHypervisor {
         &self,
         id: &str,
         netns: Option<String>,
-        _annotations: &HashMap<String, String>,
+        annotations: &HashMap<String, String>,
         selinux_label: Option<String>,
     ) -> Result<()> {
         let mut inner = self.inner.write().await;
-        inner.prepare_vm(id, netns, selinux_label).await
+        inner.prepare_vm(id, netns, annotations, selinux_label).await
     }
 
     async fn start_vm(&self, timeout: i32) -> Result<()> {

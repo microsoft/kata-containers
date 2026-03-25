@@ -4,9 +4,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::inner::CloudHypervisorInner;
-use crate::ch::utils::{get_api_socket_path, get_api_socket_path_already_existing};
+use crate::ch::utils::{get_api_socket_path, socket_exists};
 use crate::ch::utils::get_rootless_symlink_sandbox_path;
-use crate::ch::utils::{get_vsock_path , get_vsock_path_already_existing};
+use crate::ch::utils::{get_vsock_path};
 use crate::kernel_param::KernelParams;
 use crate::selinux;
 use crate::utils::create_dir_all_with_inherit_owner;
@@ -98,6 +98,8 @@ pub enum GuestProtectionError {
 
 impl CloudHypervisorInner {
     async fn start_hypervisor(&mut self, timeout_secs: i32) -> Result<()> {
+        info!(sl!(), "start_hypervisor start");
+
         self.cloud_hypervisor_launch(timeout_secs)
             .await
             .context("launch failed")?;
@@ -122,6 +124,8 @@ impl CloudHypervisorInner {
     }
 
     async fn get_kernel_params(&self) -> Result<String> {
+        info!(sl!(), "get_kernel_params start");
+
         let cfg = &self.config;
 
         let enable_debug = cfg.debug_info.enable_debug;
@@ -187,6 +191,8 @@ impl CloudHypervisorInner {
     }
 
     async fn boot_vm(&mut self) -> Result<()> {
+        info!(sl!(), "boot_vm start");
+
         let (shared_fs_devices, network_devices, host_devices) = self.get_shared_devices().await?;
         let socket = self
             .api_socket
@@ -194,20 +200,12 @@ impl CloudHypervisorInner {
             .ok_or("missing socket")
             .map_err(|e| anyhow!(e))?;
 
-        let sandbox_path = get_sandbox_path(&self.id);
+        let sandbox_path = get_sandbox_path(&self.id, &self.uvm_id);
 
         create_dir_all_with_inherit_owner(sandbox_path.clone(), 0o750)
             .context("failed to create sandbox path")?;
 
-        let vsock_socket_path = if let Some(existing) = get_vsock_path_already_existing() {
-            info!(sl!(), "CLH: already existing vsock_path = {existing}");
-            existing
-        } else {
-            let new_path = get_vsock_path(&self.id)?;
-            info!(sl!(), "CLH: new vsock_path = {new_path}");
-            new_path
-        };
-        self.vsock_path = vsock_socket_path.clone();
+        let vsock_socket_path = get_vsock_path(&self.id, &self.uvm_id)?;
 
         if self.reuse_guest {
             info!(sl!(), "CLH: reusing Guest VM");
@@ -284,8 +282,9 @@ impl CloudHypervisorInner {
     }
 
     async fn cloud_hypervisor_setup_comms(&mut self) -> Result<()> {
-        // let api_socket_path = get_api_socket_path(&self.id)?;
-        let api_socket_path = self.api_socket_path.clone();
+        info!(sl!(), "cloud_hypervisor_setup_comms start");
+
+        let api_socket_path = get_api_socket_path(&self.id, &self.uvm_id)?;
 
         // The hypervisor has just been spawned, but may not yet have created
         // the API socket, so repeatedly try to connect for up to
@@ -328,6 +327,8 @@ impl CloudHypervisorInner {
     }
 
     async fn cloud_hypervisor_check_running(&mut self) -> Result<()> {
+        info!(sl!(), "cloud_hypervisor_check_running start");
+
         let timeout_secs = self.timeout_secs;
 
         let timeout_msg = format!("API socket connect timed out after {timeout_secs} seconds");
@@ -340,6 +341,8 @@ impl CloudHypervisorInner {
     }
 
     async fn cloud_hypervisor_ensure_not_launched(&self) -> Result<()> {
+        info!(sl!(), "cloud_hypervisor_ensure_not_launched start");
+
         if let Some(child) = &self.process {
             return Err(anyhow!(
                 "{} already running with PID {}",
@@ -352,6 +355,8 @@ impl CloudHypervisorInner {
     }
 
     async fn cloud_hypervisor_launch(&mut self, _timeout_secs: i32) -> Result<()> {
+        info!(sl!(), "cloud_hypervisor_launch start");
+
         self.cloud_hypervisor_ensure_not_launched().await?;
 
         let cfg = &self.config;
@@ -360,14 +365,10 @@ impl CloudHypervisorInner {
 
         let disable_seccomp = cfg.security_info.disable_seccomp;
 
-        let api_socket_path = if let Some(already_existing) = get_api_socket_path_already_existing() {
-            self.reuse_guest = true;
-            already_existing
-        } else {
-            get_api_socket_path(&self.id)?
-        };
-        self.api_socket_path = api_socket_path.clone();
+        let api_socket_path = get_api_socket_path(&self.id, &self.uvm_id)?;
 
+        // DMFIX: race
+        self.reuse_guest = socket_exists(&api_socket_path);
         if !self.reuse_guest {
             let _ = std::fs::remove_file(api_socket_path.clone());
 
@@ -490,6 +491,8 @@ impl CloudHypervisorInner {
     }
 
     async fn cloud_hypervisor_shutdown(&mut self) -> Result<()> {
+        info!(sl!(), "cloud_hypervisor_shutdown start");
+
         let socket = self
             .api_socket
             .as_ref()
@@ -538,6 +541,8 @@ impl CloudHypervisorInner {
 
     #[allow(dead_code)]
     async fn cloud_hypervisor_wait(&mut self) -> Result<()> {
+        info!(sl!(), "cloud_hypervisor_wait start");
+
         let mut child = self
             .process
             .take()
@@ -558,6 +563,8 @@ impl CloudHypervisorInner {
     // Check the specified ping API response to see if it contains CH's
     // build-time features list. If so, save them.
     async fn handle_ch_build_features(&mut self, ping_response: &str) -> Result<()> {
+        info!(sl!(), "handle_ch_build_features start");
+
         let v: Value = serde_json::from_str(ping_response)?;
 
         let got = &v[CH_FEATURES_KEY];
@@ -583,6 +590,8 @@ impl CloudHypervisorInner {
     }
 
     async fn cloud_hypervisor_ping_until_ready(&mut self, _poll_time_ms: u64) -> Result<()> {
+        info!(sl!(), "cloud_hypervisor_ping_until_ready start");
+
         let socket = self
             .api_socket
             .as_ref()
@@ -616,15 +625,17 @@ impl CloudHypervisorInner {
         &mut self,
         id: &str,
         netns: Option<String>,
+        annotations: &HashMap<String, String>,
         selinux_label: Option<String>,
     ) -> Result<()> {
+        info!(sl!(), "prepare_vm: uvm_id = {}", self.uvm_id);
+
         self.id = id.to_string();
 
-        if self.reuse_guest {
-            info!(sl!(), "CLH: prepare_vm skip prepare, set state to VmRunning");
-            self.state = VmmState::VmRunning;
-            return Ok(());
+        if let Some(uvm_id) = annotations.get("io.katacontainers.config.hypervisor.uvm_id") {
+            self.uvm_id = uvm_id.to_string();
         }
+
         self.state = VmmState::NotReady;
 
         self.setup_environment().await?;
@@ -650,6 +661,8 @@ impl CloudHypervisorInner {
     // call, if confidential_guest is set, a confidential
     // guest will be created.
     async fn handle_guest_protection(&mut self) -> Result<()> {
+        info!(sl!(), "handle_guest_protection start");
+
         let cfg = &self.config;
 
         let confidential_guest = cfg.security_info.confidential_guest;
@@ -690,8 +703,10 @@ impl CloudHypervisorInner {
     }
 
     async fn setup_environment(&mut self) -> Result<()> {
+        info!(sl!(), "setup_environment start");
+
         // run_dir and vm_path are the same (shared)
-        self.run_dir = get_sandbox_path(&self.id);
+        self.run_dir = get_sandbox_path(&self.id, &self.uvm_id);
         self.vm_path = self.run_dir.to_string();
 
         create_dir_all_with_inherit_owner(&self.run_dir, 0o750)
@@ -706,6 +721,8 @@ impl CloudHypervisorInner {
     }
 
     pub(crate) async fn start_vm(&mut self, timeout_secs: i32) -> Result<()> {
+        info!(sl!(), "start_vm start");
+
         self.timeout_secs = timeout_secs;
         self.start_hypervisor(self.timeout_secs).await?;
 
@@ -719,6 +736,8 @@ impl CloudHypervisorInner {
     }
 
     pub(crate) async fn stop_vm(&mut self) -> Result<()> {
+        info!(sl!(), "stop_vm start");
+
         // If the container workload exits, this method gets called. However,
         // the container manager always makes a ShutdownContainer request,
         // which results in this method being called potentially a second
@@ -737,26 +756,31 @@ impl CloudHypervisorInner {
 
     #[allow(dead_code)]
     pub(crate) async fn wait_vm(&self) -> Result<i32> {
+        info!(sl!(), "wait_vm start");
         Ok(0)
     }
 
     pub(crate) fn pause_vm(&self) -> Result<()> {
+        info!(sl!(), "pause_vm start");
         Ok(())
     }
 
     pub(crate) fn resume_vm(&self) -> Result<()> {
+        info!(sl!(), "resume_vm start");
         Ok(())
     }
 
     pub(crate) async fn save_vm(&self) -> Result<()> {
+        info!(sl!(), "save_vm start");
         Ok(())
     }
 
     pub(crate) async fn get_agent_socket(&self) -> Result<String> {
+        info!(sl!(), "get_agent_socket start");
+
         const HYBRID_VSOCK_SCHEME: &str = "hvsock";
 
-        // let vsock_path = get_vsock_path(&self.id)?;
-        let vsock_path = self.vsock_path.clone();
+        let vsock_path = get_vsock_path(&self.id, &self.uvm_id)?;
 
         let uri = format!("{HYBRID_VSOCK_SCHEME}://{vsock_path}");
 
@@ -764,10 +788,14 @@ impl CloudHypervisorInner {
     }
 
     pub(crate) async fn disconnect(&mut self) {
+        info!(sl!(), "disconnect start");
+
         self.state = VmmState::NotReady;
     }
 
     pub(crate) async fn get_thread_ids(&self) -> Result<VcpuThreadIds> {
+        info!(sl!(), "get_thread_ids start");
+
         let thread_id = self.get_vmm_master_tid().await?;
         let proc_path = format!("/proc/{thread_id}");
 
@@ -778,6 +806,8 @@ impl CloudHypervisorInner {
     }
 
     pub(crate) async fn cleanup(&self) -> Result<()> {
+        info!(sl!(), "cleanup start");
+
         info!(sl!(), "CloudHypervisor::cleanup()");
         remove_dir_all(get_rootless_symlink_sandbox_path(self.id.as_str()))?;
         vm_cleanup(&self.config, self.vm_path.as_str())
@@ -788,6 +818,8 @@ impl CloudHypervisorInner {
         old_vcpus: u32,
         mut new_vcpus: u32,
     ) -> Result<(u32, u32)> {
+        info!(sl!(), "resize_vcpu start");
+
         info!(
             sl!(),
             "cloud hypervisor resize_vcpu(): {} -> {}", old_vcpus, new_vcpus
@@ -830,12 +862,16 @@ impl CloudHypervisorInner {
     }
 
     pub(crate) async fn get_pids(&self) -> Result<Vec<u32>> {
+        info!(sl!(), "get_pids start");
+
         let pid = self.get_vmm_master_tid().await?;
 
         Ok(vec![pid])
     }
 
     pub(crate) async fn get_vmm_master_tid(&self) -> Result<u32> {
+        info!(sl!(), "get_vmm_master_tid start");
+
         if let Some(pid) = self.pid {
             Ok(pid)
         } else {
@@ -844,6 +880,8 @@ impl CloudHypervisorInner {
     }
 
     pub(crate) async fn get_ns_path(&self) -> Result<String> {
+        info!(sl!(), "get_ns_path start");
+
         if let Some(pid) = self.pid {
             let ns_path = format!("/proc/{pid}/ns");
             Ok(ns_path)
@@ -853,10 +891,13 @@ impl CloudHypervisorInner {
     }
 
     pub(crate) async fn check(&self) -> Result<()> {
+        info!(sl!(), "check start");
         Ok(())
     }
 
     pub(crate) async fn get_jailer_root(&self) -> Result<String> {
+        info!(sl!(), "get_jailer_root start");
+
         let root_path = get_jailer_root(&self.id);
 
         create_dir_all_with_inherit_owner(&root_path, 0o750)?;
@@ -865,6 +906,8 @@ impl CloudHypervisorInner {
     }
 
     pub(crate) async fn capabilities(&self) -> Result<Capabilities> {
+        info!(sl!(), "capabilities start");
+
         let mut caps = Capabilities::default();
 
         let flags = if guest_protection_is_tdx(self.guest_protection_to_use.clone()) {
@@ -889,20 +932,28 @@ impl CloudHypervisorInner {
     }
 
     pub(crate) fn set_capabilities(&mut self, flag: CapabilityBits) {
+        info!(sl!(), "set_capabilities start");
+
         let mut caps = Capabilities::default();
 
         caps.set(flag)
     }
 
     pub(crate) fn set_guest_memory_block_size(&mut self, size: u32) {
+        info!(sl!(), "set_guest_memory_block_size start");
+
         self.guest_memory_block_size_mb = bytes_to_megs(size as u64);
     }
 
     pub(crate) fn guest_memory_block_size_mb(&self) -> u32 {
+        info!(sl!(), "guest_memory_block_size_mb start");
+
         self.guest_memory_block_size_mb
     }
 
     pub(crate) async fn resize_memory(&self, new_mem_mb: u32) -> Result<(u32, MemoryConfig)> {
+        info!(sl!(), "resize_memory start");
+
         let socket = self
             .api_socket
             .as_ref()
@@ -989,6 +1040,12 @@ impl CloudHypervisorInner {
 
         Ok((new_mem_mb, MemoryConfig::default()))
     }
+
+    pub fn reusing_vm(&self) -> bool {
+        info!(sl!(), "reusing_vm start");
+
+        self.reuse_guest
+    }
 }
 
 // Log all output from the CH process until a shutdown signal is received.
@@ -999,6 +1056,8 @@ async fn cloud_hypervisor_log_output(
     mut shutdown: Receiver<bool>,
     exit_notify: mpsc::Sender<i32>,
 ) -> Result<()> {
+    info!(sl!(), "cloud_hypervisor_log_output start");
+
     let stdout = child
         .stdout
         .as_mut()
@@ -1097,6 +1156,8 @@ lazy_static! {
 
 // Return the _fake_ GuestProtection value set by set_guest_protection().
 fn get_fake_guest_protection() -> Result<GuestProtection> {
+    info!(sl!(), "get_fake_guest_protection start");
+
     let existing_ref = FAKE_GUEST_PROTECTION.clone();
 
     let existing = existing_ref.read().unwrap();
@@ -1120,6 +1181,8 @@ fn get_fake_guest_protection() -> Result<GuestProtection> {
 // guest protection. It does this to allow us to force a particular guest
 // protection type in the unit tests.
 fn get_guest_protection() -> Result<GuestProtection> {
+    info!(sl!(), "get_guest_protection start");
+
     let guest_protection = if cfg!(test) {
         get_fake_guest_protection()
     } else {
@@ -1131,6 +1194,8 @@ fn get_guest_protection() -> Result<GuestProtection> {
 
 // Return a VCPU/TID map from a specified /proc/{pid} path.
 fn get_ch_vcpu_tids(proc_path: &str) -> Result<HashMap<u32, u32>> {
+    info!(sl!(), "get_ch_vcpu_tids start");
+
     const VCPU_STR: &str = "vcpu";
 
     let src = std::fs::canonicalize(proc_path)

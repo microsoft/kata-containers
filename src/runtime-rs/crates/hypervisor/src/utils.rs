@@ -58,11 +58,29 @@ pub fn get_child_threads(pid: u32) -> HashSet<u32> {
 
 // Return the path for a _hypothetical_ sandbox: the path does *not* exist
 // yet, and for this reason safe-path cannot be used.
-pub fn get_sandbox_path(sid: &str) -> String {
-    Path::new(build_path(KATA_PATH).as_str())
-        .join(sid)
+pub fn get_sandbox_path(sid: &str, uvm_id: &str) -> String {
+    info!(sl!(), "get_sandbox_path: sid = {sid}, uvm_id = {uvm_id}");
+
+    let sandbox_path = if let Some(uvm_path) = get_uvm_path(uvm_id) {
+        uvm_path
+    } else {
+        build_path(KATA_PATH).to_string()
+    };
+
+    Path::new(&sandbox_path).join(sid)
         .to_string_lossy()
         .to_string()
+}
+
+pub fn get_uvm_path(uvm_id: &str) -> Option<String> {
+    info!(sl!(), "get_uvm_path: uvm_id = {uvm_id}");
+
+    if uvm_id.is_empty() {
+       None
+    } else {
+        let kata_path = build_path(KATA_PATH);
+        Some([&kata_path, uvm_id].join("/"))
+    }
 }
 
 pub fn get_hvsock_path(sid: &str) -> String {
@@ -72,7 +90,7 @@ pub fn get_hvsock_path(sid: &str) -> String {
 }
 
 pub fn get_jailer_root(sid: &str) -> String {
-    let sandbox_path = get_sandbox_path(sid);
+    let sandbox_path = get_sandbox_path(sid, "");
 
     [&sandbox_path, JAILER_ROOT].join("/")
 }

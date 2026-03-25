@@ -26,7 +26,7 @@ impl DragonballInner {
         self.id = id.to_string();
         self.state = VmmState::NotReady;
 
-        self.vm_path = get_sandbox_path(id);
+        self.vm_path = get_sandbox_path(id, "");
         self.jailer_root = get_jailer_root(id);
         self.netns = netns;
 

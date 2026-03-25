@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(unused)]
+
 use std::fs;
 use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
@@ -9,7 +11,7 @@ use std::path::Path;
 use anyhow::{Ok, Result};
 use kata_types::build_path;
 
-use crate::{utils::get_sandbox_path, JAILER_ROOT};
+use crate::{utils::get_sandbox_path, utils::get_uvm_path, JAILER_ROOT};
 
 // The socket used to connect to CH. This is used for CH API communications.
 const CH_API_SOCKET_NAME: &str = "ch-api.sock";
@@ -21,35 +23,37 @@ const CH_VM_SOCKET_NAME: &str = "ch-vm.sock";
 // Return the path for a _hypothetical_ API socket path:
 // the path does *not* exist yet, and for this reason safe-path cannot be
 // used.
-pub fn get_api_socket_path(id: &str) -> Result<String> {
-    let sandbox_path = get_sandbox_path(id);
+pub fn get_api_socket_path(id: &str, uvm_id: &str) -> Result<String> {
+    info!(sl!(), "get_api_socket_path: id = {id} , uvm_id = {uvm_id}");
+
+    let sandbox_path = if let Some(uvm_path) = get_uvm_path(uvm_id) {
+        uvm_path
+    } else {
+        get_sandbox_path(id, uvm_id)
+    };
 
     let path = [&sandbox_path, CH_API_SOCKET_NAME].join("/");
 
+    info!(sl!(), "get_api_socket_path: returning {path}");
     Ok(path)
-}
-
-pub fn get_api_socket_path_already_existing() -> Option<String> {
-    get_socket_path_already_existing(CH_API_SOCKET_NAME)
 }
 
 // Return the path for a _hypothetical_ sandbox specific VSOCK socket path:
 // the path does *not* exist yet, and for this reason safe-path cannot be
 // used.
-pub fn get_vsock_path(id: &str) -> Result<String> {
-    if let Some(existing) = get_socket_path_already_existing(CH_VM_SOCKET_NAME) {
-        return Ok(existing);
-    }
+pub fn get_vsock_path(id: &str, uvm_id: &str) -> Result<String> {
+    info!(sl!(), "get_vsock_path: id = {id} , uvm_id = {uvm_id}");
 
-    let sandbox_path = get_sandbox_path(id);
+    let sandbox_path = if let Some(uvm_path) = get_uvm_path(uvm_id) {
+        uvm_path
+    } else {
+        get_sandbox_path(id, uvm_id)
+    };
 
     let path = [&sandbox_path, CH_VM_SOCKET_NAME].join("/");
 
+    info!(sl!(), "get_vsock_path: returning {path}");
     Ok(path)
-}
-
-pub fn get_vsock_path_already_existing() -> Option<String> {
-    get_socket_path_already_existing(CH_VM_SOCKET_NAME)
 }
 
 /// Returns the symlink path of the sandbox for the virtio-fs socket in rootless mode.
@@ -66,22 +70,16 @@ pub fn get_rootless_symlink_sandbox_jailer_root(id: &str) -> String {
     [&sandbox_path, JAILER_ROOT].join("/")
 }
 
-pub fn get_socket_path_already_existing(socket_name: &str) -> Option<String> {
-    let path = std::path::Path::new("/run/kata");
-    if path.is_dir() {
-        for entity in fs::read_dir(path).unwrap() {
-            let entity_path = entity.unwrap().path();
-            if entity_path.is_dir() {
-                let socket_path = entity_path.join(socket_name);
-                let metadata = fs::metadata(&socket_path);
-                if metadata.is_ok() {
-                    if metadata.unwrap().file_type().is_socket() {
-                        info!(sl!(), "CLH: found existing socket at {:?}", &socket_path);
-                        return Some(socket_path.to_str().unwrap().to_string());
-                    }
-                }
-            }
+
+pub fn socket_exists(socket_path: &str) -> bool {
+    let metadata = fs::metadata(&socket_path);
+    if metadata.is_ok() {
+        if metadata.unwrap().file_type().is_socket() {
+            info!(sl!(), "socket_exists: found existing socket at {:?}", &socket_path);
+            return true;
         }
     }
-    None
+
+    info!(sl!(), "socket_exists: socket not found at {:?}", &socket_path);
+    false
 }
