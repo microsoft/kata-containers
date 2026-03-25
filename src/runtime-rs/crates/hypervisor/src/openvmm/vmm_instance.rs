@@ -17,6 +17,11 @@ use ovmm_mesh_worker::RegisteredWorkers;
 use ovmm_vmm_core_defs::HaltReason;
 use tokio::sync::mpsc;
 
+// Force linker to include openvmm_resources which registers the VmWorker
+// via linkme::distributed_slice. Without this, the worker factory won't
+// find the "VmWorker" entry.
+extern crate openvmm_resources as _;
+
 /// Wrapper around OpenVMM's VmWorker, providing VM lifecycle control.
 #[allow(dead_code)]
 pub(crate) struct VmmInstance {
