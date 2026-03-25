@@ -48,6 +48,7 @@ shim-interface = { workspace = true }
 persist = { workspace = true }
 ch-config = { workspace = true, optional = true }
 tests_utils = { workspace = true }
+tracing-subscriber = { version = "0.3", optional = true }
 
 # Local dependencies: Dragonball
 dragonball = { workspace = true, features = [
@@ -120,6 +121,7 @@ openvmm = [
     "dep:ovmm_vmm_core_defs",
     "dep:ovmm_guid",
     "dep:ovmm_memory_range",
+    "dep:tracing-subscriber",
 ]
 
 [dev-dependencies]

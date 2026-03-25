@@ -14,7 +14,7 @@ use crate::{MemoryConfig, VcpuThreadIds, VmmState};
 
 use openvmm_defs::config::{
     Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig,
-    LinuxDirectBootMode, LoadMode, MemoryConfig as OvmmMemoryConfig,
+    LoadMode, MemoryConfig as OvmmMemoryConfig,
     PcieDeviceConfig, PcieRootComplexConfig, PcieRootPortConfig,
     ProcessorTopologyConfig, VmbusConfig, DEFAULT_MMIO_GAPS_X86,
 };
@@ -71,7 +71,6 @@ impl OpenVmmInner {
             cmdline,
             custom_dsdt: None,
             enable_serial: true,
-            boot_mode: LinuxDirectBootMode::Acpi,
         };
 
         // Build chipset via VmManifestBuilder
@@ -208,14 +207,15 @@ impl OpenVmmInner {
 
         // Set up hvsocket for agent communication
         let hvsock_path = get_hvsock_path(&self.id);
-        info!(sl!(), "openvmm: binding hvsock listener at: {}", hvsock_path);
+        info!(sl!(), "openvmm: hvsock path: {}", hvsock_path);
         // Remove stale socket file if it exists
         let _ = std::fs::remove_file(&hvsock_path);
-        let listener = ovmm_unix_socket::UnixListener::bind(&hvsock_path)
-            .with_context(|| format!("failed to bind hvsock listener: {}", hvsock_path))?;
+        // NOTE: We pass the hvsock_path to VmmInstance::launch() which binds the
+        // listener inside the worker host thread. This avoids FD transfer issues
+        // when passing UnixListener through mesh channels across async runtimes.
         let vmbus_config = VmbusConfig {
-            vsock_listener: Some(listener),
-            vsock_path: Some(hvsock_path),
+            vsock_listener: None,
+            vsock_path: Some(hvsock_path.clone()),
             ..Default::default()
         };
 
@@ -274,7 +274,7 @@ impl OpenVmmInner {
         // Launch the VM worker
         info!(sl!(), "openvmm: launching VM worker");
         self.vmm_instance
-            .launch(vm_config)
+            .launch(vm_config, Some(hvsock_path), Some(self.run_dir.clone()))
             .await
             .context("failed to launch VM worker")?;
 
