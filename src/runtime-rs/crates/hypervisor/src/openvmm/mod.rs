@@ -12,6 +12,7 @@
 mod inner;
 mod inner_device;
 mod inner_hypervisor;
+mod vmm_instance;
 
 use inner::OpenVmmInner;
 use persist::sandbox_persist::Persist;
