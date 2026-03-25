@@ -843,8 +843,12 @@ COMMIT_MSG = $(if $(COMMIT),$(COMMIT),unknown)
 EXTRA_RUSTFEATURES :=
 
 # if use dragonball hypervisor, add the feature to build dragonball in runtime
+# Note: dragonball and openvmm cannot be enabled simultaneously due to
+# kvm-ioctls version conflicts (dragonball uses 0.12, openvmm uses 0.14)
 ifeq ($(USE_BUILTIN_DB),true)
+  ifneq ($(USE_OPENVMM),true)
     EXTRA_RUSTFEATURES += dragonball
+  endif
 endif
 
 # if use openvmm hypervisor, add the feature to build openvmm in runtime
