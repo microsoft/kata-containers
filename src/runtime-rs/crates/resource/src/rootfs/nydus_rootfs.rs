@@ -72,7 +72,7 @@ impl NydusRootfs {
                 .await
                 .context("failed to do rafs mount")?;
                 // create rootfs under the share directory
-                let container_share_dir = get_host_rw_shared_path(sid)
+                let container_share_dir = get_host_rw_shared_path(sid, "")
                     .join(PASSTHROUGH_FS_DIR)
                     .join(cid);
                 let rootfs_dir = container_share_dir.join(ROOTFS);

@@ -594,7 +594,7 @@ impl QemuInner {
     }
 
     pub(crate) async fn get_jailer_root(&self) -> Result<String> {
-        let root_path = get_jailer_root(self.id.as_str());
+        let root_path = get_jailer_root(self.id.as_str(), "");
         create_dir_all_with_inherit_owner(&root_path, 0o750)?;
         Ok(root_path)
     }

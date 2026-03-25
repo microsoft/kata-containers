@@ -101,6 +101,7 @@ pub trait Hypervisor: std::fmt::Debug + Send + Sync {
     async fn prepare_vm(
         &self,
         id: &str,
+        uvm_id: &str,
         netns: Option<String>,
         annotations: &HashMap<String, String>,
         selinux_label: Option<String>,

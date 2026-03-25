@@ -155,7 +155,7 @@ pub trait ShareFsMount: Send + Sync {
     async fn cleanup(&self, sid: &str) -> Result<()>;
 }
 
-pub fn new(id: &str, config: &SharedFsInfo) -> Result<Arc<dyn ShareFs>> {
+pub fn new(id: &str, uvm_id: &str, config: &SharedFsInfo) -> Result<Arc<dyn ShareFs>> {
     let shared_fs = config.shared_fs.clone();
     let shared_fs = shared_fs.unwrap_or_default();
     match shared_fs.as_str() {
@@ -163,7 +163,7 @@ pub fn new(id: &str, config: &SharedFsInfo) -> Result<Arc<dyn ShareFs>> {
             ShareVirtioFsInline::new(id, config).context("new inline virtio fs")?,
         )),
         VIRTIO_FS => Ok(Arc::new(
-            ShareVirtioFsStandalone::new(id, config).context("new standalone virtio fs")?,
+            ShareVirtioFsStandalone::new(id, uvm_id, config).context("new standalone virtio fs")?,
         )),
         _ => Err(anyhow!("unsupported shred fs {:?}", &shared_fs)),
     }

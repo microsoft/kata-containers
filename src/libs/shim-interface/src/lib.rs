@@ -17,6 +17,7 @@
 //! to its corresponding handler and run certain methods.
 
 use std::fs;
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 
@@ -27,12 +28,20 @@ use kata_types::config::KATA_PATH;
 
 pub const SHIM_MGMT_SOCK_NAME: &str = "shim-monitor.sock";
 
-fn get_uds_with_sid(short_id: &str, path: &str) -> Result<String> {
+fn get_uds_with_sid(short_id: &str, uvm_id: &str, path: &str) -> Result<String> {
+    // info!(sl!(), "get_uds_with_sid: short_id = {short_id}, path = {path}");
+
     verify_id(short_id).context("The short id contains invalid characters.")?;
 
     let kata_run_path = fs::canonicalize(path).context("failed to canonicalize path")?;
 
-    let p = kata_run_path.join(short_id).join(SHIM_MGMT_SOCK_NAME);
+    // let p = kata_run_path.join(short_id).join(SHIM_MGMT_SOCK_NAME);
+    let mut run_path = PathBuf::from(kata_run_path.clone());
+    if !uvm_id.is_empty() {
+        run_path.push(uvm_id);
+    }
+    let p = run_path.as_path();
+
     if p.exists() {
         return Ok(format!("unix://{}", p.display()));
     }
@@ -83,14 +92,16 @@ pub fn sb_storage_path() -> Result<&'static str> {
 // returns the address of the unix domain socket(UDS) for communication with shim
 // management service using http
 // normally returns "unix:///run/kata/{sid}/shim_monitor.sock"
-pub fn mgmt_socket_addr(sid: &str) -> Result<String> {
+pub fn mgmt_socket_addr(sid: &str, uvm_id: &str) -> Result<String> {
+    // info!(sl!(), "mgmt_socket_addr: sid = {sid}");
+
     if sid.is_empty() {
         return Err(anyhow!(
             "Empty sandbox id for acquiring socket address for shim_mgmt"
         ));
     }
 
-    get_uds_with_sid(sid, sb_storage_path()?)
+    get_uds_with_sid(sid, uvm_id, sb_storage_path()?)
 }
 
 #[cfg(test)]

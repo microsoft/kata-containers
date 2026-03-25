@@ -35,8 +35,9 @@ pub struct SandboxBindMounts {
 impl SandboxBindMounts {
     pub fn new(sid: String, sandbox_bindmounts: Vec<String>) -> Result<Self> {
         // /run/kata-containers/shared/sandboxes/<sid>/rw/passthrough/sandbox-mounts
+        warn!(sl!(), "SandboxBindMounts: ignoring uvm_id");
         let bindmounts_path =
-            do_get_host_path(SANDBOX_BIND_MOUNTS_DIR, sid.as_str(), "", true, false);
+            do_get_host_path(SANDBOX_BIND_MOUNTS_DIR, sid.as_str(), "", "", true, false);
         let host_mounts_path = PathBuf::from(bindmounts_path);
 
         Ok(SandboxBindMounts {
@@ -61,6 +62,8 @@ impl SandboxBindMounts {
     }
 
     pub fn setup_sandbox_bind_mounts(&self) -> Result<()> {
+        warn!(sl!(), "setup_sandbox_bind_mounts: ignoring uvm_id");
+
         let mut mounted_list: Vec<PathBuf> = Vec::new();
         let mut mounted_map: HashMap<String, bool> = HashMap::new();
         for src in &self.sandbox_bindmounts {
@@ -116,7 +119,7 @@ impl SandboxBindMounts {
                 info!(sl!(), "sandbox readonly bind mount.");
                 // dest_ro: /run/kata-containers/shared/sandboxes/<sid>/ro/passthrough/sandbox-mounts
                 let mount_dest_ro =
-                    do_get_host_path(SANDBOX_BIND_MOUNTS_DIR, &self.sid, "", true, true);
+                    do_get_host_path(SANDBOX_BIND_MOUNTS_DIR, &self.sid, "", "", true, true);
                 let sandbox_bindmounts_ro = [mount_dest_ro, mnt_name.clone()].join("/");
 
                 mount::bind_remount(sandbox_bindmounts_ro, true)

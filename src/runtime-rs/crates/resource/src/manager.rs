@@ -74,9 +74,9 @@ impl ResourceManager {
     }
 
     #[instrument]
-    pub async fn prepare_before_start_vm(&self, device_configs: Vec<ResourceConfig>) -> Result<()> {
+    pub async fn prepare_before_start_vm(&self, device_configs: Vec<ResourceConfig>, uvm_id: &str) -> Result<()> {
         let mut inner = self.inner.write().await;
-        inner.prepare_before_start_vm(device_configs).await
+        inner.prepare_before_start_vm(device_configs, uvm_id).await
     }
 
     pub async fn handle_network(&self, network_config: NetworkConfig) -> Result<()> {

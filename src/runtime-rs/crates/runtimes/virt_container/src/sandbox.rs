@@ -94,6 +94,7 @@ impl SandboxInner {
 #[derive(Clone)]
 pub struct VirtSandbox {
     sid: String,
+    uvm_id: String,
     msg_sender: Arc<Mutex<Sender<Message>>>,
     inner: Arc<RwLock<SandboxInner>>,
     resource_manager: Arc<ResourceManager>,
@@ -131,10 +132,18 @@ impl VirtSandbox {
         sandbox_config: SandboxConfig,
         factory: Factory,
     ) -> Result<Self> {
+        let uvm_id = if let Some(id) = sandbox_config.annotations.get("io.katacontainers.config.hypervisor.uvm_id") {
+            id.to_string()
+        } else {
+            "".to_string()
+        };
+        info!(sl!(), "VirtSandbox: uvm_id = {}", uvm_id);
+
         let config = resource_manager.config().await;
         let keep_abnormal = config.runtime.keep_abnormal;
         Ok(Self {
             sid: sid.to_string(),
+            uvm_id,
             msg_sender: Arc::new(Mutex::new(msg_sender)),
             inner: Arc::new(RwLock::new(SandboxInner::new())),
             agent,
@@ -405,6 +414,8 @@ impl VirtSandbox {
     }
 
     async fn prepare_vm_socket_config(&self) -> Result<ResourceConfig> {
+        info!(sl!(), "prepare_vm_socket_config: uvm_id = {}", self.uvm_id);
+
         // It will check the hypervisor's capabilities to see if it supports hybrid-vsock.
         // If it does not, it'll assume that it only supports legacy vsock.
         let vm_socket = if self
@@ -416,7 +427,7 @@ impl VirtSandbox {
             // Firecracker/Dragonball/CLH use the hybrid-vsock device model.
             ResourceConfig::HybridVsock(HybridVsockConfig {
                 guest_cid: DEFAULT_GUEST_VSOCK_CID,
-                uds_path: get_hvsock_path(&self.sid),
+                uds_path: get_hvsock_path(&self.sid, &self.uvm_id),
             })
         } else {
             // Qemu uses the vsock device model.
@@ -595,6 +606,7 @@ impl Sandbox for VirtSandbox {
         self.hypervisor
             .prepare_vm(
                 id,
+                &self.uvm_id,
                 sandbox_config.network_env.netns.clone(),
                 &sandbox_config.annotations,
                 selinux_label,
@@ -609,7 +621,7 @@ impl Sandbox for VirtSandbox {
             .await?;
 
         self.resource_manager
-            .prepare_before_start_vm(resources)
+            .prepare_before_start_vm(resources, &self.uvm_id)
             .await
             .context("set up device before start vm")?;
 
@@ -691,7 +703,7 @@ impl Sandbox for VirtSandbox {
         }
 
         // create sandbox in vm
-        info!(sl!(), "Sandbox: creating CreateSandboxRequest");
+        info!(sl!(), "Sandbox: creating CreateSandboxRequest, id = {id}");
         let agent_config = self.agent.agent_config().await;
         let kernel_modules = KernelModule::set_kernel_modules(agent_config.kernel_modules)?;
         let req = agent::CreateSandboxRequest {
@@ -791,6 +803,7 @@ impl Sandbox for VirtSandbox {
         self.hypervisor
             .prepare_vm(
                 id,
+                &self.uvm_id,
                 sandbox_config.network_env.netns.clone(),
                 &sandbox_config.annotations,
                 selinux_label,
@@ -806,7 +819,7 @@ impl Sandbox for VirtSandbox {
             .context("prepare resources before start vm")?;
 
         self.resource_manager
-            .prepare_before_start_vm(resources)
+            .prepare_before_start_vm(resources, &self.uvm_id)
             .await
             .context("set up device before start vm")?;
 
@@ -1085,6 +1098,7 @@ impl Persist for VirtSandbox {
         let resource_manager = Arc::new(ResourceManager::restore(args, r).await?);
         Ok(Self {
             sid: sid.to_string(),
+            uvm_id: "".to_string(),
             msg_sender: Arc::new(Mutex::new(sandbox_args.sender)),
             inner: Arc::new(RwLock::new(SandboxInner::new())),
             agent,

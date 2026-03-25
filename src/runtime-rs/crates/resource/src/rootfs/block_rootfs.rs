@@ -44,7 +44,7 @@ impl BlockRootfs {
         rootfs: &Mount,
     ) -> Result<Self> {
         let container_path = do_get_guest_path(ROOTFS, cid, false, false);
-        let host_path = do_get_host_path(ROOTFS, sid, cid, false, false);
+        let host_path = do_get_host_path(ROOTFS, sid, "", cid, false, false);
         // Create rootfs dir on host to make sure mount point in guest exists, as readonly dir is
         // shared to guest via virtiofs, and guest is unable to create rootfs dir.
         fs::create_dir_all(&host_path)

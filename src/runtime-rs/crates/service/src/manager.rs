@@ -51,6 +51,7 @@ impl ServiceManager {
     // TODO: who manages lifecycle for `task_server_fd`?
     pub async fn new(
         id: &str,
+        uvm_id: &str,
         containerd_binary: &str,
         address: &str,
         namespace: &str,
@@ -60,7 +61,7 @@ impl ServiceManager {
         logging::register_subsystem_logger("runtimes", "service");
 
         let (sender, receiver) = channel::<Message>(MESSAGE_BUFFER_SIZE);
-        let rt_mgr = RuntimeHandlerManager::new(id, sender).context("new runtime handler")?;
+        let rt_mgr = RuntimeHandlerManager::new(id, uvm_id, sender).context("new runtime handler")?;
         let handler = Arc::new(rt_mgr);
         let mut server = unsafe { Server::from_raw_fd(task_server_fd) };
         server = server.set_domain_unix();
@@ -119,9 +120,9 @@ impl ServiceManager {
         Ok(())
     }
 
-    pub async fn cleanup(sid: &str) -> Result<()> {
+    pub async fn cleanup(sid: &str, uvm_id: &str) -> Result<()> {
         let (sender, _receiver) = channel::<Message>(MESSAGE_BUFFER_SIZE);
-        let handler = RuntimeHandlerManager::new(sid, sender).context("new runtime handler")?;
+        let handler = RuntimeHandlerManager::new(sid, uvm_id, sender).context("new runtime handler")?;
         if let Err(e) = handler.cleanup().await {
             warn!(sl!(), "failed to clean up runtime state, {}", e);
         }

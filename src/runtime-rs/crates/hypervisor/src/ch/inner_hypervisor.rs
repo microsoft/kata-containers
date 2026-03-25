@@ -1,3 +1,4 @@
+
 // Copyright (c) 2019-2022 Alibaba Cloud
 // Copyright (c) 2022 Intel Corporation
 //
@@ -624,17 +625,15 @@ impl CloudHypervisorInner {
     pub(crate) async fn prepare_vm(
         &mut self,
         id: &str,
+        uvm_id: &str,
         netns: Option<String>,
-        annotations: &HashMap<String, String>,
+        _annotations: &HashMap<String, String>,
         selinux_label: Option<String>,
     ) -> Result<()> {
-        info!(sl!(), "prepare_vm: uvm_id = {}", self.uvm_id);
+        info!(sl!(), "prepare_vm: id = {id}, uvm_id = {uvm_id}");
 
         self.id = id.to_string();
-
-        if let Some(uvm_id) = annotations.get("io.katacontainers.config.hypervisor.uvm_id") {
-            self.uvm_id = uvm_id.to_string();
-        }
+        self.uvm_id = uvm_id.to_string();
 
         self.state = VmmState::NotReady;
 
@@ -898,7 +897,7 @@ impl CloudHypervisorInner {
     pub(crate) async fn get_jailer_root(&self) -> Result<String> {
         info!(sl!(), "get_jailer_root start");
 
-        let root_path = get_jailer_root(&self.id);
+        let root_path = get_jailer_root(&self.id, &self.uvm_id);
 
         create_dir_all_with_inherit_owner(&root_path, 0o750)?;
 

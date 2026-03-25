@@ -83,14 +83,18 @@ pub fn get_uvm_path(uvm_id: &str) -> Option<String> {
     }
 }
 
-pub fn get_hvsock_path(sid: &str) -> String {
-    let jailer_root_path = get_jailer_root(sid);
+pub fn get_hvsock_path(sid: &str, uvm_id: &str) -> String {
+    info!(sl!(), "get_hvsock_path: sid = {sid}, uvm_id = {uvm_id}");
+
+    let jailer_root_path = get_jailer_root(sid, uvm_id);
 
     [jailer_root_path, DEFAULT_HYBRID_VSOCK_NAME.to_owned()].join("/")
 }
 
-pub fn get_jailer_root(sid: &str) -> String {
-    let sandbox_path = get_sandbox_path(sid, "");
+pub fn get_jailer_root(sid: &str, uvm_id: &str) -> String {
+    info!(sl!(), "get_jailer_root: sid = {sid}, uvm_id = {uvm_id}");
+
+    let sandbox_path = get_sandbox_path(sid, uvm_id);
 
     [&sandbox_path, JAILER_ROOT].join("/")
 }

@@ -83,6 +83,7 @@ fn convert_string_to_slog_level(string_level: &str) -> slog::Level {
 
 struct RuntimeHandlerManagerInner {
     id: String,
+    // uvm_id: String,
     msg_sender: Sender<Message>,
     kata_tracer: Arc<Mutex<KataTracer>>,
     runtime_instance: Option<Arc<RuntimeInstance>>,
@@ -98,10 +99,11 @@ impl std::fmt::Debug for RuntimeHandlerManagerInner {
 }
 
 impl RuntimeHandlerManagerInner {
-    fn new(id: &str, msg_sender: Sender<Message>) -> Result<Self> {
+    fn new(id: &str, _uvm_id: &str, msg_sender: Sender<Message>) -> Result<Self> {
         let tracer = KataTracer::new();
         Ok(Self {
             id: id.to_string(),
+            // uvm_id: uvm_id.to_string(),
             msg_sender,
             kata_tracer: Arc::new(Mutex::new(tracer)),
             runtime_instance: None,
@@ -237,6 +239,7 @@ impl RuntimeHandlerManagerInner {
         // the unwrap here is safe because the runtime handler is correctly created
         let shim_mgmt_svr = MgmtServer::new(
             &self.id,
+            // &self.uvm_id,
             self.runtime_instance.as_ref().unwrap().sandbox.clone(),
         )
         .context(ERR_NO_SHIM_SERVER)?;
@@ -268,10 +271,10 @@ impl std::fmt::Debug for RuntimeHandlerManager {
 }
 
 impl RuntimeHandlerManager {
-    pub fn new(id: &str, msg_sender: Sender<Message>) -> Result<Self> {
+    pub fn new(id: &str, uvm_id: &str, msg_sender: Sender<Message>) -> Result<Self> {
         Ok(Self {
             inner: Arc::new(RwLock::new(RuntimeHandlerManagerInner::new(
-                id, msg_sender,
+                id, uvm_id, msg_sender,
             )?)),
         })
     }

@@ -45,7 +45,8 @@ impl ShimExecutor {
             fs::remove_file(file_path).ok();
         }
 
-        if let Err(e) = service::ServiceManager::cleanup(&self.args.id).await {
+        warn!(sl!(), "do_cleanup: ignoring uvm_id");
+        if let Err(e) = service::ServiceManager::cleanup(&self.args.id, "").await {
             error!(
                 sl!(),
                 "failed to cleanup in service manager: {:?}. force shutdown shim process", e

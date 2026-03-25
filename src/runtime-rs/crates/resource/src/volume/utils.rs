@@ -52,7 +52,9 @@ pub(crate) async fn generate_shared_path(
     let file_name = get_file_name(&dest).context("failed to get file name.")?;
     let mount_name = generate_mount_path(device_id, file_name.as_str());
     let guest_path = do_get_guest_path(&mount_name, device_id, true, false);
-    let host_path = do_get_host_path(&mount_name, sid, device_id, true, read_only);
+
+    warn!(sl!(), "generate_shared_path: ignoring uvm_id");
+    let host_path = do_get_host_path(&mount_name, sid, "", device_id, true, read_only);
 
     if get_mount_path(&Some(dest)).starts_with("/dev") {
         fs::File::create(&host_path).context(format!("failed to create file {:?}", &host_path))?;

@@ -36,6 +36,7 @@ use crate::share_fs::{
 #[derive(Debug, Clone)]
 pub struct ShareVirtioFsStandaloneConfig {
     id: String,
+    uvm_id: String,
 
     // virtio_fs_daemon is the virtio-fs vhost-user daemon path
     pub virtio_fs_daemon: String,
@@ -58,11 +59,14 @@ pub(crate) struct ShareVirtioFsStandalone {
 }
 
 impl ShareVirtioFsStandalone {
-    pub(crate) fn new(id: &str, config: &SharedFsInfo) -> Result<Self> {
+    pub(crate) fn new(id: &str, uvm_id: &str, config: &SharedFsInfo) -> Result<Self> {
+        info!(sl!(), "ShareVirtioFsStandalone: uvm_id = {uvm_id}");
+
         Ok(Self {
             inner: Arc::new(RwLock::new(ShareVirtioFsStandaloneInner::default())),
             config: ShareVirtioFsStandaloneConfig {
                 id: id.to_string(),
+                uvm_id: uvm_id.to_string(),
                 virtio_fs_daemon: config.virtio_fs_daemon.clone(),
                 virtio_fs_cache: config.virtio_fs_cache.clone(),
                 virtio_fs_extra_args: config.virtio_fs_extra_args.clone(),
@@ -73,8 +77,8 @@ impl ShareVirtioFsStandalone {
     }
 
     fn virtiofsd_args(&self, sock_path: &str, disable_guest_selinux: bool) -> Result<Vec<String>> {
-        let source_path = get_host_ro_shared_path(&self.config.id);
-        info!(sl!(), "virtiofsd_args: source_path = {:?}", source_path);
+        let source_path = get_host_ro_shared_path(&self.config.id, &self.config.uvm_id);
+        info!(sl!(), "virtiofsd_args: uvm_id = {}, source_path = {:?}", &self.config.uvm_id, source_path);
 
         ensure_dir_exist(&source_path)?;
         let shared_dir = source_path
@@ -225,7 +229,7 @@ impl ShareFs for ShareVirtioFsStandalone {
         h: &dyn Hypervisor,
         d: &RwLock<DeviceManager>,
     ) -> Result<()> {
-        prepare_virtiofs(d, VIRTIO_FS, &self.config.id, &h.get_jailer_root().await?)
+        prepare_virtiofs(d, VIRTIO_FS, &self.config.id, &self.config.uvm_id, &h.get_jailer_root().await?)
             .await
             .context("prepare virtiofs")?;
         self.setup_virtiofsd(h).await.context("setup virtiofsd")?;

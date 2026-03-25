@@ -144,7 +144,10 @@ impl ResourceManagerInner {
     pub async fn prepare_before_start_vm(
         &mut self,
         device_configs: Vec<ResourceConfig>,
+        uvm_id: &str,
     ) -> Result<()> {
+        warn!(sl!(), "prepare_before_start_vm: uvm_id = {uvm_id}");
+
         for dc in device_configs {
             match dc {
                 ResourceConfig::ShareFs(c) => {
@@ -154,7 +157,7 @@ impl ResourceManagerInner {
                         .await?
                         .is_fs_sharing_supported()
                     {
-                        let share_fs = share_fs::new(&self.sid, &c).context("new share fs")?;
+                        let share_fs = share_fs::new(&self.sid, uvm_id, &c).context("new share fs")?;
                         share_fs
                             .setup_device_before_start_vm(
                                 self.hypervisor.as_ref(),

@@ -34,7 +34,9 @@ impl MgmtServer {
     /// construct a new management server
     pub fn new(sid: &str, sandbox: Arc<dyn Sandbox>) -> Result<Self> {
         Ok(Self {
-            s_addr: mgmt_socket_addr(sid).context(ERR_NO_SHIM_SERVER)?,
+            // DMFIX: uvm_id
+            // s_addr: mgmt_socket_addr(sid, uvm_id).context(ERR_NO_SHIM_SERVER)?,
+            s_addr: mgmt_socket_addr(sid, "123456789").context(ERR_NO_SHIM_SERVER)?,
             sandbox,
         })
     }

@@ -1021,7 +1021,7 @@ pub fn get_pci_path_by_qdev_id(
 
 pub fn get_qmp_socket_path(sid: &str) -> String {
     if is_rootless() {
-        [get_jailer_root(sid).as_str(), QMP_SOCKET_FILE].join("/")
+        [get_jailer_root(sid, "").as_str(), QMP_SOCKET_FILE].join("/")
     } else {
         QMP_SOCKET_FILE.to_string()
     }

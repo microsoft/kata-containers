@@ -46,10 +46,13 @@ impl VirtiofsShareMount {
 impl ShareFsMount for VirtiofsShareMount {
     async fn share_rootfs(&self, config: &ShareFsRootfsConfig) -> Result<ShareFsMountResult> {
         // TODO: select virtiofs or support nydus
+        warn!(sl!(), "share_rootfs: ignoring uvm_id");
         let guest_path = utils::share_to_guest(
             &config.source,
             &config.target,
             &self.id,
+            // &self.uvm_id,
+            "",
             &config.cid,
             config.readonly,
             false,
@@ -63,10 +66,13 @@ impl ShareFsMount for VirtiofsShareMount {
     }
 
     async fn share_volume(&self, config: &ShareFsVolumeConfig) -> Result<ShareFsMountResult> {
+        warn!(sl!(), "share_volume: ignoring uvm_id");
         let mut guest_path = utils::share_to_guest(
             &config.source,
             &config.target,
             &self.id,
+            // &self.uvm_id,
+            "",
             &config.cid,
             config.readonly,
             true,
@@ -77,7 +83,7 @@ impl ShareFsMount for VirtiofsShareMount {
         // watchable mounts
         if is_watchable_mount(&config.source) {
             // Create path in shared directory for creating watchable mount:
-            let host_rw_path = utils::get_host_rw_shared_path(&self.id);
+            let host_rw_path = utils::get_host_rw_shared_path(&self.id, "");
 
             // "/run/kata-containers/shared/sandboxes/$sid/rw/passthrough/watchable"
             let watchable_host_path = Path::new(&host_rw_path)
@@ -129,31 +135,37 @@ impl ShareFsMount for VirtiofsShareMount {
     }
 
     async fn upgrade_to_rw(&self, file_name: &str) -> Result<()> {
+        warn!(sl!(), "upgrade_to_rw: ignoring uvm_id");
+
         // Remount readonly directory with readwrite permission
-        let host_dest = do_get_host_path(file_name, &self.id, "", true, true);
+        let host_dest = do_get_host_path(file_name, &self.id, "", "", true, true);
         bind_remount(host_dest, false)
             .context("remount readonly directory with readwrite permission")?;
         // Remount readwrite directory with readwrite permission
-        let host_dest = do_get_host_path(file_name, &self.id, "", true, false);
+        let host_dest = do_get_host_path(file_name, &self.id, "", "", true, false);
         bind_remount(host_dest, false)
             .context("remount readwrite directory with readwrite permission")?;
         Ok(())
     }
 
     async fn downgrade_to_ro(&self, file_name: &str) -> Result<()> {
+        warn!(sl!(), "downgrade_to_ro: ignoring uvm_id");
+
         // Remount readwrite directory with readonly permission
-        let host_dest = do_get_host_path(file_name, &self.id, "", true, false);
+        let host_dest = do_get_host_path(file_name, &self.id, "", "", true, false);
         bind_remount(host_dest, true)
             .context("remount readwrite directory with readonly permission")?;
         // Remount readonly directory with readonly permission
-        let host_dest = do_get_host_path(file_name, &self.id, "", true, true);
+        let host_dest = do_get_host_path(file_name, &self.id, "", "", true, true);
         bind_remount(host_dest, true)
             .context("remount readonly directory with readonly permission")?;
         Ok(())
     }
 
     async fn umount_volume(&self, file_name: &str) -> Result<()> {
-        let host_dest = do_get_host_path(file_name, &self.id, "", true, false);
+        warn!(sl!(), "umount_volume: ignoring uvm_id");
+
+        let host_dest = do_get_host_path(file_name, &self.id, "", "", true, false);
         umount_timeout(&host_dest, 0).context("umount volume")?;
         // Umount event will be propagated to ro directory
 
@@ -170,7 +182,9 @@ impl ShareFsMount for VirtiofsShareMount {
     }
 
     async fn umount_rootfs(&self, config: &ShareFsRootfsConfig) -> Result<()> {
-        let host_dest = do_get_host_path(&config.target, &self.id, &config.cid, false, false);
+        warn!(sl!(), "umount_rootfs: ignoring uvm_id");
+
+        let host_dest = do_get_host_path(&config.target, &self.id, "", &config.cid, false, false);
         umount_timeout(&host_dest, 0).context("umount rootfs")?;
 
         // Remove the directory of mointpoint
@@ -184,15 +198,17 @@ impl ShareFsMount for VirtiofsShareMount {
     }
 
     async fn cleanup(&self, sid: &str) -> Result<()> {
+        warn!(sl!(), "cleanup: ignoring uvm_id");
+
         // Unmount ro path
-        let host_ro_dest = get_host_ro_shared_path(sid);
+        let host_ro_dest = get_host_ro_shared_path(sid, "");
         umount_all(host_ro_dest.clone(), true).context("failed to umount ro path")?;
         fs::remove_dir_all(host_ro_dest).context("failed to remove ro path")?;
         // As the rootfs and volume have been umounted before calling this function, so just remove the rw dir directly
-        let host_rw_dest = get_host_rw_shared_path(sid);
+        let host_rw_dest = get_host_rw_shared_path(sid, "");
         fs::remove_dir_all(host_rw_dest).context("failed to remove rw path")?;
         // remove the host share directory
-        let host_path = get_host_shared_path(sid);
+        let host_path = get_host_shared_path(sid, "");
         fs::remove_dir_all(host_path).context("failed to remove host shared path")?;
         Ok(())
     }

@@ -31,8 +31,8 @@ pub struct MgmtClient {
 
 impl MgmtClient {
     /// Construct a new client connecting to shim mgmt server
-    pub fn new(sid: &str, timeout: Option<Duration>) -> Result<Self> {
-        let unix_socket_path = mgmt_socket_addr(sid).context("Failed to get unix socket path")?;
+    pub fn new(sid: &str, uvm_id: &str, timeout: Option<Duration>) -> Result<Self> {
+        let unix_socket_path = mgmt_socket_addr(sid, uvm_id).context("Failed to get unix socket path")?;
         let s_addr = unix_socket_path
             .strip_prefix("unix:")
             .context("failed to strip prefix")?;

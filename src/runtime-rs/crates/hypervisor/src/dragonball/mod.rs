@@ -74,6 +74,7 @@ impl Hypervisor for Dragonball {
     async fn prepare_vm(
         &self,
         id: &str,
+        _uvm_id: &str,
         netns: Option<String>,
         _annotations: &HashMap<String, String>,
         selinux_label: Option<String>,

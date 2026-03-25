@@ -58,7 +58,8 @@ impl ShareFs for ShareVirtioFsInline {
         _h: &dyn Hypervisor,
         d: &RwLock<DeviceManager>,
     ) -> Result<()> {
-        prepare_virtiofs(d, INLINE_VIRTIO_FS, &self.config.id, "")
+        warn!(sl!(), "setup_device_before_start_vm: ignoring uvm_id");
+        prepare_virtiofs(d, INLINE_VIRTIO_FS, &self.config.id, "", "")
             .await
             .context("prepare virtiofs")?;
 
@@ -70,7 +71,8 @@ impl ShareFs for ShareVirtioFsInline {
         _h: &dyn Hypervisor,
         d: &RwLock<DeviceManager>,
     ) -> Result<()> {
-        setup_inline_virtiofs(d, &self.config.id)
+        warn!(sl!(), "setup_device_after_start_vm: ignoring uvm_id");
+        setup_inline_virtiofs(d, &self.config.id, "")
             .await
             .context("setup inline virtiofs")?;
 

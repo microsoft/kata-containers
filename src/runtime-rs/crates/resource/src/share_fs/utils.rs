@@ -40,19 +40,20 @@ pub(crate) fn share_to_guest(
     // relative path for target
     target: &str,
     sid: &str,
+    uvm_id: &str,
     cid: &str,
     readonly: bool,
     is_volume: bool,
     is_rafs: bool,
 ) -> Result<String> {
-    let host_dest = do_get_host_path(target, sid, cid, is_volume, false);
+    let host_dest = do_get_host_path(target, sid, uvm_id, cid, is_volume, false);
     mount::bind_mount_unchecked(source, &host_dest, readonly, MsFlags::MS_SLAVE)
         .with_context(|| format!("failed to bind mount {} to {}", source, &host_dest))?;
 
     // bind mount remount event is not propagated to mount subtrees, so we have
     // to remount the read only dir mount point directly.
     if readonly {
-        let dst = do_get_host_path(target, sid, cid, is_volume, true);
+        let dst = do_get_host_path(target, sid, uvm_id, cid, is_volume, true);
         mount::bind_remount(dst, readonly).context("bind remount readonly")?;
     }
 
@@ -66,20 +67,45 @@ pub(crate) fn share_to_guest(
 // 2. /run/kata-containers/shared/sandboxes/$sbx_id/rw/ is bind mounted readonly to /run/kata-containers/shared/sandboxes/$sbx_id/ro/, so guest cannot modify it
 //
 // 3. host-guest shared files/directories are mounted one-level under /run/kata-containers/shared/sandboxes/$sbx_id/rw/passthrough and thus present to guest at one level under run/kata-containers/shared/containers/passthrough.
-pub(crate) fn get_host_ro_shared_path(id: &str) -> PathBuf {
-    Path::new(kata_host_shared_dir().as_str())
+pub(crate) fn get_host_ro_shared_path(id: &str, uvm_id: &str) -> PathBuf {
+    let shared_path = kata_host_shared_dir();
+    let mut shared_path = PathBuf::from(&shared_path);
+
+    if !uvm_id.is_empty() {
+        shared_path.push(&uvm_id);
+    }
+
+    shared_path
+        .as_path()
         .join(id)
         .join("ro")
 }
 
-pub fn get_host_rw_shared_path(sid: &str) -> PathBuf {
-    Path::new(kata_host_shared_dir().as_str())
+pub fn get_host_rw_shared_path(sid: &str, uvm_id: &str) -> PathBuf {
+    let shared_path = kata_host_shared_dir();
+    let mut shared_path = PathBuf::from(&shared_path);
+
+    if !uvm_id.is_empty() {
+        shared_path.push(&uvm_id);
+    }
+
+    shared_path
+        .as_path()
         .join(sid)
         .join("rw")
 }
 
-pub fn get_host_shared_path(sid: &str) -> PathBuf {
-    Path::new(kata_host_shared_dir().as_str()).join(sid)
+pub fn get_host_shared_path(sid: &str, uvm_id: &str) -> PathBuf {
+    let shared_path = kata_host_shared_dir();
+    let mut shared_path = PathBuf::from(&shared_path);
+
+    if !uvm_id.is_empty() {
+        shared_path.push(&uvm_id);
+    }
+
+    shared_path
+        .as_path()
+        .join(sid)
 }
 
 fn do_get_guest_any_path(
@@ -119,6 +145,7 @@ pub fn do_get_guest_share_path(target: &str, cid: &str, is_rafs: bool) -> String
 pub fn do_get_host_path(
     target: &str,
     sid: &str,
+    uvm_id: &str,
     cid: &str,
     is_volume: bool,
     read_only: bool,
@@ -132,9 +159,9 @@ pub fn do_get_host_path(
     };
 
     let path = if is_volume {
-        get_host_path(sid).join(dir).join(target)
+        get_host_path(sid, uvm_id).join(dir).join(target)
     } else {
-        get_host_path(sid).join(dir).join(cid).join(target)
+        get_host_path(sid, uvm_id).join(dir).join(cid).join(target)
     };
     path.to_str().unwrap().to_string()
 }

@@ -27,7 +27,7 @@ impl DragonballInner {
         self.state = VmmState::NotReady;
 
         self.vm_path = get_sandbox_path(id, "");
-        self.jailer_root = get_jailer_root(id);
+        self.jailer_root = get_jailer_root(id, "");
         self.netns = netns;
 
         // Dragonball is a built-in VMM that runs as a thread inside the
@@ -91,14 +91,14 @@ impl DragonballInner {
         Ok(format!(
             "{}://{}",
             HYBRID_VSOCK_SCHEME,
-            get_hvsock_path(&self.id),
+            get_hvsock_path(&self.id, ""),
         ))
     }
 
     /// Get the address of agent vsock server used to init connections for io
     pub(crate) async fn get_passfd_listener_addr(&self) -> Result<(String, u32)> {
         if let Some(passfd_port) = self.passfd_listener_port {
-            Ok((get_hvsock_path(&self.id), passfd_port))
+            Ok((get_hvsock_path(&self.id, ""), passfd_port))
         } else {
             Err(anyhow!("passfd io listener port not set"))
         }
