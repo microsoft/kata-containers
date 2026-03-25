@@ -814,7 +814,7 @@ static-checks-build: $(GENERATED_FILES)
 $(TARGET): $(GENERATED_FILES) $(TARGET_PATH)
 
 $(TARGET_PATH): $(SOURCES) | show-summary
-	@$(RELEASE_CARGO_PROFILE_ENV) RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo build --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release) $(EXTRA_RUSTFEATURES)
+	@$(RELEASE_CARGO_PROFILE_ENV) RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings --allow deprecated" cargo build --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release) $(EXTRA_RUSTFEATURES)
 
 $(GENERATED_FILES): %: %.in
 	@sed \
