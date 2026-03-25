@@ -31,6 +31,9 @@ RUNTIME=${RUNTIME:-containerd-shim-kata-${KATA_HYPERVISOR}-v2}
 FACTORY_TEST=${FACTORY_TEST:-""}
 ARCH=$(uname -m)
 SANDBOXER=${SANDBOXER:-"podsandbox"}
+# This is to avoid the following error in msft-preview:
+# pod memory limit too low: minimum 128MiB, got 0Mib
+POD_MEMORY_LIMIT_IN_BYTES=${POD_MEMORY_LIMIT_IN_BYTES:-268435456} # 256Mi
 
 containerd_runtime_type="io.containerd.kata-${KATA_HYPERVISOR}.v2"
 
@@ -206,6 +209,9 @@ metadata:
   name: busybox-sandbox1
   namespace: default
   uid: busybox-sandbox1-uid
+linux:
+  resources:
+    memory_limit_in_bytes: ${POD_MEMORY_LIMIT_IN_BYTES}
 EOF
 
 	#TestContainerSwap has created its own container_yaml.
@@ -525,6 +531,9 @@ metadata:
   name: busybox-device-cgroup-sandbox
   namespace: default
   uid: busybox-device-cgroup-sandbox-uid
+linux:
+  resources:
+    memory_limit_in_bytes: ${POD_MEMORY_LIMIT_IN_BYTES}
 EOF
 
     cat > "${container1_yaml}" <<EOF
