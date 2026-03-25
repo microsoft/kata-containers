@@ -45,6 +45,7 @@ protocols = { workspace = true, features = ["async"] }
 persist = { workspace = true }
 ch-config = { workspace = true, optional = true }
 tests_utils = { workspace = true }
+tracing-subscriber = { version = "0.3", optional = true }
 
 # Dependencies that only exist to support hypervisors which upstream only
 # build on x86_64 and aarch64 (dragonball, firecracker). Keeping them in a
@@ -132,6 +133,7 @@ openvmm = [
     "dep:ovmm_vmm_core_defs",
     "dep:ovmm_guid",
     "dep:ovmm_memory_range",
+    "dep:tracing-subscriber",
 ]
 
 [dev-dependencies]
