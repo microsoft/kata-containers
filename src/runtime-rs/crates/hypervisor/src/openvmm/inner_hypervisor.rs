@@ -87,12 +87,14 @@ impl OpenVmmInner {
             .context("memory size overflow")?;
 
         // PCIe root complex with one port for virtio-blk rootfs
+        // PCIe root complex: ECAM range must match bus count.
+        // 128MB ECAM = 128 buses (0..127), each bus has 256 devfns * 4KB config = 1MB.
         let pcie_root_complexes = vec![PcieRootComplexConfig {
             index: 0,
             name: "rc0".to_string(),
             segment: 0,
             start_bus: 0,
-            end_bus: 255,
+            end_bus: 127,
             ecam_range: ovmm_memory_range::MemoryRange::new(0xe800_0000..0xf000_0000),
             low_mmio: ovmm_memory_range::MemoryRange::new(0xc000_0000..0xd400_0000),
             high_mmio: ovmm_memory_range::MemoryRange::new(0x0020_3d30_0000..0x200f_3d30_0000),
