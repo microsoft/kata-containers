@@ -498,7 +498,7 @@ ifeq ($(USE_OPENVMM),true)
     VMROOTFSDRIVER_OPENVMM := virtio-blk-pci
     DEFBLOCKSTORAGEDRIVER_OPENVMM := virtio-blk-pci
     DEFNETWORKMODEL_OPENVMM := tcfilter
-    KERNELPARAMS_OPENVMM = console=ttyS0 cgroup_no_v1=all systemd.unified_cgroup_hierarchy=1
+    KERNELPARAMS_OPENVMM = console=ttyS0 cgroup_no_v1=all systemd.unified_cgroup_hierarchy=1 initcall_blacklist=virtio_vsock_init
     KERNELTYPE_OPENVMM = uncompressed
     KERNEL_NAME_OPENVMM = $(call MAKE_KERNEL_NAME,$(KERNELTYPE_OPENVMM))
     KERNELPATH_OPENVMM = $(KERNELDIR)/$(KERNEL_NAME_OPENVMM)
