@@ -653,8 +653,15 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.vmconfig.Console.SetIommu(clh.config.IOMMU)
 
 	cpu_topology := chclient.NewCpuTopology()
-	cpu_topology.ThreadsPerCore = func(i int32) *int32 { return &i }(1)
-	cpu_topology.CoresPerDie = func(i int32) *int32 { return &i }(int32(clh.config.DefaultMaxVCPUs))
+	maxVCPUs := clh.config.DefaultMaxVCPUs
+	if runtime.GOARCH == "amd64" && maxVCPUs >= 2 && maxVCPUs%2 == 0 {
+		// Simulate hyperthreading on x86: 2 threads per core
+		cpu_topology.ThreadsPerCore = func(i int32) *int32 { return &i }(2)
+		cpu_topology.CoresPerDie = func(i int32) *int32 { return &i }(int32(maxVCPUs / 2))
+	} else {
+		cpu_topology.ThreadsPerCore = func(i int32) *int32 { return &i }(1)
+		cpu_topology.CoresPerDie = func(i int32) *int32 { return &i }(int32(maxVCPUs))
+	}
 	cpu_topology.DiesPerPackage = func(i int32) *int32 { return &i }(1)
 	cpu_topology.Packages = func(i int32) *int32 { return &i }(1)
 	clh.vmconfig.Cpus.Topology = cpu_topology
