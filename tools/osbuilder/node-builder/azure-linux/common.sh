@@ -38,15 +38,23 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	SHIM_BINARIES_PATH="/usr/local/bin"
 	SHIM_BINARY_NAME="containerd-shim-kata-cc-v2"
 else
+
+	# Toggle the default shim implementation installed
+	if [ "${USE_RUNTIME_RS}" == "yes" ]; then
+		SHIM_CONFIG_FILE_NAME="${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}"
+		SHIM_DBG_CONFIG_FILE_NAME="${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}"
+	else # runtime-go
+		SHIM_CONFIG_FILE_NAME="${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}"
+		SHIM_DBG_CONFIG_FILE_NAME="${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO}"
+	fi
+
 	INSTALL_PATH_PREFIX="/usr"
 	UVM_TOOLS_PATH_OSB="/opt/kata-containers/uvm/tools/osbuilder"
 	UVM_TOOLS_PATH_SRC="/opt/kata-containers/uvm/src"
 	UVM_PATH_DEFAULT="${INSTALL_PATH_PREFIX}/share/kata-containers"
 	IMG_FILE_NAME="kata-containers.img"
 	SHIM_CONFIG_PATH="${INSTALL_PATH_PREFIX}/share/defaults/kata-containers"
-	SHIM_CONFIG_FILE_NAME="configuration-clh.toml"
 	SHIM_CONFIG_INST_FILE_NAME="configuration.toml"
-	SHIM_DBG_CONFIG_FILE_NAME="configuration-clh-debug.toml"
 	SHIM_DBG_CONFIG_INST_FILE_NAME="${SHIM_DBG_CONFIG_FILE_NAME}"
 	DEBUGGING_BINARIES_PATH="${INSTALL_PATH_PREFIX}/local/bin"
 	SHIM_BINARIES_PATH="${INSTALL_PATH_PREFIX}/local/bin"
