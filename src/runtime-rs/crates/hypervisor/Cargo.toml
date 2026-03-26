@@ -89,6 +89,7 @@ disk_backend_resources = { workspace = true, optional = true }
 ovmm_vmm_core_defs = { workspace = true, optional = true }
 ovmm_guid = { workspace = true, optional = true }
 ovmm_memory_range = { workspace = true, optional = true }
+ovmm_serial_socket = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -121,6 +122,7 @@ openvmm = [
     "dep:ovmm_vmm_core_defs",
     "dep:ovmm_guid",
     "dep:ovmm_memory_range",
+    "dep:ovmm_serial_socket",
     "dep:tracing-subscriber",
 ]
 

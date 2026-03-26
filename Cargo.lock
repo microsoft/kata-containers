@@ -2977,6 +2977,7 @@ dependencies = [
  "seccompiler",
  "serde",
  "serde_json",
+ "serial_socket",
  "serial_test 2.0.0",
  "shim-interface",
  "slog",
