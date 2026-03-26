@@ -13,6 +13,7 @@ use ovmm_mesh::rpc::RpcSend;
 use ovmm_mesh_worker::RegisteredWorkers;
 use ovmm_vmm_core_defs::HaltReason;
 use tokio::sync::mpsc;
+use vm_resource::IntoResource;
 
 // Force linker to include openvmm_resources which registers the VmWorker
 // via linkme::distributed_slice.
@@ -51,7 +52,16 @@ impl VmmInstance {
     /// If `hvsock_path` is Some, the hvsock listener will be bound inside
     /// the worker host thread (same pal_async context as the VmWorker) to
     /// avoid FD transfer issues with mesh channels across runtimes.
-    pub(crate) async fn launch(&mut self, mut config: Config, hvsock_path: Option<String>, log_dir: Option<String>) -> Result<()> {
+    ///
+    /// If `disk_path` is Some, the disk file will be opened inside the worker
+    /// thread and patched into the first PCIe device's virtio-blk resource.
+    pub(crate) async fn launch(
+        &mut self,
+        mut config: Config,
+        hvsock_path: Option<String>,
+        disk_path: Option<String>,
+        log_dir: Option<String>,
+    ) -> Result<()> {
         let (rpc_send, rpc_recv) = ovmm_mesh::channel();
         let (notify_send, notify_recv) = ovmm_mesh::channel();
 
@@ -98,6 +108,39 @@ impl VmmInstance {
                     }
                 }
 
+                // Open disk file inside this thread to avoid FD loss through
+                // mesh channel serialization. Replace the first PCIe device's
+                // virtio-blk resource with one backed by the freshly-opened file.
+                if let Some(ref path) = disk_path {
+                    match std::fs::OpenOptions::new().read(true).open(path) {
+                        Ok(file) => {
+                            let disk_resource =
+                                disk_backend_resources::FileDiskHandle(file).into_resource();
+                            let blk_handle = virtio_resources::blk::VirtioBlkHandle {
+                                disk: disk_resource,
+                                read_only: true,
+                            };
+                            config.pcie_devices.push(
+                                openvmm_defs::config::PcieDeviceConfig {
+                                    port_name: "rp0".to_string(),
+                                    resource: virtio_resources::VirtioPciDeviceHandle(
+                                        blk_handle.into_resource(),
+                                    )
+                                    .into_resource(),
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            let _ = result_tx.send(Err(anyhow::anyhow!(
+                                "failed to open disk at {}: {}",
+                                path,
+                                e
+                            )));
+                            return;
+                        }
+                    }
+                }
+
                 ovmm_pal_async::DefaultPool::run_with(|driver: ovmm_pal_async::DefaultDriver| async move {
                     use ovmm_pal_async::task::Spawn;
 
@@ -115,6 +158,7 @@ impl VmmInstance {
                                 saved_state: None,
                                 rpc: rpc_recv,
                                 notify: notify_send,
+                                shared_memory: None,
                             },
                         )
                         .await;
