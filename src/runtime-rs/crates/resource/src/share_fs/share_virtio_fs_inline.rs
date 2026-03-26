@@ -38,10 +38,10 @@ pub struct ShareVirtioFsInline {
 }
 
 impl ShareVirtioFsInline {
-    pub(crate) fn new(id: &str, _config: &SharedFsInfo) -> Result<Self> {
+    pub(crate) fn new(id: &str, uvm_id: &str, _config: &SharedFsInfo) -> Result<Self> {
         Ok(Self {
             config: ShareVirtioFsInlineConfig { id: id.to_string() },
-            share_fs_mount: Arc::new(VirtiofsShareMount::new(id)),
+            share_fs_mount: Arc::new(VirtiofsShareMount::new(id, uvm_id)),
             mounted_info_set: Arc::new(Mutex::new(HashMap::new())),
         })
     }

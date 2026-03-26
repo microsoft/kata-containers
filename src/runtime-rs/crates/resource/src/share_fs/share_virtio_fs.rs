@@ -131,6 +131,7 @@ pub async fn rafs_mount(
         prefetch_list_path,
     };
 
+    warn!(sl!(), "rafs_mount: ignoring uvm_id");
     let host_shared_path = utils::get_host_ro_shared_path(sid, "").display().to_string();
     let sharefs_config = ShareFsConfig {
         host_shared_path,

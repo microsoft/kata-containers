@@ -146,7 +146,7 @@ impl ResourceManagerInner {
         device_configs: Vec<ResourceConfig>,
         uvm_id: &str,
     ) -> Result<()> {
-        warn!(sl!(), "prepare_before_start_vm: uvm_id = {uvm_id}");
+        info!(sl!(), "prepare_before_start_vm: uvm_id = {uvm_id}");
 
         for dc in device_configs {
             match dc {

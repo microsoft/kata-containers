@@ -160,7 +160,7 @@ pub fn new(id: &str, uvm_id: &str, config: &SharedFsInfo) -> Result<Arc<dyn Shar
     let shared_fs = shared_fs.unwrap_or_default();
     match shared_fs.as_str() {
         INLINE_VIRTIO_FS => Ok(Arc::new(
-            ShareVirtioFsInline::new(id, config).context("new inline virtio fs")?,
+            ShareVirtioFsInline::new(id, uvm_id, config).context("new inline virtio fs")?,
         )),
         VIRTIO_FS => Ok(Arc::new(
             ShareVirtioFsStandalone::new(id, uvm_id, config).context("new standalone virtio fs")?,

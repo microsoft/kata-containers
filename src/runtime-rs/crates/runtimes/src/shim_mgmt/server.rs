@@ -28,16 +28,19 @@ pub struct MgmtServer {
 
     /// The sandbox instance
     pub sandbox: Arc<dyn Sandbox>,
+
+    pub uvm_id: String,
 }
 
 impl MgmtServer {
     /// construct a new management server
     pub fn new(sid: &str, sandbox: Arc<dyn Sandbox>) -> Result<Self> {
+        let uvm_id = sandbox.get_uvm_id();
+
         Ok(Self {
-            // DMFIX: uvm_id
-            // s_addr: mgmt_socket_addr(sid, uvm_id).context(ERR_NO_SHIM_SERVER)?,
-            s_addr: mgmt_socket_addr(sid, "123456789").context(ERR_NO_SHIM_SERVER)?,
+            s_addr: mgmt_socket_addr(sid, &uvm_id).context(ERR_NO_SHIM_SERVER)?,
             sandbox,
+            uvm_id,
         })
     }
 

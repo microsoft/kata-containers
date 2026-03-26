@@ -1022,6 +1022,10 @@ impl Sandbox for VirtSandbox {
     async fn get_sandbox_id(&self) -> String {
         self.get_sid()
     }
+
+    fn get_uvm_id(&self) -> String {
+        self.uvm_id.clone()
+    }
 }
 
 #[async_trait]

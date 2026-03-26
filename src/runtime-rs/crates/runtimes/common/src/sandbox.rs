@@ -59,4 +59,5 @@ pub trait Sandbox: Send + Sync {
     async fn set_policy(&self, policy: &str) -> Result<()>;
 
     async fn get_sandbox_id(&self) -> String;
+    fn get_uvm_id(&self) -> String;
 }

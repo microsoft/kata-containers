@@ -43,6 +43,8 @@ impl BlockRootfs {
         dev_id: u64,
         rootfs: &Mount,
     ) -> Result<Self> {
+        warn!(sl!(), "BlockRootfs: ignoring uvm_id");
+
         let container_path = do_get_guest_path(ROOTFS, cid, false, false);
         let host_path = do_get_host_path(ROOTFS, sid, "", cid, false, false);
         // Create rootfs dir on host to make sure mount point in guest exists, as readonly dir is

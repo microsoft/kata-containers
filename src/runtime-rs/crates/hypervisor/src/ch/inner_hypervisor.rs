@@ -1,4 +1,3 @@
-
 // Copyright (c) 2019-2022 Alibaba Cloud
 // Copyright (c) 2022 Intel Corporation
 //
