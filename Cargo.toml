@@ -152,6 +152,7 @@ disk_backend_resources = { path = "../openvmm-repo/vm/devices/storage/disk_backe
 ovmm_vmm_core_defs = { path = "../openvmm-repo/vmm_core/vmm_core_defs", package = "vmm_core_defs" }
 ovmm_guid = { path = "../openvmm-repo/support/guid", package = "guid" }
 ovmm_memory_range = { path = "../openvmm-repo/vm/vmcore/memory_range", package = "memory_range" }
+ovmm_serial_socket = { path = "../openvmm-repo/vm/devices/serial/serial_socket", package = "serial_socket" }
 
 # Local dependencies from `src/lib`
 kata-sys-util = { path = "src/libs/kata-sys-util" }
