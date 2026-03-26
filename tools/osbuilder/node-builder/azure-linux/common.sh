@@ -12,6 +12,13 @@ OS_VERSION=$(sort -r /etc/*-release | gawk 'match($0, /^(VERSION_ID=(.*))$/, a) 
 
 ([[ "${OS_VERSION}" == "2.0" ]] || [[ "${OS_VERSION}" == "3.0" ]]) || die "OS_VERSION: value '${OS_VERSION}' must equal 3.0 (default) or 2.0"
 
+SHIM_CONFIG_FILE_NAME_RUNTIME_GO="configuration-clh.toml"
+SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO="configuration-clh-debug.toml"
+CONFIG_DIR_RUNTIME_GO="src/runtime/config"
+SHIM_CONFIG_FILE_NAME_RUNTIME_RS="configuration-cloud-hypervisor.toml"
+SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS="configuration-cloud-hypervisor-debug.toml"
+CONFIG_DIR_RUNTIME_RS="src/runtime-rs/config"
+
 if [ "${CONF_PODS}" == "yes" ]; then
 	INSTALL_PATH_PREFIX="/opt/confidential-containers"
 	UVM_TOOLS_PATH_OSB="${INSTALL_PATH_PREFIX}/uvm/tools/osbuilder"
