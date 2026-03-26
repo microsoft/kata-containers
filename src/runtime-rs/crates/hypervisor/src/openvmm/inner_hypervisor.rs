@@ -56,6 +56,11 @@ impl OpenVmmInner {
         if !cmdline.contains("rootfstype=") && !self.config.boot_info.rootfs_type.is_empty() {
             cmdline.push_str(&format!(" rootfstype={}", self.config.boot_info.rootfs_type));
         }
+        // Mount rootfs read-only, matching CLH behavior exactly:
+        // rootflags=data=ordered,errors=remount-ro ro
+        if !cmdline.contains(" ro ") && !cmdline.ends_with(" ro") {
+            cmdline.push_str(" rootflags=data=ordered,errors=remount-ro ro");
+        }
 
         info!(sl!(), "openvmm: kernel={}", self.config.boot_info.kernel);
         info!(sl!(), "openvmm: image={}", self.config.boot_info.image);
@@ -71,16 +76,19 @@ impl OpenVmmInner {
             cmdline,
             custom_dsdt: None,
             enable_serial: true,
+            boot_mode: openvmm_defs::config::LinuxDirectBootMode::Acpi,
         };
 
-        // Bind serial COM1 to a Unix socket for guest console capture.
-        // Connect to <run_dir>/console.sock to see guest kernel logs.
-        let console_sock_path = format!("{}/console.sock", self.run_dir);
-        info!(sl!(), "openvmm: serial console socket: {}", console_sock_path);
-        let _ = std::fs::remove_file(&console_sock_path);
-        let serial_listener = ovmm_unix_socket::UnixListener::bind(&console_sock_path)
-            .with_context(|| format!("failed to bind serial socket: {}", console_sock_path))?;
-        let serial_resource = ovmm_serial_socket::net::OpenSocketSerialConfig::from(serial_listener)
+        // Set up serial console (COM1) piped to stderr/journalctl.
+        // Create a Unix socket pair — one end goes to the VM's serial device,
+        // the other end is read in a thread that logs to slog (→ journalctl).
+        let (serial_vm_std, serial_host) = std::os::unix::net::UnixStream::pair()
+            .context("failed to create serial socket pair")?;
+        // Convert std UnixStream to ovmm_unix_socket::UnixStream via OwnedFd
+        let serial_vm = ovmm_unix_socket::UnixStream::from(
+            std::os::fd::OwnedFd::from(serial_vm_std)
+        );
+        let serial_resource = ovmm_serial_socket::net::OpenSocketSerialConfig::from(serial_vm)
             .into_resource();
         let serial_ports: [Option<vm_resource::Resource<vm_resource::kind::SerialBackendHandle>>; 4] = [
             Some(serial_resource),
@@ -88,6 +96,23 @@ impl OpenVmmInner {
             None,
             None,
         ];
+
+        // Spawn a thread to read guest serial output and log it.
+        std::thread::Builder::new()
+            .name("openvmm-serial-reader".to_string())
+            .spawn(move || {
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(serial_host);
+                for line in reader.lines() {
+                    match line {
+                        Ok(line) => {
+                            info!(sl!(), "openvmm-guest: {}", line);
+                        }
+                        Err(_) => break,
+                    }
+                }
+            })
+            .context("failed to spawn serial reader thread")?;
 
         // Build chipset via VmManifestBuilder
         let chipset = vm_manifest_builder::VmManifestBuilder::new(
@@ -123,35 +148,25 @@ impl OpenVmmInner {
             ],
         }];
 
-        // Add rootfs disk as virtio-blk via PCIe
+        // Add rootfs disk as virtio-blk via PCIe.
+        // The actual file will be opened inside the VmWorker thread to avoid
+        // FD loss through mesh channel serialization. We pass just the path
+        // to vmm_instance::launch() which opens the file and creates the
+        // PcieDeviceConfig in the worker thread.
         let mut pcie_devices = Vec::new();
-        if !self.config.boot_info.image.is_empty() {
-            let disk_path = &self.config.boot_info.image;
-            info!(sl!(), "openvmm: adding rootfs disk: {}", disk_path);
-
-            let disk_file = File::open(disk_path)
-                .with_context(|| format!("failed to open disk image: {}", disk_path))?;
-
-            let disk_resource = disk_backend_resources::FileDiskHandle(disk_file).into_resource();
-
-            let blk_handle = virtio_resources::blk::VirtioBlkHandle {
-                disk: disk_resource,
-                read_only: true,
-            };
-
-            pcie_devices.push(PcieDeviceConfig {
-                port_name: "rp0".to_string(),
-                resource: virtio_resources::VirtioPciDeviceHandle(
-                    blk_handle.into_resource(),
-                )
-                .into_resource(),
-            });
-        }
+        let rootfs_disk_path = if !self.config.boot_info.image.is_empty() {
+            let disk_path = self.config.boot_info.image.clone();
+            info!(sl!(), "openvmm: rootfs disk (opened in worker thread): {}", disk_path);
+            Some(disk_path)
+        } else {
+            None
+        };
 
         // Process pending devices into the VM config
         let pending = std::mem::take(&mut self.pending_devices);
-        let mut vmbus_devices: Vec<(DeviceVtl, vm_resource::Resource<VmbusDeviceHandleKind>)> = Vec::new();
+        let vmbus_devices: Vec<(DeviceVtl, vm_resource::Resource<VmbusDeviceHandleKind>)> = Vec::new();
         let mut need_extra_pcie_port = false;
+        let mut need_net_pcie_port = false;
 
         for dev in &pending {
             match dev {
@@ -164,7 +179,7 @@ impl OpenVmmInner {
                     // vsock is configured via vmbus_config.vsock_path below
                 }
                 crate::DeviceType::Network(net_dev) => {
-                    info!(sl!(), "openvmm: wiring Network device, tap={}", net_dev.config.host_dev_name);
+                    info!(sl!(), "openvmm: wiring Network device as virtio-net-pci, tap={}", net_dev.config.host_dev_name);
                     let endpoint = net_backend_resources::tap::TapHandle {
                         name: net_dev.config.host_dev_name.clone(),
                     }
@@ -173,15 +188,23 @@ impl OpenVmmInner {
                         .map(|m| format!("{:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
                             m.0[0], m.0[1], m.0[2], m.0[3], m.0[4], m.0[5]))
                         .unwrap_or_default();
-                    let nic = netvsp_resources::NetvspHandle {
-                        instance_id: ovmm_guid::Guid::new_random(),
+                    // Use virtio-net via PCIe (kernel has CONFIG_VIRTIO_NET=y
+                    // but CONFIG_HYPERV_NET is not set).
+                    let net_handle = virtio_resources::net::VirtioNetHandle {
+                        max_queues: None,
                         mac_address: mac.parse().unwrap_or_else(|_| {
                             net_backend_resources::mac_address::MacAddress::from([0u8; 6])
                         }),
                         endpoint,
-                        max_queues: None,
                     };
-                    vmbus_devices.push((DeviceVtl::Vtl0, nic.into_resource()));
+                    need_net_pcie_port = true;
+                    pcie_devices.push(PcieDeviceConfig {
+                        port_name: "rp2".to_string(),
+                        resource: virtio_resources::VirtioPciDeviceHandle(
+                            net_handle.into_resource(),
+                        )
+                        .into_resource(),
+                    });
                 }
                 crate::DeviceType::ShareFs(fs_dev) => {
                     info!(sl!(), "openvmm: wiring ShareFs device, tag={}, path={}",
@@ -218,6 +241,14 @@ impl OpenVmmInner {
         if need_extra_pcie_port {
             pcie_root_complexes[0].ports.push(PcieRootPortConfig {
                 name: "rp1".to_string(),
+                hotplug: false,
+            });
+        }
+
+        // Add extra PCIe root port for virtio-net if needed
+        if need_net_pcie_port {
+            pcie_root_complexes[0].ports.push(PcieRootPortConfig {
+                name: "rp2".to_string(),
                 hotplug: false,
             });
         }
@@ -291,7 +322,7 @@ impl OpenVmmInner {
         // Launch the VM worker
         info!(sl!(), "openvmm: launching VM worker");
         self.vmm_instance
-            .launch(vm_config, Some(hvsock_path), Some(self.run_dir.clone()))
+            .launch(vm_config, Some(hvsock_path), rootfs_disk_path, Some(self.run_dir.clone()))
             .await
             .context("failed to launch VM worker")?;
 
