@@ -26,6 +26,7 @@ name = "acpi"
 version = "0.0.0"
 dependencies = [
  "acpi_spec",
+ "guid",
  "memory_range",
  "x86defs",
  "zerocopy",
@@ -1456,6 +1457,18 @@ name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
+name = "crypto"
+version = "0.0.0"
+dependencies = [
+ "openssl",
+ "thiserror 2.0.18",
+ "wchar",
+ "windows 0.62.2",
+ "windows-result 0.4.1",
+ "zerocopy",
+]
 
 [[package]]
 name = "crypto-common"
@@ -5052,7 +5065,6 @@ name = "netvsp"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "arrayvec",
  "async-trait",
  "bitfield-struct 0.11.0",
  "futures 0.3.32",
@@ -5965,9 +5977,12 @@ dependencies = [
  "build_rs_guest_arch",
  "cache_topology",
  "cfg-if 1.0.4",
+ "chipset_device",
  "chipset_device_resources",
  "chipset_device_worker",
  "chipset_legacy",
+ "closeable_mutex",
+ "crc32fast",
  "debug_ptr",
  "disk_backend",
  "fdt",
@@ -6005,6 +6020,7 @@ dependencies = [
  "pal_async",
  "pci_bus",
  "pci_core",
+ "pci_resources",
  "pcie",
  "range_map_vec",
  "scsi_core",
@@ -6016,6 +6032,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "uefi_nvram_storage",
+ "uefi_specs",
  "virt",
  "virt_mshv",
  "virtio",
@@ -6074,9 +6091,11 @@ dependencies = [
  "disk_backend_resources",
  "disk_vhd1",
  "disk_vhdmp",
+ "fs-err",
  "get_resources",
  "mesh",
  "openvmm_defs",
+ "sparse_mmap",
  "tracing",
  "vm_resource",
 ]
@@ -10464,14 +10483,12 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bitfield-struct 0.11.0",
  "chipset_device",
  "device_emulators",
  "futures 0.3.32",
  "guestmem",
  "inspect",
  "mesh",
- "open_enum",
  "pal_async",
  "pal_event",
  "parking_lot",
@@ -10482,6 +10499,7 @@ dependencies = [
  "tracelimit",
  "tracing",
  "virtio_resources",
+ "virtio_spec",
  "vm_resource",
  "vmcore",
  "zerocopy",
@@ -10641,6 +10659,16 @@ dependencies = [
  "virtio_resources",
  "vm_resource",
  "vmcore",
+]
+
+[[package]]
+name = "virtio_spec"
+version = "0.0.0"
+dependencies = [
+ "bitfield-struct 0.11.0",
+ "inspect",
+ "open_enum",
+ "zerocopy",
 ]
 
 [[package]]
@@ -10981,8 +11009,8 @@ name = "vmgs"
 version = "0.0.0"
 dependencies = [
  "async-trait",
- "cfg-if 1.0.4",
  "crc32fast",
+ "crypto",
  "cvm_tracing",
  "disk_backend",
  "getrandom 0.3.4",
@@ -10990,14 +11018,11 @@ dependencies = [
  "inspect",
  "inspect_counters",
  "mesh_protobuf",
- "openssl",
  "scsi_buffers",
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
  "vmgs_format",
- "windows 0.62.2",
- "windows-result 0.4.1",
  "zerocopy",
 ]
 
