@@ -4146,6 +4146,7 @@ dependencies = [
  "seccompiler",
  "serde",
  "serde_json",
+ "serial_socket",
  "serial_test 2.0.0",
  "slog",
  "slog-scope",

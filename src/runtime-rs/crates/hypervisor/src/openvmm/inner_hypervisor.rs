@@ -73,11 +73,28 @@ impl OpenVmmInner {
             enable_serial: true,
         };
 
+        // Bind serial COM1 to a Unix socket for guest console capture.
+        // Connect to <run_dir>/console.sock to see guest kernel logs.
+        let console_sock_path = format!("{}/console.sock", self.run_dir);
+        info!(sl!(), "openvmm: serial console socket: {}", console_sock_path);
+        let _ = std::fs::remove_file(&console_sock_path);
+        let serial_listener = ovmm_unix_socket::UnixListener::bind(&console_sock_path)
+            .with_context(|| format!("failed to bind serial socket: {}", console_sock_path))?;
+        let serial_resource = ovmm_serial_socket::net::OpenSocketSerialConfig::from(serial_listener)
+            .into_resource();
+        let serial_ports: [Option<vm_resource::Resource<vm_resource::kind::SerialBackendHandle>>; 4] = [
+            Some(serial_resource),
+            None,
+            None,
+            None,
+        ];
+
         // Build chipset via VmManifestBuilder
         let chipset = vm_manifest_builder::VmManifestBuilder::new(
             vm_manifest_builder::BaseChipsetType::HyperVGen2LinuxDirect,
             vm_manifest_builder::MachineArch::X86_64,
         )
+        .with_serial(serial_ports)
         .build()
         .context("failed to build VM chipset manifest")?;
 
