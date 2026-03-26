@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +41,7 @@ import (
 	hv "github.com/kata-containers/kata-containers/src/runtime/pkg/hypervisors"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/katautils/katatrace"
 	pkgUtils "github.com/kata-containers/kata-containers/src/runtime/pkg/utils"
+	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/cpuset"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/rootless"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
@@ -649,9 +651,33 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	cpu_topology := chclient.NewCpuTopology()
 	maxVCPUs := clh.config.DefaultMaxVCPUs
 	if runtime.GOARCH == "amd64" && maxVCPUs >= 2 && maxVCPUs%2 == 0 {
-		// Simulate hyperthreading on x86: 2 threads per core
+		// Configure hyperthreading on x86: 2 threads per core
 		cpu_topology.ThreadsPerCore = func(i int32) *int32 { return &i }(2)
 		cpu_topology.CoresPerDie = func(i int32) *int32 { return &i }(int32(maxVCPUs / 2))
+
+		// Pin vCPU pairs to real host sibling hyperthreads so the guest
+		// topology matches the physical scheduling. Uses a lock file and
+		// reservation to handle concurrent sandbox starts safely.
+		if siblingPairs, err := getHostSiblingPairs(); err != nil {
+			clh.Logger().WithError(err).Warn("failed to read host CPU siblings, skipping HT affinity")
+		} else if len(siblingPairs) > 0 {
+			needed := int(maxVCPUs / 2)
+			selectedPairs, err := reserveAffinityPairs(siblingPairs, needed, clh.id)
+			if err != nil {
+				clh.Logger().WithError(err).Warn("failed to reserve sibling pairs, skipping HT affinity")
+			} else {
+				affinity := make([]chclient.CpuAffinity, maxVCPUs)
+				for i := 0; i < needed; i++ {
+					pair := selectedPairs[i]
+					affinity[2*i] = *chclient.NewCpuAffinity(int32(2*i), []int32{int32(pair[0])})
+					affinity[2*i+1] = *chclient.NewCpuAffinity(int32(2*i+1), []int32{int32(pair[1])})
+				}
+				clh.vmconfig.Cpus.SetAffinity(affinity)
+				clh.Logger().Infof("Set HT affinity: %d vCPU pairs reserved on least-loaded host sibling pairs", needed)
+			}
+		} else {
+			clh.Logger().Warn("no host sibling pairs found, skipping HT affinity")
+		}
 	} else {
 		cpu_topology.ThreadsPerCore = func(i int32) *int32 { return &i }(1)
 		cpu_topology.CoresPerDie = func(i int32) *int32 { return &i }(int32(maxVCPUs))
@@ -1483,6 +1509,192 @@ const (
 // The kernel command line
 //****************************************
 
+// getHostSiblingPairs returns pairs of host logical CPU IDs that are
+// hyperthreading siblings (share the same physical core). Each pair
+// is returned as [2]int sorted ascending. The pairs themselves are
+// sorted by the first element.
+func getHostSiblingPairs() ([][2]int, error) {
+	const cpuDir = "/sys/devices/system/cpu"
+
+	entries, err := os.ReadDir(cpuDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", cpuDir, err)
+	}
+
+	seen := make(map[[2]int]bool)
+	cpuPattern := regexp.MustCompile(`^cpu(\d+)$`)
+
+	for _, entry := range entries {
+		m := cpuPattern.FindStringSubmatch(entry.Name())
+		if m == nil {
+			continue
+		}
+
+		siblingFile := filepath.Join(cpuDir, entry.Name(), "topology", "thread_siblings_list")
+		data, err := os.ReadFile(siblingFile)
+		if err != nil {
+			continue // cpu may be offline or topology not available
+		}
+
+		siblings, err := cpuset.Parse(strings.TrimSpace(string(data)))
+		if err != nil {
+			continue
+		}
+
+		slice := siblings.ToSlice()
+		if len(slice) != 2 {
+			continue // not a standard HT pair
+		}
+
+		pair := [2]int{slice[0], slice[1]}
+		if pair[0] > pair[1] {
+			pair[0], pair[1] = pair[1], pair[0]
+		}
+		seen[pair] = true
+	}
+
+	pairs := make([][2]int, 0, len(seen))
+	for pair := range seen {
+		pairs = append(pairs, pair)
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i][0] < pairs[j][0]
+	})
+
+	return pairs, nil
+}
+
+// leastLoadedSiblingPairs returns `count` sibling pairs sorted by how many
+// existing cloud-hypervisor vcpu threads are pinned to them (ascending).
+// This allows new sandboxes to pick the least contended host cores.
+// If count > len(pairs), pairs are repeated round-robin from least loaded.
+func leastLoadedSiblingPairs(pairs [][2]int, count int, reservedLoad map[[2]int]int) [][2]int {
+	// Sort pairs by reserved load (ascending), breaking ties by CPU ID.
+	// The reservation file is the source of truth for load
+	sorted := make([][2]int, len(pairs))
+	copy(sorted, pairs)
+	sort.Slice(sorted, func(i, j int) bool {
+		li, lj := reservedLoad[sorted[i]], reservedLoad[sorted[j]]
+		if li != lj {
+			return li < lj
+		}
+		return sorted[i][0] < sorted[j][0]
+	})
+
+	result := make([][2]int, count)
+	for i := 0; i < count; i++ {
+		result[i] = sorted[i%len(sorted)]
+	}
+	return result
+}
+
+const (
+	clhAffinityLockFile         = "/run/vc/clh-sibling-affinity.lock"
+	clhAffinityReservationsFile = "/run/vc/clh-sibling-affinity.json"
+)
+
+// affinityReservation represents a sandbox's claim on sibling pairs,
+// persisted so concurrent runtimes can see each other's pending assignments.
+type affinityReservation struct {
+	SandboxID string   `json:"sandbox_id"`
+	PID       int      `json:"pid"`
+	Pairs     [][2]int `json:"pairs"`
+}
+
+// reserveAffinityPairs selects the least-loaded sibling pairs under a file lock,
+// writes a reservation so concurrent runtimes see the claim, and returns the
+// selected pairs.
+func reserveAffinityPairs(siblingPairs [][2]int, needed int, sandboxID string) ([][2]int, error) {
+	// Ensure the directory exists
+	if err := os.MkdirAll(filepath.Dir(clhAffinityLockFile), 0o750); err != nil {
+		return nil, fmt.Errorf("creating affinity lock dir: %w", err)
+	}
+
+	lockFile, err := os.OpenFile(clhAffinityLockFile, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("opening affinity lock: %w", err)
+	}
+	defer lockFile.Close()
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return nil, fmt.Errorf("acquiring affinity lock: %w", err)
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+
+	// Read existing reservations and prune stale ones
+	reservations := readAffinityReservations()
+	live := make([]affinityReservation, 0, len(reservations))
+	for _, r := range reservations {
+		if err := syscall.Kill(r.PID, 0); err == nil {
+			live = append(live, r)
+		}
+	}
+
+	// Count load from live reservations
+	reservedLoad := make(map[[2]int]int)
+	for _, r := range live {
+		for _, p := range r.Pairs {
+			reservedLoad[p] += 2 // each pair claim represents 2 vcpu threads
+		}
+	}
+
+	// Pick pairs (also counts from /proc inside)
+	selected := leastLoadedSiblingPairs(siblingPairs, needed, reservedLoad)
+
+	// Write our reservation
+	live = append(live, affinityReservation{
+		SandboxID: sandboxID,
+		PID:       os.Getpid(),
+		Pairs:     selected,
+	})
+	writeAffinityReservations(live)
+
+	return selected, nil
+}
+
+// releaseAffinityReservation removes a sandbox's reservation from the file.
+func releaseAffinityReservation(sandboxID string) {
+	lockFile, err := os.OpenFile(clhAffinityLockFile, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return
+	}
+	defer lockFile.Close()
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+
+	reservations := readAffinityReservations()
+	filtered := make([]affinityReservation, 0, len(reservations))
+	for _, r := range reservations {
+		if r.SandboxID != sandboxID {
+			filtered = append(filtered, r)
+		}
+	}
+	writeAffinityReservations(filtered)
+}
+
+func readAffinityReservations() []affinityReservation {
+	data, err := os.ReadFile(clhAffinityReservationsFile)
+	if err != nil {
+		return nil
+	}
+	var reservations []affinityReservation
+	if err := json.Unmarshal(data, &reservations); err != nil {
+		return nil
+	}
+	return reservations
+}
+
+func writeAffinityReservations(reservations []affinityReservation) {
+	data, err := json.Marshal(reservations)
+	if err != nil {
+		return
+	}
+	os.WriteFile(clhAffinityReservationsFile, data, 0o600)
+}
+
 func kernelParamsToString(params []Param) string {
 
 	var paramBuilder strings.Builder
@@ -1735,6 +1947,9 @@ func (clh *cloudHypervisor) cleanupVM(force bool) error {
 	if clh.id == "" {
 		return errors.New("Hypervisor ID is empty")
 	}
+
+	// Release our sibling-pair affinity reservation
+	releaseAffinityReservation(clh.id)
 
 	clh.Logger().Debug("removing vm sockets")
 
