@@ -143,6 +143,13 @@ impl InitialSizeManager {
         if self.resource.vcpu > 0.0 {
             info!(sl!(), "resource with vcpu {}", self.resource.vcpu);
         }
+
+        if config.runtime.static_sandbox_resource_mgmt {
+            if self.resource.mem_mb == 0 {
+                self.resource.mem_mb = config.runtime.static_sandbox_default_workload_mem;
+            }
+        }
+
         self.resource.orig_toml_default_mem = hv.memory_info.default_memory;
         if self.resource.mem_mb > 0 {
             // since the memory overhead introduced by kata-agent and system components
