@@ -148,6 +148,10 @@ impl InitialSizeManager {
             if self.resource.mem_mb == 0 {
                 self.resource.mem_mb = config.runtime.static_sandbox_default_workload_mem;
             }
+
+            if self.resource.vcpu == 0.0 {
+                self.resource.vcpu = config.runtime.static_sandbox_default_workload_vcpus;
+            }
         }
 
         self.resource.orig_toml_default_mem = hv.memory_info.default_memory;
@@ -158,6 +162,10 @@ impl InitialSizeManager {
             // (if we override the default_memory here, and user apllications still
             // use memory as they orignally expected, it would be easy to OOM.)
             hv.memory_info.default_memory += self.resource.mem_mb;
+        }
+
+        if self.resource.vcpu > 0.0 {
+            hv.cpu_info.default_vcpus += self.resource.vcpu;
         }
         Ok(())
     }

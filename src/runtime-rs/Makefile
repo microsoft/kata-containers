@@ -159,7 +159,7 @@ FIRMWARE_SNP_PATH := $(PREFIXDEPS)/share/ovmf/AMDSEV.fd
 FIRMWARE_VOLUME_SNP_PATH :=
 
 ##VAR DEFVCPUS=<number> Default number of vCPUs
-DEFVCPUS := 1
+DEFVCPUS ?= 1
 ##VAR DEFMAXVCPUS=<number> Default maximum number of vCPUs
 DEFMAXVCPUS := 0
 ##VAR DEFMEMSZ=<number> Default memory size in MiB
@@ -214,8 +214,9 @@ DEFVFIOMODE := guest-kernel
 DEFBINDMOUNTS := []
 DEFDANCONF := /run/kata-containers/dans
 DEFFORCEGUESTPULL := false
-# Default memory for workloads within the sandbox when no workload memory is requested.
+# Default memory and vcpus for workloads within the sandbox when no workload values are requested.
 DEFSTATICSANDBOXWORKLOADMEM ?= 2048
+DEFSTATICSANDBOXWORKLOADVCPUS ?= 1
 QEMUTDXQUOTEGENERATIONSERVICESOCKETPORT := 4050
 
 # Create Container Timeout in seconds
@@ -625,6 +626,7 @@ USER_VARS += KATA_INSTALL_CFG_PERMS
 USER_VARS += DEFDANCONF
 USER_VARS += DEFFORCEGUESTPULL
 USER_VARS += DEFSTATICSANDBOXWORKLOADMEM
+USER_VARS += DEFSTATICSANDBOXWORKLOADVCPUS
 USER_VARS += QEMUTDXQUOTEGENERATIONSERVICESOCKETPORT
 USER_VARS += DEFCREATECONTAINERTIMEOUT
 USER_VARS += DEFCREATECONTAINERTIMEOUT_COCO
