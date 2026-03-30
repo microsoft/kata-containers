@@ -167,6 +167,17 @@ impl InitialSizeManager {
             return Ok(());
         }
 
+        // When the workload does not specify limits, fall back to the configured
+        // static workload defaults. Both keys default to 0, in which case the
+        // upstream behavior (keep the configured TOML defaults) is preserved.
+        if self.resource.mem_mb == 0 {
+            self.resource.mem_mb = config.runtime.static_sandbox_default_workload_mem;
+        }
+
+        if self.resource.vcpu == 0.0 {
+            self.resource.vcpu = config.runtime.static_sandbox_default_workload_vcpus;
+        }
+
         if self.resource.vcpu > 0.0 || self.resource.mem_mb > 0 {
             if self.resource.vcpu > 0.0 {
                 info!(sl!(), "resource with vcpu {}", self.resource.vcpu);
@@ -646,5 +657,29 @@ mod tests {
 
         assert_eq!(hv.cpu_info.default_vcpus, expected_default_vcpus);
         assert_eq!(hv.memory_info.default_memory, expected_default_memory);
+    }
+
+    #[test]
+    fn test_setup_config_static_uses_default_workload_resources_when_unset() {
+        let mut config = make_config(2.0, 0.5, 8, 512, 128, 4096, true);
+        config.runtime.static_sandbox_default_workload_vcpus = 1.5;
+        config.runtime.static_sandbox_default_workload_mem = 512;
+
+        let mut mgr = InitialSizeManager {
+            resource: InitialSize {
+                vcpu: 0.0,
+                mem_mb: 0,
+                orig_toml_default_mem: 0,
+            },
+        };
+
+        mgr.setup_config(&mut config).unwrap();
+
+        let hv = config.hypervisor.get("qemu").unwrap();
+        // overhead_vcpus (0.5) + static workload default vcpus (1.5)
+        assert_eq!(hv.cpu_info.default_vcpus, 2.0);
+        assert_eq!(hv.cpu_info.default_maxvcpus, 2);
+        // overhead_memory (128) + static workload default mem (512)
+        assert_eq!(hv.memory_info.default_memory, 640);
     }
 }
