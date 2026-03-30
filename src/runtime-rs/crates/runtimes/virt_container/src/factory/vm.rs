@@ -264,6 +264,7 @@ impl TemplateVm {
 
         let toml_config_arc = Arc::new(toml_config);
 
+        warn!(sl!(), "new_vm: ignoring uvm_id");
         let resource_manager = Arc::new(
             ResourceManager::new(
                 &sid,
@@ -271,6 +272,7 @@ impl TemplateVm {
                 hypervisor.clone(),
                 toml_config_arc,
                 initial_size_manager,
+                "",
             )
             .await
             .context("build resource manager")?,

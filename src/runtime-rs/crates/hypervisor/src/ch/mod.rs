@@ -218,6 +218,11 @@ impl Hypervisor for CloudHypervisor {
         let inner = self.inner.read().await;
         inner.reusing_vm()
     }
+
+    async fn get_uvm_id(&self) -> String {
+        let inner = self.inner.read().await;
+        inner.get_uvm_id()
+    }
 }
 
 #[async_trait]

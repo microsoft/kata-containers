@@ -60,6 +60,8 @@ pub(crate) struct ResourceManagerInner {
     pub cpu_resource: CpuResource,
     pub mem_resource: MemResource,
     pub swap_resource: Option<SwapResource>,
+
+    pub uvm_id: String,
 }
 
 impl ResourceManagerInner {
@@ -69,6 +71,7 @@ impl ResourceManagerInner {
         hypervisor: Arc<dyn Hypervisor>,
         toml_config: Arc<TomlConfig>,
         init_size_manager: InitialSizeManager,
+        uvm_id: &str,
     ) -> Result<Self> {
         let topo_config = TopologyConfigInfo::new(&toml_config);
         // create device manager
@@ -130,6 +133,7 @@ impl ResourceManagerInner {
             cpu_resource,
             mem_resource,
             swap_resource,
+            uvm_id: uvm_id.to_string(),
         })
     }
 
@@ -154,7 +158,7 @@ impl ResourceManagerInner {
                         .await?
                         .is_fs_sharing_supported()
                     {
-                        let share_fs = share_fs::new(&self.sid, &c).context("new share fs")?;
+                        let share_fs = share_fs::new(&self.sid, &c, &self.uvm_id).context("new share fs")?;
                         share_fs
                             .setup_device_before_start_vm(
                                 self.hypervisor.as_ref(),
@@ -710,6 +714,7 @@ impl Persist for ResourceManagerInner {
             None
         };
 
+        warn!(sl!(), "restore: ignoring uvm_id");
         Ok(Self {
             sid: resource_args.sid,
             agent: resource_args.agent,
@@ -728,6 +733,8 @@ impl Persist for ResourceManagerInner {
             cpu_resource: CpuResource::default(),
             mem_resource,
             swap_resource,
+
+            uvm_id: "".to_string(),
         })
     }
 }

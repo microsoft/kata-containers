@@ -49,12 +49,15 @@ impl ShimExecutor {
         self.args.validate(false).context("validate")?;
 
         let server_fd = get_server_fd().context("get server fd")?;
+
+        warn!(sl!(), "do_run: ignoring uvm_id");
         let service_manager = service::ServiceManager::new(
             &self.args.id,
             &self.args.publish_binary,
             &self.args.address,
             &self.args.namespace,
             server_fd,
+            "",
         )
         .await
         .context("new shim server")?;

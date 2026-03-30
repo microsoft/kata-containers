@@ -141,4 +141,7 @@ pub trait Hypervisor: std::fmt::Debug + Send + Sync {
     async fn reusing_vm(&self) -> bool {
         false
     }
+    async fn get_uvm_id(&self) -> String {
+        "".to_string()
+    }
 }

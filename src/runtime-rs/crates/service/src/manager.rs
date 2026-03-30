@@ -32,6 +32,7 @@ pub struct ServiceManager {
     address: String,
     namespace: String,
     event_publisher: Box<dyn Forwarder>,
+    // uvm_id: String,
 }
 
 impl std::fmt::Debug for ServiceManager {
@@ -55,12 +56,13 @@ impl ServiceManager {
         address: &str,
         namespace: &str,
         task_server_fd: RawFd,
+        uvm_id: &str,
     ) -> Result<Self> {
         // Regist service logger for later use.
         logging::register_subsystem_logger("runtimes", "service");
 
         let (sender, receiver) = channel::<Message>(MESSAGE_BUFFER_SIZE);
-        let rt_mgr = RuntimeHandlerManager::new(id, sender).context("new runtime handler")?;
+        let rt_mgr = RuntimeHandlerManager::new(id, sender, uvm_id).context("new runtime handler")?;
         let handler = Arc::new(rt_mgr);
         let mut server = unsafe { Server::from_raw_fd(task_server_fd) };
         server = server.set_domain_unix();
@@ -76,6 +78,7 @@ impl ServiceManager {
             address: address.to_string(),
             namespace: namespace.to_string(),
             event_publisher,
+            // uvm_id: uvm_id.to_string(),
         })
     }
 
@@ -121,7 +124,9 @@ impl ServiceManager {
 
     pub async fn cleanup(sid: &str) -> Result<()> {
         let (sender, _receiver) = channel::<Message>(MESSAGE_BUFFER_SIZE);
-        let handler = RuntimeHandlerManager::new(sid, sender).context("new runtime handler")?;
+        warn!(sl!(), "cleanup: ignoring uvm_id");
+        // let handler = RuntimeHandlerManager::new(sid, sender).context("new runtime handler")?;
+        let handler = RuntimeHandlerManager::new(sid, sender, "").context("new runtime handler")?;
         if let Err(e) = handler.cleanup().await {
             warn!(sl!(), "failed to clean up runtime state, {}", e);
         }

@@ -40,6 +40,7 @@ pub trait RuntimeHandler: Send + Sync {
         config: Arc<TomlConfig>,
         init_size_manager: InitialSizeManager,
         sandbox_config: SandboxConfig,
+        uvm_id: &str,
     ) -> Result<RuntimeInstance>;
 
     fn cleanup(&self, id: &str) -> Result<()>;

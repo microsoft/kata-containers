@@ -106,6 +106,7 @@ impl RuntimeHandler for VirtContainer {
         config: Arc<TomlConfig>,
         init_size_manager: InitialSizeManager,
         sandbox_config: SandboxConfig,
+        uvm_id: &str,
     ) -> Result<RuntimeInstance> {
         let factory = config.get_factory();
         let (hypervisor, agent) = if factory.enable_template {
@@ -126,6 +127,7 @@ impl RuntimeHandler for VirtContainer {
                 hypervisor.clone(),
                 config,
                 init_size_manager,
+                uvm_id,
             )
             .await?,
         );

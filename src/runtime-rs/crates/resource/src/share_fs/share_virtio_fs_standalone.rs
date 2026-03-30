@@ -4,6 +4,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![allow(unused)]
+
 use std::{collections::HashMap, path::Path, process::Stdio, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
@@ -24,6 +26,9 @@ use kata_types::{config::hypervisor::SharedFsInfo, rootless::is_rootless};
 use super::{
     share_virtio_fs::generate_sock_path, utils::ensure_dir_exist, utils::get_host_ro_shared_path,
     virtio_fs_share_mount::VirtiofsShareMount, MountedInfo, ShareFs, ShareFsMount,
+};
+use super::{
+    utils::get_host_ro_shared_path_uvm
 };
 use crate::share_fs::{
     kata_guest_share_dir,
@@ -55,10 +60,12 @@ pub(crate) struct ShareVirtioFsStandalone {
     config: ShareVirtioFsStandaloneConfig,
     share_fs_mount: Arc<dyn ShareFsMount>,
     mounted_info_set: Arc<Mutex<HashMap<String, MountedInfo>>>,
+
+    uvm_id: String,
 }
 
 impl ShareVirtioFsStandalone {
-    pub(crate) fn new(id: &str, config: &SharedFsInfo) -> Result<Self> {
+    pub(crate) fn new(id: &str, config: &SharedFsInfo, uvm_id: &str) -> Result<Self> {
         Ok(Self {
             inner: Arc::new(RwLock::new(ShareVirtioFsStandaloneInner::default())),
             config: ShareVirtioFsStandaloneConfig {
@@ -69,11 +76,14 @@ impl ShareVirtioFsStandalone {
             },
             share_fs_mount: Arc::new(VirtiofsShareMount::new(id)),
             mounted_info_set: Arc::new(Mutex::new(HashMap::new())),
+
+            uvm_id: uvm_id.to_string(),
         })
     }
 
     fn virtiofsd_args(&self, sock_path: &str, disable_guest_selinux: bool) -> Result<Vec<String>> {
-        let source_path = get_host_ro_shared_path(&self.config.id);
+        // let source_path = get_host_ro_shared_path(&self.config.id);
+        let source_path = get_host_ro_shared_path_uvm(&self.config.id, &self.uvm_id);
         info!(sl!(), "virtiofsd_args: source_path = {:?}", source_path);
 
         ensure_dir_exist(&source_path)?;
@@ -102,6 +112,8 @@ impl ShareVirtioFsStandalone {
         if !disable_guest_selinux {
             args.push(String::from("--xattr"));
         }
+
+        info!(sl!(), "virtiofsd_args: args = {:?}", &args);
 
         Ok(args)
     }

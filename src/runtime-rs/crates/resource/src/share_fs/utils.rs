@@ -71,6 +71,11 @@ pub(crate) fn get_host_ro_shared_path(id: &str) -> PathBuf {
         .join(id)
         .join("ro")
 }
+pub(crate) fn get_host_ro_shared_path_uvm(id: &str, uvm_id: &str) -> PathBuf {
+    Path::new(kata_host_shared_dir_uvm(uvm_id).as_str())
+        .join(id)
+        .join("ro")
+}
 
 pub fn get_host_rw_shared_path(sid: &str) -> PathBuf {
     Path::new(kata_host_shared_dir().as_str())

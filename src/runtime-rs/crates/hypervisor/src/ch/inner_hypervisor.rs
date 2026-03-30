@@ -1046,6 +1046,10 @@ impl CloudHypervisorInner {
 
         self.reuse_guest
     }
+
+    pub fn get_uvm_id(&self) -> String {
+        self.uvm_id.clone()
+    }
 }
 
 // Log all output from the CH process until a shutdown signal is received.
