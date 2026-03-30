@@ -144,6 +144,10 @@ impl InitialSizeManager {
             if self.resource.mem_mb == 0 {
                 self.resource.mem_mb = config.runtime.static_sandbox_default_workload_mem;
             }
+
+            if self.resource.vcpu == 0.0 {
+                self.resource.vcpu = config.runtime.static_sandbox_default_workload_vcpus;
+            }
         }
 
         if self.resource.vcpu > 0.0 {
