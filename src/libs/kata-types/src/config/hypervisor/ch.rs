@@ -129,12 +129,6 @@ impl ConfigPlugin for CloudHypervisorConfig {
                     ch.device_info.default_bridges,
                 )));
             }
-
-            if ch.memory_info.default_memory < MIN_CH_MEMORY_SIZE_MB {
-                return Err(std::io::Error::other(format!(
-                    "CH hypervisor has minimal memory limitation {MIN_CH_MEMORY_SIZE_MB}",
-                )));
-            }
         }
 
         Ok(())

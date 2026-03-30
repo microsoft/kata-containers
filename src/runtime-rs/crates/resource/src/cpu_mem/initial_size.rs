@@ -143,6 +143,17 @@ impl InitialSizeManager {
         if self.resource.vcpu > 0.0 {
             info!(sl!(), "resource with vcpu {}", self.resource.vcpu);
         }
+
+        if config.runtime.static_sandbox_resource_mgmt {
+            if self.resource.mem_mb == 0 {
+                self.resource.mem_mb = config.runtime.static_sandbox_default_workload_mem;
+            }
+
+            if self.resource.vcpu == 0.0 {
+                self.resource.vcpu = config.runtime.static_sandbox_default_workload_vcpus;
+            }
+        }
+
         self.resource.orig_toml_default_mem = hv.memory_info.default_memory;
         if self.resource.mem_mb > 0 {
             // since the memory overhead introduced by kata-agent and system components
@@ -151,6 +162,10 @@ impl InitialSizeManager {
             // (if we override the default_memory here, and user apllications still
             // use memory as they orignally expected, it would be easy to OOM.)
             hv.memory_info.default_memory += self.resource.mem_mb;
+        }
+
+        if self.resource.vcpu > 0.0 {
+            hv.cpu_info.default_vcpus += self.resource.vcpu;
         }
         Ok(())
     }
@@ -197,6 +212,7 @@ fn get_sizing_info(annotation: Annotation) -> Result<(u64, i64, i64)> {
 mod tests {
     use super::*;
     use kata_types::annotations::cri_containerd;
+    use kata_types::config::Hypervisor;
     use oci_spec::runtime::{LinuxBuilder, LinuxMemory, LinuxMemoryBuilder, LinuxResourcesBuilder};
     use std::collections::HashMap;
     #[derive(Clone)]
@@ -365,5 +381,73 @@ mod tests {
                 i, d.desc, d.result.mem_mb,
             );
         }
+    }
+
+    fn get_config_for_setup_tests(
+        base_vcpus: f32,
+        base_mem_mb: u32,
+        static_mgmt: bool,
+        default_workload_vcpus: f32,
+        default_workload_mem_mb: u32,
+    ) -> TomlConfig {
+        let hypervisor_name = "test-hv".to_string();
+        let mut config = TomlConfig::default();
+        config.runtime.hypervisor_name = hypervisor_name.clone();
+        config.runtime.static_sandbox_resource_mgmt = static_mgmt;
+        config.runtime.static_sandbox_default_workload_vcpus = default_workload_vcpus;
+        config.runtime.static_sandbox_default_workload_mem = default_workload_mem_mb;
+
+        let mut hv = Hypervisor::default();
+        hv.cpu_info.default_vcpus = base_vcpus;
+        hv.memory_info.default_memory = base_mem_mb;
+        config.hypervisor.insert(hypervisor_name, hv);
+
+        config
+    }
+
+    #[test]
+    fn test_setup_config_static_defaults_unset_resources() {
+        let mut manager = InitialSizeManager {
+            resource: InitialSize {
+                vcpu: 0.0,
+                mem_mb: 0,
+                orig_toml_default_mem: 0,
+            },
+        };
+        let mut config = get_config_for_setup_tests(2.0, 256, true, 1.0, 512);
+
+        manager.setup_config(&mut config).unwrap();
+
+        let hv = config
+            .hypervisor
+            .get(&config.runtime.hypervisor_name)
+            .unwrap();
+        assert_eq!(hv.cpu_info.default_vcpus, 3.0);
+        assert_eq!(hv.memory_info.default_memory, 768);
+        assert_eq!(manager.get_orig_toml_default_mem(), 256);
+        assert_eq!(manager.workload_mem_mb(), 512);
+    }
+
+    #[test]
+    fn test_setup_config_static_preserves_explicit_resources() {
+        let mut manager = InitialSizeManager {
+            resource: InitialSize {
+                vcpu: 1.5,
+                mem_mb: 1024,
+                orig_toml_default_mem: 0,
+            },
+        };
+        let mut config = get_config_for_setup_tests(2.0, 256, true, 3.0, 512);
+
+        manager.setup_config(&mut config).unwrap();
+
+        let hv = config
+            .hypervisor
+            .get(&config.runtime.hypervisor_name)
+            .unwrap();
+        assert_eq!(hv.cpu_info.default_vcpus, 3.5);
+        assert_eq!(hv.memory_info.default_memory, 1280);
+        assert_eq!(manager.get_orig_toml_default_mem(), 256);
+        assert_eq!(manager.workload_mem_mb(), 1024);
     }
 }

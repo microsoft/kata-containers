@@ -54,7 +54,7 @@ pub const MAX_SHARED_9PFS_SIZE_MB: u32 = 8 * 1024 * 1024;
 pub const DEFAULT_GUEST_HOOK_PATH: &str = "/opt/kata/hooks";
 pub const DEFAULT_GUEST_DNS_FILE: &str = "/etc/resolv.conf";
 
-pub const DEFAULT_GUEST_VCPUS: u32 = 1;
+pub const DEFAULT_GUEST_VCPUS: u32 = 0;
 
 // Default configuration for dragonball
 pub const DEFAULT_DRAGONBALL_GUEST_KERNEL_IMAGE: &str = "vmlinuz";
@@ -93,7 +93,7 @@ pub const DEFAULT_CH_MEMORY_SLOTS: u32 = 128;
 pub const DEFAULT_CH_PCI_BRIDGES: u32 = 2;
 pub const MAX_CH_PCI_BRIDGES: u32 = 5;
 pub const MAX_CH_VCPUS: u32 = 256;
-pub const MIN_CH_MEMORY_SIZE_MB: u32 = 64;
+pub const MIN_CH_MEMORY_SIZE_MB: u32 = 0;
 
 //Default configuration for firecracker
 pub const DEFAULT_FIRECRACKER_ENTROPY_SOURCE: &str = "/dev/urandom";
