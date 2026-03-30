@@ -123,6 +123,10 @@ pub struct Runtime {
     #[serde(default)]
     pub static_sandbox_resource_mgmt: bool,
 
+    /// Memory to allocate for workloads within the sandbox when workload memory is unspecified
+    #[serde(default)]
+    pub static_sandbox_default_workload_mem: u32,
+
     /// Determines whether container seccomp profiles are passed to the virtual machine and
     /// applied by the kata agent. If set to true, seccomp is not applied within the guest.
     #[serde(default)]
