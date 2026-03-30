@@ -49,6 +49,7 @@ impl Hypervisor for Remote {
         netns: Option<String>,
         annotations: &HashMap<String, String>,
         selinux_label: Option<String>,
+        _uvm_id: &str,
     ) -> Result<()> {
         let mut inner = self.inner.write().await;
         inner

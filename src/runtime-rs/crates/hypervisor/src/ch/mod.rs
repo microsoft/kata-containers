@@ -3,6 +3,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(unused)]
+
 use super::HypervisorState;
 use crate::device::DeviceType;
 use crate::{Hypervisor, MemoryConfig, VcpuThreadIds};
@@ -64,11 +66,13 @@ impl Hypervisor for CloudHypervisor {
         &self,
         id: &str,
         netns: Option<String>,
-        annotations: &HashMap<String, String>,
+        _annotations: &HashMap<String, String>,
         selinux_label: Option<String>,
+        uvm_id: &str,
     ) -> Result<()> {
         let mut inner = self.inner.write().await;
-        inner.prepare_vm(id, netns, annotations, selinux_label).await
+        // inner.prepare_vm(id, netns, annotations, selinux_label).await
+        inner.prepare_vm(id, netns, selinux_label, uvm_id).await
     }
 
     async fn start_vm(&self, timeout: i32) -> Result<()> {

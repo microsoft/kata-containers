@@ -625,16 +625,19 @@ impl CloudHypervisorInner {
         &mut self,
         id: &str,
         netns: Option<String>,
-        annotations: &HashMap<String, String>,
         selinux_label: Option<String>,
+        uvm_id: &str,
     ) -> Result<()> {
         info!(sl!(), "prepare_vm: uvm_id = {}", self.uvm_id);
 
         self.id = id.to_string();
 
+        /*
         if let Some(uvm_id) = annotations.get("io.katacontainers.config.hypervisor.uvm_id") {
             self.uvm_id = uvm_id.to_string();
         }
+        */
+        self.uvm_id = uvm_id.to_string();
 
         self.state = VmmState::NotReady;
 

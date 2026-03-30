@@ -103,6 +103,7 @@ pub struct VirtSandbox {
     sandbox_config: Option<SandboxConfig>,
     shm_size: u64,
     factory: Option<Factory>,
+    uvm_id: String,
 }
 
 impl std::fmt::Debug for VirtSandbox {
@@ -133,6 +134,13 @@ impl VirtSandbox {
     ) -> Result<Self> {
         let config = resource_manager.config().await;
         let keep_abnormal = config.runtime.keep_abnormal;
+
+        let uvm_id = if let Some(uid) = sandbox_config.annotations.get("io.katacontainers.config.hypervisor.uvm_id") {
+            uid.to_string()
+        } else {
+            String::new()
+        };
+
         Ok(Self {
             sid: sid.to_string(),
             msg_sender: Arc::new(Mutex::new(msg_sender)),
@@ -144,6 +152,7 @@ impl VirtSandbox {
             shm_size: sandbox_config.shm_size,
             sandbox_config: Some(sandbox_config),
             factory: Some(factory),
+            uvm_id,
         })
     }
 
@@ -598,6 +607,7 @@ impl Sandbox for VirtSandbox {
                 sandbox_config.network_env.netns.clone(),
                 &sandbox_config.annotations,
                 selinux_label,
+                &self.uvm_id,
             )
             .await
             .context("prepare vm")?;
@@ -794,6 +804,7 @@ impl Sandbox for VirtSandbox {
                 sandbox_config.network_env.netns.clone(),
                 &sandbox_config.annotations,
                 selinux_label,
+                &self.uvm_id,
             )
             .await
             .context("prepare vm")?;
@@ -1083,6 +1094,8 @@ impl Persist for VirtSandbox {
             config,
         };
         let resource_manager = Arc::new(ResourceManager::restore(args, r).await?);
+
+        warn!(sl!(), "restore: ignoring uvm_id");
         Ok(Self {
             sid: sid.to_string(),
             msg_sender: Arc::new(Mutex::new(sandbox_args.sender)),
@@ -1094,6 +1107,7 @@ impl Persist for VirtSandbox {
             sandbox_config: None,
             shm_size: DEFAULT_SHM_SIZE,
             factory: None,
+            uvm_id: "".to_string(),
         })
     }
 }

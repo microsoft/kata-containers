@@ -61,9 +61,11 @@ pub fn get_child_threads(pid: u32) -> HashSet<u32> {
 pub fn get_sandbox_path(sid: &str, uvm_id: &str) -> String {
     info!(sl!(), "get_sandbox_path: sid = {sid}, uvm_id = {uvm_id}");
 
+    /*
     if uvm_id.is_empty() {
         panic!("uvm_id is empty");
     }
+    */
 
     let sandbox_path = if let Some(uvm_path) = get_uvm_path(uvm_id) {
         uvm_path
