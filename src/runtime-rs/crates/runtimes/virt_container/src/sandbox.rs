@@ -580,6 +580,7 @@ impl VirtSandbox {
 impl Sandbox for VirtSandbox {
     #[instrument(name = "sb: start")]
     async fn start(&self) -> Result<()> {
+        info!(sl!(), "VirtSandbox: start");
         let id = &self.sid;
 
         if self.sandbox_config.is_none() {
@@ -830,7 +831,7 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn status(&self) -> Result<SandboxStatus> {
-        info!(sl!(), "get sandbox status");
+        info!(sl!(), "VirtSandbox: get sandbox status");
         let inner = self.inner.read().await;
         let state = inner.state.to_string();
 
@@ -843,7 +844,7 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn wait(&self) -> Result<SandboxExitInfo> {
-        info!(sl!(), "wait sandbox");
+        info!(sl!(), "VirtSandbox: wait sandbox");
         let exit_code = self.hypervisor.wait_vm().await.context("wait vm")?;
         Ok(SandboxExitInfo {
             exit_status: exit_code as u32,
@@ -852,6 +853,8 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn stop(&self) -> Result<()> {
+        info!(sl!(), "VirtSandbox: stop");
+
         let mut sandbox_inner = self.inner.write().await;
 
         if sandbox_inner.state != SandboxState::Stopped {
@@ -865,7 +868,8 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        info!(sl!(), "shutdown");
+        info!(sl!(), "VirtSandbox: shutdown");
+        panic!("VirtSandbox: shutdown");
 
         self.stop().await.context("stop")?;
 
@@ -887,7 +891,7 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn cleanup(&self) -> Result<()> {
-        info!(sl!(), "delete hypervisor");
+        info!(sl!(), "VirtSandbox: delete hypervisor");
         self.hypervisor
             .cleanup()
             .await
@@ -909,6 +913,8 @@ impl Sandbox for VirtSandbox {
         process_id: ContainerProcess,
         shim_pid: u32,
     ) -> Result<()> {
+        info!(sl!(), "VirtSandbox: wait_process");
+
         let exit_status = cm.wait_process(&process_id).await?;
         info!(sl!(), "container process exited with {:?}", exit_status);
 
@@ -946,6 +952,8 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn direct_volume_stats(&self, volume_guest_path: &str) -> Result<String> {
+        info!(sl!(), "VirtSandbox: direct_volume_stats");
+
         let req: agent::VolumeStatsRequest = VolumeStatsRequest {
             volume_guest_path: volume_guest_path.to_string(),
         };
@@ -958,6 +966,8 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn direct_volume_resize(&self, resize_req: agent::ResizeVolumeRequest) -> Result<()> {
+        info!(sl!(), "VirtSandbox: direct_volume_resize");
+
         self.agent
             .resize_volume(resize_req)
             .await
@@ -988,6 +998,8 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn agent_metrics(&self) -> Result<String> {
+        info!(sl!(), "VirtSandbox: agent_metrics");
+
         self.agent
             .get_metrics(agent::Empty::new())
             .await
@@ -996,10 +1008,14 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn hypervisor_metrics(&self) -> Result<String> {
+        info!(sl!(), "VirtSandbox: hypervisor_metrics");
+
         self.hypervisor.get_hypervisor_metrics().await
     }
 
     async fn set_policy(&self, policy: &str) -> Result<()> {
+        info!(sl!(), "VirtSandbox: set_policy");
+
         if policy.is_empty() {
             debug!(sl!(), "sb: set_policy skipped without policy");
             return Ok(());

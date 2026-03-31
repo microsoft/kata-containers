@@ -1234,6 +1234,7 @@ impl agent_ttrpc::AgentService for AgentService {
             }
         }
 
+        info!(sl(), "update_interface: calling into netlink");
         // sandbox.rtnl.update_interface(&interface).await.map_ttrpc_err(|e| format!("update interface: {e:?}"))?;
         let mut rtnl = crate::netlink::Handle::new().map_ttrpc_err(same)?;
         rtnl.update_interface(&interface).await.map_ttrpc_err(|e| format!("update interface: {e:?}"))?;
@@ -1268,6 +1269,7 @@ impl agent_ttrpc::AgentService for AgentService {
         // let mut sandbox = self.sandbox.lock().await;
         let mut rtnl = crate::netlink::Handle::new().map_ttrpc_err(same)?;
 
+        info!(sl(), "update_routes: calling rtnl");
         //sandbox
         rtnl
             .update_routes(new_routes)
@@ -1280,6 +1282,7 @@ impl agent_ttrpc::AgentService for AgentService {
             .await
             .map_ttrpc_err(|e| format!("Failed to list routes after update: {e:?}"))?;
 
+        info!(sl(), "update_routes: returning success");
         Ok(protocols::agent::Routes {
             Routes: list,
             ..Default::default()
@@ -1709,6 +1712,8 @@ impl agent_ttrpc::AgentService for AgentService {
 
         // to get agent details
         let detail = get_agent_details();
+        info!(sl(), "get_guest_details: success, detail = {:?}", detail);
+
         resp.agent_details = MessageField::some(detail);
 
         Ok(resp)
