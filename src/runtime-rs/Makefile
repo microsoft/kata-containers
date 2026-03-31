@@ -737,8 +737,8 @@ static-checks-build: $(GENERATED_FILES)
 
 $(TARGET): $(GENERATED_FILES) $(TARGET_PATH)
 
-$(TARGET_PATH): $(SOURCES) | show-summary
-	@RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo build -p runtime-rs --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release) $(EXTRA_RUSTFEATURES)
+$(TARGET_PATH): $(SOURCES) Makefile | show-summary
+	@RUSTFLAGS="$(EXTRA_RUSTFLAGS) $(if $(findstring release,$(BUILD_TYPE)),-C strip=symbols,) --deny warnings" cargo build -p runtime-rs --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release) $(EXTRA_RUSTFEATURES)
 
 $(GENERATED_FILES): %: %.in
 	@sed \
