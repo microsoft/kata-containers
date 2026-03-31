@@ -256,6 +256,8 @@ pub async fn add_storages(
     sandbox: &Arc<Mutex<Sandbox>>,
     cid: Option<String>,
 ) -> Result<Vec<String>> {
+    info!(logger, "add_storages: storages = {:?}", storages);
+
     let mut mount_list = Vec::new();
     let mut processed_mount_points = HashSet::new();
 
