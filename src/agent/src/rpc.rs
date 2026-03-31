@@ -1189,6 +1189,7 @@ impl agent_ttrpc::AgentService for AgentService {
             .await
             .map_ttrpc_err(|e| format!("Failed to list routes after update: {e:?}"))?;
 
+        info!(sl(), "update_routes: returning success");
         Ok(protocols::agent::Routes {
             Routes: list,
             ..Default::default()
@@ -1557,6 +1558,8 @@ impl agent_ttrpc::AgentService for AgentService {
 
         // to get agent details
         let detail = get_agent_details();
+        info!(sl(), "get_guest_details: success, detail = {:?}", detail);
+
         resp.agent_details = MessageField::some(detail);
 
         Ok(resp)
