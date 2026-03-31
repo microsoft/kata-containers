@@ -242,7 +242,8 @@ impl ShareFs for ShareVirtioFsStandalone {
         h: &dyn Hypervisor,
         d: &RwLock<DeviceManager>,
     ) -> Result<()> {
-        prepare_virtiofs(d, VIRTIO_FS, &self.config.id, &h.get_jailer_root().await?)
+        // prepare_virtiofs(d, VIRTIO_FS, &self.config.id, &h.get_jailer_root().await?)
+        prepare_virtiofs(d, VIRTIO_FS, &self.config.id, &h.get_jailer_root().await?, &self.uvm_id)
             .await
             .context("prepare virtiofs")?;
         self.setup_virtiofsd(h).await.context("setup virtiofsd")?;

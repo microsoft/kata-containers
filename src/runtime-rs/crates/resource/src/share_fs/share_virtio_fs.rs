@@ -39,9 +39,10 @@ pub(crate) async fn prepare_virtiofs(
     fs_type: &str,
     id: &str,
     root: &str,
+    uvm_id: &str,
 ) -> Result<()> {
-    let host_ro_dest = utils::get_host_ro_shared_path(id);
-    // let host_ro_dest = utils::get_host_ro_shared_path_uvm(id);
+    // let host_ro_dest = utils::get_host_ro_shared_path(id);
+    let host_ro_dest = utils::get_host_ro_shared_path_uvm(id, uvm_id);
     utils::ensure_dir_exist(&host_ro_dest)?;
 
     let host_rw_dest = utils::get_host_rw_shared_path(id);
@@ -78,8 +79,10 @@ pub(crate) async fn setup_inline_virtiofs(d: &RwLock<DeviceManager>, id: &str) -
     let rw_source = utils::get_host_rw_shared_path(id).join(PASSTHROUGH_FS_DIR);
     utils::ensure_dir_exist(&rw_source).context("ensure directory exist")?;
 
-    let host_ro_shared_path = utils::get_host_ro_shared_path(id);
-    // let host_ro_shared_path = utils::get_host_ro_shared_path_uvm(id);
+    warn!(sl!(), "setup_inline_virtiofs: ignoring uvm_id");
+    // let host_ro_shared_path = utils::get_host_ro_shared_path(id);
+    let host_ro_shared_path = utils::get_host_ro_shared_path_uvm(id, "");
+
     let source = host_ro_shared_path
         .join(PASSTHROUGH_FS_DIR)
         .display()
@@ -132,8 +135,10 @@ pub async fn rafs_mount(
         prefetch_list_path,
     };
 
-    let host_shared_path = utils::get_host_ro_shared_path(sid).display().to_string();
-    // let host_shared_path = utils::get_host_ro_shared_path_uvm(sid).display().to_string();
+    warn!(sl!(), "rafs_mount: ignoring uvm_id");
+    // let host_shared_path = utils::get_host_ro_shared_path(sid).display().to_string();
+    let host_shared_path = utils::get_host_ro_shared_path_uvm(sid, "").display().to_string();
+
     let sharefs_config = ShareFsConfig {
         host_shared_path,
         mount_config: Some(rafs_config),

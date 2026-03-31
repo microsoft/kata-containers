@@ -61,7 +61,8 @@ impl ShareFs for ShareVirtioFsInline {
         _h: &dyn Hypervisor,
         d: &RwLock<DeviceManager>,
     ) -> Result<()> {
-        prepare_virtiofs(d, INLINE_VIRTIO_FS, &self.config.id, "")
+        // DMFIX: uvm_id
+        prepare_virtiofs(d, INLINE_VIRTIO_FS, &self.config.id, "", "")
             .await
             .context("prepare virtiofs")?;
 
