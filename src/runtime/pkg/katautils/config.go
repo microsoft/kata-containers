@@ -181,30 +181,30 @@ type hypervisor struct {
 }
 
 type runtime struct {
-	InterNetworkModel         string   `toml:"internetworking_model"`
-	JaegerEndpoint            string   `toml:"jaeger_endpoint"`
-	JaegerUser                string   `toml:"jaeger_user"`
-	JaegerPassword            string   `toml:"jaeger_password"`
-	VfioMode                  string   `toml:"vfio_mode"`
-	GuestSeLinuxLabel         string   `toml:"guest_selinux_label"`
-	SandboxBindMounts         []string `toml:"sandbox_bind_mounts"`
-	Experimental              []string `toml:"experimental"`
-	Tracing                   bool     `toml:"enable_tracing"`
-	DisableNewNetNs           bool     `toml:"disable_new_netns"`
-	DisableGuestSeccomp       bool     `toml:"disable_guest_seccomp"`
-	EnableVCPUsPinning        bool     `toml:"enable_vcpus_pinning"`
-	Debug                     bool     `toml:"enable_debug"`
-	SandboxCgroupOnly         bool     `toml:"sandbox_cgroup_only"`
-	StaticSandboxResourceMgmt bool     `toml:"static_sandbox_resource_mgmt"`
-	StaticSandboxWorkloadDefaultMem uint32   `toml:"static_sandbox_default_workload_mem"`
+	InterNetworkModel                 string   `toml:"internetworking_model"`
+	JaegerEndpoint                    string   `toml:"jaeger_endpoint"`
+	JaegerUser                        string   `toml:"jaeger_user"`
+	JaegerPassword                    string   `toml:"jaeger_password"`
+	VfioMode                          string   `toml:"vfio_mode"`
+	GuestSeLinuxLabel                 string   `toml:"guest_selinux_label"`
+	SandboxBindMounts                 []string `toml:"sandbox_bind_mounts"`
+	Experimental                      []string `toml:"experimental"`
+	Tracing                           bool     `toml:"enable_tracing"`
+	DisableNewNetNs                   bool     `toml:"disable_new_netns"`
+	DisableGuestSeccomp               bool     `toml:"disable_guest_seccomp"`
+	EnableVCPUsPinning                bool     `toml:"enable_vcpus_pinning"`
+	Debug                             bool     `toml:"enable_debug"`
+	SandboxCgroupOnly                 bool     `toml:"sandbox_cgroup_only"`
+	StaticSandboxResourceMgmt         bool     `toml:"static_sandbox_resource_mgmt"`
+	StaticSandboxWorkloadDefaultMem   uint32   `toml:"static_sandbox_default_workload_mem"`
 	StaticSandboxWorkloadDefaultVcpus float32  `toml:"static_sandbox_default_workload_vcpus"`
 	SandboxWorkloadMemMin             uint32   `toml:"sandbox_workload_mem_min"`
-	EnablePprof               bool     `toml:"enable_pprof"`
-	DisableGuestEmptyDir      bool     `toml:"disable_guest_empty_dir"`
-	CreateContainerTimeout    uint64   `toml:"create_container_timeout"`
-	DanConf                   string   `toml:"dan_conf"`
-	ForceGuestPull            bool     `toml:"experimental_force_guest_pull"`
-	PodResourceAPISock        string   `toml:"pod_resource_api_sock"`
+	EnablePprof                       bool     `toml:"enable_pprof"`
+	DisableGuestEmptyDir              bool     `toml:"disable_guest_empty_dir"`
+	CreateContainerTimeout            uint64   `toml:"create_container_timeout"`
+	DanConf                           string   `toml:"dan_conf"`
+	ForceGuestPull                    bool     `toml:"experimental_force_guest_pull"`
+	PodResourceAPISock                string   `toml:"pod_resource_api_sock"`
 }
 
 type agent struct {
@@ -1924,11 +1924,11 @@ func checkPCIeConfig(coldPlug config.PCIePort, hotPlug config.PCIePort, machineT
 		return nil
 	}
 	if hypervisorType == virtcontainers.ClhHypervisor {
-		if coldPlug != config.NoPort {
-			return fmt.Errorf("cold-plug not supported on CLH")
+		if coldPlug != config.NoPort && coldPlug != config.RootPort {
+			return fmt.Errorf("only cold-plug=%s or %s supported on CLH", config.NoPort, config.RootPort)
 		}
-		if hotPlug != config.RootPort {
-			return fmt.Errorf("only hot-plug=%s supported on CLH", config.RootPort)
+		if hotPlug != config.NoPort && hotPlug != config.RootPort {
+			return fmt.Errorf("only hot-plug=%s or %s supported on CLH", config.NoPort, config.RootPort)
 		}
 	}
 
