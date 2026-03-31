@@ -1328,6 +1328,7 @@ impl agent_ttrpc::AgentService for AgentService {
         {
             let mut s = self.sandbox.lock().await;
 
+            info!(sl(), "create_sandbox: setting up CONTAINER_BASE = {CONTAINER_BASE}");
             let _ = fs::remove_dir_all(CONTAINER_BASE);
             let _ = fs::create_dir_all(CONTAINER_BASE);
 
@@ -1342,9 +1343,11 @@ impl agent_ttrpc::AgentService for AgentService {
                 load_kernel_module(m).map_ttrpc_err(same)?;
             }
 
+            info!(sl(), "create_sandbox: calling setup_shared_namespaces");
             s.setup_shared_namespaces().await.map_ttrpc_err(same)?;
         }
 
+        info!(sl(), "create_sandbox: calling add_storages");
         let m = add_storages(sl(), req.storages.clone(), &self.sandbox, None)
             .await
             .map_ttrpc_err(same)?;
@@ -1355,6 +1358,7 @@ impl agent_ttrpc::AgentService for AgentService {
         {
             let mut s = self.sandbox.lock().await;
             if !req.guest_hook_path.is_empty() {
+                info!(sl(), "create_sandbox: calling add_hooks");
                 let _ = s.add_hooks(&req.guest_hook_path).map_err(|e| {
                     error!(
                         sl(),
@@ -1364,6 +1368,7 @@ impl agent_ttrpc::AgentService for AgentService {
             }
         }
 
+        info!(sl(), "create_sandbox: calling setup_guest_dns");
         setup_guest_dns(sl(), &req.dns).map_ttrpc_err(same)?;
         {
             let mut s = self.sandbox.lock().await;

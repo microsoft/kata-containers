@@ -173,6 +173,8 @@ impl Sandbox {
     /// The caller may detect new storage object by checking `StorageState.refcount == 1`.
     #[instrument]
     pub async fn add_sandbox_storage(&mut self, path: &str) -> StorageState {
+        info!(self.logger, "add_sandbox_storage: path = {:?}", path);
+
         match self.storages.entry(path.to_string()) {
             Entry::Occupied(e) => {
                 let state = e.get().clone();
