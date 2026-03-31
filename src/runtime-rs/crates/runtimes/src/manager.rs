@@ -553,8 +553,14 @@ impl RuntimeHandlerManager {
         let sandbox = instance.sandbox.clone();
 
         match req {
-            SandboxRequest::CreateSandbox(req) => Err(anyhow!("Unreachable request {:?}", req)),
+            SandboxRequest::CreateSandbox(req) => {
+                info!(sl!(), "SandboxRequest::CreateSandbox");
+                
+                Err(anyhow!("Unreachable request {:?}", req))
+            }
             SandboxRequest::StartSandbox(_) => {
+                info!(sl!(), "SandboxRequest::StartSandbox");
+
                 sandbox
                     .start()
                     .await
@@ -564,21 +570,31 @@ impl RuntimeHandlerManager {
                     create_time: Some(SystemTime::now()),
                 }))
             }
-            SandboxRequest::Platform(_) => Ok(SandboxResponse::Platform(PlatformInfo {
-                os: std::env::consts::OS.to_string(),
-                architecture: std::env::consts::ARCH.to_string(),
-            })),
+            SandboxRequest::Platform(_) => {
+                info!(sl!(), "SandboxRequest::Platform");
+
+                Ok(SandboxResponse::Platform(PlatformInfo {
+                    os: std::env::consts::OS.to_string(),
+                    architecture: std::env::consts::ARCH.to_string(),
+                }))
+            }
             SandboxRequest::StopSandbox(_) => {
+                info!(sl!(), "SandboxRequest::StopSandbox");
+
                 sandbox.stop().await.context("stop sandbox")?;
 
                 Ok(SandboxResponse::StopSandbox)
             }
             SandboxRequest::WaitSandbox(_) => {
+                info!(sl!(), "SandboxRequest::WaitSandbox");
+
                 let exit_info = sandbox.wait().await.context("wait sandbox")?;
 
                 Ok(SandboxResponse::WaitSandbox(exit_info))
             }
             SandboxRequest::SandboxStatus(_) => {
+                info!(sl!(), "SandboxRequest::SandboxStatus");
+
                 let status = sandbox.status().await?;
 
                 Ok(SandboxResponse::SandboxStatus(SandboxStatusInfo {
@@ -589,8 +605,14 @@ impl RuntimeHandlerManager {
                     exited_at: None,
                 }))
             }
-            SandboxRequest::Ping(_) => Ok(SandboxResponse::Ping),
+            SandboxRequest::Ping(_) => {
+                info!(sl!(), "SandboxRequest::Ping");
+
+                Ok(SandboxResponse::Ping)
+            }
             SandboxRequest::ShutdownSandbox(_) => {
+                info!(sl!(), "SandboxRequest::ShutdownSandbox");
+
                 sandbox.shutdown().await.context("shutdown sandbox")?;
 
                 Ok(SandboxResponse::ShutdownSandbox)
@@ -616,14 +638,14 @@ impl RuntimeHandlerManager {
                 Err(anyhow!("Unreachable TaskRequest {:?}", req))
             },
             TaskRequest::CloseProcessIO(process_id) => {
-                info!(logger, "handler_task_request: CloseProcessIO");
+                info!(sl!(), "TaskRequest::CloseProcessIO");
 
                 cm.close_process_io(&process_id).await.context("close io")?;
                 Ok(TaskResponse::CloseProcessIO)
             }
             TaskRequest::DeleteProcess(process_id) => {
-                info!(logger, "handler_task_request: DeleteProcess");
-            
+                info!(sl!(), "TaskRequest::DeleteProcess");
+
                 let resp = cm.delete_process(&process_id).await.context("do delete")?;
                 if process_id.process_type == ProcessType::Container {
                     let event = TaskDelete {
@@ -642,19 +664,20 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::DeleteProcess(resp))
             }
             TaskRequest::ExecProcess(req) => {
-                info!(logger, "handler_task_request: ExecProcess");
+                info!(sl!(), "TaskRequest::ExecProcess");
 
                 cm.exec_process(req).await.context("exec")?;
                 Ok(TaskResponse::ExecProcess)
             }
             TaskRequest::KillProcess(req) => {
-                info!(logger, "handler_task_request: KillProcess");
-
+                info!(sl!(), "TaskRequest::KillProcess");
+                
                 cm.kill_process(&req).await.context("kill process")?;
                 Ok(TaskResponse::KillProcess)
             }
             TaskRequest::ShutdownContainer(req) => {
-                info!(logger, "handler_task_request: ShutdownContainer");
+                // info!(logger, "handler_task_request: ShutdownContainer");
+                info!(sl!(), "TaskRequest::ShutdownContainer");
 
                 if cm.need_shutdown_sandbox(&req).await {
                     sandbox.shutdown().await.context("do shutdown")?;
@@ -667,7 +690,8 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::ShutdownContainer)
             }
             TaskRequest::WaitProcess(process_id) => {
-                info!(logger, "handler_task_request: WaitProcess");
+                // info!(logger, "handler_task_request: WaitProcess");
+                info!(sl!(), "TaskRequest::WaitProcess");
 
                 let exit_status = cm.wait_process(&process_id).await.context("wait process")?;
                 if cm.is_sandbox_container(&process_id).await {
@@ -689,7 +713,8 @@ impl RuntimeHandlerManager {
                         );
                     }
                 }
-                info!(logger, "handler_task_request: StartProcess");
+                //info!(logger, "handler_task_request: StartProcess");
+                info!(sl!(), "TaskRequest::StartProcess");
 
                 let shim_pid = cm
                     .start_process(&process_id)
@@ -723,7 +748,8 @@ impl RuntimeHandlerManager {
             }
 
             TaskRequest::StateProcess(process_id) => {
-                info!(logger, "handler_task_request: StateProcess");
+                // info!(logger, "handler_task_request: StateProcess");
+                info!(sl!(), "TaskRequest::StateProcess");
 
                 let state = cm
                     .state_process(&process_id)
@@ -732,7 +758,8 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::StateProcess(state))
             }
             TaskRequest::PauseContainer(container_id) => {
-                info!(logger, "handler_task_request: PauseContainer");
+                // info!(logger, "handler_task_request: PauseContainer");
+                info!(sl!(), "TaskRequest::PauseContainer");
 
                 cm.pause_container(&container_id)
                     .await
@@ -740,7 +767,8 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::PauseContainer)
             }
             TaskRequest::ResumeContainer(container_id) => {
-                info!(logger, "handler_task_request: ResumeContainer");
+                // info!(logger, "handler_task_request: ResumeContainer");
+                info!(sl!(), "TaskRequest::ResumeContainer");
 
                 cm.resume_container(&container_id)
                     .await
@@ -748,13 +776,15 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::ResumeContainer)
             }
             TaskRequest::ResizeProcessPTY(req) => {
-                info!(logger, "handler_task_request: ResizeProcessPTY");
+                // info!(logger, "handler_task_request: ResizeProcessPTY");
+                info!(sl!(), "TaskRequest::ResizeProcessPTY");
 
                 cm.resize_process_pty(&req).await.context("resize pty")?;
                 Ok(TaskResponse::ResizeProcessPTY)
             }
             TaskRequest::StatsContainer(container_id) => {
-                info!(logger, "handler_task_request: StatsContainer");
+                // info!(logger, "handler_task_request: StatsContainer");
+                info!(sl!(), "TaskRequest::StatsContainer");
 
                 let stats = cm
                     .stats_container(&container_id)
@@ -763,18 +793,21 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::StatsContainer(stats))
             }
             TaskRequest::UpdateContainer(req) => {
-                info!(logger, "handler_task_request: UpdateContainer");
+                // info!(logger, "handler_task_request: UpdateContainer");
+                info!(sl!(), "TaskRequest::UpdateContainer");
 
                 cm.update_container(req).await.context("update container")?;
                 Ok(TaskResponse::UpdateContainer)
             }
             TaskRequest::Pid => {
-                info!(logger, "handler_task_request: Pid");
+                // info!(logger, "handler_task_request: Pid");
+                info!(sl!(), "TaskRequest::Pid");
 
                 Ok(TaskResponse::Pid(cm.pid().await.context("pid")?))
             }
             TaskRequest::ConnectContainer(container_id) => {
-                info!(logger, "handler_task_request: ConnectContainer");
+                // info!(logger, "handler_task_request: ConnectContainer");
+                info!(sl!(), "TaskRequest::ConnectContainer");
 
                 Ok(TaskResponse::ConnectContainer(
                     cm.connect_container(&container_id)
