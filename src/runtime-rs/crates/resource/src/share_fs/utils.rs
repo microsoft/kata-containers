@@ -72,6 +72,10 @@ pub(crate) fn get_host_ro_shared_path(id: &str) -> PathBuf {
         .join("ro")
 }
 pub(crate) fn get_host_ro_shared_path_uvm(id: &str, uvm_id: &str) -> PathBuf {
+    if uvm_id.is_empty() {
+        panic!("get_host_ro_shared_path_uvm: uvm_id is empty");
+    }
+
     Path::new(kata_host_shared_dir_uvm(uvm_id).as_str())
         .join(id)
         .join("ro")

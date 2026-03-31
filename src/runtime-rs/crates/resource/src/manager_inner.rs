@@ -73,6 +73,12 @@ impl ResourceManagerInner {
         init_size_manager: InitialSizeManager,
         uvm_id: &str,
     ) -> Result<Self> {
+        info!(sl!(), "ResourceManagerInner::new: uvm_id = {uvm_id}");
+
+        if uvm_id.is_empty() {
+            panic!("ResourceManagerInner: uvm_id is empty");
+        }
+
         let topo_config = TopologyConfigInfo::new(&toml_config);
         // create device manager
         let dev_manager = DeviceManager::new(hypervisor.clone(), topo_config.as_ref())
@@ -149,9 +155,13 @@ impl ResourceManagerInner {
         &mut self,
         device_configs: Vec<ResourceConfig>,
     ) -> Result<()> {
+        info!(sl!(), "prepare_before_start_vm: starting, self.uvm_id = {}", &self.uvm_id);
+
         for dc in device_configs {
             match dc {
                 ResourceConfig::ShareFs(c) => {
+                    info!(sl!(), "prepare_before_start_vm: ShareFs");
+
                     self.share_fs = if self
                         .hypervisor
                         .capabilities()
@@ -178,31 +188,43 @@ impl ResourceManagerInner {
                     };
                 }
                 ResourceConfig::Network(c) => {
+                    info!(sl!(), "prepare_before_start_vm: Network");
+
                     self.handle_network(c)
                         .await
                         .context("failed to handle network")?;
                 }
                 ResourceConfig::VmRootfs(r) => {
+                    info!(sl!(), "prepare_before_start_vm: VmRootfs");
+
                     do_handle_device(&self.device_manager, &DeviceConfig::BlockCfg(r))
                         .await
                         .context("do handle device failed.")?;
                 }
                 ResourceConfig::HybridVsock(hv) => {
+                    info!(sl!(), "prepare_before_start_vm: HybridVsock");
+
                     do_handle_device(&self.device_manager, &DeviceConfig::HybridVsockCfg(hv))
                         .await
                         .context("do handle hybrid-vsock device failed.")?;
                 }
                 ResourceConfig::Vsock(v) => {
+                    info!(sl!(), "prepare_before_start_vm: Vsock");
+
                     do_handle_device(&self.device_manager, &DeviceConfig::VsockCfg(v))
                         .await
                         .context("do handle vsock device failed.")?;
                 }
                 ResourceConfig::Protection(p) => {
+                    info!(sl!(), "prepare_before_start_vm: Protection");
+
                     do_handle_device(&self.device_manager, &DeviceConfig::ProtectionDevCfg(p))
                         .await
                         .context("do handle protection device failed.")?;
                 }
                 ResourceConfig::PortDevice(pd) => {
+                    info!(sl!(), "prepare_before_start_vm: PortDevice");
+
                     do_handle_device(
                         &self.device_manager,
                         &DeviceConfig::PortDeviceCfg(pd.clone()),
@@ -211,6 +233,8 @@ impl ResourceManagerInner {
                     .context("do handle port device failed.")?;
                 }
                 ResourceConfig::InitData(id) => {
+                    info!(sl!(), "prepare_before_start_vm: InitData");
+
                     do_handle_device(&self.device_manager, &DeviceConfig::BlockCfg(id))
                         .await
                         .context("do handle initdata block device failed.")?;

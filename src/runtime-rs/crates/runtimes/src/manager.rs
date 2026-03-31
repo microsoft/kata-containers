@@ -86,7 +86,7 @@ struct RuntimeHandlerManagerInner {
     msg_sender: Sender<Message>,
     kata_tracer: Arc<Mutex<KataTracer>>,
     runtime_instance: Option<Arc<RuntimeInstance>>,
-    uvm_id: String,
+    //uvm_id: String,
 }
 
 impl std::fmt::Debug for RuntimeHandlerManagerInner {
@@ -99,14 +99,14 @@ impl std::fmt::Debug for RuntimeHandlerManagerInner {
 }
 
 impl RuntimeHandlerManagerInner {
-    fn new(id: &str, msg_sender: Sender<Message>, uvm_id: &str) -> Result<Self> {
+    fn new(id: &str, msg_sender: Sender<Message>, _uvm_id: &str) -> Result<Self> {
         let tracer = KataTracer::new();
         Ok(Self {
             id: id.to_string(),
             msg_sender,
             kata_tracer: Arc::new(Mutex::new(tracer)),
             runtime_instance: None,
-            uvm_id: uvm_id.to_string(),
+            //uvm_id: uvm_id.to_string(),
         })
     }
 
@@ -136,7 +136,7 @@ impl RuntimeHandlerManagerInner {
                 config.clone(),
                 init_size_manager,
                 sandbox_config,
-                &self.uvm_id,
+                // &self.uvm_id,
             )
             .await
             .context("new runtime instance")?;

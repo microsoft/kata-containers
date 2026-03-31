@@ -82,6 +82,8 @@ impl ShareVirtioFsStandalone {
     }
 
     fn virtiofsd_args(&self, sock_path: &str, disable_guest_selinux: bool) -> Result<Vec<String>> {
+        info!(sl!(), "virtiofsd_args: uvm_id = {:?}", &self.uvm_id);
+
         // let source_path = get_host_ro_shared_path(&self.config.id);
         let source_path = get_host_ro_shared_path_uvm(&self.config.id, &self.uvm_id);
         info!(sl!(), "virtiofsd_args: source_path = {:?}", source_path);

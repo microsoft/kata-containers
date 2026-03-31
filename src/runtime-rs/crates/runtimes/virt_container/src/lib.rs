@@ -106,8 +106,18 @@ impl RuntimeHandler for VirtContainer {
         config: Arc<TomlConfig>,
         init_size_manager: InitialSizeManager,
         sandbox_config: SandboxConfig,
-        uvm_id: &str,
+        // uvm_id: &str,
     ) -> Result<RuntimeInstance> {
+        let uvm_id = if let Some(uid) = sandbox_config.annotations.get("io.katacontainers.config.hypervisor.uvm_id") {
+            uid.to_string()
+        } else {
+            String::new()
+        };
+
+        if uvm_id.is_empty() {
+            panic!("new_instance: uvm_id is empty");
+        }
+
         let factory = config.get_factory();
         let (hypervisor, agent) = if factory.enable_template {
             build_vm_from_template()
@@ -127,7 +137,7 @@ impl RuntimeHandler for VirtContainer {
                 hypervisor.clone(),
                 config,
                 init_size_manager,
-                uvm_id,
+                &uvm_id,
             )
             .await?,
         );
