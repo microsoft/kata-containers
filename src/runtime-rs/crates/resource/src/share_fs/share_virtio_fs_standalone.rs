@@ -74,7 +74,10 @@ impl ShareVirtioFsStandalone {
                 virtio_fs_cache: config.virtio_fs_cache.clone(),
                 virtio_fs_extra_args: config.virtio_fs_extra_args.clone(),
             },
-            share_fs_mount: Arc::new(VirtiofsShareMount::new(id)),
+            
+            // share_fs_mount: Arc::new(VirtiofsShareMount::new(id)),
+            share_fs_mount: Arc::new(VirtiofsShareMount::new(id, uvm_id)),
+
             mounted_info_set: Arc::new(Mutex::new(HashMap::new())),
 
             uvm_id: uvm_id.to_string(),

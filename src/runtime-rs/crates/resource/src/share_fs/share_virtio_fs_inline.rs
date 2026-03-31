@@ -41,7 +41,10 @@ impl ShareVirtioFsInline {
     pub(crate) fn new(id: &str, _config: &SharedFsInfo) -> Result<Self> {
         Ok(Self {
             config: ShareVirtioFsInlineConfig { id: id.to_string() },
-            share_fs_mount: Arc::new(VirtiofsShareMount::new(id)),
+
+            // DMFIX: uvm_id
+            share_fs_mount: Arc::new(VirtiofsShareMount::new(id, "")),
+
             mounted_info_set: Arc::new(Mutex::new(HashMap::new())),
         })
     }

@@ -19,12 +19,20 @@ const DEFAULT_EPHEMERAL_PATH: &str = "/run/kata-containers/sandbox/ephemeral";
 use crate::share_fs::kata_guest_share_dir;
 
 use super::{
-    get_host_rw_shared_path,
+    // get_host_rw_shared_path,
     utils::{
-        self, do_get_host_path, get_host_ro_shared_path, get_host_shared_path,
+        self,
+        do_get_host_path,
+        // get_host_ro_shared_path,
+        get_host_shared_path,
         mkdir_with_permissions,
     },
     ShareFsMount, ShareFsMountResult, ShareFsRootfsConfig, ShareFsVolumeConfig, PASSTHROUGH_FS_DIR,
+};
+
+use super::utils::{
+        get_host_ro_shared_path_uvm,
+        get_host_rw_shared_path_uvm,
 };
 
 pub fn ephemeral_path() -> String {
@@ -34,11 +42,15 @@ pub fn ephemeral_path() -> String {
 #[derive(Debug)]
 pub struct VirtiofsShareMount {
     id: String,
+    uvm_id: String,
 }
 
 impl VirtiofsShareMount {
-    pub fn new(id: &str) -> Self {
-        Self { id: id.to_string() }
+    pub fn new(id: &str, uvm_id: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            uvm_id: uvm_id.to_string()
+        }
     }
 }
 
@@ -77,7 +89,7 @@ impl ShareFsMount for VirtiofsShareMount {
         // watchable mounts
         if is_watchable_mount(&config.source) {
             // Create path in shared directory for creating watchable mount:
-            let host_rw_path = utils::get_host_rw_shared_path(&self.id);
+            let host_rw_path = utils::get_host_rw_shared_path_uvm(&self.id, &self.uvm_id);
 
             // "/run/kata-containers/shared/sandboxes/$sid/rw/passthrough/watchable"
             let watchable_host_path = Path::new(&host_rw_path)
@@ -185,11 +197,16 @@ impl ShareFsMount for VirtiofsShareMount {
 
     async fn cleanup(&self, sid: &str) -> Result<()> {
         // Unmount ro path
-        let host_ro_dest = get_host_ro_shared_path(sid);
+        // let host_ro_dest = get_host_ro_shared_path(sid);
+        let host_ro_dest = get_host_ro_shared_path_uvm(sid, &self.uvm_id);
+
         umount_all(host_ro_dest.clone(), true).context("failed to umount ro path")?;
         fs::remove_dir_all(host_ro_dest).context("failed to remove ro path")?;
         // As the rootfs and volume have been umounted before calling this function, so just remove the rw dir directly
-        let host_rw_dest = get_host_rw_shared_path(sid);
+
+        // let host_rw_dest = get_host_rw_shared_path(sid);
+        let host_rw_dest = get_host_rw_shared_path_uvm(sid, &self.uvm_id);
+
         fs::remove_dir_all(host_rw_dest).context("failed to remove rw path")?;
         // remove the host share directory
         let host_path = get_host_shared_path(sid);
