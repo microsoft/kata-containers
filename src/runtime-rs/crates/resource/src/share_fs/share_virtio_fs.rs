@@ -45,7 +45,8 @@ pub(crate) async fn prepare_virtiofs(
     let host_ro_dest = utils::get_host_ro_shared_path_uvm(id, uvm_id);
     utils::ensure_dir_exist(&host_ro_dest)?;
 
-    let host_rw_dest = utils::get_host_rw_shared_path(id);
+    // let host_rw_dest = utils::get_host_rw_shared_path(id);
+    let host_rw_dest = utils::get_host_rw_shared_path_uvm(id, uvm_id);
     utils::ensure_dir_exist(&host_rw_dest)?;
 
     mount::bind_mount_unchecked(&host_rw_dest, &host_ro_dest, true, MsFlags::MS_SLAVE)
@@ -76,10 +77,11 @@ pub(crate) async fn setup_inline_virtiofs(d: &RwLock<DeviceManager>, id: &str) -
     // - mount point is the path relative to KATA_GUEST_SHARE_DIR in guest
     let mnt = format!("/{PASSTHROUGH_FS_DIR}");
 
-    let rw_source = utils::get_host_rw_shared_path(id).join(PASSTHROUGH_FS_DIR);
+    warn!(sl!(), "setup_inline_virtiofs: ignoring uvm_id");
+    // let rw_source = utils::get_host_rw_shared_path(id).join(PASSTHROUGH_FS_DIR);
+    let rw_source = utils::get_host_rw_shared_path_uvm(id, "").join(PASSTHROUGH_FS_DIR);
     utils::ensure_dir_exist(&rw_source).context("ensure directory exist")?;
 
-    warn!(sl!(), "setup_inline_virtiofs: ignoring uvm_id");
     // let host_ro_shared_path = utils::get_host_ro_shared_path(id);
     let host_ro_shared_path = utils::get_host_ro_shared_path_uvm(id, "");
 
