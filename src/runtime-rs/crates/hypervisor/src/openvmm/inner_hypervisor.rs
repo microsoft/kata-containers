@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context, Result};
 use std::fs::{self, File};
 
 use super::inner::OpenVmmInner;
-use crate::utils::{get_hvsock_path, get_jailer_root, get_sandbox_path};
+use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{MemoryConfig, VcpuThreadIds, VmmState};
 
 use openvmm_defs::config::{
@@ -171,12 +171,12 @@ impl OpenVmmInner {
         for dev in &pending {
             match dev {
                 crate::DeviceType::HybridVsock(hvsock_dev) => {
-                    info!(sl!(), "openvmm: wiring HybridVsock device, uds_path={}", hvsock_dev.config.uds_path);
-                    // hvsock is configured via vmbus_config.vsock_path below
+                    info!(sl!(), "openvmm: wiring HybridVsock device as virtio-vsock, uds_path={}", hvsock_dev.config.uds_path);
+                    // Handled below via virtio-vsock PCIe device
                 }
                 crate::DeviceType::Vsock(vsock_dev) => {
-                    info!(sl!(), "openvmm: wiring Vsock device, guest_cid={}", vsock_dev.config.guest_cid);
-                    // vsock is configured via vmbus_config.vsock_path below
+                    info!(sl!(), "openvmm: wiring Vsock device as virtio-vsock, guest_cid={}", vsock_dev.config.guest_cid);
+                    // Handled below via virtio-vsock PCIe device
                 }
                 crate::DeviceType::Network(net_dev) => {
                     info!(sl!(), "openvmm: wiring Network device as virtio-net-pci, tap={}", net_dev.config.host_dev_name);
@@ -253,17 +253,16 @@ impl OpenVmmInner {
             });
         }
 
-        // Set up hvsocket for agent communication
-        let hvsock_path = get_hvsock_path(&self.id);
-        info!(sl!(), "openvmm: hvsock path: {}", hvsock_path);
-        // Remove stale socket file if it exists
-        let _ = std::fs::remove_file(&hvsock_path);
-        // NOTE: We pass the hvsock_path to VmmInstance::launch() which binds the
-        // listener inside the worker host thread. This avoids FD transfer issues
-        // when passing UnixListener through mesh channels across async runtimes.
+        // Set up virtio-vsock for agent communication.
+        // The vsock listener will be bound inside the worker thread to avoid
+        // FD transfer issues with mesh channels across async runtimes.
+        let vsock_uds_path = format!("{}/vsock.sock", self.run_dir);
+        info!(sl!(), "openvmm: virtio-vsock uds path: {}", vsock_uds_path);
+        let _ = std::fs::remove_file(&vsock_uds_path);
+
         let vmbus_config = VmbusConfig {
             vsock_listener: None,
-            vsock_path: Some(hvsock_path.clone()),
+            vsock_path: None,
             ..Default::default()
         };
 
@@ -322,7 +321,7 @@ impl OpenVmmInner {
         // Launch the VM worker
         info!(sl!(), "openvmm: launching VM worker");
         self.vmm_instance
-            .launch(vm_config, Some(hvsock_path), rootfs_disk_path, Some(self.run_dir.clone()))
+            .launch(vm_config, vsock_uds_path, rootfs_disk_path, Some(self.run_dir.clone()))
             .await
             .context("failed to launch VM worker")?;
 
@@ -373,12 +372,11 @@ impl OpenVmmInner {
     }
 
     pub(crate) async fn get_agent_socket(&self) -> Result<String> {
-        const HYBRID_VSOCK_SCHEME: &str = "hvsock";
-        Ok(format!(
-            "{}://{}",
-            HYBRID_VSOCK_SCHEME,
-            get_hvsock_path(&self.id),
-        ))
+        // With virtio-vsock the agent listens on vsock CID 3 (default guest),
+        // port 1024. The runtime connects via the Unix socket that OpenVMM's
+        // virtio-vsock device exposes on the host.
+        let vsock_uds_path = format!("{}/vsock.sock", self.run_dir);
+        Ok(format!("hvsock://{}", vsock_uds_path))
     }
 
     pub(crate) async fn disconnect(&mut self) {
