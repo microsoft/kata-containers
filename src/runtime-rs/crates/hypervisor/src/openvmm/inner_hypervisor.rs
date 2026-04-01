@@ -75,34 +75,28 @@ impl OpenVmmInner {
             initrd: None,
             cmdline,
             custom_dsdt: None,
-            enable_serial: true,
+            enable_serial: false,
             boot_mode: openvmm_defs::config::LinuxDirectBootMode::Acpi,
         };
 
-        // Set up serial console (COM1) piped to stderr/journalctl.
-        // Create a Unix socket pair — one end goes to the VM's serial device,
-        // the other end is read in a thread that logs to slog (→ journalctl).
-        let (serial_vm_std, serial_host) = std::os::unix::net::UnixStream::pair()
-            .context("failed to create serial socket pair")?;
-        // Convert std UnixStream to ovmm_unix_socket::UnixStream via OwnedFd
-        let serial_vm = ovmm_unix_socket::UnixStream::from(
-            std::os::fd::OwnedFd::from(serial_vm_std)
+        // Set up virtio-console for guest output, piped to journalctl.
+        // This is much faster than serial (2.5s vs 9.5s boot time).
+        // Create a Unix socket pair — one end goes to the virtio-console
+        // device, the other is read in a thread that logs to slog.
+        let (console_vm_std, console_host) = std::os::unix::net::UnixStream::pair()
+            .context("failed to create console socket pair")?;
+        let console_vm = ovmm_unix_socket::UnixStream::from(
+            std::os::fd::OwnedFd::from(console_vm_std)
         );
-        let serial_resource = ovmm_serial_socket::net::OpenSocketSerialConfig::from(serial_vm)
+        let console_resource = ovmm_serial_socket::net::OpenSocketSerialConfig::from(console_vm)
             .into_resource();
-        let serial_ports: [Option<vm_resource::Resource<vm_resource::kind::SerialBackendHandle>>; 4] = [
-            Some(serial_resource),
-            None,
-            None,
-            None,
-        ];
 
-        // Spawn a thread to read guest serial output and log it.
+        // Spawn a thread to read guest console output and log it.
         std::thread::Builder::new()
-            .name("openvmm-serial-reader".to_string())
+            .name("openvmm-console-reader".to_string())
             .spawn(move || {
                 use std::io::{BufRead, BufReader};
-                let reader = BufReader::new(serial_host);
+                let reader = BufReader::new(console_host);
                 for line in reader.lines() {
                     match line {
                         Ok(line) => {
@@ -112,7 +106,12 @@ impl OpenVmmInner {
                     }
                 }
             })
-            .context("failed to spawn serial reader thread")?;
+            .context("failed to spawn console reader thread")?;
+
+        // No serial ports — COM1 disabled for performance.
+        let serial_ports: [Option<vm_resource::Resource<vm_resource::kind::SerialBackendHandle>>; 4] = [
+            None, None, None, None,
+        ];
 
         // Build chipset via VmManifestBuilder
         let chipset = vm_manifest_builder::VmManifestBuilder::new(
@@ -259,6 +258,22 @@ impl OpenVmmInner {
         let vsock_uds_path = format!("{}/vsock.sock", self.run_dir);
         info!(sl!(), "openvmm: virtio-vsock uds path: {}", vsock_uds_path);
         let _ = std::fs::remove_file(&vsock_uds_path);
+
+        // Add virtio-console PCIe device for guest console output.
+        pcie_devices.push(PcieDeviceConfig {
+            port_name: "rp4".to_string(),
+            resource: virtio_resources::VirtioPciDeviceHandle(
+                virtio_resources::console::VirtioConsoleHandle {
+                    backend: console_resource,
+                }
+                .into_resource(),
+            )
+            .into_resource(),
+        });
+        pcie_root_complexes[0].ports.push(PcieRootPortConfig {
+            name: "rp4".to_string(),
+            hotplug: false,
+        });
 
         let vmbus_config = VmbusConfig {
             vsock_listener: None,
