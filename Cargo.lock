@@ -4115,6 +4115,7 @@ dependencies = [
  "hyper 0.14.32",
  "hyperlocal",
  "hypervisor",
+ "hypervisor_resources",
  "kata-sys-util",
  "kata-types",
  "lazy_static",
