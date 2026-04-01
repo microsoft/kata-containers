@@ -452,10 +452,18 @@ impl RuntimeHandlerManager {
         }
     }
 
+    fn check_dir(tag: u32, dir_path: &str) {
+        let p = Path::new(dir_path);
+        let is_dir = p.is_dir();
+        info!(sl!(), "CreateContainer: {tag}: path = {:?}, is_dir = {is_dir}", &p);
+    }
+
     #[instrument(parent = &*(ROOTSPAN))]
     pub async fn handler_task_message(&self, req: TaskRequest) -> Result<TaskResponse> {
         if let TaskRequest::CreateContainer(container_config) = req {
             // rootfs /run/kata-containers/shared/sandboxes/123456789/8eed8f684f8e223ace7c7349526e92e2596a9789dc42cb071b3ad1b6fa44dc3a/rw/passthrough/8eed8f684f8e223ace7c7349526e92e2596a9789dc42cb071b3ad1b6fa44dc3a/rootfs
+            
+            // Self::check_dir(1, "/run/kata-containers/shared/sandboxes");
 
             // get oci spec
             let bundler_path = format!(
@@ -479,11 +487,15 @@ impl RuntimeHandlerManager {
                 .await
                 .context("try init runtime instance")?;
             info!(sl!(), "CreateContainer: after task_init_runtime_instance, spec = {:?}", &spec);
+            
+            // Self::check_dir(2, "/run/kata-containers/shared/sandboxes");
 
             let instance = self
                 .get_runtime_instance()
                 .await
                 .context("get runtime instance")?;
+
+            Self::check_dir(3, "/run/kata-containers/shared/sandboxes");
 
             info!(sl!(), "CreateContainer: calling instance start");
             instance
@@ -491,6 +503,19 @@ impl RuntimeHandlerManager {
                 .start()
                 .await
                 .context("start sandbox in task handler")?;
+
+            let dir1 = "/run/kata-containers/shared/sandboxes/123456789".to_string();
+            // Self::check_dir(4, &dir1);
+
+            let container_id = container_config.container_id.to_string();
+            let dir2 = dir1.clone() + "/" + &container_id;
+            Self::check_dir(4, &dir2);
+
+            let dir3 = dir2.clone() + "/rw/passthrough";
+            Self::check_dir(4, &dir3);
+
+            let dir4 = dir3.clone() + "/" + &container_id + "/rootfs";
+            Self::check_dir(4, &dir4);
 
             let bundle = container_config.bundle.clone();
             let container_id = container_config.container_id.clone();
@@ -502,6 +527,10 @@ impl RuntimeHandlerManager {
                 .await
                 .context("create container")?;
 
+            // Self::check_dir(5, "/run/kata-containers/shared/sandboxes");
+            Self::check_dir(5, &dir3);
+            Self::check_dir(5, &dir4);
+
             let container_manager = instance.container_manager.clone();
             let process_id =
                 ContainerProcess::new(&container_id, "").context("create container process")?;
@@ -509,6 +538,8 @@ impl RuntimeHandlerManager {
                 "CreateContainer: starting wait_process: shim_pid = {:?}, process_id = {process_id}",
                 &shim_pid
             );
+
+            // Self::check_dir(6, &dir4);
 
             let pid = shim_pid.pid;
             tokio::spawn(async move {
@@ -533,6 +564,8 @@ impl RuntimeHandlerManager {
                 .send(msg)
                 .await
                 .context("send task create event")?;
+            
+            // Self::check_dir(7, &dir4);
 
             info!(sl!(), "CreateContainer: returning Ok");
             Ok(TaskResponse::CreateContainer(shim_pid))

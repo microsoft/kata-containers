@@ -96,6 +96,7 @@ impl NydusRootfs {
                         is_rafs: false,
                     },
                     &mut log_file,
+                    "/foo/bar"
                     )
                     .await
                     .context("share nydus rootfs")?;

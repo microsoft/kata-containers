@@ -17,6 +17,7 @@ use hypervisor::{device::device_manager::DeviceManager, Hypervisor};
 use virtual_volume::{is_kata_virtual_volume, VirtualVolume};
 
 use std::{collections::HashMap, sync::Arc, vec::Vec};
+use std::path::Path;
 use tokio::sync::RwLock;
 
 use self::{block_rootfs::is_block_rootfs, nydus_rootfs::NYDUS_ROOTFS_TYPE};
@@ -51,6 +52,12 @@ impl Default for RootFsResource {
     }
 }
 
+fn check_dir(tag: u32, dir_path: &str) {
+    let p = Path::new(dir_path);
+    let is_dir = p.is_dir();
+    info!(sl!(), "handler_rootfs: {tag}: path = {:?}, is_dir = {is_dir}", &p);
+}
+
 impl RootFsResource {
     pub fn new() -> Self {
         Self {
@@ -71,9 +78,23 @@ impl RootFsResource {
         rootfs_mounts: &[Mount],
         annotations: &HashMap<String, String>,
     ) -> Result<Arc<dyn Rootfs>> {
+        let dir1 = "/run/kata-containers/shared/sandboxes/123456789".to_string();
+
+        let container_id = sid.to_string();
+        let dir2 = dir1.clone() + "/" + &container_id;
+
+        let dir3 = dir2.clone() + "/rw/passthrough";
+        //check_dir(1, &dir3);
+
+        let dir4 = dir3.clone() + "/" + &container_id + "/rootfs";
+        //check_dir(1, &dir4);
+        
         match rootfs_mounts {
             // if rootfs_mounts is empty
             [] => {
+                check_dir(2, &dir3);
+                check_dir(2, &dir4);
+
                 if let Some(share_fs) = share_fs {
                     // handle share fs rootfs
                     Ok(Arc::new(
@@ -82,6 +103,7 @@ impl RootFsResource {
                             cid,
                             root.path().display().to_string().as_str(),
                             None,
+                            sid,
                         )
                         .await
                         .context("new share fs rootfs")?,
@@ -91,6 +113,9 @@ impl RootFsResource {
                 }
             }
             mounts_vec if is_single_layer_rootfs(mounts_vec) => {
+                //check_dir(3, &dir3);
+                //check_dir(3, &dir4);
+
                 // Safe as single_layer_rootfs must have one layer
                 let layer = &mounts_vec[0];
                 let mut inner = self.inner.write().await;
@@ -113,6 +138,10 @@ impl RootFsResource {
                             .await
                             .context("new block rootfs")?,
                     );
+
+                    //check_dir(4, &dir3);
+                    //check_dir(4, &dir4);
+
                     Ok(block_rootfs)
                 } else if let Some(share_fs) = share_fs {
                     // handle nydus rootfs
@@ -132,22 +161,34 @@ impl RootFsResource {
                     }
                     // handle sharefs rootfs
                     else {
+                        check_dir(5, &dir3);
+                        check_dir(5, &dir4);
+
                         Arc::new(
                             share_fs_rootfs::ShareFsRootfs::new(
                                 share_fs,
                                 cid,
                                 bundle_path,
                                 Some(layer),
+                                sid,
                             )
                             .await
                             .context("new share fs rootfs")?,
                         )
                     };
+
+                    check_dir(6, &dir3);
+                    check_dir(6, &dir4);
+                    
                     Ok(share_rootfs)
                 } else {
                     Err(anyhow!("unsupported rootfs {:?}", &layer))
                 }?;
                 inner.rootfs.push(rootfs.clone());
+
+                check_dir(7, &dir3);
+                check_dir(7, &dir4);
+
                 Ok(rootfs)
             }
             _ => Err(anyhow!(

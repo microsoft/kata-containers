@@ -5,6 +5,7 @@
 //
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use agent::Agent;
@@ -104,7 +105,25 @@ impl Container {
         })
     }
 
+    fn check_dir(tag: u32, dir_path: &str) {
+        let p = Path::new(dir_path);
+        let is_dir = p.is_dir();
+        info!(sl!(), "Container: {tag}: path = {:?}, is_dir = {is_dir}", &p);
+    }
+
     pub async fn create(&self, mut spec: oci::Spec) -> Result<()> {
+        let dir1 = "/run/kata-containers/shared/sandboxes/123456789".to_string();
+
+        let container_id = self.config.container_id.clone();
+        let dir2 = dir1.clone() + "/" + &container_id;
+        // check_dir(1, &dir2);
+
+        let dir3 = dir2.clone() + "/rw/passthrough";
+        //Self::check_dir(1, &dir3);
+
+        let dir4 = dir3.clone() + "/" + &container_id + "/rootfs";
+        //Self::check_dir(1, &dir4);
+        
         // process oci spec
         let mut inner = self.inner.write().await;
         let toml_config = self.resource_manager.config().await;
@@ -137,6 +156,9 @@ impl Container {
         );
         spec.set_annotations(Some(updated_annotations.clone()));
 
+        //Self::check_dir(2, &dir3);
+        //Self::check_dir(2, &dir4);
+
         amend_spec(
             &mut spec,
             toml_config.runtime.disable_guest_seccomp,
@@ -154,6 +176,10 @@ impl Container {
 
         // handler rootfs
         info!(sl!(), "container::create: calling handler_rootfs, root = {:?}", &root);
+
+        Self::check_dir(3, &dir3);
+        Self::check_dir(3, &dir4);
+
         let rootfs = self
             .resource_manager
             .handler_rootfs(
@@ -166,6 +192,9 @@ impl Container {
             .await
             .context("handler rootfs")?;
 
+        Self::check_dir(4, &dir3);
+        Self::check_dir(4, &dir4);
+
         // update rootfs
         let guest_rootfs_path = rootfs
                 .get_guest_rootfs_path()
@@ -175,6 +204,10 @@ impl Container {
         info!(sl!(), "container::create: calling set_path, guest_rootfs_path = {:?}, root = {:?}", 
             &guest_rootfs_path, &root);
         root.set_path(guest_rootfs_path.into());
+
+        //Self::check_dir(5, &dir3);
+        //Self::check_dir(5, &dir4);
+
             /*
         root.set_path(
             rootfs
@@ -191,6 +224,9 @@ impl Container {
         }
         info!(sl!(), "container::create: storages = {:?}", &storages);
 
+        //Self::check_dir(6, &dir3);
+        //Self::check_dir(6, &dir4);
+
         inner.rootfs.push(rootfs);
         // info!(sl!(), "container::create: inner.rootfs = {:?}", &inner.rootfs);
 
@@ -201,6 +237,9 @@ impl Container {
             .await
             .context("handler volumes")?;
         // info!(sl!(), "container::create: volumes = {:?}", &volumes);
+
+        //Self::check_dir(7, &dir3);
+        //Self::check_dir(7, &dir4);
 
         let mut oci_mounts = vec![];
         for v in volumes {
@@ -216,6 +255,9 @@ impl Container {
             inner.volumes.push(v);
         }
 
+        //Self::check_dir(8, &dir3);
+        //Self::check_dir(8, &dir4);
+
         info!(sl!(), "container::create: oci_mounts = {:?}", &oci_mounts);
         spec.set_mounts(Some(oci_mounts));
 
@@ -230,6 +272,9 @@ impl Container {
             .await?;
         // info!(sl!(), "container::create: container_devices = {:?}", &container_devices);
 
+        //Self::check_dir(9, &dir3);
+        //Self::check_dir(9, &dir4);
+
         let devices_agent = annotate_container_devices(&mut spec, container_devices)
             .context("annotate container devices failed")?;
 
@@ -243,6 +288,9 @@ impl Container {
             )
             .await?;
         info!(sl!(), "container::create: resources = {:?}", &resources);
+
+        //Self::check_dir(10, &dir3);
+        //Self::check_dir(10, &dir4);
 
         if let Some(linux) = &mut spec.linux_mut() {
             linux.set_resources(resources);
@@ -270,6 +318,9 @@ impl Container {
         }
         // info!(sl!(), "container::create: shared_mounts = {:?}", &shared_mounts);
 
+        //Self::check_dir(11, &dir3);
+        //Self::check_dir(11, &dir4);
+
         // In passfd io mode, we create vsock connections for io in advance
         // and pass port info to agent in `CreateContainerRequest`.
         // These vsock connections will be used as stdin/stdout/stderr of the container process.
@@ -287,6 +338,9 @@ impl Container {
             spec.clone(),
             &self.sandbox_id,
         );
+
+        //Self::check_dir(12, &dir3);
+        //Self::check_dir(12, &dir4);
 
         // create container
         let r = agent::CreateContainerRequest {
@@ -316,12 +370,22 @@ impl Container {
         };
         info!(sl!(), "Container::create: sending request, sandbox_id = {}", r.sandbox_id);
 
+        //Self::check_dir(13, &dir3);
+        //Self::check_dir(13, &dir4);
+
         info!(sl!(), "container::create: calling create_container");
         self.agent
             .create_container(r)
             .await
             .context("agent create container")?;
+
+        //Self::check_dir(14, &dir3);
+        //Self::check_dir(14, &dir4);
+
         self.resource_manager.dump().await;
+
+        //Self::check_dir(15, &dir3);
+        //Self::check_dir(15, &dir4);
 
         info!(sl!(), "container::create: success");
         Ok(())

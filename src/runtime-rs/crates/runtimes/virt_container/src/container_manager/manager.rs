@@ -9,6 +9,8 @@ use async_trait::async_trait;
 
 use std::{collections::HashMap, sync::Arc};
 
+use std::path::Path;
+
 use agent::Agent;
 use common::{
     error::Error,
@@ -77,11 +79,30 @@ impl VirtContainerManager {
     }
 }
 
+fn check_dir(tag: u32, dir_path: &str) {
+    let p = Path::new(dir_path);
+    let is_dir = p.is_dir();
+    info!(sl!(), "VirtContainerManager: {tag}: path = {:?}, is_dir = {is_dir}", &p);
+}
+
 #[async_trait]
 impl ContainerManager for VirtContainerManager {
     #[instrument]
     async fn create_container(&self, config: ContainerConfig, spec: oci::Spec, sandbox_id: &str) -> Result<PID> {
         info!(sl!(), "VirtContainerManager: sandbox_id = {sandbox_id}");
+
+        let dir1 = "/run/kata-containers/shared/sandboxes/123456789".to_string();
+
+        let container_id = sandbox_id.to_string();
+        let dir2 = dir1.clone() + "/" + &container_id;
+        // check_dir(1, &dir2);
+
+        let dir3 = dir2.clone() + "/rw/passthrough";
+        //check_dir(1, &dir3);
+
+        let dir4 = dir3.clone() + "/" + &container_id + "/rootfs";
+        //check_dir(1, &dir4);
+
         let mut container = Container::new(
             self.pid,
             config.clone(),
@@ -93,6 +114,9 @@ impl ContainerManager for VirtContainerManager {
         )
         .await
         .context("new container")?;
+
+        //check_dir(2, &dir3);
+        //check_dir(2, &dir4);
 
         // CreateContainer Hooks:
         // * should be run in vmm namespace (hook path in runtime namespace)
@@ -115,6 +139,9 @@ impl ContainerManager for VirtContainerManager {
             annotations: spec.annotations().clone().unwrap_or_default(),
         };
 
+        //check_dir(3, &dir3);
+        //check_dir(3, &dir4);
+
         // new scope, CreateContainer hooks in which will execute in a new network namespace
         {
             let _netns_guard = NetnsGuard::new(&vmm_netns_path).context("vmm netns guard")?;
@@ -125,7 +152,14 @@ impl ContainerManager for VirtContainerManager {
             }
         }
 
+        //check_dir(4, &dir3);
+        //check_dir(4, &dir4);
+
         let mut containers = self.containers.write().await;
+
+        check_dir(5, &dir3);
+        check_dir(5, &dir4);
+
         if let Err(e) = container.create(spec).await {
             if let Err(inner_e) = container.cleanup().await {
                 warn!(sl!(), "failed to cleanup container {:?}", inner_e);
@@ -134,7 +168,14 @@ impl ContainerManager for VirtContainerManager {
             return Err(e);
         }
 
+        check_dir(6, &dir3);
+        check_dir(6, &dir4);
+
         containers.insert(container.container_id.to_string(), container);
+
+        //check_dir(7, &dir3);
+        //check_dir(7, &dir4);
+        
         Ok(PID { pid: self.pid })
     }
 

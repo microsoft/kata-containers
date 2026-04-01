@@ -153,6 +153,7 @@ pub trait ShareFsMount: Send + Sync {
         &self,
         config: &ShareFsRootfsConfig,
         log_file: &mut tokio::fs::File,
+        log_rootfs_dir: &str,
     ) -> Result<ShareFsMountResult>;
 
     async fn share_volume(&self, config: &ShareFsVolumeConfig) -> Result<ShareFsMountResult>;
