@@ -419,6 +419,8 @@ impl ShareFsVolume {
         agent: Arc<dyn Agent>,
         volume_manager: Arc<VolumeManager>,
     ) -> Result<Self> {
+        info!(sl!(), "ShareFsVolume::new: starting");
+
         // The file_name is in the format of "sandbox-{uuid}-{file_name}"
         let source_path = get_mount_path(m.source());
         let file_name = Path::new(&source_path)
@@ -552,8 +554,7 @@ impl ShareFsVolume {
                     volume.mounts.push(oci_mount);
                 } else {
                     // Not mounted ever
-                    let mount_result = share_fs_mount
-                        .share_volume(&ShareFsVolumeConfig {
+                    let volume_config = ShareFsVolumeConfig {
                             // The scope of shared volume is sandbox
                             cid: String::from(""),
                             source: source_path.clone(),
@@ -562,14 +563,22 @@ impl ShareFsVolume {
                             mount_options: get_mount_options(m.options()).clone(),
                             mount: m.clone(),
                             is_rafs: false,
-                        })
+                        };
+                    info!(sl!(), "ShareFsVolume: volume_config = {:?}", volume_config);
+
+                    let mount_result = share_fs_mount
+                        .share_volume(&volume_config)
                         .await
                         .context("mount shared volume")?;
+                    info!(sl!(), "ShareFsVolume: mount_result = {:?}", mount_result);
+
                     let mounted_info = MountedInfo::new(
                         PathBuf::from_str(&mount_result.guest_path)
                             .context("convert guest path")?,
                         readonly,
                     );
+                    info!(sl!(), "ShareFsVolume: mounted_info = {:?}", mounted_info);
+
                     mounted_info_set.insert(source_path.clone(), mounted_info);
                     // set storages for the volume
                     volume.storages = mount_result.storages;
@@ -582,6 +591,12 @@ impl ShareFsVolume {
                     oci_mount.set_options(m.options().clone());
 
                     volume.mounts.push(oci_mount);
+                    info!(sl!(), "ShareFsVolume: volume: mounts = {:?} , storages = {:?} , source_path = {:?} , container_id = {:?}", 
+                        volume.mounts,
+                        volume.storages,
+                        volume.source_path,
+                        volume.container_id,
+                    );
                 }
             }
         }

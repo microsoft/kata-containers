@@ -15,12 +15,21 @@ use hypervisor::device::device_manager::DeviceManager;
 use kata_sys_util::mount::{umount_timeout, Mounter};
 use kata_types::mount::Mount;
 use oci_spec::runtime as oci;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 
 pub(crate) struct ShareFsRootfs {
     guest_path: String,
     share_fs: Arc<dyn ShareFs>,
     config: ShareFsRootfsConfig,
+
+    // log_file: tokio::fs::File,
+}
+
+async fn log_to_file(log_file: &mut tokio::fs::File, log_entry: &str) {
+    let entry = format!("{log_entry}\n\n");
+    let _ = log_file.write_all(entry.as_bytes()).await;
+    let _ = log_file.flush().await;
 }
 
 impl ShareFsRootfs {
@@ -30,14 +39,35 @@ impl ShareFsRootfs {
         bundle_path: &str,
         rootfs: Option<&Mount>,
     ) -> Result<Self> {
+        let mut log_file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .truncate(false)
+            .create(true)
+            .open("/tmp/dmihai.txt")
+            .await?;
+
         let bundle_rootfs = if let Some(rootfs) = rootfs {
+            log_to_file(
+                &mut log_file,
+                &format!("ShareFsRootfs: rootfs = {:?}", &rootfs)
+            ).await;
+
             let bundle_rootfs = format!("{bundle_path}/{ROOTFS}");
+            log_to_file(
+                &mut log_file,
+                &format!("ShareFsRootfs: mounting rootfs from {:?} to {}", &rootfs, &bundle_rootfs)
+            ).await;
+
             rootfs.mount(&bundle_rootfs).context(format!(
                 "mount rootfs from {:?} to {}",
                 &rootfs, &bundle_rootfs
             ))?;
             bundle_rootfs
         } else {
+            log_to_file(
+                &mut log_file,
+                &format!("ShareFsRootfs: keeping input bundle_path = {}", &bundle_path)
+            ).await;
             bundle_path.to_string()
         };
 
@@ -49,17 +79,25 @@ impl ShareFsRootfs {
             readonly: false,
             is_rafs: false,
         };
+        log_to_file(
+            &mut log_file,
+            &format!("ShareFsRootfs: config = {:?}", &config)
+        ).await;
 
         let mount_result = share_fs_mount
-            .share_rootfs(&config)
+            .share_rootfs(&config, &mut log_file)
             .await
             .context("share rootfs")?;
 
-        Ok(ShareFsRootfs {
+        let r = ShareFsRootfs {
             guest_path: mount_result.guest_path,
             share_fs: Arc::clone(share_fs),
             config,
-        })
+            // log_file,
+        };
+        //  log_to_file(&mut log_file, format!("ShareFsRootfs: returning ShareFsRootfs = {:?}", &r));
+
+        Ok(r)
     }
 }
 

@@ -46,6 +46,13 @@ impl NydusRootfs {
         cid: &str,
         rootfs: &Mount,
     ) -> Result<Self> {
+        let mut log_file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .truncate(false)
+            .create(true)
+            .open("/tmp/dmihai.txt")
+            .await?;
+
         let prefetch_list_path =
             get_nydus_prefetch_files(h.hypervisor_config().await.prefetch_list_path).await;
 
@@ -87,7 +94,9 @@ impl NydusRootfs {
                         target: SNAPSHOT_DIR.to_string(),
                         readonly: false,
                         is_rafs: false,
-                    })
+                    },
+                    &mut log_file,
+                    )
                     .await
                     .context("share nydus rootfs")?;
                 let mut options: Vec<String> = Vec::new();

@@ -43,10 +43,14 @@ pub(crate) async fn prepare_virtiofs(
 ) -> Result<()> {
     // let host_ro_dest = utils::get_host_ro_shared_path(id);
     let host_ro_dest = utils::get_host_ro_shared_path_uvm(id, uvm_id);
+    info!(sl!(), "prepare_virtiofs: host_ro_dest = {:?}", host_ro_dest);
+
     utils::ensure_dir_exist(&host_ro_dest)?;
 
     // let host_rw_dest = utils::get_host_rw_shared_path(id);
     let host_rw_dest = utils::get_host_rw_shared_path_uvm(id, uvm_id);
+    info!(sl!(), "prepare_virtiofs: host_rw_dest = {:?}", host_rw_dest);
+
     utils::ensure_dir_exist(&host_rw_dest)?;
 
     mount::bind_mount_unchecked(&host_rw_dest, &host_ro_dest, true, MsFlags::MS_SLAVE)
@@ -84,6 +88,7 @@ pub(crate) async fn setup_inline_virtiofs(d: &RwLock<DeviceManager>, id: &str) -
 
     // let host_ro_shared_path = utils::get_host_ro_shared_path(id);
     let host_ro_shared_path = utils::get_host_ro_shared_path_uvm(id, "");
+    info!(sl!(), "setup_inline_virtiofs: host_ro_shared_path = {:?}", host_ro_shared_path);
 
     let source = host_ro_shared_path
         .join(PASSTHROUGH_FS_DIR)
