@@ -152,7 +152,7 @@ impl ShareFsMount for VirtiofsShareMount {
                 .join(WATCHABLE_PATH_NAME);
             log_to_file(
                 &mut log_file,
-                &format!("share_volume: watchable_host_path = {:?}", &watchable_host_path)
+                &format!("share_volume: creating watchable_host_path = {:?}", &watchable_host_path)
             ).await;
 
             mkdir_with_permissions(watchable_host_path.clone(), 0o750).context(format!(

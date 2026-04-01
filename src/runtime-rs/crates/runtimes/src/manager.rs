@@ -455,6 +455,8 @@ impl RuntimeHandlerManager {
     #[instrument(parent = &*(ROOTSPAN))]
     pub async fn handler_task_message(&self, req: TaskRequest) -> Result<TaskResponse> {
         if let TaskRequest::CreateContainer(container_config) = req {
+            // rootfs /run/kata-containers/shared/sandboxes/123456789/8eed8f684f8e223ace7c7349526e92e2596a9789dc42cb071b3ad1b6fa44dc3a/rw/passthrough/8eed8f684f8e223ace7c7349526e92e2596a9789dc42cb071b3ad1b6fa44dc3a/rootfs
+
             // get oci spec
             let bundler_path = format!(
                 "{}/{}",
@@ -462,6 +464,8 @@ impl RuntimeHandlerManager {
                 spec::OCI_SPEC_CONFIG_FILE_NAME
             );
             let mut spec = oci::Spec::load(&bundler_path).context("load spec")?;
+            info!(sl!(), "CreateContainer: bundler_path = {bundler_path}, spec = {:?}", &spec);
+
             let state = spec::State {
                 version: spec.version().clone(),
                 id: container_config.container_id.to_string(),
@@ -474,11 +478,14 @@ impl RuntimeHandlerManager {
             self.task_init_runtime_instance(&mut spec, &state, &container_config.options)
                 .await
                 .context("try init runtime instance")?;
+            info!(sl!(), "CreateContainer: after task_init_runtime_instance, spec = {:?}", &spec);
+
             let instance = self
                 .get_runtime_instance()
                 .await
                 .context("get runtime instance")?;
 
+            info!(sl!(), "CreateContainer: calling instance start");
             instance
                 .sandbox
                 .start()
@@ -488,7 +495,7 @@ impl RuntimeHandlerManager {
             let bundle = container_config.bundle.clone();
             let container_id = container_config.container_id.clone();
             let sandbox_id = instance.sandbox.get_sandbox_id().await;
-            info!(sl!(), "handler_task_message: sandbox_id = {sandbox_id}");
+            info!(sl!(), "CreateContainer: calling create_container, sandbox_id = {sandbox_id}");
             let shim_pid = instance
                 .container_manager
                 .create_container(container_config, spec, &sandbox_id)
@@ -498,6 +505,11 @@ impl RuntimeHandlerManager {
             let container_manager = instance.container_manager.clone();
             let process_id =
                 ContainerProcess::new(&container_id, "").context("create container process")?;
+            info!(sl!(),
+                "CreateContainer: starting wait_process: shim_pid = {:?}, process_id = {process_id}",
+                &shim_pid
+            );
+
             let pid = shim_pid.pid;
             tokio::spawn(async move {
                 let result = instance
@@ -522,6 +534,7 @@ impl RuntimeHandlerManager {
                 .await
                 .context("send task create event")?;
 
+            info!(sl!(), "CreateContainer: returning Ok");
             Ok(TaskResponse::CreateContainer(shim_pid))
         } else {
             self.handler_task_request(req)

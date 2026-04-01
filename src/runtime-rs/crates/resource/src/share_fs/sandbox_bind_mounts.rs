@@ -95,6 +95,7 @@ impl SandboxBindMounts {
             }
 
             // mount_dest: /run/kata-containers/shared/sandboxes/<sid>/rw/passthrough/sandbox-mounts/dirX
+            info!(sl!(), "setup_sandbox_bind_mounts: creating host_mounts_path = {:?}", &self.host_mounts_path);
             let mount_dest = self.host_mounts_path.clone().join(mnt_name.as_str());
             mkdir_with_permissions(self.host_mounts_path.clone().to_path_buf(), 0o750).context(
                 format!(

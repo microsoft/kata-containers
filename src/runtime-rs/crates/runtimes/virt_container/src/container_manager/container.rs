@@ -144,6 +144,7 @@ impl Container {
             toml_config.runtime.disable_guest_empty_dir,
         )
         .context("amend spec")?;
+        info!(sl!(), "container::create: ammended spec = {:?}", &spec);
 
         // get mutable root from oci spec
         let root = match spec.root_mut() {
@@ -152,6 +153,7 @@ impl Container {
         };
 
         // handler rootfs
+        info!(sl!(), "container::create: calling handler_rootfs, root = {:?}", &root);
         let rootfs = self
             .resource_manager
             .handler_rootfs(
@@ -165,6 +167,15 @@ impl Container {
             .context("handler rootfs")?;
 
         // update rootfs
+        let guest_rootfs_path = rootfs
+                .get_guest_rootfs_path()
+                .await
+                .context("get guest rootfs path")?;
+
+        info!(sl!(), "container::create: calling set_path, guest_rootfs_path = {:?}, root = {:?}", 
+            &guest_rootfs_path, &root);
+        root.set_path(guest_rootfs_path.into());
+            /*
         root.set_path(
             rootfs
                 .get_guest_rootfs_path()
@@ -172,12 +183,16 @@ impl Container {
                 .context("get guest rootfs path")?
                 .into(),
         );
+        */
 
         let mut storages = vec![];
         if let Some(storage) = rootfs.get_storage().await {
             storages.push(storage);
         }
+        info!(sl!(), "container::create: storages = {:?}", &storages);
+
         inner.rootfs.push(rootfs);
+        // info!(sl!(), "container::create: inner.rootfs = {:?}", &inner.rootfs);
 
         // handler volumes
         let volumes = self
@@ -185,6 +200,8 @@ impl Container {
             .handler_volumes(&config.container_id, &spec)
             .await
             .context("handler volumes")?;
+        // info!(sl!(), "container::create: volumes = {:?}", &volumes);
+
         let mut oci_mounts = vec![];
         for v in volumes {
             let mut volume_mounts = v.get_volume_mount().context("get volume mount")?;
@@ -198,6 +215,8 @@ impl Container {
             }
             inner.volumes.push(v);
         }
+
+        info!(sl!(), "container::create: oci_mounts = {:?}", &oci_mounts);
         spec.set_mounts(Some(oci_mounts));
 
         let linux = spec
@@ -209,6 +228,8 @@ impl Container {
             .resource_manager
             .handler_devices(&config.container_id, linux)
             .await?;
+        // info!(sl!(), "container::create: container_devices = {:?}", &container_devices);
+
         let devices_agent = annotate_container_devices(&mut spec, container_devices)
             .context("annotate container devices failed")?;
 
@@ -221,6 +242,8 @@ impl Container {
                 ResourceUpdateOp::Add,
             )
             .await?;
+        info!(sl!(), "container::create: resources = {:?}", &resources);
+
         if let Some(linux) = &mut spec.linux_mut() {
             linux.set_resources(resources);
 
@@ -245,6 +268,7 @@ impl Container {
                 shared_mounts.push(m);
             }
         }
+        // info!(sl!(), "container::create: shared_mounts = {:?}", &shared_mounts);
 
         // In passfd io mode, we create vsock connections for io in advance
         // and pass port info to agent in `CreateContainerRequest`.
@@ -259,7 +283,7 @@ impl Container {
 
         info!(
             sl!(),
-            "OCI Spec {:?} within CreateContainerRequest, sandbox_id = {} .",
+            "container::create: OCI Spec {:?} within CreateContainerRequest, sandbox_id = {} .",
             spec.clone(),
             &self.sandbox_id,
         );
@@ -292,11 +316,14 @@ impl Container {
         };
         info!(sl!(), "Container::create: sending request, sandbox_id = {}", r.sandbox_id);
 
+        info!(sl!(), "container::create: calling create_container");
         self.agent
             .create_container(r)
             .await
             .context("agent create container")?;
         self.resource_manager.dump().await;
+
+        info!(sl!(), "container::create: success");
         Ok(())
     }
 
