@@ -24,7 +24,9 @@ use hypervisor::{device::device_manager::DeviceManager, utils::chown_to_parent, 
 use kata_types::{config::hypervisor::SharedFsInfo, rootless::is_rootless};
 
 use super::{
-    share_virtio_fs::generate_sock_path, utils::ensure_dir_exist, utils::get_host_ro_shared_path,
+    share_virtio_fs::generate_sock_path,
+    utils::ensure_dir_exist,
+    // utils::get_host_ro_shared_path,
     virtio_fs_share_mount::VirtiofsShareMount, MountedInfo, ShareFs, ShareFsMount,
 };
 use super::{

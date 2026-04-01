@@ -68,18 +68,12 @@ impl ShareFsMount for VirtiofsShareMount {
         config: &ShareFsRootfsConfig,
         log_file: &mut tokio::fs::File,
     ) -> Result<ShareFsMountResult> {
-        /*
-        let mut log_file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .truncate(false)
-            .create(true)
-            .open("/tmp/dmihai.txt")
-            .await?;
-        */
-
         log_to_file(
             log_file,
-            &format!("share_rootfs: config = {:?}", &config)
+            &format!(
+                "share_rootfs: config = {:?} , uvm_id = {}", 
+                &config,
+                &self.uvm_id)
         ).await;
 
         // TODO: select virtiofs or support nydus
@@ -91,6 +85,7 @@ impl ShareFsMount for VirtiofsShareMount {
             config.readonly,
             false,
             config.is_rafs,
+            &self.uvm_id
         )
         .context("share to guest")?;
 
@@ -133,6 +128,7 @@ impl ShareFsMount for VirtiofsShareMount {
             config.readonly,
             true,
             config.is_rafs,
+            &self.uvm_id
         )
         .context("share to guest")?;
 
@@ -218,11 +214,28 @@ impl ShareFsMount for VirtiofsShareMount {
 
     async fn upgrade_to_rw(&self, file_name: &str) -> Result<()> {
         // Remount readonly directory with readwrite permission
-        let host_dest = do_get_host_path(file_name, &self.id, "", true, true);
+        let host_dest = do_get_host_path(
+            file_name, 
+            &self.id, 
+            "", 
+            true, 
+            true,
+            &self.uvm_id,
+        );
+
         bind_remount(host_dest, false)
             .context("remount readonly directory with readwrite permission")?;
         // Remount readwrite directory with readwrite permission
-        let host_dest = do_get_host_path(file_name, &self.id, "", true, false);
+        
+        let host_dest = do_get_host_path(
+            file_name, 
+            &self.id, 
+            "", 
+            true, 
+            false,
+            &self.uvm_id,
+        );
+        
         bind_remount(host_dest, false)
             .context("remount readwrite directory with readwrite permission")?;
         Ok(())
@@ -230,18 +243,42 @@ impl ShareFsMount for VirtiofsShareMount {
 
     async fn downgrade_to_ro(&self, file_name: &str) -> Result<()> {
         // Remount readwrite directory with readonly permission
-        let host_dest = do_get_host_path(file_name, &self.id, "", true, false);
+        let host_dest = do_get_host_path(
+            file_name, 
+            &self.id, 
+            "", 
+            true, 
+            false,
+            &self.uvm_id,
+        );
+
         bind_remount(host_dest, true)
             .context("remount readwrite directory with readonly permission")?;
         // Remount readonly directory with readonly permission
-        let host_dest = do_get_host_path(file_name, &self.id, "", true, true);
+        let host_dest = do_get_host_path(
+            file_name, 
+            &self.id, 
+            "", 
+            true, 
+            true,
+            &self.uvm_id,
+        );
+
         bind_remount(host_dest, true)
             .context("remount readonly directory with readonly permission")?;
         Ok(())
     }
 
     async fn umount_volume(&self, file_name: &str) -> Result<()> {
-        let host_dest = do_get_host_path(file_name, &self.id, "", true, false);
+        let host_dest = do_get_host_path(
+            file_name, 
+            &self.id, 
+            "", 
+            true, 
+            false,
+            &self.uvm_id,
+        );
+
         umount_timeout(&host_dest, 0).context("umount volume")?;
         // Umount event will be propagated to ro directory
 
@@ -258,7 +295,15 @@ impl ShareFsMount for VirtiofsShareMount {
     }
 
     async fn umount_rootfs(&self, config: &ShareFsRootfsConfig) -> Result<()> {
-        let host_dest = do_get_host_path(&config.target, &self.id, &config.cid, false, false);
+        let host_dest = do_get_host_path(
+            &config.target, 
+            &self.id, 
+            &config.cid, 
+            false, 
+            false,
+            &self.uvm_id,
+        );
+
         umount_timeout(&host_dest, 0).context("umount rootfs")?;
 
         // Remove the directory of mointpoint
