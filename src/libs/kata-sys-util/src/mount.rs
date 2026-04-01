@@ -248,12 +248,24 @@ pub fn bind_remount<P: AsRef<Path>>(dst: P, readonly: bool) -> Result<()> {
 /// - `src` exists.
 /// - `dst` exists, and is suitable as destination for bind mount.
 /// - `dst` is free of file path based attacks.
+fn check_dir(tag: u32, dir_path: &str) {
+    let p = Path::new(dir_path);
+    let is_dir = p.is_dir();
+    info!(sl!(), "sys-util/mount: {tag}: path = {:?}, is_dir = {is_dir}", &p);
+}
+
 pub fn bind_mount_unchecked<S: AsRef<Path>, D: AsRef<Path>>(
     src: S,
     dst: D,
     readonly: bool,
     pgflag: MsFlags,
 ) -> Result<()> {
+    let log_src_path = src.as_ref().to_path_buf().display().to_string();
+    let log_dst_path = dst.as_ref().to_path_buf().display().to_string();
+
+    //check_dir(1, &log_src_path);
+    //check_dir(1, &log_dst_path);
+
     fail::fail_point!("bind_mount", |_| {
         Err(Error::FailureInject(
             "Bind mount fail point injection".to_string(),
@@ -272,7 +284,14 @@ pub fn bind_mount_unchecked<S: AsRef<Path>, D: AsRef<Path>>(
         .canonicalize()
         .map_err(|_e| Error::InvalidPath(src.to_path_buf()))?;
 
+    check_dir(2, &log_src_path);
+    check_dir(2, &log_dst_path);
+
     create_mount_destination(src, dst, "/", "bind")?;
+
+    check_dir(3, &log_src_path);
+    check_dir(3, &log_dst_path);
+
     // Bind mount `src` to `dst`.
     mount(
         Some(&abs_src),
@@ -292,7 +311,13 @@ pub fn bind_mount_unchecked<S: AsRef<Path>, D: AsRef<Path>>(
 
     // Optionally rebind into readonly mode.
     if readonly {
+        //check_dir(4, &log_src_path);
+        //check_dir(4, &log_dst_path);
+
         do_rebind_mount(dst, readonly, MsFlags::empty())?;
+
+        //check_dir(5, &log_src_path);
+        //check_dir(5, &log_dst_path);
     }
 
     Ok(())
