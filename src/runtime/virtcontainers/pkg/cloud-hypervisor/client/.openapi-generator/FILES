@@ -35,7 +35,6 @@ docs/ReceiveMigrationData.md
 docs/RestoreConfig.md
 docs/RngConfig.md
 docs/SendMigrationData.md
-docs/SgxEpcConfig.md
 docs/TokenBucket.md
 docs/TpmConfig.md
 docs/VdpaConfig.md
@@ -46,6 +45,7 @@ docs/VmCoredumpData.md
 docs/VmInfo.md
 docs/VmRemoveDevice.md
 docs/VmResize.md
+docs/VmResizeDisk.md
 docs/VmResizeZone.md
 docs/VmSnapshotConfig.md
 docs/VmmPingResponse.md
@@ -81,7 +81,6 @@ model_receive_migration_data.go
 model_restore_config.go
 model_rng_config.go
 model_send_migration_data.go
-model_sgx_epc_config.go
 model_token_bucket.go
 model_tpm_config.go
 model_vdpa_config.go
@@ -92,6 +91,7 @@ model_vm_coredump_data.go
 model_vm_info.go
 model_vm_remove_device.go
 model_vm_resize.go
+model_vm_resize_disk.go
 model_vm_resize_zone.go
 model_vm_snapshot_config.go
 model_vmm_ping_response.go

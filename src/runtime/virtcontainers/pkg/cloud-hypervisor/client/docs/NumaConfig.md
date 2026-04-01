@@ -8,8 +8,8 @@ Name | Type | Description | Notes
 **Cpus** | Pointer to **[]int32** |  | [optional] 
 **Distances** | Pointer to [**[]NumaDistance**](NumaDistance.md) |  | [optional] 
 **MemoryZones** | Pointer to **[]string** |  | [optional] 
-**SgxEpcSections** | Pointer to **[]string** |  | [optional] 
 **PciSegments** | Pointer to **[]int32** |  | [optional] 
+**DeviceId** | Pointer to **string** |  | [optional] 
 
 ## Methods
 
@@ -125,31 +125,6 @@ SetMemoryZones sets MemoryZones field to given value.
 
 HasMemoryZones returns a boolean if a field has been set.
 
-### GetSgxEpcSections
-
-`func (o *NumaConfig) GetSgxEpcSections() []string`
-
-GetSgxEpcSections returns the SgxEpcSections field if non-nil, zero value otherwise.
-
-### GetSgxEpcSectionsOk
-
-`func (o *NumaConfig) GetSgxEpcSectionsOk() (*[]string, bool)`
-
-GetSgxEpcSectionsOk returns a tuple with the SgxEpcSections field if it's non-nil, zero value otherwise
-and a boolean to check if the value has been set.
-
-### SetSgxEpcSections
-
-`func (o *NumaConfig) SetSgxEpcSections(v []string)`
-
-SetSgxEpcSections sets SgxEpcSections field to given value.
-
-### HasSgxEpcSections
-
-`func (o *NumaConfig) HasSgxEpcSections() bool`
-
-HasSgxEpcSections returns a boolean if a field has been set.
-
 ### GetPciSegments
 
 `func (o *NumaConfig) GetPciSegments() []int32`
@@ -174,6 +149,31 @@ SetPciSegments sets PciSegments field to given value.
 `func (o *NumaConfig) HasPciSegments() bool`
 
 HasPciSegments returns a boolean if a field has been set.
+
+### GetDeviceId
+
+`func (o *NumaConfig) GetDeviceId() string`
+
+GetDeviceId returns the DeviceId field if non-nil, zero value otherwise.
+
+### GetDeviceIdOk
+
+`func (o *NumaConfig) GetDeviceIdOk() (*string, bool)`
+
+GetDeviceIdOk returns a tuple with the DeviceId field if it's non-nil, zero value otherwise
+and a boolean to check if the value has been set.
+
+### SetDeviceId
+
+`func (o *NumaConfig) SetDeviceId(v string)`
+
+SetDeviceId sets DeviceId field to given value.
+
+### HasDeviceId
+
+`func (o *NumaConfig) HasDeviceId() bool`
+
+HasDeviceId returns a boolean if a field has been set.
 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
