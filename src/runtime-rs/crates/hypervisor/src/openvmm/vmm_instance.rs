@@ -49,16 +49,15 @@ impl VmmInstance {
 
     /// Launch the VmWorker with the given configuration.
     ///
-    /// If `hvsock_path` is Some, the hvsock listener will be bound inside
-    /// the worker host thread (same pal_async context as the VmWorker) to
-    /// avoid FD transfer issues with mesh channels across runtimes.
+    /// `vsock_uds_path` is the Unix socket path for virtio-vsock. The listener
+    /// is bound inside the worker thread to avoid FD transfer issues.
     ///
     /// If `disk_path` is Some, the disk file will be opened inside the worker
     /// thread and patched into the first PCIe device's virtio-blk resource.
     pub(crate) async fn launch(
         &mut self,
         mut config: Config,
-        hvsock_path: Option<String>,
+        vsock_uds_path: String,
         disk_path: Option<String>,
         log_dir: Option<String>,
     ) -> Result<()> {
@@ -88,19 +87,38 @@ impl VmmInstance {
                     }
                 }
 
-                // Bind hvsock listener inside this thread context
-                if let Some(ref path) = hvsock_path {
-                    let _ = std::fs::remove_file(path);
-                    match ovmm_unix_socket::UnixListener::bind(path) {
+                // Bind virtio-vsock listener inside this thread and add
+                // the device as a PCIe virtio device.
+                {
+                    let _ = std::fs::remove_file(&vsock_uds_path);
+                    match ovmm_unix_socket::UnixListener::bind(&vsock_uds_path) {
                         Ok(listener) => {
-                            if let Some(ref mut vmbus) = config.vmbus {
-                                vmbus.vsock_listener = Some(listener);
-                            }
+                            let vsock_handle = virtio_resources::vsock::VirtioVsockHandle {
+                                guest_cid: 3, // standard guest CID
+                                base_path: vsock_uds_path.clone(),
+                                listener,
+                            };
+                            config.pcie_devices.push(
+                                openvmm_defs::config::PcieDeviceConfig {
+                                    port_name: "rp3".to_string(),
+                                    resource: virtio_resources::VirtioPciDeviceHandle(
+                                        vsock_handle.into_resource(),
+                                    )
+                                    .into_resource(),
+                                },
+                            );
+                            // Add the root port for rp3
+                            config.pcie_root_complexes[0].ports.push(
+                                openvmm_defs::config::PcieRootPortConfig {
+                                    name: "rp3".to_string(),
+                                    hotplug: false,
+                                },
+                            );
                         }
                         Err(e) => {
                             let _ = result_tx.send(Err(anyhow::anyhow!(
-                                "failed to bind hvsock listener at {}: {}",
-                                path,
+                                "failed to bind vsock listener at {}: {}",
+                                vsock_uds_path,
                                 e
                             )));
                             return;
