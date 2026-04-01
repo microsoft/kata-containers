@@ -72,6 +72,7 @@ ovmm_virt = { workspace = true, optional = true }
 virt_mshv = { workspace = true, optional = true }
 openvmm_core = { workspace = true, optional = true }
 openvmm_defs = { workspace = true, optional = true }
+hypervisor_resources = { workspace = true, optional = true }
 openvmm_resources = { workspace = true, optional = true }
 openvmm_helpers = { workspace = true, optional = true }
 vm_manifest_builder = { workspace = true, optional = true }
@@ -106,6 +107,7 @@ openvmm = [
     "dep:openvmm_core",
     "dep:openvmm_defs",
     "dep:openvmm_resources",
+    "dep:hypervisor_resources",
     "dep:openvmm_helpers",
     "dep:vm_manifest_builder",
     "dep:ovmm_mesh",
