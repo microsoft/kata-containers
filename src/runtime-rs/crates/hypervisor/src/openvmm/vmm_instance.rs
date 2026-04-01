@@ -153,7 +153,7 @@ impl VmmInstance {
                         .launch_worker(
                             VM_WORKER,
                             VmWorkerParameters {
-                                hypervisor: None,
+                                hypervisor: hypervisor_resources::MshvHandle.into_resource(),
                                 cfg: config,
                                 saved_state: None,
                                 rpc: rpc_recv,
