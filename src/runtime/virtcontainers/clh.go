@@ -599,7 +599,8 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 
 	if assetType == types.ImageAsset {
 		if clh.config.DisableImageNvdimm || clh.config.ConfidentialGuest {
-			disk := chclient.NewDiskConfig(assetPath)
+			disk := chclient.NewDiskConfig()
+			disk.SetPath(assetPath)
 			disk.SetReadonly(true)
 
 			diskRateLimiterConfig := clh.getDiskRateLimiterConfig()
@@ -690,15 +691,9 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	}
 
 	if clh.config.SGXEPCSize > 0 {
-		epcSection := chclient.NewSgxEpcConfig("kata-epc", clh.config.SGXEPCSize)
-		epcSection.Prefault = func(b bool) *bool { return &b }(true)
-
-		if clh.vmconfig.SgxEpc != nil {
-			*clh.vmconfig.SgxEpc = append(*clh.vmconfig.SgxEpc, *epcSection)
-		} else {
-			clh.vmconfig.SgxEpc = &[]chclient.SgxEpcConfig{*epcSection}
-		}
-
+		clh.Logger().WithField("sgx_epc_size", clh.config.SGXEPCSize).Warn(
+			"SGX EPC size requested, but cloud-hypervisor client API in this build does not expose SGX EPC vm config",
+		)
 	}
 
 	return nil
@@ -891,7 +886,8 @@ func (clh *cloudHypervisor) hotplugAddBlockDevice(drive *config.BlockDrive) erro
 	}
 
 	// Create the clh disk config via the constructor to ensure default values are properly assigned
-	clhDisk := *chclient.NewDiskConfig(drive.File)
+	clhDisk := *chclient.NewDiskConfig()
+	clhDisk.SetPath(drive.File)
 	clhDisk.Readonly = &drive.ReadOnly
 	clhDisk.VhostUser = func(b bool) *bool { return &b }(false)
 	if clh.config.BlockDeviceCacheSet {
