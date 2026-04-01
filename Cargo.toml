@@ -102,6 +102,7 @@ ovmm_virt = { path = "../openvmm-repo/vmm_core/virt", package = "virt" }
 virt_mshv = { path = "../openvmm-repo/vmm_core/virt_mshv" }
 openvmm_core = { path = "../openvmm-repo/openvmm/openvmm_core" }
 openvmm_defs = { path = "../openvmm-repo/openvmm/openvmm_defs" }
+hypervisor_resources = { path = "../openvmm-repo/openvmm/hypervisor_resources" }
 openvmm_resources = { path = "../openvmm-repo/openvmm/openvmm_resources", features = ["virt_mshv", "net_tap"] }
 openvmm_helpers = { path = "../openvmm-repo/openvmm/openvmm_helpers" }
 vm_manifest_builder = { path = "../openvmm-repo/vmm_core/vm_manifest_builder" }
