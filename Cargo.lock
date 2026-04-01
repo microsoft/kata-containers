@@ -3166,6 +3166,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
 
 [[package]]
+name = "hybrid_vsock"
+version = "0.0.0"
+dependencies = [
+ "fs-err",
+ "guid",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "hyper"
 version = "0.14.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3370,6 +3379,7 @@ dependencies = [
  "hyper 0.14.32",
  "hyperlocal",
  "hypervisor",
+ "hypervisor_resources",
  "kata-sys-util",
  "kata-types",
  "lazy_static",
@@ -3411,6 +3421,16 @@ dependencies = [
  "ttrpc",
  "ttrpc-codegen",
  "vmm-sys-util 0.15.0",
+]
+
+[[package]]
+name = "hypervisor_resources"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "linkme",
+ "mesh",
+ "vm_resource",
 ]
 
 [[package]]
@@ -6000,6 +6020,7 @@ dependencies = [
  "guid",
  "hcl_compat_uefi_nvram_storage",
  "hvdef",
+ "hypervisor_resources",
  "ide",
  "ide_resources",
  "igvm",
@@ -6034,7 +6055,6 @@ dependencies = [
  "uefi_nvram_storage",
  "uefi_specs",
  "virt",
- "virt_mshv",
  "virtio",
  "vm_loader",
  "vm_resource",
@@ -6065,6 +6085,7 @@ dependencies = [
  "framebuffer",
  "get_resources",
  "guid",
+ "hypervisor_resources",
  "ide_resources",
  "input_core",
  "memory_range",
@@ -6093,10 +6114,23 @@ dependencies = [
  "disk_vhdmp",
  "fs-err",
  "get_resources",
+ "hypervisor_resources",
  "mesh",
  "openvmm_defs",
  "sparse_mmap",
  "tracing",
+ "vm_resource",
+]
+
+[[package]]
+name = "openvmm_hypervisors"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "build_rs_guest_arch",
+ "hypervisor_resources",
+ "openvmm_core",
+ "virt_mshv",
  "vm_resource",
 ]
 
@@ -6138,6 +6172,7 @@ dependencies = [
  "nvme",
  "nvme_test",
  "openvmm_core",
+ "openvmm_hypervisors",
  "rusqlite",
  "scsidisk",
  "serial_16550",
@@ -6154,6 +6189,7 @@ dependencies = [
  "virtio_p9",
  "virtio_pmem",
  "virtio_rng",
+ "virtio_vsock",
  "virtiofs",
  "vm_resource",
  "vmbfs",
@@ -10640,6 +10676,7 @@ version = "0.0.0"
 dependencies = [
  "mesh",
  "net_backend_resources",
+ "unix_socket",
  "vm_resource",
 ]
 
@@ -10668,6 +10705,33 @@ dependencies = [
  "bitfield-struct 0.11.0",
  "inspect",
  "open_enum",
+ "zerocopy",
+]
+
+[[package]]
+name = "virtio_vsock"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bitfield-struct 0.11.0",
+ "futures 0.3.32",
+ "guestmem",
+ "hybrid_vsock",
+ "inspect",
+ "mesh",
+ "open_enum",
+ "pal_async",
+ "parking_lot",
+ "smallvec",
+ "task_control",
+ "tracelimit",
+ "tracing",
+ "unicycle",
+ "unix_socket",
+ "virtio",
+ "virtio_resources",
+ "vm_resource",
+ "vmcore",
  "zerocopy",
 ]
 
@@ -10951,12 +11015,12 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "fs-err",
  "futures 0.3.32",
  "futures-concurrency",
  "guestmem",
  "guid",
  "hvdef",
+ "hybrid_vsock",
  "inspect",
  "mesh",
  "pal_async",
