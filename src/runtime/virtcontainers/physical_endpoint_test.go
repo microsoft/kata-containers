@@ -17,6 +17,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	ktu "github.com/kata-containers/kata-containers/src/runtime/pkg/katatestutils"
+	persistapi "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/persist/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
@@ -316,4 +317,115 @@ func TestCreatePhysicalEndpoint_NegativeIdx(t *testing.T) {
 	_, err := createPhysicalEndpoint(-1, netInfo, false, DefaultNetInterworkingModel)
 	assert.Error(err)
 	assert.Contains(err.Error(), "invalid network endpoint index")
+}
+
+func TestPhysicalEndpoint_SaveLoad_NonVF(t *testing.T) {
+	assert := assert.New(t)
+
+	netPair := NetworkInterfacePair{
+		TapInterface: TapInterface{
+			ID:   "tap-id-1",
+			Name: "br-tap1",
+			TAPIface: NetworkInterface{
+				Name:     "tap1",
+				HardAddr: "aa:bb:cc:dd:ee:ff",
+			},
+		},
+		VirtIface: NetworkInterface{
+			Name:     "eth0",
+			HardAddr: "aa:bb:cc:dd:ee:ff",
+		},
+		NetInterworkingModel: DefaultNetInterworkingModel,
+	}
+
+	endpoint := &PhysicalEndpoint{
+		IfaceName:      "eth0",
+		HardAddr:       "aa:bb:cc:dd:ee:ff",
+		EndpointType:   PhysicalEndpointType,
+		BDF:            "0000:01:00.0",
+		Driver:         "mlx5_core",
+		VendorDeviceID: "0x8086 0x1572",
+		IsVF:           false,
+		NetPair:        netPair,
+		BusType:        "pci",
+	}
+
+	saved := endpoint.save()
+	assert.NotNil(saved.Physical)
+	assert.Equal("0000:01:00.0", saved.Physical.BDF)
+	assert.Equal("mlx5_core", saved.Physical.Driver)
+	assert.Equal("pci", saved.Physical.BusType)
+	assert.Equal("tap1", saved.Physical.NetPair.TAPIface.Name)
+	assert.Equal("eth0", saved.Physical.NetPair.VirtIface.Name)
+
+	// load() reads NetPair from Veth.NetPair (shared persistence format).
+	// Populate it to simulate a fully persisted state.
+	saved.Veth = &persistapi.VethEndpoint{
+		NetPair: saved.Physical.NetPair,
+	}
+
+	loaded := &PhysicalEndpoint{}
+	loaded.load(saved)
+	assert.Equal(PhysicalEndpointType, loaded.EndpointType)
+	assert.Equal("0000:01:00.0", loaded.BDF)
+	assert.Equal("mlx5_core", loaded.Driver)
+	assert.Equal("0x8086 0x1572", loaded.VendorDeviceID)
+	assert.Equal("pci", loaded.BusType)
+	assert.Equal("tap1", loaded.NetPair.TapInterface.TAPIface.Name)
+	assert.Equal("eth0", loaded.NetPair.VirtIface.Name)
+	assert.Equal(DefaultNetInterworkingModel, loaded.NetPair.NetInterworkingModel)
+}
+
+func TestCreatePhysicalEndpoint_NonVF_HappyPath(t *testing.T) {
+	assert := assert.New(t)
+
+	tmpDir := t.TempDir()
+	origSysBusPath := sysBusPath
+	sysBusPath = tmpDir
+	defer func() { sysBusPath = origSysBusPath }()
+
+	guid := "00000000-0000-0000-0000-000000000002"
+	vmbusDevDir := filepath.Join(tmpDir, "vmbus", "devices", guid)
+	assert.NoError(os.MkdirAll(vmbusDevDir, 0755))
+
+	// Create driver symlink
+	driverTarget := filepath.Join(tmpDir, "drivers", "hv_netvsc")
+	assert.NoError(os.MkdirAll(driverTarget, 0755))
+	assert.NoError(os.Symlink(driverTarget, filepath.Join(vmbusDevDir, "driver")))
+
+	// Create device and vendor files
+	assert.NoError(os.WriteFile(filepath.Join(vmbusDevDir, "device"), []byte("0x1572\n"), 0644))
+	assert.NoError(os.WriteFile(filepath.Join(vmbusDevDir, "vendor"), []byte("0x8086\n"), 0644))
+
+	// No physfn symlink → not a VF
+	hwAddr, _ := net.ParseMAC("aa:bb:cc:dd:ee:ff")
+	netInfo := NetworkInfo{
+		Iface: NetlinkIface{
+			LinkAttrs: netlink.LinkAttrs{
+				Name:         "eth1",
+				ParentDevBus: "vmbus",
+				ParentDev:    guid,
+				HardwareAddr: hwAddr,
+			},
+			Type: "",
+		},
+		Link: &netlink.Dummy{
+			LinkAttrs: netlink.LinkAttrs{
+				Name:         "eth1",
+				ParentDevBus: "vmbus",
+				ParentDev:    guid,
+				HardwareAddr: hwAddr,
+			},
+		},
+	}
+
+	ep, err := createPhysicalEndpoint(0, netInfo, false, DefaultNetInterworkingModel)
+	assert.NoError(err)
+	assert.NotNil(ep)
+	assert.False(ep.IsVF)
+	assert.Equal("eth1", ep.IfaceName)
+	assert.Equal("hv_netvsc", ep.Driver)
+	assert.Equal(guid, ep.BDF)
+	assert.Equal("vmbus", ep.BusType)
+	assert.Equal("eth1", ep.NetPair.VirtIface.Name)
 }
