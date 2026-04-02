@@ -13,6 +13,10 @@ pub struct PhysicalEndpointState {
     pub vendor_id: String,
     pub device_id: String,
     pub hard_addr: String,
+    pub is_vf: bool,
+    pub iface_name: String,
+    /// "pci" or "vmbus"
+    pub bus_type: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
