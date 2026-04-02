@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **Topology** | Pointer to [**CpuTopology**](CpuTopology.md) |  | [optional] 
 **KvmHyperv** | Pointer to **bool** |  | [optional] [default to false]
 **MaxPhysBits** | Pointer to **int32** |  | [optional] 
+**Nested** | Pointer to **bool** |  | [optional] [default to true]
 **Affinity** | Pointer to [**[]CpuAffinity**](CpuAffinity.md) |  | [optional] 
 **Features** | Pointer to [**CpuFeatures**](CpuFeatures.md) |  | [optional] 
 
@@ -145,6 +146,31 @@ SetMaxPhysBits sets MaxPhysBits field to given value.
 `func (o *CpusConfig) HasMaxPhysBits() bool`
 
 HasMaxPhysBits returns a boolean if a field has been set.
+
+### GetNested
+
+`func (o *CpusConfig) GetNested() bool`
+
+GetNested returns the Nested field if non-nil, zero value otherwise.
+
+### GetNestedOk
+
+`func (o *CpusConfig) GetNestedOk() (*bool, bool)`
+
+GetNestedOk returns a tuple with the Nested field if it's non-nil, zero value otherwise
+and a boolean to check if the value has been set.
+
+### SetNested
+
+`func (o *CpusConfig) SetNested(v bool)`
+
+SetNested sets Nested field to given value.
+
+### HasNested
+
+`func (o *CpusConfig) HasNested() bool`
+
+HasNested returns a boolean if a field has been set.
 
 ### GetAffinity
 
