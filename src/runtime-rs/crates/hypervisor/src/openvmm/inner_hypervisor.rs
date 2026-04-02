@@ -9,8 +9,9 @@ use anyhow::{anyhow, Context, Result};
 use std::fs::{self, File};
 
 use super::inner::OpenVmmInner;
+use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
-use crate::{MemoryConfig, VcpuThreadIds, VmmState};
+use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 use openvmm_defs::config::{
     Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig,
@@ -22,6 +23,26 @@ use vm_resource::IntoResource;
 use vm_resource::kind::VmbusDeviceHandleKind;
 
 const KATA_PATH: &str = "/run/kata";
+
+fn build_kernel_cmdline(
+    debug: bool,
+    kernel_params: &str,
+    kernel_verity_params: &str,
+    rootfs_type: &str,
+) -> Result<String> {
+    let mut params = KernelParams::new(debug);
+
+    let mut rootfs_params = KernelParams::new_rootfs_kernel_params(
+        kernel_verity_params,
+        VM_ROOTFS_DRIVER_BLK,
+        rootfs_type,
+        false,
+    )?;
+    params.append(&mut rootfs_params);
+    params.append(&mut KernelParams::from_string(kernel_params));
+
+    params.to_string()
+}
 
 impl OpenVmmInner {
     pub(crate) async fn prepare_vm(
@@ -48,19 +69,12 @@ impl OpenVmmInner {
     pub(crate) async fn start_vm(&mut self, _timeout: i32) -> Result<()> {
         info!(sl!(), "openvmm: start_vm");
 
-        // Build kernel command line
-        let mut cmdline = self.config.boot_info.kernel_params.clone();
-        if !cmdline.contains("root=") {
-            cmdline.push_str(" root=/dev/vda1");
-        }
-        if !cmdline.contains("rootfstype=") && !self.config.boot_info.rootfs_type.is_empty() {
-            cmdline.push_str(&format!(" rootfstype={}", self.config.boot_info.rootfs_type));
-        }
-        // Mount rootfs read-only, matching CLH behavior exactly:
-        // rootflags=data=ordered,errors=remount-ro ro
-        if !cmdline.contains(" ro ") && !cmdline.ends_with(" ro") {
-            cmdline.push_str(" rootflags=data=ordered,errors=remount-ro ro");
-        }
+        let cmdline = build_kernel_cmdline(
+            self.config.debug_info.enable_debug,
+            &self.config.boot_info.kernel_params,
+            &self.config.boot_info.kernel_verity_params,
+            &self.config.boot_info.rootfs_type,
+        )?;
 
         info!(sl!(), "openvmm: kernel={}", self.config.boot_info.kernel);
         info!(sl!(), "openvmm: image={}", self.config.boot_info.image);
@@ -336,7 +350,13 @@ impl OpenVmmInner {
         // Launch the VM worker
         info!(sl!(), "openvmm: launching VM worker");
         self.vmm_instance
-            .launch(vm_config, vsock_uds_path, rootfs_disk_path, Some(self.run_dir.clone()))
+            .launch(
+                vm_config,
+                vsock_uds_path,
+                rootfs_disk_path,
+                self.netns.clone(),
+                Some(self.run_dir.clone()),
+            )
             .await
             .context("failed to launch VM worker")?;
 
@@ -440,5 +460,31 @@ impl OpenVmmInner {
         Err(anyhow!(
             "openvmm get_passfd_listener_addr not yet implemented"
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_kernel_cmdline;
+
+    #[test]
+    fn build_kernel_cmdline_includes_kata_defaults() {
+        let cmdline = build_kernel_cmdline(
+            false,
+            "console=hvc0 cgroup_no_v1=all systemd.unified_cgroup_hierarchy=1",
+            "",
+            "ext4",
+        )
+        .unwrap();
+
+        assert!(cmdline.contains("reboot=k"));
+        assert!(cmdline.contains("panic=1"));
+        assert!(cmdline.contains("systemd.unit=kata-containers.target"));
+        assert!(cmdline.contains("systemd.mask=systemd-networkd.service"));
+        assert!(cmdline.contains("root=/dev/vda1"));
+        assert!(cmdline.contains("rootfstype=ext4"));
+        assert!(cmdline.contains("rootflags=data=ordered,errors=remount-ro ro"));
+        assert!(cmdline.contains("console=hvc0"));
+        assert!(cmdline.contains("cgroup_no_v1=all"));
     }
 }
