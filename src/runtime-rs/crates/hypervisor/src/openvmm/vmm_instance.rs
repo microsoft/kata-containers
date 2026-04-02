@@ -15,6 +15,8 @@ use ovmm_vmm_core_defs::HaltReason;
 use tokio::sync::mpsc;
 use vm_resource::IntoResource;
 
+use crate::utils::enter_netns;
+
 // Force linker to include openvmm_resources which registers the VmWorker
 // via linkme::distributed_slice.
 extern crate openvmm_resources as _;
@@ -59,6 +61,7 @@ impl VmmInstance {
         mut config: Config,
         vsock_uds_path: String,
         disk_path: Option<String>,
+        netns: Option<String>,
         log_dir: Option<String>,
     ) -> Result<()> {
         let (rpc_send, rpc_recv) = ovmm_mesh::channel();
@@ -84,6 +87,16 @@ impl VmmInstance {
                             .finish();
                         // Use set_default (thread-local) not set_global_default
                         let _guard = tracing::subscriber::set_default(subscriber);
+                    }
+                }
+
+                if let Some(ref netns_path) = netns {
+                    if let Err(err) = enter_netns(netns_path) {
+                        let _ = result_tx.send(Err(err.context(format!(
+                            "failed to enter netns {}",
+                            netns_path
+                        ))));
+                        return;
                     }
                 }
 
