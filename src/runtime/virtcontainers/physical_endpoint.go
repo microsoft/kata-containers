@@ -238,9 +238,6 @@ func (endpoint *PhysicalEndpoint) HotDetach(ctx context.Context, s *Sandbox, net
 			return nil
 		}
 
-		span, ctx := vethTrace(ctx, "HotDetach", endpoint)
-		defer span.End()
-
 		if err := doNetNS(netNsPath, func(_ ns.NetNS) error {
 			return xDisconnectVMNetwork(ctx, endpoint)
 		}); err != nil {
