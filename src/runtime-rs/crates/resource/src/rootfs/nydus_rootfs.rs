@@ -9,7 +9,12 @@ use super::{Rootfs, TYPE_OVERLAY_FS};
 use crate::{
     rootfs::{HYBRID_ROOTFS_LOWER_DIR, ROOTFS},
     share_fs::{
-        do_get_guest_path, do_get_guest_share_path, get_host_rw_shared_path, rafs_mount, ShareFs,
+        do_get_guest_path,
+        do_get_guest_share_path,
+        // get_host_rw_shared_path,
+        get_host_rw_shared_path_uvm,
+        rafs_mount, 
+        ShareFs,
         ShareFsRootfsConfig, PASSTHROUGH_FS_DIR,
     },
 };
@@ -79,9 +84,13 @@ impl NydusRootfs {
                 .await
                 .context("failed to do rafs mount")?;
                 // create rootfs under the share directory
-                let container_share_dir = get_host_rw_shared_path(sid)
+                
+                warn!(sl!(), "NydusRootfs: ignoring uvm_id");
+                // let container_share_dir = get_host_rw_shared_path(sid)
+                let container_share_dir = get_host_rw_shared_path_uvm(sid, "")
                     .join(PASSTHROUGH_FS_DIR)
                     .join(cid);
+                
                 let rootfs_dir = container_share_dir.join(ROOTFS);
                 fs::create_dir_all(rootfs_dir).context("failed to create directory")?;
                 // mount point inside the guest

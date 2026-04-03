@@ -100,11 +100,13 @@ pub(crate) fn get_host_ro_shared_path_uvm(id: &str, uvm_id: &str) -> PathBuf {
         .join("ro")
 }
 
+/*
 pub fn get_host_rw_shared_path(sid: &str) -> PathBuf {
     Path::new(kata_host_shared_dir().as_str())
         .join(sid)
         .join("rw")
 }
+*/
 pub fn get_host_rw_shared_path_uvm(sid: &str, uvm_id: &str) -> PathBuf {
     if uvm_id.is_empty() {
         panic!("get_host_ro_shared_path_uvm: uvm_id is empty");
@@ -115,9 +117,14 @@ pub fn get_host_rw_shared_path_uvm(sid: &str, uvm_id: &str) -> PathBuf {
         .join("rw")
 }
 
+/*
 pub fn get_host_shared_path(sid: &str) -> PathBuf {
     Path::new(kata_host_shared_dir().as_str()).join(sid)
 }
+pub fn get_host_shared_path_uvm(sid: &str, uvm_id: &str) -> PathBuf {
+    Path::new(kata_host_shared_dir_uvm(uvm_id).as_str()).join(sid)
+}
+*/
 
 fn do_get_guest_any_path(
     target: &str,

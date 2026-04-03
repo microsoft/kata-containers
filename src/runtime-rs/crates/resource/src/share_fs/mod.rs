@@ -13,7 +13,11 @@ use share_virtio_fs_standalone::ShareVirtioFsStandalone;
 mod utils;
 use tokio::sync::Mutex;
 pub use utils::{
-    do_get_guest_path, do_get_guest_share_path, do_get_host_path, get_host_rw_shared_path,
+    do_get_guest_path,
+    do_get_guest_share_path,
+    do_get_host_path,
+    // get_host_rw_shared_path,
+    get_host_rw_shared_path_uvm,
 };
 mod virtio_fs_share_mount;
 pub use virtio_fs_share_mount::ephemeral_path;
@@ -43,9 +47,11 @@ const DEFAULT_KATA_GUEST_SHARE_DIR: &str = "/run/kata-containers/shared/containe
 pub const PASSTHROUGH_FS_DIR: &str = "passthrough";
 const RAFS_DIR: &str = "rafs";
 
+/*
 pub fn kata_host_shared_dir() -> String {
     build_path(DEFAULT_KATA_HOST_SHARED_DIR)
 }
+*/
 pub fn kata_host_shared_dir_uvm(uvm_id: &str) -> String {
     let mut uvm_path = DEFAULT_KATA_HOST_SHARED_DIR.to_string();
     if !uvm_id.is_empty() {

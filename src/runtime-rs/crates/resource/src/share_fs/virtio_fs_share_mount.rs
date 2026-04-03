@@ -25,7 +25,7 @@ use super::{
         self,
         do_get_host_path,
         // get_host_ro_shared_path,
-        get_host_shared_path,
+        // get_host_shared_path,
         mkdir_with_permissions,
     },
     ShareFsMount, ShareFsMountResult, ShareFsRootfsConfig, ShareFsVolumeConfig, PASSTHROUGH_FS_DIR,
@@ -33,7 +33,8 @@ use super::{
 
 use super::utils::{
         get_host_ro_shared_path_uvm,
-        get_host_rw_shared_path_uvm,
+        // get_host_rw_shared_path_uvm,
+        // get_host_shared_path_uvm,
 };
 
 pub fn ephemeral_path() -> String {
@@ -322,16 +323,19 @@ impl ShareFsMount for VirtiofsShareMount {
         let host_ro_dest = get_host_ro_shared_path_uvm(sid, &self.uvm_id);
 
         umount_all(host_ro_dest.clone(), true).context("failed to umount ro path")?;
-        fs::remove_dir_all(host_ro_dest).context("failed to remove ro path")?;
+        
+        // TODO: leaking directories
+        // fs::remove_dir_all(host_ro_dest).context("failed to remove ro path")?;
         // As the rootfs and volume have been umounted before calling this function, so just remove the rw dir directly
 
         // let host_rw_dest = get_host_rw_shared_path(sid);
-        let host_rw_dest = get_host_rw_shared_path_uvm(sid, &self.uvm_id);
+        // let host_rw_dest = get_host_rw_shared_path_uvm(sid, &self.uvm_id);
+        // fs::remove_dir_all(host_rw_dest).context("failed to remove rw path")?;
 
-        fs::remove_dir_all(host_rw_dest).context("failed to remove rw path")?;
         // remove the host share directory
-        let host_path = get_host_shared_path(sid);
-        fs::remove_dir_all(host_path).context("failed to remove host shared path")?;
+        // let host_path = get_host_shared_path(sid);
+        // fs::remove_dir_all(host_path).context("failed to remove host shared path")?;
+
         Ok(())
     }
 }
