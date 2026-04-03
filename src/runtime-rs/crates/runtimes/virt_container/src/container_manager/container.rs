@@ -162,6 +162,7 @@ impl Container {
         if let Some(mut storage_list) = rootfs.get_storage().await {
             storages.append(&mut storage_list);
         }
+
         inner.rootfs.push(rootfs);
 
         // handler volumes
@@ -264,8 +265,9 @@ impl Container {
 
         info!(
             sl!(),
-            "OCI Spec {:?} within CreateContainerRequest.",
-            spec.clone()
+            "Container::create: sandbox_id = {}, OCI Spec {:?}.",
+            &self.sandbox_id,
+            spec.clone(),
         );
 
         // create container
