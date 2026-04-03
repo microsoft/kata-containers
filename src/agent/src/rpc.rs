@@ -132,6 +132,21 @@ const ERR_NO_SANDBOX_PIDNS: &str = "Sandbox does not have sandbox_pidns";
 // not available.
 const IPTABLES_RESTORE_WAIT_SEC: u64 = 5;
 
+fn check_path(p: &Path) {
+    let mut parent = Some(p);
+    while parent.is_some() {
+        let parent_unwrapped = parent.unwrap();
+
+        let exists = parent_unwrapped.exists();
+        info!(sl(), "setup_bundle: exists = {exists}: {:?}", parent_unwrapped);
+        if exists {
+            break;
+        }
+
+        parent = parent_unwrapped.parent();
+    }
+}
+
 // Convenience function to obtain the scope logger.
 fn sl() -> slog::Logger {
     slog_scope::logger()
@@ -329,6 +344,8 @@ impl AgentService {
         };
 
         let new_p = confidential_data_hub::image::get_process(p, &oci, req.storages.clone())?;
+
+        info!(sl(), "do_create_container: calling Process::new");
         let p = Process::new(&sl(), &new_p, cid.as_str(), true, pipe_size, proc_io)?;
 
         // if starting container failed, we will do some rollback work
@@ -344,11 +361,15 @@ impl AgentService {
             return Err(err);
         }
 
+        info!(sl(), "do_create_container: calling update_shared_pidns");
         s.update_shared_pidns(&ctr)?;
-        s.setup_shared_mounts(&ctr, &req.shared_mounts)?;
-        s.add_container(ctr);
-        info!(sl(), "created container!");
 
+        info!(sl(), "do_create_container: calling setup_shared_mounts");
+        s.setup_shared_mounts(&ctr, &req.shared_mounts)?;
+
+        s.add_container(ctr);
+
+        info!(sl(), "do_create_container: success");
         Ok(())
     }
 
@@ -1869,6 +1890,8 @@ fn update_container_namespaces(
     spec: &mut Spec,
     sandbox_pidns: bool,
 ) -> Result<()> {
+    info!(sl(), "update_container_namespaces: starting");
+
     let linux = spec
         .linux_mut()
         .as_mut()
@@ -1915,6 +1938,7 @@ fn update_container_namespaces(
         namespaces.push(pid_ns);
     }
 
+    info!(sl(), "update_container_namespaces: success");
     Ok(())
 }
 
@@ -1950,6 +1974,8 @@ async fn remove_container_resources(sandbox: &mut Sandbox, cid: &str) -> Result<
 }
 
 fn append_guest_hooks(s: &Sandbox, oci: &mut Spec) -> Result<()> {
+    info!(sl(), "append_guest_hooks: starting");
+
     if let Some(ref guest_hooks) = s.hooks {
         if let Some(hooks) = oci.hooks_mut() {
             util::merge(hooks.poststart_mut(), guest_hooks.prestart());
@@ -1965,6 +1991,7 @@ fn append_guest_hooks(s: &Sandbox, oci: &mut Spec) -> Result<()> {
         }
     }
 
+    info!(sl(), "append_guest_hooks: success");
     Ok(())
 }
 
@@ -2208,6 +2235,8 @@ async fn do_add_swap_path(req: &AddSwapPathRequest) -> Result<()> {
 // - container rootfs bind mounted at /<CONTAINER_BASE>/<cid>/rootfs
 // - modify container spec root to point to /<CONTAINER_BASE>/<cid>/rootfs
 pub fn setup_bundle(cid: &str, spec: &mut Spec) -> Result<PathBuf> {
+    info!(sl(), "setup_bundle: start");
+
     let spec_root = if let Some(sr) = &spec.root() {
         sr
     } else {
@@ -2222,11 +2251,14 @@ pub fn setup_bundle(cid: &str, spec: &mut Spec) -> Result<PathBuf> {
     let rootfs_exists = Path::new(&rootfs_path).exists();
     info!(
         sl(),
-        "The rootfs_path is {:?} and exists: {}", rootfs_path, rootfs_exists
+        "setup_bundle: The rootfs_path is {:?} and exists: {}", rootfs_path, rootfs_exists
     );
+    check_path(&spec_root_path);
 
     if !rootfs_exists {
         fs::create_dir_all(&rootfs_path)?;
+        info!(sl(), "setup_bundle: created rootfs_path = {:?}", &rootfs_path);
+
         baremount(
             spec_root_path,
             &rootfs_path,
@@ -2255,6 +2287,7 @@ pub fn setup_bundle(cid: &str, spec: &mut Spec) -> Result<PathBuf> {
             .ok_or_else(|| anyhow!("cannot convert bundle path to unicode"))?,
     )?;
 
+    info!(sl(), "setup_bundle: success, olddir = {:?}", olddir);
     Ok(olddir)
 }
 
