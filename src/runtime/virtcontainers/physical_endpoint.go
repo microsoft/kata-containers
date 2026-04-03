@@ -334,7 +334,7 @@ func createPhysicalEndpoint(idx int, netInfo NetworkInfo, isFVIODisabled bool, i
 	// pointing to the Physical Function (PF)
 	isVF := true
 	netPair := NetworkInterfacePair{}
-	_, err = filepath.EvalSymlinks(filepath.Join(ifaceDevicePath, "physfn"))
+	_, err = filepath.EvalSymlinks(filepath.Join(sysIfaceDevicePath, "physfn"))
 	if err != nil {
 		isVF = false
 
