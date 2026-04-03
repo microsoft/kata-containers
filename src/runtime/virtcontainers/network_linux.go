@@ -152,11 +152,11 @@ func (n *LinuxNetwork) addSingleEndpoint(ctx context.Context, s *Sandbox, netInf
 		lastEndpoint := n.eps[len(n.eps)-1]
 		re := regexp.MustCompile("[0-9]+")
 		matchStr := re.FindString(lastEndpoint.Name())
-		n, err := strconv.ParseInt(matchStr, 10, 64)
+		parsedIdx, err := strconv.ParseInt(matchStr, 10, strconv.IntSize)
 		if err != nil {
 			return nil, err
 		}
-		lastIdx = int(n)
+		lastIdx = int(parsedIdx)
 	}
 	if idx <= lastIdx {
 		idx = lastIdx + 1
