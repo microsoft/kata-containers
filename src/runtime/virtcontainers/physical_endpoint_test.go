@@ -162,7 +162,6 @@ func TestIsPhysicalIface(t *testing.T) {
 			MTU:          testMTU,
 			HardwareAddr: hwAddr,
 			TxQLen:       -1,
-			ParentDevBus: "pci",
 		},
 	}
 
@@ -181,9 +180,14 @@ func TestIsPhysicalIface(t *testing.T) {
 	err = netlinkHandle.LinkAdd(link)
 	assert.NoError(err)
 
+	// Fetch the link back from the kernel so its attributes (e.g. ParentDevBus)
+	// reflect reality rather than whatever was set on the local struct.
+	kernelLink, err := netlinkHandle.LinkByName(testNetIface)
+	assert.NoError(err)
+
 	var isPhysical bool
 	err = doNetNS(n.Path(), func(_ ns.NetNS) error {
-		isPhysical = isPhysicalIface(link)
+		isPhysical = isPhysicalIface(kernelLink)
 		return nil
 	})
 	assert.NoError(err)
