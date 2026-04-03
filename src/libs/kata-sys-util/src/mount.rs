@@ -254,6 +254,11 @@ pub fn bind_mount_unchecked<S: AsRef<Path>, D: AsRef<Path>>(
     readonly: bool,
     pgflag: MsFlags,
 ) -> Result<()> {
+    info!(sl!(), 
+        "bind_mount_unchecked: src = {:?}, dst = {:?}", 
+        src.as_ref().to_path_buf().display().to_string(), 
+        dst.as_ref().to_path_buf().display().to_string());
+
     fail::fail_point!("bind_mount", |_| {
         Err(Error::FailureInject(
             "Bind mount fail point injection".to_string(),
