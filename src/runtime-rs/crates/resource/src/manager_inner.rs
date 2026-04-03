@@ -326,12 +326,18 @@ impl ResourceManagerInner {
     }
 
     pub async fn setup_after_start_vm(&mut self) -> Result<()> {
+        info!(sl!(), "setup_after_start_vm: starting");
+
         self.cgroups_resource
             .setup_after_start_vm(self.hypervisor.as_ref())
             .await
             .context("setup cgroups after start vm")?;
 
+        info!(sl!(), "setup_after_start_vm: checking share_fs");
+
         if let Some(share_fs) = self.share_fs.as_ref() {
+            info!(sl!(), "setup_after_start_vm: calling share_fs.setup_device_after_start_vm");
+
             share_fs
                 .setup_device_after_start_vm(self.hypervisor.as_ref(), &self.device_manager)
                 .await
@@ -342,19 +348,28 @@ impl ResourceManagerInner {
             info!(sl!(), "Manager: skipping network init")
         } else if let Some(network) = self.network.as_ref() {
                 let network = network.as_ref();
+
+                info!(sl!(), "setup_after_start_vm: calling handle_interfaces");
                 self.handle_interfaces(network)
                     .await
                     .context("handle interfaces")?;
+
+                info!(sl!(), "setup_after_start_vm: calling handle_neighbours");
                 self.handle_neighbours(network)
                     .await
                     .context("handle neighbors")?;
+
+                info!(sl!(), "setup_after_start_vm: calling handle_routes");
                 self.handle_routes(network).await.context("handle routes")?;
         }
 
+        info!(sl!(), "setup_after_start_vm: checking swap_resource");
         if let Some(swap) = self.swap_resource.as_ref() {
+            info!(sl!(), "setup_after_start_vm: calling swap.update");
             swap.update().await;
         }
 
+        info!(sl!(), "setup_after_start_vm: success");
         Ok(())
     }
 

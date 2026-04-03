@@ -104,6 +104,19 @@ pub fn baremount(
         flags
     );
 
+    if fs_type == "bind" {
+        if !source.exists() {
+            error!(logger, "baremount: non-existent source = {:?}", &source);
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            return Err(anyhow!("baremount: non-existent source = {:?}", &source));
+        }
+        if !destination.exists() {
+            error!(logger, "baremount: non-existent destination = {:?}", &destination);
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            return Err(anyhow!("baremount: non-existent destination = {:?}", &destination));
+        }
+    }
+
     let mount_result = nix::mount::mount(
         Some(source),
         destination,

@@ -30,7 +30,8 @@ use super::{
     virtio_fs_share_mount::VirtiofsShareMount, MountedInfo, ShareFs, ShareFsMount,
 };
 use super::{
-    utils::get_host_ro_shared_path_uvm
+    // utils::get_host_ro_shared_path_uvm
+    utils::get_host_shared_path_uvm,
 };
 use crate::share_fs::{
     kata_guest_share_dir,
@@ -90,7 +91,8 @@ impl ShareVirtioFsStandalone {
         info!(sl!(), "virtiofsd_args: uvm_id = {:?}", &self.uvm_id);
 
         // let source_path = get_host_ro_shared_path(&self.config.id);
-        let source_path = get_host_ro_shared_path_uvm(&self.config.id, &self.uvm_id);
+        // let source_path = get_host_ro_shared_path_uvm(&self.config.id, &self.uvm_id);
+        let source_path = get_host_shared_path_uvm(&self.uvm_id);
         info!(sl!(), "virtiofsd_args: source_path = {:?}", source_path);
 
         ensure_dir_exist(&source_path)?;

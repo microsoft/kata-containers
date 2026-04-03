@@ -89,13 +89,19 @@ impl ShareFsRootfs {
             .await
             .context("share rootfs")?;
 
+        log_to_file(&mut log_file, 
+            &format!("ShareFsRootfs: returning guest_path = {:?}, config = {:?}",
+                mount_result.guest_path,
+                config,
+            )
+        ).await;
+
         let r = ShareFsRootfs {
             guest_path: mount_result.guest_path,
             share_fs: Arc::clone(share_fs),
             config,
             // log_file,
         };
-        //  log_to_file(&mut log_file, format!("ShareFsRootfs: returning ShareFsRootfs = {:?}", &r));
 
         Ok(r)
     }

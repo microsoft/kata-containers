@@ -319,6 +319,7 @@ pub fn bind_mount_unchecked<S: AsRef<Path>, D: AsRef<Path>>(
         do_rebind_mount(dst, readonly, MsFlags::empty())?;
     }
 
+    info!(sl!(), "bind_mount_unchecked: success");
     Ok(())
 }
 

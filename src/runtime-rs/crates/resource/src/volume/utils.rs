@@ -51,7 +51,7 @@ pub(crate) async fn generate_shared_path(
 ) -> Result<String> {
     let file_name = get_file_name(&dest).context("failed to get file name.")?;
     let mount_name = generate_mount_path(device_id, file_name.as_str());
-    let guest_path = do_get_guest_path(&mount_name, device_id, true, false);
+    let guest_path = do_get_guest_path(&mount_name, device_id, true, false, sid);
     
     // DMFIX: uvm_id
     // let host_path = do_get_host_path(&mount_name, sid, device_id, true, read_only);

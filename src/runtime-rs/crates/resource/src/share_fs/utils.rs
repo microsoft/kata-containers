@@ -73,7 +73,7 @@ pub(crate) fn share_to_guest(
         mount::bind_remount(dst, readonly).context("bind remount readonly")?;
     }
 
-    Ok(do_get_guest_path(target, cid, is_volume, is_rafs))
+    Ok(do_get_guest_path(target, cid, is_volume, is_rafs, sid))
 }
 // Shared path handling:
 // 1. create two directories for each sandbox:
@@ -121,10 +121,10 @@ pub fn get_host_rw_shared_path_uvm(sid: &str, uvm_id: &str) -> PathBuf {
 pub fn get_host_shared_path(sid: &str) -> PathBuf {
     Path::new(kata_host_shared_dir().as_str()).join(sid)
 }
-pub fn get_host_shared_path_uvm(sid: &str, uvm_id: &str) -> PathBuf {
-    Path::new(kata_host_shared_dir_uvm(uvm_id).as_str()).join(sid)
-}
 */
+pub fn get_host_shared_path_uvm(uvm_id: &str) -> PathBuf {
+    Path::new(kata_host_shared_dir_uvm(uvm_id).as_str()).to_path_buf()
+}
 
 fn do_get_guest_any_path(
     target: &str,
@@ -132,6 +132,7 @@ fn do_get_guest_any_path(
     is_volume: bool,
     is_rafs: bool,
     is_virtiofs: bool,
+    sid: &str,
 ) -> String {
     let dir = if is_rafs {
         RAFS_DIR
@@ -145,19 +146,22 @@ fn do_get_guest_any_path(
     };
 
     let path = if is_volume && !is_virtiofs {
-        guest_share_dir.join(dir).join(target)
+        // guest_share_dir.join(dir).join(target)
+        // guest_share_dir.join(sid).join(dir).join("rw").join(target)
+        guest_share_dir.join(sid).join("rw").join(dir).join(target)
     } else {
-        guest_share_dir.join(dir).join(cid).join(target)
+        // guest_share_dir.join(dir).join(cid).join(target)
+        guest_share_dir.join(sid).join("rw").join(dir).join(cid).join(target)
     };
     path.to_str().unwrap().to_string()
 }
 
-pub fn do_get_guest_path(target: &str, cid: &str, is_volume: bool, is_rafs: bool) -> String {
-    do_get_guest_any_path(target, cid, is_volume, is_rafs, false)
+pub fn do_get_guest_path(target: &str, cid: &str, is_volume: bool, is_rafs: bool, sid: &str) -> String {
+    do_get_guest_any_path(target, cid, is_volume, is_rafs, false, sid)
 }
 
-pub fn do_get_guest_share_path(target: &str, cid: &str, is_rafs: bool) -> String {
-    do_get_guest_any_path(target, cid, false, is_rafs, true)
+pub fn do_get_guest_share_path(target: &str, cid: &str, is_rafs: bool, sid: &str) -> String {
+    do_get_guest_any_path(target, cid, false, is_rafs, true, sid)
 }
 
 pub fn do_get_host_path(

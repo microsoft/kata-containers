@@ -419,7 +419,7 @@ impl ShareFsVolume {
         agent: Arc<dyn Agent>,
         volume_manager: Arc<VolumeManager>,
     ) -> Result<Self> {
-        info!(sl!(), "ShareFsVolume::new: starting");
+        info!(sl!(), "ShareFsVolume::new: starting, m.source() = {:?}", m.source());
 
         // The file_name is in the format of "sandbox-{uuid}-{file_name}"
         let source_path = get_mount_path(m.source());

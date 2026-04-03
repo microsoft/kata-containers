@@ -72,7 +72,8 @@ impl NydusRootfs {
             // see this issue (https://github.com/kata-containers/kata-containers/issues/5143)
             NYDUS_ROOTFS_V5 | NYDUS_ROOTFS_V6 => {
                 // rafs mount the metadata of nydus rootfs
-                let rafs_mnt = do_get_guest_share_path(HYBRID_ROOTFS_LOWER_DIR, cid, true);
+                // let rafs_mnt = do_get_guest_share_path(HYBRID_ROOTFS_LOWER_DIR, cid, true);
+                let rafs_mnt = do_get_guest_share_path(HYBRID_ROOTFS_LOWER_DIR, cid, true, sid);
                 rafs_mount(
                     d,
                     sid,
@@ -93,8 +94,11 @@ impl NydusRootfs {
                 
                 let rootfs_dir = container_share_dir.join(ROOTFS);
                 fs::create_dir_all(rootfs_dir).context("failed to create directory")?;
+                
                 // mount point inside the guest
-                let rootfs_guest_path = do_get_guest_path(ROOTFS, cid, false, false);
+                // let rootfs_guest_path = do_get_guest_path(ROOTFS, cid, false, false);
+                let rootfs_guest_path = do_get_guest_path(ROOTFS, cid, false, false, sid);
+
                 // bind mount the snapshot dir under the share directory
                 share_fs_mount
                     .share_rootfs(&ShareFsRootfsConfig {
@@ -111,7 +115,7 @@ impl NydusRootfs {
                 let mut options: Vec<String> = Vec::new();
                 options.push(
                     "lowerdir=".to_string()
-                        + &do_get_guest_path(HYBRID_ROOTFS_LOWER_DIR, cid, false, true),
+                        + &do_get_guest_path(HYBRID_ROOTFS_LOWER_DIR, cid, false, true, sid),
                 );
                 options.push(
                     "workdir=".to_string()
@@ -120,6 +124,7 @@ impl NydusRootfs {
                             cid,
                             false,
                             false,
+                            sid,
                         ),
                 );
                 options.push(
@@ -129,6 +134,7 @@ impl NydusRootfs {
                             cid,
                             false,
                             false,
+                            sid,
                         ),
                 );
                 options.push("index=off".to_string());

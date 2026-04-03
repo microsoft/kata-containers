@@ -175,6 +175,8 @@ pub fn init_rootfs(
     lazy_static::initialize(&PROPAGATION);
     lazy_static::initialize(&LINUXDEVICETYPE);
 
+    log_child!(cfd_log, "init_rootfs: starting");
+
     let linux = &spec
         .linux()
         .as_ref()
@@ -211,8 +213,10 @@ pub fn init_rootfs(
 
     mount(None::<&str>, "/", None::<&str>, flags, None::<&str>)?;
 
+    log_child!(cfd_log, "init_rootfs: calling rootfs_parent_mount_private");
     rootfs_parent_mount_private(rootfs)?;
 
+    log_child!(cfd_log, "init_rootfs: calling mount 2");
     mount(
         Some(rootfs),
         rootfs,
@@ -273,7 +277,9 @@ pub fn init_rootfs(
                 }
             }
 
+            log_child!(cfd_log, "init_rootfs: calling mount_from");
             mount_from(cfd_log, m, rootfs, flags, &data, label)?;
+
             // bind mount won't change mount options, we need remount to make mount options
             // effective.
             // first check that we have non-default options required before attempting a
@@ -283,6 +289,8 @@ pub fn init_rootfs(
                     .to_str()
                     .ok_or_else(|| anyhow::anyhow!("Failed to convert path to string"))?
                     .to_string();
+
+                log_child!(cfd_log, "init_rootfs: calling mount 3");
                 mount(
                     None::<&str>,
                     dest.as_str(),
@@ -310,6 +318,7 @@ pub fn init_rootfs(
 
     unistd::chdir(&olddir)?;
 
+    log_child!(cfd_log, "init_rootfs: success");
     Ok(())
 }
 
@@ -760,23 +769,47 @@ fn mount_from(
     data: &str,
     label: &str,
 ) -> Result<()> {
+    log_child!(cfd_log, "mount_from: starting");
+
     let mut d = String::from(data);
     let mount_dest = m.destination().display().to_string();
-    let mount_typ = m.typ().as_ref().unwrap();
+    
+    //let mount_typ = m.typ().as_ref().unwrap();
+    let mount_typ = match m.typ().as_ref() {
+        Some(t) => t,
+        None => return Err(anyhow!("mount_from: bogus m.typ = {:?}", m.typ())),
+    };
+    
     let dest = scoped_join(rootfs, mount_dest)?
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("Failed to convert path to string"))?
         .to_string();
 
-    let mount_source = m.source().as_ref().unwrap().display().to_string();
+    // let mount_source = m.source().as_ref().unwrap().display().to_string();
+
+    let mount_source = if let Some(s) = m.source().as_ref() {
+        s.display().to_string()
+    } else {
+        return Err(anyhow!("mount_from: bogus m.source = {:?}", m.source()));
+    };
+
     let src = if mount_typ == "bind" {
-        let src = fs::canonicalize(&mount_source)?;
+        // let src = fs::canonicalize(&mount_source)?;
+        let src = match fs::canonicalize(&mount_source) {
+            Ok(s) => s,
+            Err(e) => return Err(anyhow!("mount_from: canonicalize failed for {mount_source}: {:?}", e)),
+        };
+
         let dir = if src.is_dir() {
             Path::new(&dest)
         } else {
             Path::new(&dest).parent().unwrap()
         };
 
+        if let Err(e) = fs::create_dir_all(dir) {
+            return Err(anyhow!("mount_from: create_dir_all failed: {:?}", e));
+        }
+        /*
         fs::create_dir_all(dir).inspect_err(|e| {
             log_child!(
                 cfd_log,
@@ -785,9 +818,18 @@ fn mount_from(
                 e.to_string()
             )
         })?;
+        */
 
         // make sure file exists so we can bind over it
         if !src.is_dir() {
+            if let Err(e) = OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(&dest) {
+                return Err(anyhow!("mount_from: open failed: {:?}", e));
+            }
+            /*
             let _ = OpenOptions::new()
                 .create(true)
                 .truncate(true)
@@ -802,6 +844,7 @@ fn mount_from(
                     );
                     e
                 })?;
+            */
         }
         src.to_str().unwrap().to_string()
     } else {
@@ -813,8 +856,13 @@ fn mount_from(
         }
     };
 
+    if let Err(e) = stat::stat(dest.as_str()) {
+        return Err(anyhow!("mount_from: stat failed: {:?}", e));
+    }
+    /*
     let _ = stat::stat(dest.as_str())
         .inspect_err(|e| log_child!(cfd_log, "dest stat error. {}: {:?}", dest.as_str(), e))?;
+    */
 
     // Set the SELinux context for the mounts
     let mut use_xattr = false;
@@ -852,6 +900,7 @@ fn mount_from(
         }
     }
 
+    /*
     mount(
         Some(src.as_str()),
         dest.as_str(),
@@ -860,7 +909,18 @@ fn mount_from(
         Some(d.as_str()).filter(|s| !s.is_empty()),
     )
     .inspect_err(|e| log_child!(cfd_log, "mount error: {:?}", e))?;
-
+    */
+    if let Err(e) = mount(
+        Some(src.as_str()),
+        dest.as_str(),
+        Some(mount_typ.as_str()),
+        flags,
+        Some(d.as_str()).filter(|s| !s.is_empty()),
+        ) {
+        return Err(anyhow!("mount_from: mount 1 failed: {:?}", e));
+        //panic!("mount_from: mount 1 failed: {:?}", e);
+    }
+    
     if !label.is_empty() && selinux::is_enabled()? && use_xattr {
         xattr::set(dest.as_str(), "security.selinux", label.as_bytes())?;
     }
@@ -875,6 +935,7 @@ fn mount_from(
                 | MsFlags::MS_SLAVE),
         )
     {
+        /*
         mount(
             Some(dest.as_str()),
             dest.as_str(),
@@ -883,7 +944,20 @@ fn mount_from(
             None::<&str>,
         )
         .inspect_err(|e| log_child!(cfd_log, "remout {}: {:?}", dest.as_str(), e))?;
+        */
+        if let Err(e) = mount(
+            Some(dest.as_str()),
+            dest.as_str(),
+            None::<&str>,
+            flags | MsFlags::MS_REMOUNT,
+            None::<&str>,
+        ) {
+            return Err(anyhow!("mount_from: mount 2 failed: {:?}", e));
+            //panic!("mount_from: mount 2 failed: {:?}", e);
+        }
     }
+
+    log_child!(cfd_log, "mount_from: success");
     Ok(())
 }
 

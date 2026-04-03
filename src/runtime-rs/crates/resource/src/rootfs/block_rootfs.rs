@@ -43,7 +43,7 @@ impl BlockRootfs {
         dev_id: u64,
         rootfs: &Mount,
     ) -> Result<Self> {
-        let container_path = do_get_guest_path(ROOTFS, cid, false, false);
+        let container_path = do_get_guest_path(ROOTFS, cid, false, false, sid);
         
         // DMFIX: uvm_id
         // let host_path = do_get_host_path(ROOTFS, sid, cid, false, false);

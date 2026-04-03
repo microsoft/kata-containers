@@ -1602,8 +1602,9 @@ impl agent_ttrpc::AgentService for AgentService {
             }
         }
 
-        info!(sl(), "create_sandbox: success, inserting s = {:?}", s);
+        //info!(sl(), "create_sandbox: success, inserting s = {:?}", s);
         self.sandboxes.lock().await.insert(req.sandbox_id.clone(), s);
+        info!(sl(), "create_sandbox: success");
 
         Ok(Empty::new())
     }
