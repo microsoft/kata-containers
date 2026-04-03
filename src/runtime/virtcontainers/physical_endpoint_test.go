@@ -17,7 +17,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	ktu "github.com/kata-containers/kata-containers/src/runtime/pkg/katatestutils"
-	persistapi "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/persist/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
@@ -361,12 +360,7 @@ func TestPhysicalEndpoint_SaveLoad_NonVF(t *testing.T) {
 	assert.Equal("pci", saved.Physical.BusType)
 	assert.Equal("tap1", saved.Physical.NetPair.TAPIface.Name)
 	assert.Equal("eth0", saved.Physical.NetPair.VirtIface.Name)
-
-	// load() reads NetPair from Veth.NetPair (shared persistence format).
-	// Populate it to simulate a fully persisted state.
-	saved.Veth = &persistapi.VethEndpoint{
-		NetPair: saved.Physical.NetPair,
-	}
+	assert.False(saved.Physical.IsVF)
 
 	loaded := &PhysicalEndpoint{}
 	loaded.load(saved)
@@ -378,6 +372,7 @@ func TestPhysicalEndpoint_SaveLoad_NonVF(t *testing.T) {
 	assert.Equal("tap1", loaded.NetPair.TapInterface.TAPIface.Name)
 	assert.Equal("eth0", loaded.NetPair.VirtIface.Name)
 	assert.Equal(DefaultNetInterworkingModel, loaded.NetPair.NetInterworkingModel)
+	assert.False(loaded.IsVF)
 }
 
 func TestCreatePhysicalEndpoint_NonVF_HappyPath(t *testing.T) {

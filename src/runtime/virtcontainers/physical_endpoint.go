@@ -255,8 +255,11 @@ func (endpoint *PhysicalEndpoint) HotDetach(ctx context.Context, s *Sandbox, net
 	}
 }
 
-// isPhysicalIface checks if an interface is a physical device.
-// We use ethtool here to not rely on device sysfs inside the network namespace.
+// isPhysicalIface checks if an interface is a physical device by inspecting
+// the link's ParentDevBus attribute. Returns true when the bus is "pci" or
+// "vmbus", which covers both SR-IOV VFs and non-VF physical NICs (e.g.
+// VMBus-backed devices). ParentDevBus is populated by the kernel via netlink
+// and does not require sysfs access inside the network namespace.
 func isPhysicalIface(link netlink.Link) bool {
 
 	isParent := (link.Attrs().ParentDevBus == "pci" || link.Attrs().ParentDevBus == "vmbus")
@@ -394,6 +397,7 @@ func (endpoint *PhysicalEndpoint) save() persistapi.NetworkEndpoint {
 			VendorDeviceID: endpoint.VendorDeviceID,
 			NetPair:        *netpair,
 			BusType:        endpoint.BusType,
+			IsVF:           endpoint.IsVF,
 		},
 	}
 }
@@ -402,12 +406,13 @@ func (endpoint *PhysicalEndpoint) load(s persistapi.NetworkEndpoint) {
 	endpoint.EndpointType = PhysicalEndpointType
 
 	if s.Physical != nil {
-		netpair := loadNetIfPair(&s.Veth.NetPair)
+		netpair := loadNetIfPair(&s.Physical.NetPair)
 		endpoint.NetPair = *netpair
 		endpoint.BDF = s.Physical.BDF
 		endpoint.Driver = s.Physical.Driver
 		endpoint.VendorDeviceID = s.Physical.VendorDeviceID
 		endpoint.BusType = s.Physical.BusType
+		endpoint.IsVF = s.Physical.IsVF
 	}
 }
 

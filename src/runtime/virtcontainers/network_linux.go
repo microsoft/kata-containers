@@ -130,6 +130,17 @@ func (n *LinuxNetwork) addSingleEndpoint(ctx context.Context, s *Sandbox, netInf
 
 	// Check if interface is a physical interface. Do not create
 	// tap interface/bridge if it is.
+	// netInfo.Link may be nil when coming from the hotplug path
+	// (Sandbox.generateNetInfo does not populate it).  Resolve the link
+	// now so isPhysicalIface() and createPhysicalEndpoint() have access
+	// to its attributes (e.g. ParentDevBus).
+	if netInfo.Link == nil {
+		l, err := netlink.LinkByName(netInfo.Iface.Name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve link %q: %w", netInfo.Iface.Name, err)
+		}
+		netInfo.Link = l
+	}
 	isPhysical := isPhysicalIface(netInfo.Link)
 	var err error
 	idx := len(n.eps)
@@ -1443,6 +1454,15 @@ func addRxRateLimiter(endpoint Endpoint, maxRate uint64) error {
 		linkName = netPair.TAPIface.Name
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
+	case *PhysicalEndpoint:
+		if ep.IsVF {
+			// VF endpoints use VFIO passthrough; rate limiting is handled by
+			// the hypervisor / physical function and does not apply here.
+			return nil
+		}
+		// Non-VF physical NICs are tap-backed; apply rx limiting on the tap.
+		netPair := endpoint.NetworkPair()
+		linkName = netPair.TapInterface.TAPIface.Name
 	default:
 		return fmt.Errorf("Unsupported endpointType %s for adding rx rate limiter", ep.Type())
 	}
@@ -1615,6 +1635,15 @@ func addTxRateLimiter(endpoint Endpoint, maxRate uint64) error {
 
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
+	case *PhysicalEndpoint:
+		if ep.IsVF {
+			// VF endpoints use VFIO passthrough; rate limiting is handled by
+			// the hypervisor / physical function and does not apply here.
+			return nil
+		}
+		// Non-VF physical NICs are tap-backed; apply IFB-based tx limiting via tap.
+		netPair = endpoint.NetworkPair()
+		linkName = netPair.TapInterface.TAPIface.Name
 	default:
 		return fmt.Errorf("Unsupported endpointType %s for adding tx rate limiter", ep.Type())
 	}
@@ -1673,6 +1702,12 @@ func removeRxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 		linkName = netPair.TAPIface.Name
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
+	case *PhysicalEndpoint:
+		if ep.IsVF {
+			return nil
+		}
+		netPair := endpoint.NetworkPair()
+		linkName = netPair.TapInterface.TAPIface.Name
 	default:
 		return fmt.Errorf("Unsupported endpointType %s for removing rx rate limiter", ep.Type())
 	}
@@ -1705,8 +1740,14 @@ func removeTxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 		}
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
+	case *PhysicalEndpoint:
+		if ep.IsVF {
+			return nil
+		}
+		netPair := endpoint.NetworkPair()
+		linkName = netPair.TapInterface.TAPIface.Name
 	default:
-		return fmt.Errorf("Unsupported endpointType %s for adding tx rate limiter", ep.Type())
+		return fmt.Errorf("Unsupported endpointType %s for removing tx rate limiter", ep.Type())
 	}
 
 	if err := doNetNS(networkNSPath, func(_ ns.NetNS) error {
