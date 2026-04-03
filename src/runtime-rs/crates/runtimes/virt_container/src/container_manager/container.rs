@@ -170,6 +170,7 @@ impl Container {
         if let Some(storage) = rootfs.get_storage().await {
             storages.push(storage);
         }
+
         inner.rootfs.push(rootfs);
 
         // handler volumes
@@ -252,8 +253,9 @@ impl Container {
 
         info!(
             sl!(),
-            "OCI Spec {:?} within CreateContainerRequest.",
-            spec.clone()
+            "Container::create: sandbox_id = {}, OCI Spec {:?}.",
+            &self.sandbox_id,
+            spec.clone(),
         );
 
         // create container
