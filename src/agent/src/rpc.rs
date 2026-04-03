@@ -1552,7 +1552,7 @@ impl agent_ttrpc::AgentService for AgentService {
             // let mut s = self.sandbox.lock().await;
 
             info!(sl(), "create_sandbox: setting up CONTAINER_BASE = {CONTAINER_BASE}");
-            let _ = fs::remove_dir_all(CONTAINER_BASE);
+            // let _ = fs::remove_dir_all(CONTAINER_BASE);
             let _ = fs::create_dir_all(CONTAINER_BASE);
 
             s.hostname = req.hostname.clone();
