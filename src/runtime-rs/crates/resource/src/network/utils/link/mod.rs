@@ -41,7 +41,11 @@ pub fn get_bus_type(name: &str) -> Result<Option<BusType>> {
                 _ => Ok(None),
             }
         }
-        Err(_) => Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(anyhow!(e).context(format!(
+            "failed to read subsystem symlink for interface {}",
+            name
+        ))),
     }
 }
 
