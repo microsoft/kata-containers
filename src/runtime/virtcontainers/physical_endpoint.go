@@ -40,6 +40,8 @@ type PhysicalEndpoint struct {
 	CCWDevice          *vcTypes.CcwDevice
 	NetPair            NetworkInterfacePair
 	BusType            string
+	RxRateLimiter      bool
+	TxRateLimiter      bool
 }
 
 // Properties returns the properties of the physical interface.
@@ -413,20 +415,20 @@ func (endpoint *PhysicalEndpoint) load(s persistapi.NetworkEndpoint) {
 	}
 }
 
-// unsupported
 func (endpoint *PhysicalEndpoint) GetRxRateLimiter() bool {
-	return false
+	return endpoint.RxRateLimiter
 }
 
 func (endpoint *PhysicalEndpoint) SetRxRateLimiter() error {
-	return fmt.Errorf("rx rate limiter is unsupported for physical endpoint")
+	endpoint.RxRateLimiter = true
+	return nil
 }
 
-// unsupported
 func (endpoint *PhysicalEndpoint) GetTxRateLimiter() bool {
-	return false
+	return endpoint.TxRateLimiter
 }
 
 func (endpoint *PhysicalEndpoint) SetTxRateLimiter() error {
-	return fmt.Errorf("tx rate limiter is unsupported for physical endpoint")
+	endpoint.TxRateLimiter = true
+	return nil
 }
