@@ -96,7 +96,7 @@ pub fn baremount(
 
     info!(
         logger,
-        "baremount source={:?}, dest={:?}, fs_type={:?}, options={:?}, flags={:?}",
+        "baremount source: {:?}, dest={:?}, fs_type={:?}, options={:?}, flags={:?}",
         source,
         destination,
         fs_type,
@@ -104,13 +104,23 @@ pub fn baremount(
         flags
     );
 
-    nix::mount::mount(
+    let mount_result = nix::mount::mount(
         Some(source),
         destination,
         Some(fs_type),
         flags,
         Some(options),
-    )
+    );
+
+    if mount_result.is_err() {
+        error!(logger, "baremount source: error: {:?}", &mount_result);
+        Err(anyhow!("baremount source: error: {:?}", &mount_result))
+    } else {
+        info!(logger, "baremount source: success");
+        Ok(mount_result?)
+    }
+
+    /*
     .map_err(|e| {
         anyhow!(
             "failed to mount {} to {}, with error: {}",
@@ -119,6 +129,7 @@ pub fn baremount(
             e
         )
     })
+    */
 }
 
 /// Looks for `mount_point` entry in the /proc/mounts.

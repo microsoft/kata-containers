@@ -361,6 +361,8 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
     let crfd = std::env::var(CRFD_FD)?.parse::<i32>().unwrap();
     let cfd_log = std::env::var(CLOG_FD)?.parse::<i32>().unwrap();
 
+    //log_child!(cfd_log, "do_init_child: start");
+
     if std::env::var(PIDNS_ENABLED)?.eq(format!("{}", true).as_str()) {
         // get the pidns fd from parent, if parent had passed the pidns fd,
         // then get it and join in this pidns; otherwise, create a new pidns
@@ -585,11 +587,13 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
 
     let rootfs = spec.root().as_ref().unwrap().path().display().to_string();
 
-    log_child!(cfd_log, "setup rootfs {}", &rootfs);
+    // log_child!(cfd_log, "do_init_child: setup rootfs {}", &rootfs);
     let root = fs::canonicalize(&rootfs)?;
     let rootfs = root.to_str().unwrap();
 
     if to_new.contains(CloneFlags::CLONE_NEWNS) {
+        log_child!(cfd_log, "do_init_child: CLONE_NEWNS setup rootfs {}", &rootfs);
+
         // setup rootfs
         if let Ok(systemd_cm) = systemd_cm {
             mount::init_rootfs(
@@ -600,6 +604,8 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
                 bind_device,
             )?;
         } else {
+            log_child!(cfd_log, "do_init_child: !CLONE_NEWNS setup rootfs {}", &rootfs);
+
             let fs_cm = fs_cm.unwrap();
             mount::init_rootfs(cfd_log, &spec, &fs_cm.paths, &fs_cm.mounts, bind_device)?;
         }
@@ -846,6 +852,8 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
             seccomp::init_seccomp(scmp)?;
         }
     }
+
+    //log_child!(cfd_log, "do_init_child: calling do_exec");
 
     do_exec(&args);
 }

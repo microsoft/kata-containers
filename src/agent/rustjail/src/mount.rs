@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![allow(unused)]
+
 use anyhow::{anyhow, Context, Result};
 use libc::uid_t;
 use nix::errno::Errno;
@@ -768,7 +770,16 @@ fn mount_from(
         .ok_or_else(|| anyhow::anyhow!("Failed to convert path to string"))?
         .to_string();
 
+        /*
+    let source_ref = m.source().as_ref();
+    let exists = source_ref.expect("mount_from source_ref").exists();
+    if !exists {
+        return Err(anyhow!("mount_from: missing m.source() = {:?}", source_ref));
+    }
+        */
+
     let mount_source = m.source().as_ref().unwrap().display().to_string();
+    
     let src = if mount_typ == "bind" {
         let src = fs::canonicalize(&mount_source)?;
         let dir = if src.is_dir() {

@@ -251,7 +251,8 @@ pub fn bind_remount<P: AsRef<Path>>(dst: P, readonly: bool) -> Result<()> {
 fn check_dir(tag: u32, dir_path: &str) {
     let p = Path::new(dir_path);
     let is_dir = p.is_dir();
-    info!(sl!(), "sys-util/mount: {tag}: path = {:?}, is_dir = {is_dir}", &p);
+    let is_file = p.is_dir();
+    info!(sl!(), "sys-util/mount: {tag}: path = {:?}, is_dir = {is_dir}, is_file = {is_file}", &p);
 }
 
 pub fn bind_mount_unchecked<S: AsRef<Path>, D: AsRef<Path>>(

@@ -62,6 +62,8 @@ impl ContainerInner {
     }
 
     pub(crate) async fn check_state(&self, states: Vec<ProcessStatus>) -> Result<()> {
+        info!(self.logger, "check_state");
+
         let state = self.init_process.get_status().await;
         if states.contains(&state) {
             return Ok(());
@@ -75,11 +77,15 @@ impl ContainerInner {
     }
 
     pub(crate) async fn set_state(&mut self, state: ProcessStatus) {
+        info!(self.logger, "set_state");
+
         let mut status = self.init_process.status.write().await;
         *status = state;
     }
 
     pub(crate) async fn start_exec_process(&mut self, process: &ContainerProcess) -> Result<()> {
+        info!(self.logger, "start_exec_process");
+
         let exec = self
             .exec_processes
             .get_mut(&process.exec_id)
@@ -115,6 +121,8 @@ impl ContainerInner {
         height: u32,
         width: u32,
     ) -> Result<()> {
+        info!(self.logger, "win_resize_process");
+
         self.check_state(vec![ProcessStatus::Created, ProcessStatus::Running])
             .await
             .context("check state")?;
@@ -131,6 +139,8 @@ impl ContainerInner {
     }
 
     pub fn fetch_exit_watcher(&self, process: &ContainerProcess) -> Result<ProcessWatcher> {
+        info!(self.logger, "fetch_exit_watcher");
+
         match process.process_type {
             ProcessType::Container => self.init_process.fetch_exit_watcher(),
             ProcessType::Exec => {
@@ -144,6 +154,8 @@ impl ContainerInner {
     }
 
     pub(crate) async fn start_container(&mut self, cid: &ContainerID) -> Result<()> {
+        info!(self.logger, "start_container");
+
         self.check_state(vec![ProcessStatus::Created, ProcessStatus::Stopped])
             .await
             .context("check state")?;
@@ -170,6 +182,8 @@ impl ContainerInner {
     }
 
     pub(crate) async fn delete_exec_process(&mut self, eid: &str) -> Result<()> {
+        info!(self.logger, "delete_exec_process");
+
         match self.exec_processes.remove(eid) {
             Some(_) => {
                 debug!(self.logger, " delete process eid {}", eid);
@@ -191,10 +205,10 @@ impl ContainerInner {
     ) -> Result<()> {
         // wait until the container process
         // terminated and the status write lock released.
-        info!(self.logger, "wait on container terminated");
+        info!(self.logger, "cleanup_container: wait on container terminated");
         let exit_status = self.get_exit_status().await;
         let _locked_exit_status = exit_status.read().await;
-        info!(self.logger, "container terminated");
+        info!(self.logger, "cleanup_container: container terminated");
         let remove_request = agent::RemoveContainerRequest {
             container_id: cid.to_string(),
             sandbox_id: self.sandbox_id.clone(),
@@ -236,7 +250,7 @@ impl ContainerInner {
         device_manager: &RwLock<DeviceManager>,
     ) -> Result<()> {
         let logger = logger_with_process(process);
-        info!(logger, "begin to stop process");
+        info!(logger, "stop_process: begin to stop process");
 
         // do not stop again when state stopped, may cause multi cleanup resource
         let state = self.init_process.get_status().await;
@@ -282,6 +296,8 @@ impl ContainerInner {
         signal: u32,
         all: bool,
     ) -> Result<()> {
+        info!(self.logger, "signal_process");
+
         if self.check_state(vec![ProcessStatus::Stopped]).await.is_ok() {
             return Ok(());
         }

@@ -49,7 +49,7 @@ pub fn kata_host_shared_dir() -> String {
 pub fn kata_host_shared_dir_uvm(uvm_id: &str) -> String {
     let mut uvm_path = DEFAULT_KATA_HOST_SHARED_DIR.to_string();
     if !uvm_id.is_empty() {
-        uvm_path += &format!("{uvm_id}/");
+        uvm_path += &format!("{uvm_id}");
     }
     build_path(&uvm_path)
 }

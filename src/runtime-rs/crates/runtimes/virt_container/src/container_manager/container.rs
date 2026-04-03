@@ -112,6 +112,8 @@ impl Container {
     }
 
     pub async fn create(&self, mut spec: oci::Spec) -> Result<()> {
+        info!(sl!(), "Container::create");
+
         let dir1 = "/run/kata-containers/shared/sandboxes/123456789".to_string();
 
         let container_id = self.config.container_id.clone();
@@ -378,11 +380,13 @@ impl Container {
             .create_container(r)
             .await
             .context("agent create container")?;
+        info!(sl!(), "container::create: back from create_container");
 
         //Self::check_dir(14, &dir3);
         //Self::check_dir(14, &dir4);
 
         self.resource_manager.dump().await;
+        info!(sl!(), "container::create: back from resource_manager.dump");
 
         //Self::check_dir(15, &dir3);
         //Self::check_dir(15, &dir4);
@@ -396,6 +400,8 @@ impl Container {
         containers: Arc<RwLock<HashMap<String, Container>>>,
         process: &ContainerProcess,
     ) -> Result<()> {
+        info!(sl!(), "Container::start");
+
         let mut inner = self.inner.write().await;
         match process.process_type {
             ProcessType::Container => {
@@ -487,6 +493,8 @@ impl Container {
     }
 
     pub async fn delete_exec_process(&self, container_process: &ContainerProcess) -> Result<()> {
+        info!(sl!(), "Container::delete_exec_process");
+
         let mut inner = self.inner.write().await;
         inner
             .delete_exec_process(&container_process.exec_id)
@@ -498,6 +506,8 @@ impl Container {
         &self,
         container_process: &ContainerProcess,
     ) -> Result<ProcessStateInfo> {
+        info!(sl!(), "Container::state_process");
+
         let inner = self.inner.read().await;
         match container_process.process_type {
             ProcessType::Container => inner.init_process.state().await,
@@ -515,6 +525,8 @@ impl Container {
         &self,
         container_process: &ContainerProcess,
     ) -> Result<ProcessWatcher> {
+        info!(sl!(), "Container::wait_process");
+
         let logger = logger_with_process(container_process);
         info!(logger, "start wait process");
 
@@ -530,6 +542,8 @@ impl Container {
         signal: u32,
         all: bool,
     ) -> Result<()> {
+        info!(sl!(), "Container::kill_process");
+
         let mut inner = self.inner.write().await;
 
         // Check if process is already stopped before signaling.
@@ -568,6 +582,8 @@ impl Container {
         terminal: bool,
         oci_process: OCIProcess,
     ) -> Result<()> {
+        info!(sl!(), "Container::exec_process");
+
         let process = Process::new(
             container_process,
             self.pid,
@@ -588,11 +604,15 @@ impl Container {
     }
 
     pub async fn close_io(&self, container_process: &ContainerProcess) -> Result<()> {
+        info!(sl!(), "Container::close_io");
+
         let mut inner = self.inner.write().await;
         inner.close_io(container_process).await
     }
 
     pub async fn stop_process(&self, container_process: &ContainerProcess) -> Result<()> {
+        info!(sl!(), "Container::stop_process");
+
         let mut inner = self.inner.write().await;
         let device_manager = self.resource_manager.get_device_manager().await;
         inner
@@ -615,6 +635,8 @@ impl Container {
     }
 
     pub async fn pause(&self) -> Result<()> {
+        info!(sl!(), "Container::pause");
+
         let mut inner = self.inner.write().await;
         let status = inner.init_process.get_status().await;
         if status != ProcessStatus::Running {
@@ -635,6 +657,8 @@ impl Container {
     }
 
     pub async fn resume(&self) -> Result<()> {
+        info!(sl!(), "Container::resume");
+
         let mut inner = self.inner.write().await;
         let status = inner.init_process.get_status().await;
         if status != ProcessStatus::Paused {
@@ -660,6 +684,8 @@ impl Container {
         width: u32,
         height: u32,
     ) -> Result<()> {
+        info!(sl!(), "Container::resize_pty");
+
         let logger = logger_with_process(process);
         let mut inner = self.inner.write().await;
         if inner.init_process.get_status().await != ProcessStatus::Running {
@@ -691,6 +717,8 @@ impl Container {
     }
 
     pub async fn stats(&self) -> Result<Option<agent::StatsContainerResponse>> {
+        info!(sl!(), "Container::stats");
+
         let stats_resp = self
             .agent
             .stats_container(agent::StatsContainerRequest {
@@ -704,6 +732,8 @@ impl Container {
     }
 
     pub async fn update(&self, resources: &LinuxResources) -> Result<()> {
+        info!(sl!(), "Container::update");
+
         let mut inner = self.inner.write().await;
         inner.linux_resources = Some(resources.clone());
         // update vcpus, mems and host cgroups
@@ -729,14 +759,20 @@ impl Container {
     }
 
     pub async fn config(&self) -> ContainerConfig {
+        info!(sl!(), "Container::config");
         self.config.clone()
     }
 
     pub async fn spec(&self) -> oci::Spec {
+        info!(sl!(), "Container::spec");
         self.spec.clone()
     }
 
+    #[allow(unreachable_code)]
     pub async fn cleanup(&mut self) -> Result<()> {
+        info!(sl!(), "Container::cleanup");
+        //panic!("Container::cleanup");
+
         let mut inner = self.inner.write().await;
         let device_manager = self.resource_manager.get_device_manager().await;
         inner
