@@ -46,6 +46,7 @@ type PhysicalEndpoint struct {
 	VendorDeviceID string
 	NetPair        NetworkInterfacePair
 	BusType        string
+	IsVF           bool
 }
 
 type MacvtapEndpoint struct {
