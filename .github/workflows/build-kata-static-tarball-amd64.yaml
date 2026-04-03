@@ -171,8 +171,9 @@ jobs:
           - rootfs-image-mariner
           - rootfs-initrd
           - rootfs-initrd-confidential
-          - rootfs-initrd-nvidia-gpu
-          - rootfs-initrd-nvidia-gpu-confidential
+          # msft-main: nvidia-imex-580 : Depends: nvidia-kernel-common-580-server-580.126.09
+          # - rootfs-initrd-nvidia-gpu
+          # - rootfs-initrd-nvidia-gpu-confidential
     steps:
       - name: Login to Kata Containers quay.io
         if: ${{ inputs.push-to-registry == 'yes' }}
