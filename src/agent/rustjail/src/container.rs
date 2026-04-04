@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![allow(unused)]
+
 use anyhow::{anyhow, Context, Result};
 use libc::pid_t;
 use oci::{Linux, LinuxDevice, LinuxIdMapping, LinuxNamespace, LinuxResources, Spec};
@@ -1267,6 +1269,8 @@ impl BaseContainer for LinuxContainer {
     }
 
     async fn destroy(&mut self) -> Result<()> {
+        // DMFIX - cleanup
+        /*
         let spec = self.config.spec.as_ref().unwrap();
         let st = self.oci_state()?;
 
@@ -1331,7 +1335,7 @@ impl BaseContainer for LinuxContainer {
         }
 
         cgm.destroy().context("destroy cgroups")?;
-
+        */
         Ok(())
     }
 

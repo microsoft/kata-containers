@@ -176,6 +176,9 @@ pub fn init_rootfs(
     lazy_static::initialize(&LINUXDEVICETYPE);
 
     log_child!(cfd_log, "init_rootfs: starting");
+    log_child!(cfd_log, "init_rootfs: spec.root = {:?}", spec.root());
+    log_child!(cfd_log, "init_rootfs: cpath = {:?}", cpath);
+    log_child!(cfd_log, "init_rootfs: cpath = {:?}", mounts);
 
     let linux = &spec
         .linux()
@@ -211,12 +214,13 @@ pub fn init_rootfs(
         .to_str()
         .ok_or_else(|| anyhow!("Could not convert rootfs path to string"))?;
 
+    log_child!(cfd_log, "init_rootfs: mounting /");
     mount(None::<&str>, "/", None::<&str>, flags, None::<&str>)?;
 
     log_child!(cfd_log, "init_rootfs: calling rootfs_parent_mount_private");
     rootfs_parent_mount_private(rootfs)?;
 
-    log_child!(cfd_log, "init_rootfs: calling mount 2");
+    log_child!(cfd_log, "init_rootfs: mounting rootfs = {rootfs}");
     mount(
         Some(rootfs),
         rootfs,
@@ -249,6 +253,7 @@ pub fn init_rootfs(
         let default_typ = String::new();
         let mount_typ = m.typ().as_ref().unwrap_or(&default_typ);
         if mount_typ == "cgroup" {
+            log_child!(cfd_log, "init_rootfs: calling mount_cgroups");
             mount_cgroups(cfd_log, m, rootfs, flags, &data, cpath, mounts)?;
         } else {
             if mount_dest.clone().as_str() == "/dev" {
@@ -277,7 +282,7 @@ pub fn init_rootfs(
                 }
             }
 
-            log_child!(cfd_log, "init_rootfs: calling mount_from");
+            log_child!(cfd_log, "init_rootfs: mount_from m = {:?}, rootfs = {:?}", m, rootfs);
             mount_from(cfd_log, m, rootfs, flags, &data, label)?;
 
             // bind mount won't change mount options, we need remount to make mount options
@@ -290,7 +295,7 @@ pub fn init_rootfs(
                     .ok_or_else(|| anyhow::anyhow!("Failed to convert path to string"))?
                     .to_string();
 
-                log_child!(cfd_log, "init_rootfs: calling mount 3");
+                log_child!(cfd_log, "init_rootfs: mounting dest = {:?}", dest);
                 mount(
                     None::<&str>,
                     dest.as_str(),
@@ -311,8 +316,13 @@ pub fn init_rootfs(
     let default_devs = Vec::new();
     let linux_devices = linux.devices().as_ref().unwrap_or(&default_devs);
     if !bind_mount_dev {
+        log_child!(cfd_log, "init_rootfs: calling default_symlinks");
         default_symlinks()?;
+        
+        log_child!(cfd_log, "init_rootfs: calling create_devices");
         create_devices(linux_devices, bind_device)?;
+        
+        log_child!(cfd_log, "init_rootfs: calling ensure_ptmx");
         ensure_ptmx()?;
     }
 

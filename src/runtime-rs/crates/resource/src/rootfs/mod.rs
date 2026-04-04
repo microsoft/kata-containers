@@ -162,7 +162,7 @@ impl RootFsResource {
         for r in &inner.rootfs {
             info!(
                 sl!(),
-                "rootfs {:?}: count {}",
+                "dump: rootfs {:?}: count {}",
                 r.get_guest_rootfs_path().await,
                 Arc::strong_count(r)
             );

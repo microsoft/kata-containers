@@ -730,6 +730,9 @@ impl Sandbox for VirtSandbox {
             .await
             .context("create sandbox")?;
 
+        //info!(sl!(), "Sleeping...");
+        //std::thread::sleep(std::time::Duration::from_secs(10));
+
         inner.state = SandboxState::Running;
 
         // get and store guest details
@@ -868,6 +871,8 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        // DMFIX - clean-up
+        /*
         info!(sl!(), "VirtSandbox: shutdown");
         // panic!("VirtSandbox: shutdown");
 
@@ -887,10 +892,13 @@ impl Sandbox for VirtSandbox {
         let sender = self.msg_sender.clone();
         let sender = sender.lock().await;
         sender.send(msg).await.context("send shutdown msg")?;
+        */
         Ok(())
     }
 
     async fn cleanup(&self) -> Result<()> {
+        // DMFIX - clean-up
+        /*
         info!(sl!(), "VirtSandbox: delete hypervisor");
         self.hypervisor
             .cleanup()
@@ -902,7 +910,8 @@ impl Sandbox for VirtSandbox {
             .cleanup()
             .await
             .context("resource clean up")?;
-
+        
+        */
         // TODO: cleanup other sandbox resource
         Ok(())
     }

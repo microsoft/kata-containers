@@ -1247,7 +1247,7 @@ impl agent_ttrpc::AgentService for AgentService {
                 /*
                 let ccw_dev = ccw::Device::from_str(&interface.devicePath).map_ttrpc_err(|e| {
                     format!("Unexpected CCW path for network interface: {e:?}")
-                })?;
+                })?;    
                 wait_for_ccw_net_interface(&self.sandbox, &ccw_dev)
                     .await
                     .map_ttrpc_err(|e| format!("interface not available: {e:?}"))?;
@@ -2198,7 +2198,9 @@ fn update_container_namespaces(
     Ok(())
 }
 
-async fn remove_container_resources(sandbox: &mut Sandbox, cid: &str) -> Result<()> {
+async fn remove_container_resources(_sandbox: &mut Sandbox, _cid: &str) -> Result<()> {
+    // DMFIX - cleanup
+    /*
     let mut cmounts: Vec<String> = vec![];
 
     // Find the sandbox storage used by this container
@@ -2226,6 +2228,7 @@ async fn remove_container_resources(sandbox: &mut Sandbox, cid: &str) -> Result<
     sandbox.containers.remove(cid);
     // Remove any host -> guest mappings for this container
     sandbox.pcimap.remove(cid);
+    */
     Ok(())
 }
 

@@ -291,12 +291,16 @@ impl Container {
             sandbox_id: self.sandbox_id.clone(),
             ..Default::default()
         };
-        info!(sl!(), "Container::create: sending request, sandbox_id = {}", r.sandbox_id);
 
+        info!(sl!(), "Sleeping...");
+        std::thread::sleep(std::time::Duration::from_secs(10));
+
+        info!(sl!(), "Container::create: sending CreateContainerRequest, sandbox_id = {}", r.sandbox_id);
         self.agent
             .create_container(r)
             .await
             .context("agent create container")?;
+
         self.resource_manager.dump().await;
         Ok(())
     }
@@ -647,6 +651,9 @@ impl Container {
     }
 
     pub async fn cleanup(&mut self) -> Result<()> {
+        Ok(())
+        // DMFIX - clean-up
+        /*
         let mut inner = self.inner.write().await;
         let device_manager = self.resource_manager.get_device_manager().await;
         inner
@@ -656,6 +663,7 @@ impl Container {
                 &device_manager,
             )
             .await
+        */
     }
 }
 
