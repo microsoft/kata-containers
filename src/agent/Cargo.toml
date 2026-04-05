@@ -199,9 +199,6 @@ async-std.workspace = true
 
 test-utils.workspace = true
 
-[profile.release]
-lto = true
-
 [features]
 seccomp = ["rustjail/seccomp"]
 standard-oci-runtime = ["rustjail/standard-oci-runtime"]
