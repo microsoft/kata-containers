@@ -23,7 +23,9 @@ PACKAGE_FLAGS := $(patsubst %,-p %,$(PACKAGES))
 include ../../utils.mk
 
 ##VAR RELEASE_LTO=true|false|thin|fat LTO setting used for release builds
-RELEASE_LTO ?= true
+# RELEASE_LTO ?= true
+RELEASE_LTO ?= false
+
 ##VAR RELEASE_CODEGEN_UNITS=<number> codegen units used for release builds
 RELEASE_CODEGEN_UNITS ?= 1
 # Apply release profile overrides only for release builds.
