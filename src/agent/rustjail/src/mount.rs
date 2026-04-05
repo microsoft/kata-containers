@@ -180,6 +180,14 @@ pub fn init_rootfs(
     log_child!(cfd_log, "init_rootfs: cpath = {:?}", cpath);
     log_child!(cfd_log, "init_rootfs: cpath = {:?}", mounts);
 
+    let spec_root_string = spec.root().as_ref().unwrap().path().display().to_string();
+    let spec_root = Path::new(&spec_root_string);
+    log_child!(cfd_log, "init_rootfs: spec_root = {:?}", &spec_root);
+
+    let pause_file = spec_root.join("pause");
+    let pause_exists = pause_file.exists();
+    log_child!(cfd_log, "init_rootfs: exists = {pause_exists}, pause = {:?}", &pause_file);
+
     let linux = &spec
         .linux()
         .as_ref()
