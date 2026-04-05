@@ -37,14 +37,23 @@ impl ShimExecutor {
 
         let mut container_type = ContainerType::PodSandbox;
         let mut id = None;
+        let mut uvm_id = None;
 
         if let Ok(spec) = self.load_oci_spec(&bundle_path) {
             (container_type, id) = k8s::container_type_with_id(&spec);
+
+            // Check for uvm_id annotation
+            let annotations = spec.annotations().clone().unwrap_or_default();
+            if let Some(uvm_id_value) = annotations.get("io.katacontainers.config.hypervisor.uvm_id") {
+                uvm_id = Some(uvm_id_value.clone());
+            }
         }
 
         match container_type {
             ContainerType::PodSandbox | ContainerType::SingleContainer => {
-                let address = self.socket_address(&self.args.id)?;
+                // Use uvm_id if available, otherwise use the original id
+                let socket_id = uvm_id.as_ref().unwrap_or(&self.args.id);
+                let address = self.socket_address(socket_id)?;
                 let socket = new_listener(&address)?;
                 let child_pid = self.create_shim_process(socket)?;
                 self.write_pid_file(&bundle_path, child_pid)?;
@@ -55,7 +64,9 @@ impl ShimExecutor {
                 let sid = id
                     .ok_or(Error::InvalidArgument)
                     .context("get sid for container")?;
-                let address = self.socket_address(&sid).context("socket address")?;
+                // Use uvm_id if available, otherwise use the sandbox id
+                let socket_id = uvm_id.as_ref().unwrap_or(&sid);
+                let address = self.socket_address(socket_id).context("socket address")?;
                 self.write_address(&bundle_path, &address)?;
                 Ok(address)
             }
