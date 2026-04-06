@@ -32,7 +32,7 @@ impl ShimExecutor {
         Ok(())
     }
 
-    fn log_to_file(&self, message: &str) {
+    pub fn log_to_file(&self, message: &str) {
         if let Ok(mut file) = OpenOptions::new()
             .create(true)
             .append(true)
@@ -47,7 +47,6 @@ impl ShimExecutor {
 
         let mut container_type = ContainerType::PodSandbox;
         let mut id = None;
-        let mut uvm_id = None;
 
         if let Ok(spec) = self.load_oci_spec(&bundle_path) {
             (container_type, id) = k8s::container_type_with_id(&spec);
@@ -55,17 +54,17 @@ impl ShimExecutor {
             // Check for uvm_id annotation
             let annotations = spec.annotations().clone().unwrap_or_default();
             if let Some(uvm_id_value) = annotations.get("io.katacontainers.config.hypervisor.uvm_id") {
-                uvm_id = Some(uvm_id_value.clone());
+                self.uvm_id = Some(uvm_id_value.clone());
             }
         }
 
-        self.log_to_file(&format!("do_start: args.id={}, uvm_id={:?}", self.args.id, uvm_id));
+        self.log_to_file(&format!("do_start: args.id={}, uvm_id={:?}", self.args.id, self.uvm_id));
         self.log_to_file(&format!("container_type={:?}", container_type));
 
         match container_type {
             ContainerType::PodSandbox | ContainerType::SingleContainer => {
                 // Use uvm_id if available, otherwise use the original id
-                let socket_id = uvm_id.as_ref().unwrap_or(&self.args.id);
+                let socket_id = self.uvm_id.as_ref().unwrap_or(&self.args.id);
                 let address = self.socket_address(socket_id)?;
                 
                 self.log_to_file(&format!("socket_id={}, address={:?}", socket_id, address));
@@ -97,7 +96,7 @@ impl ShimExecutor {
                     .ok_or(Error::InvalidArgument)
                     .context("get sid for container")?;
                 // Use uvm_id if available, otherwise use the sandbox id
-                let socket_id = uvm_id.as_ref().unwrap_or(&sid);
+                let socket_id = self.uvm_id.as_ref().unwrap_or(&sid);
                 let address = self.socket_address(socket_id).context("socket address")?;
                 
                 self.log_to_file(&format!("PodContainer: sid={}, socket_id={}, address={:?}", sid, socket_id, address));
