@@ -23,12 +23,16 @@ pub(crate) const ENV_KATA_RUNTIME_BIND_FD: &str = "KATA_RUNTIME_BIND_FD";
 #[derive(Debug)]
 pub struct ShimExecutor {
     pub(crate) args: Args,
+    pub(crate) uvm_id: Option<String>,
 }
 
 impl ShimExecutor {
     /// Create a new instance of [`Shim`].
     pub fn new(args: Args) -> Self {
-        ShimExecutor { args }
+        ShimExecutor { 
+            args,
+            uvm_id: None,
+        }
     }
 
     pub(crate) fn load_oci_spec(&self, path: &Path) -> Result<oci::Spec> {
