@@ -90,14 +90,21 @@ impl ServiceManager {
             while let Some(r) = rx.recv().await {
                 info!(sl!(), "receive action {:?}", &r.action);
                 let result = match r.action {
-                    Action::Start => self.start_service().await.context("start listen"),
-                    Action::Stop => self.stop_service().await.context("stop listen"),
+                    Action::Start => {
+                        info!(sl!(), "ServiceManager::run: action Start");
+                        self.start_service().await.context("start listen")
+                    },
+                    Action::Stop => {
+                        info!(sl!(), "ServiceManager::run: action Start");
+                        self.stop_service().await.context("stop listen")
+                    },
                     Action::Shutdown => {
+                        info!(sl!(), "ServiceManager::run: action Shutdown");
                         self.stop_service().await.context("stop listen")?;
                         break;
-                    }
+                    },
                     Action::Event(event) => {
-                        info!(sl!(), "get event {:?}", &event);
+                        info!(sl!(), "ServiceManager::run: event {:?}", &event);
                         self.event_publisher
                             .forward(event)
                             .await
