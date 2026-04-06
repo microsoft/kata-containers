@@ -45,7 +45,7 @@ impl ShimExecutor {
     }
 
     async fn do_run(&mut self) -> Result<()> {
-        info!(sl!(), "start to run");
+        info!(sl!(), "ShimExecutor: start to run");
         self.args.validate(false).context("validate")?;
 
         let server_fd = get_server_fd().context("get server fd")?;
