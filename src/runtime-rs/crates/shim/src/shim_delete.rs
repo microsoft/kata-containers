@@ -16,6 +16,8 @@ use crate::{shim::ShimExecutor, Error};
 
 impl ShimExecutor {
     pub async fn delete(&mut self) -> Result<()> {
+        info!(sl!(), "ShimExecutor: delete");
+
         self.args.validate(true).context("validate")?;
         let rsp = self.do_cleanup().await.context("shim do cleanup")?;
         rsp.write_to_writer(&mut std::io::stdout())
@@ -24,6 +26,8 @@ impl ShimExecutor {
     }
 
     async fn do_cleanup(&self) -> Result<api::DeleteResponse> {
+        info!(sl!(), "ShimExecutor: do_cleanup");
+
         let mut rsp = api::DeleteResponse::new();
         rsp.set_exit_status(128 + libc::SIGKILL as u32);
         let mut exited_time = protobuf::well_known_types::timestamp::Timestamp::new();
@@ -41,7 +45,7 @@ impl ShimExecutor {
         let file_path = Path::new("/").join(trim_path);
         let file_path = file_path.as_path();
         if std::fs::metadata(file_path).is_ok() {
-            info!(sl!(), "remote socket path: {:?}", &file_path);
+            info!(sl!(), "ShimExecutor: remote socket path: {:?}", &file_path);
             fs::remove_file(file_path).ok();
         }
 
