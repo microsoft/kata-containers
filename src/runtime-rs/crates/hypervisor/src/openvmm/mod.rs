@@ -30,6 +30,15 @@ use tracing::instrument;
 use super::HypervisorState;
 use crate::{DeviceType, Hypervisor, MemoryConfig, VcpuThreadIds};
 
+pub(crate) const OPENVMM_ROOTFS_PCI_PORT: &str = "rp0";
+pub(crate) const OPENVMM_SHAREFS_PCI_PORT: &str = "rp1";
+pub(crate) const OPENVMM_NET_PCI_PORT: &str = "rp2";
+pub(crate) const OPENVMM_VSOCK_PCI_PORT: &str = "rp3";
+pub(crate) const OPENVMM_CONSOLE_PCI_PORT: &str = "rp4";
+pub(crate) const OPENVMM_STATIC_PCI_PORT_COUNT: u8 = 5;
+pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX: &str = "hp";
+pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_COUNT: u8 = 24;
+
 /// The OpenVMM hypervisor struct, wrapping inner state behind a lock.
 pub struct OpenVmm {
     inner: Arc<RwLock<OpenVmmInner>>,

@@ -9,6 +9,11 @@ use anyhow::{anyhow, Context, Result};
 use std::fs::{self, File};
 
 use super::inner::OpenVmmInner;
+use super::{
+    OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
+    OPENVMM_CONSOLE_PCI_PORT, OPENVMM_NET_PCI_PORT, OPENVMM_ROOTFS_PCI_PORT,
+    OPENVMM_SHAREFS_PCI_PORT,
+};
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
@@ -53,6 +58,8 @@ impl OpenVmmInner {
         info!(sl!(), "openvmm: prepare_vm id={}", id);
         self.id = id.to_string();
         self.state = VmmState::NotReady;
+        self.pending_devices.clear();
+        self.reset_block_hotplug_ports();
         self.vm_path = get_sandbox_path(id);
         self.jailer_root = get_jailer_root(id);
         self.netns = netns;
@@ -68,6 +75,7 @@ impl OpenVmmInner {
 
     pub(crate) async fn start_vm(&mut self, _timeout: i32) -> Result<()> {
         info!(sl!(), "openvmm: start_vm");
+        self.reset_block_hotplug_ports();
 
         let cmdline = build_kernel_cmdline(
             self.config.debug_info.enable_debug,
@@ -141,10 +149,9 @@ impl OpenVmmInner {
             .checked_mul(1024 * 1024)
             .context("memory size overflow")?;
 
-        // PCIe root complex with one port for virtio-blk rootfs
         // PCIe root complex: ECAM range must match bus count.
         // 128MB ECAM = 128 buses (0..127), each bus has 256 devfns * 4KB config = 1MB.
-        let mut pcie_root_complexes = vec![PcieRootComplexConfig {
+        let pcie_root_complexes = vec![PcieRootComplexConfig {
             index: 0,
             name: "rc0".to_string(),
             segment: 0,
@@ -153,12 +160,39 @@ impl OpenVmmInner {
             ecam_range: ovmm_memory_range::MemoryRange::new(0xe800_0000..0xf000_0000),
             low_mmio: ovmm_memory_range::MemoryRange::new(0xc000_0000..0xd400_0000),
             high_mmio: ovmm_memory_range::MemoryRange::new(0x0020_3d30_0000..0x200f_3d30_0000),
-            ports: vec![
-                PcieRootPortConfig {
-                    name: "rp0".to_string(),
-                    hotplug: false,
-                },
-            ],
+            ports: {
+                let mut ports = vec![
+                    PcieRootPortConfig {
+                        name: OPENVMM_ROOTFS_PCI_PORT.to_string(),
+                        hotplug: false,
+                    },
+                    PcieRootPortConfig {
+                        name: OPENVMM_SHAREFS_PCI_PORT.to_string(),
+                        hotplug: false,
+                    },
+                    PcieRootPortConfig {
+                        name: OPENVMM_NET_PCI_PORT.to_string(),
+                        hotplug: false,
+                    },
+                    PcieRootPortConfig {
+                        name: super::OPENVMM_VSOCK_PCI_PORT.to_string(),
+                        hotplug: false,
+                    },
+                    PcieRootPortConfig {
+                        name: OPENVMM_CONSOLE_PCI_PORT.to_string(),
+                        hotplug: false,
+                    },
+                ];
+
+                for index in 0..OPENVMM_BLOCK_HOTPLUG_PORT_COUNT {
+                    ports.push(PcieRootPortConfig {
+                        name: format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
+                        hotplug: true,
+                    });
+                }
+
+                ports
+            },
         }];
 
         // Add rootfs disk as virtio-blk via PCIe.
@@ -178,8 +212,7 @@ impl OpenVmmInner {
         // Process pending devices into the VM config
         let pending = std::mem::take(&mut self.pending_devices);
         let vmbus_devices: Vec<(DeviceVtl, vm_resource::Resource<VmbusDeviceHandleKind>)> = Vec::new();
-        let mut need_extra_pcie_port = false;
-        let mut need_net_pcie_port = false;
+        let mut deferred_block_devices = Vec::new();
 
         for dev in &pending {
             match dev {
@@ -210,9 +243,8 @@ impl OpenVmmInner {
                         }),
                         endpoint,
                     };
-                    need_net_pcie_port = true;
                     pcie_devices.push(PcieDeviceConfig {
-                        port_name: "rp2".to_string(),
+                        port_name: OPENVMM_NET_PCI_PORT.to_string(),
                         resource: virtio_resources::VirtioPciDeviceHandle(
                             net_handle.into_resource(),
                         )
@@ -230,9 +262,8 @@ impl OpenVmmInner {
                         },
                     };
                     // Use PCIe for virtio-fs (needs an extra root port)
-                    need_extra_pcie_port = true;
                     pcie_devices.push(PcieDeviceConfig {
-                        port_name: "rp1".to_string(),
+                        port_name: OPENVMM_SHAREFS_PCI_PORT.to_string(),
                         resource: virtio_resources::VirtioPciDeviceHandle(
                             fs_handle.into_resource(),
                         )
@@ -240,30 +271,17 @@ impl OpenVmmInner {
                     });
                 }
                 crate::DeviceType::Block(blk_dev) => {
-                    // Block device for rootfs is already added above via config.boot_info.image
-                    info!(sl!(), "openvmm: skipping duplicate Block device (already added as rootfs): {}",
-                        blk_dev.config.path_on_host);
+                    if Some(blk_dev.config.path_on_host.as_str()) == rootfs_disk_path.as_deref() {
+                        info!(sl!(), "openvmm: skipping duplicate Block device (already added as rootfs): {}",
+                            blk_dev.config.path_on_host);
+                    } else {
+                        deferred_block_devices.push(dev.clone());
+                    }
                 }
                 other => {
                     warn!(sl!(), "openvmm: unsupported pending device type: {}", other);
                 }
             }
-        }
-
-        // Add extra PCIe root port for virtio-fs if needed
-        if need_extra_pcie_port {
-            pcie_root_complexes[0].ports.push(PcieRootPortConfig {
-                name: "rp1".to_string(),
-                hotplug: false,
-            });
-        }
-
-        // Add extra PCIe root port for virtio-net if needed
-        if need_net_pcie_port {
-            pcie_root_complexes[0].ports.push(PcieRootPortConfig {
-                name: "rp2".to_string(),
-                hotplug: false,
-            });
         }
 
         // Set up virtio-vsock for agent communication.
@@ -275,7 +293,7 @@ impl OpenVmmInner {
 
         // Add virtio-console PCIe device for guest console output.
         pcie_devices.push(PcieDeviceConfig {
-            port_name: "rp4".to_string(),
+            port_name: OPENVMM_CONSOLE_PCI_PORT.to_string(),
             resource: virtio_resources::VirtioPciDeviceHandle(
                 virtio_resources::console::VirtioConsoleHandle {
                     backend: console_resource,
@@ -283,10 +301,6 @@ impl OpenVmmInner {
                 .into_resource(),
             )
             .into_resource(),
-        });
-        pcie_root_complexes[0].ports.push(PcieRootPortConfig {
-            name: "rp4".to_string(),
-            hotplug: false,
         });
 
         let vmbus_config = VmbusConfig {
@@ -369,6 +383,11 @@ impl OpenVmmInner {
 
         self.state = VmmState::VmRunning;
         info!(sl!(), "openvmm: VM is running");
+
+        for device in deferred_block_devices {
+            self.add_device(device).await.context("failed to hotplug deferred block device")?;
+        }
+
         Ok(())
     }
 

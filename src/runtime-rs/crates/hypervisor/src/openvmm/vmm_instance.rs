@@ -15,6 +15,7 @@ use ovmm_vmm_core_defs::HaltReason;
 use tokio::sync::mpsc;
 use vm_resource::IntoResource;
 
+use super::OPENVMM_VSOCK_PCI_PORT;
 use crate::utils::enter_netns;
 
 // Force linker to include openvmm_resources which registers the VmWorker
@@ -106,6 +107,21 @@ impl VmmInstance {
                     let _ = std::fs::remove_file(&vsock_uds_path);
                     match ovmm_unix_socket::UnixListener::bind(&vsock_uds_path) {
                         Ok(listener) => {
+                            let has_vsock_port = config.pcie_root_complexes.iter().any(|root_complex| {
+                                root_complex
+                                    .ports
+                                    .iter()
+                                    .any(|port| port.name == OPENVMM_VSOCK_PCI_PORT)
+                            });
+
+                            if !has_vsock_port {
+                                let _ = result_tx.send(Err(anyhow::anyhow!(
+                                    "missing preconfigured OpenVMM vsock PCIe port {}",
+                                    OPENVMM_VSOCK_PCI_PORT
+                                )));
+                                return;
+                            }
+
                             let vsock_handle = virtio_resources::vsock::VirtioVsockHandle {
                                 guest_cid: 3, // standard guest CID
                                 base_path: vsock_uds_path.clone(),
@@ -113,18 +129,11 @@ impl VmmInstance {
                             };
                             config.pcie_devices.push(
                                 openvmm_defs::config::PcieDeviceConfig {
-                                    port_name: "rp3".to_string(),
+                                    port_name: OPENVMM_VSOCK_PCI_PORT.to_string(),
                                     resource: virtio_resources::VirtioPciDeviceHandle(
                                         vsock_handle.into_resource(),
                                     )
                                     .into_resource(),
-                                },
-                            );
-                            // Add the root port for rp3
-                            config.pcie_root_complexes[0].ports.push(
-                                openvmm_defs::config::PcieRootPortConfig {
-                                    name: "rp3".to_string(),
-                                    hotplug: false,
                                 },
                             );
                         }
@@ -234,6 +243,26 @@ impl VmmInstance {
             Ok(false) => anyhow::bail!("VM pause returned false"),
             Err(e) => anyhow::bail!("VM pause failed: {:?}", e),
         }
+    }
+
+    pub(crate) async fn add_pcie_device(
+        &self,
+        port_name: String,
+        resource: vm_resource::Resource<vm_resource::kind::PciDeviceHandleKind>,
+    ) -> Result<()> {
+        let rpc = self.worker_rpc.as_ref().context("VM not launched")?;
+        rpc.call_failable(VmRpc::AddPcieDevice, (port_name, resource))
+            .await
+            .context("failed to hotplug PCIe device")?;
+        Ok(())
+    }
+
+    pub(crate) async fn remove_pcie_device(&self, port_name: String) -> Result<()> {
+        let rpc = self.worker_rpc.as_ref().context("VM not launched")?;
+        rpc.call_failable(VmRpc::RemovePcieDevice, port_name)
+            .await
+            .context("failed to hot-remove PCIe device")?;
+        Ok(())
     }
 
     /// Stop and teardown the VM.
