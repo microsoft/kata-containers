@@ -143,6 +143,7 @@ ovmm_guid = { git = "https://github.com/danmihai1/openvmm.git", rev = "97f57f464
 ovmm_memory_range = { git = "https://github.com/danmihai1/openvmm.git", rev = "97f57f46476e129a8eb21ce4c6f43af0cc0da8a5", package = "memory_range" }
 ovmm_serial_socket = { git = "https://github.com/danmihai1/openvmm.git", rev = "97f57f46476e129a8eb21ce4c6f43af0cc0da8a5", package = "serial_socket" }
 hypervisor_resources = { git = "https://github.com/danmihai1/openvmm.git", rev = "97f57f46476e129a8eb21ce4c6f43af0cc0da8a5"}
+disk_blockdevice = { git = "https://github.com/danmihai1/openvmm.git", rev = "97f57f46476e129a8eb21ce4c6f43af0cc0da8a5"}
 
 #openvmm_core = { path = "../openvmm-repo/openvmm/openvmm_core" }
 #openvmm_defs = { path = "../openvmm-repo/openvmm/openvmm_defs" }
@@ -271,6 +272,31 @@ hypervisor_resources = { git = "https://github.com/danmihai1/openvmm.git", rev =
 #virtio_resources = { path = "../openvmm-repo/vm/devices/virtio/virtio_resources" }
 #vm_resource = { path = "../openvmm-repo/vm/vmcore/vm_resource" }
 #disk_backend_resources = { path = "../openvmm-repo/vm/devices/storage/disk_backend_resources" }
+#ovmm_vmm_core_defs = { path = "../openvmm-repo/vmm_core/vmm_core_defs", package = "vmm_core_defs" }
+#ovmm_guid = { path = "../openvmm-repo/support/guid", package = "guid" }
+#ovmm_memory_range = { path = "../openvmm-repo/vm/vmcore/memory_range", package = "memory_range" }
+#ovmm_serial_socket = { path = "../openvmm-repo/vm/devices/serial/serial_socket", package = "serial_socket" }
+
+#ovmm_virt = { path = "../openvmm-repo/vmm_core/virt", package = "virt" }
+#virt_mshv = { path = "../openvmm-repo/vmm_core/virt_mshv" }
+#openvmm_core = { path = "../openvmm-repo/openvmm/openvmm_core" }
+#openvmm_defs = { path = "../openvmm-repo/openvmm/openvmm_defs" }
+#hypervisor_resources = { path = "../openvmm-repo/openvmm/hypervisor_resources" }
+#openvmm_resources = { path = "../openvmm-repo/openvmm/openvmm_resources", features = ["virt_mshv", "net_tap"] }
+#openvmm_helpers = { path = "../openvmm-repo/openvmm/openvmm_helpers" }
+#vm_manifest_builder = { path = "../openvmm-repo/vmm_core/vm_manifest_builder" }
+#ovmm_mesh = { path = "../openvmm-repo/support/mesh", package = "mesh" }
+#ovmm_mesh_worker = { path = "../openvmm-repo/support/mesh/mesh_worker", package = "mesh_worker" }
+#ovmm_pal_async = { path = "../openvmm-repo/support/pal/pal_async", package = "pal_async" }
+#ovmm_unix_socket = { path = "../openvmm-repo/support/unix_socket", package = "unix_socket", features = ["mesh"] }
+#storvsp_resources = { path = "../openvmm-repo/vm/devices/storage/storvsp_resources" }
+#scsidisk_resources = { path = "../openvmm-repo/vm/devices/storage/scsidisk_resources" }
+#netvsp_resources = { path = "../openvmm-repo/vm/devices/net/netvsp_resources" }
+#net_backend_resources = { path = "../openvmm-repo/vm/devices/net/net_backend_resources" }
+#virtio_resources = { path = "../openvmm-repo/vm/devices/virtio/virtio_resources" }
+#vm_resource = { path = "../openvmm-repo/vm/vmcore/vm_resource" }
+#disk_backend_resources = { path = "../openvmm-repo/vm/devices/storage/disk_backend_resources" }
+#disk_blockdevice = { path = "../openvmm-repo/vm/devices/storage/disk_blockdevice" }
 #ovmm_vmm_core_defs = { path = "../openvmm-repo/vmm_core/vmm_core_defs", package = "vmm_core_defs" }
 #ovmm_guid = { path = "../openvmm-repo/support/guid", package = "guid" }
 #ovmm_memory_range = { path = "../openvmm-repo/vm/vmcore/memory_range", package = "memory_range" }

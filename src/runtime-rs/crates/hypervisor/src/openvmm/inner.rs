@@ -5,16 +5,41 @@
 
 //! Inner state for the OpenVMM hypervisor integration.
 
+use std::collections::{HashMap, HashSet, VecDeque};
+
 use crate::{device::DeviceType, hypervisor_persist::HypervisorState, VmmState};
 use anyhow::Result;
 use kata_types::{
     capabilities::{Capabilities, CapabilityBits},
     config::hypervisor::Hypervisor as HypervisorConfig,
 };
-use std::collections::HashSet;
 use tokio::sync::mpsc;
 
 use super::vmm_instance::VmmInstance;
+use super::{
+    OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
+    OPENVMM_STATIC_PCI_PORT_COUNT,
+};
+use crate::device::pci_path::{PciPath, PciSlot};
+
+#[derive(Clone, Debug)]
+pub(crate) struct OpenVmmHotplugPort {
+    pub(crate) name: String,
+    pub(crate) pci_path: PciPath,
+}
+
+impl OpenVmmHotplugPort {
+    fn new(index: u8) -> Self {
+        let root_slot = OPENVMM_STATIC_PCI_PORT_COUNT + index;
+        let pci_path = PciPath::new(vec![PciSlot::new(root_slot), PciSlot::new(0)])
+            .expect("openvmm hotplug port PCI path must be non-empty");
+
+        Self {
+            name: format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
+            pci_path,
+        }
+    }
+}
 
 /// Inner state for the OpenVMM hypervisor.
 #[allow(dead_code)]
@@ -28,6 +53,8 @@ pub(crate) struct OpenVmmInner {
     pub(crate) run_dir: String,
     pub(crate) pending_devices: Vec<DeviceType>,
     pub(crate) cached_block_devices: HashSet<String>,
+    pub(crate) free_block_hotplug_ports: VecDeque<OpenVmmHotplugPort>,
+    pub(crate) attached_block_hotplug_ports: HashMap<String, OpenVmmHotplugPort>,
     pub(crate) capabilities: Capabilities,
     pub(crate) guest_memory_block_size_mb: u32,
     pub(crate) vmm_instance: VmmInstance,
@@ -57,6 +84,8 @@ impl OpenVmmInner {
             run_dir: String::new(),
             pending_devices: Vec::new(),
             cached_block_devices: HashSet::new(),
+            free_block_hotplug_ports: Self::default_block_hotplug_ports(),
+            attached_block_hotplug_ports: HashMap::new(),
             capabilities,
             guest_memory_block_size_mb: 0,
             vmm_instance: VmmInstance::new(exit_notify),
@@ -111,6 +140,46 @@ impl OpenVmmInner {
         inner.config = state.config;
         inner.run_dir = state.run_dir;
         inner.cached_block_devices = state.cached_block_devices;
+        inner.reset_block_hotplug_ports();
         Ok(inner)
+    }
+
+    pub(crate) fn reset_block_hotplug_ports(&mut self) {
+        self.free_block_hotplug_ports = Self::default_block_hotplug_ports();
+        self.attached_block_hotplug_ports.clear();
+    }
+
+    pub(crate) fn reserve_block_hotplug_port(
+        &mut self,
+        device_id: &str,
+    ) -> Result<OpenVmmHotplugPort> {
+        if let Some(port) = self.attached_block_hotplug_ports.get(device_id) {
+            return Ok(port.clone());
+        }
+
+        let port = self
+            .free_block_hotplug_ports
+            .pop_front()
+            .ok_or_else(|| anyhow::anyhow!("openvmm ran out of block hotplug PCIe ports"))?;
+
+        self.attached_block_hotplug_ports
+            .insert(device_id.to_string(), port.clone());
+
+        Ok(port)
+    }
+
+    pub(crate) fn release_block_hotplug_port(
+        &mut self,
+        device_id: &str,
+    ) -> Option<OpenVmmHotplugPort> {
+        let port = self.attached_block_hotplug_ports.remove(device_id)?;
+        self.free_block_hotplug_ports.push_front(port.clone());
+        Some(port)
+    }
+
+    fn default_block_hotplug_ports() -> VecDeque<OpenVmmHotplugPort> {
+        (0..OPENVMM_BLOCK_HOTPLUG_PORT_COUNT)
+            .map(OpenVmmHotplugPort::new)
+            .collect()
     }
 }
