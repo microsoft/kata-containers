@@ -309,6 +309,14 @@ impl OpenVmmInner {
             ..Default::default()
         };
 
+        let proc_count = self.config.cpu_info.default_vcpus.ceil() as u32;
+        info!(
+            sl!(),
+            "openvmm: boot processor topology default_vcpus={} -> proc_count={}",
+            self.config.cpu_info.default_vcpus,
+            proc_count
+        );
+
         let vm_config = Config {
             load_mode,
             floppy_disks: vec![],
@@ -327,7 +335,7 @@ impl OpenVmmInner {
                 transparent_hugepages: false,
             },
             processor_topology: ProcessorTopologyConfig {
-                proc_count: self.config.cpu_info.default_vcpus.ceil() as u32,
+                proc_count,
                 vps_per_socket: None,
                 enable_smt: None,
                 arch: Default::default(),
