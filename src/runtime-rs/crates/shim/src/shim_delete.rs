@@ -27,6 +27,7 @@ impl ShimExecutor {
 
     async fn do_cleanup(&self) -> Result<api::DeleteResponse> {
         info!(sl!(), "ShimExecutor: do_cleanup");
+        self.log_to_file(&format!("ShimExecutor: do_cleanup: start"));
 
         let mut rsp = api::DeleteResponse::new();
         rsp.set_exit_status(128 + libc::SIGKILL as u32);
@@ -38,14 +39,35 @@ impl ShimExecutor {
         exited_time.seconds = seconds;
         rsp.set_exited_at(exited_time);
 
+        let mut socket_id = self.args.id.clone();
+        let bundle_path = get_bundle_path().context("get bundle path")?;
+
+        match self.load_oci_spec(&bundle_path) {
+            Ok(spec) => {
+                let annotations = spec.annotations().clone().unwrap_or_default();
+                if let Some(uvm_id_value) = annotations.get("io.katacontainers.config.hypervisor.uvm_id") {
+                    socket_id = uvm_id_value.to_string();
+                } else {
+                    self.log_to_file(&format!("ShimExecutor: do_cleanup: no uvm_id annotation"));
+                }
+            }
+            Err(e) => {
+                self.log_to_file(&format!("ShimExecutor: do_cleanup: load_oci_spec failed {:?}", e));
+            }
+        }
+
+        self.log_to_file(&format!("ShimExecutor: do_cleanup: socket_id = {socket_id}"));
         let address = self
-            .socket_address(&self.args.id)
+            .socket_address(&socket_id)
             .context("socket address")?;
+
         let trim_path = address.strip_prefix("unix://").context("trim path")?;
         let file_path = Path::new("/").join(trim_path);
         let file_path = file_path.as_path();
         if std::fs::metadata(file_path).is_ok() {
             info!(sl!(), "ShimExecutor: remote socket path: {:?}", &file_path);
+            self.log_to_file(&format!("ShimExecutor: do_cleanup: removing file {:?}", &file_path));
+
             fs::remove_file(file_path).ok();
         }
 
