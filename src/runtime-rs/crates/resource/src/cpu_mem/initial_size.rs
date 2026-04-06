@@ -140,10 +140,12 @@ impl InitialSizeManager {
             .get_mut(hypervisor_name)
             .context("failed to get hypervisor config")?;
 
+        let orig_default_vcpus = hv.cpu_info.default_vcpus;
         if self.resource.vcpu > 0.0 {
-            info!(sl!(), "resource with vcpu {}", self.resource.vcpu);
+            hv.cpu_info.default_vcpus += self.resource.vcpu;
         }
         self.resource.orig_toml_default_mem = hv.memory_info.default_memory;
+        let orig_default_mem = hv.memory_info.default_memory;
         if self.resource.mem_mb > 0 {
             // since the memory overhead introduced by kata-agent and system components
             // will really affect the amount of memory the user can use, so we choose to
@@ -152,6 +154,17 @@ impl InitialSizeManager {
             // use memory as they orignally expected, it would be easy to OOM.)
             hv.memory_info.default_memory += self.resource.mem_mb;
         }
+
+        info!(
+            sl!(),
+            "static sandbox sizing: resource_vcpu={} default_vcpus {} -> {} default_memory {} -> {}",
+            self.resource.vcpu,
+            orig_default_vcpus,
+            hv.cpu_info.default_vcpus,
+            orig_default_mem,
+            hv.memory_info.default_memory
+        );
+
         Ok(())
     }
 
@@ -197,6 +210,7 @@ fn get_sizing_info(annotation: Annotation) -> Result<(u64, i64, i64)> {
 mod tests {
     use super::*;
     use kata_types::annotations::cri_containerd;
+    use kata_types::config::{Hypervisor, TomlConfig};
     use oci_spec::runtime::{LinuxBuilder, LinuxMemory, LinuxMemoryBuilder, LinuxResourcesBuilder};
     use std::collections::HashMap;
     #[derive(Clone)]
@@ -365,5 +379,35 @@ mod tests {
                 i, d.desc, d.result.mem_mb,
             );
         }
+    }
+
+    #[test]
+    fn test_setup_config_adds_static_resources() {
+        let mut hypervisor = Hypervisor::default();
+        hypervisor.cpu_info.default_vcpus = 0.75;
+        hypervisor.memory_info.default_memory = 2048;
+
+        const HYPERVISOR_NAME: &str = "dvmmy";
+        let mut config = TomlConfig::default();
+
+        config
+            .hypervisor
+            .insert(HYPERVISOR_NAME.to_string(), hypervisor);
+        config.runtime.hypervisor_name = HYPERVISOR_NAME.to_string();
+
+        let mut initial_size_manager = InitialSizeManager {
+            resource: InitialSize {
+                vcpu: 1.2,
+                mem_mb: 512,
+                orig_toml_default_mem: 0,
+            },
+        };
+
+        initial_size_manager.setup_config(&mut config).unwrap();
+
+        let hypervisor = config.hypervisor.get(HYPERVISOR_NAME).unwrap();
+        assert!((hypervisor.cpu_info.default_vcpus - (0.75 + 1.2)).abs() < f32::EPSILON);
+        assert_eq!(hypervisor.memory_info.default_memory, 2048 + 512);
+        assert_eq!(initial_size_manager.get_orig_toml_default_mem(), 2048);
     }
 }
