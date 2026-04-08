@@ -15,7 +15,7 @@ use super::{
     OPENVMM_SHAREFS_PCI_PORT,
 };
 use crate::kernel_param::KernelParams;
-use crate::utils::{get_jailer_root, get_sandbox_path};
+use crate::utils::{get_jailer_root, get_sandbox_path, open_named_tuntap};
 use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 use openvmm_defs::config::{
@@ -24,10 +24,14 @@ use openvmm_defs::config::{
     PcieDeviceConfig, PcieRootComplexConfig, PcieRootPortConfig,
     ProcessorTopologyConfig, VmbusConfig, DEFAULT_MMIO_GAPS_X86,
 };
-use vm_resource::IntoResource;
 use vm_resource::kind::VmbusDeviceHandleKind;
+use vm_resource::IntoResource;
 
 const KATA_PATH: &str = "/run/kata";
+const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
+const OPENVMM_INLINE_VIRTIO_FS: &str = "inline-virtio-fs";
+// Kata currently exposes a single virtio-fs request queue per shared mount.
+const OPENVMM_VIRTIO_FS_REQUEST_QUEUES: u32 = 1;
 
 fn build_kernel_cmdline(
     debug: bool,
@@ -225,14 +229,38 @@ impl OpenVmmInner {
                     // Handled below via virtio-vsock PCIe device
                 }
                 crate::DeviceType::Network(net_dev) => {
-                    info!(sl!(), "openvmm: wiring Network device as virtio-net-pci, tap={}", net_dev.config.host_dev_name);
-                    let endpoint = net_backend_resources::tap::TapHandle {
-                        name: net_dev.config.host_dev_name.clone(),
-                    }
-                    .into_resource();
-                    let mac = net_dev.config.guest_mac.as_ref()
-                        .map(|m| format!("{:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
-                            m.0[0], m.0[1], m.0[2], m.0[3], m.0[4], m.0[5]))
+                    info!(
+                        sl!(),
+                        "openvmm: wiring Network device as virtio-net-pci, tap={}",
+                        net_dev.config.host_dev_name
+                    );
+                    let fd = open_named_tuntap(&net_dev.config.host_dev_name, 1)
+                        .with_context(|| {
+                            format!(
+                                "failed to open TAP device {} for openvmm",
+                                net_dev.config.host_dev_name
+                            )
+                        })?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "no TAP file descriptors returned for {}",
+                                net_dev.config.host_dev_name
+                            )
+                        })?
+                        .into();
+                    let endpoint = net_backend_resources::tap::TapHandle { fd }.into_resource();
+                    let mac = net_dev
+                        .config
+                        .guest_mac
+                        .as_ref()
+                        .map(|m| {
+                            format!(
+                                "{:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
+                                m.0[0], m.0[1], m.0[2], m.0[3], m.0[4], m.0[5]
+                            )
+                        })
                         .unwrap_or_default();
                     // Use virtio-net via PCIe (kernel has CONFIG_VIRTIO_NET=y
                     // but CONFIG_HYPERV_NET is not set).
@@ -252,22 +280,54 @@ impl OpenVmmInner {
                     });
                 }
                 crate::DeviceType::ShareFs(fs_dev) => {
-                    info!(sl!(), "openvmm: wiring ShareFs device, tag={}, path={}",
-                        fs_dev.config.mount_tag, fs_dev.config.host_shared_path);
-                    let fs_handle = virtio_resources::fs::VirtioFsHandle {
-                        tag: fs_dev.config.mount_tag.clone(),
-                        fs: virtio_resources::fs::VirtioFsBackend::HostFs {
-                            root_path: fs_dev.config.host_shared_path.clone(),
-                            mount_options: String::new(),
-                        },
-                    };
-                    // Use PCIe for virtio-fs (needs an extra root port)
-                    pcie_devices.push(PcieDeviceConfig {
-                        port_name: OPENVMM_SHAREFS_PCI_PORT.to_string(),
-                        resource: virtio_resources::VirtioPciDeviceHandle(
-                            fs_handle.into_resource(),
+                    info!(
+                        sl!(),
+                        "openvmm: wiring ShareFs device, tag={}, path={}, fs_type={}, sock_path={}",
+                        fs_dev.config.mount_tag,
+                        fs_dev.config.host_shared_path,
+                        fs_dev.config.fs_type,
+                        fs_dev.config.sock_path
+                    );
+                    let resource = match fs_dev.config.fs_type.as_str() {
+                        OPENVMM_STANDALONE_VIRTIO_FS => {
+                            let socket =
+                                std::os::unix::net::UnixStream::connect(&fs_dev.config.sock_path)
+                                    .with_context(|| {
+                                    format!(
+                                        "failed to connect to virtiofsd socket {} for tag {}",
+                                        fs_dev.config.sock_path, fs_dev.config.mount_tag
+                                    )
+                                })?;
+
+                            virtio_resources::VirtioPciDeviceHandle(
+                                virtio_resources::vhost_user_fs::VhostUserFsHandle {
+                                    socket: socket.into(),
+                                    tag: fs_dev.config.mount_tag.clone(),
+                                    num_request_queues: OPENVMM_VIRTIO_FS_REQUEST_QUEUES,
+                                }
+                                .into_resource(),
+                            )
+                            .into_resource()
+                        }
+                        OPENVMM_INLINE_VIRTIO_FS => virtio_resources::VirtioPciDeviceHandle(
+                            virtio_resources::fs::VirtioFsHandle {
+                                tag: fs_dev.config.mount_tag.clone(),
+                                fs: virtio_resources::fs::VirtioFsBackend::HostFs {
+                                    root_path: fs_dev.config.host_shared_path.clone(),
+                                    mount_options: String::new(),
+                                },
+                            }
+                            .into_resource(),
                         )
                         .into_resource(),
+                        other => {
+                            return Err(anyhow!("openvmm unsupported shared fs type '{}'", other));
+                        }
+                    };
+
+                    pcie_devices.push(PcieDeviceConfig {
+                        port_name: OPENVMM_SHAREFS_PCI_PORT.to_string(),
+                        resource,
                     });
                 }
                 crate::DeviceType::Block(blk_dev) => {
