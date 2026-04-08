@@ -56,15 +56,23 @@ default_memory = @DEFMEMSZ@
 default_maxmemory = @DEFMAXMEMSZ@
 
 # Shared file system type:
-#   - inline-virtio-fs (default for OpenVMM - built-in, no external virtiofsd)
-#   - virtio-fs
+#   - virtio-fs (default for OpenVMM - external virtiofsd over vhost-user)
+#   - inline-virtio-fs
 #   - none
 shared_fs = "@DEFSHAREDFS_OPENVMM@"
+
+# Path to vhost-user-fs daemon.
+virtio_fs_daemon = "@DEFVIRTIOFSDAEMON@"
+
+# List of valid annotations values for the virtiofs daemon
+# The default if not set is empty (all annotations rejected.)
+# Your distribution recommends: @DEFVALIDVIRTIOFSDAEMONPATHS@
+valid_virtio_fs_daemon_paths = @DEFVALIDVIRTIOFSDAEMONPATHS@
 
 # Default size of DAX cache in MiB
 virtio_fs_cache_size = @DEFVIRTIOFSCACHESIZE@
 
-# Extra args for virtiofsd daemon (not used with inline-virtio-fs)
+# Extra args for virtiofsd daemon
 virtio_fs_extra_args = @DEFVIRTIOFSEXTRAARGS@
 
 # Cache mode:
