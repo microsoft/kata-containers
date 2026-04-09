@@ -5,7 +5,7 @@
 
 //! VmmInstance wrapper for OpenVMM's in-process VM worker.
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use openvmm_defs::config::Config;
 use openvmm_defs::rpc::VmRpc;
 use openvmm_defs::worker::{VmWorkerParameters, VM_WORKER};
@@ -16,7 +16,14 @@ use tokio::sync::mpsc;
 use vm_resource::IntoResource;
 
 use super::OPENVMM_VSOCK_PCI_PORT;
-use crate::utils::enter_netns;
+use crate::utils::{enter_netns, open_named_tuntap};
+
+#[derive(Debug)]
+pub(crate) struct DeferredNetworkDevice {
+    pub(crate) port_name: String,
+    pub(crate) tap_name: String,
+    pub(crate) mac_address: String,
+}
 
 // Force linker to include openvmm_resources which registers the VmWorker
 // via linkme::distributed_slice.
@@ -62,6 +69,7 @@ impl VmmInstance {
         mut config: Config,
         vsock_uds_path: String,
         disk_path: Option<String>,
+        network_devices: Vec<DeferredNetworkDevice>,
         netns: Option<String>,
         log_dir: Option<String>,
     ) -> Result<()> {
@@ -99,6 +107,51 @@ impl VmmInstance {
                         ))));
                         return;
                     }
+                }
+
+                let add_network_devices = || -> Result<()> {
+                    for network_device in network_devices {
+                        let fd = open_named_tuntap(&network_device.tap_name, 1)
+                            .with_context(|| {
+                                format!(
+                                    "failed to open TAP device {} for openvmm",
+                                    network_device.tap_name
+                                )
+                            })?
+                            .into_iter()
+                            .next()
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "no TAP file descriptors returned for {}",
+                                    network_device.tap_name
+                                )
+                            })?
+                            .into();
+
+                        let endpoint = net_backend_resources::tap::TapHandle { fd }.into_resource();
+                        let net_handle = virtio_resources::net::VirtioNetHandle {
+                            max_queues: None,
+                            mac_address: network_device.mac_address.parse().unwrap_or_else(|_| {
+                                net_backend_resources::mac_address::MacAddress::from([0u8; 6])
+                            }),
+                            endpoint,
+                        };
+
+                        config.pcie_devices.push(openvmm_defs::config::PcieDeviceConfig {
+                            port_name: network_device.port_name,
+                            resource: virtio_resources::VirtioPciDeviceHandle(
+                                net_handle.into_resource(),
+                            )
+                            .into_resource(),
+                        });
+                    }
+
+                    Ok(())
+                };
+
+                if let Err(err) = add_network_devices() {
+                    let _ = result_tx.send(Err(err.context("failed to configure network devices")));
+                    return;
                 }
 
                 // Bind virtio-vsock listener inside this thread and add
