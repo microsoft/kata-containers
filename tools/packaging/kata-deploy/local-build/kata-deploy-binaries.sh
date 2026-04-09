@@ -646,6 +646,7 @@ install_initrd_nvidia_gpu_confidential() {
 install_image_nvidia_gpu_mariner() {
 	export AGENT_POLICY
 	export MEASURED_ROOTFS="yes"
+	export ROOT_FREE_SPACE="${ROOT_FREE_SPACE:-512}"
 	local version=$(get_from_kata_deps .externals.nvidia.driver.version)
 	EXTRA_PKGS="dnf curl sed ${EXTRA_PKGS}"
 	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
