@@ -30,8 +30,6 @@ use vm_resource::IntoResource;
 const KATA_PATH: &str = "/run/kata";
 const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
 const OPENVMM_INLINE_VIRTIO_FS: &str = "inline-virtio-fs";
-// Kata currently exposes a single virtio-fs request queue per shared mount.
-const OPENVMM_VIRTIO_FS_REQUEST_QUEUES: u32 = 1;
 
 fn build_kernel_cmdline(
     debug: bool,
@@ -300,10 +298,9 @@ impl OpenVmmInner {
                                 })?;
 
                             virtio_resources::VirtioPciDeviceHandle(
-                                virtio_resources::vhost_user_fs::VhostUserFsHandle {
+                                virtio_resources::vhost_user::VhostUserFsHandle {
                                     socket: socket.into(),
                                     tag: fs_dev.config.mount_tag.clone(),
-                                    num_request_queues: OPENVMM_VIRTIO_FS_REQUEST_QUEUES,
                                 }
                                 .into_resource(),
                             )
