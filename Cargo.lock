@@ -1464,6 +1464,7 @@ version = "0.0.0"
 dependencies = [
  "openssl",
  "thiserror 2.0.18",
+ "tracing",
  "wchar",
  "windows 0.62.2",
  "windows-result 0.4.1",
@@ -6169,7 +6170,6 @@ dependencies = [
  "storvsp",
  "uidevices",
  "vhost_user_frontend",
- "vhost_user_fs",
  "virtio",
  "virtio_blk",
  "virtio_console",
@@ -10322,24 +10322,6 @@ dependencies = [
  "vm_resource",
  "vmcore",
  "zerocopy",
-]
-
-[[package]]
-name = "vhost_user_fs"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "guestmem",
- "inspect",
- "pal_async",
- "unix_socket",
- "vhost_user_frontend",
- "vhost_user_protocol",
- "virtio",
- "virtio_resources",
- "virtiofs",
- "vm_resource",
 ]
 
 [[package]]
