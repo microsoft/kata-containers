@@ -51,18 +51,31 @@ setup_dnf_repositories() {
 
 	# The build container is Ubuntu, so no AZL3 base repos exist.
 	# Create the base repo inline so DNF can resolve dependencies (glibc, bash, etc.).
+	# Bootstrap with gpgcheck=0 because the GPG key is shipped by
+	# azurelinux-repos-shared which we install below.
 	if [[ ! -f /etc/yum.repos.d/azurelinux-official-base.repo ]]; then
 		cat > /etc/yum.repos.d/azurelinux-official-base.repo <<-'EOF'
 		[azurelinux-official-base]
 		name=Azure Linux Official Base $releasever $basearch
 		baseurl=https://packages.microsoft.com/azurelinux/$releasever/prod/base/$basearch
-		gpgkey=file:///etc/pki/rpm-gpg/MICROSOFT-RPM-GPG-KEY
-		gpgcheck=1
-		repo_gpgcheck=1
+		gpgcheck=0
+		repo_gpgcheck=0
 		enabled=1
 		skip_if_unavailable=True
 		sslverify=1
 		EOF
+	fi
+
+	# Install the package that ships /etc/pki/rpm-gpg/MICROSOFT-RPM-GPG-KEY,
+	# then flip the bootstrap repo to full GPG verification.
+
+	# TODO: For better security, we'll need to figure out a better way to embed the certificates
+	# a priori in the rootfs, possibly by doing a manual fetch/validation of the RPM azurelinux-repos-shared.
+	dnf install -y --setopt=install_weak_deps=False ${DNF_OPTS} azurelinux-repos-shared
+	sed -i 's/^gpgcheck=0/gpgcheck=1/' /etc/yum.repos.d/azurelinux-official-base.repo
+	sed -i 's/^repo_gpgcheck=0/repo_gpgcheck=1/' /etc/yum.repos.d/azurelinux-official-base.repo
+	if ! grep -q '^gpgkey=' /etc/yum.repos.d/azurelinux-official-base.repo; then
+		sed -i '/^\[azurelinux-official-base\]/a gpgkey=file:///etc/pki/rpm-gpg/MICROSOFT-RPM-GPG-KEY' /etc/yum.repos.d/azurelinux-official-base.repo
 	fi
 
 	# Install the CUDA .repo file for NVIDIA packages

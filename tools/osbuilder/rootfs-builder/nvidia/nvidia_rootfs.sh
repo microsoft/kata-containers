@@ -123,15 +123,26 @@ setup_nvidia_gpu_rootfs_stage_one() {
 	chroot . /bin/bash -c "/${chroot_script} ${machine_arch} ${NVIDIA_GPU_STACK} \
 		 ${gpu_base_os_version} ${cuda_repo_url} ${cuda_repo_pkg} ${tools_repo_url} ${tools_repo_pkg} ${ctk_version}"
 
-	umount -R ./dev
-	umount ./proc
+	# Lazy unmount handles stale fd/process refs left by dnf/rpm scriptlets
+	umount -Rl ./dev
+	umount -l ./proc
 
 	rm ./"${chroot_script}"
+
+	# Remove Unix sockets (gpg-agent, etc.) left by rpm scriptlets —
+	# tar cannot archive sockets and --remove-files fails on them.
+	find . -type s -delete
 
 	tar cfa "${stage_one}.tar.zst" --remove-files -- *
 
 	popd  >> /dev/null
+}
 
+ensure_upx() {
+	local upx_dir="${BUILD_DIR}/upx-4.2.4-${distro_arch}_linux"
+	if [[ -x "${upx_dir}/upx" ]]; then
+		return
+	fi
 	pushd "${BUILD_DIR}" >> /dev/null
 	curl -LO "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-${distro_arch}_linux.tar.xz"
 	tar xvf "upx-4.2.4-${distro_arch}_linux.tar.xz"
@@ -299,6 +310,7 @@ chisseled_init() {
 
 compress_rootfs() {
 	echo "nvidia: compressing rootfs"
+	ensure_upx
 
 	# For some unobvious reason libc has executable bit set
 	# clean this up otherwise the find -executable will not work correctly
@@ -322,7 +334,7 @@ compress_rootfs() {
 			continue
 		fi
 		strip "${file}"
-		"${BUILD_DIR}"/upx-4.2.4-"${distro_arch}"_linux/upx --best --lzma "${file}"
+		"${BUILD_DIR}"/upx-4.2.4-"${distro_arch}"_linux/upx --best --lzma "${file}" || echo "nvidia: upx could not compress: ${file} (ignored)"
 	done
 
  	# While I was playing with compression the executable flag on
@@ -407,9 +419,9 @@ setup_nvidia_gpu_rootfs_stage_two() {
 		done
 
 		coco_guest_components
+		compress_rootfs
 	fi
 
-	compress_rootfs
 	chroot . ldconfig
 
 	popd >> /dev/null
