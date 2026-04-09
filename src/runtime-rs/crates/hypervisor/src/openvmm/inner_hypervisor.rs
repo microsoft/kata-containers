@@ -9,13 +9,14 @@ use anyhow::{anyhow, Context, Result};
 use std::fs::{self, File};
 
 use super::inner::OpenVmmInner;
+use super::vmm_instance::DeferredNetworkDevice;
 use super::{
     OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
     OPENVMM_CONSOLE_PCI_PORT, OPENVMM_NET_PCI_PORT, OPENVMM_ROOTFS_PCI_PORT,
     OPENVMM_SHAREFS_PCI_PORT,
 };
 use crate::kernel_param::KernelParams;
-use crate::utils::{get_jailer_root, get_sandbox_path, open_named_tuntap};
+use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 use openvmm_defs::config::{
@@ -215,6 +216,7 @@ impl OpenVmmInner {
         let pending = std::mem::take(&mut self.pending_devices);
         let vmbus_devices: Vec<(DeviceVtl, vm_resource::Resource<VmbusDeviceHandleKind>)> = Vec::new();
         let mut deferred_block_devices = Vec::new();
+        let mut deferred_network_devices = Vec::new();
 
         for dev in &pending {
             match dev {
@@ -229,26 +231,9 @@ impl OpenVmmInner {
                 crate::DeviceType::Network(net_dev) => {
                     info!(
                         sl!(),
-                        "openvmm: wiring Network device as virtio-net-pci, tap={}",
+                        "openvmm: queueing Network device for worker-thread TAP open, tap={}",
                         net_dev.config.host_dev_name
                     );
-                    let fd = open_named_tuntap(&net_dev.config.host_dev_name, 1)
-                        .with_context(|| {
-                            format!(
-                                "failed to open TAP device {} for openvmm",
-                                net_dev.config.host_dev_name
-                            )
-                        })?
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "no TAP file descriptors returned for {}",
-                                net_dev.config.host_dev_name
-                            )
-                        })?
-                        .into();
-                    let endpoint = net_backend_resources::tap::TapHandle { fd }.into_resource();
                     let mac = net_dev
                         .config
                         .guest_mac
@@ -260,21 +245,10 @@ impl OpenVmmInner {
                             )
                         })
                         .unwrap_or_default();
-                    // Use virtio-net via PCIe (kernel has CONFIG_VIRTIO_NET=y
-                    // but CONFIG_HYPERV_NET is not set).
-                    let net_handle = virtio_resources::net::VirtioNetHandle {
-                        max_queues: None,
-                        mac_address: mac.parse().unwrap_or_else(|_| {
-                            net_backend_resources::mac_address::MacAddress::from([0u8; 6])
-                        }),
-                        endpoint,
-                    };
-                    pcie_devices.push(PcieDeviceConfig {
+                    deferred_network_devices.push(DeferredNetworkDevice {
                         port_name: OPENVMM_NET_PCI_PORT.to_string(),
-                        resource: virtio_resources::VirtioPciDeviceHandle(
-                            net_handle.into_resource(),
-                        )
-                        .into_resource(),
+                        tap_name: net_dev.config.host_dev_name.clone(),
+                        mac_address: mac,
                     });
                 }
                 crate::DeviceType::ShareFs(fs_dev) => {
@@ -433,6 +407,7 @@ impl OpenVmmInner {
                 vm_config,
                 vsock_uds_path,
                 rootfs_disk_path,
+                deferred_network_devices,
                 self.netns.clone(),
                 Some(self.run_dir.clone()),
             )
