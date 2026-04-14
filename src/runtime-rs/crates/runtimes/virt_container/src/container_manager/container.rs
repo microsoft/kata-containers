@@ -253,8 +253,7 @@ impl Container {
 
         info!(
             sl!(),
-            "Container::create: sandbox_id = {}, OCI Spec {:?}.",
-            &self.sandbox_id,
+            "Container::create: OCI Spec {:?}.",
             spec.clone(),
         );
 
