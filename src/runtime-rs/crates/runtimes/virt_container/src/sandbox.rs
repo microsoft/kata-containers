@@ -754,7 +754,7 @@ impl Sandbox for VirtSandbox {
 
         let mut inner = self.inner.write().await;
         if inner.state != SandboxState::Init {
-            warn!(sl!(), "sandbox is started");
+            warn!(sl!(), "VirtSandbox: already started, returning success");
             return Ok(());
         }
         let selinux_label = load_oci_spec().ok().and_then(|spec| {
@@ -871,22 +871,45 @@ impl Sandbox for VirtSandbox {
         // create sandbox in vm
         let agent_config = self.agent.agent_config().await;
         let kernel_modules = KernelModule::set_kernel_modules(agent_config.kernel_modules)?;
-        let req = agent::CreateSandboxRequest {
-            hostname: sandbox_config.hostname.clone(),
-            dns: sandbox_config.dns.clone(),
-            storages: self
+        
+        let hostname = sandbox_config.hostname.clone();
+        let dns = sandbox_config.dns.clone();
+        let storages = self
                 .resource_manager
                 .get_storage_for_sandbox(self.shm_size)
                 .await
-                .context("get storages for sandbox")?,
-            sandbox_pidns: false,
-            sandbox_id: id.to_string(),
-            guest_hook_path: self
+                .context("get storages for sandbox")?;
+        let sandbox_id = id.to_string();
+        let guest_hook_path = self
                 .hypervisor
                 .hypervisor_config()
                 .await
                 .security_info
-                .guest_hook_path,
+                .guest_hook_path;
+        
+        info!(
+            sl!(), 
+            "Sandbox: sending CreateSandboxRequest: sandbox_id = {sandbox_id}, hostname = {hostname}, dns = {:?}, storages = {:?}",
+            dns,
+            storages
+        );
+
+        let req = agent::CreateSandboxRequest {
+            hostname/*: sandbox_config.hostname.clone()*/,
+            dns/*: sandbox_config.dns.clone()*/,
+            storages/*: self
+                .resource_manager
+                .get_storage_for_sandbox(self.shm_size)
+                .await
+                .context("get storages for sandbox")?*/,
+            sandbox_pidns: false,
+            sandbox_id/*: id.to_string()*/,
+            guest_hook_path/*: self
+                .hypervisor
+                .hypervisor_config()
+                .await
+                .security_info
+                .guest_hook_path*/,
             kernel_modules,
         };
 
@@ -894,7 +917,6 @@ impl Sandbox for VirtSandbox {
             .create_sandbox(req)
             .await
             .context("create sandbox")?;
-
         inner.state = SandboxState::Running;
         inner.created_at = Some(std::time::SystemTime::now());
 
