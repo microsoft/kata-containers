@@ -704,6 +704,36 @@ impl VirtSandbox {
             queues,
             network_created: false,
         })
+    async fn setup_secondary_sandbox(&self, sandbox_id: &str) -> Result<()> {
+        info!(sl!(), "setup_secondary_sandbox: start");
+
+        // create additional sandbox in vm
+        if self.sandbox_config.is_none() {
+            return Err(anyhow!("sandbox config is missing"));
+        }
+        let sandbox_config = self.sandbox_config.as_ref().unwrap();
+
+        let hostname = sandbox_config.hostname.clone();
+        let dns = sandbox_config.dns.clone();
+
+        info!(
+            sl!(), 
+            "setup_secondary_sandbox: sending CreateSecondarySandboxRequest: sandbox_id = {sandbox_id}, hostname = {hostname}, dns = {:?}",
+            dns,
+        );
+
+        let req = agent::CreateSecondarySandboxRequest {
+            hostname,
+            dns,
+            sandbox_id: sandbox_id.to_string(),
+        };
+
+        self.agent
+            .create_secondary_sandbox(req)
+            .await
+            .context("create secondary sandbox")?;
+
+        Ok(())
     }
 }
 
@@ -719,22 +749,23 @@ impl Sandbox for VirtSandbox {
         }
         let sandbox_config = self.sandbox_config.as_ref().unwrap();
 
-        // if sandbox is not in SandboxState::Init then return,
-        // otherwise try to create sandbox
-
         let mut inner = self.inner.write().await;
 
         if let Some(sid) = bundle_sandbox_id {
-            if !inner.additional_sids.contains(&sid) {
-                info!(sl!(), "VirtSandbox: tracking new sandbox_id = {sid}");
-                inner.additional_sids.push(sid);
+            if sid != *id && !inner.additional_sids.contains(&sid) {
+                info!(sl!(), "VirtSandbox: adding secondary sandbox_id = {sid}");
+                inner.additional_sids.push(sid.clone());
+                self.setup_secondary_sandbox(&sid).await?;
             }
         }
 
+        // if sandbox is not in SandboxState::Init then return,
+        // otherwise try to create sandbox
         if inner.state != SandboxState::Init {
-            warn!(sl!(), "VirtSandbox: already started, returning success");
+            info!(sl!(), "VirtSandbox: already started, returning success");
             return Ok(());
         }
+
         let selinux_label = load_oci_spec().ok().and_then(|spec| {
             spec.process()
                 .as_ref()
