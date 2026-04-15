@@ -352,6 +352,7 @@ impl RuntimeHandlerManager {
 
         // return if runtime instance has init
         if inner.runtime_instance.is_some() {
+            info!(sl!(), "task_init_runtime_instance: already initialized");
             return Ok(());
         }
 
@@ -463,6 +464,8 @@ impl RuntimeHandlerManager {
                 spec::OCI_SPEC_CONFIG_FILE_NAME
             );
             let mut spec = oci::Spec::load(&bundler_path).context("load spec")?;
+            info!(logger, "handler_task_message: OCI spec = {:?}", &spec);
+
             let state = spec::State {
                 version: spec.version().clone(),
                 id: container_config.container_id.to_string(),
@@ -475,6 +478,11 @@ impl RuntimeHandlerManager {
             self.task_init_runtime_instance(&mut spec, &state, &container_config.options)
                 .await
                 .context("try init runtime instance")?;
+            let sandbox_id = spec
+                .annotations()
+                .as_ref()
+                .and_then(|a| a.get("io.kubernetes.cri.sandbox-id").cloned());
+
             let instance = self
                 .get_runtime_instance()
                 .await
@@ -482,7 +490,7 @@ impl RuntimeHandlerManager {
 
             instance
                 .sandbox
-                .start()
+                .start(sandbox_id)
                 .await
                 .context("start sandbox in task handler")?;
 
@@ -546,7 +554,7 @@ impl RuntimeHandlerManager {
                 info!(sl!(), "SandboxRequest::StartSandbox");
 
                 sandbox
-                    .start()
+                    .start(None)
                     .await
                     .context("start sandbox in sandbox handler")?;
                 Ok(SandboxResponse::StartSandbox(StartSandboxInfo {
