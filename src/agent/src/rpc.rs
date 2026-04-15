@@ -11,6 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
+use std::collections::HashMap;
 use std::convert::TryFrom;
 #[cfg(feature = "agent-policy")]
 use std::convert::TryInto as _;
@@ -211,6 +212,7 @@ impl<T> OptionToTtrpcResult<T> for Option<T> {
 #[derive(Clone, Debug)]
 pub struct AgentService {
     sandbox: Arc<Mutex<Sandbox>>,
+    secondary_sandboxes: Arc<Mutex<HashMap<String, Sandbox>>>,
     init_mode: bool,
     oma: Option<mem_agent::agent::MemAgent>,
 }
@@ -1477,8 +1479,20 @@ impl agent_ttrpc::AgentService for AgentService {
         ctx: &TtrpcContext,
         req: protocols::agent::CreateSecondarySandboxRequest,
     ) -> ttrpc::Result<Empty> {
-        trace_rpc_call!(ctx, "create_secondary_sandbox: ignoring", req);
-        // is_allowed(&req).await?;
+        trace_rpc_call!(ctx, "create_secondary_sandbox", req);
+        is_allowed(&req).await?;
+
+        let mut sandbox = Sandbox::new(&sl()).map_ttrpc_err(same)?;
+        sandbox.hostname = req.hostname.clone();
+        sandbox.running = true;
+
+        if !req.sandbox_id.is_empty() {
+            sandbox.id = req.sandbox_id.clone();
+        }
+
+        let key = req.sandbox_id;
+        self.secondary_sandboxes.lock().await.insert(key, sandbox);
+
         Ok(Empty::new())
     }
 
@@ -1965,6 +1979,7 @@ pub async fn start(
 ) -> Result<TtrpcServer> {
     let agent_service = Box::new(AgentService {
         sandbox: s,
+        secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
         init_mode,
         oma,
     });
@@ -2754,6 +2769,7 @@ mod tests {
 
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -2772,6 +2788,7 @@ mod tests {
         let sandbox = Sandbox::new(&logger).unwrap();
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -2790,6 +2807,7 @@ mod tests {
         let sandbox = Sandbox::new(&logger).unwrap();
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -2924,6 +2942,7 @@ mod tests {
 
             let agent_service = Box::new(AgentService {
                 sandbox: Arc::new(Mutex::new(sandbox)),
+                secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
                 init_mode: true,
                 oma: None,
             });
@@ -3414,6 +3433,7 @@ OtherField:other
         let sandbox = Sandbox::new(&logger).unwrap();
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
