@@ -309,12 +309,11 @@ impl AgentService {
                     )
                 })?;
             update_container_namespaces(secondary, &mut oci, use_sandbox_pidns)?;
+            append_guest_hooks(secondary, &mut oci)?;
         } else {
             update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
+            append_guest_hooks(&s, &mut oci)?;
         }
-
-        // Append guest hooks
-        append_guest_hooks(&s, &mut oci)?;
 
         // write spec to bundle path, hooks might
         // read ocispec
