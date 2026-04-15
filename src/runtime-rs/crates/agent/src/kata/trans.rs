@@ -16,7 +16,9 @@ use crate::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
         ContainerID, CopyFileRequest, CpuStats, CpuUsage, CreateContainerRequest,
-        CreateSandboxRequest, Device, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy,
+        CreateSandboxRequest,
+        CreateSecondarySandboxRequest,
+        Device, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy,
         GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse,
         HugetlbStats, IPAddress, IPFamily, Interface, Interfaces, KernelModule,
         MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse, NetworkStats,
@@ -684,6 +686,17 @@ impl From<CreateSandboxRequest> for agent::CreateSandboxRequest {
             sandbox_id: from.sandbox_id,
             guest_hook_path: from.guest_hook_path,
             kernel_modules: trans_vec(from.kernel_modules),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CreateSecondarySandboxRequest> for agent::CreateSecondarySandboxRequest {
+    fn from(from: CreateSecondarySandboxRequest) -> Self {
+        Self {
+            hostname: from.hostname,
+            dns: trans_vec(from.dns),
+            sandbox_id: from.sandbox_id,
             ..Default::default()
         }
     }
