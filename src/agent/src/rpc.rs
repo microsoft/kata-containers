@@ -1472,6 +1472,16 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn create_secondary_sandbox(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CreateSecondarySandboxRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "create_secondary_sandbox: ignoring", req);
+        // is_allowed(&req).await?;
+        Ok(Empty::new())
+    }
+
     async fn destroy_sandbox(
         &self,
         ctx: &TtrpcContext,
