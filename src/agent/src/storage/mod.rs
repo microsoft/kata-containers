@@ -173,6 +173,8 @@ pub async fn add_storages(
     let mut mount_list = Vec::new();
 
     for storage in storages {
+        info!(logger, "add_storages: storage = {:?}", storage);
+
         let path = storage.mount_point.clone();
         let state = sandbox.lock().await.add_sandbox_storage(&path).await;
         if state.ref_count().await > 1 {
