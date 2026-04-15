@@ -110,6 +110,7 @@ struct SandboxInner {
     state: SandboxState,
     exit_info: Option<SandboxExitInfo>,
     created_at: Option<SystemTime>,
+    additional_sids: Vec<String>,
 }
 
 impl SandboxInner {
@@ -118,6 +119,7 @@ impl SandboxInner {
             state: SandboxState::Init,
             exit_info: None,
             created_at: None,
+            additional_sids: Vec::new(),
         }
     }
 }
@@ -740,8 +742,8 @@ impl VirtSandbox {
 #[async_trait]
 impl Sandbox for VirtSandbox {
     #[instrument(name = "sb: start")]
-    async fn start(&self) -> Result<()> {
-        info!(sl!(), "VirtSandbox: start");
+    async fn start(&self, bundle_sandbox_id: Option<String>) -> Result<()> {
+        info!(sl!(), "VirtSandbox: start, container sandbox-id annotation = {:?}", bundle_sandbox_id);
         let id = &self.sid;
 
         if self.sandbox_config.is_none() {
@@ -753,6 +755,14 @@ impl Sandbox for VirtSandbox {
         // otherwise try to create sandbox
 
         let mut inner = self.inner.write().await;
+
+        if let Some(sid) = bundle_sandbox_id {
+            if !inner.additional_sids.contains(&sid) {
+                info!(sl!(), "VirtSandbox: tracking new sandbox_id = {sid}");
+                inner.additional_sids.push(sid);
+            }
+        }
+
         if inner.state != SandboxState::Init {
             warn!(sl!(), "VirtSandbox: already started, returning success");
             return Ok(());
