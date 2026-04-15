@@ -191,6 +191,8 @@ pub async fn add_devices(
     let mut dev_updates = HashMap::<&str, DevUpdate>::with_capacity(devices.len());
 
     for device in devices.iter() {
+        info!(logger, "add_devices: device = {:?}", device);
+
         validate_device(logger, device, sandbox).await?;
         if let Some(handler) = DEVICE_HANDLERS.handler(&device.type_) {
             let mut ctx = DeviceContext { logger, sandbox };

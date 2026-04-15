@@ -262,6 +262,8 @@ pub async fn add_storages(
     let mut processed_mount_points = HashSet::new();
 
     for storage in &storages {
+        info!(logger, "add_storages: storage = {:?}", storage);
+
         // Try multi-layer storage handling first
         if let Some(result) = handle_multi_layer_storage(
             &logger,
