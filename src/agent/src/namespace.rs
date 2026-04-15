@@ -79,10 +79,15 @@ impl Namespace {
     // Note, pid namespaces cannot be persisted.
     #[instrument]
     #[allow(clippy::question_mark)]
-    pub async fn setup(mut self) -> Result<Self> {
-        fs::create_dir_all(&self.persistent_ns_dir)?;
+    pub async fn setup(mut self, secondary_sandbox_id: &str) -> Result<Self> {
+        let mut ns_path = PathBuf::from(&self.persistent_ns_dir);
+        if !secondary_sandbox_id.is_empty() {
+            ns_path.push(secondary_sandbox_id);
+        }
 
-        let ns_path = PathBuf::from(&self.persistent_ns_dir);
+        // fs::create_dir_all(&self.persistent_ns_dir)?;
+        fs::create_dir_all(&ns_path)?;
+
         let ns_type = self.ns_type;
         if ns_type == NamespaceType::Pid {
             return Err(anyhow!("Cannot persist namespace of PID type"));

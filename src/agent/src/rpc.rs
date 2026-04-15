@@ -1438,7 +1438,7 @@ impl agent_ttrpc::AgentService for AgentService {
             }
 
             info!(sl(), "create_sandbox: calling setup_shared_namespaces");
-            s.setup_shared_namespaces().await.map_ttrpc_err(same)?;
+            s.setup_shared_namespaces("").await.map_ttrpc_err(same)?;
         }
 
         info!(sl(), "create_sandbox: calling add_storages");
@@ -1482,13 +1482,22 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "create_secondary_sandbox", req);
         is_allowed(&req).await?;
 
+        if req.sandbox_id.is_empty() {
+            error!(sl(), "create_secondary_sandbox: empty sandbox_id");
+            return Err(ttrpc_error(
+                ttrpc::Code::INTERNAL,
+                "empty sandbox_id",
+            ));
+        }
+        let sandbox_id = req.sandbox_id.clone();
+
         let mut sandbox = Sandbox::new(&sl()).map_ttrpc_err(same)?;
+        sandbox.id = sandbox_id.clone();
         sandbox.hostname = req.hostname.clone();
         sandbox.running = true;
 
-        if !req.sandbox_id.is_empty() {
-            sandbox.id = req.sandbox_id.clone();
-        }
+        info!(sl(), "create_secondary_sandbox: calling setup_shared_namespaces");
+        sandbox.setup_shared_namespaces(&sandbox_id).await.map_ttrpc_err(same)?;
 
         let key = req.sandbox_id;
         self.secondary_sandboxes.lock().await.insert(key, sandbox);
@@ -2025,16 +2034,20 @@ fn update_container_namespaces(
         for namespace in namespaces.iter_mut() {
             if namespace.typ().to_string() == NSTYPEIPC {
                 namespace.set_path(if !sandbox.shared_ipcns.path.is_empty() {
+                    info!(sl(), "update_container_namespaces: using sandbox shared_ipcns = {:?}", sandbox.shared_ipcns.path);
                     Some(PathBuf::from(&sandbox.shared_ipcns.path))
                 } else {
+                    info!(sl(), "update_container_namespaces: namespace {NSTYPEIPC}, set_path(None)");
                     None
                 });
                 continue;
             }
             if namespace.typ().to_string() == NSTYPEUTS {
                 namespace.set_path(if !sandbox.shared_utsns.path.is_empty() {
+                    info!(sl(), "update_container_namespaces: using sandbox shared_utsns = {:?}", sandbox.shared_ipcns.path);
                     Some(PathBuf::from(&sandbox.shared_utsns.path))
                 } else {
+                    info!(sl(), "update_container_namespaces: namespace {NSTYPEUTS}, set_path(None)");
                     None
                 });
                 continue;
@@ -2052,11 +2065,14 @@ fn update_container_namespaces(
         if sandbox_pidns {
             if let Some(ref pidns) = &sandbox.sandbox_pidns {
                 if !pidns.path.is_empty() {
+                    info!(sl(), "update_container_namespaces: using sandbox_pidns = {:?}", pidns.path);
                     pid_ns.set_path(Some(PathBuf::from(&pidns.path)));
                 }
             } else if !sandbox.containers.is_empty() {
                 return Err(anyhow!(ERR_NO_SANDBOX_PIDNS));
             }
+        } else {
+            info!(sl(), "update_container_namespaces: using default pid_ns = {:?}", &pid_ns);
         }
 
         namespaces.push(pid_ns);
