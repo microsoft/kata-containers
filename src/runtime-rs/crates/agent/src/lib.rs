@@ -16,7 +16,9 @@ pub mod types;
 pub use types::{
     ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
     BlkioStatsEntry, CheckRequest, CloseStdinRequest, ContainerID, ContainerProcessID,
-    CopyFileRequest, CreateContainerRequest, CreateSandboxRequest, Empty, ExecProcessRequest,
+    CopyFileRequest, CreateContainerRequest, CreateSandboxRequest, 
+    CreateSecondarySandboxRequest, 
+    Empty, ExecProcessRequest,
     GetGuestDetailsRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
     HealthCheckResponse, IPAddress, IPFamily, Interface, Interfaces, ListProcessesRequest,
     MemHotplugByProbeRequest, MetricsResponse, OnlineCPUMemRequest, OomEventResponse,
@@ -57,6 +59,7 @@ pub trait HealthService: Send + Sync {
 pub trait Agent: AgentManager + HealthService + Send + Sync {
     // sandbox
     async fn create_sandbox(&self, req: CreateSandboxRequest) -> Result<Empty>;
+    async fn create_secondary_sandbox(&self, req: CreateSecondarySandboxRequest) -> Result<Empty>;
     async fn destroy_sandbox(&self, req: Empty) -> Result<Empty>;
     async fn online_cpu_mem(&self, req: OnlineCPUMemRequest) -> Result<Empty>;
 

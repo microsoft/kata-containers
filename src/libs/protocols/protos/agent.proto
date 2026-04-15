@@ -78,6 +78,8 @@ service AgentService {
 	rpc GetVolumeStats(VolumeStatsRequest) returns (VolumeStatsResponse);
 	rpc ResizeVolume(ResizeVolumeRequest) returns (google.protobuf.Empty);
 	rpc SetPolicy(SetPolicyRequest) returns (google.protobuf.Empty);
+
+	rpc CreateSecondarySandbox(CreateSecondarySandboxRequest) returns (google.protobuf.Empty);
 }
 
 message CreateContainerRequest {
@@ -323,6 +325,16 @@ message CreateSandboxRequest {
 	string guest_hook_path = 6;
 	// This field is the list of kernel modules to be loaded in the guest kernel.
 	repeated KernelModule kernel_modules = 7;
+}
+
+message CreateSecondarySandboxRequest {
+	string hostname = 1;
+	repeated string dns = 2;
+
+	// SandboxId identifies which sandbox is using the agent. We allow only
+	// one sandbox per agent and implicitly require that CreateSandbox is
+	// called before other sandbox/network calls.
+	string sandbox_id = 3;
 }
 
 message DestroySandboxRequest {
