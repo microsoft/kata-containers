@@ -298,7 +298,27 @@ impl AgentService {
         let mut s = self.sandbox.lock().await;
         s.container_mounts.insert(cid.clone(), m);
 
-        update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
+        let sandbox_id_annotation = oci
+            .annotations()
+            .as_ref()
+            .and_then(|a| a.get("io.kubernetes.cri.sandbox-id"))
+            .cloned()
+            .unwrap_or_default();
+
+        if !sandbox_id_annotation.is_empty() && sandbox_id_annotation != s.id {
+            let secondary_sandboxes = self.secondary_sandboxes.lock().await;
+            let secondary = secondary_sandboxes
+                .get(&sandbox_id_annotation)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "secondary sandbox not found for sandbox-id: {}",
+                        sandbox_id_annotation
+                    )
+                })?;
+            update_container_namespaces(secondary, &mut oci, use_sandbox_pidns)?;
+        } else {
+            update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
+        }
 
         // Append guest hooks
         append_guest_hooks(&s, &mut oci)?;
