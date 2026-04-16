@@ -934,7 +934,7 @@ impl BaseContainer for LinuxContainer {
     }
 
     fn set(&mut self, r: LinuxResources) -> Result<()> {
-        self.cgroup_manager.as_ref().set(&r, true)?;
+        self.cgroup_manager.as_ref().set(&self.logger, &r, true)?;
 
         if let Some(linux) = self.config.spec.as_mut().unwrap().linux_mut() {
             linux.set_resources(Some(r));
@@ -1576,13 +1576,13 @@ async fn join_namespaces(
     // For SystemdManger, apply must be precede set because we can only create a systemd unit with specific processes(pids).
     if res.is_some() {
         info!(logger, "apply processes to cgroups!");
-        cm.apply(p.pid)?;
+        cm.apply(&logger, p.pid)?;
     }
 
     if p.init {
         if let Some(resource) = res {
             info!(logger, "set properties to cgroups!");
-            cm.set(resource, false)?;
+            cm.set(&logger, resource, false)?;
         }
     }
 
