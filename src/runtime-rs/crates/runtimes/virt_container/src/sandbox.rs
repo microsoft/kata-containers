@@ -1149,7 +1149,7 @@ impl Sandbox for VirtSandbox {
 
     async fn shutdown(&self) -> Result<()> {
         info!(sl!(), "VirtSandbox: shutdown");
-        panic!("VirtSandbox: shutdown");
+        // panic!("VirtSandbox: shutdown");
 
         self.stop().await.context("stop")?;
 
