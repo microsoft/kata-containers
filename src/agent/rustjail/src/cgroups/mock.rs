@@ -18,6 +18,8 @@ use std::collections::HashMap;
 use std::string::String;
 use std::sync::{Arc, RwLock};
 
+use slog::Logger;
+
 use super::DevicesCgroupInfo;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -28,11 +30,11 @@ pub struct Manager {
 }
 
 impl CgroupManager for Manager {
-    fn apply(&self, _: pid_t) -> Result<()> {
+    fn apply(&self, _logger: &Logger, _: pid_t) -> Result<()> {
         Ok(())
     }
 
-    fn set(&self, _: &LinuxResources, _: bool) -> Result<()> {
+    fn set(&self, _logger: &Logger, _: &LinuxResources, _: bool) -> Result<()> {
         Ok(())
     }
 

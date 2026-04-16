@@ -17,6 +17,8 @@ use std::convert::TryInto;
 use std::string::String;
 use std::vec;
 
+use slog::{info, Logger};
+
 use super::super::fs::Manager as FsManager;
 
 use super::cgroups_path::CgroupsPath;
@@ -40,11 +42,20 @@ pub struct Manager {
 }
 
 impl CgroupManager for Manager {
-    fn apply(&self, pid: pid_t) -> Result<()> {
+    fn apply(&self, logger: &Logger, pid: pid_t) -> Result<()> {
+        info!(logger, "Manager::apply: start");
+
         if self.dbus_client.unit_exists()? {
             let subcgroup = self.fs_manager.subcgroup();
+            info!(logger, "Manager::apply: add_process pid = {pid}, subcgroup = {:?}", subcgroup);
             self.dbus_client.add_process(pid, subcgroup)?;
         } else {
+            info!(
+                logger,
+                "Manager::apply: start_unit pid = {pid}, cgroups_path = {:?}, cg_hierarchy = {:?}",
+                &self.cgroups_path,
+                &self.cg_hierarchy
+            );
             self.dbus_client.start_unit(
                 (pid as u32).try_into().unwrap(),
                 self.cgroups_path.slice.as_str(),
@@ -55,7 +66,9 @@ impl CgroupManager for Manager {
         Ok(())
     }
 
-    fn set(&self, r: &LinuxResources, _: bool) -> Result<()> {
+    fn set(&self, logger: &Logger, r: &LinuxResources, _: bool) -> Result<()> {
+        info!(logger, "Manager::set: start");
+
         let mut properties: Properties = vec![];
 
         let systemd_version = self.dbus_client.get_version()?;
@@ -66,6 +79,7 @@ impl CgroupManager for Manager {
         Pids::apply(r, &mut properties, &self.cg_hierarchy, systemd_version_str)?;
         CpuSet::apply(r, &mut properties, &self.cg_hierarchy, systemd_version_str)?;
 
+        info!(logger, "Manager::set: dbus_client.set_properties {:?}", &properties);
         self.dbus_client.set_properties(&properties)?;
 
         Ok(())
