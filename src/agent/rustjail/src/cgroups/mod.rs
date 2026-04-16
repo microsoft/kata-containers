@@ -9,6 +9,8 @@ use oci_spec::runtime::{LinuxDeviceCgroup, LinuxDeviceType, LinuxResources};
 use protocols::agent::CgroupStats;
 use std::any::Any;
 
+use slog::Logger;
+
 use cgroups::freezer::FreezerState;
 
 pub mod fs;
@@ -26,7 +28,7 @@ pub struct DevicesCgroupInfo {
 }
 
 pub trait Manager {
-    fn apply(&self, _pid: i32) -> Result<()> {
+    fn apply(&self, _logger: &Logger, _pid: i32) -> Result<()> {
         Err(anyhow!("not supported!".to_string()))
     }
 
@@ -46,7 +48,7 @@ pub trait Manager {
         Err(anyhow!("not supported!"))
     }
 
-    fn set(&self, _container: &LinuxResources, _update: bool) -> Result<()> {
+    fn set(&self, _logger: &Logger, _container: &LinuxResources, _update: bool) -> Result<()> {
         Err(anyhow!("not supported!"))
     }
 
