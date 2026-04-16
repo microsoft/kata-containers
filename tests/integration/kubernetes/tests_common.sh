@@ -56,7 +56,7 @@ setup_common() {
 
 	export node node_start_time
 
-	k8s_delete_all_pods_if_any_exists || true
+	#k8s_delete_all_pods_if_any_exists || true
 
 	get_pod_config_dir
 }
@@ -443,7 +443,7 @@ teardown_common() {
 	local node_start_time="$2"
 
 	kubectl describe pods
-	k8s_delete_all_pods_if_any_exists || true
+	#k8s_delete_all_pods_if_any_exists || true
 
 	local node_end_time
 	node_end_time=$(measure_node_time "${node}")

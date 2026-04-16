@@ -23,7 +23,7 @@ pub(crate) const ENV_KATA_RUNTIME_BIND_FD: &str = "KATA_RUNTIME_BIND_FD";
 #[derive(Debug)]
 pub struct ShimExecutor {
     pub(crate) args: Args,
-    pub(crate) uvm_id: Option<String>,
+    pub(crate) guest_vm_id: Option<String>,
 }
 
 impl ShimExecutor {
@@ -31,7 +31,7 @@ impl ShimExecutor {
     pub fn new(args: Args) -> Self {
         ShimExecutor { 
             args,
-            uvm_id: None,
+            guest_vm_id: None,
         }
     }
 

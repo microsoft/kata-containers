@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-63c5faf6-460b-4900-9482-d88d55b65182
+  annotations:
+    io.katacontainers.config.hypervisor.guest_vm_id: 63c5faf6-460b-4900-9482-d88d55b65182-1
+spec:
+  runtimeClassName: kata
+  containers:
+    - name: guest-vm-placeholder
+      image: mcr.microsoft.com/oss/v2/kubernetes/pause:3.6
+      command:
+        - /pause
+      resources:
+        limits:
+          cpu: "4"
+          memory: 16Gi

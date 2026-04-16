@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: pod1
+  name: pod3
   annotations:
     io.katacontainers.config.hypervisor.guest_vm_id: guest1
 spec:
@@ -10,7 +10,7 @@ spec:
   runtimeClassName: kata
   containers:
     - name: first-test-container
-      image: quay.io/prometheus/busybox:latest
+      image: ubuntu:latest
       env:
         - name: CONTAINER_NAME
           value: "first-test-container"

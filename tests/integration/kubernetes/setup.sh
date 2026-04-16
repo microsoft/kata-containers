@@ -149,11 +149,35 @@ add_runtime_handler_annotations() {
 	esac
 }
 
+add_guest_vm_annotations_to_yaml() {
+	local -r yaml_file="$1"
+
+	local -r annotation_key="io.katacontainers.config.hypervisor.guest_vm_id"
+	local -r annotation_value="63c5faf6-460b-4900-9482-d88d55b65182-1"
+
+	add_annotations_to_yaml "${yaml_file}" "${annotation_key}" "${annotation_value}"
+}
+
+add_guest_vm_annotations() {
+	info "Adding guest_vm_id annotations"
+
+	for K8S_TEST_YAML in runtimeclass_workloads_work/*.yaml
+	do
+		add_guest_vm_annotations_to_yaml "${K8S_TEST_YAML}"
+	done
+
+	for K8S_TEST_YAML in runtimeclass_workloads_work/openvpn/*.yaml
+	do
+		add_guest_vm_annotations_to_yaml "${K8S_TEST_YAML}"
+	done
+}
+
 main() {
 	ensure_yq
 	reset_workloads_work_dir
 	add_cbl_mariner_specific_annotations
 	add_runtime_handler_annotations
+	add_guest_vm_annotations
 }
 
 main "$@"

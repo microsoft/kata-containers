@@ -45,7 +45,7 @@ teardown(){
 	# Debugging information
 	kubectl describe "pod/$pod_name"
 
-	rm -f "${yaml_file}"
+	#rm -f "${yaml_file}"
 	kubectl delete pod "$pod_name"
 
 	delete_tmp_policy_settings_dir "${policy_settings_dir}"
