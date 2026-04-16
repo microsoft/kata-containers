@@ -18,16 +18,21 @@ impl ShimExecutor {
     pub async fn delete(&mut self) -> Result<()> {
         info!(sl!(), "ShimExecutor: delete");
 
+        self.log_to_file(&format!(">>>>>>>> ShimExecutor: delete"));
+
         self.args.validate(true).context("validate")?;
         let rsp = self.do_cleanup().await.context("shim do cleanup")?;
         rsp.write_to_writer(&mut std::io::stdout())
             .context(Error::FileWrite(format!("write {rsp:?} to stdout")))?;
+
+        self.log_to_file(&format!("<<<<<<<< ShimExecutor: delete"));
+
         Ok(())
     }
 
     async fn do_cleanup(&self) -> Result<api::DeleteResponse> {
-        info!(sl!(), "ShimExecutor: do_cleanup");
-        self.log_to_file(&format!("ShimExecutor: do_cleanup: start"));
+        info!(sl!(), "ShimExecutor::do_cleanup");
+        self.log_to_file(&format!(">>>>>>>> ShimExecutor::do_cleanup"));
 
         let mut rsp = api::DeleteResponse::new();
         rsp.set_exit_status(128 + libc::SIGKILL as u32);
@@ -48,15 +53,15 @@ impl ShimExecutor {
                 if let Some(guest_vm_id_value) = annotations.get("io.katacontainers.config.hypervisor.guest_vm_id") {
                     socket_id = guest_vm_id_value.to_string();
                 } else {
-                    self.log_to_file(&format!("ShimExecutor: do_cleanup: no guest_vm_id annotation"));
+                    self.log_to_file(&format!("ShimExecutor::do_cleanup: no guest_vm_id annotation"));
                 }
             }
             Err(e) => {
-                self.log_to_file(&format!("ShimExecutor: do_cleanup: load_oci_spec failed {:?}", e));
+                self.log_to_file(&format!("ShimExecutor::do_cleanup: load_oci_spec failed {:?}", e));
             }
         }
 
-        self.log_to_file(&format!("ShimExecutor: do_cleanup: socket_id = {socket_id}"));
+        self.log_to_file(&format!("ShimExecutor::do_cleanup: socket_id = {socket_id}"));
         let address = self
             .socket_address(&socket_id)
             .context("socket address")?;
@@ -66,8 +71,9 @@ impl ShimExecutor {
         let file_path = file_path.as_path();
         if std::fs::metadata(file_path).is_ok() {
             info!(sl!(), "ShimExecutor: remote socket path: {:?}", &file_path);
-            self.log_to_file(&format!("ShimExecutor: do_cleanup: removing file {:?}", &file_path));
 
+            // self.log_to_file(&format!("ShimExecutor::do_cleanup: leaking file {:?}", &file_path));
+            self.log_to_file(&format!("ShimExecutor::do_cleanup: removing file {:?}", &file_path));
             fs::remove_file(file_path).ok();
         }
 
@@ -92,6 +98,7 @@ impl ShimExecutor {
             }
         }
 
+        self.log_to_file(&format!("<<<<<<<< ShimExecutor::do_cleanup"));
         Ok(rsp)
     }
 }
