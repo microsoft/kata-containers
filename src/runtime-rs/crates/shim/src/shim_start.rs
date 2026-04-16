@@ -58,8 +58,8 @@ impl ShimExecutor {
             }
         }
 
-        self.log_to_file(&format!("do_start: args.id={}, guest_vm_id={:?}", self.args.id, self.guest_vm_id));
-        self.log_to_file(&format!("container_type={:?}", container_type));
+        self.log_to_file(&format!(">>>>>>>> ShimExecutor::do_start: args.id={}, guest_vm_id={:?}", self.args.id, self.guest_vm_id));
+        self.log_to_file(&format!("ShimExecutor::do_start: container_type={:?}", container_type));
 
         match container_type {
             ContainerType::PodSandbox | ContainerType::SingleContainer => {
@@ -67,28 +67,29 @@ impl ShimExecutor {
                 let socket_id = self.guest_vm_id.as_ref().unwrap_or(&self.args.id);
                 let address = self.socket_address(socket_id)?;
                 
-                self.log_to_file(&format!("socket_id={}, address={:?}", socket_id, address));
+                self.log_to_file(&format!("ShimExecutor::do_start: socket_id={}, address={:?}", socket_id, address));
                 
                 // Always try to create listener
                 match new_listener(&address) {
                     Ok(socket) => {
-                        self.log_to_file("new_listener: created socket, creating new shim process");
+                        self.log_to_file("ShimExecutor::do_start: created socket, creating new shim process");
                         let pid = self.create_shim_process(socket)?;
-                        self.log_to_file(&format!("create_shim_process: created PID={}", pid));
+                        self.log_to_file(&format!("ShimExecutor::do_start: create_shim_process: created PID={}", pid));
                         self.write_pid_file(&bundle_path, pid)?;
                         self.write_address(&bundle_path, &address)?;
                     }
                     Err(e) => {
                         let error_msg = format!("{}", e);
                         if error_msg.contains("bind address") {
-                            self.log_to_file("new_listener: address in use, shim process already running");
+                            self.log_to_file("ShimExecutor::do_start: address in use, shim process already running");
                         } else {
-                            self.log_to_file(&format!("new_listener: failed with error: {}", error_msg));
+                            self.log_to_file(&format!("ShimExecutor::do_start: new_listener failed with error: {}", error_msg));
                             return Err(e);
                         }
                     }
                 }
 
+                self.log_to_file(&format!("<<<<<<<< ShimExecutor::do_start"));
                 Ok(address)
             }
             ContainerType::PodContainer => {
@@ -99,9 +100,11 @@ impl ShimExecutor {
                 let socket_id = self.guest_vm_id.as_ref().unwrap_or(&sid);
                 let address = self.socket_address(socket_id).context("socket address")?;
                 
-                self.log_to_file(&format!("PodContainer: sid={}, socket_id={}, address={:?}", sid, socket_id, address));
+                self.log_to_file(&format!("ShimExecutor::do_start: sid={}, socket_id={}, address={:?}", sid, socket_id, address));
                 
                 self.write_address(&bundle_path, &address)?;
+
+                self.log_to_file(&format!("<<<<<<<< ShimExecutor::do_start"));
                 Ok(address)
             }
         }
