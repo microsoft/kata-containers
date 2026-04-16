@@ -1192,6 +1192,10 @@ function run_bats_tests() {
 
 	info "Running tests with bats version: $(bats --version). Save outputs to ${report_dir}"
 
+	# DMFIX
+	kubectl create -f "${test_dir}/runtimeclass_workloads_work/test-placeholder-pod.yaml"
+	kubectl wait --for=condition=Ready pod "pod-63c5faf6-460b-4900-9482-d88d55b65182"
+
 	local tests_fail=()
 	for test_entry in "${test_array[@]}"; do
 		test_entry=$(echo "${test_entry}" | tr -d '[:space:][:cntrl:]')
