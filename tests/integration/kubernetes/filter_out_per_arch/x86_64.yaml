@@ -1,0 +1,21 @@
+test:
+  - kubernetes
+
+kubernetes:
+  - k8s-empty-image
+  - k8s-block-volume
+  - k8s-guest-pull-image-encrypted
+  - k8s-guest-pull-image-authenticated
+  - k8s-guest-pull-image-signature
+  - k8s-confidential-attestation
+  - k8s-guest-pull-image
+  - k8s-confidential
+  - k8s-sealed-secret
+  - k8s-policy-hard-coded
+  - k8s-policy-deployment
+  - k8s-policy-deployment-sc
+  - k8s-policy-job
+  - k8s-policy-logs
+  - k8s-policy-pod
+  - k8s-policy-pvc
+  - k8s-policy-rc

@@ -45,10 +45,10 @@ impl ShimExecutor {
         match self.load_oci_spec(&bundle_path) {
             Ok(spec) => {
                 let annotations = spec.annotations().clone().unwrap_or_default();
-                if let Some(uvm_id_value) = annotations.get("io.katacontainers.config.hypervisor.uvm_id") {
-                    socket_id = uvm_id_value.to_string();
+                if let Some(guest_vm_id_value) = annotations.get("io.katacontainers.config.hypervisor.guest_vm_id") {
+                    socket_id = guest_vm_id_value.to_string();
                 } else {
-                    self.log_to_file(&format!("ShimExecutor: do_cleanup: no uvm_id annotation"));
+                    self.log_to_file(&format!("ShimExecutor: do_cleanup: no guest_vm_id annotation"));
                 }
             }
             Err(e) => {
