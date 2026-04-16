@@ -7,6 +7,7 @@
 use std::{
     convert::{TryFrom, TryInto},
     sync::Arc,
+    time::Instant,
 };
 
 use async_trait::async_trait;
@@ -27,6 +28,7 @@ impl TaskService {
 
     async fn handler_message<TtrpcReq, TtrpcResp>(
         &self,
+        method: &'static str,
         ctx: &TtrpcContext,
         req: TtrpcReq,
     ) -> ttrpc::Result<TtrpcResp>
@@ -36,10 +38,12 @@ impl TaskService {
         TtrpcResp: TryFrom<TaskResponse>,
         <TtrpcResp as TryFrom<TaskResponse>>::Error: std::fmt::Debug,
     {
+        let start = Instant::now();
+        let logger = sl!().new(o!("stream id" =>  ctx.mh.stream_id, "method" => method));
+        info!(logger, "task rpc begin");
         let r = req.try_into().map_err(|err| {
             ttrpc::Error::Others(format!("failed to translate from shim {err:?}"))
         })?;
-        let logger = sl!().new(o!("stream id" =>  ctx.mh.stream_id));
         debug!(logger, "====> task service {:?}", &r);
         let resp = self
             .handler
@@ -47,6 +51,11 @@ impl TaskService {
             .await
             .map_err(|err| ttrpc::Error::Others(format!("failed to handle message {err:?}")))?;
         debug!(logger, "<==== task service {:?}", &resp);
+        info!(
+            logger,
+            "task rpc completed";
+            "elapsed_ms" => start.elapsed().as_millis() as u64,
+        );
         resp.try_into()
             .map_err(|err| ttrpc::Error::Others(format!("failed to translate to shim {err:?}")))
     }
@@ -57,7 +66,7 @@ macro_rules! impl_service {
         #[async_trait]
         impl shim_async::Task for TaskService {
             $(async fn $name(&self, ctx: &TtrpcContext, req: $req) -> ttrpc::Result<$resp> {
-                self.handler_message(ctx, req).await
+                self.handler_message(stringify!($name), ctx, req).await
             })*
         }
     };

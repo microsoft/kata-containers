@@ -149,9 +149,36 @@ impl ContainerManager for VirtContainerManager {
         match process.process_type {
             ProcessType::Container => {
                 let mut containers = self.containers.write().await;
-                let c = containers
-                    .remove(container_id)
-                    .ok_or_else(|| Error::ContainerNotFound(container_id.to_string()))?;
+                let containers_before = containers.len();
+                info!(
+                    sl!(),
+                    "delete container process requested";
+                    "sandbox_id" => self.sid.clone(),
+                    "container_id" => container_id.clone(),
+                    "containers_before" => containers_before,
+                );
+                let c = match containers.remove(container_id) {
+                    Some(c) => c,
+                    None => {
+                        let known_container_ids: Vec<String> = containers.keys().cloned().collect();
+                        warn!(
+                            sl!(),
+                            "delete container process: container not found";
+                            "sandbox_id" => self.sid.clone(),
+                            "container_id" => container_id.clone(),
+                            "containers_before" => containers_before,
+                            "known_containers" => format!("{:?}", known_container_ids),
+                        );
+                        return Err(Error::ContainerNotFound(container_id.to_string()).into());
+                    }
+                };
+                info!(
+                    sl!(),
+                    "delete container process removed from map";
+                    "sandbox_id" => self.sid.clone(),
+                    "container_id" => container_id.clone(),
+                    "containers_after" => containers.len(),
+                );
 
                 // Poststop Hooks:
                 // * should be run in runtime namespace
@@ -412,10 +439,34 @@ impl ContainerManager for VirtContainerManager {
     #[instrument]
     async fn stats_container(&self, id: &ContainerID) -> Result<StatsInfo> {
         let containers = self.containers.read().await;
-        let c = containers
-            .get(&id.container_id)
-            .ok_or_else(|| Error::ContainerNotFound(id.container_id.clone()))?;
+        let c = match containers.get(&id.container_id) {
+            Some(c) => c,
+            None => {
+                let known_container_ids: Vec<String> = containers.keys().cloned().collect();
+                warn!(
+                    sl!(),
+                    "stats requested for unknown container";
+                    "sandbox_id" => self.sid.clone(),
+                    "requested_container_id" => id.container_id.clone(),
+                    "known_container_count" => known_container_ids.len(),
+                    "known_containers" => format!("{:?}", known_container_ids),
+                );
+                return Err(Error::ContainerNotFound(id.container_id.clone()).into());
+            }
+        };
+        debug!(
+            sl!(),
+            "stats request forwarding to agent";
+            "sandbox_id" => self.sid.clone(),
+            "container_id" => id.container_id.clone(),
+        );
         let stats = c.stats().await.context("stats")?;
+        debug!(
+            sl!(),
+            "stats request completed";
+            "sandbox_id" => self.sid.clone(),
+            "container_id" => id.container_id.clone(),
+        );
         Ok(StatsInfo::from(stats))
     }
 

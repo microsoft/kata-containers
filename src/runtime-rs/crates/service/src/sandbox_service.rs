@@ -7,6 +7,7 @@
 use std::{
     convert::{TryFrom, TryInto},
     sync::Arc,
+    time::Instant,
 };
 
 use async_trait::async_trait;
@@ -26,6 +27,7 @@ impl SandboxService {
 
     async fn handler_message<TtrpcReq, TtrpcResp>(
         &self,
+        method: &'static str,
         ctx: &TtrpcContext,
         req: TtrpcReq,
     ) -> ttrpc::Result<TtrpcResp>
@@ -35,10 +37,12 @@ impl SandboxService {
         TtrpcResp: TryFrom<SandboxResponse>,
         <TtrpcResp as TryFrom<SandboxResponse>>::Error: std::fmt::Debug,
     {
+        let start = Instant::now();
+        let logger = sl!().new(o!("stream id" =>  ctx.mh.stream_id, "method" => method));
+        info!(logger, "sandbox rpc begin");
         let r = req.try_into().map_err(|err| {
             ttrpc::Error::Others(format!("failed to translate from shim {err:?}"))
         })?;
-        let logger = sl!().new(o!("stream id" =>  ctx.mh.stream_id));
         debug!(logger, "====> sandbox service {:?}", &r);
         let resp = self
             .handler
@@ -48,6 +52,11 @@ impl SandboxService {
                 ttrpc::Error::Others(format!("failed to handle sandbox message {err:?}"))
             })?;
         debug!(logger, "<==== sandbox service {:?}", &resp);
+        info!(
+            logger,
+            "sandbox rpc completed";
+            "elapsed_ms" => start.elapsed().as_millis() as u64,
+        );
         resp.try_into()
             .map_err(|err| ttrpc::Error::Others(format!("failed to translate to shim {err:?}")))
     }
@@ -58,7 +67,7 @@ macro_rules! impl_service {
         #[async_trait]
         impl sandbox_async::Sandbox for SandboxService {
             $(async fn $name(&self, ctx: &TtrpcContext, req: $req) -> ttrpc::Result<$resp> {
-                self.handler_message(ctx, req).await
+                self.handler_message(stringify!($name), ctx, req).await
             })*
         }
     };

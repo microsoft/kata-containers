@@ -58,6 +58,7 @@ use resource::{ResourceConfig, ResourceManager};
 use runtime_spec as spec;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 use strum::Display;
 use tokio::sync::{mpsc::Sender, Mutex, RwLock};
 use tracing::instrument;
@@ -827,23 +828,57 @@ impl Sandbox for VirtSandbox {
 
     async fn stop(&self) -> Result<()> {
         let mut sandbox_inner = self.inner.write().await;
+        info!(
+            sl!(),
+            "stop sandbox requested";
+            "sandbox_id" => self.sid.clone(),
+            "state" => format!("{:?}", sandbox_inner.state),
+        );
 
         if sandbox_inner.state != SandboxState::Stopped {
+            let start = Instant::now();
             info!(sl!(), "begin stop sandbox");
             self.hypervisor.stop_vm().await.context("stop vm")?;
+            info!(
+                sl!(),
+                "stop vm finished";
+                "sandbox_id" => self.sid.clone(),
+                "elapsed_ms" => start.elapsed().as_millis() as u64,
+            );
             sandbox_inner.state = SandboxState::Stopped;
             info!(sl!(), "sandbox stopped");
+        } else {
+            info!(sl!(), "stop sandbox skipped, already stopped";
+                "sandbox_id" => self.sid.clone(),
+            );
         }
 
         Ok(())
     }
 
     async fn shutdown(&self) -> Result<()> {
-        info!(sl!(), "shutdown");
+        let shutdown_start = Instant::now();
+        info!(sl!(), "shutdown";
+            "sandbox_id" => self.sid.clone(),
+        );
 
+        info!(sl!(), "shutdown stage: stop";
+            "sandbox_id" => self.sid.clone(),
+        );
         self.stop().await.context("stop")?;
+        info!(sl!(), "shutdown stage: stop completed";
+            "sandbox_id" => self.sid.clone(),
+            "elapsed_ms" => shutdown_start.elapsed().as_millis() as u64,
+        );
 
+        info!(sl!(), "shutdown stage: cleanup";
+            "sandbox_id" => self.sid.clone(),
+        );
         self.cleanup().await.context("do the clean up")?;
+        info!(sl!(), "shutdown stage: cleanup completed";
+            "sandbox_id" => self.sid.clone(),
+            "elapsed_ms" => shutdown_start.elapsed().as_millis() as u64,
+        );
 
         info!(sl!(), "stop monitor");
         self.monitor.stop().await;
@@ -857,21 +892,34 @@ impl Sandbox for VirtSandbox {
         let sender = self.msg_sender.clone();
         let sender = sender.lock().await;
         sender.send(msg).await.context("send shutdown msg")?;
+        info!(sl!(), "shutdown completed";
+            "sandbox_id" => self.sid.clone(),
+            "elapsed_ms" => shutdown_start.elapsed().as_millis() as u64,
+        );
         Ok(())
     }
 
     async fn cleanup(&self) -> Result<()> {
+        let cleanup_start = Instant::now();
         info!(sl!(), "delete hypervisor");
         self.hypervisor
             .cleanup()
             .await
             .context("delete hypervisor")?;
+        info!(sl!(), "delete hypervisor completed";
+            "sandbox_id" => self.sid.clone(),
+            "elapsed_ms" => cleanup_start.elapsed().as_millis() as u64,
+        );
 
         info!(sl!(), "resource clean up");
         self.resource_manager
             .cleanup()
             .await
             .context("resource clean up")?;
+        info!(sl!(), "resource clean up completed";
+            "sandbox_id" => self.sid.clone(),
+            "elapsed_ms" => cleanup_start.elapsed().as_millis() as u64,
+        );
 
         // TODO: cleanup other sandbox resource
         Ok(())
@@ -883,10 +931,27 @@ impl Sandbox for VirtSandbox {
         process_id: ContainerProcess,
         shim_pid: u32,
     ) -> Result<()> {
+        let wait_start = Instant::now();
+        info!(sl!(), "wait_process begin";
+            "sandbox_id" => self.sid.clone(),
+            "container_id" => process_id.container_id().to_string(),
+            "exec_id" => process_id.exec_id().to_string(),
+            "shim_pid" => shim_pid,
+        );
         let exit_status = cm.wait_process(&process_id).await?;
         info!(sl!(), "container process exited with {:?}", exit_status);
+        info!(sl!(), "wait_process completed";
+            "sandbox_id" => self.sid.clone(),
+            "container_id" => process_id.container_id().to_string(),
+            "exec_id" => process_id.exec_id().to_string(),
+            "elapsed_ms" => wait_start.elapsed().as_millis() as u64,
+        );
 
         if cm.is_sandbox_container(&process_id).await {
+            info!(sl!(), "wait_process identified sandbox container, stopping sandbox";
+                "sandbox_id" => self.sid.clone(),
+                "container_id" => process_id.container_id().to_string(),
+            );
             self.stop().await.context("stop sandbox")?;
         }
 
@@ -912,6 +977,12 @@ impl Sandbox for VirtSandbox {
         let msg = Message::new(Action::Event(Arc::new(event)));
         let lock_sender = self.msg_sender.lock().await;
         lock_sender.send(msg).await.context("send exit event")?;
+        info!(sl!(), "wait_process exit event sent";
+            "sandbox_id" => self.sid.clone(),
+            "container_id" => cid.to_string(),
+            "exec_id" => eid.to_string(),
+            "elapsed_ms" => wait_start.elapsed().as_millis() as u64,
+        );
         Ok(())
     }
 

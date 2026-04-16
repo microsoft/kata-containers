@@ -589,12 +589,29 @@ impl Container {
     }
 
     pub async fn stats(&self) -> Result<Option<agent::StatsContainerResponse>> {
-        let stats_resp = self
+        match self
             .agent
             .stats_container(self.container_id.clone().into())
             .await
-            .context("agent stats container")?;
-        Ok(Some(stats_resp))
+        {
+            Ok(stats_resp) => {
+                debug!(
+                    self.logger,
+                    "agent stats container succeeded";
+                    "container_id" => self.container_id.container_id.clone(),
+                );
+                Ok(Some(stats_resp))
+            }
+            Err(err) => {
+                warn!(
+                    self.logger,
+                    "agent stats container failed";
+                    "container_id" => self.container_id.container_id.clone(),
+                    "error" => format!("{err:?}"),
+                );
+                Err(err).context("agent stats container")
+            }
+        }
     }
 
     pub async fn update(&self, resources: &LinuxResources) -> Result<()> {

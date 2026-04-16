@@ -50,7 +50,7 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
-    time::SystemTime,
+    time::{Instant, SystemTime},
 };
 use tokio::fs;
 use tokio::sync::{mpsc::Sender, Mutex, RwLock};
@@ -595,7 +595,22 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::CloseProcessIO)
             }
             TaskRequest::DeleteProcess(process_id) => {
+                info!(
+                    sl!(),
+                    "task delete process request";
+                    "container_id" => process_id.container_id().to_string(),
+                    "exec_id" => process_id.exec_id().to_string(),
+                    "process_type" => format!("{:?}", process_id.process_type),
+                );
                 let resp = cm.delete_process(&process_id).await.context("do delete")?;
+                info!(
+                    sl!(),
+                    "task delete process completed";
+                    "container_id" => process_id.container_id().to_string(),
+                    "exec_id" => process_id.exec_id().to_string(),
+                    "pid" => resp.pid.pid,
+                    "exit_status" => resp.exit_status,
+                );
                 if process_id.process_type == ProcessType::Container {
                     let event = TaskDelete {
                         id: process_id.container_id().to_string(),
@@ -617,25 +632,81 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::ExecProcess)
             }
             TaskRequest::KillProcess(req) => {
+                let req_start = Instant::now();
+                info!(
+                    sl!(),
+                    "task kill request";
+                    "container_id" => req.process.container_id().to_string(),
+                    "exec_id" => req.process.exec_id().to_string(),
+                    "signal" => req.signal,
+                    "all" => req.all,
+                );
                 cm.kill_process(&req).await.context("kill process")?;
+                info!(
+                    sl!(),
+                    "task kill completed";
+                    "container_id" => req.process.container_id().to_string(),
+                    "exec_id" => req.process.exec_id().to_string(),
+                    "elapsed_ms" => req_start.elapsed().as_millis() as u64,
+                );
                 Ok(TaskResponse::KillProcess)
             }
             TaskRequest::ShutdownContainer(req) => {
-                if cm.need_shutdown_sandbox(&req).await {
+                let req_start = Instant::now();
+                let should_shutdown = cm.need_shutdown_sandbox(&req).await;
+                info!(
+                    sl!(),
+                    "task shutdown request";
+                    "container_id" => req.container_id.clone(),
+                    "is_now" => req.is_now,
+                    "should_shutdown_sandbox" => should_shutdown,
+                );
+                if should_shutdown {
+                    info!(sl!(), "task shutdown: begin sandbox shutdown");
                     sandbox.shutdown().await.context("do shutdown")?;
+                    info!(
+                        sl!(),
+                        "task shutdown: sandbox shutdown completed";
+                        "elapsed_ms" => req_start.elapsed().as_millis() as u64,
+                    );
 
                     // stop the tracer collector
                     let kata_tracer = self.get_kata_tracer().await.context("get kata tracer")?;
                     let tracer = kata_tracer.lock().await;
                     tracer.trace_end();
+                    info!(sl!(), "task shutdown: tracer shutdown completed");
+                } else {
+                    debug!(sl!(), "task shutdown skipped sandbox shutdown");
                 }
+                info!(
+                    sl!(),
+                    "task shutdown completed";
+                    "container_id" => req.container_id,
+                    "elapsed_ms" => req_start.elapsed().as_millis() as u64,
+                );
                 Ok(TaskResponse::ShutdownContainer)
             }
             TaskRequest::WaitProcess(process_id) => {
+                let req_start = Instant::now();
+                info!(
+                    sl!(),
+                    "task wait request";
+                    "container_id" => process_id.container_id().to_string(),
+                    "exec_id" => process_id.exec_id().to_string(),
+                    "process_type" => format!("{:?}", process_id.process_type),
+                );
                 let exit_status = cm.wait_process(&process_id).await.context("wait process")?;
                 if cm.is_sandbox_container(&process_id).await {
                     sandbox.stop().await.context("stop sandbox")?;
                 }
+                info!(
+                    sl!(),
+                    "task wait completed";
+                    "container_id" => process_id.container_id().to_string(),
+                    "exec_id" => process_id.exec_id().to_string(),
+                    "exit_code" => exit_status.exit_code,
+                    "elapsed_ms" => req_start.elapsed().as_millis() as u64,
+                );
                 Ok(TaskResponse::WaitProcess(exit_status))
             }
             TaskRequest::StartProcess(process_id) => {
@@ -694,10 +765,30 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::ResizeProcessPTY)
             }
             TaskRequest::StatsContainer(container_id) => {
+                let requested_container_id = container_id.container_id.clone();
+                debug!(
+                    sl!(),
+                    "task stats request";
+                    "container_id" => requested_container_id.clone(),
+                );
                 let stats = cm
                     .stats_container(&container_id)
                     .await
+                    .map_err(|err| {
+                        warn!(
+                            sl!(),
+                            "task stats request failed";
+                            "container_id" => requested_container_id.clone(),
+                            "error" => format!("{err:?}"),
+                        );
+                        err
+                    })
                     .context("stats container")?;
+                debug!(
+                    sl!(),
+                    "task stats request completed";
+                    "container_id" => requested_container_id,
+                );
                 Ok(TaskResponse::StatsContainer(stats))
             }
             TaskRequest::UpdateContainer(req) => {
