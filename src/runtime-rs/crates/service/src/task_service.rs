@@ -11,6 +11,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use common::error::Error as CommonError;
 use common::types::{TaskRequest, TaskResponse};
 use containerd_shim_protos::{api, shim_async};
 use ttrpc::{self, r#async::TtrpcContext};
@@ -24,6 +25,34 @@ pub(crate) struct TaskService {
 impl TaskService {
     pub(crate) fn new(handler: Arc<RuntimeHandlerManager>) -> Self {
         Self { handler }
+    }
+
+    /// Convert handler errors to proper ttrpc status codes.
+    /// Specifically, maps ContainerNotFound and ProcessAlreadyTerminated to NOT_FOUND
+    /// so containerd stops polling/retrying and allows pods to exit Terminating state.
+    fn convert_handler_error(err: anyhow::Error) -> ttrpc::Error {
+        // Check if the error chain contains a known error type
+        if let Some(common_err) = err.downcast_ref::<CommonError>() {
+            match common_err {
+                CommonError::ContainerNotFound(_) => {
+                    // Return NOT_FOUND status so containerd stops polling this container
+                    let mut status = ttrpc::Status::new();
+                    status.set_code(ttrpc::Code::NOT_FOUND);
+                    status.message = format!("container not found: {}", common_err);
+                    return ttrpc::Error::RpcStatus(status);
+                }
+                CommonError::ProcessAlreadyTerminated => {
+                    // Process is already gone - also return NOT_FOUND to stop retries
+                    let mut status = ttrpc::Status::new();
+                    status.set_code(ttrpc::Code::NOT_FOUND);
+                    status.message = "process already terminated".to_string();
+                    return ttrpc::Error::RpcStatus(status);
+                }
+                _ => {}
+            }
+        }
+        // Default: return generic error
+        ttrpc::Error::Others(format!("failed to handle message {err:?}"))
     }
 
     async fn handler_message<TtrpcReq, TtrpcResp>(
@@ -49,7 +78,7 @@ impl TaskService {
             .handler
             .handler_task_message(r)
             .await
-            .map_err(|err| ttrpc::Error::Others(format!("failed to handle message {err:?}")))?;
+            .map_err(|err| Self::convert_handler_error(err))?;
         debug!(logger, "<==== task service {:?}", &resp);
         info!(
             logger,
