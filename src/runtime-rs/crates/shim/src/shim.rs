@@ -52,6 +52,12 @@ impl ShimExecutor {
             .context(Error::FileWrite(format!("{:?}", &file_path)))
     }
 
+    pub(crate) fn write_guest_vm_id(&self, path: &Path, guest_vm_id: &str) -> Result<()> {
+        let file_path = &path.join("guest_vm_id");
+        std::fs::write(file_path, guest_vm_id)
+            .context(Error::FileWrite(format!("{:?}", &file_path)))
+    }
+
     // There may be a multi-container for a Pod, each container has a bundle path, we need to write
     // the PID to the file for each container in their own bundle path, so we can directly get the
     // `bundle_path()` and write the PID.

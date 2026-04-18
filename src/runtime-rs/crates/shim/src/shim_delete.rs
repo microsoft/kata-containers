@@ -69,12 +69,33 @@ impl ShimExecutor {
         let trim_path = address.strip_prefix("unix://").context("trim path")?;
         let file_path = Path::new("/").join(trim_path);
         let file_path = file_path.as_path();
-        if std::fs::metadata(file_path).is_ok() {
-            info!(sl!(), "ShimExecutor: remote socket path: {:?}", &file_path);
 
-            // self.log_to_file(&format!("ShimExecutor::do_cleanup: leaking file {:?}", &file_path));
-            self.log_to_file(&format!("ShimExecutor::do_cleanup: removing file {:?}", &file_path));
-            fs::remove_file(file_path).ok();
+        let sandbox_id_path = file_path.with_extension("sandbox_id");
+        let owned_by_this_sandbox = match fs::read_to_string(&sandbox_id_path) {
+            Ok(saved_id) => {
+                self.log_to_file(&format!(
+                    "ShimExecutor::do_cleanup: found in file sandbox_id = {saved_id}, self.args.id = {}",
+                    &self.args.id
+                ));
+
+                saved_id == self.args.id
+            },
+            Err(_) => true, // if file doesn't exist, allow removal for backward compat
+        };
+
+        if owned_by_this_sandbox {
+            if std::fs::metadata(file_path).is_ok() {
+                info!(sl!(), "ShimExecutor: remote socket path: {:?}", &file_path);
+
+                self.log_to_file(&format!("ShimExecutor::do_cleanup: removing file {:?}", &file_path));
+                fs::remove_file(file_path).ok();
+            }
+            fs::remove_file(&sandbox_id_path).ok();
+        } else {
+            self.log_to_file(&format!(
+                "ShimExecutor::do_cleanup: skipping remove of {:?}, sandbox_id mismatch",
+                &file_path
+            ));
         }
 
         if let Err(e) = service::ServiceManager::cleanup(&self.args.id).await {

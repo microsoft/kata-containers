@@ -67,7 +67,7 @@ impl ShimExecutor {
                 let socket_id = self.guest_vm_id.as_ref().unwrap_or(&self.args.id);
                 let address = self.socket_address(socket_id)?;
                 
-                self.log_to_file(&format!("ShimExecutor::do_start: socket_id={}, address={:?}", socket_id, address));
+                self.log_to_file(&format!("ShimExecutor::do_start: socket_id = {}, address = {:?}", socket_id, address));
                 
                 // Always try to create listener
                 match new_listener(&address) {
@@ -77,6 +77,16 @@ impl ShimExecutor {
                         self.log_to_file(&format!("ShimExecutor::do_start: create_shim_process: created PID={}", pid));
                         self.write_pid_file(&bundle_path, pid)?;
                         self.write_address(&bundle_path, &address)?;
+
+                        let trim_path = address.strip_prefix("unix:").context("trim path for sandbox_id")?;
+                        let socket_file_path = Path::new("/").join(trim_path);
+                        let sandbox_id_path = socket_file_path.with_extension("sandbox_id");
+                        fs::write(&sandbox_id_path, &self.args.id)
+                            .context(format!("write sandbox_id to {:?}", sandbox_id_path))?;
+                        self.log_to_file(&format!(
+                            "ShimExecutor::do_start: wrote sandbox_id = {} in file = {:?}", 
+                            &self.args.id, &sandbox_id_path
+                        ));
                     }
                     Err(e) => {
                         let error_msg = format!("{}", e);
@@ -87,6 +97,14 @@ impl ShimExecutor {
                             return Err(e);
                         }
                     }
+                }
+
+                if let Some(ref guest_vm_id) = self.guest_vm_id {
+                    self.write_guest_vm_id(&bundle_path, guest_vm_id)?;
+                    self.log_to_file(&format!(
+                        "ShimExecutor::do_start: wrote guest_vm_id = {guest_vm_id} in bundle_path = {:?}", 
+                        &bundle_path
+                    ));
                 }
 
                 self.log_to_file(&format!("<<<<<<<< ShimExecutor::do_start"));
