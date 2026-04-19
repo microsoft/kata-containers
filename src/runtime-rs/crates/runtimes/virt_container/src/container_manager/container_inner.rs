@@ -17,6 +17,7 @@ use oci_spec::runtime as oci;
 use resource::{rootfs::Rootfs, volume::Volume};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 
 use crate::container_manager::{convert_agent_error, logger_with_process};
 
@@ -183,12 +184,31 @@ impl ContainerInner {
         force: bool,
         device_manager: &RwLock<DeviceManager>,
     ) -> Result<()> {
+        let cleanup_start = Instant::now();
+        info!(
+            self.logger,
+            "cleanup_container begin";
+            "container_id" => cid,
+            "force" => force,
+        );
+
         // wait until the container process
         // terminated and the status write lock released.
         info!(self.logger, "wait on container terminated");
         let exit_status = self.get_exit_status().await;
         let _locked_exit_status = exit_status.read().await;
-        info!(self.logger, "container terminated");
+        info!(
+            self.logger,
+            "container terminated";
+            "container_id" => cid,
+            "elapsed_ms" => cleanup_start.elapsed().as_millis() as u64,
+        );
+
+        info!(
+            self.logger,
+            "cleanup_container: agent remove_container begin";
+            "container_id" => cid,
+        );
         let remove_request = agent::RemoveContainerRequest {
             container_id: cid.to_string(),
             ..Default::default()
@@ -207,17 +227,55 @@ impl ContainerInner {
                     Err(e)
                 }
             })?;
+        info!(
+            self.logger,
+            "cleanup_container: agent remove_container completed";
+            "container_id" => cid,
+            "elapsed_ms" => cleanup_start.elapsed().as_millis() as u64,
+        );
 
         // close the exit channel to wakeup wait service
         // send to notify watchers who are waiting for the process exit
         self.init_process.stop().await;
+        info!(
+            self.logger,
+            "cleanup_container: init process stop signal sent";
+            "container_id" => cid,
+            "elapsed_ms" => cleanup_start.elapsed().as_millis() as u64,
+        );
 
+        info!(
+            self.logger,
+            "cleanup_container: volume cleanup begin";
+            "container_id" => cid,
+        );
         self.clean_volumes(device_manager)
             .await
             .context("clean volumes")?;
+        info!(
+            self.logger,
+            "cleanup_container: volume cleanup completed";
+            "container_id" => cid,
+            "remaining_volumes" => self.volumes.len(),
+            "elapsed_ms" => cleanup_start.elapsed().as_millis() as u64,
+        );
+
+        info!(
+            self.logger,
+            "cleanup_container: rootfs cleanup begin";
+            "container_id" => cid,
+        );
         self.clean_rootfs(device_manager)
             .await
             .context("clean rootfs")?;
+
+        info!(
+            self.logger,
+            "cleanup_container completed";
+            "container_id" => cid,
+            "remaining_rootfs" => self.rootfs.len(),
+            "elapsed_ms" => cleanup_start.elapsed().as_millis() as u64,
+        );
 
         Ok(())
     }
