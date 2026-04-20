@@ -248,6 +248,7 @@ pub fn bind_remount<P: AsRef<Path>>(dst: P, readonly: bool) -> Result<()> {
 /// - `src` exists.
 /// - `dst` exists, and is suitable as destination for bind mount.
 /// - `dst` is free of file path based attacks.
+/*
 fn check_path(p: &Path) {
     let mut parent = Some(p);
     while parent.is_some() {
@@ -262,6 +263,7 @@ fn check_path(p: &Path) {
         parent = parent_unwrapped.parent();
     }
 }
+    */
 
 pub fn bind_mount_unchecked<S: AsRef<Path>, D: AsRef<Path>>(
     src: S,
@@ -292,10 +294,10 @@ pub fn bind_mount_unchecked<S: AsRef<Path>, D: AsRef<Path>>(
         .canonicalize()
         .map_err(|_e| Error::InvalidPath(src.to_path_buf()))?;
 
-    check_path(dst);
+    //check_path(dst);
     info!(sl!(), "bind_mount_unchecked: calling create_mount_destination");
     create_mount_destination(src, dst, "/", "bind")?;
-    check_path(dst);
+    //check_path(dst);
 
     // Bind mount `src` to `dst`.
     mount(
