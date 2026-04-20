@@ -84,21 +84,26 @@ impl VolumeResource {
         let emptydir_mode = ctx.emptydir_mode;
         let mut volumes: Vec<Arc<dyn Volume>> = vec![];
         let oci_mounts = &spec.mounts().clone().unwrap_or_default();
-        info!(sl!(), " oci mount is : {:?}", oci_mounts.clone());
+        info!(sl!(), "handler_volumes: {} oci_mounts elements", oci_mounts.len());
         // handle mounts
         for m in oci_mounts {
+            info!(sl!(), "handler_volumes: mount = {:?}", m);
+
             let read_only = get_mount_options(m.options()).iter().any(|opt| opt == "ro");
             let volume: Arc<dyn Volume> = if shm_volume::is_shm_volume(m) {
+                info!(sl!(), "handler_volumes: is_shm_volume");
                 Arc::new(
                     shm_volume::ShmVolume::new(m)
                         .with_context(|| format!("new shm volume {m:?}"))?,
                 )
             } else if local_volume::is_local_volume(m) {
+                info!(sl!(), "handler_volumes: is_local_volume");
                 Arc::new(
                     local_volume::LocalStorage::new(m, sid, cid)
                         .with_context(|| format!("new local volume {m:?}"))?,
                 )
             } else if ephemeral_volume::is_ephemeral_volume(m) {
+                info!(sl!(), "handler_volumes: is_ephemeral_volume");
                 Arc::new(
                     ephemeral_volume::EphemeralVolume::new(m)
                         .with_context(|| format!("new ephemeral volume {m:?}"))?,
@@ -113,13 +118,14 @@ impl VolumeResource {
                 drop(inner);
                 vol_arc
             } else if is_block_volume(m) {
-                // handle block volume
+                info!(sl!(), "handler_volumes: is_block_volume");
                 Arc::new(
                     block_volume::BlockVolume::new(d, m, read_only, sid)
                         .await
                         .with_context(|| format!("new block volume {m:?}"))?,
                 )
             } else if is_direct_volume(m)? {
+                info!(sl!(), "handler_volumes: is_direct_volume");
                 // handle direct volumes
                 match direct_volume::handle_direct_volume(d, m, read_only, sid)
                     .await
@@ -131,6 +137,8 @@ impl VolumeResource {
             } else if let Some(options) =
                 get_huge_page_option(m).context("failed to check huge page")?
             {
+                info!(sl!(), "handler_volumes: huge_page");
+
                 // get hugepage limits from oci
                 let hugepage_limits =
                     get_huge_page_limits_map(spec).context("get huge page option")?;
@@ -140,6 +148,8 @@ impl VolumeResource {
                         .with_context(|| format!("handle hugepages {m:?}"))?,
                 )
             } else if share_fs_volume::is_share_fs_volume(m) {
+                info!(sl!(), "handler_volumes: is_share_fs_volume");
+
                 Arc::new(
                     share_fs_volume::ShareFsVolume::new(
                         share_fs,
@@ -153,9 +163,10 @@ impl VolumeResource {
                     .with_context(|| format!("new share fs volume {m:?}"))?,
                 )
             } else if is_skip_volume(m) {
-                info!(sl!(), "skip volume {:?}", m);
+                info!(sl!(), "handler_volumes: skip volume {:?}", m);
                 continue;
             } else {
+                info!(sl!(), "handler_volumes: default_volume");
                 Arc::new(
                     default_volume::DefaultVolume::new(m)
                         .with_context(|| format!("new default volume {m:?}"))?,
@@ -196,7 +207,7 @@ impl VolumeResource {
         for v in &inner.volumes {
             info!(
                 sl!(),
-                "volume mount {:?}: count {}",
+                "VolumeResource::dump: volume mount {:?}: count {}",
                 v.get_volume_mount(),
                 Arc::strong_count(v)
             );

@@ -10,7 +10,8 @@ spec:
   runtimeClassName: kata
   containers:
     - name: first-test-container
-      image: ubuntu:latest
+      #image: ubuntu:latest
+      image: quay.io/prometheus/busybox:latest
       env:
         - name: CONTAINER_NAME
           value: "first-test-container"
