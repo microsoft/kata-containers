@@ -546,8 +546,10 @@ impl ResourceManagerInner {
         let sb_bindmnt = SandboxBindMounts::new(self.sid.clone(), bindmounts)?;
 
         if setup {
+            info!(sl!(), "handle_sandbox_bindmounts: calling setup_sandbox_bind_mounts");
             sb_bindmnt.setup_sandbox_bind_mounts()
         } else {
+            info!(sl!(), "handle_sandbox_bindmounts: calling cleanup_sandbox_bind_mounts");
             sb_bindmnt.cleanup_sandbox_bind_mounts()
         }
     }
@@ -582,6 +584,7 @@ impl ResourceManagerInner {
     }
 
     pub async fn dump(&self) {
+        info!(sl!(), "ResourceManagerInner: dump start");
         self.rootfs_resource.dump().await;
         self.volume_resource.dump().await;
     }
