@@ -171,6 +171,14 @@ impl Container {
             .handler_volumes(&config.container_id, &spec)
             .await
             .context("handler volumes")?;
+        /*
+        info!(
+            sl!(),
+            "Container::create: volumes = {:?}",
+            volumes,
+        );
+        */
+
         let mut oci_mounts = vec![];
         for v in volumes {
             let mut volume_mounts = v.get_volume_mount().context("get volume mount")?;
@@ -184,6 +192,11 @@ impl Container {
             }
             inner.volumes.push(v);
         }
+        info!(
+            sl!(),
+            "Container::create: oci_mounts = {:?}",
+            oci_mounts,
+        );
         spec.set_mounts(Some(oci_mounts));
 
         let linux = spec

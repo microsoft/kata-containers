@@ -84,11 +84,11 @@ impl VolumeResource {
         let emptydir_mode = ctx.emptydir_mode;
         let mut volumes: Vec<Arc<dyn Volume>> = vec![];
         let oci_mounts = &spec.mounts().clone().unwrap_or_default();
-        info!(sl!(), "handler_volumes: {} oci_mounts elements", oci_mounts.len());
+        
+        info!(sl!(), "handler_volumes: ======= start");
+                
         // handle mounts
         for m in oci_mounts {
-            info!(sl!(), "handler_volumes: mount = {:?}", m);
-
             let read_only = get_mount_options(m.options()).iter().any(|opt| opt == "ro");
             let volume: Arc<dyn Volume> = if shm_volume::is_shm_volume(m) {
                 info!(sl!(), "handler_volumes: is_shm_volume");
@@ -174,10 +174,13 @@ impl VolumeResource {
             };
 
             volumes.push(volume.clone());
+
+            info!(sl!(), "handler_volumes: inner.volumes.push volume mount = {:?}", volume.get_volume_mount());
             let mut inner = self.inner.write().await;
             inner.volumes.push(volume);
         }
 
+        info!(sl!(), "handler_volumes: ======= end");
         Ok(volumes)
     }
 
@@ -203,6 +206,8 @@ impl VolumeResource {
     }
 
     pub async fn dump(&self) {
+        info!(sl!(), "VolumeResource::dump: ========================== start");
+
         let inner = self.inner.read().await;
         for v in &inner.volumes {
             info!(
@@ -212,6 +217,8 @@ impl VolumeResource {
                 Arc::strong_count(v)
             );
         }
+
+        info!(sl!(), "VolumeResource::dump: ========================== end");
     }
 }
 
