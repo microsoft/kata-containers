@@ -55,7 +55,7 @@ pub(crate) struct ResourceManagerInner {
     share_fs: Option<Arc<dyn ShareFs>>,
 
     pub rootfs_resource: RootFsResource,
-    pub volume_resource: VolumeResource,
+    pub volume_resource: HashMap<String, VolumeResource>,
     pub cgroups_resource: CgroupsResource,
     pub cpu_resource: CpuResource,
     pub mem_resource: MemResource,
@@ -125,7 +125,7 @@ impl ResourceManagerInner {
             network: None,
             share_fs: None,
             rootfs_resource: RootFsResource::new(),
-            volume_resource: VolumeResource::new(),
+            volume_resource: HashMap::new(),
             cgroups_resource,
             cpu_resource,
             mem_resource,
@@ -474,11 +474,25 @@ impl ResourceManagerInner {
     }
 
     pub async fn handler_volumes(
-        &self,
+        &mut self,
         cid: &str,
         spec: &oci::Spec,
     ) -> Result<Vec<Arc<dyn Volume>>> {
-        self.volume_resource
+        info!(sl!(), "ResourceManagerInner::handler_volumes: updating volume_resource from spec = {:?}", spec);
+
+        let sandbox_id = spec
+            .annotations()
+            .as_ref()
+            .and_then(|a| a.get("io.kubernetes.cri.sandbox-id"))
+            .cloned()
+            .unwrap_or_default();
+
+        let volume_resource = self
+            .volume_resource
+            .entry(sandbox_id)
+            .or_insert_with(VolumeResource::new);
+
+        volume_resource
             .handler_volumes(
                 &self.share_fs,
                 cid,
@@ -755,7 +769,10 @@ impl ResourceManagerInner {
     pub async fn dump(&self) {
         info!(sl!(), "ResourceManagerInner: dump start");
         self.rootfs_resource.dump().await;
-        self.volume_resource.dump().await;
+        for (key, volume_resource) in &self.volume_resource {
+            info!(sl!(), "ResourceManagerInner: dump volume_resource for sandbox-id: {}", key);
+            volume_resource.dump().await;
+        }
     }
 
     pub async fn update_linux_resource(
@@ -887,7 +904,7 @@ impl Persist for ResourceManagerInner {
             network: None,
             share_fs: None,
             rootfs_resource: RootFsResource::new(),
-            volume_resource: VolumeResource::new(),
+            volume_resource: HashMap::new(),
             cgroups_resource: CgroupsResource::restore(
                 args,
                 resource_state.cgroup_state.unwrap_or_default(),
