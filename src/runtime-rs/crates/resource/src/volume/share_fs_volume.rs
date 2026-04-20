@@ -471,7 +471,7 @@ impl ShareFsVolume {
                 } else if src.is_dir() {
                     // We allow directory copying wildly
                     // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
-                    info!(sl!(), "copying directory {:?} to guest", &src);
+                    info!(sl!(), "ShareFsVolume::new: copying directory {:?} to guest", &src);
 
                     // Get or create the guest path
                     let guest_path = volume_manager
@@ -526,7 +526,7 @@ impl ShareFsVolume {
                         // The current mount should be upgraded to readwrite permission
                         info!(
                             sl!(),
-                            "The mount will be upgraded, mount = {:?}, cid = {}", m, cid
+                            "ShareFsVolume::new: The mount will be upgraded to rw, mount = {:?}, cid = {}", m, cid
                         );
                         share_fs_mount
                             .upgrade_to_rw(
@@ -550,6 +550,7 @@ impl ShareFsVolume {
                     oci_mount.set_source(Some(PathBuf::from(&guest_path)));
                     oci_mount.set_options(m.options().clone());
 
+                    info!(sl!(), "ShareFsVolume::new: mounted at least once: pushing to volume.mounts oci_mount = {:?}", &oci_mount);
                     volume.mounts.push(oci_mount);
                 } else {
                     // Not mounted ever
@@ -582,6 +583,7 @@ impl ShareFsVolume {
                     oci_mount.set_source(Some(PathBuf::from(&mount_result.guest_path)));
                     oci_mount.set_options(m.options().clone());
 
+                    info!(sl!(), "ShareFsVolume::new: never mounted: pushing to volume.mounts oci_mount = {:?}", &oci_mount);
                     volume.mounts.push(oci_mount);
                 }
             }
