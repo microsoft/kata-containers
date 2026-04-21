@@ -568,7 +568,12 @@ impl VirtSandbox {
         !prestart_hooks.is_empty() || !create_runtime_hooks.is_empty()
     }
 
-    async fn setup_secondary_sandbox(&self, sandbox_id: &str) -> Result<()> {
+    async fn setup_secondary_sandbox(
+        &self, 
+        bundle_sandbox_id: &str,
+        bundle_hostname: &str,
+    ) -> Result<()> {
+
         info!(sl!(), "setup_secondary_sandbox: start");
 
         // create additional sandbox in vm
@@ -576,20 +581,18 @@ impl VirtSandbox {
             return Err(anyhow!("sandbox config is missing"));
         }
         let sandbox_config = self.sandbox_config.as_ref().unwrap();
-
-        let hostname = sandbox_config.hostname.clone();
         let dns = sandbox_config.dns.clone();
 
         info!(
             sl!(), 
-            "setup_secondary_sandbox: sending CreateSecondarySandboxRequest: sandbox_id = {sandbox_id}, hostname = {hostname}, dns = {:?}",
+            "setup_secondary_sandbox: sending CreateSecondarySandboxRequest: sandbox_id = {bundle_sandbox_id}, hostname = {bundle_hostname}, dns = {:?}",
             dns,
         );
 
         let req = agent::CreateSecondarySandboxRequest {
-            hostname,
+            hostname: bundle_hostname.to_string(),
             dns,
-            sandbox_id: sandbox_id.to_string(),
+            sandbox_id: bundle_sandbox_id.to_string(),
         };
 
         self.agent
@@ -604,7 +607,12 @@ impl VirtSandbox {
 #[async_trait]
 impl Sandbox for VirtSandbox {
     #[instrument(name = "sb: start")]
-    async fn start(&self, bundle_sandbox_id: Option<String>) -> Result<()> {
+    async fn start(
+        &self, 
+        bundle_sandbox_id: Option<String>,
+        bundle_hostname: &str,
+    ) -> Result<()> {
+
         info!(sl!(), "VirtSandbox: start, container sandbox-id annotation = {:?}", bundle_sandbox_id);
         let id = &self.sid;
 
@@ -619,7 +627,7 @@ impl Sandbox for VirtSandbox {
             if sid != *id && !inner.additional_sids.contains(&sid) {
                 info!(sl!(), "VirtSandbox: adding secondary sandbox_id = {sid}");
                 inner.additional_sids.push(sid.clone());
-                self.setup_secondary_sandbox(&sid).await?;
+                self.setup_secondary_sandbox(&sid, bundle_hostname).await?;
             }
         }
 

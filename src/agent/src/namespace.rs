@@ -21,6 +21,18 @@ pub const NSTYPEIPC: &str = "ipc";
 pub const NSTYPEUTS: &str = "uts";
 pub const NSTYPEPID: &str = "pid";
 
+/*
+pub fn log_to_file(message: &str) {
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/kata-debug.txt")
+    {
+        let _ = writeln!(file, "[{}] {}", std::process::id(), message);
+    }
+}
+*/
+
 #[instrument]
 pub fn get_current_thread_ns_path(ns_type: &str) -> String {
     format!("/proc/{}/task/{}/ns/{}", getpid(), gettid(), ns_type)
@@ -80,6 +92,9 @@ impl Namespace {
     #[instrument]
     #[allow(clippy::question_mark)]
     pub async fn setup(mut self, secondary_sandbox_id: &str) -> Result<Self> {
+        // log_to_file(&format!("Namespace::setup: secondary_sandbox_id = {secondary_sandbox_id}"));
+        info!(self.logger, "Namespace::setup: secondary_sandbox_id = {secondary_sandbox_id}");
+
         let mut ns_path = PathBuf::from(&self.persistent_ns_dir);
         if !secondary_sandbox_id.is_empty() {
             ns_path.push(secondary_sandbox_id);
@@ -101,8 +116,8 @@ impl Namespace {
         self.path = new_ns_path.clone().into_os_string().into_string().unwrap();
         let hostname = self.hostname.clone();
 
-        let new_thread = std::thread::spawn(move || {
-            if let Err(err) = || -> Result<()> {
+        //let new_thread = std::thread::spawn(move || {
+            //if let Err(err) = || -> Result<()> {
                 let origin_ns_path = get_current_thread_ns_path(ns_type.get());
 
                 let source = Path::new(&origin_ns_path);
@@ -116,10 +131,11 @@ impl Namespace {
                 unshare(cf)?;
 
                 if ns_type == NamespaceType::Uts && hostname.is_some() {
+                    info!(self.logger, "Namespace::setup: hostname = {}", hostname.clone().unwrap());
                     nix::unistd::sethostname(hostname.unwrap())?;
                 }
-                // Bind mount the new namespace from the current thread onto the mount point to persist it.
 
+                // Bind mount the new namespace from the current thread onto the mount point to persist it.
                 let mut flags = MsFlags::empty();
                 flags |= MsFlags::MS_BIND | MsFlags::MS_REC;
 
@@ -132,17 +148,21 @@ impl Namespace {
                     )
                 })?;
 
+            /*
                 Ok(())
             }() {
                 return Err(err);
             }
+            */
 
-            Ok(())
-        });
+        //    Ok(())
+        //});
 
+        /*
         new_thread
             .join()
             .map_err(|e| anyhow!("Failed to join thread {:?}!", e))??;
+        */
 
         Ok(self)
     }

@@ -478,11 +478,12 @@ impl RuntimeHandlerManager {
             self.task_init_runtime_instance(&mut spec, &state, &container_config.options)
                 .await
                 .context("try init runtime instance")?;
-            let sandbox_id = spec
+
+            let bundle_sandbox_id = spec
                 .annotations()
                 .as_ref()
                 .and_then(|a| a.get("io.kubernetes.cri.sandbox-id").cloned());
-
+            
             let instance = self
                 .get_runtime_instance()
                 .await
@@ -490,7 +491,7 @@ impl RuntimeHandlerManager {
 
             instance
                 .sandbox
-                .start(sandbox_id)
+                .start(bundle_sandbox_id, &spec.hostname().clone().unwrap_or_default())
                 .await
                 .context("start sandbox in task handler")?;
 
@@ -554,7 +555,7 @@ impl RuntimeHandlerManager {
                 info!(sl!(), "SandboxRequest::StartSandbox");
 
                 sandbox
-                    .start(None)
+                    .start(None, "")
                     .await
                     .context("start sandbox in sandbox handler")?;
                 Ok(SandboxResponse::StartSandbox(StartSandboxInfo {
