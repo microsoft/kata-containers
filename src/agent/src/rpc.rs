@@ -2063,7 +2063,7 @@ fn update_container_namespaces(
             }
             if namespace.typ().to_string() == NSTYPEUTS {
                 namespace.set_path(if !sandbox.shared_utsns.path.is_empty() {
-                    info!(sl(), "update_container_namespaces: using sandbox shared_utsns = {:?}", sandbox.shared_ipcns.path);
+                    info!(sl(), "update_container_namespaces: using sandbox shared_utsns = {:?}", sandbox.shared_utsns.path);
                     Some(PathBuf::from(&sandbox.shared_utsns.path))
                 } else {
                     info!(sl(), "update_container_namespaces: namespace {NSTYPEUTS}, set_path(None)");
