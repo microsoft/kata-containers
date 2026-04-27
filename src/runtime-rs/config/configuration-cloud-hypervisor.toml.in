@@ -228,7 +228,7 @@ disable_seccomp = false
 # to enable debug output where available.
 #
 # Default false
-enable_debug = true
+enable_debug = false
 
 # Disable the customizations done in the runtime when it detects
 # that it is running on top a VMM. This will result in the runtime
@@ -275,7 +275,7 @@ guest_swap_create_threshold_secs = 60
 container_pipe_size = @PIPESIZE@
 # If enabled, make the agent display debug-level messages.
 # (default: disabled)
-enable_debug = true
+enable_debug = false
 
 # Enable agent tracing.
 #
@@ -426,7 +426,7 @@ create_container_timeout = @DEFCREATECONTAINERTIMEOUT@
 # If enabled, the runtime will log additional debug messages to the
 # system log
 # (default: disabled)
-enable_debug = true
+enable_debug = false
 
 # If enabled, enabled, it means that 1) if the runtime exits abnormally,
 # the cleanup process will be skipped, and 2) the runtime will not exit
