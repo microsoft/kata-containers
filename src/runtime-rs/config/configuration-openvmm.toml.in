@@ -95,7 +95,7 @@ network_queues = @DEFNETQUEUES@
 
 # This option changes the default hypervisor and kernel parameters
 # to enable debug output where available.
-enable_debug = true
+enable_debug = false
 
 # Disable the customizations done in the runtime when it detects
 # that it is running on top a VMM.
@@ -115,7 +115,7 @@ enable_guest_swap = false
 
 [agent.@PROJECT_TYPE@]
 container_pipe_size = @PIPESIZE@
-enable_debug = true
+enable_debug = false
 enable_tracing = false
 debug_console_enabled = false
 
@@ -131,7 +131,7 @@ reconnect_timeout_ms = 60000
 create_container_timeout = @DEFCREATECONTAINERTIMEOUT@
 
 [runtime]
-enable_debug = true
+enable_debug = false
 keep_abnormal = false
 
 # Internetworking model
