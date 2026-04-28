@@ -32,6 +32,7 @@ mkdir -p "${PREFIX}/${SHIM_BINARIES_PATH}"
 RUNTIME_GO_SHIM="src/runtime/containerd-shim-kata-v2"
 RUNTIME_RS_TARGET="target/x86_64-unknown-linux-gnu/release"
 RUNTIME_RS_SHIM="${RUNTIME_RS_TARGET}/containerd-shim-kata-v2"
+KATA_CTL_BINARY="src/tools/kata-ctl/target/x86_64-unknown-linux-gnu/release/kata-ctl"
 SHIM_BINARY_RUNTIME_GO="${SHIM_BINARY_NAME}-go"
 SHIM_BINARY_RUNTIME_RS="${SHIM_BINARY_NAME}-rs"
 
@@ -51,11 +52,12 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	fi
 fi
 
-echo "Installing diagnosability binaries from runtime-go (monitor, runtime, collect-data script)"
+echo "Installing diagnosability binaries (monitor, runtime, collect-data script)"
 cp -a --backup=numbered src/runtime/kata-monitor "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
 cp -a --backup=numbered src/runtime/kata-runtime "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
 chmod +x src/runtime/data/kata-collect-data.sh
 cp -a --backup=numbered src/runtime/data/kata-collect-data.sh "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
+cp -a --backup=numbered "${KATA_CTL_BINARY}" "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
 
 echo "Installing shim binaries side by side"
 cp -a --backup=numbered "${RUNTIME_GO_SHIM}" "${PREFIX}/${SHIM_BINARIES_PATH}/${SHIM_BINARY_RUNTIME_GO}"

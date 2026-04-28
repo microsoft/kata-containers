@@ -107,6 +107,11 @@ pushd src/runtime-rs/
 make ${runtime_rs_make_flags}
 popd
 
+echo "Building kata-ctl binary"
+pushd src/tools/kata-ctl/
+make ${runtime_rs_make_flags}
+popd
+
 create_debug_shim_config() {
 	local config_dir="$1"
 	local release_cfg="$2"
