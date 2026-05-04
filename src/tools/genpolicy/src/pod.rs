@@ -770,18 +770,19 @@ impl EnvVar {
         annotations: &Option<BTreeMap<String, String>>,
         service_account_name: &str,
     ) -> String {
+        // When neither `value` nor `valueFrom` were specified, the default value is an empty string:
+        // https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#environment-variables
         if let Some(value) = &self.value {
             value.clone()
-        } else if let Some(value) = self.get_value_from(
-            config_maps,
-            secrets,
-            namespace,
-            annotations,
-            service_account_name,
-        ) {
-            value.clone()
         } else {
-            panic!("No value or valueFrom for env var: {}", &self.name);
+            self.get_value_from(
+                config_maps,
+                secrets,
+                namespace,
+                annotations,
+                service_account_name,
+            )
+            .unwrap_or_default()
         }
     }
 
