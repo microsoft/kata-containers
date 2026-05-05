@@ -101,6 +101,9 @@ pub struct PodSpec {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     preemptionPolicy: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    priority: Option<i32>,
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
