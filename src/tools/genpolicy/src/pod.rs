@@ -104,6 +104,9 @@ pub struct PodSpec {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     priority: Option<i32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schedulerName: Option<String>,
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
