@@ -53,7 +53,10 @@ if [ "${CONF_PODS}" == "yes" ]; then
 	echo "Building tarfs kernel driver and installing into rootfs"
 	pushd src/tarfs
 	make KDIR=${UVM_KERNEL_HEADER_DIR}
-	sudo make KDIR=${UVM_KERNEL_HEADER_DIR} KVER=${UVM_KERNEL_VERSION} INSTALL_MOD_PATH=${ROOTFS_PATH} install
+
+	#sudo make KDIR=${UVM_KERNEL_HEADER_DIR} KVER=${UVM_KERNEL_VERSION} INSTALL_MOD_PATH=${ROOTFS_PATH} install
+	sudo make KDIR=${UVM_KERNEL_HEADER_DIR} KVER=${UVM_KERNEL_VERSION}-${UVM_KERNEL_RELEASE} INSTALL_MOD_PATH=${ROOTFS_PATH} install
+
 	popd
 
 	echo "Building dm-verity protected image based on rootfs"

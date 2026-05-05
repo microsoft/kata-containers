@@ -29,6 +29,7 @@ use tracing::instrument;
 pub struct VirtioBlkPciDeviceHandler {}
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct VirtioBlkCcwDeviceHandler {}
 
 #[derive(Debug)]
