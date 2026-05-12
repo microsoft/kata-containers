@@ -154,11 +154,12 @@ impl InitialSizeManager {
             info!(sl!(), "resource with vcpu {}", self.resource.vcpu);
             if config.runtime.static_sandbox_resource_mgmt {
                 hv.cpu_info.default_vcpus += self.resource.vcpu;
-                let new_vcpus_ceil = hv.cpu_info.default_vcpus.ceil() as u32;
-                if hv.cpu_info.default_maxvcpus < new_vcpus_ceil {
-                    hv.cpu_info.default_maxvcpus = new_vcpus_ceil;
-                }
             }
+        }
+
+        if config.runtime.static_sandbox_resource_mgmt {
+            let new_vcpus_ceil = hv.cpu_info.default_vcpus.ceil() as u32;
+            hv.cpu_info.default_maxvcpus = new_vcpus_ceil;
         }
 
         self.resource.orig_toml_default_mem = hv.memory_info.default_memory;
@@ -459,6 +460,23 @@ mod tests {
         let hv = config.hypervisor.get("qemu").unwrap();
         assert_eq!(hv.cpu_info.default_vcpus, 3.5);
         assert_eq!(hv.cpu_info.default_maxvcpus, 4);
+    }
+
+    #[test]
+    fn test_setup_config_static_reduces_maxvcpus_to_static_total() {
+        let mut config = make_config(1.0, 8, 256, 4096, true);
+        let mut mgr = InitialSizeManager {
+            resource: InitialSize {
+                vcpu: 1.2,
+                mem_mb: 0,
+                orig_toml_default_mem: 0,
+            },
+        };
+
+        mgr.setup_config(&mut config).unwrap();
+        let hv = config.hypervisor.get("qemu").unwrap();
+        assert_eq!(hv.cpu_info.default_vcpus, 2.2);
+        assert_eq!(hv.cpu_info.default_maxvcpus, 3);
     }
 
     #[test]
