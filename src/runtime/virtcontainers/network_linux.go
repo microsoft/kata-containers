@@ -985,15 +985,6 @@ func setIPs(link netlink.Link, addrs []netlink.Addr) error {
 }
 
 func tapNetworkPair(ctx context.Context, endpoint Endpoint, queues int, disableVhostNet bool) error {
-	// Ensure at least one queue so that createMacvtapFds opens the
-	// /dev/tapN device and returns a valid fd.  Without this guard,
-	// hypervisors that do not advertise multi-queue support (e.g.
-	// Cloud Hypervisor) would pass queues=0, resulting in an empty
-	// VMFds slice that the hypervisor rightfully rejects.
-	if queues == 0 {
-		queues = 1
-	}
-
 	span, _ := networkTrace(ctx, "tapNetworkPair", endpoint)
 	defer span.End()
 
