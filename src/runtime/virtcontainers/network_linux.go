@@ -765,6 +765,9 @@ func xConnectVMNetwork(ctx context.Context, endpoint Endpoint, h Hypervisor) err
 	default:
 		err = fmt.Errorf("Invalid internetworking model")
 	}
+	if err != nil {
+		networkLogger().WithError(err).WithField("model", netPair.NetInterworkingModel).Error("xConnectVMNetwork failed")
+	}
 	return err
 }
 
@@ -877,6 +880,7 @@ func tapNetworkPair(ctx context.Context, endpoint Endpoint, queues int, disableV
 
 	netHandle, err := netlink.NewHandle()
 	if err != nil {
+		networkLogger().WithError(err).Error("tapNetworkPair: failed to create netlink handle")
 		return err
 	}
 	defer netHandle.Close()
@@ -885,6 +889,7 @@ func tapNetworkPair(ctx context.Context, endpoint Endpoint, queues int, disableV
 
 	link, err := getLinkForEndpoint(endpoint, netHandle)
 	if err != nil {
+		networkLogger().WithError(err).Error("tapNetworkPair: failed to get link for endpoint")
 		return err
 	}
 
@@ -903,6 +908,7 @@ func tapNetworkPair(ctx context.Context, endpoint Endpoint, queues int, disableV
 		}, queues)
 
 	if err != nil {
+		networkLogger().WithError(err).Error("tapNetworkPair: could not create TAP interface")
 		return fmt.Errorf("Could not create TAP interface: %s", err)
 	}
 
@@ -915,38 +921,46 @@ func tapNetworkPair(ctx context.Context, endpoint Endpoint, queues int, disableV
 	netPair.TAPIface.HardAddr = attrs.HardwareAddr.String()
 
 	if err := netHandle.LinkSetMTU(tapLink, attrs.MTU); err != nil {
+		networkLogger().WithError(err).WithField("mtu", attrs.MTU).Error("tapNetworkPair: could not set TAP MTU")
 		return fmt.Errorf("Could not set TAP MTU %d: %s", attrs.MTU, err)
 	}
 
 	hardAddr, err := net.ParseMAC(netPair.VirtIface.HardAddr)
 	if err != nil {
+		networkLogger().WithError(err).WithField("mac", netPair.VirtIface.HardAddr).Error("tapNetworkPair: failed to parse MAC")
 		return err
 	}
 	if err := netHandle.LinkSetHardwareAddr(link, hardAddr); err != nil {
+		networkLogger().WithError(err).Error("tapNetworkPair: could not set MAC for veth")
 		return fmt.Errorf("Could not set MAC address %s for veth interface %s: %s",
 			netPair.VirtIface.HardAddr, netPair.VirtIface.Name, err)
 	}
 
 	if err := netHandle.LinkSetHardwareAddr(tapLink, tapHardAddr); err != nil {
+		networkLogger().WithError(err).Error("tapNetworkPair: could not set MAC for TAP")
 		return fmt.Errorf("Could not set MAC address %s for TAP interface %s: %s",
 			netPair.TAPIface.HardAddr, netPair.TAPIface.Name, err)
 	}
 
 	if err := netHandle.LinkSetUp(tapLink); err != nil {
+		networkLogger().WithError(err).Error("tapNetworkPair: could not enable TAP")
 		return fmt.Errorf("Could not enable TAP %s: %s", netPair.TAPIface.Name, err)
 	}
 
 	// Clear the IP addresses from the veth interface to prevent ARP conflict
 	netPair.VirtIface.Addrs, err = netlink.AddrList(link, netlink.FAMILY_ALL)
 	if err != nil {
+		networkLogger().WithError(err).Error("tapNetworkPair: unable to obtain veth IP addresses")
 		return fmt.Errorf("Unable to obtain veth IP addresses: %s", err)
 	}
 
 	if err := clearIPs(link, netPair.VirtIface.Addrs); err != nil {
+		networkLogger().WithError(err).Error("tapNetworkPair: unable to clear veth IP addresses")
 		return fmt.Errorf("Unable to clear veth IP addresses: %s", err)
 	}
 
 	if err := netHandle.LinkSetUp(link); err != nil {
+		networkLogger().WithError(err).Error("tapNetworkPair: could not enable veth")
 		return fmt.Errorf("Could not enable veth %s: %s", netPair.VirtIface.Name, err)
 	}
 
@@ -954,12 +968,14 @@ func tapNetworkPair(ctx context.Context, endpoint Endpoint, queues int, disableV
 
 	netPair.VMFds, err = createMacvtapFds(tapLink.Attrs().Index, queues)
 	if err != nil {
+		networkLogger().WithError(err).WithField("queues", queues).Error("tapNetworkPair: could not setup macvtap fds")
 		return fmt.Errorf("Could not setup macvtap fds %s: %s", netPair.TAPIface, err)
 	}
 
 	if !disableVhostNet {
 		vhostFds, err := createVhostFds(queues)
 		if err != nil {
+			networkLogger().WithError(err).WithField("queues", queues).Error("tapNetworkPair: could not setup vhost fds")
 			return fmt.Errorf("Could not setup vhost fds %s : %s", netPair.VirtIface.Name, err)
 		}
 		netPair.VhostFds = vhostFds
@@ -974,6 +990,7 @@ func setupTCFiltering(ctx context.Context, endpoint Endpoint, queues int, disabl
 
 	netHandle, err := netlink.NewHandle()
 	if err != nil {
+		networkLogger().WithError(err).Error("setupTCFiltering: failed to create netlink handle")
 		return err
 	}
 	defer netHandle.Close()
@@ -982,6 +999,7 @@ func setupTCFiltering(ctx context.Context, endpoint Endpoint, queues int, disabl
 
 	tapLink, fds, err := createLink(netHandle, netPair.TAPIface.Name, &netlink.Tuntap{}, queues)
 	if err != nil {
+		networkLogger().WithError(err).Error("setupTCFiltering: could not create TAP interface")
 		return fmt.Errorf("Could not create TAP interface: %s", err)
 	}
 	netPair.VMFds = fds
@@ -989,6 +1007,7 @@ func setupTCFiltering(ctx context.Context, endpoint Endpoint, queues int, disabl
 	if !disableVhostNet {
 		vhostFds, err := createVhostFds(queues)
 		if err != nil {
+			networkLogger().WithError(err).WithField("queues", queues).Error("setupTCFiltering: could not setup vhost fds")
 			return fmt.Errorf("Could not setup vhost fds %s : %s", netPair.VirtIface.Name, err)
 		}
 		netPair.VhostFds = vhostFds
@@ -999,6 +1018,7 @@ func setupTCFiltering(ctx context.Context, endpoint Endpoint, queues int, disabl
 
 	link, err = getLinkForEndpoint(endpoint, netHandle)
 	if err != nil {
+		networkLogger().WithError(err).Error("setupTCFiltering: failed to get link for endpoint")
 		return err
 	}
 
@@ -1012,28 +1032,34 @@ func setupTCFiltering(ctx context.Context, endpoint Endpoint, queues int, disabl
 	netPair.TAPIface.HardAddr = attrs.HardwareAddr.String()
 
 	if err := netHandle.LinkSetMTU(tapLink, attrs.MTU); err != nil {
+		networkLogger().WithError(err).WithField("mtu", attrs.MTU).Error("setupTCFiltering: could not set TAP MTU")
 		return fmt.Errorf("Could not set TAP MTU %d: %s", attrs.MTU, err)
 	}
 
 	if err := netHandle.LinkSetUp(tapLink); err != nil {
+		networkLogger().WithError(err).Error("setupTCFiltering: could not enable TAP")
 		return fmt.Errorf("Could not enable TAP %s: %s", netPair.TAPIface.Name, err)
 	}
 
 	tapAttrs := tapLink.Attrs()
 
 	if err := addQdiscIngress(tapAttrs.Index); err != nil {
+		networkLogger().WithError(err).WithField("index", tapAttrs.Index).Error("setupTCFiltering: failed to add qdisc ingress on TAP")
 		return err
 	}
 
 	if err := addQdiscIngress(attrs.Index); err != nil {
+		networkLogger().WithError(err).WithField("index", attrs.Index).Error("setupTCFiltering: failed to add qdisc ingress on endpoint")
 		return err
 	}
 
 	if err := addRedirectTCFilter(attrs.Index, tapAttrs.Index); err != nil {
+		networkLogger().WithError(err).Error("setupTCFiltering: failed to add redirect TC filter (endpoint->TAP)")
 		return err
 	}
 
 	if err := addRedirectTCFilter(tapAttrs.Index, attrs.Index); err != nil {
+		networkLogger().WithError(err).Error("setupTCFiltering: failed to add redirect TC filter (TAP->endpoint)")
 		return err
 	}
 

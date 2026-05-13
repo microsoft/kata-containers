@@ -74,18 +74,24 @@ func (endpoint *MacvtapEndpoint) Attach(ctx context.Context, s *Sandbox) error {
 
 	endpoint.VMFds, err = createMacvtapFds(endpoint.EndpointProperties.Iface.Index, int(h.HypervisorConfig().NumVCPUs()))
 	if err != nil {
+		networkLogger().WithError(err).Error("Error creating macvtap fds")
 		return fmt.Errorf("Could not setup macvtap fds %s: %s", endpoint.EndpointProperties.Iface.Name, err)
 	}
 
 	if !h.HypervisorConfig().DisableVhostNet {
 		vhostFds, err := createVhostFds(int(h.HypervisorConfig().NumVCPUs()))
 		if err != nil {
+			networkLogger().WithError(err).Error("Error creating vhost fds for macvtap")
 			return fmt.Errorf("Could not setup vhost fds %s : %s", endpoint.EndpointProperties.Iface.Name, err)
 		}
 		endpoint.VhostFds = vhostFds
 	}
 
-	return h.AddDevice(ctx, endpoint, NetDev)
+	if err := h.AddDevice(ctx, endpoint, NetDev); err != nil {
+		networkLogger().WithError(err).Error("Error adding macvtap endpoint device")
+		return err
+	}
+	return nil
 }
 
 // Detach for macvtap endpoint does nothing.

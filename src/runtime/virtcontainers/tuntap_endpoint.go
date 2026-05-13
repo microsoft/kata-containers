@@ -95,7 +95,11 @@ func (endpoint *TuntapEndpoint) Attach(ctx context.Context, s *Sandbox) error {
 		return err
 	}
 
-	return h.AddDevice(ctx, endpoint, NetDev)
+	if err := h.AddDevice(ctx, endpoint, NetDev); err != nil {
+		networkLogger().WithError(err).Error("Error adding tuntap endpoint device")
+		return err
+	}
+	return nil
 }
 
 // Detach for the tun/tap endpoint tears down the tap

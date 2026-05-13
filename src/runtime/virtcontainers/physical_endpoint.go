@@ -121,9 +121,14 @@ func (endpoint *PhysicalEndpoint) Attach(ctx context.Context, s *Sandbox) error 
 	} else {
 		h := s.hypervisor
 		if err := xConnectVMNetwork(ctx, endpoint, h); err != nil {
+			networkLogger().WithError(err).Error("Error bridging physical endpoint")
 			return err
 		}
-		return h.AddDevice(ctx, endpoint, NetDev)
+		if err := h.AddDevice(ctx, endpoint, NetDev); err != nil {
+			networkLogger().WithError(err).Error("Error adding physical endpoint device")
+			return err
+		}
+		return nil
 	}
 }
 
@@ -178,9 +183,11 @@ func (endpoint *PhysicalEndpoint) HotAttach(ctx context.Context, s *Sandbox) err
 	} else {
 		h := s.hypervisor
 		if err := xConnectVMNetwork(ctx, endpoint, h); err != nil {
+			networkLogger().WithError(err).Error("Error bridging physical endpoint (hotplug)")
 			return err
 		}
 		if _, err := h.HotplugAddDevice(ctx, endpoint, NetDev); err != nil {
+			networkLogger().WithError(err).Error("Error hotplugging physical endpoint device")
 			return err
 		}
 		return nil

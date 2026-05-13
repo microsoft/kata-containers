@@ -116,7 +116,11 @@ func (endpoint *VethEndpoint) Attach(ctx context.Context, s *Sandbox) error {
 		return err
 	}
 
-	return h.AddDevice(ctx, endpoint, NetDev)
+	if err := h.AddDevice(ctx, endpoint, NetDev); err != nil {
+		networkLogger().WithError(err).Error("Error adding virtual endpoint device")
+		return err
+	}
+	return nil
 }
 
 // Detach for the veth endpoint tears down the tap and bridge
