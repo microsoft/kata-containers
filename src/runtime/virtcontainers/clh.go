@@ -1409,6 +1409,7 @@ func (clh *cloudHypervisor) Capabilities(ctx context.Context) types.Capabilities
 	}
 	caps.SetBlockDeviceHotplugSupport()
 	caps.SetNetworkDeviceHotplugSupported()
+	caps.SetMultiQueueSupport()
 	return caps
 }
 
@@ -1815,6 +1816,10 @@ func (clh *cloudHypervisor) addNet(e Endpoint) error {
 
 	net := chclient.NewNetConfig()
 	net.Mac = &mac
+
+	numQueues := int32(len(netPair.TapInterface.VMFds) * 2)
+	net.NumQueues = &numQueues
+
 	if netRateLimiterConfig != nil {
 		net.SetRateLimiterConfig(*netRateLimiterConfig)
 	}
