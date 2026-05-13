@@ -930,6 +930,14 @@ func tapNetworkPair(ctx context.Context, endpoint Endpoint, queues int, disableV
 		networkLogger().WithError(err).WithField("mac", netPair.VirtIface.HardAddr).Error("tapNetworkPair: failed to parse MAC")
 		return err
 	}
+	// Physical NICs (e.g. Azure accelerated networking VFs) require
+	// the link to be down before changing the MAC address; otherwise
+	// the driver returns EBUSY.  Bring it down, swap the MAC, and
+	// it will be brought back up after IP addresses are cleared below.
+	if err := netHandle.LinkSetDown(link); err != nil {
+		networkLogger().WithError(err).Error("tapNetworkPair: could not bring link down for MAC swap")
+		return fmt.Errorf("Could not disable %s for MAC swap: %s", netPair.VirtIface.Name, err)
+	}
 	if err := netHandle.LinkSetHardwareAddr(link, hardAddr); err != nil {
 		networkLogger().WithError(err).Error("tapNetworkPair: could not set MAC for veth")
 		return fmt.Errorf("Could not set MAC address %s for veth interface %s: %s",
