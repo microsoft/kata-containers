@@ -141,9 +141,19 @@ func GetAPVFIODevices(sysfsdev string) ([]string, error) {
 	return strings.Split(string(data[:len(data)-1]), "\n"), nil
 }
 
-// Ignore specific PCI devices, supply the pciClass and the bitmask to check
-// against the device class, deviceBDF for meaningfull info message
-func checkIgnorePCIClass(pciClass string, deviceBDF string, bitmask uint64) (bool, error) {
+// Ignore specific PCI device classes. pciClass is the raw sysfs class
+// string (e.g. "0x060400"); ignoredClasses is an allow-list of exact
+// 16-bit class IDs (PCI base class | sub-class) to skip. deviceBDF is
+// used only for the info-level log message.
+//
+// Note: this previously used a bitmask test (`class & mask == mask`) with
+// mask 0x0600, which also matched class 0x0680 ("Bridge: Other"). NVIDIA
+// NVSwitches advertise class 0x0680 and are valid VFIO passthrough
+// endpoints, so the bitmask test silently dropped them from the IOMMU
+// group, leaving the group empty and causing Sandbox.AppendDevice to
+// surface a confusing "unsupported device type" error. Use exact
+// equality against an explicit allow-list instead.
+func checkIgnorePCIClass(pciClass string, deviceBDF string, ignoredClasses ...uint64) (bool, error) {
 	if pciClass == "" {
 		return false, nil
 	}
@@ -151,11 +161,14 @@ func checkIgnorePCIClass(pciClass string, deviceBDF string, bitmask uint64) (boo
 	if err != nil {
 		return false, err
 	}
-	// ClassID is 16 bits, remove the two trailing zeros
+	// sysfs class is 24 bits (base | sub-class | prog-if). Compare against
+	// the upper 16 bits (base | sub-class).
 	pciClassID = pciClassID >> 8
-	if pciClassID&bitmask == bitmask {
-		deviceLogger().Infof("Ignoring PCI (Host) Bridge deviceBDF %v Class %x", deviceBDF, pciClassID)
-		return true, nil
+	for _, c := range ignoredClasses {
+		if pciClassID == c {
+			deviceLogger().Infof("Ignoring PCI (Host) Bridge deviceBDF %v Class %x", deviceBDF, pciClassID)
+			return true, nil
+		}
 	}
 	return false, nil
 }
@@ -279,8 +292,10 @@ func GetAllVFIODevicesFromIOMMUGroup(device config.DeviceInfo) ([]*config.VFIODe
 			pciClass := GetPCIDeviceProperty(deviceBDF, PCISysFsDevicesClass)
 			// We need to ignore Host or PCI Bridges that are in the same IOMMU group as the
 			// passed-through devices. One CANNOT pass-through a PCI bridge or Host bridge.
-			// Class 0x0604 is PCI bridge, 0x0600 is Host bridge
-			ignorePCIDevice, err := checkIgnorePCIClass(pciClass, deviceBDF, 0x0600)
+			// Class 0x0600 is Host bridge, 0x0604 is PCI-to-PCI bridge. Match these
+			// exactly -- do NOT use a bitmask, since class 0x0680 ("Bridge: Other")
+			// is used by NVIDIA NVSwitches and other valid passthrough endpoints.
+			ignorePCIDevice, err := checkIgnorePCIClass(pciClass, deviceBDF, 0x0600, 0x0604)
 			if err != nil {
 				return nil, err
 			}
