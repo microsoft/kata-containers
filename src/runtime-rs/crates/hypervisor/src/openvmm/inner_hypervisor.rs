@@ -6,23 +6,24 @@
 //! OpenVMM hypervisor lifecycle management.
 
 use anyhow::{anyhow, Context, Result};
-use std::fs::{self, File};
+use std::{
+    convert::TryFrom,
+    fs::{self, File},
+};
 
 use super::inner::OpenVmmInner;
 use super::vmm_instance::DeferredNetworkDevice;
 use super::{
-    OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
-    OPENVMM_CONSOLE_PCI_PORT, OPENVMM_NET_PCI_PORT, OPENVMM_ROOTFS_PCI_PORT,
-    OPENVMM_SHAREFS_PCI_PORT,
+    OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_CONSOLE_PCI_PORT,
+    OPENVMM_NET_PCI_PORT, OPENVMM_ROOTFS_PCI_PORT, OPENVMM_SHAREFS_PCI_PORT,
 };
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 use openvmm_defs::config::{
-    Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig,
-    LoadMode, MemoryConfig as OvmmMemoryConfig,
-    PcieDeviceConfig, PcieRootComplexConfig, PcieRootPortConfig,
+    Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig, LoadMode,
+    MemoryConfig as OvmmMemoryConfig, PcieDeviceConfig, PcieRootComplexConfig, PcieRootPortConfig,
     ProcessorTopologyConfig, VmbusConfig, DEFAULT_MMIO_GAPS_X86,
 };
 use vm_resource::kind::VmbusDeviceHandleKind;
@@ -53,11 +54,7 @@ fn build_kernel_cmdline(
 }
 
 impl OpenVmmInner {
-    pub(crate) async fn prepare_vm(
-        &mut self,
-        id: &str,
-        netns: Option<String>,
-    ) -> Result<()> {
+    pub(crate) async fn prepare_vm(&mut self, id: &str, netns: Option<String>) -> Result<()> {
         info!(sl!(), "openvmm: prepare_vm id={}", id);
         self.id = id.to_string();
         self.state = VmmState::NotReady;
@@ -110,11 +107,10 @@ impl OpenVmmInner {
         // device, the other is read in a thread that logs to slog.
         let (console_vm_std, console_host) = std::os::unix::net::UnixStream::pair()
             .context("failed to create console socket pair")?;
-        let console_vm = ovmm_unix_socket::UnixStream::from(
-            std::os::fd::OwnedFd::from(console_vm_std)
-        );
-        let console_resource = ovmm_serial_socket::net::OpenSocketSerialConfig::from(console_vm)
-            .into_resource();
+        let console_vm =
+            ovmm_unix_socket::UnixStream::from(std::os::fd::OwnedFd::from(console_vm_std));
+        let console_resource =
+            ovmm_serial_socket::net::OpenSocketSerialConfig::from(console_vm).into_resource();
 
         // Spawn a thread to read guest console output and log it.
         std::thread::Builder::new()
@@ -134,12 +130,16 @@ impl OpenVmmInner {
             .context("failed to spawn console reader thread")?;
 
         // No serial ports — COM1 disabled for performance.
-        let serial_ports: [Option<vm_resource::Resource<vm_resource::kind::SerialBackendHandle>>; 4] = [
-            None, None, None, None,
-        ];
+        let serial_ports: [Option<vm_resource::Resource<vm_resource::kind::SerialBackendHandle>>;
+            4] = [None, None, None, None];
 
         // Build chipset via VmManifestBuilder
-        let chipset = vm_manifest_builder::VmManifestBuilder::new(
+        let vm_manifest_builder::VmChipsetResult {
+            chipset,
+            chipset_devices,
+            pci_chipset_devices,
+            capabilities: chipset_capabilities,
+        } = vm_manifest_builder::VmManifestBuilder::new(
             vm_manifest_builder::BaseChipsetType::HyperVGen2LinuxDirect,
             vm_manifest_builder::MachineArch::X86_64,
         )
@@ -206,7 +206,10 @@ impl OpenVmmInner {
         let mut pcie_devices = Vec::new();
         let rootfs_disk_path = if !self.config.boot_info.image.is_empty() {
             let disk_path = self.config.boot_info.image.clone();
-            info!(sl!(), "openvmm: rootfs disk (opened in worker thread): {}", disk_path);
+            info!(
+                sl!(),
+                "openvmm: rootfs disk (opened in worker thread): {}", disk_path
+            );
             Some(disk_path)
         } else {
             None
@@ -214,18 +217,27 @@ impl OpenVmmInner {
 
         // Process pending devices into the VM config
         let pending = std::mem::take(&mut self.pending_devices);
-        let vmbus_devices: Vec<(DeviceVtl, vm_resource::Resource<VmbusDeviceHandleKind>)> = Vec::new();
+        let vmbus_devices: Vec<(DeviceVtl, vm_resource::Resource<VmbusDeviceHandleKind>)> =
+            Vec::new();
         let mut deferred_block_devices = Vec::new();
         let mut deferred_network_devices = Vec::new();
 
         for dev in &pending {
             match dev {
                 crate::DeviceType::HybridVsock(hvsock_dev) => {
-                    info!(sl!(), "openvmm: wiring HybridVsock device as virtio-vsock, uds_path={}", hvsock_dev.config.uds_path);
+                    info!(
+                        sl!(),
+                        "openvmm: wiring HybridVsock device as virtio-vsock, uds_path={}",
+                        hvsock_dev.config.uds_path
+                    );
                     // Handled below via virtio-vsock PCIe device
                 }
                 crate::DeviceType::Vsock(vsock_dev) => {
-                    info!(sl!(), "openvmm: wiring Vsock device as virtio-vsock, guest_cid={}", vsock_dev.config.guest_cid);
+                    info!(
+                        sl!(),
+                        "openvmm: wiring Vsock device as virtio-vsock, guest_cid={}",
+                        vsock_dev.config.guest_cid
+                    );
                     // Handled below via virtio-vsock PCIe device
                 }
                 crate::DeviceType::Network(net_dev) => {
@@ -271,10 +283,27 @@ impl OpenVmmInner {
                                     )
                                 })?;
 
+                            let num_queues = if fs_dev.config.queue_num > 0 {
+                                Some(u16::try_from(fs_dev.config.queue_num).context(
+                                    "openvmm vhost-user-fs queue_num does not fit in u16",
+                                )?)
+                            } else {
+                                None
+                            };
+                            let queue_size = if fs_dev.config.queue_size > 0 {
+                                Some(u16::try_from(fs_dev.config.queue_size).context(
+                                    "openvmm vhost-user-fs queue_size does not fit in u16",
+                                )?)
+                            } else {
+                                None
+                            };
+
                             virtio_resources::VirtioPciDeviceHandle(
                                 virtio_resources::vhost_user::VhostUserFsHandle {
                                     socket: socket.into(),
                                     tag: fs_dev.config.mount_tag.clone(),
+                                    num_queues,
+                                    queue_size,
                                 }
                                 .into_resource(),
                             )
@@ -364,6 +393,9 @@ impl OpenVmmInner {
                 prefetch_memory: false,
                 private_memory: false,
                 transparent_hugepages: false,
+                hugepages: false,
+                hugepage_size: None,
+                numa_mem_sizes: None,
             },
             processor_topology: ProcessorTopologyConfig {
                 proc_count,
@@ -375,7 +407,7 @@ impl OpenVmmInner {
                 with_hv: true,
                 ..Default::default()
             },
-            chipset: chipset.chipset,
+            chipset,
             vmbus: Some(vmbus_config),
             vtl2_vmbus: None,
             #[cfg(windows)]
@@ -393,7 +425,9 @@ impl OpenVmmInner {
             firmware_event_send: None,
             debugger_rpc: None,
             vmbus_devices,
-            chipset_devices: chipset.chipset_devices,
+            chipset_devices,
+            pci_chipset_devices,
+            chipset_capabilities,
             generation_id_recv: None,
             rtc_delta_milliseconds: 0,
             automatic_guest_reset: true,
@@ -425,7 +459,9 @@ impl OpenVmmInner {
         info!(sl!(), "openvmm: VM is running");
 
         for device in deferred_block_devices {
-            self.add_device(device).await.context("failed to hotplug deferred block device")?;
+            self.add_device(device)
+                .await
+                .context("failed to hotplug deferred block device")?;
         }
 
         Ok(())
@@ -450,18 +486,11 @@ impl OpenVmmInner {
         Err(anyhow!("openvmm save_vm not yet implemented"))
     }
 
-    pub(crate) async fn resize_vcpu(
-        &self,
-        old_vcpus: u32,
-        _new_vcpus: u32,
-    ) -> Result<(u32, u32)> {
+    pub(crate) async fn resize_vcpu(&self, old_vcpus: u32, _new_vcpus: u32) -> Result<(u32, u32)> {
         Ok((old_vcpus, old_vcpus))
     }
 
-    pub(crate) async fn resize_memory(
-        &mut self,
-        new_mem_mb: u32,
-    ) -> Result<(u32, MemoryConfig)> {
+    pub(crate) async fn resize_memory(&mut self, new_mem_mb: u32) -> Result<(u32, MemoryConfig)> {
         Ok((new_mem_mb, MemoryConfig::default()))
     }
 

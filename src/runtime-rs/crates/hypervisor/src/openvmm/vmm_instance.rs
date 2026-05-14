@@ -101,10 +101,9 @@ impl VmmInstance {
 
                 if let Some(ref netns_path) = netns {
                     if let Err(err) = enter_netns(netns_path) {
-                        let _ = result_tx.send(Err(err.context(format!(
-                            "failed to enter netns {}",
-                            netns_path
-                        ))));
+                        let _ = result_tx.send(Err(
+                            err.context(format!("failed to enter netns {}", netns_path))
+                        ));
                         return;
                     }
                 }
@@ -137,13 +136,15 @@ impl VmmInstance {
                             endpoint,
                         };
 
-                        config.pcie_devices.push(openvmm_defs::config::PcieDeviceConfig {
-                            port_name: network_device.port_name,
-                            resource: virtio_resources::VirtioPciDeviceHandle(
-                                net_handle.into_resource(),
-                            )
-                            .into_resource(),
-                        });
+                        config
+                            .pcie_devices
+                            .push(openvmm_defs::config::PcieDeviceConfig {
+                                port_name: network_device.port_name,
+                                resource: virtio_resources::VirtioPciDeviceHandle(
+                                    net_handle.into_resource(),
+                                )
+                                .into_resource(),
+                            });
                     }
 
                     Ok(())
@@ -160,12 +161,13 @@ impl VmmInstance {
                     let _ = std::fs::remove_file(&vsock_uds_path);
                     match ovmm_unix_socket::UnixListener::bind(&vsock_uds_path) {
                         Ok(listener) => {
-                            let has_vsock_port = config.pcie_root_complexes.iter().any(|root_complex| {
-                                root_complex
-                                    .ports
-                                    .iter()
-                                    .any(|port| port.name == OPENVMM_VSOCK_PCI_PORT)
-                            });
+                            let has_vsock_port =
+                                config.pcie_root_complexes.iter().any(|root_complex| {
+                                    root_complex
+                                        .ports
+                                        .iter()
+                                        .any(|port| port.name == OPENVMM_VSOCK_PCI_PORT)
+                                });
 
                             if !has_vsock_port {
                                 let _ = result_tx.send(Err(anyhow::anyhow!(
@@ -180,15 +182,15 @@ impl VmmInstance {
                                 base_path: vsock_uds_path.clone(),
                                 listener,
                             };
-                            config.pcie_devices.push(
-                                openvmm_defs::config::PcieDeviceConfig {
+                            config
+                                .pcie_devices
+                                .push(openvmm_defs::config::PcieDeviceConfig {
                                     port_name: OPENVMM_VSOCK_PCI_PORT.to_string(),
                                     resource: virtio_resources::VirtioPciDeviceHandle(
                                         vsock_handle.into_resource(),
                                     )
                                     .into_resource(),
-                                },
-                            );
+                                });
                         }
                         Err(e) => {
                             let _ = result_tx.send(Err(anyhow::anyhow!(
@@ -213,15 +215,15 @@ impl VmmInstance {
                                 disk: disk_resource,
                                 read_only: true,
                             };
-                            config.pcie_devices.push(
-                                openvmm_defs::config::PcieDeviceConfig {
+                            config
+                                .pcie_devices
+                                .push(openvmm_defs::config::PcieDeviceConfig {
                                     port_name: "rp0".to_string(),
                                     resource: virtio_resources::VirtioPciDeviceHandle(
                                         blk_handle.into_resource(),
                                     )
                                     .into_resource(),
-                                },
-                            );
+                                });
                         }
                         Err(e) => {
                             let _ = result_tx.send(Err(anyhow::anyhow!(
@@ -234,40 +236,51 @@ impl VmmInstance {
                     }
                 }
 
-                ovmm_pal_async::DefaultPool::run_with(|driver: ovmm_pal_async::DefaultDriver| async move {
-                    use ovmm_pal_async::task::Spawn;
+                ovmm_pal_async::DefaultPool::run_with(
+                    |driver: ovmm_pal_async::DefaultDriver| async move {
+                        use ovmm_pal_async::task::Spawn;
 
-                    let (host, runner) = ovmm_mesh_worker::worker_host();
-                    driver
-                        .spawn("worker-host-runner", runner.run(RegisteredWorkers))
-                        .detach();
+                        let (host, runner) = ovmm_mesh_worker::worker_host();
+                        driver
+                            .spawn("worker-host-runner", runner.run(RegisteredWorkers))
+                            .detach();
 
-                    let result = host
-                        .launch_worker(
-                            VM_WORKER,
-                            VmWorkerParameters {
-                                hypervisor: hypervisor_resources::MshvHandle.into_resource(),
-                                cfg: config,
-                                saved_state: None,
-                                rpc: rpc_recv,
-                                notify: notify_send,
-                                shared_memory: None,
-                            },
-                        )
-                        .await;
+                        let hypervisor = match std::fs::File::open("/dev/mshv") {
+                            Ok(mshv) => hypervisor_resources::MshvHandle { mshv }.into_resource(),
+                            Err(err) => {
+                                let _ = result_tx.send(Err(anyhow::anyhow!(
+                                    "failed to open /dev/mshv for openvmm: {}",
+                                    err
+                                )));
+                                return;
+                            }
+                        };
 
-                    let _ = result_tx.send(result.context("failed to launch VM worker"));
+                        let result = host
+                            .launch_worker(
+                                VM_WORKER,
+                                VmWorkerParameters {
+                                    hypervisor,
+                                    cfg: config,
+                                    saved_state: None,
+                                    rpc: rpc_recv,
+                                    notify: notify_send,
+                                    shared_memory: None,
+                                },
+                            )
+                            .await;
 
-                    // Keep the pool alive for the VM's lifetime.
-                    std::future::pending::<()>().await;
-                });
+                        let _ = result_tx.send(result.context("failed to launch VM worker"));
+
+                        // Keep the pool alive for the VM's lifetime.
+                        std::future::pending::<()>().await;
+                    },
+                );
             })
             .context("failed to spawn worker host thread")?;
 
         // Wait for the worker to start from the tokio context.
-        let worker = result_rx
-            .await
-            .context("worker host thread died")??;
+        let worker = result_rx.await.context("worker host thread died")??;
 
         self.worker_handle = Some(worker);
         self.worker_rpc = Some(rpc_send);
@@ -323,7 +336,10 @@ impl VmmInstance {
         if let Some(mut worker_handle) = self.worker_handle.take() {
             worker_handle.stop();
             if let Err(err) = worker_handle.join().await {
-                warn!(sl!(), "openvmm: VM worker failed during shutdown: {:?}", err);
+                warn!(
+                    sl!(),
+                    "openvmm: VM worker failed during shutdown: {:?}", err
+                );
             }
         }
         self.worker_rpc = None;
