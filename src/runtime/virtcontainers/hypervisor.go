@@ -817,6 +817,10 @@ type HypervisorConfig struct {
 	// BootFromTemplate used to indicate if the VM should be created from a template VM
 	BootFromTemplate bool
 
+	// NetworkQueues specifies the number of network queue pairs (RX/TX).
+	// If 0, defaults to NumVCPUs when multi-queue is supported.
+	NetworkQueues uint32
+
 	// DisableVhostNet is used to indicate if host supports vhost_net
 	DisableVhostNet bool
 
@@ -1065,6 +1069,15 @@ func RoundUpNumVCPUs(cpus float32) uint32 {
 
 func (conf HypervisorConfig) NumVCPUs() uint32 {
 	return RoundUpNumVCPUs(conf.NumVCPUsF)
+}
+
+// NumNetworkQueues returns the number of network queue pairs to use.
+// If NetworkQueues is explicitly set, it is returned; otherwise defaults to NumVCPUs.
+func (conf HypervisorConfig) NumNetworkQueues() uint32 {
+	if conf.NetworkQueues > 0 {
+		return conf.NetworkQueues
+	}
+	return conf.NumVCPUs()
 }
 
 func (conf HypervisorConfig) NumGuestNUMANodes() uint32 {

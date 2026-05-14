@@ -110,7 +110,7 @@ func (endpoint *TapEndpoint) HotAttach(ctx context.Context, s *Sandbox) error {
 	defer span.End()
 
 	h := s.hypervisor
-	if err := tapNetwork(endpoint, h.HypervisorConfig().NumVCPUs(), h.HypervisorConfig().DisableVhostNet); err != nil {
+	if err := tapNetwork(endpoint, h.HypervisorConfig().NumNetworkQueues(), h.HypervisorConfig().DisableVhostNet); err != nil {
 		networkLogger().WithError(err).Error("Error bridging tap ep")
 		return err
 	}
