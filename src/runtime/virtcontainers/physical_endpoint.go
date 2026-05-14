@@ -250,6 +250,55 @@ func isPhysicalIface(link netlink.Link) bool {
 }
 
 var sysBusPath = "/sys/bus/"
+var sysClassNetPath = "/sys/class/net"
+
+// findSubordinateVF looks for a PCI virtual function (VF) paired with a
+// VMBus netvsc NIC. On Azure with Accelerated Networking, the hv_netvsc
+// driver bonds a Mellanox (or other) SR-IOV VF as a lower device for
+// data-plane acceleration. The VF appears under
+// /sys/class/net/<iface>/lower_<vf_iface>.
+//
+// Returns the VF's PCI BDF (e.g. "8cd5:00:02.0") when found, or an
+// empty string when no subordinate VF exists.
+func findSubordinateVF(ifaceName string) (string, error) {
+	pattern := filepath.Join(sysClassNetPath, ifaceName, "lower_*")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", fmt.Errorf("glob for lower devices of %s: %w", ifaceName, err)
+	}
+
+	for _, match := range matches {
+		subordinateName := strings.TrimPrefix(filepath.Base(match), "lower_")
+
+		// Verify the lower device is backed by PCI by checking its subsystem.
+		subsystemLink := filepath.Join(sysClassNetPath, subordinateName, "device", "subsystem")
+		subsystemPath, err := os.Readlink(subsystemLink)
+		if err != nil {
+			continue
+		}
+		if filepath.Base(subsystemPath) != "pci" {
+			continue
+		}
+
+		// Resolve the PCI BDF from the device symlink.
+		deviceLink := filepath.Join(sysClassNetPath, subordinateName, "device")
+		devicePath, err := os.Readlink(deviceLink)
+		if err != nil {
+			continue
+		}
+		bdf := filepath.Base(devicePath)
+
+		networkLogger().WithFields(logrus.Fields{
+			"parent-iface":      ifaceName,
+			"subordinate-iface": subordinateName,
+			"vf-bdf":            bdf,
+		}).Info("Discovered subordinate PCI VF under VMBus netvsc device")
+
+		return bdf, nil
+	}
+
+	return "", nil
+}
 
 // Get vendor and device id from pci space (sys/bus/pci/devices, or sys/bus/vmbus/devices, ...)
 func getDevicesPath(link netlink.Link) string {
@@ -306,6 +355,31 @@ func createPhysicalEndpoint(idx int, netInfo NetworkInfo, isFVIODisabled bool, i
 	if err != nil {
 		return nil, err
 	}
+
+	// For VMBus devices, attempt to discover a subordinate PCI VF
+	// (e.g. mlx5 VF under netvsc with Azure Accelerated Networking).
+	// When found, use VFIO passthrough on the VF instead of macvtap.
+	// When no subordinate VF is present, fall through to the macvtap
+	// network pair path.
+	busType := netInfo.Link.Attrs().ParentDevBus
+	isVFIO := (busType == "pci")
+	if busType == "vmbus" {
+		vfBDF, vfErr := findSubordinateVF(netInfo.Iface.Name)
+		if vfErr != nil {
+			networkLogger().WithError(vfErr).Warn("Error searching for subordinate VF, falling back to macvtap")
+		} else if vfBDF != "" {
+			networkLogger().WithFields(logrus.Fields{
+				"vmbus-guid": bdf,
+				"vf-bdf":     vfBDF,
+				"iface":      netInfo.Iface.Name,
+			}).Info("Using subordinate PCI VF for VFIO passthrough instead of macvtap")
+			sysIfaceDevicePath = filepath.Join(sysBusPath, "pci", "devices", vfBDF)
+			bdf = vfBDF
+			busType = "pci"
+			isVFIO = true
+		}
+	}
+
 	// Get driver by following symlink /sys/bus/pci/devices/$bdf/driver or /sys/bus/vmbus/devices/$guid/driver
 	driverPath := filepath.Join(sysIfaceDevicePath, "driver")
 	link, err := os.Readlink(driverPath)
@@ -326,10 +400,6 @@ func createPhysicalEndpoint(idx int, netInfo NetworkInfo, isFVIODisabled bool, i
 	if err != nil {
 		return nil, err
 	}
-	// Determine whether to use VFIO passthrough based on bus type:
-	// PCI devices are passed through via VFIO.
-	// VMBus devices use a network pair (tap/bridge).
-	isVFIO := (netInfo.Link.Attrs().ParentDevBus == "pci")
 	netPair := NetworkInterfacePair{}
 	if isVFIO {
 		if isFVIODisabled {
@@ -361,7 +431,7 @@ func createPhysicalEndpoint(idx int, netInfo NetworkInfo, isFVIODisabled bool, i
 		Driver:         driver,
 		BDF:            bdf,
 		NetPair:        netPair,
-		BusType:        netInfo.Link.Attrs().ParentDevBus,
+		BusType:        busType,
 	}
 	return physicalEndpoint, nil
 }
