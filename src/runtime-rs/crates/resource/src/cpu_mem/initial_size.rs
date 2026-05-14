@@ -160,6 +160,12 @@ impl InitialSizeManager {
         if config.runtime.static_sandbox_resource_mgmt {
             let new_vcpus_ceil = hv.cpu_info.default_vcpus.ceil() as u32;
             hv.cpu_info.default_maxvcpus = new_vcpus_ceil;
+            info!(
+                sl!(),
+                "after setting maxvcpu equal to vcpu, default_vcpus={}, default_maxvcpus={}",
+                hv.cpu_info.default_vcpus,
+                hv.cpu_info.default_maxvcpus
+            );
         }
 
         self.resource.orig_toml_default_mem = hv.memory_info.default_memory;
