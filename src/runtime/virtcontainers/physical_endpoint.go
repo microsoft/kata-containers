@@ -14,12 +14,12 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/config"
-	logrus "github.com/sirupsen/logrus"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/drivers"
 	resCtrl "github.com/kata-containers/kata-containers/src/runtime/pkg/resourcecontrol"
 	persistapi "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/persist/api"
 	vcTypes "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
 	"github.com/safchain/ethtool"
+	logrus "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
 
@@ -267,6 +267,13 @@ func findSubordinateVF(ifaceName string) (string, error) {
 		return "", fmt.Errorf("glob for lower devices of %s: %w", ifaceName, err)
 	}
 
+	networkLogger().WithFields(logrus.Fields{
+		"iface":        ifaceName,
+		"glob-pattern": pattern,
+		"match-count":  len(matches),
+		"matches":      fmt.Sprintf("%v", matches),
+	}).Info("findSubordinateVF: searching for lower devices")
+
 	for _, match := range matches {
 		subordinateName := strings.TrimPrefix(filepath.Base(match), "lower_")
 
@@ -274,9 +281,15 @@ func findSubordinateVF(ifaceName string) (string, error) {
 		subsystemLink := filepath.Join(sysClassNetPath, subordinateName, "device", "subsystem")
 		subsystemPath, err := os.Readlink(subsystemLink)
 		if err != nil {
+			networkLogger().WithError(err).WithField("subordinate-iface", subordinateName).Debug("findSubordinateVF: skipping lower device, cannot read subsystem")
 			continue
 		}
-		if filepath.Base(subsystemPath) != "pci" {
+		subsystem := filepath.Base(subsystemPath)
+		if subsystem != "pci" {
+			networkLogger().WithFields(logrus.Fields{
+				"subordinate-iface": subordinateName,
+				"subsystem":         subsystem,
+			}).Debug("findSubordinateVF: skipping lower device, not PCI-backed")
 			continue
 		}
 
@@ -284,6 +297,7 @@ func findSubordinateVF(ifaceName string) (string, error) {
 		deviceLink := filepath.Join(sysClassNetPath, subordinateName, "device")
 		devicePath, err := os.Readlink(deviceLink)
 		if err != nil {
+			networkLogger().WithError(err).WithField("subordinate-iface", subordinateName).Debug("findSubordinateVF: skipping lower device, cannot resolve device link")
 			continue
 		}
 		bdf := filepath.Base(devicePath)
@@ -297,6 +311,7 @@ func findSubordinateVF(ifaceName string) (string, error) {
 		return bdf, nil
 	}
 
+	networkLogger().WithField("iface", ifaceName).Info("findSubordinateVF: no subordinate PCI VF found")
 	return "", nil
 }
 
@@ -358,21 +373,21 @@ func createPhysicalEndpoint(idx int, netInfo NetworkInfo, isFVIODisabled bool, i
 
 	// For VMBus devices, attempt to discover a subordinate PCI VF
 	// (e.g. mlx5 VF under netvsc with Azure Accelerated Networking).
-	// When found, use VFIO passthrough on the VF instead of macvtap.
-	// When no subordinate VF is present, fall through to the macvtap
+	// When found, use VFIO passthrough on the VF instead of virtio-net.
+	// When no subordinate VF is present, fall through to the virtio-net
 	// network pair path.
 	busType := netInfo.Link.Attrs().ParentDevBus
 	isVFIO := (busType == "pci")
 	if busType == "vmbus" {
 		vfBDF, vfErr := findSubordinateVF(netInfo.Iface.Name)
 		if vfErr != nil {
-			networkLogger().WithError(vfErr).Warn("Error searching for subordinate VF, falling back to macvtap")
+			networkLogger().WithError(vfErr).Warn("Error searching for subordinate VF, falling back to virtio-net pair")
 		} else if vfBDF != "" {
 			networkLogger().WithFields(logrus.Fields{
 				"vmbus-guid": bdf,
 				"vf-bdf":     vfBDF,
 				"iface":      netInfo.Iface.Name,
-			}).Info("Using subordinate PCI VF for VFIO passthrough instead of macvtap")
+			}).Info("Using subordinate PCI VF for VFIO passthrough instead of virtio-net pair")
 			sysIfaceDevicePath = filepath.Join(sysBusPath, "pci", "devices", vfBDF)
 			bdf = vfBDF
 			busType = "pci"
