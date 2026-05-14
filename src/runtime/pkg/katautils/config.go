@@ -168,6 +168,7 @@ type hypervisor struct {
 	ColdPlugVFIO                   config.PCIePort           `toml:"cold_plug_vfio"`
 	PCIeRootPort                   uint32                    `toml:"pcie_root_port"`
 	PCIeSwitchPort                 uint32                    `toml:"pcie_switch_port"`
+	NetworkQueues                  uint32                    `toml:"network_queues"`
 	DisableVhostNet                bool                      `toml:"disable_vhost_net"`
 	GuestMemoryDumpPaging          bool                      `toml:"guest_memory_dump_paging"`
 	ConfidentialGuest              bool                      `toml:"confidential_guest"`
@@ -1225,6 +1226,7 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		HotPlugVFIO:                    h.hotPlugVFIO(),
 		PCIeRootPort:                   h.pcieRootPort(),
 		PCIeSwitchPort:                 h.pcieSwitchPort(),
+		NetworkQueues:                  h.NetworkQueues,
 		DisableVhostNet:                true,
 		GuestHookPath:                  h.guestHookPath(),
 		VirtioFSExtraArgs:              h.VirtioFSExtraArgs,

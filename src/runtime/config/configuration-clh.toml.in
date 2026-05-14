@@ -94,6 +94,11 @@ default_vcpus = 1
 # unless you know what are you doing.
 default_maxvcpus = @DEFMAXVCPUS@
 
+# Number of network queue pairs (RX/TX) for virtio-net.
+# Setting network_queues = N creates N RX queues and N TX queues (i.e., N queue pairs).
+# If unspecified or 0, defaults to the number of vCPUs when multi-queue is supported.
+#network_queues = 0
+
 # Default memory size in MiB for SB/VM.
 # If unspecified then it will be set @DEFMEMSZ@ MiB.
 default_memory = @DEFMEMSZ@
