@@ -371,8 +371,8 @@ impl CloudHypervisorInner {
         }
 
         let netns = self.netns.clone();
-        if let Some(netns_ref) = &self.netns {
-            info!(sl!(), "set netns for vmm : {:?}", netns_ref);
+        if let Some(ref ns) = self.netns {
+            info!(sl!(), "set netns for vmm : {:?}", ns);
         }
 
         let user: Option<RootlessUser> = if is_rootless() {
