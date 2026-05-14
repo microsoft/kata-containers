@@ -14,6 +14,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/config"
+	logrus "github.com/sirupsen/logrus"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/drivers"
 	resCtrl "github.com/kata-containers/kata-containers/src/runtime/pkg/resourcecontrol"
 	persistapi "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/persist/api"
@@ -278,6 +279,29 @@ func getIfaceDevicePath(link netlink.Link, deviceInterfaceName string) (string, 
 	}
 }
 func createPhysicalEndpoint(idx int, netInfo NetworkInfo, isFVIODisabled bool, interworkingModel NetInterworkingModel) (*PhysicalEndpoint, error) {
+	attrs := netInfo.Link.Attrs()
+	networkLogger().WithFields(logrus.Fields{
+		"iface-name":     netInfo.Iface.Name,
+		"iface-index":    netInfo.Iface.Index,
+		"iface-mtu":      netInfo.Iface.MTU,
+		"iface-hwaddr":   netInfo.Iface.HardwareAddr,
+		"iface-flags":    netInfo.Iface.Flags,
+		"link-type":      netInfo.Link.Type(),
+		"link-name":      attrs.Name,
+		"link-index":     attrs.Index,
+		"link-mtu":       attrs.MTU,
+		"link-hwaddr":    attrs.HardwareAddr,
+		"link-encap":     attrs.EncapType,
+		"link-operstate": attrs.OperState,
+		"parent-dev":     attrs.ParentDev,
+		"parent-dev-bus": attrs.ParentDevBus,
+		"parent-index":   attrs.ParentIndex,
+		"master-index":   attrs.MasterIndex,
+		"alias":          attrs.Alias,
+		"num-addrs":      len(netInfo.Addrs),
+		"num-routes":     len(netInfo.Routes),
+	}).Info("createPhysicalEndpoint: netInfo details for device correlation")
+
 	sysIfaceDevicePath, bdf, err := getIfaceDevicePath(netInfo.Link, netInfo.Iface.Name)
 	if err != nil {
 		return nil, err
