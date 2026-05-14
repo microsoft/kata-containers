@@ -373,12 +373,17 @@ impl CloudHypervisorInner {
             .ok_or("missing socket")
             .map_err(|e| anyhow!(e))?;
 
+        let network_queues_pairs =
+            self.hypervisor_config().network_info.network_queues as usize;
+
         let mut clh_net_config = NetConfig::try_from(device.config)?;
         // When using fds to pass the tap device to cloud-hypervisor, tap and id fields should be None
         clh_net_config.tap = None;
         clh_net_config.id = None;
+        // CLH num_queues is total virtio queues (RX + TX), so multiply pairs by 2
+        clh_net_config.num_queues = network_queues_pairs * 2;
 
-        let files = open_named_tuntap(&netdev.config.host_dev_name, netdev.config.queue_num as u32)
+        let files = open_named_tuntap(&netdev.config.host_dev_name, network_queues_pairs as u32)
             .context("open named tuntap")?;
 
         let fds = files.iter().map(|f| f.as_raw_fd()).collect();
