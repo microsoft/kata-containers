@@ -250,68 +250,66 @@ func isPhysicalIface(link netlink.Link) bool {
 }
 
 var sysBusPath = "/sys/bus/"
-var sysClassNetPath = "/sys/class/net"
 
 // findSubordinateVF looks for a PCI virtual function (VF) paired with a
 // VMBus netvsc NIC. On Azure with Accelerated Networking, the hv_netvsc
 // driver bonds a Mellanox (or other) SR-IOV VF as a lower device for
-// data-plane acceleration. The VF appears under
-// /sys/class/net/<iface>/lower_<vf_iface>.
+// data-plane acceleration.
+//
+// The kata shim enters the pod's network namespace via setns(CLONE_NEWNET)
+// but does NOT remount sysfs, so /sys/class/net/ still reflects the host's
+// view.  Netlink and ethtool operate on the current network namespace
+// regardless of mount namespace, so we use those instead for discovery.
 //
 // Returns the VF's PCI BDF (e.g. "8cd5:00:02.0") when found, or an
 // empty string when no subordinate VF exists.
 func findSubordinateVF(ifaceName string) (string, error) {
-	pattern := filepath.Join(sysClassNetPath, ifaceName, "lower_*")
-	matches, err := filepath.Glob(pattern)
+	links, err := netlink.LinkList()
 	if err != nil {
-		return "", fmt.Errorf("glob for lower devices of %s: %w", ifaceName, err)
+		return "", fmt.Errorf("listing links to find subordinate VF: %w", err)
 	}
 
 	networkLogger().WithFields(logrus.Fields{
-		"iface":        ifaceName,
-		"glob-pattern": pattern,
-		"match-count":  len(matches),
-		"matches":      fmt.Sprintf("%v", matches),
-	}).Info("findSubordinateVF: searching for lower devices")
+		"iface":      ifaceName,
+		"link-count": len(links),
+	}).Info("findSubordinateVF: enumerating netns links for PCI VF")
 
-	for _, match := range matches {
-		subordinateName := strings.TrimPrefix(filepath.Base(match), "lower_")
+	ethHandle, err := ethtool.NewEthtool()
+	if err != nil {
+		return "", fmt.Errorf("creating ethtool handle for VF discovery: %w", err)
+	}
+	defer ethHandle.Close()
 
-		// Verify the lower device is backed by PCI by checking its subsystem.
-		subsystemLink := filepath.Join(sysClassNetPath, subordinateName, "device", "subsystem")
-		subsystemPath, err := os.Readlink(subsystemLink)
-		if err != nil {
-			networkLogger().WithError(err).WithField("subordinate-iface", subordinateName).Debug("findSubordinateVF: skipping lower device, cannot read subsystem")
+	for _, link := range links {
+		attrs := link.Attrs()
+		if attrs.Name == ifaceName {
 			continue
 		}
-		subsystem := filepath.Base(subsystemPath)
-		if subsystem != "pci" {
+		if attrs.ParentDevBus != "pci" {
 			networkLogger().WithFields(logrus.Fields{
-				"subordinate-iface": subordinateName,
-				"subsystem":         subsystem,
-			}).Debug("findSubordinateVF: skipping lower device, not PCI-backed")
+				"link":           attrs.Name,
+				"parent-dev-bus": attrs.ParentDevBus,
+			}).Debug("findSubordinateVF: skipping non-PCI link")
 			continue
 		}
 
-		// Resolve the PCI BDF from the device symlink.
-		deviceLink := filepath.Join(sysClassNetPath, subordinateName, "device")
-		devicePath, err := os.Readlink(deviceLink)
+		bdf, err := ethHandle.BusInfo(attrs.Name)
 		if err != nil {
-			networkLogger().WithError(err).WithField("subordinate-iface", subordinateName).Debug("findSubordinateVF: skipping lower device, cannot resolve device link")
+			networkLogger().WithError(err).WithField("link", attrs.Name).Debug("findSubordinateVF: skipping PCI link, ethtool BusInfo failed")
 			continue
 		}
-		bdf := filepath.Base(devicePath)
 
 		networkLogger().WithFields(logrus.Fields{
-			"parent-iface":      ifaceName,
-			"subordinate-iface": subordinateName,
-			"vf-bdf":            bdf,
-		}).Info("Discovered subordinate PCI VF under VMBus netvsc device")
+			"parent-iface":       ifaceName,
+			"subordinate-iface":  attrs.Name,
+			"subordinate-hwaddr": attrs.HardwareAddr,
+			"vf-bdf":             bdf,
+		}).Info("Discovered subordinate PCI VF via netlink")
 
 		return bdf, nil
 	}
 
-	networkLogger().WithField("iface", ifaceName).Info("findSubordinateVF: no subordinate PCI VF found")
+	networkLogger().WithField("iface", ifaceName).Info("findSubordinateVF: no subordinate PCI VF found in netns")
 	return "", nil
 }
 
