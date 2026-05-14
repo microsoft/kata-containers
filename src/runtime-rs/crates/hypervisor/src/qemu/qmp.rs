@@ -177,11 +177,21 @@ impl Qmp {
                         continue;
                     }
                     (None, _) => {
-                        warn!(sl!(), "hotpluggable vcpu {} has no socket_id for driver {}, skipping", core_id, driver);
+                        warn!(
+                            sl!(),
+                            "hotpluggable vcpu {} has no socket_id for driver {}, skipping",
+                            core_id,
+                            driver
+                        );
                         continue;
                     }
                     (_, None) => {
-                        warn!(sl!(), "hotpluggable vcpu {} has no thread_id for driver {}, skipping", core_id, driver);
+                        warn!(
+                            sl!(),
+                            "hotpluggable vcpu {} has no thread_id for driver {}, skipping",
+                            core_id,
+                            driver
+                        );
                         continue;
                     }
                 }
