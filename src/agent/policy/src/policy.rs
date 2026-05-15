@@ -12,8 +12,6 @@ use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 use anyhow::{bail, Error, Result};
 use protocols::agent::CopyFileRequest;
 use regorus::PolicyLengthConfig;
-use slog::{debug, error, info, warn};
-use anyhow::{bail, Result};
 use slog::{error, info, warn};
 use tokio::io::AsyncWriteExt;
 

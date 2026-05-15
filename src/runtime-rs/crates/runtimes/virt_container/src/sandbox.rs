@@ -736,7 +736,8 @@ impl VirtSandbox {
             queues,
             network_created: false,
         })
-    async fn setup_secondary_sandbox(&self, sandbox_id: &str) -> Result<()> {
+    }
+
     async fn setup_secondary_sandbox(
         &self, 
         bundle_sandbox_id: &str,
