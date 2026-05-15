@@ -31,7 +31,7 @@ pub use types::{
     */
     CopyFileRequest, CreateContainerRequest, CreateSandboxRequest, 
     CreateSecondarySandboxRequest, 
-    Empty, ExecProcessRequest,
+    Empty, ExecProcessRequest, GetDiagnosticDataRequest, GetDiagnosticDataResponse,
     GetGuestDetailsRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
     HealthCheckResponse, IPAddress, IPFamily, Interface, Interfaces, ListProcessesRequest,
     MemHotplugByProbeRequest, MetricsResponse, OnlineCPUMemRequest, OomEventResponse,
