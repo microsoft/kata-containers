@@ -163,7 +163,6 @@ impl InitialSizeManager {
         }
 
         self.resource.orig_toml_default_mem = hv.memory_info.default_memory;
-        let orig_default_mem = hv.memory_info.default_memory;
         if self.resource.mem_mb > 0 {
             info!(sl!(), "resource with memory {}", self.resource.mem_mb);
             if config.runtime.static_sandbox_resource_mgmt {
@@ -173,17 +172,6 @@ impl InitialSizeManager {
                 }
             }
         }
-
-        info!(
-            sl!(),
-            "static sandbox sizing: resource_vcpu={} default_vcpus {} -> {} default_memory {} -> {}",
-            self.resource.vcpu,
-            orig_default_vcpus,
-            hv.cpu_info.default_vcpus,
-            orig_default_mem,
-            hv.memory_info.default_memory
-        );
-
         Ok(())
     }
 
@@ -229,7 +217,6 @@ fn get_sizing_info(annotation: Annotation) -> Result<(u64, i64, i64)> {
 mod tests {
     use super::*;
     use kata_types::annotations::cri_containerd;
-    use kata_types::config::{Hypervisor, TomlConfig};
     use oci_spec::runtime::{LinuxBuilder, LinuxMemory, LinuxMemoryBuilder, LinuxResourcesBuilder};
     use std::collections::HashMap;
     #[derive(Clone)]
