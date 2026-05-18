@@ -123,39 +123,45 @@ func (n *LinuxNetwork) addSingleEndpoint(ctx context.Context, s *Sandbox, netInf
 
 	// Check if interface is a physical interface. Do not create
 	// tap interface/bridge if it is.
-	isPhysical, err := isPhysicalIface(netInfo.Iface.Name)
-	if err != nil {
-		return nil, err
+	// netInfo.Link may be nil when coming from the hotplug path
+	// (Sandbox.generateNetInfo does not populate it).  Resolve the link
+	// now so isPhysicalIface() and createPhysicalEndpoint() have access
+	// to its attributes (e.g. ParentDevBus).
+	if netInfo.Link == nil {
+		l, err := netlink.LinkByName(netInfo.Iface.Name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve link %q: %w", netInfo.Iface.Name, err)
+		}
+		netInfo.Link = l
+	}
+	isPhysical := isPhysicalIface(netInfo.Link)
+	var err error
+	idx := len(n.eps)
+
+	// Avoid endpoint naming conflicts
+	// When creating a new endpoint, we check existing endpoint names and automatically adjust the naming of the new endpoint to ensure uniqueness.
+	lastIdx := -1
+	if len(n.eps) > 0 {
+		lastEndpoint := n.eps[len(n.eps)-1]
+		re := regexp.MustCompile("[0-9]+")
+		matchStr := re.FindString(lastEndpoint.Name())
+		parsedIdx, err := strconv.ParseInt(matchStr, 10, strconv.IntSize)
+		if err != nil {
+			return nil, err
+		}
+		lastIdx = int(parsedIdx)
+	}
+	if idx <= lastIdx {
+		idx = lastIdx + 1
 	}
 
 	if isPhysical {
-		if s.config.HypervisorConfig.ColdPlugVFIO == config.NoPort {
-			// When `cold_plug_vfio` is set to "no-port", the PhysicalEndpoint's VFIO device cannot be attached to the guest VM.
-			// Fail early to prevent the VF interface from being unbound and rebound to the VFIO driver.
-			return nil, fmt.Errorf("unable to add PhysicalEndpoint %s because cold_plug_vfio is disabled", netInfo.Iface.Name)
-		}
 		networkLogger().WithField("interface", netInfo.Iface.Name).Info("Physical network interface found")
-		endpoint, err = createPhysicalEndpoint(netInfo)
+		isFVIODisabled := (s.config.HypervisorConfig.ColdPlugVFIO == config.NoPort)
+		endpoint, err = createPhysicalEndpoint(idx, netInfo, isFVIODisabled, n.interworkingModel)
 	} else {
 		var socketPath string
-		idx := len(n.eps)
 
-		// Avoid endpoint naming conflicts
-		// When creating a new endpoint, we check existing endpoint names and automatically adjust the naming of the new endpoint to ensure uniqueness.
-		lastIdx := -1
-		if len(n.eps) > 0 {
-			lastEndpoint := n.eps[len(n.eps)-1]
-			re := regexp.MustCompile("[0-9]+")
-			matchStr := re.FindString(lastEndpoint.Name())
-			n, err := strconv.ParseInt(matchStr, 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			lastIdx = int(n)
-		}
-		if idx <= lastIdx {
-			idx = lastIdx + 1
-		}
 		// Check if this is a dummy interface which has a vhost-user socket associated with it
 		socketPath, err = vhostUserSocketPath(netInfo)
 		if err != nil {
@@ -195,6 +201,16 @@ func (n *LinuxNetwork) addSingleEndpoint(ctx context.Context, s *Sandbox, netInf
 		} else if netInfo.Iface.Type == "ipvlan" {
 			networkLogger().Info("ipvlan interface found")
 			endpoint, err = createIPVlanNetworkEndpoint(idx, netInfo.Iface.Name)
+		} else if netInfo.Iface.Type == "device" {
+			// "device" is the generic netlink type for interfaces whose
+			// drivers do not register a more specific kind. This includes
+			// mlx5 Scalable Functions (SFs), some SR-IOV VFs on arm64,
+			// and other non-PCI backed netdevs that isPhysicalIface()
+			// cannot classify via ethtool BusInfo. Handle them the same
+			// way as veth endpoints, following the configured interworking
+			// model (TC-filter by default).
+			networkLogger().Info("device interface found")
+			endpoint, err = createVethNetworkEndpoint(idx, netInfo.Iface.Name, n.interworkingModel)
 		} else {
 			return nil, fmt.Errorf("Unsupported network interface: %s", netInfo.Iface.Type)
 		}
@@ -651,22 +667,33 @@ func createLink(netHandle *netlink.Handle, name string, expectedLink netlink.Lin
 }
 
 func getLinkForEndpoint(endpoint Endpoint, netHandle *netlink.Handle) (netlink.Link, error) {
-	var link netlink.Link
-
-	switch ep := endpoint.(type) {
-	case *VethEndpoint:
-		link = &netlink.Veth{}
-	case *MacvlanEndpoint:
-		link = &netlink.Macvlan{}
-	case *IPVlanEndpoint:
-		link = &netlink.IPVlan{}
-	case *TuntapEndpoint:
-		link = &netlink.Tuntap{}
-	default:
-		return nil, fmt.Errorf("Unexpected endpointType %s", ep.Type())
+	netPair := endpoint.NetworkPair()
+	if netPair == nil {
+		return nil, fmt.Errorf("endpoint %s has no network pair", endpoint.Type())
 	}
+	name := netPair.VirtIface.Name
 
-	return getLinkByName(netHandle, endpoint.NetworkPair().VirtIface.Name, link)
+	switch endpoint.(type) {
+	case *PhysicalEndpoint:
+		return getLinkByName(netHandle, name, &netlink.Device{})
+	case *VethEndpoint:
+		link, err := netHandle.LinkByName(name)
+		if err != nil {
+			return nil, fmt.Errorf("LinkByName() failed for %s: %s", name, err)
+		}
+		// Accept the concrete type returned by the kernel (e.g.
+		// *netlink.Veth for real veths, *netlink.Device for mlx5
+		// SFs / generic netdevs). All callers only need Attrs().
+		return link, nil
+	case *MacvlanEndpoint:
+		return getLinkByName(netHandle, name, &netlink.Macvlan{})
+	case *IPVlanEndpoint:
+		return getLinkByName(netHandle, name, &netlink.IPVlan{})
+	case *TuntapEndpoint:
+		return getLinkByName(netHandle, name, &netlink.Tuntap{})
+	default:
+		return nil, fmt.Errorf("Unexpected endpointType %s", endpoint.Type())
+	}
 }
 
 func getLinkByName(netHandle *netlink.Handle, name string, expectedLink netlink.Link) (netlink.Link, error) {
@@ -676,6 +703,10 @@ func getLinkByName(netHandle *netlink.Handle, name string, expectedLink netlink.
 	}
 
 	switch expectedLink.Type() {
+	case (&netlink.Device{}).Type():
+		if l, ok := link.(*netlink.Device); ok {
+			return l, nil
+		}
 	case (&netlink.Tuntap{}).Type():
 		if l, ok := link.(*netlink.Tuntap); ok {
 			return l, nil
@@ -1302,6 +1333,15 @@ func addRxRateLimiter(endpoint Endpoint, maxRate uint64) error {
 		linkName = netPair.TapInterface.TAPIface.Name
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
+	case *PhysicalEndpoint:
+		if ep.IsVFIO {
+			// VFIO endpoints use VFIO passthrough; rate limiting is handled by
+			// the hypervisor / physical function and does not apply here.
+			return nil
+		}
+		// Non-VFIO physical NICs are tap-backed; apply rx limiting on the tap.
+		netPair := endpoint.NetworkPair()
+		linkName = netPair.TapInterface.TAPIface.Name
 	default:
 		return fmt.Errorf("Unsupported endpointType %s for adding rx rate limiter", ep.Type())
 	}
@@ -1474,6 +1514,15 @@ func addTxRateLimiter(endpoint Endpoint, maxRate uint64) error {
 
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
+	case *PhysicalEndpoint:
+		if ep.IsVFIO {
+			// VFIO endpoints use VFIO passthrough; rate limiting is handled by
+			// the hypervisor / physical function and does not apply here.
+			return nil
+		}
+		// Non-VFIO physical NICs are tap-backed; apply IFB-based tx limiting via tap.
+		netPair = endpoint.NetworkPair()
+		linkName = netPair.TapInterface.TAPIface.Name
 	default:
 		return fmt.Errorf("Unsupported endpointType %s for adding tx rate limiter", ep.Type())
 	}
@@ -1532,6 +1581,12 @@ func removeRxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 		linkName = netPair.TapInterface.TAPIface.Name
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
+	case *PhysicalEndpoint:
+		if ep.IsVFIO {
+			return nil
+		}
+		netPair := endpoint.NetworkPair()
+		linkName = netPair.TapInterface.TAPIface.Name
 	default:
 		return fmt.Errorf("Unsupported endpointType %s for removing rx rate limiter", ep.Type())
 	}
@@ -1564,8 +1619,14 @@ func removeTxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 		}
 	case *MacvtapEndpoint, *TapEndpoint:
 		linkName = endpoint.Name()
+	case *PhysicalEndpoint:
+		if ep.IsVFIO {
+			return nil
+		}
+		netPair := endpoint.NetworkPair()
+		linkName = netPair.TapInterface.TAPIface.Name
 	default:
-		return fmt.Errorf("Unsupported endpointType %s for adding tx rate limiter", ep.Type())
+		return fmt.Errorf("Unsupported endpointType %s for removing tx rate limiter", ep.Type())
 	}
 
 	if err := doNetNS(networkNSPath, func(_ ns.NetNS) error {
