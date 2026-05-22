@@ -751,6 +751,8 @@ impl ResourceManagerInner {
     }
 
     pub async fn cleanup(&self) -> Result<()> {
+        info!(sl!(), "ResourceManagerInner: cleanup start");
+
         // clean up cgroup
         self.cgroups_resource
             .delete()
@@ -775,10 +777,19 @@ impl ResourceManagerInner {
             swap.clean().await;
         }
 
+        /*
         self.volume_resource
             .cleanup_ephemeral_disks()
             .await
             .context("failed to cleanup ephemeral disks")?;
+        */
+        for v in &self.volume_resource {
+            info!(sl!(), "ResourceManagerInner: cleanup calling cleanup_ephemeral_disks");
+
+            v.1.cleanup_ephemeral_disks()
+                .await
+                .context("failed to cleanup ephemeral disks")?;
+        }
 
         Ok(())
     }
