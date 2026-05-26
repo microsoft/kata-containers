@@ -9,11 +9,11 @@ name: OSV-Scanner
 on:
   workflow_dispatch:
   pull_request:
-    branches: [ "msft-preview" ]
+    branches: [ "up/3.31.0" ]
   schedule:
     - cron: '0 1 * * 0'
   push:
-    branches: [ "msft-preview" ]
+    branches: [ "up/3.31.0" ]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-osv-scanner
