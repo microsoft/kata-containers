@@ -69,21 +69,17 @@ mapping:
       # - Kata Containers CI / kata-containers-ci-on-push / run-basic-amd64-tests / run-nydus (lts, dragonball)
       - Kata Containers CI / kata-containers-ci-on-push / run-basic-amd64-tests / run-nydus (lts, qemu)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (active, clh-runtime-rs) / run-cri-containerd-amd64 (active, clh-runtime-rs)
-      # up/3.31.0: pod memory limit too low: minimum 128MiB, got 0MiB
-      # - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (active, clh) / run-cri-containerd-amd64 (active, clh)
+      - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (active, clh) / run-cri-containerd-amd64 (active, clh)
       # up/3.31.0: load podSandboxConfig: error converting YAML to JSON: yaml: line 6: found character that cannot start any token
       # - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (active, dragonball) / run-cri-containerd-amd64 (active, dragonball)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (active, qemu-runtime-rs) / run-cri-containerd-amd64 (active, qemu-runtime-rs)
-      # up/3.31.0: load podSandboxConfig: error converting YAML to JSON: yaml: line 6: found character that cannot start any token
-      # - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (active, qemu) / run-cri-containerd-amd64 (active, qemu)
-      # up/3.31.0: pod memory limit too low: minimum 128MiB, got 0MiB
-      # - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (lts, clh) / run-cri-containerd-amd64 (lts, clh)
+      - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (active, qemu) / run-cri-containerd-amd64 (active, qemu)
+      - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (lts, clh) / run-cri-containerd-amd64 (lts, clh)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (lts, clh-runtime-rs) / run-cri-containerd-amd64 (lts, clh-runtime-rs)
       # up/3.31.0: load podSandboxConfig: error converting YAML to JSON: yaml: line 6: found character that cannot start any token
       # - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (lts, dragonball) / run-cri-containerd-amd64 (lts, dragonball)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (lts, qemu-runtime-rs) / run-cri-containerd-amd64 (lts, qemu-runtime-rs)
-      # up/3.31.0: load podSandboxConfig: error converting YAML to JSON: yaml: line 6: found character that cannot start any token
-      # - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (lts, qemu) / run-cri-containerd-amd64 (lts, qemu)
+      - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (lts, qemu) / run-cri-containerd-amd64 (lts, qemu)
       # up/3.31.0: We don't have s390x runners.
       # - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-s390x (active, qemu) / run-cri-containerd-s390x (active, qemu)
       # up/3.31.0: We don't run k8s tests yet.
@@ -99,8 +95,8 @@ mapping:
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (clh, active)
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (dragonball, lts)
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (dragonball, active)
-      # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (qemu, lts)
-      # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (qemu, active)
+      - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (qemu, lts)
+      - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (qemu, active)
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (qemu-runtime-rs, lts)
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (qemu-runtime-rs, active)
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (clh-runtime-rs, lts)
@@ -111,7 +107,6 @@ mapping:
       # - Kata Containers CI / kata-containers-ci-on-push / run-kata-coco-tests / run-k8s-tests-coco-nontee (qemu-coco-dev, nydus, guest-pull)
       # - Kata Containers CI / kata-containers-ci-on-push / run-kata-coco-tests / run-k8s-tests-coco-nontee (qemu-coco-dev-runtime-rs, nydus, guest-pull)
       - Kata Containers CI / kata-containers-ci-on-push / run-kata-deploy-tests / run-kata-deploy-tests (qemu, k0s)
-      # up/3.31.0: failing: no runtime for "kata-my-custom-handler" is configured
       # - Kata Containers CI / kata-containers-ci-on-push / run-kata-deploy-tests / run-kata-deploy-tests (qemu, k3s)
       - Kata Containers CI / kata-containers-ci-on-push / run-kata-deploy-tests / run-kata-deploy-tests (qemu, microk8s)
       - Kata Containers CI / kata-containers-ci-on-push / run-kata-deploy-tests / run-kata-deploy-tests (qemu, rke2)
