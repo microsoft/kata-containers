@@ -53,6 +53,7 @@ const (
 	dragonballHypervisorTableType  = "dragonball"
 	stratovirtHypervisorTableType  = "stratovirt"
 	remoteHypervisorTableType      = "remote"
+	openvmmHypervisorTableType     = "openvmm"
 
 	// the maximum amount of PCI bridges that can be cold plugged in a VM
 	maxPCIBridges uint32 = 5
@@ -1281,6 +1282,54 @@ func newDragonballHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 	}, nil
 }
 
+// newOpenvmmHypervisorConfig parses an [hypervisor.openvmm] section.
+//
+// OpenVMM is an in-process Rust VMM driven by the runtime-rs shim; the legacy
+// Go runtime never launches it. This parser exists only so the Go kata-runtime
+// CLI can read the config for diagnostic, read-only commands (list, env,
+// check). It deliberately mirrors newDragonballHypervisorConfig (the other
+// runtime-rs-only backend) rather than newClhHypervisorConfig: it skips the
+// h.path() hypervisor-binary existence check (OpenVMM has no external binary)
+// and the Cloud-Hypervisor-specific shared-FS validation (which would emit a
+// misleading "Cloud Hypervisor does not support ..." error for an OpenVMM
+// config). Note this does NOT make the Go runtime able to start an OpenVMM VM
+// or to 'kata-runtime exec' into a runtime-rs sandbox – those are owned by the
+// Rust shim and its separate state store.
+func newOpenvmmHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
+	kernel, err := h.kernel()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	image, err := h.image()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	rootfsType, err := h.rootfsType()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	kernelParams := h.kernelParams()
+
+	return vc.HypervisorConfig{
+		KernelPath:         kernel,
+		ImagePath:          image,
+		RootfsType:         rootfsType,
+		KernelParams:       vc.DeserializeParams(vc.KernelParamFields(kernelParams)),
+		KernelVerityParams: h.kernelVerityParams(),
+		NumVCPUsF:          h.defaultVCPUs(),
+		DefaultMaxVCPUs:    h.defaultMaxVCPUs(),
+		MemorySize:         h.defaultMemSz(),
+		MemSlots:           h.defaultMemSlots(),
+		EntropySource:      h.GetEntropySource(),
+		ColdPlugVFIO:       h.coldPlugVFIO(),
+		HotPlugVFIO:        h.hotPlugVFIO(),
+		Debug:              h.Debug,
+	}, nil
+}
+
 func newStratovirtHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 	hypervisor, err := h.path()
 	if err != nil {
@@ -1445,6 +1494,14 @@ func updateRuntimeConfigHypervisor(configPath string, tomlConf tomlConfig, confi
 		case clhHypervisorTableType:
 			config.HypervisorType = vc.ClhHypervisor
 			hConfig, err = newClhHypervisorConfig(hypervisor)
+		case openvmmHypervisorTableType:
+			// OpenVMM is a runtime-rs-only (Rust) VMM, like Dragonball: the
+			// Go runtime never launches it (NewHypervisor maps it to the mock
+			// hypervisor) and only parses the config for read-only CLI
+			// commands. Report it as its own type rather than masquerading
+			// as clh.
+			config.HypervisorType = vc.OpenvmmHypervisor
+			hConfig, err = newOpenvmmHypervisorConfig(hypervisor)
 		case dragonballHypervisorTableType:
 			config.HypervisorType = vc.DragonballHypervisor
 			hConfig, err = newDragonballHypervisorConfig(hypervisor)
