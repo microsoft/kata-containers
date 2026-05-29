@@ -45,7 +45,7 @@ persist = { workspace = true }
 ch-config = { workspace = true, optional = true }
 safe-path = { workspace = true }
 tests_utils = { workspace = true }
-tracing-subscriber = { version = "0.3", optional = true }
+tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter"] }
 
 # Dependencies that only exist to support hypervisors which upstream only
 # build on x86_64 and aarch64 (dragonball, firecracker). Keeping them in a
@@ -102,6 +102,7 @@ virtio_resources = { workspace = true, optional = true }
 vm_resource = { workspace = true, optional = true }
 disk_backend_resources = { workspace = true, optional = true }
 disk_blockdevice = { workspace = true, optional = true }
+vfio_assigned_device_resources = { workspace = true, optional = true }
 ovmm_vmm_core_defs = { workspace = true, optional = true }
 ovmm_guid = { workspace = true, optional = true }
 ovmm_memory_range = { workspace = true, optional = true }
@@ -135,6 +136,7 @@ openvmm = [
     "dep:vm_resource",
     "dep:disk_backend_resources",
     "dep:disk_blockdevice",
+    "dep:vfio_assigned_device_resources",
     "dep:ovmm_vmm_core_defs",
     "dep:ovmm_guid",
     "dep:ovmm_memory_range",
