@@ -1003,6 +1003,12 @@ func tapNetworkPair(ctx context.Context, endpoint Endpoint, queues int, disableV
 
 	attrs := link.Attrs()
 
+	// The number of queues needs to be at least 1 for the
+	// createMacVtapFds function call below to succeed.
+	if queues <= 0 {
+		queues = 1
+	}
+
 	// Attach the macvtap interface to the underlying container
 	// interface. Also picks relevant attributes from the parent
 	tapLink, err := createMacVtap(netHandle, netPair.TAPIface.Name,
