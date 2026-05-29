@@ -23,6 +23,7 @@ const ALL_SHIMS: &[&str] = &[
     "dragonball",
     "fc",
     "firecracker",
+    "openvmm",
     "remote",
     // QEMU shims
     "qemu",
@@ -62,6 +63,7 @@ fn get_hypervisor_name(shim: &str) -> Result<&str> {
         "cloud-hypervisor" => Ok("cloud-hypervisor"),
         "dragonball" => Ok("dragonball"),
         "fc" | "firecracker" => Ok("firecracker"),
+        "openvmm" => Ok("openvmm"),
         "remote" => Ok("remote"),
         _ => anyhow::bail!(
             "Unknown shim '{}'. Valid shims are: {}",
@@ -865,6 +867,16 @@ async fn configure_experimental_force_guest_pull(config_file: &Path) -> Result<(
 }
 
 async fn configure_mariner(config: &Config) -> Result<()> {
+    // configure_mariner mutates configuration-clh.toml in place to point it
+    // at the cbl-mariner-shipped cloud-hypervisor binary (and to flip a
+    // couple of related knobs). It is a no-op for hosts that do not have
+    // the clh shim enabled — for example, an openvmm-only deployment must
+    // not have its `hypervisor_name = "openvmm"` rewritten to `clh`. Gate
+    // on the active shim list to keep this function clh-specific.
+    if !config.shims_for_arch.iter().any(|s| s == "clh") {
+        return Ok(());
+    }
+
     let config_path = format!(
         "{}/share/defaults/kata-containers/configuration-clh.toml",
         config.host_install_dir
@@ -945,6 +957,7 @@ mod tests {
     #[case("dragonball", "dragonball")]
     #[case("fc", "firecracker")]
     #[case("firecracker", "firecracker")]
+    #[case("openvmm", "openvmm")]
     #[case("remote", "remote")]
     fn test_get_hypervisor_name_other_hypervisors(#[case] shim: &str, #[case] expected: &str) {
         assert_eq!(get_hypervisor_name(shim).unwrap(), expected);

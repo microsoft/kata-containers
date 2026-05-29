@@ -9,6 +9,7 @@ use std::process::Command;
 pub const RUST_SHIMS: &[&str] = &[
     "cloud-hypervisor",
     "dragonball",
+    "openvmm",
     "qemu-runtime-rs",
     "qemu-coco-dev-runtime-rs",
     "qemu-se-runtime-rs",
