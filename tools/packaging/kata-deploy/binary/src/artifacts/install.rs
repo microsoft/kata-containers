@@ -27,6 +27,7 @@ const ALL_SHIMS: &[&str] = &[
     "dragonball",
     "fc",
     "firecracker",
+    "openvmm",
     "remote",
     // QEMU shims
     "qemu",
@@ -68,6 +69,7 @@ fn get_hypervisor_name(shim: &str) -> Result<&str> {
         "clh" | "clh-azure" | "clh-runtime-rs" | "clh-azure-runtime-rs" => Ok("clh"),
         "dragonball" => Ok("dragonball"),
         "fc" | "firecracker" => Ok("firecracker"),
+        "openvmm" => Ok("openvmm"),
         "remote" => Ok("remote"),
         _ => anyhow::bail!(
             "Unknown shim '{}'. Valid shims are: {}",
@@ -1360,6 +1362,7 @@ mod tests {
     #[case("dragonball", "dragonball")]
     #[case("fc", "firecracker")]
     #[case("firecracker", "firecracker")]
+    #[case("openvmm", "openvmm")]
     #[case("remote", "remote")]
     fn test_get_hypervisor_name_other_hypervisors(#[case] shim: &str, #[case] expected: &str) {
         assert_eq!(get_hypervisor_name(shim).unwrap(), expected);
