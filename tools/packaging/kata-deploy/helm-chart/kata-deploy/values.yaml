@@ -457,6 +457,15 @@ shims:
       httpsProxy: ""
       noProxy: ""
 
+  openvmm:
+    enabled: ~
+    supportedArches:
+      - amd64
+      - arm64
+    allowedHypervisorAnnotations: []
+    containerd:
+      snapshotter: ""
+
 # Default shim per architecture
 defaultShim:
   amd64: qemu

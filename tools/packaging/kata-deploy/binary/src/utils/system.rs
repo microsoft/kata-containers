@@ -9,6 +9,7 @@ use std::process::Command;
 pub const RUST_SHIMS: &[&str] = &[
     "clh-runtime-rs",
     "dragonball",
+    "openvmm",
     "qemu-runtime-rs",
     "qemu-nvidia-gpu-runtime-rs",
     "qemu-nvidia-gpu-snp-runtime-rs",
