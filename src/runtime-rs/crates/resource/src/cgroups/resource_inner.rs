@@ -265,15 +265,23 @@ impl CgroupsResourceInner {
                 .await
                 .context("get vCPU thread IDs")?;
 
-            // QEMU may not have spawned all vCPU threads yet. Retry with
-            // exponential backoff until we see the expected count.
+            // An out-of-process VMM such as QEMU may not have spawned all
+            // vCPU threads yet. Retry with exponential backoff until we see
+            // the expected count. An in-process VMM that does not report
+            // vCPU thread IDs never will, so retrying only burns startup
+            // time (~25s per call, three calls per sandbox).
             let expected = hypervisor
                 .hypervisor_config()
                 .await
                 .cpu_info
                 .default_vcpus
                 .ceil() as usize;
-            if expected > 0 && tids.vcpus.len() < expected {
+            if expected > 0 && tids.vcpus.is_empty() && is_in_process_vmm(hypervisor).await {
+                info!(
+                    sl!(),
+                    "in-process VMM reports no vCPU thread IDs; skipping vCPU thread wait"
+                );
+            } else if expected > 0 && tids.vcpus.len() < expected {
                 const MAX_ATTEMPTS: u32 = 10;
                 let mut backoff = Duration::from_millis(50);
                 for attempt in 2..=MAX_ATTEMPTS {
@@ -509,12 +517,46 @@ impl CgroupsResourceInner {
         // to the sandbox cgroup, it results in those threads being under
         // the overhead cgroup, and allowing them to consume more resources
         // than we have allocated for the sandbox.
+        //
+        // This check only applies to out-of-process VMMs (clh, qemu, fc):
+        // their vCPU threads belong to a child process that can be moved
+        // into the sandbox cgroup without disturbing the runtime, and a
+        // missing vCPU thread ID list at this point indicates a bug.
+        //
+        // For in-process VMMs (openvmm, and dragonball when sandbox
+        // _cgroup_only=false is opted into), the runtime IS the VMM:
+        // vCPU threads are threads of the runtime process and cannot be
+        // moved to a different cgroup without dragging the runtime
+        // (including the in-process VMM that allocated guest RAM) with
+        // them. Those drivers therefore return an empty VcpuThreadIds
+        // from `get_thread_ids` by design (see e.g.
+        // openvmm/inner_hypervisor.rs::get_thread_ids), which makes
+        // `update_sandbox_cgroups` return Ok(false). Treating that as
+        // fatal would make sandbox_cgroup_only=false unusable on those
+        // hypervisors, even though that setting is required for
+        // non-trivial guest RAM (otherwise the pod's memcg OOM-kills
+        // the in-process VMM during VM construction).
         if self.overhead_cgroup.is_some() && !updated {
-            return Err(anyhow!("hypervisor cannot be moved to sandbox cgroup"));
+            if !is_in_process_vmm(hypervisor).await {
+                return Err(anyhow!("hypervisor cannot be moved to sandbox cgroup"));
+            }
+            // In-process VMM: leave the runtime (and its vCPU threads)
+            // in the overhead cgroup. The sandbox cgroup will materialise
+            // once container processes are added to it.
         }
 
         Ok(())
     }
+}
+
+/// Whether the hypervisor runs inside the runtime process.
+///
+/// An in-process VMM reports only the runtime's own PID, while an
+/// out-of-process VMM reports a distinct child process.
+async fn is_in_process_vmm(hypervisor: &dyn Hypervisor) -> bool {
+    let hv_pids = hypervisor.get_pids().await.unwrap_or_default();
+    let runtime_pid = process::id();
+    hv_pids.is_empty() || hv_pids.iter().all(|p| *p == runtime_pid)
 }
 
 /// Build a `NixCpuSet` from a slice of CPU ids.

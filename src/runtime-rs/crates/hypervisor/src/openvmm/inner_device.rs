@@ -117,6 +117,13 @@ impl OpenVmmInner {
                 Ok(DeviceType::Block(block))
             }
             other => {
+                if matches!(other, DeviceType::Vfio(_)) {
+                    return Err(anyhow!(
+                        "openvmm: VFIO devices are cold-plug only and must be \
+                         added before start_vm; got {} after VMM start",
+                        other
+                    ));
+                }
                 warn!(sl!(), "openvmm: add_device stub for {}", other);
                 Ok(other)
             }
