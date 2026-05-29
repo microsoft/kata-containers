@@ -16,6 +16,7 @@
   "clh-azure-runtime-rs" (dict "memory" "130Mi" "cpu" "250m")
   "dragonball" (dict "memory" "130Mi" "cpu" "250m")
   "fc" (dict "memory" "130Mi" "cpu" "250m")
+  "openvmm" (dict "memory" "130Mi" "cpu" "250m")
   "qemu" (dict "memory" "320Mi" "cpu" "250m")
   "qemu-coco-dev" (dict "memory" "160Mi" "cpu" "250m")
   "qemu-coco-dev-runtime-rs" (dict "memory" "320Mi" "cpu" "250m")
