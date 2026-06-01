@@ -102,6 +102,7 @@ virtio_resources = { workspace = true, optional = true }
 vm_resource = { workspace = true, optional = true }
 disk_backend_resources = { workspace = true, optional = true }
 disk_blockdevice = { workspace = true, optional = true }
+vfio_assigned_device_resources = { workspace = true, optional = true }
 ovmm_vmm_core_defs = { workspace = true, optional = true }
 ovmm_guid = { workspace = true, optional = true }
 ovmm_memory_range = { workspace = true, optional = true }
@@ -135,6 +136,7 @@ openvmm = [
     "dep:vm_resource",
     "dep:disk_backend_resources",
     "dep:disk_blockdevice",
+    "dep:vfio_assigned_device_resources",
     "dep:ovmm_vmm_core_defs",
     "dep:ovmm_guid",
     "dep:ovmm_memory_range",

@@ -4174,6 +4174,7 @@ dependencies = [
  "ttrpc",
  "ttrpc-codegen",
  "unix_socket",
+ "vfio_assigned_device_resources",
  "virt",
  "virt_mshv",
  "virtio_resources",

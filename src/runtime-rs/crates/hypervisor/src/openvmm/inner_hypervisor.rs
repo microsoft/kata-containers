@@ -16,6 +16,7 @@ use super::vmm_instance::DeferredNetworkDevice;
 use super::{
     OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_CONSOLE_PCI_PORT,
     OPENVMM_NET_PCI_PORT, OPENVMM_ROOTFS_PCI_PORT, OPENVMM_SHAREFS_PCI_PORT,
+    OPENVMM_VFIO_COLDPLUG_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_PREFIX,
 };
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
@@ -194,6 +195,17 @@ impl OpenVmmInner {
                     });
                 }
 
+                // Cold-plug ports for VFIO PCI pass-through (GPUs, NVSwitches,
+                // InfiniBand VFs). These are always created so the OpenVMM
+                // root-complex layout is stable; unused ones simply appear
+                // empty in the guest.
+                for index in 0..OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
+                    ports.push(PcieRootPortConfig {
+                        name: format!("{}{}", OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, index),
+                        hotplug: false,
+                    });
+                }
+
                 ports
             },
         }];
@@ -221,6 +233,7 @@ impl OpenVmmInner {
             Vec::new();
         let mut deferred_block_devices = Vec::new();
         let mut deferred_network_devices = Vec::new();
+        let mut next_vfio_port: u8 = 0;
 
         for dev in &pending {
             match dev {
@@ -336,6 +349,72 @@ impl OpenVmmInner {
                             blk_dev.config.path_on_host);
                     } else {
                         deferred_block_devices.push(dev.clone());
+                    }
+                }
+                crate::DeviceType::Vfio(vfio_dev) => {
+                    // Cold-plug VFIO PCI pass-through. Each HostDevice in the
+                    // IOMMU group becomes its own PcieDeviceConfig on a
+                    // pre-reserved root port. The /dev/vfio/<group> fd is
+                    // opened here (one open per device, which the kernel
+                    // allows for the same group).
+                    let host_path = &vfio_dev.config.host_path;
+                    info!(
+                        sl!(),
+                        "openvmm: cold-plug VFIO group {} ({} device(s))",
+                        host_path,
+                        vfio_dev.devices.len()
+                    );
+
+                    for hostdev in &vfio_dev.devices {
+                        if hostdev.bus_slot_func.is_empty() {
+                            warn!(
+                                sl!(),
+                                "openvmm: skipping VFIO device with empty BDF in group {}",
+                                host_path
+                            );
+                            continue;
+                        }
+
+                        if next_vfio_port >= OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
+                            return Err(anyhow!(
+                                "openvmm: too many VFIO devices (limit {}), cannot cold-plug BDF {}",
+                                OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
+                                hostdev.bus_slot_func
+                            ));
+                        }
+
+                        let group_fd = std::fs::OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .open(host_path)
+                            .with_context(|| {
+                                format!(
+                                    "openvmm: failed to open VFIO group {} for BDF {}",
+                                    host_path, hostdev.bus_slot_func
+                                )
+                            })?;
+
+                        let port_name = format!(
+                            "{}{}",
+                            OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, next_vfio_port
+                        );
+                        next_vfio_port += 1;
+
+                        info!(
+                            sl!(),
+                            "openvmm: assigning VFIO BDF {} to port {}",
+                            hostdev.bus_slot_func,
+                            port_name
+                        );
+
+                        pcie_devices.push(PcieDeviceConfig {
+                            port_name,
+                            resource: vfio_assigned_device_resources::VfioDeviceHandle {
+                                pci_id: hostdev.bus_slot_func.clone(),
+                                group: group_fd,
+                            }
+                            .into_resource(),
+                        });
                     }
                 }
                 other => {
