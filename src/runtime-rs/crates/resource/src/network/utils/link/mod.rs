@@ -28,10 +28,21 @@ pub enum BusType {
 ///
 /// Returns `Some(BusType)` for PCI or VMBus devices, `None` for virtual
 /// interfaces that have no backing hardware device (veth, bridge, etc.).
+///
+/// Note: this relies on sysfs being available and complete in the caller's
+/// mount namespace. The Go implementation in `isPhysicalIface` /
+/// `getDevicesPath` uses the netlink `ParentDevBus` attribute instead, which
+/// works inside network namespaces where sysfs may not be mounted. If this
+/// Rust code is run in such an environment, prefer a netlink-based
+/// implementation.
 pub fn get_bus_type(name: &str) -> Result<Option<BusType>> {
-    let subsystem_path = Path::new("/sys/class/net")
-        .join(name)
-        .join("device/subsystem");
+    get_bus_type_in("/sys/class/net", name)
+}
+
+/// Inner implementation of [`get_bus_type`] that takes the sysfs base path as
+/// a parameter so tests can substitute a tempdir.
+fn get_bus_type_in<P: AsRef<Path>>(base: P, name: &str) -> Result<Option<BusType>> {
+    let subsystem_path = base.as_ref().join(name).join("device/subsystem");
     match std::fs::read_link(&subsystem_path) {
         Ok(target) => {
             let bus_name = target.file_name().and_then(|f| f.to_str()).unwrap_or("");
@@ -57,8 +68,11 @@ pub fn get_bus_type(name: &str) -> Result<Option<BusType>> {
 /// For VMBus devices, resolves `/sys/class/net/<name>/device` to get the
 /// device GUID and returns `/sys/bus/vmbus/devices/<guid>`.
 ///
-/// This mirrors Go's `getIfaceDevicePath()` which branches on
-/// `link.Attrs().ParentDevBus`.
+/// This corresponds to Go's `getIfaceDevicePath()` which branches on
+/// `link.Attrs().ParentDevBus`. Unlike the Go path, which reaches the bus
+/// type via netlink, this function depends on sysfs (`/sys/class/net` and
+/// `/sys/bus/...`) being mounted and complete in the caller's mount
+/// namespace.
 pub fn get_iface_device_path(name: &str) -> Result<(String, String, BusType)> {
     let bus_type = get_bus_type(name)?
         .ok_or_else(|| anyhow!("unsupported or no bus for interface {}", name))?;
@@ -218,4 +232,73 @@ pub trait Link: Send + Sync {
     fn attrs(&self) -> &LinkAttrs;
     fn set_attrs(&mut self, attr: LinkAttrs);
     fn r#type(&self) -> &str;
+}
+
+
+#[cfg(test)]
+mod bus_type_tests {
+    use super::{get_bus_type_in, BusType};
+    use std::os::unix::fs::symlink;
+    use tempfile::tempdir;
+
+    // Build a fake sysfs layout under ase:
+    //   <base>/<iface>/device/subsystem -> <base>/bus/<bus_name>
+    // and return the iface name. If us_name is None, the symlink target
+    // is a non-bus path so the function should return Ok(None).
+    fn make_iface(base: &std::path::Path, iface: &str, bus_name: Option<&str>) {
+        let dev_dir = base.join(iface).join("device");
+        std::fs::create_dir_all(&dev_dir).unwrap();
+        let target = match bus_name {
+            Some(b) => {
+                let bus_dir = base.join("bus").join(b);
+                std::fs::create_dir_all(&bus_dir).unwrap();
+                bus_dir
+            }
+            None => {
+                let other = base.join("other").join("virtual");
+                std::fs::create_dir_all(&other).unwrap();
+                other
+            }
+        };
+        symlink(target, dev_dir.join("subsystem")).unwrap();
+    }
+
+    #[test]
+    fn pci_interface_is_detected() {
+        let tmp = tempdir().unwrap();
+        make_iface(tmp.path(), "eth0", Some("pci"));
+        let bus = get_bus_type_in(tmp.path(), "eth0").unwrap();
+        assert_eq!(bus, Some(BusType::Pci));
+    }
+
+    #[test]
+    fn vmbus_interface_is_detected() {
+        let tmp = tempdir().unwrap();
+        make_iface(tmp.path(), "eth1", Some("vmbus"));
+        let bus = get_bus_type_in(tmp.path(), "eth1").unwrap();
+        assert_eq!(bus, Some(BusType::Vmbus));
+    }
+
+    #[test]
+    fn unknown_bus_returns_none() {
+        let tmp = tempdir().unwrap();
+        make_iface(tmp.path(), "veth0", Some("usb"));
+        let bus = get_bus_type_in(tmp.path(), "veth0").unwrap();
+        assert_eq!(bus, None);
+    }
+
+    #[test]
+    fn virtual_interface_returns_none() {
+        let tmp = tempdir().unwrap();
+        make_iface(tmp.path(), "veth1", None);
+        let bus = get_bus_type_in(tmp.path(), "veth1").unwrap();
+        assert_eq!(bus, None);
+    }
+
+    #[test]
+    fn missing_interface_returns_none() {
+        let tmp = tempdir().unwrap();
+        let bus = get_bus_type_in(tmp.path(), "nosuch").unwrap();
+        assert_eq!(bus, None);
+    }
 }

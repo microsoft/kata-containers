@@ -295,7 +295,11 @@ func getIfaceDevicePath(link netlink.Link, deviceInterfaceName string) (string, 
 		// Get device by following symlink /sys/bus/pci/devices/$bdf
 		return filepath.Join(getDevicesPath(link), bdf), bdf, nil
 	} else if link.Attrs().ParentDevBus == "vmbus" {
-		return filepath.Join(getDevicesPath(link), link.Attrs().ParentDev), link.Attrs().ParentDev, nil
+		parentDev := link.Attrs().ParentDev
+		if parentDev == "" {
+			return "", "", fmt.Errorf("vmbus interface %q has empty ParentDev; cannot resolve sysfs device path", deviceInterfaceName)
+		}
+		return filepath.Join(getDevicesPath(link), parentDev), parentDev, nil
 	} else {
 		return "", "", fmt.Errorf("unsupported ParentDevBus: %s", link.Attrs().ParentDevBus)
 	}
@@ -485,12 +489,10 @@ func pfNetdevName(pfBDF string) (string, error) {
 }
 
 func (endpoint *PhysicalEndpoint) save() persistapi.NetworkEndpoint {
-	var savedPair persistapi.NetworkInterfacePair
-	if netpair := saveNetIfPair(&endpoint.NetPair); netpair != nil {
-		savedPair = *netpair
-	} else {
-		networkLogger().Warn("saveNetIfPair returned nil for physical endpoint, using empty NetworkInterfacePair")
-	}
+	// saveNetIfPair returns a non-nil pair when given a non-nil input. For VFIO
+	// physical endpoints the pair is intentionally empty; persist it as-is
+	// without warning.
+	savedPair := *saveNetIfPair(&endpoint.NetPair)
 	return persistapi.NetworkEndpoint{
 		Type: string(endpoint.Type()),
 		Physical: &persistapi.PhysicalEndpoint{
@@ -521,6 +523,14 @@ func (endpoint *PhysicalEndpoint) GetRxRateLimiter() bool {
 	return endpoint.RxRateLimiter
 }
 func (endpoint *PhysicalEndpoint) SetRxRateLimiter() error {
+	if endpoint.IsVFIO {
+		// VFIO endpoints use VFIO passthrough; the runtime has no dataplane in
+		// which to enforce rate limiting. Leave the flag unset so callers can
+		// observe the actual runtime behavior via GetRxRateLimiter().
+		networkLogger().WithField("endpoint", endpoint.Name()).
+			Debug("ignoring SetRxRateLimiter on VFIO physical endpoint")
+		return nil
+	}
 	endpoint.RxRateLimiter = true
 	return nil
 }
@@ -529,6 +539,14 @@ func (endpoint *PhysicalEndpoint) GetTxRateLimiter() bool {
 	return endpoint.TxRateLimiter
 }
 func (endpoint *PhysicalEndpoint) SetTxRateLimiter() error {
+	if endpoint.IsVFIO {
+		// VFIO endpoints use VFIO passthrough; the runtime has no dataplane in
+		// which to enforce rate limiting. Leave the flag unset so callers can
+		// observe the actual runtime behavior via GetTxRateLimiter().
+		networkLogger().WithField("endpoint", endpoint.Name()).
+			Debug("ignoring SetTxRateLimiter on VFIO physical endpoint")
+		return nil
+	}
 	endpoint.TxRateLimiter = true
 	return nil
 }
