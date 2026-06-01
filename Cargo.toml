@@ -151,6 +151,7 @@ virtio_resources = { git = "https://github.com/microsoft/openvmm", rev = "14ad21
 vm_resource = { git = "https://github.com/microsoft/openvmm", rev = "14ad213b739a2ca7976f00ea090b475ceddd4592" }
 disk_backend_resources = { git = "https://github.com/microsoft/openvmm", rev = "14ad213b739a2ca7976f00ea090b475ceddd4592" }
 disk_blockdevice = { git = "https://github.com/microsoft/openvmm", rev = "14ad213b739a2ca7976f00ea090b475ceddd4592" }
+vfio_assigned_device_resources = { git = "https://github.com/microsoft/openvmm", rev = "14ad213b739a2ca7976f00ea090b475ceddd4592" }
 ovmm_vmm_core_defs = { git = "https://github.com/microsoft/openvmm", rev = "14ad213b739a2ca7976f00ea090b475ceddd4592", package = "vmm_core_defs" }
 ovmm_guid = { git = "https://github.com/microsoft/openvmm", rev = "14ad213b739a2ca7976f00ea090b475ceddd4592", package = "guid" }
 ovmm_memory_range = { git = "https://github.com/microsoft/openvmm", rev = "14ad213b739a2ca7976f00ea090b475ceddd4592", package = "memory_range" }
