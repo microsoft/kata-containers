@@ -1057,7 +1057,6 @@ standard_rust_check:
 		-- \
 		-D warnings
 
-ifeq ($(ARCH),x86_64)
 ##TARGET check: run test
 check: $(GENERATED_FILES) standard_rust_check
 

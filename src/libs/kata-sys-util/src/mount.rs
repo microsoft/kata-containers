@@ -52,6 +52,7 @@ use std::time::Instant;
 use lazy_static::lazy_static;
 use nix::mount::{mount, MntFlags, MsFlags};
 use nix::unistd;
+use nix::NixPath;
 use oci_spec::runtime as oci;
 
 use crate::fs::is_symlink;
