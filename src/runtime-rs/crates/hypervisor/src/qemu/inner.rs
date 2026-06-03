@@ -150,6 +150,7 @@ impl QemuInner {
                                     .is_direct
                                     .unwrap_or(self.config.blockdev_info.block_device_cache_direct),
                                 block_dev.config.driver_option.as_str() == KATA_SCSI_DEV_TYPE,
+                                block_dev.config.discard_unmap,
                             )?,
                         unsupported => {
                             info!(sl!(), "unsupported block device driver: {}", unsupported)
@@ -980,6 +981,7 @@ impl QemuInner {
                         ),
                         block_device.config.is_readonly,
                         block_device.config.no_drop,
+                        block_device.config.discard_unmap,
                         block_device.config.logical_sector_size,
                         block_device.config.physical_sector_size,
                         &block_device.config.format,
@@ -1032,6 +1034,7 @@ impl QemuInner {
                     is_direct,
                     is_readonly,
                     no_drop,
+                    discard_unmap,
                     driver,
                     logical_sector_size,
                     physical_sector_size,
@@ -1047,6 +1050,7 @@ impl QemuInner {
                         ),
                         cfg.is_readonly,
                         cfg.no_drop,
+                        cfg.discard_unmap,
                         self.config.blockdev_info.block_device_driver.clone(),
                         cfg.logical_sector_size,
                         cfg.physical_sector_size,
@@ -1063,6 +1067,7 @@ impl QemuInner {
                         is_direct,
                         is_readonly,
                         no_drop,
+                        discard_unmap,
                         logical_sector_size,
                         physical_sector_size,
                         &BlockDeviceFormat::default(),
