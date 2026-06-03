@@ -47,25 +47,7 @@ ch-config = { workspace = true, optional = true }
 tests_utils = { workspace = true }
 tracing-subscriber = { version = "0.3", optional = true }
 
-# Dependencies that only exist to support hypervisors which upstream only
-# build on x86_64 and aarch64 (dragonball, firecracker). Keeping them in a
-# target-specific table means:
-#   * the `dragonball` cargo feature is a safe no-op on s390x/ppc64le/
-#     riscv64gc (so `cargo clippy --all-features` in CI doesn't break),
-#   * the dep graph on those targets is completely free of dragonball
-#     and firecracker artifacts, matching what the Makefile already
-#     installs (`FCCMD` is only defined for x86_64/aarch64), and
-#   * any future `use dbs_utils::...` or `use hyperlocal::...` in code
-#     that isn't already arch-gated will fail to build on those targets,
-#     forcing the new code to grow a proper `cfg(target_arch = ...)`
-#     gate at review time instead of silently shipping dead code.
-[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
-# `dbs-utils` is only used by the dragonball and firecracker drivers
-# (both x86_64+aarch64 only). It compiles on every arch, but we have no
-# use for it elsewhere, so don't pull it in.
-dbs-utils = { workspace = true }
-# `hyperlocal` is only used by the firecracker driver (UDS HTTP client).
-hyperlocal = { workspace = true }
+# Local dependencies: Dragonball
 dragonball = { workspace = true, features = [
     "atomic-guest-memory",
     "virtio-vsock",
@@ -82,33 +64,9 @@ dragonball = { workspace = true, features = [
 ], optional = true }
 
 # OpenVMM dependencies
-ovmm_virt = { workspace = true, optional = true }
-virt_mshv = { workspace = true, optional = true }
-openvmm_core = { workspace = true, optional = true }
-openvmm_defs = { workspace = true, optional = true }
-hypervisor_resources = { workspace = true, optional = true }
-openvmm_resources = { workspace = true, optional = true }
-openvmm_helpers = { workspace = true, optional = true }
-vm_manifest_builder = { workspace = true, optional = true }
-ovmm_mesh = { workspace = true, optional = true }
 mesh_rpc = { workspace = true, optional = true }
-ovmm_mesh_worker = { workspace = true, optional = true }
 ovmm_pal_async = { workspace = true, optional = true }
-ovmm_unix_socket = { workspace = true, optional = true }
 openvmm_ttrpc_vmservice = { workspace = true, optional = true }
-storvsp_resources = { workspace = true, optional = true }
-scsidisk_resources = { workspace = true, optional = true }
-netvsp_resources = { workspace = true, optional = true }
-net_backend_resources = { workspace = true, optional = true }
-virtio_resources = { workspace = true, optional = true }
-vm_resource = { workspace = true, optional = true }
-disk_backend_resources = { workspace = true, optional = true }
-disk_blockdevice = { workspace = true, optional = true }
-vfio_assigned_device_resources = { workspace = true, optional = true }
-ovmm_vmm_core_defs = { workspace = true, optional = true }
-ovmm_guid = { workspace = true, optional = true }
-ovmm_memory_range = { workspace = true, optional = true }
-ovmm_serial_socket = { workspace = true, optional = true }
 
 [features]
 default = ["cloud-hypervisor"]
@@ -116,36 +74,11 @@ default = ["cloud-hypervisor"]
 dragonball = ["dep:dragonball"]
 cloud-hypervisor = ["ch-config"]
 
-# Enable the built-in OpenVMM (MSHV-backed) hypervisor
+# Enable the external OpenVMM TTRPC hypervisor backend.
 openvmm = [
-    "dep:virt_mshv",
-    "dep:ovmm_virt",
-    "dep:openvmm_core",
-    "dep:openvmm_defs",
-    "dep:openvmm_resources",
-    "dep:hypervisor_resources",
-    "dep:openvmm_helpers",
-    "dep:vm_manifest_builder",
-    "dep:ovmm_mesh",
     "dep:mesh_rpc",
-    "dep:ovmm_mesh_worker",
     "dep:ovmm_pal_async",
-    "dep:ovmm_unix_socket",
     "dep:openvmm_ttrpc_vmservice",
-    "dep:storvsp_resources",
-    "dep:scsidisk_resources",
-    "dep:netvsp_resources",
-    "dep:net_backend_resources",
-    "dep:virtio_resources",
-    "dep:vm_resource",
-    "dep:disk_backend_resources",
-    "dep:disk_blockdevice",
-    "dep:vfio_assigned_device_resources",
-    "dep:ovmm_vmm_core_defs",
-    "dep:ovmm_guid",
-    "dep:ovmm_memory_range",
-    "dep:ovmm_serial_socket",
-    "dep:tracing-subscriber",
 ]
 
 [dev-dependencies]
