@@ -24,8 +24,8 @@ use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 use openvmm_defs::config::{
     Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig, LoadMode,
-    MemoryConfig as OvmmMemoryConfig, PcieDeviceConfig, PcieRootComplexConfig, PcieRootPortConfig,
-    ProcessorTopologyConfig, VmbusConfig, DEFAULT_MMIO_GAPS_X86,
+    MemoryConfig as OvmmMemoryConfig, PcieDeviceConfig, PcieMmioRangeConfig,
+    PcieRootComplexConfig, PcieRootPortConfig, ProcessorTopologyConfig, VmbusConfig,
 };
 use vm_resource::kind::VmbusDeviceHandleKind;
 use vm_resource::IntoResource;
@@ -134,57 +134,76 @@ impl OpenVmmInner {
         let serial_ports: [Option<vm_resource::Resource<vm_resource::kind::SerialBackendHandle>>;
             4] = [None, None, None, None];
 
-        // Build chipset via VmManifestBuilder
+        // Build chipset via VmManifestBuilder. Compute the default memory
+        // layout from the same builder so it stays in sync with upstream
+        // OpenVMM's per-chipset defaults (see VmManifestBuilder::layout_config).
+        let manifest_builder = vm_manifest_builder::VmManifestBuilder::new(
+            vm_manifest_builder::BaseChipsetType::HyperVGen2LinuxDirect,
+            vm_manifest_builder::MachineArch::X86_64,
+        )
+        .with_serial(serial_ports);
+        let layout_config = manifest_builder.layout_config();
         let vm_manifest_builder::VmChipsetResult {
             chipset,
             chipset_devices,
             pci_chipset_devices,
+            isa_dma_controller,
             capabilities: chipset_capabilities,
-        } = vm_manifest_builder::VmManifestBuilder::new(
-            vm_manifest_builder::BaseChipsetType::HyperVGen2LinuxDirect,
-            vm_manifest_builder::MachineArch::X86_64,
-        )
-        .with_serial(serial_ports)
-        .build()
-        .context("failed to build VM chipset manifest")?;
+        } = manifest_builder
+            .build()
+            .context("failed to build VM chipset manifest")?;
 
         // Memory config
         let mem_size_bytes = (self.config.memory_info.default_memory as u64)
             .checked_mul(1024 * 1024)
             .context("memory size overflow")?;
 
-        // PCIe root complex: ECAM range must match bus count.
-        // 128MB ECAM = 128 buses (0..127), each bus has 256 devfns * 4KB config = 1MB.
+        // PCIe root complex: low/high MMIO windows for BAR allocation.
         let pcie_root_complexes = vec![PcieRootComplexConfig {
             index: 0,
             name: "rc0".to_string(),
             segment: 0,
             start_bus: 0,
             end_bus: 127,
-            ecam_range: ovmm_memory_range::MemoryRange::new(0xe800_0000..0xf000_0000),
-            low_mmio: ovmm_memory_range::MemoryRange::new(0xc000_0000..0xd400_0000),
-            high_mmio: ovmm_memory_range::MemoryRange::new(0x0020_3d30_0000..0x200f_3d30_0000),
+            low_mmio: PcieMmioRangeConfig::Fixed(ovmm_memory_range::MemoryRange::new(
+                0xc000_0000..0xd400_0000,
+            )),
+            high_mmio: PcieMmioRangeConfig::Fixed(ovmm_memory_range::MemoryRange::new(
+                0x0020_3d30_0000..0x200f_3d30_0000,
+            )),
+            cxl: None,
+            iommu: None,
             ports: {
                 let mut ports = vec![
                     PcieRootPortConfig {
                         name: OPENVMM_ROOTFS_PCI_PORT.to_string(),
                         hotplug: false,
+                        acs_capabilities_supported: None,
+                        cxl: false,
                     },
                     PcieRootPortConfig {
                         name: OPENVMM_SHAREFS_PCI_PORT.to_string(),
                         hotplug: false,
+                        acs_capabilities_supported: None,
+                        cxl: false,
                     },
                     PcieRootPortConfig {
                         name: OPENVMM_NET_PCI_PORT.to_string(),
                         hotplug: false,
+                        acs_capabilities_supported: None,
+                        cxl: false,
                     },
                     PcieRootPortConfig {
                         name: super::OPENVMM_VSOCK_PCI_PORT.to_string(),
                         hotplug: false,
+                        acs_capabilities_supported: None,
+                        cxl: false,
                     },
                     PcieRootPortConfig {
                         name: OPENVMM_CONSOLE_PCI_PORT.to_string(),
                         hotplug: false,
+                        acs_capabilities_supported: None,
+                        cxl: false,
                     },
                 ];
 
@@ -192,6 +211,8 @@ impl OpenVmmInner {
                     ports.push(PcieRootPortConfig {
                         name: format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
                         hotplug: true,
+                        acs_capabilities_supported: None,
+                        cxl: false,
                     });
                 }
 
@@ -203,6 +224,8 @@ impl OpenVmmInner {
                     ports.push(PcieRootPortConfig {
                         name: format!("{}{}", OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, index),
                         hotplug: false,
+                        acs_capabilities_supported: None,
+                        cxl: false,
                     });
                 }
 
@@ -458,9 +481,6 @@ impl OpenVmmInner {
             vpci_devices: vec![],
             memory: OvmmMemoryConfig {
                 mem_size: mem_size_bytes,
-                mmio_gaps: DEFAULT_MMIO_GAPS_X86.into(),
-                pci_ecam_gaps: vec![],
-                pci_mmio_gaps: vec![],
                 prefetch_memory: false,
                 private_memory: false,
                 transparent_hugepages: false,
@@ -498,8 +518,9 @@ impl OpenVmmInner {
             vmbus_devices,
             chipset_devices,
             pci_chipset_devices,
+            isa_dma_controller,
             chipset_capabilities,
-            generation_id_recv: None,
+            layout: layout_config,
             rtc_delta_milliseconds: 0,
             automatic_guest_reset: true,
             efi_diagnostics_log_level: Default::default(),
