@@ -3,352 +3,373 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-//! VmmInstance wrapper for OpenVMM's in-process VM worker.
+//! External OpenVMM process wrapper using OpenVMM's TTRPC VM service.
 
 use anyhow::{anyhow, Context, Result};
-use openvmm_defs::config::Config;
-use openvmm_defs::rpc::VmRpc;
-use openvmm_defs::worker::{VmWorkerParameters, VM_WORKER};
-use ovmm_mesh::rpc::RpcSend;
-use ovmm_mesh_worker::RegisteredWorkers;
-use ovmm_vmm_core_defs::HaltReason;
+use openvmm_ttrpc_vmservice as vmservice;
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
+use tokio::process::Command;
 use tokio::sync::mpsc;
-use vm_resource::IntoResource;
+use tokio::task::JoinHandle;
 
-use super::OPENVMM_VSOCK_PCI_PORT;
-use crate::utils::{enter_netns, open_named_tuntap};
+use crate::utils::enter_netns;
 
-#[derive(Debug)]
-pub(crate) struct DeferredNetworkDevice {
-    pub(crate) port_name: String,
-    pub(crate) tap_name: String,
-    pub(crate) mac_address: String,
-}
+const OPENVMM_READY_TIMEOUT: Duration = Duration::from_secs(20);
+const OPENVMM_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+const OPENVMM_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 
-// Force linker to include openvmm_resources which registers the VmWorker
-// via linkme::distributed_slice.
-extern crate openvmm_resources as _;
-
-/// Wrapper around OpenVMM's VmWorker, providing VM lifecycle control.
-#[allow(dead_code)]
+/// Wrapper around an external OpenVMM process, providing VM lifecycle control.
 pub(crate) struct VmmInstance {
-    worker_handle: Option<ovmm_mesh_worker::WorkerHandle>,
-    worker_rpc: Option<ovmm_mesh::Sender<VmRpc>>,
-    _notify_recv: Option<ovmm_mesh::Receiver<HaltReason>>,
+    pid: Option<u32>,
+    ttrpc_socket_path: Option<String>,
+    wait_task: Option<JoinHandle<()>>,
     exit_notify: Option<mpsc::Sender<i32>>,
 }
 
 impl std::fmt::Debug for VmmInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VmmInstance")
-            .field("running", &self.worker_handle.is_some())
+            .field("pid", &self.pid)
+            .field("ttrpc_socket_path", &self.ttrpc_socket_path)
             .finish()
     }
 }
 
-#[allow(dead_code)]
 impl VmmInstance {
     pub(crate) fn new(exit_notify: mpsc::Sender<i32>) -> Self {
-        VmmInstance {
-            worker_handle: None,
-            worker_rpc: None,
-            _notify_recv: None,
+        Self {
+            pid: None,
+            ttrpc_socket_path: None,
+            wait_task: None,
             exit_notify: Some(exit_notify),
         }
     }
 
-    /// Launch the VmWorker with the given configuration.
-    ///
-    /// `vsock_uds_path` is the Unix socket path for virtio-vsock. The listener
-    /// is bound inside the worker thread to avoid FD transfer issues.
-    ///
-    /// If `disk_path` is Some, the disk file will be opened inside the worker
-    /// thread and patched into the first PCIe device's virtio-blk resource.
     pub(crate) async fn launch(
         &mut self,
-        mut config: Config,
-        vsock_uds_path: String,
-        disk_path: Option<String>,
-        network_devices: Vec<DeferredNetworkDevice>,
+        configured_path: &str,
+        ttrpc_socket_path: String,
+        request: vmservice::CreateVmRequest,
         netns: Option<String>,
         log_dir: Option<String>,
     ) -> Result<()> {
-        let (rpc_send, rpc_recv) = ovmm_mesh::channel();
-        let (notify_send, notify_recv) = ovmm_mesh::channel();
+        if self.pid.is_some() {
+            anyhow::bail!("openvmm process is already running");
+        }
 
-        // Use a oneshot channel to get the worker handle from the pal_async thread.
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let openvmm_path = resolve_openvmm_path(configured_path)?;
+        let _ = std::fs::remove_file(&ttrpc_socket_path);
 
-        // Run everything in a single pal_async thread: bind listener, create
-        // worker host, launch worker. This ensures the UnixListener FD stays
-        // in the same async runtime as the VmWorker.
+        let mut command = Command::new(&openvmm_path);
+        command
+            .arg("--ttrpc")
+            .arg(&ttrpc_socket_path)
+            .stdin(Stdio::null())
+            .kill_on_drop(false);
+
+        if let Some(log_dir) = &log_dir {
+            std::fs::create_dir_all(log_dir)
+                .with_context(|| format!("failed to create openvmm log dir {log_dir}"))?;
+            let log_path = Path::new(log_dir).join("openvmm.log");
+            let log_file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+                .with_context(|| {
+                    format!("failed to create openvmm log file {}", log_path.display())
+                })?;
+            command
+                .stdout(Stdio::from(
+                    log_file.try_clone().context("failed to clone log file")?,
+                ))
+                .stderr(Stdio::from(log_file));
+        } else {
+            command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+
+        if let Some(netns_path) = netns {
+            unsafe {
+                command.pre_exec(move || {
+                    enter_netns(&netns_path).map_err(|err| std::io::Error::other(err.to_string()))
+                });
+            }
+        }
+
+        info!(
+            sl!(),
+            "openvmm: launching external process path={} socket={}",
+            openvmm_path.display(),
+            ttrpc_socket_path
+        );
+
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("failed to spawn openvmm at {}", openvmm_path.display()))?;
+        let pid = child.id().context("failed to get openvmm pid")?;
+
+        let exit_notify = self.exit_notify.clone();
+        let wait_task = tokio::spawn(async move {
+            let exit_code = match child.wait().await {
+                Ok(status) => status.code().unwrap_or(1),
+                Err(err) => {
+                    warn!(
+                        sl!(),
+                        "openvmm: failed waiting for process {}: {:?}", pid, err
+                    );
+                    1
+                }
+            };
+
+            if let Some(exit_notify) = exit_notify {
+                let _ = exit_notify.try_send(exit_code);
+            }
+        });
+
+        self.pid = Some(pid);
+        self.ttrpc_socket_path = Some(ttrpc_socket_path.clone());
+        self.wait_task = Some(wait_task);
+
+        wait_for_socket(&ttrpc_socket_path, OPENVMM_READY_TIMEOUT)
+            .await
+            .with_context(|| {
+                format!("openvmm TTRPC socket did not become ready: {ttrpc_socket_path}")
+            })?;
+        self.create_vm(request).await
+    }
+
+    pub(crate) async fn resume(&self) -> Result<()> {
+        let socket_path = self.socket_path()?;
+        rpc_call(socket_path, |client| async move {
+            client
+                .call()
+                .wait_ready(true)
+                .timeout(Some(OPENVMM_RPC_TIMEOUT))
+                .start(vmservice::Vm::ResumeVm, ())
+                .await
+        })
+        .await
+    }
+
+    pub(crate) async fn pause(&self) -> Result<()> {
+        let socket_path = self.socket_path()?;
+        rpc_call(socket_path, |client| async move {
+            client
+                .call()
+                .wait_ready(true)
+                .timeout(Some(OPENVMM_RPC_TIMEOUT))
+                .start(vmservice::Vm::PauseVm, ())
+                .await
+        })
+        .await
+    }
+
+    pub(crate) async fn add_scsi_disk(
+        &self,
+        lun: u32,
+        host_path: String,
+        read_only: bool,
+    ) -> Result<()> {
+        let request = vmservice::ModifyResourceRequest {
+            r#type: vmservice::ModifyType::Add as i32,
+            resource: Some(vmservice::modify_resource_request::Resource::ScsiDisk(
+                vmservice::ScsiDisk {
+                    controller: 0,
+                    lun,
+                    host_path,
+                    r#type: vmservice::DiskType::ScsiDiskTypePhysical as i32,
+                    read_only,
+                },
+            )),
+        };
+
+        let socket_path = self.socket_path()?;
+        rpc_call(socket_path, move |client| async move {
+            client
+                .call()
+                .wait_ready(true)
+                .timeout(Some(OPENVMM_RPC_TIMEOUT))
+                .start(vmservice::Vm::ModifyResource, request)
+                .await
+        })
+        .await
+    }
+
+    pub(crate) async fn remove_scsi_disk(&self, lun: u32) -> Result<()> {
+        let request = vmservice::ModifyResourceRequest {
+            r#type: vmservice::ModifyType::Remove as i32,
+            resource: Some(vmservice::modify_resource_request::Resource::ScsiDisk(
+                vmservice::ScsiDisk {
+                    controller: 0,
+                    lun,
+                    host_path: String::new(),
+                    r#type: vmservice::DiskType::ScsiDiskTypePhysical as i32,
+                    read_only: true,
+                },
+            )),
+        };
+
+        let socket_path = self.socket_path()?;
+        rpc_call(socket_path, move |client| async move {
+            client
+                .call()
+                .wait_ready(true)
+                .timeout(Some(OPENVMM_RPC_TIMEOUT))
+                .start(vmservice::Vm::ModifyResource, request)
+                .await
+        })
+        .await
+    }
+
+    pub(crate) async fn stop(&mut self) -> Result<()> {
+        if self.pid.is_none() {
+            return Ok(());
+        }
+
+        if let Err(err) = self.teardown_vm().await {
+            warn!(sl!(), "openvmm: teardown RPC failed: {:?}", err);
+        }
+        if let Err(err) = self.quit().await {
+            warn!(sl!(), "openvmm: quit RPC failed: {:?}", err);
+        }
+
+        if let Some(wait_task) = self.wait_task.take() {
+            if let Err(err) = tokio::time::timeout(OPENVMM_STOP_TIMEOUT, wait_task).await {
+                warn!(sl!(), "openvmm: process did not exit after quit: {:?}", err);
+                if let Some(pid) = self.pid {
+                    let _ = nix::sys::signal::kill(
+                        nix::unistd::Pid::from_raw(pid as i32),
+                        nix::sys::signal::Signal::SIGKILL,
+                    );
+                }
+            }
+        }
+
+        if let Some(socket_path) = self.ttrpc_socket_path.take() {
+            let _ = std::fs::remove_file(socket_path);
+        }
+        self.pid = None;
+
+        Ok(())
+    }
+
+    pub(crate) fn pid(&self) -> Option<u32> {
+        self.pid
+    }
+
+    async fn create_vm(&self, request: vmservice::CreateVmRequest) -> Result<()> {
+        let socket_path = self.socket_path()?;
+        rpc_call(socket_path, move |client| async move {
+            client
+                .call()
+                .wait_ready(true)
+                .timeout(Some(OPENVMM_RPC_TIMEOUT))
+                .start(vmservice::Vm::CreateVm, request)
+                .await
+        })
+        .await
+    }
+
+    async fn teardown_vm(&self) -> Result<()> {
+        let socket_path = self.socket_path()?;
+        rpc_call(socket_path, |client| async move {
+            client
+                .call()
+                .wait_ready(true)
+                .timeout(Some(OPENVMM_RPC_TIMEOUT))
+                .start(vmservice::Vm::TeardownVm, ())
+                .await
+        })
+        .await
+    }
+
+    async fn quit(&self) -> Result<()> {
+        let socket_path = self.socket_path()?;
+        rpc_call(socket_path, |client| async move {
+            client
+                .call()
+                .wait_ready(true)
+                .timeout(Some(OPENVMM_RPC_TIMEOUT))
+                .start(vmservice::Vm::Quit, ())
+                .await
+        })
+        .await
+    }
+
+    fn socket_path(&self) -> Result<String> {
+        self.ttrpc_socket_path
+            .as_ref()
+            .context("openvmm process not launched")
+            .cloned()
+    }
+}
+
+async fn rpc_call<T, F, Fut>(socket_path: String, call: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce(mesh_rpc::Client) -> Fut + Send + 'static,
+    Fut: Future<Output = std::result::Result<T, mesh_rpc::service::Status>> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || -> Result<T> {
+        let (result_send, result_recv) = std::sync::mpsc::channel();
+
         std::thread::Builder::new()
-            .name("ovmm-worker-host".to_string())
+            .name("openvmm-rpc-client".to_string())
             .spawn(move || {
-                // Set up tracing for the VmWorker thread.
-                // Write openvmm tracing output to a log file for debugging.
-                if let Some(ref dir) = log_dir {
-                    let log_file_path = format!("{}/openvmm-worker.log", dir);
-                    if let Ok(file) = std::fs::File::create(&log_file_path) {
-                        let subscriber = tracing_subscriber::fmt()
-                            .with_writer(std::sync::Mutex::new(file))
-                            .with_ansi(false)
-                            .finish();
-                        // Use set_default (thread-local) not set_global_default
-                        let _guard = tracing::subscriber::set_default(subscriber);
-                    }
-                }
-
-                if let Some(ref netns_path) = netns {
-                    if let Err(err) = enter_netns(netns_path) {
-                        let _ = result_tx.send(Err(
-                            err.context(format!("failed to enter netns {}", netns_path))
-                        ));
-                        return;
-                    }
-                }
-
-                let add_network_devices = || -> Result<()> {
-                    for network_device in network_devices {
-                        let fd = open_named_tuntap(&network_device.tap_name, 1)
-                            .with_context(|| {
-                                format!(
-                                    "failed to open TAP device {} for openvmm",
-                                    network_device.tap_name
-                                )
-                            })?
-                            .into_iter()
-                            .next()
-                            .ok_or_else(|| {
-                                anyhow!(
-                                    "no TAP file descriptors returned for {}",
-                                    network_device.tap_name
-                                )
-                            })?
-                            .into();
-
-                        let endpoint = net_backend_resources::tap::TapHandle { fd }.into_resource();
-                        let net_handle = virtio_resources::net::VirtioNetHandle {
-                            max_queues: None,
-                            mac_address: network_device.mac_address.parse().unwrap_or_else(|_| {
-                                net_backend_resources::mac_address::MacAddress::from([0u8; 6])
-                            }),
-                            endpoint,
-                        };
-
-                        config
-                            .pcie_devices
-                            .push(openvmm_defs::config::PcieDeviceConfig {
-                                port_name: network_device.port_name,
-                                resource: virtio_resources::VirtioPciDeviceHandle(
-                                    net_handle.into_resource(),
-                                )
-                                .into_resource(),
-                            });
-                    }
-
-                    Ok(())
-                };
-
-                if let Err(err) = add_network_devices() {
-                    let _ = result_tx.send(Err(err.context("failed to configure network devices")));
-                    return;
-                }
-
-                // Bind virtio-vsock listener inside this thread and add
-                // the device as a PCIe virtio device.
-                {
-                    let _ = std::fs::remove_file(&vsock_uds_path);
-                    match ovmm_unix_socket::UnixListener::bind(&vsock_uds_path) {
-                        Ok(listener) => {
-                            let has_vsock_port =
-                                config.pcie_root_complexes.iter().any(|root_complex| {
-                                    root_complex
-                                        .ports
-                                        .iter()
-                                        .any(|port| port.name == OPENVMM_VSOCK_PCI_PORT)
-                                });
-
-                            if !has_vsock_port {
-                                let _ = result_tx.send(Err(anyhow::anyhow!(
-                                    "missing preconfigured OpenVMM vsock PCIe port {}",
-                                    OPENVMM_VSOCK_PCI_PORT
-                                )));
-                                return;
-                            }
-
-                            let vsock_handle = virtio_resources::vsock::VirtioVsockHandle {
-                                guest_cid: 3, // standard guest CID
-                                base_path: vsock_uds_path.clone(),
-                                listener,
-                            };
-                            config
-                                .pcie_devices
-                                .push(openvmm_defs::config::PcieDeviceConfig {
-                                    port_name: OPENVMM_VSOCK_PCI_PORT.to_string(),
-                                    resource: virtio_resources::VirtioPciDeviceHandle(
-                                        vsock_handle.into_resource(),
-                                    )
-                                    .into_resource(),
-                                });
-                        }
-                        Err(e) => {
-                            let _ = result_tx.send(Err(anyhow::anyhow!(
-                                "failed to bind vsock listener at {}: {}",
-                                vsock_uds_path,
-                                e
-                            )));
-                            return;
-                        }
-                    }
-                }
-
-                // Open disk file inside this thread to avoid FD loss through
-                // mesh channel serialization. Replace the first PCIe device's
-                // virtio-blk resource with one backed by the freshly-opened file.
-                if let Some(ref path) = disk_path {
-                    match std::fs::OpenOptions::new().read(true).open(path) {
-                        Ok(file) => {
-                            let disk_resource =
-                                disk_backend_resources::FileDiskHandle(file).into_resource();
-                            let blk_handle = virtio_resources::blk::VirtioBlkHandle {
-                                disk: disk_resource,
-                                read_only: true,
-                            };
-                            config
-                                .pcie_devices
-                                .push(openvmm_defs::config::PcieDeviceConfig {
-                                    port_name: "rp0".to_string(),
-                                    resource: virtio_resources::VirtioPciDeviceHandle(
-                                        blk_handle.into_resource(),
-                                    )
-                                    .into_resource(),
-                                });
-                        }
-                        Err(e) => {
-                            let _ = result_tx.send(Err(anyhow::anyhow!(
-                                "failed to open disk at {}: {}",
-                                path,
-                                e
-                            )));
-                            return;
-                        }
-                    }
-                }
-
                 ovmm_pal_async::DefaultPool::run_with(
                     |driver: ovmm_pal_async::DefaultDriver| async move {
-                        use ovmm_pal_async::task::Spawn;
-
-                        let (host, runner) = ovmm_mesh_worker::worker_host();
-                        driver
-                            .spawn("worker-host-runner", runner.run(RegisteredWorkers))
-                            .detach();
-
-                        let hypervisor = match std::fs::File::open("/dev/mshv") {
-                            Ok(mshv) => hypervisor_resources::MshvHandle { mshv }.into_resource(),
-                            Err(err) => {
-                                let _ = result_tx.send(Err(anyhow::anyhow!(
-                                    "failed to open /dev/mshv for openvmm: {}",
-                                    err
-                                )));
-                                return;
-                            }
-                        };
-
-                        let result = host
-                            .launch_worker(
-                                VM_WORKER,
-                                VmWorkerParameters {
-                                    hypervisor,
-                                    cfg: config,
-                                    saved_state: None,
-                                    rpc: rpc_recv,
-                                    notify: notify_send,
-                                    shared_memory: None,
-                                },
-                            )
-                            .await;
-
-                        let _ = result_tx.send(result.context("failed to launch VM worker"));
-
-                        // Keep the pool alive for the VM's lifetime.
-                        std::future::pending::<()>().await;
+                        let dialer =
+                            mesh_rpc::client::UnixDialier::new(driver.clone(), socket_path);
+                        let mut builder = mesh_rpc::client::ClientBuilder::new();
+                        builder.retry_timeout(Duration::from_millis(100));
+                        let client = builder.build(&driver, dialer);
+                        let result = call(client)
+                            .await
+                            .map_err(|status| anyhow!("openvmm RPC failed: {:?}", status));
+                        let _ = result_send.send(result);
                     },
                 );
             })
-            .context("failed to spawn worker host thread")?;
+            .context("failed to spawn openvmm RPC client thread")?;
 
-        // Wait for the worker to start from the tokio context.
-        let worker = result_rx.await.context("worker host thread died")??;
+        result_recv
+            .recv()
+            .context("openvmm RPC client thread exited without a result")?
+    })
+    .await
+    .context("openvmm RPC task join failed")?
+}
 
-        self.worker_handle = Some(worker);
-        self.worker_rpc = Some(rpc_send);
-        self._notify_recv = Some(notify_recv);
-
-        Ok(())
+async fn wait_for_socket(path: &str, timeout: Duration) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if Path::new(path).exists() {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
-    /// Resume (boot) the VM.
-    pub(crate) async fn resume(&self) -> Result<()> {
-        let rpc = self.worker_rpc.as_ref().context("VM not launched")?;
-        let result = rpc.call(VmRpc::Resume, ()).await;
-        match result {
-            Ok(true) => Ok(()),
-            Ok(false) => anyhow::bail!("VM resume returned false"),
-            Err(e) => anyhow::bail!("VM resume failed: {:?}", e),
+    anyhow::bail!("timed out waiting for socket {path}")
+}
+
+fn resolve_openvmm_path(configured_path: &str) -> Result<PathBuf> {
+    if !configured_path.is_empty() {
+        return Ok(PathBuf::from(configured_path));
+    }
+
+    for candidate in [
+        "/usr/bin/openvmm",
+        "/usr/local/bin/openvmm",
+        "/mnt/data/openvmm",
+        "/mnt/data/openvmm-repo/target/release/openvmm",
+        "/mnt/data/openvmm-repo/target/debug/openvmm",
+    ] {
+        if Path::new(candidate).exists() {
+            return Ok(PathBuf::from(candidate));
         }
     }
 
-    /// Pause the VM.
-    pub(crate) async fn pause(&self) -> Result<()> {
-        let rpc = self.worker_rpc.as_ref().context("VM not launched")?;
-        let result = rpc.call(VmRpc::Pause, ()).await;
-        match result {
-            Ok(true) => Ok(()),
-            Ok(false) => anyhow::bail!("VM pause returned false"),
-            Err(e) => anyhow::bail!("VM pause failed: {:?}", e),
-        }
-    }
-
-    pub(crate) async fn add_pcie_device(
-        &self,
-        port_name: String,
-        resource: vm_resource::Resource<vm_resource::kind::PciDeviceHandleKind>,
-    ) -> Result<()> {
-        let rpc = self.worker_rpc.as_ref().context("VM not launched")?;
-        rpc.call_failable(VmRpc::AddPcieDevice, (port_name, resource))
-            .await
-            .context("failed to hotplug PCIe device")?;
-        Ok(())
-    }
-
-    pub(crate) async fn remove_pcie_device(&self, port_name: String) -> Result<()> {
-        let rpc = self.worker_rpc.as_ref().context("VM not launched")?;
-        rpc.call_failable(VmRpc::RemovePcieDevice, port_name)
-            .await
-            .context("failed to hot-remove PCIe device")?;
-        Ok(())
-    }
-
-    /// Stop and teardown the VM.
-    pub(crate) async fn stop(&mut self) -> Result<()> {
-        if let Some(mut worker_handle) = self.worker_handle.take() {
-            worker_handle.stop();
-            if let Err(err) = worker_handle.join().await {
-                warn!(
-                    sl!(),
-                    "openvmm: VM worker failed during shutdown: {:?}", err
-                );
-            }
-        }
-        self.worker_rpc = None;
-        self._notify_recv = None;
-
-        if let Some(exit_notify) = &self.exit_notify {
-            let _ = exit_notify.try_send(0);
-        }
-
-        Ok(())
-    }
+    Ok(PathBuf::from("openvmm"))
 }

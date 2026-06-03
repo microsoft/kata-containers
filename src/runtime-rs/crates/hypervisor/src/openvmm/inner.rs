@@ -16,27 +16,17 @@ use kata_types::{
 use tokio::sync::mpsc;
 
 use super::vmm_instance::VmmInstance;
-use super::{
-    OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
-    OPENVMM_STATIC_PCI_PORT_COUNT,
-};
-use crate::device::pci_path::{PciPath, PciSlot};
+use super::{OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX};
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpenVmmHotplugPort {
     pub(crate) name: String,
-    pub(crate) pci_path: PciPath,
 }
 
 impl OpenVmmHotplugPort {
     fn new(index: u8) -> Self {
-        let root_slot = OPENVMM_STATIC_PCI_PORT_COUNT + index;
-        let pci_path = PciPath::new(vec![PciSlot::new(root_slot), PciSlot::new(0)])
-            .expect("openvmm hotplug port PCI path must be non-empty");
-
         Self {
             name: format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
-            pci_path,
         }
     }
 }
