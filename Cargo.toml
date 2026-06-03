@@ -129,9 +129,11 @@ openvmm_resources = { git = "https://github.com/microsoft/openvmm", rev = "e32de
 openvmm_helpers = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240" }
 vm_manifest_builder = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240" }
 ovmm_mesh = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240", package = "mesh" }
+mesh_rpc = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240" }
 ovmm_mesh_worker = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240", package = "mesh_worker" }
 ovmm_pal_async = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240", package = "pal_async" }
 ovmm_unix_socket = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240", package = "unix_socket", features = ["mesh"] }
+openvmm_ttrpc_vmservice = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240" }
 storvsp_resources = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240" }
 scsidisk_resources = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240" }
 netvsp_resources = { git = "https://github.com/microsoft/openvmm", rev = "e32de766db7d4e369f2e9b7904360d9e52d15240" }

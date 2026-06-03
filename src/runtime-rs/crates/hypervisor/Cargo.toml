@@ -91,9 +91,11 @@ openvmm_resources = { workspace = true, optional = true }
 openvmm_helpers = { workspace = true, optional = true }
 vm_manifest_builder = { workspace = true, optional = true }
 ovmm_mesh = { workspace = true, optional = true }
+mesh_rpc = { workspace = true, optional = true }
 ovmm_mesh_worker = { workspace = true, optional = true }
 ovmm_pal_async = { workspace = true, optional = true }
 ovmm_unix_socket = { workspace = true, optional = true }
+openvmm_ttrpc_vmservice = { workspace = true, optional = true }
 storvsp_resources = { workspace = true, optional = true }
 scsidisk_resources = { workspace = true, optional = true }
 netvsp_resources = { workspace = true, optional = true }
@@ -125,9 +127,11 @@ openvmm = [
     "dep:openvmm_helpers",
     "dep:vm_manifest_builder",
     "dep:ovmm_mesh",
+    "dep:mesh_rpc",
     "dep:ovmm_mesh_worker",
     "dep:ovmm_pal_async",
     "dep:ovmm_unix_socket",
+    "dep:openvmm_ttrpc_vmservice",
     "dep:storvsp_resources",
     "dep:scsidisk_resources",
     "dep:netvsp_resources",

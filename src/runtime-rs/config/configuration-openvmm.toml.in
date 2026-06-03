@@ -10,7 +10,7 @@
 # XXX:   Type: @PROJECT_TYPE@
 
 [hypervisor.openvmm]
-path = ""
+path = "@OPENVMMPATH@"
 kernel = "@KERNELPATH_OPENVMM@"
 image = "@IMAGEPATH@"
 
@@ -28,7 +28,7 @@ vm_rootfs_driver = "@VMROOTFSDRIVER_OPENVMM@"
 enable_annotations = @DEFENABLEANNOTATIONS@
 
 # List of valid annotations values for the hypervisor
-valid_hypervisor_paths = []
+valid_hypervisor_paths = @OPENVMMVALIDHYPERVISORPATHS@
 
 # List of valid annotations values for ctlpath
 valid_ctlpaths = []
@@ -158,6 +158,11 @@ experimental = @DEFAULTEXPFEATURES@
 enable_pprof = false
 
 static_sandbox_resource_mgmt = @DEFSTATICRESOURCEMGMT_OPENVMM@
+
+# Default resources reserved for sandbox workloads when static sandbox resource
+# management is enabled and the workload did not request explicit resources.
+static_sandbox_default_workload_mem = @DEFSTATICSANDBOXWORKLOADMEM@
+static_sandbox_default_workload_vcpus = @DEFSTATICSANDBOXWORKLOADVCPUS@
 
 sandbox_bind_mounts = @DEFBINDMOUNTS@
 

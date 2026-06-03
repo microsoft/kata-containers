@@ -2625,7 +2625,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13bdac971eb2efaceffca0976058ab80c715945cc565c8a4aa1ed3bb0dc8d0e4"
 dependencies = [
  "libc",
- "vmm-sys-util 0.15.0",
+ "vmm-sys-util 0.10.0",
 ]
 
 [[package]]
@@ -4132,6 +4132,7 @@ dependencies = [
  "logging",
  "memory_range",
  "mesh",
+ "mesh_rpc",
  "mesh_worker",
  "net_backend_resources",
  "netvsp_resources",
@@ -4141,6 +4142,7 @@ dependencies = [
  "openvmm_defs",
  "openvmm_helpers",
  "openvmm_resources",
+ "openvmm_ttrpc_vmservice",
  "pal_async",
  "path-clean",
  "persist",
@@ -4204,7 +4206,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -5676,11 +5678,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh_channel"
+name = "mesh_build"
+version = "0.0.0"
+source = "git+https://github.com/microsoft/openvmm?rev=14ad213b739a2ca7976f00ea090b475ceddd4592#14ad213b739a2ca7976f00ea090b475ceddd4592"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "prost-build 0.11.9",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "mesh_build"
 version = "0.0.0"
 source = "git+https://github.com/microsoft/openvmm?rev=e32de766db7d4e369f2e9b7904360d9e52d15240#e32de766db7d4e369f2e9b7904360d9e52d15240"
 dependencies = [
- "futures",
+ "futures 0.3.32",
  "mesh_channel_core",
  "mesh_node",
  "mesh_protobuf",
@@ -5739,9 +5753,55 @@ dependencies = [
  "fs-err",
  "heck 0.5.0",
  "mesh_derive",
+ "prost 0.11.9",
+ "prost-build 0.11.9",
  "socket2 0.6.4",
  "thiserror 2.0.18",
  "zerocopy 0.8.50",
+]
+
+[[package]]
+name = "mesh_rpc"
+version = "0.0.0"
+source = "git+https://github.com/microsoft/openvmm?rev=14ad213b739a2ca7976f00ea090b475ceddd4592#14ad213b739a2ca7976f00ea090b475ceddd4592"
+dependencies = [
+ "anyhow",
+ "futures 0.3.32",
+ "futures-concurrency",
+ "mesh",
+ "mesh_build",
+ "pal_async",
+ "parking_lot",
+ "prost 0.11.9",
+ "prost-build 0.11.9",
+ "prost-types 0.11.9",
+ "thiserror 2.0.18",
+ "tracing",
+ "unicycle",
+ "unix_socket",
+ "zerocopy",
+]
+
+[[package]]
+name = "mesh_rpc"
+version = "0.0.0"
+source = "git+https://github.com/microsoft/openvmm?rev=e32de766db7d4e369f2e9b7904360d9e52d15240#e32de766db7d4e369f2e9b7904360d9e52d15240"
+dependencies = [
+ "anyhow",
+ "futures 0.3.32",
+ "futures-concurrency",
+ "mesh",
+ "mesh_build",
+ "pal_async",
+ "parking_lot",
+ "prost 0.11.9",
+ "prost-build 0.11.9",
+ "prost-types 0.11.9",
+ "thiserror 2.0.18",
+ "tracing",
+ "unicycle",
+ "unix_socket",
+ "zerocopy",
 ]
 
 [[package]]
@@ -7211,6 +7271,18 @@ dependencies = [
  "vmcore",
  "vmgs_broker",
  "vnc_worker",
+]
+
+[[package]]
+name = "openvmm_ttrpc_vmservice"
+version = "0.0.0"
+source = "git+https://github.com/microsoft/openvmm?rev=14ad213b739a2ca7976f00ea090b475ceddd4592#14ad213b739a2ca7976f00ea090b475ceddd4592"
+dependencies = [
+ "mesh",
+ "mesh_build",
+ "mesh_rpc",
+ "prost 0.11.9",
+ "prost-build 0.11.9",
 ]
 
 [[package]]
@@ -11665,9 +11737,9 @@ dependencies = [
  "kvm-ioctls",
  "libc",
  "log",
- "thiserror 2.0.18",
+ "thiserror 1.0.69",
  "vfio-bindings 0.6.2",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util 0.15.0",
 ]
 
@@ -13277,7 +13349,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

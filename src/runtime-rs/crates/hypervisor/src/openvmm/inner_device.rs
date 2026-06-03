@@ -3,16 +3,24 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-//! OpenVMM device management (stubs).
-
-use std::os::unix::fs::FileTypeExt;
+//! OpenVMM device management over the standalone VM service.
 
 use anyhow::{anyhow, Context, Result};
-use vm_resource::IntoResource;
 
 use super::inner::OpenVmmInner;
+use super::OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX;
 use crate::device::DeviceType;
 use crate::{VmmState, KATA_BLK_DEV_TYPE};
+
+fn scsi_lun_from_hotplug_port(port_name: &str) -> Result<u32> {
+    let index = port_name
+        .strip_prefix(OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX)
+        .ok_or_else(|| anyhow!("invalid openvmm hotplug port name {}", port_name))?
+        .parse::<u32>()
+        .with_context(|| format!("invalid openvmm hotplug port name {}", port_name))?;
+
+    Ok(index + 1)
+}
 
 impl OpenVmmInner {
     pub(crate) async fn add_device(&mut self, device: DeviceType) -> Result<DeviceType> {
@@ -37,62 +45,19 @@ impl OpenVmmInner {
                 }
 
                 let port = self.reserve_block_hotplug_port(&block.device_id)?;
+                let lun = scsi_lun_from_hotplug_port(&port.name)?;
                 let hotplug_result = async {
-                    let metadata =
-                        std::fs::metadata(&block.config.path_on_host).with_context(|| {
-                            format!(
-                                "failed to stat block device path {}",
-                                block.config.path_on_host
-                            )
-                        })?;
-
-                    let disk = if metadata.file_type().is_block_device() {
-                        let file = disk_blockdevice::open_file_for_block(
-                            std::path::Path::new(&block.config.path_on_host),
-                            block.config.is_readonly,
-                            true,
-                        )
-                        .with_context(|| {
-                            format!(
-                                "failed to open host block device {}",
-                                block.config.path_on_host
-                            )
-                        })?;
-
-                        disk_backend_resources::BlockDeviceDiskHandle { file }.into_resource()
-                    } else {
-                        let mut options = std::fs::OpenOptions::new();
-                        options.read(true);
-                        if !block.config.is_readonly {
-                            options.write(true);
-                        }
-
-                        let file = options.open(&block.config.path_on_host).with_context(|| {
-                            format!(
-                                "failed to open block device path {}",
-                                block.config.path_on_host
-                            )
-                        })?;
-
-                        disk_backend_resources::FileDiskHandle(file).into_resource()
-                    };
-
-                    let resource = virtio_resources::VirtioPciDeviceHandle(
-                        virtio_resources::blk::VirtioBlkHandle {
-                            disk,
-                            read_only: block.config.is_readonly,
-                        }
-                        .into_resource(),
-                    )
-                    .into_resource();
-
                     self.vmm_instance
-                        .add_pcie_device(port.name.clone(), resource)
+                        .add_scsi_disk(
+                            lun,
+                            block.config.path_on_host.clone(),
+                            block.config.is_readonly,
+                        )
                         .await
                         .with_context(|| {
                             format!(
-                                "failed to hotplug block device {} on {}",
-                                block.config.path_on_host, port.name
+                                "failed to hotplug block device {} as SCSI lun {}",
+                                block.config.path_on_host, lun
                             )
                         })?;
 
@@ -107,13 +72,12 @@ impl OpenVmmInner {
 
                 info!(
                     sl!(),
-                    "openvmm: hotplugged block device {} on port {} ({})",
+                    "openvmm: hotplugged block device {} as SCSI lun {} via RPC",
                     block.config.path_on_host,
-                    port.name,
-                    port.pci_path
+                    lun
                 );
 
-                block.config.pci_path = Some(port.pci_path);
+                block.config.scsi_addr = Some(format!("0:{}", lun));
                 Ok(DeviceType::Block(block))
             }
             other => {
@@ -141,19 +105,21 @@ impl OpenVmmInner {
                     return Ok(());
                 };
 
+                let lun = scsi_lun_from_hotplug_port(&port.name)?;
+
                 self.vmm_instance
-                    .remove_pcie_device(port.name.clone())
+                    .remove_scsi_disk(lun)
                     .await
                     .with_context(|| {
                         format!(
-                            "failed to hot-remove block device {} from {}",
-                            block.device_id, port.name
+                            "failed to hot-remove block device {} from SCSI lun {}",
+                            block.device_id, lun
                         )
                     })?;
 
                 info!(
                     sl!(),
-                    "openvmm: hot-removed block device {} from port {}", block.device_id, port.name
+                    "openvmm: hot-removed block device {} from SCSI lun {}", block.device_id, lun
                 );
                 Ok(())
             }
