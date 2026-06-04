@@ -32,11 +32,6 @@ use crate::{DeviceType, Hypervisor, MemoryConfig, VcpuThreadIds};
 
 pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX: &str = "hp";
 pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_COUNT: u8 = 24;
-/// Number of pre-reserved PCIe root ports for cold-plug VFIO pass-through
-/// devices (e.g., GPUs, NVSwitches). These ports are created with
-/// `hotplug: false` so the guest sees the assigned devices at boot.
-pub(crate) const OPENVMM_VFIO_COLDPLUG_PORT_PREFIX: &str = "vfio";
-pub(crate) const OPENVMM_VFIO_COLDPLUG_PORT_COUNT: u8 = 16;
 
 /// The OpenVMM hypervisor struct, wrapping inner state behind a lock.
 pub struct OpenVmm {
