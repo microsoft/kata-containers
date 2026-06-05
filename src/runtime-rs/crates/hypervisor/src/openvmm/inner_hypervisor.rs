@@ -397,12 +397,28 @@ impl OpenVmmInner {
                             );
                             continue;
                         }
+                        if hostdev.domain.is_empty() {
+                            warn!(
+                                sl!(),
+                                "openvmm: skipping VFIO device with empty PCI domain (BDF {}) in group {}",
+                                hostdev.bus_slot_func,
+                                host_path
+                            );
+                            continue;
+                        }
+                        // OpenVMM expects the full PCI BDF including the segment/
+                        // domain (e.g. "0001:00:00.0") to resolve
+                        // /sys/bus/pci/devices/<full_bdf>. HostDevice splits
+                        // these into `domain` ("0001") and `bus_slot_func`
+                        // ("00:00.0"); recombine them here.
+                        let full_bdf =
+                            format!("{}:{}", hostdev.domain, hostdev.bus_slot_func);
 
                         if next_vfio_port >= OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
                             return Err(anyhow!(
                                 "openvmm: too many VFIO devices (limit {}), cannot cold-plug BDF {}",
                                 OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
-                                hostdev.bus_slot_func
+                                full_bdf
                             ));
                         }
 
@@ -413,7 +429,7 @@ impl OpenVmmInner {
                             .with_context(|| {
                                 format!(
                                     "openvmm: failed to open VFIO group {} for BDF {}",
-                                    host_path, hostdev.bus_slot_func
+                                    host_path, full_bdf
                                 )
                             })?;
 
@@ -425,15 +441,13 @@ impl OpenVmmInner {
 
                         info!(
                             sl!(),
-                            "openvmm: assigning VFIO BDF {} to port {}",
-                            hostdev.bus_slot_func,
-                            port_name
+                            "openvmm: assigning VFIO BDF {} to port {}", full_bdf, port_name
                         );
 
                         pcie_devices.push(PcieDeviceConfig {
                             port_name,
                             resource: vfio_assigned_device_resources::VfioDeviceHandle {
-                                pci_id: hostdev.bus_slot_func.clone(),
+                                pci_id: full_bdf,
                                 group: group_fd,
                             }
                             .into_resource(),
