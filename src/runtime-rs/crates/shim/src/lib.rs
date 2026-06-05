@@ -13,6 +13,7 @@ mod args;
 pub use args::Args;
 mod error;
 pub use error::Error;
+pub mod early_log;
 mod logger;
 mod panic_hook;
 mod shim;

@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use kata_sys_util::spec::get_bundle_path;
 
 use crate::{
-    core_sched, logger,
+    core_sched, early_log, logger,
     shim::{ShimExecutor, ENV_KATA_RUNTIME_BIND_FD},
     Error,
 };
@@ -25,6 +25,39 @@ impl ShimExecutor {
             logger::set_logger(path.to_str().unwrap(), &sid, self.args.debug).context("set logger");
         // Regist shim logger for later use.
         logging::register_subsystem_logger("runtimes", "shim");
+
+        // The slog journal pipeline is now live. From here on, structured
+        // events go to `journalctl -t kata` (journal identifier is
+        // hard-coded to "kata" in `logging::create_logger_with_destination`;
+        // see src/libs/logging/src/lib.rs). Note this in the early-log
+        // fallback file so a human trailing both logs can correlate the
+        // hand-off point.
+        early_log::handoff_to_slog();
+
+        // First structured invocation breadcrumb. Mirrors the early-log
+        // record but goes through the slog journal pipeline so it
+        // shows up in `journalctl -t kata` next to every later event.
+        // High-value when bisecting "which shim invocation did what?".
+        let ppid = nix::unistd::getppid().as_raw();
+        let cwd = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "<unknown>".to_string());
+        info!(
+            sl!(),
+            "shim invocation";
+            "pid" => std::process::id(),
+            "ppid" => ppid,
+            "sid" => &sid,
+            "bundle" => bundle_path.display().to_string(),
+            "cwd" => cwd,
+            "address" => &self.args.address,
+            "namespace" => &self.args.namespace,
+            "publish_binary" => &self.args.publish_binary,
+            "debug" => self.args.debug,
+            "early_log" => early_log::current_log_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+        );
 
         if try_core_sched().is_err() {
             warn!(
