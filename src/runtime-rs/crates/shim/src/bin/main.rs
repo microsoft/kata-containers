@@ -20,7 +20,7 @@ use nix::{
     sched::{self, CloneFlags},
     sys::signal::{signal, SigHandler, Signal},
 };
-use shim::{config, Args, Error, ShimExecutor};
+use shim::{config, early_log, Args, Error, ShimExecutor};
 
 // default tokio runtime worker threads
 const DEFAULT_TOKIO_RUNTIME_WORKER_THREADS: usize = 2;
@@ -199,6 +199,17 @@ fn real_main() -> Result<()> {
     Ok(())
 }
 fn main() {
+    // Install the early fallback file logger BEFORE anything else
+    // (including SIGTERM handling). It records a one-line breadcrumb of
+    // this invocation and installs a panic hook that writes panics to
+    // /var/log/kata-shim/early-<pid>.log -- so a crash before
+    // `logger::set_logger` runs is still visible to a human, instead of
+    // being swallowed by containerd's `cmd.CombinedOutput()`.
+    //
+    // This is best-effort: if /var/log/kata-shim is not writable the
+    // module silently no-ops and the shim continues normally.
+    early_log::init();
+
     // When enabling systemd cgroup driver and sandbox cgroup only, the
     // shim is under a systemd unit. When the unit is stopping, systemd
     // sends SIGTERM to the shim. The shim can't exit immediately, as there
@@ -211,6 +222,7 @@ fn main() {
     }
 
     if let Err(err) = real_main() {
+        early_log::record(&format!("real_main returned error: {:?}", err));
         show_version(Some(err));
     }
 }

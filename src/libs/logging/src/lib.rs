@@ -171,6 +171,15 @@ pub fn create_logger_with_destination(
         // Use the .new() method to build a child logger which inherits all existing
         // key-value pairs from its parent and supplements them with additional ones.
         // This is the idiomatic way.
+        //
+        // NOTE: The journal `SYSLOG_IDENTIFIER` is intentionally fixed
+        // to "kata" for every kata-containers process (runtime, shim,
+        // agent forwarder, ...). All shim diagnostic tooling assumes
+        // this and queries `journalctl -t kata`. If this string ever
+        // changes, update at minimum:
+        //   * src/runtime-rs/crates/shim/src/logger.rs (cross-reference)
+        //   * any out-of-tree diagnostics that grep for `-t kata`
+        //     (KataForGPUs scripts: 09-create-a-GPU-enabled-Kata-POD.sh).
         base_logger.new(o!("SYSLOG_IDENTIFIER" => "kata"))
     } else {
         base_logger
