@@ -87,15 +87,30 @@ impl VmmInstance {
             .spawn(move || {
                 // Set up tracing for the VmWorker thread.
                 // Write openvmm tracing output to a log file for debugging.
+                //
+                // We install the subscriber globally (rather than thread-local
+                // via `set_default`) because `DefaultPool::run_with` may
+                // execute spawned tasks on its own internal threads where a
+                // thread-local subscriber would not be visible.
+                //
+                // `try_init()` is a no-op if a global subscriber is already
+                // installed (e.g. by an earlier sandbox in the same shim
+                // process). Kata normally creates a fresh shim per sandbox,
+                // so the first launch wins and configures verbosity.
+                //
+                // Verbosity is controlled by the `RUST_LOG` environment
+                // variable; default is `info`. For VM-launch debugging use
+                // e.g. `RUST_LOG=info,openvmm=debug,virt_mshv=debug`.
                 if let Some(ref dir) = log_dir {
                     let log_file_path = format!("{}/openvmm-worker.log", dir);
                     if let Ok(file) = std::fs::File::create(&log_file_path) {
-                        let subscriber = tracing_subscriber::fmt()
+                        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+                        let _ = tracing_subscriber::fmt()
                             .with_writer(std::sync::Mutex::new(file))
                             .with_ansi(false)
-                            .finish();
-                        // Use set_default (thread-local) not set_global_default
-                        let _guard = tracing::subscriber::set_default(subscriber);
+                            .with_env_filter(filter)
+                            .try_init();
                     }
                 }
 
