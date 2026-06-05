@@ -30,6 +30,7 @@ use containerd_shim_protos::events::task::{TaskExit, TaskOOM};
 ))]
 use hypervisor::ch::CloudHypervisor;
 use hypervisor::device::topology::PCIePort;
+use hypervisor::device::util::{get_host_path, DEVICE_TYPE_CHAR};
 use hypervisor::remote::Remote;
 use hypervisor::VfioDeviceBase;
 use hypervisor::VsockConfig;
@@ -227,7 +228,29 @@ impl VirtSandbox {
             None
         };
 
-        let vfio_devices = self.prepare_coldplug_cdi_devices(sandbox_config).await?;
+        // Cold-plug VFIO devices for hypervisors that build the PCIe
+        // topology at VM-creation time (notably openvmm). Two sources
+        // are unioned, in declaration order:
+        //
+        //   1. CDI via the kubelet Pod Resources API
+        //      (`prepare_coldplug_cdi_devices`). Upstream pattern; used
+        //      when the device-plugin registers with the Pod Resources
+        //      socket and emits CDI device nodes. This is the K8s path.
+        //   2. Raw OCI `linux.devices`
+        //      (`prepare_coldplug_raw_vfio_devices`). Standalone-container
+        //      path (`ctr --device /dev/vfio/0`). Aligned with the
+        //      upstream PR that adds raw VFIO cold-plug support to
+        //      runtime-rs.
+        //
+        // Each source independently gates on the `cold_plug_vfio`
+        // hypervisor config. Hot-plug back-ends (qemu, dragonball, ...)
+        // still pick devices up via the regular `handler_devices`
+        // post-start path.
+        let mut vfio_devices = self.prepare_coldplug_cdi_devices(sandbox_config).await?;
+        vfio_devices.extend(
+            self.prepare_coldplug_raw_vfio_devices(sandbox_config)
+                .await?,
+        );
         if !vfio_devices.is_empty() {
             info!(
                 sl!(),
@@ -345,6 +368,100 @@ impl VirtSandbox {
             };
             vfio_configs.push(dev_info);
         }
+
+        Ok(vfio_configs
+            .into_iter()
+            .map(ResourceConfig::VfioDeviceModern)
+            .collect())
+    }
+
+    // Raw VFIO cold-plug fallback for standalone containers
+    // (e.g. `ctr --device /dev/vfio/0`). Reads the OCI spec from the
+    // bundle and cold-plugs any VFIO char devices found in
+    // `linux.devices` before VM boot, mirroring the Go runtime's
+    // `coldOrHotPlugVFIO()`. Returns empty when `cold_plug_vfio` is not
+    // configured, when the bundle path is unavailable, or when the OCI
+    // spec is missing/has no eligible devices.
+    async fn prepare_coldplug_raw_vfio_devices(
+        &self,
+        sandbox_config: &SandboxConfig,
+    ) -> Result<Vec<ResourceConfig>> {
+        let hypervisor_config = self.hypervisor.hypervisor_config().await;
+        let cold_plug_vfio = &hypervisor_config.device_info.cold_plug_vfio;
+        if cold_plug_vfio.is_empty() || cold_plug_vfio == "no-port" {
+            return Ok(Vec::new());
+        }
+
+        let port = match cold_plug_vfio.as_str() {
+            "root-port" => PCIePort::RootPort,
+            other => {
+                return Err(anyhow!(
+                    "unsupported cold_plug_vfio value {:?}; only \"root-port\" is supported",
+                    other
+                ))
+            }
+        };
+
+        let bundle = &sandbox_config.state.bundle;
+        if bundle.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let spec_path = format!("{}/{}", bundle, spec::OCI_SPEC_CONFIG_FILE_NAME);
+        let oci_spec = match oci::Spec::load(&spec_path) {
+            Ok(s) => s,
+            Err(e) => {
+                info!(
+                    sl!(),
+                    "no OCI spec at {:?}: {:?}, skipping raw VFIO cold-plug", spec_path, e
+                );
+                return Ok(Vec::new());
+            }
+        };
+
+        let linux_devices = oci_spec
+            .linux()
+            .as_ref()
+            .and_then(|l| l.devices().as_ref())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut vfio_configs = Vec::new();
+        for d in linux_devices.iter() {
+            if d.typ() != oci::LinuxDeviceType::C {
+                continue;
+            }
+            let host_path = match get_host_path(DEVICE_TYPE_CHAR, d.major(), d.minor()) {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!(
+                        sl!(),
+                        "failed to resolve host path for {:?}: {:?}",
+                        d.path(),
+                        e
+                    );
+                    continue;
+                }
+            };
+            // Only process VFIO passthrough devices under /dev/vfio/*.
+            // Skip non-VFIO devices and the legacy VFIO control node
+            // (/dev/vfio/vfio).
+            if !host_path.starts_with("/dev/vfio/") || host_path == "/dev/vfio/vfio" {
+                continue;
+            }
+            vfio_configs.push(VfioDeviceBase {
+                host_path: host_path.clone(),
+                iommu_group_devnode: PathBuf::from(&host_path),
+                dev_type: "c".to_string(),
+                port,
+                hostdev_prefix: "vfio_device".to_owned(),
+                ..Default::default()
+            });
+        }
+        info!(
+            sl!(),
+            "raw VFIO cold-plug candidates: {:?}", vfio_configs
+        );
 
         Ok(vfio_configs
             .into_iter()
