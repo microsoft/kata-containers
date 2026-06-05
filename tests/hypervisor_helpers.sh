@@ -19,6 +19,7 @@ ALL_HYPERVISORS=(
 	"clh-runtime-rs"
 	"clh-azure-runtime-rs"
 	"dragonball"
+	"openvmm"
 	"qemu"
 	"qemu-runtime-rs"
 	"qemu-nvidia-gpu"
