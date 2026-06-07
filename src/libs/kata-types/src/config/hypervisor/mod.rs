@@ -874,6 +874,7 @@ impl TopologyConfigInfo {
             HYPERVISOR_NAME_CH,
             HYPERVISOR_NAME_DRAGONBALL,
             HYPERVISOR_NAME_FIRECRACKER,
+            HYPERVISOR_NAME_OPENVMM,
             HYPERVISOR_NAME_REMOTE,
         ];
         let hypervisor_name = toml_config.runtime.hypervisor_name.as_str();
