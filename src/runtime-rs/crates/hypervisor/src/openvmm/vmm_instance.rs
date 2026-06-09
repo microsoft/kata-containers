@@ -13,6 +13,7 @@ use ovmm_mesh::rpc::RpcSend;
 use ovmm_mesh_worker::RegisteredWorkers;
 use ovmm_vmm_core_defs::HaltReason;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use vm_resource::IntoResource;
 
 use super::OPENVMM_VSOCK_PCI_PORT;
@@ -34,7 +35,12 @@ extern crate openvmm_resources as _;
 pub(crate) struct VmmInstance {
     worker_handle: Option<ovmm_mesh_worker::WorkerHandle>,
     worker_rpc: Option<ovmm_mesh::Sender<VmRpc>>,
-    _notify_recv: Option<ovmm_mesh::Receiver<HaltReason>>,
+    /// Background task that consumes guest-halt notifications from the
+    /// in-process VmWorker and signals `exit_notify` so that `wait_vm()`
+    /// (and therefore the containerd-shim main loop) returns when the
+    /// guest powers off on its own (e.g. agent-initiated shutdown,
+    /// kernel panic, triple fault, OOM-killed init, etc.).
+    halt_watcher: Option<JoinHandle<()>>,
     exit_notify: Option<mpsc::Sender<i32>>,
 }
 
@@ -52,7 +58,7 @@ impl VmmInstance {
         VmmInstance {
             worker_handle: None,
             worker_rpc: None,
-            _notify_recv: None,
+            halt_watcher: None,
             exit_notify: Some(exit_notify),
         }
     }
@@ -299,7 +305,7 @@ impl VmmInstance {
 
         self.worker_handle = Some(worker);
         self.worker_rpc = Some(rpc_send);
-        self._notify_recv = Some(notify_recv);
+        self.halt_watcher = Some(spawn_halt_watcher(notify_recv, self.exit_notify.clone()));
 
         Ok(())
     }
@@ -348,6 +354,14 @@ impl VmmInstance {
 
     /// Stop and teardown the VM.
     pub(crate) async fn stop(&mut self) -> Result<()> {
+        // Stop the halt watcher first so it does not race with the
+        // explicit exit_notify send below. Aborting the task is safe
+        // because it only borrows owned values (the mesh Receiver and
+        // a clone of the exit_notify Sender).
+        if let Some(handle) = self.halt_watcher.take() {
+            handle.abort();
+        }
+
         if let Some(mut worker_handle) = self.worker_handle.take() {
             worker_handle.stop();
             if let Err(err) = worker_handle.join().await {
@@ -358,7 +372,6 @@ impl VmmInstance {
             }
         }
         self.worker_rpc = None;
-        self._notify_recv = None;
 
         if let Some(exit_notify) = &self.exit_notify {
             let _ = exit_notify.try_send(0);
@@ -366,4 +379,53 @@ impl VmmInstance {
 
         Ok(())
     }
+}
+
+/// Spawn a tokio task that watches the OpenVMM halt-notification
+/// channel and signals `exit_notify` when the guest reaches a terminal
+/// halt state (anything other than a guest-initiated reset, which the
+/// VmWorker handles internally via `automatic_guest_reset = true`).
+///
+/// Without this watcher, `OpenVmm::wait_vm()` would block forever after
+/// the guest powers off, because the in-process VmWorker has no child
+/// process for the shim to reap and no other code reads the halt
+/// channel. That stall surfaces as the kata-shim hanging on container
+/// teardown.
+fn spawn_halt_watcher(
+    mut notify_recv: ovmm_mesh::Receiver<HaltReason>,
+    exit_notify: Option<mpsc::Sender<i32>>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            match notify_recv.recv().await {
+                Ok(HaltReason::Reset) => {
+                    // The VmWorker is configured with
+                    // `automatic_guest_reset = true`, so it should
+                    // handle resets internally and not forward them
+                    // here. Be defensive in case that ever changes.
+                    info!(sl!(), "openvmm: guest-initiated reset (ignored)");
+                    continue;
+                }
+                Ok(reason) => {
+                    info!(
+                        sl!(),
+                        "openvmm: guest halted, signaling shim exit: {:?}", reason
+                    );
+                    if let Some(tx) = &exit_notify {
+                        let _ = tx.try_send(0);
+                    }
+                    return;
+                }
+                Err(err) => {
+                    // The sender side was dropped — typically because
+                    // `stop()` tore down the worker. Nothing more to do.
+                    info!(
+                        sl!(),
+                        "openvmm: halt notification channel closed: {:?}", err
+                    );
+                    return;
+                }
+            }
+        }
+    })
 }
