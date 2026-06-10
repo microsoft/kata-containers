@@ -603,8 +603,6 @@ func TestClhSaveVM(t *testing.T) {
 
 	clhConfig, err := newClhConfig()
 	assert.NoError(err)
-	// For testing, assume the memory path is located within the VM store path.
-	clhConfig.MemoryPath = filepath.Join(store.RunVMStoragePath(), "memory")
 	clhConfig.VMStorePath = store.RunVMStoragePath()
 	clhConfig.RunStorePath = store.RunStoragePath()
 
@@ -614,11 +612,12 @@ func TestClhSaveVM(t *testing.T) {
 		APIClient: mockClient,
 	}
 
-	err = clh.SaveVM()
+	snapshotDir := store.RunVMStoragePath()
+	err = clh.SaveVM(snapshotDir)
 	assert.NoError(err)
 
 	if assert.NotNil(mockClient.snapshotRequest) {
-		expectedDestinationURL := "file://" + filepath.Dir(clhConfig.MemoryPath)
+		expectedDestinationURL := "file://" + snapshotDir
 		assert.Equal(expectedDestinationURL, mockClient.snapshotRequest.GetDestinationUrl())
 	}
 }
@@ -631,15 +630,16 @@ func TestClhSaveVMWarnsHotpluggedFileBackedZone(t *testing.T) {
 
 	clhConfig, err := newClhConfig()
 	assert.NoError(err)
-	clhConfig.MemoryPath = filepath.Join(store.RunVMStoragePath(), "memory")
 	clhConfig.VMStorePath = store.RunVMStoragePath()
 	clhConfig.RunStorePath = store.RunStoragePath()
+
+	memoryFilePath := filepath.Join(store.RunVMStoragePath(), "memory")
 
 	mockClient := &clhClientMock{}
 	// Simulate a restored template VM that has grown its file-backed virtio-mem
 	// zone (hotplugged_size > 0). SaveVM should warn but still proceed.
 	zone := chclient.NewMemoryZoneConfig("mem0", int64(512*utils.MiB.ToBytes()))
-	zone.SetFile(clhConfig.MemoryPath)
+	zone.SetFile(memoryFilePath)
 	zone.HotpluggedSize = func(i int64) *int64 { return &i }(int64(1024 * utils.MiB.ToBytes()))
 	mockClient.vmInfo.Config = *chclient.NewVmConfig(*chclient.NewPayloadConfig())
 	mockClient.vmInfo.Config.Memory = chclient.NewMemoryConfig(0)
@@ -650,7 +650,8 @@ func TestClhSaveVMWarnsHotpluggedFileBackedZone(t *testing.T) {
 		APIClient: mockClient,
 	}
 
-	err = clh.SaveVM()
+	snapshotDir := store.RunVMStoragePath()
+	err = clh.SaveVM(snapshotDir)
 	assert.NoError(err)
 	// The snapshot must still have been attempted despite the warning.
 	assert.NotNil(mockClient.snapshotRequest)
@@ -710,7 +711,7 @@ func TestCloudHypervisorStartSandbox(t *testing.T) {
 	err = clh.PauseVM(context.Background())
 	assert.NoError(err)
 
-	err = clh.SaveVM()
+	err = clh.SaveVM(clhConfig.VMStorePath)
 	assert.NoError(err)
 
 	err = clh.ResumeVM(context.Background())
