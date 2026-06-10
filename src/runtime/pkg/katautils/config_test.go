@@ -1626,7 +1626,7 @@ func TestCheckFactoryConfig(t *testing.T) {
 		{false, false, "", "initrd"},
 
 		{true, false, "", "initrd"},
-		{true, true, "image", ""},
+		{true, false, "image", ""},
 	}
 
 	for i, d := range data {
