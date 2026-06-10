@@ -11,19 +11,9 @@ load "${BATS_TEST_DIRNAME}/../../common.bash"
 load "${BATS_TEST_DIRNAME}/confidential_common.sh"
 load "${BATS_TEST_DIRNAME}/tests_common.sh"
 
-get_shim_config_file() {
-	case "${KATA_HYPERVISOR}" in
-		*-runtime-rs)
-			echo "/opt/kata/share/defaults/kata-containers/runtime-rs/runtimes/${KATA_HYPERVISOR}/configuration-${KATA_HYPERVISOR}.toml"
-			;;
-		*)
-			echo "/opt/kata/share/defaults/kata-containers/runtimes/${KATA_HYPERVISOR}/configuration-${KATA_HYPERVISOR}.toml"
-			;;
-	esac
-}
-
-# With setup_file and teardown_file being used, we use >&3 in some places to direct output to the terminal
-# setup_file is used in BATS for one-time initialization for all tests in the file
+# With setup_file and teardown_file being used, we use >&3 in some places to
+# direct output to the terminal. setup_file is used in BATS for one-time
+# initialization for all tests in the file.
 setup_file() {
 	if [[ "${KATA_HYPERVISOR}" != "clh" ]] || is_confidential_runtime_class; then
 		export skip_vm_templating_tests=true
@@ -31,25 +21,41 @@ setup_file() {
 	fi
 
 	setup_common || die "setup_common failed"
-	config_file="$(get_shim_config_file)"
-	backup_file="${config_file}.bats-vm-templating.bak"
 
 	# Get ALL kata nodes
 	mapfile -t all_nodes < <(kubectl get nodes -l katacontainers.io/kata-runtime=true -o name | sed 's|^node/||')
 	[[ "${#all_nodes[@]}" -gt 0 ]] || die "No Kata nodes found"
 
-	export all_nodes config_file backup_file
+	# Build a single Kata runtime config drop-in that enables VM templating and
+	# disables shared_fs for the clh shim.
+	local runtime_config_dropin_file="${BATS_FILE_TMPDIR}/99-k8s-vm-templating.toml"
+	cat > "${runtime_config_dropin_file}" <<DROPIN
+[hypervisor.clh]
+shared_fs = "none"
 
-	# Configure and initialize VM templates on all Kata nodes
+[factory]
+enable_template = true
+template_path = "/run/vc/vm/template"
+DROPIN
+
+	# Track per-node drop-in paths so teardown_file() can remove them.
+	declare -ag dropin_paths=()
+
+	# Apply the drop-in and initialize VM templates on all Kata nodes.
 	for n in "${all_nodes[@]}"; do
-		echo "Configuring and initializing VM template on node: $n" >&3
-		exec_host "$n" "sudo test -f '${backup_file}' || sudo cp '${config_file}' '${backup_file}'" || die "Failed to backup kata config on node $n"
-		exec_host "$n" "sudo sed -i -e 's|^#\\?enable_template[[:space:]]*=.*$|enable_template = true|g' -e 's|^#\\?template_path[[:space:]]*=.*$|template_path = \"/run/vc/vm/template\"|g' -e 's|^#\\?shared_fs[[:space:]]*=.*$|shared_fs = \"none\"|g' '${config_file}'" || die "Failed to update kata config on node $n"
-		exec_host "$n" "sudo grep -q '^enable_template[[:space:]]*=' '${config_file}' || echo 'enable_template = true' | sudo tee -a '${config_file}' >/dev/null" || die "Failed to set enable_template on node $n"
-		exec_host "$n" "sudo grep -q '^template_path[[:space:]]*=' '${config_file}' || echo 'template_path = \"/run/vc/vm/template\"' | sudo tee -a '${config_file}' >/dev/null" || die "Failed to set template_path on node $n"
-		exec_host "$n" "sudo grep -q '^shared_fs[[:space:]]*=' '${config_file}' || echo 'shared_fs = \"none\"' | sudo tee -a '${config_file}' >/dev/null" || die "Failed to set shared_fs on node $n"
-		exec_host "$n" "sudo kata-runtime factory init" || die "Failed to initialize VM template on node $n"
+		echo "Applying VM templating drop-in on node: $n" >&3
+		local dropin_path
+		dropin_path="$(set_kata_runtime_config_dropin_file "$n" "${runtime_config_dropin_file}")" \
+			|| die "Failed to install Kata runtime config drop-in on node $n"
+		dropin_paths+=("${n}=${dropin_path}")
+
+		echo "Initializing VM template on node: $n" >&3
+		exec_host "$n" "sudo kata-runtime factory init" \
+			|| die "Failed to initialize VM template on node $n"
 	done
+
+	export all_nodes
+	export dropin_paths
 
 	echo "VM templates initialized on ${#all_nodes[@]} nodes" >&3
 }
@@ -59,12 +65,10 @@ setup() {
 		skip "VM templating is only supported for non-confidential clh hypervisor"
 	fi
 
-	# Select one node for this test
 	setup_common || die "setup_common failed"
 }
 
 @test "VM template factory is initialized" {
-	# Verify factory state on each node
 	for n in "${all_nodes[@]}"; do
 		exec_host "$n" "test -d /run/vc/vm/template" || skip "VM template directory not found on $n"
 	done
@@ -80,21 +84,24 @@ setup() {
 	sed -i "s/POD_NAME/$pod_name/" "$pod_config"
 	sed -i "s/CTR_NAME/$ctr_name/" "$pod_config"
 
-	# Create a simple pod to verify templating works
 	kubectl create -f "${pod_config}"
 	kubectl wait --for=condition=Ready --timeout=120s "pod/${pod_name}" || die "Pod failed to reach Ready state"
 
-	# Verify the pod is running
 	kubectl get pod "${pod_name}" | grep Running || die "Pod is not in Running state"
 
-	# Basic test: verify we can execute a command in the pod
 	kubectl exec "${pod_name}" -- sh -c "echo 'Hello from templated VM' && exit 0"
 }
 
 teardown() {
-	[[ "${skip_vm_templating_tests:-false}" == "true" ]] && return 0
+	if [[ "${skip_vm_templating_tests:-false}" == "true" ]]; then
+		return 0
+	fi
 
-	teardown_common "${node}" "${node_start_time:-}"
+	# Best-effort cleanup of any pod/yaml created by a test in this file.
+	kubectl delete pod test-templated-pod --ignore-not-found=true --wait=false || true
+	[[ -n "${pod_config:-}" && -f "${pod_config}" ]] && rm -f "${pod_config}"
+
+	teardown_common "${node:-}" "${node_start_time:-}"
 }
 
 teardown_file() {
@@ -102,12 +109,22 @@ teardown_file() {
 		return 0
 	fi
 
-	# Clean up VM templates on all Kata nodes
-	for n in "${all_nodes[@]}"; do
+	# Destroy templates and remove the runtime config drop-in on each node.
+	# Iterate dropin_paths so we always try to remove what setup_file installed,
+	# even if a node has been removed from all_nodes mid-run.
+	for entry in "${dropin_paths[@]:-}"; do
+		[[ -z "${entry}" ]] && continue
+		local n="${entry%%=*}"
+		local dropin_path="${entry#*=}"
+
 		echo "Destroying VM template on node: $n" >&3
-		exec_host "$n" "sudo kata-runtime factory destroy" || echo "Warning: Failed to destroy VM template on node $n" >&3
-		exec_host "$n" "if [ -f '${backup_file}' ]; then sudo mv '${backup_file}' '${config_file}'; fi" || echo "Warning: Failed to restore kata config on node $n" >&3
+		exec_host "$n" "sudo kata-runtime factory destroy" \
+			|| echo "Warning: Failed to destroy VM template on node $n" >&3
+
+		echo "Removing VM templating drop-in on node: $n" >&3
+		remove_kata_runtime_config_dropin_file "$n" "${dropin_path}" \
+			|| echo "Warning: Failed to remove Kata runtime config drop-in on node $n" >&3
 	done
 
-	echo "VM templates destroyed on ${#all_nodes[@]} nodes" >&3
+	echo "VM templates destroyed on ${#dropin_paths[@]} nodes" >&3
 }
