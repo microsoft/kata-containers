@@ -122,7 +122,7 @@ func TestFCSaveVM(t *testing.T) {
 	assert := assert.New(t)
 
 	fc := firecracker{}
-	err := fc.SaveVM()
+	err := fc.SaveVM(t.TempDir())
 	assert.NoError(err)
 }
 
