@@ -6,10 +6,11 @@
 //! OpenVMM hypervisor lifecycle management over the standalone VM service.
 
 use anyhow::{anyhow, Context, Result};
-use openvmm_ttrpc_vmservice as vmservice;
+use protobuf::MessageField;
 use std::fs;
 
 use super::inner::OpenVmmInner;
+use super::vmservice;
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
@@ -43,13 +44,14 @@ fn adapt_cmdline_for_rpc(cmdline: String) -> String {
     cmdline.replace("console=hvc0", "console=ttyS0")
 }
 
-fn scsi_disk(lun: u32, host_path: String, read_only: bool) -> vmservice::ScsiDisk {
-    vmservice::ScsiDisk {
+fn scsi_disk(lun: u32, host_path: String, read_only: bool) -> vmservice::SCSIDisk {
+    vmservice::SCSIDisk {
         controller: 0,
         lun,
         host_path,
-        r#type: vmservice::DiskType::ScsiDiskTypePhysical as i32,
+        type_: vmservice::DiskType::SCSI_DISK_TYPE_PHYSICAL.into(),
         read_only,
+        ..Default::default()
     }
 }
 
@@ -152,14 +154,16 @@ impl OpenVmmInner {
                         "openvmm: wiring Network device over RPC NetVSP TAP, tap={}",
                         net_dev.config.host_dev_name
                     );
-                    devices_config.nic_config.push(vmservice::NicConfig {
+                    devices_config.nic_config.push(vmservice::NICConfig {
                         nic_id: nic_id(network_index),
                         mac_address: mac_address(net_dev, network_index),
                         legacy_switch_id: String::new(),
                         nic_name: net_dev.device_id.clone(),
-                        backend: Some(vmservice::nic_config::Backend::Tap(vmservice::TapBackend {
+                        backend: Some(vmservice::nicconfig::Backend::Tap(vmservice::TapBackend {
                             name: net_dev.config.host_dev_name.clone(),
+                            ..Default::default()
                         })),
+                        ..Default::default()
                     });
                     network_index += 1;
                 }
@@ -181,9 +185,10 @@ impl OpenVmmInner {
 
                     devices_config
                         .virtiofs_config
-                        .push(vmservice::VirtioFsConfig {
+                        .push(vmservice::VirtioFSConfig {
                             tag: fs_dev.config.mount_tag.clone(),
                             root_path: fs_dev.config.host_shared_path.clone(),
+                            ..Default::default()
                         });
                 }
                 DeviceType::Block(blk_dev) => {
@@ -216,46 +221,42 @@ impl OpenVmmInner {
         let _ = std::fs::remove_file(&ttrpc_socket_path);
         let _ = std::fs::remove_file(&serial_socket_path);
 
-        let request = vmservice::CreateVmRequest {
-            config: Some(vmservice::VmConfig {
-                memory_config: Some(vmservice::MemoryConfig {
+        let request = vmservice::CreateVMRequest {
+            config: MessageField::some(vmservice::VMConfig {
+                memory_config: MessageField::some(vmservice::MemoryConfig {
                     memory_mb: self.config.memory_info.default_memory as u64,
-                    allow_overcommit: false,
-                    deferred_commit: false,
-                    hot_hint: false,
-                    cold_hint: false,
-                    cold_discard_hint: false,
-                    low_mmio_gap_in_mb: 0,
-                    high_mmio_base_in_mb: 0,
-                    high_mmio_gap_in_mb: 0,
+                    ..Default::default()
                 }),
-                processor_config: Some(vmservice::ProcessorConfig {
+                processor_config: MessageField::some(vmservice::ProcessorConfig {
                     processor_count: self.config.cpu_info.default_vcpus.ceil() as u32,
-                    processor_weight: 0,
-                    processor_limit: 0,
+                    ..Default::default()
                 }),
-                devices_config: Some(devices_config),
-                serial_config: Some(vmservice::SerialConfig {
+                devices_config: MessageField::some(devices_config),
+                serial_config: MessageField::some(vmservice::SerialConfig {
                     ports: vec![vmservice::serial_config::Config {
                         port: 0,
                         socket_path: serial_socket_path,
                         connect: false,
+                        ..Default::default()
                     }],
+                    ..Default::default()
                 }),
-                boot_config: Some(vmservice::vm_config::BootConfig::DirectBoot(
+                hvsocket_config: MessageField::some(vmservice::HVSocketConfig {
+                    path: hvsocket_path,
+                    ..Default::default()
+                }),
+                BootConfig: Some(vmservice::vmconfig::BootConfig::DirectBoot(
                     vmservice::DirectBoot {
                         kernel_path: self.config.boot_info.kernel.clone(),
                         initrd_path: self.config.boot_info.initrd.clone(),
                         kernel_cmdline: cmdline,
+                        ..Default::default()
                     },
                 )),
-                windows_options: None,
-                extra_data: Default::default(),
-                hvsocket_config: Some(vmservice::HvSocketConfig {
-                    path: hvsocket_path,
-                }),
+                ..Default::default()
             }),
             log_id: self.id.clone(),
+            ..Default::default()
         };
 
         info!(sl!(), "openvmm: launching standalone OpenVMM process");

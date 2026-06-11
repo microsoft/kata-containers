@@ -6,8 +6,6 @@
 //! External OpenVMM process wrapper using OpenVMM's TTRPC VM service.
 
 use anyhow::{anyhow, Context, Result};
-use openvmm_ttrpc_vmservice as vmservice;
-use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -15,6 +13,9 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use super::empty::Empty;
+use super::vmservice;
+use super::vmservice_ttrpc::VmClient;
 use crate::utils::enter_netns;
 
 const OPENVMM_READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -27,6 +28,9 @@ pub(crate) struct VmmInstance {
     ttrpc_socket_path: Option<String>,
     wait_task: Option<JoinHandle<()>>,
     exit_notify: Option<mpsc::Sender<i32>>,
+    /// Persistent ttrpc async client for the OpenVMM `vmservice.VM` service,
+    /// established once the process is launched and reused for every RPC.
+    client: Option<VmClient>,
 }
 
 impl std::fmt::Debug for VmmInstance {
@@ -45,6 +49,7 @@ impl VmmInstance {
             ttrpc_socket_path: None,
             wait_task: None,
             exit_notify: Some(exit_notify),
+            client: None,
         }
     }
 
@@ -52,7 +57,7 @@ impl VmmInstance {
         &mut self,
         configured_path: &str,
         ttrpc_socket_path: String,
-        request: vmservice::CreateVmRequest,
+        request: vmservice::CreateVMRequest,
         netns: Option<String>,
         log_dir: Option<String>,
     ) -> Result<()> {
@@ -132,38 +137,37 @@ impl VmmInstance {
         self.ttrpc_socket_path = Some(ttrpc_socket_path.clone());
         self.wait_task = Some(wait_task);
 
-        wait_for_socket(&ttrpc_socket_path, OPENVMM_READY_TIMEOUT)
+        // Wait for the OpenVMM TTRPC server to start accepting connections.
+        // `Client::connect` performs a one-shot `connect(2)`, so `connect_client`
+        // retries until the child has created the socket and begun listening (or
+        // the timeout elapses). This single readiness loop intentionally
+        // replaces a separate "does the socket file exist yet?" poll: a missing
+        // socket file and a not-yet-listening server are both just transient
+        // connect errors that the retry already handles.
+        let client = connect_client(&ttrpc_socket_path, OPENVMM_READY_TIMEOUT)
             .await
             .with_context(|| {
                 format!("openvmm TTRPC socket did not become ready: {ttrpc_socket_path}")
             })?;
+        self.client = Some(client);
+
         self.create_vm(request).await
     }
 
     pub(crate) async fn resume(&self) -> Result<()> {
-        let socket_path = self.socket_path()?;
-        rpc_call(socket_path, |client| async move {
-            client
-                .call()
-                .wait_ready(true)
-                .timeout(Some(OPENVMM_RPC_TIMEOUT))
-                .start(vmservice::Vm::ResumeVm, ())
-                .await
-        })
-        .await
+        self.client()?
+            .resume_vm(rpc_ctx(), &Empty::new())
+            .await
+            .map(|_| ())
+            .map_err(|e| anyhow!("openvmm resume_vm RPC failed: {:?}", e))
     }
 
     pub(crate) async fn pause(&self) -> Result<()> {
-        let socket_path = self.socket_path()?;
-        rpc_call(socket_path, |client| async move {
-            client
-                .call()
-                .wait_ready(true)
-                .timeout(Some(OPENVMM_RPC_TIMEOUT))
-                .start(vmservice::Vm::PauseVm, ())
-                .await
-        })
-        .await
+        self.client()?
+            .pause_vm(rpc_ctx(), &Empty::new())
+            .await
+            .map(|_| ())
+            .map_err(|e| anyhow!("openvmm pause_vm RPC failed: {:?}", e))
     }
 
     pub(crate) async fn add_scsi_disk(
@@ -173,54 +177,48 @@ impl VmmInstance {
         read_only: bool,
     ) -> Result<()> {
         let request = vmservice::ModifyResourceRequest {
-            r#type: vmservice::ModifyType::Add as i32,
+            type_: vmservice::ModifyType::ADD.into(),
             resource: Some(vmservice::modify_resource_request::Resource::ScsiDisk(
-                vmservice::ScsiDisk {
+                vmservice::SCSIDisk {
                     controller: 0,
                     lun,
                     host_path,
-                    r#type: vmservice::DiskType::ScsiDiskTypePhysical as i32,
+                    type_: vmservice::DiskType::SCSI_DISK_TYPE_PHYSICAL.into(),
                     read_only,
+                    ..Default::default()
                 },
             )),
+            ..Default::default()
         };
 
-        let socket_path = self.socket_path()?;
-        rpc_call(socket_path, move |client| async move {
-            client
-                .call()
-                .wait_ready(true)
-                .timeout(Some(OPENVMM_RPC_TIMEOUT))
-                .start(vmservice::Vm::ModifyResource, request)
-                .await
-        })
-        .await
+        self.client()?
+            .modify_resource(rpc_ctx(), &request)
+            .await
+            .map(|_| ())
+            .map_err(|e| anyhow!("openvmm add_scsi_disk RPC failed: {:?}", e))
     }
 
     pub(crate) async fn remove_scsi_disk(&self, lun: u32) -> Result<()> {
         let request = vmservice::ModifyResourceRequest {
-            r#type: vmservice::ModifyType::Remove as i32,
+            type_: vmservice::ModifyType::REMOVE.into(),
             resource: Some(vmservice::modify_resource_request::Resource::ScsiDisk(
-                vmservice::ScsiDisk {
+                vmservice::SCSIDisk {
                     controller: 0,
                     lun,
                     host_path: String::new(),
-                    r#type: vmservice::DiskType::ScsiDiskTypePhysical as i32,
+                    type_: vmservice::DiskType::SCSI_DISK_TYPE_PHYSICAL.into(),
                     read_only: true,
+                    ..Default::default()
                 },
             )),
+            ..Default::default()
         };
 
-        let socket_path = self.socket_path()?;
-        rpc_call(socket_path, move |client| async move {
-            client
-                .call()
-                .wait_ready(true)
-                .timeout(Some(OPENVMM_RPC_TIMEOUT))
-                .start(vmservice::Vm::ModifyResource, request)
-                .await
-        })
-        .await
+        self.client()?
+            .modify_resource(rpc_ctx(), &request)
+            .await
+            .map(|_| ())
+            .map_err(|e| anyhow!("openvmm remove_scsi_disk RPC failed: {:?}", e))
     }
 
     pub(crate) async fn stop(&mut self) -> Result<()> {
@@ -250,6 +248,7 @@ impl VmmInstance {
         if let Some(socket_path) = self.ttrpc_socket_path.take() {
             let _ = std::fs::remove_file(socket_path);
         }
+        self.client = None;
         self.pid = None;
 
         Ok(())
@@ -259,99 +258,63 @@ impl VmmInstance {
         self.pid
     }
 
-    async fn create_vm(&self, request: vmservice::CreateVmRequest) -> Result<()> {
-        let socket_path = self.socket_path()?;
-        rpc_call(socket_path, move |client| async move {
-            client
-                .call()
-                .wait_ready(true)
-                .timeout(Some(OPENVMM_RPC_TIMEOUT))
-                .start(vmservice::Vm::CreateVm, request)
-                .await
-        })
-        .await
+    async fn create_vm(&self, request: vmservice::CreateVMRequest) -> Result<()> {
+        self.client()?
+            .create_vm(rpc_ctx(), &request)
+            .await
+            .map(|_| ())
+            .map_err(|e| anyhow!("openvmm create_vm RPC failed: {:?}", e))
     }
 
     async fn teardown_vm(&self) -> Result<()> {
-        let socket_path = self.socket_path()?;
-        rpc_call(socket_path, |client| async move {
-            client
-                .call()
-                .wait_ready(true)
-                .timeout(Some(OPENVMM_RPC_TIMEOUT))
-                .start(vmservice::Vm::TeardownVm, ())
-                .await
-        })
-        .await
+        self.client()?
+            .teardown_vm(rpc_ctx(), &Empty::new())
+            .await
+            .map(|_| ())
+            .map_err(|e| anyhow!("openvmm teardown_vm RPC failed: {:?}", e))
     }
 
     async fn quit(&self) -> Result<()> {
-        let socket_path = self.socket_path()?;
-        rpc_call(socket_path, |client| async move {
-            client
-                .call()
-                .wait_ready(true)
-                .timeout(Some(OPENVMM_RPC_TIMEOUT))
-                .start(vmservice::Vm::Quit, ())
-                .await
-        })
-        .await
+        self.client()?
+            .quit(rpc_ctx(), &Empty::new())
+            .await
+            .map(|_| ())
+            .map_err(|e| anyhow!("openvmm quit RPC failed: {:?}", e))
     }
 
-    fn socket_path(&self) -> Result<String> {
-        self.ttrpc_socket_path
+    fn client(&self) -> Result<&VmClient> {
+        self.client
             .as_ref()
-            .context("openvmm process not launched")
-            .cloned()
+            .context("openvmm TTRPC client not connected")
     }
 }
 
-async fn rpc_call<T, F, Fut>(socket_path: String, call: F) -> Result<T>
-where
-    T: Send + 'static,
-    F: FnOnce(mesh_rpc::Client) -> Fut + Send + 'static,
-    Fut: Future<Output = std::result::Result<T, mesh_rpc::service::Status>> + Send + 'static,
-{
-    tokio::task::spawn_blocking(move || -> Result<T> {
-        let (result_send, result_recv) = std::sync::mpsc::channel();
-
-        std::thread::Builder::new()
-            .name("openvmm-rpc-client".to_string())
-            .spawn(move || {
-                ovmm_pal_async::DefaultPool::run_with(
-                    |driver: ovmm_pal_async::DefaultDriver| async move {
-                        let dialer =
-                            mesh_rpc::client::UnixDialier::new(driver.clone(), socket_path);
-                        let mut builder = mesh_rpc::client::ClientBuilder::new();
-                        builder.retry_timeout(Duration::from_millis(100));
-                        let client = builder.build(&driver, dialer);
-                        let result = call(client)
-                            .await
-                            .map_err(|status| anyhow!("openvmm RPC failed: {:?}", status));
-                        let _ = result_send.send(result);
-                    },
-                );
-            })
-            .context("failed to spawn openvmm RPC client thread")?;
-
-        result_recv
-            .recv()
-            .context("openvmm RPC client thread exited without a result")?
-    })
-    .await
-    .context("openvmm RPC task join failed")?
+/// Build a per-call ttrpc context carrying the standard OpenVMM RPC timeout.
+fn rpc_ctx() -> ttrpc::context::Context {
+    ttrpc::context::with_timeout(OPENVMM_RPC_TIMEOUT.as_nanos() as i64)
 }
 
-async fn wait_for_socket(path: &str, timeout: Duration) -> Result<()> {
+/// Connect a ttrpc async client to the OpenVMM `vmservice` Unix socket, retrying
+/// until the server accepts connections or `timeout` elapses.
+async fn connect_client(socket_path: &str, timeout: Duration) -> Result<VmClient> {
+    let address = format!("unix://{socket_path}");
     let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if Path::new(path).exists() {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
 
-    anyhow::bail!("timed out waiting for socket {path}")
+    loop {
+        match ttrpc::asynchronous::Client::connect(&address) {
+            Ok(inner) => return Ok(VmClient::new(inner)),
+            Err(err) => {
+                if Instant::now() >= deadline {
+                    return Err(anyhow!(
+                        "failed to connect to openvmm TTRPC socket {socket_path}: {err:?}"
+                    ));
+                }
+                // Back off between attempts so we don't busy-spin on
+                // ECONNREFUSED/ENOENT while the child process is still starting.
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    }
 }
 
 fn resolve_openvmm_path(configured_path: &str) -> Result<PathBuf> {

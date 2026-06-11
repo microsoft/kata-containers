@@ -14,6 +14,13 @@ mod inner_device;
 mod inner_hypervisor;
 mod vmm_instance;
 
+mod vmservice;
+mod vmservice_ttrpc;
+
+mod empty {
+    pub use ::protobuf::well_known_types::empty::Empty;
+}
+
 use inner::OpenVmmInner;
 use persist::sandbox_persist::Persist;
 
