@@ -16,6 +16,7 @@
 
 MK_DIR := $(dir $(realpath $(firstword $(MAKEFILE_LIST))))
 VERSIONS_FILE := $(MK_DIR)../../../../versions.yaml
+YQ_INSTALLER := $(MK_DIR)../../../../ci/install_yq.sh
 PROTO_DIR := $(MK_DIR)protos
 OPENVMM_RAW_BASE := https://raw.githubusercontent.com/microsoft/openvmm
 VMSERVICE_PROTO_PATH := openvmm/openvmm_ttrpc_vmservice/src/vmservice.proto
@@ -25,7 +26,7 @@ YQ := $(shell command -v yq 2>/dev/null)
 .PHONY: update-proto
 update-proto:
 ifndef YQ
-	$(error "yq not found; install it (see ci/install_yq.sh) and retry")
+	$(YQ_INSTALLER)
 endif
 	@openvmm_version=$$(yq '.assets.hypervisor.openvmm.version' "$(VERSIONS_FILE)"); \
 	if [ -z "$$openvmm_version" ] || [ "$$openvmm_version" = "null" ]; then \

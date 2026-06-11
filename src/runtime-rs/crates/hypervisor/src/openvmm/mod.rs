@@ -17,9 +17,7 @@ mod vmm_instance;
 mod vmservice;
 mod vmservice_ttrpc;
 
-mod empty {
-    pub use ::protobuf::well_known_types::empty::Empty;
-}
+use ::protobuf::well_known_types::empty;
 
 use inner::OpenVmmInner;
 use persist::sandbox_persist::Persist;

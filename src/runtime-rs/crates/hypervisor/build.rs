@@ -13,21 +13,30 @@
 //! compiles the committed proto, so builds remain hermetic and offline-capable.
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Error, ErrorKind, Read, Write};
 
 /// Replace every occurrence of `from` with `to` in the file at `path`.
+///
+/// Returns an error if `from` does not appear in the file, so a patch that has
+/// silently become a no-op (e.g. the generated output changed shape) fails the
+/// build instead of passing unnoticed.
 fn replace_in_file(path: &str, from: &str, to: &str) -> std::io::Result<()> {
     let mut contents = String::new();
     File::open(path)?.read_to_string(&mut contents)?;
 
     let replaced = contents.replace(from, to);
-    if replaced != contents {
-        OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(path)?
-            .write_all(replaced.as_bytes())?;
+    if replaced == contents {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("expected to find {from:?} in {path}, but it was not present"),
+        ));
     }
+
+    OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)?
+        .write_all(replaced.as_bytes())?;
 
     Ok(())
 }
