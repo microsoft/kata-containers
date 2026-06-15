@@ -14,13 +14,13 @@ use std::{
 use super::inner::OpenVmmInner;
 use super::vmm_instance::DeferredNetworkDevice;
 use super::{
-    OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_CONSOLE_PCI_PORT,
-    OPENVMM_NET_PCI_PORT, OPENVMM_ROOTFS_PCI_PORT, OPENVMM_SHAREFS_PCI_PORT,
-    OPENVMM_STATIC_PCI_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
+    openvmm_port_pci_path, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
+    OPENVMM_CONSOLE_PCI_PORT, OPENVMM_NET_PCI_PORT, OPENVMM_ROOTFS_PCI_PORT,
+    OPENVMM_SHAREFS_PCI_PORT, OPENVMM_STATIC_PCI_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
     OPENVMM_VFIO_COLDPLUG_PORT_PREFIX,
 };
 use crate::device::driver::vfio_device::DeviceAddress;
-use crate::device::pci_path::{PciPath, PciSlot};
+use crate::device::pci_path::PciPath;
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
@@ -162,6 +162,27 @@ impl OpenVmmInner {
             .context("memory size overflow")?;
 
         // PCIe root complex: low/high MMIO windows for BAR allocation.
+        //
+        // low_mmio is the 32-bit non-prefetchable BAR pool. Each cold-plug
+        // root port consumes a bridge MMIO32 window sized for that device's
+        // 32-bit MMIO BARs (rounded up to the bridge-alignment granularity);
+        // 64-bit prefetchable BARs (e.g. H100 BAR1/2 = 128 GB, BAR3/4 = 32 MB)
+        // go in high_mmio and do NOT count here.
+        //
+        // Worst case on the bench (NVIDIA A100/H100 + NVSwitch):
+        //   8x GPU BAR0  (16 MB ea.) = 128 MB
+        //   6x NVSwitch BAR0 (32 MB ea.) = 192 MB
+        //   static + 24 block-hotplug + 16 vfio-coldplug bridge headers
+        //     (each pre-reserves an aligned MMIO32 window even when empty)
+        //     and 1 MB-aligned padding between bridges
+        //                                    ~ 150-200 MB
+        //   Total ≥ 512 MB; 640 MB gives ~2x headroom and still fits
+        //   between PCI hole start (0xC000_0000) and ECAM (0xE800_0000+).
+        //
+        // The original 320 MB window (0xc000_0000..0xd400_0000) overflows
+        // with as little as 8 GPUs + 6 NVSwitches and the openvmm worker
+        // aborts with: "low_mmio MMIO exhaustion: need 0x14500000 bytes,
+        // have 0x14000000".
         let pcie_root_complexes = vec![PcieRootComplexConfig {
             index: 0,
             name: "rc0".to_string(),
@@ -169,7 +190,7 @@ impl OpenVmmInner {
             start_bus: 0,
             end_bus: 127,
             low_mmio: PcieMmioRangeConfig::Fixed(ovmm_memory_range::MemoryRange::new(
-                0xc000_0000..0xd400_0000,
+                0xc000_0000..0xe800_0000,
             )),
             high_mmio: PcieMmioRangeConfig::Fixed(ovmm_memory_range::MemoryRange::new(
                 0x0020_3d30_0000..0x200f_3d30_0000,
@@ -181,31 +202,48 @@ impl OpenVmmInner {
                     PcieRootPortConfig {
                         name: OPENVMM_ROOTFS_PCI_PORT.to_string(),
                         hotplug: false,
-                        acs_capabilities_supported: None,
+                        // ACS (Access Control Services) capability bits the
+                        // emulated root port advertises. 0x5f = SV | TB | RR
+                        // | CR | UF | DT (everything except EC, the standard
+                        // PCIe ACS bitmask for downstream ports).
+                        //
+                        // Without ACS visible on the upstream root port, the
+                        // in-guest NVIDIA driver concludes that peer-to-peer
+                        // DMA between assigned PCI devices is not safely
+                        // supported and silently disables P2P (which leaves
+                        // NVLink fabric down on multi-GPU baseboards, since
+                        // fabricmanager needs cross-device DMA to program
+                        // the switches). OpenVMM's CLI default when the user
+                        // passes --pcie-root-port is also 0x5f for the same
+                        // reason — kata previously left this None, which
+                        // OpenVMM treats as "do not synthesize the ACS
+                        // capability at all" (see
+                        // openvmm/vm/devices/pci/pcie/src/port.rs:353).
+                        acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     },
                     PcieRootPortConfig {
                         name: OPENVMM_SHAREFS_PCI_PORT.to_string(),
                         hotplug: false,
-                        acs_capabilities_supported: None,
+                        acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     },
                     PcieRootPortConfig {
                         name: OPENVMM_NET_PCI_PORT.to_string(),
                         hotplug: false,
-                        acs_capabilities_supported: None,
+                        acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     },
                     PcieRootPortConfig {
                         name: super::OPENVMM_VSOCK_PCI_PORT.to_string(),
                         hotplug: false,
-                        acs_capabilities_supported: None,
+                        acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     },
                     PcieRootPortConfig {
                         name: OPENVMM_CONSOLE_PCI_PORT.to_string(),
                         hotplug: false,
-                        acs_capabilities_supported: None,
+                        acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     },
                 ];
@@ -214,7 +252,7 @@ impl OpenVmmInner {
                     ports.push(PcieRootPortConfig {
                         name: format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
                         hotplug: true,
-                        acs_capabilities_supported: None,
+                        acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     });
                 }
@@ -227,7 +265,7 @@ impl OpenVmmInner {
                     ports.push(PcieRootPortConfig {
                         name: format!("{}{}", OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, index),
                         hotplug: false,
-                        acs_capabilities_supported: None,
+                        acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     });
                 }
@@ -464,23 +502,24 @@ impl OpenVmmInner {
                         );
                         next_vfio_port += 1;
 
-                        // openvmm's PCIe root-bus slot layout, from inner.rs:
+                        // openvmm's PCIe root-bus port layout (kata side):
                         //   [0 .. OPENVMM_STATIC_PCI_PORT_COUNT)              static
                         //   [STATIC .. STATIC + BLOCK_HOTPLUG_PORT_COUNT)     hp<N>
                         //   [STATIC + BLOCK_HOTPLUG .. + VFIO_COLDPLUG)       vfio<N>
-                        // The VFIO endpoint sits behind the port at function
-                        // 0 of its secondary bus; kata's two-slot PciPath
-                        // convention represents that as [root_slot, 0],
-                        // matching how OpenVmmHotplugPort::new builds the
-                        // block hotplug pci_path.
-                        let root_slot = OPENVMM_STATIC_PCI_PORT_COUNT
+                        //
+                        // OpenVMM packs root ports into multi-function
+                        // device slots (device = i/8, function = i%8) so
+                        // the total port count is bounded by the MMIO
+                        // budget, not PCI's 5-bit device-number field.
+                        // The VFIO endpoint sits behind the port at
+                        // function 0 of its secondary bus, which kata
+                        // models as the second slot in the PciPath.
+                        let openvmm_port_index = OPENVMM_STATIC_PCI_PORT_COUNT
                             + OPENVMM_BLOCK_HOTPLUG_PORT_COUNT
                             + port_index;
-                        let pci_path = PciPath::new(vec![
-                            PciSlot::new(root_slot),
-                            PciSlot::new(0),
-                        ])
-                        .context("openvmm: failed to build guest PciPath for VFIO device")?;
+                        let pci_path = openvmm_port_pci_path(openvmm_port_index).context(
+                            "openvmm: failed to build guest PciPath for VFIO device",
+                        )?;
 
                         info!(
                             sl!(),
