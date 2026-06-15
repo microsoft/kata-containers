@@ -200,7 +200,11 @@ impl SwapTask {
         if let DeviceType::Block(device) = device_info {
             let ret = if let Some(pci_path) = device.config.pci_path.clone() {
                 self.agent.add_swap(agent::types::AddSwapRequest {
-                    pci_path: pci_path.slots.iter().map(|slot| slot.0 as u32).collect(),
+                    pci_path: pci_path
+                        .slots
+                        .iter()
+                        .map(|slot| slot.device as u32)
+                        .collect(),
                 })
             } else if !device.config.virt_path.is_empty() {
                 self.agent.add_swap_path(agent::types::AddSwapPathRequest {
