@@ -37,12 +37,52 @@ pub(crate) const OPENVMM_VSOCK_PCI_PORT: &str = "rp3";
 pub(crate) const OPENVMM_CONSOLE_PCI_PORT: &str = "rp4";
 pub(crate) const OPENVMM_STATIC_PCI_PORT_COUNT: u8 = 5;
 pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX: &str = "hp";
+// OpenVMM packs root ports into multi-function device slots (see
+// `GenericPcieRootComplex::new` in microsoft/openvmm:
+// `vm/devices/pci/pcie/src/root.rs`): port index `i` lands at PCI
+// `device = i / 8, function = i % 8` on bus 0 of the root complex
+// (assuming `first_port_device_number = 0`, which the openvmm worker
+// uses when no IOMMU is attached). That gives us up to 8 root ports
+// per device slot and 32 device slots, i.e. 256 ports total — far
+// beyond anything kata needs.
+//
+// Each cold-plug root port still consumes a bridge MMIO32 window for
+// the device's 32-bit BARs, so the practical ceiling is the size of
+// the low_mmio window allocated above, not the PCI device-number
+// space. The numbers below cover any Azure SKU we know about (HGX
+// A100 8-GPU baseboard = 14 VFIO devices, HGX H100 = 16, plus IB VFs).
 pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_COUNT: u8 = 24;
 /// Number of pre-reserved PCIe root ports for cold-plug VFIO pass-through
 /// devices (e.g., GPUs, NVSwitches). These ports are created with
 /// `hotplug: false` so the guest sees the assigned devices at boot.
 pub(crate) const OPENVMM_VFIO_COLDPLUG_PORT_PREFIX: &str = "vfio";
-pub(crate) const OPENVMM_VFIO_COLDPLUG_PORT_COUNT: u8 = 16;
+pub(crate) const OPENVMM_VFIO_COLDPLUG_PORT_COUNT: u8 = 32;
+
+/// Map an OpenVMM PCIe root-port index (0..256) to the corresponding
+/// guest PciPath. OpenVMM packs root ports into multi-function device
+/// slots, so port `i` is at `device = i / 8, function = i % 8` on bus 0
+/// of the root complex. The endpoint device sits at function 0 of the
+/// root port's secondary bus, which kata represents as the second
+/// PciSlot in the path.
+///
+/// We need this because the original single-function layout
+/// (`root_slot = STATIC + BLOCK_HOTPLUG + port_index`) overflowed PCI's
+/// 5-bit slot field (32 slot numbers) as soon as the shim allocated
+/// more than 3 VFIO ports on a build that also keeps the full 24-slot
+/// block-hotplug pool. The multi-function layout matches what OpenVMM
+/// itself programs into the guest's PCIe config space, so the agent's
+/// QOM-path → pci_path parser also accepts what we send.
+pub(crate) fn openvmm_port_pci_path(
+    port_index: u8,
+) -> anyhow::Result<crate::device::pci_path::PciPath> {
+    use crate::device::pci_path::{PciPath, PciSlot};
+    let device = port_index / 8;
+    let function = port_index % 8;
+    let root = PciSlot::with_function(device, function)?;
+    let endpoint = PciSlot::new(0);
+    PciPath::new(vec![root, endpoint])
+        .ok_or_else(|| anyhow::anyhow!("openvmm: failed to build PciPath for port {}", port_index))
+}
 
 /// The OpenVMM hypervisor struct, wrapping inner state behind a lock.
 pub struct OpenVmm {
