@@ -473,8 +473,40 @@ impl CgroupsResourceInner {
         // to the sandbox cgroup, it results in those threads being under
         // the overhead cgroup, and allowing them to consume more resources
         // than we have allocated for the sandbox.
+        //
+        // This check only applies to out-of-process VMMs (clh, qemu, fc):
+        // their vCPU threads belong to a child process that can be moved
+        // into the sandbox cgroup without disturbing the runtime, and a
+        // missing vCPU thread ID list at this point indicates a bug.
+        //
+        // For in-process VMMs (openvmm, and dragonball when sandbox
+        // _cgroup_only=false is opted into), the runtime IS the VMM:
+        // vCPU threads are threads of the runtime process and cannot be
+        // moved to a different cgroup without dragging the runtime
+        // (including the in-process VMM that allocated guest RAM) with
+        // them. Those drivers therefore return an empty VcpuThreadIds
+        // from `get_thread_ids` by design (see e.g.
+        // openvmm/inner_hypervisor.rs::get_thread_ids), which makes
+        // `update_sandbox_cgroups` return Ok(false). Treating that as
+        // fatal would make sandbox_cgroup_only=false unusable on those
+        // hypervisors, even though that setting is required for
+        // non-trivial guest RAM (otherwise the pod's memcg OOM-kills
+        // the in-process VMM during VM construction).
+        //
+        // Distinguish the two cases by asking the hypervisor for its
+        // PID list: an in-process VMM reports only the runtime's own
+        // PID, while an out-of-process VMM reports a distinct child.
         if self.overhead_cgroup.is_some() && !updated {
-            return Err(anyhow!("hypervisor cannot be moved to sandbox cgroup"));
+            let hv_pids = hypervisor.get_pids().await.unwrap_or_default();
+            let runtime_pid = process::id();
+            let in_process_vmm =
+                hv_pids.is_empty() || hv_pids.iter().all(|p| *p == runtime_pid);
+            if !in_process_vmm {
+                return Err(anyhow!("hypervisor cannot be moved to sandbox cgroup"));
+            }
+            // In-process VMM: leave the runtime (and its vCPU threads)
+            // in the overhead cgroup. The sandbox cgroup will materialise
+            // once container processes are added to it.
         }
 
         Ok(())

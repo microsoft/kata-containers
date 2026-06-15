@@ -649,7 +649,18 @@ ifeq ($(USE_OPENVMM),true)
     KERNELTYPE_OPENVMM = uncompressed
     KERNEL_NAME_OPENVMM = $(call MAKE_KERNEL_NAME,$(KERNELTYPE_OPENVMM))
     KERNELPATH_OPENVMM = $(KERNELDIR)/$(KERNEL_NAME_OPENVMM)
-    DEFSANDBOXCGROUPONLY_OPENVMM := true
+    # OpenVMM runs in-process inside the runtime-rs shim, so guest RAM is
+    # shmem owned by the shim PID. When sandbox_cgroup_only=true the shim
+    # lives in the pod cgroup, capped by container.limits.memory, and the
+    # kernel OOM-killer fires during VM construction for any non-trivial
+    # guest RAM size ("misc mshv: Failed to populate memory region: -12",
+    # surfaced as "ttrpc: closed" / FailedCreatePodSandBox). Default to
+    # false so the shim+VMM land in the unconstrained kata-overhead
+    # cgroup; container processes still get sized correctly because they
+    # are placed in the pod cgroup at the usual time. Operators that
+    # want the legacy single-cgroup behaviour can still flip this back
+    # in configuration-openvmm.toml.
+    DEFSANDBOXCGROUPONLY_OPENVMM := false
     DEFSTATICRESOURCEMGMT_OPENVMM := false
     DEFSHAREDFS_OPENVMM := virtio-fs
     RUNTIMENAME := virt_container
