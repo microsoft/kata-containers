@@ -16,8 +16,11 @@ use super::vmm_instance::DeferredNetworkDevice;
 use super::{
     OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_CONSOLE_PCI_PORT,
     OPENVMM_NET_PCI_PORT, OPENVMM_ROOTFS_PCI_PORT, OPENVMM_SHAREFS_PCI_PORT,
-    OPENVMM_VFIO_COLDPLUG_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_PREFIX,
+    OPENVMM_STATIC_PCI_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
+    OPENVMM_VFIO_COLDPLUG_PORT_PREFIX,
 };
+use crate::device::driver::vfio_device::DeviceAddress;
+use crate::device::pci_path::{PciPath, PciSlot};
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
@@ -372,6 +375,141 @@ impl OpenVmmInner {
                             blk_dev.config.path_on_host);
                     } else {
                         deferred_block_devices.push(dev.clone());
+                    }
+                }
+                crate::DeviceType::VfioModern(vfio_handle) => {
+                    // Modern-VFIO cold-plug. This is the variant that
+                    // prepare_coldplug_cdi_devices() and
+                    // prepare_coldplug_raw_vfio_devices() actually emit, so
+                    // this arm is what fires for kubelet CDI grants and for
+                    // `ctr --device /dev/vfio/N` standalone containers.
+                    //
+                    // For each PCI function in the IOMMU group we:
+                    //   1. Reserve the next pre-allocated vfio<N> root port.
+                    //   2. Open the group fd and hand it to openvmm.
+                    //   3. Compute the guest PciPath [root_slot, 0] for that
+                    //      port and write it back onto the device's
+                    //      `config.guest_pci_path`.
+                    //
+                    // Step 3 is critical: downstream `handler_devices` in
+                    // resource::manager_inner reads that field to build the
+                    // agent's `vfio-pci` `device_options`
+                    // ("HOST_BDF=GUEST_PCI_PATH"). With it unset the
+                    // container create call fails with:
+                    //     "VFIO device has no guest PCI path assigned"
+                    // even though openvmm successfully attached the device.
+                    //
+                    // `vfio_handle` is the Arc<Mutex<VfioDeviceModern>> the
+                    // VfioModern enum variant carries directly, so it locks
+                    // exactly like ch/inner_device.rs does.
+                    let mut vfio_device = vfio_handle.lock().await;
+
+                    let host_path = vfio_device.config.host_path.clone();
+                    let group_devices: Vec<_> = if !vfio_device.device.devices.is_empty() {
+                        vfio_device.device.devices.clone()
+                    } else {
+                        vec![vfio_device.device.primary.clone()]
+                    };
+                    info!(
+                        sl!(),
+                        "openvmm: cold-plug VFIO group {} ({} device(s))",
+                        host_path,
+                        group_devices.len()
+                    );
+
+                    let mut primary_pci_path: Option<PciPath> = None;
+
+                    for dev_info in &group_devices {
+                        // openvmm needs the full segment-qualified BDF
+                        // (e.g. "0001:00:00.0") so it can look up
+                        // /sys/bus/pci/devices/<bdf>. Modern VFIO stores
+                        // that as DeviceAddress::Pci(BdfAddress), whose
+                        // Display impl prints exactly that form.
+                        let host_bdf = match &dev_info.addr {
+                            DeviceAddress::Pci(bdf) => bdf.to_string(),
+                            other => {
+                                warn!(
+                                    sl!(),
+                                    "openvmm: skipping non-PCI VFIO device {} in group {}",
+                                    other,
+                                    host_path
+                                );
+                                continue;
+                            }
+                        };
+
+                        if next_vfio_port >= OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
+                            return Err(anyhow!(
+                                "openvmm: too many VFIO devices (limit {}), cannot cold-plug BDF {}",
+                                OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
+                                host_bdf
+                            ));
+                        }
+
+                        let group_fd = std::fs::OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .open(&host_path)
+                            .with_context(|| {
+                                format!(
+                                    "openvmm: failed to open VFIO group {} for BDF {}",
+                                    host_path, host_bdf
+                                )
+                            })?;
+
+                        let port_index = next_vfio_port;
+                        let port_name = format!(
+                            "{}{}",
+                            OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, port_index
+                        );
+                        next_vfio_port += 1;
+
+                        // openvmm's PCIe root-bus slot layout, from inner.rs:
+                        //   [0 .. OPENVMM_STATIC_PCI_PORT_COUNT)              static
+                        //   [STATIC .. STATIC + BLOCK_HOTPLUG_PORT_COUNT)     hp<N>
+                        //   [STATIC + BLOCK_HOTPLUG .. + VFIO_COLDPLUG)       vfio<N>
+                        // The VFIO endpoint sits behind the port at function
+                        // 0 of its secondary bus; kata's two-slot PciPath
+                        // convention represents that as [root_slot, 0],
+                        // matching how OpenVmmHotplugPort::new builds the
+                        // block hotplug pci_path.
+                        let root_slot = OPENVMM_STATIC_PCI_PORT_COUNT
+                            + OPENVMM_BLOCK_HOTPLUG_PORT_COUNT
+                            + port_index;
+                        let pci_path = PciPath::new(vec![
+                            PciSlot::new(root_slot),
+                            PciSlot::new(0),
+                        ])
+                        .context("openvmm: failed to build guest PciPath for VFIO device")?;
+
+                        info!(
+                            sl!(),
+                            "openvmm: assigning VFIO BDF {} to port {} (guest pci_path={})",
+                            host_bdf,
+                            port_name,
+                            pci_path
+                        );
+
+                        pcie_devices.push(PcieDeviceConfig {
+                            port_name,
+                            resource: vfio_assigned_device_resources::VfioDeviceHandle {
+                                pci_id: host_bdf,
+                                group: group_fd,
+                            }
+                            .into_resource(),
+                        });
+
+                        if primary_pci_path.is_none() {
+                            primary_pci_path = Some(pci_path);
+                        }
+                    }
+
+                    // handler_devices() exposes a single device per
+                    // VfioDeviceModern (the IOMMU-group primary), so we
+                    // record the primary's guest path here. Matches what
+                    // ch/inner_device.rs does in its own cold-plug branch.
+                    if let Some(pp) = primary_pci_path {
+                        vfio_device.config.guest_pci_path = Some(pp);
                     }
                 }
                 crate::DeviceType::Vfio(vfio_dev) => {

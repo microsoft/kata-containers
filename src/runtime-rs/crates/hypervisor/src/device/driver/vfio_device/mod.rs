@@ -6,7 +6,7 @@
 mod core;
 mod device;
 
-pub use core::{discover_vfio_group_device, VfioDevice};
+pub use core::{discover_vfio_group_device, DeviceAddress, VfioDevice};
 pub use device::VfioDeviceBase;
 pub use device::VfioDeviceModern;
 pub use device::VfioDeviceModernHandle;
