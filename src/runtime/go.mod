@@ -49,8 +49,8 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0
 	github.com/urfave/cli v1.22.14
-	github.com/vishvananda/netlink v1.2.1-beta.2
-	github.com/vishvananda/netns v0.0.4
+	github.com/vishvananda/netlink v1.3.1
+	github.com/vishvananda/netns v0.0.5
 	gitlab.com/nvidia/cloud-native/go-nvlib v0.0.0-20220601114329-47893b162965
 	go.opentelemetry.io/otel v1.23.1
 	go.opentelemetry.io/otel/exporters/jaeger v1.0.0

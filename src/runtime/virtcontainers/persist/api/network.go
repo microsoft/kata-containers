@@ -44,6 +44,7 @@ type PhysicalEndpoint struct {
 	BDF            string
 	Driver         string
 	VendorDeviceID string
+	NetPair        NetworkInterfacePair
 }
 
 type MacvtapEndpoint struct {

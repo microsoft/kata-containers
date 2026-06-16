@@ -123,39 +123,34 @@ func (n *LinuxNetwork) addSingleEndpoint(ctx context.Context, s *Sandbox, netInf
 
 	// Check if interface is a physical interface. Do not create
 	// tap interface/bridge if it is.
-	isPhysical, err := isPhysicalIface(netInfo.Iface.Name)
-	if err != nil {
-		return nil, err
+	isPhysical := isPhysicalIface(netInfo.Link)
+	var err error
+	idx := len(n.eps)
+
+	// Avoid endpoint naming conflicts
+	// When creating a new endpoint, we check existing endpoint names and automatically adjust the naming of the new endpoint to ensure uniqueness.
+	lastIdx := -1
+	if len(n.eps) > 0 {
+		lastEndpoint := n.eps[len(n.eps)-1]
+		re := regexp.MustCompile("[0-9]+")
+		matchStr := re.FindString(lastEndpoint.Name())
+		n, err := strconv.ParseInt(matchStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		lastIdx = int(n)
+	}
+	if idx <= lastIdx {
+		idx = lastIdx + 1
 	}
 
 	if isPhysical {
-		if s.config.HypervisorConfig.ColdPlugVFIO == config.NoPort {
-			// When `cold_plug_vfio` is set to "no-port", the PhysicalEndpoint's VFIO device cannot be attached to the guest VM.
-			// Fail early to prevent the VF interface from being unbound and rebound to the VFIO driver.
-			return nil, fmt.Errorf("unable to add PhysicalEndpoint %s because cold_plug_vfio is disabled", netInfo.Iface.Name)
-		}
 		networkLogger().WithField("interface", netInfo.Iface.Name).Info("Physical network interface found")
-		endpoint, err = createPhysicalEndpoint(netInfo)
+		isFVIODisabled := (s.config.HypervisorConfig.ColdPlugVFIO == config.NoPort)
+		endpoint, err = createPhysicalEndpoint(idx, netInfo, isFVIODisabled, n.interworkingModel)
 	} else {
 		var socketPath string
-		idx := len(n.eps)
 
-		// Avoid endpoint naming conflicts
-		// When creating a new endpoint, we check existing endpoint names and automatically adjust the naming of the new endpoint to ensure uniqueness.
-		lastIdx := -1
-		if len(n.eps) > 0 {
-			lastEndpoint := n.eps[len(n.eps)-1]
-			re := regexp.MustCompile("[0-9]+")
-			matchStr := re.FindString(lastEndpoint.Name())
-			n, err := strconv.ParseInt(matchStr, 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			lastIdx = int(n)
-		}
-		if idx <= lastIdx {
-			idx = lastIdx + 1
-		}
 		// Check if this is a dummy interface which has a vhost-user socket associated with it
 		socketPath, err = vhostUserSocketPath(netInfo)
 		if err != nil {
@@ -654,6 +649,8 @@ func getLinkForEndpoint(endpoint Endpoint, netHandle *netlink.Handle) (netlink.L
 	var link netlink.Link
 
 	switch ep := endpoint.(type) {
+	case *PhysicalEndpoint:
+		link = &netlink.Device{}
 	case *VethEndpoint:
 		link = &netlink.Veth{}
 	case *MacvlanEndpoint:
@@ -676,6 +673,10 @@ func getLinkByName(netHandle *netlink.Handle, name string, expectedLink netlink.
 	}
 
 	switch expectedLink.Type() {
+	case (&netlink.Device{}).Type():
+		if l, ok := link.(*netlink.Device); ok {
+			return l, nil
+		}
 	case (&netlink.Tuntap{}).Type():
 		if l, ok := link.(*netlink.Tuntap); ok {
 			return l, nil
