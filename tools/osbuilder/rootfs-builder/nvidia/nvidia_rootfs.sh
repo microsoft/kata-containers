@@ -26,6 +26,7 @@ AGENT_POLICY="${AGENT_POLICY:-no}"
 NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:?NVIDIA_GPU_STACK must be set}
 BUILD_VARIANT=${BUILD_VARIANT:?BUILD_VARIANT must be set}
 ARCH=${ARCH:?ARCH must be set}
+INSTALL_NVLSM=${INSTALL_NVLSM:-yes}
 
 machine_arch="${ARCH}"
 
@@ -153,13 +154,26 @@ chisseled_nvswitch() {
 	libdir=usr/lib/"${machine_arch}"-linux-gnu
 	cp -a "${stage_one}/${libdir}"/libnvidia-nscq.so.* lib/"${machine_arch}"-linux-gnu/.
 
-	# NVLINK SubnetManager dependencies
-	local nvlsm=usr/share/nvidia/nvlsm
-	mkdir -p "${nvlsm}"
+	# NVLINK SubnetManager dependencies are only needed on multi-node racks.
+	# Force-disable NVLSM when it is not explicitly present in the requested stack
+	# so stage-two does not depend on external env propagation.
+	local install_nvlsm="${INSTALL_NVLSM}"
+	if [[ ",${NVIDIA_GPU_STACK}," != *",nvlsm,"* ]]; then
+		install_nvlsm="no"
+	fi
 
-	cp -a "${stage_one}"/opt/nvidia/nvlsm/lib/libgrpc_mgr.so	lib/.
-	cp -a "${stage_one}"/opt/nvidia/nvlsm/sbin/nvlsm			sbin/.
-	cp -a "${stage_one}/${nvlsm}"/*.conf						"${nvlsm}"/.
+	if [[ "${install_nvlsm}" == "yes" ]]; then
+		local nvlsm=usr/share/nvidia/nvlsm
+		mkdir -p "${nvlsm}"
+
+		if [[ -f "${stage_one}/opt/nvidia/nvlsm/lib/libgrpc_mgr.so" && -f "${stage_one}/opt/nvidia/nvlsm/sbin/nvlsm" ]]; then
+			cp -a "${stage_one}"/opt/nvidia/nvlsm/lib/libgrpc_mgr.so	lib/.
+			cp -a "${stage_one}"/opt/nvidia/nvlsm/sbin/nvlsm		sbin/.
+			cp -a "${stage_one}/${nvlsm}"/*.conf					"${nvlsm}"/.
+		else
+			echo "nvidia: warning: nvlsm requested but nvlsm artifacts are missing in stage-one; skipping nvlsm userspace copy"
+		fi
+	fi
 	# Redirect all the logs to syslog instead of logging to file
 	sed -i 's|^LOG_USE_SYSLOG=.*|LOG_USE_SYSLOG=1|' usr/share/nvidia/nvswitch/fabricmanager.cfg
 }
