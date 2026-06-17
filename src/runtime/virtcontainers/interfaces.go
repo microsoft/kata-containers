@@ -55,6 +55,10 @@ type VCSandbox interface {
 	StatsContainer(ctx context.Context, containerID string) (ContainerStats, error)
 	PauseContainer(ctx context.Context, containerID string) error
 	ResumeContainer(ctx context.Context, containerID string) error
+	PauseVM(ctx context.Context) error
+	SaveVM(destDir string) error
+	ResumeVM(ctx context.Context) error
+	Save() error
 	EnterContainer(ctx context.Context, containerID string, cmd types.Cmd) (VCContainer, *Process, error)
 	UpdateContainer(ctx context.Context, containerID string, resources specs.LinuxResources) error
 	WaitProcess(ctx context.Context, containerID, processID string) (int32, error)
