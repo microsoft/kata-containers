@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 
@@ -41,6 +42,7 @@ const (
 	PolicyUrl             = "/policy"
 	IP6TablesUrl          = "/ip6tables"
 	MetricsUrl            = "/metrics"
+	SnapshotUrl           = "/snapshot"
 )
 
 var (
@@ -295,6 +297,7 @@ func (s *service) startManagementServer(ctx context.Context, ociSpec *specs.Spec
 	m.Handle(IPTablesUrl, http.HandlerFunc(s.ipTablesHandler))
 	m.Handle(PolicyUrl, http.HandlerFunc(s.policyHandler))
 	m.Handle(IP6TablesUrl, http.HandlerFunc(s.ip6TablesHandler))
+	m.Handle(SnapshotUrl, http.HandlerFunc(s.snapshotHandler))
 	s.mountPprofHandle(m, ociSpec)
 
 	// register shim metrics
@@ -360,6 +363,155 @@ func SocketPathRust(id string) string {
 // NOTE: this code is only called by the go shim management implementation.
 func ServerSocketAddress(id string) string {
 	return fmt.Sprintf("unix://%s", SocketPathGo(id))
+}
+
+// SnapshotBaseDir is where kata-runtime snapshot dirs live by default. It is
+// the canonical default shared by the shim handler and the kata-runtime CLI.
+const SnapshotBaseDir = "/run/vc/vm/snapshots"
+
+// snapshotManifest is the small self-describing record we drop alongside the
+// cloud-hypervisor snapshot files so a future restore can identify the source.
+type snapshotManifest struct {
+	SourceSandboxID string `json:"source_sandbox_id"`
+	Timestamp       string `json:"timestamp"`
+}
+
+// snapshotHandler triggers a VM snapshot of the sandbox over the management socket.
+// the request body, when non-empty, is the destination directory; otherwise we
+// default to SnapshotBaseDir/<sandbox-id>.
+func (s *service) snapshotHandler(w http.ResponseWriter, r *http.Request) {
+	logger := shimMgtLog.WithFields(logrus.Fields{"handler": "snapshot"})
+
+	switch r.Method {
+	case http.MethodPut:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			logger.WithError(err).Error("failed to read request body")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+		destDir := strings.TrimSpace(string(body))
+		if destDir == "" {
+			destDir = filepath.Join(SnapshotBaseDir, s.id)
+		}
+
+		if err := s.doSnapshot(context.Background(), destDir); err != nil {
+			logger.WithError(err).Error("snapshot failed")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+		fmt.Fprint(w, destDir)
+
+	default:
+		w.WriteHeader(http.StatusNotImplemented)
+	}
+}
+
+// doSnapshot pauses the VM, persists kata sandbox state, snapshots the VM memory
+// to destDir, copies the persist.json into destDir, writes a manifest, then
+// resumes the VM. the VM is always resumed (best-effort) even on failure so the
+// running pod is not left frozen.
+func (s *service) doSnapshot(ctx context.Context, destDir string) error {
+	if err := os.MkdirAll(destDir, 0700); err != nil {
+		return err
+	}
+
+	if err := s.sandbox.PauseVM(ctx); err != nil {
+		return err
+	}
+	// always try to resume so a partial failure never leaves the pod paused.
+	defer s.sandbox.ResumeVM(ctx)
+
+	// persist kata-level sandbox state to /run/vc/sbs/<id>/persist.json.
+	if err := s.sandbox.Save(); err != nil {
+		return err
+	}
+	// snapshot the VM memory + device state into destDir via cloud-hypervisor.
+	if err := s.sandbox.SaveVM(destDir); err != nil {
+		return err
+	}
+	// repoint config.json's memory zone file at the in-dir memory-ranges so the
+	// snapshot is self-contained for memory (the source path it inherits is the
+	// shared template/source memory, outside this dir). without this, a restore
+	// that reads config.json mmaps the wrong file (or fails if it is gone).
+	if err := makeConfigSelfContained(destDir); err != nil {
+		return err
+	}
+	// bundle the persist.json into the snapshot dir alongside the memory/state files.
+	if err := s.copyPersistInto(destDir); err != nil {
+		return err
+	}
+	return s.writeSnapshotManifest(destDir)
+}
+
+// makeConfigSelfContained rewrites config.json's memory zone backing-file paths
+// to point at the memory-ranges file inside destDir. cloud-hypervisor writes the
+// snapshot's config.json from the live VmConfig, whose memory.zones[].file still
+// names the source memory path (e.g. /run/vc/vm/template/memory) outside destDir.
+// On restore CLH opens that path to back the memory zone, so a relocated snapshot
+// (or a GC'd source) would fail. Pointing it at the in-dir memory-ranges makes the
+// snapshot dir's memory self-contained. (Disks are not rewritten here; that is
+// separate, larger work for cross-host portability.)
+func makeConfigSelfContained(destDir string) error {
+	configPath := filepath.Join(destDir, "config.json")
+	memoryRanges := filepath.Join(destDir, "memory-ranges")
+	if _, err := os.Stat(memoryRanges); err != nil {
+		// no memory-ranges file: nothing to repoint, leave config as-is.
+		return nil
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return err
+	}
+	mem, ok := cfg["memory"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	zones, ok := mem["zones"].([]interface{})
+	if !ok {
+		return nil
+	}
+	for _, z := range zones {
+		if zm, ok := z.(map[string]interface{}); ok {
+			zm["file"] = memoryRanges
+		}
+	}
+	out, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, out, 0600)
+}
+
+// copyPersistInto copies /run/vc/sbs/<id>/persist.json into destDir.
+func (s *service) copyPersistInto(destDir string) error {
+	src := filepath.Join("/run/vc/sbs", s.id, "persist.json")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		// persist.json may legitimately be absent on some configs; not fatal.
+		shimMgtLog.WithError(err).WithField("src", src).Warn("no persist.json to bundle")
+		return nil
+	}
+	return os.WriteFile(filepath.Join(destDir, "persist.json"), data, 0600)
+}
+
+// writeSnapshotManifest drops a small kata-snapshot.json describing the source.
+func (s *service) writeSnapshotManifest(destDir string) error {
+	m := snapshotManifest{
+		SourceSandboxID: s.id,
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+	}
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(destDir, "kata-snapshot.json"), b, 0600)
 }
 
 // ClientSocketAddress returns the address of the unix domain socket for communicating with the

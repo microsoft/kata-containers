@@ -1858,6 +1858,24 @@ func (s *Sandbox) ResumeContainer(ctx context.Context, containerID string) error
 	return nil
 }
 
+// PauseVM pauses the sandbox's VM.
+func (s *Sandbox) PauseVM(ctx context.Context) error {
+	s.Logger().Info("pause vm")
+	return s.hypervisor.PauseVM(ctx)
+}
+
+// SaveVM saves the sandbox's VM state to the given destination directory.
+func (s *Sandbox) SaveVM(destDir string) error {
+	s.Logger().Info("save vm to dir")
+	return s.hypervisor.SaveVM(destDir)
+}
+
+// ResumeVM resumes the sandbox's paused VM.
+func (s *Sandbox) ResumeVM(ctx context.Context) error {
+	s.Logger().Info("resume vm")
+	return s.hypervisor.ResumeVM(ctx)
+}
+
 // createContainers registers all containers, create the
 // containers in the guest.
 func (s *Sandbox) createContainers(ctx context.Context) error {
