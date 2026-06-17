@@ -273,3 +273,23 @@ func (s *Sandbox) SetIPTables(ctx context.Context, isIPv6 bool, data []byte) err
 func (s *Sandbox) SetPolicy(ctx context.Context, policy string) error {
 	return nil
 }
+
+// PauseVM implements the VCSandbox function of the same name.
+func (s *Sandbox) PauseVM(ctx context.Context) error {
+	return nil
+}
+
+// SaveVM implements the VCSandbox function of the same name.
+func (s *Sandbox) SaveVM(destDir string) error {
+	return nil
+}
+
+// ResumeVM implements the VCSandbox function of the same name.
+func (s *Sandbox) ResumeVM(ctx context.Context) error {
+	return nil
+}
+
+// Save implements the VCSandbox function of the same name.
+func (s *Sandbox) Save() error {
+	return nil
+}
