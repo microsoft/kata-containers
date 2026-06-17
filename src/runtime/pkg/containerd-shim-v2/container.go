@@ -39,6 +39,8 @@ type container struct {
 	status      task.Status
 	terminal    bool
 	mounted     bool
+
+	restorePauseIOArmPending bool
 }
 
 func newContainer(s *service, r *taskAPI.CreateTaskRequest, containerType vc.ContainerType, spec *specs.Spec, mounted bool) (*container, error) {

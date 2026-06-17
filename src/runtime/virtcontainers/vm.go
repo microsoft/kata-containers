@@ -8,6 +8,7 @@ package virtcontainers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -41,6 +42,9 @@ type VMConfig struct {
 	HypervisorType   HypervisorType
 	AgentConfig      KataAgentConfig
 	HypervisorConfig HypervisorConfig
+
+	// RestoreNetEndpoints supplies fresh TAP FDs for a restored NIC.
+	RestoreNetEndpoints []Endpoint `json:"-"`
 }
 
 func (c *VMConfig) Valid() error {
@@ -135,6 +139,14 @@ func newVM(ctx context.Context, config VMConfig, restoreSnapshotDir string) (*VM
 		return nil, err
 	}
 
+	// Own cleanup as soon as CreateVM launches the VMM.
+	defer func() {
+		if err != nil {
+			virtLog.WithField("vm", id).WithError(err).Info("clean up vm")
+			hypervisor.StopVM(ctx, false)
+		}
+	}()
+
 	// 2. setup agent
 	newAagentFunc := getNewAgentFunc(ctx)
 	agent := newAagentFunc()
@@ -151,6 +163,15 @@ func newVM(ctx context.Context, config VMConfig, restoreSnapshotDir string) (*VM
 
 	// 3. boot up (or restore) the guest vm
 	if restoreSnapshotDir != "" {
+		if len(config.RestoreNetEndpoints) > 0 {
+			clh, ok := hypervisor.(*cloudHypervisor)
+			if !ok {
+				return nil, fmt.Errorf("kata restore failed: net_fds require cloud-hypervisor")
+			}
+			if err = clh.stageRestoreNet(config.RestoreNetEndpoints); err != nil {
+				return nil, fmt.Errorf("stage restore net_fds: %w", err)
+			}
+		}
 		if err = hypervisor.RestoreVM(ctx, restoreSnapshotDir); err != nil {
 			return nil, err
 		}
@@ -159,13 +180,6 @@ func newVM(ctx context.Context, config VMConfig, restoreSnapshotDir string) (*VM
 			return nil, err
 		}
 	}
-
-	defer func() {
-		if err != nil {
-			virtLog.WithField("vm", id).WithError(err).Info("clean up vm")
-			hypervisor.StopVM(ctx, false)
-		}
-	}()
 
 	// 4. Check agent aliveness
 	// Restored VMs (e.g. clones from a template) are paused, do not Check

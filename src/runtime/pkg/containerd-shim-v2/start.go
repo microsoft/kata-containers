@@ -34,12 +34,17 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 		return err
 	}
 
+	if c.cType.IsSandbox() && s.restoredSandbox {
+		c.status = task.Status_RUNNING
+		c.restorePauseIOArmPending = true
+		return nil
+	}
+
 	if c.cType.IsSandbox() {
-		err := s.sandbox.Start(ctx)
-		if err != nil {
+		if err := s.sandbox.Start(ctx); err != nil {
 			return err
 		}
-		// Start monitor after starting sandbox
+		var err error
 		s.monitor, err = s.sandbox.Monitor(ctx)
 		if err != nil {
 			return err
@@ -59,17 +64,26 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 			}
 		}()
 
-		// We use s.ctx(`ctx` derived from `s.ctx`) to check for cancellation of the
-		// shim context and the context passed to startContainer for tracing.
 		go watchOOMEvents(ctx, s)
-	} else {
-		_, err := s.sandbox.StartContainer(ctx, c.id)
+	} else if s.restoredSandbox {
+		// The workload is already live; resume the VM and restore its network identity.
+		if err := s.sandbox.FinalizeRestoreNetwork(ctx); err != nil {
+			return err
+		}
+		var err error
+		s.monitor, err = s.sandbox.Monitor(ctx)
 		if err != nil {
 			return err
 		}
+		go watchSandbox(ctx, s)
+		go watchOOMEvents(ctx, s)
+		if err := armDeferredRestoredPauseTask(ctx, s); err != nil {
+			return err
+		}
+	} else if _, err := s.sandbox.StartContainer(ctx, c.id); err != nil {
+		return err
 	}
 
-	// Run post-start OCI hooks.
 	err := katautils.EnterNetNS(s.sandbox.GetNetNs(), func() error {
 		return katautils.PostStartHooks(ctx, *c.spec, s.sandbox.ID(), c.bundle)
 	})
@@ -107,6 +121,37 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 
 	go wait(ctx, s, c, "")
 
+	return nil
+}
+
+// armDeferredRestoredPauseTask attaches pause-task I/O after the restored VM is resumed.
+func armDeferredRestoredPauseTask(ctx context.Context, s *service) error {
+	c := s.containers[s.id]
+	if c == nil || !c.cType.IsSandbox() {
+		return fmt.Errorf("kata restore failed: pause task %s is not registered", s.id)
+	}
+	if !c.restorePauseIOArmPending {
+		return fmt.Errorf("kata restore failed: pause task %s is not pending IO arming", c.id)
+	}
+
+	stdin, stdout, stderr, err := s.sandbox.IOStream(c.id, c.id)
+	if err != nil {
+		return fmt.Errorf("kata restore failed: open pause task IO: %w", err)
+	}
+	c.stdinPipe = stdin
+	if c.stdin != "" || c.stdout != "" || c.stderr != "" {
+		tty, err := newTtyIO(ctx, s.namespace, c.id, c.stdin, c.stdout, c.stderr, c.terminal)
+		if err != nil {
+			return fmt.Errorf("kata restore failed: create pause task IO: %w", err)
+		}
+		c.ttyio = tty
+		go ioCopy(shimLog.WithField("container", c.id), c.exitIOch, c.stdinCloser, tty, stdin, stdout, stderr)
+	} else {
+		close(c.exitIOch)
+		close(c.stdinCloser)
+	}
+	go wait(ctx, s, c, "")
+	c.restorePauseIOArmPending = false
 	return nil
 }
 

@@ -43,6 +43,9 @@ const (
 	// HypervisorPath is a sandbox annotation for passing a per container path pointing at the hypervisor that will run the container VM.
 	HypervisorPath = kataAnnotHypervisorPrefix + "path"
 
+	// RestoreFrom names the snapshot used to restore this sandbox.
+	RestoreFrom = kataAnnotationsPrefix + "restore-from"
+
 	// JailerPath is a sandbox annotation for passing a per container path pointing at the jailer that will constrain the container VM.
 	JailerPath = kataAnnotHypervisorPrefix + "jailer_path"
 

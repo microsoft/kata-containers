@@ -274,6 +274,8 @@ type Sandbox struct {
 	// multiple times for hot-plugged network device when Sandbox has multiple
 	// containers.
 	hotplugNetworkConfigApplied bool
+
+	restoreNetFence bool
 }
 
 // ID returns the sandbox identifier string.
@@ -1213,6 +1215,16 @@ func (s *Sandbox) removeNetwork(ctx context.Context) error {
 	span, ctx := katatrace.Trace(ctx, s.Logger(), "removeNetwork", sandboxTracingTags, map[string]string{"sandbox_id": s.id})
 	defer span.End()
 
+	if s.restoreNetFence {
+		if err := s.network.Run(ctx, func() error {
+			for _, ep := range s.network.Endpoints() {
+				cleanupRestoreTCFence(ep)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
 	return s.network.RemoveEndpoints(ctx, s, nil, false)
 }
 
@@ -2010,6 +2022,24 @@ func (s *Sandbox) ResumeContainer(ctx context.Context, containerID string) error
 		return err
 	}
 	return nil
+}
+
+// PauseVM pauses the sandbox's VM.
+func (s *Sandbox) PauseVM(ctx context.Context) error {
+	s.Logger().Info("pause vm")
+	return s.hypervisor.PauseVM(ctx)
+}
+
+// SaveVM saves the sandbox's VM state to the given destination directory.
+func (s *Sandbox) SaveVM(destDir string) error {
+	s.Logger().Info("save vm to dir")
+	return s.hypervisor.SaveVM(destDir)
+}
+
+// ResumeVM resumes the sandbox's paused VM.
+func (s *Sandbox) ResumeVM(ctx context.Context) error {
+	s.Logger().Info("resume vm")
+	return s.hypervisor.ResumeVM(ctx)
 }
 
 // createContainers registers all containers, create the

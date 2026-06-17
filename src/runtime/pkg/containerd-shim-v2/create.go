@@ -97,6 +97,21 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 	if err != nil {
 		return nil, err
 	}
+	restoreFrom, isRestore := ociSpec.Annotations[annotations.RestoreFrom]
+	// pod annotations reach workload containers; only sandbox creation dispatches restore.
+	if isRestore && s.sandbox == nil {
+		if restoreFrom == "" {
+			return nil, fmt.Errorf("kata restore failed: restore source is required")
+		}
+		if containerType != virtcontainers.PodSandbox {
+			return nil, fmt.Errorf("kata restore failed: restore-from is only supported on pod sandboxes")
+		}
+		if h := ociSpec.Hooks; h != nil &&
+			(len(h.Prestart) > 0 || len(h.CreateRuntime) > 0 || len(h.CreateContainer) > 0 ||
+				len(h.StartContainer) > 0 || len(h.Poststart) > 0 || len(h.Poststop) > 0) {
+			return nil, fmt.Errorf("kata restore failed: sandbox OCI hooks are not supported")
+		}
+	}
 
 	disableOutput := noNeedForOutput(detach, ociSpec.Process.Terminal)
 	rootfs := filepath.Join(r.Bundle, "rootfs")
@@ -187,10 +202,37 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 		// ctx will be canceled after this rpc service call, but the sandbox will live
 		// across multiple rpc service calls.
 		//
-		sandbox, _, err := katautils.CreateSandbox(s.ctx, vci, *ociSpec, *s.config, rootFs, r.ID, bundlePath, disableOutput, false)
+		var sandbox virtcontainers.VCSandbox
+		if isRestore {
+			// snapshot storage is caller-owned, so Kata trusts the annotation path.
+			snapDir := filepath.Clean(restoreFrom)
+			if !filepath.IsAbs(snapDir) {
+				snapDir = filepath.Join(SnapshotBaseDir, snapDir)
+			}
+			shimLog.WithFields(logrus.Fields{"restore-from": restoreFrom, "snapshot-dir": snapDir, "sandbox": r.ID}).Info("dispatching restore-from-snapshot")
+			// Use the target pod's live netns, never the snapshot's source netns.
+			var netNSPath string
+			if ociSpec.Linux != nil {
+				for _, ns := range ociSpec.Linux.Namespaces {
+					if ns.Type == specs.NetworkNamespace && ns.Path != "" {
+						netNSPath = ns.Path
+					}
+				}
+			}
+			sandbox, err = virtcontainers.RestoreSandbox(s.ctx, snapDir, virtcontainers.RestoreOpts{
+				SandboxID:      r.ID,
+				HypervisorPath: s.config.HypervisorConfig.HypervisorPath,
+				KernelPath:     s.config.HypervisorConfig.KernelPath,
+				ImagePath:      s.config.HypervisorConfig.ImagePath,
+				NetNSPath:      netNSPath,
+			})
+		} else {
+			sandbox, _, err = katautils.CreateSandbox(s.ctx, vci, *ociSpec, *s.config, rootFs, r.ID, bundlePath, disableOutput, false)
+		}
 		if err != nil {
 			return nil, err
 		}
+		s.restoredSandbox = isRestore
 		s.sandbox = sandbox
 		pid, err := s.sandbox.GetHypervisorPid()
 		if err != nil {
@@ -208,6 +250,19 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 
 		if s.sandbox == nil {
 			return nil, fmt.Errorf("BUG: Cannot start the container, since the sandbox hasn't been created")
+		}
+
+		if s.restoredSandbox {
+			removeCDIAnnotations(ociSpec.Annotations)
+			contConfig, err := oci.ContainerConfig(*ociSpec, bundlePath, r.ID, disableOutput)
+			if err != nil {
+				return nil, err
+			}
+			contConfig.RootFs = rootFs
+			if _, err = s.sandbox.RestoreContainer(ctx, contConfig); err != nil {
+				return nil, err
+			}
+			break
 		}
 
 		if rootFs.Mounted, err = checkAndMount(s, r); err != nil {

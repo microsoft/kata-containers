@@ -47,6 +47,8 @@ type VCSandbox interface {
 	Delete(ctx context.Context) error
 	Status() SandboxStatus
 	CreateContainer(ctx context.Context, contConfig ContainerConfig) (VCContainer, error)
+	RestoreContainer(ctx context.Context, contConfig ContainerConfig) (VCContainer, error)
+	FinalizeRestoreNetwork(ctx context.Context) error
 	DeleteContainer(ctx context.Context, containerID string) (VCContainer, error)
 	StartContainer(ctx context.Context, containerID string) (VCContainer, error)
 	StopContainer(ctx context.Context, containerID string, force bool) (VCContainer, error)
@@ -55,6 +57,10 @@ type VCSandbox interface {
 	StatsContainer(ctx context.Context, containerID string) (ContainerStats, error)
 	PauseContainer(ctx context.Context, containerID string) error
 	ResumeContainer(ctx context.Context, containerID string) error
+	PauseVM(ctx context.Context) error
+	SaveVM(destDir string) error
+	ResumeVM(ctx context.Context) error
+	Save() error
 	EnterContainer(ctx context.Context, containerID string, cmd types.Cmd) (VCContainer, *Process, error)
 	UpdateContainer(ctx context.Context, containerID string, resources specs.LinuxResources) error
 	WaitProcess(ctx context.Context, containerID, processID string) (int32, error)
