@@ -56,6 +56,16 @@ const (
 	// DragonballHypervisor is the Dragonball hypervisor.
 	DragonballHypervisor HypervisorType = "dragonball"
 
+	// OpenvmmHypervisor is the OpenVMM hypervisor.
+	//
+	// Like Dragonball, OpenVMM is only driven by the runtime-rs (Rust) shim;
+	// the legacy Go runtime never launches it. The type exists so the Go
+	// kata-runtime CLI can parse [hypervisor.openvmm] sections and report the
+	// backend honestly for read-only commands (list, env, check). It maps to
+	// the mock hypervisor in NewHypervisor() because the Go runtime has no
+	// OpenVMM VM driver of its own.
+	OpenvmmHypervisor HypervisorType = "openvmm"
+
 	// VirtFrameworkHypervisor is the Darwin Virtualization.framework hypervisor
 	VirtframeworkHypervisor HypervisorType = "virtframework"
 
@@ -388,6 +398,9 @@ func (hType *HypervisorType) Set(value string) error {
 	case "dragonball":
 		*hType = DragonballHypervisor
 		return nil
+	case "openvmm":
+		*hType = OpenvmmHypervisor
+		return nil
 	case "virtframework":
 		*hType = VirtframeworkHypervisor
 		return nil
@@ -413,6 +426,8 @@ func (hType *HypervisorType) String() string {
 		return string(ClhHypervisor)
 	case StratovirtHypervisor:
 		return string(StratovirtHypervisor)
+	case OpenvmmHypervisor:
+		return string(OpenvmmHypervisor)
 	case RemoteHypervisor:
 		return string(RemoteHypervisor)
 	case MockHypervisor:

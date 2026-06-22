@@ -38,6 +38,11 @@ func NewHypervisor(hType HypervisorType) (Hypervisor, error) {
 		return &stratovirt{}, nil
 	case DragonballHypervisor:
 		return &mockHypervisor{}, nil
+	case OpenvmmHypervisor:
+		// OpenVMM is a runtime-rs-only (Rust) VMM; the legacy Go runtime
+		// never launches it, so – like Dragonball – it resolves to the mock
+		// hypervisor. The Go CLI only parses/reports the config.
+		return &mockHypervisor{}, nil
 	case RemoteHypervisor:
 		return &remoteHypervisor{}, nil
 	case MockHypervisor:
