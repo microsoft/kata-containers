@@ -112,6 +112,34 @@ fn is_containerd_v3_config(pluginid: &str) -> bool {
     pluginid == CONTAINERD_V3_RUNTIME_PLUGIN_ID
 }
 
+/// Resolve the CRI runtime plugin id to use when registering a Kata runtime.
+///
+/// When writing into a *drop-in* file, the plugin id must match the schema
+/// containerd actually interprets the drop-in at — NOT the `version` declared
+/// in the legacy main `/etc/containerd/config.toml`.
+///
+/// Drop-in files are version-less, and containerd interprets them at its
+/// native config schema. `use_drop_in` is only ever true for containerd 2.0
+/// or newer (see `is_containerd_capable_of_using_drop_in_files`), whose
+/// native schema is v3 — even when the on-disk main config still declares
+/// `version = 2`. Picking the v2 plugin id (`io.containerd.grpc.v1.cri`) from
+/// that stale `version = 2` would make containerd's v3 loader treat the
+/// imported runtime as an unknown plugin and silently drop it, so the runtime
+/// never registers and never appears in `containerd config dump`.
+///
+/// For non-drop-in installs (containerd 1.x) the main config IS the runtime
+/// registration and is interpreted at its declared version, so fall back to
+/// reading that version from the file.
+fn resolve_runtime_plugin_id<'a>(paths: &'a ContainerdPaths, runtime: &str) -> Result<&'a str> {
+    if let Some(plugin_id) = paths.plugin_id.as_deref() {
+        return Ok(plugin_id);
+    }
+    if paths.use_drop_in {
+        return Ok(CONTAINERD_V3_RUNTIME_PLUGIN_ID);
+    }
+    get_containerd_pluginid(&paths.config_file, runtime)
+}
+
 /// Maps the runtime plugin ID (from `get_containerd_pluginid` / K3s `paths.plugin_id`) to the table where
 /// disable_snapshot_annotations lives. In v3 that's the *images* plugin; in v2 the CRI .containerd subtable.
 pub(crate) fn pluginid_for_snapshotter_annotations(
@@ -309,10 +337,7 @@ pub async fn configure_containerd_runtime(
 
     let paths = config.get_containerd_paths(runtime).await?;
     let configuration_file = get_containerd_output_path(&paths);
-    let pluginid = match paths.plugin_id.as_deref() {
-        Some(plugin_id) => plugin_id,
-        None => get_containerd_pluginid(&paths.config_file, runtime)?,
-    };
+    let pluginid = resolve_runtime_plugin_id(&paths, runtime)?;
 
     log::info!(
         "configure_containerd_runtime: Writing to {:?}, pluginid={}",
@@ -389,10 +414,7 @@ pub async fn configure_custom_containerd_runtime(
 
     let paths = config.get_containerd_paths(runtime).await?;
     let configuration_file = get_containerd_output_path(&paths);
-    let pluginid = match paths.plugin_id.as_deref() {
-        Some(plugin_id) => plugin_id,
-        None => get_containerd_pluginid(&paths.config_file, runtime)?,
-    };
+    let pluginid = resolve_runtime_plugin_id(&paths, runtime)?;
 
     log::info!(
         "configure_custom_containerd_runtime: Writing to {:?}, pluginid={}",
@@ -883,6 +905,59 @@ mod tests {
         std::fs::write(f.path(), "version = 2\n").unwrap();
         assert_eq!(
             get_containerd_pluginid(f.path().to_str().unwrap(), "containerd").unwrap(),
+            CONTAINERD_V2_CRI_PLUGIN_ID
+        );
+    }
+
+    fn make_paths(
+        config_file: &str,
+        use_drop_in: bool,
+        plugin_id: Option<&str>,
+    ) -> ContainerdPaths {
+        ContainerdPaths {
+            config_file: config_file.to_string(),
+            backup_file: format!("{config_file}.bak"),
+            imports_file: Some(config_file.to_string()),
+            drop_in_file: "/opt/kata/containerd/config.d/kata-deploy.toml".to_string(),
+            use_drop_in,
+            plugin_id: plugin_id.map(|s| s.to_string()),
+        }
+    }
+
+    /// A drop-in is version-less and interpreted by containerd at its native
+    /// (v3) schema, even when the legacy main config still declares
+    /// `version = 2`. The runtime must therefore be registered under the v3
+    /// CRI plugin id, otherwise containerd silently drops it.
+    #[test]
+    fn test_resolve_runtime_plugin_id_drop_in_forces_v3_despite_version_2_main() {
+        let f = NamedTempFile::new().unwrap();
+        std::fs::write(f.path(), "version = 2\n").unwrap();
+        let paths = make_paths(f.path().to_str().unwrap(), true, None);
+        assert_eq!(
+            resolve_runtime_plugin_id(&paths, "containerd").unwrap(),
+            CONTAINERD_V3_RUNTIME_PLUGIN_ID
+        );
+    }
+
+    /// Without drop-in (containerd 1.x), the main config IS the registration
+    /// and is interpreted at its declared version.
+    #[test]
+    fn test_resolve_runtime_plugin_id_no_drop_in_reads_main_version() {
+        let f = NamedTempFile::new().unwrap();
+        std::fs::write(f.path(), "version = 2\n").unwrap();
+        let paths = make_paths(f.path().to_str().unwrap(), false, None);
+        assert_eq!(
+            resolve_runtime_plugin_id(&paths, "containerd").unwrap(),
+            CONTAINERD_V2_CRI_PLUGIN_ID
+        );
+    }
+
+    /// An explicit plugin id (K3s/RKE2 templates) always wins.
+    #[test]
+    fn test_resolve_runtime_plugin_id_explicit_plugin_id_wins() {
+        let paths = make_paths("/unused", true, Some(CONTAINERD_V2_CRI_PLUGIN_ID));
+        assert_eq!(
+            resolve_runtime_plugin_id(&paths, "k3s").unwrap(),
             CONTAINERD_V2_CRI_PLUGIN_ID
         );
     }
