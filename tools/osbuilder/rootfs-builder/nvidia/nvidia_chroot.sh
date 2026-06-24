@@ -34,6 +34,30 @@ is_feature_enabled() {
 	[[ ",${nvidia_gpu_stack}," == *",${feature},"* ]]
 }
 
+# apt-mark hold only the packages from "$@" that are actually installed.
+#
+# Some NVIDIA packages (notably nvidia-imex and libnvidia-nscq) dropped
+# their -${driver_major} branch suffix starting with the 580 driver: the
+# CUDA repo still ships the suffixed name as a Provides: alias, so
+# `apt install nvidia-imex-580` succeeds and pulls in the real binary
+# package `nvidia-imex`, but `apt-mark hold nvidia-imex-580` fails with
+# "Can't select installed nor candidate version" because apt-mark does
+# not follow Provides:. That non-zero exit trips `set -e` and aborts the
+# rootfs build. Filter the list to what dpkg actually has installed so
+# the hold succeeds regardless of which alias name apt resolved.
+hold_if_installed() {
+	local pkg
+	local -a installed=()
+	for pkg in "$@"; do
+		if dpkg-query -W -f='${Status}\n' "${pkg}" 2>/dev/null \
+			| grep -q '^install ok installed$'; then
+			installed+=("${pkg}")
+		fi
+	done
+	[[ "${#installed[@]}" -eq 0 ]] && return 0
+	apt-mark hold "${installed[@]}"
+}
+
 install_nvidia_ctk() {
 	echo "chroot: Installing NVIDIA GPU container runtime"
 	# Base  gives a nvidia-ctk and the nvidia-container-runtime
@@ -70,8 +94,11 @@ install_nvidia_fabricmanager() {
 
 	# shellcheck disable=SC2086 # pkgs is an intentionally word-split list
 	eval "${APT_INSTALL}" ${pkgs}
+	# Include the unversioned aliases: on driver 580+ libnvidia-nscq
+	# no longer ships with a -${driver_major} suffix, so apt resolves
+	# the request via Provides: to the bare name. See hold_if_installed.
 	# shellcheck disable=SC2086
-	apt-mark hold ${pkgs}
+	hold_if_installed ${pkgs} libnvidia-nscq
 }
 
 install_userspace_components() {
@@ -115,7 +142,11 @@ install_userspace_components() {
 	)
 
 	eval "${APT_INSTALL}" "${userspace_pkgs[@]}"
-	apt-mark hold "${userspace_pkgs[@]}"
+	# Include the unversioned aliases for the two packages that dropped
+	# their -${driver_major} suffix on driver 580+ (nvidia-imex and
+	# libnvidia-nscq); hold_if_installed filters to whatever apt actually
+	# resolved so this works on both old and new driver branches.
+	hold_if_installed "${userspace_pkgs[@]}" nvidia-imex libnvidia-nscq
 
 	# Needed for confidential-data-hub and NVAT runtime dependencies
 	eval "${APT_INSTALL}" cryptsetup-bin dmsetup         \
