@@ -17,10 +17,10 @@ use tokio::sync::mpsc;
 
 use super::vmm_instance::VmmInstance;
 use super::{
-    OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
+    openvmm_port_pci_path, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
     OPENVMM_STATIC_PCI_PORT_COUNT,
 };
-use crate::device::pci_path::{PciPath, PciSlot};
+use crate::device::pci_path::PciPath;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpenVmmHotplugPort {
@@ -30,9 +30,13 @@ pub(crate) struct OpenVmmHotplugPort {
 
 impl OpenVmmHotplugPort {
     fn new(index: u8) -> Self {
-        let root_slot = OPENVMM_STATIC_PCI_PORT_COUNT + index;
-        let pci_path = PciPath::new(vec![PciSlot::new(root_slot), PciSlot::new(0)])
-            .expect("openvmm hotplug port PCI path must be non-empty");
+        // OpenVMM packs root ports into multi-function device slots:
+        // port index `STATIC + index` lands at `device = (..)/8,
+        // function = (..)%8` of bus 0. See
+        // `openvmm_port_pci_path` for the rationale.
+        let port_index = OPENVMM_STATIC_PCI_PORT_COUNT + index;
+        let pci_path = openvmm_port_pci_path(port_index)
+            .expect("openvmm hotplug port PCI path must be valid");
 
         Self {
             name: format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
