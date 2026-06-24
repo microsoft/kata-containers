@@ -334,7 +334,14 @@ compress_rootfs() {
 			continue
 		fi
 		strip "${file}"
-		"${BUILD_DIR}"/upx-4.2.4-"${distro_arch}"_linux/upx --best --lzma "${file}"
+		# UPX refuses to compress some ELF binaries with a non-zero exit
+		# (NotCompressibleException, typically on Go binaries with large
+		# embedded sections). Treat that as a benign skip instead of aborting
+		# the whole rootfs build -- the file is already stripped and remains
+		# fully usable, just not compressed.
+		if ! "${BUILD_DIR}"/upx-4.2.4-"${distro_arch}"_linux/upx --best --lzma "${file}"; then
+			echo "nvidia: skip compressing (UPX refused): ${file}"
+		fi
 	done
 
  	# While I was playing with compression the executable flag on
