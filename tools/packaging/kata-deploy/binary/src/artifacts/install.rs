@@ -902,6 +902,35 @@ fn generate_kernel_params_drop_in(config: &Config, shim: &str) -> Result<String>
     if config.debug {
         additional_params.push("agent.log=debug".to_string());
         additional_params.push("initcall_debug".to_string());
+        // NVRC (the NVIDIA Kata-aware GPU pre-init that runs as PID 1 in
+        // the NVIDIA UVM rootfs) needs two kernel cmdline knobs to make
+        // its log!() output visible in the host journal; either knob
+        // alone leaves the diagnostic capture at "kernel printks + a
+        // final NVRC panic line" which cannot discriminate P1 (bad
+        // cmdline) from P2 (bad runtime state) from P3 (missing binary).
+        //
+        //   nvrc.log=debug   Lifts NVRC's runtime log filter from `Off`
+        //                    (the hard-coded default in
+        //                    `kmsg::kernlog_setup()`) up to Debug. Required
+        //                    or every `info!()`/`debug!()` call in NVRC
+        //                    is a no-op regardless of priority.
+        //
+        //   loglevel=8       Raises the kernel's `console_loglevel` so
+        //                    userspace writes to /dev/kmsg below KERN_WARNING
+        //                    (4) get forwarded to the console (= the
+        //                    `openvmm-guest:` journal stream on the host).
+        //                    NVRC's `kernlog` crate emits info!() at
+        //                    KERN_INFO (6) and debug!() at KERN_DEBUG (7);
+        //                    with the default `console_loglevel=4` both are
+        //                    ring-buffered but never forwarded to console
+        //                    -- which is why nvrc.log alone is invisible.
+        //                    NVRC's final panic IS visible because the panic
+        //                    hook writes at KERN_EMERG (0), always forwarded.
+        //
+        // Both knobs are harmless on non-NVRC images (kata-agent ignores
+        // unknown cmdline tokens; loglevel=8 only changes verbosity).
+        additional_params.push("nvrc.log=debug".to_string());
+        additional_params.push("loglevel=8".to_string());
     }
 
     // If no additional params to set, return empty (base params are in original config)
