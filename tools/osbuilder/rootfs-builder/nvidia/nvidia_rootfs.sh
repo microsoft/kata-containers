@@ -230,11 +230,20 @@ chisseled_compute() {
 	cp -a "${stage_one}"/usr/bin/nvidia-ctk           bin/.
 	cp -a "${stage_one}"/usr/bin/nvidia-cdi-hook      bin/.
 	# nv-fabricmanager and nvidia-imex both execve /usr/bin/nvidia-modprobe
-	# (the path is hard-coded in their .data section) to create the
-	# /dev/nvidia* device nodes and load the nvidia kernel module on demand.
-	# Without it both daemons exit at startup before fabric init can run.
+	# (the path is hard-coded in their .data section via
+	# libnvidia-modprobe-utils) to create the /dev/nvidia* device nodes and
+	# load the nvidia kernel module on demand. Without it both daemons exit
+	# at startup before fabric init can run.
+	#
+	# Ship the binary into BOTH /bin and /usr/bin so the hard-coded
+	# /usr/bin/nvidia-modprobe path always resolves, regardless of whether
+	# the surrounding chisseled_* helpers materialised usr/bin/ as a real
+	# directory (e.g. chisseled_init dropping kata-agent into usr/bin/, which
+	# turns a subsequent `ln -s ../bin usr/bin` into a no-op that creates
+	# usr/bin/bin -> ../bin instead of replacing the directory).
 	cp -a "${stage_one}"/usr/bin/nvidia-modprobe      bin/.
-	ln -s ../bin usr/bin
+	install -d -m 0755 usr/bin
+	cp -a "${stage_one}"/usr/bin/nvidia-modprobe      usr/bin/.
 }
 
 chisseled_gpudirect() {
