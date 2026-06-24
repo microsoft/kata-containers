@@ -47,14 +47,26 @@ install_nvidia_fabricmanager() {
 	}
 	echo "chroot: Install NVIDIA fabricmanager"
 
+	# Pin fabricmanager / nscq / nvlsm to the same driver MAJOR version
+	# (see the rationale in install_userspace_components). Without the
+	# -${driver_major} suffix apt resolves the unversioned names to
+	# whatever the latest driver branch is in the CUDA repo, which can
+	# pull in a mismatched nvidia-persistenced and break the build.
+	local driver_version=""
+	if [[ "${nvidia_gpu_stack}" =~ driver=([^,]+) ]]; then
+		driver_version="${BASH_REMATCH[1]}"
+	fi
+	[[ -z "${driver_version}" ]] && die "NVIDIA_GPU_STACK must include 'driver=<version>'"
+	local driver_major="${driver_version%%.*}"
+
 	# nvlsm is the NVIDIA Subnet Manager for NVSwitch fabric. It is only
 	# required by certain multi-node NVSwitch products (e.g. GB200 NVL72);
 	# single-node NVSwitch hosts (e.g. HGX A100, HGX H100) do not need it,
 	# and pulling it in unconditionally drags an extra ~100 MB of NVLSM
 	# tooling into every fabricmanager-enabled UVM. Gate it on a dedicated
 	# NVIDIA_GPU_STACK token so consumers opt in only when they need it.
-	local pkgs="nvidia-fabricmanager libnvidia-nscq"
-	is_feature_enabled "nvlsm" && pkgs+=" nvlsm"
+	local pkgs="nvidia-fabricmanager-${driver_major} libnvidia-nscq-${driver_major}"
+	is_feature_enabled "nvlsm" && pkgs+=" nvlsm-${driver_major}"
 
 	# shellcheck disable=SC2086 # pkgs is an intentionally word-split list
 	eval "${APT_INSTALL}" ${pkgs}
@@ -72,15 +84,38 @@ install_userspace_components() {
 	echo "chroot: driver_version: ${driver_version}"
 
 	eval "${APT_INSTALL}" nvidia-driver-pinning-"${driver_version}"
-	eval "${APT_INSTALL}" nvidia-imex nvidia-firmware    \
-		libnvidia-cfg1 libnvidia-gl libnvidia-extra      \
-		libnvidia-decode libnvidia-fbc1 libnvidia-encode \
-		libnvidia-nscq libnvidia-compute nvidia-settings
 
-	apt-mark hold nvidia-imex nvidia-firmware            \
-		libnvidia-cfg1 libnvidia-gl libnvidia-extra      \
-		libnvidia-decode libnvidia-fbc1 libnvidia-encode \
-		libnvidia-nscq libnvidia-compute nvidia-settings
+	# Pin every libnvidia-* / nvidia-imex / nvidia-firmware install to
+	# the driver MAJOR version (e.g. "580" from "580.159.04"). The
+	# nvidia-driver-pinning-${driver_version} package above drops a pin
+	# that covers binary packages produced by src:nvidia-graphics-drivers-
+	# ${driver_major} (i.e. libnvidia-compute-580, libnvidia-gl-580, ...),
+	# but it does NOT cover the unversioned metapackage names
+	# (libnvidia-compute, libnvidia-gl, ...). As soon as the CUDA repo
+	# ships a newer driver branch (e.g. 610), those unversioned metas
+	# resolve to the new branch and apt fails with unmet dependencies
+	# like:
+	#   libnvidia-compute : Depends: nvidia-persistenced (= 610.43.02-1ubuntu1)
+	# Installing the versioned binary names directly sidesteps the
+	# resolver entirely. nvidia-settings is intentionally left unversioned
+	# because it is not part of the driver-branch closure.
+	local driver_major="${driver_version%%.*}"
+	local userspace_pkgs=(
+		"nvidia-imex-${driver_major}"
+		"nvidia-firmware-${driver_major}"
+		"libnvidia-cfg1-${driver_major}"
+		"libnvidia-gl-${driver_major}"
+		"libnvidia-extra-${driver_major}"
+		"libnvidia-decode-${driver_major}"
+		"libnvidia-fbc1-${driver_major}"
+		"libnvidia-encode-${driver_major}"
+		"libnvidia-nscq-${driver_major}"
+		"libnvidia-compute-${driver_major}"
+		"nvidia-settings"
+	)
+
+	eval "${APT_INSTALL}" "${userspace_pkgs[@]}"
+	apt-mark hold "${userspace_pkgs[@]}"
 
 	# Needed for confidential-data-hub and NVAT runtime dependencies
 	eval "${APT_INSTALL}" cryptsetup-bin dmsetup         \
