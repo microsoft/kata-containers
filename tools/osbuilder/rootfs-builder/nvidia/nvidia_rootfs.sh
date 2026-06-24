@@ -318,6 +318,47 @@ chisseled_init() {
 	echo 'options nvidia NVreg_DeviceFileMode=0660' > "${conf_file}"
 }
 
+# Ship debug tools (bash + strace) and their .so deps into the chiseled
+# rootfs. apt-installed by install_debug_tools() in nvidia_chroot.sh so the
+# stage_one tree already has them.
+#
+# Why these two:
+#   * bash    -- the kata-static-busybox shipped to the chiseled rootfs
+#                is a minimized build (no `sh` applet). Without bash any
+#                shebang-based scripting is broken, including the
+#                dev-time /init wrappers used by debug tooling.
+#   * strace  -- the canonical "what syscall failed?" tool. Several
+#                silent fabricmanager / NVRC failures (exit 255 with no
+#                useful stderr, hung IOCTLs on /dev/nvidia*) are only
+#                diagnosable by tracing the actual syscall sequence
+#                inside the UVM.
+#
+# Lib copies match the runtime deps that the Ubuntu noble packages of
+# bash + strace actually pull in (verified by apt install output 2026-06-25):
+#   bash    -> libtinfo + libreadline + libncursesw  (terminal + line editing)
+#   strace  -> libunwind                              (stack trace symbols)
+# libc + ld-linux are already shipped by chisseled_init / chisseled_compute.
+# Other libs sometimes seen in `ldd strace` on richer distros (libdw,
+# libelf, libz, libzstd, liblzma, libbz2) are NOT linked by Ubuntu's strace,
+# so we don't try to copy them.
+chisseled_debug_tools() {
+	echo "nvidia: chisseling debug tools (bash + strace)"
+
+	local libdir="lib/${machine_arch}-linux-gnu"
+
+	# bash + its terminal-handling deps. Bash imports libreadline +
+	# libncursesw at startup (DT_NEEDED) even for non-interactive script
+	# execution; missing either makes /bin/bash fail to exec.
+	cp -a "${stage_one}"/usr/bin/bash             bin/.
+	cp -a "${stage_one}/${libdir}"/libtinfo.so.6*       "${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libreadline.so.8*    "${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libncursesw.so.6*    "${libdir}"/.
+
+	# strace + its single runtime dep on Ubuntu noble (libunwind).
+	cp -a "${stage_one}"/usr/bin/strace           bin/.
+	cp -a "${stage_one}/${libdir}"/libunwind.so.8*      "${libdir}"/.
+}
+
 compress_rootfs() {
 	echo "nvidia: compressing rootfs"
 
@@ -467,6 +508,7 @@ setup_nvidia_gpu_rootfs_stage_two() {
 
 		chisseled_init
 		chisseled_iptables
+		chisseled_debug_tools
 
 		IFS=',' read -r -a stack_components <<< "${NVIDIA_GPU_STACK}"
 

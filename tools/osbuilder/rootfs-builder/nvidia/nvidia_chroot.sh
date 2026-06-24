@@ -156,6 +156,35 @@ install_userspace_components() {
 		e2fsprogs libxml2
 }
 
+# Install debug binaries that the chiseled rootfs builder will cherry-pick
+# into the GPU UVM image. Specifically:
+#
+#   bash    -- a real POSIX shell. The kata-static-busybox shipped to the
+#              chiseled rootfs is a minimized build that intentionally
+#              omits the `sh` applet (saving ~100 KiB at the cost of any
+#              shebang-based scripting being broken). Carrying a real bash
+#              binary in the chiseled rootfs lets dev-time /init wrappers
+#              (e.g. dev-swap-nvrc.sh P5 diagnostic init script) just work
+#              with `#!/bin/bash`. ~1 MiB binary + libtinfo dep.
+#
+#   strace  -- the canonical "what syscall failed?" tool. Several silent
+#              fabricmanager / NVRC failures (exit 255 with no useful
+#              stderr, hung IOCTLs on /dev/nvidia*) are only diagnosable
+#              by tracing the actual syscall sequence inside the UVM. The
+#              5 MiB strace + libdw/libelf/libz/libzstd/liblzma deps are
+#              negligible against the new ROOT_FREE_SPACE=512 MiB headroom.
+#
+# These are installed unconditionally (no `is_feature_enabled` gate)
+# because the size cost is trivial and the debugging upside is high. If a
+# future production tenant cares about the ~10 MiB they can be gated
+# behind a new `debug-tools` NVIDIA_GPU_STACK token.
+install_debug_tools() {
+	echo "chroot: Install debug tools (bash + strace) for chiseled rootfs to pick up"
+
+	eval "${APT_INSTALL}" bash strace
+	apt-mark hold bash strace
+}
+
 setup_apt_repositories() {
 	echo "chroot: Setup APT repositories"
 
@@ -275,4 +304,5 @@ install_nvidia_fabricmanager
 install_nvidia_ctk
 install_nvidia_dcgm
 install_devkit_packages
+install_debug_tools
 cleanup_rootfs
