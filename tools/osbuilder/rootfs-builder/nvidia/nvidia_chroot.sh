@@ -46,8 +46,20 @@ install_nvidia_fabricmanager() {
 		return
 	}
 	echo "chroot: Install NVIDIA fabricmanager"
-	eval "${APT_INSTALL}" nvidia-fabricmanager libnvidia-nscq nvlsm
-	apt-mark hold nvidia-fabricmanager libnvidia-nscq nvlsm
+
+	# nvlsm is the NVIDIA Subnet Manager for NVSwitch fabric. It is only
+	# required by certain multi-node NVSwitch products (e.g. GB200 NVL72);
+	# single-node NVSwitch hosts (e.g. HGX A100, HGX H100) do not need it,
+	# and pulling it in unconditionally drags an extra ~100 MB of NVLSM
+	# tooling into every fabricmanager-enabled UVM. Gate it on a dedicated
+	# NVIDIA_GPU_STACK token so consumers opt in only when they need it.
+	local pkgs="nvidia-fabricmanager libnvidia-nscq"
+	is_feature_enabled "nvlsm" && pkgs+=" nvlsm"
+
+	# shellcheck disable=SC2086 # pkgs is an intentionally word-split list
+	eval "${APT_INSTALL}" ${pkgs}
+	# shellcheck disable=SC2086
+	apt-mark hold ${pkgs}
 }
 
 install_userspace_components() {
