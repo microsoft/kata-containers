@@ -885,6 +885,13 @@ install_image_nvidia_gpu() {
 	export MEASURED_ROOTFS="yes"
 	export FS_TYPE="erofs"
 	export SKIP_DAX_HEADER="yes"
+	# Add free space to the rootfs partition so the deployed image-nvidia.img
+	# has headroom for in-place dev-time modifications (NVRC binary swaps,
+	# diagnostic /init wrappers, strace runs from /var/log, fabricmanager.log
+	# growth, etc.). 512 MiB matches the upper bound seen across the rebuilt
+	# rootfs flavors (chiseled ~470 MiB + debug tools ~10 MiB + future growth)
+	# while staying well under typical host disk budgets.
+	export ROOT_FREE_SPACE="${ROOT_FREE_SPACE:-512}"
 	local version
 	version=$(get_latest_nvidia_driver_version)
 	EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
