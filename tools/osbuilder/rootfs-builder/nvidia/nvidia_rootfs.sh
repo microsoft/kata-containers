@@ -229,6 +229,11 @@ chisseled_compute() {
 	cp -a "${stage_one}"/usr/bin/nvidia-smi           bin/.
 	cp -a "${stage_one}"/usr/bin/nvidia-ctk           bin/.
 	cp -a "${stage_one}"/usr/bin/nvidia-cdi-hook      bin/.
+	# nv-fabricmanager and nvidia-imex both execve /usr/bin/nvidia-modprobe
+	# (the path is hard-coded in their .data section) to create the
+	# /dev/nvidia* device nodes and load the nvidia kernel module on demand.
+	# Without it both daemons exit at startup before fabric init can run.
+	cp -a "${stage_one}"/usr/bin/nvidia-modprobe      bin/.
 	ln -s ../bin usr/bin
 }
 
