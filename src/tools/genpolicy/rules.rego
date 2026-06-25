@@ -14,6 +14,7 @@ default GetDiagnosticDataRequest := false
 
 # Default values, returned by OPA when rules cannot be evaluated to true.
 default AddARPNeighborsRequest := false
+default AddSwapPathRequest := false
 default AddSwapRequest := false
 default CloseStdinRequest := false
 default CopyFileRequest := false
@@ -21,6 +22,8 @@ default CreateContainerRequest := false
 default CreateSandboxRequest := false
 default DestroySandboxRequest := true
 default ExecProcessRequest := false
+default GetIPTablesRequest := false
+default GetMetricsRequest := false
 default GetOOMEventRequest := true
 default GuestDetailsRequest := true
 default ListInterfacesRequest := false
@@ -34,8 +37,10 @@ default ReadStreamRequest := false
 default RemoveContainerRequest := false
 default RemoveStaleVirtiofsShareMountsRequest := true
 default ReseedRandomDevRequest := false
+default ResizeVolumeRequest := false
 default ResumeContainerRequest := false
 default SetGuestDateTimeRequest := false
+default SetIPTablesRequest := false
 default SetPolicyRequest := false
 default SignalProcessRequest := false
 default StartContainerRequest := false
