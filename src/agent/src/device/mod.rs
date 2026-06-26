@@ -435,15 +435,19 @@ pub async fn handle_cdi_devices(
     cdi_timeout: time::Duration,
     extra_devices: &[String],
 ) -> Result<()> {
-    if let Some(container_type) = spec
-        .annotations()
-        .as_ref()
-        .and_then(|a| a.get("io.katacontainers.pkg.oci.container_type"))
-    {
-        if container_type == "pod_sandbox" {
-            return Ok(());
-        }
-    }
+    // NB: we deliberately do NOT short-circuit on
+    //   spec.annotations["io.katacontainers.pkg.oci.container_type"] == "pod_sandbox"
+    // here. The earlier version of this function did, on the theory that in CRI
+    // flow the pod_sandbox (pause) container should not receive GPU/CDI edits.
+    // That's correct for CRI but the wrong gate to check: in CRI the pause
+    // container's CreateContainer call has no `cdi.k8s.io/*` annotations at
+    // all, so the `devices.is_empty()` check below returns Ok cleanly without
+    // doing anything. Meanwhile non-CRI clients like nerdctl label every
+    // container as `pod_sandbox` (they have no separate pause concept) and
+    // legitimately request CDI devices via `--device nvidia.com/gpu=N`, which
+    // end up as `cdi.k8s.io/*` annotations on that same sandbox container.
+    // Honouring those annotations is the whole point of the CDI integration,
+    // so we let the annotation-based check below decide.
 
     let mut devices = match spec.annotations().as_ref() {
         Some(annotations) => parse_annotations(annotations)?.1,
@@ -2266,5 +2270,99 @@ mod tests {
             "an absent kind should take the wait/timeout path, got: {}",
             msg
         );
+    }
+
+    /// Regression test for the pod_sandbox early-return that used to bypass
+    /// CDI injection for any container labeled
+    /// `io.katacontainers.pkg.oci.container_type=pod_sandbox`.
+    /// nerdctl labels every single-container "pod" as pod_sandbox while still
+    /// using `cdi.k8s.io/*` annotations to request GPU devices; that
+    /// combination must inject like any other CDI request. See
+    /// handle_cdi_devices for the full rationale.
+    #[tokio::test]
+    async fn test_handle_cdi_devices_pod_sandbox_with_annotations() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let mut spec = Spec::default();
+
+        let mut annotations = HashMap::new();
+        annotations.insert(
+            "io.katacontainers.pkg.oci.container_type".to_string(),
+            "pod_sandbox".to_string(),
+        );
+        annotations.insert("cdi.k8s.io/vfio8".to_string(), "kata.com/gpu=0".to_string());
+        spec.set_annotations(Some(annotations));
+
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let cdi_file = temp_dir.path().join("kata.json");
+
+        // Minimal but valid CDI spec: one device with one node edit.
+        let cdi_content = r#"{
+            "cdiVersion": "0.6.0",
+            "kind": "kata.com/gpu",
+            "devices": [
+                {
+                    "name": "0",
+                    "containerEdits": {
+                        "deviceNodes": [
+                            { "path": "/dev/zero" }
+                        ]
+                    }
+                }
+            ]
+        }"#;
+        fs::write(&cdi_file, cdi_content).expect("Failed to write CDI file");
+
+        let res = handle_cdi_devices(
+            &logger,
+            &mut spec,
+            temp_dir.path().to_str().unwrap(),
+            Duration::from_secs(0),
+            &[],
+        )
+        .await;
+        assert!(res.is_ok(), "{}", res.err().unwrap());
+
+        // The CDI inject MUST have happened: the device node from the CDI
+        // spec ends up in linux.resources.devices.
+        let linux = spec.linux().as_ref().expect("linux section missing");
+        let devices = linux
+            .resources()
+            .as_ref()
+            .and_then(|r| r.devices().as_ref())
+            .expect("CDI inject did not populate linux.resources.devices");
+        assert_eq!(
+            devices.len(),
+            1,
+            "pod_sandbox container with cdi.k8s.io/* annotations must still \
+             receive CDI device edits; got: {devices:?}"
+        );
+    }
+
+    /// Companion to the test above: a pod_sandbox container with NO CDI
+    /// annotations (the CRI pause-container shape) must still no-op cleanly.
+    #[tokio::test]
+    async fn test_handle_cdi_devices_pod_sandbox_without_annotations() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let mut spec = Spec::default();
+
+        let mut annotations = HashMap::new();
+        annotations.insert(
+            "io.katacontainers.pkg.oci.container_type".to_string(),
+            "pod_sandbox".to_string(),
+        );
+        spec.set_annotations(Some(annotations));
+
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let res = handle_cdi_devices(
+            &logger,
+            &mut spec,
+            temp_dir.path().to_str().unwrap(),
+            Duration::from_secs(0),
+            &[],
+        )
+        .await;
+        assert!(res.is_ok(), "{}", res.err().unwrap());
+        // linux section must still be untouched / None — we did not inject.
+        assert!(spec.linux().is_none());
     }
 }
