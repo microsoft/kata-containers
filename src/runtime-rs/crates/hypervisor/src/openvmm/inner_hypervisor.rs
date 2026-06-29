@@ -27,8 +27,9 @@ use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 use openvmm_defs::config::{
     Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig, LoadMode,
-    MemoryConfig as OvmmMemoryConfig, PcieDeviceConfig, PcieMmioRangeConfig,
-    PcieRootComplexConfig, PcieRootPortConfig, ProcessorTopologyConfig, VmbusConfig,
+    MemoryConfig as OvmmMemoryConfig, NumaNode, NumaTopology, PciePortConfig,
+    PcieDeviceConfig, PcieMmioRangeConfig, PcieRootComplexConfig, ProcessorTopologyConfig,
+    VmbusConfig, VpAssignment,
 };
 use vm_resource::kind::VmbusDeviceHandleKind;
 use vm_resource::IntoResource;
@@ -197,10 +198,13 @@ impl OpenVmmInner {
             )),
             cxl: None,
             iommu: None,
+            vnode: None,
+            preserve_bars: false,
             ports: {
                 let mut ports = vec![
-                    PcieRootPortConfig {
+                    PciePortConfig {
                         name: OPENVMM_ROOTFS_PCI_PORT.to_string(),
+                        devfn: None,
                         hotplug: false,
                         // ACS (Access Control Services) capability bits the
                         // emulated root port advertises. 0x5f = SV | TB | RR
@@ -222,26 +226,30 @@ impl OpenVmmInner {
                         acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     },
-                    PcieRootPortConfig {
+                    PciePortConfig {
                         name: OPENVMM_SHAREFS_PCI_PORT.to_string(),
+                        devfn: None,
                         hotplug: false,
                         acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     },
-                    PcieRootPortConfig {
+                    PciePortConfig {
                         name: OPENVMM_NET_PCI_PORT.to_string(),
+                        devfn: None,
                         hotplug: false,
                         acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     },
-                    PcieRootPortConfig {
+                    PciePortConfig {
                         name: super::OPENVMM_VSOCK_PCI_PORT.to_string(),
+                        devfn: None,
                         hotplug: false,
                         acs_capabilities_supported: Some(0x5f),
                         cxl: false,
                     },
-                    PcieRootPortConfig {
+                    PciePortConfig {
                         name: OPENVMM_CONSOLE_PCI_PORT.to_string(),
+                        devfn: None,
                         hotplug: false,
                         acs_capabilities_supported: Some(0x5f),
                         cxl: false,
@@ -249,8 +257,9 @@ impl OpenVmmInner {
                 ];
 
                 for index in 0..OPENVMM_BLOCK_HOTPLUG_PORT_COUNT {
-                    ports.push(PcieRootPortConfig {
+                    ports.push(PciePortConfig {
                         name: format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
+                        devfn: None,
                         hotplug: true,
                         acs_capabilities_supported: Some(0x5f),
                         cxl: false,
@@ -262,8 +271,9 @@ impl OpenVmmInner {
                 // root-complex layout is stable; unused ones simply appear
                 // empty in the guest.
                 for index in 0..OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
-                    ports.push(PcieRootPortConfig {
+                    ports.push(PciePortConfig {
                         name: format!("{}{}", OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, index),
+                        devfn: None,
                         hotplug: false,
                         acs_capabilities_supported: Some(0x5f),
                         cxl: false,
@@ -534,6 +544,7 @@ impl OpenVmmInner {
                             resource: vfio_assigned_device_resources::VfioDeviceHandle {
                                 pci_id: host_bdf,
                                 group: group_fd,
+                                bar_pt: [false; 6],
                             }
                             .into_resource(),
                         });
@@ -626,6 +637,7 @@ impl OpenVmmInner {
                             resource: vfio_assigned_device_resources::VfioDeviceHandle {
                                 pci_id: full_bdf,
                                 group: group_fd,
+                                bar_pt: [false; 6],
                             }
                             .into_resource(),
                         });
@@ -670,15 +682,22 @@ impl OpenVmmInner {
             pcie_devices,
             pcie_switches: vec![],
             vpci_devices: vec![],
-            memory: OvmmMemoryConfig {
-                mem_size: mem_size_bytes,
-                prefetch_memory: false,
-                private_memory: false,
-                transparent_hugepages: false,
-                hugepages: false,
-                hugepage_size: None,
-                numa_mem_sizes: None,
+            numa: NumaTopology {
+                nodes: vec![NumaNode {
+                    mem: Some(OvmmMemoryConfig {
+                        mem_size: mem_size_bytes,
+                        prefetch_memory: false,
+                        private_memory: false,
+                        transparent_hugepages: false,
+                        hugepages: false,
+                        hugepage_size: None,
+                        host_numa_node: None,
+                    }),
+                    vps: VpAssignment::FromTopology,
+                }],
+                distances: vec![],
             },
+            pcie_generic_initiators: vec![],
             processor_topology: ProcessorTopologyConfig {
                 proc_count: self.config.cpu_info.default_vcpus.ceil() as u32,
                 vps_per_socket: None,
