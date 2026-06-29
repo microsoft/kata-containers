@@ -354,9 +354,20 @@ chisseled_debug_tools() {
 	cp -a "${stage_one}/${libdir}"/libreadline.so.8*    "${libdir}"/.
 	cp -a "${stage_one}/${libdir}"/libncursesw.so.6*    "${libdir}"/.
 
-	# strace + its single runtime dep on Ubuntu noble (libunwind).
+	# strace + (on some arches) libunwind.
+	#
+	# On Ubuntu noble x86_64 the strace 6.8 package links libunwind for
+	# symbolic backtraces and apt pulls libunwind8 in as a hard dep.
+	# On Ubuntu noble arm64 the same strace 6.8 package does NOT link
+	# libunwind (aarch64 uses a different unwind path), so apt doesn't
+	# install libunwind8 and the stage_one tree has no libunwind.so.8.
+	# Guard the copy with compgen so the build doesn't abort there.
 	cp -a "${stage_one}"/usr/bin/strace           bin/.
-	cp -a "${stage_one}/${libdir}"/libunwind.so.8*      "${libdir}"/.
+	if compgen -G "${stage_one}/${libdir}/libunwind.so.8*" >/dev/null; then
+		cp -a "${stage_one}/${libdir}"/libunwind.so.8*  "${libdir}"/.
+	else
+		echo "nvidia: strace has no libunwind dep on this arch, skipping libunwind.so.8 copy"
+	fi
 }
 
 compress_rootfs() {
