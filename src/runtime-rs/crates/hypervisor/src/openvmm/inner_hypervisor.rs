@@ -544,7 +544,7 @@ impl OpenVmmInner {
                             resource: vfio_assigned_device_resources::VfioDeviceHandle {
                                 pci_id: host_bdf,
                                 group: group_fd,
-                                bar_pt: [false; 6],
+                                bar_pt: [vfio_assigned_device_resources::BarPassthrough::None; 6],
                             }
                             .into_resource(),
                         });
@@ -637,7 +637,7 @@ impl OpenVmmInner {
                             resource: vfio_assigned_device_resources::VfioDeviceHandle {
                                 pci_id: full_bdf,
                                 group: group_fd,
-                                bar_pt: [false; 6],
+                                bar_pt: [vfio_assigned_device_resources::BarPassthrough::None; 6],
                             }
                             .into_resource(),
                         });
