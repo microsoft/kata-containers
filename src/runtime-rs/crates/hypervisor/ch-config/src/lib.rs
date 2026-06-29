@@ -115,6 +115,7 @@ pub struct DeviceConfig {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ImageType {
+    FlatVmdk,
     FixedVhd,
     Qcow2,
     Raw,

@@ -823,10 +823,13 @@ impl CloudHypervisorInner {
     pub(crate) async fn capabilities(&self) -> Result<Capabilities> {
         let mut caps = Capabilities::default();
 
-        let flags = if guest_protection_is_tdx(self.guest_protection_to_use.clone())
-            || guest_protection_is_snp(self.guest_protection_to_use.clone())
+        let flags = if self
+            .hypervisor_config()
+            .security_info
+            .confidential_guest
+            || self.hypervisor_config().shared_fs.shared_fs.is_none()
         {
-            // Protected CH guests do not use virtio-fs.
+            // Confidential guests and configurations without shared_fs use block devices.
             CapabilityBits::BlockDeviceSupport
                 | CapabilityBits::BlockDeviceHotplugSupport
                 | CapabilityBits::HybridVsockSupport
