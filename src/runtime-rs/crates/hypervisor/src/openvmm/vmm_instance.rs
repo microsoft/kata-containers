@@ -266,15 +266,41 @@ impl VmmInstance {
                             .spawn("worker-host-runner", runner.run(RegisteredWorkers))
                             .detach();
 
+                        // OpenVMM supports two Linux hypervisor backends:
+                        //   * MSHV (Microsoft Hypervisor) via /dev/mshv,
+                        //     used when running under an MSHV root partition
+                        //     (Azure Host, future direction for this stack).
+                        //   * KVM via /dev/kvm, used on hosts where MSHV is
+                        //     not available (current state on the GB200
+                        //     aarch64 bench: the kernel ships KVM, not MSHV).
+                        // Both backends are compiled in via the openvmm_resources
+                        // crate features `virt_mshv` + `virt_kvm` (see the
+                        // workspace Cargo.toml). At runtime we prefer MSHV
+                        // when /dev/mshv exists, and fall back to /dev/kvm
+                        // otherwise. This makes the same shim binary work on
+                        // both classes of host without a rebuild.
                         let hypervisor = match std::fs::File::open("/dev/mshv") {
                             Ok(mshv) => hypervisor_resources::MshvHandle { mshv }.into_resource(),
-                            Err(err) => {
-                                let _ = result_tx.send(Err(anyhow::anyhow!(
-                                    "failed to open /dev/mshv for openvmm: {}",
-                                    err
-                                )));
-                                return;
-                            }
+                            Err(mshv_err) => match std::fs::OpenOptions::new()
+                                .read(true)
+                                .write(true)
+                                .open("/dev/kvm")
+                            {
+                                Ok(kvm) => hypervisor_resources::KvmHandle {
+                                    kvm,
+                                    nested_virt: false,
+                                }
+                                .into_resource(),
+                                Err(kvm_err) => {
+                                    let _ = result_tx.send(Err(anyhow::anyhow!(
+                                        "no usable hypervisor backend for openvmm: \
+                                         /dev/mshv: {}; /dev/kvm: {}",
+                                        mshv_err,
+                                        kvm_err
+                                    )));
+                                    return;
+                                }
+                            },
                         };
 
                         let result = host

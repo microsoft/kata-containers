@@ -831,10 +831,20 @@ impl OpenVmmInner {
     }
 
     pub(crate) async fn check(&self) -> Result<()> {
-        if std::path::Path::new("/dev/mshv").exists() {
+        // Mirror vmm_instance.rs::launch backend selection: OpenVMM
+        // accepts either /dev/mshv (MSHV, preferred when both are
+        // present) or /dev/kvm (KVM, fallback). The shim is happy as
+        // long as one of them exists; the actual handle is built in
+        // launch().
+        if std::path::Path::new("/dev/mshv").exists()
+            || std::path::Path::new("/dev/kvm").exists()
+        {
             Ok(())
         } else {
-            Err(anyhow!("MSHV hypervisor is not available on this host"))
+            Err(anyhow!(
+                "no OpenVMM hypervisor backend available on this host: \
+                 neither /dev/mshv nor /dev/kvm exists"
+            ))
         }
     }
 
