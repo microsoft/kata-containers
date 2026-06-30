@@ -141,11 +141,22 @@ impl OpenVmmInner {
         // Build chipset via VmManifestBuilder. Compute the default memory
         // layout from the same builder so it stays in sync with upstream
         // OpenVMM's per-chipset defaults (see VmManifestBuilder::layout_config).
-        let manifest_builder = vm_manifest_builder::VmManifestBuilder::new(
-            vm_manifest_builder::BaseChipsetType::HyperVGen2LinuxDirect,
-            vm_manifest_builder::MachineArch::X86_64,
-        )
-        .with_serial(serial_ports);
+        //
+        // The MachineArch selection drives which chipset devices are attached
+        // (e.g. ioapic/PIC/PIT/serial-16550 on x86_64, vs PL011 on aarch64);
+        // the wrong choice yields runtime resolver errors such as
+        // "no resolver for chipset_device_handle:generic-ioapic" on aarch64.
+        // Track the build target since the shim is built per-arch.
+        #[cfg(target_arch = "x86_64")]
+        let host_arch = vm_manifest_builder::MachineArch::X86_64;
+        #[cfg(target_arch = "aarch64")]
+        let host_arch = vm_manifest_builder::MachineArch::Aarch64;
+        let manifest_builder =
+            vm_manifest_builder::VmManifestBuilder::new(
+                vm_manifest_builder::BaseChipsetType::HyperVGen2LinuxDirect,
+                host_arch,
+            )
+            .with_serial(serial_ports);
         let layout_config = manifest_builder.layout_config();
         let vm_manifest_builder::VmChipsetResult {
             chipset,
