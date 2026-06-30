@@ -136,7 +136,7 @@ virt_mshv = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab
 openvmm_core = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
 openvmm_defs = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
 hypervisor_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-openvmm_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", features = ["virt_mshv", "net_tap"] }
+openvmm_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", features = ["virt_mshv", "virt_kvm", "net_tap"] }
 openvmm_helpers = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
 vm_manifest_builder = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
 ovmm_mesh = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", package = "mesh" }
