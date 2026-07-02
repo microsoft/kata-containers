@@ -55,7 +55,8 @@ pub(crate) struct ResourceManagerInner {
     share_fs: Option<Arc<dyn ShareFs>>,
 
     pub rootfs_resource: RootFsResource,
-    pub volume_resource: VolumeResource,
+    // pub volume_resource: VolumeResource,
+    pub volume_resource: HashMap<String, VolumeResource>,
     pub cgroups_resource: CgroupsResource,
     pub cpu_resource: CpuResource,
     pub mem_resource: MemResource,
@@ -125,7 +126,8 @@ impl ResourceManagerInner {
             network: None,
             share_fs: None,
             rootfs_resource: RootFsResource::new(),
-            volume_resource: VolumeResource::new(),
+            // volume_resource: VolumeResource::new(),
+            volume_resource: HashMap::new(),
             cgroups_resource,
             cpu_resource,
             mem_resource,
@@ -474,7 +476,7 @@ impl ResourceManagerInner {
     }
 
     pub async fn handler_volumes(
-        &self,
+        &mut self,
         cid: &str,
         spec: &oci::Spec,
     ) -> Result<Vec<Arc<dyn Volume>>> {
@@ -485,7 +487,20 @@ impl ResourceManagerInner {
             agent: self.agent.clone(),
             emptydir_mode: &self.toml_config.runtime.emptydir_mode,
         };
-        self.volume_resource.handler_volumes(&ctx, cid, spec).await
+
+        // self.volume_resource.handler_volumes(&ctx, cid, spec).await
+        let sandbox_id = spec
+            .annotations()
+            .as_ref()
+            .and_then(|a| a.get("io.kubernetes.cri.sandbox-id"))
+            .cloned()
+            .unwrap_or_default();
+
+        let volume_resource = self
+            .volume_resource
+            .entry(sandbox_id)
+            .or_insert_with(VolumeResource::new);
+        volume_resource.handler_volumes(&ctx, cid, spec).await
     }
 
     pub async fn handler_devices(&self, _cid: &str, linux: &Linux) -> Result<Vec<ContainerDevice>> {
@@ -744,17 +759,31 @@ impl ResourceManagerInner {
             swap.clean().await;
         }
 
+        /*
         self.volume_resource
             .cleanup_ephemeral_disks()
             .await
             .context("failed to cleanup ephemeral disks")?;
+        */
+        for v in &self.volume_resource {
+            info!(sl!(), "ResourceManagerInner: cleanup calling cleanup_ephemeral_disks");
+
+            v.1.cleanup_ephemeral_disks()
+                .await
+                .context("failed to cleanup ephemeral disks")?;
+        }
 
         Ok(())
     }
 
     pub async fn dump(&self) {
         self.rootfs_resource.dump().await;
-        self.volume_resource.dump().await;
+
+        // self.volume_resource.dump().await;
+        for (key, volume_resource) in &self.volume_resource {
+            info!(sl!(), "ResourceManagerInner: dump volume_resource for sandbox-id: {}", key);
+            volume_resource.dump().await;
+        }
     }
 
     pub async fn update_linux_resource(
@@ -886,7 +915,8 @@ impl Persist for ResourceManagerInner {
             network: None,
             share_fs: None,
             rootfs_resource: RootFsResource::new(),
-            volume_resource: VolumeResource::new(),
+            // volume_resource: VolumeResource::new(),
+            volume_resource: HashMap::new(),
             cgroups_resource: CgroupsResource::restore(
                 args,
                 resource_state.cgroup_state.unwrap_or_default(),

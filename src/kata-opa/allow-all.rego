@@ -11,6 +11,7 @@ default CloseStdinRequest := true
 default CopyFileRequest := true
 default CreateContainerRequest := true
 default CreateSandboxRequest := true
+default CreateSecondarySandboxRequest := true
 default DestroySandboxRequest := true
 default ExecProcessRequest := true
 default GetDiagnosticDataRequest := true

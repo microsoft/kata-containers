@@ -23,12 +23,17 @@ pub(crate) const ENV_KATA_RUNTIME_BIND_FD: &str = "KATA_RUNTIME_BIND_FD";
 #[derive(Debug)]
 pub struct ShimExecutor {
     pub(crate) args: Args,
+    pub(crate) guest_vm_id: Option<String>,
 }
 
 impl ShimExecutor {
     /// Create a new instance of [`Shim`].
     pub fn new(args: Args) -> Self {
-        ShimExecutor { args }
+        // ShimExecutor { args }
+        ShimExecutor {
+            args,
+            guest_vm_id: None,
+        }
     }
 
     pub(crate) fn load_oci_spec(&self, path: &Path) -> Result<oci::Spec> {
@@ -45,6 +50,12 @@ impl ShimExecutor {
     pub(crate) fn write_pid_file(&self, path: &Path, pid: u32) -> Result<()> {
         let file_path = &path.join(SHIM_PID_FILE);
         std::fs::write(file_path, format!("{pid}"))
+            .context(Error::FileWrite(format!("{:?}", &file_path)))
+    }
+
+    pub(crate) fn write_guest_vm_id(&self, path: &Path, guest_vm_id: &str) -> Result<()> {
+        let file_path = &path.join("guest_vm_id");
+        std::fs::write(file_path, guest_vm_id)
             .context(Error::FileWrite(format!("{:?}", &file_path)))
     }
 
