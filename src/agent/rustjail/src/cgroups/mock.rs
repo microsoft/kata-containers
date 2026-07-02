@@ -34,7 +34,7 @@ impl CgroupManager for Manager {
         Ok(())
     }
 
-    fn set(&self, _logger: &Logger, _: &LinuxResources, _: bool) -> Result<()> {
+    fn set(&self, _: &LinuxResources, _: bool) -> Result<()> {
         Ok(())
     }
 

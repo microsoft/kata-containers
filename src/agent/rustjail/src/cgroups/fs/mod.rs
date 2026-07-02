@@ -87,7 +87,7 @@ impl CgroupManager for Manager {
         Ok(())
     }
 
-    fn set(&self, _logger: &slog::Logger, r: &LinuxResources, update: bool) -> Result<()> {
+    fn set(&self, r: &LinuxResources, update: bool) -> Result<()> {
         info!(
             sl(),
             "cgroup manager set resources for container. Resources input {:?}", r

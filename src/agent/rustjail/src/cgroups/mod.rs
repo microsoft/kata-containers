@@ -48,7 +48,7 @@ pub trait Manager {
         Err(anyhow!("not supported!"))
     }
 
-    fn set(&self, _logger: &Logger, _container: &LinuxResources, _update: bool) -> Result<()> {
+    fn set(&self, _container: &LinuxResources, _update: bool) -> Result<()> {
         Err(anyhow!("not supported!"))
     }
 

@@ -66,8 +66,8 @@ impl CgroupManager for Manager {
         Ok(())
     }
 
-    fn set(&self, logger: &Logger, r: &LinuxResources, _: bool) -> Result<()> {
-        info!(logger, "Manager::set: start");
+    fn set(&self, r: &LinuxResources, _: bool) -> Result<()> {
+        // info!(logger, "Manager::set: start");
 
         let mut properties: Properties = vec![];
 
@@ -79,7 +79,7 @@ impl CgroupManager for Manager {
         Pids::apply(r, &mut properties, &self.cg_hierarchy, systemd_version_str)?;
         CpuSet::apply(r, &mut properties, &self.cg_hierarchy, systemd_version_str)?;
 
-        info!(logger, "Manager::set: dbus_client.set_properties {:?}", &properties);
+        // info!(logger, "Manager::set: dbus_client.set_properties {:?}", &properties);
         self.dbus_client.set_properties(&properties)?;
 
         Ok(())
