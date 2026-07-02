@@ -1510,6 +1510,14 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn create_secondary_sandbox(
+        &self,
+        _ctx: &TtrpcContext,
+        _req: protocols::agent::CreateSecondarySandboxRequest,
+    ) -> ttrpc::Result<Empty> {
+        Ok(Empty::new())
+    }
+
     async fn destroy_sandbox(
         &self,
         ctx: &TtrpcContext,

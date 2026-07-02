@@ -504,6 +504,13 @@ pub struct OnlineCPUMemRequest {
 }
 
 #[derive(PartialEq, Clone, Default)]
+pub struct CreateSecondarySandboxRequest {
+    pub hostname: String,
+    pub dns: Vec<String>,
+    pub sandbox_id: String,
+}
+
+#[derive(PartialEq, Clone, Default)]
 pub struct ReseedRandomDevRequest {
     pub data: ::std::vec::Vec<u8>,
 }
