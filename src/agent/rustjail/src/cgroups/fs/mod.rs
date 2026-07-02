@@ -82,7 +82,7 @@ macro_rules! set_resource {
 }
 
 impl CgroupManager for Manager {
-    fn apply(&self, _logger: &slog::Logger, pid: pid_t) -> Result<()> {
+    fn apply(&self, pid: pid_t) -> Result<()> {
         self.cgroup.add_task_by_tgid(CgroupPid::from(pid as u64))?;
         Ok(())
     }

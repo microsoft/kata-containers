@@ -1576,7 +1576,7 @@ async fn join_namespaces(
     // For SystemdManger, apply must be precede set because we can only create a systemd unit with specific processes(pids).
     if res.is_some() {
         info!(logger, "apply processes to cgroups!");
-        cm.apply(&logger, p.pid)?;
+        cm.apply(p.pid)?;
     }
 
     if p.init {
