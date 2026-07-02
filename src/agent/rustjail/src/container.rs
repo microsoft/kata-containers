@@ -338,9 +338,9 @@ pub fn init_child() {
     let cfd_log = std::env::var(CLOG_FD).unwrap().parse::<i32>().unwrap();
 
     match do_init_child(cwfd) {
-        Ok(_) => log_child!(cfd_log, "temporary parent process exit successfully"),
+        Ok(_) => log_child!(cfd_log, "child: temporary parent process exit successfully"),
         Err(e) => {
-            log_child!(cfd_log, "temporary parent process exit:child exit: {:?}", e);
+            log_child!(cfd_log, "child: temporary parent process exit:child exit: {:?}", e);
             let _ = write_sync(cwfd, SYNC_FAILED, format!("{e:?}").as_str());
         }
     }
@@ -391,23 +391,23 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
             )));
         }
     }
-    log_child!(cfd_log, "child process start run");
+    log_child!(cfd_log, "child: child process start run");
     let buf = read_sync(crfd)?;
     let spec_str = std::str::from_utf8(&buf)?;
     let spec: oci::Spec = serde_json::from_str(spec_str)?;
-    log_child!(cfd_log, "notify parent to send oci process");
+    log_child!(cfd_log, "child: notify parent to send oci process");
     write_sync(cwfd, SYNC_SUCCESS, "")?;
 
     let buf = read_sync(crfd)?;
     let process_str = std::str::from_utf8(&buf)?;
     let oci_process: oci::Process = serde_json::from_str(process_str)?;
-    log_child!(cfd_log, "notify parent to send oci state");
+    log_child!(cfd_log, "child: notify parent to send oci state");
     write_sync(cwfd, SYNC_SUCCESS, "")?;
 
     let buf = read_sync(crfd)?;
     let state_str = std::str::from_utf8(&buf)?;
     let mut state: OCIState = serde_json::from_str(state_str)?;
-    log_child!(cfd_log, "notify parent to send cgroup manager");
+    log_child!(cfd_log, "child: notify parent to send cgroup manager");
     write_sync(cwfd, SYNC_SUCCESS, "")?;
 
     let buf = read_sync(crfd)?;
@@ -457,7 +457,7 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
                         &ns.typ().to_string(),
                         ns.path().as_ref().unwrap().display()
                     );
-                    log_child!(cfd_log, "error is : {:?}", e)
+                    log_child!(cfd_log, "child: error is : {:?}", e)
                 })?;
 
             if *s != CloneFlags::CLONE_NEWPID {
@@ -471,7 +471,7 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
     }
 
     if p.oom_score_adj().is_some() {
-        log_child!(cfd_log, "write oom score {}", p.oom_score_adj().unwrap());
+        log_child!(cfd_log, "child: write oom score {}", p.oom_score_adj().unwrap());
         fs::write(
             "/proc/self/oom_score_adj",
             p.oom_score_adj().unwrap().to_string().as_bytes(),
@@ -482,7 +482,7 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
     let default_rlimits = Vec::new();
     let process_rlimits = p.rlimits().as_ref().unwrap_or(&default_rlimits);
     for rl in process_rlimits.iter() {
-        log_child!(cfd_log, "set resource limit: {:?}", rl);
+        log_child!(cfd_log, "child: set resource limit: {:?}", rl);
         setrlimit(
             Resource::from_str(&rl.typ().to_string())?,
             Rlim::from_raw(rl.soft()),
@@ -508,19 +508,19 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
     }
 
     if userns {
-        log_child!(cfd_log, "enter new user namespace");
+        log_child!(cfd_log, "child: enter new user namespace");
         sched::unshare(CloneFlags::CLONE_NEWUSER)?;
     }
 
-    log_child!(cfd_log, "notify parent unshare user ns completed");
+    log_child!(cfd_log, "child: notify parent unshare user ns completed");
     // notify parent unshare user ns completed.
     write_sync(cwfd, SYNC_SUCCESS, "")?;
     // wait parent to setup user id mapping.
-    log_child!(cfd_log, "wait parent to setup user id mapping");
+    log_child!(cfd_log, "child: wait parent to setup user id mapping");
     read_sync(crfd)?;
 
     if userns {
-        log_child!(cfd_log, "setup user id");
+        log_child!(cfd_log, "child: setup user id");
         setid(Uid::from_raw(0), Gid::from_raw(0))?;
     }
 
@@ -532,7 +532,7 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
             continue;
         }
 
-        log_child!(cfd_log, "join namespace {:?}", s);
+        log_child!(cfd_log, "child: join namespace {:?}", s);
         sched::setns(fd, s).or_else(|e| {
             if s == CloneFlags::CLONE_NEWUSER {
                 if e != Errno::EINVAL {
@@ -577,7 +577,7 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
 
     let rootfs = spec.root().as_ref().unwrap().path().display().to_string();
 
-    log_child!(cfd_log, "setup rootfs {}", &rootfs);
+    log_child!(cfd_log, "child: setup rootfs {}", &rootfs);
     let root = fs::canonicalize(&rootfs)?;
     let rootfs = root.to_str().unwrap();
 
@@ -700,7 +700,7 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
             ));
         }
 
-        log_child!(cfd_log, "Set SELinux label to the container process");
+        log_child!(cfd_log, "child: Set SELinux label to the container process");
         let default_label = String::new();
         selinux::set_exec_label(
             oci_process
@@ -714,7 +714,7 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
     #[cfg(feature = "seccomp")]
     if let Some(ref scmp) = linux.seccomp() {
         if let Some(syscalls) = seccomp::get_unknown_syscalls(scmp) {
-            log_child!(cfd_log, "unknown seccomp system calls: {:?}", syscalls);
+            log_child!(cfd_log, "child: unknown seccomp system calls: {:?}", syscalls);
         }
     }
 
@@ -752,7 +752,7 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
     for e in env.iter() {
         match valid_env(e) {
             Some((key, value)) => env::set_var(key, value),
-            None => log_child!(cfd_log, "invalid env key-value: {:?}", e),
+            None => log_child!(cfd_log, "child: invalid env key-value: {:?}", e),
         }
     }
 
@@ -770,14 +770,14 @@ fn do_init_child(cwfd: RawFd) -> Result<()> {
     }
 
     let exec_file = Path::new(&args[0]);
-    log_child!(cfd_log, "process command: {:?}", &args);
+    log_child!(cfd_log, "child: process command: {:?}", &args);
     if !exec_file.exists() {
         find_file(exec_file).ok_or_else(|| anyhow!("the file {} was not found", &args[0]))?;
     }
 
     // notify parent that the child's ready to start
     write_sync(cwfd, SYNC_SUCCESS, "")?;
-    log_child!(cfd_log, "ready to run exec");
+    log_child!(cfd_log, "child: ready to run exec");
     let _ = unistd::close(cfd_log);
     let _ = unistd::close(crfd);
     let _ = unistd::close(cwfd);
@@ -934,7 +934,7 @@ impl BaseContainer for LinuxContainer {
     }
 
     fn set(&mut self, r: LinuxResources) -> Result<()> {
-        self.cgroup_manager.as_ref().set(&r, true)?;
+        self.cgroup_manager.as_ref().set(&self.logger, &r, true)?;
 
         if let Some(linux) = self.config.spec.as_mut().unwrap().linux_mut() {
             linux.set_resources(Some(r));
@@ -1576,13 +1576,13 @@ async fn join_namespaces(
     // For SystemdManger, apply must be precede set because we can only create a systemd unit with specific processes(pids).
     if res.is_some() {
         info!(logger, "apply processes to cgroups!");
-        cm.apply(p.pid)?;
+        cm.apply(&logger, p.pid)?;
     }
 
     if p.init {
         if let Some(resource) = res {
             info!(logger, "set properties to cgroups!");
-            cm.set(resource, false)?;
+            cm.set(&logger, resource, false)?;
         }
     }
 
