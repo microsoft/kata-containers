@@ -79,8 +79,14 @@ impl Namespace {
     // Note, pid namespaces cannot be persisted.
     #[instrument]
     #[allow(clippy::question_mark)]
-    pub async fn setup(mut self) -> Result<Self> {
-        fs::create_dir_all(&self.persistent_ns_dir)?;
+    // pub async fn setup(mut self) -> Result<Self> {
+    pub async fn setup(mut self, secondary_sandbox_id: &str) -> Result<Self> {
+        // fs::create_dir_all(&self.persistent_ns_dir)?;
+        let mut ns_path = PathBuf::from(&self.persistent_ns_dir);
+        if !secondary_sandbox_id.is_empty() {
+            ns_path.push(secondary_sandbox_id);
+        }
+        fs::create_dir_all(&ns_path)?;
 
         let ns_path = PathBuf::from(&self.persistent_ns_dir);
         let ns_type = self.ns_type;
