@@ -11,6 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
+use std::collections::HashMap;
 use std::convert::TryFrom;
 #[cfg(feature = "agent-policy")]
 use std::convert::TryInto as _;
@@ -196,6 +197,7 @@ impl<T> OptionToTtrpcResult<T> for Option<T> {
 #[derive(Clone, Debug)]
 pub struct AgentService {
     sandbox: Arc<Mutex<Sandbox>>,
+    secondary_sandboxes: Arc<Mutex<HashMap<String, Sandbox>>>,
     init_mode: bool,
     oma: Option<mem_agent::agent::MemAgent>,
 }
@@ -281,10 +283,33 @@ impl AgentService {
         let mut s = self.sandbox.lock().await;
         s.container_mounts.insert(cid.clone(), m);
 
-        update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
+        // update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
 
         // Append guest hooks
-        append_guest_hooks(&s, &mut oci)?;
+        // append_guest_hooks(&s, &mut oci)?;
+        let sandbox_id_annotation = oci
+            .annotations()
+            .as_ref()
+            .and_then(|a| a.get("io.kubernetes.cri.sandbox-id"))
+            .cloned()
+            .unwrap_or_default();
+
+        if !sandbox_id_annotation.is_empty() && sandbox_id_annotation != s.id {
+            let secondary_sandboxes = self.secondary_sandboxes.lock().await;
+            let secondary = secondary_sandboxes
+                .get(&sandbox_id_annotation)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "secondary sandbox not found for sandbox-id: {}",
+                        sandbox_id_annotation
+                    )
+                })?;
+            update_container_namespaces(secondary, &mut oci, use_sandbox_pidns)?;
+            append_guest_hooks(secondary, &mut oci)?;
+        } else {
+            update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
+            append_guest_hooks(&s, &mut oci)?;
+        }
 
         // write spec to bundle path, hooks might
         // read ocispec
@@ -1412,7 +1437,8 @@ impl agent_ttrpc::AgentService for AgentService {
                 load_kernel_module(m).map_ttrpc_err(same)?;
             }
 
-            s.setup_shared_namespaces().await.map_ttrpc_err(same)?;
+            // s.setup_shared_namespaces().await.map_ttrpc_err(same)?;
+            s.setup_shared_namespaces("").await.map_ttrpc_err(same)?;
         }
 
         let m = add_storages(sl(), req.storages.clone(), &self.sandbox, None)
@@ -1447,9 +1473,32 @@ impl agent_ttrpc::AgentService for AgentService {
 
     async fn create_secondary_sandbox(
         &self,
-        _ctx: &TtrpcContext,
-        _req: protocols::agent::CreateSecondarySandboxRequest,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CreateSecondarySandboxRequest,
     ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "create_secondary_sandbox", req);
+        is_allowed(&req).await?;
+
+        if req.sandbox_id.is_empty() {
+            error!(sl(), "create_secondary_sandbox: empty sandbox_id");
+            return Err(ttrpc_error(
+                ttrpc::Code::INTERNAL,
+                "empty sandbox_id",
+            ));
+        }
+        let sandbox_id = req.sandbox_id.clone();
+
+        let mut sandbox = Sandbox::new(&sl()).map_ttrpc_err(same)?;
+        sandbox.id = sandbox_id.clone();
+        sandbox.hostname = req.hostname.clone();
+        sandbox.running = true;
+
+        info!(sl(), "create_secondary_sandbox: calling setup_shared_namespaces");
+        sandbox.setup_shared_namespaces(&sandbox_id).await.map_ttrpc_err(same)?;
+
+        let key = req.sandbox_id;
+        self.secondary_sandboxes.lock().await.insert(key, sandbox);
+
         Ok(Empty::new())
     }
 
@@ -1934,6 +1983,7 @@ pub async fn start(
 ) -> Result<TtrpcServer> {
     let agent_service = Box::new(AgentService {
         sandbox: s,
+        secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
         init_mode,
         oma,
     });
@@ -2711,6 +2761,7 @@ mod tests {
 
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -2729,6 +2780,7 @@ mod tests {
         let sandbox = Sandbox::new(&logger).unwrap();
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -2747,6 +2799,7 @@ mod tests {
         let sandbox = Sandbox::new(&logger).unwrap();
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -2881,6 +2934,7 @@ mod tests {
 
             let agent_service = Box::new(AgentService {
                 sandbox: Arc::new(Mutex::new(sandbox)),
+                secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
                 init_mode: true,
                 oma: None,
             });
@@ -3371,6 +3425,7 @@ OtherField:other
         let sandbox = Sandbox::new(&logger).unwrap();
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -3571,5 +3626,77 @@ COMMIT
             let result = is_sealed_secret_path(d.source_path);
             assert_eq!(d.result, result, "{msg}");
         }
+    }
+
+    #[tokio::test]
+    async fn test_get_oom_event_no_deadlock() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Sandbox::new(&logger).unwrap();
+
+        let agent_service = Arc::new(AgentService {
+            sandbox: Arc::new(Mutex::new(sandbox)),
+            secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
+            init_mode: true,
+            oma: None,
+        });
+
+        let svc1 = agent_service.clone();
+        let handle1 = tokio::spawn(async move {
+            let ctx = mk_ttrpc_context();
+            let req = protocols::agent::GetOOMEventRequest::default();
+            svc1.get_oom_event(&ctx, req).await
+        });
+
+        // Yield until handler #1 has released the sandbox lock (entered recv()).
+        // Each yield_now() gives the spawned task a chance to make progress.
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                tokio::task::yield_now().await;
+                if agent_service.sandbox.try_lock().is_ok() {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("sandbox lock should be free while get_oom_event waits");
+
+        let svc2 = agent_service.clone();
+        let handle2 = tokio::spawn(async move {
+            let ctx = mk_ttrpc_context();
+            let req = protocols::agent::GetOOMEventRequest::default();
+            svc2.get_oom_event(&ctx, req).await
+        });
+
+        // Yield until handler #2 has also released the sandbox lock (entered recv()).
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                tokio::task::yield_now().await;
+                if agent_service.sandbox.try_lock().is_ok() {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("sandbox lock should be free with two concurrent get_oom_event handlers");
+
+        let tx = {
+            let s = agent_service.sandbox.lock().await;
+            s.event_tx.as_ref().unwrap().clone()
+        };
+        tx.send("container-1".to_string()).await.unwrap();
+        tx.send("container-2".to_string()).await.unwrap();
+
+        let result1 = tokio::time::timeout(std::time::Duration::from_secs(5), handle1).await;
+        let result2 = tokio::time::timeout(std::time::Duration::from_secs(5), handle2).await;
+
+        assert!(result1.is_ok(), "handler #1 timed out — possible deadlock");
+        assert!(result2.is_ok(), "handler #2 timed out — possible deadlock");
+
+        let resp1 = result1.unwrap().unwrap().unwrap();
+        let resp2 = result2.unwrap().unwrap().unwrap();
+
+        let mut ids: Vec<String> = vec![resp1.container_id, resp2.container_id];
+        ids.sort();
+        assert_eq!(ids, vec!["container-1", "container-2"]);
     }
 }
