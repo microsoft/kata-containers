@@ -34,15 +34,51 @@ impl ShimExecutor {
         exited_time.seconds = seconds;
         rsp.set_exited_at(exited_time);
 
+        let mut socket_id = self.args.id.clone();
+        let bundle_path = get_bundle_path().context("get bundle path")?;
+
+        match self.load_oci_spec(&bundle_path) {
+            Ok(spec) => {
+                let annotations = spec.annotations().clone().unwrap_or_default();
+                if let Some(guest_vm_id_value) = annotations.get("io.katacontainers.config.hypervisor.guest_vm_id") {
+                    socket_id = guest_vm_id_value.to_string();
+                } else {
+                }
+            }
+            Err(_e) => {
+            }
+        }
+        
         let address = self
-            .socket_address(&self.args.id)
+            // .socket_address(&self.args.id)
+            .socket_address(&socket_id)
             .context("socket address")?;
         let trim_path = address.strip_prefix("unix://").context("trim path")?;
         let file_path = Path::new("/").join(trim_path);
         let file_path = file_path.as_path();
+        
+        /*
         if std::fs::metadata(file_path).is_ok() {
             info!(sl!(), "remote socket path: {:?}", &file_path);
             fs::remove_file(file_path).ok();
+        }
+        */
+        let sandbox_id_path = file_path.with_extension("sandbox_id");
+        let owned_by_this_sandbox = match fs::read_to_string(&sandbox_id_path) {
+            Ok(saved_id) => {
+                saved_id == self.args.id
+            },
+            Err(_) => true, // if file doesn't exist, allow removal for backward compat
+        };
+
+        if owned_by_this_sandbox {
+            if std::fs::metadata(file_path).is_ok() {
+                info!(sl!(), "ShimExecutor: remote socket path: {:?}", &file_path);
+
+                fs::remove_file(file_path).ok();
+            }
+            fs::remove_file(&sandbox_id_path).ok();
+        } else {
         }
 
         if let Err(e) = service::ServiceManager::cleanup(&self.args.id).await {
