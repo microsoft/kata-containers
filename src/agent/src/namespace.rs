@@ -79,10 +79,20 @@ impl Namespace {
     // Note, pid namespaces cannot be persisted.
     #[instrument]
     #[allow(clippy::question_mark)]
-    pub async fn setup(mut self) -> Result<Self> {
-        fs::create_dir_all(&self.persistent_ns_dir)?;
+    // pub async fn setup(mut self) -> Result<Self> {
+    pub async fn setup(mut self, secondary_sandbox_id: &str) -> Result<Self> {
+        info!(self.logger, "Namespace::setup: secondary_sandbox_id = {secondary_sandbox_id}");
 
-        let ns_path = PathBuf::from(&self.persistent_ns_dir);
+        // fs::create_dir_all(&self.persistent_ns_dir)?;
+        // let ns_path = PathBuf::from(&self.persistent_ns_dir);
+        let mut ns_path = PathBuf::from(&self.persistent_ns_dir);
+        if !secondary_sandbox_id.is_empty() {
+            ns_path.push(secondary_sandbox_id);
+        }
+
+        info!(self.logger, "Namespace::setup: creating directory {:?}", &ns_path);
+        fs::create_dir_all(&ns_path)?;
+
         let ns_type = self.ns_type;
         if ns_type == NamespaceType::Pid {
             return Err(anyhow!("Cannot persist namespace of PID type"));
@@ -91,23 +101,26 @@ impl Namespace {
 
         let new_ns_path = ns_path.join(ns_type.get());
 
+        info!(self.logger, "Namespace::setup: creating file {:?}", &new_ns_path);
         File::create(new_ns_path.as_path())?;
 
         self.path = new_ns_path.clone().into_os_string().into_string().unwrap();
         let hostname = self.hostname.clone();
 
-        let new_thread = std::thread::spawn(move || {
-            if let Err(err) = || -> Result<()> {
+        //let new_thread = std::thread::spawn(move || {
+            //if let Err(err) = || -> Result<()> {
                 let origin_ns_path = get_current_thread_ns_path(ns_type.get());
 
                 let source = Path::new(&origin_ns_path);
                 let destination = new_ns_path.as_path();
 
+                info!(self.logger, "Namespace::setup: opening file {:?}", &source);
                 File::open(source)?;
 
                 // Create a new netns on the current thread.
                 let cf = ns_type.get_flags();
 
+                info!(self.logger, "Namespace::setup: calling unshare");
                 unshare(cf)?;
 
                 if ns_type == NamespaceType::Uts {
@@ -120,6 +133,7 @@ impl Namespace {
                 let mut flags = MsFlags::empty();
                 flags |= MsFlags::MS_BIND | MsFlags::MS_REC;
 
+                info!(self.logger, "Namespace::setup: baremount: source = {:?}, destination = {:?}", &source, &destination);
                 baremount(source, destination, "none", flags, "", &logger).map_err(|e| {
                     anyhow!(
                         "Failed to mount {:?} to {:?} with err:{:?}",
@@ -128,18 +142,23 @@ impl Namespace {
                         e
                     )
                 })?;
+                info!(self.logger, "Namespace::setup: baremount succeeded");
 
+            /*
                 Ok(())
             }() {
                 return Err(err);
             }
+            */
 
-            Ok(())
-        });
+        //    Ok(())
+        //});
 
+        /*
         new_thread
             .join()
             .map_err(|e| anyhow!("Failed to join thread {:?}!", e))??;
+        */
 
         Ok(self)
     }
