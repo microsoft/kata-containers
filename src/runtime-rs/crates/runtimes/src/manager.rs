@@ -81,14 +81,6 @@ fn convert_string_to_slog_level(string_level: &str) -> slog::Level {
     }
 }
 
-fn effective_log_level(enable_debug: bool, log_level: &str) -> &str {
-    if enable_debug && log_level == "info" {
-        "debug"
-    } else {
-        log_level
-    }
-}
-
 struct RuntimeHandlerManagerInner {
     id: String,
     msg_sender: Sender<Message>,
@@ -223,13 +215,6 @@ impl RuntimeHandlerManagerInner {
             InitialSizeManager::new_from(&sandbox_config.annotations)
                 .context("failed to construct static resource manager")?
         };
-
-        // For CRI sandboxes, sizing annotations are carried in PodSandboxConfig
-        // and may be absent from the OCI sandbox spec. Fill any missing sizing
-        // values from sandbox annotations before applying static sizing.
-        initial_size_manager
-            .supplement_from_annotations(&sandbox_config.annotations)
-            .context("failed to supplement static resource manager from annotations")?;
 
         initial_size_manager
             .setup_config(&mut config)
@@ -367,6 +352,7 @@ impl RuntimeHandlerManager {
 
         // return if runtime instance has init
         if inner.runtime_instance.is_some() {
+            info!(sl!(), "task_init_runtime_instance: already initialized");
             return Ok(());
         }
 
@@ -482,7 +468,11 @@ impl RuntimeHandlerManager {
 
     #[instrument(parent = &*(ROOTSPAN))]
     pub async fn handler_task_message(&self, req: TaskRequest) -> Result<TaskResponse> {
+        let logger = slog::Logger::clone(&slog_scope::logger());
+
         if let TaskRequest::CreateContainer(container_config) = req {
+            info!(logger, "handler_task_message: CreateContainer");
+
             // get oci spec
             let bundler_path = format!(
                 "{}/{}",
@@ -490,6 +480,8 @@ impl RuntimeHandlerManager {
                 spec::OCI_SPEC_CONFIG_FILE_NAME
             );
             let mut spec = oci::Spec::load(&bundler_path).context("load spec")?;
+            info!(logger, "handler_task_message: OCI spec = {:?}", &spec);
+
             let state = spec::State {
                 version: spec.version().clone(),
                 id: container_config.container_id.to_string(),
@@ -507,7 +499,7 @@ impl RuntimeHandlerManager {
                 .annotations()
                 .as_ref()
                 .and_then(|a| a.get("io.kubernetes.cri.sandbox-id").cloned());
-
+            
             let instance = self
                 .get_runtime_instance()
                 .await
@@ -515,7 +507,6 @@ impl RuntimeHandlerManager {
 
             instance
                 .sandbox
-                // .start()
                 .start(bundle_sandbox_id, &spec.hostname().clone().unwrap_or_default())
                 .await
                 .context("start sandbox in task handler")?;
@@ -557,29 +548,6 @@ impl RuntimeHandlerManager {
 
             Ok(TaskResponse::CreateContainer(shim_pid))
         } else {
-            // A teardown RPC must still make the shim daemon exit even when
-            // the runtime instance was never (fully) created -- e.g. after a
-            // failed CreateContainer.  In that case containerd's follow-up
-            // Shutdown would otherwise hit `get_runtime_instance()`, fail with
-            // "runtime not ready", and the service loop would never receive
-            // `Action::Shutdown`.  Because the shim ignores SIGTERM the daemon
-            // would then be left running and orphaned by containerd.
-            if let TaskRequest::ShutdownContainer(_) = &req {
-                if self.get_runtime_instance().await.is_err() {
-                    warn!(
-                        sl!(),
-                        "shutdown requested but runtime instance is not ready; \
-                         forcing shim exit to avoid an orphaned shim process"
-                    );
-                    let sender = self.inner.read().await.msg_sender.clone();
-                    sender
-                        .send(Message::new(Action::Shutdown))
-                        .await
-                        .context("send shutdown message")?;
-                    return Ok(TaskResponse::ShutdownContainer);
-                }
-            }
-
             self.handler_task_request(req)
                 .await
                 .context("handler TaskRequest")
@@ -594,10 +562,15 @@ impl RuntimeHandlerManager {
         let sandbox = instance.sandbox.clone();
 
         match req {
-            SandboxRequest::CreateSandbox(req) => Err(anyhow!("Unreachable request {:?}", req)),
+            SandboxRequest::CreateSandbox(req) => {
+                info!(sl!(), "SandboxRequest::CreateSandbox");
+                
+                Err(anyhow!("Unreachable request {:?}", req))
+            }
             SandboxRequest::StartSandbox(_) => {
+                info!(sl!(), "SandboxRequest::StartSandbox");
+
                 sandbox
-                    // .start()
                     .start(None, "")
                     .await
                     .context("start sandbox in sandbox handler")?;
@@ -606,21 +579,31 @@ impl RuntimeHandlerManager {
                     create_time: Some(SystemTime::now()),
                 }))
             }
-            SandboxRequest::Platform(_) => Ok(SandboxResponse::Platform(PlatformInfo {
-                os: std::env::consts::OS.to_string(),
-                architecture: std::env::consts::ARCH.to_string(),
-            })),
+            SandboxRequest::Platform(_) => {
+                info!(sl!(), "SandboxRequest::Platform");
+
+                Ok(SandboxResponse::Platform(PlatformInfo {
+                    os: std::env::consts::OS.to_string(),
+                    architecture: std::env::consts::ARCH.to_string(),
+                }))
+            }
             SandboxRequest::StopSandbox(_) => {
+                info!(sl!(), "SandboxRequest::StopSandbox");
+
                 sandbox.stop().await.context("stop sandbox")?;
 
                 Ok(SandboxResponse::StopSandbox)
             }
             SandboxRequest::WaitSandbox(_) => {
+                info!(sl!(), "SandboxRequest::WaitSandbox");
+
                 let exit_info = sandbox.wait().await.context("wait sandbox")?;
 
                 Ok(SandboxResponse::WaitSandbox(exit_info))
             }
             SandboxRequest::SandboxStatus(_) => {
+                info!(sl!(), "SandboxRequest::SandboxStatus");
+
                 let status = sandbox.status().await?;
 
                 Ok(SandboxResponse::SandboxStatus(SandboxStatusInfo {
@@ -631,8 +614,14 @@ impl RuntimeHandlerManager {
                     exited_at: None,
                 }))
             }
-            SandboxRequest::Ping(_) => Ok(SandboxResponse::Ping),
+            SandboxRequest::Ping(_) => {
+                info!(sl!(), "SandboxRequest::Ping");
+
+                Ok(SandboxResponse::Ping)
+            }
             SandboxRequest::ShutdownSandbox(_) => {
+                info!(sl!(), "SandboxRequest::ShutdownSandbox");
+
                 sandbox.shutdown().await.context("shutdown sandbox")?;
 
                 Ok(SandboxResponse::ShutdownSandbox)
@@ -642,6 +631,8 @@ impl RuntimeHandlerManager {
 
     #[instrument(parent = &(*ROOTSPAN))]
     pub async fn handler_task_request(&self, req: TaskRequest) -> Result<TaskResponse> {
+        let logger = slog::Logger::clone(&slog_scope::logger());
+
         let instance = self
             .get_runtime_instance()
             .await
@@ -651,12 +642,19 @@ impl RuntimeHandlerManager {
         let msg_sender = self.inner.read().await.msg_sender.clone();
 
         match req {
-            TaskRequest::CreateContainer(req) => Err(anyhow!("Unreachable TaskRequest {:?}", req)),
+            TaskRequest::CreateContainer(req) => {
+                info!(logger, "handler_task_request: CreateContainer");
+                Err(anyhow!("Unreachable TaskRequest {:?}", req))
+            },
             TaskRequest::CloseProcessIO(process_id) => {
+                info!(sl!(), "TaskRequest::CloseProcessIO");
+
                 cm.close_process_io(&process_id).await.context("close io")?;
                 Ok(TaskResponse::CloseProcessIO)
             }
             TaskRequest::DeleteProcess(process_id) => {
+                info!(sl!(), "TaskRequest::DeleteProcess");
+
                 let resp = cm.delete_process(&process_id).await.context("do delete")?;
                 if process_id.process_type == ProcessType::Container {
                     let event = TaskDelete {
@@ -675,14 +673,21 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::DeleteProcess(resp))
             }
             TaskRequest::ExecProcess(req) => {
+                info!(sl!(), "TaskRequest::ExecProcess");
+
                 cm.exec_process(req).await.context("exec")?;
                 Ok(TaskResponse::ExecProcess)
             }
             TaskRequest::KillProcess(req) => {
+                info!(sl!(), "TaskRequest::KillProcess");
+                
                 cm.kill_process(&req).await.context("kill process")?;
                 Ok(TaskResponse::KillProcess)
             }
             TaskRequest::ShutdownContainer(req) => {
+                // info!(logger, "handler_task_request: ShutdownContainer");
+                info!(sl!(), "TaskRequest::ShutdownContainer");
+
                 if cm.need_shutdown_sandbox(&req).await {
                     sandbox.shutdown().await.context("do shutdown")?;
 
@@ -694,6 +699,9 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::ShutdownContainer)
             }
             TaskRequest::WaitProcess(process_id) => {
+                // info!(logger, "handler_task_request: WaitProcess");
+                info!(sl!(), "TaskRequest::WaitProcess");
+
                 let exit_status = cm.wait_process(&process_id).await.context("wait process")?;
                 if cm.is_sandbox_container(&process_id).await {
                     sandbox.stop().await.context("stop sandbox")?;
@@ -714,6 +722,8 @@ impl RuntimeHandlerManager {
                         );
                     }
                 }
+                //info!(logger, "handler_task_request: StartProcess");
+                info!(sl!(), "TaskRequest::StartProcess");
 
                 let shim_pid = cm
                     .start_process(&process_id)
@@ -747,6 +757,9 @@ impl RuntimeHandlerManager {
             }
 
             TaskRequest::StateProcess(process_id) => {
+                // info!(logger, "handler_task_request: StateProcess");
+                info!(sl!(), "TaskRequest::StateProcess");
+
                 let state = cm
                     .state_process(&process_id)
                     .await
@@ -754,22 +767,34 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::StateProcess(state))
             }
             TaskRequest::PauseContainer(container_id) => {
+                // info!(logger, "handler_task_request: PauseContainer");
+                info!(sl!(), "TaskRequest::PauseContainer");
+
                 cm.pause_container(&container_id)
                     .await
                     .context("pause container")?;
                 Ok(TaskResponse::PauseContainer)
             }
             TaskRequest::ResumeContainer(container_id) => {
+                // info!(logger, "handler_task_request: ResumeContainer");
+                info!(sl!(), "TaskRequest::ResumeContainer");
+
                 cm.resume_container(&container_id)
                     .await
                     .context("resume container")?;
                 Ok(TaskResponse::ResumeContainer)
             }
             TaskRequest::ResizeProcessPTY(req) => {
+                // info!(logger, "handler_task_request: ResizeProcessPTY");
+                info!(sl!(), "TaskRequest::ResizeProcessPTY");
+
                 cm.resize_process_pty(&req).await.context("resize pty")?;
                 Ok(TaskResponse::ResizeProcessPTY)
             }
             TaskRequest::StatsContainer(container_id) => {
+                // info!(logger, "handler_task_request: StatsContainer");
+                info!(sl!(), "TaskRequest::StatsContainer");
+
                 let stats = cm
                     .stats_container(&container_id)
                     .await
@@ -777,15 +802,28 @@ impl RuntimeHandlerManager {
                 Ok(TaskResponse::StatsContainer(stats))
             }
             TaskRequest::UpdateContainer(req) => {
+                // info!(logger, "handler_task_request: UpdateContainer");
+                info!(sl!(), "TaskRequest::UpdateContainer");
+
                 cm.update_container(req).await.context("update container")?;
                 Ok(TaskResponse::UpdateContainer)
             }
-            TaskRequest::Pid => Ok(TaskResponse::Pid(cm.pid().await.context("pid")?)),
-            TaskRequest::ConnectContainer(container_id) => Ok(TaskResponse::ConnectContainer(
-                cm.connect_container(&container_id)
-                    .await
-                    .context("connect")?,
-            )),
+            TaskRequest::Pid => {
+                // info!(logger, "handler_task_request: Pid");
+                info!(sl!(), "TaskRequest::Pid");
+
+                Ok(TaskResponse::Pid(cm.pid().await.context("pid")?))
+            }
+            TaskRequest::ConnectContainer(container_id) => {
+                // info!(logger, "handler_task_request: ConnectContainer");
+                info!(sl!(), "TaskRequest::ConnectContainer");
+
+                Ok(TaskResponse::ConnectContainer(
+                    cm.connect_container(&container_id)
+                        .await
+                        .context("connect")?,
+                ))
+            }
         }
     }
 }
@@ -883,22 +921,19 @@ fn update_agent_kernel_params(config: &mut TomlConfig) -> Result<()> {
 // according to the settings read from configuration file
 fn update_component_log_level(config: &TomlConfig) {
     // Retrieve the log-levels set in configuration file, modify the FILTER_RULE accordingly
-    let default_level = "info";
+    let default_level = String::from("info");
     let agent_level = if let Some(agent_config) = config.agent.get(&config.runtime.agent_name) {
-        effective_log_level(agent_config.debug, &agent_config.log_level)
+        agent_config.log_level.clone()
     } else {
-        default_level
+        default_level.clone()
     };
     let hypervisor_level =
         if let Some(hypervisor_config) = config.hypervisor.get(&config.runtime.hypervisor_name) {
-            effective_log_level(
-                hypervisor_config.debug_info.enable_debug,
-                &hypervisor_config.debug_info.log_level,
-            )
+            hypervisor_config.debug_info.log_level.clone()
         } else {
-            default_level
+            default_level.clone()
         };
-    let runtime_level = effective_log_level(config.runtime.debug, &config.runtime.log_level);
+    let runtime_level = config.runtime.log_level.clone();
 
     // Update FILTER_RULE to apply changes
     FILTER_RULE.rcu(|inner| {
@@ -906,15 +941,15 @@ fn update_component_log_level(config: &TomlConfig) {
         updated_inner.clone_from(inner);
         updated_inner.insert(
             "runtimes".to_string(),
-            convert_string_to_slog_level(runtime_level),
+            convert_string_to_slog_level(&runtime_level),
         );
         updated_inner.insert(
             "agent".to_string(),
-            convert_string_to_slog_level(agent_level),
+            convert_string_to_slog_level(&agent_level),
         );
         updated_inner.insert(
             "hypervisor".to_string(),
-            convert_string_to_slog_level(hypervisor_level),
+            convert_string_to_slog_level(&hypervisor_level),
         );
         updated_inner
     });
@@ -998,45 +1033,4 @@ fn configure_non_root_hypervisor(config: &mut Hypervisor) -> Result<()> {
     });
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use common::types::ShutdownRequest;
-    use tokio::sync::mpsc::channel;
-
-    // A ShutdownContainer RPC that arrives before any runtime instance was
-    // created (e.g. after a failed CreateContainer) must still drive the shim
-    // daemon to exit, otherwise the process is orphaned.  Verify it returns
-    // ShutdownContainer and emits Action::Shutdown on the service channel.
-    #[tokio::test]
-    async fn test_shutdown_without_runtime_instance_forces_exit() {
-        let (sender, mut receiver) = channel::<Message>(8);
-        let manager = RuntimeHandlerManager::new("test-sid", sender).unwrap();
-
-        let resp = manager
-            .handler_task_message(TaskRequest::ShutdownContainer(ShutdownRequest {
-                container_id: "test-sid".to_string(),
-                is_now: true,
-            }))
-            .await
-            .expect("shutdown should succeed even without a runtime instance");
-
-        assert!(matches!(resp, TaskResponse::ShutdownContainer));
-
-        let msg = receiver
-            .try_recv()
-            .expect("an Action::Shutdown message must be sent to stop the daemon");
-        assert!(matches!(msg.action, Action::Shutdown));
-    }
-
-    #[test]
-    fn test_effective_log_level() {
-        assert_eq!(effective_log_level(false, "info"), "info");
-        assert_eq!(effective_log_level(false, "debug"), "debug");
-        assert_eq!(effective_log_level(true, "info"), "debug");
-        assert_eq!(effective_log_level(true, "trace"), "trace");
-        assert_eq!(effective_log_level(true, "warn"), "warn");
-    }
 }

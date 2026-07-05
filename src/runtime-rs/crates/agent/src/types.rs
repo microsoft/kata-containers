@@ -497,17 +497,17 @@ pub struct CreateSandboxRequest {
 }
 
 #[derive(PartialEq, Clone, Default)]
-pub struct OnlineCPUMemRequest {
-    pub wait: bool,
-    pub nb_cpus: u32,
-    pub cpu_only: bool,
-}
-
-#[derive(PartialEq, Clone, Default)]
 pub struct CreateSecondarySandboxRequest {
     pub hostname: String,
     pub dns: Vec<String>,
     pub sandbox_id: String,
+}
+
+#[derive(PartialEq, Clone, Default)]
+pub struct OnlineCPUMemRequest {
+    pub wait: bool,
+    pub nb_cpus: u32,
+    pub cpu_only: bool,
 }
 
 #[derive(PartialEq, Clone, Default)]

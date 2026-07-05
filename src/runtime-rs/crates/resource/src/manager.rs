@@ -195,7 +195,6 @@ impl ResourceManager {
         cid: &str,
         spec: &oci::Spec,
     ) -> Result<Vec<Arc<dyn Volume>>> {
-        // let inner = self.inner.read().await;
         let mut inner = self.inner.write().await;
         inner.handler_volumes(cid, spec).await
     }

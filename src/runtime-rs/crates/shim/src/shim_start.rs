@@ -5,7 +5,7 @@
 //
 
 use std::{
-    fs,
+    fs::{self, OpenOptions},
     io::Write,
     os::unix::{io::IntoRawFd, prelude::OsStrExt},
     path::{Path, PathBuf},
@@ -32,6 +32,16 @@ impl ShimExecutor {
         Ok(())
     }
 
+    pub fn log_to_file(&self, message: &str) {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/kata-shim-log.txt")
+        {
+            let _ = writeln!(file, "[{}] {}", std::process::id(), message);
+        }
+    }
+
     fn do_start(&mut self) -> Result<PathBuf> {
         let bundle_path = get_bundle_path().context("get bundle path")?;
 
@@ -48,24 +58,23 @@ impl ShimExecutor {
             }
         }
 
+        self.log_to_file(&format!(">>>>>>>> ShimExecutor::do_start: args.id={}, guest_vm_id={:?}", self.args.id, self.guest_vm_id));
+        self.log_to_file(&format!("ShimExecutor::do_start: container_type={:?}", container_type));
+
         match container_type {
             ContainerType::PodSandbox | ContainerType::SingleContainer => {
-                /*
-                let address = self.socket_address(&self.args.id)?;
-                let socket = new_listener(&address)?;
-                let child_pid = self.create_shim_process(socket)?;
-                self.write_pid_file(&bundle_path, child_pid)?;
-                self.write_address(&bundle_path, &address)?;
-                Ok(address)
-                */
                 // Use guest_vm_id if available, otherwise use the original id
                 let socket_id = self.guest_vm_id.as_ref().unwrap_or(&self.args.id);
                 let address = self.socket_address(socket_id)?;
-
+                
+                self.log_to_file(&format!("ShimExecutor::do_start: socket_id = {}, address = {:?}", socket_id, address));
+                
                 // Always try to create listener
                 match new_listener(&address) {
                     Ok(socket) => {
+                        self.log_to_file("ShimExecutor::do_start: created socket, creating new shim process");
                         let pid = self.create_shim_process(socket)?;
+                        self.log_to_file(&format!("ShimExecutor::do_start: create_shim_process: created PID={}", pid));
                         self.write_pid_file(&bundle_path, pid)?;
                         self.write_address(&bundle_path, &address)?;
 
@@ -74,11 +83,17 @@ impl ShimExecutor {
                         let sandbox_id_path = socket_file_path.with_extension("sandbox_id");
                         fs::write(&sandbox_id_path, &self.args.id)
                             .context(format!("write sandbox_id to {:?}", sandbox_id_path))?;
+                        self.log_to_file(&format!(
+                            "ShimExecutor::do_start: wrote sandbox_id = {} in file = {:?}", 
+                            &self.args.id, &sandbox_id_path
+                        ));
                     }
                     Err(e) => {
                         let error_msg = format!("{}", e);
                         if error_msg.contains("bind address") {
+                            self.log_to_file("ShimExecutor::do_start: address in use, shim process already running");
                         } else {
+                            self.log_to_file(&format!("ShimExecutor::do_start: new_listener failed with error: {}", error_msg));
                             return Err(e);
                         }
                     }
@@ -86,21 +101,28 @@ impl ShimExecutor {
 
                 if let Some(ref guest_vm_id) = self.guest_vm_id {
                     self.write_guest_vm_id(&bundle_path, guest_vm_id)?;
+                    self.log_to_file(&format!(
+                        "ShimExecutor::do_start: wrote guest_vm_id = {guest_vm_id} in bundle_path = {:?}", 
+                        &bundle_path
+                    ));
                 }
 
+                self.log_to_file(&format!("<<<<<<<< ShimExecutor::do_start"));
                 Ok(address)
             }
             ContainerType::PodContainer => {
                 let sid = id
                     .ok_or(Error::InvalidArgument)
                     .context("get sid for container")?;
-
-                // let address = self.socket_address(&sid).context("socket address")?;
                 // Use guest_vm_id if available, otherwise use the sandbox id
                 let socket_id = self.guest_vm_id.as_ref().unwrap_or(&sid);
-                let address = self.socket_address(socket_id).context("socket address")?;                
-
+                let address = self.socket_address(socket_id).context("socket address")?;
+                
+                self.log_to_file(&format!("ShimExecutor::do_start: sid={}, socket_id={}, address={:?}", sid, socket_id, address));
+                
                 self.write_address(&bundle_path, &address)?;
+
+                self.log_to_file(&format!("<<<<<<<< ShimExecutor::do_start"));
                 Ok(address)
             }
         }
