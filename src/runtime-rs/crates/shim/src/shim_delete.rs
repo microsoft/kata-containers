@@ -16,14 +16,24 @@ use crate::{shim::ShimExecutor, Error};
 
 impl ShimExecutor {
     pub async fn delete(&mut self) -> Result<()> {
+        info!(sl!(), "ShimExecutor: delete");
+
+        self.log_to_file(&format!(">>>>>>>> ShimExecutor: delete"));
+
         self.args.validate(true).context("validate")?;
         let rsp = self.do_cleanup().await.context("shim do cleanup")?;
         rsp.write_to_writer(&mut std::io::stdout())
             .context(Error::FileWrite(format!("write {rsp:?} to stdout")))?;
+
+        self.log_to_file(&format!("<<<<<<<< ShimExecutor: delete"));
+
         Ok(())
     }
 
     async fn do_cleanup(&self) -> Result<api::DeleteResponse> {
+        info!(sl!(), "ShimExecutor::do_cleanup");
+        self.log_to_file(&format!(">>>>>>>> ShimExecutor::do_cleanup"));
+
         let mut rsp = api::DeleteResponse::new();
         rsp.set_exit_status(128 + libc::SIGKILL as u32);
         let mut exited_time = protobuf::well_known_types::timestamp::Timestamp::new();
@@ -43,29 +53,31 @@ impl ShimExecutor {
                 if let Some(guest_vm_id_value) = annotations.get("io.katacontainers.config.hypervisor.guest_vm_id") {
                     socket_id = guest_vm_id_value.to_string();
                 } else {
+                    self.log_to_file(&format!("ShimExecutor::do_cleanup: no guest_vm_id annotation"));
                 }
             }
-            Err(_e) => {
+            Err(e) => {
+                self.log_to_file(&format!("ShimExecutor::do_cleanup: load_oci_spec failed {:?}", e));
             }
         }
-        
+
+        self.log_to_file(&format!("ShimExecutor::do_cleanup: socket_id = {socket_id}"));
         let address = self
-            // .socket_address(&self.args.id)
             .socket_address(&socket_id)
             .context("socket address")?;
+
         let trim_path = address.strip_prefix("unix://").context("trim path")?;
         let file_path = Path::new("/").join(trim_path);
         let file_path = file_path.as_path();
-        
-        /*
-        if std::fs::metadata(file_path).is_ok() {
-            info!(sl!(), "remote socket path: {:?}", &file_path);
-            fs::remove_file(file_path).ok();
-        }
-        */
+
         let sandbox_id_path = file_path.with_extension("sandbox_id");
         let owned_by_this_sandbox = match fs::read_to_string(&sandbox_id_path) {
             Ok(saved_id) => {
+                self.log_to_file(&format!(
+                    "ShimExecutor::do_cleanup: found in file sandbox_id = {saved_id}, self.args.id = {}",
+                    &self.args.id
+                ));
+
                 saved_id == self.args.id
             },
             Err(_) => true, // if file doesn't exist, allow removal for backward compat
@@ -75,10 +87,15 @@ impl ShimExecutor {
             if std::fs::metadata(file_path).is_ok() {
                 info!(sl!(), "ShimExecutor: remote socket path: {:?}", &file_path);
 
+                self.log_to_file(&format!("ShimExecutor::do_cleanup: removing file {:?}", &file_path));
                 fs::remove_file(file_path).ok();
             }
             fs::remove_file(&sandbox_id_path).ok();
         } else {
+            self.log_to_file(&format!(
+                "ShimExecutor::do_cleanup: skipping remove of {:?}, sandbox_id mismatch",
+                &file_path
+            ));
         }
 
         if let Err(e) = service::ServiceManager::cleanup(&self.args.id).await {
@@ -102,6 +119,7 @@ impl ShimExecutor {
             }
         }
 
+        self.log_to_file(&format!("<<<<<<<< ShimExecutor::do_cleanup"));
         Ok(rsp)
     }
 }

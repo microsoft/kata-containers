@@ -30,12 +30,11 @@ impl std::fmt::Debug for SandboxNetworkEnv {
 
 #[async_trait]
 pub trait Sandbox: Send + Sync {
-    // async fn start(&self) -> Result<()>;
     async fn start(
         &self, 
         bundle_sandbox_id: Option<String>,
         bundle_hostname: &str,
-    ) -> Result<()>;    
+    ) -> Result<()>;
 
     async fn start_template(&self) -> Result<()>;
     async fn stop(&self) -> Result<()>;

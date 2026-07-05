@@ -29,7 +29,6 @@ pub struct ShimExecutor {
 impl ShimExecutor {
     /// Create a new instance of [`Shim`].
     pub fn new(args: Args) -> Self {
-        // ShimExecutor { args }
         ShimExecutor { 
             args,
             guest_vm_id: None,
