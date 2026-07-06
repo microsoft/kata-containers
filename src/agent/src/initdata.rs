@@ -9,8 +9,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[cfg(feature = "init-data")]
-use std::{os::unix::fs::FileTypeExt, path::Path};
+//#[cfg(feature = "init-data")]
+//use std::{os::unix::fs::FileTypeExt, path::Path};
 
 use anyhow::{bail, Context, Result};
 use async_compression::tokio::bufread::GzipDecoder;
@@ -38,16 +38,16 @@ pub const AA_CONFIG_PATH: &str = concatcp!(INITDATA_PATH, "/aa.toml");
 pub const CDH_CONFIG_PATH: &str = concatcp!(INITDATA_PATH, "/cdh.toml");
 
 /// Magic number of initdata device
-#[cfg(feature = "init-data")]
-pub const INITDATA_MAGIC_NUMBER: &[u8] = b"initdata";
+// #[cfg(feature = "init-data")]
+// pub const INITDATA_MAGIC_NUMBER: &[u8] = b"initdata";
 
 /// initdata device with disk type 'vd*'
-#[cfg(feature = "init-data")]
-const INITDATA_PREFIX_DISK_VDX: &str = "vd";
+// #[cfg(feature = "init-data")]
+// const INITDATA_PREFIX_DISK_VDX: &str = "vd";
 
 /// initdata device with disk type 'sd*'
-#[cfg(feature = "init-data")]
-const INITDATA_PREFIX_DISK_SDX: &str = "sd";
+// #[cfg(feature = "init-data")]
+// const INITDATA_PREFIX_DISK_SDX: &str = "sd";
 
 #[cfg(not(feature = "init-data"))]
 async fn detect_initdata_device(logger: &Logger) -> Result<Option<String>> {
@@ -57,6 +57,8 @@ async fn detect_initdata_device(logger: &Logger) -> Result<Option<String>> {
 
 #[cfg(feature = "init-data")]
 async fn detect_initdata_device(logger: &Logger) -> Result<Option<String>> {
+    debug!(logger, "detect_initdata_device: disabled");
+    /*
     let dev_dir = Path::new("/dev");
     let mut read_dir = tokio::fs::read_dir(dev_dir).await?;
     while let Some(entry) = read_dir.next_entry().await? {
@@ -97,6 +99,7 @@ async fn detect_initdata_device(logger: &Logger) -> Result<Option<String>> {
             Err(e) => debug!(logger, "Initdata read device `{filename}` failed: {e:?}"),
         }
     }
+    */
 
     Ok(None)
 }
