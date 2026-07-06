@@ -21,7 +21,12 @@ use oci_client::{
     Client, Reference,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, io::Read, io::Write, path::Path};
+use std::{
+    collections::BTreeMap,
+    io::Read,
+    io::Write,
+    path::{Component, Path},
+};
 use tokio::io::AsyncWriteExt;
 
 /// Container image properties obtained from an OCI repository.
@@ -698,7 +703,9 @@ pub fn get_users_from_decompressed_layer(path: &Path) -> Result<(String, String)
     for entry_wrap in tar::Archive::new(file).entries()? {
         let mut entry = entry_wrap?;
         let entry_path = entry.header().path()?;
-        let path_str = entry_path.to_str().unwrap();
+        let Some(path_str) = normalized_layer_path(&entry_path) else {
+            continue;
+        };
         if path_str == PASSWD_FILE_TAR_PATH {
             entry.read_to_string(&mut passwd)?;
             found_passwd = true;
@@ -727,6 +734,24 @@ pub fn get_users_from_decompressed_layer(path: &Path) -> Result<(String, String)
     }
 
     Ok((passwd, group))
+}
+
+fn normalized_layer_path(path: &Path) -> Option<String> {
+    let mut components = Vec::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => components.push(part.to_str()?),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    if components.is_empty() {
+        return None;
+    }
+
+    Some(components.join("/"))
 }
 
 pub async fn get_container(
