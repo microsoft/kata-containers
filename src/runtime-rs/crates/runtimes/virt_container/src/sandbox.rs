@@ -222,7 +222,7 @@ impl VirtSandbox {
     ) -> Result<Vec<ResourceConfig>> {
         let mut resource_configs = vec![];
 
-        info!(sl!(), "prepare vm socket config for sandbox.");
+        info!(sl!(), "prepare_for_start_sandbox: prepare vm socket config for sandbox.");
         let vm_socket_config = self
             .prepare_vm_socket_config()
             .await
@@ -230,11 +230,16 @@ impl VirtSandbox {
         resource_configs.push(vm_socket_config);
 
         let network_env: SandboxNetworkEnv = sandbox_config.network_env.clone();
+        info!(sl!(), "prepare_for_start_sandbox: network_env = {:?}", &network_env);
+
         // prepare network config
         if !network_env.network_created {
+            info!(sl!(), "prepare_for_start_sandbox: calling prepare_network_resource");
             if let Some(network_resource) = self.prepare_network_resource(&network_env).await {
                 resource_configs.push(network_resource);
             }
+        } else {
+            warn!(sl!(), "prepare_for_start_sandbox: skipping prepare_network_resource");
         }
 
         // prepare sharefs device config
