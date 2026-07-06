@@ -35,6 +35,7 @@ pub trait Sandbox: Send + Sync {
         &self,
         bundle_sandbox_id: Option<String>,
         bundle_hostname: &str,
+        bundle_netns_path: Option<String>,
     ) -> Result<()>;
 
     async fn start_template(&self) -> Result<()>;
