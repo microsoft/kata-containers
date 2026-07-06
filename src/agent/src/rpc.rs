@@ -1297,16 +1297,88 @@ impl agent_ttrpc::AgentService for AgentService {
                                 }
                             }
 
-                            secondary
+                            let fallback_result = secondary
                                 .rtnl
                                 .update_interface_with_name_fallback(&interface)
-                                .await
-                                .map_ttrpc_err(|e| {
-                                    format!(
-                                        "update secondary interface (fallback): primary_err={}, fallback_err={:?}",
-                                        err_msg, e
-                                    )
-                                })?;
+                                .await;
+
+                            match fallback_result {
+                                Ok(()) => {}
+                                Err(fallback_err) => {
+                                    let secondary_netns_path = secondary.shared_netns.path.clone();
+                                    let fallback_err_msg = format!("{fallback_err:#}");
+
+                                    if secondary_netns_path.is_empty() {
+                                        return Err(ttrpc_error(
+                                            ttrpc::Code::INTERNAL,
+                                            format!(
+                                                "update secondary interface (fallback): primary_err={}, fallback_err={:?}",
+                                                err_msg, fallback_err
+                                            ),
+                                        ));
+                                    }
+
+                                    let move_candidate = {
+                                        let primary = self.sandbox.lock().await;
+                                        primary
+                                            .rtnl
+                                            .pick_link_for_secondary_netns_move(
+                                                &interface.name,
+                                                &interface.hwAddr,
+                                            )
+                                            .await
+                                            .map_ttrpc_err(|e| {
+                                                format!(
+                                                    "pick primary link for secondary netns move: {:?}; primary_err={}; fallback_err={}",
+                                                    e, err_msg, fallback_err_msg
+                                                )
+                                            })?
+                                    };
+
+                                    {
+                                        let primary = self.sandbox.lock().await;
+                                        warn!(
+                                            sl(),
+                                            "update_interface: moving link from primary netns into secondary netns";
+                                            "sandbox-id" => sid.as_str(),
+                                            "target-name" => interface.name.as_str(),
+                                            "target-mac" => interface.hwAddr.as_str(),
+                                            "move-candidate" => move_candidate.as_str(),
+                                            "secondary-netns" => secondary_netns_path.as_str(),
+                                            "primary-error" => err_msg.clone(),
+                                            "fallback-error" => fallback_err_msg.clone(),
+                                        );
+                                        primary
+                                            .rtnl
+                                            .move_link_to_netns(&move_candidate, &secondary_netns_path)
+                                            .await
+                                            .map_ttrpc_err(|e| {
+                                                format!(
+                                                    "move primary link {} to secondary netns {}: {:?}; primary_err={}; fallback_err={}",
+                                                    move_candidate,
+                                                    secondary_netns_path,
+                                                    e,
+                                                    err_msg,
+                                                    fallback_err_msg
+                                                )
+                                            })?;
+                                    }
+
+                                    secondary
+                                        .rtnl
+                                        .update_interface_with_name_fallback(&interface)
+                                        .await
+                                        .map_ttrpc_err(|e| {
+                                            format!(
+                                                "update secondary interface after netns move: move_candidate={}, primary_err={}, fallback_err={}, final_err={:?}",
+                                                move_candidate,
+                                                err_msg,
+                                                fallback_err_msg,
+                                                e
+                                            )
+                                        })?;
+                                }
+                            }
                         } else {
                             return Err(ttrpc_error(
                                 ttrpc::Code::INTERNAL,
