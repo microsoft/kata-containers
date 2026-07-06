@@ -1272,30 +1272,13 @@ impl agent_ttrpc::AgentService for AgentService {
                             !interface.name.is_empty() && err_msg.contains("Link not found");
 
                         if should_fallback {
-                            match secondary.rtnl.list_interfaces().await {
-                                Ok(ifaces) => {
-                                    warn!(
-                                        sl(),
-                                        "update_interface: secondary MAC lookup failed; retrying by name";
-                                        "sandbox-id" => sid.as_str(),
-                                        "target-name" => interface.name.as_str(),
-                                        "target-mac" => interface.hwAddr.as_str(),
-                                        "existing-interfaces" => format!("{:?}", ifaces),
-                                        "error" => err_msg.clone(),
-                                    );
-                                }
-                                Err(snapshot_err) => {
-                                    warn!(
-                                        sl(),
-                                        "update_interface: secondary MAC lookup failed; could not list interfaces before name fallback";
-                                        "sandbox-id" => sid.as_str(),
-                                        "target-name" => interface.name.as_str(),
-                                        "target-mac" => interface.hwAddr.as_str(),
-                                        "error" => err_msg.clone(),
-                                        "snapshot-error" => format!("{:?}", snapshot_err),
-                                    );
-                                }
-                            }
+                            warn!(
+                                sl(),
+                                "update_interface: secondary MAC lookup failed; retrying by fallback selectors";
+                                "sandbox-id" => sid.as_str(),
+                                "target-name" => interface.name.as_str(),
+                                "target-mac" => interface.hwAddr.as_str(),
+                            );
 
                             let fallback_result = secondary
                                 .rtnl
@@ -1312,7 +1295,7 @@ impl agent_ttrpc::AgentService for AgentService {
                                         return Err(ttrpc_error(
                                             ttrpc::Code::INTERNAL,
                                             format!(
-                                                "update secondary interface (fallback): primary_err={}, fallback_err={:?}",
+                                                "update secondary interface fallback failed: primary_err={}, fallback_err={:?}",
                                                 err_msg, fallback_err
                                             ),
                                         ));
@@ -1329,7 +1312,7 @@ impl agent_ttrpc::AgentService for AgentService {
                                             .await
                                             .map_ttrpc_err(|e| {
                                                 format!(
-                                                    "pick primary link for secondary netns move: {:?}; primary_err={}; fallback_err={}",
+                                                    "pick primary link for secondary netns move failed: {:?}; primary_err={}; fallback_err={}",
                                                     e, err_msg, fallback_err_msg
                                                 )
                                             })?
@@ -1354,7 +1337,7 @@ impl agent_ttrpc::AgentService for AgentService {
                                             .await
                                             .map_ttrpc_err(|e| {
                                                 format!(
-                                                    "move primary link {} to secondary netns {}: {:?}; primary_err={}; fallback_err={}",
+                                                    "move primary link {} to secondary netns {} failed: {:?}; primary_err={}; fallback_err={}",
                                                     move_candidate,
                                                     secondary_netns_path,
                                                     e,
@@ -1370,7 +1353,7 @@ impl agent_ttrpc::AgentService for AgentService {
                                         .await
                                         .map_ttrpc_err(|e| {
                                             format!(
-                                                "update secondary interface after netns move: move_candidate={}, primary_err={}, fallback_err={}, final_err={:?}",
+                                                "update secondary interface after netns move failed: move_candidate={}, primary_err={}, fallback_err={}, final_err={:?}",
                                                 move_candidate,
                                                 err_msg,
                                                 fallback_err_msg,
