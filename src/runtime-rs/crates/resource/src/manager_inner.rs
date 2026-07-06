@@ -374,6 +374,63 @@ impl ResourceManagerInner {
         Ok(())
     }
 
+    pub async fn apply_network_config_to_agent(&self, network_config: NetworkConfig) -> Result<()> {
+        if let NetworkConfig::NetNs(cfg) = &network_config {
+            use std::time::{Duration, Instant};
+
+            const POLL: Duration = Duration::from_millis(50);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let netns_path = cfg.netns_path.clone();
+
+            let found = tokio::task::spawn_blocking(move || -> Result<bool> {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .build()?;
+                loop {
+                    if rt.block_on(crate::network::netns_has_interfaces(&netns_path))? {
+                        return Ok(true);
+                    }
+                    if Instant::now() >= deadline {
+                        return Ok(false);
+                    }
+                    std::thread::sleep(POLL);
+                }
+            })
+            .await
+            .map_err(|e| anyhow!("{:?}", e))
+            .context("secondary netns poll task join")?
+            .context("secondary netns poll")?;
+
+            if !found {
+                warn!(
+                    sl!(),
+                    "secondary network: no interfaces in target netns before timeout"
+                );
+            }
+        }
+
+        // Build and set up a temporary network object from the provided netns,
+        // then push interfaces/routes/neighbors to the agent.
+        let device_manager = self.device_manager.clone();
+        let network = thread::spawn(move || -> Result<Arc<dyn Network>> {
+            let rt = runtime::Builder::new_current_thread().enable_io().build()?;
+            let d = rt
+                .block_on(network::new(&network_config, device_manager))
+                .context("new network")?;
+            rt.block_on(d.setup()).context("setup network")?;
+            Ok(d)
+        })
+        .join()
+        .map_err(|e| anyhow!("{:?}", e))
+        .context("Couldn't join on the associated thread")?
+        .context("failed to set up network")?;
+
+        resolve_physical_endpoint_pci_paths(network.as_ref(), self.hypervisor.as_ref()).await;
+        self.apply_network_to_agent(network.as_ref())
+            .await
+            .context("apply network to agent")
+    }
+
     pub async fn apply_network_to_agent(&self, network: &dyn Network) -> Result<()> {
         self.handle_interfaces(network)
             .await

@@ -12,7 +12,6 @@ use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
 use std::collections::HashMap;
-use std::convert::TryFrom;
 #[cfg(feature = "agent-policy")]
 use std::convert::TryInto as _;
 use std::ffi::{CString, OsStr};
@@ -60,6 +59,7 @@ use rustjail::specconv::CreateOpts;
 
 use nix::errno::Errno;
 use nix::mount::MsFlags;
+use nix::sched::{setns, CloneFlags};
 use nix::sys::{stat, statfs};
 use nix::unistd::{self, Pid};
 use rustjail::process::ProcessOperations;
@@ -82,7 +82,6 @@ use crate::device::{
 use crate::features::get_build_features;
 use crate::metrics::get_metrics;
 use crate::mount::baremount;
-use crate::namespace::{NSTYPEIPC, NSTYPENET, NSTYPEPID, NSTYPEUTS};
 use crate::network::setup_guest_dns;
 use crate::passfd_io;
 use crate::pci;
@@ -176,6 +175,25 @@ fn same<E>(e: E) -> E {
     e
 }
 
+fn create_rtnl_handle_in_netns(netns_path: &str) -> Result<crate::netlink::Handle> {
+    let current_netns_path = format!(
+        "/proc/{}/task/{}/ns/net",
+        unistd::getpid(),
+        unistd::gettid()
+    );
+    let old_netns = File::open(&current_netns_path)
+        .with_context(|| format!("open current netns path {}", &current_netns_path))?;
+    let new_netns = File::open(netns_path)
+        .with_context(|| format!("open target netns path {}", netns_path))?;
+
+    setns(&new_netns, CloneFlags::CLONE_NEWNET).context("set netns to target")?;
+    let handle = crate::netlink::Handle::new();
+    let restore = setns(&old_netns, CloneFlags::CLONE_NEWNET).context("restore netns");
+
+    restore?;
+    handle
+}
+
 trait ResultToTtrpcResult<T, E: Debug>: Sized {
     fn map_ttrpc_err<R: Debug>(self, msg_builder: impl FnOnce(E) -> R) -> ttrpc::Result<T>;
     fn map_ttrpc_err_do(self, doer: impl FnOnce(&E)) -> ttrpc::Result<T> {
@@ -206,6 +224,7 @@ impl<T> OptionToTtrpcResult<T> for Option<T> {
 pub struct AgentService {
     sandbox: Arc<Mutex<Sandbox>>,
     secondary_sandboxes: Arc<Mutex<HashMap<String, Sandbox>>>,
+    network_target_sandbox: Arc<Mutex<Option<String>>>,
     init_mode: bool,
     oma: Option<mem_agent::agent::MemAgent>,
 }
@@ -1198,6 +1217,110 @@ impl agent_ttrpc::AgentService for AgentService {
             }
         }
 
+        let target_sid = self.network_target_sandbox.lock().await.clone();
+        if let Some(sid) = target_sid {
+            let mut secondary_sandboxes = self.secondary_sandboxes.lock().await;
+            if let Some(secondary) = secondary_sandboxes.get_mut(&sid) {
+                #[cfg(not(target_arch = "s390x"))]
+                if !interface.devicePath.is_empty() && !interface.hwAddr.is_empty() {
+                    match secondary
+                        .rtnl
+                        .netdev_name_from_pci_path(&interface.devicePath)
+                    {
+                        Ok(Some(netdev_name)) => {
+                            if let Err(err) = secondary
+                                .rtnl
+                                .set_link_mac_by_name(&netdev_name, &interface.hwAddr)
+                                .await
+                            {
+                                warn!(
+                                    sl(),
+                                    "update_interface: secondary VFIO MAC reconciliation failed";
+                                    "sandbox-id" => sid.as_str(),
+                                    "device-path" => interface.devicePath.as_str(),
+                                    "target-mac" => interface.hwAddr.as_str(),
+                                    "netdev" => netdev_name.as_str(),
+                                    "error" => format!("{:?}", err),
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            info!(
+                                sl(),
+                                "update_interface: no secondary netdev found for PCI path";
+                                "sandbox-id" => sid.as_str(),
+                                "device-path" => interface.devicePath.as_str(),
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                sl(),
+                                "update_interface: unable to resolve secondary netdev from PCI path";
+                                "sandbox-id" => sid.as_str(),
+                                "device-path" => interface.devicePath.as_str(),
+                                "error" => format!("{:?}", err),
+                            );
+                        }
+                    }
+                }
+
+                match secondary.rtnl.update_interface(&interface).await {
+                    Ok(()) => {}
+                    Err(err) => {
+                        let err_msg = format!("{err:#}");
+                        let should_fallback =
+                            !interface.name.is_empty() && err_msg.contains("Link not found");
+
+                        if should_fallback {
+                            match secondary.rtnl.list_interfaces().await {
+                                Ok(ifaces) => {
+                                    warn!(
+                                        sl(),
+                                        "update_interface: secondary MAC lookup failed; retrying by name";
+                                        "sandbox-id" => sid.as_str(),
+                                        "target-name" => interface.name.as_str(),
+                                        "target-mac" => interface.hwAddr.as_str(),
+                                        "existing-interfaces" => format!("{:?}", ifaces),
+                                        "error" => err_msg.clone(),
+                                    );
+                                }
+                                Err(snapshot_err) => {
+                                    warn!(
+                                        sl(),
+                                        "update_interface: secondary MAC lookup failed; could not list interfaces before name fallback";
+                                        "sandbox-id" => sid.as_str(),
+                                        "target-name" => interface.name.as_str(),
+                                        "target-mac" => interface.hwAddr.as_str(),
+                                        "error" => err_msg.clone(),
+                                        "snapshot-error" => format!("{:?}", snapshot_err),
+                                    );
+                                }
+                            }
+
+                            secondary
+                                .rtnl
+                                .update_interface_with_name_fallback(&interface)
+                                .await
+                                .map_ttrpc_err(|e| {
+                                    format!(
+                                        "update secondary interface (fallback): primary_err={}, fallback_err={:?}",
+                                        err_msg, e
+                                    )
+                                })?;
+                        } else {
+                            return Err(ttrpc_error(
+                                ttrpc::Code::INTERNAL,
+                                format!("update secondary interface: {err:?}"),
+                            ));
+                        }
+                    }
+                }
+
+                return Ok(interface);
+            }
+            *self.network_target_sandbox.lock().await = None;
+        }
+
         let mut sandbox = self.sandbox.lock().await;
 
         #[cfg(not(target_arch = "s390x"))]
@@ -1264,6 +1387,33 @@ impl agent_ttrpc::AgentService for AgentService {
             .into_option()
             .map(|r| r.Routes)
             .map_ttrpc_err(ttrpc::Code::INVALID_ARGUMENT, "empty update routes request")?;
+
+        let target_sid = self.network_target_sandbox.lock().await.clone();
+        if let Some(sid) = target_sid {
+            let mut secondary_sandboxes = self.secondary_sandboxes.lock().await;
+            if let Some(secondary) = secondary_sandboxes.get_mut(&sid) {
+                secondary
+                    .rtnl
+                    .update_routes(new_routes)
+                    .await
+                    .map_ttrpc_err(|e| format!("Failed to update secondary routes: {e:?}"))?;
+
+                let list = secondary
+                    .rtnl
+                    .list_routes()
+                    .await
+                    .map_ttrpc_err(|e| {
+                        format!("Failed to list secondary routes after update: {e:?}")
+                    })?;
+
+                *self.network_target_sandbox.lock().await = None;
+                return Ok(protocols::agent::Routes {
+                    Routes: list,
+                    ..Default::default()
+                });
+            }
+            *self.network_target_sandbox.lock().await = None;
+        }
 
         let mut sandbox = self.sandbox.lock().await;
 
@@ -1561,8 +1711,14 @@ impl agent_ttrpc::AgentService for AgentService {
         info!(sl(), "create_secondary_sandbox: calling setup_shared_namespaces");
         sandbox.setup_shared_namespaces(&sandbox_id).await.map_ttrpc_err(same)?;
 
+        if !sandbox.shared_netns.path.is_empty() {
+            sandbox.rtnl = create_rtnl_handle_in_netns(&sandbox.shared_netns.path)
+                .map_ttrpc_err(same)?;
+        }
+
         let key = req.sandbox_id;
         self.secondary_sandboxes.lock().await.insert(key, sandbox);
+        *self.network_target_sandbox.lock().await = Some(sandbox_id);
 
         Ok(Empty::new())
     }
@@ -1611,6 +1767,22 @@ impl agent_ttrpc::AgentService for AgentService {
                 ttrpc::Code::INVALID_ARGUMENT,
                 "empty add arp neighbours request",
             )?;
+
+        let target_sid = self.network_target_sandbox.lock().await.clone();
+        if let Some(sid) = target_sid {
+            let mut secondary_sandboxes = self.secondary_sandboxes.lock().await;
+            if let Some(secondary) = secondary_sandboxes.get_mut(&sid) {
+                secondary
+                    .rtnl
+                    .add_arp_neighbors(neighs)
+                    .await
+                    .map_ttrpc_err(|e| {
+                        format!("Failed to add secondary ARP neighbours: {e:?}")
+                    })?;
+                return Ok(Empty::new());
+            }
+            *self.network_target_sandbox.lock().await = None;
+        }
 
         self.sandbox
             .lock()
@@ -2066,6 +2238,7 @@ pub async fn start(
     let agent_service = Box::new(AgentService {
         sandbox: s,
         secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
+        network_target_sandbox: Arc::new(Mutex::new(None)),
         init_mode,
         oma,
     });
@@ -2106,8 +2279,9 @@ fn update_container_namespaces(
         .ok_or_else(|| anyhow!(ERR_NO_LINUX_FIELD))?;
 
     if let Some(namespaces) = linux.namespaces_mut() {
+        let mut has_netns = false;
         for namespace in namespaces.iter_mut() {
-            if namespace.typ().to_string() == NSTYPEIPC {
+            if namespace.typ() == oci::LinuxNamespaceType::Ipc {
                 namespace.set_path(if !sandbox.shared_ipcns.path.is_empty() {
                     Some(PathBuf::from(&sandbox.shared_ipcns.path))
                 } else {
@@ -2115,7 +2289,7 @@ fn update_container_namespaces(
                 });
                 continue;
             }
-            if namespace.typ().to_string() == NSTYPEUTS {
+            if namespace.typ() == oci::LinuxNamespaceType::Uts {
                 namespace.set_path(if !sandbox.shared_utsns.path.is_empty() {
                     Some(PathBuf::from(&sandbox.shared_utsns.path))
                 } else {
@@ -2123,7 +2297,8 @@ fn update_container_namespaces(
                 });
                 continue;
             }
-            if namespace.typ().to_string() == NSTYPENET {
+            if namespace.typ() == oci::LinuxNamespaceType::Network {
+                has_netns = true;
                 if !sandbox.shared_netns.path.is_empty() {
                     namespace.set_path(Some(PathBuf::from(&sandbox.shared_netns.path)));
                 }
@@ -2131,9 +2306,19 @@ fn update_container_namespaces(
             }
         }
 
+        // Secondary sandboxes might not carry an explicit network namespace
+        // entry in the OCI spec. Add one so they do not fall back to sharing
+        // the primary sandbox network namespace.
+        if !has_netns && !sandbox.shared_netns.path.is_empty() {
+            let mut net_ns = LinuxNamespace::default();
+            net_ns.set_typ(oci::LinuxNamespaceType::Network);
+            net_ns.set_path(Some(PathBuf::from(&sandbox.shared_netns.path)));
+            namespaces.push(net_ns);
+        }
+
         // update pid namespace
         let mut pid_ns = LinuxNamespace::default();
-        pid_ns.set_typ(oci::LinuxNamespaceType::try_from(NSTYPEPID).unwrap());
+        pid_ns.set_typ(oci::LinuxNamespaceType::Pid);
 
         // Use shared pid ns if useSandboxPidns has been set in either
         // the create_sandbox request or create_container request.
@@ -2861,6 +3046,7 @@ mod tests {
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
             secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
+            network_target_sandbox: Arc::new(Mutex::new(None)),
             init_mode: true,
             oma: None,
         });
@@ -2880,6 +3066,7 @@ mod tests {
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
             secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
+            network_target_sandbox: Arc::new(Mutex::new(None)),
             init_mode: true,
             oma: None,
         });
@@ -2899,6 +3086,7 @@ mod tests {
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
             secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
+            network_target_sandbox: Arc::new(Mutex::new(None)),
             init_mode: true,
             oma: None,
         });
@@ -3038,6 +3226,7 @@ mod tests {
             let agent_service = Box::new(AgentService {
                 sandbox: Arc::new(Mutex::new(sandbox)),
                 secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
+                network_target_sandbox: Arc::new(Mutex::new(None)),
                 init_mode: true,
                 oma: None,
             });
@@ -3527,6 +3716,7 @@ OtherField:other
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
             secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
+            network_target_sandbox: Arc::new(Mutex::new(None)),
             init_mode: true,
             oma: None,
         });
@@ -3737,6 +3927,7 @@ COMMIT
         let agent_service = Arc::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
             secondary_sandboxes: Arc::new(Mutex::new(HashMap::new())),
+            network_target_sandbox: Arc::new(Mutex::new(None)),
             init_mode: true,
             oma: None,
         });

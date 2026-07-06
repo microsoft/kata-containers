@@ -114,6 +114,41 @@ impl Handle {
         // we cannot use that to find target link.
         // let's try if hardware address filter works. -_-
         let link = self.find_link(LinkFilter::Address(&iface.hwAddr)).await?;
+        self.update_interface_on_link(iface, &link).await
+    }
+
+    pub async fn update_interface_with_name_fallback(&mut self, iface: &Interface) -> Result<()> {
+        match self.find_link(LinkFilter::Address(&iface.hwAddr)).await {
+            Ok(link) => self.update_interface_on_link(iface, &link).await,
+            Err(mac_err) => {
+                if iface.name.is_empty() {
+                    return Err(mac_err);
+                }
+
+                let mac_err_msg = format!("{mac_err:#}");
+                let link = self
+                    .find_link(LinkFilter::Name(iface.name.as_str()))
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "MAC lookup failed ({}), and name lookup also failed for {}",
+                            mac_err_msg, iface.name
+                        )
+                    })?;
+
+                self.update_interface_on_link(iface, &link)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "updated via name fallback after MAC lookup failed: {}",
+                            mac_err_msg
+                        )
+                    })
+            }
+        }
+    }
+
+    async fn update_interface_on_link(&mut self, iface: &Interface, link: &Link) -> Result<()> {
 
         // Bring down interface if it is UP
         if link.is_up() {
@@ -183,7 +218,6 @@ impl Handle {
         }
 
         // Update link
-        let link = self.find_link(LinkFilter::Address(&iface.hwAddr)).await?;
         let mut request = self.handle.link().set(link.index());
         request.message_mut().header = link.header.clone();
 

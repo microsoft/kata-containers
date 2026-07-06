@@ -879,6 +879,40 @@ impl VirtSandbox {
 
         Ok(())
     }
+
+    async fn setup_secondary_network(&self, bundle_netns_path: Option<String>) -> Result<()> {
+        let Some(netns_path) = bundle_netns_path else {
+            info!(sl!(), "setup_secondary_network: no netns path, skip");
+            return Ok(());
+        };
+
+        info!(sl!(), "setup_secondary_network: netns_path = {}", netns_path);
+
+        let config = self.resource_manager.config().await;
+        if config.runtime.disable_new_netns || dan_config_path(&config, &self.sid).exists() {
+            info!(sl!(), "setup_secondary_network: netns disabled or DAN present, skip");
+            return Ok(());
+        }
+
+        let network_resource = NetworkConfig::NetNs(NetworkWithNetNsConfig {
+            network_model: config.runtime.internetworking_model.clone(),
+            netns_path,
+            queues: self
+                .hypervisor
+                .hypervisor_config()
+                .await
+                .network_info
+                .network_queues as usize,
+            network_created: false,
+        });
+
+        self.resource_manager
+            .apply_network_config_to_agent(network_resource)
+            .await
+            .context("apply secondary network to agent")?;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -889,6 +923,7 @@ impl Sandbox for VirtSandbox {
         &self,
         bundle_sandbox_id: Option<String>,
         bundle_hostname: &str,
+        bundle_netns_path: Option<String>,
     ) -> Result<()> {
 
         info!(sl!(), "VirtSandbox: start, container sandbox-id annotation = {:?}", bundle_sandbox_id);
@@ -901,16 +936,23 @@ impl Sandbox for VirtSandbox {
 
         let mut inner = self.inner.write().await;
 
+        let mut added_secondary = false;
         if let Some(sid) = bundle_sandbox_id {
             if sid != *id && !inner.additional_sids.contains(&sid) {
                 info!(sl!(), "VirtSandbox: adding secondary sandbox_id = {sid}");
                 inner.additional_sids.push(sid.clone());
                 self.setup_secondary_sandbox(&sid, bundle_hostname).await?;
+                added_secondary = true;
             }
         }
         // if sandbox is not in SandboxState::Init then return,
         // otherwise try to create sandbox
         if inner.state != SandboxState::Init {
+            if added_secondary {
+                self.setup_secondary_network(bundle_netns_path)
+                    .await
+                    .context("setup secondary network")?;
+            }
             warn!(sl!(), "sandbox is started");
             return Ok(());
         }
