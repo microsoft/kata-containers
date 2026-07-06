@@ -18,6 +18,7 @@ use crate::mount::baremount;
 
 const PERSISTENT_NS_DIR: &str = "/var/run/sandbox-ns";
 pub const NSTYPEIPC: &str = "ipc";
+pub const NSTYPENET: &str = "network";
 pub const NSTYPEUTS: &str = "uts";
 pub const NSTYPEPID: &str = "pid";
 
@@ -51,6 +52,12 @@ impl Namespace {
     #[instrument]
     pub fn get_ipc(mut self) -> Self {
         self.ns_type = NamespaceType::Ipc;
+        self
+    }
+
+    #[instrument]
+    pub fn get_net(mut self) -> Self {
+        self.ns_type = NamespaceType::Net;
         self
     }
 
@@ -168,6 +175,7 @@ impl Namespace {
 #[derive(Clone, Copy, PartialEq)]
 enum NamespaceType {
     Ipc,
+    Net,
     Uts,
     Pid,
 }
@@ -177,6 +185,7 @@ impl NamespaceType {
     pub fn get(&self) -> &str {
         match *self {
             Self::Ipc => "ipc",
+            Self::Net => "net",
             Self::Uts => "uts",
             Self::Pid => "pid",
         }
@@ -186,6 +195,7 @@ impl NamespaceType {
     pub fn get_flags(&self) -> CloneFlags {
         match *self {
             Self::Ipc => CloneFlags::CLONE_NEWIPC,
+            Self::Net => CloneFlags::CLONE_NEWNET,
             Self::Uts => CloneFlags::CLONE_NEWUTS,
             Self::Pid => CloneFlags::CLONE_NEWPID,
         }
@@ -217,7 +227,7 @@ mod tests {
         let ns_ipc = Namespace::new(&logger)
             .get_ipc()
             .set_root_dir(tmpdir.path().to_str().unwrap())
-            .setup()
+            .setup("")
             .await;
 
         assert!(ns_ipc.is_ok());
@@ -229,7 +239,7 @@ mod tests {
         let ns_uts = Namespace::new(&logger)
             .get_uts("test_hostname")
             .set_root_dir(tmpdir.path().to_str().unwrap())
-            .setup()
+            .setup("")
             .await;
 
         assert!(ns_uts.is_ok());
@@ -242,7 +252,7 @@ mod tests {
         let ns_pid = Namespace::new(&logger)
             .get_pid()
             .set_root_dir(tmpdir.path().to_str().unwrap())
-            .setup()
+            .setup("")
             .await;
 
         assert!(ns_pid.is_err());

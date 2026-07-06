@@ -82,7 +82,7 @@ use crate::device::{
 use crate::features::get_build_features;
 use crate::metrics::get_metrics;
 use crate::mount::baremount;
-use crate::namespace::{NSTYPEIPC, NSTYPEPID, NSTYPEUTS};
+use crate::namespace::{NSTYPEIPC, NSTYPENET, NSTYPEPID, NSTYPEUTS};
 use crate::network::setup_guest_dns;
 use crate::passfd_io;
 use crate::pci;
@@ -2121,6 +2121,12 @@ fn update_container_namespaces(
                 } else {
                     None
                 });
+                continue;
+            }
+            if namespace.typ().to_string() == NSTYPENET {
+                if !sandbox.shared_netns.path.is_empty() {
+                    namespace.set_path(Some(PathBuf::from(&sandbox.shared_netns.path)));
+                }
                 continue;
             }
         }
