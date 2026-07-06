@@ -194,6 +194,10 @@ fn create_rtnl_handle_in_netns(netns_path: &str) -> Result<crate::netlink::Handl
     handle
 }
 
+fn should_try_secondary_interface_fallback(interface_name: &str, err_msg: &str) -> bool {
+    !interface_name.is_empty() && err_msg.contains("Link not found")
+}
+
 trait ResultToTtrpcResult<T, E: Debug>: Sized {
     fn map_ttrpc_err<R: Debug>(self, msg_builder: impl FnOnce(E) -> R) -> ttrpc::Result<T>;
     fn map_ttrpc_err_do(self, doer: impl FnOnce(&E)) -> ttrpc::Result<T> {
@@ -1269,7 +1273,7 @@ impl agent_ttrpc::AgentService for AgentService {
                     Err(err) => {
                         let err_msg = format!("{err:#}");
                         let should_fallback =
-                            !interface.name.is_empty() && err_msg.contains("Link not found");
+                            should_try_secondary_interface_fallback(&interface.name, &err_msg);
 
                         if should_fallback {
                             warn!(
@@ -3073,6 +3077,24 @@ mod tests {
         }
 
         assert!(result.is_ok(), "load module should success");
+    }
+
+    #[test]
+    fn test_should_try_secondary_interface_fallback() {
+        assert!(should_try_secondary_interface_fallback(
+            "eth0",
+            "update secondary interface: Link not found (Address: aa:bb:cc:dd:ee:ff)"
+        ));
+
+        assert!(!should_try_secondary_interface_fallback(
+            "",
+            "update secondary interface: Link not found (Address: aa:bb:cc:dd:ee:ff)"
+        ));
+
+        assert!(!should_try_secondary_interface_fallback(
+            "eth0",
+            "update secondary interface: operation not permitted"
+        ));
     }
 
     #[tokio::test]
