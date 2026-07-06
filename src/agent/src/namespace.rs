@@ -17,9 +17,6 @@ use tracing::instrument;
 use crate::mount::baremount;
 
 const PERSISTENT_NS_DIR: &str = "/var/run/sandbox-ns";
-pub const NSTYPEIPC: &str = "ipc";
-pub const NSTYPEUTS: &str = "uts";
-pub const NSTYPEPID: &str = "pid";
 
 #[instrument]
 pub fn get_current_thread_ns_path(ns_type: &str) -> String {
@@ -51,6 +48,12 @@ impl Namespace {
     #[instrument]
     pub fn get_ipc(mut self) -> Self {
         self.ns_type = NamespaceType::Ipc;
+        self
+    }
+
+    #[instrument]
+    pub fn get_net(mut self) -> Self {
+        self.ns_type = NamespaceType::Net;
         self
     }
 
@@ -106,59 +109,47 @@ impl Namespace {
 
         self.path = new_ns_path.clone().into_os_string().into_string().unwrap();
         let hostname = self.hostname.clone();
+        let new_thread = std::thread::spawn(move || -> Result<()> {
+            let origin_ns_path = get_current_thread_ns_path(ns_type.get());
+            let source = Path::new(&origin_ns_path);
+            let destination = new_ns_path.as_path();
 
-        //let new_thread = std::thread::spawn(move || {
-            //if let Err(err) = || -> Result<()> {
-                let origin_ns_path = get_current_thread_ns_path(ns_type.get());
+            info!(logger, "Namespace::setup: opening file {:?}", &source);
+            File::open(source)?;
 
-                let source = Path::new(&origin_ns_path);
-                let destination = new_ns_path.as_path();
+            // Create a new namespace on the helper thread.
+            let cf = ns_type.get_flags();
+            info!(logger, "Namespace::setup: calling unshare");
+            unshare(cf)?;
 
-                info!(self.logger, "Namespace::setup: opening file {:?}", &source);
-                File::open(source)?;
-
-                // Create a new netns on the current thread.
-                let cf = ns_type.get_flags();
-
-                info!(self.logger, "Namespace::setup: calling unshare");
-                unshare(cf)?;
-
-                if ns_type == NamespaceType::Uts {
-                    if let Some(host) = hostname {
-                        nix::unistd::sethostname(host)?;
-                    }
+            if ns_type == NamespaceType::Uts {
+                if let Some(host) = hostname {
+                    nix::unistd::sethostname(host)?;
                 }
-                // Bind mount the new namespace from the current thread onto the mount point to persist it.
-
-                let mut flags = MsFlags::empty();
-                flags |= MsFlags::MS_BIND | MsFlags::MS_REC;
-
-                info!(self.logger, "Namespace::setup: baremount: source = {:?}, destination = {:?}", &source, &destination);
-                baremount(source, destination, "none", flags, "", &logger).map_err(|e| {
-                    anyhow!(
-                        "Failed to mount {:?} to {:?} with err:{:?}",
-                        source,
-                        destination,
-                        e
-                    )
-                })?;
-                info!(self.logger, "Namespace::setup: baremount succeeded");
-
-            /*
-                Ok(())
-            }() {
-                return Err(err);
             }
-            */
 
-        //    Ok(())
-        //});
+            // Bind mount the new namespace from the helper thread onto the
+            // mount point to persist it.
+            let mut flags = MsFlags::empty();
+            flags |= MsFlags::MS_BIND | MsFlags::MS_REC;
 
-        /*
+            info!(logger, "Namespace::setup: baremount: source = {:?}, destination = {:?}", &source, &destination);
+            baremount(source, destination, "none", flags, "", &logger).map_err(|e| {
+                anyhow!(
+                    "Failed to mount {:?} to {:?} with err:{:?}",
+                    source,
+                    destination,
+                    e
+                )
+            })?;
+            info!(logger, "Namespace::setup: baremount succeeded");
+
+            Ok(())
+        });
+
         new_thread
             .join()
             .map_err(|e| anyhow!("Failed to join thread {:?}!", e))??;
-        */
 
         Ok(self)
     }
@@ -168,6 +159,7 @@ impl Namespace {
 #[derive(Clone, Copy, PartialEq)]
 enum NamespaceType {
     Ipc,
+    Net,
     Uts,
     Pid,
 }
@@ -177,6 +169,7 @@ impl NamespaceType {
     pub fn get(&self) -> &str {
         match *self {
             Self::Ipc => "ipc",
+            Self::Net => "net",
             Self::Uts => "uts",
             Self::Pid => "pid",
         }
@@ -186,6 +179,7 @@ impl NamespaceType {
     pub fn get_flags(&self) -> CloneFlags {
         match *self {
             Self::Ipc => CloneFlags::CLONE_NEWIPC,
+            Self::Net => CloneFlags::CLONE_NEWNET,
             Self::Uts => CloneFlags::CLONE_NEWUTS,
             Self::Pid => CloneFlags::CLONE_NEWPID,
         }
@@ -217,7 +211,7 @@ mod tests {
         let ns_ipc = Namespace::new(&logger)
             .get_ipc()
             .set_root_dir(tmpdir.path().to_str().unwrap())
-            .setup()
+            .setup("")
             .await;
 
         assert!(ns_ipc.is_ok());
@@ -229,7 +223,7 @@ mod tests {
         let ns_uts = Namespace::new(&logger)
             .get_uts("test_hostname")
             .set_root_dir(tmpdir.path().to_str().unwrap())
-            .setup()
+            .setup("")
             .await;
 
         assert!(ns_uts.is_ok());
@@ -242,7 +236,7 @@ mod tests {
         let ns_pid = Namespace::new(&logger)
             .get_pid()
             .set_root_dir(tmpdir.path().to_str().unwrap())
-            .setup()
+            .setup("")
             .await;
 
         assert!(ns_pid.is_err());

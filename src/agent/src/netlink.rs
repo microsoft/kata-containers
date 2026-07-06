@@ -25,6 +25,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::os::fd::AsRawFd;
 use std::ops::Deref;
 use std::str::{self, FromStr};
 
@@ -111,6 +112,182 @@ impl Handle {
         // we cannot use that to find target link.
         // let's try if hardware address filter works. -_-
         let link = self.find_link(LinkFilter::Address(&iface.hwAddr)).await?;
+        self.update_interface_on_link(iface, &link).await
+    }
+
+    pub async fn update_interface_with_name_fallback(&mut self, iface: &Interface) -> Result<()> {
+        match self.find_link(LinkFilter::Address(&iface.hwAddr)).await {
+            Ok(link) => self.update_interface_on_link(iface, &link).await,
+            Err(mac_err) => {
+                let mac_err_msg = format!("{mac_err:#}");
+                if !iface.name.is_empty() {
+                    if let Ok(link) = self.find_link(LinkFilter::Name(iface.name.as_str())).await {
+                        return self
+                            .update_interface_on_link(iface, &link)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "updated via name fallback after MAC lookup failed: {}",
+                                    mac_err_msg
+                                )
+                            });
+                    }
+                }
+
+                let link = self
+                    .find_unique_non_loopback_link()
+                    .await
+                    .with_context(|| {
+                        if iface.name.is_empty() {
+                            format!(
+                                "MAC lookup failed ({}) and no requested interface name was provided",
+                                mac_err_msg
+                            )
+                        } else {
+                            format!(
+                                "MAC lookup failed ({}), and name lookup also failed for {}",
+                                mac_err_msg, iface.name
+                            )
+                        }
+                    })?;
+
+                self.update_interface_on_link(iface, &link)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "updated via unique-link fallback after MAC lookup failed: {}",
+                            mac_err_msg
+                        )
+                    })
+            }
+        }
+    }
+
+    async fn find_unique_non_loopback_link(&self) -> Result<Link> {
+        let mut candidates = self
+            .list_links()
+            .await?
+            .into_iter()
+            .filter(|link| !link.is_loopback())
+            .collect::<Vec<_>>();
+
+        match candidates.len() {
+            1 => Ok(candidates.remove(0)),
+            0 => Err(anyhow!("no non-loopback link found for fallback")),
+            _ => {
+                let links = candidates
+                    .iter()
+                    .map(|link| format!("{}({})", link.name(), link.address()))
+                    .collect::<Vec<_>>();
+                Err(anyhow!(
+                    "multiple non-loopback links found for fallback: {}",
+                    links.join(", ")
+                ))
+            }
+        }
+    }
+
+    pub async fn pick_link_for_secondary_netns_move(
+        &self,
+        requested_name: &str,
+        requested_mac: &str,
+    ) -> Result<String> {
+        let candidates = self
+            .list_links()
+            .await?
+            .into_iter()
+            .filter(|link| !link.is_loopback())
+            .map(|link| LinkIdentity {
+                name: link.name(),
+                address: link.address(),
+                index: link.index(),
+            })
+            .collect::<Vec<_>>();
+
+        pick_link_for_secondary_netns_move_from_candidates(
+            candidates,
+            requested_name,
+            requested_mac,
+        )
+    }
+
+    pub async fn move_link_to_netns(&self, ifname: &str, netns_path: &str) -> Result<()> {
+        let link = self.find_link(LinkFilter::Name(ifname)).await?;
+        let netns = fs::File::open(netns_path)
+            .with_context(|| format!("open target netns path {}", netns_path))?;
+
+        let mut request = self.handle.link().set(link.index());
+        request.message_mut().header = link.header.clone();
+        request
+            .setns_by_fd(netns.as_raw_fd())
+            .execute()
+            .await
+            .with_context(|| format!("move interface {} to netns {}", ifname, netns_path))?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LinkIdentity {
+    name: String,
+    address: String,
+    index: u32,
+}
+
+fn pick_link_for_secondary_netns_move_from_candidates(
+    mut candidates: Vec<LinkIdentity>,
+    requested_name: &str,
+    requested_mac: &str,
+) -> Result<String> {
+    if candidates.is_empty() {
+        return Err(anyhow!("no non-loopback link available for secondary netns move"));
+    }
+
+    candidates.sort_by_key(|link| link.index);
+
+    if candidates.len() == 1 {
+        let candidate = &candidates[0];
+        if candidate.name == requested_name
+            || (!requested_mac.is_empty() && candidate.address.eq_ignore_ascii_case(requested_mac))
+        {
+            return Err(anyhow!(
+                "only primary-like link is present for secondary netns move: {}({})",
+                candidate.name,
+                candidate.address
+            ));
+        }
+
+        return Ok(candidate.name.clone());
+    }
+
+    let non_requested = candidates
+        .iter()
+        .filter(|link| {
+            link.name != requested_name
+                && (requested_mac.is_empty() || !link.address.eq_ignore_ascii_case(requested_mac))
+        })
+        .collect::<Vec<_>>();
+    if non_requested.len() == 1 {
+        return Ok(non_requested[0].name.clone());
+    }
+
+    if let Some(link) = non_requested.last() {
+        return Ok(link.name.clone());
+    }
+
+    Err(anyhow!(
+        "failed to pick a distinct link for secondary netns move from candidates: {}",
+        candidates
+            .iter()
+            .map(|link| format!("{}({})", link.name, link.address))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
+impl Handle {
+    async fn update_interface_on_link(&mut self, iface: &Interface, link: &Link) -> Result<()> {
 
         // Bring down interface if it is UP
         if link.is_up() {
@@ -180,7 +357,6 @@ impl Handle {
         }
 
         // Update link
-        let link = self.find_link(LinkFilter::Address(&iface.hwAddr)).await?;
         let mut request = self.handle.link().set(link.index());
         request.message_mut().header = link.header.clone();
 
@@ -798,6 +974,15 @@ impl Link {
         flags as i32 & libc::IFF_UP > 0
     }
 
+    fn is_loopback(&self) -> bool {
+        let mut flags: u32 = 0;
+        for flag in &self.header.flags {
+            flags += u32::from(*flag);
+        }
+
+        flags as i32 & libc::IFF_LOOPBACK > 0
+    }
+
     fn index(&self) -> u32 {
         self.header.index
     }
@@ -958,6 +1143,56 @@ mod tests {
             .expect("Failed to query link by address");
 
         assert_eq!(result.header.index, link.header.index);
+    }
+
+    fn test_link(name: &str, address: &str, index: u32) -> LinkIdentity {
+        LinkIdentity {
+            name: name.to_string(),
+            address: address.to_string(),
+            index,
+        }
+    }
+
+    #[test]
+    fn test_pick_secondary_move_candidate_rejects_primary_only() {
+        let candidates = vec![test_link("eth0", "3a:77:96:27:2c:9d", 2)];
+        let result = pick_link_for_secondary_netns_move_from_candidates(
+            candidates,
+            "eth0",
+            "3a:77:96:27:2c:9d",
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pick_secondary_move_candidate_prefers_distinct_link() {
+        let candidates = vec![
+            test_link("eth0", "3a:77:96:27:2c:9d", 2),
+            test_link("eth1", "a2:17:83:d1:6d:ab", 6),
+        ];
+        let result = pick_link_for_secondary_netns_move_from_candidates(
+            candidates,
+            "eth0",
+            "3a:77:96:27:2c:9d",
+        )
+        .unwrap();
+        assert_eq!(result, "eth1");
+    }
+
+    #[test]
+    fn test_pick_secondary_move_candidate_uses_highest_index_when_multiple_distinct() {
+        let candidates = vec![
+            test_link("eth0", "3a:77:96:27:2c:9d", 2),
+            test_link("eth1", "a2:17:83:d1:6d:ab", 5),
+            test_link("eth2", "b2:17:83:d1:6d:ac", 6),
+        ];
+        let result = pick_link_for_secondary_netns_move_from_candidates(
+            candidates,
+            "eth0",
+            "3a:77:96:27:2c:9d",
+        )
+        .unwrap();
+        assert_eq!(result, "eth2");
     }
 
     #[tokio::test]
