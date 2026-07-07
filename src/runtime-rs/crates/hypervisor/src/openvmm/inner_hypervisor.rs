@@ -188,22 +188,34 @@ impl OpenVmmInner {
         //     (each pre-reserves an aligned MMIO32 window even when empty)
         //     and 1 MB-aligned padding between bridges
         //                                    ~ 150-200 MB
-        //   Total ≥ 512 MB; 640 MB gives ~2x headroom and still fits
-        //   between PCI hole start (0xC000_0000) and ECAM (0xE800_0000+).
+        //   Total ≥ 512 MB; 640 MB gives ~2x headroom.
         //
-        // The original 320 MB window (0xc000_0000..0xd400_0000) overflows
-        // with as little as 8 GPUs + 6 NVSwitches and the openvmm worker
-        // aborts with: "low_mmio MMIO exhaustion: need 0x14500000 bytes,
-        // have 0x14000000".
+        // Use a Dynamic (size-only) request rather than a Fixed absolute
+        // range so OpenVMM's memory-layout resolver places the window in
+        // free Mmio32 space below the chipset's architecture-specific
+        // "chipset-low-mmio" reservation. That reservation is pinned to the
+        // top of 32-bit space and its size is arch-dependent: on x86_64 it
+        // is [0xF800_0000, 4 GiB) (128 MB), but on aarch64 it is
+        // [0xE000_0000, 4 GiB) (512 MB, driven by the larger GIC/PL011
+        // architectural reserved zone). A hardcoded Fixed low_mmio ending at
+        // 0xE800_0000 works on x86_64 but overlaps the aarch64 chipset zone,
+        // and the resolver then aborts with:
+        //   "fixed/reserved requests pcie-rc0-low-mmio (0xc0000000-0xe8000000)
+        //    and chipset-low-mmio (0xe0000000-0x100000000) overlap".
+        // Dynamic sizing is arch-portable and lets the resolver route around
+        // the chipset zone, ECAM, and virtio-mmio slots automatically.
+        // preserve_bars is false here, so pinning an absolute base buys us
+        // nothing.
+        const RC0_LOW_MMIO_SIZE: u64 = 0x2800_0000; // 640 MB
         let pcie_root_complexes = vec![PcieRootComplexConfig {
             index: 0,
             name: "rc0".to_string(),
             segment: 0,
             start_bus: 0,
             end_bus: 127,
-            low_mmio: PcieMmioRangeConfig::Fixed(ovmm_memory_range::MemoryRange::new(
-                0xc000_0000..0xe800_0000,
-            )),
+            low_mmio: PcieMmioRangeConfig::Dynamic {
+                size: RC0_LOW_MMIO_SIZE,
+            },
             high_mmio: PcieMmioRangeConfig::Fixed(ovmm_memory_range::MemoryRange::new(
                 0x0020_3d30_0000..0x200f_3d30_0000,
             )),
