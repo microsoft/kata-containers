@@ -1,0 +1,176 @@
+# Copyright (c) 2024 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# XXX: WARNING: this file is auto-generated.
+# XXX:
+# XXX: Source file: "@CONFIG_OPENVMM_IN@"
+# XXX: Project:
+# XXX:   Name: @PROJECT_NAME@
+# XXX:   Type: @PROJECT_TYPE@
+
+[hypervisor.openvmm]
+path = "@OPENVMMPATH@"
+kernel = "@KERNELPATH_OPENVMM@"
+image = "@IMAGEPATH_OPENVMM_AZURE@"
+
+# rootfs filesystem type:
+#   - ext4 (default)
+#   - xfs
+#   - erofs
+rootfs_type = @DEFROOTFSTYPE@
+
+# Block storage driver to be used for the VM rootfs is backed
+# by a block device.
+vm_rootfs_driver = "@VMROOTFSDRIVER_OPENVMM@"
+
+# List of valid annotation names for the hypervisor
+enable_annotations = @DEFENABLEANNOTATIONS@
+
+# List of valid annotations values for the hypervisor
+valid_hypervisor_paths = @OPENVMMVALIDHYPERVISORPATHS@
+
+# List of valid annotations values for ctlpath
+valid_ctlpaths = []
+
+# Optional space-separated list of options to pass to the guest kernel.
+kernel_params = "@KERNELPARAMS_OPENVMM@"
+
+# Path to the firmware.
+firmware = "@FIRMWAREPATH@"
+
+# Default number of vCPUs per SB/VM:
+default_vcpus = @DEFVCPUS@
+
+# Guest-side vCPU overhead budget (fractional) used with static_sandbox_resource_mgmt.
+# When workload limits are present, vm_vcpus = requested_vcpus + overhead_vcpus
+# (rounded up at boot). When no workload limits are present, default_vcpus is used instead.
+# See docs/how-to/how-to-size-sandbox-overhead-runtime-rs.md
+overhead_vcpus = @DEFOVERHEADVCPUS_OPENVMM@
+
+# Default maximum number of vCPUs per SB/VM:
+default_maxvcpus = @DEFMAXVCPUS@
+
+# Default number of bridges per SB/VM:
+# OpenVMM uses PCIe root complexes, not PCI bridges.
+default_bridges = 0
+
+# Default memory size in MiB for SB/VM.
+default_memory = @DEFMEMSZ@
+
+# Guest-side memory overhead budget (MiB) used with static_sandbox_resource_mgmt.
+# When workload limits are present, vm_memory = requested_memory + overhead_memory.
+# When no workload limits are present, default_memory is used instead.
+# See docs/how-to/how-to-size-sandbox-overhead-runtime-rs.md
+overhead_memory = @DEFOVERHEADMEMSZ_OPENVMM@
+
+# Default maximum memory in MiB per SB / VM
+default_maxmemory = @DEFMAXMEMSZ@
+
+# Shared file system type:
+#   - virtio-fs (default for OpenVMM - external virtiofsd over vhost-user)
+#   - inline-virtio-fs
+#   - none
+shared_fs = "@DEFSHAREDFS_OPENVMM@"
+
+# Path to vhost-user-fs daemon.
+virtio_fs_daemon = "@DEFVIRTIOFSDAEMON@"
+
+# List of valid annotations values for the virtiofs daemon
+# The default if not set is empty (all annotations rejected.)
+# Your distribution recommends: @DEFVALIDVIRTIOFSDAEMONPATHS@
+valid_virtio_fs_daemon_paths = @DEFVALIDVIRTIOFSDAEMONPATHS@
+
+# Default size of DAX cache in MiB
+virtio_fs_cache_size = @DEFVIRTIOFSCACHESIZE@
+
+# Extra args for virtiofsd daemon
+virtio_fs_extra_args = @DEFVIRTIOFSEXTRAARGS@
+
+# Cache mode:
+virtio_fs_cache = "@DEFVIRTIOFSCACHE@"
+
+# Block device driver to be used by the hypervisor
+block_device_driver = "@DEFBLOCKSTORAGEDRIVER_OPENVMM@"
+
+# Specifies cache-related options for block devices.
+block_device_cache_direct = false
+
+# Virtio queue size. Size: byte. default 128
+queue_size = 128
+
+# Block device multi-queue, default 1
+num_queues = 1
+
+# network_queues
+network_queues = @DEFNETQUEUES@
+
+# This option changes the default hypervisor and kernel parameters
+# to enable debug output where available.
+enable_debug = true
+
+# Disable the customizations done in the runtime when it detects
+# that it is running on top a VMM.
+disable_nesting_checks = false
+
+# Disable the 'seccomp' feature
+disable_seccomp = false
+
+# Disable guest selinux
+disable_guest_selinux = true
+
+# Reclaim guest freed memory.
+reclaim_guest_freed_memory = false
+
+# Enable swap in the guest. Default false.
+enable_guest_swap = false
+
+[agent.@PROJECT_TYPE@]
+container_pipe_size = @PIPESIZE@
+enable_debug = true
+enable_tracing = false
+debug_console_enabled = false
+
+# Agent dial timeout in millisecond.
+# Use longer timeout to give the hvsock relay time to complete VMBus handshake.
+dial_timeout_ms = 1000
+
+# Agent reconnect timeout in millisecond.
+# OpenVMM needs more time for guest to boot and kata-agent to start.
+reconnect_timeout_ms = 60000
+
+# Create Container Request Timeout
+create_container_timeout = @DEFCREATECONTAINERTIMEOUT@
+
+[runtime]
+enable_debug = true
+keep_abnormal = false
+
+# Internetworking model
+internetworking_model = "@DEFNETWORKMODEL_OPENVMM@"
+
+name = "@RUNTIMENAME@"
+hypervisor_name = "@HYPERVISOR_NAME_OPENVMM@"
+agent_name = "@PROJECT_TYPE@"
+
+# disable guest seccomp
+disable_guest_seccomp = @DEFDISABLEGUESTSECCOMP@
+
+enable_tracing = false
+jaeger_endpoint = ""
+jaeger_user = ""
+jaeger_password = ""
+
+disable_new_netns = false
+
+sandbox_cgroup_only = @DEFSANDBOXCGROUPONLY_OPENVMM@
+
+experimental = @DEFAULTEXPFEATURES@
+
+enable_pprof = false
+
+static_sandbox_resource_mgmt = @DEFSTATICRESOURCEMGMT_OPENVMM_AZURE@
+
+sandbox_bind_mounts = @DEFBINDMOUNTS@
+
+dan_conf = "@DEFDANCONF@"

@@ -658,6 +658,14 @@ shims:
       httpsProxy: ""
       noProxy: ""
 
+  openvmm-azure-runtime-rs:
+    enabled: ~
+    supportedArches:
+      - amd64
+    allowedHypervisorAnnotations: []
+    containerd:
+      snapshotter: ""
+
 # Default shim per architecture
 defaultShim:
   amd64: qemu

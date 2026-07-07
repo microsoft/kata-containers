@@ -28,6 +28,7 @@ path-clean = "1.0.1"
 lazy_static = { workspace = true }
 tracing = { workspace = true }
 ttrpc = { workspace = true, features = ["async"] }
+protobuf = { workspace = true }
 futures = "0.3.25"
 crossbeam-channel = "0.5.6"
 qapi = { version = "0.15", features = ["qmp", "async-tokio-all"] }
@@ -88,6 +89,13 @@ default = ["cloud-hypervisor"]
 
 dragonball = ["dep:dragonball"]
 cloud-hypervisor = ["ch-config"]
+
+# Enable the external OpenVMM TTRPC hypervisor backend.
+#
+# The OpenVMM bindings are generated in-tree by `build.rs` from the vendored
+# `protos/vmservice.proto`, so this backend pulls in no OpenVMM crates; it talks
+# to the external `openvmm` process over the standard `ttrpc` async client.
+openvmm = []
 
 [dev-dependencies]
 serial_test = "2.0.0"
