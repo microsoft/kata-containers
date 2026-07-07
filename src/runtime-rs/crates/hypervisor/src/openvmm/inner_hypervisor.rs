@@ -207,6 +207,22 @@ impl OpenVmmInner {
         // preserve_bars is false here, so pinning an absolute base buys us
         // nothing.
         const RC0_LOW_MMIO_SIZE: u64 = 0x2800_0000; // 640 MB
+
+        // high_mmio is the 64-bit prefetchable BAR pool: 8x H100 BAR1/2
+        // (128 GB ea.) plus the GB200 coherent-memory BARs (186 GB ea.) all
+        // land here. Like low_mmio, request it by size (Dynamic) rather than
+        // pinning an absolute Fixed range so OpenVMM's resolver places the
+        // window above RAM and routes chipset-high-mmio and dynamic RAM
+        // around it automatically. A pinned range is not required here
+        // (preserve_bars is false, so the guest re-assigns 64-bit BARs within
+        // whatever window it is given during PCI enumeration) and the earlier
+        // Fixed [~129 GB, ~35.1 TB) base only worked by accident: nothing
+        // else requested a *fixed* 64-bit range, so the overlap check never
+        // fired -- but it forced layout_top to ~35 TB and fragmented RAM for
+        // any UVM larger than the fixed base. 4 TiB comfortably holds the
+        // worst-case bench (8 GPUs x (128 GB BAR1 + 186 GB coherent) ~ 2.5 TB)
+        // and matches the validated GB200 reference CLI (high_mmio=4T).
+        const RC0_HIGH_MMIO_SIZE: u64 = 0x400_0000_0000; // 4 TiB
         let pcie_root_complexes = vec![PcieRootComplexConfig {
             index: 0,
             name: "rc0".to_string(),
@@ -216,9 +232,9 @@ impl OpenVmmInner {
             low_mmio: PcieMmioRangeConfig::Dynamic {
                 size: RC0_LOW_MMIO_SIZE,
             },
-            high_mmio: PcieMmioRangeConfig::Fixed(ovmm_memory_range::MemoryRange::new(
-                0x0020_3d30_0000..0x200f_3d30_0000,
-            )),
+            high_mmio: PcieMmioRangeConfig::Dynamic {
+                size: RC0_HIGH_MMIO_SIZE,
+            },
             cxl: None,
             iommu: None,
             vnode: None,
