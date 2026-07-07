@@ -164,12 +164,21 @@ impl OpenVmmInner {
         info!(sl!(), "openvmm: start_vm");
         self.reset_block_hotplug_ports();
 
-        let cmdline = build_kernel_cmdline(
+        let mut cmdline = build_kernel_cmdline(
             self.config.debug_info.enable_debug,
             &self.config.boot_info.kernel_params,
             &self.config.boot_info.kernel_verity_params,
             &self.config.boot_info.rootfs_type,
         )?;
+
+        // DIAGNOSTIC (GB200 early-reset triage): the guest was PSCI
+        // SYSTEM_RESETing ~0.3s into boot (panic=1 reboots 1s later) with no
+        // console output, because hvc0 (virtio-console) only comes up late.
+        // Wire an SPCR-described PL011 serial + `earlycon` so the kernel
+        // prints from its very first instruction. keep_bootcon keeps earlycon
+        // live after hvc0 registers so we don't lose the tail. Revert once the
+        // panic cause is understood.
+        cmdline.push_str(" earlycon keep_bootcon");
 
         info!(sl!(), "openvmm: kernel={}", self.config.boot_info.kernel);
         info!(sl!(), "openvmm: image={}", self.config.boot_info.image);
@@ -184,7 +193,10 @@ impl OpenVmmInner {
             initrd: None,
             cmdline,
             custom_dsdt: None,
-            enable_serial: false,
+            // DIAGNOSTIC: enable the ACPI SPCR serial description so the
+            // kernel's `earlycon` (appended above) finds the PL011. Paired
+            // with serial_ports[0] wired below. Revert with the cmdline change.
+            enable_serial: true,
             boot_mode: openvmm_defs::config::LinuxDirectBootMode::Acpi,
         };
 
@@ -216,9 +228,34 @@ impl OpenVmmInner {
             })
             .context("failed to spawn console reader thread")?;
 
-        // No serial ports — COM1 disabled for performance.
+        // DIAGNOSTIC (GB200 early-reset triage): wire COM1 (PL011 on
+        // aarch64) to a socket we drain into slog as "openvmm-serial:", so
+        // the guest's `earlycon` output is captured before hvc0 exists.
+        // Revert (back to [None; 4] + enable_serial:false) once the early
+        // panic is understood.
+        let (serial_vm_std, serial_host) = std::os::unix::net::UnixStream::pair()
+            .context("failed to create serial socket pair")?;
+        let serial_vm =
+            ovmm_unix_socket::UnixStream::from(std::os::fd::OwnedFd::from(serial_vm_std));
+        let serial_backend =
+            ovmm_serial_socket::net::OpenSocketSerialConfig::from(serial_vm).into_resource();
+        std::thread::Builder::new()
+            .name("openvmm-serial-reader".to_string())
+            .spawn(move || {
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(serial_host);
+                for line in reader.lines() {
+                    match line {
+                        Ok(line) => {
+                            info!(sl!(), "openvmm-serial: {}", line);
+                        }
+                        Err(_) => break,
+                    }
+                }
+            })
+            .context("failed to spawn serial reader thread")?;
         let serial_ports: [Option<vm_resource::Resource<vm_resource::kind::SerialBackendHandle>>;
-            4] = [None, None, None, None];
+            4] = [Some(serial_backend), None, None, None];
 
         // Build chipset via VmManifestBuilder. Compute the default memory
         // layout from the same builder so it stays in sync with upstream
