@@ -707,11 +707,28 @@ impl OpenVmmInner {
             .into_resource(),
         });
 
-        let vmbus_config = VmbusConfig {
+        // Hyper-V enlightenments (with_hv) and VMBus both require the backend
+        // to emulate the Hyper-V synic. MSHV always provides it; KVM provides
+        // it on x86_64 but NOT on aarch64, where OpenVMM aborts VM launch with
+        // "failed to get partition synic access for vmbus: synic not supported
+        // on KVM/aarch64". Detect the backend the same way vmm_instance::launch
+        // and check() do (prefer /dev/mshv, else /dev/kvm) and enable hv+vmbus
+        // only when a synic is actually available. This matches the validated
+        // GB200 OpenVMM CLI, which runs the aarch64/KVM GPU UVM with
+        // --no-hv --no-vmbus.
+        //
+        // Dropping VMBus costs nothing here: the agent transport is a
+        // virtio-vsock PCIe device (bound in vmm_instance::launch on
+        // OPENVMM_VSOCK_PCI_PORT) and the console is virtio-console, so this
+        // VmbusConfig carried a null vsock listener and was never on the agent
+        // path.
+        let synic_available =
+            std::path::Path::new("/dev/mshv").exists() || cfg!(target_arch = "x86_64");
+        let vmbus_config = synic_available.then(|| VmbusConfig {
             vsock_listener: None,
             vsock_path: None,
             ..Default::default()
-        };
+        });
 
         let vm_config = Config {
             load_mode,
@@ -744,11 +761,11 @@ impl OpenVmmInner {
                 arch: Default::default(),
             },
             hypervisor: OvmmHypervisorConfig {
-                with_hv: true,
+                with_hv: synic_available,
                 ..Default::default()
             },
             chipset,
-            vmbus: Some(vmbus_config),
+            vmbus: vmbus_config,
             vtl2_vmbus: None,
             #[cfg(windows)]
             kernel_vmnics: vec![],
