@@ -27,9 +27,9 @@ use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 use openvmm_defs::config::{
     Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig, LoadMode,
-    MemoryConfig as OvmmMemoryConfig, NumaNode, NumaTopology, PciePortConfig,
-    PcieDeviceConfig, PcieMmioRangeConfig, PcieRootComplexConfig, ProcessorTopologyConfig,
-    VmbusConfig, VpAssignment,
+    MemoryConfig as OvmmMemoryConfig, NumaNode, NumaTopology, PcieDeviceConfig,
+    PcieGenericInitiatorConfig, PcieIommuConfig, PcieMmioRangeConfig, PciePortConfig,
+    PcieRootComplexConfig, ProcessorTopologyConfig, SmmuOas, VmbusConfig, VpAssignment,
 };
 use vm_resource::kind::VmbusDeviceHandleKind;
 use vm_resource::IntoResource;
@@ -37,6 +37,88 @@ use vm_resource::IntoResource;
 const KATA_PATH: &str = "/run/kata";
 const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
 const OPENVMM_INLINE_VIRTIO_FS: &str = "inline-virtio-fs";
+
+// ---------------------------------------------------------------------------
+// GB200 / Grace+Blackwell coherent-GPU topology constants.
+//
+// On GB200 each GPU exposes a synthetic multi-hundred-GiB coherent-memory
+// BAR (Grace LPDDR) through the nvgrace_gpu_vfio_pci variant driver. That
+// BAR cannot be relocated after guest PCI probe, so the GPU must sit on its
+// OWN PCIe root complex with preserve_bars + high_mmio pinned at the BAR's
+// host physical address (GPA == HPA). This mirrors the standalone OpenVMM
+// harness shape that was validated end-to-end (all 4 GB200 GPUs ->
+// nvidia-smi 186 GiB coherent). Gated on the nvgrace driver so the x86
+// A100/H100 flat-rc0 path is completely unaffected.
+// ---------------------------------------------------------------------------
+
+/// SRAT Generic-Initiator NUMA nodes emitted per GB200 GPU. Bounded by the
+/// UVM kernel's `MAX_NUMNODES = 16`: node 0 (CPU) + K * N_GPU must stay
+/// <= 16, so K = 3 supports up to ~4 GPUs (1 + 4*3 = 13 <= 16). One GI node
+/// is enough for the NVIDIA driver's coherent-NUMA discovery; 3 leaves a
+/// little headroom while staying within the cap.
+const GB200_GI_NODES_PER_GPU: u32 = 3;
+
+/// First guest PCI bus reserved for per-GPU root complexes. rc0 owns
+/// [0, 127]; GB200 GPU RCs are carved out of [128, 255], one span each.
+const GB200_GPU_RC_FIRST_BUS: u8 = 128;
+/// Buses reserved per GB200 GPU root complex. (256 - 128) / 16 = 8 GPUs max.
+const GB200_GPU_RC_BUS_SPAN: u8 = 16;
+/// High-MMIO window pinned at each GPU's coherent-BAR HPA. Matches the
+/// validated harness run (`high_mmio=2T`). Must be >= the coherent BAR plus
+/// a 256 GiB-aligned slot for the small register BAR, and < the inter-GPU
+/// HPA delta (2 TiB on this bench) to avoid overlap. Only the base (= HPA)
+/// is load-bearing for coherent init; the size is allocation headroom.
+const GB200_HIGH_MMIO_WINDOW: u64 = 2 * (1u64 << 40); // 2 TiB
+
+/// True if the host PCI device at `bdf` (segment-qualified, e.g.
+/// "0008:06:00.0") is bound to `nvgrace_gpu_vfio_pci` -- the NVIDIA variant
+/// driver for GB200 coherent-memory GPUs. Gating the per-GPU-RC topology on
+/// this keeps the x86 A100/H100 flat path (driver = vfio-pci) unchanged.
+fn is_nvgrace_gpu(bdf: &str) -> bool {
+    let link = format!("/sys/bus/pci/devices/{}/driver", bdf);
+    std::fs::read_link(&link)
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n == "nvgrace_gpu_vfio_pci"))
+        .unwrap_or(false)
+}
+
+/// Read the GB200 coherent-memory BAR from host L1 sysfs and return its
+/// host physical address (the largest IORESOURCE_MEM BAR). The coherent
+/// aperture is hundreds of GiB; register BARs are far smaller, so we pick
+/// the biggest memory BAR above a 1 GiB threshold.
+///
+/// `/sys/bus/pci/devices/<bdf>/resource` has one `start end flags` line per
+/// BAR (BAR0..BAR5 = first six lines). IORESOURCE_MEM = 0x200.
+///
+/// NOTE: in the nested L1VH setup this is the L1 sysfs value -- the correct
+/// nested "HPA" that OpenVMM's `preserve_bars` must pin -- not the
+/// bare-metal L0 address.
+fn nvgrace_coherent_bar_hpa(bdf: &str) -> Option<u64> {
+    let path = format!("/sys/bus/pci/devices/{}/resource", bdf);
+    let text = std::fs::read_to_string(&path).ok()?;
+    let mut best_start = 0u64;
+    let mut best_size = 0u64;
+    for line in text.lines().take(6) {
+        let mut it = line.split_whitespace();
+        let start = u64::from_str_radix(it.next()?.trim_start_matches("0x"), 16).ok()?;
+        let end = u64::from_str_radix(it.next()?.trim_start_matches("0x"), 16).ok()?;
+        let flags = u64::from_str_radix(it.next()?.trim_start_matches("0x"), 16).ok()?;
+        if start == 0 && end == 0 {
+            continue;
+        }
+        // IORESOURCE_MEM = 0x200; skip IO-port BARs.
+        if flags & 0x200 == 0 {
+            continue;
+        }
+        let size = end - start + 1;
+        if size > best_size {
+            best_size = size;
+            best_start = start;
+        }
+    }
+    // 1 GiB threshold excludes small register BARs.
+    (best_size > (1u64 << 30)).then_some(best_start)
+}
 
 fn build_kernel_cmdline(
     debug: bool,
@@ -223,7 +305,7 @@ impl OpenVmmInner {
         // worst-case bench (8 GPUs x (128 GB BAR1 + 186 GB coherent) ~ 2.5 TB)
         // and matches the validated GB200 reference CLI (high_mmio=4T).
         const RC0_HIGH_MMIO_SIZE: u64 = 0x400_0000_0000; // 4 TiB
-        let pcie_root_complexes = vec![PcieRootComplexConfig {
+        let mut pcie_root_complexes = vec![PcieRootComplexConfig {
             index: 0,
             name: "rc0".to_string(),
             segment: 0,
@@ -347,6 +429,15 @@ impl OpenVmmInner {
         let mut deferred_block_devices = Vec::new();
         let mut deferred_network_devices = Vec::new();
         let mut next_vfio_port: u8 = 0;
+
+        // GB200/Grace coherent-GPU accumulators. Each nvgrace GPU gets its
+        // own PCIe root complex (preserve_bars + high_mmio pinned at the
+        // coherent BAR HPA + per-RC SMMU) plus K SRAT generic-initiator
+        // NUMA nodes, instead of sharing rc0. See is_nvgrace_gpu().
+        let mut gb200_gpu_count: u8 = 0;
+        let mut gb200_next_gi_node: u32 = 1; // node 0 is the CPU node
+        let mut gb200_generic_initiators: Vec<PcieGenericInitiatorConfig> = Vec::new();
+        let mut gb200_extra_numa_nodes: Vec<NumaNode> = Vec::new();
 
         for dev in &pending {
             match dev {
@@ -524,6 +615,162 @@ impl OpenVmmInner {
                                 continue;
                             }
                         };
+
+                        // GB200/Grace coherent GPU: give this GPU its own
+                        // PCIe root complex with preserve_bars + high_mmio
+                        // pinned at the coherent-BAR HPA + per-RC SMMU + K
+                        // generic-initiator NUMA nodes. This is the shape
+                        // validated end-to-end on the standalone OpenVMM
+                        // harness (all 4 GB200 GPUs -> nvidia-smi 186 GiB
+                        // coherent). Gated on nvgrace_gpu_vfio_pci so the
+                        // x86 A100/H100 vfio-pci flat path below is
+                        // unaffected. John's 2-level ACS-off switch (for
+                        // multi-GPU P2P/NVLink) is intentionally DEFERRED to
+                        // a later iteration; single-GPU coherent init does
+                        // not need it, and a single root port keeps the
+                        // guest topology simpler.
+                        if is_nvgrace_gpu(&host_bdf) {
+                            let max_gpu_rcs = (256u16 - GB200_GPU_RC_FIRST_BUS as u16)
+                                / GB200_GPU_RC_BUS_SPAN as u16;
+                            if (gb200_gpu_count as u16) >= max_gpu_rcs {
+                                warn!(
+                                    sl!(),
+                                    "openvmm: GB200 GPU RC budget exhausted ({} max); \
+                                     falling back to flat rc0 path for BDF {}",
+                                    max_gpu_rcs,
+                                    host_bdf
+                                );
+                            } else if let Some(hpa) = nvgrace_coherent_bar_hpa(&host_bdf) {
+                                let rc_idx = gb200_gpu_count;
+                                let bus_start =
+                                    GB200_GPU_RC_FIRST_BUS + rc_idx * GB200_GPU_RC_BUS_SPAN;
+                                let bus_end = bus_start + GB200_GPU_RC_BUS_SPAN - 1;
+                                let rc_name = format!("gpurc{}", rc_idx);
+                                let port_name = format!("gpu{}", rc_idx);
+
+                                let group_fd = std::fs::OpenOptions::new()
+                                    .read(true)
+                                    .write(true)
+                                    .open(&host_path)
+                                    .with_context(|| {
+                                        format!(
+                                            "openvmm: failed to open VFIO group {} for GB200 GPU {}",
+                                            host_path, host_bdf
+                                        )
+                                    })?;
+
+                                pcie_root_complexes.push(PcieRootComplexConfig {
+                                    index: pcie_root_complexes.len() as u32,
+                                    name: rc_name.clone(),
+                                    segment: 0,
+                                    start_bus: bus_start,
+                                    end_bus: bus_end,
+                                    low_mmio: PcieMmioRangeConfig::Dynamic {
+                                        size: 64 * 1024 * 1024,
+                                    },
+                                    // high_mmio pinned at the coherent-BAR
+                                    // HPA so preserve_bars maps the aperture
+                                    // at GPA == HPA. Base is load-bearing;
+                                    // 2 TiB window matches the harness run.
+                                    high_mmio: PcieMmioRangeConfig::Fixed(
+                                        ovmm_memory_range::MemoryRange::new(
+                                            hpa..hpa + GB200_HIGH_MMIO_WINDOW,
+                                        ),
+                                    ),
+                                    ports: vec![PciePortConfig {
+                                        name: port_name.clone(),
+                                        devfn: None,
+                                        hotplug: false,
+                                        acs_capabilities_supported: Some(0x5f),
+                                        cxl: false,
+                                    }],
+                                    cxl: None,
+                                    // Per-RC Arm SMMUv3 with HW-accelerated
+                                    // nested translation. accel:true is the
+                                    // `--smmu rc=,accel` that the validated
+                                    // B0b/B1n runs used; John flagged --smmu
+                                    // as not-yet-stable upstream, but
+                                    // accel:true is exactly what worked on
+                                    // this bench, so we match the proven
+                                    // config (flip to false if it regresses).
+                                    // Required for nested VFIO under L1VH.
+                                    iommu: Some(PcieIommuConfig::Smmu {
+                                        accel: true,
+                                        oas: SmmuOas::Auto,
+                                    }),
+                                    // node=0 in the harness CLI: emit ACPI
+                                    // _PXM binding devices under this RC to
+                                    // the CPU node.
+                                    vnode: Some(0),
+                                    preserve_bars: true,
+                                });
+
+                                pcie_devices.push(PcieDeviceConfig {
+                                    port_name: port_name.clone(),
+                                    resource: vfio_assigned_device_resources::VfioDeviceHandle {
+                                        pci_id: host_bdf.clone(),
+                                        group: group_fd,
+                                        bar_pt:
+                                            [vfio_assigned_device_resources::BarPassthrough::None;
+                                                6],
+                                    }
+                                    .into_resource(),
+                                });
+
+                                // K memoryless (CPU-less) NUMA nodes for this
+                                // GPU's coherent LPDDR slices, each bound to
+                                // the GPU's port via SRAT Generic Initiator
+                                // Affinity. K <= 3 to respect MAX_NUMNODES=16.
+                                for _ in 0..GB200_GI_NODES_PER_GPU {
+                                    let node = gb200_next_gi_node;
+                                    gb200_next_gi_node += 1;
+                                    gb200_extra_numa_nodes.push(NumaNode {
+                                        mem: None,
+                                        vps: VpAssignment::Empty,
+                                    });
+                                    gb200_generic_initiators.push(PcieGenericInitiatorConfig {
+                                        port_name: port_name.clone(),
+                                        node,
+                                    });
+                                }
+                                gb200_gpu_count += 1;
+
+                                // Best-effort guest PciPath. The per-GPU RC
+                                // has an IOMMU, which shifts OpenVMM's
+                                // first_port_device_number, so the [0/0, 0]
+                                // rule used for the IOMMU-less flat rc0 path
+                                // may be off. VERIFY on the first bench boot
+                                // (harness lspci shows the GPU's guest BDF,
+                                // e.g. host 0008 -> guest <bus_start>:00.0)
+                                // and correct if the container can't find it.
+                                let pci_path = openvmm_port_pci_path(0).context(
+                                    "openvmm: failed to build guest PciPath for GB200 GPU",
+                                )?;
+                                info!(
+                                    sl!(),
+                                    "openvmm: GB200 GPU {} -> RC {} (buses {}..{}), \
+                                     high_mmio_base={:#x}, guest pci_path={} (VERIFY)",
+                                    host_bdf,
+                                    rc_name,
+                                    bus_start,
+                                    bus_end,
+                                    hpa,
+                                    pci_path
+                                );
+                                if primary_pci_path.is_none() {
+                                    primary_pci_path = Some(pci_path);
+                                }
+                                continue;
+                            } else {
+                                warn!(
+                                    sl!(),
+                                    "openvmm: {} is nvgrace but its coherent BAR is \
+                                     unreadable; falling back to flat rc0 path \
+                                     (coherent init will likely fail)",
+                                    host_bdf
+                                );
+                            }
+                        }
 
                         if next_vfio_port >= OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
                             return Err(anyhow!(
@@ -713,15 +960,7 @@ impl OpenVmmInner {
         // "failed to get partition synic access for vmbus: synic not supported
         // on KVM/aarch64". Detect the backend the same way vmm_instance::launch
         // and check() do (prefer /dev/mshv, else /dev/kvm) and enable hv+vmbus
-        // only when a synic is actually available. This matches the validated
-        // GB200 OpenVMM CLI, which runs the aarch64/KVM GPU UVM with
-        // --no-hv --no-vmbus.
-        //
-        // Dropping VMBus costs nothing here: the agent transport is a
-        // virtio-vsock PCIe device (bound in vmm_instance::launch on
-        // OPENVMM_VSOCK_PCI_PORT) and the console is virtio-console, so this
-        // VmbusConfig carried a null vsock listener and was never on the agent
-        // path.
+        // only when a synic is actually available.
         let synic_available =
             std::path::Path::new("/dev/mshv").exists() || cfg!(target_arch = "x86_64");
         let vmbus_config = synic_available.then(|| VmbusConfig {
@@ -739,26 +978,53 @@ impl OpenVmmInner {
             pcie_switches: vec![],
             vpci_devices: vec![],
             numa: NumaTopology {
-                nodes: vec![NumaNode {
-                    mem: Some(OvmmMemoryConfig {
-                        mem_size: mem_size_bytes,
-                        prefetch_memory: false,
-                        private_memory: false,
-                        transparent_hugepages: false,
-                        hugepages: false,
-                        hugepage_size: None,
-                        host_numa_node: None,
-                    }),
-                    vps: VpAssignment::FromTopology,
-                }],
+                nodes: {
+                    let mut nodes = vec![NumaNode {
+                        mem: Some(OvmmMemoryConfig {
+                            mem_size: mem_size_bytes,
+                            prefetch_memory: false,
+                            private_memory: false,
+                            transparent_hugepages: false,
+                            hugepages: false,
+                            hugepage_size: None,
+                            host_numa_node: None,
+                        }),
+                        vps: VpAssignment::FromTopology,
+                    }];
+                    // Append the GB200 memoryless generic-initiator nodes
+                    // (one set per nvgrace GPU) after the CPU node.
+                    nodes.append(&mut gb200_extra_numa_nodes);
+                    nodes
+                },
                 distances: vec![],
             },
-            pcie_generic_initiators: vec![],
+            pcie_generic_initiators: gb200_generic_initiators,
             processor_topology: ProcessorTopologyConfig {
                 proc_count: self.config.cpu_info.default_vcpus.ceil() as u32,
                 vps_per_socket: None,
                 enable_smt: None,
-                arch: Default::default(),
+                arch: {
+                    // GB200/Grace (aarch64) needs GICv2m MSI delivery:
+                    // John's validated CLI uses --gic-msi v2m because the
+                    // GICv3 ITS path has known issues in this combination.
+                    // The shim binary is arch-specific, so a compile-time
+                    // cfg is correct here.
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        Some(openvmm_defs::config::ArchTopologyConfig::Aarch64(
+                            openvmm_defs::config::Aarch64TopologyConfig {
+                                gic_msi: openvmm_defs::config::GicMsiConfig::V2m {
+                                    spi_count: None,
+                                },
+                                ..Default::default()
+                            },
+                        ))
+                    }
+                    #[cfg(not(target_arch = "aarch64"))]
+                    {
+                        Default::default()
+                    }
+                },
             },
             hypervisor: OvmmHypervisorConfig {
                 with_hv: synic_available,
