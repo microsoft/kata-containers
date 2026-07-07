@@ -11,14 +11,17 @@ use std::fs;
 
 use super::inner::OpenVmmInner;
 use super::vmservice;
+use super::{
+    OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
+    OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT,
+    OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VSOCK_PCI_DEVICE,
+};
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 const KATA_PATH: &str = "/run/kata";
 const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
-const OPENVMM_INLINE_VIRTIO_FS: &str = "inline-virtio-fs";
-const OPENVMM_ROOTFS_SCSI_LUN: u32 = 0;
 
 fn build_kernel_cmdline(
     debug: bool,
@@ -44,19 +47,106 @@ fn adapt_cmdline_for_rpc(cmdline: String) -> String {
     cmdline.replace("console=hvc0", "console=ttyS0")
 }
 
-fn scsi_disk(lun: u32, host_path: String, read_only: bool) -> vmservice::SCSIDisk {
-    vmservice::SCSIDisk {
-        controller: 0,
-        lun,
-        host_path,
-        type_: vmservice::DiskType::SCSI_DISK_TYPE_PHYSICAL.into(),
-        read_only,
+/// Wrap a virtio device function as a `PcieDeviceKind` (the endpoint behind a
+/// PCIe root port).
+fn virtio_pcie_device(kind: vmservice::virtio_device::Kind) -> vmservice::PcieDeviceKind {
+    vmservice::PcieDeviceKind {
+        kind: Some(vmservice::pcie_device_kind::Kind::Virtio(
+            vmservice::VirtioDevice {
+                kind: Some(kind),
+                ..Default::default()
+            },
+        )),
         ..Default::default()
     }
 }
 
-fn nic_id(index: usize) -> String {
-    format!("00000000-0000-0000-0000-{:012x}", index + 1)
+/// Build a virtio-blk-pci endpoint backed by a host file or block device node.
+pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieDeviceKind {
+    virtio_pcie_device(vmservice::virtio_device::Kind::Blk(vmservice::VirtioBlk {
+        backend: MessageField::some(vmservice::DiskBackend {
+            kind: Some(vmservice::disk_backend::Kind::File(vmservice::FileDisk {
+                path,
+                direct: false,
+                ..Default::default()
+            })),
+            ..Default::default()
+        }),
+        read_only,
+        ..Default::default()
+    }))
+}
+
+/// Build a virtio-net-pci endpoint backed by a host TAP, opened by name inside
+/// the OpenVMM process (which runs in the sandbox network namespace).
+fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
+    virtio_pcie_device(vmservice::virtio_device::Kind::Net(vmservice::VirtioNet {
+        backend: MessageField::some(vmservice::NicBackend {
+            kind: Some(vmservice::nic_backend::Kind::Tap(vmservice::TapBackend {
+                name: tap_name,
+                ..Default::default()
+            })),
+            ..Default::default()
+        }),
+        mac_address,
+        ..Default::default()
+    }))
+}
+
+/// Build a virtio-vsock-pci endpoint relayed over a host Unix socket.
+fn vsock_device_kind(socket_path: String) -> vmservice::PcieDeviceKind {
+    virtio_pcie_device(vmservice::virtio_device::Kind::Vsock(
+        vmservice::VirtioVsock {
+            socket_path,
+            ..Default::default()
+        },
+    ))
+}
+
+/// Build a vhost-user-fs endpoint (virtiofsd backend reached over a Unix socket).
+fn vhost_user_fs_device_kind(socket_path: String, tag: String) -> vmservice::PcieDeviceKind {
+    virtio_pcie_device(vmservice::virtio_device::Kind::VhostUser(
+        vmservice::VhostUser {
+            socket_path,
+            device: MessageField::some(vmservice::VhostUserDevice {
+                kind: Some(vmservice::vhost_user_device::Kind::Fs(
+                    vmservice::VhostUserFs {
+                        tag,
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    ))
+}
+
+/// Build a PCIe root port at `device` (function 0), optionally carrying a
+/// cold-plug endpoint. Empty `hotplug` ports are populated later via
+/// AddPcieDevice.
+fn make_pcie_port(
+    name: &str,
+    device: u8,
+    hotplug: bool,
+    device_kind: Option<vmservice::PcieDeviceKind>,
+) -> vmservice::PciePort {
+    let attached = match device_kind {
+        Some(dev) => MessageField::some(vmservice::PcieAttachment {
+            kind: Some(vmservice::pcie_attachment::Kind::Device(dev)),
+            ..Default::default()
+        }),
+        None => MessageField::none(),
+    };
+    vmservice::PciePort {
+        name: name.to_string(),
+        hotplug,
+        attached,
+        // Pin the port at function 0 of its device so the guest-visible path is
+        // deterministic ("DD/00"); see OpenVmmHotplugPort.
+        devfn: Some((device as u32) << 3),
+        ..Default::default()
+    }
 }
 
 fn mac_address(device: &crate::NetworkDevice, index: usize) -> String {
@@ -109,19 +199,28 @@ impl OpenVmmInner {
         info!(sl!(), "openvmm: image={}", self.config.boot_info.image);
         info!(sl!(), "openvmm: cmdline={}", cmdline);
 
-        let mut devices_config = vmservice::DevicesConfig::default();
+        // Build the PCIe topology: every Kata device is a virtio (or
+        // vhost-user) function at function 0 of its own root port on a single
+        // root complex. Cold-plug devices (rootfs, sharefs, network, the agent
+        // vsock) are attached here; block volumes are hot-added after resume
+        // into the pre-declared empty hotplug ports.
+        let mut root_ports: Vec<vmservice::PciePort> = Vec::new();
+
+        // rootfs as virtio-blk-pci. The guest mounts it via the kernel cmdline
+        // (root=/dev/vda), so no guest pci_path needs to be reported.
         let rootfs_disk_path = if !self.config.boot_info.image.is_empty() {
             let disk_path = self.config.boot_info.image.clone();
-            warn!(
+            info!(
                 sl!(),
-                "openvmm: requesting rootfs disk as RPC lun {} for OpenVMM virtio-blk MMIO mapping: {}",
-                OPENVMM_ROOTFS_SCSI_LUN,
+                "openvmm: rootfs as virtio-blk-pci at device {}: {}",
+                OPENVMM_ROOTFS_PCI_DEVICE,
                 disk_path
             );
-            devices_config.scsi_disks.push(scsi_disk(
-                OPENVMM_ROOTFS_SCSI_LUN,
-                disk_path.clone(),
-                true,
+            root_ports.push(make_pcie_port(
+                "rootfs",
+                OPENVMM_ROOTFS_PCI_DEVICE,
+                false,
+                Some(blk_device_kind(disk_path.clone(), true)),
             ));
             Some(disk_path)
         } else {
@@ -130,7 +229,7 @@ impl OpenVmmInner {
 
         let pending = std::mem::take(&mut self.pending_devices);
         let mut deferred_block_devices = Vec::new();
-        let mut network_index = 0usize;
+        let mut network_index = 0u8;
 
         for dev in &pending {
             match dev {
@@ -149,47 +248,64 @@ impl OpenVmmInner {
                     );
                 }
                 DeviceType::Network(net_dev) => {
+                    if network_index >= OPENVMM_NET_PCI_MAX_COUNT {
+                        return Err(anyhow!(
+                            "openvmm supports at most {} virtio-net-pci devices",
+                            OPENVMM_NET_PCI_MAX_COUNT
+                        ));
+                    }
+                    let device = OPENVMM_NET_PCI_FIRST_DEVICE + network_index;
                     info!(
                         sl!(),
-                        "openvmm: wiring Network device over RPC NetVSP TAP, tap={}",
+                        "openvmm: virtio-net-pci at device {} over host TAP {}",
+                        device,
                         net_dev.config.host_dev_name
                     );
-                    devices_config.nic_config.push(vmservice::NICConfig {
-                        nic_id: nic_id(network_index),
-                        mac_address: mac_address(net_dev, network_index),
-                        legacy_switch_id: String::new(),
-                        nic_name: net_dev.device_id.clone(),
-                        backend: Some(vmservice::nicconfig::Backend::Tap(vmservice::TapBackend {
-                            name: net_dev.config.host_dev_name.clone(),
-                            ..Default::default()
-                        })),
-                        ..Default::default()
-                    });
+                    root_ports.push(make_pcie_port(
+                        &format!("net{}", network_index),
+                        device,
+                        false,
+                        Some(net_device_kind(
+                            mac_address(net_dev, network_index as usize),
+                            net_dev.config.host_dev_name.clone(),
+                        )),
+                    ));
                     network_index += 1;
                 }
                 DeviceType::ShareFs(fs_dev) => {
-                    match fs_dev.config.fs_type.as_str() {
-                        OPENVMM_STANDALONE_VIRTIO_FS => warn!(
-                            sl!(),
-                            "openvmm: RPC has no vhost-user-fs; using inline virtio-fs for tag {}",
-                            fs_dev.config.mount_tag
-                        ),
-                        OPENVMM_INLINE_VIRTIO_FS => info!(
-                            sl!(),
-                            "openvmm: wiring inline virtio-fs for tag {}", fs_dev.config.mount_tag
-                        ),
-                        other => {
-                            return Err(anyhow!("openvmm unsupported shared fs type '{}'", other));
-                        }
+                    // Only vhost-user virtio-fs over PCIe is supported (no
+                    // vmbus / inline transport). The virtiofsd backend is
+                    // started by the shared-fs resource layer, which populates
+                    // sock_path.
+                    if fs_dev.config.fs_type != OPENVMM_STANDALONE_VIRTIO_FS {
+                        return Err(anyhow!(
+                            "openvmm only supports vhost-user virtio-fs (fs_type '{}'), got '{}'",
+                            OPENVMM_STANDALONE_VIRTIO_FS,
+                            fs_dev.config.fs_type
+                        ));
                     }
-
-                    devices_config
-                        .virtiofs_config
-                        .push(vmservice::VirtioFSConfig {
-                            tag: fs_dev.config.mount_tag.clone(),
-                            root_path: fs_dev.config.host_shared_path.clone(),
-                            ..Default::default()
-                        });
+                    if fs_dev.config.sock_path.is_empty() {
+                        return Err(anyhow!(
+                            "openvmm vhost-user-fs for tag '{}' has no virtiofsd socket path",
+                            fs_dev.config.mount_tag
+                        ));
+                    }
+                    info!(
+                        sl!(),
+                        "openvmm: vhost-user-fs at device {} tag={} sock={}",
+                        OPENVMM_SHAREFS_PCI_DEVICE,
+                        fs_dev.config.mount_tag,
+                        fs_dev.config.sock_path
+                    );
+                    root_ports.push(make_pcie_port(
+                        "sharefs",
+                        OPENVMM_SHAREFS_PCI_DEVICE,
+                        false,
+                        Some(vhost_user_fs_device_kind(
+                            fs_dev.config.sock_path.clone(),
+                            fs_dev.config.mount_tag.clone(),
+                        )),
+                    ));
                 }
                 DeviceType::Block(blk_dev) => {
                     if Some(blk_dev.config.path_on_host.as_str()) == rootfs_disk_path.as_deref() {
@@ -204,8 +320,11 @@ impl OpenVmmInner {
                 }
                 DeviceType::Vfio(_) => {
                     return Err(anyhow!(
-                        "openvmm: VFIO cold-plug requires Linux PCI assignment support in the \
-                         external OpenVMM TTRPC VM service"
+                        "openvmm: VFIO device pass-through is not yet wired in Kata. \
+                         OpenVMM's ttrpc API now supports it (PcieDeviceKind::Vfio with a \
+                         host BDF), so the remaining work is Kata-side: convert the VFIO \
+                         device to a proto VfioDevice, place it behind a PCIe root port, \
+                         and report its guest pci_path."
                     ));
                 }
                 other => {
@@ -214,12 +333,55 @@ impl OpenVmmInner {
             }
         }
 
-        let hvsocket_path = format!("{}/vsock.sock", self.run_dir);
+        let vsock_socket_path = format!("{}/vsock.sock", self.run_dir);
         let ttrpc_socket_path = format!("{}/openvmm.sock", self.run_dir);
         let serial_socket_path = format!("{}/serial.sock", self.run_dir);
-        let _ = std::fs::remove_file(&hvsocket_path);
+        let _ = std::fs::remove_file(&vsock_socket_path);
         let _ = std::fs::remove_file(&ttrpc_socket_path);
         let _ = std::fs::remove_file(&serial_socket_path);
+
+        // virtio-vsock-pci carries the Kata agent channel (replacing the
+        // Hyper-V socket). OpenVMM binds a listener at this UDS and relays it to
+        // the guest's virtio-vsock; the runtime connects over the same UDS using
+        // the hybrid-vsock "hvsock://" scheme (see get_agent_socket).
+        root_ports.push(make_pcie_port(
+            "vsock",
+            OPENVMM_VSOCK_PCI_DEVICE,
+            false,
+            Some(vsock_device_kind(vsock_socket_path.clone())),
+        ));
+
+        // Pre-declare empty, hotplug-capable ports (hp0..) for block volumes
+        // that are hot-added after resume. Their device numbers match the
+        // OpenVmmHotplugPort pool so the guest pci_path can be computed without
+        // an OpenVMM round-trip.
+        for index in 0..OPENVMM_BLOCK_HOTPLUG_PORT_COUNT {
+            let device = OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE + index;
+            root_ports.push(make_pcie_port(
+                &format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
+                device,
+                true,
+                None,
+            ));
+        }
+
+        let pcie = vmservice::PcieTopologyConfig {
+            root_complexes: vec![vmservice::PcieRootComplex {
+                name: "rc0".to_string(),
+                segment: 0,
+                start_bus: 0,
+                end_bus: 127,
+                // MMIO apertures sized for ~32 virtio root-port bridges; bases
+                // are auto-assigned by OpenVMM to stay consistent with the ECAM
+                // and ACPI layout it generates.
+                low_mmio: 0x1000_0000,    // 256 MiB (32-bit)
+                high_mmio: 0x4_0000_0000, // 16 GiB (64-bit)
+                preserve_bars: false,
+                root_ports,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
 
         let request = vmservice::CreateVMRequest {
             config: MessageField::some(vmservice::VMConfig {
@@ -231,7 +393,7 @@ impl OpenVmmInner {
                     processor_count: self.config.cpu_info.default_vcpus.ceil() as u32,
                     ..Default::default()
                 }),
-                devices_config: MessageField::some(devices_config),
+                pcie: MessageField::some(pcie),
                 serial_config: MessageField::some(vmservice::SerialConfig {
                     ports: vec![vmservice::serial_config::Config {
                         port: 0,
@@ -239,10 +401,6 @@ impl OpenVmmInner {
                         connect: false,
                         ..Default::default()
                     }],
-                    ..Default::default()
-                }),
-                hvsocket_config: MessageField::some(vmservice::HVSocketConfig {
-                    path: hvsocket_path,
                     ..Default::default()
                 }),
                 BootConfig: Some(vmservice::vmconfig::BootConfig::DirectBoot(

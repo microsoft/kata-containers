@@ -8,19 +8,8 @@
 use anyhow::{anyhow, Context, Result};
 
 use super::inner::OpenVmmInner;
-use super::OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX;
 use crate::device::DeviceType;
 use crate::{VmmState, KATA_BLK_DEV_TYPE};
-
-fn scsi_lun_from_hotplug_port(port_name: &str) -> Result<u32> {
-    let index = port_name
-        .strip_prefix(OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX)
-        .ok_or_else(|| anyhow!("invalid openvmm hotplug port name {}", port_name))?
-        .parse::<u32>()
-        .with_context(|| format!("invalid openvmm hotplug port name {}", port_name))?;
-
-    Ok(index + 1)
-}
 
 impl OpenVmmInner {
     pub(crate) async fn add_device(&mut self, device: DeviceType) -> Result<DeviceType> {
@@ -45,25 +34,20 @@ impl OpenVmmInner {
                 }
 
                 let port = self.reserve_block_hotplug_port(&block.device_id)?;
-                let lun = scsi_lun_from_hotplug_port(&port.name)?;
-                let hotplug_result = async {
-                    self.vmm_instance
-                        .add_scsi_disk(
-                            lun,
-                            block.config.path_on_host.clone(),
-                            block.config.is_readonly,
+                let hotplug_result = self
+                    .vmm_instance
+                    .add_pcie_device(
+                        &port.name,
+                        block.config.path_on_host.clone(),
+                        block.config.is_readonly,
+                    )
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to hotplug block device {} into PCIe port {}",
+                            block.config.path_on_host, port.name
                         )
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "failed to hotplug block device {} as SCSI lun {}",
-                                block.config.path_on_host, lun
-                            )
-                        })?;
-
-                    Ok::<(), anyhow::Error>(())
-                }
-                .await;
+                    });
 
                 if let Err(err) = hotplug_result {
                     let _ = self.release_block_hotplug_port(&block.device_id);
@@ -72,12 +56,16 @@ impl OpenVmmInner {
 
                 info!(
                     sl!(),
-                    "openvmm: hotplugged block device {} as SCSI lun {} via RPC",
+                    "openvmm: hotplugged block device {} as virtio-blk-pci at port {} (pci_path {})",
                     block.config.path_on_host,
-                    lun
+                    port.name,
+                    port.pci_path
                 );
 
-                block.config.scsi_addr = Some(format!("0:{}", lun));
+                // The agent resolves the device from its guest PCI path; make
+                // sure no stale SCSI address is left set.
+                block.config.pci_path = Some(port.pci_path.clone());
+                block.config.scsi_addr = None;
                 Ok(DeviceType::Block(block))
             }
             other => {
@@ -105,21 +93,21 @@ impl OpenVmmInner {
                     return Ok(());
                 };
 
-                let lun = scsi_lun_from_hotplug_port(&port.name)?;
-
                 self.vmm_instance
-                    .remove_scsi_disk(lun)
+                    .remove_pcie_device(&port.name)
                     .await
                     .with_context(|| {
                         format!(
-                            "failed to hot-remove block device {} from SCSI lun {}",
-                            block.device_id, lun
+                            "failed to hot-remove block device {} from PCIe port {}",
+                            block.device_id, port.name
                         )
                     })?;
 
                 info!(
                     sl!(),
-                    "openvmm: hot-removed block device {} from SCSI lun {}", block.device_id, lun
+                    "openvmm: hot-removed block device {} from PCIe port {}",
+                    block.device_id,
+                    port.name
                 );
                 Ok(())
             }

@@ -16,17 +16,31 @@ use kata_types::{
 use tokio::sync::mpsc;
 
 use super::vmm_instance::VmmInstance;
-use super::{OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX};
+use super::{
+    OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
+    OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
+};
+use crate::device::pci_path::{PciPath, PciSlot};
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpenVmmHotplugPort {
+    /// Topology port name (e.g. "hp0"); matches the name declared in the PCIe
+    /// topology at CreateVm and targeted by AddPcieDevice/RemovePcieDevice.
     pub(crate) name: String,
+    /// Guest-visible PCI path of an endpoint hot-added into this port: "DD/00"
+    /// (root-port device number on bus 0, then device 0 on its secondary bus).
+    /// Reported to the agent so it can resolve /dev/vdX.
+    pub(crate) pci_path: PciPath,
 }
 
 impl OpenVmmHotplugPort {
     fn new(index: u8) -> Self {
+        let device = OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE + index;
+        let pci_path = PciPath::new(vec![PciSlot::new(device), PciSlot::new(0)])
+            .expect("openvmm hotplug port PCI path is non-empty");
         Self {
             name: format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
+            pci_path,
         }
     }
 }

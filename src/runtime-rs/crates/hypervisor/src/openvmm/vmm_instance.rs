@@ -14,9 +14,11 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::empty::Empty;
+use super::inner_hypervisor::blk_device_kind;
 use super::vmservice;
 use super::vmservice_ttrpc::VmClient;
 use crate::utils::enter_netns;
+use protobuf::MessageField;
 
 const OPENVMM_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const OPENVMM_STOP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -170,55 +172,39 @@ impl VmmInstance {
             .map_err(|e| anyhow!("openvmm pause_vm RPC failed: {:?}", e))
     }
 
-    pub(crate) async fn add_scsi_disk(
+    /// Hot-add a virtio-blk-pci device behind the named (pre-declared) PCIe
+    /// hotplug port.
+    pub(crate) async fn add_pcie_device(
         &self,
-        lun: u32,
+        port_name: &str,
         host_path: String,
         read_only: bool,
     ) -> Result<()> {
-        let request = vmservice::ModifyResourceRequest {
-            type_: vmservice::ModifyType::ADD.into(),
-            resource: Some(vmservice::modify_resource_request::Resource::ScsiDisk(
-                vmservice::SCSIDisk {
-                    controller: 0,
-                    lun,
-                    host_path,
-                    type_: vmservice::DiskType::SCSI_DISK_TYPE_PHYSICAL.into(),
-                    read_only,
-                    ..Default::default()
-                },
-            )),
+        let request = vmservice::AddPcieDeviceRequest {
+            port_name: port_name.to_string(),
+            device: MessageField::some(blk_device_kind(host_path, read_only)),
             ..Default::default()
         };
 
         self.client()?
-            .modify_resource(rpc_ctx(), &request)
+            .add_pcie_device(rpc_ctx(), &request)
             .await
             .map(|_| ())
-            .map_err(|e| anyhow!("openvmm add_scsi_disk RPC failed: {:?}", e))
+            .map_err(|e| anyhow!("openvmm add_pcie_device RPC failed: {:?}", e))
     }
 
-    pub(crate) async fn remove_scsi_disk(&self, lun: u32) -> Result<()> {
-        let request = vmservice::ModifyResourceRequest {
-            type_: vmservice::ModifyType::REMOVE.into(),
-            resource: Some(vmservice::modify_resource_request::Resource::ScsiDisk(
-                vmservice::SCSIDisk {
-                    controller: 0,
-                    lun,
-                    host_path: String::new(),
-                    type_: vmservice::DiskType::SCSI_DISK_TYPE_PHYSICAL.into(),
-                    read_only: true,
-                    ..Default::default()
-                },
-            )),
+    /// Hot-remove the device behind the named PCIe hotplug port.
+    pub(crate) async fn remove_pcie_device(&self, port_name: &str) -> Result<()> {
+        let request = vmservice::RemovePcieDeviceRequest {
+            port_name: port_name.to_string(),
             ..Default::default()
         };
 
         self.client()?
-            .modify_resource(rpc_ctx(), &request)
+            .remove_pcie_device(rpc_ctx(), &request)
             .await
             .map(|_| ())
-            .map_err(|e| anyhow!("openvmm remove_scsi_disk RPC failed: {:?}", e))
+            .map_err(|e| anyhow!("openvmm remove_pcie_device RPC failed: {:?}", e))
     }
 
     pub(crate) async fn stop(&mut self) -> Result<()> {

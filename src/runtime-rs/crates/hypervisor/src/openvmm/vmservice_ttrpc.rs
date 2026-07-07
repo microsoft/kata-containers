@@ -71,6 +71,16 @@ impl VmClient {
         ::ttrpc::async_client_request!(self, ctx, req, "vmservice.VM", "ModifyResource", cres);
     }
 
+    pub async fn add_pcie_device(&self, ctx: ttrpc::context::Context, req: &super::vmservice::AddPcieDeviceRequest) -> ::ttrpc::Result<super::empty::Empty> {
+        let mut cres = super::empty::Empty::new();
+        ::ttrpc::async_client_request!(self, ctx, req, "vmservice.VM", "AddPcieDevice", cres);
+    }
+
+    pub async fn remove_pcie_device(&self, ctx: ttrpc::context::Context, req: &super::vmservice::RemovePcieDeviceRequest) -> ::ttrpc::Result<super::empty::Empty> {
+        let mut cres = super::empty::Empty::new();
+        ::ttrpc::async_client_request!(self, ctx, req, "vmservice.VM", "RemovePcieDevice", cres);
+    }
+
     pub async fn quit(&self, ctx: ttrpc::context::Context, req: &super::empty::Empty) -> ::ttrpc::Result<super::empty::Empty> {
         let mut cres = super::empty::Empty::new();
         ::ttrpc::async_client_request!(self, ctx, req, "vmservice.VM", "Quit", cres);
@@ -165,6 +175,28 @@ impl ::ttrpc::r#async::MethodHandler for ModifyResourceMethod {
     }
 }
 
+struct AddPcieDeviceMethod {
+    service: Arc<dyn Vm + Send + Sync>,
+}
+
+#[async_trait]
+impl ::ttrpc::r#async::MethodHandler for AddPcieDeviceMethod {
+    async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, req: ::ttrpc::Request) -> ::ttrpc::Result<::ttrpc::Response> {
+        ::ttrpc::async_request_handler!(self, ctx, req, vmservice, AddPcieDeviceRequest, add_pcie_device);
+    }
+}
+
+struct RemovePcieDeviceMethod {
+    service: Arc<dyn Vm + Send + Sync>,
+}
+
+#[async_trait]
+impl ::ttrpc::r#async::MethodHandler for RemovePcieDeviceMethod {
+    async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, req: ::ttrpc::Request) -> ::ttrpc::Result<::ttrpc::Response> {
+        ::ttrpc::async_request_handler!(self, ctx, req, vmservice, RemovePcieDeviceRequest, remove_pcie_device);
+    }
+}
+
 struct QuitMethod {
     service: Arc<dyn Vm + Send + Sync>,
 }
@@ -202,6 +234,12 @@ pub trait Vm: Sync {
     async fn modify_resource(&self, _ctx: &::ttrpc::r#async::TtrpcContext, _: super::vmservice::ModifyResourceRequest) -> ::ttrpc::Result<super::empty::Empty> {
         Err(::ttrpc::Error::RpcStatus(::ttrpc::get_status(::ttrpc::Code::NOT_FOUND, "/vmservice.Vm/ModifyResource is not supported".to_string())))
     }
+    async fn add_pcie_device(&self, _ctx: &::ttrpc::r#async::TtrpcContext, _: super::vmservice::AddPcieDeviceRequest) -> ::ttrpc::Result<super::empty::Empty> {
+        Err(::ttrpc::Error::RpcStatus(::ttrpc::get_status(::ttrpc::Code::NOT_FOUND, "/vmservice.Vm/AddPcieDevice is not supported".to_string())))
+    }
+    async fn remove_pcie_device(&self, _ctx: &::ttrpc::r#async::TtrpcContext, _: super::vmservice::RemovePcieDeviceRequest) -> ::ttrpc::Result<super::empty::Empty> {
+        Err(::ttrpc::Error::RpcStatus(::ttrpc::get_status(::ttrpc::Code::NOT_FOUND, "/vmservice.Vm/RemovePcieDevice is not supported".to_string())))
+    }
     async fn quit(&self, _ctx: &::ttrpc::r#async::TtrpcContext, _: super::empty::Empty) -> ::ttrpc::Result<super::empty::Empty> {
         Err(::ttrpc::Error::RpcStatus(::ttrpc::get_status(::ttrpc::Code::NOT_FOUND, "/vmservice.Vm/Quit is not supported".to_string())))
     }
@@ -235,6 +273,12 @@ pub fn create_vm(service: Arc<dyn Vm + Send + Sync>) -> HashMap<String, ::ttrpc:
 
     methods.insert("ModifyResource".to_string(),
                     Box::new(ModifyResourceMethod{service: service.clone()}) as Box<dyn ::ttrpc::r#async::MethodHandler + Send + Sync>);
+
+    methods.insert("AddPcieDevice".to_string(),
+                    Box::new(AddPcieDeviceMethod{service: service.clone()}) as Box<dyn ::ttrpc::r#async::MethodHandler + Send + Sync>);
+
+    methods.insert("RemovePcieDevice".to_string(),
+                    Box::new(RemovePcieDeviceMethod{service: service.clone()}) as Box<dyn ::ttrpc::r#async::MethodHandler + Send + Sync>);
 
     methods.insert("Quit".to_string(),
                     Box::new(QuitMethod{service: service.clone()}) as Box<dyn ::ttrpc::r#async::MethodHandler + Send + Sync>);

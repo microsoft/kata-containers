@@ -1473,27 +1473,1293 @@ impl ::protobuf::reflect::ProtobufValue for DevicesConfig {
     type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
 }
 
-// @@protoc_insertion_point(message:vmservice.VirtioConsoleConfig)
+// @@protoc_insertion_point(message:vmservice.PcieDeviceKind)
 #[derive(PartialEq,Clone,Default,Debug)]
-pub struct VirtioConsoleConfig {
-    // message fields
-    // @@protoc_insertion_point(field:vmservice.VirtioConsoleConfig.socket_path)
-    pub socket_path: ::std::string::String,
-    // @@protoc_insertion_point(field:vmservice.VirtioConsoleConfig.connect)
-    pub connect: bool,
+pub struct PcieDeviceKind {
+    // message oneof groups
+    pub kind: ::std::option::Option<pcie_device_kind::Kind>,
     // special fields
-    // @@protoc_insertion_point(special_field:vmservice.VirtioConsoleConfig.special_fields)
+    // @@protoc_insertion_point(special_field:vmservice.PcieDeviceKind.special_fields)
     pub special_fields: ::protobuf::SpecialFields,
 }
 
-impl<'a> ::std::default::Default for &'a VirtioConsoleConfig {
-    fn default() -> &'a VirtioConsoleConfig {
-        <VirtioConsoleConfig as ::protobuf::Message>::default_instance()
+impl<'a> ::std::default::Default for &'a PcieDeviceKind {
+    fn default() -> &'a PcieDeviceKind {
+        <PcieDeviceKind as ::protobuf::Message>::default_instance()
     }
 }
 
-impl VirtioConsoleConfig {
-    pub fn new() -> VirtioConsoleConfig {
+impl PcieDeviceKind {
+    pub fn new() -> PcieDeviceKind {
+        ::std::default::Default::default()
+    }
+
+    // .vmservice.VirtioDevice virtio = 1;
+
+    pub fn virtio(&self) -> &VirtioDevice {
+        match self.kind {
+            ::std::option::Option::Some(pcie_device_kind::Kind::Virtio(ref v)) => v,
+            _ => <VirtioDevice as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_virtio(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_virtio(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(pcie_device_kind::Kind::Virtio(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_virtio(&mut self, v: VirtioDevice) {
+        self.kind = ::std::option::Option::Some(pcie_device_kind::Kind::Virtio(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_virtio(&mut self) -> &mut VirtioDevice {
+        if let ::std::option::Option::Some(pcie_device_kind::Kind::Virtio(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(pcie_device_kind::Kind::Virtio(VirtioDevice::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(pcie_device_kind::Kind::Virtio(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_virtio(&mut self) -> VirtioDevice {
+        if self.has_virtio() {
+            match self.kind.take() {
+                ::std::option::Option::Some(pcie_device_kind::Kind::Virtio(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VirtioDevice::new()
+        }
+    }
+
+    // .vmservice.NvmeConfig nvme = 2;
+
+    pub fn nvme(&self) -> &NvmeConfig {
+        match self.kind {
+            ::std::option::Option::Some(pcie_device_kind::Kind::Nvme(ref v)) => v,
+            _ => <NvmeConfig as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_nvme(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_nvme(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(pcie_device_kind::Kind::Nvme(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_nvme(&mut self, v: NvmeConfig) {
+        self.kind = ::std::option::Option::Some(pcie_device_kind::Kind::Nvme(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_nvme(&mut self) -> &mut NvmeConfig {
+        if let ::std::option::Option::Some(pcie_device_kind::Kind::Nvme(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(pcie_device_kind::Kind::Nvme(NvmeConfig::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(pcie_device_kind::Kind::Nvme(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_nvme(&mut self) -> NvmeConfig {
+        if self.has_nvme() {
+            match self.kind.take() {
+                ::std::option::Option::Some(pcie_device_kind::Kind::Nvme(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            NvmeConfig::new()
+        }
+    }
+
+    // .vmservice.VfioDevice vfio = 3;
+
+    pub fn vfio(&self) -> &VfioDevice {
+        match self.kind {
+            ::std::option::Option::Some(pcie_device_kind::Kind::Vfio(ref v)) => v,
+            _ => <VfioDevice as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_vfio(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_vfio(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(pcie_device_kind::Kind::Vfio(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_vfio(&mut self, v: VfioDevice) {
+        self.kind = ::std::option::Option::Some(pcie_device_kind::Kind::Vfio(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_vfio(&mut self) -> &mut VfioDevice {
+        if let ::std::option::Option::Some(pcie_device_kind::Kind::Vfio(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(pcie_device_kind::Kind::Vfio(VfioDevice::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(pcie_device_kind::Kind::Vfio(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_vfio(&mut self) -> VfioDevice {
+        if self.has_vfio() {
+            match self.kind.take() {
+                ::std::option::Option::Some(pcie_device_kind::Kind::Vfio(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VfioDevice::new()
+        }
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(3);
+        let mut oneofs = ::std::vec::Vec::with_capacity(1);
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VirtioDevice>(
+            "virtio",
+            PcieDeviceKind::has_virtio,
+            PcieDeviceKind::virtio,
+            PcieDeviceKind::mut_virtio,
+            PcieDeviceKind::set_virtio,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, NvmeConfig>(
+            "nvme",
+            PcieDeviceKind::has_nvme,
+            PcieDeviceKind::nvme,
+            PcieDeviceKind::mut_nvme,
+            PcieDeviceKind::set_nvme,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VfioDevice>(
+            "vfio",
+            PcieDeviceKind::has_vfio,
+            PcieDeviceKind::vfio,
+            PcieDeviceKind::mut_vfio,
+            PcieDeviceKind::set_vfio,
+        ));
+        oneofs.push(pcie_device_kind::Kind::generated_oneof_descriptor_data());
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<PcieDeviceKind>(
+            "PcieDeviceKind",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for PcieDeviceKind {
+    const NAME: &'static str = "PcieDeviceKind";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.kind = ::std::option::Option::Some(pcie_device_kind::Kind::Virtio(is.read_message()?));
+                },
+                18 => {
+                    self.kind = ::std::option::Option::Some(pcie_device_kind::Kind::Nvme(is.read_message()?));
+                },
+                26 => {
+                    self.kind = ::std::option::Option::Some(pcie_device_kind::Kind::Vfio(is.read_message()?));
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &pcie_device_kind::Kind::Virtio(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &pcie_device_kind::Kind::Nvme(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &pcie_device_kind::Kind::Vfio(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+            };
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &pcie_device_kind::Kind::Virtio(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+                },
+                &pcie_device_kind::Kind::Nvme(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+                },
+                &pcie_device_kind::Kind::Vfio(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(3, v, os)?;
+                },
+            };
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> PcieDeviceKind {
+        PcieDeviceKind::new()
+    }
+
+    fn clear(&mut self) {
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static PcieDeviceKind {
+        static instance: PcieDeviceKind = PcieDeviceKind {
+            kind: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for PcieDeviceKind {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("PcieDeviceKind").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for PcieDeviceKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for PcieDeviceKind {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+/// Nested message and enums of message `PcieDeviceKind`
+pub mod pcie_device_kind {
+
+    #[derive(Clone,PartialEq,Debug)]
+    #[non_exhaustive]
+    // @@protoc_insertion_point(oneof:vmservice.PcieDeviceKind.kind)
+    pub enum Kind {
+        // @@protoc_insertion_point(oneof_field:vmservice.PcieDeviceKind.virtio)
+        Virtio(super::VirtioDevice),
+        // @@protoc_insertion_point(oneof_field:vmservice.PcieDeviceKind.nvme)
+        Nvme(super::NvmeConfig),
+        // @@protoc_insertion_point(oneof_field:vmservice.PcieDeviceKind.vfio)
+        Vfio(super::VfioDevice),
+    }
+
+    impl ::protobuf::Oneof for Kind {
+    }
+
+    impl ::protobuf::OneofFull for Kind {
+        fn descriptor() -> ::protobuf::reflect::OneofDescriptor {
+            static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::OneofDescriptor> = ::protobuf::rt::Lazy::new();
+            descriptor.get(|| <super::PcieDeviceKind as ::protobuf::MessageFull>::descriptor().oneof_by_name("kind").unwrap()).clone()
+        }
+    }
+
+    impl Kind {
+        pub(in super) fn generated_oneof_descriptor_data() -> ::protobuf::reflect::GeneratedOneofDescriptorData {
+            ::protobuf::reflect::GeneratedOneofDescriptorData::new::<Kind>("kind")
+        }
+    }
+}
+
+// @@protoc_insertion_point(message:vmservice.VirtioDevice)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VirtioDevice {
+    // message oneof groups
+    pub kind: ::std::option::Option<virtio_device::Kind>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VirtioDevice.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VirtioDevice {
+    fn default() -> &'a VirtioDevice {
+        <VirtioDevice as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VirtioDevice {
+    pub fn new() -> VirtioDevice {
+        ::std::default::Default::default()
+    }
+
+    // .vmservice.VirtioBlk blk = 1;
+
+    pub fn blk(&self) -> &VirtioBlk {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Blk(ref v)) => v,
+            _ => <VirtioBlk as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_blk(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_blk(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Blk(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_blk(&mut self, v: VirtioBlk) {
+        self.kind = ::std::option::Option::Some(virtio_device::Kind::Blk(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_blk(&mut self) -> &mut VirtioBlk {
+        if let ::std::option::Option::Some(virtio_device::Kind::Blk(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(virtio_device::Kind::Blk(VirtioBlk::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Blk(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_blk(&mut self) -> VirtioBlk {
+        if self.has_blk() {
+            match self.kind.take() {
+                ::std::option::Option::Some(virtio_device::Kind::Blk(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VirtioBlk::new()
+        }
+    }
+
+    // .vmservice.VirtioNet net = 2;
+
+    pub fn net(&self) -> &VirtioNet {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Net(ref v)) => v,
+            _ => <VirtioNet as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_net(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_net(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Net(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_net(&mut self, v: VirtioNet) {
+        self.kind = ::std::option::Option::Some(virtio_device::Kind::Net(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_net(&mut self) -> &mut VirtioNet {
+        if let ::std::option::Option::Some(virtio_device::Kind::Net(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(virtio_device::Kind::Net(VirtioNet::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Net(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_net(&mut self) -> VirtioNet {
+        if self.has_net() {
+            match self.kind.take() {
+                ::std::option::Option::Some(virtio_device::Kind::Net(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VirtioNet::new()
+        }
+    }
+
+    // .vmservice.VirtioRng rng = 3;
+
+    pub fn rng(&self) -> &VirtioRng {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Rng(ref v)) => v,
+            _ => <VirtioRng as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_rng(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_rng(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Rng(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_rng(&mut self, v: VirtioRng) {
+        self.kind = ::std::option::Option::Some(virtio_device::Kind::Rng(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_rng(&mut self) -> &mut VirtioRng {
+        if let ::std::option::Option::Some(virtio_device::Kind::Rng(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(virtio_device::Kind::Rng(VirtioRng::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Rng(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_rng(&mut self) -> VirtioRng {
+        if self.has_rng() {
+            match self.kind.take() {
+                ::std::option::Option::Some(virtio_device::Kind::Rng(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VirtioRng::new()
+        }
+    }
+
+    // .vmservice.VirtioVsock vsock = 4;
+
+    pub fn vsock(&self) -> &VirtioVsock {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Vsock(ref v)) => v,
+            _ => <VirtioVsock as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_vsock(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_vsock(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Vsock(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_vsock(&mut self, v: VirtioVsock) {
+        self.kind = ::std::option::Option::Some(virtio_device::Kind::Vsock(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_vsock(&mut self) -> &mut VirtioVsock {
+        if let ::std::option::Option::Some(virtio_device::Kind::Vsock(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(virtio_device::Kind::Vsock(VirtioVsock::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Vsock(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_vsock(&mut self) -> VirtioVsock {
+        if self.has_vsock() {
+            match self.kind.take() {
+                ::std::option::Option::Some(virtio_device::Kind::Vsock(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VirtioVsock::new()
+        }
+    }
+
+    // .vmservice.VirtioConsole console = 5;
+
+    pub fn console(&self) -> &VirtioConsole {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Console(ref v)) => v,
+            _ => <VirtioConsole as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_console(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_console(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Console(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_console(&mut self, v: VirtioConsole) {
+        self.kind = ::std::option::Option::Some(virtio_device::Kind::Console(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_console(&mut self) -> &mut VirtioConsole {
+        if let ::std::option::Option::Some(virtio_device::Kind::Console(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(virtio_device::Kind::Console(VirtioConsole::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::Console(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_console(&mut self) -> VirtioConsole {
+        if self.has_console() {
+            match self.kind.take() {
+                ::std::option::Option::Some(virtio_device::Kind::Console(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VirtioConsole::new()
+        }
+    }
+
+    // .vmservice.VhostUser vhost_user = 6;
+
+    pub fn vhost_user(&self) -> &VhostUser {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::VhostUser(ref v)) => v,
+            _ => <VhostUser as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_vhost_user(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_vhost_user(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::VhostUser(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_vhost_user(&mut self, v: VhostUser) {
+        self.kind = ::std::option::Option::Some(virtio_device::Kind::VhostUser(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_vhost_user(&mut self) -> &mut VhostUser {
+        if let ::std::option::Option::Some(virtio_device::Kind::VhostUser(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(virtio_device::Kind::VhostUser(VhostUser::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(virtio_device::Kind::VhostUser(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_vhost_user(&mut self) -> VhostUser {
+        if self.has_vhost_user() {
+            match self.kind.take() {
+                ::std::option::Option::Some(virtio_device::Kind::VhostUser(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VhostUser::new()
+        }
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(6);
+        let mut oneofs = ::std::vec::Vec::with_capacity(1);
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VirtioBlk>(
+            "blk",
+            VirtioDevice::has_blk,
+            VirtioDevice::blk,
+            VirtioDevice::mut_blk,
+            VirtioDevice::set_blk,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VirtioNet>(
+            "net",
+            VirtioDevice::has_net,
+            VirtioDevice::net,
+            VirtioDevice::mut_net,
+            VirtioDevice::set_net,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VirtioRng>(
+            "rng",
+            VirtioDevice::has_rng,
+            VirtioDevice::rng,
+            VirtioDevice::mut_rng,
+            VirtioDevice::set_rng,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VirtioVsock>(
+            "vsock",
+            VirtioDevice::has_vsock,
+            VirtioDevice::vsock,
+            VirtioDevice::mut_vsock,
+            VirtioDevice::set_vsock,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VirtioConsole>(
+            "console",
+            VirtioDevice::has_console,
+            VirtioDevice::console,
+            VirtioDevice::mut_console,
+            VirtioDevice::set_console,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VhostUser>(
+            "vhost_user",
+            VirtioDevice::has_vhost_user,
+            VirtioDevice::vhost_user,
+            VirtioDevice::mut_vhost_user,
+            VirtioDevice::set_vhost_user,
+        ));
+        oneofs.push(virtio_device::Kind::generated_oneof_descriptor_data());
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VirtioDevice>(
+            "VirtioDevice",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VirtioDevice {
+    const NAME: &'static str = "VirtioDevice";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.kind = ::std::option::Option::Some(virtio_device::Kind::Blk(is.read_message()?));
+                },
+                18 => {
+                    self.kind = ::std::option::Option::Some(virtio_device::Kind::Net(is.read_message()?));
+                },
+                26 => {
+                    self.kind = ::std::option::Option::Some(virtio_device::Kind::Rng(is.read_message()?));
+                },
+                34 => {
+                    self.kind = ::std::option::Option::Some(virtio_device::Kind::Vsock(is.read_message()?));
+                },
+                42 => {
+                    self.kind = ::std::option::Option::Some(virtio_device::Kind::Console(is.read_message()?));
+                },
+                50 => {
+                    self.kind = ::std::option::Option::Some(virtio_device::Kind::VhostUser(is.read_message()?));
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &virtio_device::Kind::Blk(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &virtio_device::Kind::Net(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &virtio_device::Kind::Rng(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &virtio_device::Kind::Vsock(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &virtio_device::Kind::Console(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &virtio_device::Kind::VhostUser(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+            };
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &virtio_device::Kind::Blk(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+                },
+                &virtio_device::Kind::Net(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+                },
+                &virtio_device::Kind::Rng(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(3, v, os)?;
+                },
+                &virtio_device::Kind::Vsock(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(4, v, os)?;
+                },
+                &virtio_device::Kind::Console(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(5, v, os)?;
+                },
+                &virtio_device::Kind::VhostUser(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(6, v, os)?;
+                },
+            };
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VirtioDevice {
+        VirtioDevice::new()
+    }
+
+    fn clear(&mut self) {
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VirtioDevice {
+        static instance: VirtioDevice = VirtioDevice {
+            kind: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VirtioDevice {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VirtioDevice").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VirtioDevice {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VirtioDevice {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+/// Nested message and enums of message `VirtioDevice`
+pub mod virtio_device {
+
+    #[derive(Clone,PartialEq,Debug)]
+    #[non_exhaustive]
+    // @@protoc_insertion_point(oneof:vmservice.VirtioDevice.kind)
+    pub enum Kind {
+        // @@protoc_insertion_point(oneof_field:vmservice.VirtioDevice.blk)
+        Blk(super::VirtioBlk),
+        // @@protoc_insertion_point(oneof_field:vmservice.VirtioDevice.net)
+        Net(super::VirtioNet),
+        // @@protoc_insertion_point(oneof_field:vmservice.VirtioDevice.rng)
+        Rng(super::VirtioRng),
+        // @@protoc_insertion_point(oneof_field:vmservice.VirtioDevice.vsock)
+        Vsock(super::VirtioVsock),
+        // @@protoc_insertion_point(oneof_field:vmservice.VirtioDevice.console)
+        Console(super::VirtioConsole),
+        // @@protoc_insertion_point(oneof_field:vmservice.VirtioDevice.vhost_user)
+        VhostUser(super::VhostUser),
+    }
+
+    impl ::protobuf::Oneof for Kind {
+    }
+
+    impl ::protobuf::OneofFull for Kind {
+        fn descriptor() -> ::protobuf::reflect::OneofDescriptor {
+            static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::OneofDescriptor> = ::protobuf::rt::Lazy::new();
+            descriptor.get(|| <super::VirtioDevice as ::protobuf::MessageFull>::descriptor().oneof_by_name("kind").unwrap()).clone()
+        }
+    }
+
+    impl Kind {
+        pub(in super) fn generated_oneof_descriptor_data() -> ::protobuf::reflect::GeneratedOneofDescriptorData {
+            ::protobuf::reflect::GeneratedOneofDescriptorData::new::<Kind>("kind")
+        }
+    }
+}
+
+// @@protoc_insertion_point(message:vmservice.VirtioConsole)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VirtioConsole {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VirtioConsole.backend)
+    pub backend: ::protobuf::MessageField<SerialBackend>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VirtioConsole.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VirtioConsole {
+    fn default() -> &'a VirtioConsole {
+        <VirtioConsole as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VirtioConsole {
+    pub fn new() -> VirtioConsole {
+        ::std::default::Default::default()
+    }
+
+    // .vmservice.SerialBackend backend = 1;
+
+    pub fn backend(&self) -> &SerialBackend {
+        self.backend.as_ref().unwrap_or_else(|| <SerialBackend as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_backend(&mut self) {
+        self.backend.clear();
+    }
+
+    pub fn has_backend(&self) -> bool {
+        self.backend.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_backend(&mut self, v: SerialBackend) {
+        self.backend = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_backend(&mut self) -> &mut SerialBackend {
+        self.backend.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_backend(&mut self) -> SerialBackend {
+        self.backend.take().unwrap_or_else(|| SerialBackend::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(1);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, SerialBackend>(
+            "backend",
+            |m: &VirtioConsole| { &m.backend },
+            |m: &mut VirtioConsole| { &mut m.backend },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VirtioConsole>(
+            "VirtioConsole",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VirtioConsole {
+    const NAME: &'static str = "VirtioConsole";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.backend)?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let Some(v) = self.backend.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let Some(v) = self.backend.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VirtioConsole {
+        VirtioConsole::new()
+    }
+
+    fn clear(&mut self) {
+        self.backend.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VirtioConsole {
+        static instance: VirtioConsole = VirtioConsole {
+            backend: ::protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VirtioConsole {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VirtioConsole").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VirtioConsole {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VirtioConsole {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.SerialBackend)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct SerialBackend {
+    // message oneof groups
+    pub kind: ::std::option::Option<serial_backend::Kind>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.SerialBackend.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a SerialBackend {
+    fn default() -> &'a SerialBackend {
+        <SerialBackend as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl SerialBackend {
+    pub fn new() -> SerialBackend {
+        ::std::default::Default::default()
+    }
+
+    // .vmservice.SerialRelay relay = 1;
+
+    pub fn relay(&self) -> &SerialRelay {
+        match self.kind {
+            ::std::option::Option::Some(serial_backend::Kind::Relay(ref v)) => v,
+            _ => <SerialRelay as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_relay(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_relay(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(serial_backend::Kind::Relay(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_relay(&mut self, v: SerialRelay) {
+        self.kind = ::std::option::Option::Some(serial_backend::Kind::Relay(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_relay(&mut self) -> &mut SerialRelay {
+        if let ::std::option::Option::Some(serial_backend::Kind::Relay(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(serial_backend::Kind::Relay(SerialRelay::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(serial_backend::Kind::Relay(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_relay(&mut self) -> SerialRelay {
+        if self.has_relay() {
+            match self.kind.take() {
+                ::std::option::Option::Some(serial_backend::Kind::Relay(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            SerialRelay::new()
+        }
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(1);
+        let mut oneofs = ::std::vec::Vec::with_capacity(1);
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, SerialRelay>(
+            "relay",
+            SerialBackend::has_relay,
+            SerialBackend::relay,
+            SerialBackend::mut_relay,
+            SerialBackend::set_relay,
+        ));
+        oneofs.push(serial_backend::Kind::generated_oneof_descriptor_data());
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<SerialBackend>(
+            "SerialBackend",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for SerialBackend {
+    const NAME: &'static str = "SerialBackend";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.kind = ::std::option::Option::Some(serial_backend::Kind::Relay(is.read_message()?));
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &serial_backend::Kind::Relay(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+            };
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &serial_backend::Kind::Relay(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+                },
+            };
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> SerialBackend {
+        SerialBackend::new()
+    }
+
+    fn clear(&mut self) {
+        self.kind = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static SerialBackend {
+        static instance: SerialBackend = SerialBackend {
+            kind: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for SerialBackend {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("SerialBackend").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for SerialBackend {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for SerialBackend {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+/// Nested message and enums of message `SerialBackend`
+pub mod serial_backend {
+
+    #[derive(Clone,PartialEq,Debug)]
+    #[non_exhaustive]
+    // @@protoc_insertion_point(oneof:vmservice.SerialBackend.kind)
+    pub enum Kind {
+        // @@protoc_insertion_point(oneof_field:vmservice.SerialBackend.relay)
+        Relay(super::SerialRelay),
+    }
+
+    impl ::protobuf::Oneof for Kind {
+    }
+
+    impl ::protobuf::OneofFull for Kind {
+        fn descriptor() -> ::protobuf::reflect::OneofDescriptor {
+            static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::OneofDescriptor> = ::protobuf::rt::Lazy::new();
+            descriptor.get(|| <super::SerialBackend as ::protobuf::MessageFull>::descriptor().oneof_by_name("kind").unwrap()).clone()
+        }
+    }
+
+    impl Kind {
+        pub(in super) fn generated_oneof_descriptor_data() -> ::protobuf::reflect::GeneratedOneofDescriptorData {
+            ::protobuf::reflect::GeneratedOneofDescriptorData::new::<Kind>("kind")
+        }
+    }
+}
+
+// @@protoc_insertion_point(message:vmservice.SerialRelay)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct SerialRelay {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.SerialRelay.socket_path)
+    pub socket_path: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.SerialRelay.connect)
+    pub connect: bool,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.SerialRelay.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a SerialRelay {
+    fn default() -> &'a SerialRelay {
+        <SerialRelay as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl SerialRelay {
+    pub fn new() -> SerialRelay {
         ::std::default::Default::default()
     }
 
@@ -1543,24 +2809,24 @@ impl VirtioConsoleConfig {
         let mut oneofs = ::std::vec::Vec::with_capacity(0);
         fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
             "socket_path",
-            |m: &VirtioConsoleConfig| { &m.socket_path },
-            |m: &mut VirtioConsoleConfig| { &mut m.socket_path },
+            |m: &SerialRelay| { &m.socket_path },
+            |m: &mut SerialRelay| { &mut m.socket_path },
         ));
         fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
             "connect",
-            |m: &VirtioConsoleConfig| { &m.connect },
-            |m: &mut VirtioConsoleConfig| { &mut m.connect },
+            |m: &SerialRelay| { &m.connect },
+            |m: &mut SerialRelay| { &mut m.connect },
         ));
-        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VirtioConsoleConfig>(
-            "VirtioConsoleConfig",
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<SerialRelay>(
+            "SerialRelay",
             fields,
             oneofs,
         )
     }
 }
 
-impl ::protobuf::Message for VirtioConsoleConfig {
-    const NAME: &'static str = "VirtioConsoleConfig";
+impl ::protobuf::Message for SerialRelay {
+    const NAME: &'static str = "SerialRelay";
 
     fn is_initialized(&self) -> bool {
         true
@@ -1617,8 +2883,8 @@ impl ::protobuf::Message for VirtioConsoleConfig {
         &mut self.special_fields
     }
 
-    fn new() -> VirtioConsoleConfig {
-        VirtioConsoleConfig::new()
+    fn new() -> SerialRelay {
+        SerialRelay::new()
     }
 
     fn clear(&mut self) {
@@ -1627,8 +2893,8 @@ impl ::protobuf::Message for VirtioConsoleConfig {
         self.special_fields.clear();
     }
 
-    fn default_instance() -> &'static VirtioConsoleConfig {
-        static instance: VirtioConsoleConfig = VirtioConsoleConfig {
+    fn default_instance() -> &'static SerialRelay {
+        static instance: SerialRelay = SerialRelay {
             socket_path: ::std::string::String::new(),
             connect: false,
             special_fields: ::protobuf::SpecialFields::new(),
@@ -1637,21 +2903,5587 @@ impl ::protobuf::Message for VirtioConsoleConfig {
     }
 }
 
-impl ::protobuf::MessageFull for VirtioConsoleConfig {
+impl ::protobuf::MessageFull for SerialRelay {
     fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
         static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
-        descriptor.get(|| file_descriptor().message_by_package_relative_name("VirtioConsoleConfig").unwrap()).clone()
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("SerialRelay").unwrap()).clone()
     }
 }
 
-impl ::std::fmt::Display for VirtioConsoleConfig {
+impl ::std::fmt::Display for SerialRelay {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         ::protobuf::text_format::fmt(self, f)
     }
 }
 
-impl ::protobuf::reflect::ProtobufValue for VirtioConsoleConfig {
+impl ::protobuf::reflect::ProtobufValue for SerialRelay {
     type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.DiskBackend)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct DiskBackend {
+    // message oneof groups
+    pub kind: ::std::option::Option<disk_backend::Kind>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.DiskBackend.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a DiskBackend {
+    fn default() -> &'a DiskBackend {
+        <DiskBackend as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl DiskBackend {
+    pub fn new() -> DiskBackend {
+        ::std::default::Default::default()
+    }
+
+    // .vmservice.FileDisk file = 1;
+
+    pub fn file(&self) -> &FileDisk {
+        match self.kind {
+            ::std::option::Option::Some(disk_backend::Kind::File(ref v)) => v,
+            _ => <FileDisk as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_file(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_file(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(disk_backend::Kind::File(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_file(&mut self, v: FileDisk) {
+        self.kind = ::std::option::Option::Some(disk_backend::Kind::File(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_file(&mut self) -> &mut FileDisk {
+        if let ::std::option::Option::Some(disk_backend::Kind::File(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(disk_backend::Kind::File(FileDisk::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(disk_backend::Kind::File(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_file(&mut self) -> FileDisk {
+        if self.has_file() {
+            match self.kind.take() {
+                ::std::option::Option::Some(disk_backend::Kind::File(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            FileDisk::new()
+        }
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(1);
+        let mut oneofs = ::std::vec::Vec::with_capacity(1);
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, FileDisk>(
+            "file",
+            DiskBackend::has_file,
+            DiskBackend::file,
+            DiskBackend::mut_file,
+            DiskBackend::set_file,
+        ));
+        oneofs.push(disk_backend::Kind::generated_oneof_descriptor_data());
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<DiskBackend>(
+            "DiskBackend",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for DiskBackend {
+    const NAME: &'static str = "DiskBackend";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.kind = ::std::option::Option::Some(disk_backend::Kind::File(is.read_message()?));
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &disk_backend::Kind::File(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+            };
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &disk_backend::Kind::File(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+                },
+            };
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> DiskBackend {
+        DiskBackend::new()
+    }
+
+    fn clear(&mut self) {
+        self.kind = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static DiskBackend {
+        static instance: DiskBackend = DiskBackend {
+            kind: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for DiskBackend {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("DiskBackend").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for DiskBackend {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for DiskBackend {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+/// Nested message and enums of message `DiskBackend`
+pub mod disk_backend {
+
+    #[derive(Clone,PartialEq,Debug)]
+    #[non_exhaustive]
+    // @@protoc_insertion_point(oneof:vmservice.DiskBackend.kind)
+    pub enum Kind {
+        // @@protoc_insertion_point(oneof_field:vmservice.DiskBackend.file)
+        File(super::FileDisk),
+    }
+
+    impl ::protobuf::Oneof for Kind {
+    }
+
+    impl ::protobuf::OneofFull for Kind {
+        fn descriptor() -> ::protobuf::reflect::OneofDescriptor {
+            static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::OneofDescriptor> = ::protobuf::rt::Lazy::new();
+            descriptor.get(|| <super::DiskBackend as ::protobuf::MessageFull>::descriptor().oneof_by_name("kind").unwrap()).clone()
+        }
+    }
+
+    impl Kind {
+        pub(in super) fn generated_oneof_descriptor_data() -> ::protobuf::reflect::GeneratedOneofDescriptorData {
+            ::protobuf::reflect::GeneratedOneofDescriptorData::new::<Kind>("kind")
+        }
+    }
+}
+
+// @@protoc_insertion_point(message:vmservice.FileDisk)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct FileDisk {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.FileDisk.path)
+    pub path: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.FileDisk.direct)
+    pub direct: bool,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.FileDisk.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a FileDisk {
+    fn default() -> &'a FileDisk {
+        <FileDisk as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl FileDisk {
+    pub fn new() -> FileDisk {
+        ::std::default::Default::default()
+    }
+
+    // string path = 1;
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn clear_path(&mut self) {
+        self.path.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_path(&mut self, v: ::std::string::String) {
+        self.path = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_path(&mut self) -> &mut ::std::string::String {
+        &mut self.path
+    }
+
+    // Take field
+    pub fn take_path(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.path, ::std::string::String::new())
+    }
+
+    // bool direct = 2;
+
+    pub fn direct(&self) -> bool {
+        self.direct
+    }
+
+    pub fn clear_direct(&mut self) {
+        self.direct = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_direct(&mut self, v: bool) {
+        self.direct = v;
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "path",
+            |m: &FileDisk| { &m.path },
+            |m: &mut FileDisk| { &mut m.path },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "direct",
+            |m: &FileDisk| { &m.direct },
+            |m: &mut FileDisk| { &mut m.direct },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<FileDisk>(
+            "FileDisk",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for FileDisk {
+    const NAME: &'static str = "FileDisk";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.path = is.read_string()?;
+                },
+                16 => {
+                    self.direct = is.read_bool()?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.path.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.path);
+        }
+        if self.direct != false {
+            my_size += 1 + 1;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.path.is_empty() {
+            os.write_string(1, &self.path)?;
+        }
+        if self.direct != false {
+            os.write_bool(2, self.direct)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> FileDisk {
+        FileDisk::new()
+    }
+
+    fn clear(&mut self) {
+        self.path.clear();
+        self.direct = false;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static FileDisk {
+        static instance: FileDisk = FileDisk {
+            path: ::std::string::String::new(),
+            direct: false,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for FileDisk {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("FileDisk").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for FileDisk {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for FileDisk {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.VirtioBlk)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VirtioBlk {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VirtioBlk.backend)
+    pub backend: ::protobuf::MessageField<DiskBackend>,
+    // @@protoc_insertion_point(field:vmservice.VirtioBlk.read_only)
+    pub read_only: bool,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VirtioBlk.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VirtioBlk {
+    fn default() -> &'a VirtioBlk {
+        <VirtioBlk as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VirtioBlk {
+    pub fn new() -> VirtioBlk {
+        ::std::default::Default::default()
+    }
+
+    // .vmservice.DiskBackend backend = 1;
+
+    pub fn backend(&self) -> &DiskBackend {
+        self.backend.as_ref().unwrap_or_else(|| <DiskBackend as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_backend(&mut self) {
+        self.backend.clear();
+    }
+
+    pub fn has_backend(&self) -> bool {
+        self.backend.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_backend(&mut self, v: DiskBackend) {
+        self.backend = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_backend(&mut self) -> &mut DiskBackend {
+        self.backend.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_backend(&mut self) -> DiskBackend {
+        self.backend.take().unwrap_or_else(|| DiskBackend::new())
+    }
+
+    // bool read_only = 2;
+
+    pub fn read_only(&self) -> bool {
+        self.read_only
+    }
+
+    pub fn clear_read_only(&mut self) {
+        self.read_only = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_read_only(&mut self, v: bool) {
+        self.read_only = v;
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, DiskBackend>(
+            "backend",
+            |m: &VirtioBlk| { &m.backend },
+            |m: &mut VirtioBlk| { &mut m.backend },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "read_only",
+            |m: &VirtioBlk| { &m.read_only },
+            |m: &mut VirtioBlk| { &mut m.read_only },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VirtioBlk>(
+            "VirtioBlk",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VirtioBlk {
+    const NAME: &'static str = "VirtioBlk";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.backend)?;
+                },
+                16 => {
+                    self.read_only = is.read_bool()?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let Some(v) = self.backend.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        if self.read_only != false {
+            my_size += 1 + 1;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let Some(v) = self.backend.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+        }
+        if self.read_only != false {
+            os.write_bool(2, self.read_only)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VirtioBlk {
+        VirtioBlk::new()
+    }
+
+    fn clear(&mut self) {
+        self.backend.clear();
+        self.read_only = false;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VirtioBlk {
+        static instance: VirtioBlk = VirtioBlk {
+            backend: ::protobuf::MessageField::none(),
+            read_only: false,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VirtioBlk {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VirtioBlk").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VirtioBlk {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VirtioBlk {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.VirtioNet)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VirtioNet {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VirtioNet.max_queues)
+    pub max_queues: ::std::option::Option<u32>,
+    // @@protoc_insertion_point(field:vmservice.VirtioNet.backend)
+    pub backend: ::protobuf::MessageField<NicBackend>,
+    // @@protoc_insertion_point(field:vmservice.VirtioNet.mac_address)
+    pub mac_address: ::std::string::String,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VirtioNet.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VirtioNet {
+    fn default() -> &'a VirtioNet {
+        <VirtioNet as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VirtioNet {
+    pub fn new() -> VirtioNet {
+        ::std::default::Default::default()
+    }
+
+    // uint32 max_queues = 1;
+
+    pub fn max_queues(&self) -> u32 {
+        self.max_queues.unwrap_or(0)
+    }
+
+    pub fn clear_max_queues(&mut self) {
+        self.max_queues = ::std::option::Option::None;
+    }
+
+    pub fn has_max_queues(&self) -> bool {
+        self.max_queues.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_max_queues(&mut self, v: u32) {
+        self.max_queues = ::std::option::Option::Some(v);
+    }
+
+    // .vmservice.NicBackend backend = 2;
+
+    pub fn backend(&self) -> &NicBackend {
+        self.backend.as_ref().unwrap_or_else(|| <NicBackend as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_backend(&mut self) {
+        self.backend.clear();
+    }
+
+    pub fn has_backend(&self) -> bool {
+        self.backend.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_backend(&mut self, v: NicBackend) {
+        self.backend = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_backend(&mut self) -> &mut NicBackend {
+        self.backend.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_backend(&mut self) -> NicBackend {
+        self.backend.take().unwrap_or_else(|| NicBackend::new())
+    }
+
+    // string mac_address = 3;
+
+    pub fn mac_address(&self) -> &str {
+        &self.mac_address
+    }
+
+    pub fn clear_mac_address(&mut self) {
+        self.mac_address.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_mac_address(&mut self, v: ::std::string::String) {
+        self.mac_address = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_mac_address(&mut self) -> &mut ::std::string::String {
+        &mut self.mac_address
+    }
+
+    // Take field
+    pub fn take_mac_address(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.mac_address, ::std::string::String::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(3);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "max_queues",
+            |m: &VirtioNet| { &m.max_queues },
+            |m: &mut VirtioNet| { &mut m.max_queues },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, NicBackend>(
+            "backend",
+            |m: &VirtioNet| { &m.backend },
+            |m: &mut VirtioNet| { &mut m.backend },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "mac_address",
+            |m: &VirtioNet| { &m.mac_address },
+            |m: &mut VirtioNet| { &mut m.mac_address },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VirtioNet>(
+            "VirtioNet",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VirtioNet {
+    const NAME: &'static str = "VirtioNet";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                8 => {
+                    self.max_queues = ::std::option::Option::Some(is.read_uint32()?);
+                },
+                18 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.backend)?;
+                },
+                26 => {
+                    self.mac_address = is.read_string()?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let Some(v) = self.max_queues {
+            my_size += ::protobuf::rt::uint32_size(1, v);
+        }
+        if let Some(v) = self.backend.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        if !self.mac_address.is_empty() {
+            my_size += ::protobuf::rt::string_size(3, &self.mac_address);
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let Some(v) = self.max_queues {
+            os.write_uint32(1, v)?;
+        }
+        if let Some(v) = self.backend.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+        }
+        if !self.mac_address.is_empty() {
+            os.write_string(3, &self.mac_address)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VirtioNet {
+        VirtioNet::new()
+    }
+
+    fn clear(&mut self) {
+        self.max_queues = ::std::option::Option::None;
+        self.backend.clear();
+        self.mac_address.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VirtioNet {
+        static instance: VirtioNet = VirtioNet {
+            max_queues: ::std::option::Option::None,
+            backend: ::protobuf::MessageField::none(),
+            mac_address: ::std::string::String::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VirtioNet {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VirtioNet").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VirtioNet {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VirtioNet {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.NicBackend)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct NicBackend {
+    // message oneof groups
+    pub kind: ::std::option::Option<nic_backend::Kind>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.NicBackend.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a NicBackend {
+    fn default() -> &'a NicBackend {
+        <NicBackend as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl NicBackend {
+    pub fn new() -> NicBackend {
+        ::std::default::Default::default()
+    }
+
+    // .vmservice.DioBackend dio = 1;
+
+    pub fn dio(&self) -> &DioBackend {
+        match self.kind {
+            ::std::option::Option::Some(nic_backend::Kind::Dio(ref v)) => v,
+            _ => <DioBackend as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_dio(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_dio(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(nic_backend::Kind::Dio(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_dio(&mut self, v: DioBackend) {
+        self.kind = ::std::option::Option::Some(nic_backend::Kind::Dio(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_dio(&mut self) -> &mut DioBackend {
+        if let ::std::option::Option::Some(nic_backend::Kind::Dio(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(nic_backend::Kind::Dio(DioBackend::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(nic_backend::Kind::Dio(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_dio(&mut self) -> DioBackend {
+        if self.has_dio() {
+            match self.kind.take() {
+                ::std::option::Option::Some(nic_backend::Kind::Dio(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            DioBackend::new()
+        }
+    }
+
+    // .vmservice.TapBackend tap = 2;
+
+    pub fn tap(&self) -> &TapBackend {
+        match self.kind {
+            ::std::option::Option::Some(nic_backend::Kind::Tap(ref v)) => v,
+            _ => <TapBackend as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_tap(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_tap(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(nic_backend::Kind::Tap(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_tap(&mut self, v: TapBackend) {
+        self.kind = ::std::option::Option::Some(nic_backend::Kind::Tap(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_tap(&mut self) -> &mut TapBackend {
+        if let ::std::option::Option::Some(nic_backend::Kind::Tap(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(nic_backend::Kind::Tap(TapBackend::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(nic_backend::Kind::Tap(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_tap(&mut self) -> TapBackend {
+        if self.has_tap() {
+            match self.kind.take() {
+                ::std::option::Option::Some(nic_backend::Kind::Tap(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            TapBackend::new()
+        }
+    }
+
+    // .vmservice.ConsommeBackend consomme = 3;
+
+    pub fn consomme(&self) -> &ConsommeBackend {
+        match self.kind {
+            ::std::option::Option::Some(nic_backend::Kind::Consomme(ref v)) => v,
+            _ => <ConsommeBackend as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_consomme(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_consomme(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(nic_backend::Kind::Consomme(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_consomme(&mut self, v: ConsommeBackend) {
+        self.kind = ::std::option::Option::Some(nic_backend::Kind::Consomme(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_consomme(&mut self) -> &mut ConsommeBackend {
+        if let ::std::option::Option::Some(nic_backend::Kind::Consomme(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(nic_backend::Kind::Consomme(ConsommeBackend::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(nic_backend::Kind::Consomme(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_consomme(&mut self) -> ConsommeBackend {
+        if self.has_consomme() {
+            match self.kind.take() {
+                ::std::option::Option::Some(nic_backend::Kind::Consomme(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            ConsommeBackend::new()
+        }
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(3);
+        let mut oneofs = ::std::vec::Vec::with_capacity(1);
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, DioBackend>(
+            "dio",
+            NicBackend::has_dio,
+            NicBackend::dio,
+            NicBackend::mut_dio,
+            NicBackend::set_dio,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, TapBackend>(
+            "tap",
+            NicBackend::has_tap,
+            NicBackend::tap,
+            NicBackend::mut_tap,
+            NicBackend::set_tap,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, ConsommeBackend>(
+            "consomme",
+            NicBackend::has_consomme,
+            NicBackend::consomme,
+            NicBackend::mut_consomme,
+            NicBackend::set_consomme,
+        ));
+        oneofs.push(nic_backend::Kind::generated_oneof_descriptor_data());
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<NicBackend>(
+            "NicBackend",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for NicBackend {
+    const NAME: &'static str = "NicBackend";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.kind = ::std::option::Option::Some(nic_backend::Kind::Dio(is.read_message()?));
+                },
+                18 => {
+                    self.kind = ::std::option::Option::Some(nic_backend::Kind::Tap(is.read_message()?));
+                },
+                26 => {
+                    self.kind = ::std::option::Option::Some(nic_backend::Kind::Consomme(is.read_message()?));
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &nic_backend::Kind::Dio(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &nic_backend::Kind::Tap(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &nic_backend::Kind::Consomme(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+            };
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &nic_backend::Kind::Dio(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+                },
+                &nic_backend::Kind::Tap(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+                },
+                &nic_backend::Kind::Consomme(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(3, v, os)?;
+                },
+            };
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> NicBackend {
+        NicBackend::new()
+    }
+
+    fn clear(&mut self) {
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static NicBackend {
+        static instance: NicBackend = NicBackend {
+            kind: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for NicBackend {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("NicBackend").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for NicBackend {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for NicBackend {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+/// Nested message and enums of message `NicBackend`
+pub mod nic_backend {
+
+    #[derive(Clone,PartialEq,Debug)]
+    #[non_exhaustive]
+    // @@protoc_insertion_point(oneof:vmservice.NicBackend.kind)
+    pub enum Kind {
+        // @@protoc_insertion_point(oneof_field:vmservice.NicBackend.dio)
+        Dio(super::DioBackend),
+        // @@protoc_insertion_point(oneof_field:vmservice.NicBackend.tap)
+        Tap(super::TapBackend),
+        // @@protoc_insertion_point(oneof_field:vmservice.NicBackend.consomme)
+        Consomme(super::ConsommeBackend),
+    }
+
+    impl ::protobuf::Oneof for Kind {
+    }
+
+    impl ::protobuf::OneofFull for Kind {
+        fn descriptor() -> ::protobuf::reflect::OneofDescriptor {
+            static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::OneofDescriptor> = ::protobuf::rt::Lazy::new();
+            descriptor.get(|| <super::NicBackend as ::protobuf::MessageFull>::descriptor().oneof_by_name("kind").unwrap()).clone()
+        }
+    }
+
+    impl Kind {
+        pub(in super) fn generated_oneof_descriptor_data() -> ::protobuf::reflect::GeneratedOneofDescriptorData {
+            ::protobuf::reflect::GeneratedOneofDescriptorData::new::<Kind>("kind")
+        }
+    }
+}
+
+// @@protoc_insertion_point(message:vmservice.VhostUser)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VhostUser {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VhostUser.socket_path)
+    pub socket_path: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.VhostUser.device)
+    pub device: ::protobuf::MessageField<VhostUserDevice>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VhostUser.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VhostUser {
+    fn default() -> &'a VhostUser {
+        <VhostUser as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VhostUser {
+    pub fn new() -> VhostUser {
+        ::std::default::Default::default()
+    }
+
+    // string socket_path = 1;
+
+    pub fn socket_path(&self) -> &str {
+        &self.socket_path
+    }
+
+    pub fn clear_socket_path(&mut self) {
+        self.socket_path.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_socket_path(&mut self, v: ::std::string::String) {
+        self.socket_path = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_socket_path(&mut self) -> &mut ::std::string::String {
+        &mut self.socket_path
+    }
+
+    // Take field
+    pub fn take_socket_path(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.socket_path, ::std::string::String::new())
+    }
+
+    // .vmservice.VhostUserDevice device = 2;
+
+    pub fn device(&self) -> &VhostUserDevice {
+        self.device.as_ref().unwrap_or_else(|| <VhostUserDevice as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_device(&mut self) {
+        self.device.clear();
+    }
+
+    pub fn has_device(&self) -> bool {
+        self.device.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_device(&mut self, v: VhostUserDevice) {
+        self.device = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_device(&mut self) -> &mut VhostUserDevice {
+        self.device.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_device(&mut self) -> VhostUserDevice {
+        self.device.take().unwrap_or_else(|| VhostUserDevice::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "socket_path",
+            |m: &VhostUser| { &m.socket_path },
+            |m: &mut VhostUser| { &mut m.socket_path },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, VhostUserDevice>(
+            "device",
+            |m: &VhostUser| { &m.device },
+            |m: &mut VhostUser| { &mut m.device },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VhostUser>(
+            "VhostUser",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VhostUser {
+    const NAME: &'static str = "VhostUser";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.socket_path = is.read_string()?;
+                },
+                18 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.device)?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.socket_path.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.socket_path);
+        }
+        if let Some(v) = self.device.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.socket_path.is_empty() {
+            os.write_string(1, &self.socket_path)?;
+        }
+        if let Some(v) = self.device.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VhostUser {
+        VhostUser::new()
+    }
+
+    fn clear(&mut self) {
+        self.socket_path.clear();
+        self.device.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VhostUser {
+        static instance: VhostUser = VhostUser {
+            socket_path: ::std::string::String::new(),
+            device: ::protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VhostUser {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VhostUser").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VhostUser {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VhostUser {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.VhostUserDevice)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VhostUserDevice {
+    // message oneof groups
+    pub kind: ::std::option::Option<vhost_user_device::Kind>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VhostUserDevice.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VhostUserDevice {
+    fn default() -> &'a VhostUserDevice {
+        <VhostUserDevice as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VhostUserDevice {
+    pub fn new() -> VhostUserDevice {
+        ::std::default::Default::default()
+    }
+
+    // .vmservice.VhostUserBlk blk = 1;
+
+    pub fn blk(&self) -> &VhostUserBlk {
+        match self.kind {
+            ::std::option::Option::Some(vhost_user_device::Kind::Blk(ref v)) => v,
+            _ => <VhostUserBlk as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_blk(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_blk(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(vhost_user_device::Kind::Blk(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_blk(&mut self, v: VhostUserBlk) {
+        self.kind = ::std::option::Option::Some(vhost_user_device::Kind::Blk(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_blk(&mut self) -> &mut VhostUserBlk {
+        if let ::std::option::Option::Some(vhost_user_device::Kind::Blk(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(vhost_user_device::Kind::Blk(VhostUserBlk::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(vhost_user_device::Kind::Blk(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_blk(&mut self) -> VhostUserBlk {
+        if self.has_blk() {
+            match self.kind.take() {
+                ::std::option::Option::Some(vhost_user_device::Kind::Blk(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VhostUserBlk::new()
+        }
+    }
+
+    // .vmservice.VhostUserFs fs = 2;
+
+    pub fn fs(&self) -> &VhostUserFs {
+        match self.kind {
+            ::std::option::Option::Some(vhost_user_device::Kind::Fs(ref v)) => v,
+            _ => <VhostUserFs as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_fs(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_fs(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(vhost_user_device::Kind::Fs(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_fs(&mut self, v: VhostUserFs) {
+        self.kind = ::std::option::Option::Some(vhost_user_device::Kind::Fs(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_fs(&mut self) -> &mut VhostUserFs {
+        if let ::std::option::Option::Some(vhost_user_device::Kind::Fs(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(vhost_user_device::Kind::Fs(VhostUserFs::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(vhost_user_device::Kind::Fs(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_fs(&mut self) -> VhostUserFs {
+        if self.has_fs() {
+            match self.kind.take() {
+                ::std::option::Option::Some(vhost_user_device::Kind::Fs(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VhostUserFs::new()
+        }
+    }
+
+    // .vmservice.VhostUserGeneric other = 3;
+
+    pub fn other(&self) -> &VhostUserGeneric {
+        match self.kind {
+            ::std::option::Option::Some(vhost_user_device::Kind::Other(ref v)) => v,
+            _ => <VhostUserGeneric as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_other(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_other(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(vhost_user_device::Kind::Other(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_other(&mut self, v: VhostUserGeneric) {
+        self.kind = ::std::option::Option::Some(vhost_user_device::Kind::Other(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_other(&mut self) -> &mut VhostUserGeneric {
+        if let ::std::option::Option::Some(vhost_user_device::Kind::Other(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(vhost_user_device::Kind::Other(VhostUserGeneric::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(vhost_user_device::Kind::Other(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_other(&mut self) -> VhostUserGeneric {
+        if self.has_other() {
+            match self.kind.take() {
+                ::std::option::Option::Some(vhost_user_device::Kind::Other(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            VhostUserGeneric::new()
+        }
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(3);
+        let mut oneofs = ::std::vec::Vec::with_capacity(1);
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VhostUserBlk>(
+            "blk",
+            VhostUserDevice::has_blk,
+            VhostUserDevice::blk,
+            VhostUserDevice::mut_blk,
+            VhostUserDevice::set_blk,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VhostUserFs>(
+            "fs",
+            VhostUserDevice::has_fs,
+            VhostUserDevice::fs,
+            VhostUserDevice::mut_fs,
+            VhostUserDevice::set_fs,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, VhostUserGeneric>(
+            "other",
+            VhostUserDevice::has_other,
+            VhostUserDevice::other,
+            VhostUserDevice::mut_other,
+            VhostUserDevice::set_other,
+        ));
+        oneofs.push(vhost_user_device::Kind::generated_oneof_descriptor_data());
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VhostUserDevice>(
+            "VhostUserDevice",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VhostUserDevice {
+    const NAME: &'static str = "VhostUserDevice";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.kind = ::std::option::Option::Some(vhost_user_device::Kind::Blk(is.read_message()?));
+                },
+                18 => {
+                    self.kind = ::std::option::Option::Some(vhost_user_device::Kind::Fs(is.read_message()?));
+                },
+                26 => {
+                    self.kind = ::std::option::Option::Some(vhost_user_device::Kind::Other(is.read_message()?));
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &vhost_user_device::Kind::Blk(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &vhost_user_device::Kind::Fs(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &vhost_user_device::Kind::Other(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+            };
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &vhost_user_device::Kind::Blk(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+                },
+                &vhost_user_device::Kind::Fs(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+                },
+                &vhost_user_device::Kind::Other(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(3, v, os)?;
+                },
+            };
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VhostUserDevice {
+        VhostUserDevice::new()
+    }
+
+    fn clear(&mut self) {
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VhostUserDevice {
+        static instance: VhostUserDevice = VhostUserDevice {
+            kind: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VhostUserDevice {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VhostUserDevice").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VhostUserDevice {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VhostUserDevice {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+/// Nested message and enums of message `VhostUserDevice`
+pub mod vhost_user_device {
+
+    #[derive(Clone,PartialEq,Debug)]
+    #[non_exhaustive]
+    // @@protoc_insertion_point(oneof:vmservice.VhostUserDevice.kind)
+    pub enum Kind {
+        // @@protoc_insertion_point(oneof_field:vmservice.VhostUserDevice.blk)
+        Blk(super::VhostUserBlk),
+        // @@protoc_insertion_point(oneof_field:vmservice.VhostUserDevice.fs)
+        Fs(super::VhostUserFs),
+        // @@protoc_insertion_point(oneof_field:vmservice.VhostUserDevice.other)
+        Other(super::VhostUserGeneric),
+    }
+
+    impl ::protobuf::Oneof for Kind {
+    }
+
+    impl ::protobuf::OneofFull for Kind {
+        fn descriptor() -> ::protobuf::reflect::OneofDescriptor {
+            static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::OneofDescriptor> = ::protobuf::rt::Lazy::new();
+            descriptor.get(|| <super::VhostUserDevice as ::protobuf::MessageFull>::descriptor().oneof_by_name("kind").unwrap()).clone()
+        }
+    }
+
+    impl Kind {
+        pub(in super) fn generated_oneof_descriptor_data() -> ::protobuf::reflect::GeneratedOneofDescriptorData {
+            ::protobuf::reflect::GeneratedOneofDescriptorData::new::<Kind>("kind")
+        }
+    }
+}
+
+// @@protoc_insertion_point(message:vmservice.VhostUserBlk)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VhostUserBlk {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VhostUserBlk.num_queues)
+    pub num_queues: ::std::option::Option<u32>,
+    // @@protoc_insertion_point(field:vmservice.VhostUserBlk.queue_size)
+    pub queue_size: ::std::option::Option<u32>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VhostUserBlk.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VhostUserBlk {
+    fn default() -> &'a VhostUserBlk {
+        <VhostUserBlk as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VhostUserBlk {
+    pub fn new() -> VhostUserBlk {
+        ::std::default::Default::default()
+    }
+
+    // uint32 num_queues = 1;
+
+    pub fn num_queues(&self) -> u32 {
+        self.num_queues.unwrap_or(0)
+    }
+
+    pub fn clear_num_queues(&mut self) {
+        self.num_queues = ::std::option::Option::None;
+    }
+
+    pub fn has_num_queues(&self) -> bool {
+        self.num_queues.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_num_queues(&mut self, v: u32) {
+        self.num_queues = ::std::option::Option::Some(v);
+    }
+
+    // uint32 queue_size = 2;
+
+    pub fn queue_size(&self) -> u32 {
+        self.queue_size.unwrap_or(0)
+    }
+
+    pub fn clear_queue_size(&mut self) {
+        self.queue_size = ::std::option::Option::None;
+    }
+
+    pub fn has_queue_size(&self) -> bool {
+        self.queue_size.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_queue_size(&mut self, v: u32) {
+        self.queue_size = ::std::option::Option::Some(v);
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "num_queues",
+            |m: &VhostUserBlk| { &m.num_queues },
+            |m: &mut VhostUserBlk| { &mut m.num_queues },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "queue_size",
+            |m: &VhostUserBlk| { &m.queue_size },
+            |m: &mut VhostUserBlk| { &mut m.queue_size },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VhostUserBlk>(
+            "VhostUserBlk",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VhostUserBlk {
+    const NAME: &'static str = "VhostUserBlk";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                8 => {
+                    self.num_queues = ::std::option::Option::Some(is.read_uint32()?);
+                },
+                16 => {
+                    self.queue_size = ::std::option::Option::Some(is.read_uint32()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let Some(v) = self.num_queues {
+            my_size += ::protobuf::rt::uint32_size(1, v);
+        }
+        if let Some(v) = self.queue_size {
+            my_size += ::protobuf::rt::uint32_size(2, v);
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let Some(v) = self.num_queues {
+            os.write_uint32(1, v)?;
+        }
+        if let Some(v) = self.queue_size {
+            os.write_uint32(2, v)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VhostUserBlk {
+        VhostUserBlk::new()
+    }
+
+    fn clear(&mut self) {
+        self.num_queues = ::std::option::Option::None;
+        self.queue_size = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VhostUserBlk {
+        static instance: VhostUserBlk = VhostUserBlk {
+            num_queues: ::std::option::Option::None,
+            queue_size: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VhostUserBlk {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VhostUserBlk").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VhostUserBlk {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VhostUserBlk {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.VhostUserFs)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VhostUserFs {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VhostUserFs.tag)
+    pub tag: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.VhostUserFs.num_queues)
+    pub num_queues: ::std::option::Option<u32>,
+    // @@protoc_insertion_point(field:vmservice.VhostUserFs.queue_size)
+    pub queue_size: ::std::option::Option<u32>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VhostUserFs.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VhostUserFs {
+    fn default() -> &'a VhostUserFs {
+        <VhostUserFs as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VhostUserFs {
+    pub fn new() -> VhostUserFs {
+        ::std::default::Default::default()
+    }
+
+    // string tag = 1;
+
+    pub fn tag(&self) -> &str {
+        &self.tag
+    }
+
+    pub fn clear_tag(&mut self) {
+        self.tag.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_tag(&mut self, v: ::std::string::String) {
+        self.tag = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_tag(&mut self) -> &mut ::std::string::String {
+        &mut self.tag
+    }
+
+    // Take field
+    pub fn take_tag(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.tag, ::std::string::String::new())
+    }
+
+    // uint32 num_queues = 2;
+
+    pub fn num_queues(&self) -> u32 {
+        self.num_queues.unwrap_or(0)
+    }
+
+    pub fn clear_num_queues(&mut self) {
+        self.num_queues = ::std::option::Option::None;
+    }
+
+    pub fn has_num_queues(&self) -> bool {
+        self.num_queues.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_num_queues(&mut self, v: u32) {
+        self.num_queues = ::std::option::Option::Some(v);
+    }
+
+    // uint32 queue_size = 3;
+
+    pub fn queue_size(&self) -> u32 {
+        self.queue_size.unwrap_or(0)
+    }
+
+    pub fn clear_queue_size(&mut self) {
+        self.queue_size = ::std::option::Option::None;
+    }
+
+    pub fn has_queue_size(&self) -> bool {
+        self.queue_size.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_queue_size(&mut self, v: u32) {
+        self.queue_size = ::std::option::Option::Some(v);
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(3);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "tag",
+            |m: &VhostUserFs| { &m.tag },
+            |m: &mut VhostUserFs| { &mut m.tag },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "num_queues",
+            |m: &VhostUserFs| { &m.num_queues },
+            |m: &mut VhostUserFs| { &mut m.num_queues },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "queue_size",
+            |m: &VhostUserFs| { &m.queue_size },
+            |m: &mut VhostUserFs| { &mut m.queue_size },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VhostUserFs>(
+            "VhostUserFs",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VhostUserFs {
+    const NAME: &'static str = "VhostUserFs";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.tag = is.read_string()?;
+                },
+                16 => {
+                    self.num_queues = ::std::option::Option::Some(is.read_uint32()?);
+                },
+                24 => {
+                    self.queue_size = ::std::option::Option::Some(is.read_uint32()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.tag.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.tag);
+        }
+        if let Some(v) = self.num_queues {
+            my_size += ::protobuf::rt::uint32_size(2, v);
+        }
+        if let Some(v) = self.queue_size {
+            my_size += ::protobuf::rt::uint32_size(3, v);
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.tag.is_empty() {
+            os.write_string(1, &self.tag)?;
+        }
+        if let Some(v) = self.num_queues {
+            os.write_uint32(2, v)?;
+        }
+        if let Some(v) = self.queue_size {
+            os.write_uint32(3, v)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VhostUserFs {
+        VhostUserFs::new()
+    }
+
+    fn clear(&mut self) {
+        self.tag.clear();
+        self.num_queues = ::std::option::Option::None;
+        self.queue_size = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VhostUserFs {
+        static instance: VhostUserFs = VhostUserFs {
+            tag: ::std::string::String::new(),
+            num_queues: ::std::option::Option::None,
+            queue_size: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VhostUserFs {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VhostUserFs").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VhostUserFs {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VhostUserFs {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.VhostUserGeneric)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VhostUserGeneric {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VhostUserGeneric.device_id)
+    pub device_id: u32,
+    // @@protoc_insertion_point(field:vmservice.VhostUserGeneric.queue_sizes)
+    pub queue_sizes: ::std::vec::Vec<u32>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VhostUserGeneric.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VhostUserGeneric {
+    fn default() -> &'a VhostUserGeneric {
+        <VhostUserGeneric as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VhostUserGeneric {
+    pub fn new() -> VhostUserGeneric {
+        ::std::default::Default::default()
+    }
+
+    // uint32 device_id = 1;
+
+    pub fn device_id(&self) -> u32 {
+        self.device_id
+    }
+
+    pub fn clear_device_id(&mut self) {
+        self.device_id = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_device_id(&mut self, v: u32) {
+        self.device_id = v;
+    }
+
+    // repeated uint32 queue_sizes = 2;
+
+    pub fn queue_sizes(&self) -> &[u32] {
+        &self.queue_sizes
+    }
+
+    pub fn clear_queue_sizes(&mut self) {
+        self.queue_sizes.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_queue_sizes(&mut self, v: ::std::vec::Vec<u32>) {
+        self.queue_sizes = v;
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_queue_sizes(&mut self) -> &mut ::std::vec::Vec<u32> {
+        &mut self.queue_sizes
+    }
+
+    // Take field
+    pub fn take_queue_sizes(&mut self) -> ::std::vec::Vec<u32> {
+        ::std::mem::replace(&mut self.queue_sizes, ::std::vec::Vec::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "device_id",
+            |m: &VhostUserGeneric| { &m.device_id },
+            |m: &mut VhostUserGeneric| { &mut m.device_id },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_vec_simpler_accessor::<_, _>(
+            "queue_sizes",
+            |m: &VhostUserGeneric| { &m.queue_sizes },
+            |m: &mut VhostUserGeneric| { &mut m.queue_sizes },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VhostUserGeneric>(
+            "VhostUserGeneric",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VhostUserGeneric {
+    const NAME: &'static str = "VhostUserGeneric";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                8 => {
+                    self.device_id = is.read_uint32()?;
+                },
+                18 => {
+                    is.read_repeated_packed_uint32_into(&mut self.queue_sizes)?;
+                },
+                16 => {
+                    self.queue_sizes.push(is.read_uint32()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if self.device_id != 0 {
+            my_size += ::protobuf::rt::uint32_size(1, self.device_id);
+        }
+        my_size += ::protobuf::rt::vec_packed_uint32_size(2, &self.queue_sizes);
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if self.device_id != 0 {
+            os.write_uint32(1, self.device_id)?;
+        }
+        os.write_repeated_packed_uint32(2, &self.queue_sizes)?;
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VhostUserGeneric {
+        VhostUserGeneric::new()
+    }
+
+    fn clear(&mut self) {
+        self.device_id = 0;
+        self.queue_sizes.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VhostUserGeneric {
+        static instance: VhostUserGeneric = VhostUserGeneric {
+            device_id: 0,
+            queue_sizes: ::std::vec::Vec::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VhostUserGeneric {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VhostUserGeneric").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VhostUserGeneric {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VhostUserGeneric {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.VirtioRng)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VirtioRng {
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VirtioRng.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VirtioRng {
+    fn default() -> &'a VirtioRng {
+        <VirtioRng as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VirtioRng {
+    pub fn new() -> VirtioRng {
+        ::std::default::Default::default()
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(0);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VirtioRng>(
+            "VirtioRng",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VirtioRng {
+    const NAME: &'static str = "VirtioRng";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VirtioRng {
+        VirtioRng::new()
+    }
+
+    fn clear(&mut self) {
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VirtioRng {
+        static instance: VirtioRng = VirtioRng {
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VirtioRng {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VirtioRng").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VirtioRng {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VirtioRng {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.VirtioVsock)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VirtioVsock {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VirtioVsock.socket_path)
+    pub socket_path: ::std::string::String,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VirtioVsock.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VirtioVsock {
+    fn default() -> &'a VirtioVsock {
+        <VirtioVsock as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VirtioVsock {
+    pub fn new() -> VirtioVsock {
+        ::std::default::Default::default()
+    }
+
+    // string socket_path = 1;
+
+    pub fn socket_path(&self) -> &str {
+        &self.socket_path
+    }
+
+    pub fn clear_socket_path(&mut self) {
+        self.socket_path.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_socket_path(&mut self, v: ::std::string::String) {
+        self.socket_path = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_socket_path(&mut self) -> &mut ::std::string::String {
+        &mut self.socket_path
+    }
+
+    // Take field
+    pub fn take_socket_path(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.socket_path, ::std::string::String::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(1);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "socket_path",
+            |m: &VirtioVsock| { &m.socket_path },
+            |m: &mut VirtioVsock| { &mut m.socket_path },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VirtioVsock>(
+            "VirtioVsock",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VirtioVsock {
+    const NAME: &'static str = "VirtioVsock";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.socket_path = is.read_string()?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.socket_path.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.socket_path);
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.socket_path.is_empty() {
+            os.write_string(1, &self.socket_path)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VirtioVsock {
+        VirtioVsock::new()
+    }
+
+    fn clear(&mut self) {
+        self.socket_path.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VirtioVsock {
+        static instance: VirtioVsock = VirtioVsock {
+            socket_path: ::std::string::String::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VirtioVsock {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VirtioVsock").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VirtioVsock {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VirtioVsock {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.NvmeConfig)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct NvmeConfig {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.NvmeConfig.controller_id)
+    pub controller_id: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.NvmeConfig.namespaces)
+    pub namespaces: ::std::vec::Vec<NvmeNamespace>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.NvmeConfig.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a NvmeConfig {
+    fn default() -> &'a NvmeConfig {
+        <NvmeConfig as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl NvmeConfig {
+    pub fn new() -> NvmeConfig {
+        ::std::default::Default::default()
+    }
+
+    // string controller_id = 1;
+
+    pub fn controller_id(&self) -> &str {
+        &self.controller_id
+    }
+
+    pub fn clear_controller_id(&mut self) {
+        self.controller_id.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_controller_id(&mut self, v: ::std::string::String) {
+        self.controller_id = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_controller_id(&mut self) -> &mut ::std::string::String {
+        &mut self.controller_id
+    }
+
+    // Take field
+    pub fn take_controller_id(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.controller_id, ::std::string::String::new())
+    }
+
+    // repeated .vmservice.NvmeNamespace namespaces = 2;
+
+    pub fn namespaces(&self) -> &[NvmeNamespace] {
+        &self.namespaces
+    }
+
+    pub fn clear_namespaces(&mut self) {
+        self.namespaces.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_namespaces(&mut self, v: ::std::vec::Vec<NvmeNamespace>) {
+        self.namespaces = v;
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_namespaces(&mut self) -> &mut ::std::vec::Vec<NvmeNamespace> {
+        &mut self.namespaces
+    }
+
+    // Take field
+    pub fn take_namespaces(&mut self) -> ::std::vec::Vec<NvmeNamespace> {
+        ::std::mem::replace(&mut self.namespaces, ::std::vec::Vec::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "controller_id",
+            |m: &NvmeConfig| { &m.controller_id },
+            |m: &mut NvmeConfig| { &mut m.controller_id },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_vec_simpler_accessor::<_, _>(
+            "namespaces",
+            |m: &NvmeConfig| { &m.namespaces },
+            |m: &mut NvmeConfig| { &mut m.namespaces },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<NvmeConfig>(
+            "NvmeConfig",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for NvmeConfig {
+    const NAME: &'static str = "NvmeConfig";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.controller_id = is.read_string()?;
+                },
+                18 => {
+                    self.namespaces.push(is.read_message()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.controller_id.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.controller_id);
+        }
+        for value in &self.namespaces {
+            let len = value.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        };
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.controller_id.is_empty() {
+            os.write_string(1, &self.controller_id)?;
+        }
+        for v in &self.namespaces {
+            ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+        };
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> NvmeConfig {
+        NvmeConfig::new()
+    }
+
+    fn clear(&mut self) {
+        self.controller_id.clear();
+        self.namespaces.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static NvmeConfig {
+        static instance: NvmeConfig = NvmeConfig {
+            controller_id: ::std::string::String::new(),
+            namespaces: ::std::vec::Vec::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for NvmeConfig {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("NvmeConfig").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for NvmeConfig {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for NvmeConfig {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.NvmeNamespace)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct NvmeNamespace {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.NvmeNamespace.nsid)
+    pub nsid: u32,
+    // @@protoc_insertion_point(field:vmservice.NvmeNamespace.backend)
+    pub backend: ::protobuf::MessageField<DiskBackend>,
+    // @@protoc_insertion_point(field:vmservice.NvmeNamespace.read_only)
+    pub read_only: bool,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.NvmeNamespace.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a NvmeNamespace {
+    fn default() -> &'a NvmeNamespace {
+        <NvmeNamespace as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl NvmeNamespace {
+    pub fn new() -> NvmeNamespace {
+        ::std::default::Default::default()
+    }
+
+    // uint32 nsid = 1;
+
+    pub fn nsid(&self) -> u32 {
+        self.nsid
+    }
+
+    pub fn clear_nsid(&mut self) {
+        self.nsid = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_nsid(&mut self, v: u32) {
+        self.nsid = v;
+    }
+
+    // .vmservice.DiskBackend backend = 2;
+
+    pub fn backend(&self) -> &DiskBackend {
+        self.backend.as_ref().unwrap_or_else(|| <DiskBackend as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_backend(&mut self) {
+        self.backend.clear();
+    }
+
+    pub fn has_backend(&self) -> bool {
+        self.backend.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_backend(&mut self, v: DiskBackend) {
+        self.backend = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_backend(&mut self) -> &mut DiskBackend {
+        self.backend.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_backend(&mut self) -> DiskBackend {
+        self.backend.take().unwrap_or_else(|| DiskBackend::new())
+    }
+
+    // bool read_only = 3;
+
+    pub fn read_only(&self) -> bool {
+        self.read_only
+    }
+
+    pub fn clear_read_only(&mut self) {
+        self.read_only = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_read_only(&mut self, v: bool) {
+        self.read_only = v;
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(3);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "nsid",
+            |m: &NvmeNamespace| { &m.nsid },
+            |m: &mut NvmeNamespace| { &mut m.nsid },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, DiskBackend>(
+            "backend",
+            |m: &NvmeNamespace| { &m.backend },
+            |m: &mut NvmeNamespace| { &mut m.backend },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "read_only",
+            |m: &NvmeNamespace| { &m.read_only },
+            |m: &mut NvmeNamespace| { &mut m.read_only },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<NvmeNamespace>(
+            "NvmeNamespace",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for NvmeNamespace {
+    const NAME: &'static str = "NvmeNamespace";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                8 => {
+                    self.nsid = is.read_uint32()?;
+                },
+                18 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.backend)?;
+                },
+                24 => {
+                    self.read_only = is.read_bool()?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if self.nsid != 0 {
+            my_size += ::protobuf::rt::uint32_size(1, self.nsid);
+        }
+        if let Some(v) = self.backend.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        if self.read_only != false {
+            my_size += 1 + 1;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if self.nsid != 0 {
+            os.write_uint32(1, self.nsid)?;
+        }
+        if let Some(v) = self.backend.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+        }
+        if self.read_only != false {
+            os.write_bool(3, self.read_only)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> NvmeNamespace {
+        NvmeNamespace::new()
+    }
+
+    fn clear(&mut self) {
+        self.nsid = 0;
+        self.backend.clear();
+        self.read_only = false;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static NvmeNamespace {
+        static instance: NvmeNamespace = NvmeNamespace {
+            nsid: 0,
+            backend: ::protobuf::MessageField::none(),
+            read_only: false,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for NvmeNamespace {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("NvmeNamespace").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for NvmeNamespace {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for NvmeNamespace {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.VfioDevice)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VfioDevice {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VfioDevice.host_pci_address)
+    pub host_pci_address: ::std::string::String,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VfioDevice.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VfioDevice {
+    fn default() -> &'a VfioDevice {
+        <VfioDevice as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VfioDevice {
+    pub fn new() -> VfioDevice {
+        ::std::default::Default::default()
+    }
+
+    // string host_pci_address = 1;
+
+    pub fn host_pci_address(&self) -> &str {
+        &self.host_pci_address
+    }
+
+    pub fn clear_host_pci_address(&mut self) {
+        self.host_pci_address.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_host_pci_address(&mut self, v: ::std::string::String) {
+        self.host_pci_address = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_host_pci_address(&mut self) -> &mut ::std::string::String {
+        &mut self.host_pci_address
+    }
+
+    // Take field
+    pub fn take_host_pci_address(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.host_pci_address, ::std::string::String::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(1);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "host_pci_address",
+            |m: &VfioDevice| { &m.host_pci_address },
+            |m: &mut VfioDevice| { &mut m.host_pci_address },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VfioDevice>(
+            "VfioDevice",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VfioDevice {
+    const NAME: &'static str = "VfioDevice";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.host_pci_address = is.read_string()?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.host_pci_address.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.host_pci_address);
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.host_pci_address.is_empty() {
+            os.write_string(1, &self.host_pci_address)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VfioDevice {
+        VfioDevice::new()
+    }
+
+    fn clear(&mut self) {
+        self.host_pci_address.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VfioDevice {
+        static instance: VfioDevice = VfioDevice {
+            host_pci_address: ::std::string::String::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VfioDevice {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VfioDevice").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VfioDevice {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VfioDevice {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.NumaConfig)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct NumaConfig {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.NumaConfig.nodes)
+    pub nodes: ::std::vec::Vec<NumaNode>,
+    // @@protoc_insertion_point(field:vmservice.NumaConfig.distances)
+    pub distances: ::std::vec::Vec<NumaDistance>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.NumaConfig.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a NumaConfig {
+    fn default() -> &'a NumaConfig {
+        <NumaConfig as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl NumaConfig {
+    pub fn new() -> NumaConfig {
+        ::std::default::Default::default()
+    }
+
+    // repeated .vmservice.NumaNode nodes = 1;
+
+    pub fn nodes(&self) -> &[NumaNode] {
+        &self.nodes
+    }
+
+    pub fn clear_nodes(&mut self) {
+        self.nodes.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_nodes(&mut self, v: ::std::vec::Vec<NumaNode>) {
+        self.nodes = v;
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_nodes(&mut self) -> &mut ::std::vec::Vec<NumaNode> {
+        &mut self.nodes
+    }
+
+    // Take field
+    pub fn take_nodes(&mut self) -> ::std::vec::Vec<NumaNode> {
+        ::std::mem::replace(&mut self.nodes, ::std::vec::Vec::new())
+    }
+
+    // repeated .vmservice.NumaDistance distances = 2;
+
+    pub fn distances(&self) -> &[NumaDistance] {
+        &self.distances
+    }
+
+    pub fn clear_distances(&mut self) {
+        self.distances.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_distances(&mut self, v: ::std::vec::Vec<NumaDistance>) {
+        self.distances = v;
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_distances(&mut self) -> &mut ::std::vec::Vec<NumaDistance> {
+        &mut self.distances
+    }
+
+    // Take field
+    pub fn take_distances(&mut self) -> ::std::vec::Vec<NumaDistance> {
+        ::std::mem::replace(&mut self.distances, ::std::vec::Vec::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_vec_simpler_accessor::<_, _>(
+            "nodes",
+            |m: &NumaConfig| { &m.nodes },
+            |m: &mut NumaConfig| { &mut m.nodes },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_vec_simpler_accessor::<_, _>(
+            "distances",
+            |m: &NumaConfig| { &m.distances },
+            |m: &mut NumaConfig| { &mut m.distances },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<NumaConfig>(
+            "NumaConfig",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for NumaConfig {
+    const NAME: &'static str = "NumaConfig";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.nodes.push(is.read_message()?);
+                },
+                18 => {
+                    self.distances.push(is.read_message()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        for value in &self.nodes {
+            let len = value.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        };
+        for value in &self.distances {
+            let len = value.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        };
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        for v in &self.nodes {
+            ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+        };
+        for v in &self.distances {
+            ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+        };
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> NumaConfig {
+        NumaConfig::new()
+    }
+
+    fn clear(&mut self) {
+        self.nodes.clear();
+        self.distances.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static NumaConfig {
+        static instance: NumaConfig = NumaConfig {
+            nodes: ::std::vec::Vec::new(),
+            distances: ::std::vec::Vec::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for NumaConfig {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("NumaConfig").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for NumaConfig {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for NumaConfig {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.NumaNode)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct NumaNode {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.NumaNode.memory)
+    pub memory: ::protobuf::MessageField<NodeMemoryConfig>,
+    // @@protoc_insertion_point(field:vmservice.NumaNode.vps)
+    pub vps: ::protobuf::MessageField<VpAssignment>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.NumaNode.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a NumaNode {
+    fn default() -> &'a NumaNode {
+        <NumaNode as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl NumaNode {
+    pub fn new() -> NumaNode {
+        ::std::default::Default::default()
+    }
+
+    // .vmservice.NodeMemoryConfig memory = 1;
+
+    pub fn memory(&self) -> &NodeMemoryConfig {
+        self.memory.as_ref().unwrap_or_else(|| <NodeMemoryConfig as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_memory(&mut self) {
+        self.memory.clear();
+    }
+
+    pub fn has_memory(&self) -> bool {
+        self.memory.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_memory(&mut self, v: NodeMemoryConfig) {
+        self.memory = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_memory(&mut self) -> &mut NodeMemoryConfig {
+        self.memory.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_memory(&mut self) -> NodeMemoryConfig {
+        self.memory.take().unwrap_or_else(|| NodeMemoryConfig::new())
+    }
+
+    // .vmservice.VpAssignment vps = 2;
+
+    pub fn vps(&self) -> &VpAssignment {
+        self.vps.as_ref().unwrap_or_else(|| <VpAssignment as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_vps(&mut self) {
+        self.vps.clear();
+    }
+
+    pub fn has_vps(&self) -> bool {
+        self.vps.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_vps(&mut self, v: VpAssignment) {
+        self.vps = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_vps(&mut self) -> &mut VpAssignment {
+        self.vps.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_vps(&mut self) -> VpAssignment {
+        self.vps.take().unwrap_or_else(|| VpAssignment::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, NodeMemoryConfig>(
+            "memory",
+            |m: &NumaNode| { &m.memory },
+            |m: &mut NumaNode| { &mut m.memory },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, VpAssignment>(
+            "vps",
+            |m: &NumaNode| { &m.vps },
+            |m: &mut NumaNode| { &mut m.vps },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<NumaNode>(
+            "NumaNode",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for NumaNode {
+    const NAME: &'static str = "NumaNode";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.memory)?;
+                },
+                18 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.vps)?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let Some(v) = self.memory.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        if let Some(v) = self.vps.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let Some(v) = self.memory.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+        }
+        if let Some(v) = self.vps.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> NumaNode {
+        NumaNode::new()
+    }
+
+    fn clear(&mut self) {
+        self.memory.clear();
+        self.vps.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static NumaNode {
+        static instance: NumaNode = NumaNode {
+            memory: ::protobuf::MessageField::none(),
+            vps: ::protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for NumaNode {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("NumaNode").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for NumaNode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for NumaNode {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.VpAssignment)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VpAssignment {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VpAssignment.vp_index)
+    pub vp_index: ::std::vec::Vec<u32>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VpAssignment.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VpAssignment {
+    fn default() -> &'a VpAssignment {
+        <VpAssignment as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VpAssignment {
+    pub fn new() -> VpAssignment {
+        ::std::default::Default::default()
+    }
+
+    // repeated uint32 vp_index = 1;
+
+    pub fn vp_index(&self) -> &[u32] {
+        &self.vp_index
+    }
+
+    pub fn clear_vp_index(&mut self) {
+        self.vp_index.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_vp_index(&mut self, v: ::std::vec::Vec<u32>) {
+        self.vp_index = v;
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_vp_index(&mut self) -> &mut ::std::vec::Vec<u32> {
+        &mut self.vp_index
+    }
+
+    // Take field
+    pub fn take_vp_index(&mut self) -> ::std::vec::Vec<u32> {
+        ::std::mem::replace(&mut self.vp_index, ::std::vec::Vec::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(1);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_vec_simpler_accessor::<_, _>(
+            "vp_index",
+            |m: &VpAssignment| { &m.vp_index },
+            |m: &mut VpAssignment| { &mut m.vp_index },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VpAssignment>(
+            "VpAssignment",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VpAssignment {
+    const NAME: &'static str = "VpAssignment";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    is.read_repeated_packed_uint32_into(&mut self.vp_index)?;
+                },
+                8 => {
+                    self.vp_index.push(is.read_uint32()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        my_size += ::protobuf::rt::vec_packed_uint32_size(1, &self.vp_index);
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        os.write_repeated_packed_uint32(1, &self.vp_index)?;
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VpAssignment {
+        VpAssignment::new()
+    }
+
+    fn clear(&mut self) {
+        self.vp_index.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VpAssignment {
+        static instance: VpAssignment = VpAssignment {
+            vp_index: ::std::vec::Vec::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VpAssignment {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VpAssignment").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VpAssignment {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VpAssignment {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.NodeMemoryConfig)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct NodeMemoryConfig {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.NodeMemoryConfig.memory_mb)
+    pub memory_mb: u64,
+    // @@protoc_insertion_point(field:vmservice.NodeMemoryConfig.host_numa_node)
+    pub host_numa_node: ::std::option::Option<u32>,
+    // @@protoc_insertion_point(field:vmservice.NodeMemoryConfig.prefetch)
+    pub prefetch: bool,
+    // @@protoc_insertion_point(field:vmservice.NodeMemoryConfig.private_memory)
+    pub private_memory: bool,
+    // @@protoc_insertion_point(field:vmservice.NodeMemoryConfig.transparent_hugepages)
+    pub transparent_hugepages: bool,
+    // @@protoc_insertion_point(field:vmservice.NodeMemoryConfig.hugepages)
+    pub hugepages: bool,
+    // @@protoc_insertion_point(field:vmservice.NodeMemoryConfig.hugepage_size_bytes)
+    pub hugepage_size_bytes: ::std::option::Option<u64>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.NodeMemoryConfig.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a NodeMemoryConfig {
+    fn default() -> &'a NodeMemoryConfig {
+        <NodeMemoryConfig as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl NodeMemoryConfig {
+    pub fn new() -> NodeMemoryConfig {
+        ::std::default::Default::default()
+    }
+
+    // uint64 memory_mb = 1;
+
+    pub fn memory_mb(&self) -> u64 {
+        self.memory_mb
+    }
+
+    pub fn clear_memory_mb(&mut self) {
+        self.memory_mb = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_memory_mb(&mut self, v: u64) {
+        self.memory_mb = v;
+    }
+
+    // uint32 host_numa_node = 2;
+
+    pub fn host_numa_node(&self) -> u32 {
+        self.host_numa_node.unwrap_or(0)
+    }
+
+    pub fn clear_host_numa_node(&mut self) {
+        self.host_numa_node = ::std::option::Option::None;
+    }
+
+    pub fn has_host_numa_node(&self) -> bool {
+        self.host_numa_node.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_host_numa_node(&mut self, v: u32) {
+        self.host_numa_node = ::std::option::Option::Some(v);
+    }
+
+    // bool prefetch = 3;
+
+    pub fn prefetch(&self) -> bool {
+        self.prefetch
+    }
+
+    pub fn clear_prefetch(&mut self) {
+        self.prefetch = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_prefetch(&mut self, v: bool) {
+        self.prefetch = v;
+    }
+
+    // bool private_memory = 4;
+
+    pub fn private_memory(&self) -> bool {
+        self.private_memory
+    }
+
+    pub fn clear_private_memory(&mut self) {
+        self.private_memory = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_private_memory(&mut self, v: bool) {
+        self.private_memory = v;
+    }
+
+    // bool transparent_hugepages = 5;
+
+    pub fn transparent_hugepages(&self) -> bool {
+        self.transparent_hugepages
+    }
+
+    pub fn clear_transparent_hugepages(&mut self) {
+        self.transparent_hugepages = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_transparent_hugepages(&mut self, v: bool) {
+        self.transparent_hugepages = v;
+    }
+
+    // bool hugepages = 6;
+
+    pub fn hugepages(&self) -> bool {
+        self.hugepages
+    }
+
+    pub fn clear_hugepages(&mut self) {
+        self.hugepages = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_hugepages(&mut self, v: bool) {
+        self.hugepages = v;
+    }
+
+    // uint64 hugepage_size_bytes = 7;
+
+    pub fn hugepage_size_bytes(&self) -> u64 {
+        self.hugepage_size_bytes.unwrap_or(0)
+    }
+
+    pub fn clear_hugepage_size_bytes(&mut self) {
+        self.hugepage_size_bytes = ::std::option::Option::None;
+    }
+
+    pub fn has_hugepage_size_bytes(&self) -> bool {
+        self.hugepage_size_bytes.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_hugepage_size_bytes(&mut self, v: u64) {
+        self.hugepage_size_bytes = ::std::option::Option::Some(v);
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(7);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "memory_mb",
+            |m: &NodeMemoryConfig| { &m.memory_mb },
+            |m: &mut NodeMemoryConfig| { &mut m.memory_mb },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "host_numa_node",
+            |m: &NodeMemoryConfig| { &m.host_numa_node },
+            |m: &mut NodeMemoryConfig| { &mut m.host_numa_node },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "prefetch",
+            |m: &NodeMemoryConfig| { &m.prefetch },
+            |m: &mut NodeMemoryConfig| { &mut m.prefetch },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "private_memory",
+            |m: &NodeMemoryConfig| { &m.private_memory },
+            |m: &mut NodeMemoryConfig| { &mut m.private_memory },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "transparent_hugepages",
+            |m: &NodeMemoryConfig| { &m.transparent_hugepages },
+            |m: &mut NodeMemoryConfig| { &mut m.transparent_hugepages },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "hugepages",
+            |m: &NodeMemoryConfig| { &m.hugepages },
+            |m: &mut NodeMemoryConfig| { &mut m.hugepages },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "hugepage_size_bytes",
+            |m: &NodeMemoryConfig| { &m.hugepage_size_bytes },
+            |m: &mut NodeMemoryConfig| { &mut m.hugepage_size_bytes },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<NodeMemoryConfig>(
+            "NodeMemoryConfig",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for NodeMemoryConfig {
+    const NAME: &'static str = "NodeMemoryConfig";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                8 => {
+                    self.memory_mb = is.read_uint64()?;
+                },
+                16 => {
+                    self.host_numa_node = ::std::option::Option::Some(is.read_uint32()?);
+                },
+                24 => {
+                    self.prefetch = is.read_bool()?;
+                },
+                32 => {
+                    self.private_memory = is.read_bool()?;
+                },
+                40 => {
+                    self.transparent_hugepages = is.read_bool()?;
+                },
+                48 => {
+                    self.hugepages = is.read_bool()?;
+                },
+                56 => {
+                    self.hugepage_size_bytes = ::std::option::Option::Some(is.read_uint64()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if self.memory_mb != 0 {
+            my_size += ::protobuf::rt::uint64_size(1, self.memory_mb);
+        }
+        if let Some(v) = self.host_numa_node {
+            my_size += ::protobuf::rt::uint32_size(2, v);
+        }
+        if self.prefetch != false {
+            my_size += 1 + 1;
+        }
+        if self.private_memory != false {
+            my_size += 1 + 1;
+        }
+        if self.transparent_hugepages != false {
+            my_size += 1 + 1;
+        }
+        if self.hugepages != false {
+            my_size += 1 + 1;
+        }
+        if let Some(v) = self.hugepage_size_bytes {
+            my_size += ::protobuf::rt::uint64_size(7, v);
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if self.memory_mb != 0 {
+            os.write_uint64(1, self.memory_mb)?;
+        }
+        if let Some(v) = self.host_numa_node {
+            os.write_uint32(2, v)?;
+        }
+        if self.prefetch != false {
+            os.write_bool(3, self.prefetch)?;
+        }
+        if self.private_memory != false {
+            os.write_bool(4, self.private_memory)?;
+        }
+        if self.transparent_hugepages != false {
+            os.write_bool(5, self.transparent_hugepages)?;
+        }
+        if self.hugepages != false {
+            os.write_bool(6, self.hugepages)?;
+        }
+        if let Some(v) = self.hugepage_size_bytes {
+            os.write_uint64(7, v)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> NodeMemoryConfig {
+        NodeMemoryConfig::new()
+    }
+
+    fn clear(&mut self) {
+        self.memory_mb = 0;
+        self.host_numa_node = ::std::option::Option::None;
+        self.prefetch = false;
+        self.private_memory = false;
+        self.transparent_hugepages = false;
+        self.hugepages = false;
+        self.hugepage_size_bytes = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static NodeMemoryConfig {
+        static instance: NodeMemoryConfig = NodeMemoryConfig {
+            memory_mb: 0,
+            host_numa_node: ::std::option::Option::None,
+            prefetch: false,
+            private_memory: false,
+            transparent_hugepages: false,
+            hugepages: false,
+            hugepage_size_bytes: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for NodeMemoryConfig {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("NodeMemoryConfig").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for NodeMemoryConfig {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for NodeMemoryConfig {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.NumaDistance)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct NumaDistance {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.NumaDistance.src)
+    pub src: u32,
+    // @@protoc_insertion_point(field:vmservice.NumaDistance.dst)
+    pub dst: u32,
+    // @@protoc_insertion_point(field:vmservice.NumaDistance.distance)
+    pub distance: u32,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.NumaDistance.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a NumaDistance {
+    fn default() -> &'a NumaDistance {
+        <NumaDistance as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl NumaDistance {
+    pub fn new() -> NumaDistance {
+        ::std::default::Default::default()
+    }
+
+    // uint32 src = 1;
+
+    pub fn src(&self) -> u32 {
+        self.src
+    }
+
+    pub fn clear_src(&mut self) {
+        self.src = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_src(&mut self, v: u32) {
+        self.src = v;
+    }
+
+    // uint32 dst = 2;
+
+    pub fn dst(&self) -> u32 {
+        self.dst
+    }
+
+    pub fn clear_dst(&mut self) {
+        self.dst = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_dst(&mut self, v: u32) {
+        self.dst = v;
+    }
+
+    // uint32 distance = 3;
+
+    pub fn distance(&self) -> u32 {
+        self.distance
+    }
+
+    pub fn clear_distance(&mut self) {
+        self.distance = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_distance(&mut self, v: u32) {
+        self.distance = v;
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(3);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "src",
+            |m: &NumaDistance| { &m.src },
+            |m: &mut NumaDistance| { &mut m.src },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "dst",
+            |m: &NumaDistance| { &m.dst },
+            |m: &mut NumaDistance| { &mut m.dst },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "distance",
+            |m: &NumaDistance| { &m.distance },
+            |m: &mut NumaDistance| { &mut m.distance },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<NumaDistance>(
+            "NumaDistance",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for NumaDistance {
+    const NAME: &'static str = "NumaDistance";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                8 => {
+                    self.src = is.read_uint32()?;
+                },
+                16 => {
+                    self.dst = is.read_uint32()?;
+                },
+                24 => {
+                    self.distance = is.read_uint32()?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if self.src != 0 {
+            my_size += ::protobuf::rt::uint32_size(1, self.src);
+        }
+        if self.dst != 0 {
+            my_size += ::protobuf::rt::uint32_size(2, self.dst);
+        }
+        if self.distance != 0 {
+            my_size += ::protobuf::rt::uint32_size(3, self.distance);
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if self.src != 0 {
+            os.write_uint32(1, self.src)?;
+        }
+        if self.dst != 0 {
+            os.write_uint32(2, self.dst)?;
+        }
+        if self.distance != 0 {
+            os.write_uint32(3, self.distance)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> NumaDistance {
+        NumaDistance::new()
+    }
+
+    fn clear(&mut self) {
+        self.src = 0;
+        self.dst = 0;
+        self.distance = 0;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static NumaDistance {
+        static instance: NumaDistance = NumaDistance {
+            src: 0,
+            dst: 0,
+            distance: 0,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for NumaDistance {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("NumaDistance").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for NumaDistance {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for NumaDistance {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.PcieTopologyConfig)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct PcieTopologyConfig {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.PcieTopologyConfig.root_complexes)
+    pub root_complexes: ::std::vec::Vec<PcieRootComplex>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.PcieTopologyConfig.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a PcieTopologyConfig {
+    fn default() -> &'a PcieTopologyConfig {
+        <PcieTopologyConfig as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl PcieTopologyConfig {
+    pub fn new() -> PcieTopologyConfig {
+        ::std::default::Default::default()
+    }
+
+    // repeated .vmservice.PcieRootComplex root_complexes = 1;
+
+    pub fn root_complexes(&self) -> &[PcieRootComplex] {
+        &self.root_complexes
+    }
+
+    pub fn clear_root_complexes(&mut self) {
+        self.root_complexes.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_root_complexes(&mut self, v: ::std::vec::Vec<PcieRootComplex>) {
+        self.root_complexes = v;
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_root_complexes(&mut self) -> &mut ::std::vec::Vec<PcieRootComplex> {
+        &mut self.root_complexes
+    }
+
+    // Take field
+    pub fn take_root_complexes(&mut self) -> ::std::vec::Vec<PcieRootComplex> {
+        ::std::mem::replace(&mut self.root_complexes, ::std::vec::Vec::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(1);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_vec_simpler_accessor::<_, _>(
+            "root_complexes",
+            |m: &PcieTopologyConfig| { &m.root_complexes },
+            |m: &mut PcieTopologyConfig| { &mut m.root_complexes },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<PcieTopologyConfig>(
+            "PcieTopologyConfig",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for PcieTopologyConfig {
+    const NAME: &'static str = "PcieTopologyConfig";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.root_complexes.push(is.read_message()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        for value in &self.root_complexes {
+            let len = value.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        };
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        for v in &self.root_complexes {
+            ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+        };
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> PcieTopologyConfig {
+        PcieTopologyConfig::new()
+    }
+
+    fn clear(&mut self) {
+        self.root_complexes.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static PcieTopologyConfig {
+        static instance: PcieTopologyConfig = PcieTopologyConfig {
+            root_complexes: ::std::vec::Vec::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for PcieTopologyConfig {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("PcieTopologyConfig").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for PcieTopologyConfig {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for PcieTopologyConfig {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.PcieRootComplex)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct PcieRootComplex {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.name)
+    pub name: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.segment)
+    pub segment: u32,
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.start_bus)
+    pub start_bus: u32,
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.end_bus)
+    pub end_bus: u32,
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.low_mmio)
+    pub low_mmio: u64,
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.high_mmio)
+    pub high_mmio: u64,
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.low_mmio_base)
+    pub low_mmio_base: ::std::option::Option<u64>,
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.high_mmio_base)
+    pub high_mmio_base: ::std::option::Option<u64>,
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.preserve_bars)
+    pub preserve_bars: bool,
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.node)
+    pub node: ::std::option::Option<u32>,
+    // @@protoc_insertion_point(field:vmservice.PcieRootComplex.root_ports)
+    pub root_ports: ::std::vec::Vec<PciePort>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.PcieRootComplex.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a PcieRootComplex {
+    fn default() -> &'a PcieRootComplex {
+        <PcieRootComplex as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl PcieRootComplex {
+    pub fn new() -> PcieRootComplex {
+        ::std::default::Default::default()
+    }
+
+    // string name = 1;
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn clear_name(&mut self) {
+        self.name.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_name(&mut self, v: ::std::string::String) {
+        self.name = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_name(&mut self) -> &mut ::std::string::String {
+        &mut self.name
+    }
+
+    // Take field
+    pub fn take_name(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.name, ::std::string::String::new())
+    }
+
+    // uint32 segment = 2;
+
+    pub fn segment(&self) -> u32 {
+        self.segment
+    }
+
+    pub fn clear_segment(&mut self) {
+        self.segment = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_segment(&mut self, v: u32) {
+        self.segment = v;
+    }
+
+    // uint32 start_bus = 3;
+
+    pub fn start_bus(&self) -> u32 {
+        self.start_bus
+    }
+
+    pub fn clear_start_bus(&mut self) {
+        self.start_bus = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_start_bus(&mut self, v: u32) {
+        self.start_bus = v;
+    }
+
+    // uint32 end_bus = 4;
+
+    pub fn end_bus(&self) -> u32 {
+        self.end_bus
+    }
+
+    pub fn clear_end_bus(&mut self) {
+        self.end_bus = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_end_bus(&mut self, v: u32) {
+        self.end_bus = v;
+    }
+
+    // uint64 low_mmio = 5;
+
+    pub fn low_mmio(&self) -> u64 {
+        self.low_mmio
+    }
+
+    pub fn clear_low_mmio(&mut self) {
+        self.low_mmio = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_low_mmio(&mut self, v: u64) {
+        self.low_mmio = v;
+    }
+
+    // uint64 high_mmio = 6;
+
+    pub fn high_mmio(&self) -> u64 {
+        self.high_mmio
+    }
+
+    pub fn clear_high_mmio(&mut self) {
+        self.high_mmio = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_high_mmio(&mut self, v: u64) {
+        self.high_mmio = v;
+    }
+
+    // uint64 low_mmio_base = 7;
+
+    pub fn low_mmio_base(&self) -> u64 {
+        self.low_mmio_base.unwrap_or(0)
+    }
+
+    pub fn clear_low_mmio_base(&mut self) {
+        self.low_mmio_base = ::std::option::Option::None;
+    }
+
+    pub fn has_low_mmio_base(&self) -> bool {
+        self.low_mmio_base.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_low_mmio_base(&mut self, v: u64) {
+        self.low_mmio_base = ::std::option::Option::Some(v);
+    }
+
+    // uint64 high_mmio_base = 8;
+
+    pub fn high_mmio_base(&self) -> u64 {
+        self.high_mmio_base.unwrap_or(0)
+    }
+
+    pub fn clear_high_mmio_base(&mut self) {
+        self.high_mmio_base = ::std::option::Option::None;
+    }
+
+    pub fn has_high_mmio_base(&self) -> bool {
+        self.high_mmio_base.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_high_mmio_base(&mut self, v: u64) {
+        self.high_mmio_base = ::std::option::Option::Some(v);
+    }
+
+    // bool preserve_bars = 9;
+
+    pub fn preserve_bars(&self) -> bool {
+        self.preserve_bars
+    }
+
+    pub fn clear_preserve_bars(&mut self) {
+        self.preserve_bars = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_preserve_bars(&mut self, v: bool) {
+        self.preserve_bars = v;
+    }
+
+    // uint32 node = 10;
+
+    pub fn node(&self) -> u32 {
+        self.node.unwrap_or(0)
+    }
+
+    pub fn clear_node(&mut self) {
+        self.node = ::std::option::Option::None;
+    }
+
+    pub fn has_node(&self) -> bool {
+        self.node.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_node(&mut self, v: u32) {
+        self.node = ::std::option::Option::Some(v);
+    }
+
+    // repeated .vmservice.PciePort root_ports = 11;
+
+    pub fn root_ports(&self) -> &[PciePort] {
+        &self.root_ports
+    }
+
+    pub fn clear_root_ports(&mut self) {
+        self.root_ports.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_root_ports(&mut self, v: ::std::vec::Vec<PciePort>) {
+        self.root_ports = v;
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_root_ports(&mut self) -> &mut ::std::vec::Vec<PciePort> {
+        &mut self.root_ports
+    }
+
+    // Take field
+    pub fn take_root_ports(&mut self) -> ::std::vec::Vec<PciePort> {
+        ::std::mem::replace(&mut self.root_ports, ::std::vec::Vec::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(11);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "name",
+            |m: &PcieRootComplex| { &m.name },
+            |m: &mut PcieRootComplex| { &mut m.name },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "segment",
+            |m: &PcieRootComplex| { &m.segment },
+            |m: &mut PcieRootComplex| { &mut m.segment },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "start_bus",
+            |m: &PcieRootComplex| { &m.start_bus },
+            |m: &mut PcieRootComplex| { &mut m.start_bus },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "end_bus",
+            |m: &PcieRootComplex| { &m.end_bus },
+            |m: &mut PcieRootComplex| { &mut m.end_bus },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "low_mmio",
+            |m: &PcieRootComplex| { &m.low_mmio },
+            |m: &mut PcieRootComplex| { &mut m.low_mmio },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "high_mmio",
+            |m: &PcieRootComplex| { &m.high_mmio },
+            |m: &mut PcieRootComplex| { &mut m.high_mmio },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "low_mmio_base",
+            |m: &PcieRootComplex| { &m.low_mmio_base },
+            |m: &mut PcieRootComplex| { &mut m.low_mmio_base },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "high_mmio_base",
+            |m: &PcieRootComplex| { &m.high_mmio_base },
+            |m: &mut PcieRootComplex| { &mut m.high_mmio_base },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "preserve_bars",
+            |m: &PcieRootComplex| { &m.preserve_bars },
+            |m: &mut PcieRootComplex| { &mut m.preserve_bars },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "node",
+            |m: &PcieRootComplex| { &m.node },
+            |m: &mut PcieRootComplex| { &mut m.node },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_vec_simpler_accessor::<_, _>(
+            "root_ports",
+            |m: &PcieRootComplex| { &m.root_ports },
+            |m: &mut PcieRootComplex| { &mut m.root_ports },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<PcieRootComplex>(
+            "PcieRootComplex",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for PcieRootComplex {
+    const NAME: &'static str = "PcieRootComplex";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.name = is.read_string()?;
+                },
+                16 => {
+                    self.segment = is.read_uint32()?;
+                },
+                24 => {
+                    self.start_bus = is.read_uint32()?;
+                },
+                32 => {
+                    self.end_bus = is.read_uint32()?;
+                },
+                40 => {
+                    self.low_mmio = is.read_uint64()?;
+                },
+                48 => {
+                    self.high_mmio = is.read_uint64()?;
+                },
+                56 => {
+                    self.low_mmio_base = ::std::option::Option::Some(is.read_uint64()?);
+                },
+                64 => {
+                    self.high_mmio_base = ::std::option::Option::Some(is.read_uint64()?);
+                },
+                72 => {
+                    self.preserve_bars = is.read_bool()?;
+                },
+                80 => {
+                    self.node = ::std::option::Option::Some(is.read_uint32()?);
+                },
+                90 => {
+                    self.root_ports.push(is.read_message()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.name.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.name);
+        }
+        if self.segment != 0 {
+            my_size += ::protobuf::rt::uint32_size(2, self.segment);
+        }
+        if self.start_bus != 0 {
+            my_size += ::protobuf::rt::uint32_size(3, self.start_bus);
+        }
+        if self.end_bus != 0 {
+            my_size += ::protobuf::rt::uint32_size(4, self.end_bus);
+        }
+        if self.low_mmio != 0 {
+            my_size += ::protobuf::rt::uint64_size(5, self.low_mmio);
+        }
+        if self.high_mmio != 0 {
+            my_size += ::protobuf::rt::uint64_size(6, self.high_mmio);
+        }
+        if let Some(v) = self.low_mmio_base {
+            my_size += ::protobuf::rt::uint64_size(7, v);
+        }
+        if let Some(v) = self.high_mmio_base {
+            my_size += ::protobuf::rt::uint64_size(8, v);
+        }
+        if self.preserve_bars != false {
+            my_size += 1 + 1;
+        }
+        if let Some(v) = self.node {
+            my_size += ::protobuf::rt::uint32_size(10, v);
+        }
+        for value in &self.root_ports {
+            let len = value.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        };
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.name.is_empty() {
+            os.write_string(1, &self.name)?;
+        }
+        if self.segment != 0 {
+            os.write_uint32(2, self.segment)?;
+        }
+        if self.start_bus != 0 {
+            os.write_uint32(3, self.start_bus)?;
+        }
+        if self.end_bus != 0 {
+            os.write_uint32(4, self.end_bus)?;
+        }
+        if self.low_mmio != 0 {
+            os.write_uint64(5, self.low_mmio)?;
+        }
+        if self.high_mmio != 0 {
+            os.write_uint64(6, self.high_mmio)?;
+        }
+        if let Some(v) = self.low_mmio_base {
+            os.write_uint64(7, v)?;
+        }
+        if let Some(v) = self.high_mmio_base {
+            os.write_uint64(8, v)?;
+        }
+        if self.preserve_bars != false {
+            os.write_bool(9, self.preserve_bars)?;
+        }
+        if let Some(v) = self.node {
+            os.write_uint32(10, v)?;
+        }
+        for v in &self.root_ports {
+            ::protobuf::rt::write_message_field_with_cached_size(11, v, os)?;
+        };
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> PcieRootComplex {
+        PcieRootComplex::new()
+    }
+
+    fn clear(&mut self) {
+        self.name.clear();
+        self.segment = 0;
+        self.start_bus = 0;
+        self.end_bus = 0;
+        self.low_mmio = 0;
+        self.high_mmio = 0;
+        self.low_mmio_base = ::std::option::Option::None;
+        self.high_mmio_base = ::std::option::Option::None;
+        self.preserve_bars = false;
+        self.node = ::std::option::Option::None;
+        self.root_ports.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static PcieRootComplex {
+        static instance: PcieRootComplex = PcieRootComplex {
+            name: ::std::string::String::new(),
+            segment: 0,
+            start_bus: 0,
+            end_bus: 0,
+            low_mmio: 0,
+            high_mmio: 0,
+            low_mmio_base: ::std::option::Option::None,
+            high_mmio_base: ::std::option::Option::None,
+            preserve_bars: false,
+            node: ::std::option::Option::None,
+            root_ports: ::std::vec::Vec::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for PcieRootComplex {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("PcieRootComplex").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for PcieRootComplex {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for PcieRootComplex {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.PciePort)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct PciePort {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.PciePort.name)
+    pub name: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.PciePort.hotplug)
+    pub hotplug: bool,
+    // @@protoc_insertion_point(field:vmservice.PciePort.attached)
+    pub attached: ::protobuf::MessageField<PcieAttachment>,
+    // @@protoc_insertion_point(field:vmservice.PciePort.devfn)
+    pub devfn: ::std::option::Option<u32>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.PciePort.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a PciePort {
+    fn default() -> &'a PciePort {
+        <PciePort as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl PciePort {
+    pub fn new() -> PciePort {
+        ::std::default::Default::default()
+    }
+
+    // string name = 1;
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn clear_name(&mut self) {
+        self.name.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_name(&mut self, v: ::std::string::String) {
+        self.name = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_name(&mut self) -> &mut ::std::string::String {
+        &mut self.name
+    }
+
+    // Take field
+    pub fn take_name(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.name, ::std::string::String::new())
+    }
+
+    // bool hotplug = 2;
+
+    pub fn hotplug(&self) -> bool {
+        self.hotplug
+    }
+
+    pub fn clear_hotplug(&mut self) {
+        self.hotplug = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_hotplug(&mut self, v: bool) {
+        self.hotplug = v;
+    }
+
+    // .vmservice.PcieAttachment attached = 3;
+
+    pub fn attached(&self) -> &PcieAttachment {
+        self.attached.as_ref().unwrap_or_else(|| <PcieAttachment as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_attached(&mut self) {
+        self.attached.clear();
+    }
+
+    pub fn has_attached(&self) -> bool {
+        self.attached.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_attached(&mut self, v: PcieAttachment) {
+        self.attached = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_attached(&mut self) -> &mut PcieAttachment {
+        self.attached.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_attached(&mut self) -> PcieAttachment {
+        self.attached.take().unwrap_or_else(|| PcieAttachment::new())
+    }
+
+    // uint32 devfn = 4;
+
+    pub fn devfn(&self) -> u32 {
+        self.devfn.unwrap_or(0)
+    }
+
+    pub fn clear_devfn(&mut self) {
+        self.devfn = ::std::option::Option::None;
+    }
+
+    pub fn has_devfn(&self) -> bool {
+        self.devfn.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_devfn(&mut self, v: u32) {
+        self.devfn = ::std::option::Option::Some(v);
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(4);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "name",
+            |m: &PciePort| { &m.name },
+            |m: &mut PciePort| { &mut m.name },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "hotplug",
+            |m: &PciePort| { &m.hotplug },
+            |m: &mut PciePort| { &mut m.hotplug },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, PcieAttachment>(
+            "attached",
+            |m: &PciePort| { &m.attached },
+            |m: &mut PciePort| { &mut m.attached },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_option_accessor::<_, _>(
+            "devfn",
+            |m: &PciePort| { &m.devfn },
+            |m: &mut PciePort| { &mut m.devfn },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<PciePort>(
+            "PciePort",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for PciePort {
+    const NAME: &'static str = "PciePort";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.name = is.read_string()?;
+                },
+                16 => {
+                    self.hotplug = is.read_bool()?;
+                },
+                26 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.attached)?;
+                },
+                32 => {
+                    self.devfn = ::std::option::Option::Some(is.read_uint32()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.name.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.name);
+        }
+        if self.hotplug != false {
+            my_size += 1 + 1;
+        }
+        if let Some(v) = self.attached.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        if let Some(v) = self.devfn {
+            my_size += ::protobuf::rt::uint32_size(4, v);
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.name.is_empty() {
+            os.write_string(1, &self.name)?;
+        }
+        if self.hotplug != false {
+            os.write_bool(2, self.hotplug)?;
+        }
+        if let Some(v) = self.attached.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(3, v, os)?;
+        }
+        if let Some(v) = self.devfn {
+            os.write_uint32(4, v)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> PciePort {
+        PciePort::new()
+    }
+
+    fn clear(&mut self) {
+        self.name.clear();
+        self.hotplug = false;
+        self.attached.clear();
+        self.devfn = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static PciePort {
+        static instance: PciePort = PciePort {
+            name: ::std::string::String::new(),
+            hotplug: false,
+            attached: ::protobuf::MessageField::none(),
+            devfn: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for PciePort {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("PciePort").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for PciePort {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for PciePort {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.PcieSwitch)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct PcieSwitch {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.PcieSwitch.name)
+    pub name: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.PcieSwitch.downstream_ports)
+    pub downstream_ports: ::std::vec::Vec<PciePort>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.PcieSwitch.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a PcieSwitch {
+    fn default() -> &'a PcieSwitch {
+        <PcieSwitch as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl PcieSwitch {
+    pub fn new() -> PcieSwitch {
+        ::std::default::Default::default()
+    }
+
+    // string name = 1;
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn clear_name(&mut self) {
+        self.name.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_name(&mut self, v: ::std::string::String) {
+        self.name = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_name(&mut self) -> &mut ::std::string::String {
+        &mut self.name
+    }
+
+    // Take field
+    pub fn take_name(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.name, ::std::string::String::new())
+    }
+
+    // repeated .vmservice.PciePort downstream_ports = 2;
+
+    pub fn downstream_ports(&self) -> &[PciePort] {
+        &self.downstream_ports
+    }
+
+    pub fn clear_downstream_ports(&mut self) {
+        self.downstream_ports.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_downstream_ports(&mut self, v: ::std::vec::Vec<PciePort>) {
+        self.downstream_ports = v;
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_downstream_ports(&mut self) -> &mut ::std::vec::Vec<PciePort> {
+        &mut self.downstream_ports
+    }
+
+    // Take field
+    pub fn take_downstream_ports(&mut self) -> ::std::vec::Vec<PciePort> {
+        ::std::mem::replace(&mut self.downstream_ports, ::std::vec::Vec::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "name",
+            |m: &PcieSwitch| { &m.name },
+            |m: &mut PcieSwitch| { &mut m.name },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_vec_simpler_accessor::<_, _>(
+            "downstream_ports",
+            |m: &PcieSwitch| { &m.downstream_ports },
+            |m: &mut PcieSwitch| { &mut m.downstream_ports },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<PcieSwitch>(
+            "PcieSwitch",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for PcieSwitch {
+    const NAME: &'static str = "PcieSwitch";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.name = is.read_string()?;
+                },
+                18 => {
+                    self.downstream_ports.push(is.read_message()?);
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.name.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.name);
+        }
+        for value in &self.downstream_ports {
+            let len = value.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        };
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.name.is_empty() {
+            os.write_string(1, &self.name)?;
+        }
+        for v in &self.downstream_ports {
+            ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+        };
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> PcieSwitch {
+        PcieSwitch::new()
+    }
+
+    fn clear(&mut self) {
+        self.name.clear();
+        self.downstream_ports.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static PcieSwitch {
+        static instance: PcieSwitch = PcieSwitch {
+            name: ::std::string::String::new(),
+            downstream_ports: ::std::vec::Vec::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for PcieSwitch {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("PcieSwitch").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for PcieSwitch {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for PcieSwitch {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.PcieAttachment)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct PcieAttachment {
+    // message oneof groups
+    pub kind: ::std::option::Option<pcie_attachment::Kind>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.PcieAttachment.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a PcieAttachment {
+    fn default() -> &'a PcieAttachment {
+        <PcieAttachment as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl PcieAttachment {
+    pub fn new() -> PcieAttachment {
+        ::std::default::Default::default()
+    }
+
+    // .vmservice.PcieDeviceKind device = 1;
+
+    pub fn device(&self) -> &PcieDeviceKind {
+        match self.kind {
+            ::std::option::Option::Some(pcie_attachment::Kind::Device(ref v)) => v,
+            _ => <PcieDeviceKind as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_device(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_device(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(pcie_attachment::Kind::Device(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_device(&mut self, v: PcieDeviceKind) {
+        self.kind = ::std::option::Option::Some(pcie_attachment::Kind::Device(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_device(&mut self) -> &mut PcieDeviceKind {
+        if let ::std::option::Option::Some(pcie_attachment::Kind::Device(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(pcie_attachment::Kind::Device(PcieDeviceKind::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(pcie_attachment::Kind::Device(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_device(&mut self) -> PcieDeviceKind {
+        if self.has_device() {
+            match self.kind.take() {
+                ::std::option::Option::Some(pcie_attachment::Kind::Device(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            PcieDeviceKind::new()
+        }
+    }
+
+    // .vmservice.PcieSwitch switch = 2;
+
+    pub fn switch(&self) -> &PcieSwitch {
+        match self.kind {
+            ::std::option::Option::Some(pcie_attachment::Kind::Switch(ref v)) => v,
+            _ => <PcieSwitch as ::protobuf::Message>::default_instance(),
+        }
+    }
+
+    pub fn clear_switch(&mut self) {
+        self.kind = ::std::option::Option::None;
+    }
+
+    pub fn has_switch(&self) -> bool {
+        match self.kind {
+            ::std::option::Option::Some(pcie_attachment::Kind::Switch(..)) => true,
+            _ => false,
+        }
+    }
+
+    // Param is passed by value, moved
+    pub fn set_switch(&mut self, v: PcieSwitch) {
+        self.kind = ::std::option::Option::Some(pcie_attachment::Kind::Switch(v))
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_switch(&mut self) -> &mut PcieSwitch {
+        if let ::std::option::Option::Some(pcie_attachment::Kind::Switch(_)) = self.kind {
+        } else {
+            self.kind = ::std::option::Option::Some(pcie_attachment::Kind::Switch(PcieSwitch::new()));
+        }
+        match self.kind {
+            ::std::option::Option::Some(pcie_attachment::Kind::Switch(ref mut v)) => v,
+            _ => panic!(),
+        }
+    }
+
+    // Take field
+    pub fn take_switch(&mut self) -> PcieSwitch {
+        if self.has_switch() {
+            match self.kind.take() {
+                ::std::option::Option::Some(pcie_attachment::Kind::Switch(v)) => v,
+                _ => panic!(),
+            }
+        } else {
+            PcieSwitch::new()
+        }
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(1);
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, PcieDeviceKind>(
+            "device",
+            PcieAttachment::has_device,
+            PcieAttachment::device,
+            PcieAttachment::mut_device,
+            PcieAttachment::set_device,
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_oneof_message_has_get_mut_set_accessor::<_, PcieSwitch>(
+            "switch",
+            PcieAttachment::has_switch,
+            PcieAttachment::switch,
+            PcieAttachment::mut_switch,
+            PcieAttachment::set_switch,
+        ));
+        oneofs.push(pcie_attachment::Kind::generated_oneof_descriptor_data());
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<PcieAttachment>(
+            "PcieAttachment",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for PcieAttachment {
+    const NAME: &'static str = "PcieAttachment";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.kind = ::std::option::Option::Some(pcie_attachment::Kind::Device(is.read_message()?));
+                },
+                18 => {
+                    self.kind = ::std::option::Option::Some(pcie_attachment::Kind::Switch(is.read_message()?));
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &pcie_attachment::Kind::Device(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+                &pcie_attachment::Kind::Switch(ref v) => {
+                    let len = v.compute_size();
+                    my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+                },
+            };
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if let ::std::option::Option::Some(ref v) = self.kind {
+            match v {
+                &pcie_attachment::Kind::Device(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(1, v, os)?;
+                },
+                &pcie_attachment::Kind::Switch(ref v) => {
+                    ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+                },
+            };
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> PcieAttachment {
+        PcieAttachment::new()
+    }
+
+    fn clear(&mut self) {
+        self.kind = ::std::option::Option::None;
+        self.kind = ::std::option::Option::None;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static PcieAttachment {
+        static instance: PcieAttachment = PcieAttachment {
+            kind: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for PcieAttachment {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("PcieAttachment").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for PcieAttachment {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for PcieAttachment {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+/// Nested message and enums of message `PcieAttachment`
+pub mod pcie_attachment {
+
+    #[derive(Clone,PartialEq,Debug)]
+    #[non_exhaustive]
+    // @@protoc_insertion_point(oneof:vmservice.PcieAttachment.kind)
+    pub enum Kind {
+        // @@protoc_insertion_point(oneof_field:vmservice.PcieAttachment.device)
+        Device(super::PcieDeviceKind),
+        // @@protoc_insertion_point(oneof_field:vmservice.PcieAttachment.switch)
+        Switch(super::PcieSwitch),
+    }
+
+    impl ::protobuf::Oneof for Kind {
+    }
+
+    impl ::protobuf::OneofFull for Kind {
+        fn descriptor() -> ::protobuf::reflect::OneofDescriptor {
+            static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::OneofDescriptor> = ::protobuf::rt::Lazy::new();
+            descriptor.get(|| <super::PcieAttachment as ::protobuf::MessageFull>::descriptor().oneof_by_name("kind").unwrap()).clone()
+        }
+    }
+
+    impl Kind {
+        pub(in super) fn generated_oneof_descriptor_data() -> ::protobuf::reflect::GeneratedOneofDescriptorData {
+            ::protobuf::reflect::GeneratedOneofDescriptorData::new::<Kind>("kind")
+        }
+    }
 }
 
 // @@protoc_insertion_point(message:vmservice.VMConfig)
@@ -1668,10 +8500,12 @@ pub struct VMConfig {
     pub serial_config: ::protobuf::MessageField<SerialConfig>,
     // @@protoc_insertion_point(field:vmservice.VMConfig.windows_options)
     pub windows_options: ::protobuf::MessageField<WindowsOptions>,
-    // @@protoc_insertion_point(field:vmservice.VMConfig.extra_data)
-    pub extra_data: ::std::collections::HashMap<::std::string::String, ::std::string::String>,
     // @@protoc_insertion_point(field:vmservice.VMConfig.hvsocket_config)
     pub hvsocket_config: ::protobuf::MessageField<HVSocketConfig>,
+    // @@protoc_insertion_point(field:vmservice.VMConfig.numa_config)
+    pub numa_config: ::protobuf::MessageField<NumaConfig>,
+    // @@protoc_insertion_point(field:vmservice.VMConfig.pcie)
+    pub pcie: ::protobuf::MessageField<PcieTopologyConfig>,
     // message oneof groups
     pub BootConfig: ::std::option::Option<vmconfig::BootConfig>,
     // special fields
@@ -1938,31 +8772,6 @@ impl VMConfig {
         self.windows_options.take().unwrap_or_else(|| WindowsOptions::new())
     }
 
-    // repeated .vmservice.VMConfig.ExtraDataEntry extra_data = 8;
-
-    pub fn extra_data(&self) -> &::std::collections::HashMap<::std::string::String, ::std::string::String> {
-        &self.extra_data
-    }
-
-    pub fn clear_extra_data(&mut self) {
-        self.extra_data.clear();
-    }
-
-    // Param is passed by value, moved
-    pub fn set_extra_data(&mut self, v: ::std::collections::HashMap<::std::string::String, ::std::string::String>) {
-        self.extra_data = v;
-    }
-
-    // Mutable pointer to the field.
-    pub fn mut_extra_data(&mut self) -> &mut ::std::collections::HashMap<::std::string::String, ::std::string::String> {
-        &mut self.extra_data
-    }
-
-    // Take field
-    pub fn take_extra_data(&mut self) -> ::std::collections::HashMap<::std::string::String, ::std::string::String> {
-        ::std::mem::replace(&mut self.extra_data, ::std::collections::HashMap::new())
-    }
-
     // .vmservice.HVSocketConfig hvsocket_config = 9;
 
     pub fn hvsocket_config(&self) -> &HVSocketConfig {
@@ -1993,8 +8802,68 @@ impl VMConfig {
         self.hvsocket_config.take().unwrap_or_else(|| HVSocketConfig::new())
     }
 
+    // .vmservice.NumaConfig numa_config = 10;
+
+    pub fn numa_config(&self) -> &NumaConfig {
+        self.numa_config.as_ref().unwrap_or_else(|| <NumaConfig as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_numa_config(&mut self) {
+        self.numa_config.clear();
+    }
+
+    pub fn has_numa_config(&self) -> bool {
+        self.numa_config.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_numa_config(&mut self, v: NumaConfig) {
+        self.numa_config = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_numa_config(&mut self) -> &mut NumaConfig {
+        self.numa_config.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_numa_config(&mut self) -> NumaConfig {
+        self.numa_config.take().unwrap_or_else(|| NumaConfig::new())
+    }
+
+    // .vmservice.PcieTopologyConfig pcie = 11;
+
+    pub fn pcie(&self) -> &PcieTopologyConfig {
+        self.pcie.as_ref().unwrap_or_else(|| <PcieTopologyConfig as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_pcie(&mut self) {
+        self.pcie.clear();
+    }
+
+    pub fn has_pcie(&self) -> bool {
+        self.pcie.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_pcie(&mut self, v: PcieTopologyConfig) {
+        self.pcie = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_pcie(&mut self) -> &mut PcieTopologyConfig {
+        self.pcie.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_pcie(&mut self) -> PcieTopologyConfig {
+        self.pcie.take().unwrap_or_else(|| PcieTopologyConfig::new())
+    }
+
     fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
-        let mut fields = ::std::vec::Vec::with_capacity(9);
+        let mut fields = ::std::vec::Vec::with_capacity(10);
         let mut oneofs = ::std::vec::Vec::with_capacity(1);
         fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, MemoryConfig>(
             "memory_config",
@@ -2035,15 +8904,20 @@ impl VMConfig {
             |m: &VMConfig| { &m.windows_options },
             |m: &mut VMConfig| { &mut m.windows_options },
         ));
-        fields.push(::protobuf::reflect::rt::v2::make_map_simpler_accessor_new::<_, _>(
-            "extra_data",
-            |m: &VMConfig| { &m.extra_data },
-            |m: &mut VMConfig| { &mut m.extra_data },
-        ));
         fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, HVSocketConfig>(
             "hvsocket_config",
             |m: &VMConfig| { &m.hvsocket_config },
             |m: &mut VMConfig| { &mut m.hvsocket_config },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, NumaConfig>(
+            "numa_config",
+            |m: &VMConfig| { &m.numa_config },
+            |m: &mut VMConfig| { &mut m.numa_config },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, PcieTopologyConfig>(
+            "pcie",
+            |m: &VMConfig| { &m.pcie },
+            |m: &mut VMConfig| { &mut m.pcie },
         ));
         oneofs.push(vmconfig::BootConfig::generated_oneof_descriptor_data());
         ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VMConfig>(
@@ -2085,23 +8959,14 @@ impl ::protobuf::Message for VMConfig {
                 58 => {
                     ::protobuf::rt::read_singular_message_into_field(is, &mut self.windows_options)?;
                 },
-                66 => {
-                    let len = is.read_raw_varint32()?;
-                    let old_limit = is.push_limit(len as u64)?;
-                    let mut key = ::std::default::Default::default();
-                    let mut value = ::std::default::Default::default();
-                    while let Some(tag) = is.read_raw_tag_or_eof()? {
-                        match tag {
-                            10 => key = is.read_string()?,
-                            18 => value = is.read_string()?,
-                            _ => ::protobuf::rt::skip_field_for_tag(tag, is)?,
-                        };
-                    }
-                    is.pop_limit(old_limit);
-                    self.extra_data.insert(key, value);
-                },
                 74 => {
                     ::protobuf::rt::read_singular_message_into_field(is, &mut self.hvsocket_config)?;
+                },
+                82 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.numa_config)?;
+                },
+                90 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.pcie)?;
                 },
                 tag => {
                     ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
@@ -2135,13 +9000,15 @@ impl ::protobuf::Message for VMConfig {
             let len = v.compute_size();
             my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
         }
-        for (k, v) in &self.extra_data {
-            let mut entry_size = 0;
-            entry_size += ::protobuf::rt::string_size(1, &k);
-            entry_size += ::protobuf::rt::string_size(2, &v);
-            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(entry_size) + entry_size
-        };
         if let Some(v) = self.hvsocket_config.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        if let Some(v) = self.numa_config.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        if let Some(v) = self.pcie.as_ref() {
             let len = v.compute_size();
             my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
         }
@@ -2178,17 +9045,14 @@ impl ::protobuf::Message for VMConfig {
         if let Some(v) = self.windows_options.as_ref() {
             ::protobuf::rt::write_message_field_with_cached_size(7, v, os)?;
         }
-        for (k, v) in &self.extra_data {
-            let mut entry_size = 0;
-            entry_size += ::protobuf::rt::string_size(1, &k);
-            entry_size += ::protobuf::rt::string_size(2, &v);
-            os.write_raw_varint32(66)?; // Tag.
-            os.write_raw_varint32(entry_size as u32)?;
-            os.write_string(1, &k)?;
-            os.write_string(2, &v)?;
-        };
         if let Some(v) = self.hvsocket_config.as_ref() {
             ::protobuf::rt::write_message_field_with_cached_size(9, v, os)?;
+        }
+        if let Some(v) = self.numa_config.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(10, v, os)?;
+        }
+        if let Some(v) = self.pcie.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(11, v, os)?;
         }
         if let ::std::option::Option::Some(ref v) = self.BootConfig {
             match v {
@@ -2224,14 +9088,26 @@ impl ::protobuf::Message for VMConfig {
         self.BootConfig = ::std::option::Option::None;
         self.BootConfig = ::std::option::Option::None;
         self.windows_options.clear();
-        self.extra_data.clear();
         self.hvsocket_config.clear();
+        self.numa_config.clear();
+        self.pcie.clear();
         self.special_fields.clear();
     }
 
     fn default_instance() -> &'static VMConfig {
-        static instance: ::protobuf::rt::Lazy<VMConfig> = ::protobuf::rt::Lazy::new();
-        instance.get(VMConfig::new)
+        static instance: VMConfig = VMConfig {
+            memory_config: ::protobuf::MessageField::none(),
+            processor_config: ::protobuf::MessageField::none(),
+            devices_config: ::protobuf::MessageField::none(),
+            serial_config: ::protobuf::MessageField::none(),
+            windows_options: ::protobuf::MessageField::none(),
+            hvsocket_config: ::protobuf::MessageField::none(),
+            numa_config: ::protobuf::MessageField::none(),
+            pcie: ::protobuf::MessageField::none(),
+            BootConfig: ::std::option::Option::None,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
     }
 }
 
@@ -5919,12 +12795,217 @@ impl ::protobuf::reflect::ProtobufValue for TapBackend {
     type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
 }
 
+// @@protoc_insertion_point(message:vmservice.PortConfig)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct PortConfig {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.PortConfig.host_port)
+    pub host_port: u32,
+    // @@protoc_insertion_point(field:vmservice.PortConfig.guest_port)
+    pub guest_port: u32,
+    // @@protoc_insertion_point(field:vmservice.PortConfig.protocol)
+    pub protocol: ::protobuf::EnumOrUnknown<IpProtocol>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.PortConfig.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a PortConfig {
+    fn default() -> &'a PortConfig {
+        <PortConfig as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl PortConfig {
+    pub fn new() -> PortConfig {
+        ::std::default::Default::default()
+    }
+
+    // uint32 host_port = 1;
+
+    pub fn host_port(&self) -> u32 {
+        self.host_port
+    }
+
+    pub fn clear_host_port(&mut self) {
+        self.host_port = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_host_port(&mut self, v: u32) {
+        self.host_port = v;
+    }
+
+    // uint32 guest_port = 2;
+
+    pub fn guest_port(&self) -> u32 {
+        self.guest_port
+    }
+
+    pub fn clear_guest_port(&mut self) {
+        self.guest_port = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_guest_port(&mut self, v: u32) {
+        self.guest_port = v;
+    }
+
+    // .vmservice.IpProtocol protocol = 3;
+
+    pub fn protocol(&self) -> IpProtocol {
+        self.protocol.enum_value_or_default()
+    }
+
+    pub fn clear_protocol(&mut self) {
+        self.protocol = ::protobuf::EnumOrUnknown::new(IpProtocol::TCP);
+    }
+
+    // Param is passed by value, moved
+    pub fn set_protocol(&mut self, v: IpProtocol) {
+        self.protocol = ::protobuf::EnumOrUnknown::new(v);
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(3);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "host_port",
+            |m: &PortConfig| { &m.host_port },
+            |m: &mut PortConfig| { &mut m.host_port },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "guest_port",
+            |m: &PortConfig| { &m.guest_port },
+            |m: &mut PortConfig| { &mut m.guest_port },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "protocol",
+            |m: &PortConfig| { &m.protocol },
+            |m: &mut PortConfig| { &mut m.protocol },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<PortConfig>(
+            "PortConfig",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for PortConfig {
+    const NAME: &'static str = "PortConfig";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                8 => {
+                    self.host_port = is.read_uint32()?;
+                },
+                16 => {
+                    self.guest_port = is.read_uint32()?;
+                },
+                24 => {
+                    self.protocol = is.read_enum_or_unknown()?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if self.host_port != 0 {
+            my_size += ::protobuf::rt::uint32_size(1, self.host_port);
+        }
+        if self.guest_port != 0 {
+            my_size += ::protobuf::rt::uint32_size(2, self.guest_port);
+        }
+        if self.protocol != ::protobuf::EnumOrUnknown::new(IpProtocol::TCP) {
+            my_size += ::protobuf::rt::int32_size(3, self.protocol.value());
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if self.host_port != 0 {
+            os.write_uint32(1, self.host_port)?;
+        }
+        if self.guest_port != 0 {
+            os.write_uint32(2, self.guest_port)?;
+        }
+        if self.protocol != ::protobuf::EnumOrUnknown::new(IpProtocol::TCP) {
+            os.write_enum(3, ::protobuf::EnumOrUnknown::value(&self.protocol))?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> PortConfig {
+        PortConfig::new()
+    }
+
+    fn clear(&mut self) {
+        self.host_port = 0;
+        self.guest_port = 0;
+        self.protocol = ::protobuf::EnumOrUnknown::new(IpProtocol::TCP);
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static PortConfig {
+        static instance: PortConfig = PortConfig {
+            host_port: 0,
+            guest_port: 0,
+            protocol: ::protobuf::EnumOrUnknown::from_i32(0),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for PortConfig {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("PortConfig").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for PortConfig {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for PortConfig {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
 // @@protoc_insertion_point(message:vmservice.ConsommeBackend)
 #[derive(PartialEq,Clone,Default,Debug)]
 pub struct ConsommeBackend {
     // message fields
     // @@protoc_insertion_point(field:vmservice.ConsommeBackend.cidr)
     pub cidr: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.ConsommeBackend.ports)
+    pub ports: ::std::vec::Vec<PortConfig>,
     // special fields
     // @@protoc_insertion_point(special_field:vmservice.ConsommeBackend.special_fields)
     pub special_fields: ::protobuf::SpecialFields,
@@ -5967,13 +13048,43 @@ impl ConsommeBackend {
         ::std::mem::replace(&mut self.cidr, ::std::string::String::new())
     }
 
+    // repeated .vmservice.PortConfig ports = 2;
+
+    pub fn ports(&self) -> &[PortConfig] {
+        &self.ports
+    }
+
+    pub fn clear_ports(&mut self) {
+        self.ports.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_ports(&mut self, v: ::std::vec::Vec<PortConfig>) {
+        self.ports = v;
+    }
+
+    // Mutable pointer to the field.
+    pub fn mut_ports(&mut self) -> &mut ::std::vec::Vec<PortConfig> {
+        &mut self.ports
+    }
+
+    // Take field
+    pub fn take_ports(&mut self) -> ::std::vec::Vec<PortConfig> {
+        ::std::mem::replace(&mut self.ports, ::std::vec::Vec::new())
+    }
+
     fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
-        let mut fields = ::std::vec::Vec::with_capacity(1);
+        let mut fields = ::std::vec::Vec::with_capacity(2);
         let mut oneofs = ::std::vec::Vec::with_capacity(0);
         fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
             "cidr",
             |m: &ConsommeBackend| { &m.cidr },
             |m: &mut ConsommeBackend| { &mut m.cidr },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_vec_simpler_accessor::<_, _>(
+            "ports",
+            |m: &ConsommeBackend| { &m.ports },
+            |m: &mut ConsommeBackend| { &mut m.ports },
         ));
         ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<ConsommeBackend>(
             "ConsommeBackend",
@@ -5996,6 +13107,9 @@ impl ::protobuf::Message for ConsommeBackend {
                 10 => {
                     self.cidr = is.read_string()?;
                 },
+                18 => {
+                    self.ports.push(is.read_message()?);
+                },
                 tag => {
                     ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
                 },
@@ -6011,6 +13125,10 @@ impl ::protobuf::Message for ConsommeBackend {
         if !self.cidr.is_empty() {
             my_size += ::protobuf::rt::string_size(1, &self.cidr);
         }
+        for value in &self.ports {
+            let len = value.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        };
         my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
         self.special_fields.cached_size().set(my_size as u32);
         my_size
@@ -6020,6 +13138,9 @@ impl ::protobuf::Message for ConsommeBackend {
         if !self.cidr.is_empty() {
             os.write_string(1, &self.cidr)?;
         }
+        for v in &self.ports {
+            ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+        };
         os.write_unknown_fields(self.special_fields.unknown_fields())?;
         ::std::result::Result::Ok(())
     }
@@ -6038,12 +13159,14 @@ impl ::protobuf::Message for ConsommeBackend {
 
     fn clear(&mut self) {
         self.cidr.clear();
+        self.ports.clear();
         self.special_fields.clear();
     }
 
     fn default_instance() -> &'static ConsommeBackend {
         static instance: ConsommeBackend = ConsommeBackend {
             cidr: ::std::string::String::new(),
+            ports: ::std::vec::Vec::new(),
             special_fields: ::protobuf::SpecialFields::new(),
         };
         &instance
@@ -6404,6 +13527,187 @@ impl ::std::fmt::Display for VirtioFSConfig {
 }
 
 impl ::protobuf::reflect::ProtobufValue for VirtioFSConfig {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.VirtioConsoleConfig)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct VirtioConsoleConfig {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.VirtioConsoleConfig.socket_path)
+    pub socket_path: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.VirtioConsoleConfig.connect)
+    pub connect: bool,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.VirtioConsoleConfig.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a VirtioConsoleConfig {
+    fn default() -> &'a VirtioConsoleConfig {
+        <VirtioConsoleConfig as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl VirtioConsoleConfig {
+    pub fn new() -> VirtioConsoleConfig {
+        ::std::default::Default::default()
+    }
+
+    // string socket_path = 1;
+
+    pub fn socket_path(&self) -> &str {
+        &self.socket_path
+    }
+
+    pub fn clear_socket_path(&mut self) {
+        self.socket_path.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_socket_path(&mut self, v: ::std::string::String) {
+        self.socket_path = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_socket_path(&mut self) -> &mut ::std::string::String {
+        &mut self.socket_path
+    }
+
+    // Take field
+    pub fn take_socket_path(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.socket_path, ::std::string::String::new())
+    }
+
+    // bool connect = 2;
+
+    pub fn connect(&self) -> bool {
+        self.connect
+    }
+
+    pub fn clear_connect(&mut self) {
+        self.connect = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_connect(&mut self, v: bool) {
+        self.connect = v;
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "socket_path",
+            |m: &VirtioConsoleConfig| { &m.socket_path },
+            |m: &mut VirtioConsoleConfig| { &mut m.socket_path },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "connect",
+            |m: &VirtioConsoleConfig| { &m.connect },
+            |m: &mut VirtioConsoleConfig| { &mut m.connect },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<VirtioConsoleConfig>(
+            "VirtioConsoleConfig",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for VirtioConsoleConfig {
+    const NAME: &'static str = "VirtioConsoleConfig";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.socket_path = is.read_string()?;
+                },
+                16 => {
+                    self.connect = is.read_bool()?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.socket_path.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.socket_path);
+        }
+        if self.connect != false {
+            my_size += 1 + 1;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.socket_path.is_empty() {
+            os.write_string(1, &self.socket_path)?;
+        }
+        if self.connect != false {
+            os.write_bool(2, self.connect)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> VirtioConsoleConfig {
+        VirtioConsoleConfig::new()
+    }
+
+    fn clear(&mut self) {
+        self.socket_path.clear();
+        self.connect = false;
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static VirtioConsoleConfig {
+        static instance: VirtioConsoleConfig = VirtioConsoleConfig {
+            socket_path: ::std::string::String::new(),
+            connect: false,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for VirtioConsoleConfig {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("VirtioConsoleConfig").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for VirtioConsoleConfig {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for VirtioConsoleConfig {
     type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
 }
 
@@ -7509,6 +14813,351 @@ pub mod modify_resource_request {
     }
 }
 
+// @@protoc_insertion_point(message:vmservice.AddPcieDeviceRequest)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct AddPcieDeviceRequest {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.AddPcieDeviceRequest.port_name)
+    pub port_name: ::std::string::String,
+    // @@protoc_insertion_point(field:vmservice.AddPcieDeviceRequest.device)
+    pub device: ::protobuf::MessageField<PcieDeviceKind>,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.AddPcieDeviceRequest.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a AddPcieDeviceRequest {
+    fn default() -> &'a AddPcieDeviceRequest {
+        <AddPcieDeviceRequest as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl AddPcieDeviceRequest {
+    pub fn new() -> AddPcieDeviceRequest {
+        ::std::default::Default::default()
+    }
+
+    // string port_name = 1;
+
+    pub fn port_name(&self) -> &str {
+        &self.port_name
+    }
+
+    pub fn clear_port_name(&mut self) {
+        self.port_name.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_port_name(&mut self, v: ::std::string::String) {
+        self.port_name = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_port_name(&mut self) -> &mut ::std::string::String {
+        &mut self.port_name
+    }
+
+    // Take field
+    pub fn take_port_name(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.port_name, ::std::string::String::new())
+    }
+
+    // .vmservice.PcieDeviceKind device = 2;
+
+    pub fn device(&self) -> &PcieDeviceKind {
+        self.device.as_ref().unwrap_or_else(|| <PcieDeviceKind as ::protobuf::Message>::default_instance())
+    }
+
+    pub fn clear_device(&mut self) {
+        self.device.clear();
+    }
+
+    pub fn has_device(&self) -> bool {
+        self.device.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_device(&mut self, v: PcieDeviceKind) {
+        self.device = ::protobuf::MessageField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_device(&mut self) -> &mut PcieDeviceKind {
+        self.device.mut_or_insert_default()
+    }
+
+    // Take field
+    pub fn take_device(&mut self) -> PcieDeviceKind {
+        self.device.take().unwrap_or_else(|| PcieDeviceKind::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(2);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "port_name",
+            |m: &AddPcieDeviceRequest| { &m.port_name },
+            |m: &mut AddPcieDeviceRequest| { &mut m.port_name },
+        ));
+        fields.push(::protobuf::reflect::rt::v2::make_message_field_accessor::<_, PcieDeviceKind>(
+            "device",
+            |m: &AddPcieDeviceRequest| { &m.device },
+            |m: &mut AddPcieDeviceRequest| { &mut m.device },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<AddPcieDeviceRequest>(
+            "AddPcieDeviceRequest",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for AddPcieDeviceRequest {
+    const NAME: &'static str = "AddPcieDeviceRequest";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.port_name = is.read_string()?;
+                },
+                18 => {
+                    ::protobuf::rt::read_singular_message_into_field(is, &mut self.device)?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.port_name.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.port_name);
+        }
+        if let Some(v) = self.device.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint64_size(len) + len;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.port_name.is_empty() {
+            os.write_string(1, &self.port_name)?;
+        }
+        if let Some(v) = self.device.as_ref() {
+            ::protobuf::rt::write_message_field_with_cached_size(2, v, os)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> AddPcieDeviceRequest {
+        AddPcieDeviceRequest::new()
+    }
+
+    fn clear(&mut self) {
+        self.port_name.clear();
+        self.device.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static AddPcieDeviceRequest {
+        static instance: AddPcieDeviceRequest = AddPcieDeviceRequest {
+            port_name: ::std::string::String::new(),
+            device: ::protobuf::MessageField::none(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for AddPcieDeviceRequest {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("AddPcieDeviceRequest").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for AddPcieDeviceRequest {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for AddPcieDeviceRequest {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
+// @@protoc_insertion_point(message:vmservice.RemovePcieDeviceRequest)
+#[derive(PartialEq,Clone,Default,Debug)]
+pub struct RemovePcieDeviceRequest {
+    // message fields
+    // @@protoc_insertion_point(field:vmservice.RemovePcieDeviceRequest.port_name)
+    pub port_name: ::std::string::String,
+    // special fields
+    // @@protoc_insertion_point(special_field:vmservice.RemovePcieDeviceRequest.special_fields)
+    pub special_fields: ::protobuf::SpecialFields,
+}
+
+impl<'a> ::std::default::Default for &'a RemovePcieDeviceRequest {
+    fn default() -> &'a RemovePcieDeviceRequest {
+        <RemovePcieDeviceRequest as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl RemovePcieDeviceRequest {
+    pub fn new() -> RemovePcieDeviceRequest {
+        ::std::default::Default::default()
+    }
+
+    // string port_name = 1;
+
+    pub fn port_name(&self) -> &str {
+        &self.port_name
+    }
+
+    pub fn clear_port_name(&mut self) {
+        self.port_name.clear();
+    }
+
+    // Param is passed by value, moved
+    pub fn set_port_name(&mut self, v: ::std::string::String) {
+        self.port_name = v;
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_port_name(&mut self) -> &mut ::std::string::String {
+        &mut self.port_name
+    }
+
+    // Take field
+    pub fn take_port_name(&mut self) -> ::std::string::String {
+        ::std::mem::replace(&mut self.port_name, ::std::string::String::new())
+    }
+
+    fn generated_message_descriptor_data() -> ::protobuf::reflect::GeneratedMessageDescriptorData {
+        let mut fields = ::std::vec::Vec::with_capacity(1);
+        let mut oneofs = ::std::vec::Vec::with_capacity(0);
+        fields.push(::protobuf::reflect::rt::v2::make_simpler_field_accessor::<_, _>(
+            "port_name",
+            |m: &RemovePcieDeviceRequest| { &m.port_name },
+            |m: &mut RemovePcieDeviceRequest| { &mut m.port_name },
+        ));
+        ::protobuf::reflect::GeneratedMessageDescriptorData::new_2::<RemovePcieDeviceRequest>(
+            "RemovePcieDeviceRequest",
+            fields,
+            oneofs,
+        )
+    }
+}
+
+impl ::protobuf::Message for RemovePcieDeviceRequest {
+    const NAME: &'static str = "RemovePcieDeviceRequest";
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::Result<()> {
+        while let Some(tag) = is.read_raw_tag_or_eof()? {
+            match tag {
+                10 => {
+                    self.port_name = is.read_string()?;
+                },
+                tag => {
+                    ::protobuf::rt::read_unknown_or_skip_group(tag, is, self.special_fields.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u64 {
+        let mut my_size = 0;
+        if !self.port_name.is_empty() {
+            my_size += ::protobuf::rt::string_size(1, &self.port_name);
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.special_fields.unknown_fields());
+        self.special_fields.cached_size().set(my_size as u32);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::Result<()> {
+        if !self.port_name.is_empty() {
+            os.write_string(1, &self.port_name)?;
+        }
+        os.write_unknown_fields(self.special_fields.unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn special_fields(&self) -> &::protobuf::SpecialFields {
+        &self.special_fields
+    }
+
+    fn mut_special_fields(&mut self) -> &mut ::protobuf::SpecialFields {
+        &mut self.special_fields
+    }
+
+    fn new() -> RemovePcieDeviceRequest {
+        RemovePcieDeviceRequest::new()
+    }
+
+    fn clear(&mut self) {
+        self.port_name.clear();
+        self.special_fields.clear();
+    }
+
+    fn default_instance() -> &'static RemovePcieDeviceRequest {
+        static instance: RemovePcieDeviceRequest = RemovePcieDeviceRequest {
+            port_name: ::std::string::String::new(),
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
+        &instance
+    }
+}
+
+impl ::protobuf::MessageFull for RemovePcieDeviceRequest {
+    fn descriptor() -> ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().message_by_package_relative_name("RemovePcieDeviceRequest").unwrap()).clone()
+    }
+}
+
+impl ::std::fmt::Display for RemovePcieDeviceRequest {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for RemovePcieDeviceRequest {
+    type RuntimeType = ::protobuf::reflect::rt::RuntimeTypeMessage<Self>;
+}
+
 #[derive(Clone,Copy,PartialEq,Eq,Debug,Hash)]
 // @@protoc_insertion_point(enum:vmservice.ModifyType)
 pub enum ModifyType {
@@ -7643,6 +15292,68 @@ impl DiskType {
     }
 }
 
+#[derive(Clone,Copy,PartialEq,Eq,Debug,Hash)]
+// @@protoc_insertion_point(enum:vmservice.IpProtocol)
+pub enum IpProtocol {
+    // @@protoc_insertion_point(enum_value:vmservice.IpProtocol.TCP)
+    TCP = 0,
+    // @@protoc_insertion_point(enum_value:vmservice.IpProtocol.UDP)
+    UDP = 1,
+}
+
+impl ::protobuf::Enum for IpProtocol {
+    const NAME: &'static str = "IpProtocol";
+
+    fn value(&self) -> i32 {
+        *self as i32
+    }
+
+    fn from_i32(value: i32) -> ::std::option::Option<IpProtocol> {
+        match value {
+            0 => ::std::option::Option::Some(IpProtocol::TCP),
+            1 => ::std::option::Option::Some(IpProtocol::UDP),
+            _ => ::std::option::Option::None
+        }
+    }
+
+    fn from_str(str: &str) -> ::std::option::Option<IpProtocol> {
+        match str {
+            "TCP" => ::std::option::Option::Some(IpProtocol::TCP),
+            "UDP" => ::std::option::Option::Some(IpProtocol::UDP),
+            _ => ::std::option::Option::None
+        }
+    }
+
+    const VALUES: &'static [IpProtocol] = &[
+        IpProtocol::TCP,
+        IpProtocol::UDP,
+    ];
+}
+
+impl ::protobuf::EnumFull for IpProtocol {
+    fn enum_descriptor() -> ::protobuf::reflect::EnumDescriptor {
+        static descriptor: ::protobuf::rt::Lazy<::protobuf::reflect::EnumDescriptor> = ::protobuf::rt::Lazy::new();
+        descriptor.get(|| file_descriptor().enum_by_package_relative_name("IpProtocol").unwrap()).clone()
+    }
+
+    fn descriptor(&self) -> ::protobuf::reflect::EnumValueDescriptor {
+        let index = *self as usize;
+        Self::enum_descriptor().value_by_index(index)
+    }
+}
+
+impl ::std::default::Default for IpProtocol {
+    fn default() -> Self {
+        IpProtocol::TCP
+    }
+}
+
+impl IpProtocol {
+    fn generated_enum_descriptor_data() -> ::protobuf::reflect::GeneratedEnumDescriptorData {
+        ::protobuf::reflect::GeneratedEnumDescriptorData::new::<IpProtocol>("IpProtocol")
+    }
+}
+
 static file_descriptor_proto_data: &'static [u8] = b"\
     \n\x0fvmservice.proto\x12\tvmservice\x1a\x1bgoogle/protobuf/empty.proto\
     \x1a\x1cgoogle/protobuf/struct.proto\"u\n\nDirectBoot\x12\x1f\n\x0bkerne\
@@ -7670,104 +15381,203 @@ static file_descriptor_proto_data: &'static [u8] = b"\
     dowsPCIDeviceR\rwindowsDevice\x12B\n\x0fvirtiofs_config\x18\x05\x20\x03(\
     \x0b2\x19.vmservice.VirtioFSConfigR\x0evirtiofsConfig\x12E\n\x0evirtio_c\
     onsole\x18\x06\x20\x01(\x0b2\x1e.vmservice.VirtioConsoleConfigR\rvirtioC\
-    onsole\"P\n\x13VirtioConsoleConfig\x12\x1f\n\x0bsocket_path\x18\x01\x20\
-    \x01(\tR\nsocketPath\x12\x18\n\x07connect\x18\x02\x20\x01(\x08R\x07conne\
-    ct\"\x86\x05\n\x08VMConfig\x12<\n\rmemory_config\x18\x01\x20\x01(\x0b2\
-    \x17.vmservice.MemoryConfigR\x0cmemoryConfig\x12E\n\x10processor_config\
-    \x18\x02\x20\x01(\x0b2\x1a.vmservice.ProcessorConfigR\x0fprocessorConfig\
-    \x12?\n\x0edevices_config\x18\x03\x20\x01(\x0b2\x18.vmservice.DevicesCon\
-    figR\rdevicesConfig\x12<\n\rserial_config\x18\x04\x20\x01(\x0b2\x17.vmse\
-    rvice.SerialConfigR\x0cserialConfig\x128\n\x0bdirect_boot\x18\x05\x20\
-    \x01(\x0b2\x15.vmservice.DirectBootH\0R\ndirectBoot\x12%\n\x04uefi\x18\
-    \x06\x20\x01(\x0b2\x0f.vmservice.UEFIH\0R\x04uefi\x12B\n\x0fwindows_opti\
-    ons\x18\x07\x20\x01(\x0b2\x19.vmservice.WindowsOptionsR\x0ewindowsOption\
-    s\x12A\n\nextra_data\x18\x08\x20\x03(\x0b2\".vmservice.VMConfig.ExtraDat\
-    aEntryR\textraData\x12B\n\x0fhvsocket_config\x18\t\x20\x01(\x0b2\x19.vms\
-    ervice.HVSocketConfigR\x0ehvsocketConfig\x1a<\n\x0eExtraDataEntry\x12\
-    \x10\n\x03key\x18\x01\x20\x01(\tR\x03key\x12\x14\n\x05value\x18\x02\x20\
-    \x01(\tR\x05value:\x028\x01B\x0c\n\nBootConfig\"2\n\x0eWindowsOptions\
-    \x12\x20\n\x0ccpu_group_id\x18\x01\x20\x01(\x04R\ncpuGroupId\"\x9d\x01\n\
-    \x0cSerialConfig\x124\n\x05ports\x18\x03\x20\x03(\x0b2\x1e.vmservice.Ser\
-    ialConfig.ConfigR\x05ports\x1aW\n\x06Config\x12\x12\n\x04port\x18\x01\
-    \x20\x01(\rR\x04port\x12\x1f\n\x0bsocket_path\x18\x02\x20\x01(\tR\nsocke\
-    tPath\x12\x18\n\x07connect\x18\x03\x20\x01(\x08R\x07connect\"$\n\x0eHVSo\
-    cketConfig\x12\x12\n\x04path\x18\x01\x20\x01(\tR\x04path\"U\n\x0fCreateV\
-    MRequest\x12+\n\x06config\x18\x01\x20\x01(\x0b2\x13.vmservice.VMConfigR\
-    \x06config\x12\x15\n\x06log_id\x18\x02\x20\x01(\tR\x05logId\"\xb6\x01\n\
-    \x0bMemoryStats\x12*\n\x11working_set_bytes\x18\x01\x20\x01(\x04R\x0fwor\
-    kingSetBytes\x12)\n\x10available_memory\x18\x02\x20\x01(\x04R\x0favailab\
-    leMemory\x12'\n\x0freserved_memory\x18\x03\x20\x01(\x04R\x0ereservedMemo\
-    ry\x12'\n\x0fassigned_memory\x18\x04\x20\x01(\x04R\x0eassignedMemory\":\
-    \n\x0eProcessorStats\x12(\n\x10total_runtime_ns\x18\x01\x20\x01(\x04R\
-    \x0etotalRuntimeNs\"\x87\x01\n\x13PropertiesVMRequest\x12C\n\x05types\
-    \x18\x01\x20\x03(\x0e2-.vmservice.PropertiesVMRequest.PropertiesTypeR\
-    \x05types\"+\n\x0ePropertiesType\x12\n\n\x06Memory\x10\0\x12\r\n\tProces\
-    sor\x10\x01\"\x95\x01\n\x14PropertiesVMResponse\x129\n\x0cmemory_stats\
-    \x18\x01\x20\x01(\x0b2\x16.vmservice.MemoryStatsR\x0bmemoryStats\x12B\n\
-    \x0fprocessor_stats\x18\x02\x20\x01(\x0b2\x19.vmservice.ProcessorStatsR\
-    \x0eprocessorStats\"\x88\x04\n\x16CapabilitiesVMResponse\x12d\n\x13suppo\
-    rted_resources\x18\x01\x20\x03(\x0b23.vmservice.CapabilitiesVMResponse.S\
-    upportedResourceR\x12supportedResources\x12`\n\x12supported_guest_os\x18\
-    \x02\x20\x03(\x0e22.vmservice.CapabilitiesVMResponse.SupportedGuestOSR\
-    \x10supportedGuestOs\x1a\x9d\x01\n\x11SupportedResource\x12\x10\n\x03Add\
-    \x18\x01\x20\x01(\x08R\x03Add\x12\x16\n\x06Remove\x18\x02\x20\x01(\x08R\
-    \x06Remove\x12\x16\n\x06Update\x18\x03\x20\x01(\x08R\x06Update\x12F\n\
-    \x08resource\x18\x04\x20\x01(\x0e2*.vmservice.CapabilitiesVMResponse.Res\
-    ourceR\x08resource\"Z\n\x08Resource\x12\t\n\x05Vpmem\x10\0\x12\x08\n\x04\
-    Scsi\x10\x01\x12\x08\n\x04Vpci\x10\x02\x12\t\n\x05Plan9\x10\x03\x12\t\n\
-    \x05VMNic\x10\x04\x12\n\n\x06Memory\x10\x05\x12\r\n\tProcessor\x10\x06\"\
-    *\n\x10SupportedGuestOS\x12\x0b\n\x07Windows\x10\0\x12\t\n\x05Linux\x10\
-    \x01\"\x9f\x01\n\x08SCSIDisk\x12\x1e\n\ncontroller\x18\x01\x20\x01(\rR\n\
-    controller\x12\x10\n\x03lun\x18\x02\x20\x01(\rR\x03lun\x12\x1b\n\thost_p\
-    ath\x18\x03\x20\x01(\tR\x08hostPath\x12'\n\x04type\x18\x04\x20\x01(\x0e2\
-    \x13.vmservice.DiskTypeR\x04type\x12\x1b\n\tread_only\x18\x05\x20\x01(\
-    \x08R\x08readOnly\"n\n\tVPMEMDisk\x12\x1b\n\thost_path\x18\x01\x20\x01(\
-    \tR\x08hostPath\x12'\n\x04type\x18\x02\x20\x01(\x0e2\x13.vmservice.DiskT\
-    ypeR\x04type\x12\x1b\n\tread_only\x18\x03\x20\x01(\x08R\x08readOnly\"\
-    \xcb\x02\n\tNICConfig\x12\x15\n\x06nic_id\x18\x01\x20\x01(\tR\x05nicId\
-    \x12\x1f\n\x0bmac_address\x18\x03\x20\x01(\tR\nmacAddress\x12(\n\x10lega\
-    cy_switch_id\x18\x04\x20\x01(\tR\x0elegacySwitchId\x12\x19\n\x08nic_name\
-    \x18\x05\x20\x01(\tR\x07nicName\x12&\n\x0elegacy_port_id\x18\x02\x20\x01\
-    (\tH\0R\x0clegacyPortId\x12)\n\x03dio\x18\x06\x20\x01(\x0b2\x15.vmservic\
-    e.DioBackendH\0R\x03dio\x12)\n\x03tap\x18\x07\x20\x01(\x0b2\x15.vmservic\
-    e.TapBackendH\0R\x03tap\x128\n\x08consomme\x18\x08\x20\x01(\x0b2\x1a.vms\
-    ervice.ConsommeBackendH\0R\x08consommeB\t\n\x07backend\"B\n\nDioBackend\
-    \x12\x1b\n\tswitch_id\x18\x01\x20\x01(\tR\x08switchId\x12\x17\n\x07port_\
-    id\x18\x02\x20\x01(\tR\x06portId\"\x20\n\nTapBackend\x12\x12\n\x04name\
-    \x18\x01\x20\x01(\tR\x04name\"%\n\x0fConsommeBackend\x12\x12\n\x04cidr\
-    \x18\x01\x20\x01(\tR\x04cidr\"3\n\x10WindowsPCIDevice\x12\x1f\n\x0binsta\
-    nce_id\x18\x01\x20\x01(\tR\ninstanceId\"?\n\x0eVirtioFSConfig\x12\x10\n\
-    \x03tag\x18\x01\x20\x01(\tR\x03tag\x12\x1b\n\troot_path\x18\x02\x20\x01(\
-    \tR\x08rootPath\"2\n\x13ModifyMemoryRequest\x12\x1b\n\tmemory_mb\x18\x01\
-    \x20\x01(\x04R\x08memoryMb\"A\n\x16ModifyProcessorRequest\x12'\n\x0fproc\
-    essor_index\x18\x01\x20\x01(\rR\x0eprocessorIndex\"r\n\x1cModifyProcesso\
-    rConfigRequest\x12)\n\x10processor_weight\x18\x01\x20\x01(\rR\x0fprocess\
-    orWeight\x12'\n\x0fprocessor_limit\x18\x02\x20\x01(\rR\x0eprocessorLimit\
-    \"\x89\x04\n\x15ModifyResourceRequest\x12)\n\x04type\x18\x01\x20\x01(\
-    \x0e2\x15.vmservice.ModifyTypeR\x04type\x12A\n\tprocessor\x18\x02\x20\
-    \x01(\x0b2!.vmservice.ModifyProcessorRequestH\0R\tprocessor\x12T\n\x10pr\
-    ocessor_config\x18\x03\x20\x01(\x0b2'.vmservice.ModifyProcessorConfigReq\
-    uestH\0R\x0fprocessorConfig\x128\n\x06memory\x18\x04\x20\x01(\x0b2\x1e.v\
-    mservice.ModifyMemoryRequestH\0R\x06memory\x122\n\tscsi_disk\x18\x05\x20\
-    \x01(\x0b2\x13.vmservice.SCSIDiskH\0R\x08scsiDisk\x125\n\nvpmem_disk\x18\
-    \x06\x20\x01(\x0b2\x14.vmservice.VPMEMDiskH\0R\tvpmemDisk\x125\n\nnic_co\
-    nfig\x18\x07\x20\x01(\x0b2\x14.vmservice.NICConfigH\0R\tnicConfig\x12D\n\
-    \x0ewindows_device\x18\x08\x20\x01(\x0b2\x1b.vmservice.WindowsPCIDeviceH\
-    \0R\rwindowsDeviceB\n\n\x08resource*-\n\nModifyType\x12\x07\n\x03ADD\x10\
-    \0\x12\n\n\x06REMOVE\x10\x01\x12\n\n\x06UPDATE\x10\x02*Y\n\x08DiskType\
-    \x12\x17\n\x13SCSI_DISK_TYPE_VHD1\x10\0\x12\x17\n\x13SCSI_DISK_TYPE_VHDX\
-    \x10\x01\x12\x1b\n\x17SCSI_DISK_TYPE_PHYSICAL\x10\x022\xd5\x04\n\x02VM\
-    \x12>\n\x08CreateVM\x12\x1a.vmservice.CreateVMRequest\x1a\x16.google.pro\
-    tobuf.Empty\x12<\n\nTeardownVM\x12\x16.google.protobuf.Empty\x1a\x16.goo\
-    gle.protobuf.Empty\x129\n\x07PauseVM\x12\x16.google.protobuf.Empty\x1a\
-    \x16.google.protobuf.Empty\x12:\n\x08ResumeVM\x12\x16.google.protobuf.Em\
-    pty\x1a\x16.google.protobuf.Empty\x128\n\x06WaitVM\x12\x16.google.protob\
-    uf.Empty\x1a\x16.google.protobuf.Empty\x12K\n\x0eCapabilitiesVM\x12\x16.\
-    google.protobuf.Empty\x1a!.vmservice.CapabilitiesVMResponse\x12O\n\x0cPr\
-    opertiesVM\x12\x1e.vmservice.PropertiesVMRequest\x1a\x1f.vmservice.Prope\
-    rtiesVMResponse\x12J\n\x0eModifyResource\x12\x20.vmservice.ModifyResourc\
-    eRequest\x1a\x16.google.protobuf.Empty\x126\n\x04Quit\x12\x16.google.pro\
-    tobuf.Empty\x1a\x16.google.protobuf.EmptyB\x0bZ\tvmserviceb\x06proto3\
+    onsole\"\xa5\x01\n\x0ePcieDeviceKind\x121\n\x06virtio\x18\x01\x20\x01(\
+    \x0b2\x17.vmservice.VirtioDeviceH\0R\x06virtio\x12+\n\x04nvme\x18\x02\
+    \x20\x01(\x0b2\x15.vmservice.NvmeConfigH\0R\x04nvme\x12+\n\x04vfio\x18\
+    \x03\x20\x01(\x0b2\x15.vmservice.VfioDeviceH\0R\x04vfioB\x06\n\x04kind\"\
+    \xb1\x02\n\x0cVirtioDevice\x12(\n\x03blk\x18\x01\x20\x01(\x0b2\x14.vmser\
+    vice.VirtioBlkH\0R\x03blk\x12(\n\x03net\x18\x02\x20\x01(\x0b2\x14.vmserv\
+    ice.VirtioNetH\0R\x03net\x12(\n\x03rng\x18\x03\x20\x01(\x0b2\x14.vmservi\
+    ce.VirtioRngH\0R\x03rng\x12.\n\x05vsock\x18\x04\x20\x01(\x0b2\x16.vmserv\
+    ice.VirtioVsockH\0R\x05vsock\x124\n\x07console\x18\x05\x20\x01(\x0b2\x18\
+    .vmservice.VirtioConsoleH\0R\x07console\x125\n\nvhost_user\x18\x06\x20\
+    \x01(\x0b2\x14.vmservice.VhostUserH\0R\tvhostUserB\x06\n\x04kind\"C\n\rV\
+    irtioConsole\x122\n\x07backend\x18\x01\x20\x01(\x0b2\x18.vmservice.Seria\
+    lBackendR\x07backend\"G\n\rSerialBackend\x12.\n\x05relay\x18\x01\x20\x01\
+    (\x0b2\x16.vmservice.SerialRelayH\0R\x05relayB\x06\n\x04kind\"H\n\x0bSer\
+    ialRelay\x12\x1f\n\x0bsocket_path\x18\x01\x20\x01(\tR\nsocketPath\x12\
+    \x18\n\x07connect\x18\x02\x20\x01(\x08R\x07connect\"@\n\x0bDiskBackend\
+    \x12)\n\x04file\x18\x01\x20\x01(\x0b2\x13.vmservice.FileDiskH\0R\x04file\
+    B\x06\n\x04kind\"6\n\x08FileDisk\x12\x12\n\x04path\x18\x01\x20\x01(\tR\
+    \x04path\x12\x16\n\x06direct\x18\x02\x20\x01(\x08R\x06direct\"Z\n\tVirti\
+    oBlk\x120\n\x07backend\x18\x01\x20\x01(\x0b2\x16.vmservice.DiskBackendR\
+    \x07backend\x12\x1b\n\tread_only\x18\x02\x20\x01(\x08R\x08readOnly\"\x90\
+    \x01\n\tVirtioNet\x12\"\n\nmax_queues\x18\x01\x20\x01(\rH\0R\tmaxQueues\
+    \x88\x01\x01\x12/\n\x07backend\x18\x02\x20\x01(\x0b2\x15.vmservice.NicBa\
+    ckendR\x07backend\x12\x1f\n\x0bmac_address\x18\x03\x20\x01(\tR\nmacAddre\
+    ssB\r\n\x0b_max_queues\"\xa4\x01\n\nNicBackend\x12)\n\x03dio\x18\x01\x20\
+    \x01(\x0b2\x15.vmservice.DioBackendH\0R\x03dio\x12)\n\x03tap\x18\x02\x20\
+    \x01(\x0b2\x15.vmservice.TapBackendH\0R\x03tap\x128\n\x08consomme\x18\
+    \x03\x20\x01(\x0b2\x1a.vmservice.ConsommeBackendH\0R\x08consommeB\x06\n\
+    \x04kind\"`\n\tVhostUser\x12\x1f\n\x0bsocket_path\x18\x01\x20\x01(\tR\ns\
+    ocketPath\x122\n\x06device\x18\x02\x20\x01(\x0b2\x1a.vmservice.VhostUser\
+    DeviceR\x06device\"\xa5\x01\n\x0fVhostUserDevice\x12+\n\x03blk\x18\x01\
+    \x20\x01(\x0b2\x17.vmservice.VhostUserBlkH\0R\x03blk\x12(\n\x02fs\x18\
+    \x02\x20\x01(\x0b2\x16.vmservice.VhostUserFsH\0R\x02fs\x123\n\x05other\
+    \x18\x03\x20\x01(\x0b2\x1b.vmservice.VhostUserGenericH\0R\x05otherB\x06\
+    \n\x04kind\"t\n\x0cVhostUserBlk\x12\"\n\nnum_queues\x18\x01\x20\x01(\rH\
+    \0R\tnumQueues\x88\x01\x01\x12\"\n\nqueue_size\x18\x02\x20\x01(\rH\x01R\
+    \tqueueSize\x88\x01\x01B\r\n\x0b_num_queuesB\r\n\x0b_queue_size\"\x85\
+    \x01\n\x0bVhostUserFs\x12\x10\n\x03tag\x18\x01\x20\x01(\tR\x03tag\x12\"\
+    \n\nnum_queues\x18\x02\x20\x01(\rH\0R\tnumQueues\x88\x01\x01\x12\"\n\nqu\
+    eue_size\x18\x03\x20\x01(\rH\x01R\tqueueSize\x88\x01\x01B\r\n\x0b_num_qu\
+    euesB\r\n\x0b_queue_size\"P\n\x10VhostUserGeneric\x12\x1b\n\tdevice_id\
+    \x18\x01\x20\x01(\rR\x08deviceId\x12\x1f\n\x0bqueue_sizes\x18\x02\x20\
+    \x03(\rR\nqueueSizes\"\x0b\n\tVirtioRng\".\n\x0bVirtioVsock\x12\x1f\n\
+    \x0bsocket_path\x18\x01\x20\x01(\tR\nsocketPath\"k\n\nNvmeConfig\x12#\n\
+    \rcontroller_id\x18\x01\x20\x01(\tR\x0ccontrollerId\x128\n\nnamespaces\
+    \x18\x02\x20\x03(\x0b2\x18.vmservice.NvmeNamespaceR\nnamespaces\"r\n\rNv\
+    meNamespace\x12\x12\n\x04nsid\x18\x01\x20\x01(\rR\x04nsid\x120\n\x07back\
+    end\x18\x02\x20\x01(\x0b2\x16.vmservice.DiskBackendR\x07backend\x12\x1b\
+    \n\tread_only\x18\x03\x20\x01(\x08R\x08readOnly\"6\n\nVfioDevice\x12(\n\
+    \x10host_pci_address\x18\x01\x20\x01(\tR\x0ehostPciAddress\"n\n\nNumaCon\
+    fig\x12)\n\x05nodes\x18\x01\x20\x03(\x0b2\x13.vmservice.NumaNodeR\x05nod\
+    es\x125\n\tdistances\x18\x02\x20\x03(\x0b2\x17.vmservice.NumaDistanceR\t\
+    distances\"\x87\x01\n\x08NumaNode\x128\n\x06memory\x18\x01\x20\x01(\x0b2\
+    \x1b.vmservice.NodeMemoryConfigH\0R\x06memory\x88\x01\x01\x12.\n\x03vps\
+    \x18\x02\x20\x01(\x0b2\x17.vmservice.VpAssignmentH\x01R\x03vps\x88\x01\
+    \x01B\t\n\x07_memoryB\x06\n\x04_vps\")\n\x0cVpAssignment\x12\x19\n\x08vp\
+    _index\x18\x01\x20\x03(\rR\x07vpIndex\"\xd0\x02\n\x10NodeMemoryConfig\
+    \x12\x1b\n\tmemory_mb\x18\x01\x20\x01(\x04R\x08memoryMb\x12)\n\x0ehost_n\
+    uma_node\x18\x02\x20\x01(\rH\0R\x0chostNumaNode\x88\x01\x01\x12\x1a\n\
+    \x08prefetch\x18\x03\x20\x01(\x08R\x08prefetch\x12%\n\x0eprivate_memory\
+    \x18\x04\x20\x01(\x08R\rprivateMemory\x123\n\x15transparent_hugepages\
+    \x18\x05\x20\x01(\x08R\x14transparentHugepages\x12\x1c\n\thugepages\x18\
+    \x06\x20\x01(\x08R\thugepages\x123\n\x13hugepage_size_bytes\x18\x07\x20\
+    \x01(\x04H\x01R\x11hugepageSizeBytes\x88\x01\x01B\x11\n\x0f_host_numa_no\
+    deB\x16\n\x14_hugepage_size_bytes\"N\n\x0cNumaDistance\x12\x10\n\x03src\
+    \x18\x01\x20\x01(\rR\x03src\x12\x10\n\x03dst\x18\x02\x20\x01(\rR\x03dst\
+    \x12\x1a\n\x08distance\x18\x03\x20\x01(\rR\x08distance\"W\n\x12PcieTopol\
+    ogyConfig\x12A\n\x0eroot_complexes\x18\x01\x20\x03(\x0b2\x1a.vmservice.P\
+    cieRootComplexR\rrootComplexes\"\xa1\x03\n\x0fPcieRootComplex\x12\x12\n\
+    \x04name\x18\x01\x20\x01(\tR\x04name\x12\x18\n\x07segment\x18\x02\x20\
+    \x01(\rR\x07segment\x12\x1b\n\tstart_bus\x18\x03\x20\x01(\rR\x08startBus\
+    \x12\x17\n\x07end_bus\x18\x04\x20\x01(\rR\x06endBus\x12\x19\n\x08low_mmi\
+    o\x18\x05\x20\x01(\x04R\x07lowMmio\x12\x1b\n\thigh_mmio\x18\x06\x20\x01(\
+    \x04R\x08highMmio\x12'\n\rlow_mmio_base\x18\x07\x20\x01(\x04H\0R\x0blowM\
+    mioBase\x88\x01\x01\x12)\n\x0ehigh_mmio_base\x18\x08\x20\x01(\x04H\x01R\
+    \x0chighMmioBase\x88\x01\x01\x12#\n\rpreserve_bars\x18\t\x20\x01(\x08R\
+    \x0cpreserveBars\x12\x17\n\x04node\x18\n\x20\x01(\rH\x02R\x04node\x88\
+    \x01\x01\x122\n\nroot_ports\x18\x0b\x20\x03(\x0b2\x13.vmservice.PciePort\
+    R\trootPortsB\x10\n\x0e_low_mmio_baseB\x11\n\x0f_high_mmio_baseB\x07\n\
+    \x05_node\"\x94\x01\n\x08PciePort\x12\x12\n\x04name\x18\x01\x20\x01(\tR\
+    \x04name\x12\x18\n\x07hotplug\x18\x02\x20\x01(\x08R\x07hotplug\x125\n\
+    \x08attached\x18\x03\x20\x01(\x0b2\x19.vmservice.PcieAttachmentR\x08atta\
+    ched\x12\x19\n\x05devfn\x18\x04\x20\x01(\rH\0R\x05devfn\x88\x01\x01B\x08\
+    \n\x06_devfn\"`\n\nPcieSwitch\x12\x12\n\x04name\x18\x01\x20\x01(\tR\x04n\
+    ame\x12>\n\x10downstream_ports\x18\x02\x20\x03(\x0b2\x13.vmservice.PcieP\
+    ortR\x0fdownstreamPorts\"~\n\x0ePcieAttachment\x123\n\x06device\x18\x01\
+    \x20\x01(\x0b2\x19.vmservice.PcieDeviceKindH\0R\x06device\x12/\n\x06swit\
+    ch\x18\x02\x20\x01(\x0b2\x15.vmservice.PcieSwitchH\0R\x06switchB\x06\n\
+    \x04kind\"\x82\x05\n\x08VMConfig\x12<\n\rmemory_config\x18\x01\x20\x01(\
+    \x0b2\x17.vmservice.MemoryConfigR\x0cmemoryConfig\x12E\n\x10processor_co\
+    nfig\x18\x02\x20\x01(\x0b2\x1a.vmservice.ProcessorConfigR\x0fprocessorCo\
+    nfig\x12?\n\x0edevices_config\x18\x03\x20\x01(\x0b2\x18.vmservice.Device\
+    sConfigR\rdevicesConfig\x12<\n\rserial_config\x18\x04\x20\x01(\x0b2\x17.\
+    vmservice.SerialConfigR\x0cserialConfig\x128\n\x0bdirect_boot\x18\x05\
+    \x20\x01(\x0b2\x15.vmservice.DirectBootH\0R\ndirectBoot\x12%\n\x04uefi\
+    \x18\x06\x20\x01(\x0b2\x0f.vmservice.UEFIH\0R\x04uefi\x12B\n\x0fwindows_\
+    options\x18\x07\x20\x01(\x0b2\x19.vmservice.WindowsOptionsR\x0ewindowsOp\
+    tions\x12B\n\x0fhvsocket_config\x18\t\x20\x01(\x0b2\x19.vmservice.HVSock\
+    etConfigR\x0ehvsocketConfig\x126\n\x0bnuma_config\x18\n\x20\x01(\x0b2\
+    \x15.vmservice.NumaConfigR\nnumaConfig\x121\n\x04pcie\x18\x0b\x20\x01(\
+    \x0b2\x1d.vmservice.PcieTopologyConfigR\x04pcieB\x0c\n\nBootConfigJ\x04\
+    \x08\x08\x10\tR\nextra_data\"2\n\x0eWindowsOptions\x12\x20\n\x0ccpu_grou\
+    p_id\x18\x01\x20\x01(\x04R\ncpuGroupId\"\x9d\x01\n\x0cSerialConfig\x124\
+    \n\x05ports\x18\x03\x20\x03(\x0b2\x1e.vmservice.SerialConfig.ConfigR\x05\
+    ports\x1aW\n\x06Config\x12\x12\n\x04port\x18\x01\x20\x01(\rR\x04port\x12\
+    \x1f\n\x0bsocket_path\x18\x02\x20\x01(\tR\nsocketPath\x12\x18\n\x07conne\
+    ct\x18\x03\x20\x01(\x08R\x07connect\"$\n\x0eHVSocketConfig\x12\x12\n\x04\
+    path\x18\x01\x20\x01(\tR\x04path\"U\n\x0fCreateVMRequest\x12+\n\x06confi\
+    g\x18\x01\x20\x01(\x0b2\x13.vmservice.VMConfigR\x06config\x12\x15\n\x06l\
+    og_id\x18\x02\x20\x01(\tR\x05logId\"\xb6\x01\n\x0bMemoryStats\x12*\n\x11\
+    working_set_bytes\x18\x01\x20\x01(\x04R\x0fworkingSetBytes\x12)\n\x10ava\
+    ilable_memory\x18\x02\x20\x01(\x04R\x0favailableMemory\x12'\n\x0freserve\
+    d_memory\x18\x03\x20\x01(\x04R\x0ereservedMemory\x12'\n\x0fassigned_memo\
+    ry\x18\x04\x20\x01(\x04R\x0eassignedMemory\":\n\x0eProcessorStats\x12(\n\
+    \x10total_runtime_ns\x18\x01\x20\x01(\x04R\x0etotalRuntimeNs\"\x87\x01\n\
+    \x13PropertiesVMRequest\x12C\n\x05types\x18\x01\x20\x03(\x0e2-.vmservice\
+    .PropertiesVMRequest.PropertiesTypeR\x05types\"+\n\x0ePropertiesType\x12\
+    \n\n\x06Memory\x10\0\x12\r\n\tProcessor\x10\x01\"\x95\x01\n\x14Propertie\
+    sVMResponse\x129\n\x0cmemory_stats\x18\x01\x20\x01(\x0b2\x16.vmservice.M\
+    emoryStatsR\x0bmemoryStats\x12B\n\x0fprocessor_stats\x18\x02\x20\x01(\
+    \x0b2\x19.vmservice.ProcessorStatsR\x0eprocessorStats\"\x88\x04\n\x16Cap\
+    abilitiesVMResponse\x12d\n\x13supported_resources\x18\x01\x20\x03(\x0b23\
+    .vmservice.CapabilitiesVMResponse.SupportedResourceR\x12supportedResourc\
+    es\x12`\n\x12supported_guest_os\x18\x02\x20\x03(\x0e22.vmservice.Capabil\
+    itiesVMResponse.SupportedGuestOSR\x10supportedGuestOs\x1a\x9d\x01\n\x11S\
+    upportedResource\x12\x10\n\x03Add\x18\x01\x20\x01(\x08R\x03Add\x12\x16\n\
+    \x06Remove\x18\x02\x20\x01(\x08R\x06Remove\x12\x16\n\x06Update\x18\x03\
+    \x20\x01(\x08R\x06Update\x12F\n\x08resource\x18\x04\x20\x01(\x0e2*.vmser\
+    vice.CapabilitiesVMResponse.ResourceR\x08resource\"Z\n\x08Resource\x12\t\
+    \n\x05Vpmem\x10\0\x12\x08\n\x04Scsi\x10\x01\x12\x08\n\x04Vpci\x10\x02\
+    \x12\t\n\x05Plan9\x10\x03\x12\t\n\x05VMNic\x10\x04\x12\n\n\x06Memory\x10\
+    \x05\x12\r\n\tProcessor\x10\x06\"*\n\x10SupportedGuestOS\x12\x0b\n\x07Wi\
+    ndows\x10\0\x12\t\n\x05Linux\x10\x01\"\x9f\x01\n\x08SCSIDisk\x12\x1e\n\n\
+    controller\x18\x01\x20\x01(\rR\ncontroller\x12\x10\n\x03lun\x18\x02\x20\
+    \x01(\rR\x03lun\x12\x1b\n\thost_path\x18\x03\x20\x01(\tR\x08hostPath\x12\
+    '\n\x04type\x18\x04\x20\x01(\x0e2\x13.vmservice.DiskTypeR\x04type\x12\
+    \x1b\n\tread_only\x18\x05\x20\x01(\x08R\x08readOnly\"n\n\tVPMEMDisk\x12\
+    \x1b\n\thost_path\x18\x01\x20\x01(\tR\x08hostPath\x12'\n\x04type\x18\x02\
+    \x20\x01(\x0e2\x13.vmservice.DiskTypeR\x04type\x12\x1b\n\tread_only\x18\
+    \x03\x20\x01(\x08R\x08readOnly\"\xcb\x02\n\tNICConfig\x12\x15\n\x06nic_i\
+    d\x18\x01\x20\x01(\tR\x05nicId\x12\x1f\n\x0bmac_address\x18\x03\x20\x01(\
+    \tR\nmacAddress\x12(\n\x10legacy_switch_id\x18\x04\x20\x01(\tR\x0elegacy\
+    SwitchId\x12\x19\n\x08nic_name\x18\x05\x20\x01(\tR\x07nicName\x12&\n\x0e\
+    legacy_port_id\x18\x02\x20\x01(\tH\0R\x0clegacyPortId\x12)\n\x03dio\x18\
+    \x06\x20\x01(\x0b2\x15.vmservice.DioBackendH\0R\x03dio\x12)\n\x03tap\x18\
+    \x07\x20\x01(\x0b2\x15.vmservice.TapBackendH\0R\x03tap\x128\n\x08consomm\
+    e\x18\x08\x20\x01(\x0b2\x1a.vmservice.ConsommeBackendH\0R\x08consommeB\t\
+    \n\x07backend\"B\n\nDioBackend\x12\x1b\n\tswitch_id\x18\x01\x20\x01(\tR\
+    \x08switchId\x12\x17\n\x07port_id\x18\x02\x20\x01(\tR\x06portId\"\x20\n\
+    \nTapBackend\x12\x12\n\x04name\x18\x01\x20\x01(\tR\x04name\"{\n\nPortCon\
+    fig\x12\x1b\n\thost_port\x18\x01\x20\x01(\rR\x08hostPort\x12\x1d\n\ngues\
+    t_port\x18\x02\x20\x01(\rR\tguestPort\x121\n\x08protocol\x18\x03\x20\x01\
+    (\x0e2\x15.vmservice.IpProtocolR\x08protocol\"R\n\x0fConsommeBackend\x12\
+    \x12\n\x04cidr\x18\x01\x20\x01(\tR\x04cidr\x12+\n\x05ports\x18\x02\x20\
+    \x03(\x0b2\x15.vmservice.PortConfigR\x05ports\"3\n\x10WindowsPCIDevice\
+    \x12\x1f\n\x0binstance_id\x18\x01\x20\x01(\tR\ninstanceId\"?\n\x0eVirtio\
+    FSConfig\x12\x10\n\x03tag\x18\x01\x20\x01(\tR\x03tag\x12\x1b\n\troot_pat\
+    h\x18\x02\x20\x01(\tR\x08rootPath\"P\n\x13VirtioConsoleConfig\x12\x1f\n\
+    \x0bsocket_path\x18\x01\x20\x01(\tR\nsocketPath\x12\x18\n\x07connect\x18\
+    \x02\x20\x01(\x08R\x07connect\"2\n\x13ModifyMemoryRequest\x12\x1b\n\tmem\
+    ory_mb\x18\x01\x20\x01(\x04R\x08memoryMb\"A\n\x16ModifyProcessorRequest\
+    \x12'\n\x0fprocessor_index\x18\x01\x20\x01(\rR\x0eprocessorIndex\"r\n\
+    \x1cModifyProcessorConfigRequest\x12)\n\x10processor_weight\x18\x01\x20\
+    \x01(\rR\x0fprocessorWeight\x12'\n\x0fprocessor_limit\x18\x02\x20\x01(\r\
+    R\x0eprocessorLimit\"\x89\x04\n\x15ModifyResourceRequest\x12)\n\x04type\
+    \x18\x01\x20\x01(\x0e2\x15.vmservice.ModifyTypeR\x04type\x12A\n\tprocess\
+    or\x18\x02\x20\x01(\x0b2!.vmservice.ModifyProcessorRequestH\0R\tprocesso\
+    r\x12T\n\x10processor_config\x18\x03\x20\x01(\x0b2'.vmservice.ModifyProc\
+    essorConfigRequestH\0R\x0fprocessorConfig\x128\n\x06memory\x18\x04\x20\
+    \x01(\x0b2\x1e.vmservice.ModifyMemoryRequestH\0R\x06memory\x122\n\tscsi_\
+    disk\x18\x05\x20\x01(\x0b2\x13.vmservice.SCSIDiskH\0R\x08scsiDisk\x125\n\
+    \nvpmem_disk\x18\x06\x20\x01(\x0b2\x14.vmservice.VPMEMDiskH\0R\tvpmemDis\
+    k\x125\n\nnic_config\x18\x07\x20\x01(\x0b2\x14.vmservice.NICConfigH\0R\t\
+    nicConfig\x12D\n\x0ewindows_device\x18\x08\x20\x01(\x0b2\x1b.vmservice.W\
+    indowsPCIDeviceH\0R\rwindowsDeviceB\n\n\x08resource\"f\n\x14AddPcieDevic\
+    eRequest\x12\x1b\n\tport_name\x18\x01\x20\x01(\tR\x08portName\x121\n\x06\
+    device\x18\x02\x20\x01(\x0b2\x19.vmservice.PcieDeviceKindR\x06device\"6\
+    \n\x17RemovePcieDeviceRequest\x12\x1b\n\tport_name\x18\x01\x20\x01(\tR\
+    \x08portName*-\n\nModifyType\x12\x07\n\x03ADD\x10\0\x12\n\n\x06REMOVE\
+    \x10\x01\x12\n\n\x06UPDATE\x10\x02*Y\n\x08DiskType\x12\x17\n\x13SCSI_DIS\
+    K_TYPE_VHD1\x10\0\x12\x17\n\x13SCSI_DISK_TYPE_VHDX\x10\x01\x12\x1b\n\x17\
+    SCSI_DISK_TYPE_PHYSICAL\x10\x02*\x1e\n\nIpProtocol\x12\x07\n\x03TCP\x10\
+    \0\x12\x07\n\x03UDP\x10\x012\xef\x05\n\x02VM\x12>\n\x08CreateVM\x12\x1a.\
+    vmservice.CreateVMRequest\x1a\x16.google.protobuf.Empty\x12<\n\nTeardown\
+    VM\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\x129\n\
+    \x07PauseVM\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\
+    \x12:\n\x08ResumeVM\x12\x16.google.protobuf.Empty\x1a\x16.google.protobu\
+    f.Empty\x128\n\x06WaitVM\x12\x16.google.protobuf.Empty\x1a\x16.google.pr\
+    otobuf.Empty\x12K\n\x0eCapabilitiesVM\x12\x16.google.protobuf.Empty\x1a!\
+    .vmservice.CapabilitiesVMResponse\x12O\n\x0cPropertiesVM\x12\x1e.vmservi\
+    ce.PropertiesVMRequest\x1a\x1f.vmservice.PropertiesVMResponse\x12J\n\x0e\
+    ModifyResource\x12\x20.vmservice.ModifyResourceRequest\x1a\x16.google.pr\
+    otobuf.Empty\x12H\n\rAddPcieDevice\x12\x1f.vmservice.AddPcieDeviceReques\
+    t\x1a\x16.google.protobuf.Empty\x12N\n\x10RemovePcieDevice\x12\".vmservi\
+    ce.RemovePcieDeviceRequest\x1a\x16.google.protobuf.Empty\x126\n\x04Quit\
+    \x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.EmptyB\x0bZ\tvmse\
+    rviceb\x06proto3\
 ";
 
 /// `FileDescriptorProto` object which was a source for this generated file
@@ -7787,13 +15597,42 @@ pub fn file_descriptor() -> &'static ::protobuf::reflect::FileDescriptor {
             let mut deps = ::std::vec::Vec::with_capacity(2);
             deps.push(::protobuf::well_known_types::empty::file_descriptor().clone());
             deps.push(::protobuf::well_known_types::struct_::file_descriptor().clone());
-            let mut messages = ::std::vec::Vec::with_capacity(30);
+            let mut messages = ::std::vec::Vec::with_capacity(63);
             messages.push(DirectBoot::generated_message_descriptor_data());
             messages.push(UEFI::generated_message_descriptor_data());
             messages.push(MemoryConfig::generated_message_descriptor_data());
             messages.push(ProcessorConfig::generated_message_descriptor_data());
             messages.push(DevicesConfig::generated_message_descriptor_data());
-            messages.push(VirtioConsoleConfig::generated_message_descriptor_data());
+            messages.push(PcieDeviceKind::generated_message_descriptor_data());
+            messages.push(VirtioDevice::generated_message_descriptor_data());
+            messages.push(VirtioConsole::generated_message_descriptor_data());
+            messages.push(SerialBackend::generated_message_descriptor_data());
+            messages.push(SerialRelay::generated_message_descriptor_data());
+            messages.push(DiskBackend::generated_message_descriptor_data());
+            messages.push(FileDisk::generated_message_descriptor_data());
+            messages.push(VirtioBlk::generated_message_descriptor_data());
+            messages.push(VirtioNet::generated_message_descriptor_data());
+            messages.push(NicBackend::generated_message_descriptor_data());
+            messages.push(VhostUser::generated_message_descriptor_data());
+            messages.push(VhostUserDevice::generated_message_descriptor_data());
+            messages.push(VhostUserBlk::generated_message_descriptor_data());
+            messages.push(VhostUserFs::generated_message_descriptor_data());
+            messages.push(VhostUserGeneric::generated_message_descriptor_data());
+            messages.push(VirtioRng::generated_message_descriptor_data());
+            messages.push(VirtioVsock::generated_message_descriptor_data());
+            messages.push(NvmeConfig::generated_message_descriptor_data());
+            messages.push(NvmeNamespace::generated_message_descriptor_data());
+            messages.push(VfioDevice::generated_message_descriptor_data());
+            messages.push(NumaConfig::generated_message_descriptor_data());
+            messages.push(NumaNode::generated_message_descriptor_data());
+            messages.push(VpAssignment::generated_message_descriptor_data());
+            messages.push(NodeMemoryConfig::generated_message_descriptor_data());
+            messages.push(NumaDistance::generated_message_descriptor_data());
+            messages.push(PcieTopologyConfig::generated_message_descriptor_data());
+            messages.push(PcieRootComplex::generated_message_descriptor_data());
+            messages.push(PciePort::generated_message_descriptor_data());
+            messages.push(PcieSwitch::generated_message_descriptor_data());
+            messages.push(PcieAttachment::generated_message_descriptor_data());
             messages.push(VMConfig::generated_message_descriptor_data());
             messages.push(WindowsOptions::generated_message_descriptor_data());
             messages.push(SerialConfig::generated_message_descriptor_data());
@@ -7809,18 +15648,23 @@ pub fn file_descriptor() -> &'static ::protobuf::reflect::FileDescriptor {
             messages.push(NICConfig::generated_message_descriptor_data());
             messages.push(DioBackend::generated_message_descriptor_data());
             messages.push(TapBackend::generated_message_descriptor_data());
+            messages.push(PortConfig::generated_message_descriptor_data());
             messages.push(ConsommeBackend::generated_message_descriptor_data());
             messages.push(WindowsPCIDevice::generated_message_descriptor_data());
             messages.push(VirtioFSConfig::generated_message_descriptor_data());
+            messages.push(VirtioConsoleConfig::generated_message_descriptor_data());
             messages.push(ModifyMemoryRequest::generated_message_descriptor_data());
             messages.push(ModifyProcessorRequest::generated_message_descriptor_data());
             messages.push(ModifyProcessorConfigRequest::generated_message_descriptor_data());
             messages.push(ModifyResourceRequest::generated_message_descriptor_data());
+            messages.push(AddPcieDeviceRequest::generated_message_descriptor_data());
+            messages.push(RemovePcieDeviceRequest::generated_message_descriptor_data());
             messages.push(serial_config::Config::generated_message_descriptor_data());
             messages.push(capabilities_vmresponse::SupportedResource::generated_message_descriptor_data());
-            let mut enums = ::std::vec::Vec::with_capacity(5);
+            let mut enums = ::std::vec::Vec::with_capacity(6);
             enums.push(ModifyType::generated_enum_descriptor_data());
             enums.push(DiskType::generated_enum_descriptor_data());
+            enums.push(IpProtocol::generated_enum_descriptor_data());
             enums.push(properties_vmrequest::PropertiesType::generated_enum_descriptor_data());
             enums.push(capabilities_vmresponse::Resource::generated_enum_descriptor_data());
             enums.push(capabilities_vmresponse::SupportedGuestOS::generated_enum_descriptor_data());
