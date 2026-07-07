@@ -28,8 +28,8 @@ use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 use openvmm_defs::config::{
     Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig, LoadMode,
     MemoryConfig as OvmmMemoryConfig, NumaNode, NumaTopology, PcieDeviceConfig,
-    PcieGenericInitiatorConfig, PcieIommuConfig, PcieMmioRangeConfig, PciePortConfig,
-    PcieRootComplexConfig, ProcessorTopologyConfig, SmmuOas, VmbusConfig, VpAssignment,
+    PcieGenericInitiatorConfig, PcieMmioRangeConfig, PciePortConfig,
+    PcieRootComplexConfig, ProcessorTopologyConfig, VmbusConfig, VpAssignment,
 };
 use vm_resource::kind::VmbusDeviceHandleKind;
 use vm_resource::IntoResource;
@@ -685,19 +685,26 @@ impl OpenVmmInner {
                                         cxl: false,
                                     }],
                                     cxl: None,
-                                    // Per-RC Arm SMMUv3 with HW-accelerated
-                                    // nested translation. accel:true is the
-                                    // `--smmu rc=,accel` that the validated
-                                    // B0b/B1n runs used; John flagged --smmu
-                                    // as not-yet-stable upstream, but
-                                    // accel:true is exactly what worked on
-                                    // this bench, so we match the proven
-                                    // config (flip to false if it regresses).
-                                    // Required for nested VFIO under L1VH.
-                                    iommu: Some(PcieIommuConfig::Smmu {
-                                        accel: true,
-                                        oas: SmmuOas::Auto,
-                                    }),
+                                    // NO emulated SMMU. The validated harness
+                                    // used --smmu rc=,accel, but that requires
+                                    // the VFIO device to be wired to the SMMU
+                                    // via the iommufd-cdev handle (which
+                                    // carries an iommu_id). Kata cold-plugs
+                                    // through the legacy VfioDeviceHandle
+                                    // (host VFIO container, no iommu_id), so
+                                    // declaring iommu:Some(Smmu) here would
+                                    // emit a guest SMMUv3 (IORT) with nothing
+                                    // behind it -- the guest's arm-smmu-v3
+                                    // init then wedges and the VM resets ~1s
+                                    // into boot. iommu:None matches the x86
+                                    // A100/H100 flat path (legacy container,
+                                    // works). preserve_bars + high_mmio pinned
+                                    // at the HPA are the load-bearing pieces
+                                    // for coherent init (proven in B1n).
+                                    // TODO(P2P): restore nested SMMU accel by
+                                    // switching to the cdev+iommufd VFIO
+                                    // handle + a top-level --iommu context.
+                                    iommu: None,
                                     // node=0 in the harness CLI: emit ACPI
                                     // _PXM binding devices under this RC to
                                     // the CPU node.
