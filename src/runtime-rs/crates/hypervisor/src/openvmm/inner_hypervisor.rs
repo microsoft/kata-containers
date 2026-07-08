@@ -1132,6 +1132,39 @@ impl OpenVmmInner {
             efi_diagnostics_log_level: Default::default(),
         };
 
+        // Diagnostics: dump the OpenVMM topology the shim assembled so it can
+        // be diffed against a known-good standalone OpenVMM CLI. The GB200
+        // coherent-memory path hinges on the per-GPU root-complex `vnode`
+        // (emitted as ACPI _PXM) and the generic-initiator NUMA nodes; logging
+        // them here confirms whether the shim built the intended topology
+        // before it ever reaches the guest.
+        info!(
+            sl!(),
+            "openvmm: config summary: {} numa node(s), {} generic-initiator(s), \
+             {} root complex(es), {} pcie device(s)",
+            vm_config.numa.nodes.len(),
+            vm_config.pcie_generic_initiators.len(),
+            vm_config.pcie_root_complexes.len(),
+            vm_config.pcie_devices.len(),
+        );
+        for rc in &vm_config.pcie_root_complexes {
+            info!(
+                sl!(),
+                "openvmm: root complex name={} bus={}..{} vnode={:?} preserve_bars={}",
+                rc.name,
+                rc.start_bus,
+                rc.end_bus,
+                rc.vnode,
+                rc.preserve_bars,
+            );
+        }
+        for gi in &vm_config.pcie_generic_initiators {
+            info!(
+                sl!(),
+                "openvmm: generic-initiator port={} node={}", gi.port_name, gi.node
+            );
+        }
+
         // Launch the VM worker
         info!(sl!(), "openvmm: launching VM worker");
         self.vmm_instance
