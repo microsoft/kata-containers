@@ -131,31 +131,37 @@ virt_container = { path = "src/runtime-rs/crates/runtimes/virt_container" }
 wasm_container = { path = "src/runtime-rs/crates/runtimes/wasm_container" }
 
 # OpenVMM dependencies
-ovmm_virt = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", package = "virt" }
-virt_mshv = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-openvmm_core = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-openvmm_defs = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-hypervisor_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-openvmm_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", features = ["virt_mshv", "virt_kvm", "net_tap"] }
-openvmm_helpers = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-vm_manifest_builder = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-ovmm_mesh = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", package = "mesh" }
-ovmm_mesh_worker = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", package = "mesh_worker" }
-ovmm_pal_async = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", package = "pal_async" }
-ovmm_unix_socket = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", package = "unix_socket", features = ["mesh"] }
-storvsp_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-scsidisk_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-netvsp_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-net_backend_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-virtio_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-vm_resource = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-disk_backend_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-disk_blockdevice = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-vfio_assigned_device_resources = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620" }
-ovmm_vmm_core_defs = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", package = "vmm_core_defs" }
-ovmm_guid = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", package = "guid" }
-ovmm_memory_range = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", package = "memory_range" }
-ovmm_serial_socket = { git = "https://github.com/jstarks/openvmm", rev = "cd3c812834ddaab93ebc952b2fb74e2123c1a620", package = "serial_socket" }
+# Pinned to JocelynBerrendonner/openvmm @ 99a0f16 (== jstarks/openvmm tweaks2
+# cd3c812 + John's "loader: deliver SMBIOS tables to aarch64 Linux direct boot"
+# fix). The SMBIOS/DMI table is required on aarch64 for the NVIDIA GB200 driver
+# to detect it is virtualized and consume the SRAT generic-initiator entries
+# that describe the GPU coherent-memory NUMA topology; without it the driver
+# fails with "kmemsysSetupCoherentCpuLink: Failed to get NUMA node id".
+ovmm_virt = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08", package = "virt" }
+virt_mshv = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+openvmm_core = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+openvmm_defs = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+hypervisor_resources = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+openvmm_resources = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08", features = ["virt_mshv", "virt_kvm", "net_tap"] }
+openvmm_helpers = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+vm_manifest_builder = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+ovmm_mesh = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08", package = "mesh" }
+ovmm_mesh_worker = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08", package = "mesh_worker" }
+ovmm_pal_async = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08", package = "pal_async" }
+ovmm_unix_socket = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08", package = "unix_socket", features = ["mesh"] }
+storvsp_resources = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+scsidisk_resources = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+netvsp_resources = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+net_backend_resources = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+virtio_resources = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+vm_resource = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+disk_backend_resources = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+disk_blockdevice = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+vfio_assigned_device_resources = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08" }
+ovmm_vmm_core_defs = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08", package = "vmm_core_defs" }
+ovmm_guid = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08", package = "guid" }
+ovmm_memory_range = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08", package = "memory_range" }
+ovmm_serial_socket = { git = "https://github.com/JocelynBerrendonner/openvmm", rev = "99a0f1643fe21ce4338c8b85cbed1b390828ee08", package = "serial_socket" }
 
 # Local dependencies from `src/lib`
 kata-sys-util = { path = "src/libs/kata-sys-util" }
