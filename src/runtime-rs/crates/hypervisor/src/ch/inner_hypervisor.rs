@@ -424,6 +424,20 @@ impl CloudHypervisorInner {
 
         debug!(sl!(), "launching {} as: {:?}", CH_NAME, cmd);
 
+        // CGROUP-PROBE (temporary): log the shim's OWN cgroup immediately before
+        // spawn() (which calls fork()). Under cgroup v2 the VMM child inherits
+        // this exact cgroup at fork time, so this is conclusive evidence of
+        // whether the shim is in the sandbox (kubepods) cgroup when it forks the VMM.
+        let shim_cgroup = std::fs::read_to_string("/proc/self/cgroup")
+            .unwrap_or_else(|e| format!("<error reading /proc/self/cgroup: {e}>"));
+        info!(
+            sl!(),
+            "CGROUP-PROBE: shim pid {} /proc/self/cgroup BEFORE {} fork: {}",
+            std::process::id(),
+            CH_NAME,
+            shim_cgroup.trim()
+        );
+
         let child = cmd.spawn().context(format!("{CH_NAME} spawn failed"))?;
 
         // Save process PID

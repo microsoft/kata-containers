@@ -133,6 +133,18 @@ impl ShareVirtioFsStandalone {
             child_cmd.current_dir(work_dir);
         }
 
+        // CGROUP-PROBE (temporary): log the shim's OWN cgroup immediately before
+        // spawn() (which calls fork()). Under cgroup v2 the virtiofsd child inherits
+        // this exact cgroup at fork time.
+        let shim_cgroup = std::fs::read_to_string("/proc/self/cgroup")
+            .unwrap_or_else(|e| format!("<error reading /proc/self/cgroup: {e}>"));
+        info!(
+            sl!(),
+            "CGROUP-PROBE: shim pid {} /proc/self/cgroup BEFORE virtiofsd fork: {}",
+            std::process::id(),
+            shim_cgroup.trim()
+        );
+
         let child = child_cmd.spawn().context("spawn virtiofsd")?;
 
         if is_rootless() {
