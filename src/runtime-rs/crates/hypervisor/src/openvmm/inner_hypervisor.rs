@@ -17,7 +17,7 @@ use super::{
     openvmm_port_pci_path, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
     OPENVMM_CONSOLE_PCI_PORT, OPENVMM_NET_PCI_PORT, OPENVMM_ROOTFS_PCI_PORT,
     OPENVMM_SHAREFS_PCI_PORT, OPENVMM_STATIC_PCI_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
-    OPENVMM_VFIO_COLDPLUG_PORT_PREFIX,
+    OPENVMM_VFIO_COLDPLUG_PORT_COUNT_GB200, OPENVMM_VFIO_COLDPLUG_PORT_PREFIX,
 };
 use crate::device::driver::vfio_device::DeviceAddress;
 use crate::device::pci_path::PciPath;
@@ -305,6 +305,40 @@ impl OpenVmmInner {
         // worst-case bench (8 GPUs x (128 GB BAR1 + 186 GB coherent) ~ 2.5 TB)
         // and matches the validated GB200 reference CLI (high_mmio=4T).
         const RC0_HIGH_MMIO_SIZE: u64 = 0x400_0000_0000; // 4 TiB
+
+        // Pre-scan pending VFIO devices for GB200/Grace coherent GPUs. When
+        // present, each such GPU is placed on its own PCIe root complex
+        // (below) rather than an rc0 cold-plug port, so rc0's cold-plug ports
+        // only need to cover any NVSwitch / InfiniBand VFs. Trimming the pool
+        // in that case avoids reserving dozens of empty root-port bridge
+        // MMIO32 windows (and the GICv2m SPIs those empty ports would draw).
+        let mut has_nvgrace_gpu = false;
+        for dev in &self.pending_devices {
+            if let crate::DeviceType::VfioModern(vfio_handle) = dev {
+                let vfio_device = vfio_handle.lock().await;
+                let group_devices: Vec<_> = if !vfio_device.device.devices.is_empty() {
+                    vfio_device.device.devices.clone()
+                } else {
+                    vec![vfio_device.device.primary.clone()]
+                };
+                drop(vfio_device);
+                if group_devices.iter().any(|dev_info| {
+                    matches!(
+                        &dev_info.addr,
+                        DeviceAddress::Pci(bdf) if is_nvgrace_gpu(&bdf.to_string())
+                    )
+                }) {
+                    has_nvgrace_gpu = true;
+                    break;
+                }
+            }
+        }
+        let vfio_coldplug_port_count: u8 = if has_nvgrace_gpu {
+            OPENVMM_VFIO_COLDPLUG_PORT_COUNT_GB200
+        } else {
+            OPENVMM_VFIO_COLDPLUG_PORT_COUNT
+        };
+
         let mut pcie_root_complexes = vec![PcieRootComplexConfig {
             index: 0,
             name: "rc0".to_string(),
@@ -390,8 +424,10 @@ impl OpenVmmInner {
                 // Cold-plug ports for VFIO PCI pass-through (GPUs, NVSwitches,
                 // InfiniBand VFs). These are always created so the OpenVMM
                 // root-complex layout is stable; unused ones simply appear
-                // empty in the guest.
-                for index in 0..OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
+                // empty in the guest. On GB200/Grace the count is reduced
+                // (see vfio_coldplug_port_count) because each coherent GPU
+                // gets its own root complex instead of a cold-plug port here.
+                for index in 0..vfio_coldplug_port_count {
                     ports.push(PciePortConfig {
                         name: format!("{}{}", OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, index),
                         devfn: None,
@@ -779,10 +815,10 @@ impl OpenVmmInner {
                             }
                         }
 
-                        if next_vfio_port >= OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
+                        if next_vfio_port >= vfio_coldplug_port_count {
                             return Err(anyhow!(
                                 "openvmm: too many VFIO devices (limit {}), cannot cold-plug BDF {}",
-                                OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
+                                vfio_coldplug_port_count,
                                 host_bdf
                             ));
                         }
@@ -895,10 +931,10 @@ impl OpenVmmInner {
                         let full_bdf =
                             format!("{}:{}", hostdev.domain, hostdev.bus_slot_func);
 
-                        if next_vfio_port >= OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
+                        if next_vfio_port >= vfio_coldplug_port_count {
                             return Err(anyhow!(
                                 "openvmm: too many VFIO devices (limit {}), cannot cold-plug BDF {}",
-                                OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
+                                vfio_coldplug_port_count,
                                 full_bdf
                             ));
                         }
@@ -1021,7 +1057,22 @@ impl OpenVmmInner {
                         Some(openvmm_defs::config::ArchTopologyConfig::Aarch64(
                             openvmm_defs::config::Aarch64TopologyConfig {
                                 gic_msi: openvmm_defs::config::GicMsiConfig::V2m {
-                                    spi_count: None,
+                                    // Reserve a large, fixed SPI pool for PCIe
+                                    // MSIs. Under GICv2m every MSI vector
+                                    // consumes one SPI: each hotplug-capable
+                                    // root port (24 block-hotplug ports) plus
+                                    // each GPU's MSI-X vectors (~12/GPU) draws
+                                    // from this pool. OpenVMM's `None` default
+                                    // is a small platform value that the empty
+                                    // root ports + 4 GB200 GPUs exhaust, after
+                                    // which later GPUs fail with
+                                    // `request_irq() -22` / "Failed to enable
+                                    // MSI-X" and the guest never onlines
+                                    // coherent memory. 512 comfortably covers
+                                    // the worst-case device count and stays
+                                    // well under the GIC's ~960 usable SPIs
+                                    // (DEFAULT_GIC_NR_IRQS = 992 total).
+                                    spi_count: Some(512),
                                 },
                                 ..Default::default()
                             },

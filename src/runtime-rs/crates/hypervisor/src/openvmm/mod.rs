@@ -57,6 +57,13 @@ pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_COUNT: u8 = 24;
 /// `hotplug: false` so the guest sees the assigned devices at boot.
 pub(crate) const OPENVMM_VFIO_COLDPLUG_PORT_PREFIX: &str = "vfio";
 pub(crate) const OPENVMM_VFIO_COLDPLUG_PORT_COUNT: u8 = 32;
+/// Reduced cold-plug VFIO port count used when GB200/Grace coherent GPUs are
+/// present. Those GPUs each get a dedicated PCIe root complex (not an rc0
+/// cold-plug port), so rc0's cold-plug ports only need to cover any NVSwitch
+/// / InfiniBand VFs -- far fewer than the x86 HGX worst case. Trimming the
+/// pool avoids reserving dozens of empty root-port bridge MMIO32 windows (and,
+/// under GICv2m, the SPIs those empty ports would otherwise draw).
+pub(crate) const OPENVMM_VFIO_COLDPLUG_PORT_COUNT_GB200: u8 = 8;
 
 /// Map an OpenVMM PCIe root-port index (0..256) to the corresponding
 /// guest PciPath. OpenVMM packs root ports into multi-function device
