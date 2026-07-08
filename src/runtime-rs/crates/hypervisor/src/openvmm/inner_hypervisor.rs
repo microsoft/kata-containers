@@ -741,10 +741,26 @@ impl OpenVmmInner {
                                     // switching to the cdev+iommufd VFIO
                                     // handle + a top-level --iommu context.
                                     iommu: None,
-                                    // node=0 in the harness CLI: emit ACPI
-                                    // _PXM binding devices under this RC to
-                                    // the CPU node.
-                                    vnode: Some(0),
+                                    // Emit ACPI _PXM = this GPU's first
+                                    // Generic-Initiator NUMA node (the K GI
+                                    // nodes are declared just below, starting
+                                    // at gb200_next_gi_node). OpenVMM's
+                                    // vm/acpi/src/ssdt.rs turns a root
+                                    // complex's vnode into a _PXM object on the
+                                    // host bridge, and Linux reads that into
+                                    // /sys/bus/pci/devices/<bdf>/numa_node for
+                                    // the GPU under it. Pointing it at the GI
+                                    // node (NOT the CPU node 0) is what lets
+                                    // the driver's kmemsysSetupCoherentCpuLink
+                                    // resolve the coherent LPDDR's NUMA node --
+                                    // the host-side, VMM-native equivalent of
+                                    // the harness's guest numa_node write
+                                    // (proven end-to-end in B0b). With vnode=0
+                                    // the GPU landed on the CPU node, which
+                                    // holds no GPU memory, and init aborted
+                                    // with "Failed to get NUMA node id for GPU
+                                    // memory".
+                                    vnode: Some(gb200_next_gi_node),
                                     preserve_bars: true,
                                 });
 
