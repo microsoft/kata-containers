@@ -39,13 +39,26 @@ use crate::{DeviceType, Hypervisor, MemoryConfig, VcpuThreadIds};
 // a virtio (or vhost-user) function behind its own root port at function 0 of a
 // distinct device number, so the guest-visible path is "DD/00". Device 0 (00.0)
 // is intentionally left unused so the layout does not depend on whether the root
-// complex reserves it. Cold-plug devices use fixed device numbers 1..=7; block
-// hotplug ports use device numbers 8..=31 (hp0..hp23).
+// complex reserves it.
+//
+// Device assignment:
+//   1        – rootfs (cold-plug)
+//   2        – sharefs (cold-plug)
+//   3        – vsock (cold-plug)
+//   4        – primary pod NIC (cold-plug, net0)
+//   5..=7    – secondary pod NICs (NIC hotplug ports nhp0..nhp2)
+//   8..=31   – block hotplug ports (hp0..hp23)
 pub(crate) const OPENVMM_ROOTFS_PCI_DEVICE: u8 = 1;
 pub(crate) const OPENVMM_SHAREFS_PCI_DEVICE: u8 = 2;
 pub(crate) const OPENVMM_VSOCK_PCI_DEVICE: u8 = 3;
 pub(crate) const OPENVMM_NET_PCI_FIRST_DEVICE: u8 = 4;
 pub(crate) const OPENVMM_NET_PCI_MAX_COUNT: u8 = 4;
+/// Maximum number of cold-plug NICs (one per primary pod).
+pub(crate) const OPENVMM_NET_COLDPLUG_MAX_COUNT: u8 = 1;
+/// Pre-declared empty NIC hotplug ports for secondary pod NICs.
+pub(crate) const OPENVMM_NET_HOTPLUG_PORT_COUNT: u8 =
+    OPENVMM_NET_PCI_MAX_COUNT - OPENVMM_NET_COLDPLUG_MAX_COUNT;
+pub(crate) const OPENVMM_NET_HOTPLUG_PORT_PREFIX: &str = "nhp";
 pub(crate) const OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE: u8 = 8;
 pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX: &str = "hp";
 pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_COUNT: u8 = 24;

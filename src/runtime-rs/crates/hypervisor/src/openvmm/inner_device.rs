@@ -8,6 +8,7 @@
 use anyhow::{anyhow, Context, Result};
 
 use super::inner::OpenVmmInner;
+use super::inner_hypervisor::mac_address;
 use crate::device::DeviceType;
 use crate::{VmmState, KATA_BLK_DEV_TYPE};
 
@@ -76,6 +77,37 @@ impl OpenVmmInner {
                         other
                     ));
                 }
+                if let DeviceType::Network(ref net) = other {
+                    let port = self.reserve_net_hotplug_port(&net.device_id)?;
+                    let mac = mac_address(net, 0);
+                    let tap = net.config.host_dev_name.clone();
+
+                    let hotplug_result = self
+                        .vmm_instance
+                        .add_pcie_net_device(&port.name, mac.clone(), tap.clone())
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "failed to hotplug NIC (tap={}, mac={}) into PCIe port {}",
+                                tap, mac, port.name
+                            )
+                        });
+
+                    if let Err(err) = hotplug_result {
+                        let _ = self.release_net_hotplug_port(&net.device_id);
+                        return Err(err);
+                    }
+
+                    info!(
+                        sl!(),
+                        "openvmm: hotplugged NIC tap={} mac={} as virtio-net-pci at port {}",
+                        tap,
+                        mac,
+                        port.name
+                    );
+
+                    return Ok(other);
+                }
                 warn!(sl!(), "openvmm: add_device stub for {}", other);
                 Ok(other)
             }
@@ -112,6 +144,34 @@ impl OpenVmmInner {
                 Ok(())
             }
             other => {
+                if let DeviceType::Network(ref net) = other {
+                    let Some(port) = self.release_net_hotplug_port(&net.device_id) else {
+                        warn!(
+                            sl!(),
+                            "openvmm: no hotplug mapping found for NIC device {}", net.device_id
+                        );
+                        return Ok(());
+                    };
+
+                    self.vmm_instance
+                        .remove_pcie_device(&port.name)
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "failed to hot-remove NIC device {} from PCIe port {}",
+                                net.device_id, port.name
+                            )
+                        })?;
+
+                    info!(
+                        sl!(),
+                        "openvmm: hot-removed NIC device {} from PCIe port {}",
+                        net.device_id,
+                        port.name
+                    );
+
+                    return Ok(());
+                }
                 warn!(sl!(), "openvmm: remove_device stub for {}", other);
                 Ok(())
             }

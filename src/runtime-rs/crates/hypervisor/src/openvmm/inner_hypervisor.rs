@@ -13,8 +13,10 @@ use super::inner::OpenVmmInner;
 use super::vmservice;
 use super::{
     OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
-    OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT,
-    OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VSOCK_PCI_DEVICE,
+    OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_NET_COLDPLUG_MAX_COUNT,
+    OPENVMM_NET_HOTPLUG_PORT_COUNT, OPENVMM_NET_HOTPLUG_PORT_PREFIX,
+    OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT, OPENVMM_ROOTFS_PCI_DEVICE,
+    OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VSOCK_PCI_DEVICE,
 };
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
@@ -79,7 +81,7 @@ pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieD
 
 /// Build a virtio-net-pci endpoint backed by a host TAP, opened by name inside
 /// the OpenVMM process (which runs in the sandbox network namespace).
-fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
+pub(super) fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
     virtio_pcie_device(vmservice::virtio_device::Kind::Net(vmservice::VirtioNet {
         backend: MessageField::some(vmservice::NicBackend {
             kind: Some(vmservice::nic_backend::Kind::Tap(vmservice::TapBackend {
@@ -149,7 +151,7 @@ fn make_pcie_port(
     }
 }
 
-fn mac_address(device: &crate::NetworkDevice, index: usize) -> String {
+pub(super) fn mac_address(device: &crate::NetworkDevice, index: usize) -> String {
     device
         .config
         .guest_mac
@@ -170,6 +172,7 @@ impl OpenVmmInner {
         self.state = VmmState::NotReady;
         self.pending_devices.clear();
         self.reset_block_hotplug_ports();
+        self.reset_net_hotplug_ports();
         self.vm_path = get_sandbox_path(id);
         self.jailer_root = get_jailer_root(id);
         self.netns = netns;
@@ -186,6 +189,7 @@ impl OpenVmmInner {
     pub(crate) async fn start_vm(&mut self, _timeout: i32) -> Result<()> {
         info!(sl!(), "openvmm: start_vm via external ttrpc process");
         self.reset_block_hotplug_ports();
+        self.reset_net_hotplug_ports();
 
         let cmdline = build_kernel_cmdline(
             self.config.debug_info.enable_debug,
@@ -248,10 +252,11 @@ impl OpenVmmInner {
                     );
                 }
                 DeviceType::Network(net_dev) => {
-                    if network_index >= OPENVMM_NET_PCI_MAX_COUNT {
+                    if network_index >= OPENVMM_NET_COLDPLUG_MAX_COUNT {
                         return Err(anyhow!(
-                            "openvmm supports at most {} virtio-net-pci devices",
-                            OPENVMM_NET_PCI_MAX_COUNT
+                            "openvmm supports at most {} cold-plug virtio-net-pci device(s); \
+                             secondary pod NICs are hot-plugged via pre-declared NIC hotplug ports",
+                            OPENVMM_NET_COLDPLUG_MAX_COUNT
                         ));
                     }
                     let device = OPENVMM_NET_PCI_FIRST_DEVICE + network_index;
@@ -350,6 +355,19 @@ impl OpenVmmInner {
             false,
             Some(vsock_device_kind(vsock_socket_path.clone())),
         ));
+
+        // Pre-declare empty, hotplug-capable ports (nhp0..) for secondary pod
+        // NICs. These are populated at runtime via AddPcieDevice when a second
+        // Kata pod shares this Guest VM.
+        for index in 0..OPENVMM_NET_HOTPLUG_PORT_COUNT {
+            let device = OPENVMM_NET_PCI_FIRST_DEVICE + OPENVMM_NET_COLDPLUG_MAX_COUNT + index;
+            root_ports.push(make_pcie_port(
+                &format!("{}{}", OPENVMM_NET_HOTPLUG_PORT_PREFIX, index),
+                device,
+                true,
+                None,
+            ));
+        }
 
         // Pre-declare empty, hotplug-capable ports (hp0..) for block volumes
         // that are hot-added after resume. Their device numbers match the
