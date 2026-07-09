@@ -12,7 +12,7 @@ lib_file="${script_dir}/../../scripts/lib.sh"
 source "${lib_file}"
 
 CONF_PODS=${CONF_PODS:-no}
-USE_RUNTIME_RS=${USE_RUNTIME_RS:-yes}
+USE_RUNTIME_RS=${USE_RUNTIME_RS:-no}
 
 OS_VERSION=$(sort -r /etc/*-release | gawk 'match($0, /^(VERSION_ID=(.*))$/, a) { print toupper(a[2] a[3]); exit }' | tr -d '"')
 
