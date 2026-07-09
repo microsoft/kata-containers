@@ -255,9 +255,11 @@ fn pick_link_for_secondary_netns_move_from_candidates(
             || (!requested_mac.is_empty() && candidate.address.eq_ignore_ascii_case(requested_mac))
         {
             return Err(anyhow!(
-                "only primary-like link is present for secondary netns move: {}({})",
+                "only primary-like link is present for secondary netns move: {}({}) - requested {}({})",
                 candidate.name,
-                candidate.address
+                candidate.address,
+                requested_name,
+                requested_mac,
             ));
         }
 
