@@ -198,6 +198,17 @@ fn should_try_secondary_interface_fallback(interface_name: &str, err_msg: &str) 
     !interface_name.is_empty() && err_msg.contains("Link not found")
 }
 
+fn should_ignore_secondary_shared_netns_update_error(err_msg: &str) -> bool {
+    err_msg.contains("no non-loopback link found for fallback")
+        || err_msg.contains("Link not found")
+}
+
+fn should_ignore_secondary_shared_netns_route_error(err_msg: &str) -> bool {
+    err_msg.contains("Link not found")
+        || err_msg.contains("No such device")
+        || err_msg.contains("Network is down")
+}
+
 trait ResultToTtrpcResult<T, E: Debug>: Sized {
     fn map_ttrpc_err<R: Debug>(self, msg_builder: impl FnOnce(E) -> R) -> ttrpc::Result<T>;
     fn map_ttrpc_err_do(self, doer: impl FnOnce(&E)) -> ttrpc::Result<T> {
@@ -1333,17 +1344,37 @@ impl agent_ttrpc::AgentService for AgentService {
                                                 primary_netns_path, e
                                             )
                                         })?;
-                                        primary_rtnl
+                                        if let Err(e) = primary_rtnl
                                             .update_interface_with_name_fallback(&interface)
                                             .await
-                                            .map_ttrpc_err(|e| {
-                                                format!(
-                                                    "update secondary interface through shared primary netns failed: primary_err={}, fallback_err={}, final_err={:?}",
-                                                    err_msg,
-                                                    fallback_err_msg,
-                                                    e
-                                                )
-                                            })?;
+                                        {
+                                            let final_err_msg = format!("{e:#}");
+                                            if should_ignore_secondary_shared_netns_update_error(
+                                                &final_err_msg,
+                                            ) {
+                                                warn!(
+                                                    sl(),
+                                                    "update_interface: shared-primary-netns fallback found no matching link; skipping secondary interface update";
+                                                    "sandbox-id" => sid.as_str(),
+                                                    "target-name" => interface.name.as_str(),
+                                                    "target-mac" => interface.hwAddr.as_str(),
+                                                    "primary-netns" => primary_netns_path.as_str(),
+                                                    "primary-error" => err_msg.clone(),
+                                                    "fallback-error" => fallback_err_msg.clone(),
+                                                    "final-error" => final_err_msg,
+                                                );
+                                            } else {
+                                                return Err(ttrpc_error(
+                                                    ttrpc::Code::INTERNAL,
+                                                    format!(
+                                                        "update secondary interface through shared primary netns failed: primary_err={}, fallback_err={}, final_err={:?}",
+                                                        err_msg,
+                                                        fallback_err_msg,
+                                                        e
+                                                    ),
+                                                ));
+                                            }
+                                        }
 
                                         return Ok(interface);
                                     }
@@ -1401,17 +1432,37 @@ impl agent_ttrpc::AgentService for AgentService {
                                                         primary_netns_path, e
                                                     )
                                                 })?;
-                                                primary_rtnl
+                                                if let Err(e) = primary_rtnl
                                                     .update_interface_with_name_fallback(&interface)
                                                     .await
-                                                    .map_ttrpc_err(|e| {
-                                                        format!(
-                                                            "update secondary interface through primary netns failed: primary_err={}, fallback_err={}, final_err={:?}",
-                                                            err_msg,
-                                                            fallback_err_msg,
-                                                            e
-                                                        )
-                                                    })?;
+                                                {
+                                                    let final_err_msg = format!("{e:#}");
+                                                    if should_ignore_secondary_shared_netns_update_error(
+                                                        &final_err_msg,
+                                                    ) {
+                                                        warn!(
+                                                            sl(),
+                                                            "update_interface: primary-netns fallback found no matching link; skipping secondary interface update";
+                                                            "sandbox-id" => sid.as_str(),
+                                                            "target-name" => interface.name.as_str(),
+                                                            "target-mac" => interface.hwAddr.as_str(),
+                                                            "primary-netns" => primary_netns_path.as_str(),
+                                                            "primary-error" => err_msg.clone(),
+                                                            "fallback-error" => fallback_err_msg.clone(),
+                                                            "final-error" => final_err_msg,
+                                                        );
+                                                    } else {
+                                                        return Err(ttrpc_error(
+                                                            ttrpc::Code::INTERNAL,
+                                                            format!(
+                                                                "update secondary interface through primary netns failed: primary_err={}, fallback_err={}, final_err={:?}",
+                                                                err_msg,
+                                                                fallback_err_msg,
+                                                                e
+                                                            ),
+                                                        ));
+                                                    }
+                                                }
 
                                                 return Ok(interface);
                                             }
@@ -1570,28 +1621,48 @@ impl agent_ttrpc::AgentService for AgentService {
                     );
 
                     drop(secondary_sandboxes);
-                    let mut primary = self.sandbox.lock().await;
-                    primary
-                        .rtnl
-                        .update_routes(new_routes.clone())
-                        .await
+                    let mut primary_rtnl = create_rtnl_handle_in_netns(&primary_netns_path)
                         .map_ttrpc_err(|e| {
                             format!(
-                                "Failed to update secondary routes through shared primary netns: {:?}",
-                                e
+                                "create primary netns rtnl handle for route update failed (netns={}): {:?}",
+                                primary_netns_path, e
                             )
                         })?;
 
-                    let list = primary
-                        .rtnl
-                        .list_routes()
-                        .await
-                        .map_ttrpc_err(|e| {
-                            format!(
-                                "Failed to list routes after shared primary-netns route update: {:?}",
-                                e
-                            )
-                        })?;
+                    if let Err(e) = primary_rtnl.update_routes(new_routes.clone()).await {
+                        let err_msg = format!("{e:#}");
+                        if should_ignore_secondary_shared_netns_route_error(&err_msg) {
+                            warn!(
+                                sl(),
+                                "update_routes: shared-primary-netns route update found no usable link/device; skipping secondary route update";
+                                "sandbox-id" => sid.as_str(),
+                                "primary-netns" => primary_netns_path.as_str(),
+                                "error" => err_msg,
+                            );
+                        } else {
+                            return Err(ttrpc_error(
+                                ttrpc::Code::INTERNAL,
+                                format!(
+                                    "Failed to update secondary routes through shared primary netns: {:?}",
+                                    e
+                                ),
+                            ));
+                        }
+                    }
+
+                    let list = match primary_rtnl.list_routes().await {
+                        Ok(list) => list,
+                        Err(e) => {
+                            warn!(
+                                sl(),
+                                "update_routes: failed to list routes after shared-primary-netns update; returning requested routes";
+                                "sandbox-id" => sid.as_str(),
+                                "primary-netns" => primary_netns_path.as_str(),
+                                "error" => format!("{e:#}"),
+                            );
+                            new_routes.clone()
+                        }
+                    };
 
                     *self.network_target_sandbox.lock().await = None;
                     return Ok(protocols::agent::Routes {
@@ -1631,28 +1702,60 @@ impl agent_ttrpc::AgentService for AgentService {
                         );
 
                         drop(secondary_sandboxes);
-                        let mut primary = self.sandbox.lock().await;
-                        primary
-                            .rtnl
-                            .update_routes(new_routes)
-                            .await
+                        let primary_netns_path = {
+                            let primary = self.sandbox.lock().await;
+                            primary.shared_netns.path.clone()
+                        };
+
+                        if primary_netns_path.is_empty() {
+                            return Err(ttrpc_error(
+                                ttrpc::Code::INTERNAL,
+                                "primary shared netns path is empty; cannot fallback secondary route update",
+                            ));
+                        }
+
+                        let mut primary_rtnl = create_rtnl_handle_in_netns(&primary_netns_path)
                             .map_ttrpc_err(|e| {
                                 format!(
-                                    "Failed to update secondary routes via primary netns: {:?}",
-                                    e
+                                    "create primary netns rtnl handle for secondary route fallback failed (netns={}): {:?}",
+                                    primary_netns_path, e
                                 )
                             })?;
 
-                        primary
-                            .rtnl
-                            .list_routes()
-                            .await
-                            .map_ttrpc_err(|e| {
-                                format!(
-                                    "Failed to list routes after secondary primary-netns fallback: {:?}",
-                                    e
-                                )
-                            })?
+                        if let Err(e) = primary_rtnl.update_routes(new_routes.clone()).await {
+                            let err_msg = format!("{e:#}");
+                            if !should_ignore_secondary_shared_netns_route_error(&err_msg) {
+                                return Err(ttrpc_error(
+                                    ttrpc::Code::INTERNAL,
+                                    format!(
+                                        "Failed to update secondary routes via primary netns: {:?}",
+                                        e
+                                    ),
+                                ));
+                            }
+
+                            warn!(
+                                sl(),
+                                "update_routes: primary-netns fallback found no usable link/device; skipping secondary route update";
+                                "sandbox-id" => sid.as_str(),
+                                "primary-netns" => primary_netns_path.as_str(),
+                                "error" => err_msg,
+                            );
+                        }
+
+                        match primary_rtnl.list_routes().await {
+                            Ok(list) => list,
+                            Err(e) => {
+                                warn!(
+                                    sl(),
+                                    "update_routes: failed to list routes after primary-netns fallback; returning requested routes";
+                                    "sandbox-id" => sid.as_str(),
+                                    "primary-netns" => primary_netns_path.as_str(),
+                                    "error" => format!("{e:#}"),
+                                );
+                                new_routes.clone()
+                            }
+                        }
                     }
                 };
 
