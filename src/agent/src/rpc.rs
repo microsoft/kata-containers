@@ -2031,8 +2031,12 @@ impl agent_ttrpc::AgentService for AgentService {
             s.setup_shared_namespaces(&shared_ns_id).await.map_ttrpc_err(same)?;
 
             if !s.shared_netns.path.is_empty() {
-                s.rtnl = create_rtnl_handle_in_netns(&s.shared_netns.path)
-                    .map_ttrpc_err(same)?;
+                info!(
+                    sl(),
+                    "create_sandbox: keeping primary rtnl in active sandbox netns";
+                    "sandbox-id" => s.id.as_str(),
+                    "shared-netns" => s.shared_netns.path.as_str(),
+                );
             }
         }
 
