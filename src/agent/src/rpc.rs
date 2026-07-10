@@ -1314,12 +1314,52 @@ impl agent_ttrpc::AgentService for AgentService {
                                                 &interface.hwAddr,
                                             )
                                             .await
-                                            .map_ttrpc_err(|e| {
+                                    };
+
+                                    let move_candidate = match move_candidate {
+                                        Ok(candidate) => candidate,
+                                        Err(move_pick_err) => {
+                                            let move_pick_err_msg = format!("{move_pick_err:#}");
+                                            let only_primary_like = move_pick_err_msg
+                                                .contains("only primary-like link is present");
+
+                                            if only_primary_like {
+                                                warn!(
+                                                    sl(),
+                                                    "update_interface: no distinct link exists in primary netns; applying secondary interface update through primary netns";
+                                                    "sandbox-id" => sid.as_str(),
+                                                    "target-name" => interface.name.as_str(),
+                                                    "target-mac" => interface.hwAddr.as_str(),
+                                                    "primary-error" => err_msg.clone(),
+                                                    "fallback-error" => fallback_err_msg.clone(),
+                                                    "move-pick-error" => move_pick_err_msg,
+                                                );
+
+                                                let mut primary = self.sandbox.lock().await;
+                                                primary
+                                                    .rtnl
+                                                    .update_interface_with_name_fallback(&interface)
+                                                    .await
+                                                    .map_ttrpc_err(|e| {
+                                                        format!(
+                                                            "update secondary interface through primary netns failed: primary_err={}, fallback_err={}, final_err={:?}",
+                                                            err_msg,
+                                                            fallback_err_msg,
+                                                            e
+                                                        )
+                                                    })?;
+
+                                                return Ok(interface);
+                                            }
+
+                                            return Err(ttrpc_error(
+                                                ttrpc::Code::INTERNAL,
                                                 format!(
                                                     "pick primary link for secondary netns move failed: {:?}; primary_err={}; fallback_err={}",
-                                                    e, err_msg, fallback_err_msg
-                                                )
-                                            })?
+                                                    move_pick_err, err_msg, fallback_err_msg
+                                                ),
+                                            ));
+                                        }
                                     };
 
                                     {
@@ -1451,19 +1491,60 @@ impl agent_ttrpc::AgentService for AgentService {
         if let Some(sid) = target_sid {
             let mut secondary_sandboxes = self.secondary_sandboxes.lock().await;
             if let Some(secondary) = secondary_sandboxes.get_mut(&sid) {
-                secondary
-                    .rtnl
-                    .update_routes(new_routes)
-                    .await
-                    .map_ttrpc_err(|e| format!("Failed to update secondary routes: {e:?}"))?;
+                let secondary_update_result = secondary.rtnl.update_routes(new_routes.clone()).await;
 
-                let list = secondary
-                    .rtnl
-                    .list_routes()
-                    .await
-                    .map_ttrpc_err(|e| {
-                        format!("Failed to list secondary routes after update: {e:?}")
-                    })?;
+                let list = match secondary_update_result {
+                    Ok(()) => secondary
+                        .rtnl
+                        .list_routes()
+                        .await
+                        .map_ttrpc_err(|e| {
+                            format!("Failed to list secondary routes after update: {e:?}")
+                        })?,
+                    Err(secondary_err) => {
+                        let secondary_err_msg = format!("{secondary_err:#}");
+                        let should_try_primary = secondary_err_msg.contains("Link not found")
+                            || secondary_err_msg.contains("Network is down");
+
+                        if !should_try_primary {
+                            return Err(ttrpc_error(
+                                ttrpc::Code::INTERNAL,
+                                format!("Failed to update secondary routes: {secondary_err:?}"),
+                            ));
+                        }
+
+                        warn!(
+                            sl(),
+                            "update_routes: secondary route update failed; retrying through primary netns";
+                            "sandbox-id" => sid.as_str(),
+                            "error" => secondary_err_msg,
+                        );
+
+                        drop(secondary_sandboxes);
+                        let mut primary = self.sandbox.lock().await;
+                        primary
+                            .rtnl
+                            .update_routes(new_routes)
+                            .await
+                            .map_ttrpc_err(|e| {
+                                format!(
+                                    "Failed to update secondary routes via primary netns: {:?}",
+                                    e
+                                )
+                            })?;
+
+                        primary
+                            .rtnl
+                            .list_routes()
+                            .await
+                            .map_ttrpc_err(|e| {
+                                format!(
+                                    "Failed to list routes after secondary primary-netns fallback: {:?}",
+                                    e
+                                )
+                            })?
+                    }
+                };
 
                 *self.network_target_sandbox.lock().await = None;
                 return Ok(protocols::agent::Routes {
