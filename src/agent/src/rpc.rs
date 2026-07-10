@@ -278,12 +278,16 @@ fn bootstrap_secondary_macvlan_to_netns(
         "bridge".to_string(),
     ];
 
-    let create_result = run_ip_command_in_netns(primary_netns_path, &create_args);
+    let create_result = if primary_netns_path.is_empty() {
+        run_ip_command(&create_args)
+    } else {
+        run_ip_command_in_netns(primary_netns_path, &create_args)
+    };
     if let Err(primary_err) = create_result {
         let primary_err_msg = format!("{primary_err:#}");
         let retry_in_current = is_ip_device_not_found(&primary_err_msg);
 
-        if retry_in_current {
+        if retry_in_current && !primary_netns_path.is_empty() {
             run_ip_command(&create_args).with_context(|| {
                 format!(
                     "create macvlan {} on {} (fallback current netns after primary-netns failure: {})",
@@ -305,10 +309,14 @@ fn bootstrap_secondary_macvlan_to_netns(
         secondary_netns_path.to_string(),
     ];
 
-    let move_result = run_ip_command_in_netns(primary_netns_path, &move_args);
+    let move_result = if primary_netns_path.is_empty() {
+        run_ip_command(&move_args)
+    } else {
+        run_ip_command_in_netns(primary_netns_path, &move_args)
+    };
     if let Err(primary_err) = move_result {
         let primary_err_msg = format!("{primary_err:#}");
-        if is_ip_device_not_found(&primary_err_msg) {
+        if is_ip_device_not_found(&primary_err_msg) && !primary_netns_path.is_empty() {
             run_ip_command(&move_args).with_context(|| {
                 format!(
                     "move macvlan {} to secondary netns (fallback current netns after primary-netns failure: {})",
@@ -1549,15 +1557,6 @@ impl agent_ttrpc::AgentService for AgentService {
                                                     let primary = self.sandbox.lock().await;
                                                     primary.shared_netns.path.clone()
                                                 };
-                                                if primary_netns_path.is_empty() {
-                                                    return Err(ttrpc_error(
-                                                        ttrpc::Code::INTERNAL,
-                                                        format!(
-                                                            "primary shared netns path is empty; cannot bootstrap secondary macvlan: primary_err={}, fallback_err={}",
-                                                            err_msg, fallback_err_msg
-                                                        ),
-                                                    ));
-                                                }
 
                                                 let parent_ifname =
                                                     parse_primary_like_ifname(&move_pick_err_msg)
@@ -2166,8 +2165,7 @@ impl agent_ttrpc::AgentService for AgentService {
                 load_kernel_module(m).map_ttrpc_err(same)?;
             }
 
-            let shared_ns_id = s.id.clone();
-            s.setup_shared_namespaces(&shared_ns_id).await.map_ttrpc_err(same)?;
+            s.setup_shared_namespaces("").await.map_ttrpc_err(same)?;
 
             if !s.shared_netns.path.is_empty() {
                 info!(
