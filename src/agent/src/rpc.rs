@@ -2242,6 +2242,15 @@ impl agent_ttrpc::AgentService for AgentService {
         if !sandbox.shared_netns.path.is_empty() {
             sandbox.rtnl = create_rtnl_handle_in_netns(&sandbox.shared_netns.path)
                 .map_ttrpc_err(same)?;
+            if let Err(err) = sandbox.rtnl.handle_localhost().await {
+                warn!(
+                    sl(),
+                    "create_secondary_sandbox: failed to bring localhost up in shared netns";
+                    "sandbox-id" => sandbox_id.as_str(),
+                    "secondary-netns" => sandbox.shared_netns.path.as_str(),
+                    "error" => format!("{err:#}"),
+                );
+            }
         }
 
         let key = req.sandbox_id;
@@ -2829,6 +2838,12 @@ fn update_container_namespaces(
                 has_netns = true;
                 if !sandbox.shared_netns.path.is_empty() {
                     namespace.set_path(Some(PathBuf::from(&sandbox.shared_netns.path)));
+                    info!(
+                        sl(),
+                        "update_container_namespaces: using shared network namespace";
+                        "sandbox-id" => sandbox.id.as_str(),
+                        "netns-path" => sandbox.shared_netns.path.as_str(),
+                    );
                 }
                 continue;
             }
@@ -2842,6 +2857,12 @@ fn update_container_namespaces(
             net_ns.set_typ(oci::LinuxNamespaceType::Network);
             net_ns.set_path(Some(PathBuf::from(&sandbox.shared_netns.path)));
             namespaces.push(net_ns);
+            info!(
+                sl(),
+                "update_container_namespaces: appended shared network namespace";
+                "sandbox-id" => sandbox.id.as_str(),
+                "netns-path" => sandbox.shared_netns.path.as_str(),
+            );
         }
 
         // update pid namespace
