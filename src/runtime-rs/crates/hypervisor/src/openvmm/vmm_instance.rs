@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::empty::Empty;
-use super::inner_hypervisor::blk_device_kind;
+use super::inner_hypervisor::{blk_device_kind, net_device_kind};
 use super::vmservice;
 use super::vmservice_ttrpc::VmClient;
 use crate::utils::enter_netns;
@@ -191,6 +191,27 @@ impl VmmInstance {
             .await
             .map(|_| ())
             .map_err(|e| anyhow!("openvmm add_pcie_device RPC failed: {:?}", e))
+    }
+
+    /// Hot-add a virtio-net-pci device backed by host TAP into the named
+    /// (pre-declared) PCIe hotplug port.
+    pub(crate) async fn add_pcie_network_device(
+        &self,
+        port_name: &str,
+        tap_name: String,
+        mac_address: String,
+    ) -> Result<()> {
+        let request = vmservice::AddPcieDeviceRequest {
+            port_name: port_name.to_string(),
+            device: MessageField::some(net_device_kind(mac_address, tap_name)),
+            ..Default::default()
+        };
+
+        self.client()?
+            .add_pcie_device(rpc_ctx(), &request)
+            .await
+            .map(|_| ())
+            .map_err(|e| anyhow!("openvmm add_pcie_device(net) RPC failed: {:?}", e))
     }
 
     /// Hot-remove the device behind the named PCIe hotplug port.

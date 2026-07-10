@@ -79,7 +79,7 @@ pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieD
 
 /// Build a virtio-net-pci endpoint backed by a host TAP, opened by name inside
 /// the OpenVMM process (which runs in the sandbox network namespace).
-fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
+pub(super) fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
     virtio_pcie_device(vmservice::virtio_device::Kind::Net(vmservice::VirtioNet {
         backend: MessageField::some(vmservice::NicBackend {
             kind: Some(vmservice::nic_backend::Kind::Tap(vmservice::TapBackend {
@@ -170,6 +170,7 @@ impl OpenVmmInner {
         self.state = VmmState::NotReady;
         self.pending_devices.clear();
         self.reset_block_hotplug_ports();
+        self.reset_net_hotplug_ports();
         self.vm_path = get_sandbox_path(id);
         self.jailer_root = get_jailer_root(id);
         self.netns = netns;
@@ -186,6 +187,7 @@ impl OpenVmmInner {
     pub(crate) async fn start_vm(&mut self, _timeout: i32) -> Result<()> {
         info!(sl!(), "openvmm: start_vm via external ttrpc process");
         self.reset_block_hotplug_ports();
+        self.reset_net_hotplug_ports();
 
         let cmdline = build_kernel_cmdline(
             self.config.debug_info.enable_debug,
@@ -254,17 +256,17 @@ impl OpenVmmInner {
                             OPENVMM_NET_PCI_MAX_COUNT
                         ));
                     }
-                    let device = OPENVMM_NET_PCI_FIRST_DEVICE + network_index;
+                    let port = self.reserve_net_hotplug_port(&net_dev.device_id)?;
                     info!(
                         sl!(),
-                        "openvmm: virtio-net-pci at device {} over host TAP {}",
-                        device,
+                        "openvmm: virtio-net-pci cold-plug at port {} over host TAP {}",
+                        port.name,
                         net_dev.config.host_dev_name
                     );
                     root_ports.push(make_pcie_port(
-                        &format!("net{}", network_index),
-                        device,
-                        false,
+                        &port.name,
+                        OPENVMM_NET_PCI_FIRST_DEVICE + network_index,
+                        true,
                         Some(net_device_kind(
                             mac_address(net_dev, network_index as usize),
                             net_dev.config.host_dev_name.clone(),
