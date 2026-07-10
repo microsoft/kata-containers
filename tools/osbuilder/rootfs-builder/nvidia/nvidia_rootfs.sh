@@ -126,6 +126,42 @@ setup_nvidia_gpu_rootfs_stage_one() {
 	popd  >> /dev/null
 }
 
+# Copy every regular file / symlink that a stage-one dpkg package owns into the
+# chiseled image, recreating its directory tree, by reading the package's dpkg
+# file list (/var/lib/dpkg/info/<pkg>.list). This is more robust than
+# hand-picking individual paths: a file the daemon needs -- e.g. nvidia-imex's
+# /etc/nvidia-imex/config.cfg + nodes_config.cfg -- is shipped automatically
+# instead of being silently dropped, and it keeps working if a package update
+# adds files. Shared-library dependencies that live in OTHER packages (libc,
+# libnvidia-*) are still provided by the explicit copies in the chisseled_*
+# helpers, so this only needs to ship the package's own files. Runs with CWD =
+# the image root (like every chisseled_* helper).
+chisseled_from_deb() {
+	local pkg="$1"
+	local list
+	list=$(ls "${stage_one}/var/lib/dpkg/info/${pkg}.list" \
+	          "${stage_one}/var/lib/dpkg/info/${pkg}":*.list 2>/dev/null | head -1 || true)
+	if [[ -z "${list}" || ! -f "${list}" ]]; then
+		echo "nvidia: warning: dpkg package '${pkg}' not found in stage-one; skipping"
+		return 0
+	fi
+	echo "nvidia: chisseling package ${pkg} ($(basename "${list}"))"
+	local path src
+	while IFS= read -r path; do
+		[[ -z "${path}" ]] && continue
+		src="${stage_one}${path}"
+		if [[ -L "${src}" ]]; then
+			install -d "$(dirname "./${path}")"
+			cp -a "${src}" "./${path}"
+		elif [[ -d "${src}" ]]; then
+			install -d "./${path}"
+		elif [[ -e "${src}" ]]; then
+			install -d "$(dirname "./${path}")"
+			cp -a "${src}" "./${path}"
+		fi
+	done < "${list}"
+}
+
 chisseled_iptables() {
 	echo "nvidia: chisseling iptables"
 	cp -a "${stage_one}"/usr/sbin/xtables-nft-multi sbin/.
@@ -247,21 +283,15 @@ chisseled_compute() {
 
 	# nvidia-imex: on Blackwell coherent-NVLink parts (GB200) the GPU
 	# fabric/clique readiness that gates cuInit is brought up by nvidia-imex,
-	# NOT nv-fabricmanager. The 'compute' feature already apt-installs
-	# nvidia-imex into stage-one at the pinned driver version, but no chisel
-	# step copied it into the final image, so it was silently absent -> the
-	# fabric never reached a ready state (cuInit returned 802 / CliqueId
-	# stayed 32766). Ship the daemon + its control/query tool so NVRC can
-	# start it at boot (the .deb's systemd nvidia-imex.service never runs in
-	# the NVRC-PID1 UVM). Guarded so images without the compute feature (and
-	# thus without imex in stage-one) do not fail.
-	if [[ -f "${stage_one}/usr/bin/nvidia-imex" ]]; then
-		cp -a "${stage_one}"/usr/bin/nvidia-imex          bin/.
-		[[ -f "${stage_one}/usr/bin/nvidia-imex-ctl" ]] && \
-			cp -a "${stage_one}"/usr/bin/nvidia-imex-ctl  bin/.
-	else
-		echo "nvidia: warning: nvidia-imex missing from stage-one; Blackwell fabric bring-up needs it"
-	fi
+	# NOT nv-fabricmanager. The 'compute' feature apt-installs nvidia-imex into
+	# stage-one at the pinned driver version, but no chisel step shipped it, so
+	# it was silently absent -> the fabric never reached a ready state (cuInit
+	# 802 / CliqueId 32766). Ship the WHOLE package (binaries + /etc/nvidia-imex/
+	# config.cfg + nodes_config.cfg + ...) from its dpkg file list so we cannot
+	# miss a file the daemon needs (config.cfg is mandatory -- without it the
+	# daemon exits at startup). Starting it at boot is a separate NVRC concern
+	# (the .deb's systemd nvidia-imex.service never runs under the NVRC-PID1 UVM).
+	chisseled_from_deb "nvidia-imex"
 }
 
 chisseled_gpudirect() {
