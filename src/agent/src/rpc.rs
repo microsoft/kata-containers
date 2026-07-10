@@ -1786,6 +1786,20 @@ impl agent_ttrpc::AgentService for AgentService {
         info!(sl(), "create_secondary_sandbox: calling setup_shared_namespaces");
         sandbox.setup_shared_namespaces(&sandbox_id).await.map_ttrpc_err(same)?;
 
+        // openvmm secondary networking currently relies on a single guest
+        // ingress NIC. Share the primary guest netns for secondary sandboxes
+        // so interface/route updates are applied on the active ingress path.
+        let primary_netns_path = self.sandbox.lock().await.shared_netns.path.clone();
+        if !primary_netns_path.is_empty() {
+            info!(
+                sl(),
+                "create_secondary_sandbox: reusing primary shared netns for secondary sandbox";
+                "sandbox-id" => sandbox_id.as_str(),
+                "primary-netns" => primary_netns_path.as_str(),
+            );
+            sandbox.shared_netns.path = primary_netns_path;
+        }
+
         if !sandbox.shared_netns.path.is_empty() {
             sandbox.rtnl = create_rtnl_handle_in_netns(&sandbox.shared_netns.path)
                 .map_ttrpc_err(same)?;
