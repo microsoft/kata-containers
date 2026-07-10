@@ -221,6 +221,25 @@ fn run_ip_command(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn run_ip_command_in_netns(netns_path: &str, args: &[String]) -> Result<()> {
+    let current_netns_path = format!(
+        "/proc/{}/task/{}/ns/net",
+        unistd::getpid(),
+        unistd::gettid()
+    );
+    let old_netns = File::open(&current_netns_path)
+        .with_context(|| format!("open current netns path {}", &current_netns_path))?;
+    let new_netns = File::open(netns_path)
+        .with_context(|| format!("open target netns path {}", netns_path))?;
+
+    setns(&new_netns, CloneFlags::CLONE_NEWNET).context("set netns for ip command")?;
+    let result = run_ip_command(args);
+    let restore = setns(&old_netns, CloneFlags::CLONE_NEWNET).context("restore netns");
+
+    restore?;
+    result
+}
+
 fn parse_primary_like_ifname(err_msg: &str) -> Option<String> {
     const MARKER: &str = "only primary-like link is present for secondary netns move: ";
     let start = err_msg.find(MARKER)? + MARKER.len();
@@ -235,13 +254,14 @@ fn parse_primary_like_ifname(err_msg: &str) -> Option<String> {
 }
 
 fn bootstrap_secondary_macvlan_to_netns(
+    primary_netns_path: &str,
     parent_ifname: &str,
     secondary_netns_path: &str,
     target_mac: &str,
 ) -> Result<()> {
     let tmp_ifname = format!("k2{}", unistd::gettid().as_raw());
 
-    run_ip_command(&[
+    run_ip_command_in_netns(primary_netns_path, &[
         "link".to_string(),
         "add".to_string(),
         "link".to_string(),
@@ -256,7 +276,7 @@ fn bootstrap_secondary_macvlan_to_netns(
     .with_context(|| format!("create macvlan {} on {}", tmp_ifname, parent_ifname))?;
 
     if !target_mac.is_empty() {
-        run_ip_command(&[
+        run_ip_command_in_netns(primary_netns_path, &[
             "link".to_string(),
             "set".to_string(),
             "dev".to_string(),
@@ -267,7 +287,7 @@ fn bootstrap_secondary_macvlan_to_netns(
         .with_context(|| format!("set macvlan {} MAC {}", tmp_ifname, target_mac))?;
     }
 
-    run_ip_command(&[
+    run_ip_command_in_netns(primary_netns_path, &[
         "link".to_string(),
         "set".to_string(),
         "dev".to_string(),
@@ -1501,11 +1521,26 @@ impl agent_ttrpc::AgentService for AgentService {
                                                     "move-pick-error" => move_pick_err_msg.clone(),
                                                 );
 
+                                                let primary_netns_path = {
+                                                    let primary = self.sandbox.lock().await;
+                                                    primary.shared_netns.path.clone()
+                                                };
+                                                if primary_netns_path.is_empty() {
+                                                    return Err(ttrpc_error(
+                                                        ttrpc::Code::INTERNAL,
+                                                        format!(
+                                                            "primary shared netns path is empty; cannot bootstrap secondary macvlan: primary_err={}, fallback_err={}",
+                                                            err_msg, fallback_err_msg
+                                                        ),
+                                                    ));
+                                                }
+
                                                 let parent_ifname =
                                                     parse_primary_like_ifname(&move_pick_err_msg)
                                                         .unwrap_or_else(|| interface.name.clone());
 
                                                 match bootstrap_secondary_macvlan_to_netns(
+                                                    &primary_netns_path,
                                                     &parent_ifname,
                                                     &secondary_netns_path,
                                                     &interface.hwAddr,
