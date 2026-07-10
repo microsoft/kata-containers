@@ -280,17 +280,29 @@ impl Handle {
 
         candidates.sort_by_key(|l| l.index());
 
+        // Primary selector: pick a link with a MAC distinct from the
+        // requested one. In secondary flows, the target interface name is
+        // commonly "eth0", so name alone is not a reliable disambiguator.
         let distinct = candidates
             .iter()
             .filter(|l| {
-                let name = l.name();
                 let addr = l.address();
-                name != requested_name
-                    && (requested_mac.is_empty() || !addr.eq_ignore_ascii_case(requested_mac))
+                requested_mac.is_empty() || !addr.eq_ignore_ascii_case(requested_mac)
             })
             .collect::<Vec<_>>();
 
         if let Some(link) = distinct.last() {
+            return Ok(link.name());
+        }
+
+        // If MAC is unavailable or identical across candidates, fall back to
+        // picking a different name.
+        let by_name = candidates
+            .iter()
+            .filter(|l| l.name() != requested_name)
+            .collect::<Vec<_>>();
+
+        if let Some(link) = by_name.last() {
             return Ok(link.name());
         }
 
