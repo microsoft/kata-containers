@@ -262,6 +262,45 @@ impl Handle {
             .with_context(|| format!("move link {} to netns {}", ifname, netns_path))
     }
 
+    pub(crate) async fn pick_distinct_non_loopback_link_name(
+        &self,
+        requested_name: &str,
+        requested_mac: &str,
+    ) -> Result<String> {
+        let mut candidates = self
+            .list_links()
+            .await?
+            .into_iter()
+            .filter(|l| !l.is_loopback())
+            .collect::<Vec<_>>();
+
+        if candidates.is_empty() {
+            return Err(anyhow!("no non-loopback link available in current netns"));
+        }
+
+        candidates.sort_by_key(|l| l.index());
+
+        let distinct = candidates
+            .iter()
+            .filter(|l| {
+                let name = l.name();
+                let addr = l.address();
+                name != requested_name
+                    && (requested_mac.is_empty() || !addr.eq_ignore_ascii_case(requested_mac))
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(link) = distinct.last() {
+            return Ok(link.name());
+        }
+
+        Err(anyhow!(
+            "no distinct non-loopback link available for secondary move; requested {}({})",
+            requested_name,
+            requested_mac
+        ))
+    }
+
     pub(crate) async fn bootstrap_secondary_macvlan_to_netns(
         &self,
         iface: &Interface,

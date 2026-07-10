@@ -1305,29 +1305,73 @@ impl agent_ttrpc::AgentService for AgentService {
                                     );
 
                                     let primary_rtnl = crate::netlink::Handle::new().map_ttrpc_err(same)?;
-                                    primary_rtnl
-                                        .bootstrap_secondary_macvlan_to_netns(
-                                            &interface,
-                                            &secondary.shared_netns.path,
+                                    let mut updated_after_move = false;
+                                    if let Ok(link_name) = primary_rtnl
+                                        .pick_distinct_non_loopback_link_name(
+                                            &interface.name,
+                                            &interface.hwAddr,
                                         )
                                         .await
-                                        .map_ttrpc_err(|e| {
-                                            format!(
-                                                "bootstrap secondary link from primary netns failed: {:?}",
-                                                e
+                                    {
+                                        if let Err(err) = primary_rtnl
+                                            .move_link_to_netns_by_name(
+                                                &link_name,
+                                                &secondary.shared_netns.path,
                                             )
-                                        })?;
+                                            .await
+                                        {
+                                            warn!(
+                                                sl(),
+                                                "update_interface: failed to move distinct link into secondary netns, falling back to macvlan bootstrap";
+                                                "sandbox-id" => sid.as_str(),
+                                                "link" => link_name.as_str(),
+                                                "error" => format!("{:?}", err),
+                                            );
+                                        } else {
+                                            info!(
+                                                sl(),
+                                                "update_interface: moved distinct link into secondary netns";
+                                                "sandbox-id" => sid.as_str(),
+                                                "link" => link_name.as_str(),
+                                                "secondary-netns" => secondary.shared_netns.path.as_str(),
+                                            );
 
-                                    secondary
-                                        .rtnl
-                                        .update_interface_with_name_fallback(&interface)
-                                        .await
-                                        .map_ttrpc_err(|e| {
-                                            format!(
-                                                "update secondary interface after bootstrap failed: {:?}",
-                                                e
+                                            if secondary
+                                                .rtnl
+                                                .update_interface_with_name_fallback(&interface)
+                                                .await
+                                                .is_ok()
+                                            {
+                                                updated_after_move = true;
+                                            }
+                                        }
+                                    }
+
+                                    if !updated_after_move {
+                                        primary_rtnl
+                                            .bootstrap_secondary_macvlan_to_netns(
+                                                &interface,
+                                                &secondary.shared_netns.path,
                                             )
-                                        })?;
+                                            .await
+                                            .map_ttrpc_err(|e| {
+                                                format!(
+                                                    "bootstrap secondary link from primary netns failed: {:?}",
+                                                    e
+                                                )
+                                            })?;
+
+                                        secondary
+                                            .rtnl
+                                            .update_interface_with_name_fallback(&interface)
+                                            .await
+                                            .map_ttrpc_err(|e| {
+                                                format!(
+                                                    "update secondary interface after bootstrap failed: {:?}",
+                                                    e
+                                                )
+                                            })?;
+                                    }
                                 } else {
                                     return Err(ttrpc_error(
                                         ttrpc::Code::INTERNAL,
