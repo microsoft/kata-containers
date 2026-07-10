@@ -425,16 +425,20 @@ impl ResourceManagerInner {
                 .block_on(network::new(&network_config, device_manager))
                 .context("new network")?;
 
-            // Best-effort: try endpoint setup so host-side secondary endpoint
-            // plumbing can be established. On platforms/backends where
-            // network device setup still fails, continue with agent-side
-            // fallback so sandbox startup is not blocked.
+            // Try endpoint setup so host-side secondary endpoint plumbing can
+            // be established. Only tolerate known hotplug-specific failures;
+            // other setup errors should fail fast instead of being masked,
+            // since they can lead to hard-to-debug data plane breakage.
             if let Err(err) = rt.block_on(d.setup()) {
-                warn!(
-                    sl!(),
-                    "secondary network endpoint setup failed, continuing with agent-only apply: {:?}",
-                    err
-                );
+                if ResourceManagerInner::is_ignorable_secondary_setup_error(&err) {
+                    warn!(
+                        sl!(),
+                        "secondary network endpoint setup failed due to known hotplug limitation, continuing with agent-only apply: {:?}",
+                        err
+                    );
+                } else {
+                    return Err(err).context("secondary network endpoint setup");
+                }
             }
             Ok(d)
         })
@@ -447,6 +451,18 @@ impl ResourceManagerInner {
         self.apply_network_to_agent(network.as_ref())
             .await
             .context("apply network to agent")
+    }
+
+    fn is_ignorable_secondary_setup_error(err: &anyhow::Error) -> bool {
+        let msg = format!("{err:#}").to_lowercase();
+        let has_hotplug_signal = msg.contains("hotplug")
+            || msg.contains("add pcie")
+            || msg.contains("add_device")
+            || msg.contains("device_add")
+            || msg.contains("openvmm");
+        let has_enoent = msg.contains("no such file or directory") || msg.contains("os error 2");
+
+        has_hotplug_signal && has_enoent
     }
 
     pub async fn apply_network_to_agent(&self, network: &dyn Network) -> Result<()> {
