@@ -1297,7 +1297,7 @@ impl agent_ttrpc::AgentService for AgentService {
                                 if no_parent_link && !secondary.shared_netns.path.is_empty() {
                                     warn!(
                                         sl(),
-                                        "update_interface: secondary fallback has no parent link; bootstrapping macvlan from primary netns";
+                                        "update_interface: secondary fallback has no parent link; bootstrapping secondary link from primary netns";
                                         "sandbox-id" => sid.as_str(),
                                         "secondary-netns" => secondary.shared_netns.path.as_str(),
                                         "target-name" => interface.name.as_str(),
@@ -1349,7 +1349,7 @@ impl agent_ttrpc::AgentService for AgentService {
 
                                     if !updated_after_move {
                                         primary_rtnl
-                                            .bootstrap_secondary_macvlan_to_netns(
+                                            .bootstrap_secondary_link_to_netns(
                                                 &interface,
                                                 &secondary.shared_netns.path,
                                             )

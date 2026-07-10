@@ -30,6 +30,7 @@ use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
 use std::os::fd::AsRawFd;
+use std::process::Command;
 use std::str::{self, FromStr};
 
 const MACVLAN_MODE_BRIDGE: u32 = 4;
@@ -223,20 +224,26 @@ impl Handle {
             )
         })?;
 
-        self.handle
-            .link()
-            .add()
-            .macvlan(child_name.clone(), parent_link.index(), MACVLAN_MODE_BRIDGE)
-            .execute()
-            .await
-            .with_context(|| {
-                format!(
-                    "create macvlan {} on parent {}({})",
-                    child_name,
-                    parent_link.name(),
-                    parent_link.address()
-                )
-            })?;
+        // Prefer ipvlan L2 first because it reuses the parent MAC on the
+        // lower device, which avoids backend MAC filtering issues observed
+        // with secondary macvlan in shared-VM paths.
+        if let Err(ipvlan_err) = create_ipvlan_l2_link(&parent_link.name(), &child_name) {
+            self.handle
+                .link()
+                .add()
+                .macvlan(child_name.clone(), parent_link.index(), MACVLAN_MODE_BRIDGE)
+                .execute()
+                .await
+                .with_context(|| {
+                    format!(
+                        "create macvlan {} on parent {}({}) after ipvlan attempt failed ({})",
+                        child_name,
+                        parent_link.name(),
+                        parent_link.address(),
+                        ipvlan_err
+                    )
+                })?;
+        }
 
         // Keep the inherited parent MAC for fallback macvlan.
         // In shared-VM secondary networking, some backends only admit the
@@ -303,7 +310,7 @@ impl Handle {
         ))
     }
 
-    pub(crate) async fn bootstrap_secondary_macvlan_to_netns(
+    pub(crate) async fn bootstrap_secondary_link_to_netns(
         &self,
         iface: &Interface,
         target_netns_path: &str,
@@ -315,6 +322,39 @@ impl Handle {
             .await?;
         Ok(child_name)
     }
+}
+
+fn create_ipvlan_l2_link(parent_ifname: &str, child_ifname: &str) -> Result<()> {
+    let output = Command::new("ip")
+        .args([
+            "link",
+            "add",
+            "link",
+            parent_ifname,
+            "name",
+            child_ifname,
+            "type",
+            "ipvlan",
+            "mode",
+            "l2",
+        ])
+        .output()
+        .with_context(|| {
+            format!(
+                "execute ip link add ipvlan for {} on {}",
+                child_ifname, parent_ifname
+            )
+        })?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "ip link add ipvlan failed: status={:?}, stderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
 }
 
 impl Handle {
