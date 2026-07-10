@@ -1324,9 +1324,16 @@ impl agent_ttrpc::AgentService for AgentService {
                                             "fallback-error" => fallback_err_msg.clone(),
                                         );
 
-                                        let mut primary = self.sandbox.lock().await;
-                                        primary
-                                            .rtnl
+                                        let mut primary_rtnl = create_rtnl_handle_in_netns(
+                                            &primary_netns_path,
+                                        )
+                                        .map_ttrpc_err(|e| {
+                                            format!(
+                                                "create primary netns rtnl handle failed (netns={}): {:?}",
+                                                primary_netns_path, e
+                                            )
+                                        })?;
+                                        primary_rtnl
                                             .update_interface_with_name_fallback(&interface)
                                             .await
                                             .map_ttrpc_err(|e| {
@@ -1371,9 +1378,30 @@ impl agent_ttrpc::AgentService for AgentService {
                                                     "move-pick-error" => move_pick_err_msg,
                                                 );
 
-                                                let mut primary = self.sandbox.lock().await;
-                                                primary
-                                                    .rtnl
+                                                let primary_netns_path = {
+                                                    let primary = self.sandbox.lock().await;
+                                                    primary.shared_netns.path.clone()
+                                                };
+                                                if primary_netns_path.is_empty() {
+                                                    return Err(ttrpc_error(
+                                                        ttrpc::Code::INTERNAL,
+                                                        format!(
+                                                            "primary shared netns path is empty; cannot apply secondary interface fallback: primary_err={}, fallback_err={}",
+                                                            err_msg, fallback_err_msg
+                                                        ),
+                                                    ));
+                                                }
+
+                                                let mut primary_rtnl = create_rtnl_handle_in_netns(
+                                                    &primary_netns_path,
+                                                )
+                                                .map_ttrpc_err(|e| {
+                                                    format!(
+                                                        "create primary netns rtnl handle failed (netns={}): {:?}",
+                                                        primary_netns_path, e
+                                                    )
+                                                })?;
+                                                primary_rtnl
                                                     .update_interface_with_name_fallback(&interface)
                                                     .await
                                                     .map_ttrpc_err(|e| {
