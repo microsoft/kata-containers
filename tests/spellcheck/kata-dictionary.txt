@@ -99,6 +99,7 @@ upperdir
 netns
 Netlink
 ttrpc
+vmservice
 vsock
 
 # Security & Encryption
