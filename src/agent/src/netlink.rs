@@ -365,6 +365,13 @@ impl Handle {
         let mut request = self.handle.link().set(link.index());
         request.message_mut().header = link.header.clone();
 
+        if !iface.hwAddr.is_empty() && !link.address().eq_ignore_ascii_case(&iface.hwAddr) {
+            let parsed_mac = parse_mac_address(&iface.hwAddr).with_context(|| {
+                format!("failed to parse interface MAC address: {}", iface.hwAddr)
+            })?;
+            request = request.address(parsed_mac.to_vec());
+        }
+
         request
             .mtu(iface.mtu as _)
             .name(iface.name.clone())
