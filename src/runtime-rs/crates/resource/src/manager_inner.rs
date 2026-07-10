@@ -414,15 +414,16 @@ impl ResourceManagerInner {
             }
         }
 
-        // Build and set up a temporary network object from the provided netns,
-        // then push interfaces/routes/neighbors to the agent.
+        // Build a temporary network object from the provided netns and push
+        // interfaces/routes/neighbors to the agent. Secondary-pod network
+        // attachment is handled inside the guest by the agent, so we do not
+        // call endpoint.attach() here.
         let device_manager = self.device_manager.clone();
         let network = thread::spawn(move || -> Result<Arc<dyn Network>> {
             let rt = runtime::Builder::new_current_thread().enable_io().build()?;
             let d = rt
                 .block_on(network::new(&network_config, device_manager))
                 .context("new network")?;
-            rt.block_on(d.setup()).context("setup network")?;
             Ok(d)
         })
         .join()

@@ -28,9 +28,10 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::os::fd::AsRawFd;
 use std::ops::Deref;
 use std::str::{self, FromStr};
+
+const MACVLAN_MODE_BRIDGE: u32 = 4;
 
 /// Search criteria to use when looking for a link in `find_link`.
 pub enum LinkFilter<'a> {
@@ -137,7 +138,7 @@ impl Handle {
                     }
                 }
 
-                let link = self
+                let parent_link = self
                     .find_unique_non_loopback_link()
                     .await
                     .with_context(|| {
@@ -154,11 +155,21 @@ impl Handle {
                         }
                     })?;
 
-                self.update_interface_on_link(iface, &link)
+                let child_link = self
+                    .create_secondary_macvlan_link(&parent_link, iface)
                     .await
                     .with_context(|| {
                         format!(
-                            "updated via unique-link fallback after MAC lookup failed: {}",
+                            "created secondary macvlan child after MAC lookup failed: {}",
+                            mac_err_msg
+                        )
+                    })?;
+
+                self.update_interface_on_link(iface, &child_link)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "updated via macvlan fallback after MAC lookup failed: {}",
                             mac_err_msg
                         )
                     })
@@ -190,44 +201,49 @@ impl Handle {
         }
     }
 
-    pub async fn pick_link_for_secondary_netns_move(
+    async fn create_secondary_macvlan_link(
         &self,
-        requested_name: &str,
-        requested_mac: &str,
-    ) -> Result<String> {
-        let candidates = self
-            .list_links()
-            .await?
-            .into_iter()
-            .filter(|link| !link.is_loopback())
-            .map(|link| LinkIdentity {
-                name: link.name(),
-                address: link.address(),
-                index: link.index(),
-            })
-            .collect::<Vec<_>>();
+        parent_link: &Link,
+        iface: &Interface,
+    ) -> Result<Link> {
+        let mut child_name = None;
+        for suffix in 0..32u32 {
+            let candidate = format!("ksec{:x}{:x}", parent_link.index(), suffix);
+            if self.find_link(LinkFilter::Name(&candidate)).await.is_err() {
+                child_name = Some(candidate);
+                break;
+            }
+        }
 
-        pick_link_for_secondary_netns_move_from_candidates(
-            candidates,
-            requested_name,
-            requested_mac,
-        )
-    }
+        let child_name = child_name.ok_or_else(|| {
+            anyhow!(
+                "unable to allocate a temporary name for secondary macvlan on parent {}",
+                parent_link.name()
+            )
+        })?;
 
-    pub async fn move_link_to_netns(&self, ifname: &str, netns_path: &str) -> Result<()> {
-        let link = self.find_link(LinkFilter::Name(ifname)).await?;
-        let netns = fs::File::open(netns_path)
-            .with_context(|| format!("open target netns path {}", netns_path))?;
-
-        let mut request = self.handle.link().set(link.index());
-        request.message_mut().header = link.header.clone();
-        request
-            .setns_by_fd(netns.as_raw_fd())
+        self.handle
+            .link()
+            .add()
+            .macvlan(child_name.clone(), parent_link.index(), MACVLAN_MODE_BRIDGE)
             .execute()
             .await
-            .with_context(|| format!("move interface {} to netns {}", ifname, netns_path))?;
+            .with_context(|| {
+                format!(
+                    "create macvlan {} on parent {}({})",
+                    child_name,
+                    parent_link.name(),
+                    parent_link.address()
+                )
+            })?;
 
-        Ok(())
+        if !iface.hwAddr.is_empty() {
+            let _ = self.set_link_mac_by_name(&child_name, &iface.hwAddr).await;
+        }
+
+        self.find_link(LinkFilter::Name(&child_name))
+            .await
+            .with_context(|| format!("lookup created macvlan link {}", child_name))
     }
 }
 
