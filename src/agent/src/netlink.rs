@@ -205,7 +205,7 @@ impl Handle {
     async fn create_secondary_macvlan_link(
         &self,
         parent_link: &Link,
-        iface: &Interface,
+        _iface: &Interface,
     ) -> Result<Link> {
         let mut child_name = None;
         for suffix in 0..32u32 {
@@ -238,9 +238,10 @@ impl Handle {
                 )
             })?;
 
-        if !iface.hwAddr.is_empty() {
-            let _ = self.set_link_mac_by_name(&child_name, &iface.hwAddr).await;
-        }
+        // Keep the inherited parent MAC for fallback macvlan.
+        // In shared-VM secondary networking, some backends only admit the
+        // primary interface MAC on the lower device; forcing a new MAC here
+        // can make the secondary link unreachable from other pods.
 
         self.find_link(LinkFilter::Name(&child_name))
             .await
