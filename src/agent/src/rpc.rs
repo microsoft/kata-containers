@@ -257,7 +257,7 @@ fn bootstrap_secondary_macvlan_to_netns(
     primary_netns_path: &str,
     parent_ifname: &str,
     secondary_netns_path: &str,
-    target_mac: &str,
+    _target_mac: &str,
 ) -> Result<()> {
     let tmp_ifname = format!("k2{}", unistd::gettid().as_raw());
 
@@ -291,18 +291,6 @@ fn bootstrap_secondary_macvlan_to_netns(
             return Err(primary_err)
                 .with_context(|| format!("create macvlan {} on {}", tmp_ifname, parent_ifname));
         }
-    }
-
-    if !target_mac.is_empty() {
-        run_ip_command_in_netns(primary_netns_path, &[
-            "link".to_string(),
-            "set".to_string(),
-            "dev".to_string(),
-            tmp_ifname.clone(),
-            "address".to_string(),
-            target_mac.to_string(),
-        ])
-        .with_context(|| format!("set macvlan {} MAC {}", tmp_ifname, target_mac))?;
     }
 
     run_ip_command_in_netns(primary_netns_path, &[
