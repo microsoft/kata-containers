@@ -90,15 +90,32 @@ install_nvidia_fabricmanager() {
 	# tooling into every fabricmanager-enabled UVM. Gate it on a dedicated
 	# NVIDIA_GPU_STACK token so consumers opt in only when they need it.
 	local pkgs="nvidia-fabricmanager-${driver_major} libnvidia-nscq-${driver_major}"
-	is_feature_enabled "nvlsm" && pkgs+=" nvlsm-${driver_major}"
+	# nvlsm (NVLink Subnet Manager) is NOT suffixed with the driver major on
+	# the aarch64 'sbsa' CUDA repo: it ships under the bare name 'nvlsm' with a
+	# date-based version (e.g. nvlsm_2025.10.14-1_arm64.deb), so 'nvlsm-580' has
+	# no apt candidate. When the caller pins a version via the
+	# 'nvlsm_version=<ver>' token in NVIDIA_GPU_STACK (mirrors the 'driver=<ver>'
+	# token), install 'nvlsm=<ver>'; otherwise fall back to the bare 'nvlsm'.
+	if is_feature_enabled "nvlsm"; then
+		local nvlsm_version=""
+		if [[ "${nvidia_gpu_stack}" =~ nvlsm_version=([^,]+) ]]; then
+			nvlsm_version="${BASH_REMATCH[1]}"
+		fi
+		if [[ -n "${nvlsm_version}" ]]; then
+			pkgs+=" nvlsm=${nvlsm_version}"
+		else
+			pkgs+=" nvlsm"
+		fi
+	fi
 
 	# shellcheck disable=SC2086 # pkgs is an intentionally word-split list
 	eval "${APT_INSTALL}" ${pkgs}
 	# Include the unversioned aliases: on driver 580+ libnvidia-nscq
 	# no longer ships with a -${driver_major} suffix, so apt resolves
 	# the request via Provides: to the bare name. See hold_if_installed.
+	# apt-mark hold takes bare package names, so hold 'nvlsm' (not 'nvlsm=<ver>').
 	# shellcheck disable=SC2086
-	hold_if_installed ${pkgs} libnvidia-nscq
+	hold_if_installed nvidia-fabricmanager-${driver_major} libnvidia-nscq-${driver_major} libnvidia-nscq nvlsm
 }
 
 install_userspace_components() {
