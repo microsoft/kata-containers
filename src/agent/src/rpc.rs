@@ -1874,8 +1874,13 @@ impl agent_ttrpc::AgentService for AgentService {
                 load_kernel_module(m).map_ttrpc_err(same)?;
             }
 
-            // s.setup_shared_namespaces().await.map_ttrpc_err(same)?;
-            s.setup_shared_namespaces("").await.map_ttrpc_err(same)?;
+            let shared_ns_id = s.id.clone();
+            s.setup_shared_namespaces(&shared_ns_id).await.map_ttrpc_err(same)?;
+
+            if !s.shared_netns.path.is_empty() {
+                s.rtnl = create_rtnl_handle_in_netns(&s.shared_netns.path)
+                    .map_ttrpc_err(same)?;
+            }
         }
 
         let m = add_storages(sl(), req.storages.clone(), &self.sandbox, None)

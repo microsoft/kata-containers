@@ -267,8 +267,9 @@ impl Sandbox {
             .await
             .context("setup persistent UTS namespace")?;
 
-        // Keep primary sandbox behavior unchanged. Only secondary sandboxes
-        // get a dedicated guest NET namespace for network isolation.
+        // Create a persistent guest NET namespace for sandboxes that provide
+        // an identifier. This lets containers join a stable guest netns path
+        // instead of falling back to a transient thread namespace.
         if !secondary_sandbox_id.is_empty() {
             self.shared_netns = Namespace::new(&self.logger)
                 .get_net()
