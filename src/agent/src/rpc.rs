@@ -203,6 +203,12 @@ fn should_ignore_secondary_shared_netns_update_error(err_msg: &str) -> bool {
         || err_msg.contains("Link not found")
 }
 
+fn should_ignore_secondary_move_candidate_error(err_msg: &str) -> bool {
+    err_msg.contains("no non-loopback link available for secondary netns move")
+        || err_msg.contains("no non-loopback link found for fallback")
+        || err_msg.contains("Link not found")
+}
+
 fn should_ignore_secondary_shared_netns_route_error(err_msg: &str) -> bool {
     err_msg.contains("Link not found")
         || err_msg.contains("No such device")
@@ -1464,6 +1470,22 @@ impl agent_ttrpc::AgentService for AgentService {
                                                     }
                                                 }
 
+                                                return Ok(interface);
+                                            }
+
+                                            if should_ignore_secondary_move_candidate_error(
+                                                &move_pick_err_msg,
+                                            ) {
+                                                warn!(
+                                                    sl(),
+                                                    "update_interface: no viable primary link candidate for secondary netns move; skipping secondary interface update";
+                                                    "sandbox-id" => sid.as_str(),
+                                                    "target-name" => interface.name.as_str(),
+                                                    "target-mac" => interface.hwAddr.as_str(),
+                                                    "primary-error" => err_msg.clone(),
+                                                    "fallback-error" => fallback_err_msg.clone(),
+                                                    "move-pick-error" => move_pick_err_msg,
+                                                );
                                                 return Ok(interface);
                                             }
 
