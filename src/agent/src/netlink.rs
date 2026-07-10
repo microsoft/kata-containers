@@ -668,6 +668,16 @@ impl Handle {
         for route in list {
             let link = self.find_link(LinkFilter::Name(&route.device)).await?;
 
+            if !link.is_up() {
+                self.enable_link(link.index(), true).await.with_context(|| {
+                    format!(
+                        "failed to bring route device {} (index {}) up",
+                        route.device,
+                        link.index()
+                    )
+                })?;
+            }
+
             const MAIN_TABLE: u32 = libc::RT_TABLE_MAIN as u32;
             let uni_cast: RouteType = RouteType::from(libc::RTN_UNICAST);
             let boot_prot: RouteProtocol = RouteProtocol::from(libc::RTPROT_BOOT);
@@ -701,7 +711,7 @@ impl Handle {
                 flags.push(RouteFlag::Other(route.flags - got));
             }
 
-            message.header.flags = flags;
+            message.header.flags = flags.clone();
 
             if route.mtu != 0 {
                 let route_metrics = vec![RouteMetric::Mtu(route.mtu)];
@@ -745,7 +755,60 @@ impl Handle {
 
                 if let Err(rtnetlink::Error::NetlinkError(message)) = request.execute().await {
                     if let Some(code) = message.code {
-                        if Errno::from_raw(code.get()) != Errno::EEXIST {
+                        let errno = Errno::from_raw(code.get());
+                        if errno == Errno::ENETDOWN {
+                            self.enable_link(link.index(), true).await.with_context(|| {
+                                format!(
+                                    "failed to re-enable route device {} (index {}) after ENETDOWN",
+                                    route.device,
+                                    link.index()
+                                )
+                            })?;
+
+                            let mut retry = self
+                                .handle
+                                .route()
+                                .add()
+                                .table_id(MAIN_TABLE)
+                                .kind(uni_cast)
+                                .protocol(boot_prot)
+                                .scope(scope);
+                            retry.message_mut().header.flags = flags.clone();
+                            if route.mtu != 0 {
+                                retry.message_mut().attributes.push(RouteAttribute::Metrics(vec![
+                                    RouteMetric::Mtu(route.mtu),
+                                ]));
+                            }
+
+                            let mut retry = retry
+                                .v6()
+                                .destination_prefix(dest_addr.ip(), dest_addr.prefix())
+                                .output_interface(link.index())
+                                .replace();
+                            if !route.source.is_empty() {
+                                let network = Ipv6Network::from_str(&route.source)?;
+                                if network.prefix() > 0 {
+                                    retry = retry.source_prefix(network.ip(), network.prefix());
+                                } else {
+                                    retry.message_mut().attributes.push(Nla::PrefSource(
+                                        RouteAddress::from(network.ip()),
+                                    ));
+                                }
+                            }
+                            if !route.gateway.is_empty() {
+                                let ip = Ipv6Addr::from_str(&route.gateway)?;
+                                retry = retry.gateway(ip);
+                            }
+                            retry.execute().await.map_err(|err| {
+                                anyhow!(
+                                    "Failed to add IP v6 route after ENETDOWN retry (src: {}, dst: {}, gtw: {}, Err: {:?})",
+                                    route.source(),
+                                    route.dest(),
+                                    route.gateway(),
+                                    err
+                                )
+                            })?;
+                        } else if errno != Errno::EEXIST {
                             return Err(anyhow!(
                                 "Failed to add IP v6 route (src: {}, dst: {}, gtw: {},Err: {})",
                                 route.source(),
@@ -789,7 +852,60 @@ impl Handle {
 
                 if let Err(rtnetlink::Error::NetlinkError(message)) = request.execute().await {
                     if let Some(code) = message.code {
-                        if Errno::from_raw(code.get()) != Errno::EEXIST {
+                        let errno = Errno::from_raw(code.get());
+                        if errno == Errno::ENETDOWN {
+                            self.enable_link(link.index(), true).await.with_context(|| {
+                                format!(
+                                    "failed to re-enable route device {} (index {}) after ENETDOWN",
+                                    route.device,
+                                    link.index()
+                                )
+                            })?;
+
+                            let mut retry = self
+                                .handle
+                                .route()
+                                .add()
+                                .table_id(MAIN_TABLE)
+                                .kind(uni_cast)
+                                .protocol(boot_prot)
+                                .scope(scope);
+                            retry.message_mut().header.flags = flags.clone();
+                            if route.mtu != 0 {
+                                retry.message_mut().attributes.push(RouteAttribute::Metrics(vec![
+                                    RouteMetric::Mtu(route.mtu),
+                                ]));
+                            }
+
+                            let mut retry = retry
+                                .v4()
+                                .destination_prefix(dest_addr.ip(), dest_addr.prefix())
+                                .output_interface(link.index())
+                                .replace();
+                            if !route.source.is_empty() {
+                                let network = Ipv4Network::from_str(&route.source)?;
+                                if network.prefix() > 0 {
+                                    retry = retry.source_prefix(network.ip(), network.prefix());
+                                } else {
+                                    retry.message_mut().attributes.push(RouteAttribute::PrefSource(
+                                        RouteAddress::from(network.ip()),
+                                    ));
+                                }
+                            }
+                            if !route.gateway.is_empty() {
+                                let ip = Ipv4Addr::from_str(&route.gateway)?;
+                                retry = retry.gateway(ip);
+                            }
+                            retry.execute().await.map_err(|err| {
+                                anyhow!(
+                                    "Failed to add IP v4 route after ENETDOWN retry (src: {}, dst: {}, gtw: {}, Err: {:?})",
+                                    route.source(),
+                                    route.dest(),
+                                    route.gateway(),
+                                    err
+                                )
+                            })?;
+                        } else if errno != Errno::EEXIST {
                             return Err(anyhow!(
                                 "Failed to add IP v4 route (src: {}, dst: {}, gtw: {},Err: {})",
                                 route.source(),
