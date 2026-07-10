@@ -261,7 +261,7 @@ fn bootstrap_secondary_macvlan_to_netns(
 ) -> Result<()> {
     let tmp_ifname = format!("k2{}", unistd::gettid().as_raw());
 
-    run_ip_command_in_netns(primary_netns_path, &[
+    let create_args = vec![
         "link".to_string(),
         "add".to_string(),
         "link".to_string(),
@@ -272,8 +272,26 @@ fn bootstrap_secondary_macvlan_to_netns(
         "macvlan".to_string(),
         "mode".to_string(),
         "bridge".to_string(),
-    ])
-    .with_context(|| format!("create macvlan {} on {}", tmp_ifname, parent_ifname))?;
+    ];
+
+    let create_result = run_ip_command_in_netns(primary_netns_path, &create_args);
+    if let Err(primary_err) = create_result {
+        let primary_err_msg = format!("{primary_err:#}");
+        let retry_in_current = primary_err_msg.contains("Cannot find device")
+            || primary_err_msg.contains("No such device");
+
+        if retry_in_current {
+            run_ip_command(&create_args).with_context(|| {
+                format!(
+                    "create macvlan {} on {} (fallback current netns after primary-netns failure: {})",
+                    tmp_ifname, parent_ifname, primary_err_msg
+                )
+            })?;
+        } else {
+            return Err(primary_err)
+                .with_context(|| format!("create macvlan {} on {}", tmp_ifname, parent_ifname));
+        }
+    }
 
     if !target_mac.is_empty() {
         run_ip_command_in_netns(primary_netns_path, &[
