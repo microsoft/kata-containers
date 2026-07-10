@@ -420,6 +420,7 @@ impl ResourceManagerInner {
         // Build and set up a temporary network object from the provided netns,
         // then push interfaces/routes/neighbors to the agent.
         let device_manager = self.device_manager.clone();
+        let is_openvmm = self.toml_config.runtime.hypervisor_name == "openvmm";
         let network = thread::spawn(move || -> Result<Arc<dyn Network>> {
             let rt = runtime::Builder::new_current_thread()
                 .enable_io()
@@ -428,7 +429,14 @@ impl ResourceManagerInner {
             let d = rt
                 .block_on(network::new(&network_config, device_manager))
                 .context("new network")?;
-            rt.block_on(d.setup()).context("setup network")?;
+            if is_openvmm {
+                info!(
+                    sl!(),
+                    "secondary network: skip endpoint attach setup for openvmm"
+                );
+            } else {
+                rt.block_on(d.setup()).context("setup network")?;
+            }
             Ok(d)
         })
         .join()
