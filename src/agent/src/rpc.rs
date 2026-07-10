@@ -237,7 +237,6 @@ fn parse_primary_like_ifname(err_msg: &str) -> Option<String> {
 fn bootstrap_secondary_macvlan_to_netns(
     parent_ifname: &str,
     secondary_netns_path: &str,
-    target_ifname: &str,
     target_mac: &str,
 ) -> Result<()> {
     let tmp_ifname = format!("k2{}", unistd::gettid().as_raw());
@@ -277,42 +276,6 @@ fn bootstrap_secondary_macvlan_to_netns(
         secondary_netns_path.to_string(),
     ])
     .with_context(|| format!("move macvlan {} to secondary netns", tmp_ifname))?;
-
-    let final_ifname = if target_ifname.is_empty() {
-        tmp_ifname.clone()
-    } else {
-        target_ifname.to_string()
-    };
-
-    if final_ifname != tmp_ifname {
-        run_ip_command(&[
-            "-n".to_string(),
-            secondary_netns_path.to_string(),
-            "link".to_string(),
-            "set".to_string(),
-            "dev".to_string(),
-            tmp_ifname.clone(),
-            "name".to_string(),
-            final_ifname.clone(),
-        ])
-        .with_context(|| {
-            format!(
-                "rename moved macvlan {} to {} in secondary netns",
-                tmp_ifname, final_ifname
-            )
-        })?;
-    }
-
-    run_ip_command(&[
-        "-n".to_string(),
-        secondary_netns_path.to_string(),
-        "link".to_string(),
-        "set".to_string(),
-        "dev".to_string(),
-        final_ifname,
-        "up".to_string(),
-    ])
-    .with_context(|| format!("bring secondary interface up in {}", secondary_netns_path))?;
 
     Ok(())
 }
@@ -1580,7 +1543,6 @@ impl agent_ttrpc::AgentService for AgentService {
                                                         match bootstrap_secondary_macvlan_to_netns(
                                                             &parent_ifname,
                                                             &secondary_netns_path,
-                                                            &interface.name,
                                                             &interface.hwAddr,
                                                         ) {
                                                             Ok(()) => {
