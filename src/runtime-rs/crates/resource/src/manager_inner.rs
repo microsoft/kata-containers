@@ -427,19 +427,29 @@ impl ResourceManagerInner {
 
         // Build and set up a temporary network object from the provided netns,
         // then push interfaces/routes/neighbors to the agent.
+        let skip_attach_for_openvmm = self.toml_config.runtime.hypervisor_name == "openvmm";
         let device_manager = self.device_manager.clone();
         let network = thread::spawn(move || -> Result<Arc<dyn Network>> {
             let rt = build_secondary_network_runtime()?;
             let d = rt
                 .block_on(network::new(&network_config, device_manager))
                 .context("new network")?;
-            rt.block_on(d.setup()).context("setup network")?;
+            if !skip_attach_for_openvmm {
+                rt.block_on(d.setup()).context("setup network")?;
+            }
             Ok(d)
         })
         .join()
         .map_err(|e| anyhow!("{:?}", e))
         .context("Couldn't join on the associated thread")?
         .context("failed to set up network")?;
+
+        if skip_attach_for_openvmm {
+            info!(
+                sl!(),
+                "secondary network: skipping endpoint attach for openvmm; relying on agent-side in-guest link creation"
+            );
+        }
 
         resolve_physical_endpoint_pci_paths(network.as_ref(), self.hypervisor.as_ref()).await;
         self.apply_network_to_agent(network.as_ref())
