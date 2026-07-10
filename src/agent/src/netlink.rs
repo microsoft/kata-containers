@@ -82,6 +82,8 @@ const ALL_ROUTE_FLAGS: [RouteFlag; 16] = [
     RouteFlag::OffloadFailed,
 ];
 
+const MACVLAN_MODE_BRIDGE: u32 = 4;
+
 /// A filter to query addresses.
 pub enum AddressFilter {
     /// Return addresses that belong to the given interface.
@@ -190,30 +192,6 @@ impl Handle {
         }
     }
 
-    pub async fn pick_link_for_secondary_netns_move(
-        &self,
-        requested_name: &str,
-        requested_mac: &str,
-    ) -> Result<String> {
-        let candidates = self
-            .list_links()
-            .await?
-            .into_iter()
-            .filter(|link| !link.is_loopback())
-            .map(|link| LinkIdentity {
-                name: link.name(),
-                address: link.address(),
-                index: link.index(),
-            })
-            .collect::<Vec<_>>();
-
-        pick_link_for_secondary_netns_move_from_candidates(
-            candidates,
-            requested_name,
-            requested_mac,
-        )
-    }
-
     pub async fn move_link_to_netns(&self, ifname: &str, netns_path: &str) -> Result<()> {
         let link = self.find_link(LinkFilter::Name(ifname)).await?;
         let netns = fs::File::open(netns_path)
@@ -229,8 +207,105 @@ impl Handle {
 
         Ok(())
     }
+
+    pub async fn create_secondary_link_in_netns(
+        &self,
+        requested_name: &str,
+        requested_mac: &str,
+        netns_path: &str,
+    ) -> Result<String> {
+        let parent = match self.find_link(LinkFilter::Name(requested_name)).await {
+            Ok(link) => link,
+            Err(name_err) => {
+                if !requested_mac.is_empty() {
+                    match self.find_link(LinkFilter::Address(requested_mac)).await {
+                        Ok(link) => link,
+                        Err(mac_err) => {
+                            self.find_unique_non_loopback_link().await.with_context(|| {
+                                format!(
+                                    "failed to resolve parent link for secondary link creation: name_err={}, mac_err={}",
+                                    name_err, mac_err
+                                )
+                            })?
+                        }
+                    }
+                } else {
+                    self.find_unique_non_loopback_link().await.with_context(|| {
+                        format!(
+                            "failed to resolve parent link for secondary link creation: name_err={}",
+                            name_err
+                        )
+                    })?
+                }
+            }
+        };
+
+        // Linux interface names are limited to 15 characters.
+        let mut child_name = String::new();
+        for suffix in 0..32 {
+            let candidate = format!("ksec{:x}{:x}", parent.index(), suffix);
+            if self.find_link(LinkFilter::Name(&candidate)).await.is_err() {
+                child_name = candidate;
+                break;
+            }
+        }
+
+        if child_name.is_empty() {
+            return Err(anyhow!(
+                "unable to allocate a temporary name for secondary link on parent {}",
+                parent.name()
+            ));
+        }
+
+        self.handle
+            .link()
+            .add()
+            .macvlan(child_name.clone(), parent.index(), MACVLAN_MODE_BRIDGE)
+            .execute()
+            .await
+            .with_context(|| {
+                format!(
+                    "create macvlan {} on parent {}({})",
+                    child_name,
+                    parent.name(),
+                    parent.address()
+                )
+            })?;
+
+        let child_link = self
+            .find_link(LinkFilter::Name(&child_name))
+            .await
+            .with_context(|| format!("lookup created child link {}", child_name))?;
+
+        if !requested_mac.is_empty() {
+            let parsed_mac = parse_mac_address(requested_mac)
+                .with_context(|| format!("failed to parse MAC address: {requested_mac}"))?;
+            let mut request = self.handle.link().set(child_link.index());
+            request.message_mut().header = child_link.header.clone();
+            request
+                .address(parsed_mac.to_vec())
+                .execute()
+                .await
+                .with_context(|| {
+                    format!(
+                        "set MAC {} on created child link {}",
+                        requested_mac, child_name
+                    )
+                })?;
+        }
+
+        self.move_link_to_netns(&child_name, netns_path).await.with_context(|| {
+            format!(
+                "move created child link {} to netns {}",
+                child_name, netns_path
+            )
+        })?;
+
+        Ok(child_name)
+    }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LinkIdentity {
     name: String,
@@ -238,6 +313,7 @@ struct LinkIdentity {
     index: u32,
 }
 
+#[cfg(test)]
 fn pick_link_for_secondary_netns_move_from_candidates(
     mut candidates: Vec<LinkIdentity>,
     requested_name: &str,

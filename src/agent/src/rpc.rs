@@ -1305,51 +1305,35 @@ impl agent_ttrpc::AgentService for AgentService {
                                         ));
                                     }
 
-                                    let move_candidate = {
+                                    let created_link = {
                                         let primary = self.sandbox.lock().await;
                                         primary
                                             .rtnl
-                                            .pick_link_for_secondary_netns_move(
+                                            .create_secondary_link_in_netns(
                                                 &interface.name,
                                                 &interface.hwAddr,
+                                                &secondary_netns_path,
                                             )
                                             .await
                                             .map_ttrpc_err(|e| {
                                                 format!(
-                                                    "pick primary link for secondary netns move failed: {:?}; primary_err={}; fallback_err={}",
+                                                    "create secondary link in netns failed: {:?}; primary_err={}; fallback_err={}",
                                                     e, err_msg, fallback_err_msg
                                                 )
                                             })?
                                     };
 
-                                    {
-                                        let primary = self.sandbox.lock().await;
-                                        warn!(
-                                            sl(),
-                                            "update_interface: moving link from primary netns into secondary netns";
-                                            "sandbox-id" => sid.as_str(),
-                                            "target-name" => interface.name.as_str(),
-                                            "target-mac" => interface.hwAddr.as_str(),
-                                            "move-candidate" => move_candidate.as_str(),
-                                            "secondary-netns" => secondary_netns_path.as_str(),
-                                            "primary-error" => err_msg.clone(),
-                                            "fallback-error" => fallback_err_msg.clone(),
-                                        );
-                                        primary
-                                            .rtnl
-                                            .move_link_to_netns(&move_candidate, &secondary_netns_path)
-                                            .await
-                                            .map_ttrpc_err(|e| {
-                                                format!(
-                                                    "move primary link {} to secondary netns {} failed: {:?}; primary_err={}; fallback_err={}",
-                                                    move_candidate,
-                                                    secondary_netns_path,
-                                                    e,
-                                                    err_msg,
-                                                    fallback_err_msg
-                                                )
-                                            })?;
-                                    }
+                                    warn!(
+                                        sl(),
+                                        "update_interface: created secondary link in target netns";
+                                        "sandbox-id" => sid.as_str(),
+                                        "target-name" => interface.name.as_str(),
+                                        "target-mac" => interface.hwAddr.as_str(),
+                                        "created-link" => created_link.as_str(),
+                                        "secondary-netns" => secondary_netns_path.as_str(),
+                                        "primary-error" => err_msg.clone(),
+                                        "fallback-error" => fallback_err_msg.clone(),
+                                    );
 
                                     secondary
                                         .rtnl
@@ -1357,8 +1341,8 @@ impl agent_ttrpc::AgentService for AgentService {
                                         .await
                                         .map_ttrpc_err(|e| {
                                             format!(
-                                                "update secondary interface after netns move failed: move_candidate={}, primary_err={}, fallback_err={}, final_err={:?}",
-                                                move_candidate,
+                                                "update secondary interface after secondary-link creation failed: created_link={}, primary_err={}, fallback_err={}, final_err={:?}",
+                                                created_link,
                                                 err_msg,
                                                 fallback_err_msg,
                                                 e
