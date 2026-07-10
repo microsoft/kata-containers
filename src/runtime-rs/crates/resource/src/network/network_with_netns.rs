@@ -33,6 +33,8 @@ use super::{
 };
 use crate::network::NetworkInfo;
 
+static NEXT_ENDPOINT_INDEX: AtomicU32 = AtomicU32::new(0);
+
 #[derive(Clone, Debug)]
 pub struct NetworkWithNetNsConfig {
     pub network_model: String,
@@ -237,7 +239,6 @@ async fn get_entity_from_netns(
 
     let mut links = handle.link().get().execute();
 
-    let idx = AtomicU32::new(0);
     while let Some(link) = links.try_next().await? {
         let link = link::get_link_from_message(link);
         let attrs = link.attrs();
@@ -255,7 +256,7 @@ async fn get_entity_from_netns(
             continue;
         }
 
-        let idx = idx.fetch_add(1, Ordering::Relaxed);
+        let idx = NEXT_ENDPOINT_INDEX.fetch_add(1, Ordering::Relaxed);
         let (endpoint, network_info) =
             create_endpoint(&handle, link.as_ref(), ip_addresses, idx, config, d.clone())
                 .await
