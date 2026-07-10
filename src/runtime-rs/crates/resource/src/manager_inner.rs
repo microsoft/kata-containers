@@ -424,6 +424,18 @@ impl ResourceManagerInner {
             let d = rt
                 .block_on(network::new(&network_config, device_manager))
                 .context("new network")?;
+
+            // Best-effort: try endpoint setup so host-side secondary endpoint
+            // plumbing can be established. On platforms/backends where
+            // network device setup still fails, continue with agent-side
+            // fallback so sandbox startup is not blocked.
+            if let Err(err) = rt.block_on(d.setup()) {
+                warn!(
+                    sl!(),
+                    "secondary network endpoint setup failed, continuing with agent-only apply: {:?}",
+                    err
+                );
+            }
             Ok(d)
         })
         .join()
