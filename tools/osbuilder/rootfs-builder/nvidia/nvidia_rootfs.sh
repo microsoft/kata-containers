@@ -244,6 +244,24 @@ chisseled_compute() {
 	cp -a "${stage_one}"/usr/bin/nvidia-modprobe      bin/.
 	install -d -m 0755 usr/bin
 	cp -a "${stage_one}"/usr/bin/nvidia-modprobe      usr/bin/.
+
+	# nvidia-imex: on Blackwell coherent-NVLink parts (GB200) the GPU
+	# fabric/clique readiness that gates cuInit is brought up by nvidia-imex,
+	# NOT nv-fabricmanager. The 'compute' feature already apt-installs
+	# nvidia-imex into stage-one at the pinned driver version, but no chisel
+	# step copied it into the final image, so it was silently absent -> the
+	# fabric never reached a ready state (cuInit returned 802 / CliqueId
+	# stayed 32766). Ship the daemon + its control/query tool so NVRC can
+	# start it at boot (the .deb's systemd nvidia-imex.service never runs in
+	# the NVRC-PID1 UVM). Guarded so images without the compute feature (and
+	# thus without imex in stage-one) do not fail.
+	if [[ -f "${stage_one}/usr/bin/nvidia-imex" ]]; then
+		cp -a "${stage_one}"/usr/bin/nvidia-imex          bin/.
+		[[ -f "${stage_one}/usr/bin/nvidia-imex-ctl" ]] && \
+			cp -a "${stage_one}"/usr/bin/nvidia-imex-ctl  bin/.
+	else
+		echo "nvidia: warning: nvidia-imex missing from stage-one; Blackwell fabric bring-up needs it"
+	fi
 }
 
 chisseled_gpudirect() {
