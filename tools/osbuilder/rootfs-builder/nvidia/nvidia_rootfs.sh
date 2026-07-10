@@ -292,6 +292,18 @@ chisseled_compute() {
 	# daemon exits at startup). Starting it at boot is a separate NVRC concern
 	# (the .deb's systemd nvidia-imex.service never runs under the NVRC-PID1 UVM).
 	chisseled_from_deb "nvidia-imex"
+
+	# The nvidia-imex .deb ships config.cfg but NOT nodes_config.cfg (the node
+	# list is deployment-specific). config.cfg's IMEX_NODE_CONFIG_FILE points at
+	# /etc/nvidia-imex/nodes_config.cfg, and imex needs that file to form its
+	# IMEX domain. For the single-node UVM (one GPU clique per VM) the domain has
+	# exactly one member -- this node via loopback -- so write a one-line node
+	# list. Without it imex cannot reach "Domain State: UP" and the GPU fabric
+	# never becomes ready. Only written when imex was actually shipped (config.cfg
+	# present) so non-compute images are unaffected.
+	if [[ -f etc/nvidia-imex/config.cfg && ! -f etc/nvidia-imex/nodes_config.cfg ]]; then
+		echo "127.0.0.1" > etc/nvidia-imex/nodes_config.cfg
+	fi
 }
 
 chisseled_gpudirect() {
