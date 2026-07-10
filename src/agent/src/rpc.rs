@@ -1527,6 +1527,51 @@ impl agent_ttrpc::AgentService for AgentService {
         if let Some(sid) = target_sid {
             let mut secondary_sandboxes = self.secondary_sandboxes.lock().await;
             if let Some(secondary) = secondary_sandboxes.get_mut(&sid) {
+                let primary_netns_path = {
+                    let primary = self.sandbox.lock().await;
+                    primary.shared_netns.path.clone()
+                };
+                let secondary_netns_path = secondary.shared_netns.path.clone();
+
+                if !primary_netns_path.is_empty() && secondary_netns_path == primary_netns_path {
+                    warn!(
+                        sl(),
+                        "update_routes: secondary shares primary netns, applying routes through primary netns";
+                        "sandbox-id" => sid.as_str(),
+                        "primary-netns" => primary_netns_path.as_str(),
+                    );
+
+                    drop(secondary_sandboxes);
+                    let mut primary = self.sandbox.lock().await;
+                    primary
+                        .rtnl
+                        .update_routes(new_routes.clone())
+                        .await
+                        .map_ttrpc_err(|e| {
+                            format!(
+                                "Failed to update secondary routes through shared primary netns: {:?}",
+                                e
+                            )
+                        })?;
+
+                    let list = primary
+                        .rtnl
+                        .list_routes()
+                        .await
+                        .map_ttrpc_err(|e| {
+                            format!(
+                                "Failed to list routes after shared primary-netns route update: {:?}",
+                                e
+                            )
+                        })?;
+
+                    *self.network_target_sandbox.lock().await = None;
+                    return Ok(protocols::agent::Routes {
+                        Routes: list,
+                        ..Default::default()
+                    });
+                }
+
                 let secondary_update_result = secondary.rtnl.update_routes(new_routes.clone()).await;
 
                 let list = match secondary_update_result {
@@ -1540,7 +1585,8 @@ impl agent_ttrpc::AgentService for AgentService {
                     Err(secondary_err) => {
                         let secondary_err_msg = format!("{secondary_err:#}");
                         let should_try_primary = secondary_err_msg.contains("Link not found")
-                            || secondary_err_msg.contains("Network is down");
+                            || secondary_err_msg.contains("Network is down")
+                            || secondary_err_msg.contains("No such device");
 
                         if !should_try_primary {
                             return Err(ttrpc_error(
