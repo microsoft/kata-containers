@@ -1305,6 +1305,42 @@ impl agent_ttrpc::AgentService for AgentService {
                                         ));
                                     }
 
+                                    let primary_netns_path = {
+                                        let primary = self.sandbox.lock().await;
+                                        primary.shared_netns.path.clone()
+                                    };
+
+                                    if !primary_netns_path.is_empty()
+                                        && secondary_netns_path == primary_netns_path
+                                    {
+                                        warn!(
+                                            sl(),
+                                            "update_interface: secondary shares primary netns, applying interface update through primary netns";
+                                            "sandbox-id" => sid.as_str(),
+                                            "target-name" => interface.name.as_str(),
+                                            "target-mac" => interface.hwAddr.as_str(),
+                                            "primary-netns" => primary_netns_path.as_str(),
+                                            "primary-error" => err_msg.clone(),
+                                            "fallback-error" => fallback_err_msg.clone(),
+                                        );
+
+                                        let mut primary = self.sandbox.lock().await;
+                                        primary
+                                            .rtnl
+                                            .update_interface_with_name_fallback(&interface)
+                                            .await
+                                            .map_ttrpc_err(|e| {
+                                                format!(
+                                                    "update secondary interface through shared primary netns failed: primary_err={}, fallback_err={}, final_err={:?}",
+                                                    err_msg,
+                                                    fallback_err_msg,
+                                                    e
+                                                )
+                                            })?;
+
+                                        return Ok(interface);
+                                    }
+
                                     let move_candidate = {
                                         let primary = self.sandbox.lock().await;
                                         primary
