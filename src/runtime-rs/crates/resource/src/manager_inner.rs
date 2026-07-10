@@ -70,6 +70,14 @@ pub(crate) struct ResourceManagerInner {
     pub swap_resource: Option<SwapResource>,
 }
 
+fn build_secondary_network_runtime() -> Result<runtime::Runtime> {
+    runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .context("build secondary network runtime")
+}
+
 impl ResourceManagerInner {
     pub(crate) async fn new(
         sid: &str,
@@ -255,7 +263,10 @@ impl ResourceManagerInner {
         // tokio runtime, and block the task on it.
         let device_manager = self.device_manager.clone();
         let network = thread::spawn(move || -> Result<Arc<dyn Network>> {
-            let rt = runtime::Builder::new_current_thread().enable_io().build()?;
+            let rt = runtime::Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .build()?;
             let d = rt
                 .block_on(network::new(&network_config, device_manager))
                 .context("new network")?;
@@ -418,7 +429,7 @@ impl ResourceManagerInner {
         // then push interfaces/routes/neighbors to the agent.
         let device_manager = self.device_manager.clone();
         let network = thread::spawn(move || -> Result<Arc<dyn Network>> {
-            let rt = runtime::Builder::new_current_thread().enable_io().build()?;
+            let rt = build_secondary_network_runtime()?;
             let d = rt
                 .block_on(network::new(&network_config, device_manager))
                 .context("new network")?;
@@ -1429,12 +1440,13 @@ fn block_device_node_is_readonly(major: i64, minor: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::device_cgroup_access_is_readonly;
+    use super::{build_secondary_network_runtime, device_cgroup_access_is_readonly};
     use oci_spec::runtime::{
         Linux, LinuxBuilder, LinuxDeviceCgroup, LinuxDeviceCgroupBuilder, LinuxDeviceType,
         LinuxResourcesBuilder,
     };
     use rstest::rstest;
+    use std::time::Duration;
 
     const MAJOR: i64 = 8;
     const MINOR: i64 = 0;
@@ -1509,5 +1521,13 @@ mod tests {
             MAJOR,
             MINOR
         ));
+    }
+
+    #[test]
+    fn secondary_network_runtime_has_timers_enabled() {
+        let rt = build_secondary_network_runtime().expect("secondary network runtime");
+        rt.block_on(async {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        });
     }
 }
