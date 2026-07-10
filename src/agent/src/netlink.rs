@@ -32,6 +32,7 @@ use std::ops::Deref;
 use std::os::fd::AsRawFd;
 use std::process::Command;
 use std::str::{self, FromStr};
+use tracing::{info, warn};
 
 const MACVLAN_MODE_BRIDGE: u32 = 4;
 
@@ -228,6 +229,12 @@ impl Handle {
         // lower device, which avoids backend MAC filtering issues observed
         // with secondary macvlan in shared-VM paths.
         if let Err(ipvlan_err) = create_ipvlan_l2_link(&parent_link.name(), &child_name) {
+            warn!(
+                parent = %parent_link.name(),
+                child = %child_name,
+                error = ?ipvlan_err,
+                "secondary link fallback: ipvlan-l2 creation failed; trying macvlan"
+            );
             self.handle
                 .link()
                 .add()
@@ -243,6 +250,17 @@ impl Handle {
                         ipvlan_err
                     )
                 })?;
+            info!(
+                parent = %parent_link.name(),
+                child = %child_name,
+                "secondary link fallback: macvlan created"
+            );
+        } else {
+            info!(
+                parent = %parent_link.name(),
+                child = %child_name,
+                "secondary link fallback: ipvlan-l2 created"
+            );
         }
 
         // Keep the inherited parent MAC for fallback macvlan.
