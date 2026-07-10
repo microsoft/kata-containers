@@ -1501,111 +1501,52 @@ impl agent_ttrpc::AgentService for AgentService {
                                                     "move-pick-error" => move_pick_err_msg.clone(),
                                                 );
 
-                                                let primary_netns_path = {
-                                                    let primary = self.sandbox.lock().await;
-                                                    primary.shared_netns.path.clone()
-                                                };
-                                                if primary_netns_path.is_empty() {
-                                                    return Err(ttrpc_error(
-                                                        ttrpc::Code::INTERNAL,
-                                                        format!(
-                                                            "primary shared netns path is empty; cannot apply secondary interface fallback: primary_err={}, fallback_err={}",
-                                                            err_msg, fallback_err_msg
-                                                        ),
-                                                    ));
-                                                }
+                                                let parent_ifname =
+                                                    parse_primary_like_ifname(&move_pick_err_msg)
+                                                        .unwrap_or_else(|| interface.name.clone());
 
-                                                let mut primary_rtnl = create_rtnl_handle_in_netns(
-                                                    &primary_netns_path,
-                                                )
-                                                .map_ttrpc_err(|e| {
-                                                    format!(
-                                                        "create primary netns rtnl handle failed (netns={}): {:?}",
-                                                        primary_netns_path, e
-                                                    )
-                                                })?;
-                                                if let Err(e) = primary_rtnl
-                                                    .update_interface_with_name_fallback(&interface)
-                                                    .await
-                                                {
-                                                    let final_err_msg = format!("{e:#}");
-                                                    if should_ignore_secondary_shared_netns_update_error(
-                                                        &final_err_msg,
-                                                    ) {
-                                                        let parent_ifname =
-                                                            parse_primary_like_ifname(
-                                                                &move_pick_err_msg,
-                                                            )
-                                                            .unwrap_or_else(|| {
-                                                                interface.name.clone()
-                                                            });
-
-                                                        match bootstrap_secondary_macvlan_to_netns(
-                                                            &parent_ifname,
-                                                            &secondary_netns_path,
-                                                            &interface.hwAddr,
-                                                        ) {
-                                                            Ok(()) => {
-                                                                info!(
-                                                                    sl(),
-                                                                    "update_interface: bootstrapped secondary macvlan into isolated netns";
-                                                                    "sandbox-id" => sid.as_str(),
-                                                                    "parent-ifname" => parent_ifname,
-                                                                    "secondary-netns" => secondary_netns_path.as_str(),
-                                                                    "target-name" => interface.name.as_str(),
-                                                                    "target-mac" => interface.hwAddr.as_str(),
-                                                                );
-
-                                                                if let Err(retry_err) = secondary
-                                                                    .rtnl
-                                                                    .update_interface_with_name_fallback(&interface)
-                                                                    .await
-                                                                {
-                                                                    warn!(
-                                                                        sl(),
-                                                                        "update_interface: macvlan bootstrap retry failed";
-                                                                        "sandbox-id" => sid.as_str(),
-                                                                        "target-name" => interface.name.as_str(),
-                                                                        "target-mac" => interface.hwAddr.as_str(),
-                                                                        "error" => format!("{retry_err:#}"),
-                                                                    );
-                                                                }
-                                                            }
-                                                            Err(bootstrap_err) => {
-                                                                warn!(
-                                                                    sl(),
-                                                                    "update_interface: secondary macvlan bootstrap failed";
-                                                                    "sandbox-id" => sid.as_str(),
-                                                                    "parent-ifname" => parent_ifname,
-                                                                    "secondary-netns" => secondary_netns_path.as_str(),
-                                                                    "target-name" => interface.name.as_str(),
-                                                                    "target-mac" => interface.hwAddr.as_str(),
-                                                                    "error" => format!("{bootstrap_err:#}"),
-                                                                );
-                                                            }
-                                                        }
-
-                                                        warn!(
+                                                match bootstrap_secondary_macvlan_to_netns(
+                                                    &parent_ifname,
+                                                    &secondary_netns_path,
+                                                    &interface.hwAddr,
+                                                ) {
+                                                    Ok(()) => {
+                                                        info!(
                                                             sl(),
-                                                            "update_interface: primary-netns fallback found no matching link; skipping secondary interface update";
+                                                            "update_interface: bootstrapped secondary macvlan into isolated netns";
                                                             "sandbox-id" => sid.as_str(),
+                                                            "parent-ifname" => parent_ifname,
+                                                            "secondary-netns" => secondary_netns_path.as_str(),
                                                             "target-name" => interface.name.as_str(),
                                                             "target-mac" => interface.hwAddr.as_str(),
-                                                            "primary-netns" => primary_netns_path.as_str(),
-                                                            "primary-error" => err_msg.clone(),
-                                                            "fallback-error" => fallback_err_msg.clone(),
-                                                            "final-error" => final_err_msg,
                                                         );
-                                                    } else {
-                                                        return Err(ttrpc_error(
-                                                            ttrpc::Code::INTERNAL,
-                                                            format!(
-                                                                "update secondary interface through primary netns failed: primary_err={}, fallback_err={}, final_err={:?}",
-                                                                err_msg,
-                                                                fallback_err_msg,
-                                                                e
-                                                            ),
-                                                        ));
+
+                                                        if let Err(retry_err) = secondary
+                                                            .rtnl
+                                                            .update_interface_with_name_fallback(&interface)
+                                                            .await
+                                                        {
+                                                            warn!(
+                                                                sl(),
+                                                                "update_interface: macvlan bootstrap retry failed";
+                                                                "sandbox-id" => sid.as_str(),
+                                                                "target-name" => interface.name.as_str(),
+                                                                "target-mac" => interface.hwAddr.as_str(),
+                                                                "error" => format!("{retry_err:#}"),
+                                                            );
+                                                        }
+                                                    }
+                                                    Err(bootstrap_err) => {
+                                                        warn!(
+                                                            sl(),
+                                                            "update_interface: secondary macvlan bootstrap failed";
+                                                            "sandbox-id" => sid.as_str(),
+                                                            "parent-ifname" => parent_ifname,
+                                                            "secondary-netns" => secondary_netns_path.as_str(),
+                                                            "target-name" => interface.name.as_str(),
+                                                            "target-mac" => interface.hwAddr.as_str(),
+                                                            "error" => format!("{bootstrap_err:#}"),
+                                                        );
                                                     }
                                                 }
 
