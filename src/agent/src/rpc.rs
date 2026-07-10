@@ -240,6 +240,10 @@ fn run_ip_command_in_netns(netns_path: &str, args: &[String]) -> Result<()> {
     result
 }
 
+fn is_ip_device_not_found(err_msg: &str) -> bool {
+    err_msg.contains("Cannot find device") || err_msg.contains("No such device")
+}
+
 fn parse_primary_like_ifname(err_msg: &str) -> Option<String> {
     const MARKER: &str = "only primary-like link is present for secondary netns move: ";
     let start = err_msg.find(MARKER)? + MARKER.len();
@@ -277,8 +281,7 @@ fn bootstrap_secondary_macvlan_to_netns(
     let create_result = run_ip_command_in_netns(primary_netns_path, &create_args);
     if let Err(primary_err) = create_result {
         let primary_err_msg = format!("{primary_err:#}");
-        let retry_in_current = primary_err_msg.contains("Cannot find device")
-            || primary_err_msg.contains("No such device");
+        let retry_in_current = is_ip_device_not_found(&primary_err_msg);
 
         if retry_in_current {
             run_ip_command(&create_args).with_context(|| {
@@ -293,15 +296,30 @@ fn bootstrap_secondary_macvlan_to_netns(
         }
     }
 
-    run_ip_command_in_netns(primary_netns_path, &[
+    let move_args = vec![
         "link".to_string(),
         "set".to_string(),
         "dev".to_string(),
         tmp_ifname.clone(),
         "netns".to_string(),
         secondary_netns_path.to_string(),
-    ])
-    .with_context(|| format!("move macvlan {} to secondary netns", tmp_ifname))?;
+    ];
+
+    let move_result = run_ip_command_in_netns(primary_netns_path, &move_args);
+    if let Err(primary_err) = move_result {
+        let primary_err_msg = format!("{primary_err:#}");
+        if is_ip_device_not_found(&primary_err_msg) {
+            run_ip_command(&move_args).with_context(|| {
+                format!(
+                    "move macvlan {} to secondary netns (fallback current netns after primary-netns failure: {})",
+                    tmp_ifname, primary_err_msg
+                )
+            })?;
+        } else {
+            return Err(primary_err)
+                .with_context(|| format!("move macvlan {} to secondary netns", tmp_ifname));
+        }
+    }
 
     Ok(())
 }
