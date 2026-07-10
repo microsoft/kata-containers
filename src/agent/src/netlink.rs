@@ -29,6 +29,7 @@ use std::fmt;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
+use std::os::fd::AsRawFd;
 use std::str::{self, FromStr};
 
 const MACVLAN_MODE_BRIDGE: u32 = 4;
@@ -244,6 +245,33 @@ impl Handle {
         self.find_link(LinkFilter::Name(&child_name))
             .await
             .with_context(|| format!("lookup created macvlan link {}", child_name))
+    }
+
+    pub(crate) async fn move_link_to_netns_by_name(&self, ifname: &str, netns_path: &str) -> Result<()> {
+        let link = self.find_link(LinkFilter::Name(ifname)).await?;
+        let netns = fs::File::open(netns_path)
+            .with_context(|| format!("open target netns path {}", netns_path))?;
+
+        let mut request = self.handle.link().set(link.index());
+        request.message_mut().header = link.header.clone();
+        request
+            .setns_by_fd(netns.as_raw_fd())
+            .execute()
+            .await
+            .with_context(|| format!("move link {} to netns {}", ifname, netns_path))
+    }
+
+    pub(crate) async fn bootstrap_secondary_macvlan_to_netns(
+        &self,
+        iface: &Interface,
+        target_netns_path: &str,
+    ) -> Result<String> {
+        let parent = self.find_unique_non_loopback_link().await?;
+        let child = self.create_secondary_macvlan_link(&parent, iface).await?;
+        let child_name = child.name();
+        self.move_link_to_netns_by_name(&child_name, target_netns_path)
+            .await?;
+        Ok(child_name)
     }
 }
 

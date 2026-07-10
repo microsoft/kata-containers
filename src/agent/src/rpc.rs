@@ -1290,13 +1290,53 @@ impl agent_ttrpc::AgentService for AgentService {
                                 .await;
 
                             if let Err(fallback_err) = fallback_result {
-                                return Err(ttrpc_error(
-                                    ttrpc::Code::INTERNAL,
-                                    format!(
-                                        "update secondary interface fallback failed: primary_err={}, fallback_err={:?}",
-                                        err_msg, fallback_err
-                                    ),
-                                ));
+                                let fallback_err_msg = format!("{fallback_err:#}");
+                                let no_parent_link =
+                                    fallback_err_msg.contains("no non-loopback link found for fallback");
+
+                                if no_parent_link && !secondary.shared_netns.path.is_empty() {
+                                    warn!(
+                                        sl(),
+                                        "update_interface: secondary fallback has no parent link; bootstrapping macvlan from primary netns";
+                                        "sandbox-id" => sid.as_str(),
+                                        "secondary-netns" => secondary.shared_netns.path.as_str(),
+                                        "target-name" => interface.name.as_str(),
+                                        "target-mac" => interface.hwAddr.as_str(),
+                                    );
+
+                                    let primary_rtnl = crate::netlink::Handle::new().map_ttrpc_err(same)?;
+                                    primary_rtnl
+                                        .bootstrap_secondary_macvlan_to_netns(
+                                            &interface,
+                                            &secondary.shared_netns.path,
+                                        )
+                                        .await
+                                        .map_ttrpc_err(|e| {
+                                            format!(
+                                                "bootstrap secondary link from primary netns failed: {:?}",
+                                                e
+                                            )
+                                        })?;
+
+                                    secondary
+                                        .rtnl
+                                        .update_interface_with_name_fallback(&interface)
+                                        .await
+                                        .map_ttrpc_err(|e| {
+                                            format!(
+                                                "update secondary interface after bootstrap failed: {:?}",
+                                                e
+                                            )
+                                        })?;
+                                } else {
+                                    return Err(ttrpc_error(
+                                        ttrpc::Code::INTERNAL,
+                                        format!(
+                                            "update secondary interface fallback failed: primary_err={}, fallback_err={:?}",
+                                            err_msg, fallback_err
+                                        ),
+                                    ));
+                                }
                             }
                         } else {
                             return Err(ttrpc_error(
