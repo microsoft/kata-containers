@@ -651,6 +651,17 @@ impl Handle {
 
         for route in list {
             let link = self.find_link(LinkFilter::Name(&route.device)).await?;
+            // Secondary links can be freshly moved/renamed and still down when
+            // route programming starts; ensure the output link is up first.
+            if !link.is_up() {
+                self.enable_link(link.index(), true).await.with_context(|| {
+                    format!(
+                        "failed to bring route device {} (index {}) up",
+                        route.device,
+                        link.index()
+                    )
+                })?;
+            }
 
             const MAIN_TABLE: u32 = libc::RT_TABLE_MAIN as u32;
             let uni_cast: RouteType = RouteType::from(libc::RTN_UNICAST);
