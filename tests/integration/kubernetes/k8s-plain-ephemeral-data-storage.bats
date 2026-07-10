@@ -18,7 +18,7 @@ skip_unsupported_runtime() {
 	# it never reached clh-runtime-rs or dragonball in CI; this generic
 	# block-plain test would, so skip those unsupported VMM paths explicitly.
 	case "${KATA_HYPERVISOR}" in
-		clh-runtime-rs|clh-azure-runtime-rs|dragonball)
+		clh-runtime-rs|clh-azure-runtime-rs|dragonball|openvmm-azure-runtime-rs)
 			skip "block-plain emptyDir uses runtime-rs BlockModern, whose VMM glue is missing for ${KATA_HYPERVISOR}"
 			;;
 	esac
