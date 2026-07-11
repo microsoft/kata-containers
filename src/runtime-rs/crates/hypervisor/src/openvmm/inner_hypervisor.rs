@@ -335,6 +335,23 @@ impl OpenVmmInner {
             }
         }
 
+            while network_index < OPENVMM_NET_PCI_MAX_COUNT {
+                let port_name = format!("net{}", network_index);
+                info!(
+                    sl!(),
+                    "openvmm: predeclaring empty hotplug network port {} at device {}",
+                    port_name,
+                    OPENVMM_NET_PCI_FIRST_DEVICE + network_index
+                );
+                root_ports.push(make_pcie_port(
+                    &port_name,
+                    OPENVMM_NET_PCI_FIRST_DEVICE + network_index,
+                    true,
+                    None,
+                ));
+                network_index += 1;
+            }
+
         let vsock_socket_path = format!("{}/vsock.sock", self.run_dir);
         let ttrpc_socket_path = format!("{}/openvmm.sock", self.run_dir);
         let serial_socket_path = format!("{}/serial.sock", self.run_dir);
