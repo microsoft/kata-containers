@@ -304,6 +304,21 @@ chisseled_compute() {
 	if [[ -f etc/nvidia-imex/config.cfg && ! -f etc/nvidia-imex/nodes_config.cfg ]]; then
 		echo "127.0.0.1" > etc/nvidia-imex/nodes_config.cfg
 	fi
+
+	# Tune the shipped config.cfg for the NVRC-PID1 UVM so NVRC can run imex as
+	# a tracked, observable daemon: DAEMONIZE=0 keeps it in the foreground (the
+	# .deb default is 1, which would fork and detach -- NVRC's background()
+	# would then track a dead parent PID and lose the log pipe), and
+	# LOG_FILE_NAME=/dev/stderr routes its log to background()'s stderr->/dev/kmsg
+	# wiring so it shows up on the openvmm-guest console (the UVM has no syslog
+	# and the default /var/log path is invisible during triage). Mirrors how
+	# chisseled_nvswitch rewrites fabricmanager.cfg's LOG_USE_SYSLOG.
+	if [[ -f etc/nvidia-imex/config.cfg ]]; then
+		sed -i \
+			-e 's|^DAEMONIZE=.*|DAEMONIZE=0|' \
+			-e 's|^LOG_FILE_NAME=.*|LOG_FILE_NAME=/dev/stderr|' \
+			etc/nvidia-imex/config.cfg
+	fi
 }
 
 chisseled_gpudirect() {
