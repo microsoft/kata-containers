@@ -1804,64 +1804,14 @@ impl agent_ttrpc::AgentService for AgentService {
                                             return Ok(interface);
                                         }
 
-                                        let (primary_netns_path, parent_ifname) = {
-                                            let primary = self.sandbox.lock().await;
-                                            let picked_parent = primary
-                                                .rtnl
-                                                .pick_link_for_secondary_netns_move(
-                                                    &move_candidate,
-                                                    &interface.hwAddr,
-                                                )
-                                                .await
-                                                .unwrap_or_else(|_| interface.name.clone());
-                                            (primary.shared_netns.path.clone(), picked_parent)
-                                        };
-
-                                        match bootstrap_secondary_macvlan_to_netns(
-                                            &primary_netns_path,
-                                            &parent_ifname,
-                                            &secondary_netns_path,
-                                            &interface.hwAddr,
-                                        ) {
-                                            Ok(()) => {
-                                                info!(
-                                                    sl(),
-                                                    "update_interface: in-place retries failed; bootstrapped secondary macvlan fallback";
-                                                    "sandbox-id" => sid.as_str(),
-                                                    "parent-ifname" => parent_ifname.as_str(),
-                                                    "target-name" => interface.name.as_str(),
-                                                    "target-mac" => interface.hwAddr.as_str(),
-                                                );
-
-                                                if let Err(retry_err) = secondary
-                                                    .rtnl
-                                                    .update_interface_with_name_fallback(&interface)
-                                                    .await
-                                                {
-                                                    warn!(
-                                                        sl(),
-                                                        "update_interface: post-bootstrap in-place retry failed";
-                                                        "sandbox-id" => sid.as_str(),
-                                                        "target-name" => interface.name.as_str(),
-                                                        "target-mac" => interface.hwAddr.as_str(),
-                                                        "error" => format!("{retry_err:#}"),
-                                                    );
-                                                }
-                                            }
-                                            Err(bootstrap_err) => {
-                                                warn!(
-                                                    sl(),
-                                                    "update_interface: in-place retries failed and secondary macvlan fallback failed";
-                                                    "sandbox-id" => sid.as_str(),
-                                                    "parent-ifname" => parent_ifname.as_str(),
-                                                    "target-name" => interface.name.as_str(),
-                                                    "target-mac" => interface.hwAddr.as_str(),
-                                                    "error" => format!("{bootstrap_err:#}"),
-                                                );
-                                            }
-                                        }
-
-                                        return Ok(interface);
+                                        warn!(
+                                            sl(),
+                                            "update_interface: in-place secondary retries exhausted; falling back to legacy netns move path";
+                                            "sandbox-id" => sid.as_str(),
+                                            "target-name" => interface.name.as_str(),
+                                            "target-mac" => interface.hwAddr.as_str(),
+                                            "move-candidate" => move_candidate.as_str(),
+                                        );
                                     }
 
                                     {
