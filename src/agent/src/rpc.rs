@@ -360,6 +360,10 @@ fn should_ignore_secondary_neighbor_error(err_msg: &str) -> bool {
         || err_msg.contains("Cannot find device")
 }
 
+fn is_netlink_address_in_use(err_msg: &str) -> bool {
+    err_msg.contains("Address in use") || err_msg.contains("os error 98")
+}
+
 trait ResultToTtrpcResult<T, E: Debug>: Sized {
     fn map_ttrpc_err<R: Debug>(self, msg_builder: impl FnOnce(E) -> R) -> ttrpc::Result<T>;
     fn map_ttrpc_err_do(self, doer: impl FnOnce(&E)) -> ttrpc::Result<T> {
@@ -1661,14 +1665,47 @@ impl agent_ttrpc::AgentService for AgentService {
                                                             .update_interface_with_name_fallback(&interface)
                                                             .await
                                                         {
-                                                            warn!(
-                                                                sl(),
-                                                                "update_interface: macvlan bootstrap retry failed";
-                                                                "sandbox-id" => sid.as_str(),
-                                                                "target-name" => interface.name.as_str(),
-                                                                "target-mac" => interface.hwAddr.as_str(),
-                                                                "error" => format!("{retry_err:#}"),
-                                                            );
+                                                            let retry_err_msg = format!("{retry_err:#}");
+                                                            let mut recovered = false;
+                                                            if is_netlink_address_in_use(&retry_err_msg) {
+                                                                let mut iface_without_mac = interface.clone();
+                                                                iface_without_mac.hwAddr.clear();
+
+                                                                if let Err(second_retry_err) = secondary
+                                                                    .rtnl
+                                                                    .update_interface_with_name_fallback(&iface_without_mac)
+                                                                    .await
+                                                                {
+                                                                    warn!(
+                                                                        sl(),
+                                                                        "update_interface: macvlan bootstrap degraded retry without MAC failed";
+                                                                        "sandbox-id" => sid.as_str(),
+                                                                        "target-name" => interface.name.as_str(),
+                                                                        "target-mac" => interface.hwAddr.as_str(),
+                                                                        "error" => format!("{second_retry_err:#}"),
+                                                                    );
+                                                                } else {
+                                                                    recovered = true;
+                                                                    info!(
+                                                                        sl(),
+                                                                        "update_interface: macvlan bootstrap degraded retry succeeded without MAC override";
+                                                                        "sandbox-id" => sid.as_str(),
+                                                                        "target-name" => interface.name.as_str(),
+                                                                        "target-mac" => interface.hwAddr.as_str(),
+                                                                    );
+                                                                }
+                                                            }
+
+                                                            if !recovered {
+                                                                warn!(
+                                                                    sl(),
+                                                                    "update_interface: macvlan bootstrap retry failed";
+                                                                    "sandbox-id" => sid.as_str(),
+                                                                    "target-name" => interface.name.as_str(),
+                                                                    "target-mac" => interface.hwAddr.as_str(),
+                                                                    "error" => retry_err_msg,
+                                                                );
+                                                            }
                                                         }
                                                     }
                                                     Err(bootstrap_err) => {
@@ -1837,14 +1874,47 @@ impl agent_ttrpc::AgentService for AgentService {
                                                     .update_interface_with_name_fallback(&interface)
                                                     .await
                                                 {
-                                                    warn!(
-                                                        sl(),
-                                                        "update_interface: post-bootstrap retry failed";
-                                                        "sandbox-id" => sid.as_str(),
-                                                        "target-name" => interface.name.as_str(),
-                                                        "target-mac" => interface.hwAddr.as_str(),
-                                                        "error" => format!("{retry_err:#}"),
-                                                    );
+                                                    let retry_err_msg = format!("{retry_err:#}");
+                                                    let mut recovered = false;
+                                                    if is_netlink_address_in_use(&retry_err_msg) {
+                                                        let mut iface_without_mac = interface.clone();
+                                                        iface_without_mac.hwAddr.clear();
+
+                                                        if let Err(second_retry_err) = secondary
+                                                            .rtnl
+                                                            .update_interface_with_name_fallback(&iface_without_mac)
+                                                            .await
+                                                        {
+                                                            warn!(
+                                                                sl(),
+                                                                "update_interface: post-bootstrap degraded retry without MAC failed";
+                                                                "sandbox-id" => sid.as_str(),
+                                                                "target-name" => interface.name.as_str(),
+                                                                "target-mac" => interface.hwAddr.as_str(),
+                                                                "error" => format!("{second_retry_err:#}"),
+                                                            );
+                                                        } else {
+                                                            recovered = true;
+                                                            info!(
+                                                                sl(),
+                                                                "update_interface: post-bootstrap degraded retry succeeded without MAC override";
+                                                                "sandbox-id" => sid.as_str(),
+                                                                "target-name" => interface.name.as_str(),
+                                                                "target-mac" => interface.hwAddr.as_str(),
+                                                            );
+                                                        }
+                                                    }
+
+                                                    if !recovered {
+                                                        warn!(
+                                                            sl(),
+                                                            "update_interface: post-bootstrap retry failed";
+                                                            "sandbox-id" => sid.as_str(),
+                                                            "target-name" => interface.name.as_str(),
+                                                            "target-mac" => interface.hwAddr.as_str(),
+                                                            "error" => retry_err_msg,
+                                                        );
+                                                    }
                                                 }
 
                                                 return Ok(interface);
