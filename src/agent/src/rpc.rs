@@ -2084,7 +2084,7 @@ impl agent_ttrpc::AgentService for AgentService {
                             sl(),
                             "update_routes: secondary route update failed; retrying through primary netns";
                             "sandbox-id" => sid.as_str(),
-                            "error" => secondary_err_msg,
+                            "error" => secondary_err_msg.clone(),
                         );
 
                         drop(secondary_sandboxes);
@@ -2094,52 +2094,56 @@ impl agent_ttrpc::AgentService for AgentService {
                         };
 
                         if primary_netns_path.is_empty() {
-                            return Err(ttrpc_error(
-                                ttrpc::Code::INTERNAL,
-                                "primary shared netns path is empty; cannot fallback secondary route update",
-                            ));
-                        }
-
-                        let mut primary_rtnl = create_rtnl_handle_in_netns(&primary_netns_path)
-                            .map_ttrpc_err(|e| {
-                                format!(
-                                    "create primary netns rtnl handle for secondary route fallback failed (netns={}): {:?}",
-                                    primary_netns_path, e
-                                )
-                            })?;
-
-                        if let Err(e) = primary_rtnl.update_routes(new_routes.clone()).await {
-                            let err_msg = format!("{e:#}");
-                            if !should_ignore_secondary_shared_netns_route_error(&err_msg) {
-                                return Err(ttrpc_error(
-                                    ttrpc::Code::INTERNAL,
-                                    format!(
-                                        "Failed to update secondary routes via primary netns: {:?}",
-                                        e
-                                    ),
-                                ));
-                            }
-
                             warn!(
                                 sl(),
-                                "update_routes: primary-netns fallback found no usable link/device; skipping secondary route update";
+                                "update_routes: primary shared netns path is empty; skipping secondary route fallback";
                                 "sandbox-id" => sid.as_str(),
-                                "primary-netns" => primary_netns_path.as_str(),
-                                "error" => err_msg,
+                                "secondary-error" => secondary_err_msg.clone(),
                             );
-                        }
 
-                        match primary_rtnl.list_routes().await {
-                            Ok(list) => list,
-                            Err(e) => {
+                            new_routes.clone()
+                        } else {
+                            let mut primary_rtnl = create_rtnl_handle_in_netns(&primary_netns_path)
+                                .map_ttrpc_err(|e| {
+                                    format!(
+                                        "create primary netns rtnl handle for secondary route fallback failed (netns={}): {:?}",
+                                        primary_netns_path, e
+                                    )
+                                })?;
+
+                            if let Err(e) = primary_rtnl.update_routes(new_routes.clone()).await {
+                                let err_msg = format!("{e:#}");
+                                if !should_ignore_secondary_shared_netns_route_error(&err_msg) {
+                                    return Err(ttrpc_error(
+                                        ttrpc::Code::INTERNAL,
+                                        format!(
+                                            "Failed to update secondary routes via primary netns: {:?}",
+                                            e
+                                        ),
+                                    ));
+                                }
+
                                 warn!(
                                     sl(),
-                                    "update_routes: failed to list routes after primary-netns fallback; returning requested routes";
+                                    "update_routes: primary-netns fallback found no usable link/device; skipping secondary route update";
                                     "sandbox-id" => sid.as_str(),
                                     "primary-netns" => primary_netns_path.as_str(),
-                                    "error" => format!("{e:#}"),
+                                    "error" => err_msg,
                                 );
-                                new_routes.clone()
+                            }
+
+                            match primary_rtnl.list_routes().await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    warn!(
+                                        sl(),
+                                        "update_routes: failed to list routes after primary-netns fallback; returning requested routes";
+                                        "sandbox-id" => sid.as_str(),
+                                        "primary-netns" => primary_netns_path.as_str(),
+                                        "error" => format!("{e:#}"),
+                                    );
+                                    new_routes.clone()
+                                }
                             }
                         }
                     }
