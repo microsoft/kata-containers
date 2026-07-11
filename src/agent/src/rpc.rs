@@ -1450,6 +1450,76 @@ impl agent_ttrpc::AgentService for AgentService {
                                     let secondary_netns_path = secondary.shared_netns.path.clone();
                                     let fallback_err_msg = format!("{fallback_err:#}");
 
+                                    // openvmm secondary NIC hotplug can arrive slightly after the
+                                    // first update attempt; wait briefly before synthetic bootstrap.
+                                    let mut settled_after_retry = false;
+                                    if !secondary_netns_path.is_empty() {
+                                        for attempt in 1..=8 {
+                                            if attempt > 1 {
+                                                tokio::time::sleep(Duration::from_millis(150)).await;
+                                            }
+
+                                            let mut retry_rtnl =
+                                                match create_rtnl_handle_in_netns(&secondary_netns_path)
+                                                {
+                                                    Ok(handle) => handle,
+                                                    Err(retry_ns_err) => {
+                                                        warn!(
+                                                            sl(),
+                                                            "update_interface: secondary settle retry netns handle create failed";
+                                                            "sandbox-id" => sid.as_str(),
+                                                            "secondary-netns" => secondary_netns_path.as_str(),
+                                                            "attempt" => attempt,
+                                                            "error" => format!("{retry_ns_err:#}"),
+                                                        );
+                                                        continue;
+                                                    }
+                                                };
+
+                                            match retry_rtnl
+                                                .update_interface_with_name_fallback(&interface)
+                                                .await
+                                            {
+                                                Ok(()) => {
+                                                    info!(
+                                                        sl(),
+                                                        "update_interface: secondary interface settled after hotplug retry";
+                                                        "sandbox-id" => sid.as_str(),
+                                                        "secondary-netns" => secondary_netns_path.as_str(),
+                                                        "target-name" => interface.name.as_str(),
+                                                        "target-mac" => interface.hwAddr.as_str(),
+                                                        "attempt" => attempt,
+                                                    );
+                                                    settled_after_retry = true;
+                                                    break;
+                                                }
+                                                Err(retry_err) => {
+                                                    let retry_err_msg = format!("{retry_err:#}");
+                                                    if !should_try_secondary_interface_fallback(
+                                                        &interface.name,
+                                                        &retry_err_msg,
+                                                    ) {
+                                                        warn!(
+                                                            sl(),
+                                                            "update_interface: secondary settle retry hit non-retryable error";
+                                                            "sandbox-id" => sid.as_str(),
+                                                            "secondary-netns" => secondary_netns_path.as_str(),
+                                                            "target-name" => interface.name.as_str(),
+                                                            "target-mac" => interface.hwAddr.as_str(),
+                                                            "attempt" => attempt,
+                                                            "error" => retry_err_msg,
+                                                        );
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if settled_after_retry {
+                                        return Ok(interface);
+                                    }
+
                                     if secondary_netns_path.is_empty() {
                                         return Err(ttrpc_error(
                                             ttrpc::Code::INTERNAL,
