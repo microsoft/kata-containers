@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::{collections::HashMap, sync::Arc, thread};
+use std::{collections::{HashMap, HashSet}, sync::Arc, thread};
 
 use agent::{types::Device, ARPNeighbor, Agent, OnlineCPUMemRequest, Storage};
 use anyhow::{anyhow, Context, Result};
@@ -318,11 +318,31 @@ impl ResourceManagerInner {
 
     async fn handle_neighbours(&self, network: &dyn Network) -> Result<()> {
         let all_neighbors = network.neighs().await.context("neighs")?;
+        let routes = network.routes().await.context("routes for neighbors")?;
 
-        // We add only static ARP entries
+        let route_gateways = routes
+            .iter()
+            .filter_map(|r| {
+                let gw = r.gateway.clone();
+                if gw.is_empty() {
+                    None
+                } else {
+                    Some(gw)
+                }
+            })
+            .collect::<HashSet<_>>();
+
+        // Prefer static entries, but keep route gateway neighbors as well.
+        // Some CNIs export gateway neighbors as REACHABLE (not PERMANENT).
         let neighbors: Vec<ARPNeighbor> = all_neighbors
             .iter()
-            .filter(|n| n.state == NUD_PERMANENT as i32)
+            .filter(|n| {
+                n.state == NUD_PERMANENT as i32
+                    || n.to_ip_address
+                        .as_ref()
+                        .map(|ip| route_gateways.contains(ip.address.as_str()))
+                        .unwrap_or(false)
+            })
             .cloned()
             .collect();
         if !neighbors.is_empty() {
