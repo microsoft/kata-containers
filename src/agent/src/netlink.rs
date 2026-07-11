@@ -274,11 +274,15 @@ fn pick_link_for_secondary_netns_move_from_candidates(
     if !requested_mac.is_empty() {
         let mac_matches = candidates
             .iter()
-            .filter(|link| link.address.eq_ignore_ascii_case(requested_mac))
+            .filter(|link| {
+                link.address.eq_ignore_ascii_case(requested_mac) && link.name != requested_name
+            })
             .collect::<Vec<_>>();
 
-        if mac_matches.len() == 1 && mac_matches[0].name != requested_name {
-            return Ok(mac_matches[0].name.clone());
+        if let Some(link) = mac_matches.last() {
+            // When multiple hotplug NICs temporarily share the same target MAC,
+            // pick the newest (highest index) non-requested link.
+            return Ok(link.name.clone());
         }
     }
 

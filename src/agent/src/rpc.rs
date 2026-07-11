@@ -353,6 +353,13 @@ fn should_ignore_secondary_shared_netns_route_error(err_msg: &str) -> bool {
         || err_msg.contains("Network is down")
 }
 
+fn should_ignore_secondary_neighbor_error(err_msg: &str) -> bool {
+    err_msg.contains("Link not found")
+        || err_msg.contains("No such device")
+        || err_msg.contains("Network is down")
+        || err_msg.contains("Cannot find device")
+}
+
 trait ResultToTtrpcResult<T, E: Debug>: Sized {
     fn map_ttrpc_err<R: Debug>(self, msg_builder: impl FnOnce(E) -> R) -> ttrpc::Result<T>;
     fn map_ttrpc_err_do(self, doer: impl FnOnce(&E)) -> ttrpc::Result<T> {
@@ -2528,13 +2535,22 @@ impl agent_ttrpc::AgentService for AgentService {
         if let Some(sid) = target_sid {
             let mut secondary_sandboxes = self.secondary_sandboxes.lock().await;
             if let Some(secondary) = secondary_sandboxes.get_mut(&sid) {
-                secondary
-                    .rtnl
-                    .add_arp_neighbors(neighs)
-                    .await
-                    .map_ttrpc_err(|e| {
-                        format!("Failed to add secondary ARP neighbours: {e:?}")
-                    })?;
+                if let Err(e) = secondary.rtnl.add_arp_neighbors(neighs).await {
+                    let err_msg = format!("{e:#}");
+                    if should_ignore_secondary_neighbor_error(&err_msg) {
+                        warn!(
+                            sl(),
+                            "add_arp_neighbors: secondary ARP neighbour update found no usable link/device; skipping";
+                            "sandbox-id" => sid.as_str(),
+                            "error" => err_msg,
+                        );
+                    } else {
+                        return Err(ttrpc_error(
+                            ttrpc::Code::INTERNAL,
+                            format!("Failed to add secondary ARP neighbours: {e:?}"),
+                        ));
+                    }
+                }
                 return Ok(Empty::new());
             }
             *self.network_target_sandbox.lock().await = None;
