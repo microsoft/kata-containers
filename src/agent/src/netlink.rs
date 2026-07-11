@@ -266,6 +266,17 @@ fn pick_link_for_secondary_netns_move_from_candidates(
         return Ok(candidate.name.clone());
     }
 
+    if !requested_mac.is_empty() {
+        let mac_matches = candidates
+            .iter()
+            .filter(|link| link.address.eq_ignore_ascii_case(requested_mac))
+            .collect::<Vec<_>>();
+
+        if mac_matches.len() == 1 && mac_matches[0].name != requested_name {
+            return Ok(mac_matches[0].name.clone());
+        }
+    }
+
     let non_requested = candidates
         .iter()
         .filter(|link| {
@@ -1325,6 +1336,21 @@ mod tests {
             candidates,
             "eth0",
             "3a:77:96:27:2c:9d",
+        )
+        .unwrap();
+        assert_eq!(result, "eth1");
+    }
+
+    #[test]
+    fn test_pick_secondary_move_candidate_prefers_requested_mac_link() {
+        let candidates = vec![
+            test_link("eth0", "1A:83:46:6D:6E:6A", 2),
+            test_link("eth1", "EE:1E:A8:77:97:98", 6),
+        ];
+        let result = pick_link_for_secondary_netns_move_from_candidates(
+            candidates,
+            "eth0",
+            "ee:1e:a8:77:97:98",
         )
         .unwrap();
         assert_eq!(result, "eth1");
