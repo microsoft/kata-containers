@@ -229,6 +229,11 @@ impl Handle {
 
         Ok(())
     }
+
+    pub async fn link_has_address_by_name(&self, ifname: &str, mac: &str) -> Result<bool> {
+        let link = self.find_link(LinkFilter::Name(ifname)).await?;
+        Ok(link.address().eq_ignore_ascii_case(mac))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

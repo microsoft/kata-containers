@@ -1707,6 +1707,163 @@ impl agent_ttrpc::AgentService for AgentService {
                                         }
                                     };
 
+                                    let move_candidate_is_target_mac = {
+                                        let primary = self.sandbox.lock().await;
+                                        match primary
+                                            .rtnl
+                                            .link_has_address_by_name(&move_candidate, &interface.hwAddr)
+                                            .await
+                                        {
+                                            Ok(matches) => matches,
+                                            Err(err) => {
+                                                warn!(
+                                                    sl(),
+                                                    "update_interface: failed to resolve move-candidate MAC match; continue with legacy move path";
+                                                    "sandbox-id" => sid.as_str(),
+                                                    "move-candidate" => move_candidate.as_str(),
+                                                    "target-mac" => interface.hwAddr.as_str(),
+                                                    "error" => format!("{err:#}"),
+                                                );
+                                                false
+                                            }
+                                        }
+                                    };
+
+                                    if move_candidate_is_target_mac {
+                                        warn!(
+                                            sl(),
+                                            "update_interface: move candidate matches target MAC; prefer in-place secondary configuration";
+                                            "sandbox-id" => sid.as_str(),
+                                            "target-name" => interface.name.as_str(),
+                                            "target-mac" => interface.hwAddr.as_str(),
+                                            "move-candidate" => move_candidate.as_str(),
+                                            "secondary-netns" => secondary_netns_path.as_str(),
+                                        );
+
+                                        let mut in_place_ok = false;
+                                        for attempt in 1..=12 {
+                                            if attempt > 1 {
+                                                tokio::time::sleep(Duration::from_millis(200)).await;
+                                            }
+
+                                            let mut retry_rtnl =
+                                                match create_rtnl_handle_in_netns(&secondary_netns_path)
+                                                {
+                                                    Ok(handle) => handle,
+                                                    Err(retry_ns_err) => {
+                                                        warn!(
+                                                            sl(),
+                                                            "update_interface: in-place secondary retry netns handle create failed";
+                                                            "sandbox-id" => sid.as_str(),
+                                                            "secondary-netns" => secondary_netns_path.as_str(),
+                                                            "attempt" => attempt,
+                                                            "error" => format!("{retry_ns_err:#}"),
+                                                        );
+                                                        continue;
+                                                    }
+                                                };
+
+                                            match retry_rtnl
+                                                .update_interface_with_name_fallback(&interface)
+                                                .await
+                                            {
+                                                Ok(()) => {
+                                                    info!(
+                                                        sl(),
+                                                        "update_interface: in-place secondary configuration succeeded";
+                                                        "sandbox-id" => sid.as_str(),
+                                                        "target-name" => interface.name.as_str(),
+                                                        "target-mac" => interface.hwAddr.as_str(),
+                                                        "attempt" => attempt,
+                                                    );
+                                                    in_place_ok = true;
+                                                    break;
+                                                }
+                                                Err(retry_err) => {
+                                                    let retry_err_msg = format!("{retry_err:#}");
+                                                    if !should_try_secondary_interface_fallback(
+                                                        &interface.name,
+                                                        &retry_err_msg,
+                                                    ) {
+                                                        warn!(
+                                                            sl(),
+                                                            "update_interface: in-place secondary retry hit non-retryable error";
+                                                            "sandbox-id" => sid.as_str(),
+                                                            "target-name" => interface.name.as_str(),
+                                                            "target-mac" => interface.hwAddr.as_str(),
+                                                            "attempt" => attempt,
+                                                            "error" => retry_err_msg,
+                                                        );
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if in_place_ok {
+                                            return Ok(interface);
+                                        }
+
+                                        let (primary_netns_path, parent_ifname) = {
+                                            let primary = self.sandbox.lock().await;
+                                            let picked_parent = primary
+                                                .rtnl
+                                                .pick_link_for_secondary_netns_move(
+                                                    &move_candidate,
+                                                    &interface.hwAddr,
+                                                )
+                                                .await
+                                                .unwrap_or_else(|_| interface.name.clone());
+                                            (primary.shared_netns.path.clone(), picked_parent)
+                                        };
+
+                                        match bootstrap_secondary_macvlan_to_netns(
+                                            &primary_netns_path,
+                                            &parent_ifname,
+                                            &secondary_netns_path,
+                                            &interface.hwAddr,
+                                        ) {
+                                            Ok(()) => {
+                                                info!(
+                                                    sl(),
+                                                    "update_interface: in-place retries failed; bootstrapped secondary macvlan fallback";
+                                                    "sandbox-id" => sid.as_str(),
+                                                    "parent-ifname" => parent_ifname.as_str(),
+                                                    "target-name" => interface.name.as_str(),
+                                                    "target-mac" => interface.hwAddr.as_str(),
+                                                );
+
+                                                if let Err(retry_err) = secondary
+                                                    .rtnl
+                                                    .update_interface_with_name_fallback(&interface)
+                                                    .await
+                                                {
+                                                    warn!(
+                                                        sl(),
+                                                        "update_interface: post-bootstrap in-place retry failed";
+                                                        "sandbox-id" => sid.as_str(),
+                                                        "target-name" => interface.name.as_str(),
+                                                        "target-mac" => interface.hwAddr.as_str(),
+                                                        "error" => format!("{retry_err:#}"),
+                                                    );
+                                                }
+                                            }
+                                            Err(bootstrap_err) => {
+                                                warn!(
+                                                    sl(),
+                                                    "update_interface: in-place retries failed and secondary macvlan fallback failed";
+                                                    "sandbox-id" => sid.as_str(),
+                                                    "parent-ifname" => parent_ifname.as_str(),
+                                                    "target-name" => interface.name.as_str(),
+                                                    "target-mac" => interface.hwAddr.as_str(),
+                                                    "error" => format!("{bootstrap_err:#}"),
+                                                );
+                                            }
+                                        }
+
+                                        return Ok(interface);
+                                    }
+
                                     {
                                         let primary = self.sandbox.lock().await;
                                         warn!(
