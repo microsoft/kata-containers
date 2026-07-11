@@ -1848,6 +1848,87 @@ impl agent_ttrpc::AgentService for AgentService {
                                             return Ok(interface);
                                         }
 
+                                        let direct_move_result = {
+                                            let primary = self.sandbox.lock().await;
+                                            primary
+                                                .rtnl
+                                                .move_link_to_netns(&move_candidate, &secondary_netns_path)
+                                                .await
+                                        };
+
+                                        if let Err(move_err) = direct_move_result {
+                                            warn!(
+                                                sl(),
+                                                "update_interface: in-place retries exhausted and direct move-candidate netns move failed; trying macvlan bootstrap";
+                                                "sandbox-id" => sid.as_str(),
+                                                "target-name" => interface.name.as_str(),
+                                                "target-mac" => interface.hwAddr.as_str(),
+                                                "move-candidate" => move_candidate.as_str(),
+                                                "secondary-netns" => secondary_netns_path.as_str(),
+                                                "error" => format!("{move_err:#}"),
+                                            );
+                                        } else {
+                                            info!(
+                                                sl(),
+                                                "update_interface: in-place retries exhausted; moved move-candidate into secondary netns";
+                                                "sandbox-id" => sid.as_str(),
+                                                "target-name" => interface.name.as_str(),
+                                                "target-mac" => interface.hwAddr.as_str(),
+                                                "move-candidate" => move_candidate.as_str(),
+                                                "secondary-netns" => secondary_netns_path.as_str(),
+                                            );
+
+                                            if let Err(retry_err) = secondary
+                                                .rtnl
+                                                .update_interface_with_name_fallback(&interface)
+                                                .await
+                                            {
+                                                let retry_err_msg = format!("{retry_err:#}");
+                                                let mut recovered = false;
+                                                if is_netlink_address_in_use(&retry_err_msg) {
+                                                    let mut iface_without_mac = interface.clone();
+                                                    iface_without_mac.hwAddr.clear();
+
+                                                    if let Err(second_retry_err) = secondary
+                                                        .rtnl
+                                                        .update_interface_with_name_fallback(&iface_without_mac)
+                                                        .await
+                                                    {
+                                                        warn!(
+                                                            sl(),
+                                                            "update_interface: post-move degraded retry without MAC failed";
+                                                            "sandbox-id" => sid.as_str(),
+                                                            "target-name" => interface.name.as_str(),
+                                                            "target-mac" => interface.hwAddr.as_str(),
+                                                            "error" => format!("{second_retry_err:#}"),
+                                                        );
+                                                    } else {
+                                                        recovered = true;
+                                                        info!(
+                                                            sl(),
+                                                            "update_interface: post-move degraded retry succeeded without MAC override";
+                                                            "sandbox-id" => sid.as_str(),
+                                                            "target-name" => interface.name.as_str(),
+                                                            "target-mac" => interface.hwAddr.as_str(),
+                                                        );
+                                                    }
+                                                }
+
+                                                if !recovered {
+                                                    warn!(
+                                                        sl(),
+                                                        "update_interface: post-move retry failed";
+                                                        "sandbox-id" => sid.as_str(),
+                                                        "target-name" => interface.name.as_str(),
+                                                        "target-mac" => interface.hwAddr.as_str(),
+                                                        "error" => retry_err_msg,
+                                                    );
+                                                }
+                                            }
+
+                                            return Ok(interface);
+                                        }
+
                                         let primary_netns_path = {
                                             let primary = self.sandbox.lock().await;
                                             primary.shared_netns.path.clone()
