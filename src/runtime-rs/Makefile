@@ -637,6 +637,11 @@ ifeq ($(USE_OPENVMM),true)
     RUNTIMENAME := virt_container
     PIPESIZE := 1
 endif
+# DMFIX
+KERNELPATH_OPENVMM = /usr/share/cloud-hypervisor/vmlinux.bin
+OPENVMMPATH = /code/openvmm/target/release/openvmm
+IMAGEPATH_OPENVMM_AZURE = /images/opt/kata/share/kata-containers/kata-containers.img
+DEFVIRTIOFSDAEMON = /usr/libexec/virtiofsd
 
 ifeq ($(HYPERVISOR),$(HYPERVISOR_DB))
     DEFAULT_HYPERVISOR_CONFIG = $(CONFIG_FILE_DB)
