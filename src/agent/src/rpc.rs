@@ -364,6 +364,10 @@ fn is_netlink_address_in_use(err_msg: &str) -> bool {
     err_msg.contains("Address in use") || err_msg.contains("os error 98")
 }
 
+fn is_synthetic_secondary_gateway_lladdr(lladdr: &str) -> bool {
+    lladdr.eq_ignore_ascii_case("aa:aa:aa:aa:aa:aa")
+}
+
 trait ResultToTtrpcResult<T, E: Debug>: Sized {
     fn map_ttrpc_err<R: Debug>(self, msg_builder: impl FnOnce(E) -> R) -> ttrpc::Result<T>;
     fn map_ttrpc_err_do(self, doer: impl FnOnce(&E)) -> ttrpc::Result<T> {
@@ -2690,7 +2694,32 @@ impl agent_ttrpc::AgentService for AgentService {
         if let Some(sid) = target_sid {
             let mut secondary_sandboxes = self.secondary_sandboxes.lock().await;
             if let Some(secondary) = secondary_sandboxes.get_mut(&sid) {
-                if let Err(e) = secondary.rtnl.add_arp_neighbors(neighs).await {
+                let mut skipped_synthetic = 0usize;
+                let filtered_neighs = neighs
+                    .into_iter()
+                    .filter(|neigh| {
+                        if is_synthetic_secondary_gateway_lladdr(neigh.lladdr.as_str()) {
+                            skipped_synthetic += 1;
+                            return false;
+                        }
+                        true
+                    })
+                    .collect::<Vec<_>>();
+
+                if skipped_synthetic > 0 {
+                    warn!(
+                        sl(),
+                        "add_arp_neighbors: skipping synthetic secondary gateway lladdr; allow dynamic ARP resolution";
+                        "sandbox-id" => sid.as_str(),
+                        "skipped" => skipped_synthetic,
+                    );
+                }
+
+                if filtered_neighs.is_empty() {
+                    return Ok(Empty::new());
+                }
+
+                if let Err(e) = secondary.rtnl.add_arp_neighbors(filtered_neighs).await {
                     let err_msg = format!("{e:#}");
                     if should_ignore_secondary_neighbor_error(&err_msg) {
                         warn!(
