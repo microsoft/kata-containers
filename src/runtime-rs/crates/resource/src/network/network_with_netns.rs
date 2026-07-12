@@ -277,8 +277,8 @@ async fn create_endpoint(
 ) -> Result<(Arc<dyn Endpoint>, Arc<dyn NetworkInfo>)> {
     info!(
         sl!(),
-        "create_endpoint: link = {:?}, addrs = {:?}, idx = {idx}, config = {:?}",
-        link,
+        "create_endpoint: link attrs = {:?}, type = {:?}, addrs = {:?}, idx = {idx}, config = {:?}",
+        link.attrs(), link.r#type(),
         addrs,
         config,
     );
