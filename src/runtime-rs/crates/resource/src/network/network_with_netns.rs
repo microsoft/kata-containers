@@ -275,6 +275,14 @@ async fn create_endpoint(
     config: &NetworkWithNetNsConfig,
     d: Arc<RwLock<DeviceManager>>,
 ) -> Result<(Arc<dyn Endpoint>, Arc<dyn NetworkInfo>)> {
+    info!(
+        sl!(),
+        "create_endpoint: link = {:?}, addrs = {:?}, idx = {idx}, config = {:?}",
+        link,
+        addrs,
+        config,
+    );
+
     let _netns_guard = netns::NetnsGuard::new(&config.netns_path)
         .context("net netns guard")
         .unwrap();
