@@ -36,8 +36,7 @@ if [[ "${CONF_PODS}" == "yes" ]]; then
 fi
 
 echo "Installing UVM build scripting"
-uvm_root_dir="$(dirname "$(dirname "${UVM_TOOLS_PATH_OSB}")")"
-cp -a --backup=numbered VERSION "${PREFIX}/${uvm_root_dir}/"
+cp -a --backup=numbered VERSION "${PREFIX}/${UVM_TOOLS_PATH_OSB}/"
 cp -a --backup=numbered tools/osbuilder/Makefile "${PREFIX}/${UVM_TOOLS_PATH_OSB}/"
 cp -a --backup=numbered tools/osbuilder/scripts/lib.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/scripts/"
 cp -a --backup=numbered tools/osbuilder/rootfs-builder/rootfs.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/rootfs-builder/"
