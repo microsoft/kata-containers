@@ -308,6 +308,10 @@ pub const KATA_ANNO_CFG_HYPERVISOR_BLOCK_DEV_NUM_QUEUES: &str =
 pub const KATA_ANNO_CFG_HYPERVISOR_BLOCK_DEV_QUEUE_SIZE: &str =
     "io.katacontainers.config.hypervisor.block_device_queue_size";
 
+/// DMFIX
+pub const KATA_ANNO_GUEST_VM_ID: &str =
+    "io.katacontainers.config.hypervisor.guest_vm_id";
+
 // Runtime related annotations
 /// Prefix for Runtime configurations.
 pub const KATA_ANNO_CFG_RUNTIME_PREFIX: &str = "io.katacontainers.config.runtime.";
@@ -1055,6 +1059,7 @@ impl Annotation {
                             }
                         }
                     }
+                    KATA_ANNO_GUEST_VM_ID => {}
                     _ => {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
