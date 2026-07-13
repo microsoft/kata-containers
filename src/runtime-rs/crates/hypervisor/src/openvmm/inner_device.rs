@@ -14,8 +14,10 @@ use crate::{VmmState, KATA_BLK_DEV_TYPE};
 
 impl OpenVmmInner {
     pub(crate) async fn add_device(&mut self, device: DeviceType) -> Result<DeviceType> {
+        info!(sl!(), "openvmm: add_device: state = {:?}, device {}", self.state, device);
+
         if self.state == VmmState::NotReady {
-            info!(sl!(), "openvmm: VMM not ready, queueing device {}", device);
+            info!(sl!(), "openvmm: add_device: VMM not ready, queueing device");
             self.pending_devices.push(device.clone());
             return Ok(device);
         }
@@ -78,7 +80,7 @@ impl OpenVmmInner {
                         other
                     ));
                 }
-                warn!(sl!(), "openvmm: add_device stub for {}", other);
+                warn!(sl!(), "openvmm: add_device: stub for {}", other);
                 Ok(other)
             }
         }

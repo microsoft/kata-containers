@@ -232,6 +232,8 @@ impl OpenVmmInner {
         let mut network_index = 0u8;
 
         for dev in &pending {
+            info!(sl!(), "openvmm: start_vm: pending device {:?}", dev);
+
             match dev {
                 DeviceType::HybridVsock(hvsock_dev) => {
                     info!(
