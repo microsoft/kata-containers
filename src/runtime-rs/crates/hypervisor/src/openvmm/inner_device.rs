@@ -8,6 +8,7 @@
 use anyhow::{anyhow, Context, Result};
 
 use super::inner::OpenVmmInner;
+use crate::NetworkDevice;
 use crate::device::DeviceType;
 use crate::{VmmState, KATA_BLK_DEV_TYPE};
 
@@ -68,6 +69,7 @@ impl OpenVmmInner {
                 block.config.scsi_addr = None;
                 Ok(DeviceType::Block(block))
             }
+            DeviceType::Network(netdev) => self.handle_network_device(netdev).await,
             other => {
                 if matches!(other, DeviceType::Vfio(_)) {
                     return Err(anyhow!(
@@ -121,5 +123,13 @@ impl OpenVmmInner {
     pub(crate) async fn update_device(&mut self, device: DeviceType) -> Result<()> {
         warn!(sl!(), "openvmm: update_device stub for {}", device);
         Ok(())
+    }
+
+    async fn handle_network_device(&mut self, device: NetworkDevice) -> Result<DeviceType> {
+        info!(sl!(), "handle_network_device: device = {:?}", device);
+
+        let netdev = device.clone();
+
+        Ok(DeviceType::Network(netdev))
     }
 }
