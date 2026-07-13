@@ -239,8 +239,17 @@ impl VirtSandbox {
         if !network_env.network_created {
             info!(sl!(), "prepare_for_start_sandbox: calling prepare_network_resource");
             if let Some(network_resource) = self.prepare_network_resource(&network_env).await {
+                info!(sl!(), "prepare_for_start_sandbox: network_resource = {:?}", network_resource);
                 resource_configs.push(network_resource);
             }
+
+            /*
+            info!(sl!(), "prepare_for_start_sandbox: calling prepare_network_resource again");
+            if let Some(network_resource2) = self.prepare_network_resource(&network_env).await {
+                info!(sl!(), "prepare_for_start_sandbox: network_resource2 = {:?}", network_resource2);
+                resource_configs.push(network_resource2);
+            }
+            */
         } else {
             warn!(sl!(), "prepare_for_start_sandbox: skipping prepare_network_resource");
         }

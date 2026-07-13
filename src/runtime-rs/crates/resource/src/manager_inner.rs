@@ -158,6 +158,8 @@ impl ResourceManagerInner {
         device_configs: Vec<ResourceConfig>,
     ) -> Result<()> {
         for dc in device_configs {
+            // info!(sl!(), "ResourceManagerInner: prepare_before_start_vm: dc = {:?}", dc);
+
             match dc {
                 ResourceConfig::ShareFs(c) => {
                     if self
