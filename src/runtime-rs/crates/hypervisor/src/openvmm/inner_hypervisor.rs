@@ -18,7 +18,9 @@ use super::{
 };
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
-use crate::{DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
+use crate::{
+    DeviceType, MemoryConfig, NetworkDevice, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK,
+};
 
 const KATA_PATH: &str = "/run/kata";
 const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
@@ -79,7 +81,7 @@ pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieD
 
 /// Build a virtio-net-pci endpoint backed by a host TAP, opened by name inside
 /// the OpenVMM process (which runs in the sandbox network namespace).
-fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
+pub(super) fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
     virtio_pcie_device(vmservice::virtio_device::Kind::Net(vmservice::VirtioNet {
         backend: MessageField::some(vmservice::NicBackend {
             kind: Some(vmservice::nic_backend::Kind::Tap(vmservice::TapBackend {
@@ -125,7 +127,7 @@ fn vhost_user_fs_device_kind(socket_path: String, tag: String) -> vmservice::Pci
 /// Build a PCIe root port at `device` (function 0), optionally carrying a
 /// cold-plug endpoint. Empty `hotplug` ports are populated later via
 /// AddPcieDevice.
-fn make_pcie_port(
+pub fn make_pcie_port(
     name: &str,
     device: u8,
     hotplug: bool,
@@ -229,7 +231,7 @@ impl OpenVmmInner {
 
         let pending = std::mem::take(&mut self.pending_devices);
         let mut deferred_block_devices = Vec::new();
-        let mut network_index = 0u8;
+        // let mut network_index = 0u8;
 
         for dev in &pending {
             info!(sl!(), "openvmm: start_vm: pending device {:?}", dev);
@@ -250,10 +252,13 @@ impl OpenVmmInner {
                     );
                 }
                 DeviceType::Network(net_dev) => {
-                    if network_index >= OPENVMM_NET_PCI_MAX_COUNT {
+                    // if network_index >= OPENVMM_NET_PCI_MAX_COUNT {
+                    let network_index = net_dev.config.index as u8;
+                    if network_index > OPENVMM_NET_PCI_MAX_COUNT {
                         return Err(anyhow!(
-                            "openvmm supports at most {} virtio-net-pci devices",
-                            OPENVMM_NET_PCI_MAX_COUNT
+                            "openvmm supports at most {} virtio-net-pci devices but index = {}",
+                            OPENVMM_NET_PCI_MAX_COUNT,
+                            net_dev.config.index
                         ));
                     }
                     let device = OPENVMM_NET_PCI_FIRST_DEVICE + network_index;
@@ -272,7 +277,7 @@ impl OpenVmmInner {
                             net_dev.config.host_dev_name.clone(),
                         )),
                     ));
-                    network_index += 1;
+                    // network_index += 1;
                 }
                 DeviceType::ShareFs(fs_dev) => {
                     // Only vhost-user virtio-fs over PCIe is supported (no
@@ -527,5 +532,42 @@ impl OpenVmmInner {
 
     pub(crate) async fn get_passfd_listener_addr(&self) -> Result<(String, u32)> {
         Err(anyhow!("openvmm passfd IO is not supported"))
+    }
+
+    pub(crate) async fn handle_network_device(&mut self, net_dev: &NetworkDevice) -> Result<()> {
+        info!(
+            sl!(),
+            "handle_network_device: virtio-net-pci over host TAP {}", net_dev.config.host_dev_name
+        );
+
+        let network_index = net_dev.config.index;
+        let mac_address = mac_address(net_dev, network_index as usize);
+
+        let hotplug_result = self
+            .vmm_instance
+            .add_net_pcie_device(
+                &format!("net{}", network_index),
+                &mac_address,
+                &net_dev.config.host_dev_name,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to hotplug network over host TAP {}",
+                    net_dev.config.host_dev_name
+                )
+            });
+
+        if let Err(err) = hotplug_result {
+            return Err(err);
+        }
+
+        info!(
+            sl!(),
+            "handle_network_device: hotplugged virtio-net-pci device over host TAP {}",
+            net_dev.config.host_dev_name
+        );
+
+        Ok(())
     }
 }

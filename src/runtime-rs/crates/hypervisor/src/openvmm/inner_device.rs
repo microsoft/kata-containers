@@ -8,17 +8,42 @@
 use anyhow::{anyhow, Context, Result};
 
 use super::inner::OpenVmmInner;
-use crate::NetworkDevice;
 use crate::device::DeviceType;
 use crate::{VmmState, KATA_BLK_DEV_TYPE};
 
 impl OpenVmmInner {
     pub(crate) async fn add_device(&mut self, device: DeviceType) -> Result<DeviceType> {
-        info!(sl!(), "openvmm: add_device: state = {:?}, device {}", self.state, device);
+        info!(
+            sl!(),
+            "openvmm: add_device: state = {:?}, device {}", self.state, device
+        );
 
-        if self.state == VmmState::NotReady {
-            info!(sl!(), "openvmm: add_device: VMM not ready, queueing device");
-            self.pending_devices.push(device.clone());
+        // if self.state == VmmState::NotReady {
+        if self.state != VmmState::VmRunning {
+            // info!(sl!(), "openvmm: add_device: VMM not ready, queueing device");
+
+            match device {
+                DeviceType::Network(ref net_dev) => {
+                    let mut cloned_net_dev = net_dev.clone();
+                    cloned_net_dev.config.index = self.next_network_index as u64;
+                    info!(
+                        sl!(),
+                        "openvmm: add_device: VMM not running, queueing NetworkDevice index = {}",
+                        cloned_net_dev.config.index
+                    );
+                    self.next_network_index += 1;
+                    self.pending_devices
+                        .push(DeviceType::Network(cloned_net_dev));
+                }
+                _ => {
+                    info!(
+                        sl!(),
+                        "openvmm: add_device: VMM not running, queueing device"
+                    );
+                    self.pending_devices.push(device.clone());
+                }
+            }
+
             return Ok(device);
         }
 
@@ -71,7 +96,10 @@ impl OpenVmmInner {
                 block.config.scsi_addr = None;
                 Ok(DeviceType::Block(block))
             }
-            DeviceType::Network(netdev) => self.handle_network_device(netdev).await,
+            DeviceType::Network(net_dev) => {
+                self.handle_network_device(&net_dev).await?;
+                Ok(DeviceType::Network(net_dev))
+            }
             other => {
                 if matches!(other, DeviceType::Vfio(_)) {
                     return Err(anyhow!(
@@ -125,13 +153,5 @@ impl OpenVmmInner {
     pub(crate) async fn update_device(&mut self, device: DeviceType) -> Result<()> {
         warn!(sl!(), "openvmm: update_device stub for {}", device);
         Ok(())
-    }
-
-    async fn handle_network_device(&mut self, device: NetworkDevice) -> Result<DeviceType> {
-        info!(sl!(), "handle_network_device: device = {:?}", device);
-
-        let netdev = device.clone();
-
-        Ok(DeviceType::Network(netdev))
     }
 }

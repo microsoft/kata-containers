@@ -62,6 +62,7 @@ pub(crate) struct OpenVmmInner {
     pub(crate) capabilities: Capabilities,
     pub(crate) guest_memory_block_size_mb: u32,
     pub(crate) vmm_instance: VmmInstance,
+    pub(crate) next_network_index: u8,
 }
 
 impl std::fmt::Debug for OpenVmmInner {
@@ -93,6 +94,7 @@ impl OpenVmmInner {
             capabilities,
             guest_memory_block_size_mb: 0,
             vmm_instance: VmmInstance::new(exit_notify),
+            next_network_index: 0,
         }
     }
 
