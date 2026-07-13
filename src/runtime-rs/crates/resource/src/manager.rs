@@ -132,6 +132,7 @@ impl ResourceManager {
         let found = tokio::task::spawn_blocking(move || -> Result<bool> {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_io()
+                .enable_time()
                 .build()?;
             loop {
                 if rt.block_on(crate::network::netns_has_interfaces(&netns_path))? {

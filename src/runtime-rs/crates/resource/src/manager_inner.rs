@@ -257,7 +257,10 @@ impl ResourceManagerInner {
         // tokio runtime, and block the task on it.
         let device_manager = self.device_manager.clone();
         let network = thread::spawn(move || -> Result<Arc<dyn Network>> {
-            let rt = runtime::Builder::new_current_thread().enable_io().build()?;
+            let rt = runtime::Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .build()?;
             let d = rt
                 .block_on(network::new(&network_config, device_manager))
                 .context("new network")?;
@@ -392,6 +395,7 @@ impl ResourceManagerInner {
             let found = tokio::task::spawn_blocking(move || -> Result<bool> {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_io()
+                    .enable_time()
                     .build()?;
                 loop {
                     if rt.block_on(crate::network::netns_has_interfaces(&netns_path))? {
@@ -420,7 +424,10 @@ impl ResourceManagerInner {
         // then push interfaces/routes/neighbors to the agent.
         let device_manager = self.device_manager.clone();
         let network = thread::spawn(move || -> Result<Arc<dyn Network>> {
-            let rt = runtime::Builder::new_current_thread().enable_io().build()?;
+            let rt = runtime::Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .build()?;
             let d = rt
                 .block_on(network::new(&network_config, device_manager))
                 .context("new network")?;

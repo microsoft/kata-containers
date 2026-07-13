@@ -259,6 +259,7 @@ fn set_vf_admin_mac_sync(vf_bdf: &str, mac: &str) -> Result<()> {
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
+        .enable_time()
         .build()
         .context("build runtime for VF admin MAC")?;
 
