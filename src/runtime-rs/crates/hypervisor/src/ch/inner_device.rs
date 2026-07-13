@@ -311,17 +311,29 @@ impl CloudHypervisorInner {
     }
 
     async fn handle_network_device(&mut self, device: NetworkDevice) -> Result<DeviceType> {
+        info!(sl!(), "clh: handle_network_device: device = {:?}", device);
+
         let netdev = device.clone();
 
         let mut clh_net_config = NetConfig::try_from(device.config)?;
+        info!(sl!(), "clh: handle_network_device: clh_net_config = {:?}", clh_net_config);
+
         // When using fds to pass the tap device to cloud-hypervisor, tap and id fields should be None
         clh_net_config.tap = None;
         clh_net_config.id = None;
+
+        info!(
+            sl!(),
+            "clh: handle_network_device: opening {:?}, queue_num = {}",
+            netdev.config.host_dev_name,
+            netdev.config.queue_num
+        );
 
         let files = open_named_tuntap(&netdev.config.host_dev_name, netdev.config.queue_num as u32)
             .context("open named tuntap")?;
 
         let fds = files.iter().map(|f| f.as_raw_fd()).collect();
+        info!(sl!(), "clh: handle_network_device: fds = {:?}", fds);
 
         let response =
             cloud_hypervisor_vm_netdev_add_with_fds(&self.api_socket, clh_net_config, fds).await?;
@@ -330,6 +342,7 @@ impl CloudHypervisorInner {
             debug!(sl!(), "netdev add response: {:?}", detail);
         }
 
+        info!(sl!(), "clh: handle_network_device: success, netdev = {:?}", netdev);
         Ok(DeviceType::Network(netdev))
     }
 
