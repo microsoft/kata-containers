@@ -476,6 +476,8 @@ impl OpenVmmInner {
         let mut gb200_extra_numa_nodes: Vec<NumaNode> = Vec::new();
 
         for dev in &pending {
+            info!(sl!(), "openvmm: start_vm: pending device {:?}", dev);
+
             match dev {
                 crate::DeviceType::HybridVsock(hvsock_dev) => {
                     info!(

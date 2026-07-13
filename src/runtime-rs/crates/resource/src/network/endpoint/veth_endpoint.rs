@@ -34,6 +34,12 @@ impl VethEndpoint {
         model: &str,
         queues: usize,
     ) -> Result<Self> {
+        info!(
+            sl!(),
+            "VethEndpoint: NetworkPair from handle = {:?}, idx = {idx}, name = {name}, model = {model}, queues = {queues}",
+            handle
+        );
+
         let net_pair = NetworkPair::new(handle, idx, name, model, queues)
             .await
             .context("new network interface pair failed.")?;
@@ -46,6 +52,8 @@ impl VethEndpoint {
 
     fn get_network_config(&self) -> Result<NetworkConfig> {
         let iface = &self.net_pair.tap.tap_iface;
+        info!(sl!(), "VethEndpoint: iface = {:?}", iface);
+
         let guest_mac = utils::parse_mac(&iface.hard_addr).ok_or_else(|| {
             Error::new(
                 io::ErrorKind::InvalidData,
