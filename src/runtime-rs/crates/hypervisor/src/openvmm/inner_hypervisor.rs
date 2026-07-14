@@ -539,6 +539,8 @@ impl OpenVmmInner {
             "handle_network_device: virtio-net-pci over host TAP {}", net_dev.config.host_dev_name
         );
 
+        let port = self.reserve_block_hotplug_port(&net_dev.config.host_dev_name)?;
+
         // let network_index = net_dev.config.index;
         let network_index = self.next_network_index;
         self.next_network_index += 1;
@@ -555,7 +557,7 @@ impl OpenVmmInner {
         let hotplug_result = self
             .vmm_instance
             .add_net_pcie_device(
-                &format!("net{}", network_index),
+                &port.name,
                 &mac_address,
                 &net_dev.config.host_dev_name,
                 tap.tap_file,
@@ -569,6 +571,7 @@ impl OpenVmmInner {
             });
 
         if let Err(err) = hotplug_result {
+            let _ = self.release_block_hotplug_port(&net_dev.config.host_dev_name);
             return Err(err);
         }
 

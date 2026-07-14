@@ -141,6 +141,35 @@ impl OpenVmmInner {
                 );
                 Ok(())
             }
+            DeviceType::Network(net_dev) => {
+                let Some(port) = self.release_block_hotplug_port(&net_dev.config.host_dev_name) else {
+                    warn!(
+                        sl!(),
+                        "openvmm: no hotplug mapping found for network device {}",
+                        net_dev.config.host_dev_name
+                    );
+                    return Ok(());
+                };
+
+                self.vmm_instance
+                    .remove_pcie_device(&port.name)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to hot-remove network device {} from PCIe port {}",
+                            net_dev.config.host_dev_name, port.name
+                        )
+                    })?;
+
+                info!(
+                    sl!(),
+                    "openvmm: hot-removed network device {} from PCIe port {}",
+                    net_dev.config.host_dev_name,
+                    port.name
+                );
+
+                Ok(())
+            }
             other => {
                 warn!(sl!(), "openvmm: remove_device stub for {}", other);
                 Ok(())
