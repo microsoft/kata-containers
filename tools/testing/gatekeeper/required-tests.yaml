@@ -60,29 +60,29 @@ mapping:
       - Kata Containers CI / kata-containers-ci-on-push / run-basic-amd64-tests / run-nerdctl-tests (qemu)
       - Kata Containers CI / kata-containers-ci-on-push / run-basic-amd64-tests / run-nerdctl-tests (qemu-runtime-rs)
       - Kata Containers CI / kata-containers-ci-on-push / run-basic-amd64-tests / run-nydus (latest, clh)
-      # msft-preview: vmm action error: MachineConfig(InvalidVcpuCount(0))
+      # up/3.32.0: vmm action error: MachineConfig(InvalidVcpuCount(0))
       # - Kata Containers CI / kata-containers-ci-on-push / run-basic-amd64-tests / run-nydus (latest, dragonball)
       - Kata Containers CI / kata-containers-ci-on-push / run-basic-amd64-tests / run-nydus (latest, qemu)
       - Kata Containers CI / kata-containers-ci-on-push / run-basic-amd64-tests / run-nydus (minimum, clh)
-      # msft-preview: vmm action error: MachineConfig(InvalidVcpuCount(0))
+      # up/3.32.0: vmm action error: MachineConfig(InvalidVcpuCount(0))
       # - Kata Containers CI / kata-containers-ci-on-push / run-basic-amd64-tests / run-nydus (minimum, dragonball)
       - Kata Containers CI / kata-containers-ci-on-push / run-basic-amd64-tests / run-nydus (minimum, qemu)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (latest, clh-runtime-rs) / run-cri-containerd-amd64 (latest, clh-runtime-rs)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (latest, clh) / run-cri-containerd-amd64 (latest, clh)
-      # msft-preview: load podSandboxConfig: error converting YAML to JSON: yaml: line 6: found character that cannot start any token
+      # up/3.32.0: load podSandboxConfig: error converting YAML to JSON: yaml: line 6: found character that cannot start any token
       # - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (latest, dragonball) / run-cri-containerd-amd64 (latest, dragonball)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (latest, qemu-runtime-rs) / run-cri-containerd-amd64 (latest, qemu-runtime-rs)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (latest, qemu) / run-cri-containerd-amd64 (latest, qemu)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (minimum, clh) / run-cri-containerd-amd64 (minimum, clh)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (minimum, clh-runtime-rs) / run-cri-containerd-amd64 (minimum, clh-runtime-rs)
-      # msft-preview: load podSandboxConfig: error converting YAML to JSON: yaml: line 6: found character that cannot start any token
+      # up/3.32.0: load podSandboxConfig: error converting YAML to JSON: yaml: line 6: found character that cannot start any token
       # - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (minimum, dragonball) / run-cri-containerd-amd64 (minimum, dragonball)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (minimum, qemu-runtime-rs) / run-cri-containerd-amd64 (minimum, qemu-runtime-rs)
       - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-amd64 (minimum, qemu) / run-cri-containerd-amd64 (minimum, qemu)
-      # msft-preview: We don't have s390x runners.
+      # up/3.32.0: We don't have s390x runners.
       # - Kata Containers CI / kata-containers-ci-on-push / run-cri-containerd-tests-s390x (latest, qemu) / run-cri-containerd-s390x (latest, qemu)
       #- Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-arm64 / run-k8s-tests-on-arm64 (qemu, kubeadm)
-      # msft-preview: Can't run these tests because the GHCR push isn't set up.
+      # up/3.32.0: Can't run these tests because the GHCR push isn't set up.
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-aks / run-k8s-tests (cbl-mariner, clh-azure, normal)
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-aks / run-k8s-tests (cbl-mariner, clh-azure, small, containerd)
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-aks / run-k8s-tests (cbl-mariner, clh-azure, small, oci-distribution)
@@ -90,7 +90,7 @@ mapping:
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-aks / run-k8s-tests (cbl-mariner, clh-azure-runtime-rs, normal)
       - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (clh, minimum)
       - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (clh, latest)
-      # msft-preview: vmm action error: MachineConfig(InvalidVcpuCount(0))
+      # up/3.32.0: vmm action error: MachineConfig(InvalidVcpuCount(0))
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (dragonball, minimum)
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (dragonball, latest)
       - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (qemu, minimum)
@@ -99,7 +99,7 @@ mapping:
       - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (qemu-runtime-rs, latest)
       - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (clh-runtime-rs, minimum)
       - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-free-runner / run-k8s-tests (clh-runtime-rs, latest)
-      # msft-preview: We don't run k8s tests yet.
+      # up/3.32.0: We don't run k8s tests yet.
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-zvsi / run-k8s-tests (devmapper, qemu, kubeadm)
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-zvsi / run-k8s-tests (nydus, qemu-coco-dev, kubeadm)
       # - Kata Containers CI / kata-containers-ci-on-push / run-kata-coco-tests / run-k8s-tests-on-tee (sev-snp, qemu-snp)
@@ -109,7 +109,7 @@ mapping:
       # - Kata Containers CI / kata-containers-ci-on-push / run-kata-deploy-tests / run-kata-deploy-tests (qemu, k3s)
       - Kata Containers CI / kata-containers-ci-on-push / run-kata-deploy-tests / run-kata-deploy-tests (qemu, microk8s)
       - Kata Containers CI / kata-containers-ci-on-push / run-kata-deploy-tests / run-kata-deploy-tests (qemu, rke2)
-      # msft-preview: We don't run k8s tests yet.
+      # up/3.32.0: We don't run k8s tests yet.
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-nvidia-gpu / run-nvidia-gpu-tests-on-amd64
       # - Kata Containers CI / kata-containers-ci-on-push / run-k8s-tests-on-nvidia-gpu / run-nvidia-gpu-snp-tests-on-amd64
     required-labels:
@@ -152,7 +152,7 @@ mapping:
       - Static checks / static-checks (make static-checks)
       - Spelling check / check-spelling
       # static-checks-self-hosted.yaml
-      # msft-preview: We don't have s390x runners.
+      # up/3.32.0: We don't have s390x runners.
       # - Static checks self-hosted / build-checks (ubuntu-24.04-s390x) / check (make check, agent, src/agent, rust, libdevmapper, libseccomp, protobuf-compiler, clang, ub...
       # - Static checks self-hosted / build-checks (ubuntu-24.04-s390x) / check (make check, dragonball, src/dragonball, rust, ubuntu-24.04-s390x)
       # - Static checks self-hosted / build-checks (ubuntu-24.04-s390x) / check (make check, genpolicy, src/tools/genpolicy, rust, protobuf-compiler, ubuntu-24.04-s390x)

@@ -23,7 +23,7 @@ jobs:
 
   build-checks:
     needs: skipper
-    if: false # msft-preview doesn't have these runners
+    if: false # up/3.32.0 doesn't have these runners
     strategy:
       fail-fast: false
       matrix:

@@ -31,7 +31,7 @@ RUNTIME=${RUNTIME:-containerd-shim-kata-${KATA_HYPERVISOR}-v2}
 FACTORY_TEST=${FACTORY_TEST:-""}
 ARCH=$(uname -m)
 SANDBOXER=${SANDBOXER:-"podsandbox"}
-# This is to avoid the following error in msft-preview:
+# This is to avoid the following error in up/3.32.0:
 # pod memory limit too low: minimum 128MiB, got 0Mib
 POD_MEMORY_LIMIT_IN_BYTES=${POD_MEMORY_LIMIT_IN_BYTES:-268435456} # 256Mi
 
