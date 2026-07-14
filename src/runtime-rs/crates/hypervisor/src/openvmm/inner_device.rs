@@ -24,14 +24,12 @@ impl OpenVmmInner {
 
             match device {
                 DeviceType::Network(ref net_dev) => {
-                    let mut cloned_net_dev = net_dev.clone();
-                    cloned_net_dev.config.index = self.next_network_index as u64;
+                    let cloned_net_dev = net_dev.clone();
                     info!(
                         sl!(),
                         "openvmm: add_device: VMM not running, queueing NetworkDevice index = {}",
                         cloned_net_dev.config.index
                     );
-                    self.next_network_index += 1;
                     self.pending_devices
                         .push(DeviceType::Network(cloned_net_dev));
                 }

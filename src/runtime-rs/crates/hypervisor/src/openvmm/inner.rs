@@ -21,6 +21,7 @@ use super::{
     OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
 };
 use crate::device::pci_path::{PciPath, PciSlot};
+use crate::openvmm::OPENVMM_NET_PCI_MAX_COUNT;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpenVmmHotplugPort {
@@ -94,7 +95,7 @@ impl OpenVmmInner {
             capabilities,
             guest_memory_block_size_mb: 0,
             vmm_instance: VmmInstance::new(exit_notify),
-            next_network_index: 0,
+            next_network_index: OPENVMM_NET_PCI_MAX_COUNT,
         }
     }
 

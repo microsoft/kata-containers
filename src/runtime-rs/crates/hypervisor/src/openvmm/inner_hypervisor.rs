@@ -235,11 +235,9 @@ impl OpenVmmInner {
 
         let pending = std::mem::take(&mut self.pending_devices);
         let mut deferred_block_devices = Vec::new();
-        // let mut network_index = 0u8;
+        let mut network_index = 0u8;
 
         for dev in &pending {
-            info!(sl!(), "openvmm: start_vm: pending device {:?}", dev);
-
             match dev {
                 DeviceType::HybridVsock(hvsock_dev) => {
                     info!(
@@ -256,13 +254,10 @@ impl OpenVmmInner {
                     );
                 }
                 DeviceType::Network(net_dev) => {
-                    // if network_index >= OPENVMM_NET_PCI_MAX_COUNT {
-                    let network_index = net_dev.config.index as u8;
-                    if network_index > OPENVMM_NET_PCI_MAX_COUNT {
+                    if network_index >= OPENVMM_NET_PCI_MAX_COUNT {
                         return Err(anyhow!(
-                            "openvmm supports at most {} virtio-net-pci devices but index = {}",
-                            OPENVMM_NET_PCI_MAX_COUNT,
-                            net_dev.config.index
+                            "openvmm supports at most {} virtio-net-pci devices",
+                            OPENVMM_NET_PCI_MAX_COUNT
                         ));
                     }
                     let device = OPENVMM_NET_PCI_FIRST_DEVICE + network_index;
@@ -281,7 +276,7 @@ impl OpenVmmInner {
                             net_dev.config.host_dev_name.clone(),
                         )),
                     ));
-                    // network_index += 1;
+                    network_index += 1;
                 }
                 DeviceType::ShareFs(fs_dev) => {
                     // Only vhost-user virtio-fs over PCIe is supported (no
@@ -544,7 +539,10 @@ impl OpenVmmInner {
             "handle_network_device: virtio-net-pci over host TAP {}", net_dev.config.host_dev_name
         );
 
-        let network_index = net_dev.config.index;
+        // let network_index = net_dev.config.index;
+        let network_index = self.next_network_index;
+        self.next_network_index += 1;
+
         let mac_address = mac_address(net_dev, network_index as usize);
 
         let tap = Tap::open_named(&net_dev.config.host_dev_name, false).with_context(|| {
