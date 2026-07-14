@@ -6,6 +6,11 @@
 //! External OpenVMM process wrapper using OpenVMM's TTRPC VM service.
 
 use anyhow::{anyhow, Context, Result};
+use nix::sys::socket::{sendmsg, ControlMessage, MsgFlags};
+use protobuf::Message;
+use std::io::{IoSlice, Read, Write};
+use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -200,6 +205,7 @@ impl VmmInstance {
         port_name: &str,
         mac_address: &str,
         tap_name: &str,
+        tap_file: std::fs::File,
     ) -> Result<()> {
         let request = vmservice::AddPcieDeviceRequest {
             port_name: port_name.to_string(),
@@ -210,11 +216,7 @@ impl VmmInstance {
             ..Default::default()
         };
 
-        self.client()?
-            .add_pcie_device(rpc_ctx(), &request)
-            .await
-            .map(|_| ())
-            .map_err(|e| anyhow!("openvmm add_pcie_device RPC failed: {:?}", e))
+        self.add_pcie_device_with_tap_fd(request, tap_file).await
     }
 
     /// Hot-remove the device behind the named PCIe hotplug port.
@@ -297,6 +299,116 @@ impl VmmInstance {
             .as_ref()
             .context("openvmm TTRPC client not connected")
     }
+
+    async fn add_pcie_device_with_tap_fd(
+        &self,
+        request: vmservice::AddPcieDeviceRequest,
+        tap_file: std::fs::File,
+    ) -> Result<()> {
+        let socket_path = self
+            .ttrpc_socket_path
+            .as_ref()
+            .context("openvmm TTRPC socket path is not set")?
+            .clone();
+
+        tokio::task::spawn_blocking(move || {
+            add_pcie_device_with_tap_fd_blocking(&socket_path, &request, tap_file)
+        })
+        .await
+        .map_err(|e| anyhow!("openvmm add_pcie_device task join failed: {e}"))??;
+
+        Ok(())
+    }
+}
+
+fn add_pcie_device_with_tap_fd_blocking(
+    socket_path: &str,
+    request: &vmservice::AddPcieDeviceRequest,
+    tap_file: std::fs::File,
+) -> Result<()> {
+    let request_payload = request
+        .write_to_bytes()
+        .context("failed to serialize AddPcieDeviceRequest")?;
+
+    let mut ttrpc_request = ttrpc::Request::new();
+    ttrpc_request.set_service("vmservice.VM".to_string());
+    ttrpc_request.set_method("AddPcieDevice".to_string());
+    ttrpc_request.set_payload(request_payload);
+    ttrpc_request.set_timeout_nano(OPENVMM_RPC_TIMEOUT.as_nanos() as i64);
+
+    let request_bytes = ttrpc_request
+        .write_to_bytes()
+        .context("failed to serialize ttrpc request")?;
+
+    let mut frame: Vec<u8> = Vec::with_capacity(10 + request_bytes.len());
+    frame.extend_from_slice(&(request_bytes.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&1u32.to_be_bytes());
+    frame.push(1);
+    frame.push(0);
+    frame.extend_from_slice(&request_bytes);
+
+    let mut stream = UnixStream::connect(socket_path)
+        .with_context(|| format!("failed to connect to openvmm ttrpc socket {socket_path}"))?;
+    stream
+        .set_read_timeout(Some(OPENVMM_RPC_TIMEOUT))
+        .context("failed to set openvmm ttrpc read timeout")?;
+    stream
+        .set_write_timeout(Some(OPENVMM_RPC_TIMEOUT))
+        .context("failed to set openvmm ttrpc write timeout")?;
+
+    send_frame_with_fd(&mut stream, &frame, tap_file.as_raw_fd())
+        .context("failed to send AddPcieDevice ttrpc request with TAP fd")?;
+
+    let response = read_ttrpc_response(&mut stream)
+        .context("failed to read AddPcieDevice ttrpc response")?;
+
+    if response.status().code() != ttrpc::Code::OK {
+        return Err(anyhow!(
+            "openvmm add_pcie_device RPC failed: {:?}: {}",
+            response.status().code(),
+            response.status().message()
+        ));
+    }
+
+    Ok(())
+}
+
+fn send_frame_with_fd(stream: &mut UnixStream, frame: &[u8], fd: RawFd) -> Result<()> {
+    let iov = [IoSlice::new(frame)];
+    let cmsgs = [ControlMessage::ScmRights(&[fd])];
+    let sent = sendmsg::<()>(stream.as_raw_fd(), &iov, &cmsgs, MsgFlags::empty(), None)
+        .context("sendmsg failed")?;
+
+    if sent < frame.len() {
+        stream
+            .write_all(&frame[sent..])
+            .context("failed to write remaining ttrpc frame bytes")?;
+    }
+
+    Ok(())
+}
+
+fn read_ttrpc_response(stream: &mut UnixStream) -> Result<ttrpc::Response> {
+    let mut header = [0u8; 10];
+    stream
+        .read_exact(&mut header)
+        .context("failed to read ttrpc response header")?;
+
+    let payload_len = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as usize;
+    let message_type = header[8];
+    if message_type != 2 {
+        return Err(anyhow!(
+            "unexpected ttrpc message type {}, expected response type 2",
+            message_type
+        ));
+    }
+
+    let mut payload = vec![0u8; payload_len];
+    stream
+        .read_exact(&mut payload)
+        .context("failed to read ttrpc response payload")?;
+
+    ttrpc::Response::parse_from_bytes(&payload).context("failed to decode ttrpc response")
 }
 
 /// Build a per-call ttrpc context carrying the standard OpenVMM RPC timeout.

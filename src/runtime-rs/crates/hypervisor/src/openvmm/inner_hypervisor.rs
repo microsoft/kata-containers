@@ -16,6 +16,7 @@ use super::{
     OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT,
     OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VSOCK_PCI_DEVICE,
 };
+use crate::device::Tap;
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{
@@ -79,8 +80,11 @@ pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieD
     }))
 }
 
-/// Build a virtio-net-pci endpoint backed by a host TAP, opened by name inside
-/// the OpenVMM process (which runs in the sandbox network namespace).
+/// Build a virtio-net-pci endpoint backed by a host TAP name.
+///
+/// For network hotplug we pass a pre-opened TAP fd from Kata to OpenVMM over
+/// ttrpc resources; OpenVMM maps that fd to NamedTapHandle and preserves this
+/// name for logs and diagnostics.
 pub(super) fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
     virtio_pcie_device(vmservice::virtio_device::Kind::Net(vmservice::VirtioNet {
         backend: MessageField::some(vmservice::NicBackend {
@@ -543,12 +547,20 @@ impl OpenVmmInner {
         let network_index = net_dev.config.index;
         let mac_address = mac_address(net_dev, network_index as usize);
 
+        let tap = Tap::open_named(&net_dev.config.host_dev_name, false).with_context(|| {
+            format!(
+                "failed to open host TAP {} for openvmm hotplug",
+                net_dev.config.host_dev_name
+            )
+        })?;
+
         let hotplug_result = self
             .vmm_instance
             .add_net_pcie_device(
                 &format!("net{}", network_index),
                 &mac_address,
                 &net_dev.config.host_dev_name,
+                tap.tap_file,
             )
             .await
             .with_context(|| {
