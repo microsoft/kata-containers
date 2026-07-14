@@ -534,16 +534,20 @@ impl OpenVmmInner {
     }
 
     pub(crate) async fn handle_network_device(&mut self, net_dev: &NetworkDevice) -> Result<()> {
-        info!(
-            sl!(),
-            "handle_network_device: virtio-net-pci over host TAP {}", net_dev.config.host_dev_name
-        );
-
-        let port = self.reserve_block_hotplug_port(&net_dev.config.host_dev_name)?;
-
         // let network_index = net_dev.config.index;
         let network_index = self.next_network_index;
         self.next_network_index += 1;
+
+        let device_id = format!("net{}", network_index);
+        let port = self.reserve_block_hotplug_port(&device_id)?;
+
+        info!(
+            sl!(),
+            "handle_network_device: host TAP {}, device_id = {}, hotplug port = {:?}",
+            net_dev.config.host_dev_name,
+            device_id,
+            port
+        );
 
         let mac_address = mac_address(net_dev, network_index as usize);
 
@@ -577,8 +581,7 @@ impl OpenVmmInner {
 
         info!(
             sl!(),
-            "handle_network_device: hotplugged virtio-net-pci device over host TAP {}",
-            net_dev.config.host_dev_name
+            "handle_network_device: {} success", net_dev.config.host_dev_name
         );
 
         Ok(())
