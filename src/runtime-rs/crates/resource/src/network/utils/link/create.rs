@@ -119,11 +119,26 @@ pub fn create_link(name: &str, link_type: LinkType, queues: usize) -> Result<()>
 
 fn create_queue(name: &str, flags: libc::c_int) -> Result<(File, String)> {
     let path = Path::new(DEVICE_PATH);
-    let file = OpenOptions::new().read(true).write(true).open(path)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .with_context(|| {
+            format!(
+                "open {} for TAP/TUN queue name={} flags=0x{flags:x}",
+                path.display(),
+                name,
+            )
+        })?;
     let mut req = CreateLinkReq::from_name(name)?;
     unsafe {
         req.set_raw_flags(flags as libc::c_short);
-        tun_set_iff(file.as_raw_fd(), &mut req as *mut _ as *mut _).context("tun set iff")?;
+        tun_set_iff(file.as_raw_fd(), &mut req as *mut _ as *mut _).with_context(|| {
+            format!(
+                "tun set iff for {} queue name={} flags=0x{flags:x}",
+                DEVICE_PATH, name,
+            )
+        })?;
     };
     Ok((file, req.get_name()?))
 }
