@@ -150,10 +150,11 @@ fn resolve_namespace(flag: Option<String>) -> String {
     if let Some(ns) = flag.filter(|s| !s.trim().is_empty()) {
         return ns;
     }
-    if let Ok(ns) = std::env::var("POD_NAMESPACE") {
-        if !ns.trim().is_empty() {
-            return ns;
-        }
+    if let Some(ns) = std::env::var("POD_NAMESPACE")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+    {
+        return ns;
     }
     if let Ok(ns) =
         std::fs::read_to_string("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
