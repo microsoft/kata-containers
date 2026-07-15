@@ -31,9 +31,11 @@ mkdir -p "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
 mkdir -p "${PREFIX}/${SHIM_BINARIES_PATH}"
 
 RUNTIME_GO_SHIM="src/runtime/containerd-shim-kata-v2"
-RUNTIME_RS_TARGET="target/x86_64-unknown-linux-gnu/release"
+# Rust workspace target triple, matching runtime-rs' TRIPLE = $(uname -m)-unknown-linux-gnu.
+# Must be derived (not hardcoded) so arm64 (aarch64) builds resolve the right target dir.
+RUNTIME_RS_TARGET="target/$(uname -m)-unknown-linux-gnu/release"
 RUNTIME_RS_SHIM="${RUNTIME_RS_TARGET}/containerd-shim-kata-v2"
-KATA_CTL_BINARY="target/x86_64-unknown-linux-gnu/release/kata-ctl"
+KATA_CTL_BINARY="${RUNTIME_RS_TARGET}/kata-ctl"
 SHIM_BINARY_RUNTIME_GO="${SHIM_BINARY_NAME}-go"
 SHIM_BINARY_RUNTIME_RS="${SHIM_BINARY_NAME}-rs"
 
