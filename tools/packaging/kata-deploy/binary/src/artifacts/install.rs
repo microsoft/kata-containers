@@ -1431,7 +1431,7 @@ async fn configure_mariner(config: &Config) -> Result<()> {
         let static_resource_mgmt_path = "runtime.static_sandbox_resource_mgmt";
         set_toml_bool_to_true(config_file, static_resource_mgmt_path)?;
 
-        let clh_path = format!("{}/bin/cloud-hypervisor-glibc", config.dest_dir);
+        let clh_path = format!("{}/bin/cloud-hypervisor", config.dest_dir);
         let valid_paths_field =
             format!("hypervisor.{mariner_hypervisor_name}.valid_hypervisor_paths");
         let existing_paths = toml_utils::get_toml_array(config_file, &valid_paths_field)

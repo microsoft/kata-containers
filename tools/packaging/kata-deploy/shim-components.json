@@ -5,8 +5,8 @@
   ],
   "shims": {
     "qemu": {
-      "x86_64":  ["shim-v2-go", "qemu", "virtiofsd", "nydus", "kernel", "kernel-debug", "rootfs-image", "rootfs-initrd"],
-      "aarch64": ["shim-v2-go", "qemu", "virtiofsd", "nydus", "kernel", "kernel-debug", "rootfs-image", "rootfs-initrd", "ovmf"],
+      "x86_64":  ["shim-v2-go", "qemu", "configuration-qemu"],
+      "aarch64": ["shim-v2-go", "qemu", "configuration-qemu"],
       "s390x":   ["shim-v2-go", "qemu", "virtiofsd", "kernel", "rootfs-image", "rootfs-initrd"],
       "ppc64le": ["shim-v2-go", "qemu", "virtiofsd", "kernel", "rootfs-initrd"]
     },
@@ -61,8 +61,12 @@
       "s390x":   ["shim-v2-rust", "qemu", "kernel", "rootfs-image", "rootfs-image-coco-extension"]
     },
     "clh": {
-      "x86_64":  ["shim-v2-go", "cloud-hypervisor", "virtiofsd", "nydus", "kernel", "kernel-debug", "rootfs-image", "rootfs-initrd"],
-      "aarch64": ["shim-v2-go", "cloud-hypervisor", "virtiofsd", "nydus", "kernel", "kernel-debug", "rootfs-image", "rootfs-initrd"]
+      "x86_64":  ["shim-v2-go", "cloud-hypervisor", "configuration-clh"],
+      "aarch64": ["shim-v2-go", "cloud-hypervisor", "configuration-clh"]
+    },
+    "openvmm": {
+      "x86_64":  ["shim-v2-rust", "configuration-openvmm"],
+      "aarch64": ["shim-v2-rust", "configuration-openvmm"]
     },
     "clh-azure": {
       "x86_64": ["shim-v2-go", "cloud-hypervisor", "virtiofsd", "kernel", "kernel-debug", "rootfs-image-mariner"]
