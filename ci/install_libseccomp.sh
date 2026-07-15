@@ -10,7 +10,7 @@ set -o errexit
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=/dev/null
-source "${script_dir}/../tests/common.bash"
+#source "${script_dir}/../tests/common.bash"
 
 # Path to the ORAS cache helper for downloading tarballs (sourced when needed)
 # Use ORAS_CACHE_HELPER env var (set by build.sh in Docker) or fallback to repo path
