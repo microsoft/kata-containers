@@ -163,6 +163,7 @@ impl OpenVmmInner {
         self.pending_devices.clear();
         self.next_network_index = 0;
         self.reset_block_hotplug_ports();
+        self.reset_network_hotplug_ports();
         self.vm_path = get_sandbox_path(id);
         self.jailer_root = get_jailer_root(id);
         self.netns = netns;
@@ -179,6 +180,7 @@ impl OpenVmmInner {
     pub(crate) async fn start_vm(&mut self, _timeout: i32) -> Result<()> {
         info!(sl!(), "openvmm: start_vm");
         self.reset_block_hotplug_ports();
+        self.reset_network_hotplug_ports();
 
         let cmdline = build_kernel_cmdline(
             self.config.debug_info.enable_debug,
@@ -522,16 +524,9 @@ impl OpenVmmInner {
                     // Handled below via virtio-vsock PCIe device
                 }
                 crate::DeviceType::Network(net_dev) => {
-                    let network_index = net_dev.config.index as u8;
-                    if network_index >= OPENVMM_NET_HOTPLUG_PORT_COUNT {
-                        return Err(anyhow!(
-                            "openvmm supports at most {} deferred network devices, got index {}",
-                            OPENVMM_NET_HOTPLUG_PORT_COUNT,
-                            net_dev.config.index
-                        ));
-                    }
-
-                    let port_name = format!("{}{}", OPENVMM_NET_HOTPLUG_PORT_PREFIX, network_index);
+                    let port_name = self.reserve_network_hotplug_port(&net_dev.config.host_dev_name)?;
+                    let network_index = self.next_network_index as usize;
+                    self.next_network_index = self.next_network_index.saturating_add(1);
                     info!(
                         sl!(),
                         "openvmm: queueing Network device for worker-thread TAP open, port={}, tap={}",
@@ -1320,19 +1315,13 @@ impl OpenVmmInner {
     }
 
     pub(crate) async fn handle_network_device(&mut self, net_dev: &NetworkDevice) -> Result<()> {
-        let network_index = net_dev.config.index as u8;
-        if network_index >= OPENVMM_NET_HOTPLUG_PORT_COUNT {
-            return Err(anyhow!(
-                "openvmm supports at most {} hotplugged network devices, got index {}",
-                OPENVMM_NET_HOTPLUG_PORT_COUNT,
-                net_dev.config.index
-            ));
-        }
-
-        let port_name = format!("{}{}", OPENVMM_NET_HOTPLUG_PORT_PREFIX, network_index);
+        let port_name = self.reserve_network_hotplug_port(&net_dev.config.host_dev_name)?;
+        let network_index = self.next_network_index as usize;
+        self.next_network_index = self.next_network_index.saturating_add(1);
         let mac_address = mac_address(net_dev, network_index as usize);
 
-        self.vmm_instance
+        let hotplug_result = self
+            .vmm_instance
             .add_net_pcie_device(
                 port_name.clone(),
                 &mac_address,
@@ -1345,7 +1334,12 @@ impl OpenVmmInner {
                     "failed to hotplug network over host TAP {} on {}",
                     net_dev.config.host_dev_name, port_name
                 )
-            })?;
+            });
+
+        if let Err(err) = hotplug_result {
+            let _ = self.release_network_hotplug_port(&net_dev.config.host_dev_name);
+            return Err(err);
+        }
 
         info!(
             sl!(),
