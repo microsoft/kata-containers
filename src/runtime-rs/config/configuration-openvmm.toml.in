@@ -127,7 +127,8 @@ dial_timeout_ms = 1000
 
 # Agent reconnect timeout in millisecond.
 # OpenVMM needs more time for guest to boot and kata-agent to start.
-reconnect_timeout_ms = 60000
+# reconnect_timeout_ms = 60000
+reconnect_timeout_ms = 600000
 
 # Create Container Request Timeout
 create_container_timeout = @DEFCREATECONTAINERTIMEOUT@
@@ -159,7 +160,7 @@ experimental = @DEFAULTEXPFEATURES@
 
 enable_pprof = false
 
-static_sandbox_resource_mgmt = @DEFSTATICRESOURCEMGMT_OPENVMM@
+static_sandbox_resource_mgmt = @DEFSTATICRESOURCEMGMT_CLH_AZURE@
 
 sandbox_bind_mounts = @DEFBINDMOUNTS@
 
