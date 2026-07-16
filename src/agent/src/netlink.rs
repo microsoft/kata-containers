@@ -249,6 +249,26 @@ fn pick_link_for_secondary_netns_move_from_candidates(
 
     candidates.sort_by_key(|link| link.index);
 
+    if !requested_mac.is_empty() {
+        let matched_mac = candidates
+            .iter()
+            .filter(|link| link.address.eq_ignore_ascii_case(requested_mac))
+            .collect::<Vec<_>>();
+
+        if matched_mac.len() == 1 {
+            let candidate = matched_mac[0];
+            if candidates.len() == 1 && candidate.name == requested_name {
+                return Err(anyhow!(
+                    "only primary-like link is present for secondary netns move: {}({})",
+                    candidate.name,
+                    candidate.address
+                ));
+            }
+
+            return Ok(candidate.name.clone());
+        }
+    }
+
     if candidates.len() == 1 {
         let candidate = &candidates[0];
         if candidate.name == requested_name
@@ -266,10 +286,7 @@ fn pick_link_for_secondary_netns_move_from_candidates(
 
     let non_requested = candidates
         .iter()
-        .filter(|link| {
-            link.name != requested_name
-                && (requested_mac.is_empty() || !link.address.eq_ignore_ascii_case(requested_mac))
-        })
+        .filter(|link| link.name != requested_name)
         .collect::<Vec<_>>();
     if non_requested.len() == 1 {
         return Ok(non_requested[0].name.clone());
@@ -1219,6 +1236,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result, "eth2");
+    }
+
+    #[test]
+    fn test_pick_secondary_move_candidate_prefers_requested_mac_match() {
+        let candidates = vec![
+            test_link("eth0", "4a:61:8a:98:a3:3a", 2),
+            test_link("eth1", "76:00:01:88:51:36", 3),
+        ];
+        let result = pick_link_for_secondary_netns_move_from_candidates(
+            candidates,
+            "eth0",
+            "76:00:01:88:51:36",
+        )
+        .unwrap();
+        assert_eq!(result, "eth1");
     }
 
     #[tokio::test]

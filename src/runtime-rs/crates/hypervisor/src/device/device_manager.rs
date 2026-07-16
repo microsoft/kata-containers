@@ -380,17 +380,24 @@ impl DeviceManager {
                     .context("failed to create vhost blk device")?
             }
             DeviceConfig::NetworkCfg(config) => {
-                // try to find the device, found and just return id.
-                let host_path = config.host_dev_name.as_str();
-                if let Some(dev_id_matched) = self.find_device(host_path.to_owned()).await {
-                    info!(
-                        sl!(),
-                        "network device with path:{:?} found. return network device id: {:?}",
-                        host_path,
-                        dev_id_matched
-                    );
-
-                    return Ok(dev_id_matched);
+                // Reuse only when both tap name and guest MAC match.
+                // The same tap name (e.g. tap0_kata) can legitimately appear
+                // in different netns for different pods.
+                for (device_id, dev) in &self.devices {
+                    if let DeviceType::Network(existing) = dev.lock().await.get_device_info().await {
+                        if existing.config.host_dev_name == config.host_dev_name
+                            && existing.config.guest_mac == config.guest_mac
+                        {
+                            info!(
+                                sl!(),
+                                "network device found for tap {:?} and MAC {:?}. return network device id: {:?}",
+                                config.host_dev_name,
+                                config.guest_mac,
+                                device_id
+                            );
+                            return Ok(device_id.to_string());
+                        }
+                    }
                 }
 
                 Arc::new(Mutex::new(NetworkDevice::new(device_id.clone(), config)))
