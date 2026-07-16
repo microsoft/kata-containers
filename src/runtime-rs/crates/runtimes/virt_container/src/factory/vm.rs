@@ -164,7 +164,6 @@ impl VmConfig {
 
 impl TemplateVm {
     /// Creates a new TemplateVm instance with the provided components and resources.
-    /// Currently, only QEMU is supported; other hypervisors are not yet implemented.
     pub fn new(
         id: String,
         hypervisor: Arc<dyn Hypervisor>,
@@ -182,7 +181,7 @@ impl TemplateVm {
         }
     }
 
-    /// Initializes the QEMU hypervisor for Kata
+    /// Initializes the configured hypervisor for Kata.
     async fn new_hypervisor(config: &VmConfig) -> Result<Arc<dyn Hypervisor>> {
         let hypervisor: Arc<dyn Hypervisor> = match config.hypervisor_name.as_str() {
             HYPERVISOR_QEMU => {
@@ -191,7 +190,16 @@ impl TemplateVm {
                     .await;
                 Arc::new(h)
             }
-            // TODO: Add support for additional hypervisors or proper error handling here.
+            #[cfg(all(
+                feature = "cloud-hypervisor",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            ))]
+            hypervisor::HYPERVISOR_NAME_CH => {
+                let h = hypervisor::ch::CloudHypervisor::new();
+                h.set_hypervisor_config(config.hypervisor_config.clone())
+                    .await;
+                Arc::new(h)
+            }
             _ => return Err(anyhow!("Unsupported hypervisor {}", config.hypervisor_name)),
         };
         Ok(hypervisor)
@@ -303,6 +311,11 @@ impl TemplateVm {
             .stop_vm()
             .await
             .map_err(|e| anyhow::anyhow!("failed to stop vm: {}", e))
+    }
+
+    /// Remove runtime resources after the VM has stopped.
+    pub async fn cleanup(&self) -> Result<()> {
+        self.hypervisor.cleanup().await.context("cleanup vm")
     }
 
     /// Disconnect agent
