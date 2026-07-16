@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use super::vmm_instance::VmmInstance;
 use super::{
     openvmm_port_pci_path, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
-    OPENVMM_STATIC_PCI_PORT_COUNT,
+    OPENVMM_NET_HOTPLUG_PORT_COUNT, OPENVMM_NET_HOTPLUG_PORT_PREFIX, OPENVMM_STATIC_PCI_PORT_COUNT,
 };
 use crate::device::pci_path::PciPath;
 
@@ -59,6 +59,8 @@ pub(crate) struct OpenVmmInner {
     pub(crate) cached_block_devices: HashSet<String>,
     pub(crate) free_block_hotplug_ports: VecDeque<OpenVmmHotplugPort>,
     pub(crate) attached_block_hotplug_ports: HashMap<String, OpenVmmHotplugPort>,
+    pub(crate) free_network_hotplug_ports: VecDeque<String>,
+    pub(crate) attached_network_hotplug_ports: HashMap<String, String>,
     pub(crate) capabilities: Capabilities,
     pub(crate) guest_memory_block_size_mb: u32,
     pub(crate) vmm_instance: VmmInstance,
@@ -91,6 +93,8 @@ impl OpenVmmInner {
             cached_block_devices: HashSet::new(),
             free_block_hotplug_ports: Self::default_block_hotplug_ports(),
             attached_block_hotplug_ports: HashMap::new(),
+            free_network_hotplug_ports: Self::default_network_hotplug_ports(),
+            attached_network_hotplug_ports: HashMap::new(),
             capabilities,
             guest_memory_block_size_mb: 0,
             vmm_instance: VmmInstance::new(exit_notify),
@@ -155,6 +159,11 @@ impl OpenVmmInner {
         self.attached_block_hotplug_ports.clear();
     }
 
+    pub(crate) fn reset_network_hotplug_ports(&mut self) {
+        self.free_network_hotplug_ports = Self::default_network_hotplug_ports();
+        self.attached_network_hotplug_ports.clear();
+    }
+
     pub(crate) fn reserve_block_hotplug_port(
         &mut self,
         device_id: &str,
@@ -183,9 +192,37 @@ impl OpenVmmInner {
         Some(port)
     }
 
+    pub(crate) fn reserve_network_hotplug_port(&mut self, device_id: &str) -> Result<String> {
+        if let Some(port_name) = self.attached_network_hotplug_ports.get(device_id) {
+            return Ok(port_name.clone());
+        }
+
+        let port_name = self
+            .free_network_hotplug_ports
+            .pop_front()
+            .ok_or_else(|| anyhow::anyhow!("openvmm ran out of network hotplug PCIe ports"))?;
+
+        self.attached_network_hotplug_ports
+            .insert(device_id.to_string(), port_name.clone());
+
+        Ok(port_name)
+    }
+
+    pub(crate) fn release_network_hotplug_port(&mut self, device_id: &str) -> Option<String> {
+        let port_name = self.attached_network_hotplug_ports.remove(device_id)?;
+        self.free_network_hotplug_ports.push_front(port_name.clone());
+        Some(port_name)
+    }
+
     fn default_block_hotplug_ports() -> VecDeque<OpenVmmHotplugPort> {
         (0..OPENVMM_BLOCK_HOTPLUG_PORT_COUNT)
             .map(OpenVmmHotplugPort::new)
+            .collect()
+    }
+
+    fn default_network_hotplug_ports() -> VecDeque<String> {
+        (0..OPENVMM_NET_HOTPLUG_PORT_COUNT)
+            .map(|index| format!("{}{}", OPENVMM_NET_HOTPLUG_PORT_PREFIX, index))
             .collect()
     }
 }
