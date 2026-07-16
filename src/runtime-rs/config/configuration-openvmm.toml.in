@@ -10,6 +10,8 @@
 # XXX:   Type: @PROJECT_TYPE@
 
 [hypervisor.openvmm]
+hot_plug_vfio = "no-port"
+cold_plug_vfio = "root-port"
 path = ""
 kernel = "@KERNELPATH_OPENVMM@"
 image = "@IMAGEPATH@"
@@ -117,7 +119,7 @@ enable_guest_swap = false
 container_pipe_size = @PIPESIZE@
 enable_debug = true
 enable_tracing = false
-debug_console_enabled = false
+debug_console_enabled = true
 
 # Agent dial timeout in millisecond.
 # Use longer timeout to give the hvsock relay time to complete VMBus handshake.
