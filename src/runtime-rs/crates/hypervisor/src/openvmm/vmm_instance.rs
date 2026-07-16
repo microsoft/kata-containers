@@ -6,6 +6,7 @@
 //! VmmInstance wrapper for OpenVMM's in-process VM worker.
 
 use anyhow::{anyhow, Context, Result};
+use nix::sched::{setns, CloneFlags};
 use openvmm_defs::config::Config;
 use openvmm_defs::rpc::VmRpc;
 use openvmm_defs::worker::{VmWorkerParameters, VM_WORKER};
@@ -18,6 +19,44 @@ use vm_resource::IntoResource;
 
 use super::OPENVMM_VSOCK_PCI_PORT;
 use crate::utils::{enter_netns, open_named_tuntap};
+
+fn open_tap_fd_in_netns(
+    tap_name: &str,
+    netns_path: Option<&str>,
+) -> Result<std::os::fd::OwnedFd> {
+    let open_tap = || {
+        open_named_tuntap(tap_name, 1)
+            .with_context(|| format!("failed to open TAP device {} for openvmm", tap_name))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("no TAP file descriptors returned for {}", tap_name))
+            .map(Into::into)
+    };
+
+    match netns_path {
+        Some(path) if !path.is_empty() => {
+            let current_netns = std::fs::File::open(format!(
+                "/proc/self/task/{}/ns/net",
+                nix::unistd::gettid().as_raw()
+            ))
+            .context("failed to open current network namespace")?;
+
+            enter_netns(path).with_context(|| format!("failed to enter netns {}", path))?;
+
+            let open_result = open_tap();
+            let restore_result = setns(&current_netns, CloneFlags::CLONE_NEWNET)
+                .context("failed to restore original network namespace");
+
+            match (open_result, restore_result) {
+                (Ok(fd), Ok(())) => Ok(fd),
+                (Err(err), Ok(())) => Err(err),
+                (Ok(_), Err(err)) => Err(err),
+                (Err(open_err), Err(restore_err)) => Err(open_err.context(restore_err)),
+            }
+        }
+        _ => open_tap(),
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct DeferredNetworkDevice {
@@ -368,6 +407,31 @@ impl VmmInstance {
             .await
             .context("failed to hotplug PCIe device")?;
         Ok(())
+    }
+
+    pub(crate) async fn add_net_pcie_device(
+        &self,
+        port_name: String,
+        mac_address: &str,
+        tap_name: &str,
+        netns_path: Option<&str>,
+    ) -> Result<()> {
+        let fd = open_tap_fd_in_netns(tap_name, netns_path)?;
+        let endpoint = net_backend_resources::tap::TapHandle { fd }.into_resource();
+        let net_handle = virtio_resources::net::VirtioNetHandle {
+            max_queues: None,
+            mac_address: mac_address.parse().unwrap_or_else(|_| {
+                net_backend_resources::mac_address::MacAddress::from([0u8; 6])
+            }),
+            endpoint,
+        };
+
+        let resource = virtio_resources::VirtioPciDeviceHandle(net_handle.into_resource())
+            .into_resource();
+
+        self.add_pcie_device(port_name, resource)
+            .await
+            .context("failed to hotplug virtio-net PCIe device")
     }
 
     pub(crate) async fn remove_pcie_device(&self, port_name: String) -> Result<()> {
