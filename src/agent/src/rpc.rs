@@ -103,6 +103,7 @@ use libc::{self, c_char, c_ushort, pid_t, winsize, TIOCSWINSZ};
 use std::fs;
 use std::os::unix::prelude::PermissionsExt;
 use std::process::{Command, Stdio};
+use std::os::fd::AsRawFd;
 
 use nix::unistd::{Gid, Uid};
 use std::fs::{File, OpenOptions};
@@ -178,9 +179,9 @@ fn create_rtnl_handle_in_netns(netns_path: &str) -> Result<crate::netlink::Handl
     let new_netns = File::open(netns_path)
         .with_context(|| format!("open target netns path {}", netns_path))?;
 
-    setns(&new_netns, CloneFlags::CLONE_NEWNET).context("set netns to target")?;
+    setns(new_netns.as_raw_fd(), CloneFlags::CLONE_NEWNET).context("set netns to target")?;
     let handle = crate::netlink::Handle::new();
-    let restore = setns(&old_netns, CloneFlags::CLONE_NEWNET).context("restore netns");
+    let restore = setns(old_netns.as_raw_fd(), CloneFlags::CLONE_NEWNET).context("restore netns");
 
     restore?;
     handle
