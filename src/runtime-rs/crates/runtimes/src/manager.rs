@@ -81,14 +81,6 @@ fn convert_string_to_slog_level(string_level: &str) -> slog::Level {
     }
 }
 
-fn effective_log_level(enable_debug: bool, log_level: &str) -> &str {
-    if enable_debug && log_level == "info" {
-        "debug"
-    } else {
-        log_level
-    }
-}
-
 fn get_container_netns_path(spec: &oci::Spec) -> Option<String> {
     let mut netns = None;
 
