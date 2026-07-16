@@ -16,14 +16,15 @@ use super::vmm_instance::DeferredNetworkDevice;
 use super::{
     openvmm_port_pci_path, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT, OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX,
     OPENVMM_CONSOLE_PCI_PORT, OPENVMM_NET_PCI_PORT, OPENVMM_ROOTFS_PCI_PORT,
-    OPENVMM_SHAREFS_PCI_PORT, OPENVMM_STATIC_PCI_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
+    OPENVMM_NET_HOTPLUG_PORT_COUNT, OPENVMM_NET_HOTPLUG_PORT_PREFIX, OPENVMM_SHAREFS_PCI_PORT,
+    OPENVMM_STATIC_PCI_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
     OPENVMM_VFIO_COLDPLUG_PORT_COUNT_GB200, OPENVMM_VFIO_COLDPLUG_PORT_PREFIX,
 };
 use crate::device::driver::vfio_device::DeviceAddress;
 use crate::device::pci_path::PciPath;
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
-use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
+use crate::{MemoryConfig, NetworkDevice, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 use openvmm_defs::config::{
     Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig, LoadMode,
@@ -140,12 +141,27 @@ fn build_kernel_cmdline(
     params.to_string()
 }
 
+fn mac_address(device: &NetworkDevice, index: usize) -> String {
+    device
+        .config
+        .guest_mac
+        .as_ref()
+        .map(|mac| {
+            format!(
+                "{:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
+                mac.0[0], mac.0[1], mac.0[2], mac.0[3], mac.0[4], mac.0[5]
+            )
+        })
+        .unwrap_or_else(|| format!("02-00-00-00-00-{:02X}", index + 1))
+}
+
 impl OpenVmmInner {
     pub(crate) async fn prepare_vm(&mut self, id: &str, netns: Option<String>) -> Result<()> {
         info!(sl!(), "openvmm: prepare_vm id={}", id);
         self.id = id.to_string();
         self.state = VmmState::NotReady;
         self.pending_devices.clear();
+        self.next_network_index = 0;
         self.reset_block_hotplug_ports();
         self.vm_path = get_sandbox_path(id);
         self.jailer_root = get_jailer_root(id);
@@ -437,6 +453,16 @@ impl OpenVmmInner {
                     });
                 }
 
+                for index in 0..OPENVMM_NET_HOTPLUG_PORT_COUNT {
+                    ports.push(PciePortConfig {
+                        name: format!("{}{}", OPENVMM_NET_HOTPLUG_PORT_PREFIX, index),
+                        devfn: None,
+                        hotplug: true,
+                        acs_capabilities_supported: Some(0x5f),
+                        cxl: false,
+                    });
+                }
+
                 ports
             },
         }];
@@ -496,26 +522,26 @@ impl OpenVmmInner {
                     // Handled below via virtio-vsock PCIe device
                 }
                 crate::DeviceType::Network(net_dev) => {
+                    let network_index = net_dev.config.index as u8;
+                    if network_index >= OPENVMM_NET_HOTPLUG_PORT_COUNT {
+                        return Err(anyhow!(
+                            "openvmm supports at most {} deferred network devices, got index {}",
+                            OPENVMM_NET_HOTPLUG_PORT_COUNT,
+                            net_dev.config.index
+                        ));
+                    }
+
+                    let port_name = format!("{}{}", OPENVMM_NET_HOTPLUG_PORT_PREFIX, network_index);
                     info!(
                         sl!(),
-                        "openvmm: queueing Network device for worker-thread TAP open, tap={}",
-                        net_dev.config.host_dev_name
+                        "openvmm: queueing Network device for worker-thread TAP open, port={}, tap={}",
+                        port_name,
+                        net_dev.config.host_dev_name,
                     );
-                    let mac = net_dev
-                        .config
-                        .guest_mac
-                        .as_ref()
-                        .map(|m| {
-                            format!(
-                                "{:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
-                                m.0[0], m.0[1], m.0[2], m.0[3], m.0[4], m.0[5]
-                            )
-                        })
-                        .unwrap_or_default();
                     deferred_network_devices.push(DeferredNetworkDevice {
-                        port_name: OPENVMM_NET_PCI_PORT.to_string(),
+                        port_name,
                         tap_name: net_dev.config.host_dev_name.clone(),
-                        mac_address: mac,
+                        mac_address: mac_address(net_dev, network_index as usize),
                     });
                 }
                 crate::DeviceType::ShareFs(fs_dev) => {
@@ -1291,6 +1317,44 @@ impl OpenVmmInner {
         Err(anyhow!(
             "openvmm get_passfd_listener_addr not yet implemented"
         ))
+    }
+
+    pub(crate) async fn handle_network_device(&mut self, net_dev: &NetworkDevice) -> Result<()> {
+        let network_index = net_dev.config.index as u8;
+        if network_index >= OPENVMM_NET_HOTPLUG_PORT_COUNT {
+            return Err(anyhow!(
+                "openvmm supports at most {} hotplugged network devices, got index {}",
+                OPENVMM_NET_HOTPLUG_PORT_COUNT,
+                net_dev.config.index
+            ));
+        }
+
+        let port_name = format!("{}{}", OPENVMM_NET_HOTPLUG_PORT_PREFIX, network_index);
+        let mac_address = mac_address(net_dev, network_index as usize);
+
+        self.vmm_instance
+            .add_net_pcie_device(
+                port_name.clone(),
+                &mac_address,
+                &net_dev.config.host_dev_name,
+                self.netns.as_deref(),
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to hotplug network over host TAP {} on {}",
+                    net_dev.config.host_dev_name, port_name
+                )
+            })?;
+
+        info!(
+            sl!(),
+            "openvmm: hotplugged virtio-net-pci over host TAP {} on {}",
+            net_dev.config.host_dev_name,
+            port_name
+        );
+
+        Ok(())
     }
 }
 
