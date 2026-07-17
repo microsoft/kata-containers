@@ -7,7 +7,15 @@
 set -euo pipefail
 [[ -n "${DEBUG}" ]] && set -x
 
-shopt -s nullglob
+# NOTE: nullglob must stay OFF. resolve_driver_pkg() emits apt version-glob
+# specs like "libnvidia-compute=595.58.03-*" (the un-suffixed form used on the
+# aarch64 'sbsa' 590/595/610 branches). These are passed through `eval
+# "${APT_INSTALL}" ...`, whose re-parse performs pathname expansion on every
+# token. With nullglob enabled, those unmatched globs are silently DROPPED,
+# so the real driver/firmware/compute packages never get installed and the
+# build later dies with "cp: cannot stat '.../lib/firmware/nvidia'". Keeping
+# nullglob off lets the "-*" survive verbatim so apt resolves the version.
+shopt -u nullglob
 shopt -s extglob
 
 # Error helpers
