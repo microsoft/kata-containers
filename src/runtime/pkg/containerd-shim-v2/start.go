@@ -35,10 +35,15 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 	}
 
 	if c.cType.IsSandbox() {
-		err := s.sandbox.Start(ctx)
-		if err != nil {
-			return err
+		// a restored sandbox is already running (RestoreSandbox resumed the VM during Create);
+		// re-running sandbox.Start() would fail the running->running state transition. skip it
+		// and go straight to the monitor/watch wiring below.
+		if !s.restoredSandbox {
+			if err := s.sandbox.Start(ctx); err != nil {
+				return err
+			}
 		}
+		var err error
 		// Start monitor after starting sandbox
 		s.monitor, err = s.sandbox.Monitor(ctx)
 		if err != nil {
@@ -63,9 +68,16 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 		// shim context and the context passed to startContainer for tracing.
 		go watchOOMEvents(ctx, s)
 	} else {
-		_, err := s.sandbox.StartContainer(ctx, c.id)
-		if err != nil {
-			return err
+		// on a restored sandbox the app container is already RUNNING in the guest (adopted at
+		// Create via RestoreContainer, marked Running). the guest agent has no "start an
+		// already-running container" op -- StartContainer would fail the Ready-state gate. skip
+		// the guest start; the container is live. (mirror of the sandbox Start-skip above.)
+		if !s.restoredSandbox {
+			_, err := s.sandbox.StartContainer(ctx, c.id)
+			if err != nil {
+				return err
+			}
+		} else {
 		}
 	}
 

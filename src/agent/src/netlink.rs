@@ -31,6 +31,11 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
 use std::str::{self, FromStr};
 
+// KATA_IFACE_NEUTRALIZE: a raw_flags sentinel (high bit, never a real IFF_* flag) asking the
+// agent to down + flush a link instead of configuring it. Used to disable a restored clone's
+// frozen snapshot NIC so it shares no network identity with its source.
+pub const KATA_IFACE_NEUTRALIZE: u32 = 0x8000_0000;
+
 /// Search criteria to use when looking for a link in `find_link`.
 pub enum LinkFilter<'a> {
     /// Find by link name.
@@ -114,6 +119,16 @@ impl Handle {
         // we cannot use that to find target link.
         // let's try if hardware address filter works. -_-
         let link = self.find_link(LinkFilter::Address(&iface.hwAddr)).await?;
+
+        // neutralize path: down + flush all addresses and return, instead of configuring.
+        // matched by mac above, so it only ever hits the frozen snapshot NIC, not the CNI NIC.
+        if iface.raw_flags & KATA_IFACE_NEUTRALIZE != 0 {
+            if link.is_up() {
+                self.enable_link(link.index(), false).await?;
+            }
+            self.del_all_addresses(link.index()).await?;
+            return Ok(());
+        }
 
         // Bring down interface if it is UP
         if link.is_up() {
@@ -663,6 +678,24 @@ impl Handle {
                 .execute()
                 .await
                 .map_err(|err| anyhow!("Failed to add address {}: {:?}", net.ip(), err))?;
+        }
+
+        Ok(())
+    }
+
+    // del_all_addresses removes every address on a link (used by the neutralize path).
+    async fn del_all_addresses(&mut self, index: u32) -> Result<()> {
+        let addrs = self
+            .list_addresses(AddressFilter::LinkIndex(index))
+            .await?;
+        for addr in addrs {
+            let msg = addr.0;
+            self.handle
+                .address()
+                .del(msg)
+                .execute()
+                .await
+                .map_err(|err| anyhow!("Failed to delete address on link {}: {:?}", index, err))?;
         }
 
         Ok(())

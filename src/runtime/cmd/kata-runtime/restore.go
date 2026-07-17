@@ -9,9 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 
 	containerdshim "github.com/kata-containers/kata-containers/src/runtime/pkg/containerd-shim-v2"
@@ -45,7 +43,7 @@ var restoreCLICommand = cli.Command{
 		if from == "" {
 			return fmt.Errorf("--path is required")
 		}
-		src, err := resolveRestoreSource(from)
+		src, err := containerdshim.ResolveRestoreSource(from, false)
 		if err != nil {
 			return err
 		}
@@ -99,19 +97,3 @@ var restoreKillCommand = cli.Command{
 	},
 }
 
-// resolveRestoreSource maps --from to a snapshot dir. a bare name (no slash) must be a
-// direct child of SnapshotBaseDir (reject traversal); a path is taken verbatim.
-func resolveRestoreSource(from string) (string, error) {
-	dir := from
-	if !strings.Contains(from, "/") {
-		clean := filepath.Clean(filepath.Join(containerdshim.SnapshotBaseDir, from))
-		if filepath.Dir(clean) != filepath.Clean(containerdshim.SnapshotBaseDir) {
-			return "", fmt.Errorf("invalid snapshot name %q: must not contain path separators or ..", from)
-		}
-		dir = clean
-	}
-	if _, err := os.Stat(filepath.Join(dir, "config.json")); err != nil {
-		return "", fmt.Errorf("not a snapshot dir (no config.json): %s", dir)
-	}
-	return dir, nil
-}

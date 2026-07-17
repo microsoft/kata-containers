@@ -343,7 +343,13 @@ type Container struct {
 	config  *ContainerConfig
 	sandbox *Sandbox
 
-	id            string
+	id string
+	// guestID is the container id the GUEST kata-agent knows this container by. For a
+	// normally-created container it equals id. For a container ADOPTED on the restore path
+	// (RestoreContainer / adoptPauseContainer), the host tracks it under a fresh containerd id
+	// (id) but the guest still knows it by its ORIGINAL snapshot id -- so agent-facing RPCs must
+	// use guestID, while host-side lookups (findContainer, IOStream) keep using id.
+	guestID       string
 	sandboxID     string
 	containerPath string
 	rootfsSuffix  string
@@ -364,6 +370,31 @@ type Container struct {
 // ID returns the container identifier string.
 func (c *Container) ID() string {
 	return c.id
+}
+
+// agentID returns the container id the guest kata-agent knows this container by. It is the
+// container id the guest was told at create time; for an adopted (restored) container that is
+// the ORIGINAL snapshot id, not the fresh host/containerd id. All agent-facing RPCs
+// (waitProcess, signalProcess, stopContainer, ...) must key by this, not c.id. Falls back to
+// c.id when guestID was never set (every non-restore path).
+func (c *Container) agentID() string {
+	if c.guestID != "" {
+		return c.guestID
+	}
+	return c.id
+}
+
+// guestExecID maps a host-side process/exec id to the exec id the guest agent knows. The
+// container's INIT process is keyed in the guest by exec-id == guest container id (see
+// kataAgent.createContainer: ExecId == c.id). The shim refers to the init process by the host
+// container id (c.id). So when execID is the init process (== c.id), translate it to agentID();
+// real exec ids (docker exec / probes, generated as fresh uuids the guest already knows) pass
+// through unchanged. For non-restore containers agentID()==c.id so this is a no-op.
+func (c *Container) guestExecID(execID string) string {
+	if execID == c.id {
+		return c.agentID()
+	}
+	return execID
 }
 
 // Logger returns a logrus logger appropriate for logging Container messages
@@ -736,6 +767,7 @@ func newContainer(ctx context.Context, sandbox *Sandbox, contConfig *ContainerCo
 
 	c := &Container{
 		id:            contConfig.ID,
+		guestID:       contConfig.ID,
 		sandboxID:     sandbox.id,
 		rootFs:        contConfig.RootFs,
 		config:        contConfig,

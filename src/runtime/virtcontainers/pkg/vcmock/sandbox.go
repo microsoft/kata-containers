@@ -103,6 +103,14 @@ func (s *Sandbox) CreateContainer(ctx context.Context, conf vc.ContainerConfig) 
 	return nil, fmt.Errorf("%s: %s (%+v): sandboxID: %v, containerConfig: %v", mockErrorPrefix, getSelf(), s, s.MockID, conf)
 }
 
+// RestoreContainer implements the VCSandbox function of the same name.
+func (s *Sandbox) RestoreContainer(ctx context.Context, conf vc.ContainerConfig) (vc.VCContainer, error) {
+	if s.RestoreContainerFunc != nil {
+		return s.RestoreContainerFunc(conf)
+	}
+	return nil, fmt.Errorf("%s: %s (%+v): sandboxID: %v, containerConfig: %v", mockErrorPrefix, getSelf(), s, s.MockID, conf)
+}
+
 // DeleteContainer implements the VCSandbox function of the same name.
 func (s *Sandbox) DeleteContainer(ctx context.Context, contID string) (vc.VCContainer, error) {
 	return &Container{}, nil
