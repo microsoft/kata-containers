@@ -877,6 +877,17 @@ func (clh *cloudHypervisor) updateVsockSocketPath(configPath, vmID string) error
 		}).Debug("Updated vsock socket path in config.json")
 	}
 
+	// the snapshot config carries the original VM's tap fds in .net[].fds; they are invalid
+	// in the restoring process and CLH refuses to restore a net device associated with FDs.
+	// null them so the restored VM gets a fresh tap binding.
+	if nets, ok := config["net"].([]interface{}); ok {
+		for _, n := range nets {
+			if nm, ok := n.(map[string]interface{}); ok {
+				nm["fds"] = nil
+			}
+		}
+	}
+
 	// Write the updated config back to file
 	updatedConfig, err := json.Marshal(config)
 	if err != nil {
@@ -1022,6 +1033,17 @@ func (clh *cloudHypervisor) prepareRestoreFiles(snapshotDir string) error {
 	dstState := filepath.Join(vmPath, "state.json")
 	if err := clh.copyFile(srcState, dstState); err != nil {
 		return fmt.Errorf("failed to copy state.json: %v", err)
+	}
+
+	// CLH restores from source_url=file://vmPath, so symlink (not copy) the snapshot's ~GiB
+	// memory-ranges into the VMM dir -- restore opens it in place, MAP_PRIVATE keeps it COW.
+	srcMem := filepath.Join(snapshotDir, "memory-ranges")
+	if _, err := os.Stat(srcMem); err == nil {
+		dstMem := filepath.Join(vmPath, "memory-ranges")
+		_ = os.Remove(dstMem)
+		if err := os.Symlink(srcMem, dstMem); err != nil {
+			return fmt.Errorf("failed to symlink memory-ranges: %v", err)
+		}
 	}
 
 	// Update vsock socket path in the copied config.json so the restored VM

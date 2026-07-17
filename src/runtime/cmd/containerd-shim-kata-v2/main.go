@@ -53,5 +53,29 @@ func main() {
 		handleInfoFlag()
 	}
 
+	// restore mode: with a snapshot dir, restore a managed sandbox and run long-lived
+	// instead of the normal containerd shim loop.
+	if restoreFrom := restoreFromArg(); restoreFrom != "" {
+		if err := shim.RunRestore(restoreFrom); err != nil {
+			fmt.Fprintf(os.Stderr, "restore failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	shimapi.Run(types.DefaultKataRuntimeName, shim.New, shimConfig)
+}
+
+// restoreFromArg returns the snapshot dir from KATA_RESTORE_FROM or --restore-from, else "".
+func restoreFromArg() string {
+	if v := os.Getenv("KATA_RESTORE_FROM"); v != "" {
+		return v
+	}
+	args := os.Args[1:]
+	for i, a := range args {
+		if a == "--restore-from" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
