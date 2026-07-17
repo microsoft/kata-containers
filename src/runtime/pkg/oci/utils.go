@@ -1281,6 +1281,11 @@ func applyStaticSizingDefaults(hc *vc.HypervisorConfig, runtime RuntimeConfig) {
 	if hc.NumVCPUsF == 0 && runtime.StaticSandboxWorkloadDefaultVcpus > 0 {
 		hc.NumVCPUsF = runtime.StaticSandboxWorkloadDefaultVcpus
 	}
+
+	// Clamp the vCPU ceiling to the effective static size. Otherwise
+	// default_maxvcpus=0 resolves to the host physical core count, and a VM
+	// (or template snapshot) boots advertising that many possible vCPUs
+	hc.DefaultMaxVCPUs = hc.NumVCPUs()
 }
 
 // StaticHypervisorConfig returns a copy of the runtime's HypervisorConfig sized
@@ -1390,6 +1395,11 @@ func SandboxConfig(ocispec specs.Spec, runtime RuntimeConfig, bundlePath, cid st
 		// that the normal/direct boot path is born at the correct size before boot.
 		sandboxConfig.HypervisorConfig.NumVCPUsF += sandboxConfig.SandboxResources.WorkloadCPUs
 		sandboxConfig.HypervisorConfig.MemorySize += sandboxConfig.SandboxResources.WorkloadMemMB
+
+		// Clamp the vCPU ceiling to the sandbox's actual vCPU count. Without this,
+		// default_maxvcpus=0 resolves to the host physical core count, and the
+		// guest reports that many possible vCPUs via `nproc --all`.
+		sandboxConfig.HypervisorConfig.DefaultMaxVCPUs = sandboxConfig.HypervisorConfig.NumVCPUs()
 
 		ociLog.WithFields(logrus.Fields{
 			"workload cpu":       sandboxConfig.SandboxResources.WorkloadCPUs,
