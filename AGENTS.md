@@ -53,11 +53,20 @@ Preserve all of the following in `src/runtime-rs`:
   - `static_sandbox_default_workload_vcpus`
 - If workload limits are specified, do not add extra CPU or memory beyond those workload limits.
 - In the static-resource path, keep `default_maxvcpus` clamped to the effective static total.
+- Every runtime-rs hypervisor config template that enables `static_sandbox_resource_mgmt` must
+  also carry `static_sandbox_default_workload_mem` and `static_sandbox_default_workload_vcpus`.
+  These are fork-added keys and default to `0` when absent (`#[serde(default)]`). Upstream rebases
+  tend to keep them in `configuration-clh-runtime-rs.toml.in` but drop them from the other
+  templates — most notably `configuration-dragonball.toml.in`. When missing, the fallback resolves
+  `vcpus` to `0`, so `default_maxvcpus` becomes `0` and dragonball fails to boot with
+  `vmm action error: MachineConfig(InvalidVcpuCount(0))` (seen on the
+  `run-nerdctl-tests (dragonball)` CI job). Keep the keys in every static-resource template.
 
 Primary files:
 
 - `src/runtime-rs/crates/resource/src/cpu_mem/initial_size.rs`
 - `src/runtime-rs/config/configuration-clh-runtime-rs.toml.in`
+- `src/runtime-rs/config/configuration-dragonball.toml.in`
 - `src/runtime-rs/Makefile`
 
 ### 3. Fork-only test and CI policy
