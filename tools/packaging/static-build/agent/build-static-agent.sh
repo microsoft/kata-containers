@@ -20,8 +20,8 @@ build_agent_from_source() {
 
 	cd src/agent
 	# shellcheck disable=SC2154
-	DESTDIR="${DESTDIR}" AGENT_POLICY="${AGENT_POLICY}" INIT_DATA="${INIT_DATA}" make
-	DESTDIR="${DESTDIR}" AGENT_POLICY="${AGENT_POLICY}" INIT_DATA="${INIT_DATA}" make install
+	DESTDIR="${DESTDIR}" AGENT_POLICY="${AGENT_POLICY}" STRICT_POLICY="${STRICT_POLICY:-no}" INIT_DATA="${INIT_DATA}" make
+	DESTDIR="${DESTDIR}" AGENT_POLICY="${AGENT_POLICY}" STRICT_POLICY="${STRICT_POLICY:-no}" INIT_DATA="${INIT_DATA}" make install
 }
 
 build_agent_from_source "$@"
