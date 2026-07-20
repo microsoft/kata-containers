@@ -28,8 +28,8 @@ use crate::{MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 use openvmm_defs::config::{
     Config, DeviceVtl, HypervisorConfig as OvmmHypervisorConfig, LoadMode,
     MemoryConfig as OvmmMemoryConfig, NumaNode, NumaTopology, PcieDeviceConfig,
-    PcieGenericInitiatorConfig, PcieMmioRangeConfig, PciePortConfig,
-    PcieRootComplexConfig, ProcessorTopologyConfig, VmbusConfig, VpAssignment,
+    PcieGenericInitiatorConfig, PcieIommuConfig, PcieMmioRangeConfig, PciePortConfig,
+    PcieRootComplexConfig, ProcessorTopologyConfig, SmmuOas, VmbusConfig, VpAssignment,
 };
 use vm_resource::kind::VmbusDeviceHandleKind;
 use vm_resource::IntoResource;
@@ -69,6 +69,12 @@ const GB200_GPU_RC_BUS_SPAN: u8 = 16;
 /// HPA delta (2 TiB on this bench) to avoid overlap. Only the base (= HPA)
 /// is load-bearing for coherent init; the size is allocation headroom.
 const GB200_HIGH_MMIO_WINDOW: u64 = 2 * (1u64 << 40); // 2 TiB
+
+/// `--iommu id=` context shared by all GB200 GPU VFIO devices. Every device
+/// tagged with the same id shares one iommufd IOAS (one set of nested SMMU
+/// page tables). Mirrors John's validated `--iommu id=iommu` +
+/// `--vfio host=...,iommu=iommu` CLI.
+const GB200_IOMMU_ID: &str = "iommu";
 
 /// True if the host PCI device at `bdf` (segment-qualified, e.g.
 /// "0008:06:00.0") is bound to `nvgrace_gpu_vfio_pci` -- the NVIDIA variant
@@ -118,6 +124,36 @@ fn nvgrace_coherent_bar_hpa(bdf: &str) -> Option<u64> {
     }
     // 1 GiB threshold excludes small register BARs.
     (best_size > (1u64 << 30)).then_some(best_start)
+}
+
+/// Open the VFIO cdev character device for the host PCI device at `bdf`
+/// (segment-qualified, e.g. "0008:06:00.0"). The device must be bound to a
+/// vfio-pci variant driver so a cdev node exists under
+/// `/sys/bus/pci/devices/<bdf>/vfio-dev/`. Returns the opened
+/// `/dev/vfio/devices/<name>` file, which the cdev+iommufd VFIO path binds to
+/// an iommufd IOAS -- the wiring that backs the emulated SMMU (required for
+/// nested translation / multi-PASID SVA).
+fn open_vfio_cdev(bdf: &str) -> Result<File> {
+    let vfio_dev_dir = format!("/sys/bus/pci/devices/{}/vfio-dev", bdf);
+    let entry = std::fs::read_dir(&vfio_dev_dir)
+        .with_context(|| {
+            format!(
+                "openvmm: failed to read {}: is {} bound to a vfio-pci variant driver?",
+                vfio_dev_dir, bdf
+            )
+        })?
+        .next()
+        .with_context(|| format!("openvmm: no vfio-dev entry for {}", bdf))?
+        .with_context(|| format!("openvmm: failed to read vfio-dev entry for {}", bdf))?;
+    let dev_path = format!(
+        "/dev/vfio/devices/{}",
+        entry.file_name().to_string_lossy()
+    );
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&dev_path)
+        .with_context(|| format!("openvmm: failed to open cdev {}", dev_path))
 }
 
 fn build_kernel_cmdline(
@@ -474,6 +510,12 @@ impl OpenVmmInner {
         let mut gb200_next_gi_node: u32 = 1; // node 0 is the CPU node
         let mut gb200_generic_initiators: Vec<PcieGenericInitiatorConfig> = Vec::new();
         let mut gb200_extra_numa_nodes: Vec<NumaNode> = Vec::new();
+        // Shared iommufd context (/dev/iommu) backing the per-GPU emulated
+        // SMMUs. Opened lazily on the first nvgrace GPU so the x86 A100/H100
+        // flat path never touches iommufd. Each GPU's cdev handle owns a
+        // try_clone() of this fd; the shared GB200_IOMMU_ID string is what
+        // fans them into one IOAS.
+        let mut gb200_iommufd: Option<File> = None;
 
         for dev in &pending {
             match dev {
@@ -684,16 +726,36 @@ impl OpenVmmInner {
                                 let rc_name = format!("gpurc{}", rc_idx);
                                 let port_name = format!("gpu{}", rc_idx);
 
-                                let group_fd = std::fs::OpenOptions::new()
-                                    .read(true)
-                                    .write(true)
-                                    .open(&host_path)
+                                // Open the shared iommufd context once (lazy;
+                                // first GB200 GPU only) and a per-device clone
+                                // for this GPU's cdev handle. VMM-native
+                                // equivalent of John's `--iommu id=iommu`.
+                                if gb200_iommufd.is_none() {
+                                    gb200_iommufd = Some(
+                                        std::fs::OpenOptions::new()
+                                            .read(true)
+                                            .write(true)
+                                            .open("/dev/iommu")
+                                            .context(
+                                                "openvmm: failed to open /dev/iommu \
+                                                 (is iommufd available?)",
+                                            )?,
+                                    );
+                                }
+                                let iommufd = gb200_iommufd
+                                    .as_ref()
+                                    .unwrap()
+                                    .try_clone()
                                     .with_context(|| {
                                         format!(
-                                            "openvmm: failed to open VFIO group {} for GB200 GPU {}",
-                                            host_path, host_bdf
+                                            "openvmm: failed to dup iommufd fd for GB200 GPU {}",
+                                            host_bdf
                                         )
                                     })?;
+                                // cdev handle for this GPU (replaces the legacy
+                                // group fd). Required so the device is bound to
+                                // the iommufd IOAS that backs the emulated SMMU.
+                                let cdev = open_vfio_cdev(&host_bdf)?;
 
                                 pcie_root_complexes.push(PcieRootComplexConfig {
                                     index: pcie_root_complexes.len() as u32,
@@ -721,26 +783,24 @@ impl OpenVmmInner {
                                         cxl: false,
                                     }],
                                     cxl: None,
-                                    // NO emulated SMMU. The validated harness
-                                    // used --smmu rc=,accel, but that requires
-                                    // the VFIO device to be wired to the SMMU
-                                    // via the iommufd-cdev handle (which
-                                    // carries an iommu_id). Kata cold-plugs
-                                    // through the legacy VfioDeviceHandle
-                                    // (host VFIO container, no iommu_id), so
-                                    // declaring iommu:Some(Smmu) here would
-                                    // emit a guest SMMUv3 (IORT) with nothing
-                                    // behind it -- the guest's arm-smmu-v3
-                                    // init then wedges and the VM resets ~1s
-                                    // into boot. iommu:None matches the x86
-                                    // A100/H100 flat path (legacy container,
-                                    // works). preserve_bars + high_mmio pinned
-                                    // at the HPA are the load-bearing pieces
-                                    // for coherent init (proven in B1n).
-                                    // TODO(P2P): restore nested SMMU accel by
-                                    // switching to the cdev+iommufd VFIO
-                                    // handle + a top-level --iommu context.
-                                    iommu: None,
+                                    // Emulated Arm SMMUv3 with HW-accelerated
+                                    // nested translation (iommufd). Mirrors
+                                    // John's `--smmu rc=<gpurc>,accel`. The GPU
+                                    // below is cold-plugged through the
+                                    // cdev+iommufd VfioCdevDeviceHandle carrying
+                                    // GB200_IOMMU_ID, which is what backs this
+                                    // SMMU -- without that wiring the guest
+                                    // arm-smmu-v3 would have no translation
+                                    // source and wedge ~1s into boot. This
+                                    // restores multi-PASID SVA for CUDA
+                                    // coherent init (the cuInit 802 blocker).
+                                    // preserve_bars + high_mmio pinned at the
+                                    // HPA remain the load-bearing pieces for
+                                    // the coherent aperture itself.
+                                    iommu: Some(PcieIommuConfig::Smmu {
+                                        accel: true,
+                                        oas: SmmuOas::Auto,
+                                    }),
                                     // Emit ACPI _PXM = this GPU's first
                                     // Generic-Initiator NUMA node (the K GI
                                     // nodes are declared just below, starting
@@ -766,12 +826,15 @@ impl OpenVmmInner {
 
                                 pcie_devices.push(PcieDeviceConfig {
                                     port_name: port_name.clone(),
-                                    resource: vfio_assigned_device_resources::VfioDeviceHandle {
+                                    resource: vfio_assigned_device_resources::VfioCdevDeviceHandle {
                                         pci_id: host_bdf.clone(),
-                                        group: group_fd,
+                                        cdev,
+                                        iommufd,
+                                        iommu_id: GB200_IOMMU_ID.to_string(),
                                         bar_pt:
                                             [vfio_assigned_device_resources::BarPassthrough::None;
                                                 6],
+                                        port_name: port_name.clone(),
                                     }
                                     .into_resource(),
                                 });
