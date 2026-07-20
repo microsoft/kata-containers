@@ -46,6 +46,7 @@ mod features;
 mod initdata;
 mod linux_abi;
 mod metrics;
+mod mediation;
 mod mount;
 mod namespace;
 mod netlink;
