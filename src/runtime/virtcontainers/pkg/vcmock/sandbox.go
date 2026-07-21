@@ -111,6 +111,14 @@ func (s *Sandbox) RestoreContainer(ctx context.Context, conf vc.ContainerConfig)
 	return nil, fmt.Errorf("%s: %s (%+v): sandboxID: %v, containerConfig: %v", mockErrorPrefix, getSelf(), s, s.MockID, conf)
 }
 
+// FinalizeRestoreNetwork implements the VCSandbox function of the same name.
+func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) error {
+	if s.FinalizeRestoreNetworkFunc != nil {
+		return s.FinalizeRestoreNetworkFunc()
+	}
+	return fmt.Errorf("%s: %s (%+v): sandboxID: %v", mockErrorPrefix, getSelf(), s, s.MockID)
+}
+
 // DeleteContainer implements the VCSandbox function of the same name.
 func (s *Sandbox) DeleteContainer(ctx context.Context, contID string) (vc.VCContainer, error) {
 	return &Container{}, nil

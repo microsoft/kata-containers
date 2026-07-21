@@ -274,6 +274,9 @@ type Sandbox struct {
 	// multiple times for hot-plugged network device when Sandbox has multiple
 	// containers.
 	hotplugNetworkConfigApplied bool
+
+	// restoreNetFence delays TC redirects until the restored guest identity is replaced.
+	restoreNetFence bool
 }
 
 // ID returns the sandbox identifier string.

@@ -187,21 +187,15 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 		// ctx will be canceled after this rpc service call, but the sandbox will live
 		// across multiple rpc service calls.
 		//
-		// when the restore-from annotation is set, restore the sandbox from that snapshot
-		// instead of a fresh boot. r.ID is the containerd-assigned (fresh) sandbox id.
-		var sandbox vc.VCSandbox
+		var sandbox virtcontainers.VCSandbox
 		var isRestore bool
 		if rf := ociSpec.Annotations[annotations.RestoreFrom]; rf != "" {
-			snapDir, rerr := ResolveRestoreSource(rf, true)
+			snapDir, rerr := resolveRestoreSource(rf)
 			if rerr != nil {
 				return nil, fmt.Errorf("resolve restore-from %q: %w", rf, rerr)
 			}
 			shimLog.WithFields(logrus.Fields{"restore-from": rf, "snapshot-dir": snapDir, "sandbox": r.ID}).Info("dispatching restore-from-snapshot")
-			// source the pod's CNI netns path from the LIVE OCI spec (containerd ran CNI
-			// ADD during RunPodSandbox and wrote it into the network namespace .Path). mirror
-			// oci.networkConfig (pkg/oci/utils.go). vc.RestoreSandbox cannot import pkg/oci
-			// (import cycle), so read it here and pass it in. do NOT use the persisted
-			// NetworkConfig.NetworkID -- that carries the SOURCE sandbox's netns.
+			// Use the target pod's live netns, never the snapshot's source netns.
 			var netNSPath string
 			if ociSpec.Linux != nil {
 				for _, ns := range ociSpec.Linux.Namespaces {
@@ -210,7 +204,7 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 					}
 				}
 			}
-			sandbox, err = vc.RestoreSandbox(s.ctx, snapDir, vc.RestoreOpts{
+			sandbox, err = virtcontainers.RestoreSandbox(s.ctx, snapDir, virtcontainers.RestoreOpts{
 				SandboxID:      r.ID,
 				HypervisorPath: s.config.HypervisorConfig.HypervisorPath,
 				KernelPath:     s.config.HypervisorConfig.KernelPath,
@@ -224,7 +218,6 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 		if err != nil {
 			return nil, err
 		}
-		// only mark restored on success -- a failed restore must not leave the flag set.
 		s.restoredSandbox = isRestore
 		s.sandbox = sandbox
 		pid, err := s.sandbox.GetHypervisorPid()
@@ -245,43 +238,36 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 			return nil, fmt.Errorf("BUG: Cannot start the container, since the sandbox hasn't been created")
 		}
 
-		if rootFs.Mounted, err = checkAndMount(s, r); err != nil {
-			return nil, err
-		}
-
-		defer func() {
-			if err != nil && rootFs.Mounted {
-				if err2 := mount.UnmountAll(rootfs, 0); err2 != nil {
-					shimLog.WithField("container-type", containerType).WithError(err2).Warn("failed to cleanup rootfs mount")
-				}
-			}
-		}()
-
-		// CDI annotations have been processed during PodSandbox creation
-		// and cold-plug. CDI annotations referencing device kinds that
-		// exist in the guest (e.g., nvidia.com/gpu) will be generated
-		// during device attachment.
-		removeCDIAnnotations(ociSpec.Annotations)
-
 		if s.restoredSandbox {
-			// T5: on a restored sandbox the app container is ALREADY LIVE in the guest (it came
-			// back with the snapshot). kubelet still issues CreateContainer per-container, but we
-			// must ADOPT the guest-live container (host-side bookkeeping only), NOT re-create it
-			// in the guest -- a fresh guest create would collide with the running process and trip
-			// guest gates (e.g. the Guest-SELinux host/guest mismatch). Build the same
-			// ContainerConfig katautils.CreateContainer would, then adopt via RestoreContainer.
+			removeCDIAnnotations(ociSpec.Annotations)
 			contConfig, cerr := oci.ContainerConfig(*ociSpec, bundlePath, r.ID, disableOutput)
 			if cerr != nil {
 				err = cerr
 				return nil, err
 			}
-			if !rootFs.Mounted {
-				contConfig.RootFs = rootFs
-			}
+			contConfig.RootFs = rootFs
 			if _, err = s.sandbox.RestoreContainer(ctx, contConfig); err != nil {
 				return nil, err
 			}
 		} else {
+			if rootFs.Mounted, err = checkAndMount(s, r); err != nil {
+				return nil, err
+			}
+
+			defer func() {
+				if err != nil && rootFs.Mounted {
+					if err2 := mount.UnmountAll(rootfs, 0); err2 != nil {
+						shimLog.WithField("container-type", containerType).WithError(err2).Warn("failed to cleanup rootfs mount")
+					}
+				}
+			}()
+
+			// CDI annotations have been processed during PodSandbox creation
+			// and cold-plug. CDI annotations referencing device kinds that
+			// exist in the guest (e.g., nvidia.com/gpu) will be generated
+			// during device attachment.
+			removeCDIAnnotations(ociSpec.Annotations)
+
 			_, err = katautils.CreateContainer(ctx, s.sandbox, *ociSpec, rootFs, r.ID, bundlePath, disableOutput, runtimeConfig.DisableGuestEmptyDir)
 			if err != nil {
 				return nil, err

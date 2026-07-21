@@ -123,8 +123,7 @@ type exit struct {
 type service struct {
 	sandbox vc.VCSandbox
 
-	// restoredSandbox is true when this sandbox was brought up via restore-from-snapshot
-	// (the VM is already running after Create), so task Start must skip sandbox.Start().
+	// restoredSandbox identifies a restored VM paused until workload start.
 	restoredSandbox bool
 
 	ctx      context.Context

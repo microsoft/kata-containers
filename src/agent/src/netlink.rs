@@ -31,10 +31,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
 use std::str::{self, FromStr};
 
-// KATA_IFACE_NEUTRALIZE: a raw_flags sentinel (high bit, never a real IFF_* flag) asking the
-// agent to down + flush a link instead of configuring it. Used to disable a restored clone's
-// frozen snapshot NIC so it shares no network identity with its source.
-pub const KATA_IFACE_NEUTRALIZE: u32 = 0x8000_0000;
+// Must match kataIfaceRestoreReplace in virtcontainers/restore.go.
+pub const KATA_IFACE_RESTORE_REPLACE: u32 = 0x4000_0000;
 
 /// Search criteria to use when looking for a link in `find_link`.
 pub enum LinkFilter<'a> {
@@ -112,6 +110,10 @@ impl Handle {
     }
 
     pub async fn update_interface(&mut self, iface: &Interface) -> Result<()> {
+        if iface.raw_flags & KATA_IFACE_RESTORE_REPLACE != 0 {
+            return self.restore_replace_interface(iface).await;
+        }
+
         // The reliable way to find link is using hardware address
         // as filter. However, hardware filter might not be supported
         // by netlink, we may have to dump link list and then find the
@@ -119,16 +121,6 @@ impl Handle {
         // we cannot use that to find target link.
         // let's try if hardware address filter works. -_-
         let link = self.find_link(LinkFilter::Address(&iface.hwAddr)).await?;
-
-        // neutralize path: down + flush all addresses and return, instead of configuring.
-        // matched by mac above, so it only ever hits the frozen snapshot NIC, not the CNI NIC.
-        if iface.raw_flags & KATA_IFACE_NEUTRALIZE != 0 {
-            if link.is_up() {
-                self.enable_link(link.index(), false).await?;
-            }
-            self.del_all_addresses(link.index()).await?;
-            return Ok(());
-        }
 
         // Bring down interface if it is UP
         if link.is_up() {
@@ -236,6 +228,71 @@ impl Handle {
                     )
                 })?;
         }
+
+        Ok(())
+    }
+
+    /// Replaces a restored interface's source identity with the target identity.
+    async fn restore_replace_interface(&mut self, iface: &Interface) -> Result<()> {
+        let link = self
+            .find_link(LinkFilter::Name(iface.name.as_str()))
+            .await?;
+        let index = link.index();
+
+        if link.is_up() {
+            self.enable_link(index, false).await?;
+        }
+
+        self.del_all_addresses(index).await?;
+
+        let mac = parse_mac_address(&iface.hwAddr)
+            .map_err(|e| anyhow!("restore-replace: parse target mac {}: {}", iface.hwAddr, e))?;
+        {
+            let mut request = self.handle.link().set(index);
+            request.message_mut().header = link.header.clone();
+            request.address(mac.to_vec()).execute().await.map_err(|e| {
+                anyhow!("restore-replace: set IFLA_ADDRESS on {}: {}", iface.name, e)
+            })?;
+        }
+
+        let supports_ipv6_all = fs::read_to_string("/proc/sys/net/ipv6/conf/all/disable_ipv6")
+            .map(|s| s.trim() == "0")
+            .unwrap_or(false);
+        let supports_ipv6_default =
+            fs::read_to_string("/proc/sys/net/ipv6/conf/default/disable_ipv6")
+                .map(|s| s.trim() == "0")
+                .unwrap_or(false);
+        let supports_ipv6 = supports_ipv6_default || supports_ipv6_all;
+
+        for ip_address in &iface.IPAddresses {
+            let ip = IpAddr::from_str(ip_address.address())?;
+            let mask = ip_address.mask().parse::<u8>()?;
+            let net = IpNetwork::new(ip, mask)?;
+            if !net.is_ipv4() && !supports_ipv6 {
+                return Err(anyhow!(
+                    "restore-replace: target IPv6 address {} requested but guest IPv6 is disabled",
+                    ip_address.address()
+                ));
+            }
+            self.add_addresses(index, std::iter::once(net)).await?;
+        }
+
+        let link = self.find_link(LinkFilter::Index(index)).await?;
+        {
+            let mut request = self.handle.link().set(index);
+            request.message_mut().header = link.header.clone();
+            let mut request = request
+                .name(iface.name.clone())
+                .arp(iface.raw_flags & (libc::IFF_NOARP as u32) == 0);
+            if iface.mtu > 0 {
+                request = request.mtu(iface.mtu as _);
+            }
+            request.execute().await.map_err(|e| {
+                anyhow!("restore-replace: set name/mtu/arp on {}: {}", iface.name, e)
+            })?;
+        }
+
+        self.enable_link(index, true).await?;
 
         Ok(())
     }
@@ -580,17 +637,20 @@ impl Handle {
                     request = request.gateway(ip);
                 }
 
-                if let Err(rtnetlink::Error::NetlinkError(message)) = request.execute().await {
-                    if let Some(code) = message.code {
-                        if Errno::from_raw(code.get()) != Errno::EEXIST {
-                            return Err(anyhow!(
-                                "Failed to add IP v6 route (src: {}, dst: {}, gtw: {},Err: {})",
-                                route.source(),
-                                route.dest(),
-                                route.gateway(),
-                                message
-                            ));
-                        }
+                if let Err(error) = request.execute().await {
+                    let ignore = matches!(
+                        &error,
+                        rtnetlink::Error::NetlinkError(message)
+                            if message.code.map(|code| Errno::from_raw(code.get()) == Errno::EEXIST).unwrap_or(false)
+                    );
+                    if !ignore {
+                        return Err(anyhow!(
+                            "Failed to add IP v6 route (src: {}, dst: {}, gtw: {}, Err: {})",
+                            route.source(),
+                            route.dest(),
+                            route.gateway(),
+                            error
+                        ));
                     }
                 }
             } else {
@@ -624,17 +684,20 @@ impl Handle {
                     request = request.gateway(ip);
                 }
 
-                if let Err(rtnetlink::Error::NetlinkError(message)) = request.execute().await {
-                    if let Some(code) = message.code {
-                        if Errno::from_raw(code.get()) != Errno::EEXIST {
-                            return Err(anyhow!(
-                                "Failed to add IP v4 route (src: {}, dst: {}, gtw: {},Err: {})",
-                                route.source(),
-                                route.dest(),
-                                route.gateway(),
-                                message
-                            ));
-                        }
+                if let Err(error) = request.execute().await {
+                    let ignore = matches!(
+                        &error,
+                        rtnetlink::Error::NetlinkError(message)
+                            if message.code.map(|code| Errno::from_raw(code.get()) == Errno::EEXIST).unwrap_or(false)
+                    );
+                    if !ignore {
+                        return Err(anyhow!(
+                            "Failed to add IP v4 route (src: {}, dst: {}, gtw: {}, Err: {})",
+                            route.source(),
+                            route.dest(),
+                            route.gateway(),
+                            error
+                        ));
                     }
                 }
             }
@@ -683,11 +746,8 @@ impl Handle {
         Ok(())
     }
 
-    // del_all_addresses removes every address on a link (used by the neutralize path).
     async fn del_all_addresses(&mut self, index: u32) -> Result<()> {
-        let addrs = self
-            .list_addresses(AddressFilter::LinkIndex(index))
-            .await?;
+        let addrs = self.list_addresses(AddressFilter::LinkIndex(index)).await?;
         for addr in addrs {
             let msg = addr.0;
             self.handle
