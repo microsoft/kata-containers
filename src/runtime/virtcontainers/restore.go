@@ -21,16 +21,11 @@ import (
 
 // RestoreOpts configures an annotation-driven restore.
 type RestoreOpts struct {
-	// SandboxID is the caller-provided target sandbox ID.
-	SandboxID string
-
-	// Runtime paths override paths persisted by the source node.
+	SandboxID      string
 	HypervisorPath string
 	KernelPath     string
 	ImagePath      string
-
-	// NetNSPath identifies the target pod's CNI namespace.
-	NetNSPath string
+	NetNSPath      string
 }
 
 // RestoreSandbox restores a snapshot as a managed, paused sandbox.
@@ -47,7 +42,20 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 		return nil, fmt.Errorf("kata restore failed: target network namespace is required")
 	}
 
-	origSandboxID, err := seedPersist(snapshotDir, newID)
+	drv, err := persist.GetDriver()
+	if err != nil {
+		return nil, fmt.Errorf("restore: get persist driver: %w", err)
+	}
+	if drv == nil {
+		return nil, fmt.Errorf("restore: nil persist driver")
+	}
+	defer func() {
+		if err != nil {
+			_ = drv.Destroy(newID)
+		}
+	}()
+
+	origSandboxID, err := seedPersist(snapshotDir, newID, drv)
 	if err != nil {
 		return nil, fmt.Errorf("seed persist for restore: %w", err)
 	}
@@ -74,13 +82,6 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 		Shared: false,
 	}
 
-	drv, derr := persist.GetDriver()
-	if derr != nil {
-		return nil, fmt.Errorf("restore: get persist driver for store paths: %w", derr)
-	}
-	if drv == nil {
-		return nil, fmt.Errorf("restore: nil persist driver for store paths")
-	}
 	sandboxConfig.HypervisorConfig.VMStorePath = drv.RunVMStoragePath()
 	sandboxConfig.HypervisorConfig.RunStorePath = drv.RunStoragePath()
 
@@ -94,6 +95,14 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 	}
 	defer func() {
 		if err != nil {
+			if s.restoreNetFence {
+				_ = s.network.Run(ctx, func() error {
+					for _, ep := range s.network.Endpoints() {
+						cleanupRestoreTCFence(ep)
+					}
+					return nil
+				})
+			}
 			// Delete accepts only terminal or pre-running states.
 			s.state.State = types.StateStopped
 			s.Delete(ctx)
@@ -127,13 +136,18 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 		err = fmt.Errorf("restore: adopt CNI netns endpoints: %w", nerr)
 		return nil, err
 	}
+	eps := s.network.Endpoints()
+	if len(eps) != 1 {
+		err = fmt.Errorf("kata restore failed: expected exactly one CNI endpoint, found %d", len(eps))
+		return nil, err
+	}
 
 	// Restore the existing guest NIC with the target TAP FDs while inside its netns.
 	vmConfig := VMConfig{
 		HypervisorType:      sandboxConfig.HypervisorType,
 		HypervisorConfig:    sandboxConfig.HypervisorConfig,
 		AgentConfig:         sandboxConfig.AgentConfig,
-		RestoreNetEndpoints: s.network.Endpoints(),
+		RestoreNetEndpoints: eps,
 	}
 	var vm *VM
 	err = s.network.Run(ctx, func() error {
@@ -171,7 +185,6 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 
 // FinalizeRestoreNetwork replaces guest identity before enabling TC redirects.
 func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) (err error) {
-
 	// Keep forwarding closed on failure.
 	eps := s.network.Endpoints()
 	if len(eps) != 1 {
@@ -208,7 +221,7 @@ func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) (err error) {
 		return fmt.Errorf("kata restore failed: expected exactly one non-loopback guest NIC, found %d", guestNICCount)
 	}
 
-	ifaces, routes, neighbors, gerr := generateVCNetworkStructures(ctx, eps)
+	ifaces, routes, _, gerr := generateVCNetworkStructures(ctx, eps)
 	if gerr != nil {
 		return fmt.Errorf("kata restore failed: generate guest network structures: %w", gerr)
 	}
@@ -217,7 +230,7 @@ func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) (err error) {
 	}
 
 	target := ifaces[0]
-	targetName := target.Name // endpoint name, kept for route device remap
+	targetName := target.Name
 	target.Name = guestNICName
 	target.Device = guestNICName
 	// TC redirects do not translate MAC addresses.
@@ -239,17 +252,6 @@ func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) (err error) {
 	if len(routes) > 0 {
 		if _, rerr := s.agent.updateRoutes(ctx, routes); rerr != nil {
 			return fmt.Errorf("kata restore failed: install target routes: %w", rerr)
-		}
-	}
-
-	for _, n := range neighbors {
-		if n != nil && n.Device == targetName {
-			n.Device = guestNICName
-		}
-	}
-	if len(neighbors) > 0 {
-		if nerr := s.agent.addARPNeighbors(ctx, neighbors); nerr != nil {
-			return fmt.Errorf("kata restore failed: install target neighbors: %w", nerr)
 		}
 	}
 
@@ -327,10 +329,10 @@ func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) (err error) {
 	return nil
 }
 
-// Must match KATA_IFACE_RESTORE_REPLACE in agent netlink.rs.
+// private raw_flags bit for restore-only identity replacement; keep in sync with kata-agent.
 const kataIfaceRestoreReplace uint32 = 0x4000_0000
 
-// adoptPauseContainer registers the already-live pause container on the host.
+// adoptPauseContainer rekeys host bookkeeping while preserving the pause process's guest ID.
 func adoptPauseContainer(s *Sandbox, origSandboxID string) error {
 	for i := range s.config.Containers {
 		cc := &s.config.Containers[i]
@@ -346,7 +348,6 @@ func adoptPauseContainer(s *Sandbox, origSandboxID string) error {
 		if err != nil {
 			return fmt.Errorf("new pause container: %w", err)
 		}
-		c.guestID = origSandboxID
 		c.process = Process{Token: origSandboxID, Pid: -1}
 		if err := s.addContainer(c); err != nil {
 			return fmt.Errorf("add pause container: %w", err)
@@ -394,7 +395,6 @@ func (s *Sandbox) RestoreContainer(_ context.Context, contConfig ContainerConfig
 	if err != nil {
 		return nil, err
 	}
-	c.guestID = guestID
 	c.process = Process{Token: guestID, Pid: -1}
 	if err = s.addContainer(c); err != nil {
 		return nil, err
@@ -414,7 +414,6 @@ func newAdoptedContainer(sandbox *Sandbox, contConfig *ContainerConfig) (*Contai
 	}
 	c := &Container{
 		id:            contConfig.ID,
-		guestID:       contConfig.ID,
 		sandboxID:     sandbox.id,
 		rootFs:        contConfig.RootFs,
 		config:        contConfig,
@@ -427,10 +426,8 @@ func newAdoptedContainer(sandbox *Sandbox, contConfig *ContainerConfig) (*Contai
 	return c, nil
 }
 
-// soleGuestWorkloadIndex returns the only persisted workload and its guest ID.
 func soleGuestWorkloadIndex(s *Sandbox) (int, string, error) {
 	idx := -1
-	count := 0
 	for i := range s.config.Containers {
 		cc := &s.config.Containers[i]
 		if cc.ID == s.id {
@@ -439,21 +436,19 @@ func soleGuestWorkloadIndex(s *Sandbox) (int, string, error) {
 		if cc.Annotations[criContainerTypeAnnotation] == criSandboxType {
 			continue
 		}
-		count++
+		if idx >= 0 {
+			return -1, "", fmt.Errorf("kata restore failed: snapshot has multiple workload containers; the first restore slice supports exactly one")
+		}
 		idx = i
 	}
-	switch count {
-	case 1:
-		return idx, s.config.Containers[idx].ID, nil
-	case 0:
+	if idx < 0 {
 		return -1, "", fmt.Errorf("kata restore failed: no persisted workload container found in snapshot (expected exactly one)")
-	default:
-		return -1, "", fmt.Errorf("kata restore failed: snapshot has %d workload containers; the first restore slice supports exactly one", count)
 	}
+	return idx, s.config.Containers[idx].ID, nil
 }
 
-// seedPersist rekeys sandbox state while preserving guest workload IDs.
-func seedPersist(snapshotDir, newID string) (string, error) {
+// seedPersist rekeys snapshot state for the new sandbox without changing the guest workload ID.
+func seedPersist(snapshotDir, newID string, store persistapi.PersistDriver) (string, error) {
 	raw, err := os.ReadFile(filepath.Join(snapshotDir, "persist.json"))
 	if err != nil {
 		return "", fmt.Errorf("read snapshot persist.json: %w", err)
@@ -471,7 +466,6 @@ func seedPersist(snapshotDir, newID string) (string, error) {
 		return "", fmt.Errorf("kata restore failed: snapshot has an empty sandbox container id")
 	}
 
-	// Point the restored agent at the target sandbox symlink.
 	ss.AgentState.URL = fmt.Sprintf("hvsock:///run/vc/vm/%s/clh.sock:1024", newID)
 	ss.SandboxContainer = newID
 	ss.SandboxCgroupPath = ""
@@ -480,6 +474,7 @@ func seedPersist(snapshotDir, newID string) (string, error) {
 	ss.HypervisorState.Pid = 0
 	ss.HypervisorState.VirtiofsDaemonPid = 0
 	ss.HypervisorState.APISocket = ""
+	ss.Config.HypervisorConfig.VMid = ""
 
 	// Rekey only the pause container; workload IDs remain guest-owned.
 	for i := range ss.Config.ContainerConfigs {
@@ -491,10 +486,6 @@ func seedPersist(snapshotDir, newID string) (string, error) {
 		}
 	}
 
-	store, err := persist.GetDriver()
-	if err != nil {
-		return "", err
-	}
 	if err := store.ToDisk(ss, map[string]persistapi.ContainerState{}); err != nil {
 		return "", err
 	}
@@ -509,7 +500,6 @@ const (
 	containerdBundleBase       = "/run/containerd/io.containerd.runtime.v2.task/k8s.io"
 )
 
-// validateSandboxID rejects IDs that can escape runtime state directories.
 func validateSandboxID(id string) error {
 	if id == "" {
 		return fmt.Errorf("sandbox id is required")

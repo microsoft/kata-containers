@@ -31,8 +31,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
 use std::str::{self, FromStr};
 
-// Must match kataIfaceRestoreReplace in virtcontainers/restore.go.
-pub const KATA_IFACE_RESTORE_REPLACE: u32 = 0x4000_0000;
+// private raw_flags bit for restore-only identity replacement; keep in sync with the runtime.
+const KATA_IFACE_RESTORE_REPLACE: u32 = 0x4000_0000;
 
 /// Search criteria to use when looking for a link in `find_link`.
 pub enum LinkFilter<'a> {
@@ -232,7 +232,7 @@ impl Handle {
         Ok(())
     }
 
-    /// Replaces a restored interface's source identity with the target identity.
+    // restore_replace_interface replaces the snapshotted identity on the existing guest NIC.
     async fn restore_replace_interface(&mut self, iface: &Interface) -> Result<()> {
         let link = self
             .find_link(LinkFilter::Name(iface.name.as_str()))
@@ -243,7 +243,14 @@ impl Handle {
             self.enable_link(index, false).await?;
         }
 
-        self.del_all_addresses(index).await?;
+        for addr in self.list_addresses(AddressFilter::LinkIndex(index)).await? {
+            self.handle
+                .address()
+                .del(addr.0)
+                .execute()
+                .await
+                .map_err(|err| anyhow!("Failed to delete address on link {}: {:?}", index, err))?;
+        }
 
         let mac = parse_mac_address(&iface.hwAddr)
             .map_err(|e| anyhow!("restore-replace: parse target mac {}: {}", iface.hwAddr, e))?;
@@ -277,7 +284,6 @@ impl Handle {
             self.add_addresses(index, std::iter::once(net)).await?;
         }
 
-        let link = self.find_link(LinkFilter::Index(index)).await?;
         {
             let mut request = self.handle.link().set(index);
             request.message_mut().header = link.header.clone();
@@ -287,12 +293,10 @@ impl Handle {
             if iface.mtu > 0 {
                 request = request.mtu(iface.mtu as _);
             }
-            request.execute().await.map_err(|e| {
+            request.up().execute().await.map_err(|e| {
                 anyhow!("restore-replace: set name/mtu/arp on {}: {}", iface.name, e)
             })?;
         }
-
-        self.enable_link(index, true).await?;
 
         Ok(())
     }
@@ -558,6 +562,13 @@ impl Handle {
         // allocating two separate collections), however it's not yet in stable Rust.
         let (a, b): (Vec<Route>, Vec<Route>) = list.into_iter().partition(|p| p.gateway.is_empty());
         let list = a.iter().chain(&b);
+        let is_eexist = |e: &rtnetlink::Error| {
+            matches!(
+                e,
+                rtnetlink::Error::NetlinkError(message)
+                    if message.code.map(|code| Errno::from_raw(code.get()) == Errno::EEXIST).unwrap_or(false)
+            )
+        };
 
         for route in list {
             let link = self.find_link(LinkFilter::Name(&route.device)).await?;
@@ -637,19 +648,14 @@ impl Handle {
                     request = request.gateway(ip);
                 }
 
-                if let Err(error) = request.execute().await {
-                    let ignore = matches!(
-                        &error,
-                        rtnetlink::Error::NetlinkError(message)
-                            if message.code.map(|code| Errno::from_raw(code.get()) == Errno::EEXIST).unwrap_or(false)
-                    );
-                    if !ignore {
+                if let Err(e) = request.execute().await {
+                    if !is_eexist(&e) {
                         return Err(anyhow!(
                             "Failed to add IP v6 route (src: {}, dst: {}, gtw: {}, Err: {})",
                             route.source(),
                             route.dest(),
                             route.gateway(),
-                            error
+                            e
                         ));
                     }
                 }
@@ -684,19 +690,14 @@ impl Handle {
                     request = request.gateway(ip);
                 }
 
-                if let Err(error) = request.execute().await {
-                    let ignore = matches!(
-                        &error,
-                        rtnetlink::Error::NetlinkError(message)
-                            if message.code.map(|code| Errno::from_raw(code.get()) == Errno::EEXIST).unwrap_or(false)
-                    );
-                    if !ignore {
+                if let Err(e) = request.execute().await {
+                    if !is_eexist(&e) {
                         return Err(anyhow!(
                             "Failed to add IP v4 route (src: {}, dst: {}, gtw: {}, Err: {})",
                             route.source(),
                             route.dest(),
                             route.gateway(),
-                            error
+                            e
                         ));
                     }
                 }
@@ -741,21 +742,6 @@ impl Handle {
                 .execute()
                 .await
                 .map_err(|err| anyhow!("Failed to add address {}: {:?}", net.ip(), err))?;
-        }
-
-        Ok(())
-    }
-
-    async fn del_all_addresses(&mut self, index: u32) -> Result<()> {
-        let addrs = self.list_addresses(AddressFilter::LinkIndex(index)).await?;
-        for addr in addrs {
-            let msg = addr.0;
-            self.handle
-                .address()
-                .del(msg)
-                .execute()
-                .await
-                .map_err(|err| anyhow!("Failed to delete address on link {}: {:?}", index, err))?;
         }
 
         Ok(())

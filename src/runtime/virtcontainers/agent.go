@@ -166,9 +166,6 @@ type agent interface {
 	// listRoutes will tell the agent to list routes of an existed Sandbox
 	listRoutes(ctx context.Context) ([]*pbTypes.Route, error)
 
-	// addARPNeighbors will tell the agent to add ARP neighbors for an existed Sandbox.
-	addARPNeighbors(ctx context.Context, neighbors []*pbTypes.ARPNeighbor) error
-
 	// getGuestDetails will tell the agent to get some information of guest
 	getGuestDetails(context.Context, *grpc.GuestDetailsRequest) (*grpc.GuestDetailsResponse, error)
 

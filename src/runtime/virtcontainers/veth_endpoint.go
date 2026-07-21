@@ -111,11 +111,17 @@ func (endpoint *VethEndpoint) Attach(ctx context.Context, s *Sandbox) error {
 	defer span.End()
 
 	h := s.hypervisor
-	if err := xConnectVMNetwork(ctx, endpoint, h, s.restoreNetFence); err != nil {
+	if s.restoreNetFence {
+		if err := prepareRestoreTCFence(ctx, endpoint, h); err != nil {
+			networkLogger().WithError(err).Error("Error bridging virtual endpoint")
+			return err
+		}
+		return nil
+	}
+	if err := xConnectVMNetwork(ctx, endpoint, h); err != nil {
 		networkLogger().WithError(err).Error("Error bridging virtual endpoint")
 		return err
 	}
-
 	return h.AddDevice(ctx, endpoint, NetDev)
 }
 
@@ -142,7 +148,7 @@ func (endpoint *VethEndpoint) HotAttach(ctx context.Context, s *Sandbox) error {
 	defer span.End()
 
 	h := s.hypervisor
-	if err := xConnectVMNetwork(ctx, endpoint, h, false); err != nil {
+	if err := xConnectVMNetwork(ctx, endpoint, h); err != nil {
 		networkLogger().WithError(err).Error("Error bridging virtual ep")
 		return err
 	}

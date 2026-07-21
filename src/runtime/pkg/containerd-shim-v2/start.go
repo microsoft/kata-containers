@@ -34,63 +34,54 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 		return err
 	}
 
+	if c.cType.IsSandbox() && s.restoredSandbox {
+		c.status = task.Status_RUNNING
+		c.restorePauseIOArmPending = true
+		return nil
+	}
+
 	if c.cType.IsSandbox() {
-		// The restored VM stays paused until workload Start.
-		if !s.restoredSandbox {
-			if err := s.sandbox.Start(ctx); err != nil {
-				return err
-			}
-			var err error
-			// Start monitor after starting sandbox
-			s.monitor, err = s.sandbox.Monitor(ctx)
-			if err != nil {
-				return err
-			}
-			go watchSandbox(ctx, s)
-
-			// If no network endpoints were discovered during sandbox creation,
-			// schedule an async rescan. This handles runtimes that configure
-			// networking after task creation (e.g. Docker 26+ configures
-			// networking after the Start response, and prestart hooks may
-			// not have run yet on slower architectures).
-			// RescanNetwork is idempotent — it returns immediately if
-			// endpoints already exist.
-			go func() {
-				if err := s.sandbox.RescanNetwork(s.ctx); err != nil {
-					shimLog.WithError(err).Error("async network rescan failed — container may lack networking")
-				}
-			}()
-
-			// We use s.ctx(`ctx` derived from `s.ctx`) to check for cancellation of the
-			// shim context and the context passed to startContainer for tracing.
-			go watchOOMEvents(ctx, s)
-		} else {
-			c.status = task.Status_RUNNING
-			c.restorePauseIOArmPending = true
-			return nil
+		if err := s.sandbox.Start(ctx); err != nil {
+			return err
 		}
-	} else {
-		if !s.restoredSandbox {
-			_, err := s.sandbox.StartContainer(ctx, c.id)
-			if err != nil {
-				return err
-			}
-		} else {
-			// The workload is already live; resume the VM and restore its network identity.
-			if err := s.sandbox.FinalizeRestoreNetwork(ctx); err != nil {
-				return err
-			}
-			var err error
-			s.monitor, err = s.sandbox.Monitor(ctx)
-			if err != nil {
-				return err
-			}
-			go watchSandbox(ctx, s)
-			go watchOOMEvents(ctx, s)
-
-			// Arm the pause task after the agent becomes reachable.
-			armDeferredRestoredPauseTask(ctx, s)
+		var err error
+		s.monitor, err = s.sandbox.Monitor(ctx)
+		if err != nil {
+			return err
 		}
+		go watchSandbox(ctx, s)
+
+		// If no network endpoints were discovered during sandbox creation,
+		// schedule an async rescan. This handles runtimes that configure
+		// networking after task creation (e.g. Docker 26+ configures
+		// networking after the Start response, and prestart hooks may
+		// not have run yet on slower architectures).
+		// RescanNetwork is idempotent — it returns immediately if
+		// endpoints already exist.
+		go func() {
+			if err := s.sandbox.RescanNetwork(s.ctx); err != nil {
+				shimLog.WithError(err).Error("async network rescan failed — container may lack networking")
+			}
+		}()
+
+		go watchOOMEvents(ctx, s)
+	} else if s.restoredSandbox {
+		// The workload is already live; resume the VM and restore its network identity.
+		if err := s.sandbox.FinalizeRestoreNetwork(ctx); err != nil {
+			return err
+		}
+		var err error
+		s.monitor, err = s.sandbox.Monitor(ctx)
+		if err != nil {
+			return err
+		}
+		go watchSandbox(ctx, s)
+		go watchOOMEvents(ctx, s)
+		if err := armDeferredRestoredPauseTask(ctx, s); err != nil {
+			return err
+		}
+	} else if _, err := s.sandbox.StartContainer(ctx, c.id); err != nil {
+		return err
 	}
 
 	err := katautils.EnterNetNS(s.sandbox.GetNetNs(), func() error {
@@ -133,37 +124,35 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 	return nil
 }
 
-// armDeferredRestoredPauseTask starts deferred pause-task IO and waiting once.
-func armDeferredRestoredPauseTask(ctx context.Context, s *service) {
-	for _, c := range s.containers {
-		if c == nil || !c.cType.IsSandbox() || !c.restorePauseIOArmPending {
-			continue
-		}
-		c.restorePauseIOArmPending = false
-
-		stdin, stdout, stderr, err := s.sandbox.IOStream(c.id, c.id)
-		if err != nil {
-			shimLog.WithError(err).WithField("container", c.id).Warn("restore: could not open pause task IO stream")
-			close(c.exitIOch)
-			close(c.stdinCloser)
-			go wait(ctx, s, c, "")
-			continue
-		}
-		c.stdinPipe = stdin
-		if c.stdin != "" || c.stdout != "" || c.stderr != "" {
-			tty, terr := newTtyIO(ctx, s.namespace, c.id, c.stdin, c.stdout, c.stderr, c.terminal)
-			if terr != nil {
-				shimLog.WithError(terr).WithField("container", c.id).Warn("restore: could not create pause task tty")
-			} else {
-				c.ttyio = tty
-				go ioCopy(shimLog.WithField("container", c.id), c.exitIOch, c.stdinCloser, tty, stdin, stdout, stderr)
-			}
-		} else {
-			close(c.exitIOch)
-			close(c.stdinCloser)
-		}
-		go wait(ctx, s, c, "")
+// armDeferredRestoredPauseTask attaches pause-task I/O after the restored VM is resumed.
+func armDeferredRestoredPauseTask(ctx context.Context, s *service) error {
+	c := s.containers[s.id]
+	if c == nil || !c.cType.IsSandbox() {
+		return fmt.Errorf("kata restore failed: pause task %s is not registered", s.id)
 	}
+	if !c.restorePauseIOArmPending {
+		return fmt.Errorf("kata restore failed: pause task %s is not pending IO arming", c.id)
+	}
+
+	stdin, stdout, stderr, err := s.sandbox.IOStream(c.id, c.id)
+	if err != nil {
+		return fmt.Errorf("kata restore failed: open pause task IO: %w", err)
+	}
+	c.stdinPipe = stdin
+	if c.stdin != "" || c.stdout != "" || c.stderr != "" {
+		tty, err := newTtyIO(ctx, s.namespace, c.id, c.stdin, c.stdout, c.stderr, c.terminal)
+		if err != nil {
+			return fmt.Errorf("kata restore failed: create pause task IO: %w", err)
+		}
+		c.ttyio = tty
+		go ioCopy(shimLog.WithField("container", c.id), c.exitIOch, c.stdinCloser, tty, stdin, stdout, stderr)
+	} else {
+		close(c.exitIOch)
+		close(c.stdinCloser)
+	}
+	go wait(ctx, s, c, "")
+	c.restorePauseIOArmPending = false
+	return nil
 }
 
 func startExec(ctx context.Context, s *service, containerID, execID string) (e *exec, retErr error) {

@@ -343,9 +343,7 @@ type Container struct {
 	config  *ContainerConfig
 	sandbox *Sandbox
 
-	id string
-	// guestID is the snapshot-era ID used for guest-agent RPCs after adoption.
-	guestID       string
+	id            string
 	sandboxID     string
 	containerPath string
 	rootfsSuffix  string
@@ -368,15 +366,15 @@ func (c *Container) ID() string {
 	return c.id
 }
 
-// agentID returns the guest-known ID, falling back to the host ID.
+// agentID returns the persisted guest ID when host bookkeeping was rekeyed during restore.
 func (c *Container) agentID() string {
-	if c.guestID != "" {
-		return c.guestID
+	if c.process.Token != "" {
+		return c.process.Token
 	}
 	return c.id
 }
 
-// guestExecID maps the adopted init process to its guest-known ID.
+// guestExecID maps the restored init process to its persisted guest ID.
 func (c *Container) guestExecID(execID string) string {
 	if execID == c.id {
 		return c.agentID()
@@ -754,7 +752,6 @@ func newContainer(ctx context.Context, sandbox *Sandbox, contConfig *ContainerCo
 
 	c := &Container{
 		id:            contConfig.ID,
-		guestID:       contConfig.ID,
 		sandboxID:     sandbox.id,
 		rootFs:        contConfig.RootFs,
 		config:        contConfig,

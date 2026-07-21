@@ -316,19 +316,17 @@ type cloudHypervisor struct {
 	state           CloudHypervisorState
 	config          HypervisorConfig
 	stopped         int32
-	// restoreNetFds holds duplicated TAP FDs until CLH receives them.
-	restoreNetFds []*os.File
-	mu            sync.Mutex
+	restoreNetFds   []*os.File
+	restoreNetID    string
+	mu              sync.Mutex
 }
 
-// restoredNetConfig mirrors CLH's net_fds restore payload.
 type restoredNetConfig struct {
 	Id     string `json:"id"`
 	NumFds int32  `json:"num_fds"`
 	Fds    []int  `json:"fds"`
 }
 
-// restoreConfigWithNetFds extends the generated restore body with net_fds.
 type restoreConfigWithNetFds struct {
 	SourceUrl string              `json:"source_url"`
 	NetFds    []restoredNetConfig `json:"net_fds"`
@@ -899,8 +897,7 @@ func (clh *cloudHypervisor) preparePrivateRestoreConfig(configPath, vmID string)
 	}
 
 	nets, _ := config["net"].([]interface{})
-	staging := len(clh.restoreNetFds) > 0
-	if staging {
+	if len(clh.restoreNetFds) > 0 {
 		if len(nets) != 1 {
 			return fmt.Errorf("kata restore failed: expected exactly one saved net device, found %d", len(nets))
 		}
@@ -912,6 +909,7 @@ func (clh *cloudHypervisor) preparePrivateRestoreConfig(configPath, vmID string)
 		if id == "" {
 			return fmt.Errorf("kata restore failed: saved net[0] has empty id")
 		}
+		clh.restoreNetID = id
 		if t, present := nm["tap"]; present && t != nil {
 			return fmt.Errorf("kata restore failed: saved net[0].tap must be null for net_fds restore, got %v", t)
 		}
@@ -923,16 +921,18 @@ func (clh *cloudHypervisor) preparePrivateRestoreConfig(configPath, vmID string)
 			return fmt.Errorf("kata restore failed: saved fds marker length %d != staged tap FD count %d", len(savedFds), len(clh.restoreNetFds))
 		}
 		if nq, ok := nm["num_queues"]; ok {
-			nqi, perr := jsonNumberToInt(nq)
+			nqNumber, ok := nq.(json.Number)
+			if !ok {
+				return fmt.Errorf("kata restore failed: saved net[0].num_queues is not a number: %T", nq)
+			}
+			nqi, perr := nqNumber.Int64()
 			if perr != nil {
 				return fmt.Errorf("kata restore failed: saved net[0].num_queues is not an integer: %w", perr)
 			}
-			if nqi != 2*len(savedFds) {
+			if nqi != int64(2*len(savedFds)) {
 				return fmt.Errorf("kata restore failed: saved net[0].num_queues %d != 2*fds %d", nqi, 2*len(savedFds))
 			}
 		}
-		clh.Logger().WithField("net-id", id).WithField("marker-len", len(savedFds)).
-			Debug("preserved restore net_fds marker")
 	} else {
 		for _, n := range nets {
 			if nm, ok := n.(map[string]interface{}); ok {
@@ -947,15 +947,6 @@ func (clh *cloudHypervisor) preparePrivateRestoreConfig(configPath, vmID string)
 	}
 
 	return os.WriteFile(configPath, updatedConfig, 0600)
-}
-
-func jsonNumberToInt(v interface{}) (int, error) {
-	n, ok := v.(json.Number)
-	if !ok {
-		return 0, fmt.Errorf("not a number: %T", v)
-	}
-	i, err := n.Int64()
-	return int(i), err
 }
 
 // setupInitdata prepares and attaches the initdata disk if present.
@@ -1005,7 +996,15 @@ func (clh *cloudHypervisor) RestoreVM(ctx context.Context, snapshotDir string) e
 
 	clh.Logger().WithField("function", "RestoreVM").Info("restoring Sandbox")
 
-	defer clh.releaseRestoreNet()
+	defer func() {
+		for _, f := range clh.restoreNetFds {
+			if f != nil {
+				_ = f.Close()
+			}
+		}
+		clh.restoreNetFds = nil
+		clh.restoreNetID = ""
+	}()
 
 	if err := clh.launchAndInit(ctx); err != nil {
 		return err
@@ -2298,7 +2297,7 @@ func (clh *cloudHypervisor) restoreVM(ctx context.Context) error {
 
 	if len(clh.restoreNetFds) > 0 {
 		// The generated client cannot send SCM_RIGHTS.
-		if err := clh.vmRestorePutWithNetFds(ctx, sourceURL, configFile); err != nil {
+		if err := clh.vmRestorePutWithNetFds(ctx, sourceURL); err != nil {
 			clh.Logger().WithError(err).Error("failed to restore VM with net_fds")
 			return err
 		}
@@ -2326,34 +2325,11 @@ func (clh *cloudHypervisor) restoreVM(ctx context.Context) error {
 	return nil
 }
 
-// snapshotFdBackedNetID returns the sole saved network device ID.
-func snapshotFdBackedNetID(configFile string) (string, error) {
-	raw, err := os.ReadFile(configFile)
-	if err != nil {
-		return "", fmt.Errorf("read snapshot config.json: %w", err)
-	}
-	var cfg struct {
-		Net []struct {
-			Id string `json:"id"`
-		} `json:"net"`
-	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return "", fmt.Errorf("decode snapshot config.json net: %w", err)
-	}
-	if len(cfg.Net) == 0 || cfg.Net[0].Id == "" {
-		return "", fmt.Errorf("snapshot config.json: no net[0].id")
-	}
-	if len(cfg.Net) > 1 {
-		return "", fmt.Errorf("snapshot has %d net devices; the first restore slice supports exactly one", len(cfg.Net))
-	}
-	return cfg.Net[0].Id, nil
-}
-
-// vmRestorePutWithNetFds sends the restore request and TAP FDs over CLH's Unix socket.
-func (clh *cloudHypervisor) vmRestorePutWithNetFds(ctx context.Context, sourceURL, configFile string) error {
-	netID, err := snapshotFdBackedNetID(configFile)
-	if err != nil {
-		return err
+// vmRestorePutWithNetFds sends the restore request and TAP FDs over the CLH Unix socket.
+func (clh *cloudHypervisor) vmRestorePutWithNetFds(ctx context.Context, sourceURL string) error {
+	netID := clh.restoreNetID
+	if netID == "" {
+		return fmt.Errorf("kata restore failed: saved net device has no id")
 	}
 	n := len(clh.restoreNetFds)
 
@@ -2488,7 +2464,7 @@ func (clh *cloudHypervisor) getDiskRateLimiterConfig() *chclient.RateLimiterConf
 		clh.config.DiskRateLimiterOpsOneTimeBurst)
 }
 
-// stageRestoreNet duplicates the sole endpoint's TAP FDs for the new CLH process.
+// stageRestoreNet duplicates target TAP FDs for the one-shot CLH restore request.
 func (clh *cloudHypervisor) stageRestoreNet(endpoints []Endpoint) error {
 	if len(endpoints) != 1 {
 		return fmt.Errorf("kata restore failed: expected exactly one restore endpoint, found %d", len(endpoints))
@@ -2503,6 +2479,12 @@ func (clh *cloudHypervisor) stageRestoreNet(endpoints []Endpoint) error {
 
 	var dups []*os.File
 	for i, f := range netPair.TapInterface.VMFds {
+		if f == nil {
+			for _, d := range dups {
+				d.Close()
+			}
+			return fmt.Errorf("kata restore failed: tap FD %d is nil", i)
+		}
 		nfd, err := syscall.Dup(int(f.Fd()))
 		if err != nil {
 			for _, d := range dups {
@@ -2512,18 +2494,13 @@ func (clh *cloudHypervisor) stageRestoreNet(endpoints []Endpoint) error {
 		}
 		dups = append(dups, os.NewFile(uintptr(nfd), fmt.Sprintf("restore-tap-%d", i)))
 	}
+	for _, f := range netPair.TapInterface.VMFds {
+		_ = f.Close()
+	}
+	netPair.TapInterface.VMFds = nil
 	clh.restoreNetFds = dups
 	clh.Logger().WithField("num-fds", len(dups)).Debug("staged restore TAP FDs")
 	return nil
-}
-
-func (clh *cloudHypervisor) releaseRestoreNet() {
-	for _, f := range clh.restoreNetFds {
-		if f != nil {
-			f.Close()
-		}
-	}
-	clh.restoreNetFds = nil
 }
 
 func (clh *cloudHypervisor) addNet(e Endpoint) error {

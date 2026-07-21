@@ -97,6 +97,21 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 	if err != nil {
 		return nil, err
 	}
+	restoreFrom, isRestore := ociSpec.Annotations[annotations.RestoreFrom]
+	// pod annotations reach workload containers; only sandbox creation dispatches restore.
+	if isRestore && s.sandbox == nil {
+		if restoreFrom == "" {
+			return nil, fmt.Errorf("kata restore failed: restore source is required")
+		}
+		if containerType != virtcontainers.PodSandbox {
+			return nil, fmt.Errorf("kata restore failed: restore-from is only supported on pod sandboxes")
+		}
+		if h := ociSpec.Hooks; h != nil &&
+			(len(h.Prestart) > 0 || len(h.CreateRuntime) > 0 || len(h.CreateContainer) > 0 ||
+				len(h.StartContainer) > 0 || len(h.Poststart) > 0 || len(h.Poststop) > 0) {
+			return nil, fmt.Errorf("kata restore failed: sandbox OCI hooks are not supported")
+		}
+	}
 
 	disableOutput := noNeedForOutput(detach, ociSpec.Process.Terminal)
 	rootfs := filepath.Join(r.Bundle, "rootfs")
@@ -188,13 +203,13 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 		// across multiple rpc service calls.
 		//
 		var sandbox virtcontainers.VCSandbox
-		var isRestore bool
-		if rf := ociSpec.Annotations[annotations.RestoreFrom]; rf != "" {
-			snapDir, rerr := resolveRestoreSource(rf)
-			if rerr != nil {
-				return nil, fmt.Errorf("resolve restore-from %q: %w", rf, rerr)
+		if isRestore {
+			// snapshot storage is caller-owned, so Kata trusts the annotation path.
+			snapDir := filepath.Clean(restoreFrom)
+			if !filepath.IsAbs(snapDir) {
+				snapDir = filepath.Join(SnapshotBaseDir, snapDir)
 			}
-			shimLog.WithFields(logrus.Fields{"restore-from": rf, "snapshot-dir": snapDir, "sandbox": r.ID}).Info("dispatching restore-from-snapshot")
+			shimLog.WithFields(logrus.Fields{"restore-from": restoreFrom, "snapshot-dir": snapDir, "sandbox": r.ID}).Info("dispatching restore-from-snapshot")
 			// Use the target pod's live netns, never the snapshot's source netns.
 			var netNSPath string
 			if ociSpec.Linux != nil {
@@ -211,7 +226,6 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 				ImagePath:      s.config.HypervisorConfig.ImagePath,
 				NetNSPath:      netNSPath,
 			})
-			isRestore = true
 		} else {
 			sandbox, _, err = katautils.CreateSandbox(s.ctx, vci, *ociSpec, *s.config, rootFs, r.ID, bundlePath, disableOutput, false)
 		}
@@ -240,38 +254,38 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 
 		if s.restoredSandbox {
 			removeCDIAnnotations(ociSpec.Annotations)
-			contConfig, cerr := oci.ContainerConfig(*ociSpec, bundlePath, r.ID, disableOutput)
-			if cerr != nil {
-				err = cerr
+			contConfig, err := oci.ContainerConfig(*ociSpec, bundlePath, r.ID, disableOutput)
+			if err != nil {
 				return nil, err
 			}
 			contConfig.RootFs = rootFs
 			if _, err = s.sandbox.RestoreContainer(ctx, contConfig); err != nil {
 				return nil, err
 			}
-		} else {
-			if rootFs.Mounted, err = checkAndMount(s, r); err != nil {
-				return nil, err
-			}
+			break
+		}
 
-			defer func() {
-				if err != nil && rootFs.Mounted {
-					if err2 := mount.UnmountAll(rootfs, 0); err2 != nil {
-						shimLog.WithField("container-type", containerType).WithError(err2).Warn("failed to cleanup rootfs mount")
-					}
+		if rootFs.Mounted, err = checkAndMount(s, r); err != nil {
+			return nil, err
+		}
+
+		defer func() {
+			if err != nil && rootFs.Mounted {
+				if err2 := mount.UnmountAll(rootfs, 0); err2 != nil {
+					shimLog.WithField("container-type", containerType).WithError(err2).Warn("failed to cleanup rootfs mount")
 				}
-			}()
-
-			// CDI annotations have been processed during PodSandbox creation
-			// and cold-plug. CDI annotations referencing device kinds that
-			// exist in the guest (e.g., nvidia.com/gpu) will be generated
-			// during device attachment.
-			removeCDIAnnotations(ociSpec.Annotations)
-
-			_, err = katautils.CreateContainer(ctx, s.sandbox, *ociSpec, rootFs, r.ID, bundlePath, disableOutput, runtimeConfig.DisableGuestEmptyDir)
-			if err != nil {
-				return nil, err
 			}
+		}()
+
+		// CDI annotations have been processed during PodSandbox creation
+		// and cold-plug. CDI annotations referencing device kinds that
+		// exist in the guest (e.g., nvidia.com/gpu) will be generated
+		// during device attachment.
+		removeCDIAnnotations(ociSpec.Annotations)
+
+		_, err = katautils.CreateContainer(ctx, s.sandbox, *ociSpec, rootFs, r.ID, bundlePath, disableOutput, runtimeConfig.DisableGuestEmptyDir)
+		if err != nil {
+			return nil, err
 		}
 	}
 

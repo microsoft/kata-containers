@@ -224,6 +224,18 @@ func (n *LinuxNetwork) addSingleEndpoint(ctx context.Context, s *Sandbox, netInf
 	if err != nil {
 		return nil, err
 	}
+	if s.restoreNetFence {
+		netPair := endpoint.NetworkPair()
+		if endpoint.Type() != VethEndpointType || netPair == nil {
+			return nil, fmt.Errorf("kata restore failed: expected a veth endpoint")
+		}
+		if netPair.NetInterworkingModel == NetXConnectDefaultModel {
+			netPair.NetInterworkingModel = DefaultNetInterworkingModel
+		}
+		if netPair.NetInterworkingModel != NetXConnectTCFilterModel {
+			return nil, fmt.Errorf("kata restore failed: restore requires the TC filter network model")
+		}
+	}
 
 	endpoint.SetProperties(netInfo)
 
@@ -848,7 +860,7 @@ func getLinkByName(netHandle *netlink.Handle, name string, expectedLink netlink.
 }
 
 // The endpoint type should dictate how the connection needs to happen.
-func xConnectVMNetwork(ctx context.Context, endpoint Endpoint, h Hypervisor, restoreFence bool) error {
+func xConnectVMNetwork(ctx context.Context, endpoint Endpoint, h Hypervisor) error {
 	var err error
 
 	span, ctx := networkTrace(ctx, "xConnectVMNetwork", endpoint)
@@ -873,13 +885,8 @@ func xConnectVMNetwork(ctx context.Context, endpoint Endpoint, h Hypervisor, res
 		networkLogger().Info("connect macvtap to VM network")
 		err = tapNetworkPair(ctx, endpoint, queues, disableVhostNet)
 	case NetXConnectTCFilterModel:
-		if restoreFence {
-			networkLogger().Debug("prepare restore TCFilter")
-			err = prepareRestoreTCFence(ctx, endpoint, queues, disableVhostNet)
-		} else {
-			networkLogger().Info("connect TCFilter to VM network")
-			err = setupTCFiltering(ctx, endpoint, queues, disableVhostNet)
-		}
+		networkLogger().Info("connect TCFilter to VM network")
+		err = setupTCFiltering(ctx, endpoint, queues, disableVhostNet)
 	default:
 		err = fmt.Errorf("Invalid internetworking model")
 	}
@@ -1086,8 +1093,8 @@ func tapNetworkPair(ctx context.Context, endpoint Endpoint, queues int, disableV
 	return nil
 }
 
-// prepareRestoreTCFence creates an active TAP without exposing it through TC redirects.
-func prepareRestoreTCFence(ctx context.Context, endpoint Endpoint, queues int, disableVhostNet bool) error {
+// prepareRestoreTCFence creates the restore TAP without redirects so traffic stays blocked.
+func prepareRestoreTCFence(ctx context.Context, endpoint Endpoint, h Hypervisor) (err error) {
 	span, _ := networkTrace(ctx, "prepareRestoreTCFence", endpoint)
 	defer span.End()
 
@@ -1097,6 +1104,11 @@ func prepareRestoreTCFence(ctx context.Context, endpoint Endpoint, queues int, d
 	}
 	defer netHandle.Close()
 
+	queues := 0
+	caps := h.Capabilities(ctx)
+	if caps.IsMultiQueueSupported() {
+		queues = int(h.HypervisorConfig().NumVCPUs())
+	}
 	netPair := endpoint.NetworkPair()
 
 	tapLink, fds, err := createLink(netHandle, netPair.TAPIface.Name, &netlink.Tuntap{}, queues)
@@ -1104,14 +1116,17 @@ func prepareRestoreTCFence(ctx context.Context, endpoint Endpoint, queues int, d
 		return fmt.Errorf("restore fence: could not create TAP interface: %s", err)
 	}
 	netPair.VMFds = fds
-
-	if !disableVhostNet {
-		vhostFds, err := createVhostFds(queues)
+	defer func() {
 		if err != nil {
-			return fmt.Errorf("restore fence: could not setup vhost fds %s: %s", netPair.VirtIface.Name, err)
+			for _, fd := range netPair.VMFds {
+				if fd != nil {
+					_ = fd.Close()
+				}
+			}
+			netPair.VMFds = nil
+			_ = netHandle.LinkDel(tapLink)
 		}
-		netPair.VhostFds = vhostFds
-	}
+	}()
 
 	link, err := getLinkForEndpoint(endpoint, netHandle)
 	if err != nil {
@@ -1132,7 +1147,7 @@ func prepareRestoreTCFence(ctx context.Context, endpoint Endpoint, queues int, d
 	return nil
 }
 
-// activateRestoreTCFence exposes the TAP after guest identity verification.
+// activateRestoreTCFence installs redirects only after guest network identity is replaced.
 func activateRestoreTCFence(ctx context.Context, endpoint Endpoint) (err error) {
 	span, _ := networkTrace(ctx, "activateRestoreTCFence", endpoint)
 	defer span.End()
@@ -1155,7 +1170,6 @@ func activateRestoreTCFence(ctx context.Context, endpoint Endpoint) (err error) 
 	tapIdx := tapLink.Attrs().Index
 	vethIdx := veth.Attrs().Index
 
-	// Remove partial redirect state on failure.
 	defer func() {
 		if err != nil {
 			_ = removeQdiscIngress(tapLink)
@@ -1179,14 +1193,21 @@ func activateRestoreTCFence(ctx context.Context, endpoint Endpoint) (err error) 
 	return nil
 }
 
-// cleanupRestoreTCFence removes Kata-created restore networking state.
+// cleanupRestoreTCFence releases restore TAP FDs and removes its redirects and link.
 func cleanupRestoreTCFence(endpoint Endpoint) {
+	netPair := endpoint.NetworkPair()
+	for _, fd := range netPair.VMFds {
+		if fd != nil {
+			_ = fd.Close()
+		}
+	}
+	netPair.VMFds = nil
+
 	netHandle, err := netlink.NewHandle()
 	if err != nil {
 		return
 	}
 	defer netHandle.Close()
-	netPair := endpoint.NetworkPair()
 
 	if veth, verr := getLinkForEndpoint(endpoint, netHandle); verr == nil {
 		_ = removeQdiscIngress(veth)

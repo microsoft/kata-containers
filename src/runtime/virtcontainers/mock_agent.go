@@ -122,11 +122,6 @@ func (n *mockAgent) listRoutes(ctx context.Context) ([]*pbTypes.Route, error) {
 	return nil, nil
 }
 
-// addARPNeighbors is the Noop agent ARP neighbor implementation. It does nothing.
-func (n *mockAgent) addARPNeighbors(ctx context.Context, neighbors []*pbTypes.ARPNeighbor) error {
-	return nil
-}
-
 // updateEphemeralMounts is the Noop agent updateEphemeralMounts implementation. It does nothing.
 func (n *mockAgent) updateEphemeralMounts(ctx context.Context, storages []*grpc.Storage) error {
 	return nil

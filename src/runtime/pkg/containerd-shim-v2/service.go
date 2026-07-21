@@ -123,7 +123,6 @@ type exit struct {
 type service struct {
 	sandbox vc.VCSandbox
 
-	// restoredSandbox identifies a restored VM paused until workload start.
 	restoredSandbox bool
 
 	ctx      context.Context

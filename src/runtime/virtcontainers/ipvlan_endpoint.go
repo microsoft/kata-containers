@@ -111,7 +111,7 @@ func (endpoint *IPVlanEndpoint) Attach(ctx context.Context, s *Sandbox) error {
 	defer span.End()
 
 	h := s.hypervisor
-	if err := xConnectVMNetwork(ctx, endpoint, h, false); err != nil {
+	if err := xConnectVMNetwork(ctx, endpoint, h); err != nil {
 		networkLogger().WithError(err).Error("Error bridging ipvlan ep")
 		return err
 	}
@@ -141,7 +141,7 @@ func (endpoint *IPVlanEndpoint) HotAttach(ctx context.Context, s *Sandbox) error
 	defer span.End()
 
 	h := s.hypervisor
-	if err := xConnectVMNetwork(ctx, endpoint, h, false); err != nil {
+	if err := xConnectVMNetwork(ctx, endpoint, h); err != nil {
 		networkLogger().WithError(err).Error("Error bridging ipvlan ep")
 		return err
 	}
