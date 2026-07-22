@@ -7,7 +7,6 @@
 package client
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -40,9 +39,12 @@ const (
 var defaultDialTimeout = 30 * time.Second
 
 var hybridVSockPort uint32
-var hybridVSockErrors uint32 = 0
 
-const hybridVSockErrorsSkip uint32 = 128
+const (
+	hybridVSockInitialAttemptWindow = 25 * time.Millisecond
+	hybridVSockMaxAttemptWindow     = 10 * time.Second
+	hybridVSockMaxResponseSize      = 64
+)
 
 var agentClientFields = logrus.Fields{
 	"name":   "agent-client",
@@ -82,7 +84,7 @@ func NewAgentClient(ctx context.Context, sock string, timeout uint32) (*AgentCli
 	}
 
 	var conn net.Conn
-	var d = agentDialer(parsedAddr)
+	var d = agentDialer(ctx, parsedAddr)
 	conn, err = d(grpcAddr, dialTimeout)
 	if err != nil {
 		return nil, err
@@ -257,12 +259,14 @@ func parse(sock string) (string, *url.URL, error) {
 	return grpcAddr, addr, nil
 }
 
-func agentDialer(addr *url.URL) dialer {
+func agentDialer(ctx context.Context, addr *url.URL) dialer {
 	switch addr.Scheme {
 	case VSockSocketScheme:
 		return VsockDialer
 	case HybridVSockScheme:
-		return HybridVSockDialer
+		return func(sock string, timeout time.Duration) (net.Conn, error) {
+			return hybridVSockDialer(ctx, sock, timeout)
+		}
 	case RemoteSockScheme:
 		return RemoteSockDialer
 	case MockHybridVSockScheme:
@@ -379,77 +383,117 @@ func VsockDialer(sock string, timeout time.Duration) (net.Conn, error) {
 
 // HybridVSockDialer dials to a hybrid virtio socket
 func HybridVSockDialer(sock string, timeout time.Duration) (net.Conn, error) {
+	return hybridVSockDialer(context.Background(), sock, timeout)
+}
+
+func hybridVSockDialer(ctx context.Context, sock string, timeout time.Duration) (net.Conn, error) {
 	udsPath, port, err := parseGrpcHybridVSockAddr(sock)
 	if err != nil {
 		return nil, err
 	}
 
-	dialFunc := func() (net.Conn, error) {
-		handshakeTimeout := 10 * time.Second
-		conn, err := net.DialTimeout("unix", udsPath, timeout)
-		if err != nil {
-			return nil, err
+	if port == 0 {
+		port = hybridVSockPort
+	}
+
+	// Bound every connection and handshake attempt by the caller's total dial budget.
+	timeoutErr := grpcStatus.Errorf(codes.DeadlineExceeded, "timed out connecting to hybrid vsocket %s", sock)
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	attemptWindow := hybridVSockInitialAttemptWindow
+	for attempt := 1; ; attempt++ {
+		// Let later attempts wait longer for a healthy response without exceeding the overall deadline.
+		attemptStarted := time.Now()
+		attemptDeadline := attemptStarted.Add(attemptWindow)
+		if deadline, ok := dialCtx.Deadline(); ok && deadline.Before(attemptDeadline) {
+			attemptDeadline = deadline
 		}
 
-		if port == 0 {
-			// use the port read at parse()
-			port = hybridVSockPort
+		// Apply one deadline to opening the UDS, sending CONNECT, and receiving the handshake response.
+		attemptCtx, cancelAttempt := context.WithDeadline(dialCtx, attemptDeadline)
+		var dialer net.Dialer
+		conn, dialErr := dialer.DialContext(attemptCtx, "unix", udsPath)
+		if dialErr == nil {
+			dialErr = conn.SetDeadline(attemptDeadline)
 		}
-
-		// Once the connection is opened, the following command MUST BE sent,
-		// the hypervisor needs to know the port number where the agent is listening in order to
-		// create the connection
-		if _, err = fmt.Fprintf(conn, "CONNECT %d\n", port); err != nil {
-			conn.Close()
-			return nil, err
+		if dialErr == nil {
+			_, dialErr = fmt.Fprintf(conn, "CONNECT %d\n", port)
 		}
+		if dialErr == nil {
+			dialErr = readHybridVSockHandshake(conn)
+		}
+		cancelAttempt()
 
-		errChan := make(chan error)
-
-		go func() {
-			reader := bufio.NewReader(conn)
-			response, err := reader.ReadString('\n')
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			agentClientLog.WithField("response", response).Debug("HybridVsock trivial handshake")
-
-			if strings.Contains(response, "OK") {
-				errChan <- nil
+		if dialErr == nil {
+			// Do not carry the handshake deadline into subsequent ttrpc traffic.
+			if err := conn.SetDeadline(time.Time{}); err == nil {
+				return conn, nil
 			} else {
-				errChan <- errors.New("HybridVsock trivial handshake failed with malformed response code")
+				dialErr = err
 			}
-		}()
+		}
+		if conn != nil {
+			_ = conn.Close()
+		}
 
-		select {
-		case err = <-errChan:
-			if err != nil {
-				conn.Close()
+		// Preserve caller cancellation, but report expiration using the existing dial error.
+		if dialCtx.Err() != nil {
+			if errors.Is(dialCtx.Err(), context.Canceled) {
+				return nil, dialCtx.Err()
+			}
+			return nil, timeoutErr
+		}
 
-				// With full debug logging enabled there might be around 1,500 redials in a tight loop, so
-				// skip logging some of these failures to avoid flooding the log.
-				errorsCount := hybridVSockErrors
-				if errorsCount%hybridVSockErrorsSkip == 0 {
-					agentClientLog.WithField("Error", err).WithField("count", errorsCount).Debug("HybridVsock trivial handshake failed")
+		agentClientLog.WithError(dialErr).WithField("attempt", attempt).Debug("HybridVsock trivial handshake failed")
+
+		// Pace retries by the current window, subtracting time already spent on this attempt.
+		retryDelay := time.Until(attemptStarted.Add(attemptWindow))
+		if retryDelay > 0 {
+			timer := time.NewTimer(retryDelay)
+			select {
+			case <-dialCtx.Done():
+				if !timer.Stop() {
+					<-timer.C
 				}
-				hybridVSockErrors = errorsCount + 1
-
-				return nil, err
+				if errors.Is(dialCtx.Err(), context.Canceled) {
+					return nil, dialCtx.Err()
+				}
+				return nil, timeoutErr
+			case <-timer.C:
 			}
-			return conn, nil
-		case <-time.After(handshakeTimeout):
-			// Timeout: kernel vsock implementation has a race condition, where no response is given
-			// Instead of waiting forever for a response, timeout after a fair amount of time.
-			// See: https://lore.kernel.org/netdev/668b0eda8823564cd604b1663dc53fbaece0cd4e.camel@intel.com/
-			conn.Close()
-			return nil, errors.New("timeout waiting for hybrid vsocket handshake")
+		}
+
+		// Double the response window after each failure, capped at the historical handshake limit.
+		attemptWindow *= 2
+		if attemptWindow > hybridVSockMaxAttemptWindow {
+			attemptWindow = hybridVSockMaxAttemptWindow
+		}
+	}
+}
+
+func readHybridVSockHandshake(conn net.Conn) error {
+	response := make([]byte, 0, hybridVSockMaxResponseSize)
+	var nextByte [1]byte
+	for len(response) < hybridVSockMaxResponseSize {
+		n, err := conn.Read(nextByte[:])
+		if n > 0 {
+			response = append(response, nextByte[0])
+			if nextByte[0] == '\n' {
+				responseText := string(response)
+				agentClientLog.WithField("response", responseText).Debug("HybridVsock trivial handshake")
+				if strings.Contains(responseText, "OK") {
+					return nil
+				}
+				return errors.New("HybridVsock trivial handshake failed with malformed response code")
+			}
+		}
+		if err != nil {
+			return err
 		}
 	}
 
-	timeoutErr := grpcStatus.Errorf(codes.DeadlineExceeded, "timed out connecting to hybrid vsocket %s", sock)
-	return commonDialer(timeout, dialFunc, timeoutErr)
+	return fmt.Errorf("HybridVsock trivial handshake response exceeds %d bytes", hybridVSockMaxResponseSize)
 }
 
 // RemoteSockDialer dials to an agent in a remote hypervisor sandbox
