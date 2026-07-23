@@ -387,6 +387,12 @@ func HybridVSockDialer(sock string, timeout time.Duration) (net.Conn, error) {
 }
 
 func hybridVSockDialer(ctx context.Context, sock string, timeout time.Duration) (net.Conn, error) {
+	// Some callers (e.g. the VM factory path) pass a nil context; guard so the
+	// per-attempt context.WithTimeout below does not panic on a nil parent.
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	udsPath, port, err := parseGrpcHybridVSockAddr(sock)
 	if err != nil {
 		return nil, err
