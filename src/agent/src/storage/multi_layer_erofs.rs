@@ -436,6 +436,155 @@ fn is_lower_storage(storage: &Storage) -> bool {
         || (storage.fstype == EROFS_TYPE && storage.options.iter().any(|o| o == OPT_MULTI_LAYER))
 }
 
+/// Check if dm-verity is enabled for this storage
+fn is_dmverity_enabled(storage: &Storage) -> bool {
+    storage.options.iter().any(|o| o == OPT_DMVERITY_ENABLED)
+}
+
+/// Parse dm-verity configuration from storage options
+#[cfg(feature = "devicemapper")]
+pub fn parse_dmverity_options(storage: &Storage) -> Result<DmVerityInfo> {
+    let mut hashtype = String::from("sha256");
+    let mut hash = String::new();
+    let mut blocknum: u64 = 0;
+    let mut blocksize: u64 = 4096;
+    let mut hashsize: u64 = 4096;
+    let mut offset: u64 = 0;
+    let mut salt: Option<String> = None;
+    let mut hash_type: u32 = 1;
+    let mut no_superblock: bool = false;
+
+    for opt in &storage.options {
+        if let Some(value) = opt.strip_prefix(OPT_DMVERITY_ROOT_HASH) {
+            hash = value.to_string();
+        } else if let Some(value) = opt.strip_prefix(OPT_DMVERITY_HASH_OFFSET) {
+            offset = value.parse::<u64>().context("Invalid hashoffset value")?;
+        } else if let Some(value) = opt.strip_prefix(OPT_DMVERITY_BLOCK_SIZE) {
+            blocksize = value.parse::<u64>().context("Invalid blocksize value")?;
+        } else if let Some(value) = opt.strip_prefix(OPT_DMVERITY_HASH_SIZE) {
+            hashsize = value.parse::<u64>().context("Invalid hashsize value")?;
+        } else if let Some(value) = opt.strip_prefix(OPT_DMVERITY_HASH_ALGORITHM) {
+            hashtype = value.to_string();
+        } else if let Some(value) = opt.strip_prefix(OPT_DMVERITY_SALT) {
+            salt = if value.is_empty() || value == "-" {
+                None
+            } else {
+                Some(value.to_string())
+            };
+        } else if let Some(value) = opt.strip_prefix(OPT_DMVERITY_HASH_TYPE) {
+            hash_type = value.parse::<u32>().context("Invalid hash type value")?;
+        } else if let Some(value) = opt.strip_prefix(OPT_DMVERITY_NO_SUPERBLOCK) {
+            no_superblock = value
+                .parse::<bool>()
+                .context("Invalid no-superblock value")?;
+        }
+    }
+
+    // Calculate blocknum from hashoffset and blocksize
+    if offset > 0 && blocksize > 0 {
+        blocknum = offset / blocksize;
+    }
+
+    if hash.is_empty() {
+        return Err(anyhow!("dm-verity roothash is required but not provided"));
+    }
+    if offset == 0 {
+        return Err(anyhow!("dm-verity hashoffset is required but not provided"));
+    }
+    if blocksize == 0 || hashsize == 0 {
+        return Err(anyhow!("dm-verity blocksize/hashsize must be non-zero"));
+    }
+    if !offset.is_multiple_of(blocksize) {
+        return Err(anyhow!(
+            "dm-verity hashoffset {} is not aligned to blocksize {}",
+            offset,
+            blocksize
+        ));
+    }
+    if blocknum == 0 {
+        return Err(anyhow!(
+            "dm-verity blocknum resolved to zero from hashoffset {} and blocksize {}",
+            offset,
+            blocksize
+        ));
+    }
+
+    Ok(DmVerityInfo {
+        hashtype,
+        hash,
+        blocknum,
+        blocksize,
+        hashsize,
+        offset,
+        salt,
+        hash_type,
+        no_superblock,
+    })
+}
+
+/// Create dm-verity device for a partition and return the verity device path
+#[cfg(feature = "devicemapper")]
+async fn create_partition_dmverity_device(
+    partition_path: &str,
+    storage: &Storage,
+    logger: &Logger,
+) -> Result<String> {
+    info!(
+        logger,
+        "Creating dm-verity device for partition";
+        "partition" => partition_path,
+        "source" => &storage.source,
+    );
+
+    // Parse dm-verity options from storage
+    let verity_info =
+        parse_dmverity_options(storage).context("Failed to parse dm-verity options")?;
+
+    // FR-4C: authorize the layer's root digest against the measured allowlist BEFORE creating
+    // the dm-verity device. dm-verity only proves "content matches this root hash"; this gate
+    // proves the root hash is one the tenant approved, so a host cannot substitute a layer
+    // with a matching self-computed hash. The Kata analogue of runhcs
+    // EnforceDeviceMountPolicy(target, RootDigest). Fail-closed in strict builds.
+    #[cfg(feature = "strict-policy")]
+    {
+        let store = crate::VERIFIED_LAYERS.lock().await;
+        store
+            .verify(&verity_info.hashtype, &verity_info.hash)
+            .map_err(|e| {
+                anyhow!(
+                    "FR-4C: dm-verity layer not authorized for partition {}: {}",
+                    partition_path,
+                    e
+                )
+            })?;
+    }
+
+    // Create dm-verity device
+    let verity_device_path = create_dmverity_device(&verity_info, Path::new(partition_path))
+        .await
+        .context("failed to create dm-verity device")?;
+
+    info!(
+        logger,
+        "Successfully created dm-verity device";
+        "partition" => partition_path,
+        "verity-device" => &verity_device_path,
+    );
+
+    Ok(verity_device_path)
+}
+
+#[cfg(not(feature = "devicemapper"))]
+async fn create_partition_dmverity_device(
+    _partition_path: &str,
+    _storage: &Storage,
+    _logger: &Logger,
+) -> Result<String> {
+    Err(anyhow!(
+        "dm-verity support not compiled in: build with `--features devicemapper` to enable",
+    ))
+}
+
 /// Validate that a container ID does not contain path traversal sequences.
 ///
 /// Container IDs are used to construct filesystem paths. A malicious ID containing
