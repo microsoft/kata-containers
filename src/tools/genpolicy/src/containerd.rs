@@ -27,6 +27,14 @@ pub fn get_process(privileged_container: bool, common: &policy::CommonData) -> p
         }
     };
 
+    // An empty configured default means "no expected apparmor profile known" ->
+    // leave the field unconstrained (None). A non-empty value is exact-matched.
+    let apparmor_profile = if common.default_apparmor_profile.is_empty() {
+        None
+    } else {
+        Some(common.default_apparmor_profile.clone())
+    };
+
     policy::KataProcess {
         Terminal: false,
         User: Default::default(),
@@ -35,6 +43,8 @@ pub fn get_process(privileged_container: bool, common: &policy::CommonData) -> p
         Cwd: "/".to_string(),
         Capabilities: capabilities,
         NoNewPrivileges: false,
+        Rlimits: common.default_rlimits.clone(),
+        ApparmorProfile: apparmor_profile,
     }
 }
 

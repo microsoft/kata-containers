@@ -63,6 +63,7 @@ implement it, the security guarantee it introduces, and how it was validated.
 | FR-1f (Stage 2) | External SCITT / CCF-profile transparency inclusion-proof receipts (`kata-ccf-proof/v1`) (PR #5) | `763a54cf5` |
 | FR-1 (delivery) | Boot-time OCI pull → SRM-verify → inject of declared fragments (fail-closed) + the `genpolicy-fragmentgen` OCI packaging/push + settings-emission tool (PRs #7, #8) | `09c7421ae`, `391bbacaf` |
 | FR-7 (breadth) | Fine-grained per-container endpoint gating on authorized container state (PRs #2, #4) | `2a6c1c3ae`, `c806264bf`, `109317082`, `54a652dd0` |
+| FR-16 | Complete OCI Process field coverage in genpolicy (workingDir/apparmor/rlimits exact-match + on-wire field-coverage CI gate) | this PR |
 | FR-5 | Encrypted scratch by effective mode | `44d6f9d04`, `b1603c3a6` |
 | FR-4B | Mount bound to the checked handle (TOCTOU) | `44d6f9d04`, `dbea0d59b` |
 | FR-4C | Verified read-only layers (dm-verity root-digest authorization) | `26d408bd7` |
@@ -550,6 +551,45 @@ external ledger are flagged and tracked in `docs/cc/backlog.md`.
   state stays on sealed encrypted-scratch (mutable + monotonic by construction); only the
   immutable initial trust config is bound into the measured section.
 - **Delivered by:** PR #10 (branch `bl5-initdata-measured`).
+
+### Complete OCI Process field coverage in genpolicy (FR-16) — this PR
+- **What:** the generated policy matches an incoming `CreateContainerRequest` field-by-field,
+  so any OCI `Process` field the policy does not reference was previously accepted with any
+  value. This closes that gap for the security-relevant fields the host forwards from the
+  CRI/kubelet:
+  - **`workingDir` (Cwd):** genpolicy previously derived `Cwd` only from the container image's
+    `WorkingDir` and ignored the Kubernetes `container.workingDir` override — both a coverage
+    gap (the host could set any `Cwd` for images without a `WorkingDir`) and a latent
+    false-deny (a pod that legitimately set `workingDir` was rejected). genpolicy now models
+    `container.workingDir` and the policy exact-matches it.
+  - **apparmor profile:** the pod-pinned `securityContext.appArmorProfile` is modeled
+    (`Localhost` → the profile name, `Unconfined` → empty) and exact-matched, at both pod and
+    container scope (container overrides pod). When the pod pins no profile the value is left
+    unconstrained, because the profile emitted for the `RuntimeDefault` case depends on whether
+    apparmor is enabled on the host, which is not derivable from the pod spec; operators who
+    run a fixed runtime-default profile can pin it cluster-wide via the
+    `common.default_apparmor_profile` genpolicy setting.
+  - **rlimits:** modeled and exact-matched (as a set) against the policy value (default: none),
+    with a `common.default_rlimits` setting for environments that inject default rlimits.
+- **Coverage CI gate:** a build-time test enumerates the agent's on-wire OCI `Process`/`User`
+  fields (from `src/libs/protocols/protos/oci.proto`) and fails when a new field is neither
+  enforced by `rules.rego` nor explicitly classified as reviewed-unenforced with a rationale,
+  so future OCI fields cannot silently escape mediation. A companion test locks in that the
+  agent `oci.proto` `User` carries no `umask` and `Linux` carries no `personality` field.
+- **Guarantee:** a compromised host cannot silently weaken a container's working directory,
+  mandatory-access-control (apparmor) profile, or resource limits when it forwards a
+  `CreateContainerRequest` — each is exact-matched against the value the policy generator
+  derived from the authorized pod spec; and the coverage gate prevents new OCI `Process`/`User`
+  fields from being added without a policy-coverage decision.
+- **Deliberately not enforced:** `OOMScoreAdj` is on the wire but kubelet computes it from the
+  pod QoS class and node memory, so it is environment-derived and not predictable at
+  policy-generation time; it only affects OOM-kill ordering and is not a sandbox-integrity
+  boundary. `umask` (OCI `User`) and `personality` (OCI `Linux`) are not part of the agent's
+  `oci.proto`, so they cannot reach the guest via `CreateContainerRequest` and need no policy
+  coverage (the coverage gate enforces this assumption).
+- **Validation:** genpolicy unit + integration tests, including a `createcontainer/fr16`
+  GOOD/BAD matrix (matching request accepted; host-overridden `workingDir`, swapped/disabled
+  apparmor profile, and injected rlimit each rejected) and the `oci_field_coverage` gate.
 
 ---
 

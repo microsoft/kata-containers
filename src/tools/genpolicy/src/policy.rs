@@ -152,6 +152,38 @@ pub struct KataProcess {
     /// NoNewPrivileges controls whether additional privileges could be gained by processes in the container.
     #[serde(default)]
     pub NoNewPrivileges: bool,
+
+    /// Rlimits specifies rlimit options to apply to the process. Modeled so the
+    /// policy can exact-match the rlimits forwarded by the host, instead of
+    /// leaving them unconstrained.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub Rlimits: Vec<KataPosixRlimit>,
+
+    /// ApparmorProfile is the expected apparmor profile for the container.
+    /// Modeled as an Option so the policy can exact-match a profile the pod spec
+    /// pins (or that an operator configures via settings), while leaving it
+    /// unconstrained (None -> field omitted) when no expected value is known -
+    /// the emitted profile for the RuntimeDefault case depends on whether
+    /// apparmor is enabled on the host, which is not derivable from the pod spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ApparmorProfile: Option<String>,
+}
+
+/// OCI POSIXRlimit struct, mirroring the POSIXRlimit message from oci.proto,
+/// preserving the upper case field names for consistency with agent's rpc.rs.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct KataPosixRlimit {
+    /// Type of the rlimit to set.
+    #[serde(default)]
+    pub Type: String,
+
+    /// Hard is the hard limit for the specified type.
+    #[serde(default)]
+    pub Hard: u64,
+
+    /// Soft is the soft limit for the specified type.
+    #[serde(default)]
+    pub Soft: u64,
 }
 
 /// OCI container User struct. This struct is very similar to the User
@@ -486,6 +518,21 @@ pub struct CommonData {
 
     /// Default capabilities for a privileged container.
     pub privileged_caps: Vec<String>,
+
+    /// Expected apparmor profile for containers whose pod spec does not pin a
+    /// specific (Localhost/Unconfined) profile. Defaults to empty, meaning the
+    /// apparmor profile is left unconstrained for such containers, because the
+    /// profile emitted for the RuntimeDefault case depends on whether apparmor
+    /// is enabled on the host (not derivable from the pod spec). Set this to the
+    /// host's runtime-default profile name (e.g. "cri-containerd.apparmor.d") to
+    /// exact-match it cluster-wide.
+    #[serde(default)]
+    pub default_apparmor_profile: String,
+
+    /// Expected rlimits forwarded by the host. Defaults to empty (enforce that no
+    /// rlimits are set). Populate for environments that inject default rlimits.
+    #[serde(default)]
+    pub default_rlimits: Vec<KataPosixRlimit>,
 }
 
 /// Configuration from "kubectl config".

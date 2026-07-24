@@ -395,4 +395,12 @@ mod tests {
     async fn test_create_container_env_vars() {
         runtests("createcontainer/env_vars").await;
     }
+
+    // FR-16: the policy exact-matches the OCI Process workingDir (Cwd), the
+    // apparmor profile pinned by the pod spec, and the process rlimits, so a
+    // compromised host cannot weaken these when starting a container.
+    #[tokio::test]
+    async fn test_create_container_fr16_oci_fields() {
+        runtests("createcontainer/fr16").await;
+    }
 }

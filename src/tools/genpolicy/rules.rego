@@ -866,8 +866,51 @@ allow_process(p_process, i_process, s_name, s_namespace) if {
     allow_process_common(p_process, i_process, s_name, s_namespace)
     allow_caps(p_process.Capabilities, i_process.Capabilities)
     p_process.Terminal == i_process.Terminal
+    allow_process_fields_fr16(p_process, i_process)
 
     print("allow_process: true")
+}
+
+# Enforce OCI Process security fields that the host forwards from the CRI/kubelet
+# but that were previously left unconstrained by the policy: ApparmorProfile and
+# Rlimits.
+#
+# - Rlimits are exact-matched (as a set) against the policy-modeled value
+#   (defaulting to empty), so a compromised host cannot silently relax them.
+# - ApparmorProfile is exact-matched only when the policy models an expected
+#   value (i.e. the pod spec pins a Localhost/Unconfined profile, or an operator
+#   configures a cluster default). When unmodeled the field is absent from the
+#   policy and left unconstrained, because the profile emitted for the
+#   RuntimeDefault case depends on host apparmor state, which is not derivable
+#   from the pod spec.
+#
+# OOMScoreAdj is intentionally not enforced here: kubelet computes it from the
+# pod QoS class and node memory, so its value is environment-derived and not
+# predictable at policy-generation time; it only influences OOM-kill ordering
+# and is not a container-sandbox integrity boundary.
+allow_process_fields_fr16(p_process, i_process) if {
+    p_rlimits := {r | some r in object.get(p_process, "Rlimits", [])}
+    i_rlimits := {r | some r in object.get(i_process, "Rlimits", [])}
+    print("allow_process_fields_fr16: policy rlimits =", p_rlimits, "input rlimits =", i_rlimits)
+    p_rlimits == i_rlimits
+
+    allow_apparmor_profile(p_process, i_process)
+
+    print("allow_process_fields_fr16: true")
+}
+
+# No expected apparmor profile modeled -> unconstrained.
+allow_apparmor_profile(p_process, _) if {
+    not p_process.ApparmorProfile
+    print("allow_apparmor_profile: not modeled, allow")
+}
+
+# Expected apparmor profile modeled -> exact match against the input.
+allow_apparmor_profile(p_process, i_process) if {
+    p_apparmor := p_process.ApparmorProfile
+    i_apparmor := object.get(i_process, "ApparmorProfile", "")
+    print("allow_apparmor_profile: policy =", p_apparmor, "input =", i_apparmor)
+    p_apparmor == i_apparmor
 }
 
 # Compare the OCI Process field of a policy container with the input process field from ExecProcessRequest

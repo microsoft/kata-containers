@@ -492,6 +492,10 @@ pub fn get_process_fields(
             process.NoNewPrivileges = !allow
         }
 
+        // Pod-level appArmorProfile. A container-level profile, applied later in
+        // Container::get_process_fields, takes precedence over this.
+        pod::apply_apparmor_profile(process, &context.appArmorProfile);
+
         debug!("get_process_fields: returning User = {:?}", &process.User);
     }
 }

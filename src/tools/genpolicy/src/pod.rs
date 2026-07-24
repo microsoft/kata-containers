@@ -129,6 +129,9 @@ pub struct Container {
     securityContext: Option<SecurityContext>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    workingDir: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub volumeMounts: Option<Vec<VolumeMount>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -389,6 +392,40 @@ struct SecurityContext {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     seccompProfile: Option<SeccompProfile>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    appArmorProfile: Option<AppArmorProfile>,
+}
+
+/// See Reference / Kubernetes API / Workload Resources / Pod (AppArmorProfile).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AppArmorProfile {
+    #[serde(rename = "type")]
+    pub profile_type: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub localhostProfile: Option<String>,
+}
+
+/// Derive the OCI ApparmorProfile that containerd would forward for a given k8s
+/// appArmorProfile, overriding the settings-derived default only when the pod
+/// spec pins an explicit profile:
+/// - Localhost -> Some(localhostProfile) (containerd forwards the name verbatim).
+/// - Unconfined -> Some("") (containerd applies no profile).
+/// - RuntimeDefault / unspecified -> keep the settings-derived value (which may
+///   be None, i.e. left unconstrained, when no expected default is configured).
+pub fn apply_apparmor_profile(process: &mut policy::KataProcess, profile: &Option<AppArmorProfile>) {
+    if let Some(p) = profile {
+        match p.profile_type.as_str() {
+            "Localhost" => {
+                process.ApparmorProfile = Some(p.localhostProfile.clone().unwrap_or_default());
+            }
+            "Unconfined" => {
+                process.ApparmorProfile = Some(String::new());
+            }
+            _ => {}
+        }
+    }
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
@@ -421,6 +458,9 @@ pub struct PodSecurityContext {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowPrivilegeEscalation: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub appArmorProfile: Option<AppArmorProfile>,
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
@@ -1145,8 +1185,20 @@ impl Container {
             self.registry.image
         );
 
+        // A k8s container.workingDir overrides the image's WorkingDir. When unset,
+        // the value derived from the container image (registry) is retained.
+        if let Some(working_dir) = &self.workingDir {
+            if !working_dir.is_empty() {
+                process.Cwd = working_dir.clone();
+                debug!("get_process_fields: set Cwd from workingDir = {working_dir}");
+            }
+        }
+
         if let Some(context) = &self.securityContext {
             debug!("get_process_fields: securityContext = {:?}", context);
+
+            // Container-level appArmorProfile overrides any pod-level default.
+            apply_apparmor_profile(process, &context.appArmorProfile);
 
             if let Some(uid) = context.runAsUser {
                 debug!("get_process_fields: runAsUser uid = {uid}");
@@ -1264,6 +1316,7 @@ pub async fn add_pause_container(containers: &mut Vec<Container>, config: &Confi
             runAsUser: None,
             runAsGroup: None,
             seccompProfile: None,
+            appArmorProfile: None,
         }),
         ..Default::default()
     };
