@@ -15,21 +15,26 @@ use tokio::time::{timeout, Duration};
 use std::convert::TryFrom;
 #[cfg(feature = "agent-policy")]
 use std::convert::TryInto as _;
+use std::collections::HashMap;
 use std::ffi::{CString, OsStr};
 use std::fmt::Debug;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+use std::path::Component;
 #[cfg(target_arch = "s390x")]
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use ttrpc::{
     self,
     error::get_rpc_status,
     r#async::{Server as TtrpcServer, TtrpcContext},
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use cgroups::FreezerState;
 use oci::{Hooks, LinuxNamespace, Spec};
 use oci_spec::runtime as oci;
@@ -38,9 +43,10 @@ use protobuf::MessageDyn;
 use protobuf::MessageField;
 use protocols::agent::{
     AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest, GetIPTablesRequest,
-    GetIPTablesResponse, GuestDetailsResponse, Interfaces, Metrics, OOMEvent, ReadStreamResponse,
-    ResizeVolumeRequest, Routes, SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse,
-    VolumeStatsRequest, WaitProcessResponse, WriteStreamResponse,
+    GetIPTablesResponse, GuestDetailsResponse, InitVolumeSourceResponse, Interfaces, Metrics,
+    OOMEvent, ReadStreamResponse, ResizeVolumeRequest, Routes, SetIPTablesRequest,
+    SetIPTablesResponse, StatsContainerResponse, VolumeSourceType, VolumeStatsRequest,
+    WaitProcessResponse, WriteStreamResponse,
 };
 use protocols::csi::{
     volume_usage::Unit as VolumeUsage_Unit, VolumeCondition, VolumeStatsResponse, VolumeUsage,
@@ -134,10 +140,23 @@ const IP6TABLES_SAVE: &str = "/sbin/ip6tables-save";
 const USR_IP6TABLES_RESTORE: &str = "/usr/sbin/ip6tables-save";
 const IP6TABLES_RESTORE: &str = "/sbin/ip6tables-restore";
 const KATA_GUEST_SHARE_DIR: &str = "/run/kata-containers/shared/containers/";
+const KATA_GUEST_MANAGED_VOLUME_DIR: &str = "/run/kata-containers/shared/managed-volumes/";
 
 const ERR_CANNOT_GET_WRITER: &str = "Cannot get writer";
 const ERR_INVALID_BLOCK_SIZE: &str = "Invalid block size";
 const ERR_NO_LINUX_FIELD: &str = "Spec does not contain linux field";
+
+#[derive(Clone, Debug)]
+struct ManagedVolumeSource {
+    host_volume_id: String,
+    guest_path: PathBuf,
+    volume_type: VolumeSourceType,
+    active_revision: Option<String>,
+}
+
+static MANAGED_VOLUME_SOURCES: LazyLock<std::sync::Mutex<HashMap<String, ManagedVolumeSource>>> =
+    LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+static NEXT_MANAGED_VOLUME_ID: AtomicU64 = AtomicU64::new(0);
 const ERR_NO_SANDBOX_PIDNS: &str = "Sandbox does not have sandbox_pidns";
 
 // IPTABLES_RESTORE_WAIT_SEC is the timeout value provided to iptables-restore --wait. Since we
@@ -1671,6 +1690,65 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn init_volume_source(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::InitVolumeSourceRequest,
+    ) -> ttrpc::Result<protocols::agent::InitVolumeSourceResponse> {
+        trace_rpc_call!(ctx, "init_volume_source", req);
+        is_allowed(&req).await?;
+
+        do_init_volume_source(&req).map_ttrpc_err(same)
+    }
+
+    async fn create_volume_subdir(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CreateVolumeSubdirRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "create_volume_subdir", req);
+        is_allowed(&req).await?;
+
+        do_create_volume_subdir(&req).map_ttrpc_err(same)?;
+        Ok(Empty::new())
+    }
+
+    async fn put_volume_file(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::PutVolumeFileRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "put_volume_file", req);
+        is_allowed(&req).await?;
+
+        do_put_volume_file(&req).map_ttrpc_err(same)?;
+        Ok(Empty::new())
+    }
+
+    async fn commit_volume_revision(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CommitVolumeRevisionRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "commit_volume_revision", req);
+        is_allowed(&req).await?;
+
+        do_commit_volume_revision(&req).map_ttrpc_err(same)?;
+        Ok(Empty::new())
+    }
+
+    async fn remove_volume_source(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::RemoveVolumeSourceRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "remove_volume_source", req);
+        is_allowed(&req).await?;
+
+        do_remove_volume_source(&req).map_ttrpc_err(same)?;
+        Ok(Empty::new())
+    }
+
     async fn copy_file(
         &self,
         ctx: &TtrpcContext,
@@ -2246,6 +2324,264 @@ fn do_set_guest_date_time(sec: i64, usec: i64) -> Result<()> {
     };
 
     Errno::result(ret).map(drop)?;
+
+    Ok(())
+}
+
+fn next_managed_volume_id() -> String {
+    let seq = NEXT_MANAGED_VOLUME_ID.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("vol-{nanos:x}-{seq:x}")
+}
+
+fn validate_relative_path(path: &str) -> Result<()> {
+    if path.is_empty() {
+        bail!("relative path cannot be empty")
+    }
+
+    let p = Path::new(path);
+    if p.is_absolute() {
+        bail!("absolute paths are not allowed")
+    }
+
+    for comp in p.components() {
+        match comp {
+            Component::Normal(_) => {}
+            Component::CurDir => {}
+            _ => bail!("relative path contains invalid component"),
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_managed_relative(root: &Path, relative: &str) -> Result<PathBuf> {
+    validate_relative_path(relative)?;
+    Ok(root.join(relative))
+}
+
+fn do_init_volume_source(req: &protocols::agent::InitVolumeSourceRequest) -> Result<InitVolumeSourceResponse> {
+    if req.host_volume_id.trim().is_empty() {
+        bail!("host_volume_id cannot be empty")
+    }
+
+    let base = PathBuf::from(KATA_GUEST_MANAGED_VOLUME_DIR);
+    fs::create_dir_all(&base).context("create managed volume root")?;
+
+    let mut sources = MANAGED_VOLUME_SOURCES
+        .lock()
+        .map_err(|_| anyhow!("managed volume sources lock poisoned"))?;
+
+    if let Some((agent_volume_id, src)) = sources
+        .iter()
+        .find(|(_, src)| src.host_volume_id == req.host_volume_id)
+    {
+        return Ok(InitVolumeSourceResponse {
+            agent_volume_id: agent_volume_id.clone(),
+            guest_path: src.guest_path.to_string_lossy().into_owned(),
+            ..Default::default()
+        });
+    }
+
+    let volume_type = req.volume_type.enum_value_or_default();
+    if volume_type == VolumeSourceType::VOLUME_SOURCE_TYPE_UNSPECIFIED {
+        bail!("volume_type is unspecified")
+    }
+
+    let agent_volume_id = next_managed_volume_id();
+    let guest_path = base.join(&agent_volume_id);
+
+    match volume_type {
+        VolumeSourceType::VOLUME_SOURCE_TYPE_SINGLE_FILE => {
+            File::create(&guest_path).context("create managed single-file target")?;
+        }
+        VolumeSourceType::VOLUME_SOURCE_TYPE_EMPTY_DIR
+        | VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S => {
+            fs::create_dir_all(&guest_path).context("create managed volume directory")?;
+        }
+        VolumeSourceType::VOLUME_SOURCE_TYPE_UNSPECIFIED => bail!("volume_type is unspecified"),
+    }
+
+    sources.insert(
+        agent_volume_id.clone(),
+        ManagedVolumeSource {
+            host_volume_id: req.host_volume_id.clone(),
+            guest_path: guest_path.clone(),
+            volume_type,
+            active_revision: None,
+        },
+    );
+
+    Ok(InitVolumeSourceResponse {
+        agent_volume_id,
+        guest_path: guest_path.to_string_lossy().into_owned(),
+        ..Default::default()
+    })
+}
+
+fn do_create_volume_subdir(req: &protocols::agent::CreateVolumeSubdirRequest) -> Result<()> {
+    let mut sources = MANAGED_VOLUME_SOURCES
+        .lock()
+        .map_err(|_| anyhow!("managed volume sources lock poisoned"))?;
+    let source = sources
+        .get_mut(&req.agent_volume_id)
+        .ok_or_else(|| anyhow!("unknown agent_volume_id"))?;
+
+    if source.volume_type != VolumeSourceType::VOLUME_SOURCE_TYPE_EMPTY_DIR
+        && source.volume_type != VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S
+    {
+        bail!("volume type does not support subdirectory creation")
+    }
+
+    let target = resolve_managed_relative(&source.guest_path, &req.subdir)?;
+    let mode = if req.dir_mode == 0 {
+        libc::S_IFDIR | 0o750
+    } else {
+        req.dir_mode
+    };
+    let copy_req = CopyFileRequest {
+        path: target.to_string_lossy().into_owned(),
+        file_mode: mode,
+        dir_mode: mode,
+        uid: req.uid,
+        gid: req.gid,
+        ..Default::default()
+    };
+    do_copy_file(&copy_req, &source.guest_path)
+}
+
+fn do_put_volume_file(req: &protocols::agent::PutVolumeFileRequest) -> Result<()> {
+    let mut sources = MANAGED_VOLUME_SOURCES
+        .lock()
+        .map_err(|_| anyhow!("managed volume sources lock poisoned"))?;
+    let source = sources
+        .get_mut(&req.agent_volume_id)
+        .ok_or_else(|| anyhow!("unknown agent_volume_id"))?;
+
+    let file_mode = if req.file_mode == 0 {
+        libc::S_IFREG | 0o640
+    } else {
+        req.file_mode
+    };
+    let dir_mode = if req.dir_mode == 0 {
+        libc::S_IFDIR | 0o750
+    } else {
+        req.dir_mode
+    };
+
+    let target = if source.volume_type == VolumeSourceType::VOLUME_SOURCE_TYPE_SINGLE_FILE {
+        if !req.relative_path.is_empty() {
+            bail!("single-file source requires empty relative_path")
+        }
+        source.guest_path.clone()
+    } else {
+        resolve_managed_relative(&source.guest_path, &req.relative_path)?
+    };
+
+    let copy_req = CopyFileRequest {
+        path: target.to_string_lossy().into_owned(),
+        file_size: req.file_size,
+        file_mode,
+        dir_mode,
+        uid: req.uid,
+        gid: req.gid,
+        offset: req.offset,
+        data: req.data.clone(),
+        ..Default::default()
+    };
+
+    let root = if source.volume_type == VolumeSourceType::VOLUME_SOURCE_TYPE_SINGLE_FILE {
+        source
+            .guest_path
+            .parent()
+            .ok_or_else(|| anyhow!("single-file guest path has no parent"))?
+            .to_path_buf()
+    } else {
+        source.guest_path.clone()
+    };
+
+    do_copy_file(&copy_req, &root)
+}
+
+fn do_commit_volume_revision(req: &protocols::agent::CommitVolumeRevisionRequest) -> Result<()> {
+    let mut sources = MANAGED_VOLUME_SOURCES
+        .lock()
+        .map_err(|_| anyhow!("managed volume sources lock poisoned"))?;
+    let source = sources
+        .get_mut(&req.agent_volume_id)
+        .ok_or_else(|| anyhow!("unknown agent_volume_id"))?;
+
+    if source.volume_type != VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S {
+        bail!("only ATOMIC_K8S volume sources support revision commits")
+    }
+
+    validate_relative_path(&req.revision)?;
+    let owner_uid = unistd::geteuid().as_raw() as i32;
+    let owner_gid = unistd::getegid().as_raw() as i32;
+
+    let data_link = source.guest_path.join("..data");
+    let link_req = CopyFileRequest {
+        path: data_link.to_string_lossy().into_owned(),
+        file_mode: libc::S_IFLNK,
+        uid: owner_uid,
+        gid: owner_gid,
+        data: req.revision.as_bytes().to_vec(),
+        ..Default::default()
+    };
+    do_copy_file(&link_req, &source.guest_path)?;
+
+    for visible in req.visible_paths.iter() {
+        validate_relative_path(visible)?;
+        let visible_path = source.guest_path.join(visible);
+        let symlink_target = format!("..data/{visible}");
+        let visible_req = CopyFileRequest {
+            path: visible_path.to_string_lossy().into_owned(),
+            file_mode: libc::S_IFLNK,
+            uid: owner_uid,
+            gid: owner_gid,
+            data: symlink_target.into_bytes(),
+            ..Default::default()
+        };
+        do_copy_file(&visible_req, &source.guest_path)?;
+    }
+
+    let previous_revision = source.active_revision.clone();
+    source.active_revision = Some(req.revision.clone());
+
+    if req.garbage_collect_previous {
+        if let Some(previous) = previous_revision {
+            if previous != req.revision {
+                let old_path = source.guest_path.join(previous);
+                let _ = fs::remove_dir_all(old_path);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn do_remove_volume_source(req: &protocols::agent::RemoveVolumeSourceRequest) -> Result<()> {
+    let mut sources = MANAGED_VOLUME_SOURCES
+        .lock()
+        .map_err(|_| anyhow!("managed volume sources lock poisoned"))?;
+    let source = sources
+        .remove(&req.agent_volume_id)
+        .ok_or_else(|| anyhow!("unknown agent_volume_id"))?;
+
+    match fs::metadata(&source.guest_path) {
+        Ok(md) => {
+            if md.is_dir() {
+                fs::remove_dir_all(&source.guest_path).context("remove managed volume directory")?;
+            } else {
+                fs::remove_file(&source.guest_path).context("remove managed volume file")?;
+            }
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e).context("stat managed volume path"),
+    }
 
     Ok(())
 }
@@ -3800,6 +4136,83 @@ COMMIT
         let mut ids: Vec<String> = vec![resp1.container_id, resp2.container_id];
         ids.sort();
         assert_eq!(ids, vec!["container-1", "container-2"]);
+    }
+
+    #[test]
+    fn test_validate_relative_path() {
+        assert!(validate_relative_path("a/b/c").is_ok());
+        assert!(validate_relative_path("./a").is_ok());
+        assert!(validate_relative_path("../a").is_err());
+        assert!(validate_relative_path("/abs/path").is_err());
+        assert!(validate_relative_path("").is_err());
+    }
+
+    #[test]
+    fn test_managed_volume_atomic_flow() {
+        let temp = tempdir().expect("create tempdir");
+        let guest_path = temp.path().join("managed");
+        fs::create_dir_all(&guest_path).expect("create guest path");
+
+        {
+            let mut sources = MANAGED_VOLUME_SOURCES
+                .lock()
+                .expect("lock managed source map");
+            sources.clear();
+            sources.insert(
+                "v1".to_string(),
+                ManagedVolumeSource {
+                    host_volume_id: "h1".to_string(),
+                    guest_path: guest_path.clone(),
+                    volume_type: VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S,
+                    active_revision: None,
+                },
+            );
+        }
+
+        let mkreq = protocols::agent::CreateVolumeSubdirRequest {
+            agent_volume_id: "v1".to_string(),
+            subdir: "rev1".to_string(),
+            dir_mode: libc::S_IFDIR | 0o750,
+            uid: unistd::getuid().as_raw() as i32,
+            gid: unistd::getgid().as_raw() as i32,
+            ..Default::default()
+        };
+        do_create_volume_subdir(&mkreq).expect("create subdir");
+
+        let putreq = protocols::agent::PutVolumeFileRequest {
+            agent_volume_id: "v1".to_string(),
+            relative_path: "rev1/token".to_string(),
+            file_size: 5,
+            file_mode: libc::S_IFREG | 0o640,
+            uid: unistd::getuid().as_raw() as i32,
+            gid: unistd::getgid().as_raw() as i32,
+            offset: 0,
+            data: b"hello".to_vec(),
+            ..Default::default()
+        };
+        do_put_volume_file(&putreq).expect("put file");
+
+        let commit = protocols::agent::CommitVolumeRevisionRequest {
+            agent_volume_id: "v1".to_string(),
+            revision: "rev1".to_string(),
+            visible_paths: vec!["token".to_string()],
+            garbage_collect_previous: true,
+            ..Default::default()
+        };
+        do_commit_volume_revision(&commit).expect("commit revision");
+
+        let data_target = fs::read_link(guest_path.join("..data")).expect("read ..data");
+        assert_eq!(data_target.to_string_lossy(), "rev1");
+
+        let token_target = fs::read_link(guest_path.join("token")).expect("read token symlink");
+        assert_eq!(token_target.to_string_lossy(), "..data/token");
+
+        let rm = protocols::agent::RemoveVolumeSourceRequest {
+            agent_volume_id: "v1".to_string(),
+            ..Default::default()
+        };
+        do_remove_volume_source(&rm).expect("remove volume source");
+        assert!(!guest_path.exists());
     }
 
     #[tokio::test]

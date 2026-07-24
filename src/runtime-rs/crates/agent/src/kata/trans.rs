@@ -15,17 +15,19 @@ use crate::{
     types::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
-        ContainerID, CopyFileRequest, CpuStats, CpuUsage, CreateContainerRequest,
-        CreateSandboxRequest, Device, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy,
-        GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse,
-        HugetlbStats, IPAddress, IPFamily, Interface, Interfaces, KernelModule,
-        MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse, NetworkStats,
-        OnlineCPUMemRequest, PidsStats, ReadStreamRequest, ReadStreamResponse,
-        RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes,
-        SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse, SharedMount,
-        SignalProcessRequest, StatsContainerResponse, Storage, StringUser, ThrottlingData,
-        TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
-        VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
+        CommitVolumeRevisionRequest, ContainerID, CopyFileRequest, CpuStats, CpuUsage,
+        CreateContainerRequest, CreateSandboxRequest, CreateVolumeSubdirRequest, Device, Empty,
+        ExecProcessRequest, FSGroup, FSGroupChangePolicy, GetIPTablesRequest,
+        GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse, HugetlbStats, IPAddress,
+        IPFamily, InitVolumeSourceRequest, InitVolumeSourceResponse, Interface, Interfaces,
+        KernelModule, MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse,
+        NetworkStats, OnlineCPUMemRequest, PidsStats, PutVolumeFileRequest, ReadStreamRequest,
+        ReadStreamResponse, RemoveContainerRequest, RemoveVolumeSourceRequest,
+        ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes, SetGuestDateTimeRequest,
+        SetIPTablesRequest, SetIPTablesResponse, SharedMount, SignalProcessRequest,
+        StatsContainerResponse, Storage, StringUser, ThrottlingData, TtyWinResizeRequest,
+        UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest, VersionCheckResponse,
+        VolumeSourceType, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
         WriteStreamRequest,
     },
     GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest, OomEventResponse,
@@ -805,6 +807,89 @@ impl From<CopyFileRequest> for agent::CopyFileRequest {
             gid: from.gid,
             offset: from.offset,
             data: from.data,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<VolumeSourceType> for agent::VolumeSourceType {
+    fn from(from: VolumeSourceType) -> Self {
+        match from {
+            VolumeSourceType::Unspecified => agent::VolumeSourceType::VOLUME_SOURCE_TYPE_UNSPECIFIED,
+            VolumeSourceType::SingleFile => agent::VolumeSourceType::VOLUME_SOURCE_TYPE_SINGLE_FILE,
+            VolumeSourceType::EmptyDir => agent::VolumeSourceType::VOLUME_SOURCE_TYPE_EMPTY_DIR,
+            VolumeSourceType::AtomicK8s => agent::VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S,
+        }
+    }
+}
+
+impl From<InitVolumeSourceRequest> for agent::InitVolumeSourceRequest {
+    fn from(from: InitVolumeSourceRequest) -> Self {
+        Self {
+            host_volume_id: from.host_volume_id,
+            volume_type: agent::VolumeSourceType::from(from.volume_type).into(),
+            read_only: from.read_only,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<agent::InitVolumeSourceResponse> for InitVolumeSourceResponse {
+    fn from(from: agent::InitVolumeSourceResponse) -> Self {
+        Self {
+            agent_volume_id: from.agent_volume_id,
+            guest_path: from.guest_path,
+        }
+    }
+}
+
+impl From<CreateVolumeSubdirRequest> for agent::CreateVolumeSubdirRequest {
+    fn from(from: CreateVolumeSubdirRequest) -> Self {
+        Self {
+            agent_volume_id: from.agent_volume_id,
+            subdir: from.subdir,
+            dir_mode: from.dir_mode,
+            uid: from.uid,
+            gid: from.gid,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<PutVolumeFileRequest> for agent::PutVolumeFileRequest {
+    fn from(from: PutVolumeFileRequest) -> Self {
+        Self {
+            agent_volume_id: from.agent_volume_id,
+            relative_path: from.relative_path,
+            file_size: from.file_size,
+            file_mode: from.file_mode,
+            uid: from.uid,
+            gid: from.gid,
+            offset: from.offset,
+            data: from.data,
+            revision: from.revision,
+            dir_mode: from.dir_mode,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CommitVolumeRevisionRequest> for agent::CommitVolumeRevisionRequest {
+    fn from(from: CommitVolumeRevisionRequest) -> Self {
+        Self {
+            agent_volume_id: from.agent_volume_id,
+            revision: from.revision,
+            visible_paths: from.visible_paths,
+            garbage_collect_previous: from.garbage_collect_previous,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<RemoveVolumeSourceRequest> for agent::RemoveVolumeSourceRequest {
+    fn from(from: RemoveVolumeSourceRequest) -> Self {
+        Self {
+            agent_volume_id: from.agent_volume_id,
             ..Default::default()
         }
     }

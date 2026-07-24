@@ -15,18 +15,21 @@ mod sock;
 pub mod types;
 pub use types::{
     ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
-    BlkioStatsEntry, CheckRequest, CloseStdinRequest, ContainerID, ContainerProcessID,
-    CopyFileRequest, CreateContainerRequest, CreateSandboxRequest, Empty, ExecProcessRequest,
-    FSGroup, FSGroupChangePolicy, GetDiagnosticDataRequest, GetDiagnosticDataResponse,
-    GetGuestDetailsRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
-    HealthCheckResponse, IPAddress, IPFamily, Interface, Interfaces, ListProcessesRequest,
-    MemHotplugByProbeRequest, MetricsResponse, OnlineCPUMemRequest, OomEventResponse,
-    ReadStreamRequest, ReadStreamResponse, RemoveContainerRequest, ReseedRandomDevRequest,
-    ResizeVolumeRequest, Route, Routes, SetGuestDateTimeRequest, SetIPTablesRequest,
-    SetIPTablesResponse, SignalProcessRequest, StatsContainerResponse, Storage,
-    TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
-    VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
-    WaitProcessResponse, WriteStreamRequest, WriteStreamResponse,
+    BlkioStatsEntry, CheckRequest, CloseStdinRequest, CommitVolumeRevisionRequest, ContainerID,
+    ContainerProcessID, CopyFileRequest, CreateContainerRequest, CreateSandboxRequest,
+    CreateVolumeSubdirRequest, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy,
+    GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest,
+    GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse,
+    IPAddress, IPFamily, InitVolumeSourceRequest, InitVolumeSourceResponse, Interface,
+    Interfaces, ListProcessesRequest, MemHotplugByProbeRequest, MetricsResponse,
+    OnlineCPUMemRequest, OomEventResponse, PutVolumeFileRequest, ReadStreamRequest,
+    ReadStreamResponse, RemoveContainerRequest, RemoveVolumeSourceRequest,
+    ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes, SetGuestDateTimeRequest,
+    SetIPTablesRequest, SetIPTablesResponse, SignalProcessRequest, StatsContainerResponse,
+    Storage, TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest,
+    UpdateRoutesRequest, VersionCheckResponse, VolumeSourceType, VolumeStatsRequest,
+    VolumeStatsResponse, WaitProcessRequest, WaitProcessResponse, WriteStreamRequest,
+    WriteStreamResponse,
 };
 
 use anyhow::Result;
@@ -91,6 +94,12 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
 
     // utils
     async fn copy_file(&self, req: CopyFileRequest) -> Result<Empty>;
+    async fn init_volume_source(&self, req: InitVolumeSourceRequest)
+        -> Result<InitVolumeSourceResponse>;
+    async fn create_volume_subdir(&self, req: CreateVolumeSubdirRequest) -> Result<Empty>;
+    async fn put_volume_file(&self, req: PutVolumeFileRequest) -> Result<Empty>;
+    async fn commit_volume_revision(&self, req: CommitVolumeRevisionRequest) -> Result<Empty>;
+    async fn remove_volume_source(&self, req: RemoveVolumeSourceRequest) -> Result<Empty>;
     async fn get_metrics(&self, req: Empty) -> Result<MetricsResponse>;
     async fn get_oom_event(&self, req: Empty) -> Result<OomEventResponse>;
     async fn get_ip_tables(&self, req: GetIPTablesRequest) -> Result<GetIPTablesResponse>;

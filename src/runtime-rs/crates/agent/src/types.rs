@@ -554,6 +554,64 @@ pub struct CopyFileRequest {
     pub data: ::std::vec::Vec<u8>,
 }
 
+#[derive(PartialEq, Clone, Debug, Default)]
+pub enum VolumeSourceType {
+    #[default]
+    Unspecified,
+    SingleFile,
+    EmptyDir,
+    AtomicK8s,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct InitVolumeSourceRequest {
+    pub host_volume_id: String,
+    pub volume_type: VolumeSourceType,
+    pub read_only: bool,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct InitVolumeSourceResponse {
+    pub agent_volume_id: String,
+    pub guest_path: String,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct CreateVolumeSubdirRequest {
+    pub agent_volume_id: String,
+    pub subdir: String,
+    pub dir_mode: u32,
+    pub uid: i32,
+    pub gid: i32,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct PutVolumeFileRequest {
+    pub agent_volume_id: String,
+    pub relative_path: String,
+    pub file_size: i64,
+    pub file_mode: u32,
+    pub uid: i32,
+    pub gid: i32,
+    pub offset: i64,
+    pub data: ::std::vec::Vec<u8>,
+    pub revision: String,
+    pub dir_mode: u32,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct CommitVolumeRevisionRequest {
+    pub agent_volume_id: String,
+    pub revision: String,
+    pub visible_paths: Vec<String>,
+    pub garbage_collect_previous: bool,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct RemoveVolumeSourceRequest {
+    pub agent_volume_id: String,
+}
+
 #[derive(PartialEq, Clone, Default, Debug)]
 pub struct CheckRequest {
     pub service: String,
