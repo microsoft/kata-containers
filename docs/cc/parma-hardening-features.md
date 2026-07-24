@@ -31,10 +31,11 @@ implement it, the security guarantee it introduces, and how it was validated.
   policy-fragment verifier, scratch classifier, verified-layer + verified-image allowlists, TOCTOU handle
   binding, and network-phase machine. Keeping this logic in one crate makes it
   unit-testable and, for the lifecycle, formally model-checkable.
-- **Companion docs:** `docs/cc/fr1-fragments.md` (the full FR-1 fragments reference),
-  `docs/cc/fr1-fragment-e2e.md` (a reproducible end-to-end walk-through), and
-  `docs/cc/backlog.md` (the remaining/open execution-integrity work items). This file is the
-  guide-level overview across all features; the FR-1 fragments detail is large enough to
+- **Companion docs:** `docs/cc/build-deploy-test-demo.md` (developer runbook — build, test,
+  deploy, and demo, with verified commands), `docs/cc/fr1-fragments.md` (the full FR-1
+  fragments reference), `docs/cc/fr1-fragment-e2e.md` (a reproducible end-to-end walk-through),
+  and `docs/cc/backlog.md` (the remaining/open execution-integrity work items). This file is
+  the guide-level overview across all features; the FR-1 fragments detail is large enough to
   live in its own document.
 - **No new host↔guest protocol** except FR-1 (`LoadPolicyFragment`), which is additive and
   backward-compatible.
