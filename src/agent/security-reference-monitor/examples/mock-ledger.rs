@@ -31,6 +31,68 @@ fn hex_decode(s: &str) -> Vec<u8> {
         .collect()
 }
 
+fn hex_encode(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{:02x}", x)).collect()
+}
+
+// BL-6 / LV-3: emit a SCITT CCF-profile `kata-ccf-proof/v1` receipt for a fragment statement.
+// Builds a real ccf-inclusion-proof (CBOR {1:[tx_hash,evidence,data_hash], 2:[[left,hash]]}),
+// recomputes the Merkle root with the same plain-SHA-256 CCF construction the guest verifier
+// uses (crate::ccf), and signs that root with the ledger Ed25519 key. `--tamper` flips the
+// leaf data_hash so the recomputed root no longer binds the statement (rejection demo).
+fn prove_ccf(f: &HashMap<String, String>) {
+    use ciborium::value::Value;
+    use sha2::{Digest, Sha256};
+
+    let key = hex_decode(f.get("key").expect("--key required"));
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&key[..32]);
+    let sk = SigningKey::from_bytes(&seed);
+
+    let leaf_path = f.get("leaf").expect("--leaf <statement-file> required");
+    let statement = std::fs::read(leaf_path).expect("read leaf statement file");
+    let mut data_hash: [u8; 32] = Sha256::digest(&statement).into();
+    if f.contains_key("tamper") {
+        data_hash[0] ^= 0xff; // bind a different statement -> verifier must reject
+    }
+
+    let tx = [7u8; 32];
+    let evidence = "ccf-evidence";
+    let leaf = kata_security_reference_monitor::ccf::ccf_leaf_hash(&tx, evidence.as_bytes(), &data_hash);
+    let sib = [0x11u8; 32];
+    // Single right sibling (left=false): root = SHA-256(leaf || sib).
+    let mut h = Sha256::new();
+    h.update(leaf);
+    h.update(sib);
+    let root: [u8; 32] = h.finalize().into();
+
+    let proof = Value::Map(vec![
+        (
+            Value::Integer(1.into()),
+            Value::Array(vec![
+                Value::Bytes(tx.to_vec()),
+                Value::Text(evidence.to_string()),
+                Value::Bytes(data_hash.to_vec()),
+            ]),
+        ),
+        (
+            Value::Integer(2.into()),
+            Value::Array(vec![Value::Array(vec![
+                Value::Bool(false),
+                Value::Bytes(sib.to_vec()),
+            ])]),
+        ),
+    ]);
+    let mut cbor = Vec::new();
+    ciborium::into_writer(&proof, &mut cbor).expect("encode ccf proof");
+    let sig = sk.sign(&root).to_bytes();
+    print!(
+        "kata-ccf-proof/v1\nproof={}\nsig={}\n",
+        hex_encode(&cbor),
+        hex_encode(&sig)
+    );
+}
+
 fn parse_flags(args: &[String]) -> HashMap<String, String> {
     let mut m = HashMap::new();
     let mut i = 0;
@@ -52,11 +114,17 @@ fn parse_flags(args: &[String]) -> HashMap<String, String> {
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
-    if argv.len() < 2 || argv[1] != "prove" {
+    let sub = argv.get(1).map(|s| s.as_str()).unwrap_or("");
+    if sub != "prove" && sub != "prove-ccf" {
         eprintln!("usage: mock-ledger prove --key <hex> --ledger <id> --leaves <f0,f1,...> --target <idx> [--cons-from <m>]");
+        eprintln!("       mock-ledger prove-ccf --key <hex> --leaf <statement-file> [--tamper]");
         std::process::exit(2);
     }
     let f = parse_flags(&argv[2..]);
+    if sub == "prove-ccf" {
+        prove_ccf(&f);
+        return;
+    }
     let key = hex_decode(f.get("key").expect("--key required"));
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&key[..32]);
