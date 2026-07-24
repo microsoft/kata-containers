@@ -77,7 +77,7 @@ impl OpenVmmInner {
                 Ok(DeviceType::BlockModern(block_device))
             }
             other => {
-                if matches!(other, DeviceType::Vfio(_)) {
+                if matches!(other, DeviceType::VfioModern(_) | DeviceType::Vfio(_)) {
                     return Err(anyhow!(
                         "openvmm: VFIO devices are cold-plug only and must be \
                          added before start_vm; got {} after VMM start",
@@ -120,6 +120,9 @@ impl OpenVmmInner {
                 );
                 Ok(())
             }
+            DeviceType::VfioModern(_) | DeviceType::Vfio(_) => Err(anyhow!(
+                "openvmm: VFIO devices are cold-plug only and remain attached until VM teardown"
+            )),
             other => {
                 warn!(sl!(), "openvmm: remove_device stub for {}", other);
                 Ok(())
@@ -128,16 +131,25 @@ impl OpenVmmInner {
     }
 
     pub(crate) async fn update_device(&mut self, device: DeviceType) -> Result<()> {
-        warn!(sl!(), "openvmm: update_device stub for {}", device);
-        Ok(())
+        match device {
+            DeviceType::VfioModern(_) | DeviceType::Vfio(_) => Err(anyhow!(
+                "openvmm: VFIO devices are cold-plug only and cannot be updated after VM creation"
+            )),
+            other => {
+                warn!(sl!(), "openvmm: update_device stub for {}", other);
+                Ok(())
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::driver::vfio_device::VfioDeviceModern;
     use crate::{BlockConfigModern, BlockDeviceModernHandle};
-    use tokio::sync::mpsc;
+    use std::sync::Arc;
+    use tokio::sync::{mpsc, Mutex};
 
     #[tokio::test]
     async fn remove_block_device_keeps_port_reserved_when_rpc_fails() {
@@ -160,5 +172,17 @@ mod tests {
         assert_eq!(released_port.name, port.name);
         assert!(inner.block_hotplug_port(device_id).is_none());
         assert_eq!(inner.free_block_hotplug_ports.len(), free_ports + 1);
+    }
+
+    #[tokio::test]
+    async fn vfio_modern_is_cold_plug_only_after_vm_start() {
+        let (exit_notify, _exit_waiter) = mpsc::channel(1);
+        let mut inner = OpenVmmInner::new(exit_notify);
+        inner.state = VmmState::VmRunning;
+        let device = DeviceType::VfioModern(Arc::new(Mutex::new(VfioDeviceModern::default())));
+
+        assert!(inner.add_device(device.clone()).await.is_err());
+        assert!(inner.remove_device(device.clone()).await.is_err());
+        assert!(inner.update_device(device).await.is_err());
     }
 }

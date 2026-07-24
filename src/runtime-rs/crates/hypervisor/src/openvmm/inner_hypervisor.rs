@@ -15,13 +15,30 @@ use super::vmservice;
 use super::{
     OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
     OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT,
-    OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VSOCK_PCI_DEVICE,
+    OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE,
+    OPENVMM_VFIO_COLDPLUG_FUNCTION, OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
+    OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, OPENVMM_VSOCK_PCI_DEVICE,
 };
+use crate::device::driver::vfio_device::DeviceAddress;
+use crate::device::pci_path::{PciPath, PciSlot};
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
+const OPENVMM_PCIE_LOW_MMIO_BASE: u64 = 0xc000_0000;
+const OPENVMM_PCIE_LOW_MMIO_END: u64 = 0xd400_0000;
+const OPENVMM_PCIE_HIGH_MMIO_BASE: u64 = 0x0020_3d30_0000;
+const OPENVMM_PCIE_HIGH_MMIO_END: u64 = 0x200f_3d30_0000;
+
+#[derive(Clone, Debug)]
+struct VfioPcieAssignment {
+    index: u8,
+    host_bdf: String,
+    port_name: String,
+    slot: PciSlot,
+    pci_path: PciPath,
+}
 
 fn build_kernel_cmdline(
     debug: bool,
@@ -122,12 +139,24 @@ fn vhost_user_fs_device_kind(socket_path: String, tag: String) -> vmservice::Pci
     ))
 }
 
-/// Build a PCIe root port at `device` (function 0), optionally carrying a
+fn vfio_device_kind(host_pci_address: String) -> vmservice::PcieDeviceKind {
+    vmservice::PcieDeviceKind {
+        kind: Some(vmservice::pcie_device_kind::Kind::Vfio(
+            vmservice::VfioDevice {
+                host_pci_address,
+                ..Default::default()
+            },
+        )),
+        ..Default::default()
+    }
+}
+
+/// Build a PCIe root port at `slot`, optionally carrying a
 /// cold-plug endpoint. Empty `hotplug` ports are populated later via
 /// AddPcieDevice.
 fn make_pcie_port(
     name: &str,
-    device: u8,
+    slot: PciSlot,
     hotplug: bool,
     device_kind: Option<vmservice::PcieDeviceKind>,
 ) -> vmservice::PciePort {
@@ -142,9 +171,77 @@ fn make_pcie_port(
         name: name.to_string(),
         hotplug,
         attached,
-        // Pin the port at function 0 of its device so the guest-visible path is
-        // deterministic ("DD/00"); see OpenVmmHotplugPort.
-        devfn: Some((device as u32) << 3),
+        devfn: Some(u32::from(slot.devfn())),
+        ..Default::default()
+    }
+}
+
+fn assign_vfio_devices(
+    mut host_bdfs: Vec<String>,
+    primary_bdf: &str,
+    first_index: u8,
+) -> Result<(Vec<VfioPcieAssignment>, PciPath)> {
+    host_bdfs.retain(|bdf| !bdf.is_empty());
+    host_bdfs.sort();
+    host_bdfs.dedup();
+
+    if host_bdfs.is_empty() {
+        return Err(anyhow!("openvmm: VFIO group contains no PCI devices"));
+    }
+    if !host_bdfs.iter().any(|bdf| bdf == primary_bdf) {
+        return Err(anyhow!(
+            "openvmm: VFIO primary BDF {} is absent from its device group",
+            primary_bdf
+        ));
+    }
+
+    let end_index = usize::from(first_index) + host_bdfs.len();
+    if end_index > usize::from(OPENVMM_VFIO_COLDPLUG_PORT_COUNT) {
+        return Err(anyhow!(
+            "openvmm: too many VFIO devices (limit {})",
+            OPENVMM_VFIO_COLDPLUG_PORT_COUNT
+        ));
+    }
+
+    let mut assignments = Vec::with_capacity(host_bdfs.len());
+    for (offset, host_bdf) in host_bdfs.into_iter().enumerate() {
+        let index = first_index + offset as u8;
+        let slot = PciSlot::new_with_function(
+            OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE + index,
+            OPENVMM_VFIO_COLDPLUG_FUNCTION,
+        )?;
+        let pci_path = PciPath::new(vec![slot, PciSlot::new(0)])
+            .context("openvmm: failed to build VFIO guest PCI path")?;
+        assignments.push(VfioPcieAssignment {
+            index,
+            port_name: format!("{}{}", OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, index),
+            host_bdf,
+            slot,
+            pci_path,
+        });
+    }
+
+    let primary_pci_path = assignments
+        .iter()
+        .find(|assignment| assignment.host_bdf == primary_bdf)
+        .map(|assignment| assignment.pci_path.clone())
+        .context("openvmm: failed to map the primary VFIO device")?;
+
+    Ok((assignments, primary_pci_path))
+}
+
+fn make_pcie_root_complex(root_ports: Vec<vmservice::PciePort>) -> vmservice::PcieRootComplex {
+    vmservice::PcieRootComplex {
+        name: "rc0".to_string(),
+        segment: 0,
+        start_bus: 0,
+        end_bus: 127,
+        low_mmio: OPENVMM_PCIE_LOW_MMIO_END - OPENVMM_PCIE_LOW_MMIO_BASE,
+        high_mmio: OPENVMM_PCIE_HIGH_MMIO_END - OPENVMM_PCIE_HIGH_MMIO_BASE,
+        low_mmio_base: Some(OPENVMM_PCIE_LOW_MMIO_BASE),
+        high_mmio_base: Some(OPENVMM_PCIE_HIGH_MMIO_BASE),
+        preserve_bars: false,
+        root_ports,
         ..Default::default()
     }
 }
@@ -218,7 +315,7 @@ impl OpenVmmInner {
             );
             root_ports.push(make_pcie_port(
                 "rootfs",
-                OPENVMM_ROOTFS_PCI_DEVICE,
+                PciSlot::new(OPENVMM_ROOTFS_PCI_DEVICE),
                 false,
                 Some(blk_device_kind(disk_path.clone(), true)),
             ));
@@ -230,6 +327,8 @@ impl OpenVmmInner {
         let pending = self.pending_devices.clone();
         let mut deferred_block_devices = Vec::new();
         let mut network_index = 0u8;
+        let mut vfio_assignments = Vec::new();
+        let mut next_vfio_port = 0u8;
 
         for dev in &pending {
             match dev {
@@ -263,7 +362,7 @@ impl OpenVmmInner {
                     );
                     root_ports.push(make_pcie_port(
                         &format!("net{}", network_index),
-                        device,
+                        PciSlot::new(device),
                         false,
                         Some(net_device_kind(
                             mac_address(net_dev, network_index as usize),
@@ -299,7 +398,7 @@ impl OpenVmmInner {
                     );
                     root_ports.push(make_pcie_port(
                         "sharefs",
-                        OPENVMM_SHAREFS_PCI_DEVICE,
+                        PciSlot::new(OPENVMM_SHAREFS_PCI_DEVICE),
                         false,
                         Some(vhost_user_fs_device_kind(
                             fs_dev.config.sock_path.clone(),
@@ -319,13 +418,51 @@ impl OpenVmmInner {
                         deferred_block_devices.push(dev.clone());
                     }
                 }
+                DeviceType::VfioModern(vfio_handle) => {
+                    let mut vfio_device = vfio_handle.lock().await;
+                    let primary_bdf = match &vfio_device.device.primary.addr {
+                        DeviceAddress::Pci(bdf) => bdf.to_string(),
+                        other => {
+                            return Err(anyhow!(
+                                "openvmm only supports PCI VFIO devices, got primary {}",
+                                other
+                            ));
+                        }
+                    };
+                    let group_devices = if vfio_device.device.devices.is_empty() {
+                        vec![vfio_device.device.primary.clone()]
+                    } else {
+                        vfio_device.device.devices.clone()
+                    };
+                    let host_bdfs = group_devices
+                        .iter()
+                        .map(|device| match &device.addr {
+                            DeviceAddress::Pci(bdf) => Ok(bdf.to_string()),
+                            other => Err(anyhow!(
+                                "openvmm only supports PCI VFIO devices, got {}",
+                                other
+                            )),
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let (assignments, primary_pci_path) =
+                        assign_vfio_devices(host_bdfs, &primary_bdf, next_vfio_port)?;
+                    next_vfio_port += assignments.len() as u8;
+
+                    info!(
+                        sl!(),
+                        "openvmm: cold-plug VFIO group {} with {} PCI function(s), primary {} at {}",
+                        vfio_device.config.host_path,
+                        assignments.len(),
+                        primary_bdf,
+                        primary_pci_path
+                    );
+
+                    vfio_device.config.guest_pci_path = Some(primary_pci_path);
+                    vfio_assignments.extend(assignments);
+                }
                 DeviceType::Vfio(_) => {
                     return Err(anyhow!(
-                        "openvmm: VFIO device pass-through is not yet wired in Kata. \
-                         OpenVMM's ttrpc API now supports it (PcieDeviceKind::Vfio with a \
-                         host BDF), so the remaining work is Kata-side: convert the VFIO \
-                         device to a proto VfioDevice, place it behind a PCIe root port, \
-                         and report its guest pci_path."
+                        "openvmm does not support the legacy VFIO device model; use VfioModern"
                     ));
                 }
                 other => {
@@ -347,7 +484,7 @@ impl OpenVmmInner {
         // the hybrid-vsock "hvsock://" scheme (see get_agent_socket).
         root_ports.push(make_pcie_port(
             "vsock",
-            OPENVMM_VSOCK_PCI_DEVICE,
+            PciSlot::new(OPENVMM_VSOCK_PCI_DEVICE),
             false,
             Some(vsock_device_kind(vsock_socket_path.clone())),
         ));
@@ -360,27 +497,41 @@ impl OpenVmmInner {
             let device = OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE + index;
             root_ports.push(make_pcie_port(
                 &format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
-                device,
+                PciSlot::new(device),
                 true,
                 None,
             ));
         }
 
+        for index in 0..OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
+            let slot = PciSlot::new_with_function(
+                OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE + index,
+                OPENVMM_VFIO_COLDPLUG_FUNCTION,
+            )?;
+            let device_kind = vfio_assignments
+                .iter()
+                .find(|assignment| assignment.index == index)
+                .map(|assignment| {
+                    debug!(
+                        sl!(),
+                        "openvmm: assigning VFIO BDF {} to port {} (guest pci_path={})",
+                        assignment.host_bdf,
+                        assignment.port_name,
+                        assignment.pci_path
+                    );
+                    debug_assert_eq!(assignment.slot, slot);
+                    vfio_device_kind(assignment.host_bdf.clone())
+                });
+            root_ports.push(make_pcie_port(
+                &format!("{}{}", OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, index),
+                slot,
+                false,
+                device_kind,
+            ));
+        }
+
         let pcie = vmservice::PcieTopologyConfig {
-            root_complexes: vec![vmservice::PcieRootComplex {
-                name: "rc0".to_string(),
-                segment: 0,
-                start_bus: 0,
-                end_bus: 127,
-                // MMIO apertures sized for ~32 virtio root-port bridges; bases
-                // are auto-assigned by OpenVMM to stay consistent with the ECAM
-                // and ACPI layout it generates.
-                low_mmio: 0x1000_0000,    // 256 MiB (32-bit)
-                high_mmio: 0x4_0000_0000, // 16 GiB (64-bit)
-                preserve_bars: false,
-                root_ports,
-                ..Default::default()
-            }],
+            root_complexes: vec![make_pcie_root_complex(root_ports)],
             ..Default::default()
         };
 
@@ -547,5 +698,53 @@ impl OpenVmmInner {
 
     pub(crate) async fn get_passfd_listener_addr(&self) -> Result<(String, u32)> {
         Err(anyhow!("openvmm passfd IO is not supported"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vfio_assignments_are_deterministic_and_track_the_actual_primary() {
+        let (assignments, primary_path) = assign_vfio_devices(
+            vec!["0000:02:00.0".to_string(), "0000:01:00.0".to_string()],
+            "0000:02:00.0",
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(assignments[0].host_bdf, "0000:01:00.0");
+        assert_eq!(assignments[0].port_name, "vfio0");
+        assert_eq!(assignments[0].pci_path.to_string(), "08.1/00");
+        assert_eq!(assignments[1].host_bdf, "0000:02:00.0");
+        assert_eq!(assignments[1].port_name, "vfio1");
+        assert_eq!(primary_path.to_string(), "09.1/00");
+    }
+
+    #[test]
+    fn vfio_assignments_enforce_capacity_and_primary_membership() {
+        let sixteen = (0..OPENVMM_VFIO_COLDPLUG_PORT_COUNT)
+            .map(|index| format!("0000:{index:02x}:00.0"))
+            .collect::<Vec<_>>();
+        assert!(assign_vfio_devices(sixteen.clone(), &sixteen[0], 0).is_ok());
+
+        let mut seventeen = sixteen;
+        seventeen.push("0000:10:00.0".to_string());
+        assert!(assign_vfio_devices(seventeen, "0000:00:00.0", 0).is_err());
+        assert!(assign_vfio_devices(vec!["0000:01:00.0".to_string()], "0000:02:00.0", 0).is_err());
+    }
+
+    #[test]
+    fn pcie_root_complex_uses_gpu_sized_fixed_mmio_windows() {
+        let root = make_pcie_root_complex(Vec::new());
+        assert_eq!(root.low_mmio_base, Some(OPENVMM_PCIE_LOW_MMIO_BASE));
+        assert_eq!(root.low_mmio, 320 * 1024 * 1024);
+        assert_eq!(root.high_mmio_base, Some(OPENVMM_PCIE_HIGH_MMIO_BASE));
+        assert_eq!(
+            root.high_mmio,
+            OPENVMM_PCIE_HIGH_MMIO_END - OPENVMM_PCIE_HIGH_MMIO_BASE
+        );
+        assert!(!root.preserve_bars);
     }
 }
