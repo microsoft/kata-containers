@@ -8,7 +8,9 @@ allowed = [
         "AddARPNeighborsRequest",
         "AddSwapRequest",
         "CloseStdinRequest",
+        "CommitVolumeRevisionRequest",
         "CopyFileRequest",
+        "CreateVolumeSubdirRequest",
         "CreateContainerRequest",
         "CreateSandboxRequest",
         "DestroySandboxRequest",
@@ -19,11 +21,13 @@ allowed = [
         "ListInterfacesRequest",
         "ListRoutesRequest",
         "MemHotplugByProbeRequest",
+        "InitVolumeSourceRequest",
         "OnlineCPUMemRequest",
         "PauseContainerRequest",
         "PullImageRequest",
         "ReadStreamRequest",
         "RemoveContainerRequest",
+        "RemoveVolumeSourceRequest",
         "ReseedRandomDevRequest",
         "ResizeVolumeRequest",
         "ResumeContainerRequest",
@@ -37,5 +41,6 @@ allowed = [
         "UpdateRoutesRequest",
         "VolumeStatsRequest",
         "WaitProcessRequest",
-        "WriteStreamRequest"
+        "WriteStreamRequest",
+        "PutVolumeFileRequest"
 ]

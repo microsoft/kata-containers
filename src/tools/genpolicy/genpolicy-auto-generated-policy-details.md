@@ -80,6 +80,36 @@ common := {
 
 Therefore, by default the auto-generated Policy allows the Host to copy any files under `/run/kata-containers/shared/containers` and rejects any other `CopyFile` requests. A user can alter this behavior by using a custom settings file including a different `policy_data.request_defaults.CopyFileRequest` field value, instead of using the default from `genpolicy-settings.json`.
 
+## Managed volume sync requests
+
+Runtime components can use a typed managed-volume flow instead of raw `CopyFile` calls:
+
+- `InitVolumeSourceRequest`
+- `CreateVolumeSubdirRequest`
+- `PutVolumeFileRequest`
+- `CommitVolumeRevisionRequest`
+- `RemoveVolumeSourceRequest`
+
+The auto-generated policy controls these requests via boolean settings under `policy_data.request_defaults`:
+
+```
+policy_data := {
+    ...
+    "request_defaults": {
+        ...
+        "InitVolumeSourceRequest": true,
+        "CreateVolumeSubdirRequest": true,
+        "PutVolumeFileRequest": true,
+        "CommitVolumeRevisionRequest": true,
+        "RemoveVolumeSourceRequest": true,
+        ...
+    },
+    ...
+}
+```
+
+By default these values are enabled in [`genpolicy-settings.json`](genpolicy-settings.json). The corresponding rules still enforce basic path-shape checks on relative-path fields.
+
 
 ## `CreateContainerRequest`
 

@@ -329,7 +329,9 @@ package agent_policy
 default AddARPNeighborsRequest := true
 default AddSwapRequest := true
 default CloseStdinRequest := true
+default CommitVolumeRevisionRequest := true
 default CopyFileRequest := true
+default CreateVolumeSubdirRequest := true
 default CreateContainerRequest := true
 default CreateSandboxRequest := true
 default DestroySandboxRequest := true
@@ -340,11 +342,13 @@ default GuestDetailsRequest := true
 default ListInterfacesRequest := true
 default ListRoutesRequest := true
 default MemHotplugByProbeRequest := true
+default InitVolumeSourceRequest := true
 default OnlineCPUMemRequest := true
 default PauseContainerRequest := true
 default PullImageRequest := true
 default ReadStreamRequest := true
 default RemoveContainerRequest := true
+default RemoveVolumeSourceRequest := true
 default RemoveStaleVirtiofsShareMountsRequest := true
 default ReseedRandomDevRequest := true
 default ResumeContainerRequest := true
@@ -362,6 +366,7 @@ default UpdateInterfaceRequest := true
 default UpdateRoutesRequest := true
 default WaitProcessRequest := true
 default WriteStreamRequest := true
+default PutVolumeFileRequest := true
 '''
 EOF
     )
