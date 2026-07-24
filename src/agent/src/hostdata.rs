@@ -36,15 +36,28 @@ const TSM_REPORT_ENTRY: &str = "kata-agent-initdata";
 const TSM_INBLOB_LEN: usize = 64;
 
 /// Offset and length of `HOST_DATA` within an SEV-SNP attestation report (Table 22,
-/// "SEV Secure Nested Paging Firmware ABI Specification").
+/// "SEV Secure Nested Paging Firmware ABI Specification"). The sev-guest TSM provider
+/// returns the attestation report itself as `outblob`, so this offset is absolute.
 const SNP_HOST_DATA_OFFSET: usize = 0xC0;
 const SNP_HOST_DATA_LEN: usize = 32;
 
-/// Offset and length of `MRCONFIGID` within a TDX quote: a 48-byte quote header followed by
-/// the TD quote body, in which `MRCONFIGID` sits at offset 184 (after TEE_TCB_SVN(16),
-/// MRSEAM(48), MRSIGNERSEAM(48), SEAMATTRIBUTES(8), TDATTRIBUTES(8), XFAM(8), MRTD(48)).
-const TDX_QUOTE_HEADER_LEN: usize = 48;
-const TDX_BODY_MRCONFIGID_OFFSET: usize = 184;
+/// sysfs directory of the SEV-SNP guest driver (`DEVICE_NAME` in `sev-guest.c`).
+const SEV_GUEST_DEV_DIR: &str = "/sys/class/misc/sev-guest";
+
+/// sysfs directory of the TDX guest driver (`KBUILD_MODNAME` in `tdx-guest.c`).
+const TDX_GUEST_DEV_DIR: &str = "/sys/class/misc/tdx_guest";
+
+/// `MRCONFIGID` as exposed by the kernel's tsm-mr measurement-register interface, relative
+/// to `TDX_GUEST_DEV_DIR`. The attribute group is named "measurements", and because
+/// `mrconfigid` is registered with `TSM_MR_F_NOHASH` its attribute name carries no `:hash`
+/// suffix. The attribute is a binary attribute holding the raw 48-byte value.
+///
+/// This is deliberately preferred over parsing a TDX quote: `outblob` on TDX is produced by
+/// a `GetQuote` hypercall serviced by the *host*, so it depends on host-side QGS, can stall
+/// for seconds or fail outright at the host's discretion, and its layout is quote-version
+/// dependent. The measurement register is read from the TDREPORT the TDX module produced,
+/// entirely inside the guest.
+const TDX_MRCONFIGID_ATTR: &str = "measurements/mrconfigid";
 const TDX_MRCONFIGID_LEN: usize = 48;
 
 /// The TEE report providers this module knows how to parse.
@@ -131,28 +144,45 @@ impl Drop for ReportEntry {
     }
 }
 
-/// Extract the launch-configuration field the initdata digest is stamped into.
-fn extract_measured_field(provider: Provider, report: &[u8]) -> Result<Vec<u8>> {
-    let (offset, len) = match provider {
-        Provider::Snp => (SNP_HOST_DATA_OFFSET, SNP_HOST_DATA_LEN),
-        Provider::Tdx => (
-            TDX_QUOTE_HEADER_LEN + TDX_BODY_MRCONFIGID_OFFSET,
-            TDX_MRCONFIGID_LEN,
-        ),
-    };
-
+/// Extract `HOST_DATA` from an SEV-SNP attestation report.
+fn extract_snp_host_data(report: &[u8]) -> Result<Vec<u8>> {
     report
-        .get(offset..offset + len)
+        .get(SNP_HOST_DATA_OFFSET..SNP_HOST_DATA_OFFSET + SNP_HOST_DATA_LEN)
         .map(|slice| slice.to_vec())
         .ok_or_else(|| {
             anyhow!(
-                "{} report too short: need {} bytes to read {}, got {}",
-                provider.field_name(),
-                offset + len,
-                provider.field_name(),
+                "SEV-SNP report too short: need {} bytes to read HOSTDATA, got {}",
+                SNP_HOST_DATA_OFFSET + SNP_HOST_DATA_LEN,
                 report.len()
             )
         })
+}
+
+/// Read `MRCONFIGID` from the tsm-mr measurement register under `dev_dir`.
+///
+/// Fails closed when the attribute is absent: a TDX guest whose kernel predates the tsm-mr
+/// interface gives us no host-independent way to read the launch configuration, and silently
+/// continuing would leave the initdata unbound.
+fn read_tdx_mrconfigid(dev_dir: &Path) -> Result<Vec<u8>> {
+    let path = dev_dir.join(TDX_MRCONFIGID_ATTR);
+    let value = fs::read(&path).with_context(|| {
+        format!(
+            "read {} -- the guest kernel does not expose MRCONFIGID through tsm-mr, so the \
+             initdata cannot be bound to the launch measurement",
+            path.display()
+        )
+    })?;
+
+    if value.len() != TDX_MRCONFIGID_LEN {
+        bail!(
+            "{} has unexpected length {} (want {})",
+            path.display(),
+            value.len(),
+            TDX_MRCONFIGID_LEN
+        );
+    }
+
+    Ok(value)
 }
 
 /// Truncate or zero-pad the digest the same way the host does before stamping it into the
@@ -168,39 +198,87 @@ fn adjust_digest(digest: &[u8], len: usize) -> Vec<u8> {
     adjusted
 }
 
-/// Fetch the local TEE report. Returns `Ok(None)` when the guest has no TEE report provider,
-/// which means it is not a confidential VM and there is no launch measurement to bind to.
-fn read_local_report(logger: &Logger) -> Result<Option<(Provider, Vec<u8>)>> {
-    if !Path::new(TSM_REPORT_DIR).is_dir() {
+/// Detect which TEE the guest is running under, from the presence of the guest driver's
+/// sysfs directory. Returns `None` when neither is present, meaning this is not a
+/// confidential VM.
+fn detect_provider() -> Option<Provider> {
+    if Path::new(TDX_GUEST_DEV_DIR).is_dir() {
+        Some(Provider::Tdx)
+    } else if Path::new(SEV_GUEST_DEV_DIR).is_dir() {
+        Some(Provider::Snp)
+    } else {
+        None
+    }
+}
+
+/// Read the launch-configuration field the initdata digest is stamped into.
+///
+/// Returns `Ok(None)` when the guest has no TEE provider, which means it is not a
+/// confidential VM and there is no launch measurement to bind to.
+fn read_measured_field(logger: &Logger) -> Result<Option<(Provider, Vec<u8>)>> {
+    let Some(provider) = detect_provider() else {
         slog::info!(
             logger,
-            "no configfs-tsm report provider; guest is not a confidential VM";
-            "path" => TSM_REPORT_DIR
+            "no TEE guest driver present; guest is not a confidential VM"
         );
         return Ok(None);
+    };
+
+    let value = match provider {
+        // TDX exposes MRCONFIGID directly as a measurement register, read from the TDREPORT
+        // without involving the host.
+        Provider::Tdx => read_tdx_mrconfigid(Path::new(TDX_GUEST_DEV_DIR))?,
+
+        // SNP has no equivalent measurement register, but its attestation report is produced
+        // by a local firmware call to the PSP, so fetching it through configfs-TSM does not
+        // depend on the host either.
+        Provider::Snp => {
+            let report = read_snp_report(logger)?;
+            extract_snp_host_data(&report)?
+        }
+    };
+
+    slog::debug!(
+        logger,
+        "read launch measurement field";
+        "field" => provider.field_name(),
+        "bytes" => value.len()
+    );
+
+    Ok(Some((provider, value)))
+}
+
+/// Fetch the SEV-SNP attestation report through configfs-TSM.
+fn read_snp_report(logger: &Logger) -> Result<Vec<u8>> {
+    if !Path::new(TSM_REPORT_DIR).is_dir() {
+        bail!(
+            "{} is not present: the guest is SEV-SNP but exposes no configfs-tsm report \
+             provider, so the initdata cannot be bound to the launch measurement",
+            TSM_REPORT_DIR
+        );
     }
 
     let entry = ReportEntry::create()?;
 
     // The report is read locally from the guest's own TEE, so freshness is not a concern
     // here; `inblob` is required by configfs-tsm but its content is irrelevant to a
-    // HOSTDATA/MRCONFIGID comparison.
+    // HOSTDATA comparison.
     entry.write_inblob(&[0u8; TSM_INBLOB_LEN])?;
 
     let raw_provider = entry.provider()?;
-    let Some(provider) = Provider::parse(&raw_provider) else {
-        bail!("unsupported TEE report provider {raw_provider:?}");
-    };
+    if Provider::parse(&raw_provider) != Some(Provider::Snp) {
+        bail!("expected an SEV-SNP configfs-tsm provider, got {raw_provider:?}");
+    }
 
     let report = entry.outblob()?;
     slog::debug!(
         logger,
-        "read local TEE report";
+        "read local SEV-SNP attestation report";
         "provider" => &raw_provider,
         "bytes" => report.len()
     );
 
-    Ok(Some((provider, report)))
+    Ok(report)
 }
 
 /// Verify that the initdata the agent parsed is the initdata this VM was launched with.
@@ -212,11 +290,10 @@ fn read_local_report(logger: &Logger) -> Result<Option<(Provider, Vec<u8>)>> {
 pub fn verify_initdata_binding(logger: &Logger, digest: &[u8]) -> Result<bool> {
     let logger = logger.new(slog::o!("subsystem" => "hostdata"));
 
-    let Some((provider, report)) = read_local_report(&logger)? else {
+    let Some((provider, measured)) = read_measured_field(&logger)? else {
         return Ok(false);
     };
 
-    let measured = extract_measured_field(provider, &report)?;
     let expected = adjust_digest(digest, provider.measured_len());
 
     if measured != expected {
@@ -267,29 +344,47 @@ mod tests {
     }
 
     #[test]
-    fn extract_snp_host_data() {
+    fn extract_snp_host_data_from_report() {
         let mut report = vec![0u8; 1184];
         report[SNP_HOST_DATA_OFFSET..SNP_HOST_DATA_OFFSET + SNP_HOST_DATA_LEN]
             .copy_from_slice(&[0x5Au8; SNP_HOST_DATA_LEN]);
 
-        let extracted = extract_measured_field(Provider::Snp, &report).unwrap();
+        let extracted = extract_snp_host_data(&report).unwrap();
         assert_eq!(extracted, vec![0x5Au8; SNP_HOST_DATA_LEN]);
     }
 
     #[test]
-    fn extract_tdx_mrconfigid() {
-        let offset = TDX_QUOTE_HEADER_LEN + TDX_BODY_MRCONFIGID_OFFSET;
-        let mut quote = vec![0u8; 1024];
-        quote[offset..offset + TDX_MRCONFIGID_LEN].copy_from_slice(&[0x3Cu8; TDX_MRCONFIGID_LEN]);
+    fn short_snp_report_is_rejected() {
+        assert!(extract_snp_host_data(&vec![0u8; 8]).is_err());
+    }
 
-        let extracted = extract_measured_field(Provider::Tdx, &quote).unwrap();
-        assert_eq!(extracted, vec![0x3Cu8; TDX_MRCONFIGID_LEN]);
+    fn fake_tdx_dev(value: Option<&[u8]>) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        if let Some(value) = value {
+            let attr = dir.path().join(TDX_MRCONFIGID_ATTR);
+            fs::create_dir_all(attr.parent().unwrap()).unwrap();
+            fs::write(attr, value).unwrap();
+        }
+        dir
     }
 
     #[test]
-    fn short_report_is_rejected() {
-        let report = vec![0u8; 8];
-        assert!(extract_measured_field(Provider::Snp, &report).is_err());
-        assert!(extract_measured_field(Provider::Tdx, &report).is_err());
+    fn read_tdx_mrconfigid_reads_raw_bytes() {
+        let dir = fake_tdx_dev(Some(&[0x3Cu8; TDX_MRCONFIGID_LEN]));
+        let value = read_tdx_mrconfigid(dir.path()).unwrap();
+        assert_eq!(value, vec![0x3Cu8; TDX_MRCONFIGID_LEN]);
+    }
+
+    #[test]
+    fn missing_tdx_mrconfigid_fails_closed() {
+        // A TDX guest on a kernel without tsm-mr must be an error, never a silent skip.
+        let dir = fake_tdx_dev(None);
+        assert!(read_tdx_mrconfigid(dir.path()).is_err());
+    }
+
+    #[test]
+    fn truncated_tdx_mrconfigid_is_rejected() {
+        let dir = fake_tdx_dev(Some(&[0x3Cu8; 16]));
+        assert!(read_tdx_mrconfigid(dir.path()).is_err());
     }
 }
