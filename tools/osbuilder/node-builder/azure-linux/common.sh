@@ -13,6 +13,7 @@ source "${lib_file}"
 
 CONF_PODS=${CONF_PODS:-no}
 USE_RUNTIME_RS=${USE_RUNTIME_RS:-no}
+USE_OPENVMM=${USE_OPENVMM:-no}
 
 OS_VERSION=$(sort -r /etc/*-release | gawk 'match($0, /^(VERSION_ID=(.*))$/, a) { print toupper(a[2] a[3]); exit }' | tr -d '"')
 
@@ -21,9 +22,19 @@ OS_VERSION=$(sort -r /etc/*-release | gawk 'match($0, /^(VERSION_ID=(.*))$/, a) 
 SHIM_CONFIG_FILE_NAME_RUNTIME_GO="configuration-clh.toml"
 SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO="configuration-clh-debug.toml"
 CONFIG_DIR_RUNTIME_GO="src/runtime/config"
-SHIM_CONFIG_FILE_NAME_RUNTIME_RS="configuration-clh-azure-runtime-rs.toml"
-SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS="configuration-clh-azure-runtime-rs-debug.toml"
+SHIM_CONFIG_FILE_NAME_RUNTIME_RS_CLH="configuration-clh-azure-runtime-rs.toml"
+SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_CLH="configuration-clh-azure-runtime-rs-debug.toml"
+SHIM_CONFIG_FILE_NAME_RUNTIME_RS_OPENVMM="configuration-openvmm-azure-runtime-rs.toml"
+SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_OPENVMM="configuration-openvmm-azure-runtime-rs-debug.toml"
 CONFIG_DIR_RUNTIME_RS="src/runtime-rs/config"
+
+if [[ "${USE_OPENVMM}" == "yes" ]]; then
+	SHIM_CONFIG_FILE_NAME_RUNTIME_RS="${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_OPENVMM}"
+	SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS="${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_OPENVMM}"
+else
+	SHIM_CONFIG_FILE_NAME_RUNTIME_RS="${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_CLH}"
+	SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS="${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_CLH}"
+fi
 
 if [[ "${CONF_PODS}" == "yes" ]]; then
 	INSTALL_PATH_PREFIX="/opt/confidential-containers"
@@ -69,6 +80,8 @@ fi
 
 # this is where cloud-hypervisor-cvm gets installed (see package SPEC)
 CLOUD_HYPERVISOR_LOCATION="/usr/bin/cloud-hypervisor"
+# OpenVMM is supplied by the host package; node-builder does not build or install it.
+OPENVMM_BINARY_LOCATION="/usr/bin/openvmm"
 # this is where kernel-uvm gets installed (see package SPEC)
 KERNEL_BINARY_LOCATION="/usr/share/cloud-hypervisor/vmlinux.bin"
 # Mariner 3: different binary name

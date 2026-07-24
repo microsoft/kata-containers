@@ -39,7 +39,6 @@ runtime_go_make_flags=(
 runtime_rs_make_flags=(
 	"BUILD_TYPE=release"
 	"LIBC=gnu"
-	"HYPERVISOR=cloud-hypervisor"
 	"OPENSSL_NO_VENDOR=Y"
 	"USE_BUILDIN_DB=false"
 	"QEMUCMD="
@@ -53,6 +52,18 @@ runtime_rs_make_flags=(
 	"DEFSTATICSANDBOXWORKLOADVCPUS=1"
 )
 
+if [[ "${USE_OPENVMM}" == "yes" ]]; then
+	runtime_rs_make_flags+=(
+		"HYPERVISOR=openvmm-runtime-rs"
+		"USE_OPENVMM=true"
+	)
+else
+	runtime_rs_make_flags+=(
+		"HYPERVISOR=cloud-hypervisor"
+		"USE_OPENVMM=false"
+	)
+fi
+
 # - for vanilla Kata we use the kernel binary. For ConfPods we use IGVM, so no need to provide kernel path.
 # - for vanilla Kata we explicitly set DEFSTATICRESOURCEMGMT_CLH. For ConfPods,
 #   the variable DEFSTATICRESOURCEMGMT_TEE is used which defaults to false
@@ -60,7 +71,11 @@ runtime_rs_make_flags=(
 #   as we have a single CLH binary for both vanilla Kata and ConfPods
 if [[ "${CONF_PODS}" == "no" ]]; then
 	runtime_go_make_flags+=("DEFSTATICRESOURCEMGMT_CLH=true" "KERNELPATH_CLH=${KERNEL_BINARY_LOCATION}")
-	runtime_rs_make_flags+=("DEFSTATICRESOURCEMGMT_CLH=true" "KERNELPATH_CLH=${KERNEL_BINARY_LOCATION}")
+	runtime_rs_make_flags+=(
+		"DEFSTATICRESOURCEMGMT_CLH=true"
+		"KERNELPATH_CLH=${KERNEL_BINARY_LOCATION}"
+		"KERNELPATH_OPENVMM=${KERNEL_BINARY_LOCATION}"
+	)
 else
 	runtime_go_make_flags+=("CLHPATH=${CLOUD_HYPERVISOR_LOCATION}")
 	runtime_rs_make_flags+=("CLHPATH=${CLOUD_HYPERVISOR_LOCATION}")
@@ -150,7 +165,10 @@ create_debug_shim_config() {
 }
 
 create_debug_shim_config  "${CONFIG_DIR_RUNTIME_GO}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO}"
-create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}"
+create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_CLH}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_CLH}"
+if [[ "${USE_OPENVMM}" == "yes" ]]; then
+	create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_OPENVMM}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_OPENVMM}"
+fi
 
 echo "Building agent binary and generating service files"
 pushd src/agent/ || exit

@@ -6,6 +6,7 @@ BUILD_TYPE := release
 
 export SHIM_REDEPLOY_CONFIG := yes
 export USE_RUNTIME_RS := no
+export USE_OPENVMM := no
 
 ifeq ($(BUILD_TYPE),debug)
 	export AGENT_BUILD_TYPE := debug

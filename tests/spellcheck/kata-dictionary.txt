@@ -24,6 +24,7 @@ msrc
 bootc
 materialx
 ostree
+OpenVMM
 
 # Hardware & Architecture
 AMD
