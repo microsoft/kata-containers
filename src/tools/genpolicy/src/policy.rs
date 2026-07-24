@@ -390,6 +390,21 @@ pub struct RequestDefaults {
     /// Guest file paths matching these regular expressions can be copied by the Host.
     pub CopyFileRequest: Vec<String>,
 
+    /// Allow the Host to initialize a managed volume source in the Guest.
+    pub InitVolumeSourceRequest: bool,
+
+    /// Allow the Host to create managed volume subdirectories in the Guest.
+    pub CreateVolumeSubdirRequest: bool,
+
+    /// Allow the Host to copy file contents into managed volume sources in the Guest.
+    pub PutVolumeFileRequest: bool,
+
+    /// Allow the Host to atomically commit a managed volume revision in the Guest.
+    pub CommitVolumeRevisionRequest: bool,
+
+    /// Allow the Host to remove managed volume sources in the Guest.
+    pub RemoveVolumeSourceRequest: bool,
+
     /// Commands allowed to be executed by the Host in all Guest containers.
     pub ExecProcessRequest: ExecProcessRequestDefaults,
 

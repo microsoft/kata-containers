@@ -389,6 +389,11 @@
         "CopyFileRequest": [
             "$(sfprefix)"
         ],
+        "InitVolumeSourceRequest": true,
+        "CreateVolumeSubdirRequest": true,
+        "PutVolumeFileRequest": true,
+        "CommitVolumeRevisionRequest": true,
+        "RemoveVolumeSourceRequest": true,
         "ExecProcessRequest": {
             "allowed_commands": [],
             "regex": []

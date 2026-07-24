@@ -17,7 +17,9 @@ default AddARPNeighborsRequest := false
 default AddSwapPathRequest := false
 default AddSwapRequest := false
 default CloseStdinRequest := false
+default CommitVolumeRevisionRequest := false
 default CopyFileRequest := false
+default CreateVolumeSubdirRequest := false
 default CreateContainerRequest := false
 default CreateSandboxRequest := false
 default DestroySandboxRequest := true
@@ -31,10 +33,12 @@ default ListRoutesRequest := false
 default MemAgentCompactConfig := false
 default MemAgentMemcgConfig := false
 default MemHotplugByProbeRequest := false
+default InitVolumeSourceRequest := false
 default OnlineCPUMemRequest := true
 default PauseContainerRequest := false
 default ReadStreamRequest := false
 default RemoveContainerRequest := true
+default RemoveVolumeSourceRequest := false
 default RemoveStaleVirtiofsShareMountsRequest := true
 default ReseedRandomDevRequest := false
 default ResizeVolumeRequest := false
@@ -55,6 +59,7 @@ default UpdateRoutesRequest := false
 default VolumeStatsRequest := false
 default WaitProcessRequest := true
 default WriteStreamRequest := false
+default PutVolumeFileRequest := false
 
 # AllowRequestsFailingPolicy := true configures the Agent to *allow any
 # requests causing a policy failure*. This is an unsecure configuration
@@ -1602,6 +1607,55 @@ allow_copy_file_path(path, regex_suffix) if {
     regex5 := concat("", [regex4, regex_suffix])
     print("allow_copy_file_path: regex5 =", regex5)
     regex.match(regex5, path)
+}
+
+InitVolumeSourceRequest if {
+    print("InitVolumeSourceRequest: input =", input)
+    policy_data.request_defaults.InitVolumeSourceRequest == true
+    count(input.host_volume_id) > 0
+    print("InitVolumeSourceRequest: true")
+}
+
+CreateVolumeSubdirRequest if {
+    print("CreateVolumeSubdirRequest: input =", input)
+    policy_data.request_defaults.CreateVolumeSubdirRequest == true
+    check_directory_traversal(input.subdir)
+    not startswith(input.subdir, "/")
+    print("CreateVolumeSubdirRequest: true")
+}
+
+PutVolumeFileRequest if {
+    print("PutVolumeFileRequest: input =", input)
+    policy_data.request_defaults.PutVolumeFileRequest == true
+    check_directory_traversal(input.relative_path)
+    not startswith(input.relative_path, "/")
+    print("PutVolumeFileRequest: true")
+}
+
+PutVolumeFileRequest if {
+    print("PutVolumeFileRequest(single-file): input =", input)
+    policy_data.request_defaults.PutVolumeFileRequest == true
+    count(input.relative_path) == 0
+    print("PutVolumeFileRequest(single-file): true")
+}
+
+CommitVolumeRevisionRequest if {
+    print("CommitVolumeRevisionRequest: input =", input)
+    policy_data.request_defaults.CommitVolumeRevisionRequest == true
+    check_directory_traversal(input.revision)
+    not startswith(input.revision, "/")
+    every visible_path in input.visible_paths {
+        check_directory_traversal(visible_path)
+        not startswith(visible_path, "/")
+    }
+    print("CommitVolumeRevisionRequest: true")
+}
+
+RemoveVolumeSourceRequest if {
+    print("RemoveVolumeSourceRequest: input =", input)
+    policy_data.request_defaults.RemoveVolumeSourceRequest == true
+    count(input.agent_volume_id) > 0
+    print("RemoveVolumeSourceRequest: true")
 }
 
 CreateSandboxRequest if {
