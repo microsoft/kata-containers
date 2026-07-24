@@ -91,6 +91,11 @@ mod policy;
 #[cfg(feature = "strict-policy")]
 mod policy_fragments;
 
+// In-guest verification that the initdata the agent consumed is the initdata the VM was
+// launched with (HOSTDATA / MRCONFIGID). Only in strict confidential builds.
+#[cfg(feature = "strict-policy")]
+mod hostdata;
+
 cfg_if! {
     if #[cfg(target_arch = "s390x")] {
         mod ap;
@@ -484,6 +489,35 @@ async fn start_sandbox(
     sandbox.lock().await.sender = Some(tx);
 
     let initdata_return_value = initdata::initialize_initdata(logger).await?;
+
+    // FR-2: bind the initdata the agent just parsed to the VM's launch measurement before
+    // anything consumes it. The host stamps the initdata digest into HOSTDATA (SEV-SNP) or
+    // MRCONFIGID (TDX); without this check the guest would take the host's word for it and
+    // rely on a remote verifier to notice later -- which gates secret release but does not
+    // stop the guest from running under host-chosen initdata (policy, SRM trust roots,
+    // AA/CDH config) in the meantime. Equivalent to hcsshim's `ValidateHostData()`.
+    //
+    // Fail-closed: a mismatch, or a report we cannot read or parse, aborts the VM. When the
+    // guest has no TEE report provider it is not a confidential VM, so there is no launch
+    // measurement to bind to and nothing to verify.
+    #[cfg(feature = "strict-policy")]
+    if let Some(idrv) = initdata_return_value.as_ref() {
+        match hostdata::verify_initdata_binding(logger, &idrv.digest) {
+            Ok(true) => info!(logger, "FR-2: initdata verified against launch measurement"),
+            Ok(false) => warn!(
+                logger,
+                "FR-2: no TEE report provider; initdata is NOT bound to a launch measurement"
+            ),
+            Err(e) => {
+                error!(
+                    logger,
+                    "FR-2: initdata does not match the launch measurement, aborting VM: {:?}", e
+                );
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                std::process::abort();
+            }
+        }
+    }
 
     // FR-1b / FR-4C / BL-3 (BL-5): seed the SRM trust roots — the policy-fragment issuers,
     // the verified read-only-layer (dm-verity) allowlist, and the verified guest-pull image

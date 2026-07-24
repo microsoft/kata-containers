@@ -129,7 +129,7 @@ pub async fn read_initdata(device_path: &str) -> Result<Vec<u8>> {
 }
 
 pub struct InitdataReturnValue {
-    pub _digest: Vec<u8>,
+    pub digest: Vec<u8>,
     pub _policy: Option<String>,
     // BL-5: SRM trust-root configs sourced from the measured initdata section (each is the
     // TOML text of the corresponding `/etc/kata/*.toml`), when the initdata declares them.
@@ -165,7 +165,7 @@ pub async fn initialize_initdata(logger: &Logger) -> Result<Option<InitdataRetur
         .await
         .context("write initdata toml failed")?;
 
-    let _digest = match initdata.algorithm() {
+    let digest = match initdata.algorithm() {
         "sha256" => Sha256::digest(&initdata_content).to_vec(),
         "sha384" => Sha384::digest(&initdata_content).to_vec(),
         "sha512" => Sha512::digest(&initdata_content).to_vec(),
@@ -186,10 +186,10 @@ pub async fn initialize_initdata(logger: &Logger) -> Result<Option<InitdataRetur
         info!(logger, "write CDH config from initdata");
     }
 
-    debug!(logger, "Initdata digest: {}", STANDARD.encode(&_digest));
+    debug!(logger, "Initdata digest: {}", STANDARD.encode(&digest));
 
     let res = InitdataReturnValue {
-        _digest,
+        digest,
         _policy: initdata.get_coco_data(POLICY_KEY).cloned(),
         _fragment_issuers: initdata.get_coco_data(FRAGMENT_ISSUERS_KEY).cloned(),
         _verified_layers: initdata.get_coco_data(VERIFIED_LAYERS_KEY).cloned(),

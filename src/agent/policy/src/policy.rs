@@ -28,12 +28,13 @@ const POLICY_MAX_FILE_BYTES: usize = 16 * 1024 * 1024; // 16 MiB per file
 const POLICY_MAX_LINES: usize = 200_000;
 
 static POLICY_LOG_FILE: &str = "/tmp/policy.jsonl";
+#[cfg(not(feature = "strict-policy"))]
 static POLICY_DEFAULT_FILE: &str = "/etc/kata-opa/default-policy.rego";
 
-/// Closed-door baseline used in strict builds when no explicit policy is provided.
-/// It denies every security-relevant request (every endpoint is left undefined, so
-/// policy evaluation fails closed) except `SetPolicyRequest`, which is the channel
-/// through which an authorized policy is delivered.
+/// Closed-door baseline used in strict builds. It denies every security-relevant request
+/// (every endpoint is left undefined, so policy evaluation fails closed) except
+/// `SetPolicyRequest`, which is the channel through which an authorized policy is
+/// delivered.
 #[cfg(feature = "strict-policy")]
 static STRICT_DEFAULT_POLICY: &str =
     "package agent_policy\n\ndefault SetPolicyRequest := true\n";
@@ -143,22 +144,47 @@ impl AgentPolicy {
             debug!(sl!(), "policy: log file: {}", log_file_path);
         }
 
-        // Strict builds never fall back to a permissive default shipped in the guest
-        // image: if no explicit (attested) policy was provided, install the compiled-in
-        // closed-door baseline so the guest denies all security-relevant requests until
-        // an authorized policy is delivered.
-        #[cfg(feature = "strict-policy")]
+        self.load_initial_policy(default_policy_file).await
+    }
+
+    /// Strict builds never load a policy from the guest filesystem: the compiled-in
+    /// closed-door baseline is installed unconditionally, so the guest denies all
+    /// security-relevant requests until an authorized policy is delivered through an
+    /// attested channel (initdata, or a `SetPolicy` bound to the launch measurement).
+    ///
+    /// `default_policy_file` is deliberately ignored. It is host-influenceable: it is
+    /// populated from the `KATA_AGENT_POLICY_FILE` environment variable and from the agent
+    /// config file, which the kernel command line can select via `agent.config_file=`.
+    /// Honouring it would let a non-empty value skip the baseline and load a permissive
+    /// policy from the image instead.
+    #[cfg(feature = "strict-policy")]
+    async fn load_initial_policy(&mut self, default_policy_file: String) -> Result<()> {
         if default_policy_file.is_empty() {
             info!(
                 sl!(),
                 "strict-policy: no explicit policy provided; loading closed-door baseline"
             );
-            self.engine
-                .add_policy("strict-default.rego".to_string(), STRICT_DEFAULT_POLICY.to_string())?;
-            self.update_allow_failures_flag().await?;
-            return Ok(());
+        } else {
+            warn!(
+                sl!(),
+                "strict-policy: ignoring configured policy file; the closed-door baseline is \
+                 always used until an authorized policy is delivered";
+                "ignored-policy-file" => &default_policy_file
+            );
         }
 
+        self.engine.add_policy(
+            "strict-default.rego".to_string(),
+            STRICT_DEFAULT_POLICY.to_string(),
+        )?;
+        self.update_allow_failures_flag().await?;
+        Ok(())
+    }
+
+    /// Non-strict builds keep the historical behaviour: load the configured policy file, or
+    /// fall back to the default policy shipped in the guest image.
+    #[cfg(not(feature = "strict-policy"))]
+    async fn load_initial_policy(&mut self, default_policy_file: String) -> Result<()> {
         let mut default_policy_file = default_policy_file;
         if default_policy_file.is_empty() {
             default_policy_file = POLICY_DEFAULT_FILE.to_string();

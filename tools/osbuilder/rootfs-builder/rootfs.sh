@@ -811,15 +811,24 @@ EOF
 	fi
 
 	if [[ "${AGENT_POLICY}" == "yes" ]]; then
-		info "Install the default policy"
-		# Install default settings for the kata-opa service.
-		local opa_settings_dir="/etc/kata-opa"
-		local policy_file_name
-		policy_file_name="$(basename "${agent_policy_file}")"
-		local policy_dir="${ROOTFS_DIR}/${opa_settings_dir}"
-		mkdir -p "${policy_dir}"
-		install -D -o root -g root -m 0644 "${agent_policy_file}" -T "${policy_dir}/${policy_file_name}"
-		ln -sf "${policy_file_name}" "${policy_dir}/default-policy.rego"
+		if [[ "${STRICT_POLICY}" == "yes" ]]; then
+			# Strict builds ignore any policy file in the guest image: the agent always
+			# starts from its compiled-in closed-door baseline and only accepts a policy
+			# delivered through an attested channel. Shipping a permissive rego would
+			# serve no purpose and would be a ready-made payload for anyone who found a
+			# way to point the agent at a file, so leave it out entirely.
+			info "Skip installing the default policy (STRICT_POLICY=yes)"
+		else
+			info "Install the default policy"
+			# Install default settings for the kata-opa service.
+			local opa_settings_dir="/etc/kata-opa"
+			local policy_file_name
+			policy_file_name="$(basename "${agent_policy_file}")"
+			local policy_dir="${ROOTFS_DIR}/${opa_settings_dir}"
+			mkdir -p "${policy_dir}"
+			install -D -o root -g root -m 0644 "${agent_policy_file}" -T "${policy_dir}/${policy_file_name}"
+			ln -sf "${policy_file_name}" "${policy_dir}/default-policy.rego"
+		fi
 	fi
 
 	if [[ -n "${GUEST_HOOKS_TARBALL}" ]]; then
