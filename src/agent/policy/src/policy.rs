@@ -31,13 +31,15 @@ static POLICY_LOG_FILE: &str = "/tmp/policy.jsonl";
 #[cfg(not(feature = "strict-policy"))]
 static POLICY_DEFAULT_FILE: &str = "/etc/kata-opa/default-policy.rego";
 
-/// Closed-door baseline used in strict builds. It denies every security-relevant request
-/// (every endpoint is left undefined, so policy evaluation fails closed) except
-/// `SetPolicyRequest`, which is the channel through which an authorized policy is
-/// delivered.
+/// Closed-door baseline used in strict builds. Every endpoint is left undefined, so policy
+/// evaluation fails closed and every request is denied.
+///
+/// Unlike upstream this does not carve out `SetPolicyRequest`: strict builds deliver policy
+/// exclusively through initdata, which is bound to the launch measurement, and the
+/// `SetPolicy` RPC is compiled out. There is therefore no request the guest should accept
+/// before an authorized policy is installed.
 #[cfg(feature = "strict-policy")]
-static STRICT_DEFAULT_POLICY: &str =
-    "package agent_policy\n\ndefault SetPolicyRequest := true\n";
+static STRICT_DEFAULT_POLICY: &str = "package agent_policy\n";
 
 /// Convenience macro to obtain the scope logger
 macro_rules! sl {

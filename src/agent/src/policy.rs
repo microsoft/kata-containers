@@ -41,6 +41,9 @@ pub async fn is_allowed_with_entrypoint(
     allow_request(&mut policy, ep, &request).await
 }
 
+/// Handle the `SetPolicy` RPC. Compiled out in strict builds, where policy is delivered
+/// exclusively through initdata and there is no host-facing policy mutation channel.
+#[cfg(not(feature = "strict-policy"))]
 pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::Result<()> {
     let request = serde_json::to_string(req).unwrap();
     let mut policy = AGENT_POLICY.lock().await;
