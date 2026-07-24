@@ -21,13 +21,24 @@ These features are implemented, unit-tested, and build-clean on `coco-parity`; t
 validation needs a running node, an OCI registry, or a live external ledger — none of which
 exist inside the confidential-guest test bed. They are **not** code gaps.
 
-| Feature | What still needs a live environment |
-|---|---|
-| FR-4C — verified read-only layers | `devicemapper` agent build + a GPT/EROFS dm-verity image to exercise the gate on real hardware; optional dm-table read-back of the effective root hash. |
-| FR-4D — verified guest-pull images | A guest-pull-enabled (CDH) agent + pod that attempts an unlisted/tag-only image and is denied. |
-| FR-1f Stage 2 — external SCITT/CCF receipts | A reachable SCITT/CCF endpoint (e.g. Azure Confidential Ledger) to feed a real `kata-ccf-proof/v1` receipt end-to-end. |
-| FR-1 delivery — boot-time OCI fragment pull | A dev OCI registry preloaded with GOOD/badsvn/wrongiss/tampered fragment artifacts, to assert GOOD injects and the rest abort the VM. |
-| `genpolicy-fragmentgen` packaging/push | A reachable OCI registry to validate `--push` against (packaging + settings emission are verified offline). |
+This work is now an **active workstream** (LV-1…LV-5) to produce a security-guarantees
+**showcase** — each guarantee demonstrated with a GOOD (accepted) and BAD (rejected/aborted)
+case. Items are sized so parallel agents can pick them up independently; dependencies are
+noted. Legend: 🟢 host-feasible now · 🟠 needs a deployed strict agent / guest.
+
+| ID | Live validation | Feasibility | Depends on |
+|---|---|---|---|
+| LV-0 | **Strict-agent test bed** — build the strict-policy agent + a runnable way to exercise the real SRM against live external artifacts (component-level live harnesses linking `kata-security-reference-monitor`, plus, for LV-2, a deployed guest). | 🟢 build now / 🟠 guest deploy | — |
+| LV-1 | **FR-4C dm-verity verified layers** — build a real EROFS/ext4 + dm-verity hash tree (`veritysetup`/`losetup`), authorize the root digest via `verified-layers.toml`, show an approved digest accepted and a tampered/other digest rejected against a real dm-verity device. | 🟢 | LV-0 |
+| LV-2 | **FR-4D CDH guest-pull verified images** — an allowlisted manifest digest pulls; an unlisted digest / mutable tag is denied, in a running Kata pod with a guest-pull (CDH) strict agent. | 🟠 | LV-0 |
+| LV-3 | **FR-1f Stage-2 SCITT/CCF receipts** — a CCF-profile ledger (local CCF or Azure Confidential Ledger) emits a real `ccf-inclusion-proof` + COSE receipt; feed a `kata-ccf-proof/v1` receipt to the agent verifier: GOOD accepted, tampered rejected. | 🟢/🟠 | LV-0 |
+| LV-4 | **BL-8/BL-9 boot OCI fragment pull + push** — local OCI registry (`registry:2`); sign with `sign-fragment`, package/push with `genpolicy-fragmentgen` (GOOD/badsvn/wrongiss/tampered), then boot-pull fetch + SRM-verify: GOOD injects, the rest are rejected. | 🟢 | LV-0 |
+| LV-5 | **Security-guarantees showcase** — a single scripted demo + doc presenting each guarantee (GOOD-accepted / BAD-rejected), suitable to present. | 🟢 | LV-1…LV-4 |
+
+**Test-bed host:** GB200 node `.6` (`gb200-bm-wxjifb`), `aarch64`, Ubuntu 6.8 kernel —
+docker 28.3.2, `veritysetup`/`losetup`/`cryptsetup` present, passwordless `sudo`, and
+admin kubectl via `kubectl-admin`. LV-1 and LV-4 are runnable on this host today; LV-2 needs
+the strict agent deployed into a Kata guest; LV-3 needs a reachable CCF/SCITT endpoint.
 
 ## Deferred / out of scope
 
