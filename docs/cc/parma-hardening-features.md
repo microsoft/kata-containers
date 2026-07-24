@@ -82,13 +82,49 @@ implement it, the security guarantee it introduces, and how it was validated.
 ### FR-2 — Closed-door default policy
 - **Gap:** a guest with no (or a not-yet-delivered) policy would fail open, allowing host
   requests before an authorized policy is active.
-- **Fix:** the strict build ships a closed-door default policy that denies every request
-  except `SetPolicyRequest`. The "ignore requests failing policy" escape hatch is compiled
-  out of strict builds.
+- **Fix:** the strict build ships a closed-door default policy. The "ignore requests failing
+  policy" escape hatch is compiled out of strict builds.
 - **Guarantee:** no host-reachable operation is permitted before an authorized policy is
   activated; unknown/undefined requests are denied, not allowed.
 - **Commit:** `0a538d111`.
 - **Validated:** matrix — a pod booted with no policy is closed-door (sandbox denied).
+
+#### FR-2 hardening follow-up — closing the residual bypasses
+
+Review against the C-ACI/hcsshim bar found three ways the closed-door default could still be
+bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-hardening`.
+
+- **Baseline is now unconditional.** Previously, if a policy file was present on the guest
+  filesystem it was loaded *instead of* the closed-door baseline. That file is selected by
+  host-controlled input (`KATA_AGENT_POLICY_FILE`, `agent.config_file=`) and is consumed at
+  `initialize_policy()`, *before* initdata is read — so there is nothing to verify it
+  against. The strict build now installs the baseline unconditionally and logs an
+  `ignored-policy-file` warning if one was configured. The measured rootfs guarantees the
+  *content* integrity of such a file, but not the integrity of *which* file is chosen.
+- **The baseline is now fully closed.** The `default SetPolicyRequest := true` carve-out is
+  removed. Initdata policy delivery calls `AgentPolicy::set_policy()` directly and never
+  passed through that gate, so the carve-out only ever widened the host-reachable surface.
+- **`SetPolicy` RPC compiled out of strict builds.** Policy is delivered through initdata;
+  the ttRPC `SetPolicy` endpoint is no longer needed and is `#[cfg]`-ed out, so ttRPC returns
+  "unimplemented" (the same pattern already used for the fragment RPCs).
+- **Initdata is now bound to the launch measurement in-guest.** The agent recomputes the
+  initdata digest and compares it against the launch configuration field the host stamped it
+  into, immediately after `initialize_initdata()` and before any consumer. Without this, a
+  host could serve initdata that does not match what the VM was launched with.
+  - **SEV-SNP:** `HOST_DATA` at offset `0xC0` of the attestation report, fetched via
+    configfs-TSM. The report is produced by a local PSP call, not by the host.
+  - **TDX:** `MRCONFIGID` read from the kernel's tsm-mr measurement register at
+    `/sys/class/misc/tdx_guest/measurements/mrconfigid`. Deliberately *not* parsed out of a
+    TDX quote: `outblob` on TDX is produced by a `GetQuote` hypercall serviced by the host,
+    so it depends on host-side QGS, can stall or fail at the host's discretion, and its
+    layout is quote-version dependent. The measurement register comes from the TDREPORT the
+    TDX module produced and is served entirely inside the guest.
+  - **Failure policy:** mismatch, unreadable report, or (on TDX) a kernel without the tsm-mr
+    interface aborts the VM. A guest with no TEE provider at all logs a warning and continues,
+    so non-confidential development flows still boot.
+- **Permissive rego excluded from the strict rootfs.** `rootfs.sh` no longer installs the
+  default policy file when `STRICT_POLICY=yes`, so `allow-all.rego` is not present in the
+  image to be selected in the first place.
 
 ### FR-12 — One-shot policy activation + capability advertisement
 - **Gap:** if the host can replace the active policy at runtime, it can weaken enforcement
@@ -101,6 +137,9 @@ implement it, the security guarantee it introduces, and how it was validated.
   guest before relying on it.
 - **Commits:** `85b3ce3f7` (one-shot), `ad01dd311` (advertisement), `8424e7e08` (build).
 - **Validated:** matrix + capability advertisement observed live.
+- **Follow-up:** with the `SetPolicy` RPC compiled out of strict builds (see FR-2 above), the
+  one-shot guard no longer has a host-reachable caller in strict mode; it now only guards the
+  internal initdata activation. The immutability guarantee is unchanged and strictly stronger.
 
 ---
 
