@@ -129,6 +129,10 @@ pub async fn read_initdata(device_path: &str) -> Result<Vec<u8>> {
 }
 
 pub struct InitdataReturnValue {
+    /// Digest of the initdata document, as computed in-guest. Strict builds compare it
+    /// against the launch measurement (HOSTDATA / MRCONFIGID); non-strict builds have no
+    /// consumer for it.
+    #[cfg_attr(not(feature = "strict-policy"), allow(dead_code))]
     pub digest: Vec<u8>,
     pub _policy: Option<String>,
     // BL-5: SRM trust-root configs sourced from the measured initdata section (each is the
