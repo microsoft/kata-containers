@@ -18,8 +18,8 @@ pub const HYPERVISOR_NAME_OPENVMM: &str = "openvmm";
 /// Maximum number of vCPUs for openvmm.
 pub const MAX_OPENVMM_VCPUS: u32 = 256;
 
-/// Minimum memory size in MiB for openvmm.
-pub const MIN_OPENVMM_MEMORY_SIZE_MB: u32 = 64;
+/// Minimum pre-sizing memory in MiB for openvmm.
+pub const MIN_OPENVMM_MEMORY_SIZE_MB: u32 = 0;
 
 /// Default memory slots for openvmm.
 pub const DEFAULT_OPENVMM_MEMORY_SLOTS: u32 = 128;
@@ -80,12 +80,6 @@ impl ConfigPlugin for OpenVmmConfig {
                     "OpenVMM hypervisor cannot support more than {MAX_OPENVMM_VCPUS} vCPUs",
                 )));
             }
-
-            if ovmm.memory_info.default_memory < MIN_OPENVMM_MEMORY_SIZE_MB {
-                return Err(std::io::Error::other(format!(
-                    "OpenVMM hypervisor has minimal memory limitation {MIN_OPENVMM_MEMORY_SIZE_MB}",
-                )));
-            }
         }
         Ok(())
     }
@@ -134,12 +128,28 @@ mod tests {
         let hypervisor = config.hypervisor.get_mut(HYPERVISOR_NAME_OPENVMM).unwrap();
         hypervisor.cpu_info.default_vcpus = 1.0;
         hypervisor.cpu_info.default_maxvcpus = MAX_OPENVMM_VCPUS;
-        hypervisor.memory_info.default_memory = MIN_OPENVMM_MEMORY_SIZE_MB;
+        hypervisor.memory_info.default_memory = 128;
 
         let plugin = OpenVmmConfig::new();
         plugin.adjust_config(&mut config).unwrap();
         plugin.validate(&config).unwrap();
         let hypervisor = config.hypervisor.get(HYPERVISOR_NAME_OPENVMM).unwrap();
+        hypervisor.memory_info.validate().unwrap();
+    }
+
+    #[test]
+    fn validate_accepts_zero_pre_sizing_resources() {
+        let binary = NamedTempFile::new().unwrap();
+        let mut config = create_config(binary.path());
+        let plugin = OpenVmmConfig::new();
+
+        plugin.adjust_config(&mut config).unwrap();
+        plugin.validate(&config).unwrap();
+
+        let hypervisor = config.hypervisor.get(HYPERVISOR_NAME_OPENVMM).unwrap();
+        assert_eq!(plugin.get_min_memory(), 0);
+        assert_eq!(hypervisor.cpu_info.default_vcpus, 0.0);
+        assert_eq!(hypervisor.memory_info.default_memory, 0);
         hypervisor.memory_info.validate().unwrap();
     }
 
@@ -163,20 +173,6 @@ mod tests {
         let hypervisor = config.hypervisor.get_mut(HYPERVISOR_NAME_OPENVMM).unwrap();
         hypervisor.cpu_info.default_maxvcpus = MAX_OPENVMM_VCPUS + 1;
         hypervisor.memory_info.default_memory = MIN_OPENVMM_MEMORY_SIZE_MB;
-
-        assert!(OpenVmmConfig::new().validate(&config).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_insufficient_memory() {
-        let binary = NamedTempFile::new().unwrap();
-        let mut config = create_config(binary.path());
-        config
-            .hypervisor
-            .get_mut(HYPERVISOR_NAME_OPENVMM)
-            .unwrap()
-            .memory_info
-            .default_memory = MIN_OPENVMM_MEMORY_SIZE_MB - 1;
 
         assert!(OpenVmmConfig::new().validate(&config).is_err());
     }

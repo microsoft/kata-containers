@@ -583,4 +583,50 @@ mod tests {
         assert_eq!(hv.memory_info.default_memory, 768);
         assert_eq!(hv.memory_info.default_maxmemory, 768);
     }
+
+    #[test]
+    fn test_setup_config_static_zero_base_uses_workload_defaults() {
+        let mut config = make_config(0.0, 0, 0, 0, true);
+        config.runtime.static_sandbox_default_workload_vcpus = 1.0;
+        config.runtime.static_sandbox_default_workload_mem = 512;
+
+        let mut mgr = InitialSizeManager {
+            resource: InitialSize {
+                vcpu: 0.0,
+                mem_mb: 0,
+                orig_toml_default_mem: 0,
+            },
+        };
+
+        mgr.setup_config(&mut config).unwrap();
+
+        let hv = config.hypervisor.get("qemu").unwrap();
+        assert_eq!(hv.cpu_info.default_vcpus, 1.0);
+        assert_eq!(hv.cpu_info.default_maxvcpus, 1);
+        assert_eq!(hv.memory_info.default_memory, 512);
+        assert_eq!(hv.memory_info.default_maxmemory, 512);
+    }
+
+    #[test]
+    fn test_setup_config_static_zero_base_preserves_explicit_resources() {
+        let mut config = make_config(0.0, 0, 0, 0, true);
+        config.runtime.static_sandbox_default_workload_vcpus = 1.0;
+        config.runtime.static_sandbox_default_workload_mem = 512;
+
+        let mut mgr = InitialSizeManager {
+            resource: InitialSize {
+                vcpu: 2.5,
+                mem_mb: 1024,
+                orig_toml_default_mem: 0,
+            },
+        };
+
+        mgr.setup_config(&mut config).unwrap();
+
+        let hv = config.hypervisor.get("qemu").unwrap();
+        assert_eq!(hv.cpu_info.default_vcpus, 2.5);
+        assert_eq!(hv.cpu_info.default_maxvcpus, 3);
+        assert_eq!(hv.memory_info.default_memory, 1024);
+        assert_eq!(hv.memory_info.default_maxmemory, 1024);
+    }
 }
