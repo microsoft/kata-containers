@@ -10,9 +10,44 @@ _For the full list of shipped items and their commits/PRs, see
 
 ## Open work items
 
-_None._ All planned execution-integrity work items (BL-1…BL-9) are merged to `coco-parity`.
+**FR-16 — Complete OCI field-model coverage in genpolicy** _(P1, open)_
+
+_Guarantee._ The policy models and enforces every security-relevant field of the container
+OCI runtime spec and process, so a host cannot silently alter an unmodeled field to change
+process behavior.
+
+_Gap (in `genpolicy` today)._ `KataUser` (`src/tools/genpolicy/src/policy.rs`) models only
+UID / GID / AdditionalGids / Username — **`process.user.umask` is not modeled**. `Cwd` is
+populated **only** from the image config `WorkingDir` (`src/tools/genpolicy/src/registry.rs`),
+so a Kubernetes pod-spec **`workingDir` override is never read into the policy**.
+`KataProcess` / `KataLinux` do not model **`personality`** (e.g. forcing `LINUX32`),
+**`rlimits`**, or **`apparmorProfile`**. A host can set any of these to a value the policy
+neither pins nor rejects.
+
+_Acceptance criteria._
+1. Extend the `genpolicy` struct model + `rules.rego` to represent and match
+   `process.user.umask`, `process.rlimits`, `personality`, and `apparmorProfile`; in strict
+   mode, reject any input container whose spec sets a security-relevant field the policy does
+   not model.
+2. Read the Kubernetes container `workingDir` override into the policy `Cwd` (not only the
+   image `WorkingDir`) and match it exactly.
+3. Add a `genpolicy` field-completeness CI gate that fails when a new security-relevant OCI
+   field is present in the agent `oci` spec but has no corresponding policy input (prevents
+   silent model drift).
+4. Negative tests: a non-default `umask` / `personality=LINUX32` / an extra `rlimit` / an
+   `apparmorProfile` not in policy → **DENIED**; a `workingDir` not equal to the policy value
+   → **DENIED**.
+
+_Suggested location._ `src/tools/genpolicy/src/policy.rs` (`KataUser` / `KataProcess` /
+`KataLinux` field additions), `src/tools/genpolicy/src/registry.rs` (`workingDir` override),
+`src/tools/genpolicy/rules.rego` (`allow_user` / `allow_linux` matching), plus an agent
+`oci`-spec cross-check. This is the same subtree as the fine-grained endpoint gating (PRs #2, #4).
+
+---
+
+All other planned execution-integrity work items (BL-1…BL-9) are merged to `coco-parity`.
 BL-5 (bind measured state into initdata) landed in PR #10 (branch `bl5-initdata-measured`) — see
-`parma-hardening-features.md` §"Measured-initdata trust roots". What remains is **live
+`parma-hardening-features.md` §"Measured-initdata trust roots". Besides FR-16, what remains is **live
 validation** of already-merged features (below).
 
 ## Merged, but live end-to-end validation is deployment-time
