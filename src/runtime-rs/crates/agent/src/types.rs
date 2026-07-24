@@ -542,18 +542,6 @@ pub struct GuestDetailsResponse {
     pub support_mem_hotplug_probe: bool,
 }
 
-#[derive(PartialEq, Clone, Default)]
-pub struct CopyFileRequest {
-    pub path: String,
-    pub file_size: i64,
-    pub file_mode: u32,
-    pub dir_mode: u32,
-    pub uid: i32,
-    pub gid: i32,
-    pub offset: i64,
-    pub data: ::std::vec::Vec<u8>,
-}
-
 #[derive(PartialEq, Clone, Debug, Default)]
 pub enum VolumeSourceType {
     #[default]

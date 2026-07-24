@@ -44,7 +44,7 @@ const DEBOUNCE_TIME: Duration = Duration::from_millis(500);
 
 // Corresponds to os.FileMode(0750) | os.ModeDir in Go
 // So, it's (permission bits 0o750) ORed with (file type bit S_IFDIR).
-// We use u32 here because `file_mode` in CopyFileRequest is u32
+// We use u32 here because mode fields in agent volume-sync requests are u32.
 const DIR_MODE_PERMS: u32 = SFlag::S_IFDIR.bits() | 0o750;
 
 // copy file to container's rootfs if filesystem sharing is not supported, otherwise

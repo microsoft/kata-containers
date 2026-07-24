@@ -119,7 +119,6 @@ impl_agent!(
     list_routes | crate::Empty | crate::Routes | None,
     create_sandbox | crate::CreateSandboxRequest | crate::Empty | None,
     destroy_sandbox | crate::Empty | crate::Empty | None,
-    copy_file | crate::CopyFileRequest | crate::Empty | None,
     init_volume_source | crate::InitVolumeSourceRequest | crate::InitVolumeSourceResponse | None,
     create_volume_subdir | crate::CreateVolumeSubdirRequest | crate::Empty | None,
     put_volume_file | crate::PutVolumeFileRequest | crate::Empty | None,
