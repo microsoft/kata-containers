@@ -587,6 +587,105 @@ mod tests {
         )
     }
 
+    /// Endpoints a closed-door baseline must refuse. `SetPolicyRequest` is deliberately in
+    /// this list: strict builds deliver policy through initdata only.
+    #[cfg(feature = "strict-policy")]
+    const CLOSED_DOOR_ENDPOINTS: &[&str] = &[
+        "CreateContainerRequest",
+        "StartContainerRequest",
+        "ExecProcessRequest",
+        "ReadStreamRequest",
+        "WriteStreamRequest",
+        "CopyFileRequest",
+        "CreateSandboxRequest",
+        "GetOOMEventRequest",
+        "SetPolicyRequest",
+    ];
+
+    /// A request is refused either by evaluating to `false` or by failing to evaluate at
+    /// all (an undefined rule yields an empty result, which `allow_request` turns into an
+    /// error). Both are denials; the agent maps `Err` to a refused request.
+    #[cfg(feature = "strict-policy")]
+    fn is_denied(outcome: Result<(bool, String)>) -> bool {
+        !matches!(outcome, Ok((true, _)))
+    }
+
+    /// A3: the compiled-in baseline denies every endpoint, including `SetPolicyRequest`.
+    /// Guards against reintroducing a carve-out.
+    #[cfg(feature = "strict-policy")]
+    #[tokio::test]
+    async fn strict_baseline_denies_every_endpoint() {
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy("strict-default.rego".to_string(), STRICT_DEFAULT_POLICY.to_string())
+            .unwrap();
+
+        for ep in CLOSED_DOOR_ENDPOINTS {
+            assert!(
+                is_denied(p.allow_request(ep, "{}").await),
+                "closed-door baseline allowed {ep}"
+            );
+        }
+    }
+
+    /// A1: in a strict build a configured policy file is ignored and the closed-door
+    /// baseline is installed anyway. This is the regression test for the rootfs
+    /// policy-file override: on the pre-fix agent the permissive file below is loaded and
+    /// `CreateContainerRequest` is allowed.
+    #[cfg(feature = "strict-policy")]
+    #[tokio::test]
+    async fn strict_initialize_ignores_configured_policy_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let permissive = dir.path().join("allow-all.rego");
+        std::fs::write(
+            &permissive,
+            "package agent_policy\ndefault CreateContainerRequest := true\n",
+        )
+        .unwrap();
+
+        let mut p = AgentPolicy::new();
+        p.initialize(0, permissive.to_string_lossy().into_owned(), None)
+            .await
+            .unwrap();
+
+        assert!(
+            is_denied(p.allow_request("CreateContainerRequest", "{}").await),
+            "a policy file on the guest filesystem overrode the closed-door baseline"
+        );
+    }
+
+    /// A1b: the same holds when no policy file is configured at all.
+    #[cfg(feature = "strict-policy")]
+    #[tokio::test]
+    async fn strict_initialize_without_policy_file_is_closed() {
+        let mut p = AgentPolicy::new();
+        p.initialize(0, String::new(), None).await.unwrap();
+
+        assert!(is_denied(p.allow_request("CreateContainerRequest", "{}").await));
+    }
+
+    /// A2: non-strict builds keep the historical behaviour -- the configured policy file
+    /// wins. Ensures the strict hardening did not change the default build.
+    #[cfg(not(feature = "strict-policy"))]
+    #[tokio::test]
+    async fn non_strict_initialize_loads_configured_policy_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let permissive = dir.path().join("allow-all.rego");
+        std::fs::write(
+            &permissive,
+            "package agent_policy\ndefault CreateContainerRequest := true\n",
+        )
+        .unwrap();
+
+        let mut p = AgentPolicy::new();
+        p.initialize(0, permissive.to_string_lossy().into_owned(), None)
+            .await
+            .unwrap();
+
+        let (allowed, _) = p.allow_request("CreateContainerRequest", "{}").await.unwrap();
+        assert!(allowed, "non-strict build should honour the configured policy file");
+    }
+
     /// BL-8: the boot-time fragment declarations are read from
     /// `data.agent_policy.policy_fragments[]`. A base policy declaring them yields the
     /// parsed specs; a base policy declaring none yields an empty list (no boot pull).

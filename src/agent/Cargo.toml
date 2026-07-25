@@ -110,3 +110,9 @@ seccomp = ["rustjail/seccomp"]
 agent-policy = ["kata-agent-policy", "oci-client"]
 strict-policy = ["agent-policy", "kata-agent-policy/strict-policy", "kata-security-reference-monitor"]
 init-data = []
+devicemapper = ["kata-types/devicemapper"]
+# Test-only: lets `KATA_AGENT_TSM_ROOT` redirect the TEE sysfs/configfs lookups at a fake
+# tree so the initdata<->launch-measurement binding can be exercised off a real TEE. MUST
+# NOT be enabled in a shipped image: the agent's environment is host-influenced, so an
+# attacker who could set that variable could point the check at a tree they control.
+tsm-test-override = []

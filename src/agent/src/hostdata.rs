@@ -25,9 +25,9 @@ use slog::Logger;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// configfs-TSM report directory. Present when the guest kernel exposes a TEE report
-/// provider (CONFIG_TSM_REPORTS) and configfs is mounted.
-const TSM_REPORT_DIR: &str = "/sys/kernel/config/tsm/report";
+/// configfs-TSM report directory, relative to [`fs_root`]. Present when the guest kernel
+/// exposes a TEE report provider (CONFIG_TSM_REPORTS) and configfs is mounted.
+const TSM_REPORT_DIR: &str = "sys/kernel/config/tsm/report";
 
 /// Name of the report entry this module creates. Removed again once the report is read.
 const TSM_REPORT_ENTRY: &str = "kata-agent-initdata";
@@ -35,17 +35,35 @@ const TSM_REPORT_ENTRY: &str = "kata-agent-initdata";
 /// configfs-TSM requires `inblob` to be exactly 64 bytes.
 const TSM_INBLOB_LEN: usize = 64;
 
+/// Root the TEE sysfs/configfs paths are resolved against. Always `/` in a shipped agent.
+///
+/// The `tsm-test-override` feature -- deliberately not implied by `strict-policy` and never
+/// enabled in a released image -- allows redirecting it so the binding can be demonstrated
+/// against a fake TEE tree on a build host. It must stay opt-in: the agent's environment is
+/// host-influenced, so honouring the variable unconditionally would hand the host a way to
+/// point the check at a tree it controls.
+fn fs_root() -> PathBuf {
+    #[cfg(feature = "tsm-test-override")]
+    if let Ok(root) = std::env::var("KATA_AGENT_TSM_ROOT") {
+        return PathBuf::from(root);
+    }
+
+    PathBuf::from("/")
+}
+
 /// Offset and length of `HOST_DATA` within an SEV-SNP attestation report (Table 22,
 /// "SEV Secure Nested Paging Firmware ABI Specification"). The sev-guest TSM provider
 /// returns the attestation report itself as `outblob`, so this offset is absolute.
 const SNP_HOST_DATA_OFFSET: usize = 0xC0;
 const SNP_HOST_DATA_LEN: usize = 32;
 
-/// sysfs directory of the SEV-SNP guest driver (`DEVICE_NAME` in `sev-guest.c`).
-const SEV_GUEST_DEV_DIR: &str = "/sys/class/misc/sev-guest";
+/// sysfs directory of the SEV-SNP guest driver (`DEVICE_NAME` in `sev-guest.c`), relative
+/// to [`fs_root`].
+const SEV_GUEST_DEV_DIR: &str = "sys/class/misc/sev-guest";
 
-/// sysfs directory of the TDX guest driver (`KBUILD_MODNAME` in `tdx-guest.c`).
-const TDX_GUEST_DEV_DIR: &str = "/sys/class/misc/tdx_guest";
+/// sysfs directory of the TDX guest driver (`KBUILD_MODNAME` in `tdx-guest.c`), relative
+/// to [`fs_root`].
+const TDX_GUEST_DEV_DIR: &str = "sys/class/misc/tdx_guest";
 
 /// `MRCONFIGID` as exposed by the kernel's tsm-mr measurement-register interface, relative
 /// to `TDX_GUEST_DEV_DIR`. The attribute group is named "measurements", and because
@@ -107,7 +125,7 @@ struct ReportEntry {
 
 impl ReportEntry {
     fn create() -> Result<Self> {
-        let path = Path::new(TSM_REPORT_DIR).join(TSM_REPORT_ENTRY);
+        let path = fs_root().join(TSM_REPORT_DIR).join(TSM_REPORT_ENTRY);
         // A stale entry from a previous (crashed) attempt would make create_dir fail.
         let _ = fs::remove_dir(&path);
         fs::create_dir(&path)
@@ -202,9 +220,10 @@ fn adjust_digest(digest: &[u8], len: usize) -> Vec<u8> {
 /// sysfs directory. Returns `None` when neither is present, meaning this is not a
 /// confidential VM.
 fn detect_provider() -> Option<Provider> {
-    if Path::new(TDX_GUEST_DEV_DIR).is_dir() {
+    let root = fs_root();
+    if root.join(TDX_GUEST_DEV_DIR).is_dir() {
         Some(Provider::Tdx)
-    } else if Path::new(SEV_GUEST_DEV_DIR).is_dir() {
+    } else if root.join(SEV_GUEST_DEV_DIR).is_dir() {
         Some(Provider::Snp)
     } else {
         None
@@ -227,7 +246,7 @@ fn read_measured_field(logger: &Logger) -> Result<Option<(Provider, Vec<u8>)>> {
     let value = match provider {
         // TDX exposes MRCONFIGID directly as a measurement register, read from the TDREPORT
         // without involving the host.
-        Provider::Tdx => read_tdx_mrconfigid(Path::new(TDX_GUEST_DEV_DIR))?,
+        Provider::Tdx => read_tdx_mrconfigid(&fs_root().join(TDX_GUEST_DEV_DIR))?,
 
         // SNP has no equivalent measurement register, but its attestation report is produced
         // by a local firmware call to the PSP, so fetching it through configfs-TSM does not
@@ -250,11 +269,12 @@ fn read_measured_field(logger: &Logger) -> Result<Option<(Provider, Vec<u8>)>> {
 
 /// Fetch the SEV-SNP attestation report through configfs-TSM.
 fn read_snp_report(logger: &Logger) -> Result<Vec<u8>> {
-    if !Path::new(TSM_REPORT_DIR).is_dir() {
+    let report_dir = fs_root().join(TSM_REPORT_DIR);
+    if !report_dir.is_dir() {
         bail!(
             "{} is not present: the guest is SEV-SNP but exposes no configfs-tsm report \
              provider, so the initdata cannot be bound to the launch measurement",
-            TSM_REPORT_DIR
+            report_dir.display()
         );
     }
 

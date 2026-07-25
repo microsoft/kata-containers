@@ -49,6 +49,10 @@ slog-scope.workspace = true
 
 protocols = { workspace = true, features = ["with-serde"] }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+tempfile.workspace = true
+
 [features]
 # Strict confidential-runtime policy behaviour:
 #  - when no explicit policy is provided, load a compiled-in closed-door baseline
