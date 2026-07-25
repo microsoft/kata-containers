@@ -407,4 +407,77 @@ mod tests {
         let dir = fake_tdx_dev(Some(&[0x3Cu8; 16]));
         assert!(read_tdx_mrconfigid(dir.path()).is_err());
     }
+
+    /// Level-B end-to-end coverage: drives the whole `verify_initdata_binding()` path
+    /// against a fake TEE tree, with no confidential VM and no TEE hardware.
+    ///
+    /// Requires the `tsm-test-override` feature, which is never enabled in a shipped image.
+    #[cfg(feature = "tsm-test-override")]
+    mod binding {
+        use super::*;
+        use std::sync::Mutex;
+
+        /// `KATA_AGENT_TSM_ROOT` is process-global, so these cases must not overlap.
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+        fn null_logger() -> Logger {
+            Logger::root(slog::Discard, slog::o!())
+        }
+
+        /// Build a fake TDX tree whose MRCONFIGID is `digest`, padded the way the runtime
+        /// pads it before stamping it into the launch configuration.
+        fn tdx_tree_for(digest: &[u8]) -> tempfile::TempDir {
+            let root = tempfile::tempdir().unwrap();
+            let dir = root.path().join(TDX_GUEST_DEV_DIR).join("measurements");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("mrconfigid"), adjust_digest(digest, TDX_MRCONFIGID_LEN)).unwrap();
+            root
+        }
+
+        fn verify_under(root: &Path, digest: &[u8]) -> Result<bool> {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            std::env::set_var("KATA_AGENT_TSM_ROOT", root);
+            let outcome = verify_initdata_binding(&null_logger(), digest);
+            std::env::remove_var("KATA_AGENT_TSM_ROOT");
+            outcome
+        }
+
+        const DIGEST: &[u8] = b"an-initdata-digest-32-bytes-long";
+
+        #[test]
+        fn matching_launch_measurement_is_accepted() {
+            let root = tdx_tree_for(DIGEST);
+            assert!(verify_under(root.path(), DIGEST).unwrap());
+        }
+
+        #[test]
+        fn tampered_launch_measurement_is_refused() {
+            // The VM was launched with one initdata; the host serves the agent another.
+            let mut other = DIGEST.to_vec();
+            other[0] ^= 0xFF;
+            let root = tdx_tree_for(&other);
+
+            assert!(verify_under(root.path(), DIGEST).is_err());
+        }
+
+        #[test]
+        fn tdx_without_tsm_mr_is_refused() {
+            // A TDX guest whose kernel predates the tsm-mr interface: there is no
+            // host-independent way to read MRCONFIGID, so the agent must not continue.
+            let root = tempfile::tempdir().unwrap();
+            fs::create_dir_all(root.path().join(TDX_GUEST_DEV_DIR)).unwrap();
+
+            assert!(verify_under(root.path(), DIGEST).is_err());
+        }
+
+        #[test]
+        fn no_tee_provider_is_skipped_not_refused() {
+            // A non-confidential development guest still boots; there is simply no launch
+            // measurement to bind to.
+            let root = tempfile::tempdir().unwrap();
+            fs::create_dir_all(root.path().join("sys/class/misc")).unwrap();
+
+            assert!(!verify_under(root.path(), DIGEST).unwrap());
+        }
+    }
 }

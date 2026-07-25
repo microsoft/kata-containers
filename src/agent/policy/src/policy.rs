@@ -623,7 +623,8 @@ mod tests {
         for ep in CLOSED_DOOR_ENDPOINTS {
             assert!(
                 is_denied(p.allow_request(ep, "{}").await),
-                "closed-door baseline allowed {ep}"
+                "closed-door baseline allowed {}",
+                ep
             );
         }
     }
