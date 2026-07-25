@@ -133,13 +133,32 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
 - **Fix:** once an authorized policy is active, `SetPolicy` is refused (changing policy
   requires a new verifier-authorized epoch). The guest advertises `strict-policy` in its
   build features.
-- **Guarantee:** policy is immutable within an epoch; a shim/verifier can detect a strict
-  guest before relying on it.
+- **Guarantee:** the base policy is immutable within an epoch — `set_policy` is one-shot. The
+  only sanctioned runtime extension is a signed, namespace-confined policy fragment (FR-1),
+  which is additive and cannot redefine or shadow a base `agent_policy` rule. A verifier can
+  distinguish a strict
+  guest from a permissive one **from the attestation report**: a strict build is a distinct
+  UVM image (different agent binary; `rootfs.sh` also skips installing the default policy
+  under `STRICT_POLICY=yes`), so it has a distinct launch `MEASUREMENT`, and the policy
+  itself is bound to `HOSTDATA`/`MRCONFIGID` via init-data (see FR-2). The `strict-policy`
+  entry in `AgentDetails.extra_features` is **diagnostics only** — it is self-reported over
+  ttRPC, and in a strict build `GetGuestDetails` is itself policy-gated, so it is denied by
+  the closed-door baseline until a policy is activated. Do not treat it as a pre-flight
+  security signal; use the launch measurement.
 - **Commits:** `85b3ce3f7` (one-shot), `ad01dd311` (advertisement), `8424e7e08` (build).
-- **Validated:** matrix + capability advertisement observed live.
-- **Follow-up:** with the `SetPolicy` RPC compiled out of strict builds (see FR-2 above), the
-  one-shot guard no longer has a host-reachable caller in strict mode; it now only guards the
-  internal initdata activation. The immutability guarantee is unchanged and strictly stronger.
+- **Validated:** matrix + capability advertisement observed live. Unit coverage for the
+  one-shot guard itself: first activation succeeds, a second is refused, a refused call
+  leaves the active policy untouched (the guard returns before the engine is rebuilt), an
+  additive policy fragment still applies after activation while `set_policy` stays refused,
+  and default builds remain replaceable.
+- **Follow-up:**
+  - With the `SetPolicy` RPC compiled out of strict builds (see FR-2 above), the one-shot
+    guard no longer has a host-reachable caller in strict mode; it now only guards the
+    internal init-data activation, and is retained as defence in depth for any future
+    caller. The immutability guarantee is unchanged and strictly stronger.
+  - The measurement-based detection above is only actionable if the release pipeline
+    **publishes the strict UVM launch digest** as a golden value for verifiers to compare
+    against. That publication step is not part of this branch.
 
 ---
 

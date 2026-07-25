@@ -55,8 +55,9 @@ pub struct AgentPolicy {
     allow_failures: bool,
 
     /// Strict builds: set once an authorized policy has been activated. After
-    /// activation, SetPolicy is rejected (policy is one-shot; changing it requires
-    /// a new verifier-authorized epoch), so the host cannot swap the policy at runtime.
+    /// activation, any further call to `set_policy` is rejected (activation is one-shot;
+    /// changing policy requires a new verifier-authorized epoch), so the host cannot swap
+    /// the policy at runtime.
     #[cfg(feature = "strict-policy")]
     policy_activated: bool,
 
@@ -151,8 +152,9 @@ impl AgentPolicy {
 
     /// Strict builds never load a policy from the guest filesystem: the compiled-in
     /// closed-door baseline is installed unconditionally, so the guest denies all
-    /// security-relevant requests until an authorized policy is delivered through an
-    /// attested channel (initdata, or a `SetPolicy` bound to the launch measurement).
+    /// security-relevant requests until an authorized policy is delivered through initdata,
+    /// which is bound to the launch measurement. (The `SetPolicy` RPC is not an alternative
+    /// here -- it is compiled out of strict builds entirely.)
     ///
     /// `default_policy_file` is deliberately ignored. It is host-influenceable: it is
     /// populated from the `KATA_AGENT_POLICY_FILE` environment variable and from the agent
@@ -330,9 +332,15 @@ impl AgentPolicy {
         // Strict builds: policy activation is one-shot. Once an authorized policy is
         // active, reject any attempt to replace it (changing policy requires a new
         // verifier-authorized epoch), so the host cannot weaken policy at runtime.
+        //
+        // Note this guards the *method*, not the `SetPolicy` RPC -- that RPC is compiled
+        // out of strict builds entirely, so the only caller left is the initdata
+        // activation in `main.rs`. The guard is the runtime invariant backing that
+        // compile-time removal: if a second activation path is ever introduced, it fails
+        // closed rather than silently replacing the active ruleset.
         #[cfg(feature = "strict-policy")]
         if self.policy_activated {
-            bail!("strict-policy: policy already activated; SetPolicy is one-shot");
+            bail!("strict-policy: policy already activated; activation is one-shot");
         }
         self.engine = Self::new_engine();
         self.engine
@@ -582,7 +590,10 @@ mod tests {
             .eval_query(format!("data.agent_policy.{ep}"), false)
             .unwrap();
         matches!(
-            r.result.first().and_then(|x| x.expressions.first()).map(|e| &e.value),
+            r.result
+                .first()
+                .and_then(|x| x.expressions.first())
+                .map(|e| &e.value),
             Some(regorus::Value::Bool(true))
         )
     }
@@ -602,6 +613,10 @@ mod tests {
         "SetPolicyRequest",
     ];
 
+    const POLICY_ALLOW_CREATE: &str =
+        "package agent_policy\ndefault CreateContainerRequest := true\n";
+    const POLICY_ALLOW_EXEC: &str = "package agent_policy\ndefault ExecProcessRequest := true\n";
+
     /// A request is refused either by evaluating to `false` or by failing to evaluate at
     /// all (an undefined rule yields an empty result, which `allow_request` turns into an
     /// error). Both are denials; the agent maps `Err` to a refused request.
@@ -617,7 +632,10 @@ mod tests {
     async fn strict_baseline_denies_every_endpoint() {
         let mut p = AgentPolicy::new();
         p.engine
-            .add_policy("strict-default.rego".to_string(), STRICT_DEFAULT_POLICY.to_string())
+            .add_policy(
+                "strict-default.rego".to_string(),
+                STRICT_DEFAULT_POLICY.to_string(),
+            )
             .unwrap();
 
         for ep in CLOSED_DOOR_ENDPOINTS {
@@ -662,7 +680,9 @@ mod tests {
         let mut p = AgentPolicy::new();
         p.initialize(0, String::new(), None).await.unwrap();
 
-        assert!(is_denied(p.allow_request("CreateContainerRequest", "{}").await));
+        assert!(is_denied(
+            p.allow_request("CreateContainerRequest", "{}").await
+        ));
     }
 
     /// A2: non-strict builds keep the historical behaviour -- the configured policy file
@@ -683,8 +703,102 @@ mod tests {
             .await
             .unwrap();
 
-        let (allowed, _) = p.allow_request("CreateContainerRequest", "{}").await.unwrap();
-        assert!(allowed, "non-strict build should honour the configured policy file");
+        let (allowed, _) = p
+            .allow_request("CreateContainerRequest", "{}")
+            .await
+            .unwrap();
+        assert!(
+            allowed,
+            "non-strict build should honour the configured policy file"
+        );
+    }
+
+    /// FR-12 / F-7: policy activation is one-shot in strict builds. The first activation
+    /// succeeds; every subsequent one is refused.
+    ///
+    /// This guards `AgentPolicy::set_policy()`, which is distinct from the `SetPolicy`
+    /// RPC -- the RPC is compiled out of strict builds, leaving the initdata activation in
+    /// `main.rs` as the only caller. That caller runs once per boot, so no live path
+    /// exercises the guard today: it exists so that a future second activation path fails
+    /// closed instead of silently replacing the active ruleset, and so that re-enabling
+    /// the RPC does not by itself reintroduce runtime policy mutation. Without this test a
+    /// regression that deleted the guard would therefore be entirely silent.
+    #[cfg(feature = "strict-policy")]
+    #[tokio::test]
+    async fn strict_policy_activation_is_one_shot() {
+        let mut p = AgentPolicy::new();
+        p.set_policy(POLICY_ALLOW_CREATE).await.unwrap();
+
+        let err = p
+            .set_policy(POLICY_ALLOW_CREATE)
+            .await
+            .expect_err("second activation must be refused");
+        assert!(
+            err.to_string().contains("one-shot"),
+            "unexpected rejection reason: {}",
+            err
+        );
+    }
+
+    /// FR-12 / F-7: a *refused* second activation must not disturb the policy already in
+    /// force. The guard returns before `new_engine()`, so a rejected call cannot wipe the
+    /// active ruleset -- this is the property that makes the one-shot lock safe rather than
+    /// merely noisy.
+    #[cfg(feature = "strict-policy")]
+    #[tokio::test]
+    async fn strict_rejected_activation_leaves_active_policy_intact() {
+        let mut p = AgentPolicy::new();
+        p.set_policy(POLICY_ALLOW_CREATE).await.unwrap();
+
+        assert!(p.set_policy(POLICY_ALLOW_EXEC).await.is_err());
+
+        let (allowed, _) = p
+            .allow_request("CreateContainerRequest", "{}")
+            .await
+            .unwrap();
+        assert!(allowed, "rejected activation wiped the active policy");
+        assert!(
+            is_denied(p.allow_request("ExecProcessRequest", "{}").await),
+            "rejected activation leaked rules from the refused policy"
+        );
+    }
+
+    /// FR-12 / F-5: `apply_fragment_module` is deliberately *not* covered by the one-shot
+    /// lock -- it is additive and namespace-confined, so it extends the ruleset without
+    /// rebuilding the engine. Pinning both halves here makes any future change to that
+    /// asymmetry a conscious decision rather than an accident.
+    #[cfg(feature = "strict-policy")]
+    #[tokio::test]
+    async fn strict_fragments_still_apply_after_activation() {
+        let mut p = AgentPolicy::new();
+        p.set_policy(POLICY_ALLOW_CREATE).await.unwrap();
+
+        p.apply_fragment_module(
+            "frag",
+            "package agent_policy.fragments\ndefault allowed := true\n",
+            &[],
+        )
+        .expect("an additive fragment must still apply after activation");
+
+        assert!(
+            p.set_policy(POLICY_ALLOW_CREATE).await.is_err(),
+            "set_policy must stay rejected regardless of fragment activity"
+        );
+    }
+
+    /// FR-12: the one-shot lock is strict-only. Default builds must keep the historical
+    /// replaceable-policy behaviour, so the hardening cannot regress upstream users.
+    #[cfg(not(feature = "strict-policy"))]
+    #[tokio::test]
+    async fn non_strict_set_policy_can_be_replaced() {
+        let mut p = AgentPolicy::new();
+        p.set_policy(POLICY_ALLOW_CREATE).await.unwrap();
+        p.set_policy(POLICY_ALLOW_EXEC)
+            .await
+            .expect("non-strict builds must allow policy replacement");
+
+        let (allowed, _) = p.allow_request("ExecProcessRequest", "{}").await.unwrap();
+        assert!(allowed, "the replacement policy did not take effect");
     }
 
     /// BL-8: the boot-time fragment declarations are read from
@@ -695,7 +809,9 @@ mod tests {
         let mut p = AgentPolicy::new();
         // No declaration → empty (default: boot unchanged, zero network calls).
         let base_none = "package agent_policy\ndefault SetPolicyRequest := true\n";
-        p.engine.add_policy("agent_policy".to_string(), base_none.to_string()).unwrap();
+        p.engine
+            .add_policy("agent_policy".to_string(), base_none.to_string())
+            .unwrap();
         assert!(p.fragment_specs().unwrap().is_empty());
 
         // Declared fragments → parsed into FragmentSpec entries in policy order.
@@ -705,7 +821,9 @@ mod tests {
             {\"issuer\": \"did:x509:0:sha256:AAA::CN:signer\", \"feed\": \"reg/frag/infra:1\", \"minimum_svn\": 2},\n\
             {\"issuer\": \"did:x509:0:sha256:BBB::CN:other\", \"feed\": \"reg/frag/net:3\"}\n\
             ]\n";
-        p2.engine.add_policy("agent_policy".to_string(), base.to_string()).unwrap();
+        p2.engine
+            .add_policy("agent_policy".to_string(), base.to_string())
+            .unwrap();
         let specs = p2.fragment_specs().unwrap();
         assert_eq!(specs.len(), 2);
         assert_eq!(specs[0].issuer, "did:x509:0:sha256:AAA::CN:signer");
@@ -725,13 +843,22 @@ mod tests {
         let base = "package agent_policy\n\
             default ExecProcessRequest := false\n\
             ExecProcessRequest := data.agent_policy.fragments.exec_allowed\n";
-        p.engine.add_policy("agent_policy".to_string(), base.to_string()).unwrap();
-        assert!(!eval_bool(&mut p, "ExecProcessRequest"), "denied before fragment");
+        p.engine
+            .add_policy("agent_policy".to_string(), base.to_string())
+            .unwrap();
+        assert!(
+            !eval_bool(&mut p, "ExecProcessRequest"),
+            "denied before fragment"
+        );
 
         // Apply a verified fragment module in the reserved namespace.
         let module = "package agent_policy.fragments\nexec_allowed := true\n";
-        p.apply_fragment_module("frag:issuerA:1", module, &[]).unwrap();
-        assert!(eval_bool(&mut p, "ExecProcessRequest"), "allowed after fragment");
+        p.apply_fragment_module("frag:issuerA:1", module, &[])
+            .unwrap();
+        assert!(
+            eval_bool(&mut p, "ExecProcessRequest"),
+            "allowed after fragment"
+        );
     }
 
     /// TC-F1.2: a fragment module outside the permitted fragment namespaces is rejected —
