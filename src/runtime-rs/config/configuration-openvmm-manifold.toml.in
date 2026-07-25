@@ -1,0 +1,197 @@
+# Copyright (c) 2024 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# XXX: WARNING: this file is auto-generated.
+# XXX:
+# XXX: Source file: "@CONFIG_OPENVMM_MANIFOLD_IN@"
+# XXX: Project:
+# XXX:   Name: @PROJECT_NAME@
+# XXX:   Type: @PROJECT_TYPE@
+
+# TODO(openvmm-upstream): fork-only GB200 "manifold" variant of the openvmm
+# config. It is a copy of configuration-openvmm.toml.in with the GB200 NVIDIA
+# UVM knobs baked in (NVIDIA kernel/rootfs, coherent-memory baseline, IMEX/
+# movable-memory kernel params, VFIO cold-plug, kubelet pod-resources socket).
+# Drop this template and its Makefile wiring once upstream ships an official
+# openvmm NVIDIA GPU configuration. Keep in sync with configuration-openvmm.toml.in
+# on rebase.
+
+[hypervisor.openvmm]
+path = ""
+# NVIDIA UVM kernel + rootfs installed by kata-deploy's kernel-nvidia-gpu /
+# rootfs-image-nvidia-gpu component tarballs. openvmm boots the UNCOMPRESSED
+# kernel, so reference the uncompressed NV symlink (vmlinux-nvidia-gpu.container)
+# rather than KERNELPATH_NV (which resolves to the compressed vmlinuz).
+kernel = "/opt/kata/share/kata-containers/vmlinux-nvidia-gpu.container"
+image = "@IMAGEPATH_NV@"
+
+# VFIO cold-plug through a PCIe root-port: openvmm cannot hot-plug devices, so
+# GPUs/NICs must be attached before the guest boots.
+cold_plug_vfio = "root-port"
+hot_plug_vfio = "no-port"
+
+# rootfs filesystem type:
+#   - ext4 (default)
+#   - xfs
+#   - erofs (default for the NVIDIA UVM image)
+rootfs_type = @DEFROOTFSTYPE_NV@
+
+# Block storage driver to be used for the VM rootfs is backed
+# by a block device.
+vm_rootfs_driver = "@VMROOTFSDRIVER_OPENVMM@"
+
+# List of valid annotation names for the hypervisor
+enable_annotations = @DEFENABLEANNOTATIONS@
+
+# List of valid annotations values for the hypervisor
+valid_hypervisor_paths = []
+
+# List of valid annotations values for ctlpath
+valid_ctlpaths = []
+
+# Optional space-separated list of options to pass to the guest kernel.
+# GB200 specials appended to the base openvmm params:
+#   memhp_default_state=online_movable  -> hot-added GPU coherent memory lands
+#                                          in ZONE_MOVABLE (NVIDIA driver req.)
+#   nvidia.NVreg_CreateImexChannel0=1   -> auto-allocate IMEX channel 0 so
+#                                          cuInit does not fail with 802.
+kernel_params = "@KERNELPARAMS_OPENVMM@ memhp_default_state=online_movable nvidia.NVreg_CreateImexChannel0=1"
+
+# Path to the firmware. Cleared: the GB200 UVM boots via direct kernel boot and
+# Azure Linux does not ship AArch64 UEFI firmware at the upstream path.
+firmware = ""
+
+# Default number of vCPUs per SB/VM:
+default_vcpus = @DEFVCPUS@
+
+# Default maximum number of vCPUs per SB/VM:
+default_maxvcpus = @DEFMAXVCPUS@
+
+# Default number of bridges per SB/VM:
+# OpenVMM uses PCIe root complexes, not PCI bridges.
+default_bridges = 0
+
+# Default memory size in MiB for SB/VM.
+# GB200 baseline: the NVIDIA driver's coherent-memory hot-add needs ~16 GiB of
+# non-movable struct-page metadata for a 1 TiB hot-add; with static resource
+# mgmt InitialSizeManager ADDS the pod's memory request on top of this.
+default_memory = 49152
+
+# Default maximum memory in MiB per SB / VM
+default_maxmemory = @DEFMAXMEMSZ@
+
+# Shared file system type:
+#   - virtio-fs (default for OpenVMM - external virtiofsd over vhost-user)
+#   - inline-virtio-fs
+#   - none
+shared_fs = "@DEFSHAREDFS_OPENVMM@"
+
+# Path to vhost-user-fs daemon.
+virtio_fs_daemon = "@DEFVIRTIOFSDAEMON@"
+
+# List of valid annotations values for the virtiofs daemon
+# The default if not set is empty (all annotations rejected.)
+# Your distribution recommends: @DEFVALIDVIRTIOFSDAEMONPATHS@
+valid_virtio_fs_daemon_paths = @DEFVALIDVIRTIOFSDAEMONPATHS@
+
+# Default size of DAX cache in MiB
+virtio_fs_cache_size = @DEFVIRTIOFSCACHESIZE@
+
+# Extra args for virtiofsd daemon
+virtio_fs_extra_args = @DEFVIRTIOFSEXTRAARGS@
+
+# Cache mode:
+virtio_fs_cache = "@DEFVIRTIOFSCACHE@"
+
+# Block device driver to be used by the hypervisor
+block_device_driver = "@DEFBLOCKSTORAGEDRIVER_OPENVMM@"
+
+# Specifies cache-related options for block devices.
+block_device_cache_direct = false
+
+# Virtio queue size. Size: byte. default 128
+queue_size = 128
+
+# Block device multi-queue, default 1
+num_queues = 1
+
+# network_queues
+network_queues = @DEFNETQUEUES@
+
+# This option changes the default hypervisor and kernel parameters
+# to enable debug output where available.
+enable_debug = true
+
+# Disable the customizations done in the runtime when it detects
+# that it is running on top a VMM.
+disable_nesting_checks = false
+
+# Disable the 'seccomp' feature
+disable_seccomp = false
+
+# Disable guest selinux
+disable_guest_selinux = true
+
+# Reclaim guest freed memory.
+reclaim_guest_freed_memory = false
+
+# Enable swap in the guest. Default false.
+enable_guest_swap = false
+
+[agent.@PROJECT_TYPE@]
+container_pipe_size = @PIPESIZE@
+enable_debug = true
+enable_tracing = false
+debug_console_enabled = true
+
+# Agent dial timeout in millisecond.
+# Use longer timeout to give the hvsock relay time to complete VMBus handshake.
+dial_timeout_ms = 1000
+
+# Agent reconnect timeout in millisecond.
+# GB200 UVM boot + NVIDIA driver init takes longer, so allow more headroom.
+reconnect_timeout_ms = 600000
+
+# Create Container Request Timeout
+create_container_timeout = @DEFCREATECONTAINERTIMEOUT@
+
+[runtime]
+enable_debug = true
+keep_abnormal = false
+
+# Kubelet Pod Resources API socket. The openvmm/runtime-rs shim queries it at
+# sandbox-create time to discover which VFIO devices kubelet allocated to the
+# pod and cold-plug them before the guest boots (openvmm has no hot-plug path).
+pod_resource_api_sock = "/var/lib/kubelet/pod-resources/kubelet.sock"
+
+# Internetworking model
+internetworking_model = "@DEFNETWORKMODEL_OPENVMM@"
+
+name = "@RUNTIMENAME@"
+hypervisor_name = "@HYPERVISOR_OPENVMM@"
+agent_name = "@PROJECT_TYPE@"
+
+# disable guest seccomp
+disable_guest_seccomp = @DEFDISABLEGUESTSECCOMP@
+
+enable_tracing = false
+jaeger_endpoint = ""
+jaeger_user = ""
+jaeger_password = ""
+
+disable_new_netns = false
+
+sandbox_cgroup_only = @DEFSANDBOXCGROUPONLY_OPENVMM@
+
+experimental = @DEFAULTEXPFEATURES@
+
+enable_pprof = false
+
+# openvmm cannot hot-plug vCPU/memory (resize_* are no-op stubs), so the guest
+# is sized once at boot from the pod spec via InitialSizeManager.
+static_sandbox_resource_mgmt = true
+
+sandbox_bind_mounts = @DEFBINDMOUNTS@
+
+dan_conf = "@DEFDANCONF@"
