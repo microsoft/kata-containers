@@ -2370,6 +2370,7 @@ fn do_init_volume_source(req: &protocols::agent::InitVolumeSourceRequest) -> Res
 
     let base = PathBuf::from(KATA_GUEST_MANAGED_VOLUME_DIR);
     fs::create_dir_all(&base).context("create managed volume root")?;
+    info!(sl(), "managed volume path created/updated"; "path" => base.to_string_lossy().into_owned());
 
     let mut sources = MANAGED_VOLUME_SOURCES
         .lock()
@@ -2397,10 +2398,12 @@ fn do_init_volume_source(req: &protocols::agent::InitVolumeSourceRequest) -> Res
     match volume_type {
         VolumeSourceType::VOLUME_SOURCE_TYPE_SINGLE_FILE => {
             File::create(&guest_path).context("create managed single-file target")?;
+            info!(sl(), "managed volume path created/updated"; "path" => guest_path.to_string_lossy().into_owned());
         }
         VolumeSourceType::VOLUME_SOURCE_TYPE_EMPTY_DIR
         | VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S => {
             fs::create_dir_all(&guest_path).context("create managed volume directory")?;
+            info!(sl(), "managed volume path created/updated"; "path" => guest_path.to_string_lossy().into_owned());
         }
         VolumeSourceType::VOLUME_SOURCE_TYPE_UNSPECIFIED => bail!("volume_type is unspecified"),
     }
@@ -2450,6 +2453,7 @@ fn do_create_volume_subdir(req: &protocols::agent::CreateVolumeSubdirRequest) ->
         gid: req.gid,
         ..Default::default()
     };
+    info!(sl(), "managed volume path created/updated"; "path" => copy_req.path.clone());
     do_copy_file(&copy_req, &source.guest_path)
 }
 
@@ -2492,6 +2496,15 @@ fn do_put_volume_file(req: &protocols::agent::PutVolumeFileRequest) -> Result<()
         data: req.data.clone(),
         ..Default::default()
     };
+    info!(
+        sl(),
+        "managed volume put_volume_file destination";
+        "agent_volume_id" => req.agent_volume_id.clone(),
+        "destination_path" => copy_req.path.clone(),
+        "relative_path" => req.relative_path.clone(),
+        "offset" => req.offset,
+        "file_size" => req.file_size,
+    );
 
     let root = if source.volume_type == VolumeSourceType::VOLUME_SOURCE_TYPE_SINGLE_FILE {
         source
@@ -2531,6 +2544,7 @@ fn do_commit_volume_revision(req: &protocols::agent::CommitVolumeRevisionRequest
         data: req.revision.as_bytes().to_vec(),
         ..Default::default()
     };
+    info!(sl(), "managed volume path created/updated"; "path" => link_req.path.clone());
     do_copy_file(&link_req, &source.guest_path)?;
 
     for visible in req.visible_paths.iter() {
@@ -2545,6 +2559,7 @@ fn do_commit_volume_revision(req: &protocols::agent::CommitVolumeRevisionRequest
             data: symlink_target.into_bytes(),
             ..Default::default()
         };
+        info!(sl(), "managed volume path created/updated"; "path" => visible_req.path.clone());
         do_copy_file(&visible_req, &source.guest_path)?;
     }
 
@@ -2555,6 +2570,7 @@ fn do_commit_volume_revision(req: &protocols::agent::CommitVolumeRevisionRequest
         if let Some(previous) = previous_revision {
             if previous != req.revision {
                 let old_path = source.guest_path.join(previous);
+                info!(sl(), "managed volume path removed"; "path" => old_path.to_string_lossy().into_owned());
                 let _ = fs::remove_dir_all(old_path);
             }
         }
@@ -2574,8 +2590,10 @@ fn do_remove_volume_source(req: &protocols::agent::RemoveVolumeSourceRequest) ->
     match fs::metadata(&source.guest_path) {
         Ok(md) => {
             if md.is_dir() {
+                info!(sl(), "managed volume path removed"; "path" => source.guest_path.to_string_lossy().into_owned());
                 fs::remove_dir_all(&source.guest_path).context("remove managed volume directory")?;
             } else {
+                info!(sl(), "managed volume path removed"; "path" => source.guest_path.to_string_lossy().into_owned());
                 fs::remove_file(&source.guest_path).context("remove managed volume file")?;
             }
         }
