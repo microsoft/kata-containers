@@ -5,6 +5,11 @@
 .git
 .github
 target
+# repo-root build/ holds the component tarballs plus root-owned extracted
+# rootfs trees (e.g. build/rootfs-image/.../ubuntu_rootfs/etc/credstore, mode
+# 0700) that make the context tar fail with "permission denied". The image
+# COPYs artifacts from tools/packaging/kata-deploy/kata-artifacts/ instead.
+build
 kata-artifacts
 docs
 tests
