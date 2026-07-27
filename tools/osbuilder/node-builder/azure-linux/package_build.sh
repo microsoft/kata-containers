@@ -12,6 +12,7 @@ set -o errtrace
 
 AGENT_BUILD_TYPE=${AGENT_BUILD_TYPE:-release}
 CONF_PODS=${CONF_PODS:-no}
+SHIM_REDEPLOY_CONFIG=${SHIM_REDEPLOY_CONFIG:-yes}
 
 script_dir="$(dirname "$(readlink -f "$0")")"
 repo_dir="${script_dir}/../../../../"
@@ -114,6 +115,11 @@ popd || exit
 
 echo "Building runtime-rs shim binary"
 pushd src/runtime-rs/ || exit
+if [[ "${SHIM_REDEPLOY_CONFIG}" == "yes" ]]; then
+	rm -f \
+		"config/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_CLH}" \
+		"config/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_OPENVMM}"
+fi
 make "${runtime_rs_make_flags[@]}"
 popd || exit
 
