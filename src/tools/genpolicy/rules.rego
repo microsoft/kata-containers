@@ -1228,6 +1228,14 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
 
     print("mount_source_allows 2: true")
 }
+mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
+    print("mount_source_allows 3 (managed-volumes): p_mount.source =", p_mount.source)
+    startswith(p_mount.source, "$(sfprefix)")
+    managed_vol_regex := concat("", ["^", policy_data.common.managed_volumes_dir, "/vol-[0-9a-f]{16}-[0-9]+$"])
+    print("mount_source_allows 3 (managed-volumes): managed_vol_regex =", managed_vol_regex)
+    regex.match(managed_vol_regex, i_mount.source)
+    print("mount_source_allows 3 (managed-volumes): true")
+}
 
 ######################################################################
 # Create container Storages

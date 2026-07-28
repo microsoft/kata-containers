@@ -439,6 +439,9 @@ pub struct CommonData {
     /// Path to the shared container files - e.g., "/run/kata-containers/shared/containers".
     pub cpath: String,
 
+    /// Path to the managed volumes directory - e.g., "/run/kata-containers/shared/managed-volumes".
+    pub managed_volumes_dir: String,
+
     /// Path to the container root - e.g., "/run/kata-containers/$(bundle-id)/rootfs".
     pub root_path: String,
 

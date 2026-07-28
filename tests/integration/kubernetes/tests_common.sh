@@ -247,7 +247,7 @@ install_genpolicy_drop_ins() {
 	# 20-* OCI version overlay
 	if [[ "${KATA_HOST_OS:-}" == "cbl-mariner" ]]; then
 		cp "${examples_dir}/20-oci-1.2.1-drop-in.json" "${settings_d}/"
-	elif is_k3s_or_rke2 || is_nvidia_gpu_platform || is_snp_hypervisor "${KATA_HYPERVISOR}" || is_tdx_hypervisor "${KATA_HYPERVISOR}" || [[ -n "${CONTAINER_ENGINE_VERSION:-}" ]] || is_arm64_host; then
+	elif is_k3s_or_rke2 || is_nvidia_gpu_platform || is_snp_hypervisor "${KATA_HYPERVISOR}" || is_tdx_hypervisor "${KATA_HYPERVISOR}" || is_non_tee_hypervisor "${KATA_HYPERVISOR}" || [[ -n "${CONTAINER_ENGINE_VERSION:-}" ]] || is_arm64_host; then
 		cp "${examples_dir}/20-oci-1.3.0-drop-in.json" "${settings_d}/"
 	fi
 
@@ -648,11 +648,11 @@ teardown_common() {
 	kubectl describe pods
 	k8s_delete_all_pods_if_any_exists || true
 
-	local node_end_time
-	node_end_time=$(measure_node_time "${node}")
+	#local node_end_time
+	#node_end_time=$(measure_node_time "${node}")
 
-	echo "Journal LOG starts at ${node_start_time:-}, ends at ${node_end_time:-}"
-	print_node_journal_since_test_start "${node}" "${node_start_time}" "${BATS_TEST_COMPLETED:-}"
+	#echo "Journal LOG starts at ${node_start_time:-}, ends at ${node_end_time:-}"
+	#print_node_journal_since_test_start "${node}" "${node_start_time}" "${BATS_TEST_COMPLETED:-}"
 }
 
 measure_node_time() {

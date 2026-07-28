@@ -275,6 +275,7 @@
     },
     "common": {
         "cpath": "/run/kata-containers/shared/containers(?:/passthrough)?",
+        "managed_volumes_dir": "/run/kata-containers/shared/managed-volumes",
         "spath": "/run/kata-containers/sandbox/storage",
         "root_path": "/run/kata-containers/$(bundle-id)/rootfs",
         "sfprefix": "^$(cpath)/(watchable/)?$(bundle-id)-[a-z0-9]{16}-",
