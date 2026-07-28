@@ -23,17 +23,20 @@ const ALL_SHIMS: &[&str] = &[
     "clh",
     "clh-azure",
     "clh-azure-runtime-rs",
+    "clh-manifold",
     "clh-runtime-rs",
     "dragonball",
     "fc",
     "firecracker",
     "openvmm",
+    "openvmm-manifold",
     "remote",
     // QEMU shims
     "qemu",
     "qemu-cca",
     "qemu-coco-dev",
     "qemu-coco-dev-runtime-rs",
+    "qemu-manifold",
     "qemu-nvidia-gpu",
     "qemu-nvidia-gpu-runtime-rs",
     "qemu-nvidia-gpu-snp",
@@ -61,11 +64,17 @@ fn get_all_valid_shims() -> String {
 
 /// Get hypervisor name from shim name
 fn get_hypervisor_name(shim: &str) -> Result<&str> {
-    if is_qemu_shim(shim) {
+    // GB200 NVIDIA UVM "<vmm>-manifold" shims share the same hypervisor as their
+    // base "<vmm>" shim; they differ only in the guest kernel/rootfs referenced
+    // by configuration-<vmm>-manifold.toml. Resolve the hypervisor from the base
+    // shim name.
+    let base_shim = shim.strip_suffix("-manifold").unwrap_or(shim);
+
+    if is_qemu_shim(base_shim) {
         return Ok("qemu");
     }
 
-    match shim {
+    match base_shim {
         "clh" | "clh-azure" | "clh-runtime-rs" | "clh-azure-runtime-rs" => Ok("clh"),
         "dragonball" => Ok("dragonball"),
         "fc" | "firecracker" => Ok("firecracker"),
@@ -1365,6 +1374,15 @@ mod tests {
     #[case("openvmm", "openvmm")]
     #[case("remote", "remote")]
     fn test_get_hypervisor_name_other_hypervisors(#[case] shim: &str, #[case] expected: &str) {
+        assert_eq!(get_hypervisor_name(shim).unwrap(), expected);
+    }
+
+    #[rstest]
+    // "<vmm>-manifold" shims resolve to the same hypervisor as their base shim.
+    #[case("openvmm-manifold", "openvmm")]
+    #[case("clh-manifold", "clh")]
+    #[case("qemu-manifold", "qemu")]
+    fn test_get_hypervisor_name_manifold_variants(#[case] shim: &str, #[case] expected: &str) {
         assert_eq!(get_hypervisor_name(shim).unwrap(), expected);
     }
 
