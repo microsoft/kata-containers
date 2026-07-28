@@ -185,7 +185,8 @@ impl FsWatcher {
                     sl!(),
                     "Initial sync from {:?} to managed volume {:?}", &src_sync, &volume_id_sync
                 );
-                if let Err(e) = copy_dir_recursively(&src_sync, &src_sync, &volume_id_sync, &agent_sync).await
+                if let Err(e) =
+                    copy_dir_recursively(&src_sync, &src_sync, &volume_id_sync, &agent_sync).await
                 {
                     error!(sl!(), "Initial sync failed: {:?}", e);
                 }
@@ -254,11 +255,10 @@ impl FsWatcher {
                     if Instant::now().duration_since(t) > DEBOUNCE_TIME && *need_sync.lock().await {
                         info!(
                             sl!(),
-                            "debounce sync {:?} -> managed volume {:?}",
-                            &src,
-                            &agent_volume_id
+                            "debounce sync {:?} -> managed volume {:?}", &src, &agent_volume_id
                         );
-                        if let Err(e) = copy_dir_recursively(&src, &src, &agent_volume_id, &agent).await
+                        if let Err(e) =
+                            copy_dir_recursively(&src, &src, &agent_volume_id, &agent).await
                         {
                             error!(
                                 sl!(),
@@ -364,7 +364,11 @@ impl VolumeManager {
             state.guest_path,
         );
 
-        Ok((state.guest_path.clone(), state.agent_volume_id.clone(), true))
+        Ok((
+            state.guest_path.clone(),
+            state.agent_volume_id.clone(),
+            true,
+        ))
     }
 
     /// Register monitor task into the volume manager
@@ -474,6 +478,15 @@ impl ShareFsVolume {
 
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
+                    slog::log!(
+                        (sl!()),
+                        slog::Level::Info,
+                        "",
+                        "***** ShareFsVolume: copying single file {:?} , mount = {:?}",
+                        src,
+                        m
+                    );
+
                     let source = Self::init_volume_source(
                         &host_volume_id,
                         agent::VolumeSourceType::SingleFile,
@@ -492,7 +505,14 @@ impl ShareFsVolume {
                 } else if src.is_dir() {
                     // We allow directory copying wildly
                     // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
-                    info!(sl!(), "copying directory {:?} to guest", &src);
+                    slog::log!(
+                        (sl!()),
+                        slog::Level::Info,
+                        "",
+                        "+++++ ShareFsVolume: copying directory {:?} , mount = {:?}",
+                        src,
+                        m
+                    );
 
                     let volume_type = if is_watchable_volume(&src) {
                         agent::VolumeSourceType::AtomicK8s
@@ -500,14 +520,10 @@ impl ShareFsVolume {
                         agent::VolumeSourceType::EmptyDir
                     };
 
-                    let source = Self::init_volume_source(
-                        &host_volume_id,
-                        volume_type,
-                        readonly,
-                        &agent,
-                    )
-                    .await
-                    .context("init directory volume source")?;
+                    let source =
+                        Self::init_volume_source(&host_volume_id, volume_type, readonly, &agent)
+                            .await
+                            .context("init directory volume source")?;
 
                     // Get or create the guest path
                     let (guest_path, agent_volume_id, is_new) = volume_manager
@@ -545,10 +561,7 @@ impl ShareFsVolume {
                         .await?;
                 } else {
                     // If not, we can ignore it. Let's issue a warning so that the user knows.
-                    warn!(
-                        sl!(),
-                        "Ignoring non-regular file as FS sharing not supported. mount: {:?}", m
-                    );
+                    slog::log!((sl!()),slog::Level::Warning,"","!!!!! ShareFsVolume: Ignoring non-regular file {:?} as FS sharing not supported, mount: {:?}", src, m);
                 }
             }
             Some(share_fs) => {
@@ -661,7 +674,10 @@ impl ShareFsVolume {
             ..Default::default()
         };
 
-        debug!(sl!(), "copy_file: {:?} to managed source {:?}", &src, agent_volume_id);
+        debug!(
+            sl!(),
+            "copy_file: {:?} to managed source {:?}", &src, agent_volume_id
+        );
 
         // Issue RPC request to agent
         agent.put_volume_file(r).await.with_context(|| {
@@ -877,9 +893,12 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                     symlink_request.file_mode
                 );
 
-                agent.put_volume_file(symlink_request).await.context(format!(
-                    "failed to sync symlink: {relative_path:?} -> {link_target_str:?}"
-                ))?;
+                agent
+                    .put_volume_file(symlink_request)
+                    .await
+                    .context(format!(
+                        "failed to sync symlink: {relative_path:?} -> {link_target_str:?}"
+                    ))?;
             } else if metadata.is_dir() {
                 // handle directory
                 let dir_request = agent::CreateVolumeSubdirRequest {
@@ -926,7 +945,10 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                     ..Default::default()
                 };
 
-                info!(sl!(), "sync file {:?} to managed volume {}", relative_path, agent_volume_id);
+                info!(
+                    sl!(),
+                    "sync file {:?} to managed volume {}", relative_path, agent_volume_id
+                );
                 agent
                     .put_volume_file(file_request)
                     .await
