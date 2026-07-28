@@ -36,8 +36,13 @@ valid_ctlpaths = []
 # Optional space-separated list of options to pass to the guest kernel.
 kernel_params = "@KERNELPARAMS_OPENVMM@"
 
-# Path to the firmware.
-firmware = "@FIRMWAREPATH@"
+# Path to the firmware. Left empty: OpenVMM direct-kernel-boots the uncompressed
+# guest kernel (vmlinux.container) and does not consume an EDK2 UEFI firmware.
+# @FIRMWAREPATH@ is a QEMU-only path (built from QEMUCMD/QEMUFW), so on aarch64 it
+# would resolve to the QEMU AArch64 blob (.../share/aavmf/AAVMF_CODE.fd) which is
+# not shipped for the OpenVMM UVM, making the shim fail config load with
+# "firmware image file ... is invalid". The manifold variant clears it the same way.
+firmware = ""
 
 # Default number of vCPUs per SB/VM:
 default_vcpus = @DEFVCPUS@
