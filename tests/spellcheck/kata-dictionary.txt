@@ -24,6 +24,7 @@ msrc
 bootc
 materialx
 ostree
+OpenVMM
 
 # Hardware & Architecture
 AMD
@@ -99,6 +100,7 @@ upperdir
 netns
 Netlink
 ttrpc
+vmservice
 vsock
 
 # Security & Encryption

@@ -146,6 +146,16 @@ sudo make deploy
 popd
 ```
 
+To select the out-of-process OpenVMM runtime-rs backend for Kata, the host
+package must provide an executable `/usr/bin/openvmm`. The node-builder uses
+that binary but does not build or install it:
+
+```shell
+pushd kata-containers/tools/osbuilder/node-builder/azure-linux
+make USE_OPENVMM=yes USE_RUNTIME_RS=yes all deploy
+popd
+```
+
 To build and install Kata-CC components, use the `all-confpods` and `deploy-confpods` targets:
 ```
 pushd kata-containers/tools/osbuilder/node-builder/azure-linux

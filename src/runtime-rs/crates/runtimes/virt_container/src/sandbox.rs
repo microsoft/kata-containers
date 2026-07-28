@@ -31,6 +31,7 @@ use containerd_shim_protos::events::task::{TaskExit, TaskOOM};
 ))]
 use hypervisor::ch::CloudHypervisor;
 use hypervisor::device::topology::PCIePort;
+use hypervisor::device::util::{get_host_path, DEVICE_TYPE_CHAR};
 use hypervisor::remote::Remote;
 use hypervisor::VfioDeviceBase;
 use hypervisor::VsockConfig;
@@ -42,6 +43,8 @@ use hypervisor::HYPERVISOR_REMOTE;
 use hypervisor::{dragonball::Dragonball, HYPERVISOR_DRAGONBALL};
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use hypervisor::{firecracker::Firecracker, HYPERVISOR_FIRECRACKER};
+#[cfg(feature = "openvmm")]
+use hypervisor::{openvmm::OpenVmm, HYPERVISOR_NAME_OPENVMM};
 use hypervisor::{qemu::Qemu, HYPERVISOR_QEMU};
 use hypervisor::{
     utils::{get_hvsock_path, uses_native_ccw_bus},
@@ -74,6 +77,7 @@ use resource::manager::ManagerArgs;
 use resource::network::{dan_config_path, DanNetworkConfig, NetworkConfig, NetworkWithNetNsConfig};
 use resource::{ResourceConfig, ResourceManager};
 use runtime_spec as spec;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -83,6 +87,56 @@ use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
+
+fn is_assignable_vfio_path(path: &str) -> bool {
+    path.starts_with("/dev/vfio/") && path != "/dev/vfio/vfio"
+}
+
+fn raw_vfio_device_paths(
+    devices: &[oci::LinuxDevice],
+    mut resolve_host_path: impl FnMut(i64, i64) -> Result<String>,
+) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+
+    for device in devices {
+        if device.typ() != oci::LinuxDeviceType::C {
+            continue;
+        }
+
+        let host_path = match resolve_host_path(device.major(), device.minor()) {
+            Ok(path) => path,
+            Err(err) => {
+                warn!(
+                    sl!(),
+                    "failed to resolve host path for raw VFIO device {:?}: {:?}",
+                    device.path(),
+                    err
+                );
+                continue;
+            }
+        };
+
+        if is_assignable_vfio_path(&host_path) && seen.insert(host_path.clone()) {
+            paths.push(host_path);
+        }
+    }
+
+    paths
+}
+
+fn pod_cdi_devices_or_empty(result: Result<Vec<String>>) -> Vec<String> {
+    match result {
+        Ok(devices) => devices,
+        Err(err) => {
+            warn!(
+                sl!(),
+                "failed to query Pod Resources CDI devices, falling back to raw OCI VFIO discovery: {err:?}"
+            );
+            Vec::new()
+        }
+    }
+}
 
 pub struct SandboxRestoreArgs {
     pub sid: String,
@@ -262,7 +316,12 @@ impl VirtSandbox {
             None
         };
 
-        let vfio_devices = self.prepare_coldplug_cdi_devices(sandbox_config).await?;
+        let mut vfio_devices = self.prepare_coldplug_cdi_devices(sandbox_config).await?;
+        if vfio_devices.is_empty() {
+            vfio_devices = self
+                .prepare_coldplug_raw_vfio_devices(sandbox_config)
+                .await?;
+        }
         if !vfio_devices.is_empty() {
             info!(
                 sl!(),
@@ -356,17 +415,19 @@ impl VirtSandbox {
             annotations.get("io.kubernetes.cri.sandbox-namespace")
         );
 
-        let cdi_devices =
+        let cdi_devices = pod_cdi_devices_or_empty(
             pod_resources_rs::pod_resources::get_pod_cdi_devices(pod_resource_socket, annotations)
-                .await
-                .context("failed to query Pod Resources CDI devices")?;
+                .await,
+        );
         info!(sl!(), "pod cdi devices: {:?}", cdi_devices);
 
         let device_nodes = handle_cdi_devices(&cdi_devices).await?;
-        let paths: Vec<String> = device_nodes
+        let mut paths: Vec<String> = device_nodes
             .iter()
             .filter_map(pod_resources_rs::device_node_host_path)
             .collect();
+        let mut seen = HashSet::new();
+        paths.retain(|path| seen.insert(path.clone()));
 
         let mut vfio_configs = Vec::new();
         for path in paths.iter() {
@@ -384,6 +445,67 @@ impl VirtSandbox {
         Ok(vfio_configs
             .into_iter()
             .map(ResourceConfig::VfioDeviceModern)
+            .collect())
+    }
+
+    async fn prepare_coldplug_raw_vfio_devices(
+        &self,
+        sandbox_config: &SandboxConfig,
+    ) -> Result<Vec<ResourceConfig>> {
+        let hypervisor_config = self.hypervisor.hypervisor_config().await;
+        let cold_plug_vfio = &hypervisor_config.device_info.cold_plug_vfio;
+        if cold_plug_vfio.is_empty() || cold_plug_vfio == "no-port" {
+            return Ok(Vec::new());
+        }
+
+        let port = match cold_plug_vfio.as_str() {
+            "root-port" => PCIePort::RootPort,
+            other => {
+                return Err(anyhow!(
+                    "unsupported cold_plug_vfio value {:?}; only \"root-port\" is supported",
+                    other
+                ));
+            }
+        };
+
+        if sandbox_config.state.bundle.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let spec_path =
+            Path::new(&sandbox_config.state.bundle).join(spec::OCI_SPEC_CONFIG_FILE_NAME);
+        let oci_spec = match oci::Spec::load(spec_path.to_string_lossy().as_ref()) {
+            Ok(spec) => spec,
+            Err(err) => {
+                info!(
+                    sl!(),
+                    "no OCI spec at {:?}: {:?}, skipping raw VFIO cold-plug", spec_path, err
+                );
+                return Ok(Vec::new());
+            }
+        };
+        let linux_devices = oci_spec
+            .linux()
+            .as_ref()
+            .and_then(|linux| linux.devices().as_ref())
+            .cloned()
+            .unwrap_or_default();
+        let paths = raw_vfio_device_paths(&linux_devices, |major, minor| {
+            get_host_path(DEVICE_TYPE_CHAR, major, minor)
+        });
+
+        Ok(paths
+            .into_iter()
+            .map(|host_path| {
+                ResourceConfig::VfioDeviceModern(VfioDeviceBase {
+                    iommu_group_devnode: PathBuf::from(&host_path),
+                    host_path,
+                    dev_type: DEVICE_TYPE_CHAR.to_string(),
+                    port,
+                    hostdev_prefix: "vfio_device".to_owned(),
+                    ..Default::default()
+                })
+            })
             .collect())
     }
 
@@ -1272,6 +1394,8 @@ impl Persist for VirtSandbox {
                 HYPERVISOR_FIRECRACKER => Ok(Some(hypervisor_state)),
                 HYPERVISOR_QEMU => Ok(Some(hypervisor_state)),
                 HYPERVISOR_REMOTE => Ok(Some(hypervisor_state)),
+                #[cfg(feature = "openvmm")]
+                HYPERVISOR_NAME_OPENVMM => Ok(Some(hypervisor_state)),
                 _ => Err(anyhow!(
                     "Unsupported hypervisor {}",
                     hypervisor_state.hypervisor_type
@@ -1334,6 +1458,11 @@ impl Persist for VirtSandbox {
                 let hypervisor = Arc::new(Remote::restore((), h).await?) as Arc<dyn Hypervisor>;
                 Ok(hypervisor)
             }
+            #[cfg(feature = "openvmm")]
+            HYPERVISOR_NAME_OPENVMM => {
+                let hypervisor = Arc::new(OpenVmm::restore((), h).await?) as Arc<dyn Hypervisor>;
+                Ok(hypervisor)
+            }
             _ => Err(anyhow!("Unsupported hypervisor {}", &h.hypervisor_type)),
         }?;
         let agent = Arc::new(KataAgent::new(kata_types::config::Agent::default()));
@@ -1360,5 +1489,57 @@ impl Persist for VirtSandbox {
             factory: None,
             cancel_token: CancellationToken::default(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn linux_device(path: &str, typ: oci::LinuxDeviceType, major: i64) -> oci::LinuxDevice {
+        oci::LinuxDeviceBuilder::default()
+            .path(path)
+            .typ(typ)
+            .major(major)
+            .minor(0)
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn raw_vfio_paths_filter_control_and_non_vfio_devices_and_deduplicate() {
+        let devices = vec![
+            linux_device("/container/vfio-a", oci::LinuxDeviceType::C, 1),
+            linux_device("/container/vfio-a-duplicate", oci::LinuxDeviceType::C, 1),
+            linux_device("/container/vfio-control", oci::LinuxDeviceType::C, 2),
+            linux_device("/container/null", oci::LinuxDeviceType::C, 3),
+            linux_device("/container/block", oci::LinuxDeviceType::B, 4),
+        ];
+
+        let paths = raw_vfio_device_paths(&devices, |major, _minor| {
+            Ok(match major {
+                1 => "/dev/vfio/7",
+                2 => "/dev/vfio/vfio",
+                3 => "/dev/null",
+                4 => "/dev/vfio/8",
+                _ => unreachable!(),
+            }
+            .to_string())
+        });
+
+        assert_eq!(paths, vec!["/dev/vfio/7"]);
+        assert!(is_assignable_vfio_path("/dev/vfio/devices/vfio0"));
+        assert!(!is_assignable_vfio_path("/dev/vfio/vfio"));
+    }
+
+    #[test]
+    fn pod_cdi_query_errors_fall_back_to_raw_oci_discovery() {
+        let devices = vec!["vendor.com/device=device0".to_string()];
+
+        assert_eq!(pod_cdi_devices_or_empty(Ok(devices.clone())), devices);
+        assert!(
+            pod_cdi_devices_or_empty(Err(anyhow!("PodResources API Get method disabled")))
+                .is_empty()
+        );
     }
 }

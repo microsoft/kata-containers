@@ -21,7 +21,12 @@ pushd "${repo_dir}" || exit
 
 echo "Clean debug shim config"
 pushd src/runtime/config/ || exit
-rm -f "${SHIM_DBG_CONFIG_FILE_NAME}"
+rm -f "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO}"
+popd || exit
+
+pushd src/runtime-rs/config/ || exit
+rm -f "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_CLH}"
+rm -f "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_OPENVMM}"
 popd || exit
 
 echo "Clean runtime build"
