@@ -432,10 +432,8 @@ func (s *service) doSnapshot(ctx context.Context, destDir string) error {
 	if err := s.sandbox.SaveVM(destDir); err != nil {
 		return err
 	}
-	// repoint config.json's memory zone file at the in-dir memory-ranges so the
-	// snapshot is self-contained for memory (the source path it inherits is the
-	// shared template/source memory, outside this dir). without this, a restore
-	// that reads config.json mmaps the wrong file (or fails if it is gone).
+	// Finalize config.json with snapshot-owned memory and EROFS disk paths. A
+	// restore copies this finalized config before applying per-VM changes.
 	if err := makeConfigSelfContained(destDir); err != nil {
 		return err
 	}
@@ -446,21 +444,12 @@ func (s *service) doSnapshot(ctx context.Context, destDir string) error {
 	return s.writeSnapshotManifest(destDir)
 }
 
-// makeConfigSelfContained rewrites config.json's memory zone backing-file paths
-// to point at the memory-ranges file inside destDir. cloud-hypervisor writes the
-// snapshot's config.json from the live VmConfig, whose memory.zones[].file still
-// names the source memory path (e.g. /run/vc/vm/template/memory) outside destDir.
-// On restore CLH opens that path to back the memory zone, so a relocated snapshot
-// (or a GC'd source) would fail. Pointing it at the in-dir memory-ranges makes the
-// snapshot dir's memory self-contained. (Disks are not rewritten here; that is
-// separate, larger work for cross-host portability.)
+// makeConfigSelfContained rewrites config.json to use snapshot-owned memory and
+// EROFS disk files. cloud-hypervisor otherwise records the live backing paths,
+// which disappear when containerd removes the source snapshots.
 func makeConfigSelfContained(destDir string) error {
 	configPath := filepath.Join(destDir, "config.json")
 	memoryRanges := filepath.Join(destDir, "memory-ranges")
-	if _, err := os.Stat(memoryRanges); err != nil {
-		// no memory-ranges file: nothing to repoint, leave config as-is.
-		return nil
-	}
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
@@ -469,24 +458,79 @@ func makeConfigSelfContained(destDir string) error {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return err
 	}
-	mem, ok := cfg["memory"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	zones, ok := mem["zones"].([]interface{})
-	if !ok {
-		return nil
-	}
-	for _, z := range zones {
-		if zm, ok := z.(map[string]interface{}); ok {
-			zm["file"] = memoryRanges
+
+	changed := false
+	if _, err := os.Stat(memoryRanges); err == nil {
+		if mem, ok := cfg["memory"].(map[string]interface{}); ok {
+			if zones, ok := mem["zones"].([]interface{}); ok {
+				for _, zone := range zones {
+					if zoneMap, ok := zone.(map[string]interface{}); ok {
+						zoneMap["file"] = memoryRanges
+						changed = true
+					}
+				}
+			}
 		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat snapshot memory file %s: %w", memoryRanges, err)
 	}
+
+	disksChanged, err := packageErofsSnapshotDisks(destDir, cfg)
+	if err != nil {
+		return err
+	}
+	changed = changed || disksChanged
+	if !changed {
+		return nil
+	}
+
 	out, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(configPath, out, 0600)
+}
+
+func packageErofsSnapshotDisks(destDir string, cfg map[string]interface{}) (bool, error) {
+	disks, ok := cfg["disks"].([]interface{})
+	if !ok {
+		return false, nil
+	}
+
+	diskDir := filepath.Join(destDir, "disks")
+	changed := false
+	for index, entry := range disks {
+		disk, ok := entry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		sourcePath, ok := disk["path"].(string)
+		if !ok || sourcePath == "" {
+			continue
+		}
+		baseName := filepath.Base(sourcePath)
+		if baseName != "layer.erofs" && baseName != "rwlayer.img" {
+			continue
+		}
+
+		if err := os.MkdirAll(diskDir, 0700); err != nil {
+			return false, fmt.Errorf("create snapshot disk directory: %w", err)
+		}
+		destinationPath := filepath.Join(diskDir, fmt.Sprintf("%d-%s", index, baseName))
+		if filepath.Clean(sourcePath) != filepath.Clean(destinationPath) {
+			if err := copySnapshotFile(sourcePath, destinationPath); err != nil {
+				return false, fmt.Errorf("package snapshot disk %q from %s: %w", disk["id"], sourcePath, err)
+			}
+		}
+		disk["path"] = destinationPath
+		changed = true
+	}
+
+	return changed, nil
+}
+
+func copySnapshotFile(sourcePath, destinationPath string) error {
+	return mutils.CopyFileSparse(sourcePath, destinationPath)
 }
 
 // copyPersistInto copies /run/vc/sbs/<id>/persist.json into destDir.

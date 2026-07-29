@@ -9,6 +9,7 @@ package virtcontainers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -637,6 +639,121 @@ func TestClhRestoreVM(t *testing.T) {
 	info, err := clh.vmInfo()
 	assert.NoError(err)
 	assert.Equal(clhStatePaused, info.State)
+}
+
+func TestClhPrepareRestoreFilesKeepsSnapshotPrivate(t *testing.T) {
+	snapshotDir := t.TempDir()
+	vmStoreDir := t.TempDir()
+	vmID := "restored-vm"
+	snapshotDiskDir := filepath.Join(snapshotDir, "disks")
+	require.NoError(t, os.MkdirAll(snapshotDiskDir, 0o700))
+
+	readonlyDisk := filepath.Join(snapshotDiskDir, "1-layer.erofs")
+	writableDisk := filepath.Join(snapshotDiskDir, "2-rwlayer.img")
+	require.NoError(t, os.WriteFile(readonlyDisk, []byte("read-only layer"), 0o600))
+	require.NoError(t, os.WriteFile(writableDisk, []byte("writable layer"), 0o600))
+
+	snapshotConfig := map[string]interface{}{
+		"vsock": map[string]interface{}{"socket": "/source/clh.sock"},
+		"memory": map[string]interface{}{
+			"shared": true,
+			"zones":  []interface{}{map[string]interface{}{"shared": true}},
+		},
+		"disks": []interface{}{
+			map[string]interface{}{"id": "_disk3", "path": readonlyDisk, "readonly": true},
+			map[string]interface{}{"id": "_disk4", "path": writableDisk, "readonly": false},
+		},
+	}
+	snapshotConfigJSON, err := json.Marshal(snapshotConfig)
+	require.NoError(t, err)
+	snapshotConfigPath := filepath.Join(snapshotDir, "config.json")
+	require.NoError(t, os.WriteFile(snapshotConfigPath, snapshotConfigJSON, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(snapshotDir, "state.json"), []byte("{}"), 0o600))
+
+	clh := &cloudHypervisor{
+		id: vmID,
+		config: HypervisorConfig{
+			VMStorePath: vmStoreDir,
+		},
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(vmStoreDir, vmID), 0o700))
+	require.NoError(t, clh.prepareRestoreFiles(snapshotDir))
+
+	canonicalConfig, err := os.ReadFile(snapshotConfigPath)
+	require.NoError(t, err)
+	assert.Equal(t, snapshotConfigJSON, canonicalConfig)
+
+	privateConfigPath := filepath.Join(vmStoreDir, vmID, "config.json")
+	canonicalConfigInfo, err := os.Stat(snapshotConfigPath)
+	require.NoError(t, err)
+	privateConfigInfo, err := os.Stat(privateConfigPath)
+	require.NoError(t, err)
+	assert.False(t, os.SameFile(canonicalConfigInfo, privateConfigInfo))
+
+	privateConfigJSON, err := os.ReadFile(privateConfigPath)
+	require.NoError(t, err)
+	var privateConfig struct {
+		Vsock struct {
+			Socket string `json:"socket"`
+		} `json:"vsock"`
+		Disks []struct {
+			Path     string `json:"path"`
+			Readonly bool   `json:"readonly"`
+		} `json:"disks"`
+	}
+	require.NoError(t, json.Unmarshal(privateConfigJSON, &privateConfig))
+	require.Len(t, privateConfig.Disks, 2)
+	assert.Equal(t, filepath.Join(vmStoreDir, vmID, clhSocket), privateConfig.Vsock.Socket)
+	assert.Equal(t, readonlyDisk, privateConfig.Disks[0].Path)
+	privateWritableDisk := filepath.Join(vmStoreDir, vmID, "disks", "1-2-rwlayer.img")
+	assert.Equal(t, privateWritableDisk, privateConfig.Disks[1].Path)
+
+	privateConfig.Disks = append(privateConfig.Disks, struct {
+		Path     string `json:"path"`
+		Readonly bool   `json:"readonly"`
+	}{Path: "/first-restore/extra-disk"})
+	mutatedPrivateConfig, err := json.Marshal(privateConfig)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(privateConfigPath, mutatedPrivateConfig, 0o600))
+	require.NoError(t, os.WriteFile(privateWritableDisk, []byte("first restore changed this"), 0o600))
+
+	secondVMID := "second-restored-vm"
+	secondVMDir := filepath.Join(vmStoreDir, secondVMID)
+	require.NoError(t, os.MkdirAll(secondVMDir, 0o700))
+	secondClh := &cloudHypervisor{
+		id: secondVMID,
+		config: HypervisorConfig{
+			VMStorePath: vmStoreDir,
+		},
+	}
+	require.NoError(t, secondClh.prepareRestoreFiles(snapshotDir))
+
+	canonicalConfig, err = os.ReadFile(snapshotConfigPath)
+	require.NoError(t, err)
+	assert.Equal(t, snapshotConfigJSON, canonicalConfig)
+	secondPrivateConfigJSON, err := os.ReadFile(filepath.Join(secondVMDir, "config.json"))
+	require.NoError(t, err)
+	var secondPrivateConfig struct {
+		Disks []struct {
+			Path     string `json:"path"`
+			Readonly bool   `json:"readonly"`
+		} `json:"disks"`
+	}
+	require.NoError(t, json.Unmarshal(secondPrivateConfigJSON, &secondPrivateConfig))
+	require.Len(t, secondPrivateConfig.Disks, 2)
+	secondPrivateWritableDisk := filepath.Join(secondVMDir, "disks", "1-2-rwlayer.img")
+	assert.Equal(t, secondPrivateWritableDisk, secondPrivateConfig.Disks[1].Path)
+	secondPrivateDiskContent, err := os.ReadFile(secondPrivateWritableDisk)
+	require.NoError(t, err)
+	assert.Equal(t, "writable layer", string(secondPrivateDiskContent))
+
+	require.NoError(t, os.Remove(writableDisk))
+	firstPrivateDiskContent, err := os.ReadFile(privateWritableDisk)
+	require.NoError(t, err)
+	assert.Equal(t, "first restore changed this", string(firstPrivateDiskContent))
+	secondPrivateDiskContent, err = os.ReadFile(secondPrivateWritableDisk)
+	require.NoError(t, err)
+	assert.Equal(t, "writable layer", string(secondPrivateDiskContent))
 }
 
 func TestClhSaveVM(t *testing.T) {
