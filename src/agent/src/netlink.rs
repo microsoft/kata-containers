@@ -284,6 +284,7 @@ impl Handle {
             self.add_addresses(index, std::iter::once(net)).await?;
         }
 
+        let link = self.find_link(LinkFilter::Index(index)).await?;
         {
             let mut request = self.handle.link().set(index);
             request.message_mut().header = link.header.clone();
@@ -293,10 +294,12 @@ impl Handle {
             if iface.mtu > 0 {
                 request = request.mtu(iface.mtu as _);
             }
-            request.up().execute().await.map_err(|e| {
+            request.execute().await.map_err(|e| {
                 anyhow!("restore-replace: set name/mtu/arp on {}: {}", iface.name, e)
             })?;
         }
+
+        self.enable_link(index, true).await?;
 
         Ok(())
     }
