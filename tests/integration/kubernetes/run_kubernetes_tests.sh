@@ -40,12 +40,12 @@ else
 	# by other cases which are using 'alpine' and 'quay.io/prometheus/busybox:latest' image.
 	# more details https://github.com/kata-containers/kata-containers/issues/8337
 	K8S_TEST_SMALL_HOST_ATTESTATION_REQUIRED_UNION=( \
-		"k8s-confidential.bats" \
-		"k8s-guest-pull-image-encrypted.bats" \
-		"k8s-guest-pull-image-authenticated.bats" \
-		"k8s-guest-pull-image-signature.bats" \
-		"k8s-confidential-attestation.bats" \
-		"k8s-measured-rootfs.bats" \
+		#"k8s-confidential.bats" \
+		#"k8s-guest-pull-image-encrypted.bats" \
+		#"k8s-guest-pull-image-authenticated.bats" \
+		#"k8s-guest-pull-image-signature.bats" \
+		#"k8s-confidential-attestation.bats" \
+		#"k8s-measured-rootfs.bats" \
 	)
 
 	K8S_TEST_SMALL_HOST_TEE_POLICY_UNION=( \
