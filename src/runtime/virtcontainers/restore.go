@@ -27,6 +27,23 @@ type RestoreOpts struct {
 	KernelPath     string
 	ImagePath      string
 	NetNSPath      string
+	DisableSeccomp bool
+}
+
+func (opts RestoreOpts) applyHypervisorOverrides(config *HypervisorConfig) {
+	if opts.HypervisorPath != "" {
+		config.HypervisorPath = opts.HypervisorPath
+	}
+	if opts.KernelPath != "" {
+		config.KernelPath = opts.KernelPath
+	}
+	if opts.ImagePath != "" {
+		config.ImagePath = opts.ImagePath
+	}
+
+	// The restored VMM is a new host process, so use the current runtime's
+	// seccomp policy rather than the snapshot's persisted configuration.
+	config.DisableSeccomp = opts.DisableSeccomp
 }
 
 // RestoreSandbox restores a snapshot as a managed, paused sandbox.
@@ -67,15 +84,7 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 	}
 	sandboxConfig.ID = newID
 
-	if opts.HypervisorPath != "" {
-		sandboxConfig.HypervisorConfig.HypervisorPath = opts.HypervisorPath
-	}
-	if opts.KernelPath != "" {
-		sandboxConfig.HypervisorConfig.KernelPath = opts.KernelPath
-	}
-	if opts.ImagePath != "" {
-		sandboxConfig.HypervisorConfig.ImagePath = opts.ImagePath
-	}
+	opts.applyHypervisorOverrides(&sandboxConfig.HypervisorConfig)
 
 	// Keep source memory immutable through a private mapping.
 	sandboxConfig.HypervisorConfig.FileBackedMemory = &FileBackedMemoryConfig{
