@@ -529,44 +529,8 @@ func packageErofsSnapshotDisks(destDir string, cfg map[string]interface{}) (bool
 	return changed, nil
 }
 
-func copySnapshotFile(sourcePath, destinationPath string) (err error) {
-	source, err := os.Open(sourcePath)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-
-	info, err := source.Stat()
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("source is not a regular file")
-	}
-
-	temporary, err := os.CreateTemp(filepath.Dir(destinationPath), ".snapshot-disk-")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer func() {
-		_ = temporary.Close()
-		_ = os.Remove(temporaryPath)
-	}()
-
-	if err := temporary.Chmod(info.Mode().Perm()); err != nil {
-		return err
-	}
-	if _, err := io.Copy(temporary, source); err != nil {
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, destinationPath)
+func copySnapshotFile(sourcePath, destinationPath string) error {
+	return mutils.CopyFileSparse(sourcePath, destinationPath)
 }
 
 // copyPersistInto copies /run/vc/sbs/<id>/persist.json into destDir.
