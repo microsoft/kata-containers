@@ -285,6 +285,11 @@ impl Handle {
         }
 
         {
+            // Avoid appending IFF_UP to the stale pre-down flags: rtnetlink 0.14
+            // adds duplicate flags numerically instead of folding them as bits.
+            let link = self
+                .find_link(LinkFilter::Name(iface.name.as_str()))
+                .await?;
             let mut request = self.handle.link().set(index);
             request.message_mut().header = link.header.clone();
             let mut request = request
