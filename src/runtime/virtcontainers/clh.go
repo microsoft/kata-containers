@@ -1024,7 +1024,7 @@ func (clh *cloudHypervisor) StartVM(ctx context.Context, timeout int) error {
 
 	clh.Logger().WithField("function", "StartVM").Info("starting Sandbox")
 
-	if err := clh.launchAndInit(ctx); err != nil {
+	if err := clh.launchAndInit(ctx, false); err != nil {
 		return err
 	}
 
@@ -1059,7 +1059,7 @@ func (clh *cloudHypervisor) RestoreVM(ctx context.Context, snapshotDir string) e
 		clh.restoreNetID = ""
 	}()
 
-	if err := clh.launchAndInit(ctx); err != nil {
+	if err := clh.launchAndInit(ctx, true); err != nil {
 		return err
 	}
 
@@ -1083,7 +1083,7 @@ func (clh *cloudHypervisor) RestoreVM(ctx context.Context, snapshotDir string) e
 // cloud-hypervisor process. On return the VMM is running and ready to accept
 // API calls; the caller then boots or restores the VM under its own boot
 // timeout (see bootTimeoutContext).
-func (clh *cloudHypervisor) launchAndInit(ctx context.Context) error {
+func (clh *cloudHypervisor) launchAndInit(ctx context.Context, captureOutput bool) error {
 	vmPath := filepath.Join(clh.config.VMStorePath, clh.id)
 	if err := utils.MkdirAllWithInheritedOwner(vmPath, DirMode); err != nil {
 		return err
@@ -1106,7 +1106,7 @@ func (clh *cloudHypervisor) launchAndInit(ctx context.Context) error {
 		return err
 	}
 
-	if err := clh.launchClh(); err != nil {
+	if err := clh.launchClh(captureOutput); err != nil {
 		if clh.config.SharedFS == config.VirtioFS || clh.config.SharedFS == config.VirtioFSNydus {
 			if shutdownErr := clh.stopVirtiofsDaemon(ctx); shutdownErr != nil {
 				clh.Logger().WithError(shutdownErr).Warn("error shutting down VirtiofsDaemon")
@@ -2094,7 +2094,19 @@ func (clh *cloudHypervisor) clhPath() (string, error) {
 	return p, nil
 }
 
-func (clh *cloudHypervisor) launchClh() error {
+func forwardClhOutput(logger *log.Entry, output io.Reader) {
+	scanner := bufio.NewScanner(output)
+	for scanner.Scan() {
+		if text := scanner.Text(); text != "" {
+			logger.WithField("stream", "stdout/stderr").Warn(text)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		logger.WithError(err).Warn("failed to read cloud-hypervisor output")
+	}
+}
+
+func (clh *cloudHypervisor) launchClh(captureOutput bool) error {
 
 	clh.state.PID = -1
 
@@ -2146,6 +2158,14 @@ func (clh *cloudHypervisor) launchClh() error {
 			cmdHypervisor.Stdout = clh.console
 		}
 	}
+	var outputReader, outputWriter *os.File
+	if captureOutput && cmdHypervisor.Stdout == nil {
+		outputReader, outputWriter, err = os.Pipe()
+		if err != nil {
+			return fmt.Errorf("create cloud-hypervisor output pipe: %w", err)
+		}
+		cmdHypervisor.Stdout = outputWriter
+	}
 	cmdHypervisor.Stderr = cmdHypervisor.Stdout
 
 	attr := syscall.SysProcAttr{}
@@ -2158,7 +2178,20 @@ func (clh *cloudHypervisor) launchClh() error {
 
 	err = utils.StartCmd(cmdHypervisor)
 	if err != nil {
+		if outputReader != nil {
+			_ = outputReader.Close()
+		}
+		if outputWriter != nil {
+			_ = outputWriter.Close()
+		}
 		return err
+	}
+	if outputWriter != nil {
+		_ = outputWriter.Close()
+		go func() {
+			defer outputReader.Close()
+			forwardClhOutput(clh.Logger(), outputReader)
+		}()
 	}
 
 	clh.state.PID = cmdHypervisor.Process.Pid

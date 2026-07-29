@@ -28,6 +28,7 @@ type VM struct {
 	hypervisor Hypervisor
 	agent      agent
 	store      persistapi.PersistDriver
+	cw         *consoleWatcher
 
 	id string
 
@@ -162,7 +163,18 @@ func newVM(ctx context.Context, config VMConfig, restoreSnapshotDir string) (*VM
 	}
 
 	// 3. boot up (or restore) the guest vm
+	var cw *consoleWatcher
 	if restoreSnapshotDir != "" {
+		if config.HypervisorConfig.Debug {
+			proto, consoleURL, consoleErr := hypervisor.GetVMConsole(ctx, id)
+			if consoleErr != nil {
+				return nil, fmt.Errorf("create restored VM console: %w", consoleErr)
+			}
+			cw = &consoleWatcher{
+				proto:      proto,
+				consoleURL: consoleURL,
+			}
+		}
 		if len(config.RestoreNetEndpoints) > 0 {
 			clh, ok := hypervisor.(*cloudHypervisor)
 			if !ok {
@@ -198,6 +210,7 @@ func newVM(ctx context.Context, config VMConfig, restoreSnapshotDir string) (*VM
 		cpu:        config.HypervisorConfig.NumVCPUs(),
 		memory:     config.HypervisorConfig.MemorySize,
 		store:      store,
+		cw:         cw,
 	}, nil
 }
 
@@ -398,6 +411,15 @@ func (v *VM) assignSandbox(s *Sandbox) error {
 
 	s.hypervisor = v.hypervisor
 	s.config.HypervisorConfig.VMid = v.id
+	if v.cw != nil {
+		s.Logger().Debug("restored VM console watcher starts")
+		if err := v.cw.start(s); err != nil {
+			v.cw.stop()
+			return fmt.Errorf("start restored VM console watcher: %w", err)
+		}
+		s.cw = v.cw
+		v.cw = nil
+	}
 
 	return nil
 }

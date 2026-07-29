@@ -72,7 +72,9 @@ func TestNewVM(t *testing.T) {
 	assert.Nil(err)
 
 	// restore a VM from a snapshot
+	config.HypervisorConfig.Debug = true
 	vmFromSnapshot, err := NewVMFromSnapshot(ctx, config, testDir)
 	assert.Nil(err)
 	assert.NotNil(vmFromSnapshot)
+	assert.NotNil(vmFromSnapshot.cw)
 }

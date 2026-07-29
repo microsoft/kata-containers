@@ -24,6 +24,8 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -839,6 +841,19 @@ func TestCloudHypervisorStartSandbox(t *testing.T) {
 
 	err = clh.Cleanup(context.Background())
 	assert.NoError(err)
+}
+
+func TestForwardClhOutput(t *testing.T) {
+	logger, hook := logtest.NewNullLogger()
+	logger.SetLevel(log.WarnLevel)
+
+	forwardClhOutput(log.NewEntry(logger), strings.NewReader("Possible seccomp violation: Syscall number: 123\n"))
+
+	entry := hook.LastEntry()
+	require.NotNil(t, entry)
+	assert.Equal(t, log.WarnLevel, entry.Level)
+	assert.Equal(t, "Possible seccomp violation: Syscall number: 123", entry.Message)
+	assert.Equal(t, "stdout/stderr", entry.Data["stream"])
 }
 
 func TestCloudHypervisorResizeMemory(t *testing.T) {

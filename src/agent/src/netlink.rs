@@ -440,6 +440,7 @@ impl Handle {
                 name: link.name(),
                 hwAddr: link.address(),
                 mtu: link.mtu().unwrap_or(0),
+                raw_flags: link.raw_flags(),
                 ..Default::default()
             };
 
@@ -1254,6 +1255,10 @@ mod tests {
         for iface in &list {
             assert_ne!(iface.name.len(), 0);
             assert_ne!(iface.mtu, 0);
+
+            if iface.name == "lo" {
+                assert_ne!(iface.raw_flags & libc::IFF_UP as u32, 0);
+            }
 
             for ip in &iface.IPAddresses {
                 assert_ne!(ip.mask.len(), 0);
