@@ -61,6 +61,8 @@ default WaitProcessRequest := true
 default WriteStreamRequest := false
 default PutVolumeFileRequest := false
 
+default CopySingleFileRequest := true
+
 # AllowRequestsFailingPolicy := true configures the Agent to *allow any
 # requests causing a policy failure*. This is an unsecure configuration
 # but is useful for allowing unsecure pods to start, then connect to

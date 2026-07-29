@@ -49,3 +49,5 @@ default WriteStreamRequest := true
 default PutVolumeFileRequest := true
 
 default ExecProcessRequest := false
+
+default CopySingleFileRequest := true
