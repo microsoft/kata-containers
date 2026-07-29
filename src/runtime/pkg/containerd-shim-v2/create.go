@@ -225,6 +225,7 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 				KernelPath:     s.config.HypervisorConfig.KernelPath,
 				ImagePath:      s.config.HypervisorConfig.ImagePath,
 				NetNSPath:      netNSPath,
+				DisableSeccomp: s.config.HypervisorConfig.DisableSeccomp,
 			})
 		} else {
 			sandbox, _, err = katautils.CreateSandbox(s.ctx, vci, *ociSpec, *s.config, rootFs, r.ID, bundlePath, disableOutput, false)
