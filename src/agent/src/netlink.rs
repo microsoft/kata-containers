@@ -298,8 +298,7 @@ impl Handle {
             .await;
 
         {
-            // Avoid appending IFF_UP to the stale pre-down flags: rtnetlink 0.14
-            // adds duplicate flags numerically instead of folding them as bits.
+            // Keep identity updates separate from the final IFF_UP transition.
             let link = self
                 .find_link(LinkFilter::Name(iface.name.as_str()))
                 .await?;
@@ -311,10 +310,12 @@ impl Handle {
             if iface.mtu > 0 {
                 request = request.mtu(iface.mtu as _);
             }
-            request.up().execute().await.map_err(|e| {
+            request.execute().await.map_err(|e| {
                 anyhow!("restore-replace: set name/mtu/arp on {}: {}", iface.name, e)
             })?;
         }
+
+        self.enable_link(index, true).await?;
         self.log_link_state_by_index("restore-replace-complete", index)
             .await;
 
