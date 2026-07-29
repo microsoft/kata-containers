@@ -587,6 +587,31 @@ pub struct PutVolumeFileRequest {
     pub dir_mode: u32,
 }
 
+#[derive(PartialEq, Clone, Debug, Default)]
+pub enum SingleFileType {
+    #[default]
+    Unspecified,
+    ResolvConf,
+    EtcHosts,
+    Hostname,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct CopySingleFileRequest {
+    pub sandbox_id: String,
+    pub file_type: SingleFileType,
+    pub uid: i32,
+    pub gid: i32,
+    pub data_size: i64,
+    pub data: Vec<u8>,
+    pub file_mode: u32,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct CopySingleFileResponse {
+    pub guest_path: String,
+}
+
 #[derive(PartialEq, Clone, Default, Debug)]
 pub struct CommitVolumeRevisionRequest {
     pub agent_volume_id: String,

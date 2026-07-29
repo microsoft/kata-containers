@@ -49,3 +49,4 @@ default UpdateRoutesRequest := true
 default WaitProcessRequest := true
 default WriteStreamRequest := true
 default PutVolumeFileRequest := true
+default CopySingleFileRequest := true

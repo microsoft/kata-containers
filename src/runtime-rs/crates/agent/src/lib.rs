@@ -16,20 +16,20 @@ pub mod types;
 pub use types::{
     ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
     BlkioStatsEntry, CheckRequest, CloseStdinRequest, CommitVolumeRevisionRequest, ContainerID,
-    ContainerProcessID, CreateContainerRequest, CreateSandboxRequest,
-    CreateVolumeSubdirRequest, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy,
-    GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest,
-    GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse,
-    IPAddress, IPFamily, InitVolumeSourceRequest, InitVolumeSourceResponse, Interface,
-    Interfaces, ListProcessesRequest, MemHotplugByProbeRequest, MetricsResponse,
+    ContainerProcessID, CopySingleFileRequest, CopySingleFileResponse, CreateContainerRequest,
+    CreateSandboxRequest, CreateVolumeSubdirRequest, Empty, ExecProcessRequest, FSGroup,
+    FSGroupChangePolicy, GetDiagnosticDataRequest, GetDiagnosticDataResponse,
+    GetGuestDetailsRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
+    HealthCheckResponse, IPAddress, IPFamily, InitVolumeSourceRequest, InitVolumeSourceResponse,
+    Interface, Interfaces, ListProcessesRequest, MemHotplugByProbeRequest, MetricsResponse,
     OnlineCPUMemRequest, OomEventResponse, PutVolumeFileRequest, ReadStreamRequest,
     ReadStreamResponse, RemoveContainerRequest, RemoveVolumeSourceRequest,
     ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes, SetGuestDateTimeRequest,
-    SetIPTablesRequest, SetIPTablesResponse, SignalProcessRequest, StatsContainerResponse,
-    Storage, TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest,
-    UpdateRoutesRequest, VersionCheckResponse, VolumeSourceType, VolumeStatsRequest,
-    VolumeStatsResponse, WaitProcessRequest, WaitProcessResponse, WriteStreamRequest,
-    WriteStreamResponse,
+    SetIPTablesRequest, SetIPTablesResponse, SignalProcessRequest, SingleFileType,
+    StatsContainerResponse, Storage, TtyWinResizeRequest, UpdateContainerRequest,
+    UpdateInterfaceRequest, UpdateRoutesRequest, VersionCheckResponse, VolumeSourceType,
+    VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest, WaitProcessResponse,
+    WriteStreamRequest, WriteStreamResponse,
 };
 
 use anyhow::Result;
@@ -97,6 +97,7 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
         -> Result<InitVolumeSourceResponse>;
     async fn create_volume_subdir(&self, req: CreateVolumeSubdirRequest) -> Result<Empty>;
     async fn put_volume_file(&self, req: PutVolumeFileRequest) -> Result<Empty>;
+    async fn copy_single_file(&self, req: CopySingleFileRequest) -> Result<CopySingleFileResponse>;
     async fn commit_volume_revision(&self, req: CommitVolumeRevisionRequest) -> Result<Empty>;
     async fn remove_volume_source(&self, req: RemoveVolumeSourceRequest) -> Result<Empty>;
     async fn get_metrics(&self, req: Empty) -> Result<MetricsResponse>;

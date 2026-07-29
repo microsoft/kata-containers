@@ -15,20 +15,20 @@ use crate::{
     types::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
-        CommitVolumeRevisionRequest, ContainerID, CpuStats, CpuUsage,
-        CreateContainerRequest, CreateSandboxRequest, CreateVolumeSubdirRequest, Device, Empty,
-        ExecProcessRequest, FSGroup, FSGroupChangePolicy, GetIPTablesRequest,
-        GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse, HugetlbStats, IPAddress,
-        IPFamily, InitVolumeSourceRequest, InitVolumeSourceResponse, Interface, Interfaces,
-        KernelModule, MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse,
-        NetworkStats, OnlineCPUMemRequest, PidsStats, PutVolumeFileRequest, ReadStreamRequest,
-        ReadStreamResponse, RemoveContainerRequest, RemoveVolumeSourceRequest,
-        ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes, SetGuestDateTimeRequest,
-        SetIPTablesRequest, SetIPTablesResponse, SharedMount, SignalProcessRequest,
-        StatsContainerResponse, Storage, StringUser, ThrottlingData, TtyWinResizeRequest,
-        UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest, VersionCheckResponse,
-        VolumeSourceType, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
-        WriteStreamRequest,
+        CommitVolumeRevisionRequest, ContainerID, CopySingleFileRequest, CopySingleFileResponse,
+        CpuStats, CpuUsage, CreateContainerRequest, CreateSandboxRequest,
+        CreateVolumeSubdirRequest, Device, Empty, ExecProcessRequest, FSGroup,
+        FSGroupChangePolicy, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
+        HealthCheckResponse, HugetlbStats, IPAddress, IPFamily, InitVolumeSourceRequest,
+        InitVolumeSourceResponse, Interface, Interfaces, KernelModule, MemHotplugByProbeRequest,
+        MemoryData, MemoryStats, MetricsResponse, NetworkStats, OnlineCPUMemRequest, PidsStats,
+        PutVolumeFileRequest, ReadStreamRequest, ReadStreamResponse, RemoveContainerRequest,
+        RemoveVolumeSourceRequest, ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes,
+        SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse, SharedMount,
+        SignalProcessRequest, SingleFileType, StatsContainerResponse, Storage, StringUser,
+        ThrottlingData, TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest,
+        UpdateRoutesRequest, VersionCheckResponse, VolumeSourceType, VolumeStatsRequest,
+        VolumeStatsResponse, WaitProcessRequest, WriteStreamRequest,
     },
     GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest, OomEventResponse,
     SetPolicyRequest, WaitProcessResponse, WriteStreamResponse,
@@ -854,6 +854,40 @@ impl From<PutVolumeFileRequest> for agent::PutVolumeFileRequest {
             revision: from.revision,
             dir_mode: from.dir_mode,
             ..Default::default()
+        }
+    }
+}
+
+impl From<SingleFileType> for agent::SingleFileType {
+    fn from(from: SingleFileType) -> Self {
+        match from {
+            SingleFileType::Unspecified => agent::SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED,
+            SingleFileType::ResolvConf => agent::SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF,
+            SingleFileType::EtcHosts => agent::SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS,
+            SingleFileType::Hostname => agent::SingleFileType::SINGLE_FILE_TYPE_HOSTNAME,
+        }
+    }
+}
+
+impl From<CopySingleFileRequest> for agent::CopySingleFileRequest {
+    fn from(from: CopySingleFileRequest) -> Self {
+        Self {
+            sandbox_id: from.sandbox_id,
+            file_type: agent::SingleFileType::from(from.file_type).into(),
+            uid: from.uid,
+            gid: from.gid,
+            data_size: from.data_size,
+            data: from.data,
+            file_mode: from.file_mode,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<agent::CopySingleFileResponse> for CopySingleFileResponse {
+    fn from(from: agent::CopySingleFileResponse) -> Self {
+        Self {
+            guest_path: from.guest_path,
         }
     }
 }

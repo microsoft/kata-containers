@@ -160,6 +160,7 @@ impl VolumeResource {
                     share_fs_volume::ShareFsVolume::new(
                         share_fs,
                         m,
+                        sid,
                         cid,
                         read_only,
                         ctx.agent.clone(),

@@ -42,6 +42,32 @@ const SYS_MOUNT_PREFIX: [&str; 2] = ["/proc", "/sys"];
 const MONITOR_INTERVAL: Duration = Duration::from_millis(100);
 const DEBOUNCE_TIME: Duration = Duration::from_millis(500);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SingleFileType {
+    ResolvConf,
+    EtcHosts,
+    Hostname,
+}
+
+impl SingleFileType {
+    fn from_mount_destination(destination: &Path) -> Option<Self> {
+        match destination.to_str() {
+            Some("/etc/resolv.conf") => Some(Self::ResolvConf),
+            Some("/etc/hosts") => Some(Self::EtcHosts),
+            Some("/etc/hostname") => Some(Self::Hostname),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ResolvConf => "resolv.conf",
+            Self::EtcHosts => "etc-hosts",
+            Self::Hostname => "hostname",
+        }
+    }
+}
+
 // Corresponds to os.FileMode(0750) | os.ModeDir in Go
 // So, it's (permission bits 0o750) ORed with (file type bit S_IFDIR).
 // We use u32 here because mode fields in agent volume-sync requests are u32.
@@ -65,6 +91,8 @@ pub(crate) struct ShareFsVolume {
     source_path: Option<String>,
     // Record the container ID
     container_id: String,
+    // Record the sandbox ID for single-file transfer requests.
+    sandbox_id: String,
 }
 
 /// Directory Monitor Config
@@ -433,6 +461,7 @@ impl ShareFsVolume {
     pub(crate) async fn new(
         share_fs: &Option<Arc<dyn ShareFs>>,
         m: &oci::Mount,
+        sid: &str,
         cid: &str,
         readonly: bool,
         agent: Arc<dyn Agent>,
@@ -455,6 +484,7 @@ impl ShareFsVolume {
             volume_manager: Some(volume_manager.clone()),
             source_path: Some(source_path.clone()),
             container_id: cid.to_string(),
+            sandbox_id: sid.to_string(),
         };
 
         match share_fs {
@@ -478,29 +508,39 @@ impl ShareFsVolume {
 
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
+                    let file_type = match SingleFileType::from_mount_destination(m.destination()) {
+                        Some(file_type) => file_type,
+                        None => {
+                            warn!(
+                                sl!(),
+                                "Skipping unsupported single-file mount: src={:?}, dest={:?}",
+                                src,
+                                m.destination()
+                            );
+                            return Ok(volume);
+                        }
+                    };
+
                     slog::log!(
                         (sl!()),
                         slog::Level::Info,
                         "",
-                        "***** ShareFsVolume: copying single file {:?} , mount = {:?}",
+                        "***** ShareFsVolume: copying supported single file {:?} (type: {}) , mount = {:?}",
                         src,
+                        file_type.as_str(),
                         m
                     );
 
-                    let source = Self::init_volume_source(
-                        &host_volume_id,
-                        agent::VolumeSourceType::SingleFile,
-                        readonly,
+                    let guest_path = Self::copy_single_file_to_guest(
+                        &src,
+                        file_type,
+                        &volume.sandbox_id,
                         &agent,
                     )
-                    .await
-                    .context("init single-file volume source")?;
-
-                    Self::copy_file_to_guest(&src, &source.agent_volume_id, &agent)
                         .await
                         .context("copy file to guest")?;
 
-                    oci_mount.set_source(Some(PathBuf::from(&source.guest_path)));
+                    oci_mount.set_source(Some(PathBuf::from(&guest_path)));
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
                     // We allow directory copying wildly
@@ -644,11 +684,12 @@ impl ShareFsVolume {
         Ok(volume)
     }
 
-    async fn copy_file_to_guest(
+    async fn copy_single_file_to_guest(
         src: &Path,
-        agent_volume_id: &str,
+        file_type: SingleFileType,
+        sandbox_id: &str,
         agent: &Arc<dyn Agent>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         // Read file metadata
         let file_metadata = std::fs::metadata(src)
             .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
@@ -661,29 +702,37 @@ impl ShareFsVolume {
         file.read_to_end(&mut buffer)
             .with_context(|| format!("Failed to read file: {src:?}"))?;
 
-        // Create RPC request
-        let r = agent::PutVolumeFileRequest {
-            agent_volume_id: agent_volume_id.to_string(),
-            relative_path: String::new(),
-            file_size: file_metadata.len() as i64,
+        let r = agent::CopySingleFileRequest {
+            sandbox_id: sandbox_id.to_string(),
+            file_type: match file_type {
+                SingleFileType::ResolvConf => agent::SingleFileType::ResolvConf,
+                SingleFileType::EtcHosts => agent::SingleFileType::EtcHosts,
+                SingleFileType::Hostname => agent::SingleFileType::Hostname,
+            },
             uid: file_metadata.uid() as i32,
             gid: file_metadata.gid() as i32,
-            file_mode: file_metadata.mode(),
-            dir_mode: DIR_MODE_PERMS,
+            data_size: file_metadata.len() as i64,
             data: buffer,
+            file_mode: file_metadata.mode(),
             ..Default::default()
         };
 
         debug!(
             sl!(),
-            "copy_file: {:?} to managed source {:?}", &src, agent_volume_id
+            "copy_single_file: {:?} (type: {}) for sandbox {:?}",
+            &src,
+            file_type.as_str(),
+            sandbox_id
         );
 
-        // Issue RPC request to agent
-        agent.put_volume_file(r).await.with_context(|| {
-            format!("put file request failed: src: {src:?}, volume: {agent_volume_id:?}")
+        let resp = agent.copy_single_file(r).await.with_context(|| {
+            format!(
+                "copy single-file request failed: src: {src:?}, sandbox: {sandbox_id:?}, type: {}",
+                file_type.as_str()
+            )
         })?;
-        Ok(())
+
+        Ok(resp.guest_path)
     }
 
     async fn copy_directory_to_guest(
@@ -1077,5 +1126,25 @@ mod test {
         assert!(is_watchable_volume(&secret_path));
         assert!(is_watchable_volume(&projected_path));
         assert!(is_watchable_volume(&downward_api_path));
+    }
+
+    #[test]
+    fn test_single_file_type_from_mount_destination() {
+        assert_eq!(
+            SingleFileType::from_mount_destination(Path::new("/etc/resolv.conf")),
+            Some(SingleFileType::ResolvConf)
+        );
+        assert_eq!(
+            SingleFileType::from_mount_destination(Path::new("/etc/hosts")),
+            Some(SingleFileType::EtcHosts)
+        );
+        assert_eq!(
+            SingleFileType::from_mount_destination(Path::new("/etc/hostname")),
+            Some(SingleFileType::Hostname)
+        );
+        assert_eq!(
+            SingleFileType::from_mount_destination(Path::new("/tmp/unsupported")),
+            None
+        );
     }
 }

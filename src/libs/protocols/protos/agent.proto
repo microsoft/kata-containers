@@ -75,6 +75,7 @@ service AgentService {
 	rpc InitVolumeSource(InitVolumeSourceRequest) returns (InitVolumeSourceResponse);
 	rpc CreateVolumeSubdir(CreateVolumeSubdirRequest) returns (google.protobuf.Empty);
 	rpc PutVolumeFile(PutVolumeFileRequest) returns (google.protobuf.Empty);
+	rpc CopySingleFile(CopySingleFileRequest) returns (CopySingleFileResponse);
 	rpc CommitVolumeRevision(CommitVolumeRevisionRequest) returns (google.protobuf.Empty);
 	rpc RemoveVolumeSource(RemoveVolumeSourceRequest) returns (google.protobuf.Empty);
 	rpc CopyFile(CopyFileRequest) returns (google.protobuf.Empty);
@@ -604,6 +605,13 @@ enum VolumeSourceType {
 	VOLUME_SOURCE_TYPE_ATOMIC_K8S = 3;
 }
 
+enum SingleFileType {
+	SINGLE_FILE_TYPE_UNSPECIFIED = 0;
+	SINGLE_FILE_TYPE_RESOLV_CONF = 1;
+	SINGLE_FILE_TYPE_ETC_HOSTS = 2;
+	SINGLE_FILE_TYPE_HOSTNAME = 3;
+}
+
 message InitVolumeSourceRequest {
 	// Opaque source id controlled by runtime, used only for runtime-side correlation.
 	string host_volume_id = 1;
@@ -640,6 +648,20 @@ message PutVolumeFileRequest {
 	// Optional revision id used by atomic Kubernetes data flows.
 	string revision = 9;
 	uint32 dir_mode = 10;
+}
+
+message CopySingleFileRequest {
+	string sandbox_id = 1;
+	SingleFileType file_type = 2;
+	int32 uid = 3;
+	int32 gid = 4;
+	int64 data_size = 5;
+	bytes data = 6;
+	uint32 file_mode = 7;
+}
+
+message CopySingleFileResponse {
+	string guest_path = 1;
 }
 
 message CommitVolumeRevisionRequest {

@@ -42,11 +42,11 @@ use oci_spec::runtime as oci;
 use protobuf::MessageDyn;
 use protobuf::MessageField;
 use protocols::agent::{
-    AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest, GetIPTablesRequest,
-    GetIPTablesResponse, GuestDetailsResponse, InitVolumeSourceResponse, Interfaces, Metrics,
-    OOMEvent, ReadStreamResponse, ResizeVolumeRequest, Routes, SetIPTablesRequest,
-    SetIPTablesResponse, StatsContainerResponse, VolumeSourceType, VolumeStatsRequest,
-    WaitProcessResponse, WriteStreamResponse,
+    AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest, CopySingleFileResponse,
+    GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, InitVolumeSourceResponse,
+    Interfaces, Metrics, OOMEvent, ReadStreamResponse, ResizeVolumeRequest, Routes,
+    SetIPTablesRequest, SetIPTablesResponse, SingleFileType, StatsContainerResponse,
+    VolumeSourceType, VolumeStatsRequest, WaitProcessResponse, WriteStreamResponse,
 };
 use protocols::csi::{
     volume_usage::Unit as VolumeUsage_Unit, VolumeCondition, VolumeStatsResponse, VolumeUsage,
@@ -141,6 +141,7 @@ const USR_IP6TABLES_RESTORE: &str = "/usr/sbin/ip6tables-save";
 const IP6TABLES_RESTORE: &str = "/sbin/ip6tables-restore";
 const KATA_GUEST_SHARE_DIR: &str = "/run/kata-containers/shared/containers/";
 const KATA_GUEST_MANAGED_VOLUME_DIR: &str = "/run/kata-containers/shared/managed-volumes/";
+const KATA_GUEST_SINGLE_FILE_DIR: &str = "/run/kata-containers/shared/single-files/";
 
 const ERR_CANNOT_GET_WRITER: &str = "Cannot get writer";
 const ERR_INVALID_BLOCK_SIZE: &str = "Invalid block size";
@@ -1725,6 +1726,17 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn copy_single_file(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CopySingleFileRequest,
+    ) -> ttrpc::Result<CopySingleFileResponse> {
+        trace_rpc_call!(ctx, "copy_single_file", req);
+        is_allowed(&req).await?;
+
+        do_copy_single_file(&req).map_ttrpc_err(same)
+    }
+
     async fn commit_volume_revision(
         &self,
         ctx: &TtrpcContext,
@@ -2517,6 +2529,77 @@ fn do_put_volume_file(req: &protocols::agent::PutVolumeFileRequest) -> Result<()
     };
 
     do_copy_file(&copy_req, &root)
+}
+
+fn single_file_name(file_type: SingleFileType) -> Result<&'static str> {
+    match file_type {
+        SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => Ok("resolv.conf"),
+        SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => Ok("hosts"),
+        SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => Ok("hostname"),
+        SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED => bail!("single file type is unspecified"),
+    }
+}
+
+fn validate_sandbox_id(sandbox_id: &str) -> Result<()> {
+    if sandbox_id.is_empty() {
+        bail!("sandbox_id cannot be empty")
+    }
+
+    let p = Path::new(sandbox_id);
+    if p.is_absolute() {
+        bail!("sandbox_id must not be absolute")
+    }
+
+    for comp in p.components() {
+        match comp {
+            Component::Normal(_) => {}
+            _ => bail!("sandbox_id contains invalid path component"),
+        }
+    }
+
+    Ok(())
+}
+
+fn do_copy_single_file(
+    req: &protocols::agent::CopySingleFileRequest,
+) -> Result<CopySingleFileResponse> {
+    validate_sandbox_id(&req.sandbox_id)?;
+
+    let file_type = req
+        .file_type
+        .enum_value()
+        .map_err(|v| anyhow!("invalid single file type enum value: {v}"))?;
+    let file_name = single_file_name(file_type)?;
+
+    let root = PathBuf::from(KATA_GUEST_SINGLE_FILE_DIR);
+    let sandbox_dir = root.join(&req.sandbox_id);
+    fs::create_dir_all(&sandbox_dir).context("create single-file sandbox directory")?;
+
+    let guest_path = sandbox_dir.join(file_name);
+    let file_mode = if req.file_mode == 0 {
+        libc::S_IFREG | 0o640
+    } else {
+        req.file_mode
+    };
+
+    let copy_req = CopyFileRequest {
+        path: guest_path.to_string_lossy().into_owned(),
+        file_size: req.data_size,
+        file_mode,
+        dir_mode: libc::S_IFDIR | 0o750,
+        uid: req.uid,
+        gid: req.gid,
+        offset: 0,
+        data: req.data.clone(),
+        ..Default::default()
+    };
+
+    do_copy_file(&copy_req, &root)?;
+
+    Ok(CopySingleFileResponse {
+        guest_path: guest_path.to_string_lossy().into_owned(),
+        ..Default::default()
+    })
 }
 
 fn do_commit_volume_revision(req: &protocols::agent::CommitVolumeRevisionRequest) -> Result<()> {
