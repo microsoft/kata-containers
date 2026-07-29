@@ -543,18 +543,19 @@ impl ShareFsVolume {
                     oci_mount.set_source(Some(PathBuf::from(&guest_path)));
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
-                    // We allow directory copying wildly
-                    // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
+                    let should_copy_contents = is_watchable_volume(&src);
+
                     slog::log!(
                         (sl!()),
                         slog::Level::Info,
                         "",
-                        "+++++ ShareFsVolume: copying directory {:?} , mount = {:?}",
+                        "+++++ ShareFsVolume: preparing directory {:?} (copy_contents: {}) , mount = {:?}",
                         src,
+                        should_copy_contents,
                         m
                     );
 
-                    let volume_type = if is_watchable_volume(&src) {
+                    let volume_type = if should_copy_contents {
                         agent::VolumeSourceType::AtomicK8s
                     } else {
                         agent::VolumeSourceType::EmptyDir
@@ -576,7 +577,7 @@ impl ShareFsVolume {
                         .await
                         .context("get or create volume")?;
 
-                    if is_new {
+                    if is_new && should_copy_contents {
                         Self::copy_directory_to_guest(&src, &agent_volume_id, &agent)
                             .await
                             .context("copy directory to guest")?;
@@ -587,7 +588,7 @@ impl ShareFsVolume {
 
                     // Start monitoring (only for watchable volumes)
                     let mut monitor_task = None;
-                    if is_new && is_watchable_volume(&src) {
+                    if is_new && should_copy_contents {
                         let watcher = FsWatcher::new(&src).await?;
                         let handle = watcher
                             .start_monitor(agent.clone(), src.clone(), agent_volume_id.clone())
