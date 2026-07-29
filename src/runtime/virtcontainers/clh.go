@@ -895,6 +895,9 @@ func (clh *cloudHypervisor) preparePrivateRestoreConfig(configPath, vmID string)
 			}
 		}
 	}
+	if err := clh.preparePrivateRestoreDisks(config, configPath); err != nil {
+		return err
+	}
 
 	nets, _ := config["net"].([]interface{})
 	if len(clh.restoreNetFds) > 0 {
@@ -947,6 +950,56 @@ func (clh *cloudHypervisor) preparePrivateRestoreConfig(configPath, vmID string)
 	}
 
 	return os.WriteFile(configPath, updatedConfig, 0600)
+}
+
+func (clh *cloudHypervisor) preparePrivateRestoreDisks(config map[string]interface{}, configPath string) error {
+	disks, ok := config["disks"].([]interface{})
+	if !ok {
+		return nil
+	}
+
+	privateDiskDir := filepath.Join(filepath.Dir(configPath), "disks")
+	for index, entry := range disks {
+		disk, ok := entry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		sourcePath, ok := disk["path"].(string)
+		if !ok || sourcePath == "" {
+			continue
+		}
+		diskID, _ := disk["id"].(string)
+		if diskID == "" {
+			diskID = fmt.Sprintf("disk[%d]", index)
+		}
+
+		info, err := os.Stat(sourcePath)
+		if err != nil {
+			return fmt.Errorf("kata restore failed: snapshot disk %q path %s is unavailable: %w", diskID, sourcePath, err)
+		}
+		readonly, _ := disk["readonly"].(bool)
+		if readonly {
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("kata restore failed: writable snapshot disk %q path %s is not a regular file", diskID, sourcePath)
+		}
+
+		if err := os.MkdirAll(privateDiskDir, DirMode); err != nil {
+			return fmt.Errorf("kata restore failed: create private disk directory: %w", err)
+		}
+		privatePath := filepath.Join(privateDiskDir, fmt.Sprintf("%d-%s", index, filepath.Base(sourcePath)))
+		if err := clh.copyFile(sourcePath, privatePath); err != nil {
+			return fmt.Errorf("kata restore failed: copy writable snapshot disk %q from %s: %w", diskID, sourcePath, err)
+		}
+		disk["path"] = privatePath
+		clh.Logger().WithFields(log.Fields{
+			"disk-id":      diskID,
+			"private-path": privatePath,
+		}).Debug("restore: copied writable snapshot disk into private VM directory")
+	}
+
+	return nil
 }
 
 // setupInitdata prepares and attaches the initdata disk if present.
