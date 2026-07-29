@@ -989,7 +989,7 @@ func (clh *cloudHypervisor) preparePrivateRestoreDisks(config map[string]interfa
 			return fmt.Errorf("kata restore failed: create private disk directory: %w", err)
 		}
 		privatePath := filepath.Join(privateDiskDir, fmt.Sprintf("%d-%s", index, filepath.Base(sourcePath)))
-		if err := clh.copyFile(sourcePath, privatePath); err != nil {
+		if err := pkgUtils.CopyFileSparse(sourcePath, privatePath); err != nil {
 			return fmt.Errorf("kata restore failed: copy writable snapshot disk %q from %s: %w", diskID, sourcePath, err)
 		}
 		disk["path"] = privatePath
