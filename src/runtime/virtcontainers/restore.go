@@ -17,6 +17,7 @@ import (
 	persistapi "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/persist/api"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/compatoci"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
+	"github.com/sirupsen/logrus"
 )
 
 // RestoreOpts configures an annotation-driven restore.
@@ -208,6 +209,7 @@ func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) (err error) {
 	if lerr != nil {
 		return fmt.Errorf("kata restore failed: list guest interfaces: %w", lerr)
 	}
+	s.Logger().WithField("guest-interfaces", fmt.Sprintf("%+v", before)).Info("restore network: listed source guest interfaces")
 	var guestNICName string
 	guestNICCount := 0
 	for _, gi := range before {
@@ -240,19 +242,52 @@ func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) (err error) {
 	}
 	target.HwAddr = props.Iface.HardwareAddr.String()
 	target.RawFlags |= kataIfaceRestoreReplace
-	if _, uerr := s.agent.updateInterface(ctx, target); uerr != nil {
+	s.Logger().WithFields(logrus.Fields{
+		"guest-nic":           guestNICName,
+		"target-cni-name":     targetName,
+		"interface-requested": fmt.Sprintf("%+v", target),
+	}).Info("restore network: applying target guest interface")
+	resultingInterface, uerr := s.agent.updateInterface(ctx, target)
+	if uerr != nil {
 		return fmt.Errorf("kata restore failed: restore-replace interface %s: %w", guestNICName, uerr)
 	}
+	s.Logger().WithFields(logrus.Fields{
+		"interface-requested": fmt.Sprintf("%+v", target),
+		"interface-result":    fmt.Sprintf("%+v", resultingInterface),
+	}).Info("restore network: target guest interface applied")
 
 	for _, r := range routes {
 		if r.Device == targetName {
 			r.Device = guestNICName
 		}
 	}
+	guestInterfacesBeforeRoutes, interfacesBeforeRoutesErr := s.agent.listInterfaces(ctx)
+	guestRoutesBeforeRoutes, routesBeforeRoutesErr := s.agent.listRoutes(ctx)
+	s.Logger().WithFields(logrus.Fields{
+		"guest-interfaces":      fmt.Sprintf("%+v", guestInterfacesBeforeRoutes),
+		"guest-routes":          fmt.Sprintf("%+v", guestRoutesBeforeRoutes),
+		"list-interfaces-error": fmt.Sprint(interfacesBeforeRoutesErr),
+		"list-routes-error":     fmt.Sprint(routesBeforeRoutesErr),
+	}).Info("restore network: guest state before target route installation")
 	if len(routes) > 0 {
-		if _, rerr := s.agent.updateRoutes(ctx, routes); rerr != nil {
+		s.Logger().WithField("routes-requested", fmt.Sprintf("%+v", routes)).Info("restore network: installing target guest routes")
+		resultingRoutes, rerr := s.agent.updateRoutes(ctx, routes)
+		if rerr != nil {
+			diagnosticInterfaces, interfacesErr := s.agent.listInterfaces(ctx)
+			diagnosticRoutes, routesErr := s.agent.listRoutes(ctx)
+			s.Logger().WithError(rerr).WithFields(logrus.Fields{
+				"routes-requested":             fmt.Sprintf("%+v", routes),
+				"guest-interfaces-after-error": fmt.Sprintf("%+v", diagnosticInterfaces),
+				"guest-routes-after-error":     fmt.Sprintf("%+v", diagnosticRoutes),
+				"list-interfaces-error":        fmt.Sprint(interfacesErr),
+				"list-routes-error":            fmt.Sprint(routesErr),
+			}).Error("restore network: target route installation failed")
 			return fmt.Errorf("kata restore failed: install target routes: %w", rerr)
 		}
+		s.Logger().WithFields(logrus.Fields{
+			"routes-requested": fmt.Sprintf("%+v", routes),
+			"routes-result":    fmt.Sprintf("%+v", resultingRoutes),
+		}).Info("restore network: target guest routes installed")
 	}
 
 	after, aerr := s.agent.listInterfaces(ctx)

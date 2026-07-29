@@ -34,6 +34,10 @@ use std::str::{self, FromStr};
 // private raw_flags bit for restore-only identity replacement; keep in sync with the runtime.
 const KATA_IFACE_RESTORE_REPLACE: u32 = 0x4000_0000;
 
+fn sl() -> slog::Logger {
+    slog_scope::logger().new(o!("subsystem" => "netlink"))
+}
+
 /// Search criteria to use when looking for a link in `find_link`.
 pub enum LinkFilter<'a> {
     /// Find by link name.
@@ -238,9 +242,12 @@ impl Handle {
             .find_link(LinkFilter::Name(iface.name.as_str()))
             .await?;
         let index = link.index();
+        self.log_link_state("restore-replace-initial", &link).await;
 
         if link.is_up() {
             self.enable_link(index, false).await?;
+            self.log_link_state_by_index("restore-replace-after-down", index)
+                .await;
         }
 
         for addr in self.list_addresses(AddressFilter::LinkIndex(index)).await? {
@@ -251,6 +258,8 @@ impl Handle {
                 .await
                 .map_err(|err| anyhow!("Failed to delete address on link {}: {:?}", index, err))?;
         }
+        self.log_link_state_by_index("restore-replace-after-address-delete", index)
+            .await;
 
         let mac = parse_mac_address(&iface.hwAddr)
             .map_err(|e| anyhow!("restore-replace: parse target mac {}: {}", iface.hwAddr, e))?;
@@ -261,6 +270,8 @@ impl Handle {
                 anyhow!("restore-replace: set IFLA_ADDRESS on {}: {}", iface.name, e)
             })?;
         }
+        self.log_link_state_by_index("restore-replace-after-mac-update", index)
+            .await;
 
         let supports_ipv6_all = fs::read_to_string("/proc/sys/net/ipv6/conf/all/disable_ipv6")
             .map(|s| s.trim() == "0")
@@ -283,6 +294,8 @@ impl Handle {
             }
             self.add_addresses(index, std::iter::once(net)).await?;
         }
+        self.log_link_state_by_index("restore-replace-after-address-add", index)
+            .await;
 
         {
             // Avoid appending IFF_UP to the stale pre-down flags: rtnetlink 0.14
@@ -302,8 +315,58 @@ impl Handle {
                 anyhow!("restore-replace: set name/mtu/arp on {}: {}", iface.name, e)
             })?;
         }
+        self.log_link_state_by_index("restore-replace-complete", index)
+            .await;
 
         Ok(())
+    }
+
+    async fn log_link_state_by_index(&self, stage: &str, index: u32) {
+        match self.find_link(LinkFilter::Index(index)).await {
+            Ok(link) => self.log_link_state(stage, &link).await,
+            Err(err) => warn!(
+                sl(),
+                "failed to read link state for restore diagnostics";
+                "stage" => stage,
+                "link-index" => index,
+                "error" => format!("{err:#}"),
+            ),
+        }
+    }
+
+    async fn log_link_state(&self, stage: &str, link: &Link) {
+        let addresses = match self
+            .list_addresses(AddressFilter::LinkIndex(link.index()))
+            .await
+        {
+            Ok(addresses) => addresses
+                .into_iter()
+                .map(|address| {
+                    let value = address.address();
+                    let value = if value.is_empty() {
+                        address.local()
+                    } else {
+                        value
+                    };
+                    format!("{}/{}", value, address.0.header.prefix_len)
+                })
+                .collect::<Vec<_>>(),
+            Err(err) => vec![format!("<failed to list addresses: {err:#}>")],
+        };
+
+        info!(
+            sl(),
+            "restore interface link state";
+            "stage" => stage,
+            "name" => link.name(),
+            "link-index" => link.index(),
+            "mac" => link.address(),
+            "flags" => format!("{:?}", link.header.flags),
+            "raw-flags" => format!("{:#x}", link.raw_flags()),
+            "up" => link.is_up(),
+            "mtu" => link.mtu().unwrap_or(0),
+            "addresses" => format!("{:?}", addresses),
+        );
     }
 
     pub async fn handle_localhost(&self) -> Result<()> {
@@ -577,6 +640,23 @@ impl Handle {
 
         for route in list {
             let link = self.find_link(LinkFilter::Name(&route.device)).await?;
+            info!(
+                sl(),
+                "route add attempt";
+                "device" => route.device.as_str(),
+                "destination" => route.dest.as_str(),
+                "gateway" => route.gateway.as_str(),
+                "source" => route.source.as_str(),
+                "scope" => route.scope,
+                "route-flags" => format!("{:#x}", route.flags),
+                "mtu" => route.mtu,
+                "link-index" => link.index(),
+                "link-name" => link.name(),
+                "link-mac" => link.address(),
+                "link-flags" => format!("{:?}", link.header.flags),
+                "link-raw-flags" => format!("{:#x}", link.raw_flags()),
+                "link-up" => link.is_up(),
+            );
 
             const MAIN_TABLE: u32 = libc::RT_TABLE_MAIN as u32;
             let uni_cast: RouteType = RouteType::from(libc::RTN_UNICAST);
@@ -655,6 +735,19 @@ impl Handle {
 
                 if let Err(e) = request.execute().await {
                     if !is_eexist(&e) {
+                        warn!(
+                            sl(),
+                            "route add failed";
+                            "device" => route.device.as_str(),
+                            "destination" => route.dest.as_str(),
+                            "gateway" => route.gateway.as_str(),
+                            "source" => route.source.as_str(),
+                            "link-index" => link.index(),
+                            "link-flags" => format!("{:?}", link.header.flags),
+                            "link-raw-flags" => format!("{:#x}", link.raw_flags()),
+                            "link-up" => link.is_up(),
+                            "error" => format!("{e}"),
+                        );
                         return Err(anyhow!(
                             "Failed to add IP v6 route (src: {}, dst: {}, gtw: {}, Err: {})",
                             route.source(),
@@ -697,6 +790,19 @@ impl Handle {
 
                 if let Err(e) = request.execute().await {
                     if !is_eexist(&e) {
+                        warn!(
+                            sl(),
+                            "route add failed";
+                            "device" => route.device.as_str(),
+                            "destination" => route.dest.as_str(),
+                            "gateway" => route.gateway.as_str(),
+                            "source" => route.source.as_str(),
+                            "link-index" => link.index(),
+                            "link-flags" => format!("{:?}", link.header.flags),
+                            "link-raw-flags" => format!("{:#x}", link.raw_flags()),
+                            "link-up" => link.is_up(),
+                            "error" => format!("{e}"),
+                        );
                         return Err(anyhow!(
                             "Failed to add IP v4 route (src: {}, dst: {}, gtw: {}, Err: {})",
                             route.source(),
@@ -906,6 +1012,13 @@ impl Link {
         }
 
         flags as i32 & libc::IFF_UP > 0
+    }
+
+    fn raw_flags(&self) -> u32 {
+        self.header
+            .flags
+            .iter()
+            .fold(0, |flags, flag| flags | u32::from(*flag))
     }
 
     fn index(&self) -> u32 {
