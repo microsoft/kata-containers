@@ -2571,7 +2571,12 @@ fn plan_digest<T: serde::Serialize>(req: &T) -> String {
 /// If the restore itself fails the enforcer state is no longer provable, and continuing
 /// would be failing open. hcsshim's `WithMetadataRollback` panics at exactly this point;
 /// the agent quarantines the reference monitor instead, which refuses all further
-/// transactions while leaving teardown paths usable.
+/// transactions.
+///
+/// Note that this is not as gentle as it sounds. `SignalProcess` and `RemoveContainer` are
+/// both transactions, so a quarantined monitor cannot gracefully stop or remove a
+/// container; only sandbox-level teardown, which is not SRM-gated, still works. See RM-8
+/// in `docs/cc/backlog.md`.
 #[cfg(feature = "strict-policy")]
 async fn rollback_policy_state(snapshot: &Option<String>, context: &str) {
     let Some(snap) = snapshot else {

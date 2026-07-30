@@ -193,7 +193,9 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   straight back, so `PlanMismatch` and `StaleStateVersion` are properties of the crate
   rather than of the integration. Meaningful anti-replay would require the version to be
   pinned by the initiator, which is outside FR-6's agent-internal scope. Quarantine blocks
-  further SRM-gated operations; it does not halt the guest. Replay protection is also not
+  further SRM-gated operations; it does not halt the guest, but because `SignalProcess` and
+  `RemoveContainer` are among those operations it does block graceful container teardown
+  (see RM-7/RM-8 in `docs/cc/backlog.md`). Replay protection is also not
   uniform across the four transactions: the retained-result cache is only sound when the
   operation id names a unique object, which holds for a container id but not for a signal
   (`(container, exec, signal)` names a repeatable event) or for an exec id (reusable once
