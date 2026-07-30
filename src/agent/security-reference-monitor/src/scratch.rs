@@ -80,8 +80,8 @@ impl std::error::Error for ScratchError {}
 /// `integrity` target (or an integrity-tagged crypt target) means integrity is in force.
 /// Anything else (`linear`, empty, ...) is plaintext regardless of what the host claimed.
 pub fn classify_scratch(effective_dm_targets: &[&str]) -> ScratchClass {
-    let has_crypt = effective_dm_targets.iter().any(|t| *t == "crypt");
-    let has_integrity = effective_dm_targets.iter().any(|t| *t == "integrity");
+    let has_crypt = effective_dm_targets.contains(&"crypt");
+    let has_integrity = effective_dm_targets.contains(&"integrity");
     match (has_crypt, has_integrity) {
         (true, true) => ScratchClass::EncryptedWithIntegrity,
         (true, false) => ScratchClass::Encrypted,

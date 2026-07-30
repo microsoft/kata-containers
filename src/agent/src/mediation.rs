@@ -156,13 +156,15 @@ mod tests {
         let unclassified: Vec<_> = proto.difference(&manifest).collect();
         assert!(
             unclassified.is_empty(),
-            "agent RPC(s) exposed but not covered by the mediation manifest (FR-7 gap): {unclassified:?}"
+            "agent RPC(s) exposed but not covered by the mediation manifest (FR-7 gap): {:?}",
+            unclassified
         );
 
         let stale: Vec<_> = manifest.difference(&proto).collect();
         assert!(
             stale.is_empty(),
-            "mediation manifest classifies method(s) the service no longer exposes: {stale:?}"
+            "mediation manifest classifies method(s) the service no longer exposes: {:?}",
+            stale
         );
     }
 
@@ -175,17 +177,24 @@ mod tests {
             let token = class.required_gate_token();
             let decl = format!("async fn {handler}(");
             let start = RPC_SOURCE.find(&decl).unwrap_or_else(|| {
-                panic!("handler `{handler}` for RPC `{rpc}` not found in rpc.rs")
+                panic!(
+                    "handler `{}` for RPC `{}` not found in rpc.rs",
+                    handler, rpc
+                )
             });
             // Bound the body at the next handler declaration to avoid leaking a gate
             // token from a neighbouring handler into this one.
             let after = &RPC_SOURCE[start + decl.len()..];
-            let end = after.find("async fn ").map(|e| e).unwrap_or(after.len());
+            let end = after.find("async fn ").unwrap_or(after.len());
             let body = &after[..end];
             assert!(
                 body.contains(token),
-                "RPC `{rpc}` (handler `{handler}`, class {class:?}) does not reach its \
-                 enforcement point (`{token}` not found in its body) — total-mediation gap"
+                "RPC `{}` (handler `{}`, class {:?}) does not reach its \
+                 enforcement point (`{}` not found in its body) — total-mediation gap",
+                rpc,
+                handler,
+                class,
+                token
             );
         }
     }

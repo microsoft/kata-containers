@@ -467,7 +467,6 @@ impl AgentPolicy {
         #[cfg(feature = "strict-policy")]
         {
             self.allow_failures = false;
-            return Ok(());
         }
         #[cfg(not(feature = "strict-policy"))]
         {
@@ -484,8 +483,8 @@ impl AgentPolicy {
                 }
                 Err(_) => false,
             };
-            Ok(())
         }
+        Ok(())
     }
 }
 

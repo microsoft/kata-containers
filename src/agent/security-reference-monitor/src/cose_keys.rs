@@ -24,6 +24,22 @@ use const_oid::ObjectIdentifier;
 use ed25519_dalek::Verifier as _;
 use std::convert::TryFrom;
 
+/// Signature verification failed.
+///
+/// Deliberately carries no detail: the caller must not be able to distinguish *why* a
+/// signature was rejected (bad encoding, wrong algorithm, bad signature), since that
+/// distinction is an oracle for an attacker probing the verifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SigError;
+
+impl std::fmt::Display for SigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("signature verification failed")
+    }
+}
+
+impl std::error::Error for SigError {}
+
 /// COSE signature algorithms we accept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoseAlg {
@@ -100,32 +116,32 @@ impl PublicKey {
     /// Verify a COSE detached signature (`sig`) over `tbs` under `alg`. `sig` is in the COSE
     /// wire form: fixed-width `r||s` for ECDSA, raw modulus-width bytes for RSA, 64 bytes for
     /// EdDSA. Returns `Ok(())` iff the signature is valid and `alg` matches this key type.
-    pub fn verify_cose(&self, alg: CoseAlg, tbs: &[u8], sig: &[u8]) -> Result<(), ()> {
+    pub fn verify_cose(&self, alg: CoseAlg, tbs: &[u8], sig: &[u8]) -> Result<(), SigError> {
         match (self, alg) {
             (PublicKey::Ed25519(k), CoseAlg::EdDsa) => {
-                let s = ed25519_dalek::Signature::from_slice(sig).map_err(|_| ())?;
-                k.verify(tbs, &s).map_err(|_| ())
+                let s = ed25519_dalek::Signature::from_slice(sig).map_err(|_| SigError)?;
+                k.verify(tbs, &s).map_err(|_| SigError)
             }
             (PublicKey::P256(k), CoseAlg::Es256) => {
-                let s = p256::ecdsa::Signature::from_slice(sig).map_err(|_| ())?;
-                k.verify(tbs, &s).map_err(|_| ())
+                let s = p256::ecdsa::Signature::from_slice(sig).map_err(|_| SigError)?;
+                k.verify(tbs, &s).map_err(|_| SigError)
             }
             (PublicKey::P384(k), CoseAlg::Es384) => {
-                let s = p384::ecdsa::Signature::from_slice(sig).map_err(|_| ())?;
-                k.verify(tbs, &s).map_err(|_| ())
+                let s = p384::ecdsa::Signature::from_slice(sig).map_err(|_| SigError)?;
+                k.verify(tbs, &s).map_err(|_| SigError)
             }
             (PublicKey::Rsa(k), CoseAlg::Ps256) => {
                 let vk = rsa::pss::VerifyingKey::<sha2::Sha256>::new(k.clone());
-                let s = rsa::pss::Signature::try_from(sig).map_err(|_| ())?;
-                vk.verify(tbs, &s).map_err(|_| ())
+                let s = rsa::pss::Signature::try_from(sig).map_err(|_| SigError)?;
+                vk.verify(tbs, &s).map_err(|_| SigError)
             }
             (PublicKey::Rsa(k), CoseAlg::Rs256) => {
                 let vk = rsa::pkcs1v15::VerifyingKey::<sha2::Sha256>::new(k.clone());
-                let s = rsa::pkcs1v15::Signature::try_from(sig).map_err(|_| ())?;
-                vk.verify(tbs, &s).map_err(|_| ())
+                let s = rsa::pkcs1v15::Signature::try_from(sig).map_err(|_| SigError)?;
+                vk.verify(tbs, &s).map_err(|_| SigError)
             }
             // Algorithm does not match the key type ⇒ reject (no cross-alg confusion).
-            _ => Err(()),
+            _ => Err(SigError),
         }
     }
 
@@ -138,27 +154,27 @@ impl PublicKey {
         sig_alg_oid: &ObjectIdentifier,
         tbs: &[u8],
         sig_der: &[u8],
-    ) -> Result<(), ()> {
+    ) -> Result<(), SigError> {
         match (self, *sig_alg_oid) {
             (PublicKey::P256(k), oid) if oid == ECDSA_WITH_SHA256 => {
-                let s = p256::ecdsa::DerSignature::try_from(sig_der).map_err(|_| ())?;
-                k.verify(tbs, &s).map_err(|_| ())
+                let s = p256::ecdsa::DerSignature::try_from(sig_der).map_err(|_| SigError)?;
+                k.verify(tbs, &s).map_err(|_| SigError)
             }
             (PublicKey::P384(k), oid) if oid == ECDSA_WITH_SHA384 => {
-                let s = p384::ecdsa::DerSignature::try_from(sig_der).map_err(|_| ())?;
-                k.verify(tbs, &s).map_err(|_| ())
+                let s = p384::ecdsa::DerSignature::try_from(sig_der).map_err(|_| SigError)?;
+                k.verify(tbs, &s).map_err(|_| SigError)
             }
             (PublicKey::Rsa(k), oid) if oid == SHA256_WITH_RSA => {
                 let vk = rsa::pkcs1v15::VerifyingKey::<sha2::Sha256>::new(k.clone());
-                let s = rsa::pkcs1v15::Signature::try_from(sig_der).map_err(|_| ())?;
-                vk.verify(tbs, &s).map_err(|_| ())
+                let s = rsa::pkcs1v15::Signature::try_from(sig_der).map_err(|_| SigError)?;
+                vk.verify(tbs, &s).map_err(|_| SigError)
             }
             (PublicKey::Rsa(k), oid) if oid == SHA384_WITH_RSA => {
                 let vk = rsa::pkcs1v15::VerifyingKey::<sha2::Sha384>::new(k.clone());
-                let s = rsa::pkcs1v15::Signature::try_from(sig_der).map_err(|_| ())?;
-                vk.verify(tbs, &s).map_err(|_| ())
+                let s = rsa::pkcs1v15::Signature::try_from(sig_der).map_err(|_| SigError)?;
+                vk.verify(tbs, &s).map_err(|_| SigError)
             }
-            _ => Err(()),
+            _ => Err(SigError),
         }
     }
 }

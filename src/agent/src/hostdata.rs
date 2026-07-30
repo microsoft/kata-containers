@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn short_snp_report_is_rejected() {
-        assert!(extract_snp_host_data(&vec![0u8; 8]).is_err());
+        assert!(extract_snp_host_data(&[0u8; 8]).is_err());
     }
 
     fn fake_tdx_dev(value: Option<&[u8]>) -> tempfile::TempDir {

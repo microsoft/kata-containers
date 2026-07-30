@@ -1047,7 +1047,7 @@ fn decode_hex32(s: &str) -> Result<[u8; 32]> {
 #[cfg(feature = "strict-policy")]
 fn decode_hex_vec(s: &str) -> Result<Vec<u8>> {
     let s = s.trim();
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         anyhow::bail!("hex string has odd length: {}", s.len());
     }
     (0..s.len())

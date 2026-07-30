@@ -1188,7 +1188,7 @@ fn bytes_to_hex(b: &[u8]) -> String {
 /// Decode a hex string into bytes.
 fn hex_to_bytes(s: &str) -> Result<Vec<u8>, ()> {
     let s = s.trim();
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(());
     }
     (0..s.len())
