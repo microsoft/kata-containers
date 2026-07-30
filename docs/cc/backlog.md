@@ -18,6 +18,25 @@ BL-5 (bind measured state into initdata) landed in PR #10 (branch `bl5-initdata-
 `parma-hardening-features.md` §"Measured-initdata trust roots". Besides FR-16, what remains is **live
 validation** of already-merged features (below).
 
+### Documentation completeness (DOC-1…DOC-3)
+
+`parma-hardening-features.md` documents each feature as **Gap → Fix → Guarantee → Commits →
+Validated**, which explains what each feature does but not the reasoning the set as a whole
+rests on. Three additions would make the document self-justifying to a reader outside the
+team, and would make over-claims harder to introduce.
+
+| ID | Item | Why |
+|---|---|---|
+| DOC-1 | **Threat model section.** State the adversary (untrusted host and shim), the trust boundary, the assumptions inherited from the hardware TEE, and what is explicitly *not* defended (host-controlled scheduling and resource starvation, denial of service, side channels). | Every feature is currently justified against an unstated model, so "is this a gap?" has no written arbiter. This is the first thing an external reviewer needs. |
+| DOC-2 | **Parity anchors.** For each feature, name the equivalent mechanism in the runhcs/OpenGCS confidential stack and state whether this branch matches it or deliberately differs, with the reason. | The design is a parity effort, but the comparison appears nowhere in the docs and only once in the code (`policy.rs` citing `WithMetadataRollback`). Recording it turns "we chose differently" into a reviewable decision instead of an apparent omission. |
+| DOC-3 | **A `Limits` bullet per feature**, stating what the guarantee does *not* cover. | A **Guarantee** with no matching **Limits** is how a requirement's text drifts ahead of its implementation. FR-6 now carries one; the rest do not. |
+
+### Feature coverage
+
+| ID | Item | Why |
+|---|---|---|
+| BL-10 | **Extend SRM transaction coverage** beyond `CreateContainer`, `ExecProcess`, `SignalProcess`, and `RemoveContainer` to the remaining mutating RPCs in the complete-mediation manifest (`UpdateContainer`, `PauseContainer`/`ResumeContainer`, `StartContainer`, sandbox lifecycle, `SetIPTables`, `AddSwap`, …). | FR-6's intent is every mutating operation. The four covered today include both rules that mutate persisted policy state, so the rollback property is complete; the rest are policy-gated but not transactional. |
+
 ## Merged, but live end-to-end validation is deployment-time
 
 These features are implemented, unit-tested, and build-clean on `coco-parity`; the remaining
