@@ -522,6 +522,104 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_duplicates_cannot_both_reserve_the_same_operation() {
+        // The checks above drive `prepare` sequentially, but the defect they cover is a
+        // race. The agent holds the monitor behind a mutex and releases it between
+        // phases -- `SRM.lock()` is taken and dropped around prepare, execute and commit
+        // separately -- so a duplicate request can arrive while the first operation is
+        // still running. This reproduces that shape: two threads contend for the same
+        // operation id, each locking only for the duration of a phase.
+        //
+        // Exactly one must win. The loser must be refused rather than silently taking
+        // the winner's transaction over, which is what made this a correctness bug and
+        // not just a tidiness one.
+        use std::sync::{Arc, Barrier, Mutex};
+
+        let m = Arc::new(Mutex::new(ReferenceMonitor::new()));
+        let start = Arc::new(Barrier::new(2));
+
+        let handles: Vec<_> = vec!["d-a", "d-b"]
+            .into_iter()
+            .map(|digest| {
+                let m = Arc::clone(&m);
+                let start = Arc::clone(&start);
+                std::thread::spawn(move || {
+                    start.wait();
+                    let mut guard = m.lock().unwrap();
+                    let version = guard.state_version();
+                    let outcome = guard.prepare("ctr1", version, digest);
+                    drop(guard);
+                    (digest, outcome)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        let winners: Vec<_> = results
+            .iter()
+            .filter(|(_, r)| matches!(r, Ok(Prepared::New)))
+            .collect();
+        assert_eq!(winners.len(), 1, "exactly one prepare may reserve the id");
+
+        let losers: Vec<_> = results
+            .iter()
+            .filter(|(_, r)| !matches!(r, Ok(Prepared::New)))
+            .collect();
+        assert_eq!(losers.len(), 1);
+        assert!(
+            matches!(
+                losers[0].1,
+                Err(SrmError::InvalidState {
+                    state: TxnState::Prepared,
+                    ..
+                })
+            ),
+            "the losing duplicate must be refused, got {:?}",
+            losers[0].1
+        );
+
+        // The surviving transaction is the winner's, untouched by the loser.
+        let guard = m.lock().unwrap();
+        assert_eq!(
+            guard.transaction("ctr1").unwrap().plan_digest,
+            *winners[0].0
+        );
+    }
+
+    #[test]
+    fn retiring_on_commit_gives_up_replay_protection_after_the_fact() {
+        // Pins the trade-off documented for FR-6 so it cannot change silently.
+        //
+        // Signal and exec retire their transaction on commit, because their operation
+        // ids name repeatable events rather than unique objects -- a second SIGHUP is a
+        // legitimate request, not a replay, and answering it from the retained result
+        // means the signal is never delivered.
+        //
+        // The cost is that replay protection for those two paths is scoped to duplicates
+        // that arrive while the first is still in flight (refused by `prepare`, see
+        // above). A retry issued after the original committed is indistinguishable from
+        // a fresh request and will execute again. Closing that window needs an
+        // idempotency key pinned by the initiator, which is outside FR-6's scope.
+        let mut m = ReferenceMonitor::new();
+        let op = "signal:ctr1::15";
+
+        m.prepare(op, 0, "d1").unwrap();
+        m.execute(op, "d1").unwrap();
+        m.commit(op, "signal-delivered").unwrap();
+        m.retire(op).unwrap();
+
+        // Not deduplicated: the monitor has no memory of the first delivery, so an
+        // after-the-fact retry is admitted as a new operation and the signal is sent
+        // twice. This is the accepted behaviour, not a defect.
+        assert_eq!(
+            m.prepare(op, m.state_version(), "d1").unwrap(),
+            Prepared::New,
+            "a post-commit repeat is admitted; replay protection is in-flight only"
+        );
+    }
+
+    #[test]
     fn retire_frees_a_committed_op_id_for_reuse() {
         // F-17/F-19: a container id is reusable once the container is removed. Without
         // retiring the create transaction, the next create for the same id is answered
