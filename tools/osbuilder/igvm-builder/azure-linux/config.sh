@@ -6,8 +6,9 @@
 
 # shellcheck disable=SC2034,SC2154
 
-# this is where the kernel-uvm package installation places bzImage, see SPEC file
-BZIMAGE_BIN="/usr/share/cloud-hypervisor/bzImage"
+# This is where the kernel-uvm package places bzImage. IGVM_KERNEL allows
+# reproducing an IGVM with a different guest kernel
+BZIMAGE_BIN="${IGVM_KERNEL:-/usr/share/cloud-hypervisor/bzImage}"
 
 IGVM_EXTRACT_FOLDER="${SCRIPT_DIR}/igvm-tooling"
 CLH_ACPI_TABLES_DIR="${IGVM_EXTRACT_FOLDER}/src/igvm/acpi/acpi-clh/"

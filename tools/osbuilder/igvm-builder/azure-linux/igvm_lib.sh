@@ -37,21 +37,39 @@ uninstall_igvm_tool()
 
 build_igvm_files()
 {
-	echo "Reading Kata image dm_verity root hash information from root_hash file"
-	ROOT_HASH_FILE="${SCRIPT_DIR}/../root_hash.txt"
-
-	if [[ ! -f "${ROOT_HASH_FILE}" ]]; then
-		echo "Could no find image root hash file '${ROOT_HASH_FILE}', aborting"
+	if [[ ! -r "${BZIMAGE_BIN}" ]]; then
+		echo "Could not read IGVM kernel '${BZIMAGE_BIN}', aborting"
 		exit 1
 	fi
 
-	IMAGE_ROOT_HASH=$(sed -e 's/Root hash:\s*//g;t;d' "${ROOT_HASH_FILE}")
-	IMAGE_SALT=$(sed -e 's/Salt:\s*//g;t;d' "${ROOT_HASH_FILE}")
-	IMAGE_DATA_BLOCKS=$(sed -e 's/Data blocks:\s*//g;t;d' "${ROOT_HASH_FILE}")
-	IMAGE_DATA_BLOCK_SIZE=$(sed -e 's/Data block size:\s*//g;t;d' "${ROOT_HASH_FILE}")
+	echo "Using IGVM kernel: ${BZIMAGE_BIN}"
+	ROOT_HASH_FILE="${SCRIPT_DIR}/../root_hash_${BUILD_VARIANT:-}.txt"
+	echo "Reading Kata image dm-verity information from ${ROOT_HASH_FILE}"
+
+	if [[ ! -f "${ROOT_HASH_FILE}" ]]; then
+		echo "Could not find image root hash file '${ROOT_HASH_FILE}', aborting"
+		exit 1
+	fi
+
+	local -A verity_params
+	while IFS='=' read -r name value; do
+		verity_params["${name}"]="${value}"
+	done < <(tr ',' '\n' < "${ROOT_HASH_FILE}")
+
+	IMAGE_ROOT_HASH="${verity_params[root_hash]:-}"
+	IMAGE_SALT="${verity_params[salt]:-}"
+	IMAGE_DATA_BLOCKS="${verity_params[data_blocks]:-}"
+	IMAGE_DATA_BLOCK_SIZE="${verity_params[data_block_size]:-}"
+	IMAGE_HASH_BLOCK_SIZE="${verity_params[hash_block_size]:-}"
+
+	if [[ -z "${IMAGE_ROOT_HASH}" || -z "${IMAGE_SALT}" || -z "${IMAGE_DATA_BLOCKS}" ||
+		-z "${IMAGE_DATA_BLOCK_SIZE}" || -z "${IMAGE_HASH_BLOCK_SIZE}" ]]; then
+		echo "Invalid dm-verity parameters in '${ROOT_HASH_FILE}', aborting"
+		exit 1
+	fi
+
 	IMAGE_DATA_SECTORS_PER_BLOCK=$((IMAGE_DATA_BLOCK_SIZE / 512))
 	IMAGE_DATA_SECTORS=$((IMAGE_DATA_BLOCKS * IMAGE_DATA_SECTORS_PER_BLOCK))
-	IMAGE_HASH_BLOCK_SIZE=$(sed -e 's/Hash block size:\s*//g;t;d' "${ROOT_HASH_FILE}")
 
 	# reloading the config file as various variables depend on above values
 	load_config_distro

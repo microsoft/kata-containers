@@ -124,6 +124,8 @@ Clone the Microsoft's fork of the kata-containers repository:
 
 ```git clone https://github.com/microsoft/kata-containers.git```
 
+Note: use the compatible Rust version listed in `versions.yaml`; Azure Linux 3's packaged Rust may be older.
+
 ## Install IGVM tooling for ConfPods
 
 When intending to build the components for Confidential Containers, install the IGVM tool that will be used by the build tooling to create IGVM files with their reference measurements for the ConfPods UVM.
@@ -159,7 +161,101 @@ The `all[-confpods]` target runs the targets `package[-confpods]` and `uvm[-conf
 Notes:
   - To retrieve more detailed build output, prefix the make commands with `DEBUG=1`.
   - To build an IGVM file for CondPods with a non-default SVN of 0, prefix the `make uvm-confpods` command with `IGVM_SVN=<number>`
+  - `IGVM_KERNEL=<path>` overrides `/usr/share/cloud-hypervisor/bzImage`.
+  - tarfs is disabled because its source is absent. Use `BUILD_TARFS=yes` on branches that include it.
   - For build and deployment of both Kata and Kata-CC artifacts, first run the `make all` and `make deploy` commands to build and install the Kata Containers for AKS components followed by `make clean`, and then run `make all-confpods` and `make deploy-confpods` to build and install the Confidential Containers for AKS components - or vice versa (using `make clean-confpods`).
+
+## Build and boot a development SEV-SNP UVM
+
+Azure Linux `kernel-uvm` 6.6.137.mshv1 currently triple-faults during IGVM
+boot. Use the known-good 6.1.58.mshv8 bzImage for development:
+
+```
+pushd kata-containers/tools/osbuilder/node-builder/azure-linux
+make package
+sudo make \
+	IGVM_KERNEL=/path/to/kernel-uvm-6.1.58.mshv8-bzImage \
+	uvm-confpods
+popd
+```
+
+Outputs in `tools/osbuilder`:
+
+- `kata-containers.img`: measured guest disk
+- `kata-containers-igvm.img`: production IGVM
+- `kata-containers-igvm-debug.img`: debug IGVM
+- `igvm-measurement.cose` and `igvm-debug-measurement.cose`: measurements
+
+Save this configuration as `vm.json` and replace the artifact paths:
+
+```json
+{
+  "cpus": {
+    "boot_vcpus": 1,
+    "max_vcpus": 1,
+    "nested": false
+  },
+  "memory": {
+    "size": 2147483648,
+    "shared": false
+  },
+  "payload": {
+    "igvm": "/absolute/path/to/kata-containers-igvm-debug.img",
+    "host_data": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "disks": [
+    {
+      "path": "/absolute/path/to/kata-containers.img",
+      "readonly": true,
+      "image_type": "Raw"
+    }
+  ],
+  "serial": {
+    "mode": "Off"
+  },
+  "console": {
+    "mode": "Tty"
+  },
+  "platform": {
+    "sev_snp": true,
+    "num_pci_segments": 10
+  }
+}
+```
+
+Cloud Hypervisor must include the `sev_snp` feature. Start it, then run the
+API calls from another terminal:
+
+```
+sudo /path/to/cloud-hypervisor-sev-snp \
+	--api-socket /run/cloud-hypervisor-snp.sock
+
+sudo curl --fail --unix-socket /run/cloud-hypervisor-snp.sock \
+	-X PUT http://localhost/api/v1/vm.create \
+	-H 'Content-Type: application/json' \
+	--data-binary @vm.json
+sudo curl --fail --unix-socket /run/cloud-hypervisor-snp.sock \
+	-X PUT http://localhost/api/v1/vm.boot
+```
+
+Inspect the VM:
+
+```
+sudo curl --fail --unix-socket /run/cloud-hypervisor-snp.sock \
+	http://localhost/api/v1/vm.info | jq
+```
+
+To tear it down, shut down a running VM and then stop Cloud Hypervisor:
+
+```
+sudo curl --fail --unix-socket /run/cloud-hypervisor-snp.sock \
+	-X PUT http://localhost/api/v1/vm.shutdown
+sudo curl --fail --unix-socket /run/cloud-hypervisor-snp.sock \
+	-X PUT http://localhost/api/v1/vmm.shutdown
+```
+
+After `vm.shutdown`, the VM state is `Created`; repeating that request returns
+`VM is not running`.
 
 ## Debug builds
 
