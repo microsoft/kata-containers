@@ -178,7 +178,9 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   undone. `prepare` refuses a duplicate for an operation that is still in flight rather
   than overwriting the live transaction. Every `commit` and `abort` result is acted on: a
   failure at either point means the monitor cannot account for an operation that already
-  ran, so it quarantines rather than continuing on state it cannot vouch for.
+  ran, so it quarantines rather than continuing on state it cannot vouch for. Operation
+  ids are built by a length-prefixed encoder rather than by joining host-supplied names
+  with a separator, so no two operations can resolve to the same id.
 - **Guarantee:** policy and runtime state commit together or are reconciled/rolled back;
   an unprovable state quarantines the monitor (never fails open).
 - **Scope — which RPCs are transactions, and why:** only two policy rules mutate persisted
@@ -204,8 +206,10 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   after the original committed will execute again.
 - **Commits:** `b10ffc663` (crate), `b88ff8e51` (create), `e4d6c8c97` (exec/signal),
   `dfac4bd7a` (policy-state rollback), this PR (removal + rollback failure handling).
-- **Validated:** unit (transaction manager tests, including transaction retirement and
-  refusal of in-flight duplicates) + policy tests covering removal rollback + matrix
+- **Validated:** unit (transaction manager tests, including transaction retirement,
+  refusal of in-flight duplicates under thread contention, and what a failed commit
+  leaves behind) + `rpc`-level integration tests covering operation-id injectivity and
+  the commit/retire helpers + policy tests covering removal rollback + matrix
   no-regression.
 
 ### FR-3 — Canonical object (authorized == executed)

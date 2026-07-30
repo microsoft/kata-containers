@@ -1002,7 +1002,7 @@ impl agent_ttrpc::AgentService for AgentService {
         {
             use kata_security_reference_monitor::Prepared;
 
-            let op_id = req.container_id.clone();
+            let op_id = srm_op_id("create", &[&req.container_id]);
             let digest = plan_digest(&req);
             {
                 let mut srm = crate::SRM.lock().await;
@@ -1116,9 +1116,9 @@ impl agent_ttrpc::AgentService for AgentService {
         {
             use kata_security_reference_monitor::Prepared;
 
-            // Namespaced: `create_container` uses the bare container id as its operation
-            // id, so an un-namespaced removal would collide with the create it undoes.
-            let op_id = format!("remove:{}", req.container_id);
+            // Namespaced by kind: `create_container` builds its id the same way, so an
+            // un-kinded removal would collide with the create it undoes.
+            let op_id = srm_op_id("remove", &[&req.container_id]);
             let digest = plan_digest(&req);
             {
                 let mut srm = crate::SRM.lock().await;
@@ -1165,7 +1165,8 @@ impl agent_ttrpc::AgentService for AgentService {
                         // The container id is now free again. Retire both transactions so
                         // a later create for the same id is a genuinely new operation
                         // rather than an idempotent replay of the create just undone.
-                        for id in [&req.container_id, &op_id] {
+                        let create_op_id = srm_op_id("create", &[&req.container_id]);
+                        for id in [&create_op_id, &op_id] {
                             retire_or_warn(&mut srm, id);
                         }
                     }
@@ -1246,7 +1247,7 @@ impl agent_ttrpc::AgentService for AgentService {
                 .require_running(&req.container_id, "exec")
                 .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
 
-            let op_id = format!("{}:{}", req.container_id, req.exec_id);
+            let op_id = srm_op_id("exec", &[&req.container_id, &req.exec_id]);
             let digest = plan_digest(&req);
             {
                 let mut srm = crate::SRM.lock().await;
@@ -1333,7 +1334,10 @@ impl agent_ttrpc::AgentService for AgentService {
         {
             use kata_security_reference_monitor::Prepared;
 
-            let op_id = format!("{}:{}:sig:{}", req.container_id, req.exec_id, req.signal);
+            let op_id = srm_op_id(
+                "signal",
+                &[&req.container_id, &req.exec_id, &req.signal.to_string()],
+            );
             let digest = plan_digest(&req);
             {
                 let mut srm = crate::SRM.lock().await;
@@ -2600,6 +2604,34 @@ async fn rollback_policy_state(snapshot: &Option<String>, context: &str) {
             .await
             .quarantine(format!("policy state rollback failed after {context}"));
     }
+}
+
+/// FR-6 / RM-4: build an operation id that no other operation can be confused with.
+///
+/// Operation ids are assembled from container and exec ids, and under this threat model
+/// both are supplied by the untrusted host. Joining them with a separator is therefore
+/// not injective: `format!("{cid}:{exec}")` maps `("a:b", "c")` and `("a", "b:c")` to the
+/// same id, and the bare container id used for a create collides with an exec id whose
+/// container and exec parts happen to concatenate to it.
+///
+/// That matters because a committed transaction is retained as an idempotent replay
+/// cache. Two different operations sharing an id means the second one is answered from
+/// the first one's cached result -- the agent returns success for work it never did, which
+/// is exactly the divergence FR-6 exists to prevent, reachable by a host that merely
+/// chooses its own container and exec ids.
+///
+/// Each part is length-prefixed, so the encoding is unambiguous regardless of what
+/// characters the host puts in a name. `kind` is a fixed literal and contains no `/`.
+#[cfg(feature = "strict-policy")]
+fn srm_op_id(kind: &str, parts: &[&str]) -> String {
+    let mut id = String::from(kind);
+    for part in parts {
+        id.push('/');
+        id.push_str(&part.len().to_string());
+        id.push(':');
+        id.push_str(part);
+    }
+    id
 }
 
 /// FR-6: record a successful operation, quarantining the monitor if that fails.
@@ -4426,5 +4458,541 @@ COMMIT
         let mut ids: Vec<String> = vec![resp1.container_id, resp2.container_id];
         ids.sort();
         assert_eq!(ids, vec!["container-1", "container-2"]);
+    }
+
+    #[tokio::test]
+    async fn test_do_copy_file() {
+        let temp_dir = tempdir().expect("creating temp dir failed");
+        // We start one directory deeper such that we catch problems when the shared directory does
+        // not exist yet.
+        let base = temp_dir.path().join("shared");
+
+        type Assertions = Box<dyn Fn(&Path) -> Result<()>>;
+        struct TestCase {
+            name: String,
+            request: CopyFileRequest,
+            assertions: Assertions,
+            should_fail: bool,
+        }
+
+        // Attention: these test cases depend on each other and can't be reordered.
+        // The first few cases build up a directory structure that the subsequent tests then rely
+        // on or try to exploit.
+        // TODO(burgerdev): define a common  directory structure for all tests up front.
+        let tests = [
+            TestCase {
+                name: "Create a top-level file".into(),
+                request: CopyFileRequest {
+                    path: base.join("f").to_string_lossy().into(),
+                    file_mode: 0o644 | libc::S_IFREG,
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    let f = base.join("f");
+                    let f_stat = fs::metadata(&f).context("stat ./f failed")?;
+                    ensure!(f_stat.is_file());
+                    ensure!(0o644 == f_stat.permissions().mode() & 0o777);
+                    let content = std::fs::read_to_string(&f).context("read ./f failed")?;
+                    ensure!(content.is_empty());
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Writing a file onto an existing file replaces it".into(),
+                request: CopyFileRequest {
+                    path: base.join("f").to_string_lossy().into(),
+                    file_mode: 0o600 | libc::S_IFREG,
+                    data: b"Hello!".to_vec(),
+                    file_size: 6,
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    let f = base.join("f");
+                    let f_stat = fs::metadata(&f).context("stat ./f failed")?;
+                    ensure!(f_stat.is_file());
+                    ensure!(0o600 == f_stat.permissions().mode() & 0o777);
+                    let content = std::fs::read_to_string(&f).context("read ./f failed")?;
+                    ensure!("Hello!" == content);
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Creating a file implicitly creates parent directories".into(),
+                request: CopyFileRequest {
+                    path: base.join("a/b").to_string_lossy().into(),
+                    dir_mode: 0o755 | libc::S_IFDIR,
+                    file_mode: 0o644 | libc::S_IFREG,
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    let a_stat = fs::metadata(base.join("a")).context("stat ./a failed")?;
+                    ensure!(a_stat.is_dir());
+                    ensure!(0o755 == a_stat.permissions().mode() & 0o777);
+                    let b_stat = fs::metadata(base.join("a/b")).context("stat ./a/b failed")?;
+                    ensure!(b_stat.is_file());
+                    ensure!(0o644 == b_stat.permissions().mode() & 0o777);
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Create a file within an existing directory".into(),
+                request: CopyFileRequest {
+                    path: base.join("a/c").to_string_lossy().into(),
+                    dir_mode: 0o700 | libc::S_IFDIR, // Test that existing directories are not touched - we expect this to stay 0o755.
+                    file_mode: 0o621 | libc::S_IFREG,
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    let a_stat = fs::metadata(base.join("a")).context("stat ./a failed")?;
+                    ensure!(a_stat.is_dir());
+                    ensure!(0o755 == a_stat.permissions().mode() & 0o777);
+                    let c_stat = fs::metadata(base.join("a/c")).context("stat ./a/c failed")?;
+                    ensure!(c_stat.is_file());
+                    ensure!(0o621 == c_stat.permissions().mode() & 0o777);
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Create a directory".into(),
+                request: CopyFileRequest {
+                    path: base.join("a/d").to_string_lossy().into(),
+                    dir_mode: 0o700 | libc::S_IFDIR, // Test that the permissions are taken from file_mode.
+                    file_mode: 0o755 | libc::S_IFDIR,
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    let a_stat = fs::metadata(base.join("a")).context("stat ./a failed")?;
+                    ensure!(a_stat.is_dir());
+                    ensure!(0o755 == a_stat.permissions().mode() & 0o777);
+                    let d_stat = fs::metadata(base.join("a/d")).context("stat ./a/d failed")?;
+                    ensure!(d_stat.is_dir());
+                    ensure!(0o755 == d_stat.permissions().mode() & 0o777);
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Creating a dir onto an existing file replaces the file".into(),
+                request: CopyFileRequest {
+                    path: base.join("a/b").to_string_lossy().into(),
+                    dir_mode: 0o700 | libc::S_IFDIR, // Test that the permissions are taken from file_mode.
+                    file_mode: 0o755 | libc::S_IFDIR,
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    let b_stat = fs::metadata(base.join("a/b")).context("stat ./a/b failed")?;
+                    ensure!(b_stat.is_dir());
+                    ensure!(0o755 == b_stat.permissions().mode() & 0o777);
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Creating a file onto an existing dir replaces the dir".into(),
+                request: CopyFileRequest {
+                    path: base.join("a/b").to_string_lossy().into(),
+                    dir_mode: 0o755 | libc::S_IFDIR,
+                    file_mode: 0o644 | libc::S_IFREG,
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    let b_stat = fs::metadata(base.join("a/b")).context("stat ./a/b failed")?;
+                    ensure!(b_stat.is_file());
+                    ensure!(0o644 == b_stat.permissions().mode() & 0o777);
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Creating a dir onto an existing dir does not replace that dir".into(),
+                request: CopyFileRequest {
+                    path: base.join("a").to_string_lossy().into(),
+                    dir_mode: 0o755 | libc::S_IFDIR,
+                    file_mode: 0o751 | libc::S_IFDIR,
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    // Check that a/b still exists
+                    let b_stat = fs::metadata(base.join("a/b")).context("stat ./a/b failed")?;
+                    ensure!(b_stat.is_file());
+                    let a_stat = fs::metadata(base.join("a")).context("stat ./a failed")?;
+                    ensure!(0o751 == a_stat.permissions().mode() & 0o777);
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Create a symlink".into(),
+                request: CopyFileRequest {
+                    path: base.join("a/link").to_string_lossy().into(),
+                    dir_mode: 0o700 | libc::S_IFDIR, // Test that the permissions are taken from file_mode.
+                    file_mode: 0o755 | libc::S_IFLNK,
+                    data: b"/etc/passwd".to_vec(),
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    let link = base.join("a/link");
+                    let link_stat = nix::sys::stat::lstat(&link).context("stat ./a/link failed")?;
+                    // Linux symlinks have no permissions!
+                    ensure!(0o777 | libc::S_IFLNK == link_stat.st_mode);
+                    let target = fs::read_link(&link).context("read_link ./a/link failed")?;
+                    ensure!(target.to_string_lossy() == "/etc/passwd");
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Create a directory with setgid and sticky bit".into(),
+                request: CopyFileRequest {
+                    path: base.join("x/y").to_string_lossy().into(),
+                    dir_mode: 0o3755 | libc::S_IFDIR,
+                    file_mode: 0o3770 | libc::S_IFDIR,
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    // Implicitly created directories should not get a sticky bit.
+                    let x_stat = fs::metadata(base.join("x")).context("stat ./x failed")?;
+                    ensure!(x_stat.is_dir());
+                    ensure!(0o755 == x_stat.permissions().mode() & 0o7777);
+                    // Explicitly created directories should.
+                    let y_stat = fs::metadata(base.join("x/y")).context("stat ./x/y failed")?;
+                    ensure!(y_stat.is_dir());
+                    ensure!(0o3770 == y_stat.permissions().mode() & 0o7777);
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Chunked upload 1".into(),
+                request: CopyFileRequest {
+                    path: base.join("x/chunked").to_string_lossy().into(),
+                    dir_mode: 0o755 | libc::S_IFDIR,
+                    file_mode: 0o644 | libc::S_IFREG,
+                    offset: 0,
+                    file_size: 11,
+                    data: b"Hello ".to_vec(),
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    ensure!(
+                        !(fs::exists(base.join("x/chunked"))
+                            .context("exists ./x/chunked failed")?)
+                    );
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Chunked upload 2".into(),
+                request: CopyFileRequest {
+                    path: base.join("x/chunked").to_string_lossy().into(),
+                    dir_mode: 0o755 | libc::S_IFDIR,
+                    file_mode: 0o644 | libc::S_IFREG,
+                    offset: 6,
+                    file_size: 11,
+                    data: b"World".to_vec(),
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    let content = std::fs::read(base.join("x/chunked"))?;
+                    println!("{:?}", content);
+                    ensure!(b"Hello World".to_vec() == content);
+                    Ok(())
+                }),
+            },
+            // =================================
+            // Below are some adversarial tests.
+            // =================================
+            TestCase {
+                name: "Malicious intermediate directory is a symlink".into(),
+                request: CopyFileRequest {
+                    path: base
+                        .join("a/link/this-could-just-be-shadow-but-I-am-not-risking-it")
+                        .to_string_lossy()
+                        .into(),
+                    dir_mode: 0o700 | libc::S_IFDIR, // Test that the permissions are taken from file_mode.
+                    file_mode: 0o755 | libc::S_IFLNK,
+                    data: b"root:password:19000:0:99999:7:::\n".to_vec(),
+                    file_size: 33,
+                    ..Default::default()
+                },
+                should_fail: true,
+                assertions: Box::new(|base| -> Result<()> {
+                    let link_stat = nix::sys::stat::lstat(&base.join("a/link"))
+                        .context("stat ./a/link failed")?;
+                    ensure!(0o777 | libc::S_IFLNK == link_stat.st_mode);
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Creating a symlink onto an existing symlink should replace the symlink, not follow it".into(),
+                request: CopyFileRequest {
+                    path: base.join("a/link").to_string_lossy().into(),
+                    dir_mode: 0o700 | libc::S_IFDIR, // Test that the permissions are taken from file_mode.
+                    file_mode: 0o755 | libc::S_IFLNK,
+                    data: b"/etc".to_vec(),
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    // The symlink should be created at the same place (not followed), with the new content.
+                    let a_stat = fs::metadata(base.join("a")).context("stat ./a failed")?;
+                    ensure!(a_stat.is_dir());
+                    ensure!(0o751 == a_stat.permissions().mode() & 0o777);
+                    let link = base.join("a/link");
+                    let link_stat = nix::sys::stat::lstat(&link).context("stat ./a/link failed")?;
+                    // Linux symlinks have no permissions!
+                    ensure!(0o777 | libc::S_IFLNK == link_stat.st_mode);
+                    let target = fs::read_link(&link).context("read_link ./a/link failed")?;
+                    ensure!(target.to_string_lossy() == "/etc");
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Creating a file at an existing symlink replaces the link and does not follow it".into(),
+                request: CopyFileRequest {
+                    path: base.join("a/link").to_string_lossy().into(),
+                    file_mode: 0o600 | libc::S_IFREG,
+                    data: b"Hello!".to_vec(),
+                    file_size: 6,
+                    ..Default::default()
+                },
+                should_fail: false,
+                assertions: Box::new(|base| -> Result<()> {
+                    // The symlink itself should be replaced with the file, not followed.
+                    let link = base.join("a/link");
+                    let link_stat = nix::sys::stat::lstat(&link).context("stat ./a/link failed")?;
+                    ensure!(0o600 | libc::S_IFREG == link_stat.st_mode);
+                    let content = std::fs::read_to_string(&link).context("read ./a/link failed")?;
+                    ensure!("Hello!" == content);
+                    Ok(())
+                }),
+            },
+            TestCase {
+                name: "Writing outside the shared directory is rejected".into(),
+                request: CopyFileRequest {
+                    path: base.parent().unwrap().join("not-shared").to_string_lossy().into(),
+                    file_mode: 0o600 | libc::S_IFREG,
+                    ..Default::default()
+                },
+                should_fail: true,
+                assertions: Box::new(|base| -> Result<()> {
+                    match fs::metadata(base.parent().unwrap().join("not-shared")) {
+                        Ok(_) => bail!("successful write outside shared directory"),
+                        Err(_) => Ok(())
+                    }
+                }),
+            },
+            TestCase {
+                name: "Traversal outside shared directory is rejected".into(),
+                request: CopyFileRequest {
+                    path: base.join("../not-shared").to_string_lossy().into(),
+                    file_mode: 0o600 | libc::S_IFREG,
+                    ..Default::default()
+                },
+                should_fail: true,
+                assertions: Box::new(|base| -> Result<()> {
+                    match fs::metadata(base.join("../not-shared")) {
+                        Ok(_) => bail!("successful write outside shared directory"),
+                        Err(_) => Ok(())
+                    }
+                }),
+            },
+        ];
+
+        let uid = unistd::getuid().as_raw() as i32;
+        let gid = unistd::getgid().as_raw() as i32;
+
+        for mut tc in tests {
+            println!("Running test case: {}", tc.name);
+            // Since we're in a unit test, using root ownership causes issues with cleaning the temp dir.
+            tc.request.uid = uid;
+            tc.request.gid = gid;
+
+            let res = do_copy_file(&tc.request, &base);
+            if tc.should_fail != res.is_err() {
+                panic!("{}: unexpected do_copy_file result: {:?}", tc.name, res)
+            }
+            (tc.assertions)(&base).context(tc.name).unwrap()
+        }
+    }
+
+    // RM-6: the reference-monitor integration lives here in `rpc.rs`, but every test for
+    // it lived in the `kata-security-reference-monitor` crate. That crate is well covered,
+    // and the defects still found in FR-6 -- removal never wrapped in a transaction, the
+    // replay cache applied to repeatable operations, commit results discarded -- were all
+    // wiring defects at this layer, which crate-level tests cannot see. These cover the
+    // decisions this file makes.
+    #[cfg(feature = "strict-policy")]
+    mod srm_integration {
+        use super::*;
+        use kata_security_reference_monitor::{Prepared, ReferenceMonitor, SrmError, TxnState};
+
+        /// The four operation ids `rpc.rs` builds, as the call sites build them.
+        fn all_op_ids(cid: &str, exec: &str, signal: u32) -> Vec<String> {
+            vec![
+                srm_op_id("create", &[cid]),
+                srm_op_id("remove", &[cid]),
+                srm_op_id("exec", &[cid, exec]),
+                srm_op_id("signal", &[cid, exec, &signal.to_string()]),
+            ]
+        }
+
+        #[test]
+        fn the_four_operation_kinds_never_share_an_id() {
+            let ids = all_op_ids("ctr1", "exec1", 15);
+            let unique: std::collections::HashSet<_> = ids.iter().collect();
+            assert_eq!(
+                unique.len(),
+                ids.len(),
+                "operation kinds must not collide: {ids:?}"
+            );
+        }
+
+        #[test]
+        fn host_chosen_names_cannot_forge_another_operations_id() {
+            // Container and exec ids come from the host, which is untrusted. With a plain
+            // separator join these pairs all produce the same id, so a committed
+            // transaction for one operation would be replayed as the result of another --
+            // the agent returning success for work it never performed.
+            //
+            // Each case is a (container, exec) pair that a naive `{cid}:{exec}` encoding
+            // maps onto the same string.
+            let collisions = [(("a:b", "c"), ("a", "b:c")), (("x:", "y"), ("x", ":y"))];
+            for ((c1, e1), (c2, e2)) in collisions {
+                assert_ne!(
+                    srm_op_id("exec", &[c1, e1]),
+                    srm_op_id("exec", &[c2, e2]),
+                    "({c1:?}, {e1:?}) and ({c2:?}, {e2:?}) must not share an operation id"
+                );
+            }
+
+            // A container literally named so that its create id spells another kind's id.
+            assert_ne!(
+                srm_op_id("create", &[&srm_op_id("remove", &["victim"])]),
+                srm_op_id("remove", &["victim"]),
+            );
+
+            // An exec id chosen to look like a signal operation on the same container.
+            assert_ne!(
+                srm_op_id("exec", &["ctr1", "e/1:9"]),
+                srm_op_id("signal", &["ctr1", "e", "9"]),
+            );
+        }
+
+        #[test]
+        fn a_colliding_id_would_be_answered_from_the_replay_cache() {
+            // Demonstrates why the above matters, using the monitor itself. A create
+            // transaction is retained (it is only retired when the container is removed),
+            // so any later operation that resolves to the same id is short-circuited.
+            // Both `exec_process` and `signal_process` return `Ok(Empty)` on
+            // `AlreadyCommitted` without running anything.
+            let mut m = ReferenceMonitor::new();
+            let create = srm_op_id("create", &["a:b"]);
+            m.prepare(create.clone(), 0, "d1").unwrap();
+            m.execute(&create, "d1").unwrap();
+            m.commit(&create, "container-created").unwrap();
+
+            // The exec that a separator-joined encoding would have aliased onto it.
+            let exec = srm_op_id("exec", &["a", "b"]);
+            assert_ne!(exec, create);
+            assert_eq!(
+                m.prepare(exec, m.state_version(), "d2").unwrap(),
+                Prepared::New,
+                "a distinct operation must not be answered from another's result"
+            );
+        }
+
+        #[test]
+        fn commit_or_quarantine_records_success_and_leaves_the_monitor_usable() {
+            let mut m = ReferenceMonitor::new();
+            let op = srm_op_id("create", &["ctr1"]);
+            m.prepare(op.clone(), 0, "d").unwrap();
+            m.execute(&op, "d").unwrap();
+
+            commit_or_quarantine(&mut m, &op, "container-created", "create_container");
+
+            assert_eq!(m.transaction(&op).unwrap().state, TxnState::Committed);
+            assert!(
+                m.prepare(srm_op_id("create", &["ctr2"]), m.state_version(), "d")
+                    .is_ok(),
+                "a successful commit must not quarantine the monitor"
+            );
+        }
+
+        #[test]
+        fn commit_or_quarantine_quarantines_when_the_record_cannot_be_made() {
+            // The runtime operation has already succeeded by the time this runs, so a
+            // failed commit means the monitor is silently wrong about a real effect.
+            // Nothing may be admitted afterwards on state it cannot vouch for.
+            let mut m = ReferenceMonitor::new();
+            let op = srm_op_id("signal", &["ctr1", "", "15"]);
+
+            // Never prepared: the shape an operation-id collision produces.
+            commit_or_quarantine(&mut m, &op, "signal-delivered", "signal_process");
+
+            assert!(matches!(
+                m.prepare(srm_op_id("create", &["ctr2"]), m.state_version(), "d"),
+                Err(SrmError::Quarantined(_))
+            ));
+        }
+
+        #[test]
+        fn retire_or_warn_frees_the_id_and_tolerates_an_unknown_one() {
+            let mut m = ReferenceMonitor::new();
+            let op = srm_op_id("signal", &["ctr1", "", "1"]);
+            m.prepare(op.clone(), 0, "d").unwrap();
+            m.execute(&op, "d").unwrap();
+            m.commit(&op, "signal-delivered").unwrap();
+
+            retire_or_warn(&mut m, &op);
+            assert!(m.transaction(&op).is_none());
+
+            // A repeated signal is a legitimate request, not a replay, and must be
+            // admitted rather than answered from the retained result.
+            assert_eq!(
+                m.prepare(op, m.state_version(), "d").unwrap(),
+                Prepared::New
+            );
+
+            // Retiring something unknown must not panic or quarantine: the operation it
+            // followed already succeeded.
+            retire_or_warn(&mut m, "never-existed");
+            assert!(m
+                .prepare(srm_op_id("create", &["ctr2"]), m.state_version(), "d")
+                .is_ok());
+        }
+
+        #[test]
+        fn removing_a_container_frees_the_id_its_create_reserved() {
+            // The sequence `remove_container` performs on success: commit the removal,
+            // then retire both transactions so the container id is genuinely reusable.
+            let mut m = ReferenceMonitor::new();
+            let create = srm_op_id("create", &["ctr1"]);
+            let remove = srm_op_id("remove", &["ctr1"]);
+
+            m.prepare(create.clone(), 0, "d1").unwrap();
+            m.execute(&create, "d1").unwrap();
+            m.commit(&create, "container-created").unwrap();
+
+            m.prepare(remove.clone(), m.state_version(), "d2").unwrap();
+            m.execute(&remove, "d2").unwrap();
+            commit_or_quarantine(&mut m, &remove, "container-removed", "remove_container");
+            for id in [&create, &remove] {
+                retire_or_warn(&mut m, id);
+            }
+
+            // Without retiring the create, this would be an idempotent replay and the new
+            // container would never be created.
+            assert_eq!(
+                m.prepare(create, m.state_version(), "d3").unwrap(),
+                Prepared::New
+            );
+        }
     }
 }
