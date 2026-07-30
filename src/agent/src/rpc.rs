@@ -1020,7 +1020,7 @@ impl agent_ttrpc::AgentService for AgentService {
             return match self.do_create_container(req).await {
                 Ok(_) => {
                     let mut srm = crate::SRM.lock().await;
-                    let _ = srm.commit(&op_id, "container-created");
+                    commit_or_quarantine(&mut srm, &op_id, "container-created", "create_container");
                     drop(srm);
                     // FR-9 occurrence creation (and FR-11 device binding) is performed
                     // inside do_create_container once the container actually exists.
@@ -1156,7 +1156,12 @@ impl agent_ttrpc::AgentService for AgentService {
                 Ok(_) => {
                     {
                         let mut srm = crate::SRM.lock().await;
-                        let _ = srm.commit(&op_id, "container-removed");
+                        commit_or_quarantine(
+                            &mut srm,
+                            &op_id,
+                            "container-removed",
+                            "remove_container",
+                        );
                         // The container id is now free again. Retire both transactions so
                         // a later create for the same id is a genuinely new operation
                         // rather than an idempotent replay of the create just undone.
@@ -1257,7 +1262,7 @@ impl agent_ttrpc::AgentService for AgentService {
             return match self.do_exec_process(req).await {
                 Ok(_) => {
                     let mut srm = crate::SRM.lock().await;
-                    let _ = srm.commit(&op_id, "process-execed");
+                    commit_or_quarantine(&mut srm, &op_id, "process-execed", "exec_process");
                     retire_or_warn(&mut srm, &op_id);
                     Ok(Empty::new())
                 }
@@ -1344,13 +1349,15 @@ impl agent_ttrpc::AgentService for AgentService {
             return match self.do_signal_process(req).await {
                 Ok(_) => {
                     let mut srm = crate::SRM.lock().await;
-                    let _ = srm.commit(&op_id, "signal-delivered");
+                    commit_or_quarantine(&mut srm, &op_id, "signal-delivered", "signal_process");
                     retire_or_warn(&mut srm, &op_id);
                     Ok(Empty::new())
                 }
                 Err(e) => {
                     let mut srm = crate::SRM.lock().await;
-                    let _ = srm.abort(&op_id);
+                    if srm.abort(&op_id).is_err() {
+                        srm.quarantine("signal_process failed with unprovable state");
+                    }
                     Err(ttrpc_error(ttrpc::Code::INTERNAL, e))
                 }
             };
@@ -2587,6 +2594,38 @@ async fn rollback_policy_state(snapshot: &Option<String>, context: &str) {
             .lock()
             .await
             .quarantine(format!("policy state rollback failed after {context}"));
+    }
+}
+
+/// FR-6: record a successful operation, quarantining the monitor if that fails.
+///
+/// A `commit` failure means the runtime operation succeeded but the monitor could not
+/// record it: either the transaction is gone (`UnknownOperation`) or it is not in
+/// `Executed` (`InvalidState`, so `execute` never ran or another caller already resolved
+/// it). Either way the monitor's view of the world no longer matches reality, which is the
+/// precise divergence FR-6 exists to prevent, so the state is no longer provable.
+///
+/// The RPC still returns success to the caller, because it *did* succeed -- reporting a
+/// failure would invite the shim to retry an operation that already happened, trading one
+/// divergence for another. Quarantine is what stops any further SRM-gated operation from
+/// building on state the monitor cannot vouch for.
+#[cfg(feature = "strict-policy")]
+fn commit_or_quarantine(
+    srm: &mut kata_security_reference_monitor::ReferenceMonitor,
+    op_id: &str,
+    observed_result: &str,
+    context: &str,
+) {
+    if let Err(e) = srm.commit(op_id, observed_result) {
+        error!(
+            sl(),
+            "failed to commit transaction {} after a successful {}: {:?}; \
+             monitor state is unprovable",
+            op_id,
+            context,
+            e
+        );
+        srm.quarantine(format!("commit failed after a successful {context}"));
     }
 }
 

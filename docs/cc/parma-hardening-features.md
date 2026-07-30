@@ -176,7 +176,9 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   successful removal the container's transactions are **retired**, so a later create for
   the same id is a new operation rather than an idempotent replay of the create just
   undone. `prepare` refuses a duplicate for an operation that is still in flight rather
-  than overwriting the live transaction.
+  than overwriting the live transaction. Every `commit` and `abort` result is acted on: a
+  failure at either point means the monitor cannot account for an operation that already
+  ran, so it quarantines rather than continuing on state it cannot vouch for.
 - **Guarantee:** policy and runtime state commit together or are reconciled/rolled back;
   an unprovable state quarantines the monitor (never fails open).
 - **Scope — which RPCs are transactions, and why:** only two policy rules mutate persisted

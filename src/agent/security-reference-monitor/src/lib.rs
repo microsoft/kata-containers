@@ -444,6 +444,36 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_commit_leaves_the_monitor_disagreeing_with_reality() {
+        // This is the hazard the commit-failure quarantine responds to. A commit can only
+        // fail when the transaction is missing or not in `Executed`; the caller reaches
+        // that code path *after* the runtime operation has already succeeded. The monitor
+        // is then silently wrong about a real effect, so callers must not ignore the
+        // error.
+        let mut m = ReferenceMonitor::new();
+        m.prepare("op1", 0, "d").unwrap();
+        let version_before = m.state_version();
+
+        // Executed was never reached (or another caller already resolved the txn).
+        assert!(matches!(
+            m.commit("op1", "container-created"),
+            Err(SrmError::InvalidState { .. })
+        ));
+
+        // The operation happened, but nothing about the monitor records it: the state
+        // version has not advanced and the transaction never reaches Committed.
+        assert_eq!(m.state_version(), version_before);
+        assert_eq!(m.transaction("op1").unwrap().state, TxnState::Prepared);
+        assert!(m.transaction("op1").unwrap().result.is_none());
+
+        // An unknown id fails the same way, which is what an id collision looks like.
+        assert!(matches!(
+            m.commit("never-prepared", "r"),
+            Err(SrmError::UnknownOperation(_))
+        ));
+    }
+
+    #[test]
     fn prepare_refuses_an_in_flight_transaction_instead_of_clobbering_it() {
         // F-13: a duplicate request for an operation that is still in flight used to
         // overwrite the live transaction, after which the original's commit or abort
