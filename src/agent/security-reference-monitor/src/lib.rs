@@ -192,11 +192,27 @@ impl ReferenceMonitor {
         let op_id = op_id.into();
 
         // Idempotent replay: a committed op returns its retained result.
+        //
+        // An in-flight transaction is refused rather than overwritten. Without this, a
+        // duplicate request for an operation still in progress replaces the live
+        // transaction, and the loser's commit or abort then fails against a state machine
+        // that no longer describes it. `formal/SRM.tla` already specifies this: `Prepare(o)`
+        // requires `state[o] \in {"none", "aborted"}`. Re-preparing after an abort is
+        // legitimate -- the reserved state was released.
         if let Some(txn) = self.txns.get(&op_id) {
-            if txn.state == TxnState::Committed {
-                return Ok(Prepared::AlreadyCommitted(
-                    txn.result.clone().unwrap_or_default(),
-                ));
+            match txn.state {
+                TxnState::Committed => {
+                    return Ok(Prepared::AlreadyCommitted(
+                        txn.result.clone().unwrap_or_default(),
+                    ))
+                }
+                TxnState::Prepared | TxnState::Executed => {
+                    return Err(SrmError::InvalidState {
+                        op: op_id,
+                        state: txn.state.clone(),
+                    })
+                }
+                TxnState::Aborted => {}
             }
         }
 
@@ -425,6 +441,54 @@ mod tests {
             m.commit("op1", "r"),
             Err(SrmError::InvalidState { .. })
         ));
+    }
+
+    #[test]
+    fn prepare_refuses_an_in_flight_transaction_instead_of_clobbering_it() {
+        // F-13: a duplicate request for an operation that is still in flight used to
+        // overwrite the live transaction, after which the original's commit or abort
+        // acted on a state machine that no longer described it. `formal/SRM.tla` requires
+        // `state[o] \in {"none", "aborted"}` to prepare; this is that requirement.
+        let mut m = ReferenceMonitor::new();
+        m.prepare("op1", 0, "d1").unwrap();
+
+        // Prepared: the duplicate is refused, and the original is untouched.
+        assert!(matches!(
+            m.prepare("op1", m.state_version(), "d2"),
+            Err(SrmError::InvalidState {
+                state: TxnState::Prepared,
+                ..
+            })
+        ));
+        assert_eq!(m.transaction("op1").unwrap().plan_digest, "d1");
+
+        // Executed: still in flight, still refused.
+        m.execute("op1", "d1").unwrap();
+        assert!(matches!(
+            m.prepare("op1", m.state_version(), "d2"),
+            Err(SrmError::InvalidState {
+                state: TxnState::Executed,
+                ..
+            })
+        ));
+
+        // The original can still complete normally.
+        m.commit("op1", "done").unwrap();
+    }
+
+    #[test]
+    fn prepare_allows_a_retry_after_an_abort() {
+        // The counterpart to the check above: an aborted transaction released its
+        // reserved state, so re-preparing the same operation id is legitimate.
+        let mut m = ReferenceMonitor::new();
+        m.prepare("op1", 0, "d1").unwrap();
+        m.abort("op1").unwrap();
+
+        assert_eq!(
+            m.prepare("op1", m.state_version(), "d2").unwrap(),
+            Prepared::New
+        );
+        assert_eq!(m.transaction("op1").unwrap().plan_digest, "d2");
     }
 
     #[test]
