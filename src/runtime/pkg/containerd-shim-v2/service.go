@@ -124,6 +124,7 @@ type service struct {
 	sandbox vc.VCSandbox
 
 	restoredSandbox bool
+	restoreFinalized bool
 
 	ctx      context.Context
 	rootCtx  context.Context // root context for tracing
