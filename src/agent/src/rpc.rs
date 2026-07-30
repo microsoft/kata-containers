@@ -251,6 +251,54 @@ fn normalize_single_file_mount_sources(oci: &mut Spec, sandbox_id: &str) -> Resu
     Ok(())
 }
 
+fn normalize_managed_volume_mount_sources(oci: &mut Spec) -> Result<()> {
+    let Some(mounts) = oci.mounts_mut().as_mut() else {
+        return Ok(());
+    };
+
+    let sources = MANAGED_VOLUME_SOURCES
+        .lock()
+        .map_err(|_| anyhow!("managed volume sources lock poisoned"))?;
+
+    for mount in mounts.iter_mut() {
+        let Some(source) = mount.source().as_ref() else {
+            continue;
+        };
+
+        if source.starts_with(KATA_GUEST_MANAGED_VOLUME_DIR) {
+            continue;
+        }
+
+        let relative = source
+            .to_string_lossy()
+            .trim_start_matches('/')
+            .to_string();
+
+        if relative.is_empty() {
+            continue;
+        }
+
+        let relative_path = Path::new(&relative);
+        if relative_path
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir))
+        {
+            bail!("invalid managed-volume mount source component: {relative}")
+        }
+
+        if relative_path.components().count() != 1 {
+            continue;
+        }
+
+        if sources.contains_key(relative.as_str()) {
+            let normalized = Path::new(KATA_GUEST_MANAGED_VOLUME_DIR).join(relative_path);
+            mount.set_source(Some(normalized));
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(not(feature = "agent-policy"))]
 async fn is_allowed(_req: &impl serde::Serialize) -> ttrpc::Result<()> {
     Ok(())
@@ -328,6 +376,8 @@ impl AgentService {
 
         normalize_single_file_mount_sources(&mut oci, &sandbox_id)
             .context("normalize single-file mount sources")?;
+        normalize_managed_volume_mount_sources(&mut oci)
+            .context("normalize managed-volume mount sources")?;
 
         let container_name = k8s::container_name(&oci);
 
@@ -2457,9 +2507,9 @@ fn do_init_volume_source(req: &protocols::agent::InitVolumeSourceRequest) -> Res
         .iter()
         .find(|(_, src)| src.host_volume_id == req.host_volume_id)
     {
+        let _ = src;
         return Ok(InitVolumeSourceResponse {
             agent_volume_id: agent_volume_id.clone(),
-            guest_path: src.guest_path.to_string_lossy().into_owned(),
             ..Default::default()
         });
     }
@@ -2497,7 +2547,6 @@ fn do_init_volume_source(req: &protocols::agent::InitVolumeSourceRequest) -> Res
 
     Ok(InitVolumeSourceResponse {
         agent_volume_id,
-        guest_path: guest_path.to_string_lossy().into_owned(),
         ..Default::default()
     })
 }
@@ -4320,6 +4369,82 @@ COMMIT
         assert!(normalize_single_file_mount_sources(&mut spec, "sandbox-d").is_err());
     }
 
+    #[test]
+    #[serial_test::serial]
+    fn test_normalize_managed_volume_mount_sources_with_opaque_id() {
+        {
+            let mut sources = MANAGED_VOLUME_SOURCES
+                .lock()
+                .expect("lock managed source map");
+            sources.clear();
+            sources.insert(
+                "vol-test-1".to_string(),
+                ManagedVolumeSource {
+                    host_volume_id: "host-1".to_string(),
+                    guest_path: PathBuf::from("/run/kata-containers/shared/managed-volumes/vol-test-1"),
+                    volume_type: VolumeSourceType::VOLUME_SOURCE_TYPE_EMPTY_DIR,
+                    active_revision: None,
+                },
+            );
+        }
+
+        let mount = MountBuilder::default()
+            .destination(PathBuf::from("/data"))
+            .source(PathBuf::from("/vol-test-1"))
+            .typ("bind")
+            .build()
+            .unwrap();
+        let mut spec = SpecBuilder::default().mounts(vec![mount]).build().unwrap();
+
+        normalize_managed_volume_mount_sources(&mut spec).unwrap();
+
+        let src = spec
+            .mounts()
+            .as_ref()
+            .unwrap()[0]
+            .source()
+            .as_ref()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(
+            src,
+            "/run/kata-containers/shared/managed-volumes/vol-test-1"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_normalize_managed_volume_mount_sources_ignores_unknown_id() {
+        {
+            let mut sources = MANAGED_VOLUME_SOURCES
+                .lock()
+                .expect("lock managed source map");
+            sources.clear();
+        }
+
+        let mount = MountBuilder::default()
+            .destination(PathBuf::from("/data"))
+            .source(PathBuf::from("/vol-unknown"))
+            .typ("bind")
+            .build()
+            .unwrap();
+        let mut spec = SpecBuilder::default().mounts(vec![mount]).build().unwrap();
+
+        normalize_managed_volume_mount_sources(&mut spec).unwrap();
+
+        let src = spec
+            .mounts()
+            .as_ref()
+            .unwrap()[0]
+            .source()
+            .as_ref()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(src, "/vol-unknown");
+    }
+
     #[tokio::test]
     async fn test_get_oom_event_no_deadlock() {
         let logger = slog::Logger::root(slog::Discard, o!());
@@ -4401,6 +4526,7 @@ COMMIT
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_managed_volume_atomic_flow() {
         let temp = tempdir().expect("create tempdir");
         let guest_path = temp.path().join("managed");

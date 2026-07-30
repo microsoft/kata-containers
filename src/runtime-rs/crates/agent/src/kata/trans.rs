@@ -822,7 +822,6 @@ impl From<agent::InitVolumeSourceResponse> for InitVolumeSourceResponse {
     fn from(from: agent::InitVolumeSourceResponse) -> Self {
         Self {
             agent_volume_id: from.agent_volume_id,
-            guest_path: from.guest_path,
         }
     }
 }

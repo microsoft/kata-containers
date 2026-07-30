@@ -321,10 +321,10 @@ pub struct VolumeManager {
 struct VolumeState {
     // Source path (on the host)
     source_path: String,
-    // Guest path
-    guest_path: String,
     // Agent-side managed volume identifier
     agent_volume_id: String,
+    // Opaque mount source sent to the agent; agent resolves it to an internal guest path.
+    mount_source: String,
     // Reference count (how many containers are using it)
     ref_count: usize,
     // List of container IDs using this volume
@@ -341,12 +341,15 @@ impl VolumeManager {
         }
     }
 
-    /// Gets or creates the volume's guest path
+    fn managed_volume_mount_source(agent_volume_id: &str) -> String {
+        format!("/{agent_volume_id}")
+    }
+
+    /// Gets or creates the volume's mount source and agent volume id.
     pub async fn get_or_create_volume(
         &self,
         canonical_source: &str,
         container_id: &str,
-        guest_path: &str,
         agent_volume_id: &str,
     ) -> Result<(String, String, bool)> {
         let mut states = self.volume_states.write().await;
@@ -358,14 +361,14 @@ impl VolumeManager {
 
             info!(
                 sl!(),
-                "Existing volume: source={:?}, guest={:?}, ref_count={}",
+                "Existing volume: source={:?}, mount_source={:?}, ref_count={}",
                 canonical_source,
-                state.guest_path,
+                state.mount_source,
                 state.ref_count,
             );
 
             return Ok((
-                state.guest_path.clone(),
+                state.mount_source.clone(),
                 state.agent_volume_id.clone(),
                 false,
             ));
@@ -376,8 +379,8 @@ impl VolumeManager {
 
         let state = VolumeState {
             source_path: canonical_source.to_string(),
-            guest_path: guest_path.to_string(),
             agent_volume_id: agent_volume_id.to_string(),
+            mount_source: Self::managed_volume_mount_source(agent_volume_id),
             ref_count: 1,
             containers,
             monitor_task: None,
@@ -387,13 +390,13 @@ impl VolumeManager {
 
         info!(
             sl!(),
-            "Created new volume state: source={:?}, guest={:?}",
+            "Created new volume state: source={:?}, mount_source={:?}",
             state.source_path,
-            state.guest_path,
+            state.mount_source,
         );
 
         Ok((
-            state.guest_path.clone(),
+            state.mount_source.clone(),
             state.agent_volume_id.clone(),
             true,
         ))
@@ -440,9 +443,9 @@ impl VolumeManager {
 
                 info!(
                     sl!(),
-                    "Volume has no more references, source={:?}, guest={:?}",
+                    "Volume has no more references, source={:?}, mount_source={:?}",
                     canonical_source,
-                    state.guest_path
+                    state.mount_source
                 );
 
                 let state = states
@@ -576,12 +579,11 @@ impl ShareFsVolume {
                             .await
                             .context("init directory volume source")?;
 
-                    // Get or create the guest path
-                    let (guest_path, agent_volume_id, is_new) = volume_manager
+                    // Get or create the opaque mount source and agent volume id.
+                    let (mount_source, agent_volume_id, is_new) = volume_manager
                         .get_or_create_volume(
                             &host_volume_id,
                             cid,
-                            &source.guest_path,
                             &source.agent_volume_id,
                         )
                         .await
@@ -593,7 +595,7 @@ impl ShareFsVolume {
                             .context("copy directory to guest")?;
                     }
 
-                    oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                    oci_mount.set_source(Some(PathBuf::from(&mount_source)));
                     volume.mounts.push(oci_mount);
 
                     // Start monitoring (only for watchable volumes)
@@ -1172,6 +1174,14 @@ mod test {
         assert_eq!(
             ShareFsVolume::single_file_mount_source(SingleFileType::Hostname),
             "/hostname"
+        );
+    }
+
+    #[test]
+    fn test_managed_volume_mount_source() {
+        assert_eq!(
+            VolumeManager::managed_volume_mount_source("vol-test"),
+            "/vol-test"
         );
     }
 }
