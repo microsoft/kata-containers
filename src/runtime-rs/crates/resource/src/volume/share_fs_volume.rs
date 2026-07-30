@@ -50,6 +50,12 @@ const DEBOUNCE_TIME: Duration = Duration::from_millis(500);
 // We use u32 here because `file_mode` in CopyFileRequest is u32
 const DIR_MODE_PERMS: u32 = SFlag::S_IFDIR.bits() | 0o750;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SymlinkCopyMode {
+    Legacy,
+    WatchableRestricted,
+}
+
 // copy file to container's rootfs if filesystem sharing is not supported, otherwise
 // bind mount it in the shared directory.
 // Ignore /dev, directories and all other device files. We handle
@@ -166,6 +172,7 @@ impl FsWatcher {
         agent: Arc<dyn Agent>,
         src: PathBuf,
         dst: PathBuf,
+        symlink_copy_mode: SymlinkCopyMode,
     ) -> JoinHandle<()> {
         let need_sync = self.need_sync.clone();
         let pending_events = self.pending_events.clone();
@@ -188,7 +195,13 @@ impl FsWatcher {
                     "Initial sync from {:?} to {:?}", &src_sync, &dst_sync
                 );
                 if let Err(e) =
-                    copy_dir_recursively(&src_sync, &dst_sync.to_string_lossy(), &agent_sync).await
+                    copy_dir_recursively(
+                        &src_sync,
+                        &dst_sync.to_string_lossy(),
+                        &agent_sync,
+                        symlink_copy_mode,
+                    )
+                    .await
                 {
                     error!(sl!(), "Initial sync failed: {:?}", e);
                 }
@@ -256,8 +269,13 @@ impl FsWatcher {
                 if let Some(t) = last_event_time {
                     if Instant::now().duration_since(t) > DEBOUNCE_TIME && *need_sync.lock().await {
                         info!(sl!(), "debounce handle copyfile {:?} -> {:?}", &src, &dst);
-                        if let Err(e) =
-                            copy_dir_recursively(&src, &dst.to_string_lossy(), &agent).await
+                        if let Err(e) = copy_dir_recursively(
+                            &src,
+                            &dst.to_string_lossy(),
+                            &agent,
+                            symlink_copy_mode,
+                        )
+                        .await
                         {
                             error!(
                                 sl!(),
@@ -418,6 +436,7 @@ impl ShareFsVolume {
         cid: &str,
         readonly: bool,
         copy_other_directories: bool,
+        copy_other_files: bool,
         agent: Arc<dyn Agent>,
         volume_manager: Arc<VolumeManager>,
     ) -> Result<Self> {
@@ -462,10 +481,23 @@ impl ShareFsVolume {
                     // Generate guest path
                     let guest_path = generate_guest_path(cid, m.destination())
                         .context("generate path failed")?;
-                    // Copy a single file
-                    Self::copy_file_to_guest(&src, &guest_path, &agent)
-                        .await
-                        .context("copy file to guest")?;
+
+                    if should_copy_single_file_to_guest(m.destination(), copy_other_files) {
+                        // Copy a single file
+                        Self::copy_file_to_guest(&src, &guest_path, &agent)
+                            .await
+                            .context("copy file to guest")?;
+                    } else {
+                        // Keep mount source file path present in guest while skipping file contents.
+                        Self::create_empty_file_in_guest(&src, &guest_path, &agent)
+                            .await
+                            .context("create empty file in guest")?;
+                        info!(
+                            sl!(),
+                            "fsshare: skip copying contents for non-special file {:?}: copy_volumes does not contain other-files",
+                            &src
+                        );
+                    }
 
                     oci_mount.set_source(Some(PathBuf::from(&guest_path)));
                     volume.mounts.push(oci_mount);
@@ -482,7 +514,16 @@ impl ShareFsVolume {
                             .context("get or create volume")?;
 
                         // Create directory
-                        Self::copy_directory_to_guest(&src, &guest_path, &agent)
+                        Self::copy_directory_to_guest(
+                            &src,
+                            &guest_path,
+                            &agent,
+                            if watchable_volume {
+                                SymlinkCopyMode::WatchableRestricted
+                            } else {
+                                SymlinkCopyMode::Legacy
+                            },
+                        )
                             .await
                             .context("copy directory to guest")?;
 
@@ -494,7 +535,12 @@ impl ShareFsVolume {
                         if watchable_volume {
                             let watcher = FsWatcher::new(&src).await?;
                             let handle = watcher
-                                .start_monitor(agent.clone(), src.clone(), PathBuf::from(&guest_path))
+                                .start_monitor(
+                                    agent.clone(),
+                                    src.clone(),
+                                    PathBuf::from(&guest_path),
+                                    SymlinkCopyMode::WatchableRestricted,
+                                )
                                 .await;
                             monitor_task = Some(handle);
                         }
@@ -642,7 +688,7 @@ impl ShareFsVolume {
             ..Default::default()
         };
 
-        info!(sl!(), "fsshare: copy_file: {:?} to sandbox {:?}", &src, guest_path);
+        info!(sl!(), "fsshare: file: {:?} to sandbox {:?}", &src, guest_path);
 
         // Issue gRPC request to agent
         agent.copy_file(r).await.with_context(|| {
@@ -655,6 +701,7 @@ impl ShareFsVolume {
         src: &Path,
         guest_path: &str,
         agent: &Arc<dyn Agent>,
+        symlink_copy_mode: SymlinkCopyMode,
     ) -> Result<()> {
         // create directory
         let dir_metadata =
@@ -674,7 +721,7 @@ impl ShareFsVolume {
 
         info!(
             sl!(),
-            "creating directory: {:?} in sandbox with file_mode: {:?}",
+            "fsshare: creating directory: {:?} in sandbox with file_mode: {:?}",
             guest_path,
             dir_request.file_mode
         );
@@ -687,7 +734,7 @@ impl ShareFsVolume {
 
         // recursively copy files from this directory
         // similar to `scp -r $source_dir $target_dir`
-        copy_dir_recursively(src, guest_path, agent)
+        copy_dir_recursively(src, guest_path, agent, symlink_copy_mode)
             .await
             .context(format!("failed to copy directory contents: {src:?}"))?;
 
@@ -715,7 +762,7 @@ impl ShareFsVolume {
 
         info!(
             sl!(),
-            "creating empty directory: {:?} in sandbox with file_mode: {:?}",
+            "fsshare: creating empty directory: {:?} in sandbox with file_mode: {:?}",
             guest_path,
             dir_request.file_mode
         );
@@ -724,6 +771,38 @@ impl ShareFsVolume {
             .copy_file(dir_request)
             .await
             .context(format!("create empty directory in sandbox: {guest_path:?}"))?;
+
+        Ok(())
+    }
+
+    async fn create_empty_file_in_guest(
+        src: &Path,
+        guest_path: &str,
+        agent: &Arc<dyn Agent>,
+    ) -> Result<()> {
+        let file_metadata = std::fs::metadata(src)
+            .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
+
+        let request = agent::CopyFileRequest {
+            path: guest_path.to_owned(),
+            file_size: 0,
+            uid: file_metadata.uid() as i32,
+            gid: file_metadata.gid() as i32,
+            file_mode: file_metadata.mode(),
+            data: vec![],
+            ..Default::default()
+        };
+
+        info!(
+            sl!(),
+            "creating empty file: {:?} in sandbox with file_mode: {:?}",
+            guest_path,
+            request.file_mode
+        );
+
+        agent.copy_file(request).await.with_context(|| {
+            format!("create empty file request failed: src: {src:?}, dest: {guest_path:?}")
+        })?;
 
         Ok(())
     }
@@ -838,6 +917,7 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
     src_dir: P,
     dest_dir: &str,
     agent: &Arc<dyn Agent>,
+    symlink_copy_mode: SymlinkCopyMode,
 ) -> Result<()> {
     let mut queue = VecDeque::new();
     queue.push_back((src_dir.as_ref().to_path_buf(), dest_dir.to_string()));
@@ -878,25 +958,77 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                         ))??;
 
                 let link_target_str = link_target.to_string_lossy().into_owned();
-                let symlink_request = agent::CopyFileRequest {
-                    path: dest_path.clone(),
-                    file_size: link_target_str.len() as i64,
-                    uid: metadata.uid() as i32,
-                    gid: metadata.gid() as i32,
-                    file_mode: SFlag::S_IFLNK.bits(),
-                    data: link_target_str.clone().into_bytes(),
-                    ..Default::default()
-                };
-                info!(
-                    sl!(),
-                    "copying symlink_request {:?} in sandbox with file_mode: {:?}",
-                    dest_path.clone(),
-                    symlink_request.file_mode
-                );
+                if symlink_copy_mode == SymlinkCopyMode::WatchableRestricted {
+                    if entry_path
+                        .file_name()
+                        .is_some_and(|n| n == "..data")
+                    {
+                        let target_component = validated_single_component_symlink_target(
+                            &link_target,
+                            &entry_path,
+                        )?;
 
-                agent.copy_file(symlink_request).await.context(format!(
-                    "failed to create symlink: {dest_path:?} -> {link_target_str:?}"
-                ))?;
+                        let symlink_request = agent::CreateWatchableVolumeDataSymlinkRequest {
+                            path: dest_path.clone(),
+                            target_component,
+                            dir_mode: DIR_MODE_PERMS,
+                            uid: metadata.uid() as i32,
+                            gid: metadata.gid() as i32,
+                        };
+                        info!(
+                            sl!(),
+                            "fsshare: creating restricted watchable symlink {:?} -> {}",
+                            dest_path,
+                            link_target_str
+                        );
+
+                        agent
+                            .create_watchable_volume_data_symlink(symlink_request)
+                            .await
+                            .context(format!(
+                                "failed to create restricted watchable data symlink: {dest_path:?} -> {link_target_str:?}"
+                            ))?;
+                    } else {
+                        let symlink_request = agent::CreateWatchableVolumeFileSymlinkRequest {
+                            path: dest_path.clone(),
+                            dir_mode: DIR_MODE_PERMS,
+                            uid: metadata.uid() as i32,
+                            gid: metadata.gid() as i32,
+                        };
+                        info!(
+                            sl!(),
+                            "fsshare: creating restricted watchable file symlink {:?} (target managed by agent)",
+                            dest_path
+                        );
+
+                        agent
+                            .create_watchable_volume_file_symlink(symlink_request)
+                            .await
+                            .context(format!(
+                                "failed to create restricted watchable file symlink: {dest_path:?}"
+                            ))?;
+                    }
+                } else {
+                    let symlink_request = agent::CopyFileRequest {
+                        path: dest_path.clone(),
+                        file_size: link_target_str.len() as i64,
+                        uid: metadata.uid() as i32,
+                        gid: metadata.gid() as i32,
+                        file_mode: SFlag::S_IFLNK.bits(),
+                        data: link_target_str.clone().into_bytes(),
+                        ..Default::default()
+                    };
+                    info!(
+                        sl!(),
+                        "fsshare: copying symlink {:?} -> {link_target_str} in sandbox with file_mode: {:?}",
+                        dest_path.clone(),
+                        symlink_request.file_mode
+                    );
+
+                    agent.copy_file(symlink_request).await.context(format!(
+                        "failed to create symlink: {dest_path:?} -> {link_target_str:?}"
+                    ))?;
+                }
             } else if metadata.is_dir() {
                 // handle directory
                 let dir_request = agent::CopyFileRequest {
@@ -943,7 +1075,7 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                     ..Default::default()
                 };
 
-                info!(sl!(), "copy file {:?} to guest", dest_path.clone());
+                info!(sl!(), "fsshare: copy file {:?} to guest", dest_path.clone());
                 agent
                     .copy_file(file_request)
                     .await
@@ -1029,6 +1161,46 @@ fn should_copy_directory_to_guest(watchable_volume: bool, copy_other_directories
     watchable_volume || copy_other_directories
 }
 
+fn is_always_copied_single_file(destination: &Path) -> bool {
+    matches!(
+        destination.to_str(),
+        Some("/etc/resolv.conf") | Some("/etc/hosts") | Some("/etc/hostname")
+    )
+}
+
+fn should_copy_single_file_to_guest(destination: &Path, copy_other_files: bool) -> bool {
+    is_always_copied_single_file(destination) || copy_other_files
+}
+
+fn validated_single_component_symlink_target(target: &Path, symlink_path: &Path) -> Result<String> {
+    let mut components = target.components();
+    let Some(first) = components.next() else {
+        return Err(anyhow!(
+            "invalid watchable symlink target for {:?}: empty target",
+            symlink_path
+        ));
+    };
+
+    if components.next().is_some() {
+        return Err(anyhow!(
+            "invalid watchable symlink target for {:?}: must be a single component, got {:?}",
+            symlink_path,
+            target
+        ));
+    }
+
+    let component = first.as_os_str().to_string_lossy().to_string();
+    if component == "." || component == ".." {
+        return Err(anyhow!(
+            "invalid watchable symlink target for {:?}: disallowed component {:?}",
+            symlink_path,
+            component
+        ));
+    }
+
+    Ok(component)
+}
+
 /// Generates a guest path related to mount dest
 fn generate_guest_path(cid: &str, mount_destination: &Path) -> Result<String> {
     let mut data = vec![0u8; 8];
@@ -1105,5 +1277,59 @@ mod test {
         assert!(should_copy_directory_to_guest(true, true));
         assert!(should_copy_directory_to_guest(false, true));
         assert!(!should_copy_directory_to_guest(false, false));
+    }
+
+    #[test]
+    fn test_is_always_copied_single_file() {
+        assert!(is_always_copied_single_file(Path::new("/etc/resolv.conf")));
+        assert!(is_always_copied_single_file(Path::new("/etc/hosts")));
+        assert!(is_always_copied_single_file(Path::new("/etc/hostname")));
+        assert!(!is_always_copied_single_file(Path::new("/tmp/other")));
+    }
+
+    #[test]
+    fn test_should_copy_single_file_to_guest() {
+        assert!(should_copy_single_file_to_guest(
+            Path::new("/etc/resolv.conf"),
+            false
+        ));
+        assert!(should_copy_single_file_to_guest(
+            Path::new("/etc/hosts"),
+            false
+        ));
+        assert!(should_copy_single_file_to_guest(
+            Path::new("/etc/hostname"),
+            false
+        ));
+        assert!(should_copy_single_file_to_guest(Path::new("/tmp/other"), true));
+        assert!(!should_copy_single_file_to_guest(Path::new("/tmp/other"), false));
+    }
+
+    #[test]
+    fn test_validated_single_component_symlink_target() {
+        assert_eq!(
+            validated_single_component_symlink_target(
+                Path::new("..2026_07_30_21_39_08.1098028261"),
+                Path::new("/tmp/..data"),
+            )
+            .unwrap(),
+            "..2026_07_30_21_39_08.1098028261"
+        );
+
+        assert!(validated_single_component_symlink_target(
+            Path::new("../outside"),
+            Path::new("/tmp/..data"),
+        )
+        .is_err());
+        assert!(validated_single_component_symlink_target(
+            Path::new("."),
+            Path::new("/tmp/..data"),
+        )
+        .is_err());
+        assert!(validated_single_component_symlink_target(
+            Path::new(".."),
+            Path::new("/tmp/..data"),
+        )
+        .is_err());
     }
 }

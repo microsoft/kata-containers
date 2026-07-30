@@ -16,11 +16,12 @@ use crate::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
         ContainerID, CopyFileRequest, CpuStats, CpuUsage, CreateContainerRequest,
-        CreateSandboxRequest, Device, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy,
-        GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse,
-        HugetlbStats, IPAddress, IPFamily, Interface, Interfaces, KernelModule,
-        MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse, NetworkStats,
-        OnlineCPUMemRequest, PidsStats, ReadStreamRequest, ReadStreamResponse,
+        CreateSandboxRequest, CreateWatchableVolumeDataSymlinkRequest,
+        CreateWatchableVolumeFileSymlinkRequest, Device, Empty, ExecProcessRequest, FSGroup,
+        FSGroupChangePolicy, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
+        HealthCheckResponse, HugetlbStats, IPAddress, IPFamily, Interface, Interfaces,
+        KernelModule, MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse,
+        NetworkStats, OnlineCPUMemRequest, PidsStats, ReadStreamRequest, ReadStreamResponse,
         RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes,
         SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse, SharedMount,
         SignalProcessRequest, StatsContainerResponse, Storage, StringUser, ThrottlingData,
@@ -805,6 +806,35 @@ impl From<CopyFileRequest> for agent::CopyFileRequest {
             gid: from.gid,
             offset: from.offset,
             data: from.data,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CreateWatchableVolumeFileSymlinkRequest>
+    for agent::CreateWatchableVolumeFileSymlinkRequest
+{
+    fn from(from: CreateWatchableVolumeFileSymlinkRequest) -> Self {
+        Self {
+            path: from.path,
+            dir_mode: from.dir_mode,
+            uid: from.uid,
+            gid: from.gid,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CreateWatchableVolumeDataSymlinkRequest>
+    for agent::CreateWatchableVolumeDataSymlinkRequest
+{
+    fn from(from: CreateWatchableVolumeDataSymlinkRequest) -> Self {
+        Self {
+            path: from.path,
+            target_component: from.target_component,
+            dir_mode: from.dir_mode,
+            uid: from.uid,
+            gid: from.gid,
             ..Default::default()
         }
     }

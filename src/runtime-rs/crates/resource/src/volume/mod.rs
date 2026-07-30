@@ -39,6 +39,7 @@ pub struct VolumeContext<'a> {
     pub agent: Arc<dyn Agent>,
     pub emptydir_mode: &'a str,
     pub copy_other_directories: bool,
+    pub copy_other_files: bool,
     pub fs_sharing_supported: bool,
     pub block_device_discard_supported: bool,
 }
@@ -164,6 +165,7 @@ impl VolumeResource {
                         cid,
                         read_only,
                         ctx.copy_other_directories,
+                        ctx.copy_other_files,
                         ctx.agent.clone(),
                         self.volume_manager.clone(),
                     )

@@ -37,10 +37,11 @@ use oci_spec::runtime as oci;
 use protobuf::MessageDyn;
 use protobuf::MessageField;
 use protocols::agent::{
-    AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest, GetIPTablesRequest,
-    GetIPTablesResponse, GuestDetailsResponse, Interfaces, Metrics, OOMEvent, ReadStreamResponse,
-    ResizeVolumeRequest, Routes, SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse,
-    VolumeStatsRequest, WaitProcessResponse, WriteStreamResponse,
+    AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest,
+    CreateWatchableVolumeDataSymlinkRequest, CreateWatchableVolumeFileSymlinkRequest,
+    GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, Interfaces, Metrics, OOMEvent,
+    ReadStreamResponse, ResizeVolumeRequest, Routes, SetIPTablesRequest, SetIPTablesResponse,
+    StatsContainerResponse, VolumeStatsRequest, WaitProcessResponse, WriteStreamResponse,
 };
 use protocols::csi::{
     volume_usage::Unit as VolumeUsage_Unit, VolumeCondition, VolumeStatsResponse, VolumeUsage,
@@ -1695,6 +1696,56 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn create_watchable_volume_file_symlink(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CreateWatchableVolumeFileSymlinkRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "create_watchable_volume_file_symlink", req);
+        #[cfg(feature = "agent-policy")]
+        {
+            let synthetic_copy_req = to_policy_copy_file_request_for_watchable_file_symlink(&req)
+                .map_ttrpc_err(same)?;
+            let req_for_policy: PolicyCopyFileRequest = (&synthetic_copy_req)
+                .try_into()
+                .context("parsing synthetic CopyFileRequest for policy")
+                .map_ttrpc_err(same)?;
+            is_allowed_with_entrypoint("CopyFileRequest", &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
+        is_allowed(&req).await?;
+
+        let root_path = PathBuf::from(KATA_GUEST_SHARE_DIR);
+        do_create_watchable_volume_file_symlink(&req, &root_path).map_ttrpc_err(same)?;
+
+        Ok(Empty::new())
+    }
+
+    async fn create_watchable_volume_data_symlink(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CreateWatchableVolumeDataSymlinkRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "create_watchable_volume_data_symlink", req);
+        #[cfg(feature = "agent-policy")]
+        {
+            let synthetic_copy_req =
+                to_policy_copy_file_request_for_watchable_data_symlink(&req).map_ttrpc_err(same)?;
+            let req_for_policy: PolicyCopyFileRequest = (&synthetic_copy_req)
+                .try_into()
+                .context("parsing synthetic CopyFileRequest for policy")
+                .map_ttrpc_err(same)?;
+            is_allowed_with_entrypoint("CopyFileRequest", &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
+        is_allowed(&req).await?;
+
+        let root_path = PathBuf::from(KATA_GUEST_SHARE_DIR);
+        do_create_watchable_volume_data_symlink(&req, &root_path).map_ttrpc_err(same)?;
+
+        Ok(Empty::new())
+    }
+
     async fn get_metrics(
         &self,
         ctx: &TtrpcContext,
@@ -2248,6 +2299,169 @@ fn do_set_guest_date_time(sec: i64, usec: i64) -> Result<()> {
     Errno::result(ret).map(drop)?;
 
     Ok(())
+}
+
+fn ensure_single_relative_component(target_component: &str) -> Result<PathBuf> {
+    let target = Path::new(target_component);
+    let mut components = target.components();
+    let first = components
+        .next()
+        .ok_or_else(|| anyhow!("empty symlink target component"))?;
+
+    if components.next().is_some() {
+        return Err(anyhow!(
+            "symlink target must be a single component: {}",
+            target_component
+        ));
+    }
+
+    match first {
+        std::path::Component::Normal(_) => Ok(PathBuf::from(target_component)),
+        _ => Err(anyhow!(
+            "invalid symlink target component: {}",
+            target_component
+        )),
+    }
+}
+
+fn watchable_file_symlink_target_for_path(path: &str) -> Result<PathBuf> {
+    let leaf = Path::new(path)
+        .file_name()
+        .ok_or_else(|| anyhow!("invalid symlink destination: {}", path))?;
+
+    if leaf == "..data" {
+        return Err(anyhow!(
+            "..data symlink must use CreateWatchableVolumeDataSymlink"
+        ));
+    }
+
+    Ok(PathBuf::from("..data").join(leaf))
+}
+
+#[cfg(feature = "agent-policy")]
+fn to_policy_copy_file_request_for_watchable_file_symlink(
+    req: &CreateWatchableVolumeFileSymlinkRequest,
+) -> Result<CopyFileRequest> {
+    let target = watchable_file_symlink_target_for_path(&req.path)?;
+    Ok(CopyFileRequest {
+        path: req.path.clone(),
+        file_mode: libc::S_IFLNK as u32,
+        dir_mode: req.dir_mode,
+        uid: req.uid,
+        gid: req.gid,
+        data: target.as_os_str().as_bytes().to_vec(),
+        ..Default::default()
+    })
+}
+
+#[cfg(feature = "agent-policy")]
+fn to_policy_copy_file_request_for_watchable_data_symlink(
+    req: &CreateWatchableVolumeDataSymlinkRequest,
+) -> Result<CopyFileRequest> {
+    let target = ensure_single_relative_component(&req.target_component)?;
+    Ok(CopyFileRequest {
+        path: req.path.clone(),
+        file_mode: libc::S_IFLNK as u32,
+        dir_mode: req.dir_mode,
+        uid: req.uid,
+        gid: req.gid,
+        data: target.as_os_str().as_bytes().to_vec(),
+        ..Default::default()
+    })
+}
+
+fn do_create_restricted_symlink(
+    path: &str,
+    dir_mode: u32,
+    uid: i32,
+    gid: i32,
+    target: PathBuf,
+    shared_dir: &PathBuf,
+) -> Result<()> {
+    let insecure_full_path = PathBuf::from(path);
+    let rel_path = insecure_full_path
+        .strip_prefix(shared_dir)
+        .context(format!("removing {:?} prefix from {}", shared_dir, path))?;
+
+    std::fs::create_dir_all(shared_dir)?;
+    let root = pathrs::Root::open(shared_dir)?;
+
+    if let Some(parent) = rel_path.parent() {
+        let dir = root
+            .mkdir_all(
+                parent,
+                &std::fs::Permissions::from_mode(dir_mode & IMPLICIT_DIRECTORY_PERMISSION_MASK),
+            )
+            .context("mkdir_all parent")?
+            .reopen(OpenFlags::O_DIRECTORY)
+            .context("reopen parent")?;
+
+        unistd::fchown(
+            dir,
+            Some(Uid::from_raw(uid as u32)),
+            Some(Gid::from_raw(gid as u32)),
+        )
+        .context("fchown parent")?;
+    }
+
+    root.remove_all(rel_path).or_else(|e| match e.kind() {
+        pathrs::error::ErrorKind::OsError(Some(errno)) if errno == libc::ENOENT => Ok(()),
+        _ => Err(e),
+    })?;
+
+    root.create(rel_path, &pathrs::InodeType::Symlink(target))
+        .context("create restricted symlink")?;
+
+    nix::unistd::fchownat(
+        root,
+        rel_path,
+        Some(Uid::from_raw(uid as u32)),
+        Some(Gid::from_raw(gid as u32)),
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .context("fchownat")?;
+
+    Ok(())
+}
+
+fn do_create_watchable_volume_file_symlink(
+    req: &CreateWatchableVolumeFileSymlinkRequest,
+    shared_dir: &PathBuf,
+) -> Result<()> {
+    let target = watchable_file_symlink_target_for_path(req.path.as_str())?;
+    do_create_restricted_symlink(
+        &req.path,
+        req.dir_mode,
+        req.uid,
+        req.gid,
+        target,
+        shared_dir,
+    )
+}
+
+fn do_create_watchable_volume_data_symlink(
+    req: &CreateWatchableVolumeDataSymlinkRequest,
+    shared_dir: &PathBuf,
+) -> Result<()> {
+    let leaf = Path::new(req.path.as_str())
+        .file_name()
+        .ok_or_else(|| anyhow!("invalid symlink destination: {}", req.path))?;
+    if leaf != "..data" {
+        return Err(anyhow!(
+            "CreateWatchableVolumeDataSymlink destination must end with ..data: {}",
+            req.path
+        ));
+    }
+
+    let target = ensure_single_relative_component(&req.target_component)?;
+    do_create_restricted_symlink(
+        &req.path,
+        req.dir_mode,
+        req.uid,
+        req.gid,
+        target,
+        shared_dir,
+    )
 }
 
 /// do_copy_file creates a file, directory or symlink beneath the provided directory.

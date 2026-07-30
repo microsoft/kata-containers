@@ -30,6 +30,9 @@ pub const EMPTYDIR_MODE_BLOCK_PLAIN: &str = "block-plain";
 /// Copy-volumes option: copy non-watchable directory volumes via agent::CopyFileRequest.
 pub const COPY_VOLUMES_OTHER_DIRECTORIES: &str = "other-directories";
 
+/// Copy-volumes option: copy non-special single-file volumes via agent::CopyFileRequest.
+pub const COPY_VOLUMES_OTHER_FILES: &str = "other-files";
+
 /// Kata runtime configuration information.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Runtime {
@@ -164,6 +167,7 @@ pub struct Runtime {
     ///
     /// Options:
     /// - other-directories: copy non-watchable source directories and their contents.
+    /// - other-files: copy non-special source files and their contents.
     ///
     /// If omitted, this list is empty.
     #[serde(default)]
@@ -302,7 +306,7 @@ impl ConfigOps for Runtime {
         }
 
         for opt in &conf.runtime.copy_volumes {
-            if opt != COPY_VOLUMES_OTHER_DIRECTORIES {
+            if opt != COPY_VOLUMES_OTHER_DIRECTORIES && opt != COPY_VOLUMES_OTHER_FILES {
                 return Err(std::io::Error::other(format!(
                     "Invalid copy_volumes option `{opt}` in configuration file",
                 )));

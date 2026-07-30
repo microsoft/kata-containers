@@ -18,7 +18,10 @@ use hypervisor::{
 };
 use kata_types::mount::{kata_guest_sandbox_dir, Mount, KATA_EPHEMERAL_VOLUME_TYPE, SHM_DIR};
 use kata_types::{
-    config::{hypervisor::TopologyConfigInfo, TomlConfig, COPY_VOLUMES_OTHER_DIRECTORIES},
+    config::{
+        hypervisor::TopologyConfigInfo, TomlConfig, COPY_VOLUMES_OTHER_DIRECTORIES,
+        COPY_VOLUMES_OTHER_FILES,
+    },
     device::DRIVER_VFIO_AP_COLD_TYPE,
     mount::{adjust_rootfs_mounts, KATA_IMAGE_FORCE_GUEST_PULL},
 };
@@ -505,6 +508,12 @@ impl ResourceManagerInner {
                 .copy_volumes
                 .iter()
                 .any(|v| v == COPY_VOLUMES_OTHER_DIRECTORIES),
+            copy_other_files: self
+                .toml_config
+                .runtime
+                .copy_volumes
+                .iter()
+                .any(|v| v == COPY_VOLUMES_OTHER_FILES),
             fs_sharing_supported: capabilities.is_fs_sharing_supported(),
             block_device_discard_supported: capabilities.is_block_device_discard_supported(),
         };
