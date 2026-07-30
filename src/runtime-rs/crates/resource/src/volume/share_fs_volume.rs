@@ -458,13 +458,12 @@ impl VolumeManager {
 }
 
 impl ShareFsVolume {
-    fn single_file_mount_source(src: &Path) -> Result<String> {
-        let file_name = src
-            .file_name()
-            .and_then(|v| v.to_str())
-            .ok_or_else(|| anyhow!("failed to resolve single-file mount source name"))?;
-
-        Ok(format!("/{file_name}"))
+    fn single_file_mount_source(file_type: SingleFileType) -> &'static str {
+        match file_type {
+            SingleFileType::ResolvConf => "/resolv.conf",
+            SingleFileType::EtcHosts => "/hosts",
+            SingleFileType::Hostname => "/hostname",
+        }
     }
 
     pub(crate) async fn new(
@@ -549,8 +548,7 @@ impl ShareFsVolume {
                         .await
                         .context("copy file to guest")?;
 
-                    let mount_source = Self::single_file_mount_source(&src)
-                        .context("derive single-file mount source")?;
+                    let mount_source = Self::single_file_mount_source(file_type);
 
                     oci_mount.set_source(Some(PathBuf::from(&mount_source)));
                     volume.mounts.push(oci_mount);
@@ -738,18 +736,12 @@ impl ShareFsVolume {
             sandbox_id
         );
 
-        let resp = agent.copy_single_file(r).await.with_context(|| {
+        agent.copy_single_file(r).await.with_context(|| {
             format!(
                 "copy single-file request failed: src: {src:?}, sandbox: {sandbox_id:?}, type: {}",
                 file_type.as_str()
             )
         })?;
-
-        debug!(
-            sl!(),
-            "copy_single_file response guest_path: {:?}",
-            resp.guest_path
-        );
 
         Ok(())
     }
@@ -1169,14 +1161,17 @@ mod test {
 
     #[test]
     fn test_single_file_mount_source() {
-        let src = Path::new("/var/lib/containerd/sandboxes/sid/resolv.conf");
-        let source = ShareFsVolume::single_file_mount_source(src).unwrap();
-        assert_eq!(source, "/resolv.conf");
-    }
-
-    #[test]
-    fn test_single_file_mount_source_invalid_path() {
-        let src = Path::new("/");
-        assert!(ShareFsVolume::single_file_mount_source(src).is_err());
+        assert_eq!(
+            ShareFsVolume::single_file_mount_source(SingleFileType::ResolvConf),
+            "/resolv.conf"
+        );
+        assert_eq!(
+            ShareFsVolume::single_file_mount_source(SingleFileType::EtcHosts),
+            "/hosts"
+        );
+        assert_eq!(
+            ShareFsVolume::single_file_mount_source(SingleFileType::Hostname),
+            "/hostname"
+        );
     }
 }

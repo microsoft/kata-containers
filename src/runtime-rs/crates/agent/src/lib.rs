@@ -16,7 +16,7 @@ pub mod types;
 pub use types::{
     ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
     BlkioStatsEntry, CheckRequest, CloseStdinRequest, CommitVolumeRevisionRequest, ContainerID,
-    ContainerProcessID, CopySingleFileRequest, CopySingleFileResponse, CreateContainerRequest,
+    ContainerProcessID, CopySingleFileRequest, CreateContainerRequest,
     CreateSandboxRequest, CreateVolumeSubdirRequest, Empty, ExecProcessRequest, FSGroup,
     FSGroupChangePolicy, GetDiagnosticDataRequest, GetDiagnosticDataResponse,
     GetGuestDetailsRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
@@ -97,7 +97,7 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
         -> Result<InitVolumeSourceResponse>;
     async fn create_volume_subdir(&self, req: CreateVolumeSubdirRequest) -> Result<Empty>;
     async fn put_volume_file(&self, req: PutVolumeFileRequest) -> Result<Empty>;
-    async fn copy_single_file(&self, req: CopySingleFileRequest) -> Result<CopySingleFileResponse>;
+    async fn copy_single_file(&self, req: CopySingleFileRequest) -> Result<Empty>;
     async fn commit_volume_revision(&self, req: CommitVolumeRevisionRequest) -> Result<Empty>;
     async fn remove_volume_source(&self, req: RemoveVolumeSourceRequest) -> Result<Empty>;
     async fn get_metrics(&self, req: Empty) -> Result<MetricsResponse>;

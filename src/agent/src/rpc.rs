@@ -42,7 +42,7 @@ use oci_spec::runtime as oci;
 use protobuf::MessageDyn;
 use protobuf::MessageField;
 use protocols::agent::{
-    AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest, CopySingleFileResponse,
+    AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest,
     GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, InitVolumeSourceResponse,
     Interfaces, Metrics, OOMEvent, ReadStreamResponse, ResizeVolumeRequest, Routes,
     SetIPTablesRequest, SetIPTablesResponse, SingleFileType, StatsContainerResponse,
@@ -1795,7 +1795,7 @@ impl agent_ttrpc::AgentService for AgentService {
         &self,
         ctx: &TtrpcContext,
         req: protocols::agent::CopySingleFileRequest,
-    ) -> ttrpc::Result<CopySingleFileResponse> {
+    ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "copy_single_file", req);
         is_allowed(&req).await?;
 
@@ -2627,7 +2627,7 @@ fn validate_sandbox_id(sandbox_id: &str) -> Result<()> {
 
 fn do_copy_single_file(
     req: &protocols::agent::CopySingleFileRequest,
-) -> Result<CopySingleFileResponse> {
+) -> Result<Empty> {
     validate_sandbox_id(&req.sandbox_id)?;
 
     let file_type = req
@@ -2661,10 +2661,8 @@ fn do_copy_single_file(
 
     do_copy_file(&copy_req, &root)?;
 
-    Ok(CopySingleFileResponse {
-        guest_path: guest_path.to_string_lossy().into_owned(),
-        ..Default::default()
-    })
+    // Do not expose guest-internal mount prefixes to the runtime side.
+    Ok(Empty::new())
 }
 
 fn do_commit_volume_revision(req: &protocols::agent::CommitVolumeRevisionRequest) -> Result<()> {

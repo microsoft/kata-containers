@@ -15,7 +15,7 @@ use crate::{
     types::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
-        CommitVolumeRevisionRequest, ContainerID, CopySingleFileRequest, CopySingleFileResponse,
+        CommitVolumeRevisionRequest, ContainerID, CopySingleFileRequest,
         CpuStats, CpuUsage, CreateContainerRequest, CreateSandboxRequest,
         CreateVolumeSubdirRequest, Device, Empty, ExecProcessRequest, FSGroup,
         FSGroupChangePolicy, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
@@ -880,14 +880,6 @@ impl From<CopySingleFileRequest> for agent::CopySingleFileRequest {
             data: from.data,
             file_mode: from.file_mode,
             ..Default::default()
-        }
-    }
-}
-
-impl From<agent::CopySingleFileResponse> for CopySingleFileResponse {
-    fn from(from: agent::CopySingleFileResponse) -> Self {
-        Self {
-            guest_path: from.guest_path,
         }
     }
 }

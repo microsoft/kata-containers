@@ -608,11 +608,6 @@ pub struct CopySingleFileRequest {
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
-pub struct CopySingleFileResponse {
-    pub guest_path: String,
-}
-
-#[derive(PartialEq, Clone, Default, Debug)]
 pub struct CommitVolumeRevisionRequest {
     pub agent_volume_id: String,
     pub revision: String,
