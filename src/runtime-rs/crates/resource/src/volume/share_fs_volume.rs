@@ -473,7 +473,7 @@ impl ShareFsVolume {
                     let watchable_volume = is_watchable_volume(&src);
                     if should_copy_directory_to_guest(watchable_volume, copy_other_directories) {
                         // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
-                        info!(sl!(), "copying directory {:?} to guest", &src);
+                        info!(sl!(), "fsshare: copying directory {:?} to guest", &src);
 
                         // Get or create the guest path
                         let guest_path = volume_manager
@@ -522,7 +522,7 @@ impl ShareFsVolume {
 
                         info!(
                             sl!(),
-                            "skip copying contents for non-watchable directory {:?}: copy_volumes does not contain other-directories",
+                            "fsshare: skip copying contents for non-watchable directory {:?}: copy_volumes does not contain other-directories",
                             &src
                         );
                     }
@@ -530,7 +530,7 @@ impl ShareFsVolume {
                     // If not, we can ignore it. Let's issue a warning so that the user knows.
                     warn!(
                         sl!(),
-                        "Ignoring non-regular file as FS sharing not supported. mount: {:?}", m
+                        "fsshare: Ignoring non-regular file as FS sharing not supported. mount: {:?}", m
                     );
                 }
             }
@@ -642,7 +642,7 @@ impl ShareFsVolume {
             ..Default::default()
         };
 
-        debug!(sl!(), "copy_file: {:?} to sandbox {:?}", &src, guest_path);
+        info!(sl!(), "fsshare: copy_file: {:?} to sandbox {:?}", &src, guest_path);
 
         // Issue gRPC request to agent
         agent.copy_file(r).await.with_context(|| {
