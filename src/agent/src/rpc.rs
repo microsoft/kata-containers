@@ -194,6 +194,63 @@ fn sandbox_err_to_ttrpc(err: SandboxError) -> ttrpc::Error {
     ttrpc_error(code, err)
 }
 
+fn is_single_file_mount_destination(destination: &Path) -> bool {
+    matches!(
+        destination.to_str(),
+        Some("/etc/resolv.conf") | Some("/etc/hosts") | Some("/etc/hostname")
+    )
+}
+
+fn normalize_single_file_mount_sources(oci: &mut Spec, sandbox_id: &str) -> Result<()> {
+    let Some(mounts) = oci.mounts_mut().as_mut() else {
+        return Ok(());
+    };
+
+    for mount in mounts.iter_mut() {
+        if !is_single_file_mount_destination(mount.destination().as_path()) {
+            continue;
+        }
+
+        let Some(source) = mount.source().as_ref() else {
+            continue;
+        };
+
+        if source.starts_with(KATA_GUEST_SINGLE_FILE_DIR) {
+            continue;
+        }
+
+        let relative = source
+            .to_string_lossy()
+            .trim_start_matches('/')
+            .to_string();
+
+        if relative.is_empty() {
+            warn!(
+                sl(),
+                "skip single-file mount source normalization due to empty source";
+                "destination" => mount.destination().display().to_string()
+            );
+            continue;
+        }
+
+        let relative_path = Path::new(&relative);
+        if relative_path.is_absolute()
+            || relative_path
+                .components()
+                .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir))
+        {
+            bail!("invalid single-file mount source component: {relative}")
+        }
+
+        let normalized = Path::new(KATA_GUEST_SINGLE_FILE_DIR)
+            .join(sandbox_id)
+            .join(relative_path);
+        mount.set_source(Some(normalized));
+    }
+
+    Ok(())
+}
+
 #[cfg(not(feature = "agent-policy"))]
 async fn is_allowed(_req: &impl serde::Serialize) -> ttrpc::Result<()> {
     Ok(())
@@ -263,6 +320,14 @@ impl AgentService {
                 return Err(anyhow!(nix::Error::EINVAL));
             }
         };
+
+        let sandbox_id = {
+            let s = self.sandbox.lock().await;
+            s.id.clone()
+        };
+
+        normalize_single_file_mount_sources(&mut oci, &sandbox_id)
+            .context("normalize single-file mount sources")?;
 
         let container_name = k8s::container_name(&oci);
 
@@ -3149,7 +3214,7 @@ mod tests {
     use nix::sched::{unshare, CloneFlags};
     use oci::{
         HookBuilder, HooksBuilder, Linux, LinuxBuilder, LinuxDeviceCgroupBuilder, LinuxNamespace,
-        LinuxNamespaceBuilder, LinuxResourcesBuilder, SpecBuilder,
+        LinuxNamespaceBuilder, LinuxResourcesBuilder, MountBuilder, SpecBuilder,
     };
     use oci_spec::runtime::{LinuxNamespaceType, Root};
     use tempfile::{tempdir, TempDir};
@@ -4166,6 +4231,95 @@ COMMIT
             let result = is_sealed_secret_path(d.source_path);
             assert_eq!(d.result, result, "{msg}");
         }
+    }
+
+    #[test]
+    fn test_normalize_single_file_mount_sources_with_relative_input() {
+        let mount = MountBuilder::default()
+            .destination(PathBuf::from("/etc/resolv.conf"))
+            .source(PathBuf::from("/resolv.conf"))
+            .typ("bind")
+            .build()
+            .unwrap();
+        let mut spec = SpecBuilder::default().mounts(vec![mount]).build().unwrap();
+
+        normalize_single_file_mount_sources(&mut spec, "sandbox-a").unwrap();
+
+        let src = spec
+            .mounts()
+            .as_ref()
+            .unwrap()[0]
+            .source()
+            .as_ref()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(
+            src,
+            "/run/kata-containers/shared/single-files/sandbox-a/resolv.conf"
+        );
+    }
+
+    #[test]
+    fn test_normalize_single_file_mount_sources_keeps_already_prefixed_path() {
+        let existing = "/run/kata-containers/shared/single-files/sandbox-b/hosts";
+        let mount = MountBuilder::default()
+            .destination(PathBuf::from("/etc/hosts"))
+            .source(PathBuf::from(existing))
+            .typ("bind")
+            .build()
+            .unwrap();
+        let mut spec = SpecBuilder::default().mounts(vec![mount]).build().unwrap();
+
+        normalize_single_file_mount_sources(&mut spec, "sandbox-b").unwrap();
+
+        let src = spec
+            .mounts()
+            .as_ref()
+            .unwrap()[0]
+            .source()
+            .as_ref()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(src, existing);
+    }
+
+    #[test]
+    fn test_normalize_single_file_mount_sources_ignores_non_single_file_dest() {
+        let mount = MountBuilder::default()
+            .destination(PathBuf::from("/tmp/custom"))
+            .source(PathBuf::from("/custom"))
+            .typ("bind")
+            .build()
+            .unwrap();
+        let mut spec = SpecBuilder::default().mounts(vec![mount]).build().unwrap();
+
+        normalize_single_file_mount_sources(&mut spec, "sandbox-c").unwrap();
+
+        let src = spec
+            .mounts()
+            .as_ref()
+            .unwrap()[0]
+            .source()
+            .as_ref()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(src, "/custom");
+    }
+
+    #[test]
+    fn test_normalize_single_file_mount_sources_rejects_parent_traversal() {
+        let mount = MountBuilder::default()
+            .destination(PathBuf::from("/etc/hostname"))
+            .source(PathBuf::from("/../hostname"))
+            .typ("bind")
+            .build()
+            .unwrap();
+        let mut spec = SpecBuilder::default().mounts(vec![mount]).build().unwrap();
+
+        assert!(normalize_single_file_mount_sources(&mut spec, "sandbox-d").is_err());
     }
 
     #[tokio::test]

@@ -458,6 +458,15 @@ impl VolumeManager {
 }
 
 impl ShareFsVolume {
+    fn single_file_mount_source(src: &Path) -> Result<String> {
+        let file_name = src
+            .file_name()
+            .and_then(|v| v.to_str())
+            .ok_or_else(|| anyhow!("failed to resolve single-file mount source name"))?;
+
+        Ok(format!("/{file_name}"))
+    }
+
     pub(crate) async fn new(
         share_fs: &Option<Arc<dyn ShareFs>>,
         m: &oci::Mount,
@@ -531,7 +540,7 @@ impl ShareFsVolume {
                         m
                     );
 
-                    let guest_path = Self::copy_single_file_to_guest(
+                    Self::copy_single_file_to_guest(
                         &src,
                         file_type,
                         &volume.sandbox_id,
@@ -540,7 +549,10 @@ impl ShareFsVolume {
                         .await
                         .context("copy file to guest")?;
 
-                    oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                    let mount_source = Self::single_file_mount_source(&src)
+                        .context("derive single-file mount source")?;
+
+                    oci_mount.set_source(Some(PathBuf::from(&mount_source)));
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
                     let should_copy_contents = is_watchable_volume(&src);
@@ -690,7 +702,7 @@ impl ShareFsVolume {
         file_type: SingleFileType,
         sandbox_id: &str,
         agent: &Arc<dyn Agent>,
-    ) -> Result<String> {
+    ) -> Result<()> {
         // Read file metadata
         let file_metadata = std::fs::metadata(src)
             .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
@@ -733,7 +745,13 @@ impl ShareFsVolume {
             )
         })?;
 
-        Ok(resp.guest_path)
+        debug!(
+            sl!(),
+            "copy_single_file response guest_path: {:?}",
+            resp.guest_path
+        );
+
+        Ok(())
     }
 
     async fn copy_directory_to_guest(
@@ -1147,5 +1165,18 @@ mod test {
             SingleFileType::from_mount_destination(Path::new("/tmp/unsupported")),
             None
         );
+    }
+
+    #[test]
+    fn test_single_file_mount_source() {
+        let src = Path::new("/var/lib/containerd/sandboxes/sid/resolv.conf");
+        let source = ShareFsVolume::single_file_mount_source(src).unwrap();
+        assert_eq!(source, "/resolv.conf");
+    }
+
+    #[test]
+    fn test_single_file_mount_source_invalid_path() {
+        let src = Path::new("/");
+        assert!(ShareFsVolume::single_file_mount_source(src).is_err());
     }
 }
