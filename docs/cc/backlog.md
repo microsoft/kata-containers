@@ -31,6 +31,27 @@ team, and would make over-claims harder to introduce.
 | DOC-2 | **Parity anchors.** For each feature, name the equivalent mechanism in the runhcs/OpenGCS confidential stack and state whether this branch matches it or deliberately differs, with the reason. | The design is a parity effort, but the comparison appears nowhere in the docs and only once in the code (`policy.rs` citing `WithMetadataRollback`). Recording it turns "we chose differently" into a reviewable decision instead of an apparent omission. |
 | DOC-3 | **A `Limits` bullet per feature**, stating what the guarantee does *not* cover. | A **Guarantee** with no matching **Limits** is how a requirement's text drifts ahead of its implementation. FR-6 now carries one; the rest do not. |
 
+### Reference-monitor correctness (RM-1…RM-5)
+
+Open items in the FR-6 transaction machinery. RM-1 and RM-2 are the halves deliberately
+left out of the transaction-lifecycle fix; RM-3…RM-5 are pre-existing.
+
+| ID | Item | Why |
+|---|---|---|
+| RM-1 | **Serialize concurrent operations on the same id.** `prepare` now *refuses* a duplicate while one is in flight, but the SRM lock is still released before the runtime operation runs, so the refusal is a clean failure rather than serialization. runhcs takes a per-container `TryLock` for the duration. | Two concurrent requests for the same container id are host-triggerable. Failing cleanly is correct but returns an error for what may be a legitimate retry; holding the lock would let the second wait. |
+| RM-2 | **Initiator-pinned idempotency key.** Replay protection for `SignalProcess` and `ExecProcess` is scoped to in-flight duplicates only, because their operation ids name repeatable events rather than unique objects, so their transactions retire on commit. A key chosen by the initiator (an attempt or sequence number) would make a post-commit retry distinguishable from a new operation. | This is the residual window in FR-6's anti-replay story. Needs a shim↔agent API change, which FR-6 scoped out. |
+| RM-3 | **Route `commit` failures into quarantine.** All four call sites discard the result (`let _ = srm.commit(...)`). A failed commit leaves the transaction in `Executed` while the runtime operation has already succeeded — exactly the divergence FR-6 exists to prevent — and the next `prepare` for that id then fails with `InvalidState`. | The abort path quarantines on unprovable state; the commit path does not. Asymmetric, and the commit path is the one that runs on success. |
+| RM-4 | **Injective operation ids.** Ids are built by concatenating host-controlled strings with unescaped separators: `{cid}`, `{cid}:{exec_id}`, `{cid}:{exec_id}:sig:{signal}`, `remove:{cid}`. A container named `remove:foo`, or an `exec_id` containing `:sig:`, collides with a different operation. Fix is a length-prefixed id builder applied at all four sites. | Every collision consequence is a state-machine confusion in the component whose job is proving authorized == executed. |
+| RM-5 | **Bind the executed digest in the formal model.** `formal/SRM.tla` specifies `Prepare`/`Execute`/`Commit`/`Abort` but has no commit-failure action, does not bind `executed_digest` on `Execute`, and models `Quarantine` as unguarded. | The model is what caught the `prepare` clobber (`Prepare(o)` requires `state[o] \in {"none","aborted"}`). Extending it is cheaper than finding the next divergence by inspection. |
+
+### Testing and CI
+
+| ID | Item | Why |
+|---|---|---|
+| CI-1 | **Exercise the feature matrix in CI.** `cargo check`/`test` for `--features strict-policy` and `--features agent-policy` separately. | `rpc::tests::test_get_oom_event_no_deadlock` fails on `coco-parity` under `--features strict-policy` (the strict baseline policy defines no `GetOOMEventRequest` rule, so `eval_query` returns no results and the test unwraps). It fails *closed*, so it is not a security gap — but it went unnoticed, which means the strict configuration is not built or tested anywhere. That is the configuration the hardening work exists to protect. |
+| CI-2 | **`cargo fmt --check` gate, crate-scoped.** Limit to `kata-agent`, `kata-security-reference-monitor`, `kata-agent-policy`, `genpolicy-fragmentgen`. | Upstream kata is not fmt-clean under this repo's pinned toolchain (files under `rustjail/` and `runtime-rs/`), so a repo-wide gate cannot pass. Scoping it to the crates this work owns makes it enforceable today. |
+| CI-3 | **Run the TLA+ model in CI** (`formal/run-tlc.sh`). | The model already encodes properties the implementation had drifted from. It is only useful if it runs. |
+
 ### Feature coverage
 
 | ID | Item | Why |
