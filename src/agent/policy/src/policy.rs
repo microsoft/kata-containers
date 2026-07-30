@@ -879,6 +879,134 @@ mod tests {
             .is_ok());
     }
 
+    /// A miniature policy that reproduces the `pstate` mechanics of the generated
+    /// `rules.rego`: the helper functions verbatim, a `RemoveContainerRequest` rule that
+    /// deletes the container from `pstate` as its authorization `ops`, and a
+    /// `SignalProcessRequest` rule that is undefined for a container missing from
+    /// `pstate`. It is deliberately self-contained so the test does not depend on a
+    /// generated policy_data blob.
+    #[cfg(feature = "strict-policy")]
+    const POLICY_PSTATE_LIFECYCLE: &str = r#"package agent_policy
+
+import future.keywords.if
+
+default RemoveContainerRequest := false
+default SignalProcessRequest := false
+
+get_state() = state if { state := data["pstate"] }
+get_state_val(key) = value if { state := get_state(); value := state[key] }
+get_state_path(key) = path if { path := concat("/", ["/pstate", key]) }
+
+state_del_key(key) = action if {
+  get_state()
+  path := get_state_path(key)
+  action := {"op": "remove", "path": path}
+}
+
+concat_op_if_not_null(ops, op) = result if { op == null; result := ops }
+concat_op_if_not_null(ops, op) = result if { op != null; result := array.concat(ops, [op]) }
+
+RemoveContainerRequest := {"ops": ops, "allowed": true} if {
+  get_state_val(input.container_id)
+  ops := concat_op_if_not_null([], state_del_key(input.container_id))
+}
+
+SignalProcessRequest if {
+  get_state_val(input.container_id)
+}
+"#;
+
+    /// Build a policy with the lifecycle rules above and one container already recorded in
+    /// `pstate`, as a successful `CreateContainerRequest` would have left it.
+    #[cfg(feature = "strict-policy")]
+    fn pstate_policy_with_container(cid: &str) -> AgentPolicy {
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy(
+                "pstate-lifecycle.rego".to_string(),
+                POLICY_PSTATE_LIFECYCLE.to_string(),
+            )
+            .unwrap();
+        // AgentPolicy::new() already seeds an empty `pstate`, so replace the data wholesale
+        // rather than adding a second binding for the same key.
+        p.restore_state(&format!(r#"{{"pstate": {{"{cid}": 0}}}}"#))
+            .unwrap();
+        p
+    }
+
+    /// F-19: authorizing a `RemoveContainerRequest` deletes the container from `pstate`
+    /// before the teardown runs. If the teardown then fails and that mutation is not rolled
+    /// back, the container is still running but the policy no longer knows about it, so
+    /// every later signal and every retried removal is denied by the fail-closed default.
+    ///
+    /// This asserts the damage exists, which is what makes the rollback in
+    /// `remove_container` load-bearing rather than defensive.
+    #[cfg(feature = "strict-policy")]
+    #[tokio::test]
+    async fn remove_authorization_alone_strands_the_container() {
+        let cid = "ctr1";
+        let req = format!(r#"{{"container_id": "{cid}"}}"#);
+        let mut p = pstate_policy_with_container(cid);
+
+        assert!(
+            matches!(
+                p.allow_request("SignalProcessRequest", &req).await,
+                Ok((true, _))
+            ),
+            "a container in pstate must be signallable to begin with"
+        );
+
+        // Authorization applies the pstate deletion. Imagine do_remove_container failing here.
+        assert!(matches!(
+            p.allow_request("RemoveContainerRequest", &req).await,
+            Ok((true, _))
+        ));
+
+        assert!(
+            is_denied(p.allow_request("SignalProcessRequest", &req).await),
+            "container is unreachable by signal once removed from pstate"
+        );
+        assert!(
+            is_denied(p.allow_request("RemoveContainerRequest", &req).await),
+            "and the removal cannot be retried either -- the container is stranded"
+        );
+    }
+
+    /// F-19: restoring the snapshot taken before authorization undoes the `pstate`
+    /// deletion, so a container whose teardown failed stays signallable and the removal
+    /// stays retryable. This is the regression test for the rollback that
+    /// `remove_container` performs on the failure path.
+    #[cfg(feature = "strict-policy")]
+    #[tokio::test]
+    async fn rollback_after_failed_remove_keeps_the_container_reachable() {
+        let cid = "ctr1";
+        let req = format!(r#"{{"container_id": "{cid}"}}"#);
+        let mut p = pstate_policy_with_container(cid);
+
+        // What remove_container does: snapshot, authorize, then roll back on failure.
+        let snapshot = p.snapshot_state().unwrap();
+        assert!(matches!(
+            p.allow_request("RemoveContainerRequest", &req).await,
+            Ok((true, _))
+        ));
+        p.restore_state(&snapshot).unwrap();
+
+        assert!(
+            matches!(
+                p.allow_request("SignalProcessRequest", &req).await,
+                Ok((true, _))
+            ),
+            "after rollback the still-running container must remain signallable"
+        );
+        assert!(
+            matches!(
+                p.allow_request("RemoveContainerRequest", &req).await,
+                Ok((true, _))
+            ),
+            "after rollback the failed removal must be retryable"
+        );
+    }
+
     struct TestCase {
         name: String,
         input: CopyFileRequest,

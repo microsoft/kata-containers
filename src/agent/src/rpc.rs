@@ -1033,9 +1033,7 @@ impl agent_ttrpc::AgentService for AgentService {
                     }
                     drop(srm);
                     // Roll back the policy pstate mutations applied during authorization.
-                    if let Some(snap) = &policy_snapshot {
-                        let _ = crate::AGENT_POLICY.lock().await.restore_state(snap);
-                    }
+                    rollback_policy_state(&policy_snapshot, "create_container").await;
                     Err(ttrpc_error(ttrpc::Code::INTERNAL, e))
                 }
             };
@@ -1097,17 +1095,108 @@ impl agent_ttrpc::AgentService for AgentService {
         req: protocols::agent::RemoveContainerRequest,
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "remove_container", req);
-        is_allowed(&req).await?;
-        self.do_remove_container(req.clone())
-            .await
-            .map_ttrpc_err(same)?;
 
-        // FR-9: retire the occurrence. Its alias may not be operated on again until a
-        // fresh create re-mints it with a new generation.
+        // FR-6: snapshot policy state before authorization.
+        //
+        // `RemoveContainerRequest` is one of only two rules that mutate the policy's
+        // persisted state: it deletes the container from `pstate` while authorizing the
+        // request. If the teardown then fails, the container is still running but the
+        // policy no longer knows about it, and `get_state_val` is undefined for it. That
+        // makes every later `SignalProcessRequest` and `RemoveContainerRequest` for that
+        // container undefined, so the fail-closed default denies them -- the container
+        // cannot be signalled and cannot be removed, permanently. Restoring this snapshot
+        // on failure is what keeps a failed removal retryable.
         #[cfg(feature = "strict-policy")]
-        let _ = crate::OCCURRENCES.lock().await.remove(&req.container_id);
+        let policy_snapshot = crate::AGENT_POLICY.lock().await.snapshot_state().ok();
 
-        Ok(Empty::new())
+        is_allowed(&req).await?;
+
+        // FR-6: a removal destroys state, so run it as a transaction like create and exec.
+        #[cfg(feature = "strict-policy")]
+        {
+            use kata_security_reference_monitor::Prepared;
+
+            // Namespaced: `create_container` uses the bare container id as its operation
+            // id, so an un-namespaced removal would collide with the create it undoes.
+            let op_id = format!("remove:{}", req.container_id);
+            let digest = plan_digest(&req);
+            {
+                let mut srm = crate::SRM.lock().await;
+                let version = srm.state_version();
+                let prepared = srm.prepare(op_id.clone(), version, digest.clone());
+                drop(srm);
+                match prepared {
+                    Ok(Prepared::New) => {}
+                    // Removal is already single-shot at the policy layer: a second remove
+                    // of the same container is undefined and denied before reaching here.
+                    // A committed transaction therefore means the operation id was reused,
+                    // not a legitimate replay. Refuse rather than report a removal that
+                    // did not happen.
+                    Ok(Prepared::AlreadyCommitted(_)) => {
+                        rollback_policy_state(&policy_snapshot, "duplicate remove_container").await;
+                        return Err(ttrpc_error(
+                            ttrpc::Code::FAILED_PRECONDITION,
+                            format!("remove transaction {op_id} already committed"),
+                        ));
+                    }
+                    Err(e) => {
+                        rollback_policy_state(&policy_snapshot, "remove_container prepare").await;
+                        return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e));
+                    }
+                }
+                let mut srm = crate::SRM.lock().await;
+                if let Err(e) = srm.execute(&op_id, &digest) {
+                    drop(srm);
+                    rollback_policy_state(&policy_snapshot, "remove_container execute").await;
+                    return Err(ttrpc_error(ttrpc::Code::INTERNAL, e));
+                }
+            }
+
+            return match self.do_remove_container(req.clone()).await {
+                Ok(_) => {
+                    {
+                        let mut srm = crate::SRM.lock().await;
+                        let _ = srm.commit(&op_id, "container-removed");
+                        // The container id is now free again. Retire both transactions so
+                        // a later create for the same id is a genuinely new operation
+                        // rather than an idempotent replay of the create just undone.
+                        for id in [&req.container_id, &op_id] {
+                            if let Err(e) = srm.retire(id) {
+                                warn!(
+                                    sl(),
+                                    "could not retire transaction {}: {:?}; a later create \
+                                     for this id may be answered from the replay cache",
+                                    id,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    // FR-9: retire the occurrence. Its alias may not be operated on again
+                    // until a fresh create re-mints it with a new generation.
+                    let _ = crate::OCCURRENCES.lock().await.remove(&req.container_id);
+                    Ok(Empty::new())
+                }
+                Err(e) => {
+                    {
+                        let mut srm = crate::SRM.lock().await;
+                        if srm.abort(&op_id).is_err() {
+                            srm.quarantine("remove_container failed with unprovable state");
+                        }
+                    }
+                    // The container is still running: put it back in `pstate` so it stays
+                    // signallable and the removal can be retried.
+                    rollback_policy_state(&policy_snapshot, "remove_container").await;
+                    Err(ttrpc_error(ttrpc::Code::INTERNAL, e))
+                }
+            };
+        }
+
+        #[cfg(not(feature = "strict-policy"))]
+        {
+            self.do_remove_container(req).await.map_ttrpc_err(same)?;
+            Ok(Empty::new())
+        }
     }
 
     async fn exec_process(
@@ -1179,9 +1268,7 @@ impl agent_ttrpc::AgentService for AgentService {
                         srm.quarantine("exec_process failed with unprovable state");
                     }
                     drop(srm);
-                    if let Some(snap) = &policy_snapshot {
-                        let _ = crate::AGENT_POLICY.lock().await.restore_state(snap);
-                    }
+                    rollback_policy_state(&policy_snapshot, "exec_process").await;
                     Err(ttrpc_error(ttrpc::Code::INTERNAL, e))
                 }
             };
@@ -2457,6 +2544,42 @@ fn plan_digest<T: serde::Serialize>(req: &T) -> String {
         .iter()
         .map(|b| format!("{:02x}", b))
         .collect::<String>()
+}
+
+/// FR-6: roll the policy's persisted state back to a snapshot taken before authorization.
+///
+/// The policy applies its `ops` (the `pstate` mutations) while it authorizes a request, so
+/// a request that is authorized and then fails to execute has already changed enforcer
+/// state. Restoring the snapshot is what keeps the enforcer's view of the world equal to
+/// reality.
+///
+/// If the restore itself fails the enforcer state is no longer provable, and continuing
+/// would be failing open. hcsshim's `WithMetadataRollback` panics at exactly this point;
+/// the agent quarantines the reference monitor instead, which refuses all further
+/// transactions while leaving teardown paths usable.
+#[cfg(feature = "strict-policy")]
+async fn rollback_policy_state(snapshot: &Option<String>, context: &str) {
+    let Some(snap) = snapshot else {
+        error!(
+            sl(),
+            "no policy snapshot to roll back to after {}; enforcer state is unprovable", context
+        );
+        crate::SRM
+            .lock()
+            .await
+            .quarantine(format!("no policy snapshot available after {context}"));
+        return;
+    };
+    if let Err(e) = crate::AGENT_POLICY.lock().await.restore_state(snap) {
+        error!(
+            sl(),
+            "failed to roll back policy state after {}: {:?}", context, e
+        );
+        crate::SRM
+            .lock()
+            .await
+            .quarantine(format!("policy state rollback failed after {context}"));
+    }
 }
 
 fn get_agent_details() -> AgentDetails {
