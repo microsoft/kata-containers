@@ -122,7 +122,9 @@ mod tests {
         ] {
             assert!(
                 !json.contains(leaked),
-                "decision object leaked a sensitive value: {leaked}\nobject: {json}"
+                "decision object leaked a sensitive value: {}\nobject: {}",
+                leaked,
+                json
             );
         }
         // The bound keys are names only (no values attached).
