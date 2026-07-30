@@ -261,7 +261,11 @@ pub enum FragmentError {
     InvalidReceipt,
     /// FR-1f (trust list): the receipt's ledger is not in the `allowed_ledgers` scope for
     /// this `(issuer, feed)`.
-    LedgerNotAllowed { issuer: String, feed: String, ledger: String },
+    LedgerNotAllowed {
+        issuer: String,
+        feed: String,
+        ledger: String,
+    },
     /// FR-1f (trust list): a receipt is required from a specific ledger for this scope, but
     /// the presented receipt originates from a different (or unspecified) ledger.
     ReceiptFromDisallowedLedger { required: String, presented: String },
@@ -291,7 +295,11 @@ pub enum FragmentError {
     InvalidInclusionProof,
     /// FR-1f Stage 2: the presented signed tree head is not an append-only extension of the
     /// last-seen one for this ledger (the log was rewound or forked).
-    LogRolledBack { ledger: String, last_size: u64, presented_size: u64 },
+    LogRolledBack {
+        ledger: String,
+        last_size: u64,
+        presented_size: u64,
+    },
 }
 
 impl fmt::Display for FragmentError {
@@ -415,11 +423,14 @@ impl FragmentStore {
         issuer: impl Into<String>,
         public_key: &[u8; 32],
     ) -> Result<(), FragmentError> {
-        let key = VerifyingKey::from_bytes(public_key).map_err(|_| FragmentError::InvalidSignature)?;
+        let key =
+            VerifyingKey::from_bytes(public_key).map_err(|_| FragmentError::InvalidSignature)?;
         let issuer = issuer.into();
         // Authorizing an issuer also declares its default feed ("") so simple fragments
         // (no explicit feed) are accepted; named feeds are added via `declare_feed`.
-        self.feeds.entry((issuer.clone(), String::new())).or_insert(0);
+        self.feeds
+            .entry((issuer.clone(), String::new()))
+            .or_insert(0);
         self.issuers.insert(issuer, key);
         Ok(())
     }
@@ -509,7 +520,9 @@ impl FragmentStore {
     /// satisfies the policy is accepted as issued by `anchor.did`. Also declares the did's
     /// default feed so simple x509 fragments (no explicit feed) are accepted.
     pub fn authorize_did_x509(&mut self, anchor: crate::did_x509::DidX509Anchor) {
-        self.feeds.entry((anchor.did.clone(), String::new())).or_insert(0);
+        self.feeds
+            .entry((anchor.did.clone(), String::new()))
+            .or_insert(0);
         self.did_x509_anchors.insert(anchor.did.clone(), anchor);
     }
 
@@ -610,8 +623,8 @@ impl FragmentStore {
         //    unsigned/tampered; the statement binds issuer/feed/svn/grants/includes/
         //    requires/module).
         let statement = fragment.signing_bytes();
-        let sig =
-            Signature::from_slice(&fragment.signature).map_err(|_| FragmentError::InvalidSignature)?;
+        let sig = Signature::from_slice(&fragment.signature)
+            .map_err(|_| FragmentError::InvalidSignature)?;
         key.verify(&statement, &sig)
             .map_err(|_| FragmentError::InvalidSignature)?;
 
@@ -790,48 +803,50 @@ impl FragmentStore {
                     // RFC 6962 tree-head/consistency checks below are skipped, and no native
                     // `ttl_head` is recorded (external ledger owns its own consistency).
                 } else {
-                    let tp = TransparencyProof::parse(proof).ok_or(FragmentError::InvalidInclusionProof)?;
-                // (a) the signed tree head must be signed by a current ledger key.
-                let sth = sth_signing_bytes(ledger, tp.size, &tp.root);
-                if !keys
-                    .iter()
-                    .any(|(k, alg)| k.verify_cose(*alg, &sth, &tp.sig).is_ok())
-                {
-                    return Err(FragmentError::InvalidReceipt);
-                }
-                // (b) the statement must be included in the tree at that head.
-                let leaf = crate::merkle::leaf_hash(statement);
-                if !crate::merkle::verify_inclusion(tp.index, tp.size, leaf, &tp.incl, &tp.root) {
-                    return Err(FragmentError::InvalidInclusionProof);
-                }
-                // (c) the head must be an append-only extension of the last-seen head
-                //     (monotonic + consistency-proven) — this is the ordering guarantee.
-                if let Some((last_size, last_root)) = self.ttl_heads.get(ledger) {
-                    if tp.size < *last_size {
-                        return Err(FragmentError::LogRolledBack {
-                            ledger: ledger.to_string(),
-                            last_size: *last_size,
-                            presented_size: tp.size,
-                        });
-                    } else if tp.size == *last_size {
-                        if &tp.root != last_root {
+                    let tp = TransparencyProof::parse(proof)
+                        .ok_or(FragmentError::InvalidInclusionProof)?;
+                    // (a) the signed tree head must be signed by a current ledger key.
+                    let sth = sth_signing_bytes(ledger, tp.size, &tp.root);
+                    if !keys
+                        .iter()
+                        .any(|(k, alg)| k.verify_cose(*alg, &sth, &tp.sig).is_ok())
+                    {
+                        return Err(FragmentError::InvalidReceipt);
+                    }
+                    // (b) the statement must be included in the tree at that head.
+                    let leaf = crate::merkle::leaf_hash(statement);
+                    if !crate::merkle::verify_inclusion(tp.index, tp.size, leaf, &tp.incl, &tp.root)
+                    {
+                        return Err(FragmentError::InvalidInclusionProof);
+                    }
+                    // (c) the head must be an append-only extension of the last-seen head
+                    //     (monotonic + consistency-proven) — this is the ordering guarantee.
+                    if let Some((last_size, last_root)) = self.ttl_heads.get(ledger) {
+                        if tp.size < *last_size {
+                            return Err(FragmentError::LogRolledBack {
+                                ledger: ledger.to_string(),
+                                last_size: *last_size,
+                                presented_size: tp.size,
+                            });
+                        } else if tp.size == *last_size {
+                            if &tp.root != last_root {
+                                return Err(FragmentError::LogRolledBack {
+                                    ledger: ledger.to_string(),
+                                    last_size: *last_size,
+                                    presented_size: tp.size,
+                                });
+                            }
+                        } else if !crate::merkle::verify_consistency(
+                            *last_size, tp.size, last_root, &tp.root, &tp.cons,
+                        ) {
                             return Err(FragmentError::LogRolledBack {
                                 ledger: ledger.to_string(),
                                 last_size: *last_size,
                                 presented_size: tp.size,
                             });
                         }
-                    } else if !crate::merkle::verify_consistency(
-                        *last_size, tp.size, last_root, &tp.root, &tp.cons,
-                    ) {
-                        return Err(FragmentError::LogRolledBack {
-                            ledger: ledger.to_string(),
-                            last_size: *last_size,
-                            presented_size: tp.size,
-                        });
                     }
-                }
-                ttl_head = Some((ledger.to_string(), tp.size, tp.root));
+                    ttl_head = Some((ledger.to_string(), tp.size, tp.root));
                 }
             }
         }
@@ -885,8 +900,10 @@ impl FragmentStore {
     /// SVN high-water mark, record the fragment id (for composition), and accumulate its
     /// grants. Returns the grants newly added.
     pub fn commit(&mut self, verified: &VerifiedFragment) -> Vec<String> {
-        self.last_svn
-            .insert((verified.issuer.clone(), verified.feed.clone()), verified.svn);
+        self.last_svn.insert(
+            (verified.issuer.clone(), verified.feed.clone()),
+            verified.svn,
+        );
         self.loaded_ids.insert(verified.id.clone());
         // FR-1j: advance the append-only ordering log head (ordered mode only).
         if self.log_genesis.is_some() {
@@ -900,7 +917,10 @@ impl FragmentStore {
         }
         // FR-1f Stage 2: advance the per-ledger transparency tree head (raise-only by size).
         if let Some((ledger, size, root)) = &verified.ttl_head {
-            let entry = self.ttl_heads.entry(ledger.clone()).or_insert((0, [0u8; 32]));
+            let entry = self
+                .ttl_heads
+                .entry(ledger.clone())
+                .or_insert((0, [0u8; 32]));
             if *size >= entry.0 {
                 *entry = (*size, *root);
             }
@@ -980,7 +1000,10 @@ impl FragmentStore {
                         if root.len() == 32 {
                             let mut r = [0u8; 32];
                             r.copy_from_slice(&root);
-                            let entry = self.ttl_heads.entry(ledger.to_string()).or_insert((0, [0u8; 32]));
+                            let entry = self
+                                .ttl_heads
+                                .entry(ledger.to_string())
+                                .or_insert((0, [0u8; 32]));
                             if size >= entry.0 {
                                 *entry = (size, r);
                             }
@@ -1262,7 +1285,10 @@ mod tests {
         sign(&sk, &mut below);
         assert!(matches!(
             store.load(&below).unwrap_err(),
-            FragmentError::RolledBackSvn { min_required: 5, .. }
+            FragmentError::RolledBackSvn {
+                min_required: 5,
+                ..
+            }
         ));
 
         let mut at_floor = frag("issuerA", 5, &["exec:x"]);
@@ -1310,7 +1336,8 @@ mod tests {
 
         // Tamper the module after signing → signature no longer verifies.
         let mut tampered = f.clone();
-        tampered.policy_module = Some("package agent_policy.fragments\nexec_allowed := true # evil".into());
+        tampered.policy_module =
+            Some("package agent_policy.fragments\nexec_allowed := true # evil".into());
         assert_eq!(
             store.verify(&tampered).unwrap_err(),
             FragmentError::InvalidSignature
@@ -1348,7 +1375,6 @@ mod tests {
             FragmentError::RolledBackSvn { .. }
         ));
     }
-
 
     /// TC4.8: a valid signed add-only fragment (with receipt) is accepted and its grants
     /// become active.
@@ -1478,7 +1504,12 @@ mod tests {
     ) {
         f.signature = issuer_sk.sign(&f.signing_bytes()).to_bytes().to_vec();
         let rsig = ledger_sk.sign(&f.signing_bytes());
-        f.receipt = Some(rsig.to_bytes().iter().map(|b| format!("{:02x}", b)).collect());
+        f.receipt = Some(
+            rsig.to_bytes()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect(),
+        );
         f.receipt_ledger = Some(ledger.to_string());
     }
 
@@ -1554,7 +1585,10 @@ mod tests {
         let mut prod_no = frag_feed("issuerA", "prod", 1);
         prod_no.receipt = None;
         sign(&issuer_sk, &mut prod_no);
-        assert_eq!(store.verify(&prod_no).unwrap_err(), FragmentError::MissingReceipt);
+        assert_eq!(
+            store.verify(&prod_no).unwrap_err(),
+            FragmentError::MissingReceipt
+        );
 
         // prod with a receipt from a different ledger -> ReceiptFromDisallowedLedger.
         let mut prod_wrong = frag_feed("issuerA", "prod", 1);
@@ -1618,7 +1652,12 @@ mod tests {
         assert_eq!(store.verify(&f).unwrap_err(), FragmentError::InvalidReceipt);
 
         let rsig = anchor_sk.sign(&f.signing_bytes());
-        f.receipt = Some(rsig.to_bytes().iter().map(|b| format!("{:02x}", b)).collect());
+        f.receipt = Some(
+            rsig.to_bytes()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect(),
+        );
         assert!(store.verify(&f).is_ok());
     }
 
@@ -1656,7 +1695,10 @@ mod tests {
         sign(&sk, &mut low);
         assert!(matches!(
             store.load(&low).unwrap_err(),
-            FragmentError::RolledBackSvn { min_required: 10, .. }
+            FragmentError::RolledBackSvn {
+                min_required: 10,
+                ..
+            }
         ));
         // test feed floor is 0: svn 1 accepted (independent of prod).
         let mut t = frag_feed("issuerA", "test", 1);
@@ -1689,7 +1731,12 @@ mod tests {
 
         // Valid receipt: anchor signs the same statement.
         let rsig = anchor_sk.sign(&f.signing_bytes());
-        f.receipt = Some(rsig.to_bytes().iter().map(|b| format!("{:02x}", b)).collect());
+        f.receipt = Some(
+            rsig.to_bytes()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect(),
+        );
         assert!(store.verify(&f).is_ok());
     }
 
@@ -1757,7 +1804,10 @@ mod tests {
         // A replay of svn 5 (or lower) is still rejected after restart.
         assert!(matches!(
             restarted.verify(&f5).unwrap_err(),
-            FragmentError::RolledBackSvn { min_required: 6, .. }
+            FragmentError::RolledBackSvn {
+                min_required: 6,
+                ..
+            }
         ));
         // svn 6 is accepted.
         let mut f6 = frag_feed("issuerA", "", 6);
@@ -1768,7 +1818,10 @@ mod tests {
         restarted.import_svn_state("issuerA\t\t2");
         assert!(matches!(
             restarted.verify(&f6).unwrap_err(),
-            FragmentError::RolledBackSvn { min_required: 7, .. }
+            FragmentError::RolledBackSvn {
+                min_required: 7,
+                ..
+            }
         ));
     }
 
@@ -1795,7 +1848,9 @@ mod tests {
         let statement = fragment.signing_bytes();
 
         // Build a COSE_Sign1 (EdDSA) with the statement as payload, signed by the issuer.
-        let protected = HeaderBuilder::new().algorithm(iana::Algorithm::EdDSA).build();
+        let protected = HeaderBuilder::new()
+            .algorithm(iana::Algorithm::EdDSA)
+            .build();
         let sign1 = CoseSign1Builder::new()
             .protected(protected)
             .payload(statement.clone())
@@ -1919,7 +1974,11 @@ mod tests {
         restarted.authorize_issuer("issuerA", &pk).unwrap();
         restarted.set_log_genesis(b"kata-fragment-log/test-genesis");
         restarted.import_svn_state(&snap_after_b);
-        assert_eq!(restarted.log_head(), h2.as_slice(), "head restored across restart");
+        assert_eq!(
+            restarted.log_head(),
+            h2.as_slice(),
+            "head restored across restart"
+        );
 
         // The next in-order fragment (prev = h2) is accepted after restart.
         let mut c = ordered_frag("issuerA", 3, &h2);
@@ -1929,7 +1988,11 @@ mod tests {
         // Raise-only: importing the older (shorter) snapshot must NOT rewind the head.
         let head_now = restarted.log_head().to_vec();
         restarted.import_svn_state(&snap_after_a);
-        assert_eq!(restarted.log_head(), head_now.as_slice(), "older snapshot cannot rewind");
+        assert_eq!(
+            restarted.log_head(),
+            head_now.as_slice(),
+            "older snapshot cannot rewind"
+        );
     }
 
     /// TC-F1.30b (FR-1j): non-ordered mode is unchanged — with no genesis configured, a
@@ -1948,17 +2011,30 @@ mod tests {
     // ---- FR-1f Stage 2: transparency inclusion + consistency proofs ----
     use crate::merkle::MerkleTree;
 
-    fn ttl_proof(tree: &MerkleTree, sk: &SigningKey, ledger: &str, index: usize, cons_from: Option<usize>) -> String {
+    fn ttl_proof(
+        tree: &MerkleTree,
+        sk: &SigningKey,
+        ledger: &str,
+        index: usize,
+        cons_from: Option<usize>,
+    ) -> String {
         let size = tree.size();
         let root = tree.root();
         let sig = sk.sign(&sth_signing_bytes(ledger, size, &root)).to_bytes();
         let incl = tree.inclusion_proof(index);
-        let cons = cons_from.map(|m| tree.consistency_proof(m)).unwrap_or_default();
+        let cons = cons_from
+            .map(|m| tree.consistency_proof(m))
+            .unwrap_or_default();
         encode_transparency_proof(size, &root, &sig, index as u64, &incl, &cons)
     }
 
     fn ttl_frag(issuer_sk: &SigningKey, svn: u64, ledger: &str) -> PolicyFragment {
-        let mut f = PolicyFragment { issuer: "issuerA".into(), svn, receipt_ledger: Some(ledger.into()), ..Default::default() };
+        let mut f = PolicyFragment {
+            issuer: "issuerA".into(),
+            svn,
+            receipt_ledger: Some(ledger.into()),
+            ..Default::default()
+        };
         f.signature = issuer_sk.sign(&f.signing_bytes()).to_bytes().to_vec();
         f
     }
@@ -1971,7 +2047,9 @@ mod tests {
         let (led_sk, led_pk) = keypair(30);
         let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &issuer_pk).unwrap();
-        store.load_transparency_trust_list(&[("ttl".into(), vec![led_pk])]).unwrap();
+        store
+            .load_transparency_trust_list(&[("ttl".into(), vec![led_pk])])
+            .unwrap();
 
         let f = ttl_frag(&issuer_sk, 1, "ttl");
         let mut tree = MerkleTree::new();
@@ -1984,7 +2062,10 @@ mod tests {
         let mut bad = f.clone();
         tree.push(b"other".to_vec());
         bad.receipt_proof = Some(ttl_proof(&tree, &led_sk, "ttl", 1, None)); // claims index 1, but leaf 1 is "other"
-        assert_eq!(store.verify(&bad).unwrap_err(), FragmentError::InvalidInclusionProof);
+        assert_eq!(
+            store.verify(&bad).unwrap_err(),
+            FragmentError::InvalidInclusionProof
+        );
     }
 
     /// TC-F1.33 (Stage 2): a signed tree head signed by a key NOT in the trust list is
@@ -1996,14 +2077,19 @@ mod tests {
         let (evil_sk, _evil_pk) = keypair(31);
         let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &issuer_pk).unwrap();
-        store.load_transparency_trust_list(&[("ttl".into(), vec![led_pk])]).unwrap();
+        store
+            .load_transparency_trust_list(&[("ttl".into(), vec![led_pk])])
+            .unwrap();
 
         let f = ttl_frag(&issuer_sk, 1, "ttl");
         let mut tree = MerkleTree::new();
         tree.push(f.signing_bytes());
         let mut bad = f.clone();
         bad.receipt_proof = Some(ttl_proof(&tree, &evil_sk, "ttl", 0, None)); // signed by untrusted key
-        assert_eq!(store.verify(&bad).unwrap_err(), FragmentError::InvalidReceipt);
+        assert_eq!(
+            store.verify(&bad).unwrap_err(),
+            FragmentError::InvalidReceipt
+        );
     }
 
     /// BL-6 (Stage 2, CCF profile): a SCITT CCF-profile inclusion proof whose recomputed
@@ -2055,7 +2141,9 @@ mod tests {
         let (evil_sk, _evil_pk) = keypair(31);
         let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &issuer_pk).unwrap();
-        store.load_transparency_trust_list(&[("ttl".into(), vec![led_pk])]).unwrap();
+        store
+            .load_transparency_trust_list(&[("ttl".into(), vec![led_pk])])
+            .unwrap();
 
         let f = ttl_frag(&issuer_sk, 1, "ttl");
         let stmt = f.signing_bytes();
@@ -2090,7 +2178,9 @@ mod tests {
         let (led_sk, led_pk) = keypair(30);
         let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &issuer_pk).unwrap();
-        store.load_transparency_trust_list(&[("ttl".into(), vec![led_pk])]).unwrap();
+        store
+            .load_transparency_trust_list(&[("ttl".into(), vec![led_pk])])
+            .unwrap();
 
         let fa = ttl_frag(&issuer_sk, 1, "ttl");
         let fb = ttl_frag(&issuer_sk, 2, "ttl");
@@ -2116,7 +2206,10 @@ mod tests {
         t1b.push(fc.signing_bytes());
         let mut c = fc.clone();
         c.receipt_proof = Some(ttl_proof(&t1b, &led_sk, "ttl", 0, None));
-        assert!(matches!(store.verify(&c).unwrap_err(), FragmentError::LogRolledBack { .. }));
+        assert!(matches!(
+            store.verify(&c).unwrap_err(),
+            FragmentError::LogRolledBack { .. }
+        ));
     }
 
     /// TC-F1.35 (Stage 2): the transparency tree head survives export/import (restart) and
@@ -2127,7 +2220,9 @@ mod tests {
         let (led_sk, led_pk) = keypair(30);
         let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &issuer_pk).unwrap();
-        store.load_transparency_trust_list(&[("ttl".into(), vec![led_pk])]).unwrap();
+        store
+            .load_transparency_trust_list(&[("ttl".into(), vec![led_pk])])
+            .unwrap();
 
         let fa = ttl_frag(&issuer_sk, 1, "ttl");
         let fb = ttl_frag(&issuer_sk, 2, "ttl");
@@ -2149,7 +2244,9 @@ mod tests {
         // Restart: fresh store, same trust list, import the persisted tree head.
         let mut restarted = FragmentStore::new(false);
         restarted.authorize_issuer("issuerA", &issuer_pk).unwrap();
-        restarted.load_transparency_trust_list(&[("ttl".into(), vec![led_pk])]).unwrap();
+        restarted
+            .load_transparency_trust_list(&[("ttl".into(), vec![led_pk])])
+            .unwrap();
         restarted.import_svn_state(&snap);
 
         // An older (size 1) head is rejected after restart (raise-only tree head).
@@ -2158,7 +2255,10 @@ mod tests {
         t1c.push(fc.signing_bytes());
         let mut c = fc.clone();
         c.receipt_proof = Some(ttl_proof(&t1c, &led_sk, "ttl", 0, None));
-        assert!(matches!(restarted.verify(&c).unwrap_err(), FragmentError::LogRolledBack { .. }));
+        assert!(matches!(
+            restarted.verify(&c).unwrap_err(),
+            FragmentError::LogRolledBack { .. }
+        ));
     }
     /// TC-F1.36 (BL-2): a transparency ledger key may be ES256 (not just Ed25519) — a receipt
     /// signed by that P-256 ledger key verifies; one signed by a different key is rejected.
@@ -2179,13 +2279,22 @@ mod tests {
         f.receipt_ledger = Some("es256-ledger".into());
         f.signature = issuer_sk.sign(&f.signing_bytes()).to_bytes().to_vec();
         let sig: P256Sig = led.sign(&f.signing_bytes());
-        f.receipt = Some(sig.to_bytes().iter().map(|b| format!("{:02x}", b)).collect());
+        f.receipt = Some(
+            sig.to_bytes()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect(),
+        );
         assert!(store.verify(&f).is_ok());
 
         let other = P256Sk::random(&mut rand_core::OsRng);
         let bad: P256Sig = other.sign(&f.signing_bytes());
-        f.receipt = Some(bad.to_bytes().iter().map(|b| format!("{:02x}", b)).collect());
+        f.receipt = Some(
+            bad.to_bytes()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect(),
+        );
         assert_eq!(store.verify(&f).unwrap_err(), FragmentError::InvalidReceipt);
     }
 }
-

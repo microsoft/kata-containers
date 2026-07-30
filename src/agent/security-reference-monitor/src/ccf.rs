@@ -36,7 +36,11 @@ fn sha256(parts: &[&[u8]]) -> [u8; 32] {
 }
 
 /// CCF leaf hash: `SHA-256(internal_tx_hash || SHA-256(internal_evidence) || data_hash)`.
-pub fn ccf_leaf_hash(internal_tx_hash: &[u8; 32], internal_evidence: &[u8], data_hash: &[u8; 32]) -> [u8; 32] {
+pub fn ccf_leaf_hash(
+    internal_tx_hash: &[u8; 32],
+    internal_evidence: &[u8],
+    data_hash: &[u8; 32],
+) -> [u8; 32] {
     let ev = sha256(&[internal_evidence]);
     sha256(&[internal_tx_hash, &ev, data_hash])
 }
@@ -122,10 +126,19 @@ mod tests {
 
     // Build a CBOR ccf-inclusion-proof for `data_hash` with a single sibling on the right
     // (left=false): root = SHA-256(leaf || sib).
-    fn make_proof(data_hash: &[u8; 32], sib: &[u8; 32], left: bool, evidence: &str) -> (Vec<u8>, [u8; 32]) {
+    fn make_proof(
+        data_hash: &[u8; 32],
+        sib: &[u8; 32],
+        left: bool,
+        evidence: &str,
+    ) -> (Vec<u8>, [u8; 32]) {
         let tx = [7u8; 32];
         let leaf = ccf_leaf_hash(&tx, evidence.as_bytes(), data_hash);
-        let root = if left { sha256(&[sib, &leaf]) } else { sha256(&[&leaf, sib]) };
+        let root = if left {
+            sha256(&[sib, &leaf])
+        } else {
+            sha256(&[&leaf, sib])
+        };
         let proof = Value::Map(vec![
             (
                 Value::Integer(1.into()),

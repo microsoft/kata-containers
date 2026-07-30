@@ -135,7 +135,8 @@ mod tests {
         assert_eq!(dm_target_types(crypt), vec!["crypt".to_string()]);
         assert_eq!(classify_scratch(&["crypt"]), ScratchClass::Encrypted);
 
-        let integrity = "0 204800 crypt aes 0 0 8:16 0 1 integrity:28:aead\n0 200000 integrity 8:16 0";
+        let integrity =
+            "0 204800 crypt aes 0 0 8:16 0 1 integrity:28:aead\n0 200000 integrity 8:16 0";
         let targets = dm_target_types(integrity);
         let refs: Vec<&str> = targets.iter().map(String::as_str).collect();
         assert_eq!(
@@ -153,8 +154,11 @@ mod tests {
     #[test]
     fn plaintext_scratch_is_denied() {
         assert_eq!(
-            enforce_scratch(ScratchClass::Plaintext, ScratchRequirement::RequireEncrypted)
-                .unwrap_err(),
+            enforce_scratch(
+                ScratchClass::Plaintext,
+                ScratchRequirement::RequireEncrypted
+            )
+            .unwrap_err(),
             ScratchError::InsufficientProtection {
                 required: ScratchRequirement::RequireEncrypted,
                 effective: ScratchClass::Plaintext,
@@ -168,10 +172,12 @@ mod tests {
     fn host_claimed_encryption_but_effective_plaintext_is_denied() {
         // Host driver_options said "encryption_key=ephemeral", but the kernel shows no
         // crypt target (e.g. a linear passthrough). classify_scratch ignores the claim.
-        let effective = classify_scratch(&dm_target_types("0 100 linear 8:1 0")
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>());
+        let effective = classify_scratch(
+            &dm_target_types("0 100 linear 8:1 0")
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        );
         assert_eq!(effective, ScratchClass::Plaintext);
         assert!(enforce_scratch(effective, ScratchRequirement::RequireEncrypted).is_err());
     }
@@ -180,7 +186,11 @@ mod tests {
     /// requirement rejects encryption-without-integrity.
     #[test]
     fn classification_levels_and_integrity_requirement() {
-        assert!(enforce_scratch(ScratchClass::Encrypted, ScratchRequirement::RequireEncrypted).is_ok());
+        assert!(enforce_scratch(
+            ScratchClass::Encrypted,
+            ScratchRequirement::RequireEncrypted
+        )
+        .is_ok());
         assert!(enforce_scratch(
             ScratchClass::EncryptedWithIntegrity,
             ScratchRequirement::RequireEncryptedWithIntegrity

@@ -79,7 +79,9 @@ pub async fn load_declared_fragments() -> Result<usize> {
 
     info!(
         sl!(),
-        "policy-fragments: injected {}/{} verified fragment(s)", injected, specs.len()
+        "policy-fragments: injected {}/{} verified fragment(s)",
+        injected,
+        specs.len()
     );
     Ok(injected)
 }
@@ -96,7 +98,9 @@ async fn verify_and_inject(
     // COSE signature against exactly these reconstructed fields, so a forged payload cannot
     // pass; parsing here only tells us which fields the envelope claims to bind.
     let fragment = kata_security_reference_monitor::PolicyFragment::from_cose_envelope(cose_sign1)
-        .ok_or_else(|| anyhow!("fragment COSE envelope is not a kata-policy-fragment/v3 statement"))?;
+        .ok_or_else(|| {
+            anyhow!("fragment COSE envelope is not a kata-policy-fragment/v3 statement")
+        })?;
 
     // The pulled artifact must match what the measured base policy declared. This is a
     // defence-in-depth cross-check on top of the SRM's own issuer/feed/SVN gates.

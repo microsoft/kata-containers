@@ -58,7 +58,8 @@ fn prove_ccf(f: &HashMap<String, String>) {
 
     let tx = [7u8; 32];
     let evidence = "ccf-evidence";
-    let leaf = kata_security_reference_monitor::ccf::ccf_leaf_hash(&tx, evidence.as_bytes(), &data_hash);
+    let leaf =
+        kata_security_reference_monitor::ccf::ccf_leaf_hash(&tx, evidence.as_bytes(), &data_hash);
     let sib = [0x11u8; 32];
     // Single right sibling (left=false): root = SHA-256(leaf || sib).
     let mut h = Sha256::new();
@@ -129,7 +130,10 @@ fn main() {
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&key[..32]);
     let sk = SigningKey::from_bytes(&seed);
-    let ledger = f.get("ledger").cloned().unwrap_or_else(|| "acl".to_string());
+    let ledger = f
+        .get("ledger")
+        .cloned()
+        .unwrap_or_else(|| "acl".to_string());
     let target: usize = f.get("target").and_then(|s| s.parse().ok()).unwrap_or(0);
     let cons_from: Option<usize> = f.get("cons-from").and_then(|s| s.parse().ok());
 
@@ -148,7 +152,9 @@ fn main() {
     let root = tree.root();
     let sig = sk.sign(&sth_signing_bytes(&ledger, size, &root)).to_bytes();
     let incl = tree.inclusion_proof(target);
-    let cons = cons_from.map(|m| tree.consistency_proof(m)).unwrap_or_default();
+    let cons = cons_from
+        .map(|m| tree.consistency_proof(m))
+        .unwrap_or_default();
     print!(
         "{}",
         encode_transparency_proof(size, &root, &sig, target as u64, &incl, &cons)

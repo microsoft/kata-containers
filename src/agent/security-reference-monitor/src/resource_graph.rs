@@ -173,7 +173,9 @@ pub fn verify_ordered_bijection(
     for (position, (d, p)) in declared.iter().zip(presented.iter()).enumerate() {
         if p.identity() != d.identity() {
             // Wrong resource at this position: distinguish reorder from undeclared.
-            let matches_elsewhere = declared.iter().any(|other| other.identity() == p.identity());
+            let matches_elsewhere = declared
+                .iter()
+                .any(|other| other.identity() == p.identity());
             return Err(if matches_elsewhere {
                 ResourceGraphError::Reordered {
                     position,

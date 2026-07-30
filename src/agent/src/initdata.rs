@@ -236,7 +236,8 @@ mod tests {
         id.validate().expect("valid initdata");
 
         assert_eq!(
-            id.get_coco_data("fragment-issuers.toml").map(|s| s.as_str()),
+            id.get_coco_data("fragment-issuers.toml")
+                .map(|s| s.as_str()),
             Some("require_receipt = true\n")
         );
         assert!(id.get_coco_data("verified-layers.toml").is_some());

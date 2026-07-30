@@ -130,8 +130,7 @@ fn verify_effective_scratch_encryption(logger: &Logger, mount_point: &str) -> Re
     let target_refs: Vec<&str> = targets.iter().map(String::as_str).collect();
     let class = classify_scratch(&target_refs);
     info!(logger, "FR-5: effective scratch protection"; "mount" => mount_point, "class" => class.to_string());
-    enforce_scratch(class, ScratchRequirement::RequireEncrypted)
-        .map_err(|e| anyhow!("FR-5: {}", e))
+    enforce_scratch(class, ScratchRequirement::RequireEncrypted).map_err(|e| anyhow!("FR-5: {}", e))
 }
 
 /// Resolve a source path (e.g. `/dev/mapper/foo` or `/dev/dm-3`) to its device-mapper name.

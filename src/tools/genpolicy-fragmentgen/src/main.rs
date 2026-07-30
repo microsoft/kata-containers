@@ -67,10 +67,7 @@ fn read_hex_or_binary(bytes: Vec<u8>) -> Vec<u8> {
     // `cose_sign1_hex=` line). Detect hex by an all-hex, even-length ASCII body.
     if let Ok(text) = std::str::from_utf8(&bytes) {
         let t = text.trim();
-        if !t.is_empty()
-            && t.len() % 2 == 0
-            && t.bytes().all(|b| b.is_ascii_hexdigit())
-        {
+        if !t.is_empty() && t.len() % 2 == 0 && t.bytes().all(|b| b.is_ascii_hexdigit()) {
             if let Ok(decoded) = (0..t.len())
                 .step_by(2)
                 .map(|i| u8::from_str_radix(&t[i..i + 2], 16))
@@ -135,8 +132,8 @@ async fn push_artifact(reference: &str, plain_http: bool, cose: &[u8]) -> Result
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let raw = std::fs::read(&cli.cose)
-        .with_context(|| format!("read COSE envelope {:?}", cli.cose))?;
+    let raw =
+        std::fs::read(&cli.cose).with_context(|| format!("read COSE envelope {:?}", cli.cose))?;
     let cose = read_hex_or_binary(raw);
 
     // Reuse the guest's own parser so the emitted settings entry is exactly what the guest
@@ -158,7 +155,10 @@ async fn main() -> Result<()> {
     if let Some(reference) = &cli.push {
         push_artifact(reference, cli.plain_http, &cose).await?;
         println!();
-        println!("Pushed {}-byte fragment artifact to {reference}", cose.len());
+        println!(
+            "Pushed {}-byte fragment artifact to {reference}",
+            cose.len()
+        );
     }
 
     Ok(())

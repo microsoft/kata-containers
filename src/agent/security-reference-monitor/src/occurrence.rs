@@ -102,7 +102,11 @@ impl fmt::Display for OccurrenceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             OccurrenceError::UnknownAlias(a) => write!(f, "no occurrence for alias {a}"),
-            OccurrenceError::IllegalTransition { alias, from, action } => write!(
+            OccurrenceError::IllegalTransition {
+                alias,
+                from,
+                action,
+            } => write!(
                 f,
                 "illegal lifecycle transition: {action} on alias {alias} while {from}"
             ),
@@ -302,7 +306,11 @@ impl OccurrenceRegistry {
     }
 
     /// Require that an alias refers to a running occurrence (exec/signal gating).
-    pub fn require_running(&self, alias: &str, action: &'static str) -> Result<(), OccurrenceError> {
+    pub fn require_running(
+        &self,
+        alias: &str,
+        action: &'static str,
+    ) -> Result<(), OccurrenceError> {
         let o = self.get_live(alias)?;
         if o.state != Lifecycle::Running {
             return Err(OccurrenceError::IllegalTransition {
@@ -452,7 +460,8 @@ mod tests {
     fn bind_device_records_verified_cdi_devices() {
         let mut r = OccurrenceRegistry::new();
         r.create("c1", None, None).unwrap();
-        r.bind_device("c1", "nvidia.com/gpu=0", "sha256:TRUSTED").unwrap();
+        r.bind_device("c1", "nvidia.com/gpu=0", "sha256:TRUSTED")
+            .unwrap();
         assert_eq!(
             r.devices("c1"),
             Some([("nvidia.com/gpu=0".to_string(), "sha256:TRUSTED".to_string())].as_slice())

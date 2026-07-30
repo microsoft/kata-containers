@@ -414,7 +414,10 @@ pub struct AppArmorProfile {
 /// - Unconfined -> Some("") (containerd applies no profile).
 /// - RuntimeDefault / unspecified -> keep the settings-derived value (which may
 ///   be None, i.e. left unconstrained, when no expected default is configured).
-pub fn apply_apparmor_profile(process: &mut policy::KataProcess, profile: &Option<AppArmorProfile>) {
+pub fn apply_apparmor_profile(
+    process: &mut policy::KataProcess,
+    profile: &Option<AppArmorProfile>,
+) {
     if let Some(p) = profile {
         match p.profile_type.as_str() {
             "Localhost" => {

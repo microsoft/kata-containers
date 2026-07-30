@@ -32,32 +32,30 @@ pub mod cdi;
 pub mod cose_keys;
 pub mod did_x509;
 pub mod fragments;
-pub mod merkle;
 pub mod handle_binding;
+pub mod merkle;
 pub mod network_phase;
 pub mod occurrence;
 pub mod resource_graph;
 pub mod scratch;
 pub mod verified_images;
 pub mod verified_layers;
-pub use cdi::{
-    authorize_cdi, CdiDeviceRequest, CdiError, MeasuredCdiSpec, VerifiedCdiDevice,
-};
+pub use cdi::{authorize_cdi, CdiDeviceRequest, CdiError, MeasuredCdiSpec, VerifiedCdiDevice};
 pub use did_x509::{DidX509Anchor, DidX509Policy};
 pub use fragments::{FragmentError, FragmentStore, PolicyFragment};
 pub use handle_binding::{CheckedHandle, HandleError};
 pub use network_phase::{NetOp, NetPhaseError, NetworkPhase, NetworkPhaseMachine};
+pub use occurrence::{Lifecycle, Occurrence, OccurrenceError, OccurrenceRegistry};
+pub use resource_graph::{
+    verify_ordered_bijection, PresentedResource, ResourceDeclaration, ResourceGraphError,
+    ResourceKind, VerifiedResourceHandle,
+};
 pub use scratch::{
     classify_scratch, dm_target_types, enforce_scratch, ScratchClass, ScratchError,
     ScratchRequirement,
 };
 pub use verified_images::{ImageError, VerifiedImageStore};
 pub use verified_layers::{LayerError, VerifiedLayerStore};
-pub use occurrence::{Lifecycle, Occurrence, OccurrenceError, OccurrenceRegistry};
-pub use resource_graph::{
-    verify_ordered_bijection, PresentedResource, ResourceDeclaration, ResourceGraphError,
-    ResourceKind, VerifiedResourceHandle,
-};
 
 /// Host-independent identifier for a single mutating operation (idempotency key).
 pub type OperationId = String;
@@ -99,7 +97,10 @@ pub enum SrmError {
     /// Expected state version did not match the current version (stale/replayed).
     StaleStateVersion { expected: u64, current: u64 },
     /// The plan presented at execution differs from the authorized plan.
-    PlanMismatch { authorized: String, presented: String },
+    PlanMismatch {
+        authorized: String,
+        presented: String,
+    },
     /// No such prepared transaction.
     UnknownOperation(OperationId),
     /// The transaction is not in a state that permits this action.
@@ -111,14 +112,26 @@ impl fmt::Display for SrmError {
         match self {
             SrmError::Quarantined(r) => write!(f, "SRM quarantined: {r}"),
             SrmError::StaleStateVersion { expected, current } => {
-                write!(f, "stale state version: expected {expected}, current {current}")
+                write!(
+                    f,
+                    "stale state version: expected {expected}, current {current}"
+                )
             }
-            SrmError::PlanMismatch { authorized, presented } => {
-                write!(f, "plan mismatch: authorized {authorized}, presented {presented}")
+            SrmError::PlanMismatch {
+                authorized,
+                presented,
+            } => {
+                write!(
+                    f,
+                    "plan mismatch: authorized {authorized}, presented {presented}"
+                )
             }
             SrmError::UnknownOperation(id) => write!(f, "unknown operation: {id}"),
             SrmError::InvalidState { op, state } => {
-                write!(f, "operation {op} in invalid state {state:?} for this action")
+                write!(
+                    f,
+                    "operation {op} in invalid state {state:?} for this action"
+                )
             }
         }
     }
@@ -252,7 +265,11 @@ impl ReferenceMonitor {
     }
 
     /// Phase 2b: the runtime op succeeded; advance state and retain the result.
-    pub fn commit(&mut self, op_id: &str, observed_result: impl Into<String>) -> Result<(), SrmError> {
+    pub fn commit(
+        &mut self,
+        op_id: &str,
+        observed_result: impl Into<String>,
+    ) -> Result<(), SrmError> {
         let txn = self
             .txns
             .get_mut(op_id)
@@ -345,7 +362,13 @@ mod tests {
         m.execute("op1", "d").unwrap();
         m.commit("op1", "r").unwrap(); // version -> 1
         let err = m.prepare("op2", 0, "d").unwrap_err();
-        assert_eq!(err, SrmError::StaleStateVersion { expected: 0, current: 1 });
+        assert_eq!(
+            err,
+            SrmError::StaleStateVersion {
+                expected: 0,
+                current: 1
+            }
+        );
     }
 
     #[test]
@@ -363,14 +386,20 @@ mod tests {
         let mut m = ReferenceMonitor::new();
         m.quarantine("ambiguous failure between execute and commit");
         assert!(m.is_quarantined());
-        assert!(matches!(m.prepare("op1", 0, "d"), Err(SrmError::Quarantined(_))));
+        assert!(matches!(
+            m.prepare("op1", 0, "d"),
+            Err(SrmError::Quarantined(_))
+        ));
     }
 
     #[test]
     fn cannot_commit_without_execute() {
         let mut m = ReferenceMonitor::new();
         m.prepare("op1", 0, "d").unwrap();
-        assert!(matches!(m.commit("op1", "r"), Err(SrmError::InvalidState { .. })));
+        assert!(matches!(
+            m.commit("op1", "r"),
+            Err(SrmError::InvalidState { .. })
+        ));
     }
 
     #[test]

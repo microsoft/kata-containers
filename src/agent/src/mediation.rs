@@ -51,6 +51,10 @@ impl EnforcementClass {
 /// Every method of the agent ttRPC service, the handler that implements it, and the
 /// enforcement point it must pass through. This table is exhaustive: the proto-sync test
 /// fails if any service method is missing or unknown.
+///
+/// Kept hand-aligned one entry per line: this is a reference table that is read far more
+/// often than it is edited, and rustfmt would expand each row to a four-line tuple.
+#[rustfmt::skip]
 pub const MEDIATION_MANIFEST: &[(&str, &str, EnforcementClass)] = &[
     // Container lifecycle (policy + occurrence state machine).
     ("CreateContainer", "create_container", EnforcementClass::LifecycleGated),
@@ -139,10 +143,15 @@ mod tests {
     #[test]
     fn every_service_rpc_is_classified() {
         let proto: HashSet<String> = proto_rpc_methods().into_iter().collect();
-        assert!(!proto.is_empty(), "failed to parse any rpc from agent.proto");
+        assert!(
+            !proto.is_empty(),
+            "failed to parse any rpc from agent.proto"
+        );
 
-        let manifest: HashSet<String> =
-            MEDIATION_MANIFEST.iter().map(|(m, _, _)| m.to_string()).collect();
+        let manifest: HashSet<String> = MEDIATION_MANIFEST
+            .iter()
+            .map(|(m, _, _)| m.to_string())
+            .collect();
 
         let unclassified: Vec<_> = proto.difference(&manifest).collect();
         assert!(

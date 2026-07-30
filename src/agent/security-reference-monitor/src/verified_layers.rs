@@ -43,7 +43,10 @@ pub struct VerifiedLayerStore {
 #[derive(Debug, PartialEq, Eq)]
 pub enum LayerError {
     /// The presented `(algorithm, root_hash)` is not in the measured allowlist.
-    UnauthorizedLayer { algorithm: String, root_hash: String },
+    UnauthorizedLayer {
+        algorithm: String,
+        root_hash: String,
+    },
     /// Verification is required but no layer has been authorized (fail-closed): an
     /// absent/empty measured config must reject every layer, not open the gate.
     NoApprovedLayers,
@@ -52,12 +55,18 @@ pub enum LayerError {
 impl fmt::Display for LayerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LayerError::UnauthorizedLayer { algorithm, root_hash } => write!(
+            LayerError::UnauthorizedLayer {
+                algorithm,
+                root_hash,
+            } => write!(
                 f,
                 "unauthorized dm-verity layer: algorithm {algorithm}, root_hash {root_hash}"
             ),
             LayerError::NoApprovedLayers => {
-                write!(f, "dm-verity layer verification required but no layer is authorized")
+                write!(
+                    f,
+                    "dm-verity layer verification required but no layer is authorized"
+                )
             }
         }
     }
@@ -164,7 +173,10 @@ mod tests {
     fn empty_allowlist_is_fail_closed_when_required() {
         let store = VerifiedLayerStore::new(true);
         assert!(!store.has_authorized_layers());
-        assert_eq!(store.verify("sha256", ROOT_A).unwrap_err(), LayerError::NoApprovedLayers);
+        assert_eq!(
+            store.verify("sha256", ROOT_A).unwrap_err(),
+            LayerError::NoApprovedLayers
+        );
     }
 
     /// TC-F4C.3: when verification is not required (feature off / opt-in), any layer is

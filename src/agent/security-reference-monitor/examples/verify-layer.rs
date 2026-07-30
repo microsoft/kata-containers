@@ -25,10 +25,14 @@ fn parse_flags(args: &[String]) -> HashMap<String, Vec<String>> {
     while i < args.len() {
         if let Some(key) = args[i].strip_prefix("--") {
             if i + 1 < args.len() && !args[i + 1].starts_with("--") {
-                m.entry(key.to_string()).or_default().push(args[i + 1].clone());
+                m.entry(key.to_string())
+                    .or_default()
+                    .push(args[i + 1].clone());
                 i += 2;
             } else {
-                m.entry(key.to_string()).or_default().push("true".to_string());
+                m.entry(key.to_string())
+                    .or_default()
+                    .push("true".to_string());
                 i += 1;
             }
         } else {
@@ -42,7 +46,11 @@ fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let f = parse_flags(&argv);
 
-    let algorithm = f.get("algorithm").and_then(|v| v.first()).cloned().unwrap_or_else(|| "sha256".to_string());
+    let algorithm = f
+        .get("algorithm")
+        .and_then(|v| v.first())
+        .cloned()
+        .unwrap_or_else(|| "sha256".to_string());
     let root_hash = match f.get("root-hash").and_then(|v| v.first()) {
         Some(h) => h.clone(),
         None => {
@@ -66,7 +74,10 @@ fn main() {
 
     match store.verify(&algorithm, &root_hash) {
         Ok(()) => {
-            println!("AUTHORIZED  algorithm={algorithm} root_hash={root_hash} (approved={})", store.len());
+            println!(
+                "AUTHORIZED  algorithm={algorithm} root_hash={root_hash} (approved={})",
+                store.len()
+            );
             std::process::exit(0);
         }
         Err(e) => {

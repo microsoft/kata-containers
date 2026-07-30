@@ -29,9 +29,9 @@ use kata_security_reference_monitor::did_x509::{DidX509Anchor, DidX509Policy};
 use kata_security_reference_monitor::{FragmentError, FragmentStore, PolicyFragment};
 
 // ---- x509 minting (in-process P-256 PKI; needs only the dev-deps the tests already use) --
+use const_oid::ObjectIdentifier;
 use coset::cbor::value::Value;
 use coset::{iana, CborSerializable, CoseSign1Builder, HeaderBuilder};
-use const_oid::ObjectIdentifier;
 use p256::ecdsa::{DerSignature, Signature as EcSignature, SigningKey as EcSigningKey};
 use p256::pkcs8::EncodePublicKey;
 use rand_core::OsRng;
@@ -58,7 +58,11 @@ fn ok(label: &str) {
 }
 
 fn hexs(b: &[u8]) -> String {
-    b.iter().take(8).map(|x| format!("{:02x}", x)).collect::<String>() + "…"
+    b.iter()
+        .take(8)
+        .map(|x| format!("{:02x}", x))
+        .collect::<String>()
+        + "…"
 }
 
 // ---------------------------------------------------------------------------------------
@@ -69,13 +73,25 @@ fn section1_core() {
     store.authorize_issuer("issuerA", &pk).unwrap();
 
     // Unauthorized issuer -> rejected (fail-closed).
-    let mut rogue = PolicyFragment { issuer: "attacker".into(), svn: 1, ..Default::default() };
+    let mut rogue = PolicyFragment {
+        issuer: "attacker".into(),
+        svn: 1,
+        ..Default::default()
+    };
     rogue.signature = sk.sign(&rogue.signing_bytes()).to_bytes().to_vec();
-    assert!(matches!(store.verify(&rogue), Err(FragmentError::UnauthorizedIssuer(_))));
+    assert!(matches!(
+        store.verify(&rogue),
+        Err(FragmentError::UnauthorizedIssuer(_))
+    ));
     ok("unknown issuer rejected");
 
     // A properly signed fragment from an authorized issuer is accepted.
-    let mut f = PolicyFragment { issuer: "issuerA".into(), svn: 1, grants: vec!["exec:tool".into()], ..Default::default() };
+    let mut f = PolicyFragment {
+        issuer: "issuerA".into(),
+        svn: 1,
+        grants: vec!["exec:tool".into()],
+        ..Default::default()
+    };
     f.signature = sk.sign(&f.signing_bytes()).to_bytes().to_vec();
     assert!(store.load(&f).is_ok());
     ok("authorized + signed fragment accepted, grant added");
@@ -83,28 +99,56 @@ fn section1_core() {
     // Tampering after signing invalidates the signature.
     let mut t = f.clone();
     t.grants = vec!["exec:tool".into(), "exec:evil".into()];
-    assert!(matches!(store.verify(&t), Err(FragmentError::InvalidSignature)));
+    assert!(matches!(
+        store.verify(&t),
+        Err(FragmentError::InvalidSignature)
+    ));
     ok("tampered fragment rejected (grants bound into signature)");
 
     // Monotonic SVN: replaying the same SVN is rejected.
-    let mut replay = PolicyFragment { issuer: "issuerA".into(), svn: 1, ..Default::default() };
+    let mut replay = PolicyFragment {
+        issuer: "issuerA".into(),
+        svn: 1,
+        ..Default::default()
+    };
     replay.signature = sk.sign(&replay.signing_bytes()).to_bytes().to_vec();
-    assert!(matches!(store.verify(&replay), Err(FragmentError::RolledBackSvn { .. })));
+    assert!(matches!(
+        store.verify(&replay),
+        Err(FragmentError::RolledBackSvn { .. })
+    ));
     ok("rolled-back SVN rejected (anti-replay)");
 
     // Add-only: a fragment relaxing a root constraint is rejected.
     store.add_root_constraint("allow-all");
-    let mut broad = PolicyFragment { issuer: "issuerA".into(), svn: 2, grants: vec!["allow-all".into()], ..Default::default() };
+    let mut broad = PolicyFragment {
+        issuer: "issuerA".into(),
+        svn: 2,
+        grants: vec!["allow-all".into()],
+        ..Default::default()
+    };
     broad.signature = sk.sign(&broad.signing_bytes()).to_bytes().to_vec();
-    assert!(matches!(store.verify(&broad), Err(FragmentError::RootConstraintRelaxation(_))));
+    assert!(matches!(
+        store.verify(&broad),
+        Err(FragmentError::RootConstraintRelaxation(_))
+    ));
     ok("root-constraint relaxation rejected (add-only)");
 }
 
 // ---------------------------------------------------------------------------------------
-fn signed_with_receipt(issuer_sk: &SigningKey, f: &mut PolicyFragment, ledger: &str, ledger_sk: &SigningKey) {
+fn signed_with_receipt(
+    issuer_sk: &SigningKey,
+    f: &mut PolicyFragment,
+    ledger: &str,
+    ledger_sk: &SigningKey,
+) {
     f.signature = issuer_sk.sign(&f.signing_bytes()).to_bytes().to_vec();
     let rsig = ledger_sk.sign(&f.signing_bytes());
-    f.receipt = Some(rsig.to_bytes().iter().map(|b| format!("{:02x}", b)).collect());
+    f.receipt = Some(
+        rsig.to_bytes()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect(),
+    );
     f.receipt_ledger = Some(ledger.to_string());
 }
 
@@ -128,25 +172,51 @@ fn section2_trust_list() {
     store.require_receipt_for("issuerA", "prod", &["ledgerA".to_string()]);
 
     // Valid receipt from the allowed ledger -> accepted.
-    let mut f = PolicyFragment { issuer: "issuerA".into(), feed: "prod".into(), svn: 1, ..Default::default() };
+    let mut f = PolicyFragment {
+        issuer: "issuerA".into(),
+        feed: "prod".into(),
+        svn: 1,
+        ..Default::default()
+    };
     signed_with_receipt(&issuer_sk, &mut f, "ledgerA", &led_a_sk);
     assert!(store.verify(&f).is_ok());
     ok("receipt from allowed ledger accepted");
 
     // Receipt from a non-allowed ledger -> rejected.
-    let mut g = PolicyFragment { issuer: "issuerA".into(), feed: "prod".into(), svn: 1, ..Default::default() };
+    let mut g = PolicyFragment {
+        issuer: "issuerA".into(),
+        feed: "prod".into(),
+        svn: 1,
+        ..Default::default()
+    };
     signed_with_receipt(&issuer_sk, &mut g, "ledgerB", &led_b_sk);
-    assert!(matches!(store.verify(&g), Err(FragmentError::LedgerNotAllowed { .. })));
+    assert!(matches!(
+        store.verify(&g),
+        Err(FragmentError::LedgerNotAllowed { .. })
+    ));
     ok("receipt from disallowed ledger rejected (allowed_ledgers)");
 
     // No receipt where one is required -> rejected.
-    let mut h = PolicyFragment { issuer: "issuerA".into(), feed: "prod".into(), svn: 1, ..Default::default() };
+    let mut h = PolicyFragment {
+        issuer: "issuerA".into(),
+        feed: "prod".into(),
+        svn: 1,
+        ..Default::default()
+    };
     h.signature = issuer_sk.sign(&h.signing_bytes()).to_bytes().to_vec();
-    assert!(matches!(store.verify(&h), Err(FragmentError::MissingReceipt)));
+    assert!(matches!(
+        store.verify(&h),
+        Err(FragmentError::MissingReceipt)
+    ));
     ok("missing required receipt rejected (required_receipts)");
 
     // Rotation: a receipt signed by ledgerA's NEW key still verifies.
-    let mut r = PolicyFragment { issuer: "issuerA".into(), feed: "prod".into(), svn: 2, ..Default::default() };
+    let mut r = PolicyFragment {
+        issuer: "issuerA".into(),
+        feed: "prod".into(),
+        svn: 2,
+        ..Default::default()
+    };
     signed_with_receipt(&issuer_sk, &mut r, "ledgerA", &led_a2_sk);
     assert!(store.verify(&r).is_ok());
     ok("receipt signed by rotated ledger key accepted (rotation)");
@@ -161,12 +231,19 @@ fn ec_spki(sk: &EcSigningKey) -> SubjectPublicKeyInfoOwned {
 fn mint_ca(cn: &str, sk: &EcSigningKey) -> Vec<u8> {
     let subject = Name::from_str(&format!("CN={cn}")).unwrap();
     let validity = Validity::from_now(Duration::from_secs(3600)).unwrap();
-    CertificateBuilder::new(Profile::Root, SerialNumber::from(1u32), validity, subject, ec_spki(sk), sk)
-        .unwrap()
-        .build::<DerSignature>()
-        .unwrap()
-        .to_der()
-        .unwrap()
+    CertificateBuilder::new(
+        Profile::Root,
+        SerialNumber::from(1u32),
+        validity,
+        subject,
+        ec_spki(sk),
+        sk,
+    )
+    .unwrap()
+    .build::<DerSignature>()
+    .unwrap()
+    .to_der()
+    .unwrap()
 }
 
 fn mint_leaf(cn: &str, leaf_sk: &EcSigningKey, ca_cn: &str, ca_sk: &EcSigningKey) -> Vec<u8> {
@@ -174,7 +251,11 @@ fn mint_leaf(cn: &str, leaf_sk: &EcSigningKey, ca_cn: &str, ca_sk: &EcSigningKey
     let subject = Name::from_str(&format!("CN={cn}")).unwrap();
     let validity = Validity::from_now(Duration::from_secs(3600)).unwrap();
     let mut b = CertificateBuilder::new(
-        Profile::Leaf { issuer, enable_key_agreement: false, enable_key_encipherment: false },
+        Profile::Leaf {
+            issuer,
+            enable_key_agreement: false,
+            enable_key_encipherment: false,
+        },
         SerialNumber::from(2u32),
         validity,
         subject,
@@ -182,15 +263,25 @@ fn mint_leaf(cn: &str, leaf_sk: &EcSigningKey, ca_cn: &str, ca_sk: &EcSigningKey
         ca_sk,
     )
     .unwrap();
-    b.add_extension(&ExtendedKeyUsage(vec![ObjectIdentifier::new_unwrap(EKU_CODE_SIGNING)])).unwrap();
+    b.add_extension(&ExtendedKeyUsage(vec![ObjectIdentifier::new_unwrap(
+        EKU_CODE_SIGNING,
+    )]))
+    .unwrap();
     b.build::<DerSignature>().unwrap().to_der().unwrap()
 }
 
 fn cose_x509(statement: &[u8], leaf_sk: &EcSigningKey, chain: &[Vec<u8>]) -> Vec<u8> {
     let mut unprotected = coset::Header::default();
-    unprotected.rest.push((coset::Label::Int(33), Value::Array(chain.iter().map(|c| Value::Bytes(c.clone())).collect())));
+    unprotected.rest.push((
+        coset::Label::Int(33),
+        Value::Array(chain.iter().map(|c| Value::Bytes(c.clone())).collect()),
+    ));
     CoseSign1Builder::new()
-        .protected(HeaderBuilder::new().algorithm(iana::Algorithm::ES256).build())
+        .protected(
+            HeaderBuilder::new()
+                .algorithm(iana::Algorithm::ES256)
+                .build(),
+        )
         .unprotected(unprotected)
         .payload(statement.to_vec())
         .create_signature(b"", |tbs| {
@@ -212,13 +303,20 @@ fn section3_did_x509() {
     store.authorize_did_x509(DidX509Anchor {
         did: did.to_string(),
         ca_fingerprint: kata_security_reference_monitor::did_x509::sha256_fingerprint(&ca),
-        policy: DidX509Policy { require_eku: vec![EKU_CODE_SIGNING.into()], ..Default::default() },
+        policy: DidX509Policy {
+            require_eku: vec![EKU_CODE_SIGNING.into()],
+            ..Default::default()
+        },
     });
 
     // Valid chain to the trusted CA, leaf satisfies the policy -> accepted.
     let leaf1_sk = EcSigningKey::random(&mut OsRng);
     let leaf1 = mint_leaf("issuerX", &leaf1_sk, "demo-ca", &ca_sk);
-    let f = PolicyFragment { issuer: did.into(), svn: 1, ..Default::default() };
+    let f = PolicyFragment {
+        issuer: did.into(),
+        svn: 1,
+        ..Default::default()
+    };
     let cose = cose_x509(&f.signing_bytes(), &leaf1_sk, &[leaf1.clone(), ca.clone()]);
     assert!(store.verify_cose_x509(&f, &cose).is_ok());
     ok("valid did:x509 chain accepted (identity = CA + policy, not a pinned key)");
@@ -229,28 +327,48 @@ fn section3_did_x509() {
     let evil_leaf_sk = EcSigningKey::random(&mut OsRng);
     let evil_leaf = mint_leaf("issuerX", &evil_leaf_sk, "evil-ca", &other_ca_sk);
     let cose_evil = cose_x509(&f.signing_bytes(), &evil_leaf_sk, &[evil_leaf, other_ca]);
-    assert!(matches!(store.verify_cose_x509(&f, &cose_evil), Err(FragmentError::UntrustedCa)));
+    assert!(matches!(
+        store.verify_cose_x509(&f, &cose_evil),
+        Err(FragmentError::UntrustedCa)
+    ));
     ok("chain to an untrusted CA rejected");
 
     // Rotation: a brand-new leaf under the SAME CA + policy is accepted with no config change.
     let leaf2_sk = EcSigningKey::random(&mut OsRng);
     let leaf2 = mint_leaf("issuerX", &leaf2_sk, "demo-ca", &ca_sk);
-    let f2 = PolicyFragment { issuer: did.into(), svn: 2, ..Default::default() };
+    let f2 = PolicyFragment {
+        issuer: did.into(),
+        svn: 2,
+        ..Default::default()
+    };
     let cose2 = cose_x509(&f2.signing_bytes(), &leaf2_sk, &[leaf2, ca.clone()]);
     assert!(store.verify_cose_x509(&f2, &cose2).is_ok());
     ok("rotated leaf (new key, same CA) accepted with no config change");
 
     // Revocation: revoke leaf1's fingerprint; even a valid chain is now rejected.
-    store.set_revoked_certs([kata_security_reference_monitor::did_x509::sha256_fingerprint(&leaf1)]);
-    let f3 = PolicyFragment { issuer: did.into(), svn: 3, ..Default::default() };
+    store
+        .set_revoked_certs([kata_security_reference_monitor::did_x509::sha256_fingerprint(&leaf1)]);
+    let f3 = PolicyFragment {
+        issuer: did.into(),
+        svn: 3,
+        ..Default::default()
+    };
     let cose3 = cose_x509(&f3.signing_bytes(), &leaf1_sk, &[leaf1, ca]);
-    assert!(matches!(store.verify_cose_x509(&f3, &cose3), Err(FragmentError::RevokedCertificate)));
+    assert!(matches!(
+        store.verify_cose_x509(&f3, &cose3),
+        Err(FragmentError::RevokedCertificate)
+    ));
     ok("revoked leaf rejected (measured revocation list)");
 }
 
 // ---------------------------------------------------------------------------------------
 fn ordered_frag(issuer: &str, svn: u64, prev_head: &[u8], sk: &SigningKey) -> PolicyFragment {
-    let mut f = PolicyFragment { issuer: issuer.into(), svn, prev_log_head: Some(prev_head.to_vec()), ..Default::default() };
+    let mut f = PolicyFragment {
+        issuer: issuer.into(),
+        svn,
+        prev_log_head: Some(prev_head.to_vec()),
+        ..Default::default()
+    };
     f.signature = sk.sign(&f.signing_bytes()).to_bytes().to_vec();
     f
 }
@@ -272,11 +390,19 @@ fn section4_ordering() {
     let b = ordered_frag("issuerA", 2, &h1, &sk);
     store.load(&b).unwrap();
     let h2 = store.log_head().to_vec();
-    ok(&format!("in-order A→B accepted; head advanced {} → {} → {}", hexs(&h0), hexs(&h1), hexs(&h2)));
+    ok(&format!(
+        "in-order A→B accepted; head advanced {} → {} → {}",
+        hexs(&h0),
+        hexs(&h1),
+        hexs(&h2)
+    ));
 
     // A fragment asserting the stale genesis head (a reorder/insertion) is rejected.
     let stale = ordered_frag("issuerA", 3, &h0, &sk);
-    assert!(matches!(store.load(&stale), Err(FragmentError::LogHeadMismatch { .. })));
+    assert!(matches!(
+        store.load(&stale),
+        Err(FragmentError::LogHeadMismatch { .. })
+    ));
     assert_eq!(store.log_head(), h2.as_slice());
     ok("out-of-order fragment rejected (LogHeadMismatch); head unchanged");
 
@@ -319,17 +445,30 @@ fn main() {
 use kata_security_reference_monitor::fragments::{encode_transparency_proof, sth_signing_bytes};
 use kata_security_reference_monitor::merkle::MerkleTree;
 
-fn ttl_proof(tree: &MerkleTree, sk: &SigningKey, ledger: &str, index: usize, cons_from: Option<usize>) -> String {
+fn ttl_proof(
+    tree: &MerkleTree,
+    sk: &SigningKey,
+    ledger: &str,
+    index: usize,
+    cons_from: Option<usize>,
+) -> String {
     let size = tree.size();
     let root = tree.root();
     let sig = sk.sign(&sth_signing_bytes(ledger, size, &root)).to_bytes();
     let incl = tree.inclusion_proof(index);
-    let cons = cons_from.map(|m| tree.consistency_proof(m)).unwrap_or_default();
+    let cons = cons_from
+        .map(|m| tree.consistency_proof(m))
+        .unwrap_or_default();
     encode_transparency_proof(size, &root, &sig, index as u64, &incl, &cons)
 }
 
 fn ttl_frag(issuer_sk: &SigningKey, svn: u64, ledger: &str) -> PolicyFragment {
-    let mut f = PolicyFragment { issuer: "issuerA".into(), svn, receipt_ledger: Some(ledger.into()), ..Default::default() };
+    let mut f = PolicyFragment {
+        issuer: "issuerA".into(),
+        svn,
+        receipt_ledger: Some(ledger.into()),
+        ..Default::default()
+    };
     f.signature = issuer_sk.sign(&f.signing_bytes()).to_bytes().to_vec();
     f
 }
@@ -340,7 +479,9 @@ fn section5_transparency_log() {
     let (led_sk, led_pk) = ed_key(30);
     let mut store = FragmentStore::new(false);
     store.authorize_issuer("issuerA", &issuer_pk).unwrap();
-    store.load_transparency_trust_list(&[("acl".into(), vec![led_pk])]).unwrap();
+    store
+        .load_transparency_trust_list(&[("acl".into(), vec![led_pk])])
+        .unwrap();
 
     // Ledger records fragment A as leaf 0; the agent accepts its inclusion proof.
     let fa = ttl_frag(&issuer_sk, 1, "acl");
@@ -349,7 +490,10 @@ fn section5_transparency_log() {
     let mut a = fa.clone();
     a.receipt_proof = Some(ttl_proof(&ledger, &led_sk, "acl", 0, None));
     assert!(store.load(&a).is_ok());
-    ok(&format!("inclusion proof accepted (log size {})", ledger.size()));
+    ok(&format!(
+        "inclusion proof accepted (log size {})",
+        ledger.size()
+    ));
 
     // Ledger grows: fragment B at leaf 1, with a consistency proof from size 1 → accepted.
     let fb = ttl_frag(&issuer_sk, 2, "acl");
@@ -357,14 +501,20 @@ fn section5_transparency_log() {
     let mut b = fb.clone();
     b.receipt_proof = Some(ttl_proof(&ledger, &led_sk, "acl", 1, Some(1)));
     assert!(store.load(&b).is_ok());
-    ok(&format!("append-only growth accepted with consistency proof (size {})", ledger.size()));
+    ok(&format!(
+        "append-only growth accepted with consistency proof (size {})",
+        ledger.size()
+    ));
 
     // Forged inclusion: claim a statement never recorded in the log → rejected.
     let forged = ttl_frag(&issuer_sk, 3, "acl");
     let mut fbad = forged.clone();
     // Reuse B's proof (wrong statement for that leaf) → inclusion recompute fails.
     fbad.receipt_proof = Some(ttl_proof(&ledger, &led_sk, "acl", 1, Some(1)));
-    assert!(matches!(store.verify(&fbad), Err(FragmentError::InvalidInclusionProof)));
+    assert!(matches!(
+        store.verify(&fbad),
+        Err(FragmentError::InvalidInclusionProof)
+    ));
     ok("forged inclusion (statement not in log) rejected");
 
     // Rewound log: present an older, smaller signed tree head after the head advanced → rejected.
@@ -373,6 +523,9 @@ fn section5_transparency_log() {
     small.push(fc.signing_bytes());
     let mut c = fc.clone();
     c.receipt_proof = Some(ttl_proof(&small, &led_sk, "acl", 0, None));
-    assert!(matches!(store.verify(&c), Err(FragmentError::LogRolledBack { .. })));
+    assert!(matches!(
+        store.verify(&c),
+        Err(FragmentError::LogRolledBack { .. })
+    ));
     ok("rewound (shrinking) transparency log rejected — append-only ordering enforced");
 }

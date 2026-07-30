@@ -24,10 +24,14 @@ fn parse_flags(args: &[String]) -> HashMap<String, Vec<String>> {
     while i < args.len() {
         if let Some(key) = args[i].strip_prefix("--") {
             if i + 1 < args.len() && !args[i + 1].starts_with("--") {
-                m.entry(key.to_string()).or_default().push(args[i + 1].clone());
+                m.entry(key.to_string())
+                    .or_default()
+                    .push(args[i + 1].clone());
                 i += 2;
             } else {
-                m.entry(key.to_string()).or_default().push("true".to_string());
+                m.entry(key.to_string())
+                    .or_default()
+                    .push("true".to_string());
                 i += 1;
             }
         } else {
@@ -63,7 +67,10 @@ fn main() {
 
     match store.verify(&image_ref) {
         Ok(()) => {
-            println!("AUTHORIZED  image_ref={image_ref} (approved={})", store.len());
+            println!(
+                "AUTHORIZED  image_ref={image_ref} (approved={})",
+                store.len()
+            );
             std::process::exit(0);
         }
         Err(e) => {

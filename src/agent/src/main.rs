@@ -45,8 +45,8 @@ mod device;
 mod features;
 mod initdata;
 mod linux_abi;
-mod metrics;
 mod mediation;
+mod metrics;
 mod mount;
 mod namespace;
 mod netlink;
@@ -182,7 +182,9 @@ lazy_static! {
 #[cfg(feature = "strict-policy")]
 lazy_static! {
     pub(crate) static ref VERIFIED_LAYERS: Mutex<kata_security_reference_monitor::VerifiedLayerStore> =
-        Mutex::new(kata_security_reference_monitor::VerifiedLayerStore::new(false));
+        Mutex::new(kata_security_reference_monitor::VerifiedLayerStore::new(
+            false
+        ));
 }
 
 // BL-3: measured allowlist of authorized guest-pull image manifest digests. The image-pull
@@ -193,7 +195,9 @@ lazy_static! {
 #[cfg(feature = "strict-policy")]
 lazy_static! {
     pub(crate) static ref VERIFIED_IMAGES: Mutex<kata_security_reference_monitor::VerifiedImageStore> =
-        Mutex::new(kata_security_reference_monitor::VerifiedImageStore::new(false));
+        Mutex::new(kata_security_reference_monitor::VerifiedImageStore::new(
+            false
+        ));
 }
 
 #[derive(Parser)]
@@ -529,7 +533,8 @@ async fn start_sandbox(
     {
         let idrv = initdata_return_value.as_ref();
         if let Err(e) =
-            seed_fragment_trust_root(logger, idrv.and_then(|r| r._fragment_issuers.as_deref())).await
+            seed_fragment_trust_root(logger, idrv.and_then(|r| r._fragment_issuers.as_deref()))
+                .await
         {
             warn!(logger, "FR-1: fragment trust root not seeded: {:?}", e);
         }
@@ -575,10 +580,16 @@ async fn start_sandbox(
     // so no request is ever served under a partially-composed policy.
     #[cfg(feature = "strict-policy")]
     match policy_fragments::load_declared_fragments().await {
-        Ok(n) if n > 0 => info!(logger, "FR-1/BL-8: injected {} boot-declared fragment(s)", n),
+        Ok(n) if n > 0 => info!(
+            logger,
+            "FR-1/BL-8: injected {} boot-declared fragment(s)", n
+        ),
         Ok(_) => {}
         Err(e) => {
-            error!(logger, "FR-1/BL-8: boot fragment pull failed, aborting VM: {:?}", e);
+            error!(
+                logger,
+                "FR-1/BL-8: boot fragment pull failed, aborting VM: {:?}", e
+            );
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             std::process::abort();
         }
@@ -870,7 +881,10 @@ fn resolve_measured_config(
     default_path: &str,
 ) -> Option<String> {
     if let Some(text) = initdata_cfg {
-        info!(logger, "{}: trust-root config sourced from measured initdata", label);
+        info!(
+            logger,
+            "{}: trust-root config sourced from measured initdata", label
+        );
         return Some(text.to_string());
     }
     let path = std::env::var(env_var).unwrap_or_else(|_| default_path.to_string());
@@ -1057,7 +1071,10 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
     ) {
         Some(t) => t,
         None => {
-            info!(logger, "FR-1: no fragment-issuer config; fragments fail-closed");
+            info!(
+                logger,
+                "FR-1: no fragment-issuer config; fragments fail-closed"
+            );
             return Ok(());
         }
     };
@@ -1074,7 +1091,10 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
         store
             .set_transparency_anchor(&key)
             .map_err(|e| anyhow::anyhow!("set transparency anchor: {}", e))?;
-        info!(logger, "FR-1: transparency anchor configured (default ledger)");
+        info!(
+            logger,
+            "FR-1: transparency anchor configured (default ledger)"
+        );
     }
     // FR-1f (trust list): load named ledgers with rotatable keys.
     if !cfg.ledger.is_empty() {
@@ -1093,7 +1113,9 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
         for l in &cfg.ledger {
             for k in &l.key {
                 let alg = match k.alg.trim().to_ascii_lowercase().as_str() {
-                    "eddsa" | "ed25519" => kata_security_reference_monitor::cose_keys::CoseAlg::EdDsa,
+                    "eddsa" | "ed25519" => {
+                        kata_security_reference_monitor::cose_keys::CoseAlg::EdDsa
+                    }
                     "es256" => kata_security_reference_monitor::cose_keys::CoseAlg::Es256,
                     "es384" => kata_security_reference_monitor::cose_keys::CoseAlg::Es384,
                     "ps256" => kata_security_reference_monitor::cose_keys::CoseAlg::Ps256,
@@ -1128,7 +1150,10 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
             kata_security_reference_monitor::did_x509::ca_fingerprint_from_pem(pem)
                 .map_err(|e| anyhow::anyhow!("ca_anchor {} pem: {}", ca.did, e))?
         } else {
-            anyhow::bail!("ca_anchor {} needs ca_fingerprint_hex or ca_cert_pem", ca.did);
+            anyhow::bail!(
+                "ca_anchor {} needs ca_fingerprint_hex or ca_cert_pem",
+                ca.did
+            );
         };
         store.authorize_did_x509(kata_security_reference_monitor::DidX509Anchor {
             did: ca.did.clone(),
@@ -1160,7 +1185,11 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
             store.declare_feed(issuer.id.clone(), feed.name.clone(), feed.min_svn);
             // FR-1f (trust list): per-feed receipt scoping.
             if !feed.allowed_ledgers.is_empty() {
-                store.set_allowed_ledgers(issuer.id.clone(), feed.name.clone(), &feed.allowed_ledgers);
+                store.set_allowed_ledgers(
+                    issuer.id.clone(),
+                    feed.name.clone(),
+                    &feed.allowed_ledgers,
+                );
             }
             if !feed.required_receipt_from.is_empty() {
                 store.require_receipt_for(
@@ -1183,7 +1212,10 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
             b"kata-fragment-log/v1".to_vec()
         };
         store.set_log_genesis(&genesis);
-        info!(logger, "FR-1: append-only fragment ordering enabled (FR-1j)");
+        info!(
+            logger,
+            "FR-1: append-only fragment ordering enabled (FR-1j)"
+        );
     }
 
     // FR-1i: re-import any persisted SVN high-water marks so a restart keeps rollback
@@ -1245,12 +1277,14 @@ async fn seed_verified_layers(logger: &Logger, initdata_cfg: Option<&str>) -> Re
     ) {
         Some(t) => t,
         None => {
-            info!(logger, "FR-4C: no verified-layers config; layer verification off");
+            info!(
+                logger,
+                "FR-4C: no verified-layers config; layer verification off"
+            );
             return Ok(());
         }
     };
-    let cfg: VerifiedLayersConfig =
-        toml::from_str(&text).context("parse verified-layers.toml")?;
+    let cfg: VerifiedLayersConfig = toml::from_str(&text).context("parse verified-layers.toml")?;
 
     let mut store = VERIFIED_LAYERS.lock().await;
     if let Some(req) = cfg.require_verified_layers {
@@ -1303,7 +1337,10 @@ async fn seed_verified_images(logger: &Logger, initdata_cfg: Option<&str>) -> Re
     ) {
         Some(t) => t,
         None => {
-            info!(logger, "BL-3: no verified-images config; image verification off");
+            info!(
+                logger,
+                "BL-3: no verified-images config; image verification off"
+            );
             return Ok(());
         }
     };

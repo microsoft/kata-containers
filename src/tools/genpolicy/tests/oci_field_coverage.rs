@@ -16,8 +16,10 @@
 
 use std::collections::BTreeSet;
 
-const OCI_PROTO: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../libs/protocols/protos/oci.proto");
+const OCI_PROTO: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../libs/protocols/protos/oci.proto"
+);
 
 /// Extract the field names of a top-level `message <name> { ... }` block.
 fn message_fields(proto: &str, message: &str) -> BTreeSet<String> {

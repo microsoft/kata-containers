@@ -130,8 +130,10 @@ pub fn authorize_cdi(
         }
 
         // Specs that declare the requested kind.
-        let of_kind: Vec<&MeasuredCdiSpec> =
-            available_specs.iter().filter(|s| s.kind == req.kind).collect();
+        let of_kind: Vec<&MeasuredCdiSpec> = available_specs
+            .iter()
+            .filter(|s| s.kind == req.kind)
+            .collect();
         if of_kind.is_empty() {
             return Err(CdiError::UnsatisfiedRequest { device });
         }

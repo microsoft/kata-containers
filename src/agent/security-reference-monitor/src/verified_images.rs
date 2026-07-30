@@ -58,7 +58,10 @@ impl fmt::Display for ImageError {
                 "guest-pull image is not pinned by digest (name@alg:hex): {image}"
             ),
             ImageError::NoApprovedImages => {
-                write!(f, "guest-pull image verification required but no image is authorized")
+                write!(
+                    f,
+                    "guest-pull image verification required but no image is authorized"
+                )
             }
         }
     }
@@ -171,7 +174,9 @@ mod tests {
         let other = format!("registry.example/app@{D2}");
         assert_eq!(
             store.verify(&other).unwrap_err(),
-            ImageError::UnauthorizedImage { digest: D2.to_string() }
+            ImageError::UnauthorizedImage {
+                digest: D2.to_string()
+            }
         );
     }
 
@@ -182,7 +187,9 @@ mod tests {
         store.authorize_image(D1);
         assert_eq!(
             store.verify("registry.example/app:latest").unwrap_err(),
-            ImageError::UnpinnedImage { image: "registry.example/app:latest".into() }
+            ImageError::UnpinnedImage {
+                image: "registry.example/app:latest".into()
+            }
         );
     }
 
@@ -192,7 +199,10 @@ mod tests {
     fn empty_allowlist_is_fail_closed_when_required() {
         let store = VerifiedImageStore::new(true);
         assert!(!store.has_authorized_images());
-        assert_eq!(store.verify(IMG1).unwrap_err(), ImageError::NoApprovedImages);
+        assert_eq!(
+            store.verify(IMG1).unwrap_err(),
+            ImageError::NoApprovedImages
+        );
     }
 
     /// TC-BL3.4: when not required (feature off), any reference (even tag-only) is allowed.
@@ -213,7 +223,9 @@ mod tests {
         assert!(store.verify(&upper).is_ok());
         // Malformed / wrong-length digest is treated as unpinned.
         assert!(matches!(
-            store.verify("registry.example/app@sha256:deadbeef").unwrap_err(),
+            store
+                .verify("registry.example/app@sha256:deadbeef")
+                .unwrap_err(),
             ImageError::UnpinnedImage { .. }
         ));
     }

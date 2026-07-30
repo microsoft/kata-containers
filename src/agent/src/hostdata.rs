@@ -138,8 +138,8 @@ impl ReportEntry {
     }
 
     fn provider(&self) -> Result<String> {
-        let raw = fs::read_to_string(self.path.join("provider"))
-            .context("read configfs-tsm provider")?;
+        let raw =
+            fs::read_to_string(self.path.join("provider")).context("read configfs-tsm provider")?;
         Ok(raw.trim().to_string())
     }
 
@@ -430,7 +430,11 @@ mod tests {
             let root = tempfile::tempdir().unwrap();
             let dir = root.path().join(TDX_GUEST_DEV_DIR).join("measurements");
             fs::create_dir_all(&dir).unwrap();
-            fs::write(dir.join("mrconfigid"), adjust_digest(digest, TDX_MRCONFIGID_LEN)).unwrap();
+            fs::write(
+                dir.join("mrconfigid"),
+                adjust_digest(digest, TDX_MRCONFIGID_LEN),
+            )
+            .unwrap();
             root
         }
 

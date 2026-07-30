@@ -370,8 +370,8 @@ mod tests {
     use p256::ecdsa::{DerSignature, Signature as EcSignature, SigningKey};
     use p256::pkcs8::EncodePublicKey;
     use rand_core::OsRng;
-    use std::str::FromStr;
     use std::convert::TryFrom;
+    use std::str::FromStr;
     use std::time::Duration;
     use x509_cert::builder::{Builder, CertificateBuilder, Profile};
     use x509_cert::ext::pkix::ExtendedKeyUsage;
@@ -404,7 +404,13 @@ mod tests {
 
     /// Mint a leaf signed by the CA key, with a code-signing EKU. `validity` lets tests mint
     /// an expired leaf.
-    fn mint_leaf(cn: &str, leaf_sk: &SigningKey, ca_cn: &str, ca_sk: &SigningKey, validity: Validity) -> Vec<u8> {
+    fn mint_leaf(
+        cn: &str,
+        leaf_sk: &SigningKey,
+        ca_cn: &str,
+        ca_sk: &SigningKey,
+        validity: Validity,
+    ) -> Vec<u8> {
         let issuer = Name::from_str(&format!("CN={ca_cn}")).unwrap();
         let subject = Name::from_str(&format!("CN={cn}")).unwrap();
         let mut builder = CertificateBuilder::new(
@@ -426,12 +432,20 @@ mod tests {
     }
 
     /// Mint an intermediate CA (basicConstraints cA=TRUE) signed by the root CA key.
-    fn mint_intermediate(cn: &str, int_sk: &SigningKey, root_cn: &str, root_sk: &SigningKey) -> Vec<u8> {
+    fn mint_intermediate(
+        cn: &str,
+        int_sk: &SigningKey,
+        root_cn: &str,
+        root_sk: &SigningKey,
+    ) -> Vec<u8> {
         let issuer = Name::from_str(&format!("CN={root_cn}")).unwrap();
         let subject = Name::from_str(&format!("CN={cn}")).unwrap();
         let validity = Validity::from_now(Duration::from_secs(3600)).unwrap();
         let builder = CertificateBuilder::new(
-            Profile::SubCA { issuer, path_len_constraint: None },
+            Profile::SubCA {
+                issuer,
+                path_len_constraint: None,
+            },
             SerialNumber::from(3u32),
             validity,
             subject,
@@ -490,7 +504,13 @@ mod tests {
         let ca_sk = SigningKey::random(&mut OsRng);
         let leaf_sk = SigningKey::random(&mut OsRng);
         let ca = mint_ca("test-ca", &ca_sk);
-        let leaf = mint_leaf("issuerX", &leaf_sk, "test-ca", &ca_sk, Validity::from_now(Duration::from_secs(3600)).unwrap());
+        let leaf = mint_leaf(
+            "issuerX",
+            &leaf_sk,
+            "test-ca",
+            &ca_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
 
         let f = frag("did:x509:test:issuerX");
@@ -509,7 +529,13 @@ mod tests {
         let leaf_sk = SigningKey::random(&mut OsRng);
         let ca = mint_ca("test-ca", &ca_sk);
         let other_ca = mint_ca("other-ca", &other_sk);
-        let leaf = mint_leaf("issuerX", &leaf_sk, "test-ca", &ca_sk, Validity::from_now(Duration::from_secs(3600)).unwrap());
+        let leaf = mint_leaf(
+            "issuerX",
+            &leaf_sk,
+            "test-ca",
+            &ca_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
         // Anchor trusts a different CA than the one in the chain.
         let anchor = anchor_for(&other_ca, "did:x509:test:issuerX");
 
@@ -530,7 +556,13 @@ mod tests {
         let leaf_sk = SigningKey::random(&mut OsRng);
         let attacker_sk = SigningKey::random(&mut OsRng);
         let ca = mint_ca("test-ca", &ca_sk);
-        let leaf = mint_leaf("issuerX", &leaf_sk, "test-ca", &ca_sk, Validity::from_now(Duration::from_secs(3600)).unwrap());
+        let leaf = mint_leaf(
+            "issuerX",
+            &leaf_sk,
+            "test-ca",
+            &ca_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
 
         let f = frag("did:x509:test:issuerX");
@@ -552,8 +584,10 @@ mod tests {
         let ca = mint_ca("test-ca", &ca_sk);
         // Validity window entirely in the past.
         let past = Validity {
-            not_before: Time::try_from(std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000)).unwrap(),
-            not_after: Time::try_from(std::time::UNIX_EPOCH + Duration::from_secs(1_000_100_000)).unwrap(),
+            not_before: Time::try_from(std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000))
+                .unwrap(),
+            not_after: Time::try_from(std::time::UNIX_EPOCH + Duration::from_secs(1_000_100_000))
+                .unwrap(),
         };
         let leaf = mint_leaf("issuerX", &leaf_sk, "test-ca", &ca_sk, past);
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
@@ -575,7 +609,13 @@ mod tests {
         let ca_sk = SigningKey::random(&mut OsRng);
         let leaf_sk = SigningKey::random(&mut OsRng);
         let ca = mint_ca("test-ca", &ca_sk);
-        let leaf = mint_leaf("issuerX", &leaf_sk, "test-ca", &ca_sk, Validity::from_now(Duration::from_secs(3600)).unwrap());
+        let leaf = mint_leaf(
+            "issuerX",
+            &leaf_sk,
+            "test-ca",
+            &ca_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
 
         let f = frag("did:x509:test:issuerX");
@@ -602,14 +642,26 @@ mod tests {
 
         // First leaf.
         let leaf1_sk = SigningKey::random(&mut OsRng);
-        let leaf1 = mint_leaf("issuerX", &leaf1_sk, "test-ca", &ca_sk, Validity::from_now(Duration::from_secs(3600)).unwrap());
+        let leaf1 = mint_leaf(
+            "issuerX",
+            &leaf1_sk,
+            "test-ca",
+            &ca_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
         let f1 = frag("did:x509:test:issuerX");
         let cose1 = cose_with_chain(&f1.signing_bytes(), &leaf1_sk, &[leaf1, ca.clone()]);
         assert!(verify_x509_cose(&anchors, &HashSet::new(), &cose1, &f1.signing_bytes()).is_ok());
 
         // Rotated leaf: brand-new key, same CA + policy, no config change.
         let leaf2_sk = SigningKey::random(&mut OsRng);
-        let leaf2 = mint_leaf("issuerX", &leaf2_sk, "test-ca", &ca_sk, Validity::from_now(Duration::from_secs(3600)).unwrap());
+        let leaf2 = mint_leaf(
+            "issuerX",
+            &leaf2_sk,
+            "test-ca",
+            &ca_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
         let f2 = frag("did:x509:test:issuerX");
         let cose2 = cose_with_chain(&f2.signing_bytes(), &leaf2_sk, &[leaf2, ca]);
         assert!(verify_x509_cose(&anchors, &HashSet::new(), &cose2, &f2.signing_bytes()).is_ok());
@@ -622,7 +674,13 @@ mod tests {
         let ca_sk = SigningKey::random(&mut OsRng);
         let leaf_sk = SigningKey::random(&mut OsRng);
         let ca = mint_ca("test-ca", &ca_sk);
-        let leaf = mint_leaf("issuerX", &leaf_sk, "test-ca", &ca_sk, Validity::from_now(Duration::from_secs(3600)).unwrap());
+        let leaf = mint_leaf(
+            "issuerX",
+            &leaf_sk,
+            "test-ca",
+            &ca_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
         // Anchor requires an EKU the leaf does not carry (server-auth instead of code-signing).
         let anchor = DidX509Anchor {
             did: "did:x509:test:issuerX".to_string(),
@@ -651,7 +709,13 @@ mod tests {
         let leaf_sk = SigningKey::random(&mut OsRng);
         let root = mint_ca("root-ca", &root_sk);
         let intermediate = mint_intermediate("int-ca", &int_sk, "root-ca", &root_sk);
-        let leaf = mint_leaf("issuerX", &leaf_sk, "int-ca", &int_sk, Validity::from_now(Duration::from_secs(3600)).unwrap());
+        let leaf = mint_leaf(
+            "issuerX",
+            &leaf_sk,
+            "int-ca",
+            &int_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
         // Trust anchored on the ROOT fingerprint; the intermediate is validated in between.
         let anchor = anchor_for(&root, "did:x509:test:issuerX");
         let mut anchors = HashMap::new();
@@ -671,8 +735,20 @@ mod tests {
         let mid_sk = SigningKey::random(&mut OsRng); // a LEAF (cA=FALSE), misused as an issuer
         let subleaf_sk = SigningKey::random(&mut OsRng);
         let root = mint_ca("root-ca", &root_sk);
-        let mid_leaf = mint_leaf("mid", &mid_sk, "root-ca", &root_sk, Validity::from_now(Duration::from_secs(3600)).unwrap());
-        let subleaf = mint_leaf("issuerX", &subleaf_sk, "mid", &mid_sk, Validity::from_now(Duration::from_secs(3600)).unwrap());
+        let mid_leaf = mint_leaf(
+            "mid",
+            &mid_sk,
+            "root-ca",
+            &root_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
+        let subleaf = mint_leaf(
+            "issuerX",
+            &subleaf_sk,
+            "mid",
+            &mid_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
         let anchor = anchor_for(&root, "did:x509:test:issuerX");
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
@@ -699,19 +775,30 @@ mod tests {
     fn mint_ca_p384(cn: &str, sk: &P384Sk) -> Vec<u8> {
         let subject = Name::from_str(&format!("CN={cn}")).unwrap();
         let validity = Validity::from_now(Duration::from_secs(3600)).unwrap();
-        CertificateBuilder::new(Profile::Root, SerialNumber::from(1u32), validity, subject, spki_p384(sk), sk)
-            .unwrap()
-            .build::<P384DerSig>()
-            .unwrap()
-            .to_der()
-            .unwrap()
+        CertificateBuilder::new(
+            Profile::Root,
+            SerialNumber::from(1u32),
+            validity,
+            subject,
+            spki_p384(sk),
+            sk,
+        )
+        .unwrap()
+        .build::<P384DerSig>()
+        .unwrap()
+        .to_der()
+        .unwrap()
     }
 
     fn mint_leaf_p384(cn: &str, leaf_sk: &P384Sk, ca_cn: &str, ca_sk: &P384Sk) -> Vec<u8> {
         let issuer = Name::from_str(&format!("CN={ca_cn}")).unwrap();
         let subject = Name::from_str(&format!("CN={cn}")).unwrap();
         let mut b = CertificateBuilder::new(
-            Profile::Leaf { issuer, enable_key_agreement: false, enable_key_encipherment: false },
+            Profile::Leaf {
+                issuer,
+                enable_key_agreement: false,
+                enable_key_encipherment: false,
+            },
             SerialNumber::from(2u32),
             Validity::from_now(Duration::from_secs(3600)).unwrap(),
             subject,
@@ -719,18 +806,33 @@ mod tests {
             ca_sk,
         )
         .unwrap();
-        b.add_extension(&ExtendedKeyUsage(vec![ObjectIdentifier::new_unwrap(EKU_CODE_SIGNING)])).unwrap();
+        b.add_extension(&ExtendedKeyUsage(vec![ObjectIdentifier::new_unwrap(
+            EKU_CODE_SIGNING,
+        )]))
+        .unwrap();
         b.build::<P384DerSig>().unwrap().to_der().unwrap()
     }
 
     fn cose_es384(statement: &[u8], leaf_sk: &P384Sk, chain: &[Vec<u8>]) -> Vec<u8> {
-        let protected = HeaderBuilder::new().algorithm(iana::Algorithm::ES384).build();
+        let protected = HeaderBuilder::new()
+            .algorithm(iana::Algorithm::ES384)
+            .build();
         let mut unprotected = coset::Header::default();
-        unprotected.rest.push((coset::Label::Int(COSE_HEADER_X5CHAIN),
-            Value::Array(chain.iter().map(|c| Value::Bytes(c.clone())).collect())));
-        CoseSign1Builder::new().protected(protected).unprotected(unprotected).payload(statement.to_vec())
-            .create_signature(b"", |tbs| { let s: P384Sig = leaf_sk.sign(tbs); s.to_bytes().to_vec() })
-            .build().to_vec().unwrap()
+        unprotected.rest.push((
+            coset::Label::Int(COSE_HEADER_X5CHAIN),
+            Value::Array(chain.iter().map(|c| Value::Bytes(c.clone())).collect()),
+        ));
+        CoseSign1Builder::new()
+            .protected(protected)
+            .unprotected(unprotected)
+            .payload(statement.to_vec())
+            .create_signature(b"", |tbs| {
+                let s: P384Sig = leaf_sk.sign(tbs);
+                s.to_bytes().to_vec()
+            })
+            .build()
+            .to_vec()
+            .unwrap()
     }
 
     fn spki_rsa(sk: &RsaPrivateKey) -> SubjectPublicKeyInfoOwned {
@@ -742,20 +844,36 @@ mod tests {
         let signer = RsaPkcsSk::<_Sha256>::new(sk.clone());
         let subject = Name::from_str(&format!("CN={cn}")).unwrap();
         let validity = Validity::from_now(Duration::from_secs(3600)).unwrap();
-        CertificateBuilder::new(Profile::Root, SerialNumber::from(1u32), validity, subject, spki_rsa(sk), &signer)
-            .unwrap()
-            .build::<RsaPkcsSig>()
-            .unwrap()
-            .to_der()
-            .unwrap()
+        CertificateBuilder::new(
+            Profile::Root,
+            SerialNumber::from(1u32),
+            validity,
+            subject,
+            spki_rsa(sk),
+            &signer,
+        )
+        .unwrap()
+        .build::<RsaPkcsSig>()
+        .unwrap()
+        .to_der()
+        .unwrap()
     }
 
-    fn mint_leaf_rsa(cn: &str, leaf_sk: &RsaPrivateKey, ca_cn: &str, ca_sk: &RsaPrivateKey) -> Vec<u8> {
+    fn mint_leaf_rsa(
+        cn: &str,
+        leaf_sk: &RsaPrivateKey,
+        ca_cn: &str,
+        ca_sk: &RsaPrivateKey,
+    ) -> Vec<u8> {
         let signer = RsaPkcsSk::<_Sha256>::new(ca_sk.clone());
         let issuer = Name::from_str(&format!("CN={ca_cn}")).unwrap();
         let subject = Name::from_str(&format!("CN={cn}")).unwrap();
         let mut b = CertificateBuilder::new(
-            Profile::Leaf { issuer, enable_key_agreement: false, enable_key_encipherment: false },
+            Profile::Leaf {
+                issuer,
+                enable_key_agreement: false,
+                enable_key_encipherment: false,
+            },
             SerialNumber::from(2u32),
             Validity::from_now(Duration::from_secs(3600)).unwrap(),
             subject,
@@ -763,19 +881,34 @@ mod tests {
             &signer,
         )
         .unwrap();
-        b.add_extension(&ExtendedKeyUsage(vec![ObjectIdentifier::new_unwrap(EKU_CODE_SIGNING)])).unwrap();
+        b.add_extension(&ExtendedKeyUsage(vec![ObjectIdentifier::new_unwrap(
+            EKU_CODE_SIGNING,
+        )]))
+        .unwrap();
         b.build::<RsaPkcsSig>().unwrap().to_der().unwrap()
     }
 
     fn cose_rs256(statement: &[u8], leaf_sk: &RsaPrivateKey, chain: &[Vec<u8>]) -> Vec<u8> {
         let signer = RsaPkcsSk::<_Sha256>::new(leaf_sk.clone());
-        let protected = HeaderBuilder::new().algorithm(iana::Algorithm::RS256).build();
+        let protected = HeaderBuilder::new()
+            .algorithm(iana::Algorithm::RS256)
+            .build();
         let mut unprotected = coset::Header::default();
-        unprotected.rest.push((coset::Label::Int(COSE_HEADER_X5CHAIN),
-            Value::Array(chain.iter().map(|c| Value::Bytes(c.clone())).collect())));
-        CoseSign1Builder::new().protected(protected).unprotected(unprotected).payload(statement.to_vec())
-            .create_signature(b"", |tbs| { let s: RsaPkcsSig = signer.sign(tbs); s.to_vec() })
-            .build().to_vec().unwrap()
+        unprotected.rest.push((
+            coset::Label::Int(COSE_HEADER_X5CHAIN),
+            Value::Array(chain.iter().map(|c| Value::Bytes(c.clone())).collect()),
+        ));
+        CoseSign1Builder::new()
+            .protected(protected)
+            .unprotected(unprotected)
+            .payload(statement.to_vec())
+            .create_signature(b"", |tbs| {
+                let s: RsaPkcsSig = signer.sign(tbs);
+                s.to_vec()
+            })
+            .build()
+            .to_vec()
+            .unwrap()
     }
 
     /// TC-F1.14: an ES384 (EC P-384) leaf under a P-384 CA verifies end-to-end.
@@ -835,4 +968,3 @@ mod tests {
         );
     }
 }
-

@@ -282,7 +282,9 @@ mod tests {
                 let lh = leaf_hash(&t.leaves[m]);
                 assert!(
                     verify_inclusion(m as u64, n as u64, lh, &proof, &root),
-                    "inclusion n={} m={}", n, m
+                    "inclusion n={} m={}",
+                    n,
+                    m
                 );
                 // A tampered leaf must not verify.
                 let mut bad = lh;
@@ -304,12 +306,16 @@ mod tests {
                 let proof = t.consistency_proof(m);
                 assert!(
                     verify_consistency(m as u64, n as u64, &root1, &root2, &proof),
-                    "consistency m={} n={}", m, n
+                    "consistency m={} n={}",
+                    m,
+                    n
                 );
                 // A wrong old root must not verify.
                 let mut bad = root1;
                 bad[0] ^= 0xff;
-                assert!(!verify_consistency(m as u64, n as u64, &bad, &root2, &proof));
+                assert!(!verify_consistency(
+                    m as u64, n as u64, &bad, &root2, &proof
+                ));
             }
         }
     }

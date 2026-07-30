@@ -208,7 +208,9 @@ fn main() {
             // payload, signed by the issuer key (EdDSA) — for the COSE load path.
             if f.contains_key("cose") {
                 use coset::{iana, CborSerializable, CoseSign1Builder, HeaderBuilder};
-                let protected = HeaderBuilder::new().algorithm(iana::Algorithm::EdDSA).build();
+                let protected = HeaderBuilder::new()
+                    .algorithm(iana::Algorithm::EdDSA)
+                    .build();
                 let sign1 = CoseSign1Builder::new()
                     .protected(protected)
                     .payload(fragment.signing_bytes())
@@ -232,14 +234,22 @@ fn main() {
                     .expect("parse EC P-256 leaf private key (PKCS#8 PEM)");
 
                 let mut chain: Vec<Value> = Vec::new();
-                for path in chain_paths.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                for path in chain_paths
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
                     let pem = std::fs::read_to_string(path).expect("read cert pem");
                     let der = pem_cert_to_der(&pem).expect("decode CERTIFICATE pem");
                     chain.push(Value::Bytes(der));
                 }
                 let mut unprotected = coset::Header::default();
-                unprotected.rest.push((coset::Label::Int(33), Value::Array(chain)));
-                let protected = HeaderBuilder::new().algorithm(iana::Algorithm::ES256).build();
+                unprotected
+                    .rest
+                    .push((coset::Label::Int(33), Value::Array(chain)));
+                let protected = HeaderBuilder::new()
+                    .algorithm(iana::Algorithm::ES256)
+                    .build();
                 let sign1 = CoseSign1Builder::new()
                     .protected(protected)
                     .unprotected(unprotected)
@@ -264,13 +274,20 @@ fn main() {
             let svn: u64 = f.get("svn").and_then(|s| s.parse().ok()).unwrap_or(0);
             let includes: Vec<String> = f
                 .get("includes")
-                .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
+                .map(|s| {
+                    s.split(',')
+                        .map(|x| x.trim().to_string())
+                        .filter(|x| !x.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default();
             let module = f.get("module").map(|p| {
                 String::from_utf8(std::fs::read(p).expect("read module")).expect("module utf8")
             });
-            let cose = hex_decode(f.get("cose").expect("--cose required")).expect("decode cose hex");
-            let ca_fp_vec = hex_decode(f.get("ca-fp").expect("--ca-fp required")).expect("decode ca-fp");
+            let cose =
+                hex_decode(f.get("cose").expect("--cose required")).expect("decode cose hex");
+            let ca_fp_vec =
+                hex_decode(f.get("ca-fp").expect("--ca-fp required")).expect("decode ca-fp");
             let mut ca_fp = [0u8; 32];
             ca_fp.copy_from_slice(&ca_fp_vec);
 
