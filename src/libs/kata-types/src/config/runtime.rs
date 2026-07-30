@@ -27,6 +27,9 @@ pub const EMPTYDIR_MODE_BLOCK_ENCRYPTED: &str = "block-encrypted";
 /// EmptyDir mode: plug a block device to be mounted directly in the guest.
 pub const EMPTYDIR_MODE_BLOCK_PLAIN: &str = "block-plain";
 
+/// Copy-volumes option: copy non-watchable directory volumes via agent::CopyFileRequest.
+pub const COPY_VOLUMES_OTHER_DIRECTORIES: &str = "other-directories";
+
 /// Kata runtime configuration information.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Runtime {
@@ -155,6 +158,16 @@ pub struct Runtime {
     /// - block-plain: plugs a block device to be mounted directly in the guest.
     #[serde(default)]
     pub emptydir_mode: String,
+
+    /// Controls which host volume source directories are copied into the guest via
+    /// agent::CopyFileRequest when shared-fs is unavailable.
+    ///
+    /// Options:
+    /// - other-directories: copy non-watchable source directories and their contents.
+    ///
+    /// If omitted, this list is empty.
+    #[serde(default)]
+    pub copy_volumes: Vec<String>,
 
     /// Determines how VFIO devices should be be presented to the container.
     ///
@@ -286,6 +299,14 @@ impl ConfigOps for Runtime {
             return Err(std::io::Error::other(format!(
                 "Invalid emptydir_mode `{emptydir_mode}` in configuration file",
             )));
+        }
+
+        for opt in &conf.runtime.copy_volumes {
+            if opt != COPY_VOLUMES_OTHER_DIRECTORIES {
+                return Err(std::io::Error::other(format!(
+                    "Invalid copy_volumes option `{opt}` in configuration file",
+                )));
+            }
         }
 
         for shared_mount in &conf.runtime.shared_mounts {

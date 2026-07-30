@@ -417,6 +417,7 @@ impl ShareFsVolume {
         m: &oci::Mount,
         cid: &str,
         readonly: bool,
+        copy_other_directories: bool,
         agent: Arc<dyn Agent>,
         volume_manager: Arc<VolumeManager>,
     ) -> Result<Self> {
@@ -469,38 +470,62 @@ impl ShareFsVolume {
                     oci_mount.set_source(Some(PathBuf::from(&guest_path)));
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
-                    // We allow directory copying wildly
-                    // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
-                    info!(sl!(), "copying directory {:?} to guest", &src);
+                    let watchable_volume = is_watchable_volume(&src);
+                    if should_copy_directory_to_guest(watchable_volume, copy_other_directories) {
+                        // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
+                        info!(sl!(), "copying directory {:?} to guest", &src);
 
-                    // Get or create the guest path
-                    let guest_path = volume_manager
-                        .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
-                        .await
-                        .context("get or create volume")?;
+                        // Get or create the guest path
+                        let guest_path = volume_manager
+                            .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
+                            .await
+                            .context("get or create volume")?;
 
-                    // Create directory
-                    Self::copy_directory_to_guest(&src, &guest_path, &agent)
-                        .await
-                        .context("copy directory to guest")?;
+                        // Create directory
+                        Self::copy_directory_to_guest(&src, &guest_path, &agent)
+                            .await
+                            .context("copy directory to guest")?;
 
-                    oci_mount.set_source(Some(PathBuf::from(&guest_path)));
-                    volume.mounts.push(oci_mount);
+                        oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                        volume.mounts.push(oci_mount);
 
-                    // Start monitoring (only for watchable volumes)
-                    let mut monitor_task = None;
-                    if is_watchable_volume(&src) {
-                        let watcher = FsWatcher::new(&src).await?;
-                        let handle = watcher
-                            .start_monitor(agent.clone(), src.clone(), PathBuf::from(&guest_path))
-                            .await;
-                        monitor_task = Some(handle);
+                        // Start monitoring (only for watchable volumes)
+                        let mut monitor_task = None;
+                        if watchable_volume {
+                            let watcher = FsWatcher::new(&src).await?;
+                            let handle = watcher
+                                .start_monitor(agent.clone(), src.clone(), PathBuf::from(&guest_path))
+                                .await;
+                            monitor_task = Some(handle);
+                        }
+
+                        // Register monitor into Volume Manager
+                        volume_manager
+                            .register_monitor(&src.to_string_lossy(), monitor_task)
+                            .await?;
+                    } else {
+                        // Keep the mount source path present in guest while skipping non-watchable directory contents.
+                        let guest_path = volume_manager
+                            .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
+                            .await
+                            .context("get or create volume")?;
+                        Self::create_empty_directory_in_guest(&src, &guest_path, &agent)
+                            .await
+                            .context("create empty directory in guest")?;
+
+                        oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                        volume.mounts.push(oci_mount);
+
+                        volume_manager
+                            .register_monitor(&src.to_string_lossy(), None)
+                            .await?;
+
+                        info!(
+                            sl!(),
+                            "skip copying contents for non-watchable directory {:?}: copy_volumes does not contain other-directories",
+                            &src
+                        );
                     }
-
-                    // Register monitor into Volume Manager
-                    volume_manager
-                        .register_monitor(&src.to_string_lossy(), monitor_task)
-                        .await?;
                 } else {
                     // If not, we can ignore it. Let's issue a warning so that the user knows.
                     warn!(
@@ -665,6 +690,40 @@ impl ShareFsVolume {
         copy_dir_recursively(src, guest_path, agent)
             .await
             .context(format!("failed to copy directory contents: {src:?}"))?;
+
+        Ok(())
+    }
+
+    async fn create_empty_directory_in_guest(
+        src: &Path,
+        guest_path: &str,
+        agent: &Arc<dyn Agent>,
+    ) -> Result<()> {
+        let dir_metadata =
+            std::fs::metadata(src).context(format!("read metadata from directory: {src:?}"))?;
+
+        let dir_request = agent::CopyFileRequest {
+            path: guest_path.to_owned(),
+            file_size: 0,
+            uid: dir_metadata.uid() as i32,
+            gid: dir_metadata.gid() as i32,
+            dir_mode: DIR_MODE_PERMS,
+            file_mode: dir_metadata.mode(),
+            data: vec![],
+            ..Default::default()
+        };
+
+        info!(
+            sl!(),
+            "creating empty directory: {:?} in sandbox with file_mode: {:?}",
+            guest_path,
+            dir_request.file_mode
+        );
+
+        agent
+            .copy_file(dir_request)
+            .await
+            .context(format!("create empty directory in sandbox: {guest_path:?}"))?;
 
         Ok(())
     }
@@ -966,6 +1025,10 @@ pub(crate) fn is_watchable_volume(source_path: &PathBuf) -> bool {
         || is_configmap(source_path)
 }
 
+fn should_copy_directory_to_guest(watchable_volume: bool, copy_other_directories: bool) -> bool {
+    watchable_volume || copy_other_directories
+}
+
 /// Generates a guest path related to mount dest
 fn generate_guest_path(cid: &str, mount_destination: &Path) -> Result<String> {
     let mut data = vec![0u8; 8];
@@ -1034,5 +1097,13 @@ mod test {
         assert!(is_watchable_volume(&secret_path));
         assert!(is_watchable_volume(&projected_path));
         assert!(is_watchable_volume(&downward_api_path));
+    }
+
+    #[test]
+    fn test_should_copy_directory_to_guest() {
+        assert!(should_copy_directory_to_guest(true, false));
+        assert!(should_copy_directory_to_guest(true, true));
+        assert!(should_copy_directory_to_guest(false, true));
+        assert!(!should_copy_directory_to_guest(false, false));
     }
 }
