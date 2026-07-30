@@ -214,7 +214,7 @@ impl FsWatcher {
                     "Initial sync from {:?} to managed volume {:?}", &src_sync, &volume_id_sync
                 );
                 if let Err(e) =
-                    copy_dir_recursively(&src_sync, &src_sync, &volume_id_sync, &agent_sync).await
+                    sync_atomic_k8s_directory(&src_sync, &volume_id_sync, &agent_sync).await
                 {
                     error!(sl!(), "Initial sync failed: {:?}", e);
                 }
@@ -286,7 +286,7 @@ impl FsWatcher {
                             "debounce sync {:?} -> managed volume {:?}", &src, &agent_volume_id
                         );
                         if let Err(e) =
-                            copy_dir_recursively(&src, &src, &agent_volume_id, &agent).await
+                            sync_atomic_k8s_directory(&src, &agent_volume_id, &agent).await
                         {
                             error!(
                                 sl!(),
@@ -753,10 +753,9 @@ impl ShareFsVolume {
         agent_volume_id: &str,
         agent: &Arc<dyn Agent>,
     ) -> Result<()> {
-        // recursively copy files from this directory
-        copy_dir_recursively(src, src, agent_volume_id, agent)
+        sync_atomic_k8s_directory(src, agent_volume_id, agent)
             .await
-            .context(format!("failed to copy directory contents: {src:?}"))?;
+            .context(format!("failed to sync directory contents: {src:?}"))?;
 
         Ok(())
     }
@@ -925,42 +924,14 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                 .context(format!("read metadata for {entry_path:?}"))?;
 
             if metadata.is_symlink() {
-                // handle symlinks
-                let entry_path_err = entry_path.clone();
-                let entry_path_clone = entry_path.clone();
-                let link_target =
-                    tokio::task::spawn_blocking(move || std::fs::read_link(&entry_path_clone))
-                        .await
-                        .context(format!(
-                            "failed to spawn blocking task for symlink: {entry_path_err:?}"
-                        ))??;
-
-                let link_target_str = link_target.to_string_lossy().into_owned();
-                let symlink_request = agent::PutVolumeFileRequest {
-                    agent_volume_id: agent_volume_id.to_string(),
-                    relative_path: relative_path.clone(),
-                    file_size: link_target_str.len() as i64,
-                    uid: metadata.uid() as i32,
-                    gid: metadata.gid() as i32,
-                    file_mode: SFlag::S_IFLNK.bits(),
-                    dir_mode: DIR_MODE_PERMS,
-                    data: link_target_str.clone().into_bytes(),
-                    ..Default::default()
-                };
-                info!(
+                // Symlink creation is handled by commit_atomic_k8s_revision() for watchable volumes.
+                // Do not forward untrusted symlink targets to the agent.
+                debug!(
                     sl!(),
-                    "syncing symlink {:?} to managed volume {} with file_mode: {:?}",
-                    relative_path,
-                    agent_volume_id,
-                    symlink_request.file_mode
+                    "skip host symlink during managed-volume file sync: {:?}",
+                    relative_path
                 );
-
-                agent
-                    .put_volume_file(symlink_request)
-                    .await
-                    .context(format!(
-                        "failed to sync symlink: {relative_path:?} -> {link_target_str:?}"
-                    ))?;
+                continue;
             } else if metadata.is_dir() {
                 // handle directory
                 let dir_request = agent::CreateVolumeSubdirRequest {
@@ -1018,6 +989,104 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
             }
         }
     }
+
+    Ok(())
+}
+
+fn collect_atomic_k8s_revision_and_visible_paths(
+    source_root: &Path,
+) -> Result<Option<(String, Vec<String>)>> {
+    let data_link = source_root.join("..data");
+    let data_target = match std::fs::read_link(&data_link) {
+        Ok(target) => target,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e).context("read ..data symlink"),
+    };
+
+    let revision = data_target
+        .file_name()
+        .and_then(|v| v.to_str())
+        .ok_or_else(|| anyhow!("invalid ..data target"))?
+        .to_string();
+
+    if Path::new(&revision)
+        .components()
+        .any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err(anyhow!("invalid atomic revision name"));
+    }
+
+    let mut visible_paths: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(source_root).context("read source root for visible paths")? {
+        let entry = entry.context("read source root entry")?;
+        let file_name_os = entry.file_name();
+        let file_name = match file_name_os.to_str() {
+            Some(v) => v,
+            None => continue,
+        };
+
+        if file_name.starts_with("..") {
+            continue;
+        }
+
+        let metadata = std::fs::symlink_metadata(entry.path())
+            .context("read source root entry metadata")?;
+        if !metadata.file_type().is_symlink() {
+            continue;
+        }
+
+        let target = std::fs::read_link(entry.path()).context("read visible symlink target")?;
+        let expected = Path::new("..data").join(file_name);
+        if target == expected {
+            visible_paths.push(file_name.to_string());
+        }
+    }
+
+    visible_paths.sort();
+
+    Ok(Some((revision, visible_paths)))
+}
+
+async fn commit_atomic_k8s_revision(
+    source_root: &Path,
+    agent_volume_id: &str,
+    agent: &Arc<dyn Agent>,
+) -> Result<()> {
+    let Some((revision, visible_paths)) =
+        collect_atomic_k8s_revision_and_visible_paths(source_root)?
+    else {
+        return Ok(());
+    };
+
+    let req = agent::CommitVolumeRevisionRequest {
+        agent_volume_id: agent_volume_id.to_string(),
+        revision,
+        visible_paths,
+        garbage_collect_previous: true,
+    };
+
+    agent
+        .commit_volume_revision(req)
+        .await
+        .context("commit atomic k8s volume revision")?;
+
+    Ok(())
+}
+
+async fn sync_atomic_k8s_directory(
+    src: &Path,
+    agent_volume_id: &str,
+    agent: &Arc<dyn Agent>,
+) -> Result<()> {
+    // Upload directories and regular files. Symlink targets are intentionally not accepted
+    // from runtime side and are materialized by commit_atomic_k8s_revision().
+    copy_dir_recursively(src, src, agent_volume_id, agent)
+        .await
+        .context(format!("failed to copy directory contents: {src:?}"))?;
+
+    commit_atomic_k8s_revision(src, agent_volume_id, agent)
+        .await
+        .context(format!("failed to commit atomic k8s revision: {src:?}"))?;
 
     Ok(())
 }
@@ -1183,5 +1252,27 @@ mod test {
             VolumeManager::managed_volume_mount_source("vol-test"),
             "/vol-test"
         );
+    }
+
+    #[test]
+    fn test_collect_atomic_k8s_revision_and_visible_paths() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+
+        let rev = "..2026_07_30_02_16_02.4040770993";
+        let rev_dir = root.join(rev);
+        std::fs::create_dir_all(&rev_dir).unwrap();
+        std::fs::write(rev_dir.join("token"), b"token").unwrap();
+        std::fs::write(rev_dir.join("namespace"), b"ns").unwrap();
+
+        std::os::unix::fs::symlink(rev, root.join("..data")).unwrap();
+        std::os::unix::fs::symlink("..data/token", root.join("token")).unwrap();
+        std::os::unix::fs::symlink("..data/namespace", root.join("namespace")).unwrap();
+
+        let collected = collect_atomic_k8s_revision_and_visible_paths(root)
+            .unwrap()
+            .unwrap();
+        assert_eq!(collected.0, rev);
+        assert_eq!(collected.1, vec!["namespace".to_string(), "token".to_string()]);
     }
 }

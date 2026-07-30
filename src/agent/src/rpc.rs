@@ -2602,6 +2602,12 @@ fn do_put_volume_file(req: &protocols::agent::PutVolumeFileRequest) -> Result<()
         req.dir_mode
     };
 
+    if source.volume_type == VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S
+        && (file_mode & libc::S_IFMT) == libc::S_IFLNK
+    {
+        bail!("ATOMIC_K8S volumes do not accept symlink targets in PutVolumeFile")
+    }
+
     let target = if source.volume_type == VolumeSourceType::VOLUME_SOURCE_TYPE_SINGLE_FILE {
         if !req.relative_path.is_empty() {
             bail!("single-file source requires empty relative_path")
@@ -4592,6 +4598,44 @@ COMMIT
         };
         do_remove_volume_source(&rm).expect("remove volume source");
         assert!(!guest_path.exists());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_atomic_k8s_put_volume_file_rejects_symlink() {
+        let temp = tempdir().expect("create tempdir");
+        let guest_path = temp.path().join("managed");
+        fs::create_dir_all(&guest_path).expect("create guest path");
+
+        {
+            let mut sources = MANAGED_VOLUME_SOURCES
+                .lock()
+                .expect("lock managed source map");
+            sources.clear();
+            sources.insert(
+                "v2".to_string(),
+                ManagedVolumeSource {
+                    host_volume_id: "h2".to_string(),
+                    guest_path,
+                    volume_type: VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S,
+                    active_revision: None,
+                },
+            );
+        }
+
+        let req = protocols::agent::PutVolumeFileRequest {
+            agent_volume_id: "v2".to_string(),
+            relative_path: "token".to_string(),
+            file_size: 11,
+            file_mode: libc::S_IFLNK,
+            uid: unistd::getuid().as_raw() as i32,
+            gid: unistd::getgid().as_raw() as i32,
+            offset: 0,
+            data: b"..data/token".to_vec(),
+            ..Default::default()
+        };
+
+        assert!(do_put_volume_file(&req).is_err());
     }
 
     #[tokio::test]
