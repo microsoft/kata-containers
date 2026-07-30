@@ -173,6 +173,7 @@ impl FsWatcher {
         src: PathBuf,
         dst: PathBuf,
         symlink_copy_mode: SymlinkCopyMode,
+        is_bind_mount: bool,
     ) -> JoinHandle<()> {
         let need_sync = self.need_sync.clone();
         let pending_events = self.pending_events.clone();
@@ -200,6 +201,7 @@ impl FsWatcher {
                         &dst_sync.to_string_lossy(),
                         &agent_sync,
                         symlink_copy_mode,
+                        is_bind_mount,
                     )
                     .await
                 {
@@ -274,6 +276,7 @@ impl FsWatcher {
                             &dst.to_string_lossy(),
                             &agent,
                             symlink_copy_mode,
+                            is_bind_mount,
                         )
                         .await
                         {
@@ -460,6 +463,8 @@ impl ShareFsVolume {
 
         match share_fs {
             None => {
+                let is_bind_mount = get_mount_type(m) == "bind";
+
                 let src = match std::fs::canonicalize(&source_path) {
                     Err(err) => {
                         return Err(anyhow!(format!(
@@ -484,12 +489,17 @@ impl ShareFsVolume {
 
                     if should_copy_single_file_to_guest(m.destination(), copy_other_files) {
                         // Copy a single file
-                        Self::copy_file_to_guest(&src, &guest_path, &agent)
+                        Self::copy_file_to_guest(&src, &guest_path, &agent, is_bind_mount)
                             .await
                             .context("copy file to guest")?;
                     } else {
                         // Keep mount source file path present in guest while skipping file contents.
-                        Self::create_empty_file_in_guest(&src, &guest_path, &agent)
+                        Self::create_empty_file_in_guest(
+                            &src,
+                            &guest_path,
+                            &agent,
+                            is_bind_mount,
+                        )
                             .await
                             .context("create empty file in guest")?;
                         info!(
@@ -523,6 +533,7 @@ impl ShareFsVolume {
                             } else {
                                 SymlinkCopyMode::Legacy
                             },
+                            is_bind_mount,
                         )
                             .await
                             .context("copy directory to guest")?;
@@ -540,6 +551,7 @@ impl ShareFsVolume {
                                     src.clone(),
                                     PathBuf::from(&guest_path),
                                     SymlinkCopyMode::WatchableRestricted,
+                                    is_bind_mount,
                                 )
                                 .await;
                             monitor_task = Some(handle);
@@ -555,7 +567,12 @@ impl ShareFsVolume {
                             .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
                             .await
                             .context("get or create volume")?;
-                        Self::create_empty_directory_in_guest(&src, &guest_path, &agent)
+                        Self::create_empty_directory_in_guest(
+                            &src,
+                            &guest_path,
+                            &agent,
+                            is_bind_mount,
+                        )
                             .await
                             .context("create empty directory in guest")?;
 
@@ -664,7 +681,10 @@ impl ShareFsVolume {
         src: &Path,
         guest_path: &str,
         agent: &Arc<dyn Agent>,
+        is_bind_mount: bool,
     ) -> Result<()> {
+        ensure_bind_mount_for_transfer(is_bind_mount, guest_path)?;
+
         // Read file metadata
         let file_metadata = std::fs::metadata(src)
             .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
@@ -702,7 +722,10 @@ impl ShareFsVolume {
         guest_path: &str,
         agent: &Arc<dyn Agent>,
         symlink_copy_mode: SymlinkCopyMode,
+        is_bind_mount: bool,
     ) -> Result<()> {
+        ensure_bind_mount_for_transfer(is_bind_mount, guest_path)?;
+
         // create directory
         let dir_metadata =
             std::fs::metadata(src).context(format!("read metadata from directory: {src:?}"))?;
@@ -734,7 +757,7 @@ impl ShareFsVolume {
 
         // recursively copy files from this directory
         // similar to `scp -r $source_dir $target_dir`
-        copy_dir_recursively(src, guest_path, agent, symlink_copy_mode)
+        copy_dir_recursively(src, guest_path, agent, symlink_copy_mode, is_bind_mount)
             .await
             .context(format!("failed to copy directory contents: {src:?}"))?;
 
@@ -745,7 +768,10 @@ impl ShareFsVolume {
         src: &Path,
         guest_path: &str,
         agent: &Arc<dyn Agent>,
+        is_bind_mount: bool,
     ) -> Result<()> {
+        ensure_bind_mount_for_transfer(is_bind_mount, guest_path)?;
+
         let dir_metadata =
             std::fs::metadata(src).context(format!("read metadata from directory: {src:?}"))?;
 
@@ -779,7 +805,10 @@ impl ShareFsVolume {
         src: &Path,
         guest_path: &str,
         agent: &Arc<dyn Agent>,
+        is_bind_mount: bool,
     ) -> Result<()> {
+        ensure_bind_mount_for_transfer(is_bind_mount, guest_path)?;
+
         let file_metadata = std::fs::metadata(src)
             .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
 
@@ -918,7 +947,10 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
     dest_dir: &str,
     agent: &Arc<dyn Agent>,
     symlink_copy_mode: SymlinkCopyMode,
+    is_bind_mount: bool,
 ) -> Result<()> {
+    ensure_bind_mount_for_transfer(is_bind_mount, dest_dir)?;
+
     let mut queue = VecDeque::new();
     queue.push_back((src_dir.as_ref().to_path_buf(), dest_dir.to_string()));
 
@@ -1172,6 +1204,17 @@ fn should_copy_single_file_to_guest(destination: &Path, copy_other_files: bool) 
     is_always_copied_single_file(destination) || copy_other_files
 }
 
+fn ensure_bind_mount_for_transfer(is_bind_mount: bool, transfer_path: &str) -> Result<()> {
+    if !is_bind_mount {
+        return Err(anyhow!(
+            "refusing file transfer for non-bind mount; transfer path: {}",
+            transfer_path
+        ));
+    }
+
+    Ok(())
+}
+
 fn validated_single_component_symlink_target(target: &Path, symlink_path: &Path) -> Result<String> {
     let mut components = target.components();
     let Some(first) = components.next() else {
@@ -1331,5 +1374,11 @@ mod test {
             Path::new("/tmp/..data"),
         )
         .is_err());
+    }
+
+    #[test]
+    fn test_ensure_bind_mount_for_transfer() {
+        assert!(ensure_bind_mount_for_transfer(true, "/tmp/target").is_ok());
+        assert!(ensure_bind_mount_for_transfer(false, "/tmp/target").is_err());
     }
 }
