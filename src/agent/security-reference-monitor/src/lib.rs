@@ -305,6 +305,31 @@ impl ReferenceMonitor {
         }
     }
 
+    /// Retire a committed transaction so its operation id may be used again.
+    ///
+    /// `prepare` treats a committed operation id as an idempotent replay and returns the
+    /// retained result without executing anything. That is correct while the object the id
+    /// names still exists, but a container id is reusable: once the container is removed,
+    /// the occurrence layer expects a later create for the same id to mint a fresh
+    /// generation. Without retiring the create transaction that later create would be
+    /// answered from the replay cache and silently do nothing.
+    ///
+    /// Only a committed transaction may be retired; an in-flight one must be committed or
+    /// aborted first.
+    pub fn retire(&mut self, op_id: &str) -> Result<(), SrmError> {
+        match self.txns.get(op_id) {
+            Some(txn) if txn.state == TxnState::Committed => {
+                self.txns.remove(op_id);
+                Ok(())
+            }
+            Some(txn) => Err(SrmError::InvalidState {
+                op: op_id.to_string(),
+                state: txn.state.clone(),
+            }),
+            None => Err(SrmError::UnknownOperation(op_id.to_string())),
+        }
+    }
+
     pub fn transaction(&self, op_id: &str) -> Option<&Transaction> {
         self.txns.get(op_id)
     }
@@ -398,6 +423,52 @@ mod tests {
         m.prepare("op1", 0, "d").unwrap();
         assert!(matches!(
             m.commit("op1", "r"),
+            Err(SrmError::InvalidState { .. })
+        ));
+    }
+
+    #[test]
+    fn retire_frees_a_committed_op_id_for_reuse() {
+        // F-17/F-19: a container id is reusable once the container is removed. Without
+        // retiring the create transaction, the next create for the same id is answered
+        // from the replay cache and the container is never created.
+        let mut m = ReferenceMonitor::new();
+        m.prepare("ctr1", 0, "d1").unwrap();
+        m.execute("ctr1", "d1").unwrap();
+        m.commit("ctr1", "container-created").unwrap();
+
+        // Before retiring, a fresh create for the same id is swallowed as a replay.
+        assert!(matches!(
+            m.prepare("ctr1", m.state_version(), "d2"),
+            Ok(Prepared::AlreadyCommitted(_))
+        ));
+
+        m.retire("ctr1").unwrap();
+        assert!(m.transaction("ctr1").is_none());
+
+        // After retiring it is a genuinely new transaction again.
+        assert_eq!(
+            m.prepare("ctr1", m.state_version(), "d2").unwrap(),
+            Prepared::New
+        );
+    }
+
+    #[test]
+    fn retire_refuses_in_flight_and_unknown_transactions() {
+        let mut m = ReferenceMonitor::new();
+        assert!(matches!(
+            m.retire("nope"),
+            Err(SrmError::UnknownOperation(_))
+        ));
+
+        m.prepare("op1", 0, "d").unwrap();
+        assert!(matches!(
+            m.retire("op1"),
+            Err(SrmError::InvalidState { .. })
+        ));
+        m.execute("op1", "d").unwrap();
+        assert!(matches!(
+            m.retire("op1"),
             Err(SrmError::InvalidState { .. })
         ));
     }
