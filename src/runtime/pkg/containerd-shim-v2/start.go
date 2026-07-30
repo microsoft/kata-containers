@@ -66,19 +66,23 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 
 		go watchOOMEvents(ctx, s)
 	} else if s.restoredSandbox {
-		// The workload is already live; resume the VM and restore its network identity.
-		if err := s.sandbox.FinalizeRestoreNetwork(ctx); err != nil {
-			return err
-		}
-		var err error
-		s.monitor, err = s.sandbox.Monitor(ctx)
-		if err != nil {
-			return err
-		}
-		go watchSandbox(ctx, s)
-		go watchOOMEvents(ctx, s)
-		if err := armDeferredRestoredPauseTask(ctx, s); err != nil {
-			return err
+		// The first workload start resumes the VM and restores its network
+		// identity; later workload starts find the guest already live.
+		if !s.restoreFinalized {
+			if err := s.sandbox.FinalizeRestoreNetwork(ctx); err != nil {
+				return err
+			}
+			var err error
+			s.monitor, err = s.sandbox.Monitor(ctx)
+			if err != nil {
+				return err
+			}
+			go watchSandbox(ctx, s)
+			go watchOOMEvents(ctx, s)
+			if err := armDeferredRestoredPauseTask(ctx, s); err != nil {
+				return err
+			}
+			s.restoreFinalized = true
 		}
 	} else if _, err := s.sandbox.StartContainer(ctx, c.id); err != nil {
 		return err

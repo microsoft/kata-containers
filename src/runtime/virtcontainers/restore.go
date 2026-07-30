@@ -323,17 +323,10 @@ func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) (err error) {
 		return fmt.Errorf("kata restore failed: activate network fence: %w", ferr)
 	}
 
-	idx, _, ierr := soleGuestWorkloadIndex(s)
-	if ierr != nil {
-		return fmt.Errorf("kata restore failed: locate adopted workload to mark running: %w", ierr)
+	if serr := s.markAdoptedWorkloadsRunning(); serr != nil {
+		return fmt.Errorf("kata restore failed: mark adopted workloads running: %w", serr)
 	}
-	c := s.containers[s.config.Containers[idx].ID]
-	if c == nil {
-		return fmt.Errorf("kata restore failed: adopted workload container %s not registered", s.config.Containers[idx].ID)
-	}
-	if serr := c.setContainerState(types.StateRunning); serr != nil {
-		return fmt.Errorf("kata restore failed: mark adopted workload running: %w", serr)
-	}
+	s.restoreActivated = true
 	s.Logger().WithField("guest-nic", guestNICName).Info("restored network activated")
 	return nil
 }
@@ -369,7 +362,7 @@ func adoptPauseContainer(s *Sandbox, origSandboxID string) error {
 	return fmt.Errorf("pause container config (id=%s) not found in restored sandbox config", s.id)
 }
 
-// RestoreContainer adopts the sole persisted workload; the caller guarantees compatibility.
+// RestoreContainer adopts the persisted workload whose CRI container name matches the target's.
 func (s *Sandbox) RestoreContainer(_ context.Context, contConfig ContainerConfig) (VCContainer, error) {
 	if spec := contConfig.CustomSpec; spec != nil && spec.Hooks != nil {
 		h := spec.Hooks
@@ -379,7 +372,7 @@ func (s *Sandbox) RestoreContainer(_ context.Context, contConfig ContainerConfig
 		}
 	}
 
-	idx, guestID, err := soleGuestWorkloadIndex(s)
+	idx, guestID, err := guestWorkloadIndexByName(s, contConfig.Annotations[criContainerNameAnnotation])
 	if err != nil {
 		return nil, err
 	}
@@ -387,8 +380,8 @@ func (s *Sandbox) RestoreContainer(_ context.Context, contConfig ContainerConfig
 		return nil, fmt.Errorf("kata restore failed: persisted workload has an empty guest id")
 	}
 
-	if len(s.containers) != 1 || s.containers[s.id] == nil {
-		return nil, fmt.Errorf("kata restore failed: expected only the pause container before workload adoption")
+	if s.containers[s.id] == nil {
+		return nil, fmt.Errorf("kata restore failed: the restored pause container must be adopted before workloads")
 	}
 
 	savedCopy := s.config.Containers[idx]
@@ -408,7 +401,13 @@ func (s *Sandbox) RestoreContainer(_ context.Context, contConfig ContainerConfig
 	if err = s.addContainer(c); err != nil {
 		return nil, err
 	}
-	if err = c.setContainerState(types.StateReady); err != nil {
+	// adoptions after the vm resumed go straight to running; earlier ones are
+	// promoted by FinalizeRestoreNetwork when the first workload starts
+	adoptedState := types.StateReady
+	if s.restoreActivated {
+		adoptedState = types.StateRunning
+	}
+	if err = c.setContainerState(adoptedState); err != nil {
 		delete(s.containers, c.id)
 		return nil, fmt.Errorf("kata restore failed: persist adopted container mapping: %w", err)
 	}
@@ -435,8 +434,13 @@ func newAdoptedContainer(sandbox *Sandbox, contConfig *ContainerConfig) (*Contai
 	return c, nil
 }
 
-func soleGuestWorkloadIndex(s *Sandbox) (int, string, error) {
-	idx := -1
+// guestWorkloadIndexByName locates the unclaimed persisted workload whose CRI
+// container name matches the target's. an adopted slot holds the target's own
+// config, whose ID is registered host-side, so it can never be claimed twice.
+func guestWorkloadIndexByName(s *Sandbox, name string) (int, string, error) {
+	if name == "" {
+		return -1, "", fmt.Errorf("kata restore failed: target container has no %s annotation", criContainerNameAnnotation)
+	}
 	for i := range s.config.Containers {
 		cc := &s.config.Containers[i]
 		if cc.ID == s.id {
@@ -445,15 +449,31 @@ func soleGuestWorkloadIndex(s *Sandbox) (int, string, error) {
 		if cc.Annotations[criContainerTypeAnnotation] == criSandboxType {
 			continue
 		}
-		if idx >= 0 {
-			return -1, "", fmt.Errorf("kata restore failed: snapshot has multiple workload containers; the first restore slice supports exactly one")
+		if cc.Annotations[criContainerNameAnnotation] != name {
+			continue
 		}
-		idx = i
+		if s.containers[cc.ID] != nil {
+			return -1, "", fmt.Errorf("kata restore failed: workload %q is already adopted", name)
+		}
+		return i, cc.ID, nil
 	}
-	if idx < 0 {
-		return -1, "", fmt.Errorf("kata restore failed: no persisted workload container found in snapshot (expected exactly one)")
+	return -1, "", fmt.Errorf("kata restore failed: snapshot has no unclaimed workload container named %q", name)
+}
+
+// markAdoptedWorkloadsRunning promotes every adopted-but-ready workload once the vm resumed.
+func (s *Sandbox) markAdoptedWorkloadsRunning() error {
+	for id, c := range s.containers {
+		if id == s.id {
+			continue
+		}
+		if c.state.State != types.StateReady {
+			continue
+		}
+		if err := c.setContainerState(types.StateRunning); err != nil {
+			return fmt.Errorf("workload %s: %w", id, err)
+		}
 	}
-	return idx, s.config.Containers[idx].ID, nil
+	return nil
 }
 
 // seedPersist rekeys snapshot state for the new sandbox without changing the guest workload ID.
@@ -503,6 +523,7 @@ func seedPersist(snapshotDir, newID string, store persistapi.PersistDriver) (str
 
 const (
 	criContainerTypeAnnotation = "io.kubernetes.cri.container-type"
+	criContainerNameAnnotation = "io.kubernetes.cri.container-name"
 	criSandboxIDAnnotation     = "io.kubernetes.cri.sandbox-id"
 	criSandboxType             = "sandbox"
 	ociBundlePathAnnotation    = "io.katacontainers.pkg.oci.bundle_path"

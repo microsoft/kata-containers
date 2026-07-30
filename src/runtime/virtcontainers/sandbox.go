@@ -276,6 +276,7 @@ type Sandbox struct {
 	hotplugNetworkConfigApplied bool
 
 	restoreNetFence bool
+	restoreActivated bool
 }
 
 // ID returns the sandbox identifier string.
