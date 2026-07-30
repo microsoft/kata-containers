@@ -1161,15 +1161,7 @@ impl agent_ttrpc::AgentService for AgentService {
                         // a later create for the same id is a genuinely new operation
                         // rather than an idempotent replay of the create just undone.
                         for id in [&req.container_id, &op_id] {
-                            if let Err(e) = srm.retire(id) {
-                                warn!(
-                                    sl(),
-                                    "could not retire transaction {}: {:?}; a later create \
-                                     for this id may be answered from the replay cache",
-                                    id,
-                                    e
-                                );
-                            }
+                            retire_or_warn(&mut srm, id);
                         }
                     }
                     // FR-9: retire the occurrence. Its alias may not be operated on again
@@ -1229,8 +1221,14 @@ impl agent_ttrpc::AgentService for AgentService {
         is_allowed(&req).await?;
 
         // FR-6: an exec creates a new process, so run it as an SRM transaction. The
-        // operation id is the container+exec id; a retried exec id is an idempotent
-        // replay. Agent-internal (no new shim<->agent API).
+        // operation id is the container+exec id, and a duplicate arriving while the first
+        // is in flight is refused. Agent-internal (no new shim<->agent API).
+        //
+        // The transaction is retired once the process is running. An exec id is unique
+        // only while its process exists: containerd allows the id to be reused after the
+        // exec is deleted, so retaining the committed transaction would make a later,
+        // legitimate exec an idempotent replay and return success without starting
+        // anything.
         #[cfg(feature = "strict-policy")]
         {
             use kata_security_reference_monitor::Prepared;
@@ -1260,6 +1258,7 @@ impl agent_ttrpc::AgentService for AgentService {
                 Ok(_) => {
                     let mut srm = crate::SRM.lock().await;
                     let _ = srm.commit(&op_id, "process-execed");
+                    retire_or_warn(&mut srm, &op_id);
                     Ok(Empty::new())
                 }
                 Err(e) => {
@@ -1314,9 +1313,17 @@ impl agent_ttrpc::AgentService for AgentService {
             .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
 
         // FR-6: wrap signal delivery in an SRM transaction for a consistent audit record
-        // and idempotent retries. The operation id includes the (effective) signal number
-        // so distinct signals to the same process are distinct transactions (only an
-        // identical retried signal is an idempotent replay).
+        // and to refuse a duplicate while one is in flight. The operation id includes the
+        // (effective) signal number so distinct signals to the same process are distinct
+        // transactions.
+        //
+        // The transaction is retired once the signal is delivered. `(container, exec,
+        // signal)` names a *kind* of event, not a unique one: repeated delivery is normal
+        // (SIGHUP to reload, SIGUSR1 to rotate, SIGTERM before SIGKILL). Retaining the
+        // committed transaction would make every later identical signal an idempotent
+        // replay, so the agent would return success without delivering anything. Replay
+        // protection here is therefore scoped to a duplicate arriving while the first is
+        // still in flight, which `prepare` refuses.
         #[cfg(feature = "strict-policy")]
         {
             use kata_security_reference_monitor::Prepared;
@@ -1338,6 +1345,7 @@ impl agent_ttrpc::AgentService for AgentService {
                 Ok(_) => {
                     let mut srm = crate::SRM.lock().await;
                     let _ = srm.commit(&op_id, "signal-delivered");
+                    retire_or_warn(&mut srm, &op_id);
                     Ok(Empty::new())
                 }
                 Err(e) => {
@@ -2579,6 +2587,29 @@ async fn rollback_policy_state(snapshot: &Option<String>, context: &str) {
             .lock()
             .await
             .quarantine(format!("policy state rollback failed after {context}"));
+    }
+}
+
+/// FR-6: free a committed operation id so the same id can be used again.
+///
+/// A committed transaction is retained as an idempotent replay cache, which is only
+/// correct for operations whose id names a unique object (a container id). For operations
+/// whose id names a repeatable event (a signal) or a reusable name (an exec id), the
+/// cached entry would answer a later legitimate request with a success it never performed.
+///
+/// A failure here is not fatal -- the operation itself succeeded -- but it does mean the
+/// stale entry remains and a later request for the same id may be swallowed, so it is
+/// logged rather than ignored.
+#[cfg(feature = "strict-policy")]
+fn retire_or_warn(srm: &mut kata_security_reference_monitor::ReferenceMonitor, op_id: &str) {
+    if let Err(e) = srm.retire(op_id) {
+        warn!(
+            sl(),
+            "could not retire transaction {}: {:?}; a later request for this id may be \
+             answered from the replay cache",
+            op_id,
+            e
+        );
     }
 }
 

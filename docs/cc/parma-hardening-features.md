@@ -175,7 +175,8 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   snapshot, quarantines the monitor rather than continuing on unprovable state. On a
   successful removal the container's transactions are **retired**, so a later create for
   the same id is a new operation rather than an idempotent replay of the create just
-  undone.
+  undone. `prepare` refuses a duplicate for an operation that is still in flight rather
+  than overwriting the live transaction.
 - **Guarantee:** policy and runtime state commit together or are reconciled/rolled back;
   an unprovable state quarantines the monitor (never fails open).
 - **Scope — which RPCs are transactions, and why:** only two policy rules mutate persisted
@@ -190,11 +191,18 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   straight back, so `PlanMismatch` and `StaleStateVersion` are properties of the crate
   rather than of the integration. Meaningful anti-replay would require the version to be
   pinned by the initiator, which is outside FR-6's agent-internal scope. Quarantine blocks
-  further SRM-gated operations; it does not halt the guest.
+  further SRM-gated operations; it does not halt the guest. Replay protection is also not
+  uniform across the four transactions: the retained-result cache is only sound when the
+  operation id names a unique object, which holds for a container id but not for a signal
+  (`(container, exec, signal)` names a repeatable event) or for an exec id (reusable once
+  the exec is deleted). Those two therefore retire on commit, which scopes their replay
+  protection to duplicates arriving while the first is still in flight; a retry issued
+  after the original committed will execute again.
 - **Commits:** `b10ffc663` (crate), `b88ff8e51` (create), `e4d6c8c97` (exec/signal),
   `dfac4bd7a` (policy-state rollback), this PR (removal + rollback failure handling).
-- **Validated:** unit (transaction manager tests, including transaction retirement) +
-  policy tests covering removal rollback + matrix no-regression.
+- **Validated:** unit (transaction manager tests, including transaction retirement and
+  refusal of in-flight duplicates) + policy tests covering removal rollback + matrix
+  no-regression.
 
 ### FR-3 — Canonical object (authorized == executed)
 - **Gap:** the agent mutates the authorized request before executing it (effective signal
