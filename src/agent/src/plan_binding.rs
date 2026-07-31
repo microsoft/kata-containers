@@ -63,6 +63,7 @@ use anyhow::{anyhow, Result};
 use oci_spec::runtime::Spec;
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use crate::confidential_data_hub::SEALED_SECRET_PREFIX;
 
@@ -70,14 +71,29 @@ use crate::confidential_data_hub::SEALED_SECRET_PREFIX;
 ///
 /// | Pointer                    | Written by                            | C-ACI position |
 /// |----------------------------|---------------------------------------|----------------|
-/// | `/root/path`               | `setup_bundle` rebinds the rootfs into the guest bundle. `root.readonly` is deliberately *not* here: `setup_bundle` preserves it and it is security-critical. | hcsshim pins this to a single expected path; we currently only allow it to change. |
 /// | `/linux/namespaces`        | `update_container_namespaces`         | not enforcer-validated |
 /// | `/linux/resources/devices` | `add_devices` writes cgroup device rules for the nodes it injected. Sibling `/linux/resources/*` limits (memory, cpu, pids) stay pinned. | not enforcer-validated |
-const RESOLUTION_REPLACEABLE_POINTERS: &[&str] = &[
-    "/root/path",
-    "/linux/namespaces",
-    "/linux/resources/devices",
-];
+///
+/// `/root/path` is deliberately **not** here: it is rewritten by `setup_bundle`,
+/// but to a value the guest derives itself, so it is pinned to that value rather
+/// than waived. See [`ROOT_PATH_POINTER`]. `/root/readonly` is likewise absent:
+/// `setup_bundle` preserves it and it is security-critical.
+const RESOLUTION_REPLACEABLE_POINTERS: &[&str] =
+    &["/linux/namespaces", "/linux/resources/devices"];
+
+/// The container rootfs pointer.
+///
+/// `setup_bundle` rewrites this from the host-supplied value to the bundle
+/// rootfs the guest prepared, so the authorized value cannot survive verbatim
+/// and a plain equality check against `authorized` would always fail. The
+/// rewrite is nonetheless *deterministic* — `CONTAINER_BASE/<cid>/rootfs` — so
+/// the executed value is checked against that expected path instead of being
+/// waived. This is C-ACI/hcsshim's position: it computes the expected rootfs
+/// itself and rejects any spec whose root differs, so a container can only ever
+/// be rooted at the one filesystem the platform prepared. Merely allowing the
+/// value to change would let a compromised in-guest transform re-root the
+/// container at a directory of its choosing without tripping the binding.
+const ROOT_PATH_POINTER: &str = "/root/path";
 
 /// Pointers holding arrays the resolution chain may *extend* but not disturb.
 ///
@@ -116,10 +132,20 @@ const MAX_REPORTED_PATHS: usize = 16;
 /// Verify that `executed` differs from `authorized` only in ways the in-guest
 /// resolution chain is permitted to produce.
 ///
+/// `expected_root_path` is the rootfs the guest itself prepared for this
+/// container; the executed plan must be rooted exactly there. The caller derives
+/// it the same way `setup_bundle` does, so the two cannot drift.
+///
 /// Returns `Ok(())` when the divergence is within bounds. Returns an error
 /// naming the offending locations otherwise; the caller must treat that as a
 /// denial of the operation, not as a warning.
-pub fn assert_within_resolution_bounds(authorized: &Spec, executed: &Spec) -> Result<()> {
+pub fn assert_within_resolution_bounds(
+    authorized: &Spec,
+    executed: &Spec,
+    expected_root_path: &Path,
+) -> Result<()> {
+    assert_root_path_pinned(executed, expected_root_path)?;
+
     let mut want = serde_json::to_value(authorized)
         .map_err(|e| anyhow!("plan binding: cannot serialize authorized spec: {e}"))?;
     let mut got = serde_json::to_value(executed)
@@ -144,7 +170,15 @@ pub fn assert_within_resolution_bounds(authorized: &Spec, executed: &Spec) -> Re
     // Remove -- rather than blank -- every replaceable pointer from both sides.
     // Removal is a no-op when the pointer is absent on one side, whereas
     // blanking would turn "absent vs null" into a spurious difference.
-    for pointer in RESOLUTION_REPLACEABLE_POINTERS {
+    //
+    // `/root/path` joins them only after `assert_root_path_pinned` has checked
+    // it: it is verified against the expected value rather than against the
+    // authorized one, so leaving it in the structural diff would fail every
+    // create.
+    for pointer in RESOLUTION_REPLACEABLE_POINTERS
+        .iter()
+        .chain(std::iter::once(&ROOT_PATH_POINTER))
+    {
         remove_at(&mut want, pointer);
         remove_at(&mut got, pointer);
     }
@@ -164,6 +198,35 @@ pub fn assert_within_resolution_bounds(authorized: &Spec, executed: &Spec) -> Re
         differing.join(", "),
         if truncated { ", ..." } else { "" }
     ))
+}
+
+/// Require that the executed plan is rooted at the filesystem the guest
+/// prepared for this container, and nowhere else.
+///
+/// The authorized value is not consulted: it is host-supplied and is always
+/// overwritten by `setup_bundle`. What matters is that the overwrite produced
+/// the one value the guest derived, so that no transform running between
+/// authorization and `create` can re-root the container.
+fn assert_root_path_pinned(executed: &Spec, expected: &Path) -> Result<()> {
+    let Some(root) = executed.root().as_ref() else {
+        return Err(anyhow!(
+            "plan binding violation: the executed plan has no root; the container must be \
+             rooted at the rootfs the guest prepared ({})",
+            expected.display()
+        ));
+    };
+
+    if root.path() != expected {
+        return Err(anyhow!(
+            "plan binding violation: the executed plan is rooted at {} but the guest \
+             prepared {}; in-guest resolution may rebind the rootfs only to the bundle \
+             path the guest itself derived",
+            root.path().display(),
+            expected.display()
+        ));
+    }
+
+    Ok(())
 }
 
 /// Require that every authorized entry survives into `got` unmodified and in
@@ -539,11 +602,18 @@ mod tests {
         })
     }
 
+    /// The rootfs the guest is taken to have prepared for the baseline spec.
+    const EXPECTED_ROOT: &str = "/run/kata/rootfs";
+
     fn check(mutate: impl FnOnce(&mut Value)) -> Result<()> {
         let authorized = baseline();
         let mut executed = baseline();
         mutate(&mut executed);
-        assert_within_resolution_bounds(&spec_from(authorized), &spec_from(executed))
+        assert_within_resolution_bounds(
+            &spec_from(authorized),
+            &spec_from(executed),
+            Path::new(EXPECTED_ROOT),
+        )
     }
 
     fn assert_allowed(mutate: impl FnOnce(&mut Value)) {
@@ -569,8 +639,6 @@ mod tests {
 
     #[test]
     fn replaceable_fields_may_be_rewritten() {
-        // setup_bundle rebinds the rootfs.
-        assert_allowed(|spec| spec["root"]["path"] = json!("/run/kata/bundles/abc/rootfs"));
         // update_container_namespaces rewrites namespaces.
         assert_allowed(|spec| spec["linux"]["namespaces"] = json!([{ "type": "ipc" }]));
         // add_devices writes cgroup device rules beside an existing memory limit.
@@ -578,6 +646,47 @@ mod tests {
             spec["linux"]["resources"]["devices"] =
                 json!([{ "allow": true, "type": "c", "major": 195, "minor": 0 }]);
         });
+    }
+
+    #[test]
+    fn root_path_must_equal_the_rootfs_the_guest_prepared() {
+        // setup_bundle rebinds the rootfs, but only ever to the path the guest
+        // itself derived; anything else re-roots the container.
+        assert_denied("is rooted at", |spec| {
+            spec["root"]["path"] = json!("/run/kata/bundles/abc/rootfs")
+        });
+    }
+
+    #[test]
+    fn root_path_matching_the_expected_rootfs_is_within_bounds() {
+        let authorized = baseline();
+        let mut executed = baseline();
+        executed["root"]["path"] = json!("/run/kata/containers/abc/rootfs");
+        assert_within_resolution_bounds(
+            &spec_from(authorized),
+            &spec_from(executed),
+            Path::new("/run/kata/containers/abc/rootfs"),
+        )
+        .expect("a plan rooted at the prepared rootfs is within bounds");
+    }
+
+    #[test]
+    fn executed_plan_without_a_root_is_denied() {
+        let authorized = baseline();
+        let mut executed = baseline();
+        executed.as_object_mut().unwrap().remove("root");
+        let rendered = assert_within_resolution_bounds(
+            &spec_from(authorized),
+            &spec_from(executed),
+            Path::new(EXPECTED_ROOT),
+        )
+        .expect_err("a rootless executed plan should be denied")
+        .to_string();
+        assert!(
+            rendered.contains("has no root"),
+            "error {:?} should mention the missing root",
+            rendered
+        );
     }
 
     #[test]
@@ -786,9 +895,13 @@ mod tests {
             "MODE=off"
         ]);
 
-        let rendered = assert_within_resolution_bounds(&authorized, &spec_from(mutated))
-            .expect_err("value rewrite should be denied")
-            .to_string();
+        let rendered = assert_within_resolution_bounds(
+            &authorized,
+            &spec_from(mutated),
+            Path::new(EXPECTED_ROOT),
+        )
+        .expect_err("value rewrite should be denied")
+        .to_string();
         assert!(
             !rendered.contains("super-secret-plaintext"),
             "error must not disclose environment values: {}",
@@ -807,9 +920,13 @@ mod tests {
         let mut mutated = baseline();
         mutated["process"]["args"] = json!(["/bin/sh", "-c", "exfiltrate --key=hunter2"]);
 
-        let rendered = assert_within_resolution_bounds(&authorized, &spec_from(mutated))
-            .expect_err("args rewrite should be denied")
-            .to_string();
+        let rendered = assert_within_resolution_bounds(
+            &authorized,
+            &spec_from(mutated),
+            Path::new(EXPECTED_ROOT),
+        )
+        .expect_err("args rewrite should be denied")
+        .to_string();
         assert!(
             !rendered.contains("hunter2"),
             "error must not disclose field values: {}",
@@ -838,9 +955,13 @@ mod tests {
             sysctl.insert(format!("net.custom.key{index}"), json!("1"));
         }
 
-        let rendered = assert_within_resolution_bounds(&authorized, &spec_from(mutated))
-            .expect_err("sysctl additions should be denied")
-            .to_string();
+        let rendered = assert_within_resolution_bounds(
+            &authorized,
+            &spec_from(mutated),
+            Path::new(EXPECTED_ROOT),
+        )
+        .expect_err("sysctl additions should be denied")
+        .to_string();
         assert!(
             rendered.ends_with(", ..."),
             "expected truncation marker: {}",
@@ -866,17 +987,26 @@ mod tests {
         executed["linux"]["resources"]["devices"] =
             json!([{ "allow": true, "type": "c", "major": 10, "minor": 200 }]);
 
-        assert_within_resolution_bounds(&spec_from(authorized), &spec_from(executed))
-            .expect("device-only resources should be within bounds");
+        assert_within_resolution_bounds(
+            &spec_from(authorized),
+            &spec_from(executed),
+            Path::new(EXPECTED_ROOT),
+        )
+        .expect("device-only resources should be within bounds");
     }
 
     #[test]
     fn a_spec_with_no_optional_sections_is_handled() {
         let minimal = json!({
             "ociVersion": "1.0.2",
+            "root": { "path": EXPECTED_ROOT, "readonly": true },
             "process": { "args": ["/bin/true"], "cwd": "/", "user": { "uid": 0, "gid": 0 } }
         });
-        assert_within_resolution_bounds(&spec_from(minimal.clone()), &spec_from(minimal))
-            .expect("a minimal spec should compare cleanly against itself");
+        assert_within_resolution_bounds(
+            &spec_from(minimal.clone()),
+            &spec_from(minimal),
+            Path::new(EXPECTED_ROOT),
+        )
+        .expect("a minimal spec should compare cleanly against itself");
     }
 }

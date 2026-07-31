@@ -383,25 +383,31 @@ impl AgentService {
                         e
                     )
                 })?;
+            // The digests routinely differ, which on its own says nothing: the
+            // resolution chain legitimately rewrites parts of the spec. What must
+            // not differ is anything the policy actually decided on. C-ACI/hcsshim
+            // obtains this property by ordering -- it evaluates policy on the
+            // already transformed spec -- so authorizing first, as we do, means the
+            // relationship has to be re-established explicitly here. The check runs
+            // unconditionally: a spec whose digest is unchanged still has to satisfy
+            // the pinned-root invariant rather than inheriting a pass from equality.
+            crate::plan_binding::assert_within_resolution_bounds(
+                &authorized_oci,
+                &oci,
+                &container_rootfs_path(&cid),
+            )
+            .inspect_err(|e| {
+                error!(
+                    sl(),
+                    "FR-3: refusing to create container; the executed OCI object \
+                     escapes the bounds of the authorized plan";
+                    "container-id" => &cid,
+                    "authorized-oci-digest" => &authorized_oci_digest,
+                    "executed-oci-digest" => &executed_oci_digest,
+                    "violation" => e.to_string(),
+                );
+            })?;
             if authorized_oci_digest != executed_oci_digest {
-                // The digests differ, which on its own says nothing: the resolution
-                // chain legitimately rewrites parts of the spec. What must not differ
-                // is anything the policy actually decided on. C-ACI/hcsshim obtains
-                // this property by ordering -- it evaluates policy on the already
-                // transformed spec -- so authorizing first, as we do, means the
-                // relationship has to be re-established explicitly here.
-                crate::plan_binding::assert_within_resolution_bounds(&authorized_oci, &oci)
-                    .inspect_err(|e| {
-                        error!(
-                            sl(),
-                            "FR-3: refusing to create container; the executed OCI object \
-                             escapes the bounds of the authorized plan";
-                            "container-id" => &cid,
-                            "authorized-oci-digest" => &authorized_oci_digest,
-                            "executed-oci-digest" => &executed_oci_digest,
-                            "violation" => e.to_string(),
-                        );
-                    })?;
                 info!(
                     sl(),
                     "FR-3: executed OCI object differs from authorized spec (trusted \
@@ -3304,6 +3310,17 @@ async fn do_add_swap_path(req: &AddSwapPathRequest) -> Result<()> {
     Ok(())
 }
 
+/// The rootfs the guest prepares for `cid`, and the only path a created
+/// container may be rooted at.
+///
+/// `setup_bundle` rebinds the host-supplied rootfs here, and the FR-3 plan
+/// binding pins the executed spec's `/root/path` to this value. Both derive it
+/// from this one function so they cannot drift apart: a change to the bundle
+/// layout that bypassed the pin would silently re-open the re-rooting gap.
+pub fn container_rootfs_path(cid: &str) -> PathBuf {
+    Path::new(CONTAINER_BASE).join(cid).join("rootfs")
+}
+
 // Setup container bundle under CONTAINER_BASE, which is cleaned up
 // before removing a container.
 // - bundle path is /<CONTAINER_BASE>/<cid>/
@@ -3319,7 +3336,7 @@ pub fn setup_bundle(cid: &str, spec: &mut Spec) -> Result<PathBuf> {
 
     let bundle_path = Path::new(CONTAINER_BASE).join(cid);
     let config_path = bundle_path.join("config.json");
-    let rootfs_path = bundle_path.join("rootfs");
+    let rootfs_path = container_rootfs_path(cid);
     let spec_root_path = spec_root.path();
 
     let rootfs_exists = Path::new(&rootfs_path).exists();
