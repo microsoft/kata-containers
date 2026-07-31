@@ -15,8 +15,11 @@ use crate::{
     types::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
-        ContainerID, CopyFileRequest, CopySharedFileRequest, CpuStats, CpuUsage,
+        ContainerID, CopyFileRequest, CopySharedFileRequest,
+        CopyWatchableVolumeDirectoryRequest, CopyWatchableVolumeFileRequest, CpuStats, CpuUsage,
         CreateContainerRequest, CreateSandboxRequest, CreateWatchableVolumeDataSymlinkRequest,
+        CreateWatchableVolumeDataSymlinkByVolumeRequest,
+        CreateWatchableVolumeFileSymlinkByVolumeRequest,
         CreateWatchableVolumeFileSymlinkRequest, Device, Empty, ExecProcessRequest, FSGroup,
         FSGroupChangePolicy, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
         HealthCheckResponse, HugetlbStats, IPAddress, IPFamily, Interface, Interfaces,
@@ -820,6 +823,66 @@ impl From<CopySharedFileRequest> for agent::CopySharedFileRequest {
             uid: from.uid,
             gid: from.gid,
             data: from.data,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CopyWatchableVolumeDirectoryRequest> for agent::CopyWatchableVolumeDirectoryRequest {
+    fn from(from: CopyWatchableVolumeDirectoryRequest) -> Self {
+        Self {
+            volume_id: from.volume_id,
+            relative_path: from.relative_path,
+            file_mode: from.file_mode,
+            dir_mode: from.dir_mode,
+            uid: from.uid,
+            gid: from.gid,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CopyWatchableVolumeFileRequest> for agent::CopyWatchableVolumeFileRequest {
+    fn from(from: CopyWatchableVolumeFileRequest) -> Self {
+        Self {
+            volume_id: from.volume_id,
+            relative_path: from.relative_path,
+            file_size: from.file_size,
+            file_mode: from.file_mode,
+            uid: from.uid,
+            gid: from.gid,
+            data: from.data,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CreateWatchableVolumeFileSymlinkByVolumeRequest>
+    for agent::CreateWatchableVolumeFileSymlinkByVolumeRequest
+{
+    fn from(from: CreateWatchableVolumeFileSymlinkByVolumeRequest) -> Self {
+        Self {
+            volume_id: from.volume_id,
+            relative_path: from.relative_path,
+            dir_mode: from.dir_mode,
+            uid: from.uid,
+            gid: from.gid,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CreateWatchableVolumeDataSymlinkByVolumeRequest>
+    for agent::CreateWatchableVolumeDataSymlinkByVolumeRequest
+{
+    fn from(from: CreateWatchableVolumeDataSymlinkByVolumeRequest) -> Self {
+        Self {
+            volume_id: from.volume_id,
+            relative_path: from.relative_path,
+            target_component: from.target_component,
+            dir_mode: from.dir_mode,
+            uid: from.uid,
+            gid: from.gid,
             ..Default::default()
         }
     }

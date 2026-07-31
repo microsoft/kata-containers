@@ -565,6 +565,46 @@ pub struct CopySharedFileRequest {
 }
 
 #[derive(PartialEq, Clone, Default)]
+pub struct CopyWatchableVolumeDirectoryRequest {
+    pub volume_id: String,
+    pub relative_path: String,
+    pub file_mode: u32,
+    pub dir_mode: u32,
+    pub uid: i32,
+    pub gid: i32,
+}
+
+#[derive(PartialEq, Clone, Default)]
+pub struct CopyWatchableVolumeFileRequest {
+    pub volume_id: String,
+    pub relative_path: String,
+    pub file_size: i64,
+    pub file_mode: u32,
+    pub uid: i32,
+    pub gid: i32,
+    pub data: ::std::vec::Vec<u8>,
+}
+
+#[derive(PartialEq, Clone, Default)]
+pub struct CreateWatchableVolumeFileSymlinkByVolumeRequest {
+    pub volume_id: String,
+    pub relative_path: String,
+    pub dir_mode: u32,
+    pub uid: i32,
+    pub gid: i32,
+}
+
+#[derive(PartialEq, Clone, Default)]
+pub struct CreateWatchableVolumeDataSymlinkByVolumeRequest {
+    pub volume_id: String,
+    pub relative_path: String,
+    pub target_component: String,
+    pub dir_mode: u32,
+    pub uid: i32,
+    pub gid: i32,
+}
+
+#[derive(PartialEq, Clone, Default)]
 pub struct CreateWatchableVolumeFileSymlinkRequest {
     pub path: String,
     pub dir_mode: u32,

@@ -171,7 +171,7 @@ impl FsWatcher {
         &self,
         agent: Arc<dyn Agent>,
         src: PathBuf,
-        dst: PathBuf,
+        volume_target: String,
         symlink_copy_mode: SymlinkCopyMode,
         is_bind_mount: bool,
     ) -> JoinHandle<()> {
@@ -183,7 +183,7 @@ impl FsWatcher {
         // Perform a full sync before starting monitoring to ensure that files which exist before monitoring starts are also synced.
         let agent_sync = agent.clone();
         let src_sync = src.clone();
-        let dst_sync = dst.clone();
+        let target_sync = volume_target.clone();
 
         tokio::spawn(async move {
             let mut buffer = [0u8; 4096];
@@ -193,18 +193,29 @@ impl FsWatcher {
             {
                 info!(
                     sl!(),
-                    "Initial sync from {:?} to {:?}", &src_sync, &dst_sync
+                    "Initial sync from {:?} to {:?}",
+                    &src_sync,
+                    &target_sync
                 );
-                if let Err(e) =
+                let sync_result = if symlink_copy_mode == SymlinkCopyMode::WatchableRestricted {
+                    copy_watchable_dir_recursively(
+                        &src_sync,
+                        &target_sync,
+                        &agent_sync,
+                        is_bind_mount,
+                    )
+                    .await
+                } else {
                     copy_dir_recursively(
                         &src_sync,
-                        &dst_sync.to_string_lossy(),
+                        &target_sync,
                         &agent_sync,
                         symlink_copy_mode,
                         is_bind_mount,
                     )
                     .await
-                {
+                };
+                if let Err(e) = sync_result {
                     error!(sl!(), "Initial sync failed: {:?}", e);
                 }
             }
@@ -270,21 +281,31 @@ impl FsWatcher {
                 // multiple times in a short period; we only execute the last one.
                 if let Some(t) = last_event_time {
                     if Instant::now().duration_since(t) > DEBOUNCE_TIME && *need_sync.lock().await {
-                        info!(sl!(), "debounce handle copyfile {:?} -> {:?}", &src, &dst);
-                        if let Err(e) = copy_dir_recursively(
-                            &src,
-                            &dst.to_string_lossy(),
-                            &agent,
-                            symlink_copy_mode,
-                            is_bind_mount,
-                        )
-                        .await
-                        {
+                        info!(sl!(), "debounce handle copyfile {:?} -> {:?}", &src, &volume_target);
+                        let sync_result = if symlink_copy_mode == SymlinkCopyMode::WatchableRestricted {
+                            copy_watchable_dir_recursively(
+                                &src,
+                                &volume_target,
+                                &agent,
+                                is_bind_mount,
+                            )
+                            .await
+                        } else {
+                            copy_dir_recursively(
+                                &src,
+                                &volume_target,
+                                &agent,
+                                symlink_copy_mode,
+                                is_bind_mount,
+                            )
+                            .await
+                        };
+                        if let Err(e) = sync_result {
                             error!(
                                 sl!(),
                                 "debounce handle copyfile {:?} -> {:?} failed with error: {:?}",
                                 &src,
-                                &dst,
+                                &volume_target,
                                 e
                             );
                             eprintln!("sync host/guest files failed: {e}");
@@ -352,6 +373,8 @@ impl VolumeManager {
                 state.guest_path,
                 state.ref_count,
             );
+
+            return Ok(state.guest_path.clone());
         }
 
         // Create a new volume state
@@ -544,23 +567,34 @@ impl ShareFsVolume {
                             .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
                             .await
                             .context("get or create volume")?;
+                        let volume_id = shared_mount_source_from_guest_path(&guest_path)
+                            .context("derive shared source for watchable directory")?;
 
-                        // Create directory
-                        Self::copy_directory_to_guest(
-                            &src,
-                            &guest_path,
-                            &agent,
-                            if watchable_volume {
-                                SymlinkCopyMode::WatchableRestricted
-                            } else {
-                                SymlinkCopyMode::Legacy
-                            },
-                            is_bind_mount,
-                        )
+                        if watchable_volume {
+                            Self::copy_watchable_directory_to_guest(
+                                &src,
+                                &volume_id,
+                                &agent,
+                                is_bind_mount,
+                            )
+                            .await
+                            .context("copy watchable directory to guest")?;
+                            // Source is just the shared base name; agent resolves this for bind-shared mounts.
+                            oci_mount.set_typ(Some("bind-shared".to_string()));
+                            oci_mount.set_source(Some(PathBuf::from(&volume_id)));
+                        } else {
+                            Self::copy_directory_to_guest(
+                                &src,
+                                &guest_path,
+                                &agent,
+                                SymlinkCopyMode::Legacy,
+                                is_bind_mount,
+                            )
                             .await
                             .context("copy directory to guest")?;
 
-                        oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                            oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                        }
                         volume.mounts.push(oci_mount);
 
                         // Start monitoring (only for watchable volumes)
@@ -571,7 +605,7 @@ impl ShareFsVolume {
                                 .start_monitor(
                                     agent.clone(),
                                     src.clone(),
-                                    PathBuf::from(&guest_path),
+                                    volume_id,
                                     SymlinkCopyMode::WatchableRestricted,
                                     is_bind_mount,
                                 )
@@ -827,6 +861,45 @@ impl ShareFsVolume {
         copy_dir_recursively(src, guest_path, agent, symlink_copy_mode, is_bind_mount)
             .await
             .context(format!("failed to copy directory contents: {src:?}"))?;
+
+        Ok(())
+    }
+
+    async fn copy_watchable_directory_to_guest(
+        src: &Path,
+        volume_id: &str,
+        agent: &Arc<dyn Agent>,
+        is_bind_mount: bool,
+    ) -> Result<()> {
+        ensure_bind_mount_for_transfer(is_bind_mount, volume_id)?;
+
+        let dir_metadata =
+            std::fs::metadata(src).context(format!("read metadata from directory: {src:?}"))?;
+
+        let root_request = agent::CopyWatchableVolumeDirectoryRequest {
+            volume_id: volume_id.to_owned(),
+            relative_path: String::new(),
+            file_mode: dir_metadata.mode(),
+            dir_mode: DIR_MODE_PERMS,
+            uid: dir_metadata.uid() as i32,
+            gid: dir_metadata.gid() as i32,
+        };
+
+        info!(
+            sl!(),
+            "fsshare: creating watchable root by id {:?} in sandbox with file_mode: {:?}",
+            volume_id,
+            root_request.file_mode
+        );
+
+        agent
+            .copy_watchable_volume_directory(root_request)
+            .await
+            .context(format!("create watchable root in sandbox by id: {volume_id:?}"))?;
+
+        copy_watchable_dir_recursively(src, volume_id, agent, is_bind_mount)
+            .await
+            .context(format!("failed to copy watchable directory contents: {src:?}"))?;
 
         Ok(())
     }
@@ -1186,6 +1259,162 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
     Ok(())
 }
 
+#[allow(dead_code)]
+async fn copy_watchable_dir_recursively<P: AsRef<Path>>(
+    src_dir: P,
+    volume_id: &str,
+    agent: &Arc<dyn Agent>,
+    is_bind_mount: bool,
+) -> Result<()> {
+    ensure_bind_mount_for_transfer(is_bind_mount, volume_id)?;
+
+    let src_root = src_dir.as_ref().to_path_buf();
+    let mut queue = VecDeque::new();
+    queue.push_back(src_root.clone());
+
+    while let Some(current_src) = queue.pop_front() {
+        let mut entries = tokio::fs::read_dir(&current_src)
+            .await
+            .context(format!("read directory: {current_src:?}"))?;
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .context(format!("read directory entry in {current_src:?}"))?
+        {
+            let entry_path = entry.path();
+            let rel_path = entry_path
+                .strip_prefix(&src_root)
+                .context(format!("strip src root from path: {entry_path:?}"))?
+                .to_string_lossy()
+                .to_string();
+
+            let metadata = entry
+                .metadata()
+                .await
+                .context(format!("read metadata for {entry_path:?}"))?;
+
+            if metadata.is_symlink() {
+                let entry_path_err = entry_path.clone();
+                let entry_path_clone = entry_path.clone();
+                let link_target =
+                    tokio::task::spawn_blocking(move || std::fs::read_link(&entry_path_clone))
+                        .await
+                        .context(format!(
+                            "failed to spawn blocking task for symlink: {entry_path_err:?}"
+                        ))??;
+
+                if entry_path
+                    .file_name()
+                    .is_some_and(|n| n == "..data")
+                {
+                    let target_component =
+                        validated_single_component_symlink_target(&link_target, &entry_path)?;
+                    let symlink_request = agent::CreateWatchableVolumeDataSymlinkByVolumeRequest {
+                        volume_id: volume_id.to_owned(),
+                        relative_path: rel_path.clone(),
+                        target_component,
+                        dir_mode: DIR_MODE_PERMS,
+                        uid: metadata.uid() as i32,
+                        gid: metadata.gid() as i32,
+                    };
+                    info!(
+                        sl!(),
+                        "fsshare: creating watchable ..data symlink by volume {:?}, relative path {:?}",
+                        volume_id,
+                        rel_path
+                    );
+
+                    agent
+                        .create_watchable_volume_data_symlink_by_volume(symlink_request)
+                        .await
+                        .context(format!(
+                            "failed to create watchable data symlink by volume id: {volume_id:?}, rel: {rel_path:?}"
+                        ))?;
+                } else {
+                    let symlink_request = agent::CreateWatchableVolumeFileSymlinkByVolumeRequest {
+                        volume_id: volume_id.to_owned(),
+                        relative_path: rel_path.clone(),
+                        dir_mode: DIR_MODE_PERMS,
+                        uid: metadata.uid() as i32,
+                        gid: metadata.gid() as i32,
+                    };
+                    info!(
+                        sl!(),
+                        "fsshare: creating watchable file symlink by volume {:?}, relative path {:?}",
+                        volume_id,
+                        rel_path
+                    );
+
+                    agent
+                        .create_watchable_volume_file_symlink_by_volume(symlink_request)
+                        .await
+                        .context(format!(
+                            "failed to create watchable file symlink by volume id: {volume_id:?}, rel: {rel_path:?}"
+                        ))?;
+                }
+            } else if metadata.is_dir() {
+                let dir_request = agent::CopyWatchableVolumeDirectoryRequest {
+                    volume_id: volume_id.to_owned(),
+                    relative_path: rel_path.clone(),
+                    file_mode: metadata.mode(),
+                    dir_mode: metadata.mode(),
+                    uid: metadata.uid() as i32,
+                    gid: metadata.gid() as i32,
+                };
+                info!(
+                    sl!(),
+                    "fsshare: creating watchable subdirectory by volume {:?}, relative path {:?}",
+                    volume_id,
+                    rel_path
+                );
+                agent
+                    .copy_watchable_volume_directory(dir_request)
+                    .await
+                    .context(format!(
+                        "failed to create watchable subdirectory by volume id: {volume_id:?}, rel: {rel_path:?}"
+                    ))?;
+
+                queue.push_back(entry_path);
+            } else if metadata.is_file() {
+                let mut file = tokio::fs::File::open(&entry_path)
+                    .await
+                    .context(format!("open file: {entry_path:?}"))?;
+
+                let mut buffer = Vec::new();
+                file.read_to_end(&mut buffer)
+                    .await
+                    .context(format!("read file: {entry_path:?}"))?;
+
+                let file_request = agent::CopyWatchableVolumeFileRequest {
+                    volume_id: volume_id.to_owned(),
+                    relative_path: rel_path.clone(),
+                    file_size: metadata.len() as i64,
+                    file_mode: metadata.mode(),
+                    uid: metadata.uid() as i32,
+                    gid: metadata.gid() as i32,
+                    data: buffer,
+                };
+
+                info!(
+                    sl!(),
+                    "fsshare: copy watchable file by volume {:?}, relative path {:?}",
+                    volume_id,
+                    rel_path
+                );
+                agent
+                    .copy_watchable_volume_file(file_request)
+                    .await
+                    .context(format!(
+                        "copy watchable file by volume id: {volume_id:?}, rel: {rel_path:?}"
+                    ))?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub(crate) fn is_share_fs_volume(m: &oci::Mount) -> bool {
     let mount_type = get_mount_type(m);
     (mount_type == "bind" || mount_type == mount::KATA_EPHEMERAL_VOLUME_TYPE)
@@ -1503,5 +1732,23 @@ mod test {
     fn test_ensure_bind_mount_for_transfer() {
         assert!(ensure_bind_mount_for_transfer(true, "/tmp/target").is_ok());
         assert!(ensure_bind_mount_for_transfer(false, "/tmp/target").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_volume_manager_get_or_create_volume_reuses_existing() {
+        let manager = VolumeManager::new();
+        let source = "/tmp/source";
+        let mount_destination = Path::new("/etc/hosts");
+
+        let first = manager
+            .get_or_create_volume(source, "ctr-a", mount_destination)
+            .await
+            .unwrap();
+        let second = manager
+            .get_or_create_volume(source, "ctr-b", mount_destination)
+            .await
+            .unwrap();
+
+        assert_eq!(first, second);
     }
 }

@@ -16,8 +16,11 @@ pub mod types;
 pub use types::{
     ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
     BlkioStatsEntry, CheckRequest, CloseStdinRequest, ContainerID, ContainerProcessID,
-    CopyFileRequest, CopySharedFileRequest, CreateContainerRequest, CreateSandboxRequest,
+    CopyFileRequest, CopySharedFileRequest, CopyWatchableVolumeDirectoryRequest,
+    CopyWatchableVolumeFileRequest, CreateContainerRequest, CreateSandboxRequest,
+    CreateWatchableVolumeDataSymlinkByVolumeRequest,
     CreateWatchableVolumeDataSymlinkRequest, CreateWatchableVolumeFileSymlinkRequest, Empty,
+    CreateWatchableVolumeFileSymlinkByVolumeRequest,
     ExecProcessRequest, FSGroup, FSGroupChangePolicy, GetDiagnosticDataRequest,
     GetDiagnosticDataResponse, GetGuestDetailsRequest, GetIPTablesRequest, GetIPTablesResponse,
     GuestDetailsResponse, HealthCheckResponse, IPAddress, IPFamily, Interface, Interfaces,
@@ -93,6 +96,20 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
     // utils
     async fn copy_file(&self, req: CopyFileRequest) -> Result<Empty>;
     async fn copy_shared_file(&self, req: CopySharedFileRequest) -> Result<Empty>;
+    async fn copy_watchable_volume_directory(
+        &self,
+        req: CopyWatchableVolumeDirectoryRequest,
+    ) -> Result<Empty>;
+    async fn copy_watchable_volume_file(&self, req: CopyWatchableVolumeFileRequest)
+        -> Result<Empty>;
+    async fn create_watchable_volume_file_symlink_by_volume(
+        &self,
+        req: CreateWatchableVolumeFileSymlinkByVolumeRequest,
+    ) -> Result<Empty>;
+    async fn create_watchable_volume_data_symlink_by_volume(
+        &self,
+        req: CreateWatchableVolumeDataSymlinkByVolumeRequest,
+    ) -> Result<Empty>;
     async fn create_watchable_volume_file_symlink(
         &self,
         req: CreateWatchableVolumeFileSymlinkRequest,

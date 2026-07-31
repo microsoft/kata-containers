@@ -38,6 +38,7 @@ use protobuf::MessageDyn;
 use protobuf::MessageField;
 use protocols::agent::{
     AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest, CopySharedFileRequest,
+    CopyWatchableVolumeDirectoryRequest, CopyWatchableVolumeFileRequest,
     CreateWatchableVolumeDataSymlinkRequest, CreateWatchableVolumeFileSymlinkRequest,
     GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, Interfaces, Metrics, OOMEvent,
     ReadStreamResponse, ResizeVolumeRequest, Routes, SetIPTablesRequest, SetIPTablesResponse,
@@ -1734,6 +1735,169 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn copy_watchable_volume_directory(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CopyWatchableVolumeDirectoryRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "copy_watchable_volume_directory", req);
+
+        let synthetic_copy_req_for_policy = {
+            let mut sandbox = self.sandbox.lock().await;
+            let path = resolve_watchable_volume_path(
+                &mut sandbox,
+                &req.volume_id,
+                &req.relative_path,
+                true,
+            )
+            .map_ttrpc_err(same)?;
+            synthetic_copy_file_for_watchable_directory_request(&req, &path)
+        };
+
+        #[cfg(feature = "agent-policy")]
+        {
+            let req_for_policy: PolicyCopyFileRequest = (&synthetic_copy_req_for_policy)
+                .try_into()
+                .context("parsing synthetic CopyFileRequest for policy")
+                .map_ttrpc_err(same)?;
+            is_allowed_with_entrypoint("CopyFileRequest", &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
+        is_allowed(&req).await?;
+
+        let root_path = PathBuf::from(KATA_GUEST_SHARE_DIR);
+        do_copy_file(&synthetic_copy_req_for_policy, &root_path).map_ttrpc_err(same)?;
+
+        Ok(Empty::new())
+    }
+
+    async fn copy_watchable_volume_file(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CopyWatchableVolumeFileRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "copy_watchable_volume_file", req);
+
+        let synthetic_copy_req_for_policy = {
+            let mut sandbox = self.sandbox.lock().await;
+            let path = resolve_watchable_volume_path(
+                &mut sandbox,
+                &req.volume_id,
+                &req.relative_path,
+                false,
+            )
+            .map_ttrpc_err(same)?;
+            synthetic_copy_file_for_watchable_file_request(&req, &path)
+        };
+
+        #[cfg(feature = "agent-policy")]
+        {
+            let req_for_policy: PolicyCopyFileRequest = (&synthetic_copy_req_for_policy)
+                .try_into()
+                .context("parsing synthetic CopyFileRequest for policy")
+                .map_ttrpc_err(same)?;
+            is_allowed_with_entrypoint("CopyFileRequest", &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
+        is_allowed(&req).await?;
+
+        let root_path = PathBuf::from(KATA_GUEST_SHARE_DIR);
+        do_copy_file(&synthetic_copy_req_for_policy, &root_path).map_ttrpc_err(same)?;
+
+        Ok(Empty::new())
+    }
+
+    async fn create_watchable_volume_file_symlink_by_volume(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CreateWatchableVolumeFileSymlinkByVolumeRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "create_watchable_volume_file_symlink_by_volume", req);
+
+        let resolved = {
+            let mut sandbox = self.sandbox.lock().await;
+            resolve_watchable_volume_path(
+                &mut sandbox,
+                &req.volume_id,
+                &req.relative_path,
+                false,
+            )
+            .map_ttrpc_err(same)?
+        };
+
+        let legacy_req = CreateWatchableVolumeFileSymlinkRequest {
+            path: resolved,
+            dir_mode: req.dir_mode,
+            uid: req.uid,
+            gid: req.gid,
+            ..Default::default()
+        };
+
+        #[cfg(feature = "agent-policy")]
+        {
+            let synthetic_copy_req = to_policy_copy_file_request_for_watchable_file_symlink(&legacy_req)
+                .map_ttrpc_err(same)?;
+            let req_for_policy: PolicyCopyFileRequest = (&synthetic_copy_req)
+                .try_into()
+                .context("parsing synthetic CopyFileRequest for policy")
+                .map_ttrpc_err(same)?;
+            is_allowed_with_entrypoint("CopyFileRequest", &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
+        is_allowed(&req).await?;
+
+        let root_path = PathBuf::from(KATA_GUEST_SHARE_DIR);
+        do_create_watchable_volume_file_symlink(&legacy_req, &root_path).map_ttrpc_err(same)?;
+
+        Ok(Empty::new())
+    }
+
+    async fn create_watchable_volume_data_symlink_by_volume(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CreateWatchableVolumeDataSymlinkByVolumeRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "create_watchable_volume_data_symlink_by_volume", req);
+
+        let resolved = {
+            let mut sandbox = self.sandbox.lock().await;
+            resolve_watchable_volume_path(
+                &mut sandbox,
+                &req.volume_id,
+                &req.relative_path,
+                false,
+            )
+            .map_ttrpc_err(same)?
+        };
+
+        let legacy_req = CreateWatchableVolumeDataSymlinkRequest {
+            path: resolved,
+            target_component: req.target_component.clone(),
+            dir_mode: req.dir_mode,
+            uid: req.uid,
+            gid: req.gid,
+            ..Default::default()
+        };
+
+        #[cfg(feature = "agent-policy")]
+        {
+            let synthetic_copy_req =
+                to_policy_copy_file_request_for_watchable_data_symlink(&legacy_req).map_ttrpc_err(same)?;
+            let req_for_policy: PolicyCopyFileRequest = (&synthetic_copy_req)
+                .try_into()
+                .context("parsing synthetic CopyFileRequest for policy")
+                .map_ttrpc_err(same)?;
+            is_allowed_with_entrypoint("CopyFileRequest", &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
+        is_allowed(&req).await?;
+
+        let root_path = PathBuf::from(KATA_GUEST_SHARE_DIR);
+        do_create_watchable_volume_data_symlink(&legacy_req, &root_path).map_ttrpc_err(same)?;
+
+        Ok(Empty::new())
+    }
+
     async fn create_watchable_volume_file_symlink(
         &self,
         ctx: &TtrpcContext,
@@ -2378,6 +2542,108 @@ fn allocate_shared_mount_path(sandbox: &mut Sandbox, file_name: &str) -> Result<
 }
 
 fn synthetic_copy_file_for_shared_request(req: &CopySharedFileRequest, path: &str) -> CopyFileRequest {
+    CopyFileRequest {
+        path: path.to_string(),
+        file_size: req.file_size,
+        file_mode: req.file_mode,
+        dir_mode: IMPLICIT_DIRECTORY_PERMISSION_MASK,
+        uid: req.uid,
+        gid: req.gid,
+        offset: 0,
+        data: req.data.clone(),
+        ..Default::default()
+    }
+}
+
+fn validate_watchable_relative_path(relative_path: &str) -> Result<()> {
+    if relative_path.is_empty() {
+        return Ok(());
+    }
+
+    let p = Path::new(relative_path);
+    if p.is_absolute() {
+        return Err(anyhow!("watchable relative path must not be absolute"));
+    }
+
+    for c in p.components() {
+        match c {
+            std::path::Component::Normal(_) => {}
+            _ => {
+                return Err(anyhow!(
+                    "watchable relative path contains invalid component: {}",
+                    relative_path
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_watchable_volume_root(
+    sandbox: &mut Sandbox,
+    volume_id: &str,
+    create_if_missing: bool,
+) -> Result<String> {
+    validate_shared_file_name(volume_id)?;
+
+    if let Some(path) = sandbox.bind_shared_mount_sources.get(volume_id) {
+        return Ok(path.clone());
+    }
+
+    if !create_if_missing {
+        return Err(anyhow!(
+            "watchable volume id {:?} not found in shared file map",
+            volume_id
+        ));
+    }
+
+    let path = allocate_shared_mount_path(sandbox, volume_id)?;
+    sandbox
+        .bind_shared_mount_sources
+        .insert(volume_id.to_string(), path.clone());
+    Ok(path)
+}
+
+fn resolve_watchable_volume_path(
+    sandbox: &mut Sandbox,
+    volume_id: &str,
+    relative_path: &str,
+    create_root_if_missing: bool,
+) -> Result<String> {
+    validate_watchable_relative_path(relative_path)?;
+    let root = resolve_watchable_volume_root(sandbox, volume_id, create_root_if_missing)?;
+    if relative_path.is_empty() {
+        return Ok(root);
+    }
+
+    Ok(Path::new(&root)
+        .join(relative_path)
+        .to_string_lossy()
+        .to_string())
+}
+
+fn synthetic_copy_file_for_watchable_directory_request(
+    req: &CopyWatchableVolumeDirectoryRequest,
+    path: &str,
+) -> CopyFileRequest {
+    CopyFileRequest {
+        path: path.to_string(),
+        file_size: 0,
+        file_mode: req.file_mode,
+        dir_mode: req.dir_mode,
+        uid: req.uid,
+        gid: req.gid,
+        offset: 0,
+        data: Vec::new(),
+        ..Default::default()
+    }
+}
+
+fn synthetic_copy_file_for_watchable_file_request(
+    req: &CopyWatchableVolumeFileRequest,
+    path: &str,
+) -> CopyFileRequest {
     CopyFileRequest {
         path: path.to_string(),
         file_size: req.file_size,
@@ -4150,6 +4416,37 @@ COMMIT
         assert!(validate_shared_file_name("..").is_err());
         assert!(validate_shared_file_name("dir/file").is_err());
         assert!(validate_shared_file_name("/etc/hosts").is_err());
+    }
+
+    #[test]
+    fn test_validate_watchable_relative_path() {
+        assert!(validate_watchable_relative_path("").is_ok());
+        assert!(validate_watchable_relative_path("a").is_ok());
+        assert!(validate_watchable_relative_path("a/b/c").is_ok());
+
+        assert!(validate_watchable_relative_path("/abs").is_err());
+        assert!(validate_watchable_relative_path("./a").is_err());
+        assert!(validate_watchable_relative_path("../a").is_err());
+        assert!(validate_watchable_relative_path("a/../b").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_watchable_volume_path() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let mut sandbox = Sandbox::new(&logger).unwrap();
+        sandbox.id = "sandbox-id".to_string();
+
+        let root = resolve_watchable_volume_path(&mut sandbox, "watch-id", "", true).unwrap();
+        assert_eq!(
+            root,
+            format!("{KATA_GUEST_SHARE_DIR}sandbox-id-{:016x}-watch-id", 1)
+        );
+
+        let nested =
+            resolve_watchable_volume_path(&mut sandbox, "watch-id", "dir/file", false).unwrap();
+        assert_eq!(nested, format!("{root}/dir/file"));
+
+        assert!(resolve_watchable_volume_path(&mut sandbox, "missing", "x", false).is_err());
     }
 
     #[tokio::test]
