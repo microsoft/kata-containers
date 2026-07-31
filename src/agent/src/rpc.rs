@@ -124,7 +124,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 
-use kata_types::k8s;
+use kata_types::{k8s, mount::KATA_MANAGED_VOLUME_BIND_TYPE};
 
 pub const CONTAINER_BASE: &str = "/run/kata-containers";
 const MODPROBE_PATH: &str = "/sbin/modprobe";
@@ -322,6 +322,10 @@ impl AgentService {
             Some(req.container_id),
         )
         .await?;
+
+        // Managed-volume mounts use the agent-generated volume id as OCI
+        // source. Resolve it to a guest path before rustjail processes mounts.
+        resolve_managed_volume_mounts(&mut oci)?;
 
         // Handle sealed secrets after storage is mounted
         cdh_handler_sealed_secrets(&mut oci)
@@ -2361,6 +2365,39 @@ fn validate_relative_path(path: &str) -> Result<()> {
 fn resolve_managed_relative(root: &Path, relative: &str) -> Result<PathBuf> {
     validate_relative_path(relative)?;
     Ok(root.join(relative))
+}
+
+fn resolve_managed_volume_mounts(oci: &mut Spec) -> Result<()> {
+    let Some(mounts) = oci.mounts_mut().as_mut() else {
+        return Ok(());
+    };
+
+    let sources = MANAGED_VOLUME_SOURCES
+        .lock()
+        .map_err(|_| anyhow!("managed volume sources lock poisoned"))?;
+
+    for m in mounts.iter_mut() {
+        if m.typ().as_deref() != Some(KATA_MANAGED_VOLUME_BIND_TYPE) {
+            continue;
+        }
+
+        let agent_volume_id = m
+            .source()
+            .as_ref()
+            .and_then(|p| p.to_str())
+            .ok_or_else(|| anyhow!("managed-volume mount source must be an agent_volume_id"))?;
+
+        let guest_path = sources
+            .get(agent_volume_id)
+            .ok_or_else(|| anyhow!("unknown managed volume id: {agent_volume_id}"))?
+            .guest_path
+            .clone();
+
+        m.set_source(Some(guest_path));
+        m.set_typ(Some("bind".to_string()));
+    }
+
+    Ok(())
 }
 
 fn do_init_volume_source(req: &protocols::agent::InitVolumeSourceRequest) -> Result<InitVolumeSourceResponse> {

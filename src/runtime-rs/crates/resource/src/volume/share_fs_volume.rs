@@ -468,7 +468,7 @@ impl ShareFsVolume {
                 // append oci::Mount structure to volume mounts
                 let mut oci_mount = oci::Mount::default();
                 oci_mount.set_destination(m.destination().clone());
-                oci_mount.set_typ(Some("bind".to_string()));
+                oci_mount.set_typ(Some(mount::KATA_MANAGED_VOLUME_BIND_TYPE.to_string()));
                 oci_mount.set_options(m.options().clone());
                 let host_volume_id = src.to_string_lossy().to_string();
 
@@ -483,13 +483,13 @@ impl ShareFsVolume {
                     .await
                     .context("init single-file volume source")?;
 
-                    info!(sl!(), "fsshare: file {:?} to {:?}", &src, &source.guest_path);
+                    info!(sl!(), "fsshare: file {:?} to managed volume {}", &src, &source.agent_volume_id);
 
                     Self::copy_file_to_guest(&src, &source.agent_volume_id, &agent)
                         .await
                         .context("copy file to guest")?;
 
-                    oci_mount.set_source(Some(PathBuf::from(&source.guest_path)));
+                    oci_mount.set_source(Some(PathBuf::from(&source.agent_volume_id)));
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
                     // We allow directory copying wildly
@@ -510,7 +510,7 @@ impl ShareFsVolume {
                     .context("init directory volume source")?;
 
                     // Get or create the guest path
-                    let (guest_path, agent_volume_id, is_new) = volume_manager
+                    let (_guest_path, agent_volume_id, is_new) = volume_manager
                         .get_or_create_volume(
                             &host_volume_id,
                             cid,
@@ -521,14 +521,14 @@ impl ShareFsVolume {
                         .context("get or create volume")?;
 
                     if is_new {
-                        info!(sl!(), "fsshare: new directory {:?} to {guest_path}", &src);
+                        info!(sl!(), "fsshare: new directory {:?} to managed volume {}", &src, &agent_volume_id);
 
                         Self::copy_directory_to_guest(&src, &agent_volume_id, &agent)
                             .await
                             .context("copy directory to guest")?;
                     }
 
-                    oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                    oci_mount.set_source(Some(PathBuf::from(&agent_volume_id)));
                     volume.mounts.push(oci_mount);
 
                     // Start monitoring (only for watchable volumes)
@@ -945,7 +945,9 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
 
 pub(crate) fn is_share_fs_volume(m: &oci::Mount) -> bool {
     let mount_type = get_mount_type(m);
-    (mount_type == "bind" || mount_type == mount::KATA_EPHEMERAL_VOLUME_TYPE)
+    (mount_type == "bind"
+        || mount_type == mount::KATA_EPHEMERAL_VOLUME_TYPE
+        || mount_type == mount::KATA_MANAGED_VOLUME_BIND_TYPE)
         && !is_host_device(&get_mount_path(&Some(m.destination().clone())))
         && !is_system_mount(&get_mount_path(m.source()))
 }

@@ -28,6 +28,10 @@ pub const KATA_EPHEMERAL_VOLUME_TYPE: &str = "ephemeral";
 /// to create a local directory inside the VM for sharing files between containers.
 pub const KATA_K8S_LOCAL_STORAGE_TYPE: &str = "local";
 
+/// KATA_MANAGED_VOLUME_BIND_TYPE marks binds whose source is an agent-managed
+/// volume id rather than a full guest path.
+pub const KATA_MANAGED_VOLUME_BIND_TYPE: &str = "bind-managed-volume";
+
 /// KATA_MOUNT_INFO_FILE_NAME is used for the file that holds direct-volume mount info
 pub const KATA_MOUNT_INFO_FILE_NAME: &str = "mountInfo.json";
 
