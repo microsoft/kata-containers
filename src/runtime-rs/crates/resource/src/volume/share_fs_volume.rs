@@ -483,6 +483,8 @@ impl ShareFsVolume {
                     .await
                     .context("init single-file volume source")?;
 
+                    info!(sl!(), "fsshare: file {:?} to {:?}", &src, &source.guest_path);
+
                     Self::copy_file_to_guest(&src, &source.agent_volume_id, &agent)
                         .await
                         .context("copy file to guest")?;
@@ -492,8 +494,6 @@ impl ShareFsVolume {
                 } else if src.is_dir() {
                     // We allow directory copying wildly
                     // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
-                    info!(sl!(), "copying directory {:?} to guest", &src);
-
                     let volume_type = if is_watchable_volume(&src) {
                         agent::VolumeSourceType::AtomicK8s
                     } else {
@@ -521,6 +521,8 @@ impl ShareFsVolume {
                         .context("get or create volume")?;
 
                     if is_new {
+                        info!(sl!(), "fsshare: new directory {:?} to {guest_path}", &src);
+
                         Self::copy_directory_to_guest(&src, &agent_volume_id, &agent)
                             .await
                             .context("copy directory to guest")?;
@@ -661,7 +663,7 @@ impl ShareFsVolume {
             ..Default::default()
         };
 
-        debug!(sl!(), "copy_file: {:?} to managed source {:?}", &src, agent_volume_id);
+        // debug!(sl!(), "copy_file: {:?} to managed source {:?}", &src, agent_volume_id);
 
         // Issue RPC request to agent
         agent.put_volume_file(r).await.with_context(|| {
@@ -858,6 +860,9 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                         ))??;
 
                 let link_target_str = link_target.to_string_lossy().into_owned();
+
+                info!(sl!(), "fsshare: symlink {:?} -> {link_target_str}", &relative_path);
+
                 let symlink_request = agent::PutVolumeFileRequest {
                     agent_volume_id: agent_volume_id.to_string(),
                     relative_path: relative_path.clone(),
