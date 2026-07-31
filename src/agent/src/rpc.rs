@@ -152,6 +152,13 @@ struct ManagedVolumeSource {
     guest_path: PathBuf,
     volume_type: VolumeSourceType,
     active_revision: Option<String>,
+    // Tracks the revision directory inferred from incoming AtomicK8s file
+    // paths (e.g. "..2026_07_31_16_20_52.3621362187").  Set by
+    // do_put_volume_file and consumed by do_commit_volume_revision.
+    pending_revision: Option<String>,
+    // Tracks top-level visible names (e.g. "namespace") inferred from
+    // incoming AtomicK8s file paths of the form "<revision>/<name>".
+    pending_visible_files: Vec<String>,
 }
 
 static MANAGED_VOLUME_SOURCES: LazyLock<std::sync::Mutex<HashMap<String, ManagedVolumeSource>>> =
@@ -2367,6 +2374,40 @@ fn resolve_managed_relative(root: &Path, relative: &str) -> Result<PathBuf> {
     Ok(root.join(relative))
 }
 
+/// Validate that `rev` looks like a Kubernetes atomic-volume revision directory
+/// name: must start with ".." followed only by ASCII digits, underscores, and
+/// a single dot (the nanosecond separator), e.g.
+/// "..2026_07_31_16_20_52.3621362187".
+///
+/// This is the format produced by kubelet.  Rejecting anything that does not
+/// match prevents a compromised runtime-rs from naming a revision with a
+/// path-traversal component (e.g. "../../etc").
+fn validate_atomic_k8s_revision(rev: &str) -> Result<()> {
+    let body = rev
+        .strip_prefix("..")
+        .ok_or_else(|| anyhow!("revision must start with \"..\""))?;
+
+    if body.is_empty() {
+        bail!("revision body after \"..\" must not be empty");
+    }
+
+    let mut dot_count = 0usize;
+    for ch in body.chars() {
+        match ch {
+            '0'..='9' | '_' => {}
+            '.' => {
+                dot_count += 1;
+                if dot_count > 1 {
+                    bail!("revision contains more than one '.' after the \"..\" prefix");
+                }
+            }
+            _ => bail!("revision contains disallowed character: {ch:?}"),
+        }
+    }
+
+    Ok(())
+}
+
 fn resolve_managed_volume_mounts(oci: &mut Spec) -> Result<()> {
     let Some(mounts) = oci.mounts_mut().as_mut() else {
         return Ok(());
@@ -2448,6 +2489,8 @@ fn do_init_volume_source(req: &protocols::agent::InitVolumeSourceRequest) -> Res
             guest_path: guest_path.clone(),
             volume_type,
             active_revision: None,
+            pending_revision: None,
+            pending_visible_files: vec![],
         },
     );
 
@@ -2495,6 +2538,48 @@ fn do_put_volume_file(req: &protocols::agent::PutVolumeFileRequest) -> Result<()
     let source = sources
         .get_mut(&req.agent_volume_id)
         .ok_or_else(|| anyhow!("unknown agent_volume_id"))?;
+
+    // For AtomicK8s volumes, reject any symlink sent by runtime-rs.
+    // Symlinks are reconstructed by the agent from the well-known K8s
+    // atomic-volume path structure, so the host never controls link
+    // destinations inside the guest.
+    if source.volume_type == VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S {
+        let sflag = stat::SFlag::from_bits_truncate(req.file_mode);
+        if sflag.contains(stat::SFlag::S_IFLNK) {
+            bail!(
+                "AtomicK8s volume does not accept symlinks from runtime: {:?}",
+                req.relative_path
+            );
+        }
+
+        // Track the pending revision and visible file names from the incoming
+        // path.  Paths of the form "<revision>/<name>" tell us which revision
+        // directory is being populated and which names will be made visible.
+        // This information is used by do_commit_volume_revision.
+        let rel = &req.relative_path;
+        if let Some((rev, name)) = rel.split_once('/') {
+            if !name.contains('/') {
+                validate_atomic_k8s_revision(rev).with_context(|| {
+                    format!("invalid AtomicK8s revision component in path {rel:?}")
+                })?;
+                match &source.pending_revision {
+                    None => {
+                        source.pending_revision = Some(rev.to_string());
+                    }
+                    Some(existing) if existing != rev => {
+                        bail!(
+                            "AtomicK8s volume received files for multiple revisions: \
+                             existing={existing:?}, new={rev:?}"
+                        );
+                    }
+                    _ => {}
+                }
+                if !source.pending_visible_files.contains(&name.to_string()) {
+                    source.pending_visible_files.push(name.to_string());
+                }
+            }
+        }
+    }
 
     let file_mode = if req.file_mode == 0 {
         libc::S_IFREG | 0o640
@@ -2553,23 +2638,55 @@ fn do_commit_volume_revision(req: &protocols::agent::CommitVolumeRevisionRequest
         bail!("only ATOMIC_K8S volume sources support revision commits")
     }
 
-    validate_relative_path(&req.revision)?;
+    // runtime-rs must not supply the revision or visible_paths for AtomicK8s
+    // volumes.  The agent derives them from the file paths it received, which
+    // prevents a compromised host from directing symlinks to arbitrary paths
+    // inside the guest.
+    if !req.revision.is_empty() {
+        bail!(
+            "AtomicK8s commit must not supply a revision string (got {:?}); \
+             the agent derives it from received file paths",
+            req.revision
+        );
+    }
+    if !req.visible_paths.is_empty() {
+        bail!(
+            "AtomicK8s commit must not supply visible_paths (got {:?}); \
+             the agent derives them from received file paths",
+            req.visible_paths
+        );
+    }
+
+    // Use the revision and visible names tracked while receiving files.
+    let revision = source
+        .pending_revision
+        .take()
+        .ok_or_else(|| anyhow!("no pending revision for AtomicK8s volume; no files were received before commit"))?;
+    let visible_files = std::mem::take(&mut source.pending_visible_files);
+
     let owner_uid = unistd::geteuid().as_raw() as i32;
     let owner_gid = unistd::getegid().as_raw() as i32;
 
+    // Create "..data" -> <revision> symlink.
     let data_link = source.guest_path.join("..data");
     let link_req = CopyFileRequest {
         path: data_link.to_string_lossy().into_owned(),
         file_mode: libc::S_IFLNK,
         uid: owner_uid,
         gid: owner_gid,
-        data: req.revision.as_bytes().to_vec(),
+        data: revision.as_bytes().to_vec(),
         ..Default::default()
     };
     do_copy_file(&link_req, &source.guest_path)?;
 
-    for visible in req.visible_paths.iter() {
+    // Create "<name>" -> "..data/<name>" symlinks for each visible file.
+    for visible in visible_files.iter() {
+        // visible names were already validated as simple (no '/') in
+        // do_put_volume_file, but validate again for defence in depth.
         validate_relative_path(visible)?;
+        if visible.contains('/') {
+            bail!("visible file name must not contain '/': {visible:?}");
+        }
         let visible_path = source.guest_path.join(visible);
         let symlink_target = format!("..data/{visible}");
         let visible_req = CopyFileRequest {
@@ -2584,11 +2701,11 @@ fn do_commit_volume_revision(req: &protocols::agent::CommitVolumeRevisionRequest
     }
 
     let previous_revision = source.active_revision.clone();
-    source.active_revision = Some(req.revision.clone());
+    source.active_revision = Some(revision.clone());
 
     if req.garbage_collect_previous {
         if let Some(previous) = previous_revision {
-            if previous != req.revision {
+            if previous != revision {
                 let old_path = source.guest_path.join(previous);
                 let _ = fs::remove_dir_all(old_path);
             }
@@ -4183,10 +4300,75 @@ COMMIT
     }
 
     #[test]
+    fn test_validate_atomic_k8s_revision() {
+        // Valid revision names (Kubernetes timestamp format)
+        assert!(validate_atomic_k8s_revision("..2026_07_31_16_20_52.3621362187").is_ok());
+        assert!(validate_atomic_k8s_revision("..2026_01_02_03_04_05.123456789").is_ok());
+        assert!(validate_atomic_k8s_revision("..2000_01_01_00_00_00.0").is_ok());
+
+        // Must start with ".."
+        assert!(validate_atomic_k8s_revision("rev1").is_err());
+        assert!(validate_atomic_k8s_revision(".only_one_dot").is_err());
+
+        // Cannot contain path traversal
+        assert!(validate_atomic_k8s_revision("../../etc").is_err());
+        assert!(validate_atomic_k8s_revision("..data").is_err()); // "data" has letters
+
+        // Must not contain letters or other special characters
+        assert!(validate_atomic_k8s_revision("..2026-07-31").is_err());
+        assert!(validate_atomic_k8s_revision("..2026/07/31").is_err());
+
+        // Body must not be empty
+        assert!(validate_atomic_k8s_revision("..").is_err());
+
+        // Cannot have more than one '.' separator
+        assert!(validate_atomic_k8s_revision("..2026_07_31.1234.567").is_err());
+    }
+
+    #[test]
+    fn test_atomick8s_rejects_symlink_in_put_volume_file() {
+        let temp = tempdir().expect("create tempdir");
+        let guest_path = temp.path().join("managed");
+        fs::create_dir_all(&guest_path).expect("create guest path");
+
+        {
+            let mut sources = MANAGED_VOLUME_SOURCES.lock().expect("lock");
+            sources.clear();
+            sources.insert(
+                "v1".to_string(),
+                ManagedVolumeSource {
+                    host_volume_id: "h1".to_string(),
+                    guest_path: guest_path.clone(),
+                    volume_type: VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S,
+                    active_revision: None,
+                    pending_revision: None,
+                    pending_visible_files: vec![],
+                },
+            );
+        }
+
+        // Sending a symlink to an AtomicK8s volume must be rejected.
+        let req = protocols::agent::PutVolumeFileRequest {
+            agent_volume_id: "v1".to_string(),
+            relative_path: "..data".to_string(),
+            file_mode: libc::S_IFLNK,
+            data: b"..2026_07_31_16_20_52.3621362187".to_vec(),
+            ..Default::default()
+        };
+        assert!(
+            do_put_volume_file(&req).is_err(),
+            "symlink to AtomicK8s volume should be rejected"
+        );
+    }
+
+    #[test]
     fn test_managed_volume_atomic_flow() {
         let temp = tempdir().expect("create tempdir");
         let guest_path = temp.path().join("managed");
         fs::create_dir_all(&guest_path).expect("create guest path");
+
+        // Use a revision name that matches the Kubernetes atomic-volume format.
+        let revision = "..2026_01_02_03_04_05.123456789";
 
         {
             let mut sources = MANAGED_VOLUME_SOURCES
@@ -4200,13 +4382,15 @@ COMMIT
                     guest_path: guest_path.clone(),
                     volume_type: VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S,
                     active_revision: None,
+                    pending_revision: None,
+                    pending_visible_files: vec![],
                 },
             );
         }
 
         let mkreq = protocols::agent::CreateVolumeSubdirRequest {
             agent_volume_id: "v1".to_string(),
-            subdir: "rev1".to_string(),
+            subdir: revision.to_string(),
             dir_mode: libc::S_IFDIR | 0o750,
             uid: unistd::getuid().as_raw() as i32,
             gid: unistd::getgid().as_raw() as i32,
@@ -4214,9 +4398,11 @@ COMMIT
         };
         do_create_volume_subdir(&mkreq).expect("create subdir");
 
+        // runtime-rs sends the file at "<revision>/token"; agent derives the
+        // revision and the visible name "token" from this path.
         let putreq = protocols::agent::PutVolumeFileRequest {
             agent_volume_id: "v1".to_string(),
-            relative_path: "rev1/token".to_string(),
+            relative_path: format!("{revision}/token"),
             file_size: 5,
             file_mode: libc::S_IFREG | 0o640,
             uid: unistd::getuid().as_raw() as i32,
@@ -4227,17 +4413,18 @@ COMMIT
         };
         do_put_volume_file(&putreq).expect("put file");
 
+        // Commit: revision and visible_paths must be empty; agent derives them.
         let commit = protocols::agent::CommitVolumeRevisionRequest {
             agent_volume_id: "v1".to_string(),
-            revision: "rev1".to_string(),
-            visible_paths: vec!["token".to_string()],
+            revision: String::new(),
+            visible_paths: vec![],
             garbage_collect_previous: true,
             ..Default::default()
         };
         do_commit_volume_revision(&commit).expect("commit revision");
 
         let data_target = fs::read_link(guest_path.join("..data")).expect("read ..data");
-        assert_eq!(data_target.to_string_lossy(), "rev1");
+        assert_eq!(data_target.to_string_lossy(), revision);
 
         let token_target = fs::read_link(guest_path.join("token")).expect("read token symlink");
         assert_eq!(token_target.to_string_lossy(), "..data/token");

@@ -179,16 +179,29 @@ impl FsWatcher {
             let mut buffer = [0u8; 4096];
             let mut last_event_time = None;
 
-            // Initial sync: ensure existing contents in the directory are synchronized
+            // Initial sync: ensure existing contents in the directory are synchronized.
+            // start_monitor is only called for AtomicK8s (watchable) volumes, so we
+            // always skip symlinks and let the agent reconstruct them.
             {
                 info!(
                     sl!(),
                     "Initial sync from {:?} to managed volume {:?}", &src_sync, &volume_id_sync
                 );
                 if let Err(e) =
-                    copy_dir_recursively(&src_sync, &src_sync, &volume_id_sync, &agent_sync).await
+                    copy_dir_recursively(&src_sync, &src_sync, &volume_id_sync, &agent_sync, true)
+                        .await
                 {
                     error!(sl!(), "Initial sync failed: {:?}", e);
+                } else {
+                    let commit_req = agent::CommitVolumeRevisionRequest {
+                        agent_volume_id: volume_id_sync.clone(),
+                        revision: String::new(),
+                        visible_paths: vec![],
+                        garbage_collect_previous: true,
+                    };
+                    if let Err(e) = agent_sync.commit_volume_revision(commit_req).await {
+                        error!(sl!(), "Initial commit_volume_revision failed: {:?}", e);
+                    }
                 }
             }
 
@@ -257,17 +270,44 @@ impl FsWatcher {
                             sl!(),
                             "debounce sync {:?} -> managed volume {:?}", &src, &agent_volume_id
                         );
-                        if let Err(e) =
-                            copy_dir_recursively(&src, &src, &agent_volume_id, &agent).await
-                        {
-                            error!(
-                                sl!(),
-                                "debounce volume sync {:?} -> {:?} failed with error: {:?}",
-                                &src,
-                                &agent_volume_id,
-                                e
-                            );
-                            eprintln!("sync host/guest files failed: {e}");
+                        // Skip symlinks: agent reconstructs them from the file paths.
+                        let sync_ok = copy_dir_recursively(
+                            &src,
+                            &src,
+                            &agent_volume_id,
+                            &agent,
+                            true,
+                        )
+                        .await;
+                        match sync_ok {
+                            Err(e) => {
+                                error!(
+                                    sl!(),
+                                    "debounce volume sync {:?} -> {:?} failed with error: {:?}",
+                                    &src,
+                                    &agent_volume_id,
+                                    e
+                                );
+                                eprintln!("sync host/guest files failed: {e}");
+                            }
+                            Ok(()) => {
+                                let commit_req = agent::CommitVolumeRevisionRequest {
+                                    agent_volume_id: agent_volume_id.clone(),
+                                    revision: String::new(),
+                                    visible_paths: vec![],
+                                    garbage_collect_previous: true,
+                                };
+                                if let Err(e) =
+                                    agent.commit_volume_revision(commit_req).await
+                                {
+                                    error!(
+                                        sl!(),
+                                        "debounce commit_volume_revision for {:?} failed: {:?}",
+                                        &agent_volume_id,
+                                        e
+                                    );
+                                }
+                            }
                         }
                         *need_sync.lock().await = false;
                         last_event_time = None;
@@ -518,9 +558,14 @@ impl ShareFsVolume {
                             &agent_volume_id
                         );
 
-                        Self::copy_directory_to_guest(&src, &agent_volume_id, &agent)
-                            .await
-                            .context("copy directory to guest")?;
+                        Self::copy_directory_to_guest(
+                            &src,
+                            &agent_volume_id,
+                            &agent,
+                            is_watchable_volume(&src),
+                        )
+                        .await
+                        .context("copy directory to guest")?;
                     }
 
                     oci_mount.set_source(Some(PathBuf::from(&agent_volume_id)));
@@ -671,11 +716,32 @@ impl ShareFsVolume {
         src: &Path,
         agent_volume_id: &str,
         agent: &Arc<dyn Agent>,
+        is_atomic_k8s: bool,
     ) -> Result<()> {
-        // recursively copy files from this directory
-        copy_dir_recursively(src, src, agent_volume_id, agent)
+        // For AtomicK8s volumes, skip symlinks: agent reconstructs them from
+        // the known path structure, preventing the host from sending arbitrary
+        // symlink destinations into the guest.
+        copy_dir_recursively(src, src, agent_volume_id, agent, is_atomic_k8s)
             .await
             .context(format!("failed to copy directory contents: {src:?}"))?;
+
+        if is_atomic_k8s {
+            // Trigger atomic commit. The agent derives the revision directory
+            // name and visible-file list from the file paths it received, so
+            // runtime-rs does not supply them here.
+            let req = agent::CommitVolumeRevisionRequest {
+                agent_volume_id: agent_volume_id.to_string(),
+                revision: String::new(),
+                visible_paths: vec![],
+                garbage_collect_previous: true,
+            };
+            agent
+                .commit_volume_revision(req)
+                .await
+                .context(format!(
+                    "failed to commit atomic K8s volume revision for {agent_volume_id}"
+                ))?;
+        }
 
         Ok(())
     }
@@ -826,6 +892,10 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
     source_root: &Path,
     agent_volume_id: &str,
     agent: &Arc<dyn Agent>,
+    // When true, symlinks are skipped: agent will reconstruct them from the
+    // well-known AtomicK8s path structure rather than trusting host-supplied
+    // link destinations.
+    skip_symlinks: bool,
 ) -> Result<()> {
     let mut queue = VecDeque::new();
     queue.push_back(src_dir.as_ref().to_path_buf());
@@ -853,7 +923,21 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                 .context(format!("read metadata for {entry_path:?}"))?;
 
             if metadata.is_symlink() {
-                // handle symlinks
+                if skip_symlinks {
+                    // For AtomicK8s volumes, symlinks are never sent to the
+                    // agent. The agent derives them from the known K8s atomic
+                    // volume path structure, preventing the host from
+                    // specifying arbitrary symlink destinations inside the
+                    // guest.
+                    info!(
+                        sl!(),
+                        "fsshare: skipping symlink {:?} (agent will reconstruct)",
+                        &relative_path
+                    );
+                    continue;
+                }
+
+                // handle symlinks (EmptyDir volumes only)
                 let entry_path_err = entry_path.clone();
                 let entry_path_clone = entry_path.clone();
                 let link_target =
