@@ -388,36 +388,14 @@ impl AgentService {
             // not differ is anything the policy actually decided on. C-ACI/hcsshim
             // obtains this property by ordering -- it evaluates policy on the
             // already transformed spec -- so authorizing first, as we do, means the
-            // relationship has to be re-established explicitly here. The check runs
-            // unconditionally: a spec whose digest is unchanged still has to satisfy
-            // the pinned-root invariant rather than inheriting a pass from equality.
-            crate::plan_binding::assert_within_resolution_bounds(
+            // relationship has to be re-established explicitly here.
+            enforce_plan_binding(
+                &cid,
                 &authorized_oci,
+                &authorized_oci_digest,
                 &oci,
-                &container_rootfs_path(&cid),
-            )
-            .inspect_err(|e| {
-                error!(
-                    sl(),
-                    "FR-3: refusing to create container; the executed OCI object \
-                     escapes the bounds of the authorized plan";
-                    "container-id" => &cid,
-                    "authorized-oci-digest" => &authorized_oci_digest,
-                    "executed-oci-digest" => &executed_oci_digest,
-                    "violation" => e.to_string(),
-                );
-            })?;
-            if authorized_oci_digest != executed_oci_digest {
-                info!(
-                    sl(),
-                    "FR-3: executed OCI object differs from authorized spec (trusted \
-                     in-guest transforms applied, within resolution bounds); \
-                     canonical-object binding recorded";
-                    "container-id" => &cid,
-                    "authorized-oci-digest" => &authorized_oci_digest,
-                    "executed-oci-digest" => &executed_oci_digest,
-                );
-            }
+                &executed_oci_digest,
+            )?;
         }
 
         // determine which cgroup driver to take and then assign to use_systemd_cgroup
@@ -3321,6 +3299,58 @@ pub fn container_rootfs_path(cid: &str) -> PathBuf {
     Path::new(CONTAINER_BASE).join(cid).join("rootfs")
 }
 
+/// FR-3: decide whether the plan about to be executed is still the plan the
+/// policy authorized, and deny the operation if it is not.
+///
+/// This lives apart from `do_create_container` so the agent's own enforcement
+/// decision can be exercised directly. `plan_binding`'s unit tests only ever see
+/// specs a test hands them; they cannot see which expected rootfs `rpc.rs`
+/// passes, that the denial is returned rather than logged, or that the check is
+/// reached at all. A regression that downgraded this to an audit-only `info!`
+/// would leave every one of those tests green.
+///
+/// The check runs unconditionally: a spec whose digest is unchanged still has to
+/// satisfy the pinned-root invariant rather than inheriting a pass from equality.
+#[cfg(feature = "strict-policy")]
+fn enforce_plan_binding(
+    cid: &str,
+    authorized_oci: &Spec,
+    authorized_oci_digest: &str,
+    executed_oci: &Spec,
+    executed_oci_digest: &str,
+) -> Result<()> {
+    crate::plan_binding::assert_within_resolution_bounds(
+        authorized_oci,
+        executed_oci,
+        &container_rootfs_path(cid),
+    )
+    .inspect_err(|e| {
+        error!(
+            sl(),
+            "FR-3: refusing to create container; the executed OCI object escapes \
+             the bounds of the authorized plan";
+            "container-id" => cid,
+            "authorized-oci-digest" => authorized_oci_digest,
+            "executed-oci-digest" => executed_oci_digest,
+            "violation" => e.to_string(),
+        );
+    })?;
+
+    if authorized_oci_digest != executed_oci_digest {
+        info!(
+            sl(),
+            "FR-3: executed OCI object differs from authorized spec (trusted \
+             in-guest transforms applied, within resolution bounds); \
+             canonical-object binding recorded";
+            "container-id" => cid,
+            "authorized-oci-digest" => authorized_oci_digest,
+            "executed-oci-digest" => executed_oci_digest,
+        );
+    }
+
+    Ok(())
+}
+
 // Setup container bundle under CONTAINER_BASE, which is cleaned up
 // before removing a container.
 // - bundle path is /<CONTAINER_BASE>/<cid>/
@@ -5048,6 +5078,121 @@ COMMIT
                 srm_op_id("exec", &[cid, exec]),
                 srm_op_id("signal", &[cid, exec, &signal.to_string()]),
             ]
+        }
+
+        const BOUND_CID: &str = "bound-ctr";
+
+        /// A spec as the host supplies it, rooted where the host asked.
+        fn authorized_spec() -> serde_json::Value {
+            serde_json::json!({
+                "ociVersion": "1.0.2",
+                "root": { "path": "/host/supplied/rootfs", "readonly": true },
+                "mounts": [{ "destination": "/proc", "type": "proc", "source": "proc" }],
+                "process": {
+                    "args": ["/bin/sh", "-c", "echo hello"],
+                    "cwd": "/",
+                    "user": { "uid": 1000, "gid": 1000 }
+                },
+                "linux": { "namespaces": [{ "type": "pid" }] }
+            })
+        }
+
+        /// The same spec after the in-guest chain has run: `setup_bundle` has
+        /// rebound the rootfs to the path the guest derived.
+        fn executed_spec() -> serde_json::Value {
+            let mut spec = authorized_spec();
+            spec["root"]["path"] =
+                serde_json::json!(container_rootfs_path(BOUND_CID).to_str().unwrap());
+            spec
+        }
+
+        fn spec_of(value: serde_json::Value) -> Spec {
+            serde_json::from_value(value).expect("test spec should deserialize")
+        }
+
+        /// Run the binding exactly as `do_create_container` does, digests included.
+        fn bind(authorized: serde_json::Value, executed: serde_json::Value) -> Result<()> {
+            let authorized = spec_of(authorized);
+            let executed = spec_of(executed);
+            enforce_plan_binding(
+                BOUND_CID,
+                &authorized,
+                &plan_digest(&authorized),
+                &executed,
+                &plan_digest(&executed),
+            )
+        }
+
+        /// FR-3: the resolved plan reaches the runtime only if it is still the
+        /// plan the policy authorized.
+        ///
+        /// `plan_binding`'s own tests compare specs a test hands them; they never
+        /// see the expected rootfs `rpc.rs` derives, nor whether the verdict is
+        /// returned or merely logged. These exercise the agent's decision.
+        #[test]
+        fn the_resolved_plan_is_admitted_when_only_trusted_transforms_ran() {
+            let mut executed = executed_spec();
+            // update_container_namespaces rewrites namespaces; storage and device
+            // handling append mounts.
+            executed["linux"]["namespaces"] = serde_json::json!([{ "type": "ipc" }]);
+            executed["mounts"] = serde_json::json!([
+                { "destination": "/proc", "type": "proc", "source": "proc" },
+                { "destination": "/dev/shm", "type": "tmpfs", "source": "shm" }
+            ]);
+
+            bind(authorized_spec(), executed)
+                .expect("trusted in-guest transforms must not fail the create");
+        }
+
+        #[test]
+        fn a_plan_mutated_outside_the_resolution_bounds_fails_the_create() {
+            let mut executed = executed_spec();
+            executed["process"]["args"] = serde_json::json!(["/bin/sh", "-c", "exfiltrate"]);
+
+            // The verdict must be returned. An audit-only downgrade here would
+            // leave every `plan_binding` unit test green.
+            let err = bind(authorized_spec(), executed)
+                .expect_err("a plan the policy never authorized must fail the create");
+            assert!(
+                err.to_string().contains("plan binding violation"),
+                "unexpected error: {}",
+                err
+            );
+        }
+
+        #[test]
+        fn the_created_container_is_rooted_only_where_the_guest_prepared() {
+            let mut executed = executed_spec();
+            executed["root"]["path"] = serde_json::json!("/run/kata-containers/other/rootfs");
+
+            let err = bind(authorized_spec(), executed)
+                .expect_err("a re-rooted container must fail the create");
+            assert!(
+                err.to_string().contains("is rooted at"),
+                "unexpected error: {}",
+                err
+            );
+        }
+
+        /// The binding is not conditional on the digests differing: a plan that
+        /// survived resolution untouched still has to be rooted where the guest
+        /// prepared, or the host's own rootfs would pass unexamined.
+        #[test]
+        fn an_unchanged_plan_is_still_held_to_the_pinned_rootfs() {
+            let host_rooted = authorized_spec();
+            assert_eq!(
+                plan_digest(&spec_of(host_rooted.clone())),
+                plan_digest(&spec_of(host_rooted.clone())),
+                "the two sides of this case must be digest-identical"
+            );
+
+            let err = bind(host_rooted.clone(), host_rooted)
+                .expect_err("an unmodified but host-rooted plan must fail the create");
+            assert!(
+                err.to_string().contains("is rooted at"),
+                "unexpected error: {}",
+                err
+            );
         }
 
         #[test]
