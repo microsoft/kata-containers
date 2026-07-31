@@ -4140,6 +4140,101 @@ COMMIT
         assert_eq!(ids, vec!["container-1", "container-2"]);
     }
 
+    #[test]
+    fn test_validate_shared_file_name() {
+        assert!(validate_shared_file_name("resolv.conf").is_ok());
+        assert!(validate_shared_file_name("hosts").is_ok());
+
+        assert!(validate_shared_file_name("").is_err());
+        assert!(validate_shared_file_name(".").is_err());
+        assert!(validate_shared_file_name("..").is_err());
+        assert!(validate_shared_file_name("dir/file").is_err());
+        assert!(validate_shared_file_name("/etc/hosts").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_allocate_shared_mount_path_and_mapping() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let mut sandbox = Sandbox::new(&logger).unwrap();
+        sandbox.id = "sandbox-id".to_string();
+
+        let path1 = allocate_shared_mount_path(&mut sandbox, "hosts").unwrap();
+        let path2 = allocate_shared_mount_path(&mut sandbox, "hostname").unwrap();
+
+        assert_eq!(
+            path1,
+            format!("{KATA_GUEST_SHARE_DIR}sandbox-id-{:016x}-hosts", 1)
+        );
+        assert_eq!(
+            path2,
+            format!("{KATA_GUEST_SHARE_DIR}sandbox-id-{:016x}-hostname", 2)
+        );
+        assert_eq!(sandbox.bind_shared_seq, 2);
+
+        sandbox
+            .bind_shared_mount_sources
+            .insert("hosts".to_string(), path1.clone());
+        assert_eq!(sandbox.bind_shared_mount_sources.get("hosts"), Some(&path1));
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_bind_shared_mounts() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let mut sandbox = Sandbox::new(&logger).unwrap();
+        let resolved = format!("{KATA_GUEST_SHARE_DIR}sandbox-id-0000000000000001-hosts");
+        sandbox
+            .bind_shared_mount_sources
+            .insert("hosts".to_string(), resolved.clone());
+
+        let mut bind_shared_mount = oci::Mount::default();
+        bind_shared_mount.set_typ(Some("bind-shared".to_string()));
+        bind_shared_mount.set_source(Some(PathBuf::from("hosts")));
+        bind_shared_mount.set_destination(PathBuf::from("/etc/hosts"));
+
+        let mut passthrough_mount = oci::Mount::default();
+        passthrough_mount.set_typ(Some("bind".to_string()));
+        passthrough_mount.set_source(Some(PathBuf::from("/tmp/src")));
+        passthrough_mount.set_destination(PathBuf::from("/tmp/dst"));
+
+        let mut spec = Spec::default();
+        spec.set_mounts(Some(vec![bind_shared_mount, passthrough_mount]));
+
+        rewrite_bind_shared_mounts(&mut spec, &sandbox).unwrap();
+
+        let mounts = spec.mounts().as_ref().unwrap();
+        assert_eq!(mounts[0].typ().as_deref(), Some("bind"));
+        assert_eq!(
+            mounts[0].source().as_ref().and_then(|p| p.to_str()),
+            Some(resolved.as_str())
+        );
+        assert_eq!(mounts[1].typ().as_deref(), Some("bind"));
+        assert_eq!(
+            mounts[1].source().as_ref().and_then(|p| p.to_str()),
+            Some("/tmp/src")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_bind_shared_mounts_missing_mapping_fails() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Sandbox::new(&logger).unwrap();
+
+        let mut bind_shared_mount = oci::Mount::default();
+        bind_shared_mount.set_typ(Some("bind-shared".to_string()));
+        bind_shared_mount.set_source(Some(PathBuf::from("missing")));
+        bind_shared_mount.set_destination(PathBuf::from("/etc/hosts"));
+
+        let mut spec = Spec::default();
+        spec.set_mounts(Some(vec![bind_shared_mount]));
+
+        let err = rewrite_bind_shared_mounts(&mut spec, &sandbox).unwrap_err();
+        assert!(
+            err.to_string().contains("not found in shared file map"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
     #[tokio::test]
     async fn test_do_copy_file() {
         let temp_dir = tempdir().expect("creating temp dir failed");
