@@ -305,6 +305,17 @@ impl OccurrenceRegistry {
         self.transition(alias, "start", &[Lifecycle::Created], Lifecycle::Running)
     }
 
+    /// Undo a start the runtime then refused: `Running` → `Created`.
+    ///
+    /// This exists so the trusted state can be made to match reality when the enforcer
+    /// has already recorded a start that did not actually happen, leaving the occurrence
+    /// retryable. It is **not** a host-drivable transition: no RPC maps to it, it is only
+    /// reachable from the agent's own start-failure path, and it does not touch the
+    /// generation counter, so it cannot be used to rewind the replay guard.
+    pub fn unstart(&mut self, alias: &str) -> Result<(), OccurrenceError> {
+        self.transition(alias, "unstart", &[Lifecycle::Running], Lifecycle::Created)
+    }
+
     /// Require that an alias refers to a running occurrence (exec/signal gating).
     pub fn require_running(
         &self,
@@ -368,6 +379,64 @@ mod tests {
         assert_eq!(
             r.start("ghost").unwrap_err(),
             OccurrenceError::UnknownAlias("ghost".into())
+        );
+    }
+
+    #[test]
+    fn unstart_returns_a_failed_start_to_created_and_allows_retry() {
+        let mut r = OccurrenceRegistry::new();
+        r.create("c1", None, None).unwrap();
+        r.start("c1").unwrap();
+        assert_eq!(r.state("c1"), Some(Lifecycle::Running));
+
+        // the runtime refused the start: undo it
+        r.unstart("c1").unwrap();
+        assert_eq!(r.state("c1"), Some(Lifecycle::Created));
+
+        // a legitimate retry now succeeds -- this is the regression `remove()` caused,
+        // which left the occurrence terminally `Removed` and the container unstartable.
+        r.start("c1").unwrap();
+        assert_eq!(r.state("c1"), Some(Lifecycle::Running));
+    }
+
+    #[test]
+    fn unstart_is_denied_unless_running() {
+        let mut r = OccurrenceRegistry::new();
+        r.create("c1", None, None).unwrap();
+        // Created, never started
+        assert!(matches!(
+            r.unstart("c1").unwrap_err(),
+            OccurrenceError::IllegalTransition {
+                from: Lifecycle::Created,
+                action: "unstart",
+                ..
+            }
+        ));
+
+        // and it cannot resurrect a removed occurrence
+        r.remove("c1").unwrap();
+        assert_eq!(
+            r.unstart("c1").unwrap_err(),
+            OccurrenceError::UnknownAlias("c1".into())
+        );
+    }
+
+    #[test]
+    fn unstart_keeps_the_declaration_cardinality_slot_held() {
+        let mut r = OccurrenceRegistry::new();
+        // declaration 0 admits exactly one occurrence
+        r.create("c1", Some(0), Some(1)).unwrap();
+        r.start("c1").unwrap();
+        r.unstart("c1").unwrap();
+
+        // c1 is still alive as `Created`, so it must still hold the only slot --
+        // unlike `remove()`, which would have freed it.
+        assert_eq!(
+            r.create("c2", Some(0), Some(1)).unwrap_err(),
+            OccurrenceError::CardinalityExceeded {
+                declaration_index: 0,
+                allowed: 1,
+            }
         );
     }
 

@@ -1122,7 +1122,18 @@ impl agent_ttrpc::AgentService for AgentService {
                 Err(e) => {
                     // Runtime start failed: roll the occurrence back to `created` so the
                     // trusted state matches reality and a legitimate retry is possible.
-                    let _ = crate::OCCURRENCES.lock().await.remove(&req.container_id);
+                    // `remove()` must not be used here -- it is terminal, and would leave
+                    // the container permanently unstartable while releasing its
+                    // cardinality slot.
+                    if let Err(re) = crate::OCCURRENCES.lock().await.unstart(&req.container_id) {
+                        error!(
+                            sl(),
+                            "failed to roll occurrence {} back to created after a failed \
+                             start: {:?}; the container is left unstartable",
+                            req.container_id,
+                            re
+                        );
+                    }
                     Err(ttrpc_error(ttrpc::Code::INTERNAL, e))
                 }
             };
