@@ -230,6 +230,9 @@ impl AgentService {
     async fn do_create_container(
         &self,
         req: protocols::agent::CreateContainerRequest,
+        #[cfg_attr(not(feature = "strict-policy"), allow(unused_variables))] srm_txn_id: Option<
+            &str,
+        >,
     ) -> Result<()> {
         // create the proc_io first, in case there's some error occur below, thus we can make sure
         // the io stream closed when error occur.
@@ -352,13 +355,25 @@ impl AgentService {
         // authorized spec captured before transformation. Divergence is expected (trusted
         // in-guest transforms) and is recorded for audit; the executed object is bound to
         // the transaction so the authorized->executed relationship is explicit.
+        //
+        // The binding is only meaningful against the transaction the caller actually
+        // prepared, so the caller passes its operation id down rather than this code
+        // re-deriving one: an id that does not match is a silent loss of the FR-3
+        // guarantee, which is why a failure here fails the create.
         #[cfg(feature = "strict-policy")]
-        {
+        if let Some(op_id) = srm_txn_id {
             let executed_oci_digest = plan_digest(&oci);
-            let _ = crate::SRM
+            crate::SRM
                 .lock()
                 .await
-                .attach_executed(&cid, executed_oci_digest.clone());
+                .attach_executed(op_id, executed_oci_digest.clone())
+                .map_err(|e| {
+                    anyhow!(
+                        "FR-3: failed to bind executed OCI object to {}: {:?}",
+                        op_id,
+                        e
+                    )
+                })?;
             if authorized_oci_digest != executed_oci_digest {
                 info!(
                     sl(),
@@ -995,16 +1010,18 @@ impl agent_ttrpc::AgentService for AgentService {
         // pstate mutations during is_allowed; if the create fails we restore this
         // snapshot so no committed enforcer state survives a failed operation.
         #[cfg(feature = "strict-policy")]
-        let policy_snapshot = crate::AGENT_POLICY.lock().await.snapshot_state().ok();
+        let policy_before = crate::AGENT_POLICY.lock().await.snapshot_state().ok();
 
         is_allowed(&req).await?;
+        #[cfg(feature = "strict-policy")]
+        let policy_snapshot = capture_policy_snapshot(policy_before).await;
         #[cfg(feature = "strict-policy")]
         {
             use kata_security_reference_monitor::Prepared;
 
             let op_id = srm_op_id("create", &[&req.container_id]);
             let digest = plan_digest(&req);
-            {
+            let txn_guard = {
                 let mut srm = crate::SRM.lock().await;
                 let version = srm.state_version();
                 match srm.prepare(op_id.clone(), version, digest.clone()) {
@@ -1013,25 +1030,34 @@ impl agent_ttrpc::AgentService for AgentService {
                     Ok(Prepared::New) => {}
                     Err(e) => return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e)),
                 }
-                srm.execute(&op_id, &digest)
-                    .map_err(|e| ttrpc_error(ttrpc::Code::INTERNAL, e))?;
-            }
+                // From here on every exit must resolve the transaction; the guard covers
+                // the paths that never run, i.e. this future being dropped mid-flight.
+                let guard = srm.guard(&op_id);
+                if let Err(e) = srm.execute(&op_id, &digest) {
+                    abort_or_quarantine(&mut srm, &op_id, "create_container execute");
+                    drop(srm);
+                    guard.disarm();
+                    rollback_policy_state(&policy_snapshot, "create_container execute").await;
+                    return Err(ttrpc_error(ttrpc::Code::INTERNAL, e));
+                }
+                guard
+            };
 
-            return match self.do_create_container(req).await {
+            return match self.do_create_container(req, Some(&op_id)).await {
                 Ok(_) => {
                     let mut srm = crate::SRM.lock().await;
                     commit_or_quarantine(&mut srm, &op_id, "container-created", "create_container");
                     drop(srm);
+                    txn_guard.disarm();
                     // FR-9 occurrence creation (and FR-11 device binding) is performed
                     // inside do_create_container once the container actually exists.
                     Ok(Empty::new())
                 }
                 Err(e) => {
                     let mut srm = crate::SRM.lock().await;
-                    if srm.abort(&op_id).is_err() {
-                        srm.quarantine("create_container failed with unprovable state");
-                    }
+                    abort_or_quarantine(&mut srm, &op_id, "create_container");
                     drop(srm);
+                    txn_guard.disarm();
                     // Roll back the policy pstate mutations applied during authorization.
                     rollback_policy_state(&policy_snapshot, "create_container").await;
                     Err(ttrpc_error(ttrpc::Code::INTERNAL, e))
@@ -1041,7 +1067,9 @@ impl agent_ttrpc::AgentService for AgentService {
 
         #[cfg(not(feature = "strict-policy"))]
         {
-            self.do_create_container(req).await.map_ttrpc_err(same)?;
+            self.do_create_container(req, None)
+                .await
+                .map_ttrpc_err(same)?;
             Ok(Empty::new())
         }
     }
@@ -1107,9 +1135,11 @@ impl agent_ttrpc::AgentService for AgentService {
         // cannot be signalled and cannot be removed, permanently. Restoring this snapshot
         // on failure is what keeps a failed removal retryable.
         #[cfg(feature = "strict-policy")]
-        let policy_snapshot = crate::AGENT_POLICY.lock().await.snapshot_state().ok();
+        let policy_before = crate::AGENT_POLICY.lock().await.snapshot_state().ok();
 
         is_allowed(&req).await?;
+        #[cfg(feature = "strict-policy")]
+        let policy_snapshot = capture_policy_snapshot(policy_before).await;
 
         // FR-6: a removal destroys state, so run it as a transaction like create and exec.
         #[cfg(feature = "strict-policy")]
@@ -1120,7 +1150,7 @@ impl agent_ttrpc::AgentService for AgentService {
             // un-kinded removal would collide with the create it undoes.
             let op_id = srm_op_id("remove", &[&req.container_id]);
             let digest = plan_digest(&req);
-            {
+            let txn_guard = {
                 let mut srm = crate::SRM.lock().await;
                 let version = srm.state_version();
                 let prepared = srm.prepare(op_id.clone(), version, digest.clone());
@@ -1145,12 +1175,18 @@ impl agent_ttrpc::AgentService for AgentService {
                     }
                 }
                 let mut srm = crate::SRM.lock().await;
+                // From here on every exit must resolve the transaction; the guard covers
+                // the paths that never run, i.e. this future being dropped mid-flight.
+                let guard = srm.guard(&op_id);
                 if let Err(e) = srm.execute(&op_id, &digest) {
+                    abort_or_quarantine(&mut srm, &op_id, "remove_container execute");
                     drop(srm);
+                    guard.disarm();
                     rollback_policy_state(&policy_snapshot, "remove_container execute").await;
                     return Err(ttrpc_error(ttrpc::Code::INTERNAL, e));
                 }
-            }
+                guard
+            };
 
             return match self.do_remove_container(req.clone()).await {
                 Ok(_) => {
@@ -1170,6 +1206,7 @@ impl agent_ttrpc::AgentService for AgentService {
                             retire_or_warn(&mut srm, id);
                         }
                     }
+                    txn_guard.disarm();
                     // FR-9: retire the occurrence. Its alias may not be operated on again
                     // until a fresh create re-mints it with a new generation.
                     let _ = crate::OCCURRENCES.lock().await.remove(&req.container_id);
@@ -1178,10 +1215,9 @@ impl agent_ttrpc::AgentService for AgentService {
                 Err(e) => {
                     {
                         let mut srm = crate::SRM.lock().await;
-                        if srm.abort(&op_id).is_err() {
-                            srm.quarantine("remove_container failed with unprovable state");
-                        }
+                        abort_or_quarantine(&mut srm, &op_id, "remove_container");
                     }
+                    txn_guard.disarm();
                     // The container is still running: put it back in `pstate` so it stays
                     // signallable and the removal can be retried.
                     rollback_policy_state(&policy_snapshot, "remove_container").await;
@@ -1222,9 +1258,11 @@ impl agent_ttrpc::AgentService for AgentService {
 
         // FR-6: snapshot policy state before authorization for rollback on failure.
         #[cfg(feature = "strict-policy")]
-        let policy_snapshot = crate::AGENT_POLICY.lock().await.snapshot_state().ok();
+        let policy_before = crate::AGENT_POLICY.lock().await.snapshot_state().ok();
 
         is_allowed(&req).await?;
+        #[cfg(feature = "strict-policy")]
+        let policy_snapshot = capture_policy_snapshot(policy_before).await;
 
         // FR-6: an exec creates a new process, so run it as an SRM transaction. The
         // operation id is the container+exec id, and a duplicate arriving while the first
@@ -1249,7 +1287,7 @@ impl agent_ttrpc::AgentService for AgentService {
 
             let op_id = srm_op_id("exec", &[&req.container_id, &req.exec_id]);
             let digest = plan_digest(&req);
-            {
+            let txn_guard = {
                 let mut srm = crate::SRM.lock().await;
                 let version = srm.state_version();
                 match srm.prepare(op_id.clone(), version, digest.clone()) {
@@ -1257,22 +1295,32 @@ impl agent_ttrpc::AgentService for AgentService {
                     Ok(Prepared::New) => {}
                     Err(e) => return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e)),
                 }
-                srm.execute(&op_id, &digest)
-                    .map_err(|e| ttrpc_error(ttrpc::Code::INTERNAL, e))?;
-            }
+                // From here on every exit must resolve the transaction; the guard covers
+                // the paths that never run, i.e. this future being dropped mid-flight.
+                let guard = srm.guard(&op_id);
+                if let Err(e) = srm.execute(&op_id, &digest) {
+                    abort_or_quarantine(&mut srm, &op_id, "exec_process execute");
+                    drop(srm);
+                    guard.disarm();
+                    rollback_policy_state(&policy_snapshot, "exec_process execute").await;
+                    return Err(ttrpc_error(ttrpc::Code::INTERNAL, e));
+                }
+                guard
+            };
             return match self.do_exec_process(req).await {
                 Ok(_) => {
                     let mut srm = crate::SRM.lock().await;
                     commit_or_quarantine(&mut srm, &op_id, "process-execed", "exec_process");
                     retire_or_warn(&mut srm, &op_id);
+                    drop(srm);
+                    txn_guard.disarm();
                     Ok(Empty::new())
                 }
                 Err(e) => {
                     let mut srm = crate::SRM.lock().await;
-                    if srm.abort(&op_id).is_err() {
-                        srm.quarantine("exec_process failed with unprovable state");
-                    }
+                    abort_or_quarantine(&mut srm, &op_id, "exec_process");
                     drop(srm);
+                    txn_guard.disarm();
                     rollback_policy_state(&policy_snapshot, "exec_process").await;
                     Err(ttrpc_error(ttrpc::Code::INTERNAL, e))
                 }
@@ -1339,7 +1387,12 @@ impl agent_ttrpc::AgentService for AgentService {
                 &[&req.container_id, &req.exec_id, &req.signal.to_string()],
             );
             let digest = plan_digest(&req);
-            {
+            // No policy snapshot here: `SignalProcessRequest` is not one of the rules that
+            // mutate `pstate` (only create and remove are), so there is nothing to roll
+            // back, and snapshotting on every signal would serialize the whole enforcer
+            // data blob twice on a hot path. If a future policy revision starts mutating
+            // state in this rule, bracket it the way `exec_process` does.
+            let txn_guard = {
                 let mut srm = crate::SRM.lock().await;
                 let version = srm.state_version();
                 match srm.prepare(op_id.clone(), version, digest.clone()) {
@@ -1347,21 +1400,31 @@ impl agent_ttrpc::AgentService for AgentService {
                     Ok(Prepared::New) => {}
                     Err(e) => return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e)),
                 }
-                srm.execute(&op_id, &digest)
-                    .map_err(|e| ttrpc_error(ttrpc::Code::INTERNAL, e))?;
-            }
+                // From here on every exit must resolve the transaction; the guard covers
+                // the paths that never run, i.e. this future being dropped mid-flight.
+                let guard = srm.guard(&op_id);
+                if let Err(e) = srm.execute(&op_id, &digest) {
+                    abort_or_quarantine(&mut srm, &op_id, "signal_process execute");
+                    drop(srm);
+                    guard.disarm();
+                    return Err(ttrpc_error(ttrpc::Code::INTERNAL, e));
+                }
+                guard
+            };
             return match self.do_signal_process(req).await {
                 Ok(_) => {
                     let mut srm = crate::SRM.lock().await;
                     commit_or_quarantine(&mut srm, &op_id, "signal-delivered", "signal_process");
                     retire_or_warn(&mut srm, &op_id);
+                    drop(srm);
+                    txn_guard.disarm();
                     Ok(Empty::new())
                 }
                 Err(e) => {
                     let mut srm = crate::SRM.lock().await;
-                    if srm.abort(&op_id).is_err() {
-                        srm.quarantine("signal_process failed with unprovable state");
-                    }
+                    abort_or_quarantine(&mut srm, &op_id, "signal_process");
+                    drop(srm);
+                    txn_guard.disarm();
                     Err(ttrpc_error(ttrpc::Code::INTERNAL, e))
                 }
             };
@@ -2582,7 +2645,7 @@ fn plan_digest<T: serde::Serialize>(req: &T) -> String {
 /// container; only sandbox-level teardown, which is not SRM-gated, still works. See RM-8
 /// in `docs/cc/backlog.md`.
 #[cfg(feature = "strict-policy")]
-async fn rollback_policy_state(snapshot: &Option<String>, context: &str) {
+async fn rollback_policy_state(snapshot: &Option<PolicySnapshot>, context: &str) {
     let Some(snap) = snapshot else {
         error!(
             sl(),
@@ -2594,7 +2657,11 @@ async fn rollback_policy_state(snapshot: &Option<String>, context: &str) {
             .quarantine(format!("no policy snapshot available after {context}"));
         return;
     };
-    if let Err(e) = crate::AGENT_POLICY.lock().await.restore_state(snap) {
+    if let Err(e) = crate::AGENT_POLICY
+        .lock()
+        .await
+        .revert_state_delta(&snap.before, &snap.after)
+    {
         error!(
             sl(),
             "failed to roll back policy state after {}: {:?}", context, e
@@ -2603,6 +2670,53 @@ async fn rollback_policy_state(snapshot: &Option<String>, context: &str) {
             .lock()
             .await
             .quarantine(format!("policy state rollback failed after {context}"));
+    }
+}
+
+/// FR-6: the policy state bracketing a single request's authorization.
+///
+/// `before` is captured ahead of `is_allowed` and `after` immediately once it succeeds, so
+/// the difference between the two is exactly the `pstate` mutation this request made.
+/// Rolling back that difference — rather than restoring `before` wholesale — is what keeps
+/// a failed request from erasing a concurrent one's committed state; see
+/// `AgentPolicy::revert_state_delta`.
+#[cfg(feature = "strict-policy")]
+struct PolicySnapshot {
+    before: String,
+    after: String,
+}
+
+/// Close the bracket opened before `is_allowed`. Returns `None` if either half is missing,
+/// which `rollback_policy_state` treats as an unprovable state.
+#[cfg(feature = "strict-policy")]
+async fn capture_policy_snapshot(before: Option<String>) -> Option<PolicySnapshot> {
+    let before = before?;
+    let after = crate::AGENT_POLICY.lock().await.snapshot_state().ok()?;
+    Some(PolicySnapshot { before, after })
+}
+
+/// FR-6: roll a transaction back, quarantining the monitor if even that is not possible.
+///
+/// Every path that leaves a handler after `prepare` has to resolve the transaction, or the
+/// operation id stays in flight and `prepare` — which refuses in-flight ids rather than
+/// clobbering them — will reject every later attempt at the same operation. An `abort`
+/// that itself fails means the transaction is not where the caller believes it is, so the
+/// monitor can no longer vouch for the state.
+#[cfg(feature = "strict-policy")]
+fn abort_or_quarantine(
+    srm: &mut kata_security_reference_monitor::ReferenceMonitor,
+    op_id: &str,
+    context: &str,
+) {
+    if let Err(e) = srm.abort(op_id) {
+        error!(
+            sl(),
+            "failed to abort transaction {} after {} failed: {:?}; monitor state is unprovable",
+            op_id,
+            context,
+            e
+        );
+        srm.quarantine(format!("{context} failed with unprovable state"));
     }
 }
 
@@ -4908,6 +5022,42 @@ COMMIT
             );
         }
 
+        /// FR-3 regression: the executed-object binding must target the transaction the
+        /// handler actually prepared.
+        ///
+        /// `create_container` prepares under `srm_op_id("create", ..)` but the binding used
+        /// to be attempted against the bare container id, and the error was discarded. The
+        /// two can never be equal — `srm_op_id` always prefixes a kind and a length — so
+        /// the authorized->executed binding was silently never recorded. The handler now
+        /// passes its operation id down to `do_create_container` instead of re-deriving
+        /// one, and a failed binding fails the create.
+        #[test]
+        fn the_executed_binding_must_use_the_prepared_operation_id() {
+            let cid = "mycid";
+            let op = srm_op_id("create", &[cid]);
+            assert_ne!(
+                op, cid,
+                "a bare container id is never a valid operation id; binding against it \
+                 silently loses the FR-3 authorized->executed relationship"
+            );
+
+            let mut m = ReferenceMonitor::new();
+            m.prepare(op.clone(), 0, "authorized").unwrap();
+            m.execute(&op, "authorized").unwrap();
+
+            assert!(
+                m.attach_executed(cid, "executed".to_string()).is_err(),
+                "the bare container id must not resolve to the create transaction"
+            );
+            m.attach_executed(&op, "executed".to_string())
+                .expect("the prepared operation id must resolve");
+            assert_eq!(
+                m.transaction(&op).unwrap().executed_digest.as_deref(),
+                Some("executed"),
+                "FR-3 requires the executed object to be bound to the transaction"
+            );
+        }
+
         #[test]
         fn commit_or_quarantine_records_success_and_leaves_the_monitor_usable() {
             let mut m = ReferenceMonitor::new();
@@ -4935,6 +5085,39 @@ COMMIT
 
             // Never prepared: the shape an operation-id collision produces.
             commit_or_quarantine(&mut m, &op, "signal-delivered", "signal_process");
+
+            assert!(matches!(
+                m.prepare(srm_op_id("create", &["ctr2"]), m.state_version(), "d"),
+                Err(SrmError::Quarantined(_))
+            ));
+        }
+
+        /// FR-6: an operation id that is never resolved is never usable again, because
+        /// `prepare` refuses an in-flight id rather than clobbering it. Every failure path
+        /// after a successful `prepare` therefore has to abort.
+        #[test]
+        fn abort_or_quarantine_releases_the_id_for_a_later_attempt() {
+            let mut m = ReferenceMonitor::new();
+            let op = srm_op_id("remove", &["ctr1"]);
+            m.prepare(op.clone(), 0, "d").unwrap();
+            m.execute(&op, "d").unwrap();
+
+            abort_or_quarantine(&mut m, &op, "remove_container");
+
+            assert_eq!(
+                m.prepare(op, m.state_version(), "d").unwrap(),
+                Prepared::New,
+                "a failed removal must stay retryable"
+            );
+        }
+
+        /// An abort that itself fails means the transaction is not where the caller
+        /// believes it is, so the monitor can no longer vouch for the state it guards.
+        #[test]
+        fn abort_or_quarantine_quarantines_when_the_transaction_is_unknown() {
+            let mut m = ReferenceMonitor::new();
+
+            abort_or_quarantine(&mut m, &srm_op_id("exec", &["ctr1", "e1"]), "exec_process");
 
             assert!(matches!(
                 m.prepare(srm_op_id("create", &["ctr2"]), m.state_version(), "d"),

@@ -17,15 +17,26 @@
 //! Guarantees provided here:
 //! - **Authorized == executed:** `execute` rejects any plan whose digest differs from
 //!   the one authorized at `prepare` (supports FR-3's canonical-object property).
-//! - **Anti-replay / idempotency:** a retried operation id returns the committed
-//!   result instead of duplicating effects; a stale `expected_state_version` is
-//!   rejected.
+//! - **Anti-replay / idempotency:** a stale `expected_state_version` is rejected, and a
+//!   retried operation id returns the committed result instead of duplicating effects —
+//!   but only for as long as the transaction is retained. Callers that `retire` a
+//!   transaction on commit trade lifetime replay protection for correctness on
+//!   *repeatable* operations, where returning a cached success would report work the
+//!   agent never performed. In-flight duplicates are still refused by `prepare`.
 //! - **No eager commit:** state only advances on `commit`, never at authorization time.
-//! - **Quarantine:** on an unprovable state the monitor refuses all new operations
-//!   except teardown.
+//! - **No abandonment:** a handler future can be dropped at any await point — the ttrpc
+//!   server drops it on a host-supplied timeout — which would otherwise leave a
+//!   transaction in flight forever and, since `prepare` refuses in-flight ids, wedge that
+//!   operation permanently. Holding a [`TxnGuard`] turns abandonment into an abort (if
+//!   nothing was executed) or a quarantine (if the outcome is unknowable).
+//! - **Quarantine:** on an unprovable state the monitor refuses all new operations.
+//!   Teardown is *not* currently exempt, so a quarantined sandbox cannot be stopped
+//!   or removed through the gated RPCs; only sandbox-level destroy, which is not
+//!   SRM-gated, still works. Whether to exempt teardown is tracked as RM-8.
 
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::{Arc, Mutex};
 
 pub mod ccf;
 pub mod cdi;
@@ -92,7 +103,7 @@ pub struct Transaction {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SrmError {
-    /// The monitor is quarantined; only teardown is permitted.
+    /// The monitor is quarantined and refuses every new operation, teardown included.
     Quarantined(String),
     /// Expected state version did not match the current version (stale/replayed).
     StaleStateVersion { expected: u64, current: u64 },
@@ -155,6 +166,55 @@ pub struct ReferenceMonitor {
     state_version: u64,
     txns: HashMap<OperationId, Transaction>,
     quarantined: Option<String>,
+    /// Operation ids whose caller disappeared without resolving the transaction.
+    ///
+    /// Shared with every live [`TxnGuard`] so a guard's `Drop` — which is synchronous and
+    /// cannot take the monitor's async lock — can still report the abandonment. Drained by
+    /// [`ReferenceMonitor::reclaim_orphans`].
+    orphans: Arc<Mutex<Vec<OperationId>>>,
+}
+
+/// Resolves an abandoned transaction if its caller never commits or aborts it.
+///
+/// A transaction is only safe because every path out of the handler that opened it either
+/// commits or aborts it. That assumption does not hold: an async handler future can be
+/// *dropped* at any await point, running no further code. The ttrpc server does exactly
+/// this — it wraps each handler in `tokio::time::timeout` whenever the client sets
+/// `timeout_nano`, a field supplied by the untrusted host — so the host can abandon any
+/// transaction it likes, at a moment of its choosing.
+///
+/// Since `prepare` refuses an in-flight transaction rather than clobbering it, an
+/// abandoned transaction would otherwise wedge its operation id for the lifetime of the
+/// VM. For `remove_container` that is an unkillable container on demand, which is the
+/// exact failure the transaction was introduced to prevent.
+///
+/// Holding this guard for the transaction's lifetime closes that hole: dropping it without
+/// [`TxnGuard::disarm`] queues the operation id for reclamation, and the next `prepare` or
+/// `execute` resolves it.
+#[derive(Debug)]
+pub struct TxnGuard {
+    op_id: OperationId,
+    orphans: Arc<Mutex<Vec<OperationId>>>,
+    armed: bool,
+}
+
+impl TxnGuard {
+    /// The transaction reached a terminal state under its owner's control; drop quietly.
+    pub fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TxnGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // A poisoned lock still holds a usable queue: another thread panicked while
+        // pushing, which must not stop this abandonment from being recorded.
+        let mut orphans = self.orphans.lock().unwrap_or_else(|e| e.into_inner());
+        orphans.push(self.op_id.clone());
+    }
 }
 
 impl ReferenceMonitor {
@@ -170,8 +230,52 @@ impl ReferenceMonitor {
         self.quarantined.is_some()
     }
 
+    /// Take ownership of `op_id`'s lifetime, so that abandoning it cannot wedge the id.
+    ///
+    /// Call immediately after a successful `prepare` and [`TxnGuard::disarm`] once the
+    /// transaction has been committed or aborted. See [`TxnGuard`] for why this is needed.
+    pub fn guard(&self, op_id: impl Into<OperationId>) -> TxnGuard {
+        TxnGuard {
+            op_id: op_id.into(),
+            orphans: Arc::clone(&self.orphans),
+            armed: true,
+        }
+    }
+
+    /// Resolve transactions whose owning handler disappeared without committing or
+    /// aborting them.
+    ///
+    /// The state at the moment of abandonment decides what is provable:
+    /// - `Prepared` — the plan was authorized and reserved, but never handed to
+    ///   execution, so nothing happened. Aborting releases the id for a legitimate retry.
+    /// - `Executed` — the plan *was* handed to execution and the outcome was never
+    ///   observed. Whether the effect landed is unknowable, which is precisely the
+    ///   divergence this monitor exists to prevent, so the sandbox is quarantined.
+    ///
+    /// Anything else is already terminal and needs nothing.
+    fn reclaim_orphans(&mut self) {
+        let orphaned = {
+            let mut orphans = self.orphans.lock().unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *orphans)
+        };
+        for op_id in orphaned {
+            match self.txns.get(&op_id).map(|t| t.state.clone()) {
+                Some(TxnState::Prepared) => {
+                    let _ = self.abort(&op_id);
+                }
+                Some(TxnState::Executed) => self.quarantine(format!(
+                    "operation {op_id} was abandoned after execution; whether it took \
+                     effect is unknown"
+                )),
+                _ => {}
+            }
+        }
+    }
+
     /// Move the monitor into the quarantined state. Fail-open for availability is
-    /// prohibited: once quarantined, only teardown/diagnostics should proceed.
+    /// prohibited: once quarantined, `prepare` and `execute` refuse everything, so no
+    /// SRM-gated RPC can proceed — teardown included. Recovery is sandbox destroy,
+    /// which is not gated here. Exempting teardown is tracked as RM-8.
     pub fn quarantine(&mut self, reason: impl Into<String>) {
         if self.quarantined.is_none() {
             self.quarantined = Some(reason.into());
@@ -186,6 +290,7 @@ impl ReferenceMonitor {
         expected_state_version: u64,
         plan_digest: impl Into<String>,
     ) -> Result<Prepared, SrmError> {
+        self.reclaim_orphans();
         if let Some(r) = &self.quarantined {
             return Err(SrmError::Quarantined(r.clone()));
         }
@@ -257,6 +362,7 @@ impl ReferenceMonitor {
     /// Phase 2a: bind the plan actually being executed. The presented plan digest MUST
     /// equal the authorized one, enforcing authorized == executed.
     pub fn execute(&mut self, op_id: &str, presented_plan_digest: &str) -> Result<(), SrmError> {
+        self.reclaim_orphans();
         if let Some(r) = &self.quarantined {
             return Err(SrmError::Quarantined(r.clone()));
         }
@@ -329,6 +435,13 @@ impl ReferenceMonitor {
     /// the occurrence layer expects a later create for the same id to mint a fresh
     /// generation. Without retiring the create transaction that later create would be
     /// answered from the replay cache and silently do nothing.
+    ///
+    /// The same applies, for a different reason, to ids that name a *repeatable event*
+    /// rather than an object — a signal delivery, or an exec whose id the runtime permits
+    /// to be reused. There the cached result is not merely stale, it is false: replying
+    /// with the retained success reports work the agent never performed. Retiring on
+    /// commit narrows replay protection for those operations to in-flight duplicates,
+    /// which `prepare` still refuses.
     ///
     /// Only a committed transaction may be retired; an in-flight one must be committed or
     /// aborted first.
@@ -685,5 +798,82 @@ mod tests {
             m.execute("nope", "d").unwrap_err(),
             SrmError::UnknownOperation("nope".into())
         );
+    }
+
+    /// An owner that disappears between `prepare` and `execute` performed no side effect,
+    /// so the id must become usable again. Without reclamation the refusal added to
+    /// `prepare` would wedge it permanently: the host can cause exactly this by setting
+    /// the ttrpc `timeout_nano` field, so a wedged `remove` id is an unkillable container.
+    #[test]
+    fn an_abandoned_prepared_transaction_is_released_for_retry() {
+        let mut m = ReferenceMonitor::new();
+        let guard = m.guard("remove/4:ctr1");
+        m.prepare("remove/4:ctr1", 0, "d1").unwrap();
+
+        drop(guard);
+
+        // The retry succeeds and the monitor is still usable: nothing had happened yet.
+        assert_eq!(
+            m.prepare("remove/4:ctr1", m.state_version(), "d1").unwrap(),
+            Prepared::New
+        );
+        assert!(!m.is_quarantined());
+    }
+
+    /// Abandoned *after* execution the outcome is unknowable, so the honest answer is
+    /// quarantine rather than silently releasing the id and letting a retry build on
+    /// state nobody observed.
+    #[test]
+    fn an_abandoned_executed_transaction_quarantines() {
+        let mut m = ReferenceMonitor::new();
+        let guard = m.guard("remove/4:ctr1");
+        m.prepare("remove/4:ctr1", 0, "d1").unwrap();
+        m.execute("remove/4:ctr1", "d1").unwrap();
+
+        drop(guard);
+
+        assert!(matches!(
+            m.prepare("other", m.state_version(), "d2"),
+            Err(SrmError::Quarantined(_))
+        ));
+        assert!(m.is_quarantined());
+    }
+
+    /// The normal path must not be disturbed: a transaction its owner resolved is not
+    /// abandoned, however the guard is dropped afterwards.
+    #[test]
+    fn a_disarmed_guard_does_not_report_abandonment() {
+        let mut m = ReferenceMonitor::new();
+        let guard = m.guard("op1");
+        m.prepare("op1", 0, "d1").unwrap();
+        m.execute("op1", "d1").unwrap();
+        m.commit("op1", "done").unwrap();
+        guard.disarm();
+
+        assert!(matches!(
+            m.prepare("op1", m.state_version(), "d1"),
+            Ok(Prepared::AlreadyCommitted(_))
+        ));
+        assert!(!m.is_quarantined());
+    }
+
+    /// Reclamation runs on `execute` too, so an abandonment is noticed as early as
+    /// possible rather than waiting for the next `prepare`.
+    #[test]
+    fn execute_also_reclaims_abandoned_transactions() {
+        let mut m = ReferenceMonitor::new();
+        let live = m.guard("op-live");
+        m.prepare("op-live", 0, "d1").unwrap();
+
+        let abandoned = m.guard("op-gone");
+        m.prepare("op-gone", m.state_version(), "d2").unwrap();
+        m.execute("op-gone", "d2").unwrap();
+        drop(abandoned);
+
+        assert!(matches!(
+            m.execute("op-live", "d1"),
+            Err(SrmError::Quarantined(_))
+        ));
+        live.disarm();
     }
 }
