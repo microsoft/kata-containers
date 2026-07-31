@@ -334,8 +334,8 @@ pub struct VolumeManager {
 struct VolumeState {
     // Source path (on the host)
     source_path: String,
-    // Guest path
-    guest_path: String,
+    // Shared source identifier used by bind-shared mounts and agent-side path resolution.
+    shared_source_id: String,
     // Reference count (how many containers are using it)
     ref_count: usize,
     // List of container IDs using this volume
@@ -352,7 +352,7 @@ impl VolumeManager {
         }
     }
 
-    /// Gets or creates the volume's guest path
+    /// Gets or creates the volume's shared source identifier.
     pub async fn get_or_create_volume(
         &self,
         canonical_source: &str,
@@ -368,25 +368,25 @@ impl VolumeManager {
 
             info!(
                 sl!(),
-                "Existing volume: source={:?}, guest={:?}, ref_count={}",
+                "Existing volume: source={:?}, shared_source_id={:?}, ref_count={}",
                 canonical_source,
-                state.guest_path,
+                state.shared_source_id,
                 state.ref_count,
             );
 
-            return Ok(state.guest_path.clone());
+            return Ok(state.shared_source_id.clone());
         }
 
         // Create a new volume state
-        let guest_path =
-            generate_guest_path(container_id, mount_destination).context("generate path failed")?;
+        let shared_source_id =
+            generate_mount_source_id(container_id, mount_destination).context("generate path failed")?;
 
         let mut containers = HashSet::new();
         containers.insert(container_id.to_string());
 
         let state = VolumeState {
             source_path: canonical_source.to_string(),
-            guest_path: guest_path.clone(),
+            shared_source_id: shared_source_id.clone(),
             ref_count: 1,
             containers,
             monitor_task: None,
@@ -396,13 +396,12 @@ impl VolumeManager {
 
         info!(
             sl!(),
-            "Created new volume state: source={:?}, guest={:?}",
+            "Created new volume state: source={:?}, shared_source_id={:?}",
             state.source_path,
-            state.guest_path,
+            state.shared_source_id,
         );
 
-        // Return guest path
-        Ok(guest_path)
+        Ok(shared_source_id)
     }
 
     /// Register monitor task into the volume manager
@@ -442,9 +441,9 @@ impl VolumeManager {
 
                 info!(
                     sl!(),
-                    "Volume has no more references, source={:?}, guest={:?}",
+                    "Volume has no more references, source={:?}, shared_source_id={:?}",
                     canonical_source,
-                    state.guest_path
+                    state.shared_source_id
                 );
 
                 return Ok(true); // Can be cleaned up
@@ -563,17 +562,15 @@ impl ShareFsVolume {
                         info!(sl!(), "fsshare: copying directory {:?} to guest", &src);
 
                         // Get or create the guest path
-                        let guest_path = volume_manager
+                        let shared_source_id = volume_manager
                             .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
                             .await
                             .context("get or create volume")?;
-                        let volume_id = shared_mount_source_from_guest_path(&guest_path)
-                            .context("derive shared source for watchable directory")?;
 
                         if watchable_volume {
                             Self::copy_watchable_directory_to_guest(
                                 &src,
-                                &volume_id,
+                                &shared_source_id,
                                 &agent,
                                 is_bind_mount,
                             )
@@ -581,8 +578,9 @@ impl ShareFsVolume {
                             .context("copy watchable directory to guest")?;
                             // Source is just the shared base name; agent resolves this for bind-shared mounts.
                             oci_mount.set_typ(Some("bind-shared".to_string()));
-                            oci_mount.set_source(Some(PathBuf::from(&volume_id)));
+                            oci_mount.set_source(Some(PathBuf::from(&shared_source_id)));
                         } else {
+                            let guest_path = guest_path_from_shared_source_id(&shared_source_id);
                             Self::copy_directory_to_guest(
                                 &src,
                                 &guest_path,
@@ -605,7 +603,7 @@ impl ShareFsVolume {
                                 .start_monitor(
                                     agent.clone(),
                                     src.clone(),
-                                    volume_id,
+                                    shared_source_id,
                                     SymlinkCopyMode::WatchableRestricted,
                                     is_bind_mount,
                                 )
@@ -619,15 +617,13 @@ impl ShareFsVolume {
                             .await?;
                     } else {
                         // Keep the mount source path present in guest while skipping non-watchable directory contents.
-                        let guest_path = volume_manager
+                        let shared_source_id = volume_manager
                             .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
                             .await
                             .context("get or create volume")?;
-                        let shared_dir_name = shared_mount_source_from_guest_path(&guest_path)
-                            .context("derive shared source for empty directory")?;
                         Self::create_empty_directory_in_guest(
                             &src,
-                            &shared_dir_name,
+                            &shared_source_id,
                             &agent,
                             is_bind_mount,
                         )
@@ -636,7 +632,7 @@ impl ShareFsVolume {
 
                         // Source is just the shared base name; agent resolves this for bind-shared mounts.
                         oci_mount.set_typ(Some("bind-shared".to_string()));
-                        oci_mount.set_source(Some(PathBuf::from(&shared_dir_name)));
+                        oci_mount.set_source(Some(PathBuf::from(&shared_source_id)));
                         volume.mounts.push(oci_mount);
 
                         volume_manager
@@ -1505,22 +1501,6 @@ fn shared_mount_source_for_single_file(destination: &Path) -> Option<&'static st
     }
 }
 
-fn shared_mount_source_from_guest_path(guest_path: &str) -> Result<String> {
-    let file_name = Path::new(guest_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| anyhow!("failed to derive shared source from guest path: {}", guest_path))?;
-
-    if file_name == "." || file_name == ".." {
-        return Err(anyhow!(
-            "invalid shared source derived from guest path: {}",
-            guest_path
-        ));
-    }
-
-    Ok(file_name.to_string())
-}
-
 fn should_copy_single_file_to_guest(destination: &Path, copy_other_files: bool) -> bool {
     is_always_copied_single_file(destination) || copy_other_files
 }
@@ -1565,8 +1545,11 @@ fn validated_single_component_symlink_target(target: &Path, symlink_path: &Path)
     Ok(component)
 }
 
-/// Generates a guest path related to mount dest
-fn generate_guest_path(cid: &str, mount_destination: &Path) -> Result<String> {
+fn guest_path_from_shared_source_id(shared_source_id: &str) -> String {
+    format!("{}{}", kata_guest_share_dir(), shared_source_id)
+}
+
+fn generate_mount_source_id(cid: &str, mount_destination: &Path) -> Result<String> {
     let mut data = vec![0u8; 8];
     let mut rng = rng(); // Get a thread-local RNG
     rng.fill_bytes(&mut data);
@@ -1577,13 +1560,15 @@ fn generate_guest_path(cid: &str, mount_destination: &Path) -> Result<String> {
         .and_then(|n| n.to_str())
         .ok_or_else(|| anyhow!("get mount destination failed"))?;
 
-    Ok(format!(
-        "{}{}-{}-{}",
-        kata_guest_share_dir(),
+    Ok(format!("{}-{}-{}", cid, hex_str, dest_base))
+}
+
+/// Generates a guest path related to mount dest
+fn generate_guest_path(cid: &str, mount_destination: &Path) -> Result<String> {
+    Ok(guest_path_from_shared_source_id(&generate_mount_source_id(
         cid,
-        hex_str,
-        dest_base
-    ))
+        mount_destination,
+    )?))
 }
 
 #[cfg(test)]
@@ -1690,14 +1675,18 @@ mod test {
     }
 
     #[test]
-    fn test_shared_mount_source_from_guest_path() {
-        let p = format!("{}sandbox-id-0123456789ab-volume", kata_guest_share_dir());
+    fn test_guest_path_from_shared_source_id() {
         assert_eq!(
-            shared_mount_source_from_guest_path(&p).unwrap(),
-            "sandbox-id-0123456789ab-volume"
+            guest_path_from_shared_source_id("sandbox-id-0123456789ab-volume"),
+            format!("{}sandbox-id-0123456789ab-volume", kata_guest_share_dir())
         );
+    }
 
-        assert!(shared_mount_source_from_guest_path("/").is_err());
+    #[test]
+    fn test_generate_mount_source_id() {
+        let source_id = generate_mount_source_id("sandbox-id", Path::new("/etc/hosts")).unwrap();
+        assert!(source_id.starts_with("sandbox-id-"));
+        assert!(source_id.ends_with("-hosts"));
     }
 
     #[test]
