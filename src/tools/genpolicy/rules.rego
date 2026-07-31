@@ -1303,11 +1303,39 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
 
     p_count == i_count - img_pull_count
 
+    # FR-4A: the presented storages must be a *bijection* of the declared ones, not
+    # merely an equal-sized set in which every presented storage happens to match some
+    # declaration. Count equality plus an existential match alone accepts a request that
+    # presents one declared storage twice while never presenting another: the counts
+    # still balance and both duplicates satisfy the same declaration. The two checks
+    # below close that, in both directions.
+    #
+    # 1. No presented storage may repeat another's identity.
+    storage_identities := {[s.driver, s.source, s.mount_point] | some s in i_storages}
+    print("allow_storages: distinct identities =", count(storage_identities))
+    count(storage_identities) == i_count
+
+    # 2. Every presented storage is covered by a declaration (as before) ...
     every i_storage in i_storages {
         allow_storage(p_storages, i_storage, bundle_id, sandbox_id)
     }
 
+    # ... and every declaration is covered by a presented storage, so no declared
+    # storage can be silently dropped in favour of a duplicate of another.
+    every p_storage in p_storages {
+        storage_is_presented(p_storage, i_storages, bundle_id, sandbox_id)
+    }
+
     print("allow_storages: true")
+}
+
+# FR-4A: the reverse direction of allow_storage — is this *declaration* satisfied by
+# some presented storage? Together with the count check and the duplicate rejection in
+# allow_storages this makes the declared/presented relation a bijection.
+storage_is_presented(p_storage, i_storages, bundle_id, sandbox_id) if {
+    some i_storage in i_storages
+    storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id)
+    print("storage_is_presented: true for", p_storage)
 }
 
 allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
@@ -1316,12 +1344,29 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
     print("allow_storage: p_storage =", p_storage)
     print("allow_storage: i_storage =", i_storage)
 
-    p_storage.driver == i_storage.driver
-    allow_storage_source(p_storage, i_storage, bundle_id)
-
-    allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id)
+    storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id)
 
     print("allow_storage: true")
+}
+
+# Pairwise storage match: does this single declaration admit this single presented
+# storage? Factored out of allow_storage so that the same relation can be evaluated in
+# the declaration -> presented direction by storage_is_presented. The three bodies below
+# mirror the three p_storage-consuming allow_storage variants exactly.
+storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id) if {
+    p_storage.driver == i_storage.driver
+    allow_storage_source(p_storage, i_storage, bundle_id)
+    allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id)
+}
+storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id) if {
+    i_storage.driver == "scsi"
+    regex.match("^[0-9]+:[0-9]+$", i_storage.source)
+    allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id)
+}
+storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id) if {
+    i_storage.driver == "blk"
+    regex.match("^[0-9a-f]{2}(/[0-9a-f]{2})?$", i_storage.source)
+    allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id)
 }
 allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
     i_storage.driver == "image_guest_pull"
@@ -1333,26 +1378,9 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
     # TODO: Check Mount Point, Source, Driver Options, etc.
     print("allow_storage with image_guest_pull: true")
 }
-allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
-    print("allow_storage with scsi: start")
-
-    i_storage.driver == "scsi"
-    regex.match("^[0-9]+:[0-9]+$", i_storage.source)
-
-    allow_block_storage(p_storages, i_storage, bundle_id, sandbox_id)
-
-    print("allow_storage with scsi: true")
-}
-allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
-    print("allow_storage with blk: start")
-
-    i_storage.driver == "blk"
-    regex.match("^[0-9]{2}/[0-9]{2}$", i_storage.source)
-
-    allow_block_storage(p_storages, i_storage, bundle_id, sandbox_id)
-
-    print("allow_storage with blk: true")
-}
+# NOTE: the former scsi/blk allow_storage variants are now expressed as bodies of
+# storage_pair_matches above, so the generic p_storage-consuming allow_storage variant
+# covers them. allow_block_storage became dead with them and has been removed.
 
 # Validates all storage fields except driver and source.
 allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id) if {
@@ -1365,16 +1393,6 @@ allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id) if {
 
     allow_mount_point(p_storage, i_storage, bundle_id, sandbox_id)
     allow_storage_options(p_storage, i_storage)
-}
-
-allow_block_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
-    print("allow_block_storage: start")
-
-    some p_storage in p_storages
-
-    allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id)
-
-    print("allow_block_storage: true")
 }
 
 allow_storage_source(p_storage, i_storage, bundle_id) if {
