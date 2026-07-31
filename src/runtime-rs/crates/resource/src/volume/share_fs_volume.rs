@@ -589,16 +589,20 @@ impl ShareFsVolume {
                             .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
                             .await
                             .context("get or create volume")?;
+                        let shared_dir_name = shared_mount_source_from_guest_path(&guest_path)
+                            .context("derive shared source for empty directory")?;
                         Self::create_empty_directory_in_guest(
                             &src,
-                            &guest_path,
+                            &shared_dir_name,
                             &agent,
                             is_bind_mount,
                         )
                             .await
                             .context("create empty directory in guest")?;
 
-                        oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                        // Source is just the shared base name; agent resolves this for bind-shared mounts.
+                        oci_mount.set_typ(Some("bind-shared".to_string()));
+                        oci_mount.set_source(Some(PathBuf::from(&shared_dir_name)));
                         volume.mounts.push(oci_mount);
 
                         volume_manager
@@ -829,37 +833,37 @@ impl ShareFsVolume {
 
     async fn create_empty_directory_in_guest(
         src: &Path,
-        guest_path: &str,
+        shared_dir_name: &str,
         agent: &Arc<dyn Agent>,
         is_bind_mount: bool,
     ) -> Result<()> {
-        ensure_bind_mount_for_transfer(is_bind_mount, guest_path)?;
+        ensure_bind_mount_for_transfer(is_bind_mount, shared_dir_name)?;
 
         let dir_metadata =
             std::fs::metadata(src).context(format!("read metadata from directory: {src:?}"))?;
 
-        let dir_request = agent::CopyFileRequest {
-            path: guest_path.to_owned(),
+        let request = agent::CopySharedFileRequest {
+            file_name: shared_dir_name.to_owned(),
             file_size: 0,
             uid: dir_metadata.uid() as i32,
             gid: dir_metadata.gid() as i32,
-            dir_mode: DIR_MODE_PERMS,
             file_mode: dir_metadata.mode(),
             data: vec![],
-            ..Default::default()
         };
 
         info!(
             sl!(),
-            "fsshare: creating empty directory: {:?} in sandbox with file_mode: {:?}",
-            guest_path,
-            dir_request.file_mode
+            "fsshare: creating empty directory by shared name {:?} in sandbox with file_mode: {:?}",
+            shared_dir_name,
+            request.file_mode
         );
 
         agent
-            .copy_file(dir_request)
+            .copy_shared_file(request)
             .await
-            .context(format!("create empty directory in sandbox: {guest_path:?}"))?;
+            .context(format!(
+                "create empty directory in sandbox by shared name: {shared_dir_name:?}"
+            ))?;
 
         Ok(())
     }
@@ -1272,6 +1276,22 @@ fn shared_mount_source_for_single_file(destination: &Path) -> Option<&'static st
     }
 }
 
+fn shared_mount_source_from_guest_path(guest_path: &str) -> Result<String> {
+    let file_name = Path::new(guest_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| anyhow!("failed to derive shared source from guest path: {}", guest_path))?;
+
+    if file_name == "." || file_name == ".." {
+        return Err(anyhow!(
+            "invalid shared source derived from guest path: {}",
+            guest_path
+        ));
+    }
+
+    Ok(file_name.to_string())
+}
+
 fn should_copy_single_file_to_guest(destination: &Path, copy_other_files: bool) -> bool {
     is_always_copied_single_file(destination) || copy_other_files
 }
@@ -1438,6 +1458,17 @@ mod test {
             shared_mount_source_for_single_file(Path::new("/tmp/other")),
             None
         );
+    }
+
+    #[test]
+    fn test_shared_mount_source_from_guest_path() {
+        let p = format!("{}sandbox-id-0123456789ab-volume", kata_guest_share_dir());
+        assert_eq!(
+            shared_mount_source_from_guest_path(&p).unwrap(),
+            "sandbox-id-0123456789ab-volume"
+        );
+
+        assert!(shared_mount_source_from_guest_path("/").is_err());
     }
 
     #[test]
