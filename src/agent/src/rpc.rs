@@ -2412,13 +2412,12 @@ fn do_init_volume_source(req: &protocols::agent::InitVolumeSourceRequest) -> Res
         .lock()
         .map_err(|_| anyhow!("managed volume sources lock poisoned"))?;
 
-    if let Some((agent_volume_id, src)) = sources
+    if let Some((agent_volume_id, _)) = sources
         .iter()
         .find(|(_, src)| src.host_volume_id == req.host_volume_id)
     {
         return Ok(InitVolumeSourceResponse {
             agent_volume_id: agent_volume_id.clone(),
-            guest_path: src.guest_path.to_string_lossy().into_owned(),
             ..Default::default()
         });
     }
@@ -2454,7 +2453,6 @@ fn do_init_volume_source(req: &protocols::agent::InitVolumeSourceRequest) -> Res
 
     Ok(InitVolumeSourceResponse {
         agent_volume_id,
-        guest_path: guest_path.to_string_lossy().into_owned(),
         ..Default::default()
     })
 }

@@ -293,8 +293,6 @@ pub struct VolumeManager {
 struct VolumeState {
     // Source path (on the host)
     source_path: String,
-    // Guest path
-    guest_path: String,
     // Agent-side managed volume identifier
     agent_volume_id: String,
     // Reference count (how many containers are using it)
@@ -313,14 +311,13 @@ impl VolumeManager {
         }
     }
 
-    /// Gets or creates the volume's guest path
+    /// Gets or creates the managed volume identifier
     pub async fn get_or_create_volume(
         &self,
         canonical_source: &str,
         container_id: &str,
-        guest_path: &str,
         agent_volume_id: &str,
-    ) -> Result<(String, String, bool)> {
+    ) -> Result<(String, bool)> {
         let mut states = self.volume_states.write().await;
 
         if let Some(state) = states.get_mut(canonical_source) {
@@ -330,17 +327,13 @@ impl VolumeManager {
 
             info!(
                 sl!(),
-                "Existing volume: source={:?}, guest={:?}, ref_count={}",
+                "Existing volume: source={:?}, managed_volume={:?}, ref_count={}",
                 canonical_source,
-                state.guest_path,
+                state.agent_volume_id,
                 state.ref_count,
             );
 
-            return Ok((
-                state.guest_path.clone(),
-                state.agent_volume_id.clone(),
-                false,
-            ));
+            return Ok((state.agent_volume_id.clone(), false));
         }
 
         let mut containers = HashSet::new();
@@ -348,7 +341,6 @@ impl VolumeManager {
 
         let state = VolumeState {
             source_path: canonical_source.to_string(),
-            guest_path: guest_path.to_string(),
             agent_volume_id: agent_volume_id.to_string(),
             ref_count: 1,
             containers,
@@ -359,16 +351,12 @@ impl VolumeManager {
 
         info!(
             sl!(),
-            "Created new volume state: source={:?}, guest={:?}",
+            "Created new volume state: source={:?}, managed_volume={:?}",
             state.source_path,
-            state.guest_path,
+            state.agent_volume_id,
         );
 
-        Ok((
-            state.guest_path.clone(),
-            state.agent_volume_id.clone(),
-            true,
-        ))
+        Ok((state.agent_volume_id.clone(), true))
     }
 
     /// Register monitor task into the volume manager
@@ -412,9 +400,9 @@ impl VolumeManager {
 
                 info!(
                     sl!(),
-                    "Volume has no more references, source={:?}, guest={:?}",
+                    "Volume has no more references, source={:?}, managed_volume={:?}",
                     canonical_source,
-                    state.guest_path
+                    state.agent_volume_id
                 );
 
                 let state = states
@@ -512,12 +500,11 @@ impl ShareFsVolume {
                             .await
                             .context("init directory volume source")?;
 
-                    // Get or create the guest path
-                    let (_guest_path, agent_volume_id, is_new) = volume_manager
+                    // Get or create the managed volume id
+                    let (agent_volume_id, is_new) = volume_manager
                         .get_or_create_volume(
                             &host_volume_id,
                             cid,
-                            &source.guest_path,
                             &source.agent_volume_id,
                         )
                         .await
