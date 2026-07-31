@@ -616,9 +616,6 @@ message InitVolumeSourceResponse {
 	// Runtime must treat it as an identifier, not a path. For container mounts,
 	// use it as OCI Mount.source with type "bind-managed-volume".
 	string agent_volume_id = 1;
-	// Deprecated: intentionally no longer populated to avoid leaking trusted
-	// guest paths back to the host runtime.
-	string guest_path = 2 [deprecated = true];
 }
 
 message CreateVolumeSubdirRequest {

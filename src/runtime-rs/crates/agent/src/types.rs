@@ -573,7 +573,6 @@ pub struct InitVolumeSourceRequest {
 #[derive(PartialEq, Clone, Default, Debug)]
 pub struct InitVolumeSourceResponse {
     pub agent_volume_id: String,
-    pub guest_path: String,
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
