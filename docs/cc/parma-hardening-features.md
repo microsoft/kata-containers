@@ -170,17 +170,29 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
 - **Fix:** a universal `ReferenceMonitor` models a mutating operation as
   `prepare → execute → commit`/`abort`, with idempotent replay, anti-replay via a monotonic
   state version, and a fail-closed `quarantine`. `CreateContainer`, `ExecProcess`,
-  `SignalProcess`, and `RemoveContainer` run as SRM transactions; policy state is
-  snapshotted before authorization and restored on abort. A failed restore, or a missing
-  snapshot, quarantines the monitor rather than continuing on unprovable state. On a
-  successful removal the container's transactions are **retired**, so a later create for
-  the same id is a new operation rather than an idempotent replay of the create just
-  undone. `prepare` refuses a duplicate for an operation that is still in flight rather
-  than overwriting the live transaction. Every `commit` and `abort` result is acted on: a
-  failure at either point means the monitor cannot account for an operation that already
-  ran, so it quarantines rather than continuing on state it cannot vouch for. Operation
-  ids are built by a length-prefixed encoder rather than by joining host-supplied names
-  with a separator, so no two operations can resolve to the same id.
+  `SignalProcess`, and `RemoveContainer` run as SRM transactions. Policy state is bracketed
+  around authorization and the request's **own delta** is reverted on abort, rather than a
+  whole-document snapshot being restored: ttrpc dispatches each request on its own task and
+  the policy lock is released while the runtime operation runs, so restoring a snapshot
+  would silently discard state committed by a concurrent request. A failed revert, or a
+  missing bracket, quarantines the monitor rather than continuing on unprovable state.
+  Every transaction is covered by a `TxnGuard` taken **under the same lock acquisition as
+  `prepare`**, so a request cancelled at any suspension point — including one cancelled
+  before it reaches its first `.await` — leaves a reclaimable record rather than a
+  transaction wedged in `Prepared` forever; orphans are drained at the head of the next
+  `prepare`/`execute`. Every early return between `prepare` and the runtime call reverts
+  the policy delta, so a refused or duplicate operation cannot leave a phantom container
+  in the enforcer's state. On a successful removal the container's transactions are
+  **retired**, so a later create for the same id is a new operation rather than an
+  idempotent replay of the create just undone. `prepare` refuses a duplicate for an
+  operation that is still in flight rather than overwriting the live transaction. Aborted
+  transactions are dropped from the map rather than parked in a terminal state, so a host
+  that can drive aborts on demand cannot grow guest agent memory without bound. Every
+  `commit` and `abort` result is acted on: a failure at either point means the monitor
+  cannot account for an operation that already ran, so it quarantines rather than
+  continuing on state it cannot vouch for. Operation ids are built by a length-prefixed
+  encoder rather than by joining host-supplied names with a separator, so no two
+  operations can resolve to the same id.
 - **Guarantee:** policy and runtime state commit together or are reconciled/rolled back;
   an unprovable state quarantines the monitor (never fails open).
 - **Scope — which RPCs are transactions, and why:** only two policy rules mutate persisted
@@ -207,10 +219,12 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
 - **Commits:** `b10ffc663` (crate), `b88ff8e51` (create), `e4d6c8c97` (exec/signal),
   `dfac4bd7a` (policy-state rollback), this PR (removal + rollback failure handling).
 - **Validated:** unit (transaction manager tests, including transaction retirement,
-  refusal of in-flight duplicates under thread contention, and what a failed commit
-  leaves behind) + `rpc`-level integration tests covering operation-id injectivity and
-  the commit/retire helpers + policy tests covering removal rollback + matrix
-  no-regression.
+  refusal of in-flight duplicates under thread contention, the orphan reaper, bounded
+  growth under repeated aborts, and what a failed commit leaves behind) + fault-injection
+  and randomized-sequence invariant tests + `rpc`-level integration tests covering
+  operation-id injectivity and the commit/retire helpers + policy tests covering removal
+  rollback via delta revert, including that a concurrent request's state change survives
+  another request's rollback + matrix no-regression.
 
 ### FR-3 — Canonical object (authorized == executed)
 - **Gap:** the agent mutates the authorized request before executing it (effective signal

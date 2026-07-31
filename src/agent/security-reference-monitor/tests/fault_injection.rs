@@ -53,14 +53,14 @@ fn run_with_fault(fp: FaultPoint) {
             assert!(matches!(err, SrmError::PlanMismatch { .. }));
             // Reconcile: abort the reserved transaction.
             m.abort(op).unwrap();
-            assert_eq!(m.transaction(op).unwrap().state, TxnState::Aborted);
+            assert!(m.transaction(op).is_none(), "aborted txn must be dropped");
         }
         FaultPoint::RuntimeBeforeCommit => {
             m.prepare(op, version_before, digest).unwrap();
             m.execute(op, digest).unwrap();
             // The runtime operation fails; the caller aborts instead of committing.
             m.abort(op).unwrap();
-            assert_eq!(m.transaction(op).unwrap().state, TxnState::Aborted);
+            assert!(m.transaction(op).is_none(), "aborted txn must be dropped");
         }
     }
 
@@ -213,17 +213,25 @@ fn randomized_sequences_preserve_invariants() {
                     SrmError::Quarantined(_)
                 ));
             }
-            // 3. Committed retains a result; Aborted never does (states are exclusive).
+            // 3. Committed retains a result; an aborted operation is never retained at
+            //    all (the map holds only in-flight and awaiting-retirement entries), so
+            //    a host that can drive aborts cannot grow it without bound.
             for id in ids {
                 if let Some(t) = m.transaction(id) {
                     if t.state == TxnState::Committed {
                         assert!(t.result.is_some());
                     }
-                    if t.state == TxnState::Aborted {
-                        assert!(t.result.is_none());
-                    }
+                    assert_ne!(
+                        t.state,
+                        TxnState::Aborted,
+                        "seed {seed}: aborted transaction was retained"
+                    );
                 }
             }
+            assert!(
+                m.transaction_count() <= ids.len(),
+                "seed {seed}: transaction map grew beyond the id space"
+            );
         }
     }
 }

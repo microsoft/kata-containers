@@ -1040,6 +1040,7 @@ import future.keywords.if
 
 default RemoveContainerRequest := false
 default SignalProcessRequest := false
+default CreateContainerRequest := false
 
 get_state() = state if { state := data["pstate"] }
 get_state_val(key) = value if { state := get_state(); value := state[key] }
@@ -1051,8 +1052,19 @@ state_del_key(key) = action if {
   action := {"op": "remove", "path": path}
 }
 
+state_add_key(key) = action if {
+  get_state()
+  path := get_state_path(key)
+  action := {"op": "add", "path": path, "value": 0}
+}
+
 concat_op_if_not_null(ops, op) = result if { op == null; result := ops }
 concat_op_if_not_null(ops, op) = result if { op != null; result := array.concat(ops, [op]) }
+
+CreateContainerRequest := {"ops": ops, "allowed": true} if {
+  not get_state_val(input.container_id)
+  ops := concat_op_if_not_null([], state_add_key(input.container_id))
+}
 
 RemoveContainerRequest := {"ops": ops, "allowed": true} if {
   get_state_val(input.container_id)
@@ -1120,10 +1132,10 @@ SignalProcessRequest if {
         );
     }
 
-    /// F-19: restoring the snapshot taken before authorization undoes the `pstate`
-    /// deletion, so a container whose teardown failed stays signallable and the removal
-    /// stays retryable. This is the regression test for the rollback that
-    /// `remove_container` performs on the failure path.
+    /// F-19: reverting this request's own `pstate` delta undoes the removal's deletion, so
+    /// a container whose teardown failed stays signallable and the removal stays retryable.
+    /// This is the regression test for the rollback that `remove_container` performs on the
+    /// failure path -- it exercises `revert_state_delta`, which is what the handler calls.
     #[cfg(feature = "strict-policy")]
     #[tokio::test]
     async fn rollback_after_failed_remove_keeps_the_container_reachable() {
@@ -1131,13 +1143,15 @@ SignalProcessRequest if {
         let req = format!(r#"{{"container_id": "{cid}"}}"#);
         let mut p = pstate_policy_with_container(cid);
 
-        // What remove_container does: snapshot, authorize, then roll back on failure.
-        let snapshot = p.snapshot_state().unwrap();
+        // What remove_container does: bracket authorization with before/after, then
+        // revert only this request's delta on failure.
+        let before = p.snapshot_state().unwrap();
         assert!(matches!(
             p.allow_request("RemoveContainerRequest", &req).await,
             Ok((true, _))
         ));
-        p.restore_state(&snapshot).unwrap();
+        let after = p.snapshot_state().unwrap();
+        p.revert_state_delta(&before, &after).unwrap();
 
         assert!(
             matches!(
@@ -1152,6 +1166,51 @@ SignalProcessRequest if {
                 Ok((true, _))
             ),
             "after rollback the failed removal must be retryable"
+        );
+    }
+
+    /// F-19: the reason the rollback is a *delta* revert and not a snapshot restore.
+    /// A concurrent request commits its own `pstate` change while the failing removal is
+    /// awaiting the runtime; the rollback must not take that change with it.
+    #[cfg(feature = "strict-policy")]
+    #[tokio::test]
+    async fn rollback_preserves_concurrent_state_changes() {
+        let (a, b) = ("ctr1", "ctr2");
+        let req_a = format!(r#"{{"container_id": "{a}"}}"#);
+        let req_b = format!(r#"{{"container_id": "{b}"}}"#);
+        let mut p = pstate_policy_with_container(a);
+
+        // remove(A) brackets its own authorization...
+        let before = p.snapshot_state().unwrap();
+        assert!(matches!(
+            p.allow_request("RemoveContainerRequest", &req_a).await,
+            Ok((true, _))
+        ));
+        let after = p.snapshot_state().unwrap();
+
+        // ...then B is created and committed while remove(A) awaits the runtime.
+        assert!(matches!(
+            p.allow_request("CreateContainerRequest", &req_b).await,
+            Ok((true, _))
+        ));
+
+        // remove(A) fails and rolls back. A whole-document restore of `before` would
+        // erase B; reverting only A's delta must not.
+        p.revert_state_delta(&before, &after).unwrap();
+
+        assert!(
+            matches!(
+                p.allow_request("RemoveContainerRequest", &req_b).await,
+                Ok((true, _))
+            ),
+            "a concurrently created container must survive another request's rollback"
+        );
+        assert!(
+            matches!(
+                p.allow_request("SignalProcessRequest", &req_a).await,
+                Ok((true, _))
+            ),
+            "the rolled-back container must still be reachable"
         );
     }
 

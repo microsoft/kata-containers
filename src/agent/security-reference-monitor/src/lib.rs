@@ -81,6 +81,11 @@ pub enum TxnState {
     /// Runtime result validated; state advanced.
     Committed,
     /// Rolled back; the reserved state was released.
+    ///
+    /// Spec-level state only. The implementation *drops* the transaction on abort
+    /// (see [`ReferenceMonitor::abort`]) so the map cannot grow without bound, which
+    /// refines the `aborted` state of `formal/SRM.tla` onto its `none` state --
+    /// `Prepare(o)` admits both, so the refinement preserves the specified behaviour.
     Aborted,
 }
 
@@ -410,14 +415,21 @@ impl ReferenceMonitor {
 
     /// Roll back a prepared/executed transaction. The reserved state is released and
     /// the state version is NOT advanced (the operation had no committed effect).
+    ///
+    /// The entry is *removed* rather than parked in [`TxnState::Aborted`]. An aborted id
+    /// carries no replay-protection value — `prepare` already treats it as re-preparable —
+    /// so retaining it only grows the map. A host that can drive aborts on demand (loop
+    /// `SignalProcess`/`ExecProcess` with a fresh random `exec_id`, each authorized but
+    /// failing at process lookup) would otherwise add one permanent entry per attempt and
+    /// exhaust guest memory.
     pub fn abort(&mut self, op_id: &str) -> Result<(), SrmError> {
         let txn = self
             .txns
-            .get_mut(op_id)
+            .get(op_id)
             .ok_or_else(|| SrmError::UnknownOperation(op_id.to_string()))?;
         match txn.state {
             TxnState::Prepared | TxnState::Executed => {
-                txn.state = TxnState::Aborted;
+                self.txns.remove(op_id);
                 Ok(())
             }
             _ => Err(SrmError::InvalidState {
@@ -461,6 +473,15 @@ impl ReferenceMonitor {
 
     pub fn transaction(&self, op_id: &str) -> Option<&Transaction> {
         self.txns.get(op_id)
+    }
+
+    /// Number of transactions currently tracked.
+    ///
+    /// Only committed (awaiting retirement) and in-flight transactions are retained;
+    /// aborted ones are dropped. Exposed so tests can assert that host-drivable failure
+    /// paths do not grow the map without bound.
+    pub fn transaction_count(&self) -> usize {
+        self.txns.len()
     }
 }
 
@@ -532,7 +553,30 @@ mod tests {
         m.execute("op1", "d").unwrap();
         m.abort("op1").unwrap();
         assert_eq!(m.state_version(), 0, "aborted op must not advance state");
-        assert_eq!(m.transaction("op1").unwrap().state, TxnState::Aborted);
+        assert!(
+            m.transaction("op1").is_none(),
+            "aborted transaction must be dropped, not retained"
+        );
+        // The id is free again, exactly as if it had never been prepared.
+        assert!(matches!(m.prepare("op1", 0, "d"), Ok(Prepared::New)));
+    }
+
+    #[test]
+    fn aborted_transactions_do_not_accumulate() {
+        // A host that can drive aborts on demand must not be able to grow the
+        // transaction map without bound (guest-agent memory exhaustion).
+        let mut m = ReferenceMonitor::new();
+        for i in 0..1_000 {
+            let op = format!("op{i}");
+            m.prepare(&op, 0, "d").unwrap();
+            m.abort(&op).unwrap();
+        }
+        assert_eq!(
+            m.transaction_count(),
+            0,
+            "aborted transactions must not be retained"
+        );
+        assert_eq!(m.state_version(), 0);
     }
 
     #[test]

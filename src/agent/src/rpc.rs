@@ -1024,15 +1024,33 @@ impl agent_ttrpc::AgentService for AgentService {
             let txn_guard = {
                 let mut srm = crate::SRM.lock().await;
                 let version = srm.state_version();
-                match srm.prepare(op_id.clone(), version, digest.clone()) {
+                let prepared = srm.prepare(op_id.clone(), version, digest.clone());
+                let guard = srm.guard(&op_id);
+                match prepared {
                     // Idempotent replay of an already-committed create: no new effect.
-                    Ok(Prepared::AlreadyCommitted(_)) => return Ok(Empty::new()),
+                    Ok(Prepared::AlreadyCommitted(_)) => {
+                        drop(srm);
+                        guard.disarm();
+                        // Authorization re-applied this container's pstate entry before
+                        // we knew the create was a replay. Reverting our own delta keeps
+                        // the enforcer's state owned by the transaction that committed it.
+                        rollback_policy_state(&policy_snapshot, "duplicate create_container").await;
+                        return Ok(Empty::new());
+                    }
                     Ok(Prepared::New) => {}
-                    Err(e) => return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e)),
+                    Err(e) => {
+                        drop(srm);
+                        guard.disarm();
+                        // `prepare` refused (in-flight duplicate, or the monitor is
+                        // quarantined), but authorization already added the container to
+                        // pstate. Without this the enforcer keeps a phantom entry for a
+                        // container that was never created.
+                        rollback_policy_state(&policy_snapshot, "create_container prepare").await;
+                        return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e));
+                    }
                 }
                 // From here on every exit must resolve the transaction; the guard covers
                 // the paths that never run, i.e. this future being dropped mid-flight.
-                let guard = srm.guard(&op_id);
                 if let Err(e) = srm.execute(&op_id, &digest) {
                     abort_or_quarantine(&mut srm, &op_id, "create_container execute");
                     drop(srm);
@@ -1154,6 +1172,13 @@ impl agent_ttrpc::AgentService for AgentService {
                 let mut srm = crate::SRM.lock().await;
                 let version = srm.state_version();
                 let prepared = srm.prepare(op_id.clone(), version, digest.clone());
+                // Take the guard under the same lock acquisition that prepared the
+                // transaction. The lock has to be released before `rollback_policy_state`
+                // (which acquires AGENT_POLICY then SRM, so holding SRM here would invert
+                // the order), and re-acquiring it is a suspension point. A transaction that
+                // is Prepared across that point without a guard is never reclaimed if the
+                // host cancels the call, which wedges the operation id forever.
+                let guard = srm.guard(&op_id);
                 drop(srm);
                 match prepared {
                     Ok(Prepared::New) => {}
@@ -1163,6 +1188,9 @@ impl agent_ttrpc::AgentService for AgentService {
                     // not a legitimate replay. Refuse rather than report a removal that
                     // did not happen.
                     Ok(Prepared::AlreadyCommitted(_)) => {
+                        // The committed transaction this collided with is already
+                        // resolved; there is nothing for the guard to reclaim.
+                        guard.disarm();
                         rollback_policy_state(&policy_snapshot, "duplicate remove_container").await;
                         return Err(ttrpc_error(
                             ttrpc::Code::FAILED_PRECONDITION,
@@ -1170,14 +1198,13 @@ impl agent_ttrpc::AgentService for AgentService {
                         ));
                     }
                     Err(e) => {
+                        // `prepare` failed, so no transaction of ours is in flight.
+                        guard.disarm();
                         rollback_policy_state(&policy_snapshot, "remove_container prepare").await;
                         return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e));
                     }
                 }
                 let mut srm = crate::SRM.lock().await;
-                // From here on every exit must resolve the transaction; the guard covers
-                // the paths that never run, i.e. this future being dropped mid-flight.
-                let guard = srm.guard(&op_id);
                 if let Err(e) = srm.execute(&op_id, &digest) {
                     abort_or_quarantine(&mut srm, &op_id, "remove_container execute");
                     drop(srm);
@@ -1290,14 +1317,25 @@ impl agent_ttrpc::AgentService for AgentService {
             let txn_guard = {
                 let mut srm = crate::SRM.lock().await;
                 let version = srm.state_version();
-                match srm.prepare(op_id.clone(), version, digest.clone()) {
-                    Ok(Prepared::AlreadyCommitted(_)) => return Ok(Empty::new()),
+                let prepared = srm.prepare(op_id.clone(), version, digest.clone());
+                let guard = srm.guard(&op_id);
+                match prepared {
+                    Ok(Prepared::AlreadyCommitted(_)) => {
+                        drop(srm);
+                        guard.disarm();
+                        rollback_policy_state(&policy_snapshot, "duplicate exec_process").await;
+                        return Ok(Empty::new());
+                    }
                     Ok(Prepared::New) => {}
-                    Err(e) => return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e)),
+                    Err(e) => {
+                        drop(srm);
+                        guard.disarm();
+                        rollback_policy_state(&policy_snapshot, "exec_process prepare").await;
+                        return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e));
+                    }
                 }
                 // From here on every exit must resolve the transaction; the guard covers
                 // the paths that never run, i.e. this future being dropped mid-flight.
-                let guard = srm.guard(&op_id);
                 if let Err(e) = srm.execute(&op_id, &digest) {
                     abort_or_quarantine(&mut srm, &op_id, "exec_process execute");
                     drop(srm);
