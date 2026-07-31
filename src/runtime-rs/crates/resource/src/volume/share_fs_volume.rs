@@ -483,16 +483,38 @@ impl ShareFsVolume {
 
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
-                    // Generate guest path
-                    let guest_path = generate_guest_path(cid, m.destination())
-                        .context("generate path failed")?;
+                    if let Some(shared_file_name) = shared_mount_source_for_single_file(m.destination()) {
+                        // Transfer always-copied single files using base-name-only request.
+                        Self::copy_shared_file_to_guest(
+                            &src,
+                            shared_file_name,
+                            &agent,
+                            is_bind_mount,
+                        )
+                        .await
+                        .context("copy shared file to guest")?;
 
-                    if should_copy_single_file_to_guest(m.destination(), copy_other_files) {
+                        // Source is just the shared base name; agent resolves this for bind-shared mounts.
+                        oci_mount.set_typ(Some("bind-shared".to_string()));
+                        oci_mount.set_source(Some(PathBuf::from(shared_file_name)));
+                        volume.mounts.push(oci_mount);
+                    } else if should_copy_single_file_to_guest(m.destination(), copy_other_files) {
+                        // Generate guest path
+                        let guest_path = generate_guest_path(cid, m.destination())
+                            .context("generate path failed")?;
+
                         // Copy a single file
                         Self::copy_file_to_guest(&src, &guest_path, &agent, is_bind_mount)
                             .await
                             .context("copy file to guest")?;
+
+                        oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                        volume.mounts.push(oci_mount);
                     } else {
+                        // Generate guest path
+                        let guest_path = generate_guest_path(cid, m.destination())
+                            .context("generate path failed")?;
+
                         // Keep mount source file path present in guest while skipping file contents.
                         Self::create_empty_file_in_guest(
                             &src,
@@ -507,10 +529,10 @@ impl ShareFsVolume {
                             "fsshare: skip copying contents for non-special file {:?}: copy_volumes does not contain other-files",
                             &src
                         );
-                    }
 
-                    oci_mount.set_source(Some(PathBuf::from(&guest_path)));
-                    volume.mounts.push(oci_mount);
+                        oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                        volume.mounts.push(oci_mount);
+                    }
                 } else if src.is_dir() {
                     let watchable_volume = is_watchable_volume(&src);
                     if should_copy_directory_to_guest(watchable_volume, copy_other_directories) {
@@ -714,6 +736,47 @@ impl ShareFsVolume {
         agent.copy_file(r).await.with_context(|| {
             format!("copy file request failed: src: {src:?}, dest: {guest_path:?}")
         })?;
+        Ok(())
+    }
+
+    async fn copy_shared_file_to_guest(
+        src: &Path,
+        shared_file_name: &str,
+        agent: &Arc<dyn Agent>,
+        is_bind_mount: bool,
+    ) -> Result<()> {
+        ensure_bind_mount_for_transfer(is_bind_mount, shared_file_name)?;
+
+        let file_metadata = std::fs::metadata(src)
+            .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
+
+        let mut file = File::open(src).with_context(|| format!("Failed to open file: {src:?}"))?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)
+            .with_context(|| format!("Failed to read file: {src:?}"))?;
+
+        let request = agent::CopySharedFileRequest {
+            file_name: shared_file_name.to_owned(),
+            file_size: file_metadata.len() as i64,
+            uid: file_metadata.uid() as i32,
+            gid: file_metadata.gid() as i32,
+            file_mode: file_metadata.mode(),
+            data: buffer,
+        };
+
+        info!(
+            sl!(),
+            "fsshare: shared file: {:?} to sandbox by name {:?}",
+            &src,
+            shared_file_name
+        );
+
+        agent.copy_shared_file(request).await.with_context(|| {
+            format!(
+                "copy shared file request failed: src: {src:?}, name: {shared_file_name:?}"
+            )
+        })?;
+
         Ok(())
     }
 
@@ -1200,6 +1263,15 @@ fn is_always_copied_single_file(destination: &Path) -> bool {
     )
 }
 
+fn shared_mount_source_for_single_file(destination: &Path) -> Option<&'static str> {
+    match destination.to_str() {
+        Some("/etc/resolv.conf") => Some("resolv.conf"),
+        Some("/etc/hosts") => Some("etc-hosts"),
+        Some("/etc/hostname") => Some("hostname"),
+        _ => None,
+    }
+}
+
 fn should_copy_single_file_to_guest(destination: &Path, copy_other_files: bool) -> bool {
     is_always_copied_single_file(destination) || copy_other_files
 }
@@ -1346,6 +1418,26 @@ mod test {
         ));
         assert!(should_copy_single_file_to_guest(Path::new("/tmp/other"), true));
         assert!(!should_copy_single_file_to_guest(Path::new("/tmp/other"), false));
+    }
+
+    #[test]
+    fn test_shared_mount_source_for_single_file() {
+        assert_eq!(
+            shared_mount_source_for_single_file(Path::new("/etc/resolv.conf")),
+            Some("resolv.conf")
+        );
+        assert_eq!(
+            shared_mount_source_for_single_file(Path::new("/etc/hosts")),
+            Some("etc-hosts")
+        );
+        assert_eq!(
+            shared_mount_source_for_single_file(Path::new("/etc/hostname")),
+            Some("hostname")
+        );
+        assert_eq!(
+            shared_mount_source_for_single_file(Path::new("/tmp/other")),
+            None
+        );
     }
 
     #[test]

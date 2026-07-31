@@ -37,7 +37,7 @@ use oci_spec::runtime as oci;
 use protobuf::MessageDyn;
 use protobuf::MessageField;
 use protocols::agent::{
-    AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest,
+    AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest, CopySharedFileRequest,
     CreateWatchableVolumeDataSymlinkRequest, CreateWatchableVolumeFileSymlinkRequest,
     GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, Interfaces, Metrics, OOMEvent,
     ReadStreamResponse, ResizeVolumeRequest, Routes, SetIPTablesRequest, SetIPTablesResponse,
@@ -312,6 +312,8 @@ impl AgentService {
 
         let mut s = self.sandbox.lock().await;
         s.container_mounts.insert(cid.clone(), m);
+
+        rewrite_bind_shared_mounts(&mut oci, &s)?;
 
         update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
 
@@ -1696,6 +1698,42 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn copy_shared_file(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CopySharedFileRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "copy_shared_file", req);
+
+        let (path, synthetic_copy_req_for_policy) = {
+            let mut sandbox = self.sandbox.lock().await;
+            let path = allocate_shared_mount_path(&mut sandbox, &req.file_name).map_ttrpc_err(same)?;
+            let synthetic = synthetic_copy_file_for_shared_request(&req, &path);
+            (path, synthetic)
+        };
+
+        #[cfg(feature = "agent-policy")]
+        {
+            let req_for_policy: PolicyCopyFileRequest = (&synthetic_copy_req_for_policy)
+                .try_into()
+                .context("parsing synthetic CopyFileRequest for policy")
+                .map_ttrpc_err(same)?;
+            is_allowed_with_entrypoint("CopyFileRequest", &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
+        is_allowed(&req).await?;
+
+        let root_path = PathBuf::from(KATA_GUEST_SHARE_DIR);
+        do_copy_file(&synthetic_copy_req_for_policy, &root_path).map_ttrpc_err(same)?;
+
+        let mut sandbox = self.sandbox.lock().await;
+        sandbox
+            .bind_shared_mount_sources
+            .insert(req.file_name.clone(), path);
+
+        Ok(Empty::new())
+    }
+
     async fn create_watchable_volume_file_symlink(
         &self,
         ctx: &TtrpcContext,
@@ -2297,6 +2335,92 @@ fn do_set_guest_date_time(sec: i64, usec: i64) -> Result<()> {
     };
 
     Errno::result(ret).map(drop)?;
+
+    Ok(())
+}
+
+fn validate_shared_file_name(file_name: &str) -> Result<()> {
+    if file_name.is_empty() {
+        return Err(anyhow!("shared file name is empty"));
+    }
+
+    let p = Path::new(file_name);
+    let mut components = p.components();
+    let Some(first) = components.next() else {
+        return Err(anyhow!("shared file name is empty"));
+    };
+
+    if components.next().is_some() {
+        return Err(anyhow!("shared file name must be a single path component"));
+    }
+
+    match first {
+        std::path::Component::Normal(_) => Ok(()),
+        _ => Err(anyhow!("shared file name must be a normal path component")),
+    }
+}
+
+fn allocate_shared_mount_path(sandbox: &mut Sandbox, file_name: &str) -> Result<String> {
+    validate_shared_file_name(file_name)?;
+
+    let sid = if sandbox.id.is_empty() {
+        "sandbox"
+    } else {
+        sandbox.id.as_str()
+    };
+
+    sandbox.bind_shared_seq = sandbox.bind_shared_seq.wrapping_add(1);
+    let generated = format!("{}-{:016x}-{}", sid, sandbox.bind_shared_seq, file_name);
+    Ok(Path::new(KATA_GUEST_SHARE_DIR)
+        .join(generated)
+        .to_string_lossy()
+        .to_string())
+}
+
+fn synthetic_copy_file_for_shared_request(req: &CopySharedFileRequest, path: &str) -> CopyFileRequest {
+    CopyFileRequest {
+        path: path.to_string(),
+        file_size: req.file_size,
+        file_mode: req.file_mode,
+        dir_mode: IMPLICIT_DIRECTORY_PERMISSION_MASK,
+        uid: req.uid,
+        gid: req.gid,
+        offset: 0,
+        data: req.data.clone(),
+        ..Default::default()
+    }
+}
+
+fn rewrite_bind_shared_mounts(oci: &mut Spec, sandbox: &Sandbox) -> Result<()> {
+    let Some(mounts) = oci.mounts_mut().as_mut() else {
+        return Ok(());
+    };
+
+    for m in mounts.iter_mut() {
+        if m.typ().as_deref() != Some("bind-shared") {
+            continue;
+        }
+
+        let source_name = m
+            .source()
+            .as_ref()
+            .and_then(|p| p.to_str())
+            .ok_or_else(|| anyhow!("bind-shared mount source is missing or invalid"))?;
+
+        let resolved = sandbox
+            .bind_shared_mount_sources
+            .get(source_name)
+            .ok_or_else(|| {
+                anyhow!(
+                    "bind-shared source {:?} not found in shared file map",
+                    source_name
+                )
+            })?
+            .clone();
+
+        m.set_source(Some(PathBuf::from(resolved)));
+        m.set_typ(Some("bind".to_string()));
+    }
 
     Ok(())
 }

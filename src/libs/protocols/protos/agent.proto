@@ -73,6 +73,7 @@ service AgentService {
 	rpc MemHotplugByProbe(MemHotplugByProbeRequest) returns (google.protobuf.Empty);
 	rpc SetGuestDateTime(SetGuestDateTimeRequest) returns (google.protobuf.Empty);
 	rpc CopyFile(CopyFileRequest) returns (google.protobuf.Empty);
+	rpc CopySharedFile(CopySharedFileRequest) returns (google.protobuf.Empty);
 	rpc CreateWatchableVolumeFileSymlink(CreateWatchableVolumeFileSymlinkRequest) returns (google.protobuf.Empty);
 	rpc CreateWatchableVolumeDataSymlink(CreateWatchableVolumeDataSymlinkRequest) returns (google.protobuf.Empty);
 	rpc GetOOMEvent(GetOOMEventRequest) returns (OOMEvent);
@@ -592,6 +593,24 @@ message CopyFileRequest {
 	int64 offset = 7;
 	// Data to write in the destination file.
 	bytes data = 8;
+}
+
+// CopySharedFileRequest copies a single file into the guest shared directory by
+// file base name only. The agent chooses the full guest path and records the
+// mapping for bind-shared mount source resolution.
+message CopySharedFileRequest {
+	// FileName is the destination base file name, e.g. "resolv.conf".
+	string file_name = 1;
+	// FileSize is the expected file size.
+	int64 file_size = 2;
+	// FileMode is the file mode.
+	uint32 file_mode = 3;
+	// Uid is the numeric user id.
+	int32 uid = 4;
+	// Gid is the numeric group id.
+	int32 gid = 5;
+	// Data to write in the destination file.
+	bytes data = 6;
 }
 
 // CreateWatchableVolumeFileSymlinkRequest creates a symlink for a watchable volume leaf file.

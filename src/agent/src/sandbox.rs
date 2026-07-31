@@ -136,6 +136,8 @@ pub struct Sandbox {
     pub event_rx: Arc<Mutex<Receiver<String>>>,
     pub event_tx: Option<Sender<String>>,
     pub bind_watcher: BindWatcher,
+    pub bind_shared_mount_sources: HashMap<String, String>,
+    pub bind_shared_seq: u64,
     pub pcimap: HashMap<String, PciHostGuestMapping>,
     pub devcg_info: Arc<RwLock<DevicesCgroupInfo>>,
 }
@@ -171,6 +173,8 @@ impl Sandbox {
             event_rx,
             event_tx: Some(tx),
             bind_watcher: BindWatcher::new(),
+            bind_shared_mount_sources: HashMap::new(),
+            bind_shared_seq: 0,
             pcimap: HashMap::new(),
             devcg_info: Arc::new(RwLock::new(DevicesCgroupInfo::default())),
         })

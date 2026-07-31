@@ -120,6 +120,7 @@ impl_agent!(
     create_sandbox | crate::CreateSandboxRequest | crate::Empty | None,
     destroy_sandbox | crate::Empty | crate::Empty | None,
     copy_file | crate::CopyFileRequest | crate::Empty | None,
+    copy_shared_file | crate::CopySharedFileRequest | crate::Empty | None,
     create_watchable_volume_file_symlink | crate::CreateWatchableVolumeFileSymlinkRequest | crate::Empty | None,
     create_watchable_volume_data_symlink | crate::CreateWatchableVolumeDataSymlinkRequest | crate::Empty | None,
     get_oom_event | crate::Empty | crate::OomEventResponse | Some(0),
