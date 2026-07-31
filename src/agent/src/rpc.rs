@@ -262,6 +262,11 @@ impl AgentService {
         // transformer runs, so we can compare it to the executed spec after resolution.
         #[cfg(feature = "strict-policy")]
         let authorized_oci_digest = plan_digest(&oci);
+        // Retain the authorized object itself, not just its digest: a digest can only
+        // report *that* the plan changed, and FR-3 needs to decide whether the specific
+        // change was one the resolution chain is permitted to make.
+        #[cfg(feature = "strict-policy")]
+        let authorized_oci = oci.clone();
 
         info!(sl(), "receive createcontainer, spec: {:?}", &oci);
         info!(
@@ -347,14 +352,18 @@ impl AgentService {
         // write spec to bundle path, hooks might
         // read ocispec
         let olddir = setup_bundle(&cid, &mut oci)?;
-        // restore the cwd for kata-agent process.
+        // restore the cwd for kata-agent process. Registered immediately, so that an
+        // early return from the checks below cannot leave the agent process parked in
+        // the container bundle directory.
+        defer!(unistd::chdir(&olddir).unwrap());
 
         // FR-3 (canonical object): the OCI spec is now fully resolved (devices, CDI,
         // storage, sealed secrets, namespaces, guest hooks). Bind the digest of this
         // executed object to the create transaction and compare it to the digest of the
         // authorized spec captured before transformation. Divergence is expected (trusted
-        // in-guest transforms) and is recorded for audit; the executed object is bound to
-        // the transaction so the authorized->executed relationship is explicit.
+        // in-guest transforms) but is not unlimited: it is checked against the bounds the
+        // resolution chain is allowed to move within, so that "the plan the policy
+        // authorized" and "the plan the runtime executes" remain the same plan.
         //
         // The binding is only meaningful against the transaction the caller actually
         // prepared, so the caller passes its operation id down rather than this code
@@ -375,17 +384,35 @@ impl AgentService {
                     )
                 })?;
             if authorized_oci_digest != executed_oci_digest {
+                // The digests differ, which on its own says nothing: the resolution
+                // chain legitimately rewrites parts of the spec. What must not differ
+                // is anything the policy actually decided on. C-ACI/hcsshim obtains
+                // this property by ordering -- it evaluates policy on the already
+                // transformed spec -- so authorizing first, as we do, means the
+                // relationship has to be re-established explicitly here.
+                crate::plan_binding::assert_within_resolution_bounds(&authorized_oci, &oci)
+                    .inspect_err(|e| {
+                        error!(
+                            sl(),
+                            "FR-3: refusing to create container; the executed OCI object \
+                             escapes the bounds of the authorized plan";
+                            "container-id" => &cid,
+                            "authorized-oci-digest" => &authorized_oci_digest,
+                            "executed-oci-digest" => &executed_oci_digest,
+                            "violation" => e.to_string(),
+                        );
+                    })?;
                 info!(
                     sl(),
                     "FR-3: executed OCI object differs from authorized spec (trusted \
-                     in-guest transforms applied); canonical-object binding recorded";
+                     in-guest transforms applied, within resolution bounds); \
+                     canonical-object binding recorded";
                     "container-id" => &cid,
                     "authorized-oci-digest" => &authorized_oci_digest,
                     "executed-oci-digest" => &executed_oci_digest,
                 );
             }
         }
-        defer!(unistd::chdir(&olddir).unwrap());
 
         // determine which cgroup driver to take and then assign to use_systemd_cgroup
         // systemd: "[slice]:[prefix]:[name]"

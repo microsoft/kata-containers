@@ -32,7 +32,10 @@ pub mod image;
 
 pub static CDH_CLIENT: OnceCell<CDHClient> = OnceCell::const_new();
 
-const SEALED_SECRET_PREFIX: &str = "sealed.";
+// Visible to the crate so that the FR-3 plan-binding check can recognise which
+// environment values the policy authorized as sealed references, and therefore
+// which values the unsealing transform is permitted to rewrite.
+pub(crate) const SEALED_SECRET_PREFIX: &str = "sealed.";
 
 // Convenience function to obtain the scope logger.
 fn sl() -> slog::Logger {

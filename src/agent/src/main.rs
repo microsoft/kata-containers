@@ -96,6 +96,11 @@ mod policy_fragments;
 #[cfg(feature = "strict-policy")]
 mod hostdata;
 
+// FR-3: bounds the divergence between the OCI spec the policy authorized and the spec the
+// in-guest resolution chain actually executes. Only in strict confidential builds.
+#[cfg(feature = "strict-policy")]
+mod plan_binding;
+
 cfg_if! {
     if #[cfg(target_arch = "s390x")] {
         mod ap;
