@@ -185,7 +185,8 @@ impl FsWatcher {
                     sl!(),
                     "Initial sync from {:?} to managed volume {:?}", &src_sync, &volume_id_sync
                 );
-                if let Err(e) = copy_dir_recursively(&src_sync, &src_sync, &volume_id_sync, &agent_sync).await
+                if let Err(e) =
+                    copy_dir_recursively(&src_sync, &src_sync, &volume_id_sync, &agent_sync).await
                 {
                     error!(sl!(), "Initial sync failed: {:?}", e);
                 }
@@ -254,11 +255,10 @@ impl FsWatcher {
                     if Instant::now().duration_since(t) > DEBOUNCE_TIME && *need_sync.lock().await {
                         info!(
                             sl!(),
-                            "debounce sync {:?} -> managed volume {:?}",
-                            &src,
-                            &agent_volume_id
+                            "debounce sync {:?} -> managed volume {:?}", &src, &agent_volume_id
                         );
-                        if let Err(e) = copy_dir_recursively(&src, &src, &agent_volume_id, &agent).await
+                        if let Err(e) =
+                            copy_dir_recursively(&src, &src, &agent_volume_id, &agent).await
                         {
                             error!(
                                 sl!(),
@@ -364,7 +364,11 @@ impl VolumeManager {
             state.guest_path,
         );
 
-        Ok((state.guest_path.clone(), state.agent_volume_id.clone(), true))
+        Ok((
+            state.guest_path.clone(),
+            state.agent_volume_id.clone(),
+            true,
+        ))
     }
 
     /// Register monitor task into the volume manager
@@ -483,7 +487,10 @@ impl ShareFsVolume {
                     .await
                     .context("init single-file volume source")?;
 
-                    info!(sl!(), "fsshare: file {:?} to managed volume {}", &src, &source.agent_volume_id);
+                    info!(
+                        sl!(),
+                        "fsshare: file {:?} to managed volume {}", &src, &source.agent_volume_id
+                    );
 
                     Self::copy_file_to_guest(&src, &source.agent_volume_id, &agent)
                         .await
@@ -500,14 +507,10 @@ impl ShareFsVolume {
                         agent::VolumeSourceType::EmptyDir
                     };
 
-                    let source = Self::init_volume_source(
-                        &host_volume_id,
-                        volume_type,
-                        readonly,
-                        &agent,
-                    )
-                    .await
-                    .context("init directory volume source")?;
+                    let source =
+                        Self::init_volume_source(&host_volume_id, volume_type, readonly, &agent)
+                            .await
+                            .context("init directory volume source")?;
 
                     // Get or create the guest path
                     let (_guest_path, agent_volume_id, is_new) = volume_manager
@@ -521,7 +524,12 @@ impl ShareFsVolume {
                         .context("get or create volume")?;
 
                     if is_new {
-                        info!(sl!(), "fsshare: new directory {:?} to managed volume {}", &src, &agent_volume_id);
+                        info!(
+                            sl!(),
+                            "fsshare: new directory {:?} to managed volume {}",
+                            &src,
+                            &agent_volume_id
+                        );
 
                         Self::copy_directory_to_guest(&src, &agent_volume_id, &agent)
                             .await
@@ -697,10 +705,19 @@ impl ShareFsVolume {
             read_only,
         };
 
-        agent
+        let response = agent
             .init_volume_source(req)
             .await
-            .with_context(|| format!("init volume source for host path {host_volume_id}"))
+            .with_context(|| format!("init volume source for host path {host_volume_id}"));
+
+        if let Ok(ref r) = response {
+            info!(
+                sl!(),
+                "fsshare: host volume {host_volume_id} -> guest volume {}", &r.agent_volume_id
+            );
+        }
+
+        response
     }
 }
 
@@ -861,7 +878,10 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
 
                 let link_target_str = link_target.to_string_lossy().into_owned();
 
-                info!(sl!(), "fsshare: symlink {:?} -> {link_target_str}", &relative_path);
+                info!(
+                    sl!(),
+                    "fsshare: symlink {:?} -> {link_target_str}", &relative_path
+                );
 
                 let symlink_request = agent::PutVolumeFileRequest {
                     agent_volume_id: agent_volume_id.to_string(),
@@ -882,9 +902,12 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                     symlink_request.file_mode
                 );
 
-                agent.put_volume_file(symlink_request).await.context(format!(
-                    "failed to sync symlink: {relative_path:?} -> {link_target_str:?}"
-                ))?;
+                agent
+                    .put_volume_file(symlink_request)
+                    .await
+                    .context(format!(
+                        "failed to sync symlink: {relative_path:?} -> {link_target_str:?}"
+                    ))?;
             } else if metadata.is_dir() {
                 // handle directory
                 let dir_request = agent::CreateVolumeSubdirRequest {
@@ -931,7 +954,10 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                     ..Default::default()
                 };
 
-                info!(sl!(), "sync file {:?} to managed volume {}", relative_path, agent_volume_id);
+                info!(
+                    sl!(),
+                    "sync file {:?} to managed volume {}", relative_path, agent_volume_id
+                );
                 agent
                     .put_volume_file(file_request)
                     .await
