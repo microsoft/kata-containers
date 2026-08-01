@@ -31,7 +31,7 @@ package:
 
 .PHONY: package-confpods
 package-confpods:
-	CONF_PODS=yes ./package_build.sh
+	CONF_PODS=yes USE_RUNTIME_RS=yes ./package_build.sh
 
 .PHONY: uvm
 uvm:
@@ -47,7 +47,7 @@ clean:
 
 .PHONY: clean-confpods
 clean-confpods:
-	CONF_PODS=yes ./clean.sh
+	CONF_PODS=yes USE_RUNTIME_RS=yes ./clean.sh
 
 .PHONY: deploy
 deploy: deploy-package deploy-uvm
@@ -69,11 +69,11 @@ deploy-confpods: deploy-confpods-package deploy-confpods-uvm
 
 .PHONY: deploy-confpods-package
 deploy-confpods-package:
-	CONF_PODS=yes ./package_install.sh
+	CONF_PODS=yes USE_RUNTIME_RS=yes ./package_install.sh
 
 .PHONY: deploy-confpods-package-tools
 deploy-confpods-package-tools:
-	CONF_PODS=yes ./package_tools_install.sh
+	CONF_PODS=yes USE_RUNTIME_RS=yes ./package_tools_install.sh
 
 .PHONY: deploy-confpods-uvm
 deploy-confpods-uvm:

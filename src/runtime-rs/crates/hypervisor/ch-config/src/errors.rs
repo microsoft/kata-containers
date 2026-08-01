@@ -85,8 +85,8 @@ pub enum CpusConfigError {
 
 #[derive(Error, Debug, PartialEq)]
 pub enum PayloadConfigError {
-    #[error("No kernel specified")]
-    NoKernel,
+    #[error("No kernel or IGVM specified")]
+    NoBootPayload,
 
     #[error("No initrd/initramfs specified")]
     NoInitrd,

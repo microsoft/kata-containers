@@ -37,7 +37,7 @@ KATA_CTL_BINARY="${RUNTIME_RS_TARGET}/kata-ctl"
 SHIM_BINARY_RUNTIME_GO="${SHIM_BINARY_NAME}-go"
 SHIM_BINARY_RUNTIME_RS="${SHIM_BINARY_NAME}-rs"
 
-if [[ "${CONF_PODS}" == "yes" ]]; then
+if [[ "${CONF_PODS}" == "yes" && "${BUILD_TARFS}" == "yes" ]]; then
 	echo "Installing tardev-snapshotter binaries and service file"
 	mkdir -p "${PREFIX}"/usr/sbin
 	cp -a --backup=numbered src/utarfs/target/release/utarfs "${PREFIX}"/usr/sbin/mount.tar
@@ -78,10 +78,15 @@ ln -sf --backup=numbered "${default_shim_binary}" "${PREFIX}/${SHIM_BINARIES_PAT
 if [[ "${SHIM_REDEPLOY_CONFIG}" == "yes" ]]; then
 
 	echo "Installing configurations side by side"
-	cp -a --backup=numbered "${CONFIG_DIR_RUNTIME_GO}/${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}"
-	cp -a --backup=numbered "${CONFIG_DIR_RUNTIME_RS}/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}"
-	cp -a --backup=numbered "${CONFIG_DIR_RUNTIME_GO}/${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO}"
-	cp -a --backup=numbered "${CONFIG_DIR_RUNTIME_RS}/${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}"
+	if [[ "${CONF_PODS}" == "yes" && "${USE_RUNTIME_RS}" == "yes" ]]; then
+		cp -a --backup=numbered "${CONFIG_DIR_RUNTIME_RS}/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_SNP}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_SNP}"
+		cp -a --backup=numbered "${CONFIG_DIR_RUNTIME_RS}/${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_SNP}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_SNP}"
+	else
+		cp -a --backup=numbered "${CONFIG_DIR_RUNTIME_GO}/${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}"
+		cp -a --backup=numbered "${CONFIG_DIR_RUNTIME_RS}/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}"
+		cp -a --backup=numbered "${CONFIG_DIR_RUNTIME_GO}/${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO}"
+		cp -a --backup=numbered "${CONFIG_DIR_RUNTIME_RS}/${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}"
+	fi
 
 	echo "Installing default shim configuration: ${SHIM_CONFIG_FILE_NAME}"
 	cp -a --backup=numbered "${shim_config_src_dir}/${SHIM_CONFIG_FILE_NAME}" "${PREFIX}/${SHIM_CONFIG_PATH}/${SHIM_CONFIG_INST_FILE_NAME}"

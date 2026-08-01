@@ -6,9 +6,9 @@ use crate::NamedHypervisorConfig;
 use crate::ProtectionDevConfig;
 use crate::VmConfig;
 use crate::{
-    guest_protection_is_tdx, ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpuTopology,
-    CpusConfig, DiskConfig, MemoryConfig, PayloadConfig, PlatformConfig, PmemConfig, RngConfig,
-    VsockConfig,
+    guest_protection_is_snp, guest_protection_is_tdx, ConsoleConfig, ConsoleOutputMode,
+    CpuFeatures, CpuTopology, CpusConfig, DiskConfig, MemoryConfig, PayloadConfig, PlatformConfig,
+    PmemConfig, RngConfig, VsockConfig,
 };
 use anyhow::Result;
 use kata_sys_util::protection::GuestProtection;
@@ -38,6 +38,7 @@ pub const DEFAULT_DISK_QUEUES: usize = 1;
 pub const DEFAULT_DISK_QUEUE_SIZE: u16 = 128;
 
 const MSHV_DEVICE_PATH: &str = "/dev/mshv";
+const SNP_ZERO_HOST_DATA: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 fn cpu_nested_config() -> Option<bool> {
     if Path::new(MSHV_DEVICE_PATH).exists() {
@@ -264,7 +265,10 @@ impl TryFrom<(MemoryInfo, GuestProtection)> for MemoryConfig {
             return Err(MemoryConfigError::DefaultMemSizeTooBig);
         }
 
-        let hotplug_size = if guest_protection_is_tdx(guest_protection_to_use) {
+        let protected_guest = guest_protection_is_tdx(guest_protection_to_use.clone())
+            || guest_protection_is_snp(guest_protection_to_use.clone());
+
+        let hotplug_size = if protected_guest {
             None
         } else {
             // The amount of memory that can be hot-plugged is the total less the
@@ -286,7 +290,7 @@ impl TryFrom<(MemoryInfo, GuestProtection)> for MemoryConfig {
             size: mem_bytes,
 
             // Required
-            shared: true,
+            shared: !guest_protection_is_snp(guest_protection_to_use),
 
             hotplug_size,
 
@@ -339,9 +343,11 @@ impl TryFrom<(CpuInfo, GuestProtection)> for CpusConfig {
 
         let boot_vcpus = default_vcpus;
 
-        let max_vcpus = if guest_protection_is_tdx(guest_protection_to_use.clone()) {
-            // Hotplug is not available with TDX so limit to number of boot
-            // cpus.
+        let protected_guest = guest_protection_is_tdx(guest_protection_to_use.clone())
+            || guest_protection_is_snp(guest_protection_to_use.clone());
+
+        let max_vcpus = if protected_guest {
+            // CPU hotplug is not available for protected CH guests.
             default_vcpus
         } else {
             default_max_vcpus
@@ -423,13 +429,25 @@ impl
         let guest_protection_to_use = args.2;
         let protection_device = args.3;
 
-        // The kernel is always specified here,
-        // not in the top level VmConfig.kernel.
+        let using_igvm = !boot_info.igvm.is_empty();
+
+        // The external kernel, when used, is specified in PayloadConfig.
+        // IGVM boot instead leaves kernel unset.
         let kernel = if boot_info.kernel.is_empty() {
-            return Err(PayloadConfigError::NoKernel);
+            None
         } else {
-            PathBuf::from(boot_info.kernel)
+            Some(PathBuf::from(boot_info.kernel))
         };
+
+        let igvm = if using_igvm {
+            Some(PathBuf::from(boot_info.igvm))
+        } else {
+            None
+        };
+
+        if kernel.is_none() && igvm.is_none() {
+            return Err(PayloadConfigError::NoBootPayload);
+        }
 
         let initramfs = if boot_info.initrd.is_empty() {
             None
@@ -437,7 +455,9 @@ impl
             Some(PathBuf::from(boot_info.initrd))
         };
 
-        let firmware = if guest_protection_is_tdx(guest_protection_to_use) {
+        let firmware = if using_igvm {
+            None
+        } else if guest_protection_is_tdx(guest_protection_to_use.clone()) {
             if boot_info.firmware.is_empty() {
                 return Err(PayloadConfigError::TDXFirmwareMissing);
             } else {
@@ -455,17 +475,22 @@ impl
             None
         };
 
-        let host_data = if let Some(ref data) = protection_device {
+        let mut host_data = if let Some(ref data) = protection_device {
             data.host_data.clone()
         } else {
             None
         };
 
+        if guest_protection_is_snp(guest_protection_to_use) && host_data.is_none() {
+            host_data = Some(SNP_ZERO_HOST_DATA.to_string());
+        }
+
         let payload = PayloadConfig {
-            kernel: Some(kernel),
+            kernel,
             initramfs,
-            cmdline,
+            cmdline: if using_igvm { None } else { cmdline },
             firmware,
+            igvm,
             mrconfigid,
             host_data,
         };
@@ -535,7 +560,9 @@ impl TryFrom<&BootInfo> for PmemConfig {
 }
 
 fn get_serial_cfg(debug: bool, guest_protection_to_use: GuestProtection) -> ConsoleConfig {
-    let mode = if guest_protection_is_tdx(guest_protection_to_use) {
+    let mode = if guest_protection_is_tdx(guest_protection_to_use.clone())
+        || guest_protection_is_snp(guest_protection_to_use)
+    {
         ConsoleOutputMode::Off
     } else if debug {
         ConsoleOutputMode::Tty
@@ -551,7 +578,9 @@ fn get_serial_cfg(debug: bool, guest_protection_to_use: GuestProtection) -> Cons
 }
 
 fn get_console_cfg(debug: bool, guest_protection_to_use: GuestProtection) -> ConsoleConfig {
-    let mode = if guest_protection_is_tdx(guest_protection_to_use) {
+    let mode = if guest_protection_is_tdx(guest_protection_to_use.clone())
+        || guest_protection_is_snp(guest_protection_to_use)
+    {
         if debug {
             ConsoleOutputMode::Tty
         } else {
@@ -569,7 +598,7 @@ fn get_console_cfg(debug: bool, guest_protection_to_use: GuestProtection) -> Con
 }
 
 fn get_platform_cfg(guest_protection_to_use: GuestProtection) -> Option<PlatformConfig> {
-    if guest_protection_is_tdx(guest_protection_to_use) {
+    if guest_protection_is_tdx(guest_protection_to_use.clone()) {
         let platform = PlatformConfig {
             tdx: true,
             num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
@@ -577,10 +606,19 @@ fn get_platform_cfg(guest_protection_to_use: GuestProtection) -> Option<Platform
             ..Default::default()
         };
 
-        Some(platform)
-    } else {
-        None
+        return Some(platform);
     }
+
+    if guest_protection_is_snp(guest_protection_to_use) {
+        return Some(PlatformConfig {
+            sev_snp: true,
+            num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
+
+            ..Default::default()
+        });
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -742,6 +780,7 @@ mod tests {
             cmdline,
             mrconfigid: None,
             host_data: None,
+            igvm: None,
         };
 
         (boot_info, payload_config)
@@ -935,6 +974,11 @@ mod tests {
             result: Option<PlatformConfig>,
         }
 
+        let snp_details = SevSnpDetails {
+            cbitpos: 42,
+            phys_addr_reduction: 1,
+        };
+
         let tests = &[
             TestData {
                 guest_protection: GuestProtection::NoProtection,
@@ -944,6 +988,15 @@ mod tests {
                 guest_protection: GuestProtection::Tdx,
                 result: Some(PlatformConfig {
                     tdx: true,
+                    num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
+
+                    ..Default::default()
+                }),
+            },
+            TestData {
+                guest_protection: GuestProtection::Snp(snp_details),
+                result: Some(PlatformConfig {
+                    sev_snp: true,
                     num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
 
                     ..Default::default()
@@ -1328,6 +1381,7 @@ mod tests {
 
         let cmdline = "debug foo a=b c=d";
         let kernel = "kernel";
+        let igvm = "igvm";
         let firmware = "firmware";
         let initramfs = "initramfs";
 
@@ -1360,7 +1414,7 @@ mod tests {
                 cmdline: None,
                 guest_protection: GuestProtection::NoProtection,
                 protection_device: None,
-                result: Err(PayloadConfigError::NoKernel),
+                result: Err(PayloadConfigError::NoBootPayload),
             },
             TestData {
                 boot_info: BootInfo {
@@ -1400,6 +1454,22 @@ mod tests {
                     firmware: Some(PathBuf::from(firmware)),
                     mrconfigid: None,
                     host_data: None,
+                    igvm: None,
+                }),
+            },
+            TestData {
+                boot_info: BootInfo {
+                    igvm: igvm.into(),
+
+                    ..Default::default()
+                },
+                cmdline: Some(cmdline.to_string()),
+                guest_protection: GuestProtection::NoProtection,
+                protection_device: None,
+                result: Ok(PayloadConfig {
+                    igvm: Some(PathBuf::from(igvm)),
+
+                    ..Default::default()
                 }),
             },
             TestData {
@@ -2032,7 +2102,9 @@ mod tests {
             },
             TestData {
                 cfg: named_hypervisor_cfg_with_image_and_kernel_bad_payload,
-                result: Err(VmConfigError::PayloadError(PayloadConfigError::NoKernel)),
+                result: Err(VmConfigError::PayloadError(
+                    PayloadConfigError::NoBootPayload,
+                )),
             },
             TestData {
                 cfg: named_hypervisor_cfg_with_image_and_kernel_bad_memory,

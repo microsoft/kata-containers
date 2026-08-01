@@ -62,7 +62,7 @@ impl ConfigPlugin for CloudHypervisorConfig {
             }
             resolve_path!(ch.ctlpath, "CH ctlpath `{}` is invalid: {}")?;
 
-            if ch.boot_info.kernel.is_empty() {
+            if ch.boot_info.kernel.is_empty() && ch.boot_info.igvm.is_empty() {
                 ch.boot_info.kernel = default::DEFAULT_CH_GUEST_KERNEL_IMAGE.to_string();
             }
             if ch.boot_info.kernel_params.is_empty() {
@@ -112,8 +112,23 @@ impl ConfigPlugin for CloudHypervisorConfig {
                 ));
             }
 
-            if ch.boot_info.kernel.is_empty() {
+            if ch.boot_info.kernel.is_empty() && ch.boot_info.igvm.is_empty() {
                 return Err(std::io::Error::other("Guest kernel image for CH is empty"));
+            }
+            if !ch.boot_info.kernel.is_empty() && !ch.boot_info.igvm.is_empty() {
+                return Err(std::io::Error::other(
+                    "CH cannot configure both a guest kernel and an IGVM",
+                ));
+            }
+            if !ch.boot_info.igvm.is_empty() && !ch.boot_info.initrd.is_empty() {
+                return Err(std::io::Error::other(
+                    "runtime-rs IGVM boot currently does not support an initrd rootfs",
+                ));
+            }
+            if !ch.boot_info.igvm.is_empty() && ch.boot_info.image.is_empty() {
+                return Err(std::io::Error::other(
+                    "runtime-rs IGVM boot currently requires a guest image",
+                ));
             }
             if ch.boot_info.image.is_empty() && ch.boot_info.initrd.is_empty() {
                 return Err(std::io::Error::other(

@@ -60,8 +60,8 @@ if [[ "${CONF_PODS}" == "no" ]]; then
 	runtime_go_make_flags+=("DEFSTATICRESOURCEMGMT_CLH=true" "KERNELPATH_CLH=${KERNEL_BINARY_LOCATION}")
 	runtime_rs_make_flags+=("DEFSTATICRESOURCEMGMT_CLH=true" "KERNELPATH_CLH=${KERNEL_BINARY_LOCATION}")
 else
-	runtime_go_make_flags+=("CLHPATH=${CLOUD_HYPERVISOR_LOCATION}")
-	runtime_rs_make_flags+=("CLHPATH=${CLOUD_HYPERVISOR_LOCATION}")
+	runtime_go_make_flags+=("CLHPATH=${CLH_SNP_PATH}")
+	runtime_rs_make_flags+=("CLHPATH=${CLH_SNP_PATH}")
 fi
 
 # On Mariner 3.0 we use cgroupsv2 with a single sandbox cgroup
@@ -83,7 +83,7 @@ fi
 
 pushd "${repo_dir}" || exit
 
-if [[ "${CONF_PODS}" == "yes" ]]; then
+if [[ "${CONF_PODS}" == "yes" && "${BUILD_TARFS}" == "yes" ]]; then
 
 	echo "Building utarfs binary"
 	pushd src/utarfs/ || exit
@@ -114,6 +114,12 @@ popd || exit
 
 echo "Building runtime-rs shim binary"
 pushd src/runtime-rs/ || exit
+if [[ "${CONF_PODS}" == "yes" ]]; then
+	# Hack: regenerate the SNP config so it includes the current command-line
+	# overrides. Make tracks the template timestamp, but not values such as
+	# CLH_SNP_PATH used while expanding the template.
+	rm -f "config/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_SNP}"
+fi
 make "${runtime_rs_make_flags[@]}"
 popd || exit
 
@@ -143,7 +149,11 @@ create_debug_shim_config() {
 }
 
 create_debug_shim_config  "${CONFIG_DIR_RUNTIME_GO}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO}"
-create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}"
+if [[ "${CONF_PODS}" == "yes" ]]; then
+	create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_SNP}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_SNP}"
+else
+	create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}"
+fi
 
 echo "Building agent binary and generating service files"
 pushd src/agent/ || exit

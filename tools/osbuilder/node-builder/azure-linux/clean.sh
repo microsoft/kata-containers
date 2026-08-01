@@ -44,7 +44,7 @@ popd || exit
 echo "Clean IGVM tool installation"
 
 
-if [[ "${CONF_PODS}" == "yes" ]]; then
+if [[ "${CONF_PODS}" == "yes" && "${BUILD_TARFS}" == "yes" ]]; then
 
 	echo "Clean tardev-snapshotter tarfs driver build"
 	pushd src/tarfs || exit

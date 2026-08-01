@@ -594,8 +594,15 @@ impl VirtSandbox {
                 })))
             }
             GuestProtection::Snp(details) => {
-                if hypervisor_config.boot_info.firmware.is_empty() {
-                    return Err(anyhow!("SEV-SNP protection requires a path to firmaware"));
+                let is_cloud_hypervisor = Arc::clone(&self.resource_manager.config().await)
+                    .runtime
+                    .hypervisor_name
+                    == "clh";
+
+                // Cloud Hypervisor can boot SNP guests from IGVM and does not
+                // require the external firmware used by QEMU.
+                if hypervisor_config.boot_info.firmware.is_empty() && !is_cloud_hypervisor {
+                    return Err(anyhow!("SEV-SNP protection requires a path to firmware"));
                 }
 
                 // If we got here SEV-SNP is available.  However, if

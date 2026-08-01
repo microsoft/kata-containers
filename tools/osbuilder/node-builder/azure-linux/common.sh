@@ -23,6 +23,8 @@ SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO="configuration-clh-debug.toml"
 CONFIG_DIR_RUNTIME_GO="src/runtime/config"
 SHIM_CONFIG_FILE_NAME_RUNTIME_RS="configuration-clh-runtime-rs.toml"
 SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS="configuration-clh-runtime-rs-debug.toml"
+SHIM_CONFIG_FILE_NAME_RUNTIME_RS_SNP="configuration-clh-snp-runtime-rs.toml"
+SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_SNP="configuration-clh-snp-runtime-rs-debug.toml"
 CONFIG_DIR_RUNTIME_RS="src/runtime-rs/config"
 
 if [[ "${CONF_PODS}" == "yes" ]]; then
@@ -35,11 +37,19 @@ if [[ "${CONF_PODS}" == "yes" ]]; then
 	IGVM_DBG_FILE_NAME="kata-containers-igvm-debug.img"
 	UVM_MEASUREMENT_FILE_NAME="igvm-measurement.cose"
 	UVM_DBG_MEASUREMENT_FILE_NAME="igvm-debug-measurement.cose"
-	SHIM_CONFIG_PATH="${INSTALL_PATH_PREFIX}/share/defaults/kata-containers"
-	SHIM_CONFIG_FILE_NAME="configuration-clh-snp.toml"
-	SHIM_CONFIG_INST_FILE_NAME="${SHIM_CONFIG_FILE_NAME}"
-	SHIM_DBG_CONFIG_FILE_NAME="configuration-clh-snp-debug.toml"
-	SHIM_DBG_CONFIG_INST_FILE_NAME="${SHIM_DBG_CONFIG_FILE_NAME}"
+	if [[ "${USE_RUNTIME_RS}" == "yes" ]]; then
+		SHIM_CONFIG_PATH="${INSTALL_PATH_PREFIX}/share/defaults/kata-containers/runtime-rs"
+		SHIM_CONFIG_FILE_NAME="${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_SNP}"
+		SHIM_DBG_CONFIG_FILE_NAME="${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_SNP}"
+		SHIM_CONFIG_INST_FILE_NAME="configuration.toml"
+		SHIM_DBG_CONFIG_INST_FILE_NAME="configuration-debug.toml"
+	else
+		SHIM_CONFIG_PATH="${INSTALL_PATH_PREFIX}/share/defaults/kata-containers"
+		SHIM_CONFIG_FILE_NAME="configuration-clh-snp.toml"
+		SHIM_CONFIG_INST_FILE_NAME="${SHIM_CONFIG_FILE_NAME}"
+		SHIM_DBG_CONFIG_FILE_NAME="configuration-clh-snp-debug.toml"
+		SHIM_DBG_CONFIG_INST_FILE_NAME="${SHIM_DBG_CONFIG_FILE_NAME}"
+	fi
 	DEBUGGING_BINARIES_PATH="${INSTALL_PATH_PREFIX}/bin"
 	SHIM_BINARIES_PATH="/usr/local/bin"
 	SHIM_BINARY_NAME="containerd-shim-kata-cc-v2"
@@ -69,6 +79,7 @@ fi
 
 # this is where cloud-hypervisor-cvm gets installed (see package SPEC)
 CLOUD_HYPERVISOR_LOCATION="/usr/bin/cloud-hypervisor"
+CLH_SNP_PATH=${CLH_SNP_PATH:-${CLOUD_HYPERVISOR_LOCATION}}
 # this is where kernel-uvm gets installed (see package SPEC)
 KERNEL_BINARY_LOCATION="/usr/share/cloud-hypervisor/vmlinux.bin"
 # Mariner 3: different binary name

@@ -26,7 +26,9 @@ use ch_config::{
     },
     VmResize,
 };
-use ch_config::{guest_protection_is_tdx, NamedHypervisorConfig, VmConfig};
+use ch_config::{
+    guest_protection_is_snp, guest_protection_is_tdx, NamedHypervisorConfig, VmConfig,
+};
 use core::future::poll_fn;
 use futures::future::join_all;
 use kata_sys_util::protection::{available_guest_protection, GuestProtection};
@@ -66,6 +68,7 @@ const CH_FEATURES_KEY: &str = "features";
 
 // The name of the CH build-time feature for Intel TDX.
 const CH_FEATURE_TDX: &str = "tdx";
+const CH_FEATURE_SEV_SNP: &str = "sev_snp";
 
 #[derive(Debug, PartialEq)]
 enum CloudHypervisorLogLevel {
@@ -90,9 +93,8 @@ pub enum GuestProtectionError {
     #[error("TDX guest protection available and must be used with Cloud Hypervisor (set 'confidential_guest=true')")]
     TDXProtectionMustBeUsedWithCH,
 
-    // TDX is the only tested CH protection currently.
-    #[error("Expected TDX protection, found {0}")]
-    ExpectedTDXProtection(GuestProtection),
+    #[error("Expected TDX or requested SEV-SNP protection, found {0}")]
+    UnsupportedProtection(GuestProtection),
 }
 
 impl CloudHypervisorInner {
@@ -117,11 +119,25 @@ impl CloudHypervisorInner {
             }
         }
 
+        if guest_protection_is_snp(self.guest_protection_to_use.clone()) {
+            if let Some(features) = &self.ch_features {
+                if !features.contains(&CH_FEATURE_SEV_SNP.to_string()) {
+                    return Err(anyhow!(
+                        "Cloud Hypervisor is not built with SEV-SNP support"
+                    ));
+                }
+            }
+        }
+
         Ok(())
     }
 
     async fn get_kernel_params(&self) -> Result<String> {
         let cfg = &self.config;
+
+        if !cfg.boot_info.igvm.is_empty() {
+            return Ok(String::new());
+        }
 
         let enable_debug = cfg.debug_info.enable_debug;
 
@@ -597,6 +613,7 @@ impl CloudHypervisorInner {
         let cfg = &self.config;
 
         let confidential_guest = cfg.security_info.confidential_guest;
+        let sev_snp_guest = cfg.security_info.sev_snp_guest;
 
         if confidential_guest {
             info!(sl!(), "confidential guest requested");
@@ -614,10 +631,12 @@ impl CloudHypervisorInner {
             if protection == GuestProtection::NoProtection {
                 // User wants protection, but none available.
                 return Err(anyhow!(GuestProtectionError::NoProtectionAvailable));
-            } else if let GuestProtection::Tdx = protection {
+            } else if matches!(protection, GuestProtection::Tdx)
+                || (sev_snp_guest && matches!(protection, GuestProtection::Snp(_)))
+            {
                 info!(sl!(), "guest protection available and requested"; "guest-protection" => protection.to_string());
             } else {
-                return Err(anyhow!(GuestProtectionError::ExpectedTDXProtection(
+                return Err(anyhow!(GuestProtectionError::UnsupportedProtection(
                     protection
                 )));
             }
@@ -628,6 +647,7 @@ impl CloudHypervisorInner {
             return Err(anyhow!(GuestProtectionError::TDXProtectionMustBeUsedWithCH));
         } else {
             info!(sl!(), "guest protection available but not requested"; "guest-protection" => protection.to_string());
+            self.guest_protection_to_use = GuestProtection::NoProtection;
         }
 
         Ok(())
@@ -803,8 +823,10 @@ impl CloudHypervisorInner {
     pub(crate) async fn capabilities(&self) -> Result<Capabilities> {
         let mut caps = Capabilities::default();
 
-        let flags = if guest_protection_is_tdx(self.guest_protection_to_use.clone()) {
-            // TDX does not permit the use of virtio-fs.
+        let flags = if guest_protection_is_tdx(self.guest_protection_to_use.clone())
+            || guest_protection_is_snp(self.guest_protection_to_use.clone())
+        {
+            // Protected CH guests do not use virtio-fs.
             CapabilityBits::BlockDeviceSupport
                 | CapabilityBits::BlockDeviceHotplugSupport
                 | CapabilityBits::HybridVsockSupport
@@ -1237,9 +1259,15 @@ mod tests {
         // available_guest_protection() requires super user privs.
         skip_if_not_root!();
 
+        let sev_snp_details = SevSnpDetails {
+            cbitpos: 42,
+            phys_addr_reduction: 1,
+        };
+
         #[derive(Debug)]
         struct TestData {
             confidential_guest: bool,
+            sev_snp_guest: bool,
             available_protection: Option<GuestProtection>,
 
             result: Result<()>,
@@ -1251,41 +1279,70 @@ mod tests {
         let tests = &[
             TestData {
                 confidential_guest: false,
+                sev_snp_guest: false,
                 available_protection: Some(GuestProtection::NoProtection),
                 result: Ok(()),
                 guest_protection_to_use: GuestProtection::NoProtection,
             },
             TestData {
                 confidential_guest: true,
+                sev_snp_guest: false,
                 available_protection: Some(GuestProtection::NoProtection),
                 result: Err(anyhow!(GuestProtectionError::NoProtectionAvailable)),
                 guest_protection_to_use: GuestProtection::NoProtection,
             },
             TestData {
                 confidential_guest: false,
+                sev_snp_guest: false,
                 available_protection: Some(GuestProtection::Tdx),
                 result: Err(anyhow!(GuestProtectionError::TDXProtectionMustBeUsedWithCH)),
                 guest_protection_to_use: GuestProtection::Tdx,
             },
             TestData {
                 confidential_guest: true,
+                sev_snp_guest: false,
                 available_protection: Some(GuestProtection::Tdx),
                 result: Ok(()),
                 guest_protection_to_use: GuestProtection::Tdx,
             },
             TestData {
                 confidential_guest: false,
+                sev_snp_guest: false,
                 available_protection: Some(GuestProtection::Pef),
                 result: Ok(()),
                 guest_protection_to_use: GuestProtection::NoProtection,
             },
             TestData {
                 confidential_guest: true,
+                sev_snp_guest: false,
                 available_protection: Some(GuestProtection::Pef),
-                result: Err(anyhow!(GuestProtectionError::ExpectedTDXProtection(
+                result: Err(anyhow!(GuestProtectionError::UnsupportedProtection(
                     GuestProtection::Pef
                 ))),
                 guest_protection_to_use: GuestProtection::Pef,
+            },
+            TestData {
+                confidential_guest: true,
+                sev_snp_guest: false,
+                available_protection: Some(GuestProtection::Snp(sev_snp_details.clone())),
+                result: Err(anyhow!(GuestProtectionError::UnsupportedProtection(
+                    GuestProtection::Snp(sev_snp_details.clone())
+                ))),
+                guest_protection_to_use: GuestProtection::Snp(sev_snp_details.clone()),
+            },
+            TestData {
+                confidential_guest: false,
+                sev_snp_guest: false,
+                available_protection: Some(GuestProtection::Snp(sev_snp_details.clone())),
+                result: Ok(()),
+                guest_protection_to_use: GuestProtection::NoProtection,
+            },
+            TestData {
+                confidential_guest: true,
+                sev_snp_guest: true,
+                available_protection: Some(GuestProtection::Snp(sev_snp_details.clone())),
+                result: Ok(()),
+                guest_protection_to_use: GuestProtection::Snp(sev_snp_details.clone()),
             },
         ];
 
@@ -1299,6 +1356,7 @@ mod tests {
             let cfg = HypervisorConfig {
                 security_info: SecurityInfo {
                     confidential_guest: d.confidential_guest,
+                    sev_snp_guest: d.sev_snp_guest,
 
                     ..Default::default()
                 },

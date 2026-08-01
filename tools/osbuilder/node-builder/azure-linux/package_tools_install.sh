@@ -31,8 +31,10 @@ mkdir -p "${PREFIX}/${UVM_TOOLS_PATH_OSB}/node-builder/azure-linux/agent-install
 
 if [[ "${CONF_PODS}" == "yes" ]]; then
 	mkdir -p "${PREFIX}/${UVM_TOOLS_PATH_SRC}/kata-opa"
-	mkdir -p "${PREFIX}/${UVM_TOOLS_PATH_SRC}/tarfs"
 	mkdir -p "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/azure-linux"
+	if [[ "${BUILD_TARFS}" == "yes" ]]; then
+		mkdir -p "${PREFIX}/${UVM_TOOLS_PATH_SRC}/tarfs"
+	fi
 fi
 
 echo "Installing UVM build scripting"
@@ -58,11 +60,13 @@ cp -a --backup=numbered tools/osbuilder/node-builder/azure-linux/agent-install/u
 if [[ "${CONF_PODS}" == "yes" ]]; then
 	cp -a --backup=numbered src/kata-opa/allow-all.rego "${PREFIX}/${UVM_TOOLS_PATH_SRC}/kata-opa/"
 	cp -a --backup=numbered src/kata-opa/allow-set-policy.rego "${PREFIX}/${UVM_TOOLS_PATH_SRC}/kata-opa/"
-	cp -a --backup=numbered src/tarfs/Makefile "${PREFIX}/${UVM_TOOLS_PATH_SRC}/tarfs/"
-	cp -a --backup=numbered src/tarfs/tarfs.c "${PREFIX}/${UVM_TOOLS_PATH_SRC}/tarfs/"
 	cp -a --backup=numbered tools/osbuilder/igvm-builder/igvm_builder.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/"
 	cp -a --backup=numbered tools/osbuilder/igvm-builder/azure-linux/config.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/azure-linux/"
 	cp -a --backup=numbered tools/osbuilder/igvm-builder/azure-linux/igvm_lib.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/azure-linux/"
+	if [[ "${BUILD_TARFS}" == "yes" ]]; then
+		cp -a --backup=numbered src/tarfs/Makefile "${PREFIX}/${UVM_TOOLS_PATH_SRC}/tarfs/"
+		cp -a --backup=numbered src/tarfs/tarfs.c "${PREFIX}/${UVM_TOOLS_PATH_SRC}/tarfs/"
+	fi
 fi
 
 popd || exit

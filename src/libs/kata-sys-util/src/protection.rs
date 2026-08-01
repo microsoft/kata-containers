@@ -84,16 +84,22 @@ pub const TDX_KVM_PARAMETER_PATH: &str = "/sys/module/kvm_intel/parameters/tdx";
 pub const SEV_KVM_PARAMETER_PATH: &str = "/sys/module/kvm_amd/parameters/sev";
 #[cfg(target_arch = "x86_64")]
 pub const SNP_KVM_PARAMETER_PATH: &str = "/sys/module/kvm_amd/parameters/sev_snp";
+pub const MSHV_DEVICE_PATH: &str = "/dev/mshv";
 
 #[cfg(target_arch = "x86_64")]
 pub fn available_guest_protection() -> Result<GuestProtection, ProtectionError> {
-    arch_guest_protection(SEV_KVM_PARAMETER_PATH, SNP_KVM_PARAMETER_PATH)
+    arch_guest_protection(
+        SEV_KVM_PARAMETER_PATH,
+        SNP_KVM_PARAMETER_PATH,
+        MSHV_DEVICE_PATH,
+    )
 }
 
 #[cfg(target_arch = "x86_64")]
 pub fn arch_guest_protection(
     sev_path: &str,
     snp_path: &str,
+    mshv_path: &str,
 ) -> Result<GuestProtection, ProtectionError> {
     // Check if /sys/module/kvm_intel/parameters/tdx is set to 'Y'
     if Path::new(TDX_KVM_PARAMETER_PATH).exists() {
@@ -150,7 +156,7 @@ pub fn arch_guest_protection(
         Ok((cbitpos, phys_addr_reduction))
     };
 
-    let is_snp_available = check_contents(snp_path)?;
+    let is_snp_available = check_contents(snp_path)? || mshv_available(mshv_path);
     let is_sev_available = is_snp_available || check_contents(sev_path)?;
     if is_snp_available || is_sev_available {
         let (cbitpos, phys_addr_reduction) = retrieve_sev_params()?;
@@ -166,6 +172,11 @@ pub fn arch_guest_protection(
     }
 
     Ok(GuestProtection::NoProtection)
+}
+
+#[cfg(target_arch = "x86_64")]
+fn mshv_available(device_path: &str) -> bool {
+    !device_path.is_empty() && Path::new(device_path).exists()
 }
 
 #[cfg(target_arch = "s390x")]
@@ -242,6 +253,17 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn test_mshv_available() {
+        let dir = tempdir().unwrap();
+        let mshv_path = dir.path().join("mshv");
+
+        assert!(!mshv_available(mshv_path.to_str().unwrap()));
+
+        fs::File::create(&mshv_path).unwrap();
+        assert!(mshv_available(mshv_path.to_str().unwrap()));
+    }
+
+    #[test]
     fn test_arch_guest_protection_snp() {
         // Test snp
         let dir = tempdir().unwrap();
@@ -255,12 +277,12 @@ mod tests {
         let mut snp_file = fs::File::create(snp_file_path).unwrap();
         writeln!(snp_file, "Y").unwrap();
 
-        let actual = arch_guest_protection("/xyz/tmp", path.to_str().unwrap());
+        let actual = arch_guest_protection("/xyz/tmp", path.to_str().unwrap(), "");
         assert!(actual.is_ok());
         assert!(matches!(actual.unwrap(), GuestProtection::Snp(_)));
 
         writeln!(snp_file, "N").unwrap();
-        let actual = arch_guest_protection("/xyz/tmp", path.to_str().unwrap());
+        let actual = arch_guest_protection("/xyz/tmp", path.to_str().unwrap(), "");
         assert!(actual.is_ok());
         assert_eq!(actual.unwrap(), GuestProtection::NoProtection);
     }
@@ -279,12 +301,12 @@ mod tests {
         let mut sev_file = fs::File::create(sev_file_path).unwrap();
         writeln!(sev_file, "Y").unwrap();
 
-        let actual = arch_guest_protection(sev_path.to_str().unwrap(), "/xyz/tmp");
+        let actual = arch_guest_protection(sev_path.to_str().unwrap(), "/xyz/tmp", "");
         assert!(actual.is_ok());
         assert!(matches!(actual.unwrap(), GuestProtection::Sev(_)));
 
         writeln!(sev_file, "N").unwrap();
-        let actual = arch_guest_protection(sev_path.to_str().unwrap(), "/xyz/tmp");
+        let actual = arch_guest_protection(sev_path.to_str().unwrap(), "/xyz/tmp", "");
         assert!(actual.is_ok());
         assert_eq!(actual.unwrap(), GuestProtection::NoProtection);
     }
@@ -306,14 +328,14 @@ mod tests {
 
         std::fs::create_dir_all(tdx_path.clone()).unwrap();
 
-        let actual = arch_guest_protection(invalid_dir, invalid_dir);
+        let actual = arch_guest_protection(invalid_dir, invalid_dir, invalid_dir);
         assert!(actual.is_ok());
         assert_eq!(actual.unwrap(), GuestProtection::NoProtection);
 
-        let actual = arch_guest_protection(invalid_dir, invalid_dir);
+        let actual = arch_guest_protection(invalid_dir, invalid_dir, invalid_dir);
         assert!(actual.is_err());
 
-        let result = arch_guest_protection(invalid_dir, invalid_dir);
+        let result = arch_guest_protection(invalid_dir, invalid_dir, invalid_dir);
         assert!(result.is_ok());
 
         let result = result.unwrap();

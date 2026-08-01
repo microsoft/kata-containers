@@ -39,16 +39,11 @@ sudo tee -a /etc/containerd/config.toml 2&>1 <<EOF
   privileged_without_host_devices = true
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata.options]
     ConfigPath = "/usr/share/defaults/kata-containers/configuration.toml"
-[proxy_plugins]
-  [proxy_plugins.tardev]
-    type = "snapshot"
-    address = "/run/containerd/tardev-snapshotter.sock"
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-cc]
-  snapshotter = "tardev"
   runtime_type = "io.containerd.kata-cc.v2"
   privileged_without_host_devices = true
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-cc.options]
-    ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/configuration-clh-snp.toml"
+    ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/runtime-rs/configuration.toml"
 EOF
 
 sudo reboot
@@ -68,24 +63,8 @@ sudo make deploy-uvm
 popd
 ```
 
-For Kata-CC:
-```
-sudo dnf -y install kata-packages-uvm-build curl jq # curl and jq are only required for installing the IGVM tool
-pushd /opt/confidential-containers/uvm/tools/osbuilder
-pushd igvm-builder
-sudo ./igvm_builder.sh -i
-popd
-pushd node-builder/azure-linux
-# Note: see explanation on AGENT_POLICY_FILE below. We build with a permissive agent policy
-# as security policy annotations part of the pod metadata field are not passed to the shim.
-# This setup SHOULD NOT BE USED for Confidential Containers in production.
-sudo make AGENT_POLICY_FILE=allow-all.rego uvm-confpods
-sudo make deploy-confpods-uvm
-popd
-popd
-# Note: currently depends on kubelet, need to manually start at every reboot.
-sudo systemctl start tardev-snapshotter
-```
+The runtime-rs Cloud Hypervisor SEV-SNP development flow is currently
+source-build only. Follow Variant II for Kata-CC.
 
 You environment is ready. Continue with section *Run Kata (Confidential) Containers*
 
@@ -138,6 +117,30 @@ popd
 
 This command installs the latest release of the [IGVM tooling](https://github.com/microsoft/igvm-tooling/) using `pip3 install`. The tool can be uninstalled at any time by calling the script using the -u parameter instead.
 
+## Prepare SEV-SNP build inputs
+
+The ConfPods Make targets consume, but do not build or install, Cloud
+Hypervisor and the guest kernel. The current development stack uses Microsoft
+Cloud Hypervisor `msft/v51.1.101` built with `sev_snp`:
+
+```
+git clone https://github.com/microsoft/cloud-hypervisor.git
+pushd cloud-hypervisor
+git checkout msft/v51.1.101
+OPENSSL_NO_VENDOR=1 cargo build --release --no-default-features --features sev_snp
+popd
+```
+
+The Azure Linux `kernel-uvm` 6.6.137.mshv1 bzImage currently triple-faults
+during IGVM boot. Use a `kernel-uvm-6.1.58.mshv8-1.azl3` bzImage for
+development. Extract it without replacing the host package:
+
+```
+mkdir -p kernel-uvm-6.1.58
+rpm2cpio /path/to/kernel-uvm-6.1.58.mshv8-1.azl3.x86_64.rpm |
+	(cd kernel-uvm-6.1.58 && cpio -idm)
+```
+
 ## Build and deploy
 
 To build and install Kata components, run:
@@ -151,10 +154,21 @@ popd
 To build and install Kata-CC components, use the `all-confpods` and `deploy-confpods` targets:
 ```
 pushd kata-containers/tools/osbuilder/node-builder/azure-linux
-make all-confpods
-sudo make deploy-confpods
+CLH_SNP_BIN=/path/to/cloud-hypervisor/target/release/cloud-hypervisor
+IGVM_KERNEL=/path/to/kernel-uvm-6.1.58/usr/share/cloud-hypervisor/bzImage
+make \
+	AGENT_POLICY_FILE=allow-all.rego \
+	CLH_SNP_PATH="${CLH_SNP_BIN}" \
+	IGVM_KERNEL="${IGVM_KERNEL}" \
+	all-confpods
+sudo make \
+	CLH_SNP_PATH="${CLH_SNP_BIN}" \
+	deploy-confpods
 popd
 ```
+
+`allow-all.rego` is only for this direct development flow. Do not use it for
+production confidential workloads.
 
 The `all[-confpods]` target runs the targets `package[-confpods]` and `uvm[-confpods]` in a single step (the `uvm[-confpods]` target depends on the `package[-confpods]` target). The `deploy[-confpods]` target moves the build artifacts to proper places (and calls into `deploy[-confpods]-package`, `deploy[-confpods]-uvm`).
 
@@ -162,19 +176,19 @@ Notes:
   - To retrieve more detailed build output, prefix the make commands with `DEBUG=1`.
   - To build an IGVM file for CondPods with a non-default SVN of 0, prefix the `make uvm-confpods` command with `IGVM_SVN=<number>`
   - `IGVM_KERNEL=<path>` overrides `/usr/share/cloud-hypervisor/bzImage`.
-  - tarfs is disabled because its source is absent. Use `BUILD_TARFS=yes` on branches that include it.
+  - `CLH_SNP_PATH=<path>` selects the prebuilt SNP-enabled Cloud Hypervisor binary referenced by the generated runtime-rs configuration.
+  - The legacy tardev/tarfs stack is disabled because its source is absent. Use `BUILD_TARFS=yes` on branches that include it.
   - For build and deployment of both Kata and Kata-CC artifacts, first run the `make all` and `make deploy` commands to build and install the Kata Containers for AKS components followed by `make clean`, and then run `make all-confpods` and `make deploy-confpods` to build and install the Confidential Containers for AKS components - or vice versa (using `make clean-confpods`).
 
 ## Build and boot a development SEV-SNP UVM
 
-Azure Linux `kernel-uvm` 6.6.137.mshv1 currently triple-faults during IGVM
-boot. Use the known-good 6.1.58.mshv8 bzImage for development:
+Use the prepared SEV-SNP inputs to build only the UVM:
 
 ```
 pushd kata-containers/tools/osbuilder/node-builder/azure-linux
 make package
 sudo make \
-	IGVM_KERNEL=/path/to/kernel-uvm-6.1.58.mshv8-bzImage \
+	IGVM_KERNEL=/path/to/kernel-uvm-6.1.58/usr/share/cloud-hypervisor/bzImage \
 	uvm-confpods
 popd
 ```
@@ -335,9 +349,17 @@ The following instructions serve as a general reference:
 
 - Run containers with `ctr`, for example a confidential container:
 
-  `sudo ctr -n=k8s.io image pull --snapshotter=tardev docker.io/library/busybox:latest`
+  ```
+id="hello-$(date +%s)"
+sudo ctr -n k8s.io run \
+  --runtime io.containerd.kata-cc.v2 \
+  --runtime-config-path /opt/confidential-containers/share/defaults/kata-containers/runtime-rs/configuration.toml \
+  docker.io/library/busybox:latest "${id}" uname -a
+```
 
-  `sudo ctr -n=k8s.io run --cni --runtime io.containerd.run.kata-cc.v2 --runtime-config-path /opt/confidential-containers/share/defaults/kata-containers/configuration-clh-snp.toml --snapshotter tardev -t --rm docker.io/library/busybox:latest hello sh`
+  The current development milestone boots the SEV-SNP UVM, starts
+  `kata-agent`, and creates the sandbox. Container creation then fails because
+  the overlayfs rootfs has no transport when `shared_fs = "none"`.
 
 For further usage we refer to the upstream `crictl` (or `ctr`) and CNI documentation.
 

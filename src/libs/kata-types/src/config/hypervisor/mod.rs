@@ -452,6 +452,10 @@ pub struct BootInfo {
     #[serde(default)]
     pub kernel: String,
 
+    /// Path to an IGVM file on the host.
+    #[serde(default)]
+    pub igvm: String,
+
     /// Guest kernel commandline.
     #[serde(default)]
     pub kernel_params: String,
@@ -491,6 +495,7 @@ impl BootInfo {
     /// Adjust the configuration information after loading from configuration file.
     pub fn adjust_config(&mut self) -> Result<()> {
         resolve_path!(self.kernel, "guest kernel image file {} is invalid: {}")?;
+        resolve_path!(self.igvm, "guest IGVM file {} is invalid: {}")?;
         resolve_path!(self.image, "guest boot image file {} is invalid: {}")?;
         resolve_path!(self.initrd, "guest initrd image file {} is invalid: {}")?;
         resolve_path!(self.firmware, "firmware image file {} is invalid: {}")?;
@@ -505,6 +510,7 @@ impl BootInfo {
     /// Validate the configuration information.
     pub fn validate(&self) -> Result<()> {
         validate_path!(self.kernel, "guest kernel image file {} is invalid: {}")?;
+        validate_path!(self.igvm, "guest IGVM file {} is invalid: {}")?;
         validate_path!(self.image, "guest boot image file {} is invalid: {}")?;
         validate_path!(self.initrd, "guest initrd image file {} is invalid: {}")?;
         validate_path!(self.firmware, "firmware image file {} is invalid: {}")?;

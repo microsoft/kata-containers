@@ -2921,6 +2921,7 @@ dependencies = [
  "actix-rt",
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "ch-config",
  "crossbeam-channel",
  "dbs-utils",

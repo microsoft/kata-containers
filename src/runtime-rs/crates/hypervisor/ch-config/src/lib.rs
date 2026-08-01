@@ -340,6 +340,8 @@ pub struct PayloadConfig {
     #[serde(default)]
     pub initramfs: Option<PathBuf>,
     #[serde(default)]
+    pub igvm: Option<PathBuf>,
+    #[serde(default)]
     pub mrconfigid: Option<String>,
     #[serde(default)]
     pub host_data: Option<String>,
@@ -359,6 +361,8 @@ pub struct PlatformConfig {
     pub oem_strings: Option<Vec<String>>,
     #[serde(default)]
     pub tdx: bool,
+    #[serde(default)]
+    pub sev_snp: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -557,6 +561,11 @@ pub fn guest_protection_is_tdx(guest_protection_to_use: GuestProtection) -> bool
     matches!(guest_protection_to_use, GuestProtection::Tdx)
 }
 
+// Returns true if the enabled guest protection is AMD SEV-SNP.
+pub fn guest_protection_is_snp(guest_protection_to_use: GuestProtection) -> bool {
+    matches!(guest_protection_to_use, GuestProtection::Snp(_))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -618,6 +627,21 @@ mod tests {
             } else {
                 assert!(!result, "{}", msg);
             }
+        }
+
+        #[test]
+        fn test_guest_protection_is_snp() {
+            let details = SevSnpDetails {
+                cbitpos: 42,
+                phys_addr_reduction: 1,
+            };
+
+            assert!(guest_protection_is_snp(GuestProtection::Snp(
+                details.clone()
+            )));
+            assert!(!guest_protection_is_snp(GuestProtection::Sev(details)));
+            assert!(!guest_protection_is_snp(GuestProtection::Tdx));
+            assert!(!guest_protection_is_snp(GuestProtection::NoProtection));
         }
     }
 }

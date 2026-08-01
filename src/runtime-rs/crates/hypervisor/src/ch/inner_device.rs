@@ -20,6 +20,7 @@ use crate::VfioDevice;
 use crate::VmmState;
 use crate::{BlockConfig, BlockDevice};
 use anyhow::{anyhow, Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use ch_config::ch_api::cloud_hypervisor_vm_device_add;
 use ch_config::ch_api::{
     cloud_hypervisor_vm_blockdev_add, cloud_hypervisor_vm_device_remove,
@@ -44,6 +45,26 @@ use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 
 const VIRTIO_FS: &str = "virtio-fs";
+
+fn clh_snp_host_data(host_data: Option<String>) -> Result<Option<String>> {
+    let Some(host_data) = host_data else {
+        return Ok(None);
+    };
+
+    let bytes = STANDARD
+        .decode(host_data)
+        .context("decode SEV-SNP host data")?;
+    if bytes.len() != 32 {
+        return Err(anyhow!(
+            "invalid SEV-SNP host data length {}, expected 32 bytes",
+            bytes.len()
+        ));
+    }
+
+    Ok(Some(
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect(),
+    ))
+}
 
 impl CloudHypervisorInner {
     pub(crate) async fn add_device(&mut self, device: DeviceType) -> Result<DeviceType> {
@@ -454,7 +475,8 @@ impl CloudHypervisorInner {
                     match config {
                         ProtectionDeviceConfig::SevSnp(sevsnp_cfg) => {
                             if sevsnp_cfg.is_snp {
-                                protection_device.host_data = sevsnp_cfg.host_data;
+                                protection_device.host_data =
+                                    clh_snp_host_data(sevsnp_cfg.host_data)?;
                             }
                         }
                         ProtectionDeviceConfig::Tdx(tdx_config) => {
@@ -558,6 +580,17 @@ impl TryFrom<ShareFsSettings> for FsConfig {
 mod tests {
     use super::*;
     use crate::Address;
+
+    #[test]
+    fn test_clh_snp_host_data() {
+        let data = STANDARD.encode([0xab; 32]);
+        assert_eq!(
+            clh_snp_host_data(Some(data)).unwrap(),
+            Some("ab".repeat(32))
+        );
+        assert!(clh_snp_host_data(Some(STANDARD.encode([0xab; 31]))).is_err());
+        assert_eq!(clh_snp_host_data(None).unwrap(), None);
+    }
 
     #[test]
     fn test_networkconfig_to_netconfig() {
