@@ -87,9 +87,10 @@ pub enum TxnState {
     /// Rolled back; the reserved state was released.
     ///
     /// Spec-level state only. The implementation *drops* the transaction on abort
-    /// (see [`ReferenceMonitor::abort`]) so the map cannot grow without bound, which
-    /// refines the `aborted` state of `formal/SRM.tla` onto its `none` state --
-    /// `Prepare(o)` admits both, so the refinement preserves the specified behaviour.
+    /// (see [`ReferenceMonitor::abort`]) so the map cannot grow without bound. This is
+    /// why `formal/SRM.tla` models abort as a return to its `none` state rather than
+    /// carrying a distinct `aborted` state: the two are indistinguishable to every
+    /// subsequent operation, since re-preparing after an abort is legitimate.
     Aborted,
 }
 
@@ -353,8 +354,8 @@ impl ReferenceMonitor {
         // duplicate request for an operation still in progress replaces the live
         // transaction, and the loser's commit or abort then fails against a state machine
         // that no longer describes it. `formal/SRM.tla` already specifies this: `Prepare(o)`
-        // requires `state[o] \in {"none", "aborted"}`. Re-preparing after an abort is
-        // legitimate -- the reserved state was released.
+        // requires `state[o] = "none"`, and abort returns an operation to that state.
+        // Re-preparing after an abort is legitimate -- the reserved state was released.
         if let Some(txn) = self.txns.get(&op_id) {
             match txn.state {
                 TxnState::Committed => {

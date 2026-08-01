@@ -7,7 +7,9 @@
 # tla2tools.jar is fetched next to this script if absent. Deadlock checking is disabled
 # on purpose: the model legitimately terminates (all operations reach a terminal state,
 # or the monitor quarantines), so a "deadlock" is an expected end state, not a bug. The
-# checked properties are the Safety invariant and the QuarantineSticky temporal property.
+# checked properties are the Safety invariant plus the QuarantineSticky,
+# QuarantineAdmitsOnlyTeardown, SupersedingIsConfined and VersionMonotone properties; see
+# README.md. Run ./mutation-test.py afterwards to confirm none of them is vacuous.
 set -euo pipefail
 cd "$(dirname "$0")"
 

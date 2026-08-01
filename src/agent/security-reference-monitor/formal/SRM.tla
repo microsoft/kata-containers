@@ -4,84 +4,325 @@
 (*                                                                         *)
 (* This models the two-phase transaction lifecycle implemented in          *)
 (* security-reference-monitor/src/lib.rs: every security-relevant,         *)
-(* state-mutating operation is prepared, executed (binding the authorized  *)
-(* == executed plan), then either committed or aborted, with a global      *)
-(* quarantine that fails closed.                                           *)
+(* state-mutating operation is prepared, executed, then either committed   *)
+(* or aborted, with a global quarantine that fails closed.                 *)
 (*                                                                         *)
-(* The model checks the equivalence-claim safety properties:               *)
-(*   - the state version equals the number of committed operations         *)
-(*     (no phantom commit, no missed commit);                              *)
-(*   - a committed operation was necessarily executed first, i.e. its      *)
-(*     authorized plan equals its executed plan (Commit is only enabled    *)
-(*     from the "executed" state);                                         *)
-(*   - Committed and Aborted are terminal;                                 *)
-(*   - quarantine is sticky and, once set, blocks new authorizations.      *)
+(* The model is deliberately operation-generic: `Ops` stands for whatever  *)
+(* the agent keys a transaction on -- `create/<cid>`, `start/<cid>`,       *)
+(* `exec/<cid>/<eid>`, `signal/<cid>/<eid>/<sig>`, `remove/<cid>`. Nothing *)
+(* below is specific to a lifecycle edge, so bringing a new handler into   *)
+(* the protocol adds no proof obligation; only a handler that departs from *)
+(* it does -- which is exactly how `StartContainer` once mutated sandbox   *)
+(* state while taking no transaction at all, leaving                       *)
+(* QuarantineAdmitsOnlyTeardown true of this model and false of the agent. *)
+(*                                                                         *)
+(* ------------------------------------------------------------------     *)
+(* WHAT THIS MODULE DOES *NOT* MODEL                                       *)
+(*                                                                         *)
+(* Stated up front, because the previous revision of this file asserted a  *)
+(* property it did not have.                                               *)
+(*                                                                         *)
+(* 1. The FR-3 authorized->executed OCI binding. `presented` below is the  *)
+(*    digest handed to `execute()`, which the monitor requires to EQUAL    *)
+(*    the authorization. That is an internal consistency check on the      *)
+(*    monitor's own API, and on every current call site the caller passes  *)
+(*    the same binding it passed to `prepare`, so no caller can fail it    *)
+(*    today; it is a barrier against a future caller, not a live gate.     *)
+(*                                                                         *)
+(*    The real FR-3 relationship -- between the plan policy authorized and *)
+(*    the OCI spec that in-guest transformers actually resolved -- is NOT  *)
+(*    equality. Those digests routinely differ because the resolution      *)
+(*    chain legitimately rewrites parts of the spec. It is enforced by     *)
+(*    `enforce_plan_binding` in rpc.rs as a BOUNDED-DIVERGENCE check over  *)
+(*    the fields policy actually decided on, which is outside this module. *)
+(*                                                                         *)
+(* 2. `attach_executed` (lib.rs), which records the resolved digest for    *)
+(*    audit. It applies no state check and no quarantine gate, so it is    *)
+(*    not part of the lifecycle this module constrains.                    *)
+(*                                                                         *)
+(* 3. Idempotent replay: preparing a COMMITTED op returns the retained     *)
+(*    result without re-executing. It changes no state, so it is a         *)
+(*    stuttering step.                                                     *)
+(*                                                                         *)
+(* 4. Stale `expected_state_version` rejection. The check is               *)
+(*    `expected = version`, so a caller that reads the version and         *)
+(*    prepares against it is exactly the enabled case below; a stale       *)
+(*    prepare is simply not enabled.                                       *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets
 
-CONSTANTS Ops   \* a finite set of operation identifiers
+CONSTANTS
+    Ops,        \* a finite set of operation identifiers
+    Digests,    \* a finite set of plan digests
+    MaxCommits  \* bound on committed operations, to keep the model finite
 
-States == {"none", "prepared", "executed", "committed", "aborted"}
+(* Sentinel for "no digest recorded". Must not be an element of Digests. *)
+NoDigest == "nodigest"
+
+ASSUME NoDigest \notin Digests
+
+(***************************************************************************)
+(* An operation's lifecycle state.                                         *)
+(*                                                                         *)
+(* There is deliberately no "aborted" state. `abort` REMOVES the entry     *)
+(* rather than parking it (lib.rs), because an aborted id carries no       *)
+(* replay-protection value -- `prepare` already treats it as               *)
+(* re-preparable -- while retaining it lets a host that can drive aborts   *)
+(* on demand grow the map without bound. An earlier revision of this model *)
+(* had an "aborted" state and asserted it was terminal, which contradicted *)
+(* its own `Prepare` guard.                                                *)
+(***************************************************************************)
+States == {"none", "prepared", "executed", "committed"}
+
+(***************************************************************************)
+(* Why the monitor is quarantined. There is no unconditional quarantine    *)
+(* action: every quarantine below corresponds to a specific call site.     *)
+(*                                                                         *)
+(*   commit-failed            commit_or_quarantine  (rpc.rs)               *)
+(*   abandoned-after-execute  reclaim_orphans       (lib.rs)               *)
+(*   rollback-failed          rollback_policy_state (rpc.rs)               *)
+(*   no-snapshot              rollback_policy_state (rpc.rs)               *)
+(*   abort-failed             abort_or_quarantine   (rpc.rs)               *)
+(***************************************************************************)
+Causes == {"none", "commit-failed", "abandoned-after-execute",
+           "rollback-failed", "no-snapshot", "abort-failed"}
 
 VARIABLES
-    state,        \* state[o] : the lifecycle state of operation o
+    state,        \* state[o]     : the lifecycle state of operation o
+    authorized,   \* authorized[o]: the plan digest o was authorized for
+    presented,    \* presented[o] : the digest handed to execute() -- see note 1
+    teardown,     \* teardown[o]  : o was prepared via prepare_teardown (RM-8)
     version,      \* the monotonic committed-state version
-    quarantined   \* whether the monitor is quarantined
+    commits,      \* ghost: how many commits have EVER occurred
+    quarantined,  \* whether the monitor is quarantined
+    qcause,       \* why it is quarantined
+    divergent     \* ghost: an effect landed that the monitor never recorded
 
-vars == <<state, version, quarantined>>
+vars == <<state, authorized, presented, teardown,
+          version, commits, quarantined, qcause, divergent>>
+
+DigestOrNone == Digests \cup {NoDigest}
 
 TypeOK ==
     /\ state \in [Ops -> States]
+    /\ authorized \in [Ops -> DigestOrNone]
+    /\ presented \in [Ops -> DigestOrNone]
+    /\ teardown \in [Ops -> BOOLEAN]
     /\ version \in Nat
+    /\ commits \in Nat
     /\ quarantined \in BOOLEAN
+    /\ qcause \in Causes
+    /\ divergent \in BOOLEAN
 
 Init ==
     /\ state = [o \in Ops |-> "none"]
+    /\ authorized = [o \in Ops |-> NoDigest]
+    /\ presented = [o \in Ops |-> NoDigest]
+    /\ teardown = [o \in Ops |-> FALSE]
     /\ version = 0
+    /\ commits = 0
     /\ quarantined = FALSE
+    /\ qcause = "none"
+    /\ divergent = FALSE
 
-(* Phase 1: reserve state for an authorized plan. Refused when quarantined. A fresh
-   op, or one previously aborted, may be (re)prepared. *)
-Prepare(o) ==
-    /\ ~quarantined
-    /\ state[o] \in {"none", "aborted"}
+(* Clear every per-operation field, so a released id is indistinguishable
+   from one that was never used. This mirrors `txns.remove(op_id)`. *)
+Release(o) ==
+    /\ state' = [state EXCEPT ![o] = "none"]
+    /\ authorized' = [authorized EXCEPT ![o] = NoDigest]
+    /\ presented' = [presented EXCEPT ![o] = NoDigest]
+    /\ teardown' = [teardown EXCEPT ![o] = FALSE]
+
+(* `quarantine()` is first-write-wins on the reason and does NOT refuse to
+   fire when already quarantined (lib.rs). Modelling it as enabled only on
+   a healthy monitor would make this model STRONGER than the code and hide
+   every second-fault interleaving. *)
+Poison(cause) ==
+    /\ quarantined' = TRUE
+    /\ qcause' = IF quarantined THEN qcause ELSE cause
+    /\ divergent' = TRUE
+
+----------------------------------------------------------------------------
+(* Actions *)
+
+(***************************************************************************)
+(* Phase 1: reserve state for an authorized plan.                          *)
+(*                                                                         *)
+(* `td` distinguishes `prepare_teardown` from `prepare`. RM-8: a teardown  *)
+(* is exempt from the quarantine gate so a degraded sandbox can still be   *)
+(* shut down gracefully. That is a de-escalation, not a fail-open: with    *)
+(* `prepare` still refused for everything else, no new transaction can     *)
+(* build capability, so admitting teardown only moves the sandbox towards  *)
+(* less state.                                                             *)
+(*                                                                         *)
+(* Second disjunct -- the RM-8 SUPERSEDING RULE. The dominant way a host   *)
+(* induces a quarantine is abandoning a call after `execute` (it controls  *)
+(* ttrpc's `timeout_nano`), which parks the transaction in "executed".     *)
+(* Without superseding, the very op id needed to tear down is wedged       *)
+(* forever and the only escape is the sandbox-level destroy RM-8 exists to *)
+(* avoid. Superseding concedes nothing: the anti-clobber invariant it      *)
+(* relaxes protects the provability of a state the monitor has ALREADY     *)
+(* declared unprovable, and it is confined to teardown-on-teardown while   *)
+(* quarantined -- see the SupersedingIsConfined property.                  *)
+(***************************************************************************)
+Prepare(o, d, td) ==
+    /\ td \/ ~quarantined
+    /\ \/ state[o] = "none"
+       \/ /\ state[o] \in {"prepared", "executed"}
+          /\ td
+          /\ teardown[o]
+          /\ quarantined
     /\ state' = [state EXCEPT ![o] = "prepared"]
-    /\ UNCHANGED <<version, quarantined>>
+    /\ authorized' = [authorized EXCEPT ![o] = d]
+    /\ presented' = [presented EXCEPT ![o] = NoDigest]
+    /\ teardown' = [teardown EXCEPT ![o] = td]
+    /\ UNCHANGED <<version, commits, quarantined, qcause, divergent>>
 
-(* Phase 2a: bind the executed plan. Enabled only from "prepared"; this is where
-   authorized == executed is enforced in the implementation. Refused when quarantined. *)
-Execute(o) ==
-    /\ ~quarantined
+(***************************************************************************)
+(* Phase 2a: hand the plan to execution. The presented digest MUST equal   *)
+(* the authorized one (see note 1 in the header for exactly how much this  *)
+(* does and does not establish).                                           *)
+(*                                                                         *)
+(* The quarantine gate is applied AFTER resolving the transaction, so a    *)
+(* teardown prepared before or during the quarantine can still complete.   *)
+(* An unknown op id is not a teardown, so it still reports the quarantine  *)
+(* rather than a lookup miss.                                              *)
+(***************************************************************************)
+Execute(o, d) ==
+    /\ teardown[o] \/ ~quarantined
     /\ state[o] = "prepared"
+    /\ d = authorized[o]
     /\ state' = [state EXCEPT ![o] = "executed"]
-    /\ UNCHANGED <<version, quarantined>>
+    /\ presented' = [presented EXCEPT ![o] = d]
+    /\ UNCHANGED <<authorized, teardown, version, commits,
+                   quarantined, qcause, divergent>>
 
-(* Phase 2b: commit. Enabled ONLY from "executed", so a committed op was necessarily
-   executed (authorized == executed). Advances the version by exactly one. *)
+(* A presented digest that does not match the authorization is refused
+   (SrmError::PlanMismatch); the caller's guard then aborts, releasing the
+   id. Modelled explicitly so the check is operational rather than
+   asserted: this path can never reach "committed". *)
+ExecuteRefused(o, d) ==
+    /\ teardown[o] \/ ~quarantined
+    /\ state[o] = "prepared"
+    /\ d # authorized[o]
+    /\ Release(o)
+    /\ UNCHANGED <<version, commits, quarantined, qcause, divergent>>
+
+(***************************************************************************)
+(* Phase 2b: the runtime operation succeeded. Enabled ONLY from            *)
+(* "executed", so a committed op was necessarily executed, and by the      *)
+(* Execute guard it was executed with the digest it was authorized for.    *)
+(* Advances the version by exactly one.                                    *)
+(***************************************************************************)
 Commit(o) ==
     /\ state[o] = "executed"
+    /\ commits < MaxCommits
     /\ state' = [state EXCEPT ![o] = "committed"]
     /\ version' = version + 1
-    /\ UNCHANGED quarantined
+    /\ commits' = commits + 1
+    /\ UNCHANGED <<authorized, presented, teardown, quarantined, qcause, divergent>>
 
-(* Roll back a reserved/executed op. Does NOT advance the version (no committed effect). *)
+(***************************************************************************)
+(* The commit itself fails. The runtime operation ALREADY HAPPENED, so the *)
+(* agent's `commit_or_quarantine` returns success to the shim -- reporting *)
+(* failure for an effect that landed would invite a replay that performs   *)
+(* it twice -- and quarantines instead.                                    *)
+(*                                                                         *)
+(* This is why RM-7 maps `Quarantined` to ttrpc DATA_LOSS: the shim's      *)
+(* FIRST sight of a degraded guest is its NEXT gated call, and it must be  *)
+(* able to tell "this guest is degraded" from "this request was invalid".  *)
+(***************************************************************************)
+CommitFails(o) ==
+    /\ state[o] = "executed"
+    /\ Poison("commit-failed")
+    /\ UNCHANGED <<state, authorized, presented, teardown, version, commits>>
+
+(* Roll back a reserved/executed op. The version is NOT advanced: the
+   operation had no committed effect. *)
 Abort(o) ==
     /\ state[o] \in {"prepared", "executed"}
-    /\ state' = [state EXCEPT ![o] = "aborted"]
-    /\ UNCHANGED <<version, quarantined>>
+    /\ Release(o)
+    /\ UNCHANGED <<version, commits, quarantined, qcause, divergent>>
 
-(* Fault injection: at any point the monitor may quarantine (fail closed). Sticky. *)
-Quarantine ==
-    /\ ~quarantined
-    /\ quarantined' = TRUE
-    /\ UNCHANGED <<state, version>>
+(* `abort_or_quarantine`: the rollback of an in-flight transaction itself
+   failed, so what the monitor was tracking is no longer provable. The
+   transaction is left in place -- there is nothing sound to move it to. *)
+AbortFailed(o) ==
+    /\ state[o] \in {"prepared", "executed"}
+    /\ Poison("abort-failed")
+    /\ UNCHANGED <<state, authorized, presented, teardown, version, commits>>
+
+(***************************************************************************)
+(* Retire a committed transaction so its operation id may be used again.   *)
+(*                                                                         *)
+(* Absent from the first revision of this model, which treated "committed" *)
+(* as terminal and asserted `version = Cardinality(Committed)`. That       *)
+(* invariant is FALSE against the implementation: retiring frees the id    *)
+(* but must not rewind the version, or a monitor could be talked into      *)
+(* forgetting effects that really happened. The ghost `commits` counter    *)
+(* pins the corrected claim.                                               *)
+(*                                                                         *)
+(* Retirement is required for two distinct reasons: an id naming a         *)
+(* REUSABLE OBJECT (a container id, once removed) would otherwise answer a *)
+(* later create from the replay cache and silently do nothing; and an id   *)
+(* naming a REPEATABLE EVENT (a signal delivery, a start, an exec whose id *)
+(* the runtime permits to be reused) would answer with a retained success  *)
+(* for work the agent never performed.                                     *)
+(***************************************************************************)
+Retire(o) ==
+    /\ state[o] = "committed"
+    /\ Release(o)
+    /\ UNCHANGED <<version, commits, quarantined, qcause, divergent>>
+
+(***************************************************************************)
+(* Abandonment (`reclaim_orphans`). The host controls `timeout_nano`, so   *)
+(* it can drop any in-flight call. What is provable depends on the state   *)
+(* at the moment of abandonment.                                           *)
+(***************************************************************************)
+
+(* Prepared: the plan was authorized and reserved but never handed to
+   execution, so nothing happened. Releasing the id is safe. *)
+AbandonPrepared(o) ==
+    /\ state[o] = "prepared"
+    /\ Release(o)
+    /\ UNCHANGED <<version, commits, quarantined, qcause, divergent>>
+
+(* Executed: the plan WAS handed to execution and the outcome was never
+   observed. Whether the effect landed is unknowable -- precisely the
+   divergence this monitor exists to prevent -- so quarantine. The
+   transaction is deliberately left parked in "executed", which is what
+   makes the superseding rule in Prepare necessary. *)
+AbandonExecuted(o) ==
+    /\ state[o] = "executed"
+    /\ Poison("abandoned-after-execute")
+    /\ UNCHANGED <<state, authorized, presented, teardown, version, commits>>
+
+(* The agent failed to restore policy state after a failed operation, so
+   the enforcer's view of what is permitted no longer matches what was
+   authorized. Two distinct call sites in `rollback_policy_state`: the
+   revert failed, or there was no snapshot to revert to. Neither is
+   internal to the transaction lifecycle, so neither is scoped to an op. *)
+RollbackFailed ==
+    /\ Poison("rollback-failed")
+    /\ UNCHANGED <<state, authorized, presented, teardown, version, commits>>
+
+SnapshotMissing ==
+    /\ Poison("no-snapshot")
+    /\ UNCHANGED <<state, authorized, presented, teardown, version, commits>>
 
 Next ==
-    \/ \E o \in Ops : Prepare(o)
-    \/ \E o \in Ops : Execute(o)
+    \/ \E o \in Ops, d \in Digests, td \in BOOLEAN : Prepare(o, d, td)
+    \/ \E o \in Ops, d \in Digests : Execute(o, d)
+    \/ \E o \in Ops, d \in Digests : ExecuteRefused(o, d)
     \/ \E o \in Ops : Commit(o)
+    \/ \E o \in Ops : CommitFails(o)
     \/ \E o \in Ops : Abort(o)
-    \/ Quarantine
+    \/ \E o \in Ops : AbortFailed(o)
+    \/ \E o \in Ops : Retire(o)
+    \/ \E o \in Ops : AbandonPrepared(o)
+    \/ \E o \in Ops : AbandonExecuted(o)
+    \/ RollbackFailed
+    \/ SnapshotMissing
 
 Spec == Init /\ [][Next]_vars
 
@@ -90,21 +331,86 @@ Spec == Init /\ [][Next]_vars
 
 Committed == {o \in Ops : state[o] = "committed"}
 
-(* Safety: the version is exactly the number of committed operations — there is no
-   phantom commit (version advanced with no committed op) and no missed commit. *)
-VersionMatchesCommits == version = Cardinality(Committed)
+(* Safety: the version counts every commit that has ever occurred. Retiring
+   a transaction frees its id without rewinding the version, so the version
+   is an upper bound on the currently-committed set rather than equal to it.
+   The second conjunct is the load-bearing one; the first holds by
+   construction of the `commits` ghost and is here to catch an edit that
+   advances one without the other. *)
+VersionCountsAllCommits ==
+    /\ version = commits
+    /\ version >= Cardinality(Committed)
 
-(* Committed and Aborted are distinct terminal states; since a variable holds a single
-   value, an op is never simultaneously committed and aborted. Stated explicitly: *)
-TerminalExclusive ==
-    \A o \in Ops : ~(state[o] = "committed" /\ state[o] = "aborted")
+(* A committed operation was executed with exactly the digest it was
+   authorized for. This is the monitor's internal execute() check; see note
+   1 in the header for why it is NOT the FR-3 OCI binding. Structurally
+   guaranteed -- Commit is enabled only from "executed", and Execute only
+   when the presented digest matches -- but stated so that a future
+   relaxation of either guard is caught. *)
+CommittedIsPlanBound ==
+    \A o \in Ops :
+        state[o] = "committed" =>
+            /\ presented[o] = authorized[o]
+            /\ presented[o] \in Digests
 
-Safety == TypeOK /\ VersionMatchesCommits /\ TerminalExclusive
+(* Every quarantine has a cause, and a cause implies a quarantine. There is
+   no unconditional fail-closed action: the model can only quarantine
+   through one of the five call sites enumerated in `Causes`. *)
+QuarantineHasCause == quarantined <=> (qcause # "none")
+
+(* A monitor whose recorded version no longer matches reality is always
+   quarantined -- what makes it safe for the agent to return success on a
+   failed commit.
+
+   Honest scope: `divergent` is only ever raised by `Poison`, which raises
+   `quarantined` in the same step, so this is a structural check that no
+   divergence-introducing action forgets to fail closed. It guards future
+   edits to the model; it is not an independent theorem about the code. *)
+DivergenceImpliesQuarantine == divergent => quarantined
+
+(* An in-flight transaction always has an authorization to be bound to. *)
+InFlightIsAuthorized ==
+    \A o \in Ops :
+        state[o] \in {"prepared", "executed"} => authorized[o] \in Digests
 
 ----------------------------------------------------------------------------
-(* Temporal properties *)
+(* Action and temporal properties *)
 
 (* Quarantine is sticky: once set it never clears. *)
 QuarantineSticky == [](quarantined => []quarantined)
+
+(* Fail closed, part 1: once quarantined, no operation is newly admitted
+   unless it is a teardown. This is the RM-8 soundness claim, and the reason
+   F-39 mattered -- `StartContainer` used to build capability without
+   appearing in this protocol at all, so the claim held over the model while
+   being false of the agent. *)
+QuarantineAdmitsOnlyTeardown ==
+    [][ \A o \in Ops :
+            (quarantined /\ state[o] = "none" /\ state'[o] = "prepared")
+                => teardown'[o] ]_vars
+
+(* Fail closed, part 2: the gate on `execute` is separate from the gate on
+   `prepare`, and is the one that stops a non-teardown transaction prepared
+   BEFORE the quarantine from proceeding after it. Without this property the
+   model checks only half of what `quarantine()` claims. *)
+QuarantineGatesExecute ==
+    [][ \A o \in Ops :
+            (quarantined /\ state[o] = "prepared" /\ state'[o] = "executed")
+                => teardown[o] ]_vars
+
+(* The superseding rule never touches a non-teardown transaction, and never
+   fires on a healthy monitor. Triggered on ANY re-prepare of a live entry
+   rather than on a change of digest, so that superseding with the same
+   digest is checked too. Without this confinement, superseding would be a
+   general clobber of in-flight transactions -- exactly the defect the
+   anti-clobber check in `prepare` exists to prevent. *)
+SupersedingIsConfined ==
+    [][ \A o \in Ops, d \in Digests, td \in BOOLEAN :
+            (Prepare(o, d, td) /\ state[o] # "none")
+                => (quarantined /\ teardown[o] /\ td) ]_vars
+
+(* The version never rewinds -- in particular, retirement does not
+   decrement it. *)
+VersionMonotone == [][version' >= version]_vars
 
 =============================================================================
