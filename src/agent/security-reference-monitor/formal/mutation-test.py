@@ -83,15 +83,18 @@ def mutants():
            {"SupersedingIsConfined"}, mutated)
 
     # Retiring frees an operation id; it must not un-count the commit. The
-    # rewind is clamped at zero so this mutant tests the version invariants
-    # rather than tripping TypeOK's `version \in Nat` first.
+    # rewind also decrements `commits` so that `version = commits` still
+    # holds and VersionCountsAllCommits cannot fire: this mutant must be
+    # caught by VersionMonotone ALONE, or that property is vacuous. The
+    # rewind is clamped at zero so it cannot trip TypeOK's `\in Nat` first.
     yield ("Retire rewinds the version",
-           {"VersionCountsAllCommits", "VersionMonotone"},
+           {"VersionMonotone"},
            replace_in_action(
                SRC, "Retire(o) ==",
                "    /\\ UNCHANGED <<version, commits, quarantined, qcause, divergent>>",
                "    /\\ version' = IF version > 0 THEN version - 1 ELSE 0\n"
-               "    /\\ UNCHANGED <<commits, quarantined, qcause, divergent>>"))
+               "    /\\ commits' = IF commits > 0 THEN commits - 1 ELSE 0\n"
+               "    /\\ UNCHANGED <<quarantined, qcause, divergent>>"))
 
     # A commit that fails after the effect landed must announce the
     # divergence, since the agent reports success to the shim regardless.
@@ -116,8 +119,11 @@ def mutants():
                              '    /\\ state[o] \\in {"prepared", "executed"}'))
 
     # Quarantine must be sticky, or every fail-closed claim is temporary.
+    # `qcause` and `divergent` are cleared alongside it so that neither
+    # QuarantineHasCause nor DivergenceImpliesQuarantine can fire: this
+    # mutant must be caught by QuarantineSticky ALONE.
     yield ("quarantine can be cleared",
-           {"QuarantineSticky", "QuarantineHasCause"},
+           {"QuarantineSticky"},
            SRC.replace(
                "Retire(o) ==\n"
                '    /\\ state[o] = "committed"\n'
@@ -127,7 +133,9 @@ def mutants():
                '    /\\ state[o] = "committed"\n'
                "    /\\ Release(o)\n"
                "    /\\ quarantined' = FALSE\n"
-               "    /\\ UNCHANGED <<version, commits, qcause, divergent>>", 1))
+               '    /\\ qcause\' = "none"\n'
+               "    /\\ divergent' = FALSE\n"
+               "    /\\ UNCHANGED <<version, commits>>", 1))
 
 
 def check(text):

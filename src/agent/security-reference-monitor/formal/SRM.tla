@@ -187,6 +187,15 @@ Prepare(o, d, td) ==
 (* teardown prepared before or during the quarantine can still complete.   *)
 (* An unknown op id is not a teardown, so it still reports the quarantine  *)
 (* rather than a lookup miss.                                              *)
+(*                                                                         *)
+(* A refusal (`SrmError::PlanMismatch`, or a failed gate) is deliberately  *)
+(* NOT an action. `execute` mutates nothing on any error path: the entry   *)
+(* stays "prepared" and the id stays reserved. Releasing it is the         *)
+(* caller's separate decision, taken in `abort_or_quarantine`, and that is *)
+(* what `Abort` models. An earlier revision had an `ExecuteRefused` action *)
+(* that released the id in the same step; it was transition-equivalent to  *)
+(* `Abort` and hid the window in which a mismatched transaction is still   *)
+(* live and re-executable through the monitor's public API.                *)
 (***************************************************************************)
 Execute(o, d) ==
     /\ teardown[o] \/ ~quarantined
@@ -196,17 +205,6 @@ Execute(o, d) ==
     /\ presented' = [presented EXCEPT ![o] = d]
     /\ UNCHANGED <<authorized, teardown, version, commits,
                    quarantined, qcause, divergent>>
-
-(* A presented digest that does not match the authorization is refused
-   (SrmError::PlanMismatch); the caller's guard then aborts, releasing the
-   id. Modelled explicitly so the check is operational rather than
-   asserted: this path can never reach "committed". *)
-ExecuteRefused(o, d) ==
-    /\ teardown[o] \/ ~quarantined
-    /\ state[o] = "prepared"
-    /\ d # authorized[o]
-    /\ Release(o)
-    /\ UNCHANGED <<version, commits, quarantined, qcause, divergent>>
 
 (***************************************************************************)
 (* Phase 2b: the runtime operation succeeded. Enabled ONLY from            *)
@@ -231,9 +229,17 @@ Commit(o) ==
 (* This is why RM-7 maps `Quarantined` to ttrpc DATA_LOSS: the shim's      *)
 (* FIRST sight of a degraded guest is its NEXT gated call, and it must be  *)
 (* able to tell "this guest is degraded" from "this request was invalid".  *)
+(*                                                                         *)
+(* Guarded on NOT "executed", which is the exact complement of `Commit`.   *)
+(* `ReferenceMonitor::commit` is total once the entry is in `Executed`:    *)
+(* it can only return `UnknownOperation` (the entry is gone -- modelled as *)
+(* "none") or `InvalidState` (`execute` never ran, or another caller       *)
+(* already resolved it -- "prepared" or "committed"). Guarding this on     *)
+(* "executed" instead, as an earlier revision did, modelled a fault the    *)
+(* code cannot produce while never exercising the ones it can.             *)
 (***************************************************************************)
 CommitFails(o) ==
-    /\ state[o] = "executed"
+    /\ state[o] # "executed"
     /\ Poison("commit-failed")
     /\ UNCHANGED <<state, authorized, presented, teardown, version, commits>>
 
@@ -245,10 +251,15 @@ Abort(o) ==
     /\ UNCHANGED <<version, commits, quarantined, qcause, divergent>>
 
 (* `abort_or_quarantine`: the rollback of an in-flight transaction itself
-   failed, so what the monitor was tracking is no longer provable. The
-   transaction is left in place -- there is nothing sound to move it to. *)
+   failed, so what the monitor was tracking is no longer provable.
+
+   `ReferenceMonitor::abort` is infallible from "prepared" and "executed" --
+   it removes the entry and returns Ok -- so, as with CommitFails, the
+   reachable fault is the complement: an unknown id ("none") or an entry
+   that is already resolved ("committed"). Nothing is released, because
+   there is nothing the monitor can soundly release. *)
 AbortFailed(o) ==
-    /\ state[o] \in {"prepared", "executed"}
+    /\ state[o] \in {"none", "committed"}
     /\ Poison("abort-failed")
     /\ UNCHANGED <<state, authorized, presented, teardown, version, commits>>
 
@@ -313,7 +324,6 @@ SnapshotMissing ==
 Next ==
     \/ \E o \in Ops, d \in Digests, td \in BOOLEAN : Prepare(o, d, td)
     \/ \E o \in Ops, d \in Digests : Execute(o, d)
-    \/ \E o \in Ops, d \in Digests : ExecuteRefused(o, d)
     \/ \E o \in Ops : Commit(o)
     \/ \E o \in Ops : CommitFails(o)
     \/ \E o \in Ops : Abort(o)
@@ -376,8 +386,14 @@ InFlightIsAuthorized ==
 ----------------------------------------------------------------------------
 (* Action and temporal properties *)
 
-(* Quarantine is sticky: once set it never clears. *)
-QuarantineSticky == [](quarantined => []quarantined)
+(* Quarantine is sticky: once set it never clears. Stated as an ACTION
+   property rather than []( quarantined => []quarantined ) so that TLC
+   checks it during state exploration and NAMES it on violation; the
+   temporal form is only reached in the liveness phase, which never runs if
+   an invariant fires first, and TLC reports it anonymously as "Temporal
+   properties were violated". The two are equivalent: no single step may
+   clear the flag, so by induction no behaviour may. *)
+QuarantineSticky == [][quarantined => quarantined']_vars
 
 (* Fail closed, part 1: once quarantined, no operation is newly admitted
    unless it is a teardown. This is the RM-8 soundness claim, and the reason
@@ -399,11 +415,25 @@ QuarantineGatesExecute ==
                 => teardown[o] ]_vars
 
 (* The superseding rule never touches a non-teardown transaction, and never
-   fires on a healthy monitor. Triggered on ANY re-prepare of a live entry
-   rather than on a change of digest, so that superseding with the same
-   digest is checked too. Without this confinement, superseding would be a
-   general clobber of in-flight transactions -- exactly the defect the
-   anti-clobber check in `prepare` exists to prevent. *)
+   fires on a healthy monitor. The antecedent references the `Prepare`
+   ACTION rather than a before/after state predicate: a predicate of the
+   form state[o] # "none" /\ state'[o] = "prepared" also holds of an op
+   that merely STAYED prepared while a different op took a step.
+
+   Known blind spot: the `_vars` subscript exempts steps that change
+   nothing, so re-preparing an entry that is already "prepared" with the
+   SAME digest and the SAME `td` is a stuttering step and is not checked.
+   That case changes no modelled state at all -- state, authorized,
+   presented (already NoDigest for a prepared entry) and teardown are all
+   identical -- so it is unobservable here by construction rather than
+   overlooked. Every supersede that changes anything, including one that
+   reuses the digest but flips `td` or acts on an "executed" entry, is
+   checked. Closing it would need a ghost step counter in `vars`, which
+   would make the state space unbounded for no additional coverage.
+
+   Without this confinement, superseding would be a general clobber of
+   in-flight transactions -- exactly the defect the anti-clobber check in
+   `prepare` exists to prevent. *)
 SupersedingIsConfined ==
     [][ \A o \in Ops, d \in Digests, td \in BOOLEAN :
             (Prepare(o, d, td) /\ state[o] # "none")

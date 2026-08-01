@@ -27,6 +27,12 @@ about:
   check and no quarantine gate, so it has no lifecycle semantics to model.
 - **Idempotent replay** and **stale-version rejection**, both of which are properties of the
   RPC layer above the monitor.
+- **Error paths as transitions.** `execute`, `commit` and `abort` mutate nothing when they
+  return `Err`, so a refusal is modelled as the absence of an enabled action, not as an
+  action of its own. Releasing the reserved id afterwards is the caller's separate decision
+  (`abort_or_quarantine`), which `Abort` models. `CommitFails` and `AbortFailed` are guarded
+  on the states in which those calls can actually fail — the *complement* of the states from
+  which they succeed.
 
 ## Checked properties
 
@@ -60,7 +66,10 @@ Invariants:
 
 Action and temporal properties:
 
-- **`QuarantineSticky`** — once quarantined the monitor never clears.
+- **`QuarantineSticky`** — once quarantined the monitor never clears. Stated as an action
+  property (`[][quarantined => quarantined']_vars`) rather than the equivalent
+  `[](quarantined => []quarantined)`, so TLC checks it during state exploration and names it
+  on violation instead of reporting an anonymous "Temporal properties were violated".
 - **`QuarantineAdmitsOnlyTeardown`** — after quarantine no operation is newly admitted
   unless it is a teardown. Admitting teardown is a de-escalation, not a fail-open: with
   `prepare` still refused for everything else, no new transaction can build capability.
@@ -71,8 +80,12 @@ Action and temporal properties:
 - **`SupersedingIsConfined`** — the rule that lets a teardown supersede an in-flight
   transaction never touches a non-teardown and never fires on a healthy monitor. The
   anti-clobber invariant it relaxes protects the provability of a state the monitor has
-  already declared unprovable. The antecedent is the `→ prepared` transition itself, so a
-  supersede that reuses the same digest is still caught.
+  already declared unprovable. The antecedent references the `Prepare` *action* rather than
+  a before/after state predicate, which would also hold of an operation that merely stayed
+  prepared while a different one took a step. One case is out of reach: re-preparing an
+  already-`prepared` entry with the same digest *and* the same teardown flag changes no
+  modelled state, so it is a stuttering step that `[][...]_vars` exempts. Every supersede
+  that changes anything is checked.
 - **`VersionMonotone`** — the version never rewinds.
 
 ## Run
