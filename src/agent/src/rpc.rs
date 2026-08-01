@@ -468,12 +468,41 @@ impl AgentService {
         // FR-9/FR-11: the container now exists. Record its occurrence in the `created`
         // state and bind the trusted-resolved CDI devices to it, so lifecycle and device
         // handles are tracked against the enforcer's own occurrence (not the host alias).
+        //
+        // F-35: these results must not be discarded. A failure here means the occurrence
+        // registry has diverged from the sandbox, and the container is already started and
+        // registered while `create_container`'s error arm does not tear it down -- so
+        // returning an error on its own would leave a running, untracked container.
+        // Quarantining first is what makes the error safe to return: no further SRM-gated
+        // operation is authorized afterwards, so the untracked container cannot be exec'd
+        // into, signalled or given new devices, and the shim is told DATA_LOSS (RM-7)
+        // rather than a retryable INTERNAL.
+        //
+        // No production path reaches this today: a duplicate create is answered from the
+        // SRM replay cache before it gets here. This is defence in depth against a future
+        // divergence between the transaction log and the occurrence registry.
+        //
+        // The occurrence lock is taken as a temporary inside the `let`, so it is released
+        // before the monitor lock is acquired below. Nothing in this file ever holds both,
+        // and nothing should start to.
         #[cfg(feature = "strict-policy")]
         {
-            let mut occ = crate::OCCURRENCES.lock().await;
-            let _ = occ.create(&cid, None, None);
-            for d in &verified_cdi_devices {
-                let _ = occ.bind_device(&cid, &d.device, &d.spec_digest);
+            let outcome = record_occurrence(
+                &mut *crate::OCCURRENCES.lock().await,
+                &cid,
+                &verified_cdi_devices,
+            );
+            if let Err(e) = outcome {
+                let reason = format!(
+                    "occurrence registry diverged while recording container {}: {}",
+                    cid, e
+                );
+                error!(sl(), "{}", reason);
+                crate::SRM.lock().await.quarantine(reason.clone());
+                return Err(anyhow::Error::new(
+                    kata_security_reference_monitor::SrmError::Quarantined(reason),
+                )
+                .context("failed to record the container occurrence"));
             }
         }
 
@@ -1364,7 +1393,23 @@ impl agent_ttrpc::AgentService for AgentService {
                     txn_guard.disarm();
                     // FR-9: retire the occurrence. Its alias may not be operated on again
                     // until a fresh create re-mints it with a new generation.
-                    let _ = crate::OCCURRENCES.lock().await.remove(&req.container_id);
+                    //
+                    // F-35: log-and-continue rather than propagate or quarantine. `remove`
+                    // returns `Err` only when there was no live occurrence to retire in the
+                    // first place -- every non-removed state is an allowed source -- so a
+                    // failure here strands nothing, and a later create for this alias mints
+                    // a fresh generation regardless. The result is still not discarded: it
+                    // is the only signal that the registry and the transaction log disagree
+                    // about whether this container ever existed.
+                    if let Err(e) = crate::OCCURRENCES.lock().await.remove(&req.container_id) {
+                        error!(
+                            sl(),
+                            "no live occurrence to retire for {} after removing the container: \
+                             {:?}; the occurrence registry disagrees with the transaction log",
+                            req.container_id,
+                            e
+                        );
+                    }
                     Ok(Empty::new())
                 }
                 Err(e) => {
@@ -2918,6 +2963,35 @@ async fn unstart_or_warn(container_id: &str) {
             e
         );
     }
+}
+
+/// FR-9/FR-11: record a freshly created container's occurrence and bind its devices.
+///
+/// Split out of `do_create_container` so the failure ordering is directly testable.
+///
+/// The ordering is the point. `create` failing means an occurrence is already live for
+/// this alias, so binding into it anyway would attribute *this* container's devices to the
+/// previous one and `devices()` would report the union of two containers' grants -- an
+/// FR-11 integrity break. The loop is therefore skipped entirely when `create` fails.
+///
+/// The `?` on `bind_device` is defence in depth rather than a live guard: against today's
+/// registry it cannot fire, because `bind_device` refuses only an absent or already-removed
+/// alias and a successful `create` guarantees neither. It is there so that a future
+/// registry whose binds *can* fail stops at the first one instead of walking the rest.
+/// Note that no unwinding happens on that path: the occurrence is left partially bound and
+/// the caller quarantines, which is what stops anything further being authorized against
+/// an occurrence that under-reports what its container holds.
+#[cfg(feature = "strict-policy")]
+fn record_occurrence(
+    occ: &mut kata_security_reference_monitor::OccurrenceRegistry,
+    cid: &str,
+    devices: &[kata_security_reference_monitor::VerifiedCdiDevice],
+) -> Result<(), kata_security_reference_monitor::OccurrenceError> {
+    occ.create(cid, None, None)?;
+    for d in devices {
+        occ.bind_device(cid, &d.device, &d.spec_digest)?;
+    }
+    Ok(())
 }
 
 /// FR-6 / RM-4: build an operation id that no other operation can be confused with.
@@ -5242,7 +5316,10 @@ COMMIT
     #[cfg(feature = "strict-policy")]
     mod srm_integration {
         use super::*;
-        use kata_security_reference_monitor::{Prepared, ReferenceMonitor, SrmError, TxnState};
+        use kata_security_reference_monitor::{
+            OccurrenceError, OccurrenceRegistry, Prepared, ReferenceMonitor, SrmError, TxnState,
+            VerifiedCdiDevice,
+        };
 
         /// The five operation ids `rpc.rs` builds, as the call sites build them.
         fn all_op_ids(cid: &str, exec: &str, signal: u32) -> Vec<String> {
@@ -5659,6 +5736,85 @@ COMMIT
                 ttrpc::Code::INTERNAL,
                 "non-SRM failures must keep the original INTERNAL mapping"
             );
+        }
+
+        /// F-35: an occurrence that could not be created must not be bound into.
+        ///
+        /// `create` fails only when a live occurrence already holds the alias. The old
+        /// code discarded that error and ran the bind loop anyway, appending the new
+        /// container's devices to the *stale* occurrence — so `devices()` returned the
+        /// union of two containers' grants, which is an FR-11 integrity break.
+        #[test]
+        fn a_failed_occurrence_create_binds_no_devices() {
+            let mut occ = OccurrenceRegistry::default();
+            occ.create("ctr1", None, None).unwrap();
+            occ.bind_device("ctr1", "vendor.com/gpu=0", "sha256:aaa")
+                .unwrap();
+
+            let devices = vec![VerifiedCdiDevice {
+                device: "vendor.com/gpu=1".into(),
+                spec_digest: "sha256:bbb".into(),
+            }];
+
+            assert_eq!(
+                record_occurrence(&mut occ, "ctr1", &devices),
+                Err(OccurrenceError::AliasInUse("ctr1".into())),
+                "a second create for a live alias must be refused, not silently ignored"
+            );
+            assert_eq!(
+                occ.devices("ctr1").map(<[_]>::to_vec),
+                Some(vec![(
+                    "vendor.com/gpu=0".to_string(),
+                    "sha256:aaa".to_string()
+                )]),
+                "the incoming container's devices must not be attributed to the \
+                 occurrence that already held the alias"
+            );
+        }
+
+        /// F-35: the happy path still binds every verified device.
+        #[test]
+        fn a_successful_occurrence_create_binds_every_device() {
+            let mut occ = OccurrenceRegistry::default();
+            let devices = vec![
+                VerifiedCdiDevice {
+                    device: "vendor.com/gpu=0".into(),
+                    spec_digest: "sha256:aaa".into(),
+                },
+                VerifiedCdiDevice {
+                    device: "vendor.com/gpu=1".into(),
+                    spec_digest: "sha256:bbb".into(),
+                },
+            ];
+
+            assert_eq!(record_occurrence(&mut occ, "ctr1", &devices), Ok(()));
+            assert_eq!(
+                occ.devices("ctr1").map(<[_]>::len),
+                Some(2),
+                "every trusted-resolved device must be bound to the new occurrence"
+            );
+        }
+
+        /// F-35: a bind failure cannot be reached through today's registry, and the test
+        /// suite should say so rather than pretend otherwise.
+        ///
+        /// `bind_device` refuses only an absent or already-removed alias, and a successful
+        /// `create` leaves the alias present and `Created`. So the `?` in
+        /// `record_occurrence`'s loop is unreachable by construction. This test pins that
+        /// premise: if a later change makes a bind fail mid-loop, this assertion breaks and
+        /// forces the loop-break behaviour to be given a real test.
+        #[test]
+        fn no_bind_can_fail_once_the_occurrence_was_created() {
+            let mut occ = OccurrenceRegistry::default();
+            occ.create("ctr1", None, None).unwrap();
+            for i in 0..3 {
+                assert_eq!(
+                    occ.bind_device("ctr1", format!("vendor.com/gpu={}", i), "sha256:aaa"),
+                    Ok(()),
+                    "binding into a freshly created occurrence must not fail; if this ever \
+                     regresses, record_occurrence's loop-break needs a real test"
+                );
+            }
         }
 
         /// RM-8: only stop signals are teardown. Misclassifying, say, SIGHUP would let a
