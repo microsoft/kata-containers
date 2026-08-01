@@ -376,12 +376,15 @@ impl AgentService {
                 .lock()
                 .await
                 .attach_executed(op_id, executed_oci_digest.clone())
+                // Keep the SrmError typed rather than stringifying it: this call is a
+                // quarantine gate (F-40), and create_container maps the error back to a
+                // ttrpc code with `srm_code` by downcasting. An `anyhow!` here would
+                // flatten a quarantine into INTERNAL, which the shim reads as "bad
+                // request" and retries — the exact confusion RM-7's DATA_LOSS code exists
+                // to prevent.
                 .map_err(|e| {
-                    anyhow!(
-                        "FR-3: failed to bind executed OCI object to {}: {:?}",
-                        op_id,
-                        e
-                    )
+                    anyhow::Error::new(e)
+                        .context(format!("FR-3: failed to bind executed OCI object to {}", op_id))
                 })?;
             // The digests routinely differ, which on its own says nothing: the
             // resolution chain legitimately rewrites parts of the spec. What must
@@ -1097,7 +1100,14 @@ impl agent_ttrpc::AgentService for AgentService {
                     txn_guard.disarm();
                     // Roll back the policy pstate mutations applied during authorization.
                     rollback_policy_state(&policy_snapshot, "create_container").await;
-                    Err(ttrpc_error(ttrpc::Code::INTERNAL, e))
+                    // RM-7: an SrmError that reached us from inside do_create_container
+                    // (the FR-3 executed-object binding) keeps its own terminal code, so a
+                    // quarantine arrives as DATA_LOSS rather than as an INTERNAL the shim
+                    // would retry.
+                    let code = e
+                        .downcast_ref::<kata_security_reference_monitor::SrmError>()
+                        .map_or(ttrpc::Code::INTERNAL, srm_code);
+                    Err(ttrpc_error(code, e))
                 }
             };
         }
@@ -5603,6 +5613,11 @@ COMMIT
                     authorized: "a".into(),
                     presented: "b".into(),
                 },
+                SrmError::ExecutedDigestAlreadyBound {
+                    op: "op".into(),
+                    bound: "a".into(),
+                    presented: "b".into(),
+                },
             ] {
                 assert_eq!(
                     srm_code(&e),
@@ -5611,6 +5626,39 @@ COMMIT
                     e
                 );
             }
+        }
+
+        /// RM-7 regression: `do_create_container` performs the FR-3 executed-object
+        /// binding, which is quarantine-gated (F-40). It is the only SRM call that
+        /// returns its error through `anyhow` rather than being mapped by `srm_code` at
+        /// the call site, so `create_container`'s error arm recovers the code by
+        /// downcasting. Stringifying the error there — which is what the code used to do —
+        /// flattens a quarantine into INTERNAL, and the shim reads INTERNAL as "malformed
+        /// request" and retries a guest that can never succeed again.
+        #[test]
+        fn an_srm_error_keeps_its_code_through_the_create_container_boundary() {
+            let wrapped = anyhow::Error::new(SrmError::Quarantined("unprovable".into()))
+                .context("FR-3: failed to bind executed OCI object to op");
+
+            let code = wrapped
+                .downcast_ref::<SrmError>()
+                .map_or(ttrpc::Code::INTERNAL, srm_code);
+
+            assert_eq!(
+                code,
+                ttrpc::Code::DATA_LOSS,
+                "a quarantine raised inside do_create_container must not reach the shim \
+                 as a retryable INTERNAL"
+            );
+
+            let opaque = anyhow!("some unrelated create failure");
+            assert_eq!(
+                opaque
+                    .downcast_ref::<SrmError>()
+                    .map_or(ttrpc::Code::INTERNAL, srm_code),
+                ttrpc::Code::INTERNAL,
+                "non-SRM failures must keep the original INTERNAL mapping"
+            );
         }
 
         /// RM-8: only stop signals are teardown. Misclassifying, say, SIGHUP would let a

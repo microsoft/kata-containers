@@ -23,8 +23,12 @@ about:
   not an equality: the resolution chain legitimately rewrites parts of the spec between
   authorization and execution. `CommittedIsPlanBound` models only the monitor's own
   digest-equality gate in `execute()`.
-- **`attach_executed`.** It records an audit digest and performs no comparison, no state
-  check and no quarantine gate, so it has no lifecycle semantics to model.
+- **`attach_executed`.** It records an audit digest and performs no digest *comparison*, so
+  it has no bearing on any lifecycle property the model checks. It is nonetheless gated
+  (F-40): refused outright on a quarantined monitor (no RM-8 teardown exemption — writing
+  an audit record sheds no capability), accepted only from `Prepared`/`Executed`, and
+  write-once. Those guards are enforced by unit tests in `lib.rs` rather than by this
+  model, because they constrain a field no transition of the monitor reads.
 - **Idempotent replay** and **stale-version rejection**, both of which are properties of the
   RPC layer above the monitor.
 - **Error paths as transitions.** `execute`, `commit` and `abort` mutate nothing when they

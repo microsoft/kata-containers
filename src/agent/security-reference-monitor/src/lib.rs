@@ -130,6 +130,14 @@ pub enum SrmError {
     UnknownOperation(OperationId),
     /// The transaction is not in a state that permits this action.
     InvalidState { op: OperationId, state: TxnState },
+    /// The executed-object digest is already bound and a *different* one was presented.
+    /// The binding is write-once: rebinding it would rewrite the record of which object
+    /// was actually executed under an authorization that has already been granted.
+    ExecutedDigestAlreadyBound {
+        op: OperationId,
+        bound: String,
+        presented: String,
+    },
 }
 
 impl fmt::Display for SrmError {
@@ -156,6 +164,16 @@ impl fmt::Display for SrmError {
                 write!(
                     f,
                     "operation {op} in invalid state {state:?} for this action"
+                )
+            }
+            SrmError::ExecutedDigestAlreadyBound {
+                op,
+                bound,
+                presented,
+            } => {
+                write!(
+                    f,
+                    "operation {op} already bound executed digest {bound}, presented {presented}"
                 )
             }
         }
@@ -410,16 +428,60 @@ impl ReferenceMonitor {
     /// FR-3: record the digest of the object actually resolved for execution, binding it
     /// to the authorized transaction. Returns the pair (authorized_plan_digest,
     /// executed_digest) so the caller can audit/log the canonical-object relationship.
+    ///
+    /// F-40: this is an audit record, and an audit record the host can rewrite after the
+    /// fact is worthless as evidence, so it is gated like the entry points that *grant*
+    /// capability rather than trusted to be called correctly:
+    ///
+    /// - **A quarantined monitor refuses it, unconditionally.** Unlike [`Self::execute`],
+    ///   there is no teardown exemption: teardown exists to let a quarantined sandbox shed
+    ///   capability, and nothing about writing an audit digest sheds capability. No
+    ///   teardown path calls this today, and refusing one could not strand it even if it
+    ///   did, because no transition of the monitor reads `executed_digest`.
+    /// - **Only an in-flight transaction accepts it.** The digest describes the object
+    ///   being handed to execution, so `Prepared` (bound before `execute`) and `Executed`
+    ///   (bound while the runtime op is in progress, which is what `create_container`
+    ///   does) are the only states where that is meaningful. Binding it to a `Committed`
+    ///   transaction would retroactively change what a completed, authorized operation
+    ///   claims to have executed.
+    /// - **The binding is write-once.** Re-presenting the same digest is idempotent, so a
+    ///   retried resolution path is harmless; presenting a *different* one is refused.
+    ///
+    /// `commit`, `abort` and `retire` remain deliberately ungated: they only *resolve* a
+    /// transaction the monitor already authorized, and refusing them would strand it.
+    ///
+    /// Nothing currently reads `executed_digest` to make a decision — the real FR-3 check
+    /// is `enforce_plan_binding` in the agent — but that is an argument for gating it now,
+    /// not later: any future check that starts trusting the field must not inherit a hole.
     pub fn attach_executed(
         &mut self,
         op_id: &str,
         executed_digest: impl Into<String>,
     ) -> Result<(String, String), SrmError> {
+        if let Some(r) = &self.quarantined {
+            return Err(SrmError::Quarantined(r.clone()));
+        }
         let txn = self
             .txns
             .get_mut(op_id)
             .ok_or_else(|| SrmError::UnknownOperation(op_id.to_string()))?;
+        if !matches!(txn.state, TxnState::Prepared | TxnState::Executed) {
+            return Err(SrmError::InvalidState {
+                op: op_id.to_string(),
+                state: txn.state.clone(),
+            });
+        }
         let executed = executed_digest.into();
+        match &txn.executed_digest {
+            Some(bound) if bound != &executed => {
+                return Err(SrmError::ExecutedDigestAlreadyBound {
+                    op: op_id.to_string(),
+                    bound: bound.clone(),
+                    presented: executed,
+                })
+            }
+            _ => {}
+        }
         txn.executed_digest = Some(executed.clone());
         Ok((txn.plan_digest.clone(), executed))
     }
@@ -1044,6 +1106,85 @@ mod tests {
         assert_eq!(
             m.transaction("op1").unwrap().executed_digest.as_deref(),
             Some("executed-digest")
+        );
+    }
+
+    /// F-40: the executed-object record is evidence, so a quarantined monitor must refuse
+    /// to write it. Before this gate `attach_executed` was the one entry point with no
+    /// state check, no quarantine gate and no write-once protection at all.
+    ///
+    /// There is deliberately no teardown exemption here, unlike [`ReferenceMonitor::execute`]:
+    /// the RM-8 carve-out exists so a quarantined sandbox can still shed capability, and
+    /// writing an audit digest sheds none. (`commit`/`abort`/`retire` stay ungated for the
+    /// opposite reason — they resolve transactions the monitor already authorized.)
+    #[test]
+    fn attach_executed_is_refused_while_quarantined() {
+        let mut m = ReferenceMonitor::new();
+        m.prepare("op1", 0, "authorized").unwrap();
+        m.quarantine("unprovable");
+        assert!(matches!(
+            m.attach_executed("op1", "executed"),
+            Err(SrmError::Quarantined(_))
+        ));
+        assert_eq!(m.transaction("op1").unwrap().executed_digest, None);
+    }
+
+    /// The quarantine gate is unconditional: a teardown transaction gets no carve-out,
+    /// because nothing reads `executed_digest` and so refusing it strands nothing.
+    #[test]
+    fn attach_executed_refuses_a_teardown_too_while_quarantined() {
+        let mut m = ReferenceMonitor::new();
+        m.prepare_teardown("op1", 0, "authorized").unwrap();
+        m.quarantine("unprovable");
+        assert!(matches!(
+            m.attach_executed("op1", "executed"),
+            Err(SrmError::Quarantined(_))
+        ));
+        m.execute("op1", "authorized")
+            .expect("RM-8: teardown must still execute while quarantined");
+    }
+
+    /// F-40: binding an executed object to an already-committed transaction would
+    /// retroactively rewrite what a completed, authorized operation claims to have run.
+    #[test]
+    fn attach_executed_is_refused_once_committed() {
+        let mut m = ReferenceMonitor::new();
+        m.prepare("op1", 0, "d").unwrap();
+        m.execute("op1", "d").unwrap();
+        m.attach_executed("op1", "executed").unwrap();
+        m.commit("op1", "ok").unwrap();
+        assert!(matches!(
+            m.attach_executed("op1", "rewritten"),
+            Err(SrmError::InvalidState { .. })
+        ));
+        assert_eq!(
+            m.transaction("op1").unwrap().executed_digest.as_deref(),
+            Some("executed"),
+            "the original record must survive the refused rebind"
+        );
+    }
+
+    /// F-40: write-once. A retried resolution presenting the same digest is harmless and
+    /// stays idempotent; a *different* digest is a second claim about the same authorized
+    /// operation and is refused rather than silently overwriting the first.
+    #[test]
+    fn attach_executed_is_write_once() {
+        let mut m = ReferenceMonitor::new();
+        m.prepare("op1", 0, "authorized").unwrap();
+        m.attach_executed("op1", "executed").unwrap();
+        m.attach_executed("op1", "executed")
+            .expect("rebinding the same digest is idempotent");
+        assert_eq!(
+            m.attach_executed("op1", "other"),
+            Err(SrmError::ExecutedDigestAlreadyBound {
+                op: "op1".into(),
+                bound: "executed".into(),
+                presented: "other".into(),
+            })
+        );
+        assert_eq!(
+            m.transaction("op1").unwrap().executed_digest.as_deref(),
+            Some("executed")
         );
     }
 
