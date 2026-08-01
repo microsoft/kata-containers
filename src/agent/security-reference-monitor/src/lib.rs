@@ -29,10 +29,14 @@
 //!   transaction in flight forever and, since `prepare` refuses in-flight ids, wedge that
 //!   operation permanently. Holding a [`TxnGuard`] turns abandonment into an abort (if
 //!   nothing was executed) or a quarantine (if the outcome is unknowable).
-//! - **Quarantine:** on an unprovable state the monitor refuses all new operations.
-//!   Teardown is *not* currently exempt, so a quarantined sandbox cannot be stopped
-//!   or removed through the gated RPCs; only sandbox-level destroy, which is not
-//!   SRM-gated, still works. Whether to exempt teardown is tracked as RM-8.
+//! - **Quarantine:** on an unprovable state the monitor refuses every new operation
+//!   *except teardown* (see [`ReferenceMonitor::prepare_teardown`]). Teardown is exempt
+//!   because it can only remove capability: with `prepare` refused, no container, process
+//!   or mount can be created while quarantined, so permitting stop/remove moves the
+//!   sandbox monotonically towards less state. Refusing it instead strands the workload
+//!   running with only sandbox-level destroy — which is not SRM-gated and is strictly
+//!   more destructive — as the escape hatch. hcsshim draws the same line: its
+//!   `setUVMInconsistent` marker is scoped to device operations, not to teardown.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -104,11 +108,15 @@ pub struct Transaction {
     pub state: TxnState,
     /// Committed result, retained for idempotent replay.
     pub result: Option<String>,
+    /// RM-8: this transaction tears capability down (stop/remove) rather than building it
+    /// up, so it is exempt from the quarantine gate. Set only via
+    /// [`ReferenceMonitor::prepare_teardown`].
+    pub teardown: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SrmError {
-    /// The monitor is quarantined and refuses every new operation, teardown included.
+    /// The monitor is quarantined and refuses every new operation except teardown.
     Quarantined(String),
     /// Expected state version did not match the current version (stale/replayed).
     StaleStateVersion { expected: u64, current: u64 },
@@ -278,9 +286,22 @@ impl ReferenceMonitor {
     }
 
     /// Move the monitor into the quarantined state. Fail-open for availability is
-    /// prohibited: once quarantined, `prepare` and `execute` refuse everything, so no
-    /// SRM-gated RPC can proceed — teardown included. Recovery is sandbox destroy,
-    /// which is not gated here. Exempting teardown is tracked as RM-8.
+    /// prohibited: once quarantined, `prepare` and `execute` refuse every operation that
+    /// could create or alter capability, so no *new* SRM-tracked transaction can build
+    /// capability — no container, process or mount is admitted into existence.
+    ///
+    /// RM-8: teardown prepared via [`Self::prepare_teardown`] is exempt, so the sandbox can
+    /// still be stopped and removed gracefully. That is a de-escalation rather than a
+    /// fail-open: with `prepare` still refused for everything else, admitting teardown only
+    /// moves the sandbox towards less state, whereas refusing it strands the workload
+    /// running and leaves sandbox-level destroy — strictly more destructive and not gated
+    /// here — as the only escape.
+    ///
+    /// Caveat: the claim is scoped to SRM-tracked transitions. `StartContainer` takes no
+    /// transaction, so a container created and committed *before* the quarantine can still
+    /// be started after it. That gap predates RM-8 and is tracked separately; it does not
+    /// flow from the teardown exemption, but the exemption's rationale must not be read as
+    /// asserting the quarantined sandbox is globally frozen.
     pub fn quarantine(&mut self, reason: impl Into<String>) {
         if self.quarantined.is_none() {
             self.quarantined = Some(reason.into());
@@ -295,9 +316,33 @@ impl ReferenceMonitor {
         expected_state_version: u64,
         plan_digest: impl Into<String>,
     ) -> Result<Prepared, SrmError> {
+        self.prepare_inner(op_id, expected_state_version, plan_digest, false)
+    }
+
+    /// RM-8: like [`Self::prepare`], but for an operation that only tears capability down
+    /// (stop/remove). Exempt from the quarantine gate so a degraded sandbox can still be
+    /// shut down gracefully; see the module docs for why this is not a fail-open.
+    pub fn prepare_teardown(
+        &mut self,
+        op_id: impl Into<OperationId>,
+        expected_state_version: u64,
+        plan_digest: impl Into<String>,
+    ) -> Result<Prepared, SrmError> {
+        self.prepare_inner(op_id, expected_state_version, plan_digest, true)
+    }
+
+    fn prepare_inner(
+        &mut self,
+        op_id: impl Into<OperationId>,
+        expected_state_version: u64,
+        plan_digest: impl Into<String>,
+        teardown: bool,
+    ) -> Result<Prepared, SrmError> {
         self.reclaim_orphans();
-        if let Some(r) = &self.quarantined {
-            return Err(SrmError::Quarantined(r.clone()));
+        if !teardown {
+            if let Some(r) = &self.quarantined {
+                return Err(SrmError::Quarantined(r.clone()));
+            }
         }
         let op_id = op_id.into();
 
@@ -316,6 +361,18 @@ impl ReferenceMonitor {
                         txn.result.clone().unwrap_or_default(),
                     ))
                 }
+                // RM-8: a teardown retried against an already-quarantined monitor
+                // supersedes the stranded attempt instead of being refused. The dominant
+                // way a host induces a quarantine is abandoning a call after `execute`
+                // (see `reclaim_orphans`), which deliberately leaves the transaction
+                // parked in `Executed`. Without this the very op id the host needs --
+                // `remove/<cid>` or the SIGKILL id -- is wedged forever and the only
+                // escape is the sandbox-level destroy RM-8 exists to avoid. Superseding
+                // concedes nothing: the anti-clobber invariant protects the provability of
+                // a state the monitor has *already* declared unprovable, and the exemption
+                // is still confined to teardown-on-teardown while quarantined.
+                TxnState::Prepared | TxnState::Executed
+                    if teardown && txn.teardown && self.quarantined.is_some() => {}
                 TxnState::Prepared | TxnState::Executed => {
                     return Err(SrmError::InvalidState {
                         op: op_id,
@@ -342,6 +399,7 @@ impl ReferenceMonitor {
                 executed_digest: None,
                 state: TxnState::Prepared,
                 result: None,
+                teardown,
             },
         );
         Ok(Prepared::New)
@@ -368,8 +426,14 @@ impl ReferenceMonitor {
     /// equal the authorized one, enforcing authorized == executed.
     pub fn execute(&mut self, op_id: &str, presented_plan_digest: &str) -> Result<(), SrmError> {
         self.reclaim_orphans();
-        if let Some(r) = &self.quarantined {
-            return Err(SrmError::Quarantined(r.clone()));
+        // RM-8: resolve the transaction before the quarantine gate so a teardown prepared
+        // by `prepare_teardown` can still complete. An unknown op id is not a teardown, so
+        // it still hits the gate first and reports the quarantine rather than a lookup miss.
+        let teardown = self.txns.get(op_id).is_some_and(|t| t.teardown);
+        if !teardown {
+            if let Some(r) = &self.quarantined {
+                return Err(SrmError::Quarantined(r.clone()));
+            }
         }
         let txn = self
             .txns
@@ -588,6 +652,152 @@ mod tests {
             m.prepare("op1", 0, "d"),
             Err(SrmError::Quarantined(_))
         ));
+    }
+
+    /// RM-8: a quarantined monitor must still let the sandbox be torn down. Refusing
+    /// teardown strands the workload running with only sandbox-level destroy — which is
+    /// not SRM-gated and is strictly more destructive — as the escape hatch.
+    #[test]
+    fn quarantine_exempts_teardown_end_to_end() {
+        let mut m = ReferenceMonitor::new();
+        m.quarantine("policy state rollback failed after remove_container");
+
+        // Build-up is still refused ...
+        assert!(matches!(
+            m.prepare("create/ctr1", 0, "d"),
+            Err(SrmError::Quarantined(_))
+        ));
+
+        // ... but a teardown runs the full prepare → execute → commit path.
+        assert_eq!(
+            m.prepare_teardown("remove/ctr1", 0, "d").unwrap(),
+            Prepared::New
+        );
+        m.execute("remove/ctr1", "d").unwrap();
+        m.commit("remove/ctr1", "container-removed").unwrap();
+        assert_eq!(
+            m.state_version(),
+            1,
+            "a committed teardown must still advance state"
+        );
+        assert!(
+            m.is_quarantined(),
+            "completing a teardown must not clear the quarantine"
+        );
+    }
+
+    /// RM-8 regression: the dominant way a host induces a quarantine is abandoning a call
+    /// after `execute`, and `reclaim_orphans` deliberately parks that transaction in
+    /// `Executed`. If the retry were refused with `InvalidState`, the exact op id needed to
+    /// tear the sandbox down would be wedged forever and the exemption would not fix the
+    /// case that motivates it.
+    #[test]
+    fn an_abandoned_teardown_can_be_retried_after_the_quarantine_it_caused() {
+        let mut m = ReferenceMonitor::new();
+
+        let guard = m.guard("remove/4:ctr1");
+        m.prepare_teardown("remove/4:ctr1", 0, "d1").unwrap();
+        m.execute("remove/4:ctr1", "d1").unwrap();
+        drop(guard); // host abandoned the call mid-flight
+
+        m.reclaim_orphans();
+        assert!(
+            m.is_quarantined(),
+            "abandoning after execute must quarantine"
+        );
+        assert_eq!(
+            m.transaction("remove/4:ctr1").map(|t| t.state.clone()),
+            Some(TxnState::Executed),
+            "the abandoned teardown is parked, not released"
+        );
+
+        assert_eq!(
+            m.prepare_teardown("remove/4:ctr1", m.state_version(), "d1")
+                .unwrap(),
+            Prepared::New,
+            "the retry must supersede the stranded teardown"
+        );
+        m.execute("remove/4:ctr1", "d1").unwrap();
+        m.commit("remove/4:ctr1", "container-removed").unwrap();
+    }
+
+    /// Superseding is confined to teardown-on-teardown while quarantined. Outside those
+    /// conditions the anti-clobber invariant still refuses to overwrite a live transaction.
+    #[test]
+    fn superseding_is_confined_to_quarantined_teardown() {
+        // Not quarantined: even a teardown may not clobber a live teardown.
+        let mut m = ReferenceMonitor::new();
+        m.prepare_teardown("remove/ctr1", 0, "d").unwrap();
+        assert!(
+            matches!(
+                m.prepare_teardown("remove/ctr1", 0, "d"),
+                Err(SrmError::InvalidState { .. })
+            ),
+            "a healthy monitor must still refuse a duplicate in-flight teardown"
+        );
+
+        // Quarantined, but the in-flight transaction is a build-up: still refused, so a
+        // teardown op id cannot be used to displace something that creates capability.
+        let mut m = ReferenceMonitor::new();
+        m.prepare("create/ctr1", 0, "d").unwrap();
+        m.quarantine("unprovable state");
+        assert!(
+            matches!(
+                m.prepare_teardown("create/ctr1", m.state_version(), "d"),
+                Err(SrmError::InvalidState { .. })
+            ),
+            "teardown must not supersede an in-flight build-up transaction"
+        );
+    }
+    #[test]
+    fn teardown_exemption_does_not_leak_to_other_transactions() {
+        let mut m = ReferenceMonitor::new();
+        m.prepare("create/ctr1", 0, "d1").unwrap();
+        m.prepare_teardown("remove/ctr1", 0, "d2").unwrap();
+        m.quarantine("unprovable state");
+
+        assert!(
+            matches!(m.execute("create/ctr1", "d1"), Err(SrmError::Quarantined(_))),
+            "a build-up transaction prepared before the quarantine must not execute after it"
+        );
+        m.execute("remove/ctr1", "d2")
+            .expect("teardown must still execute");
+    }
+
+    /// An unknown op id must report the quarantine, not a lookup miss: the caller is not
+    /// holding a teardown transaction, so the gate applies.
+    #[test]
+    fn execute_of_an_unknown_op_reports_the_quarantine() {
+        let mut m = ReferenceMonitor::new();
+        m.quarantine("unprovable state");
+        assert!(matches!(
+            m.execute("never-prepared", "d"),
+            Err(SrmError::Quarantined(_))
+        ));
+    }
+
+    /// Teardown is exempt from the quarantine gate, not from every other invariant.
+    #[test]
+    fn teardown_still_enforces_plan_binding_and_anti_replay() {
+        let mut m = ReferenceMonitor::new();
+        m.quarantine("unprovable state");
+
+        assert!(
+            matches!(
+                m.prepare_teardown("remove/ctr1", 99, "d"),
+                Err(SrmError::StaleStateVersion { .. })
+            ),
+            "teardown must still reject a stale expected state version"
+        );
+
+        m.prepare_teardown("remove/ctr1", 0, "authorized").unwrap();
+        assert!(
+            matches!(
+                m.execute("remove/ctr1", "tampered"),
+                Err(SrmError::PlanMismatch { .. })
+            ),
+            "teardown must still bind the executed plan to the authorized one"
+        );
     }
 
     #[test]

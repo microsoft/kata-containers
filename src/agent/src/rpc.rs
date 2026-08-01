@@ -584,8 +584,13 @@ impl AgentService {
     // FR-3: compute the signal that will actually be delivered, matching the rewrite in
     // do_signal_process (a container init process with no SIGTERM handler receives SIGKILL).
     // Called before authorization so the policy authorizes the effective signal.
+    //
+    // RM-8: also reports whether that delivery is *lethal* — i.e. it terminates the target
+    // without running any guest-defined handler. Only a lethal delivery is teardown. A
+    // SIGTERM that will be caught by a handler asks a running workload to run new code,
+    // which is exactly the property used to exclude SIGHUP/SIGUSR1 from the exemption.
     #[cfg(feature = "strict-policy")]
-    async fn effective_signal(&self, cid: &str, eid: &str, requested: u32) -> u32 {
+    async fn effective_signal(&self, cid: &str, eid: &str, requested: u32) -> (u32, bool) {
         let sig: libc::c_int = requested as libc::c_int;
         let all = eid.is_empty() && sig == libc::SIGKILL;
         if !all {
@@ -596,11 +601,14 @@ impl AgentService {
                     && sig == libc::SIGTERM
                     && !is_signal_handled(&proc_status_file, sig as u32)
                 {
-                    return libc::SIGKILL as u32;
+                    return (libc::SIGKILL as u32, true);
                 }
             }
         }
-        requested
+        // SIGKILL is uncatchable, so it is always lethal. Everything else — including a
+        // SIGTERM that reached here unrewritten, meaning it is either handled or targets a
+        // non-init process — may run guest code and is not teardown.
+        (requested, sig == libc::SIGKILL)
     }
 
     async fn do_signal_process(&self, req: protocols::agent::SignalProcessRequest) -> Result<()> {
@@ -1057,7 +1065,7 @@ impl agent_ttrpc::AgentService for AgentService {
                         // pstate. Without this the enforcer keeps a phantom entry for a
                         // container that was never created.
                         rollback_policy_state(&policy_snapshot, "create_container prepare").await;
-                        return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e));
+                        return Err(ttrpc_error(srm_code(&e), e));
                     }
                 }
                 // From here on every exit must resolve the transaction; the guard covers
@@ -1067,7 +1075,7 @@ impl agent_ttrpc::AgentService for AgentService {
                     drop(srm);
                     guard.disarm();
                     rollback_policy_state(&policy_snapshot, "create_container execute").await;
-                    return Err(ttrpc_error(ttrpc::Code::INTERNAL, e));
+                    return Err(ttrpc_error(srm_code(&e), e));
                 }
                 guard
             };
@@ -1193,7 +1201,10 @@ impl agent_ttrpc::AgentService for AgentService {
             let txn_guard = {
                 let mut srm = crate::SRM.lock().await;
                 let version = srm.state_version();
-                let prepared = srm.prepare(op_id.clone(), version, digest.clone());
+                let prepared = srm.prepare_teardown(op_id.clone(), version, digest.clone());
+                // RM-8: removal only tears capability down, so it stays available while
+                // the monitor is quarantined; otherwise a degraded sandbox cannot be
+                // cleaned up at all and the host's only recourse is sandbox-level destroy.
                 // Take the guard under the same lock acquisition that prepared the
                 // transaction. The lock has to be released before `rollback_policy_state`
                 // (which acquires AGENT_POLICY then SRM, so holding SRM here would invert
@@ -1223,7 +1234,7 @@ impl agent_ttrpc::AgentService for AgentService {
                         // `prepare` failed, so no transaction of ours is in flight.
                         guard.disarm();
                         rollback_policy_state(&policy_snapshot, "remove_container prepare").await;
-                        return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e));
+                        return Err(ttrpc_error(srm_code(&e), e));
                     }
                 }
                 let mut srm = crate::SRM.lock().await;
@@ -1232,7 +1243,7 @@ impl agent_ttrpc::AgentService for AgentService {
                     drop(srm);
                     guard.disarm();
                     rollback_policy_state(&policy_snapshot, "remove_container execute").await;
-                    return Err(ttrpc_error(ttrpc::Code::INTERNAL, e));
+                    return Err(ttrpc_error(srm_code(&e), e));
                 }
                 guard
             };
@@ -1353,7 +1364,7 @@ impl agent_ttrpc::AgentService for AgentService {
                         drop(srm);
                         guard.disarm();
                         rollback_policy_state(&policy_snapshot, "exec_process prepare").await;
-                        return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e));
+                        return Err(ttrpc_error(srm_code(&e), e));
                     }
                 }
                 // From here on every exit must resolve the transaction; the guard covers
@@ -1363,7 +1374,7 @@ impl agent_ttrpc::AgentService for AgentService {
                     drop(srm);
                     guard.disarm();
                     rollback_policy_state(&policy_snapshot, "exec_process execute").await;
-                    return Err(ttrpc_error(ttrpc::Code::INTERNAL, e));
+                    return Err(ttrpc_error(srm_code(&e), e));
                 }
                 guard
             };
@@ -1407,12 +1418,13 @@ impl agent_ttrpc::AgentService for AgentService {
         // authorizes (and the transaction digests) the signal that is actually delivered
         // (authorized == executed), rather than the requested one.
         #[cfg(feature = "strict-policy")]
-        let req = {
+        let (req, lethal) = {
             let mut req = req;
-            req.signal = self
+            let (sig, lethal) = self
                 .effective_signal(&req.container_id, &req.exec_id, req.signal)
                 .await;
-            req
+            req.signal = sig;
+            (req, lethal)
         };
 
         is_allowed(&req).await?;
@@ -1452,13 +1464,28 @@ impl agent_ttrpc::AgentService for AgentService {
             // back, and snapshotting on every signal would serialize the whole enforcer
             // data blob twice on a hot path. If a future policy revision starts mutating
             // state in this rule, bracket it the way `exec_process` does.
+            //
+            // RM-8: a stop signal only tears capability down, so it stays available while
+            // the monitor is quarantined -- otherwise a degraded sandbox cannot be stopped
+            // gracefully and the host's only recourse is sandbox-level destroy. The test is
+            // *lethal delivery*, not the signal number: `effective_signal` reports whether
+            // the signal terminates the target without running guest code (SIGKILL, or a
+            // SIGTERM it rewrote to SIGKILL for an unhandled init). A SIGTERM that will be
+            // caught by a handler, like SIGHUP or SIGUSR1, asks a running workload to do
+            // something new, so it stays gated.
+            let teardown = lethal && is_teardown_signal(req.signal);
             let txn_guard = {
                 let mut srm = crate::SRM.lock().await;
                 let version = srm.state_version();
-                match srm.prepare(op_id.clone(), version, digest.clone()) {
+                let prepared = if teardown {
+                    srm.prepare_teardown(op_id.clone(), version, digest.clone())
+                } else {
+                    srm.prepare(op_id.clone(), version, digest.clone())
+                };
+                match prepared {
                     Ok(Prepared::AlreadyCommitted(_)) => return Ok(Empty::new()),
                     Ok(Prepared::New) => {}
-                    Err(e) => return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e)),
+                    Err(e) => return Err(ttrpc_error(srm_code(&e), e)),
                 }
                 // From here on every exit must resolve the transaction; the guard covers
                 // the paths that never run, i.e. this future being dropped mid-flight.
@@ -1467,7 +1494,7 @@ impl agent_ttrpc::AgentService for AgentService {
                     abort_or_quarantine(&mut srm, &op_id, "signal_process execute");
                     drop(srm);
                     guard.disarm();
-                    return Err(ttrpc_error(ttrpc::Code::INTERNAL, e));
+                    return Err(ttrpc_error(srm_code(&e), e));
                 }
                 guard
             };
@@ -2700,10 +2727,11 @@ fn plan_digest<T: serde::Serialize>(req: &T) -> String {
 /// the agent quarantines the reference monitor instead, which refuses all further
 /// transactions.
 ///
-/// Note that this is not as gentle as it sounds. `SignalProcess` and `RemoveContainer` are
-/// both transactions, so a quarantined monitor cannot gracefully stop or remove a
-/// container; only sandbox-level teardown, which is not SRM-gated, still works. See RM-8
-/// in `docs/cc/backlog.md`.
+/// Note that this is not as gentle as it sounds. Every SRM-gated RPC that builds or alters
+/// capability is refused from here on, and the shim learns of it on its next such call --
+/// as `DATA_LOSS` (RM-7), so it can tell a degraded guest from a bad request. RM-8 keeps
+/// teardown working: `RemoveContainer` and a stop signal prepare as teardown transactions,
+/// so the sandbox can still be shut down gracefully rather than only destroyed wholesale.
 #[cfg(feature = "strict-policy")]
 async fn rollback_policy_state(snapshot: &Option<PolicySnapshot>, context: &str) {
     let Some(snap) = snapshot else {
@@ -2806,6 +2834,40 @@ fn srm_op_id(kind: &str, parts: &[&str]) -> String {
         id.push_str(part);
     }
     id
+}
+
+/// RM-8: is this (already effective) signal number a stop signal?
+///
+/// A *necessary* condition for teardown, not a sufficient one: the caller must also
+/// establish that the delivery is lethal (see `effective_signal`), because a SIGTERM with a
+/// handler installed runs guest code rather than terminating the target. Everything else --
+/// SIGHUP to reload, SIGUSR1 to rotate -- asks a running workload to do something new,
+/// which is exactly what a quarantine must keep refusing.
+#[cfg(feature = "strict-policy")]
+fn is_teardown_signal(signal: u32) -> bool {
+    signal == libc::SIGTERM as u32 || signal == libc::SIGKILL as u32
+}
+
+/// RM-7: map an SRM failure onto a ttrpc status code.
+///
+/// `Quarantined` gets its own terminal code so the shim can tell "this request was
+/// invalid" from "this guest is degraded and no SRM-gated request will ever succeed
+/// again". Every other `SrmError` is a per-request precondition failure and stays
+/// `FAILED_PRECONDITION`, which the shim may reasonably retry after fixing the request.
+///
+/// Because a commit failure quarantines while still returning success to its caller (see
+/// [`commit_or_quarantine`]), the shim's first sight of a degraded guest is the *next*
+/// SRM-gated call. Without a distinct code that arrives as an opaque
+/// `FAILED_PRECONDITION`, indistinguishable from a malformed request, and the shim keeps
+/// retrying. `DATA_LOSS` says what actually happened: state the monitor was tracking is no
+/// longer provable. The correct response is to tear the sandbox down, and RM-8 keeps
+/// teardown available for exactly that.
+#[cfg(feature = "strict-policy")]
+fn srm_code(e: &kata_security_reference_monitor::SrmError) -> ttrpc::Code {
+    match e {
+        kata_security_reference_monitor::SrmError::Quarantined(_) => ttrpc::Code::DATA_LOSS,
+        _ => ttrpc::Code::FAILED_PRECONDITION,
+    }
 }
 
 /// FR-6: record a successful operation, quarantining the monitor if that fails.
@@ -5413,6 +5475,114 @@ COMMIT
             assert_eq!(
                 m.prepare(create, m.state_version(), "d3").unwrap(),
                 Prepared::New
+            );
+        }
+
+        /// RM-7: a quarantine must be distinguishable from a bad request. Everything else
+        /// stays `FAILED_PRECONDITION`, which the shim may retry after fixing the request.
+        #[test]
+        fn only_a_quarantine_maps_to_data_loss() {
+            assert_eq!(
+                srm_code(&SrmError::Quarantined("unprovable".into())),
+                ttrpc::Code::DATA_LOSS
+            );
+            for e in [
+                SrmError::StaleStateVersion {
+                    expected: 1,
+                    current: 2,
+                },
+                SrmError::UnknownOperation("op".into()),
+                SrmError::InvalidState {
+                    op: "op".into(),
+                    state: TxnState::Prepared,
+                },
+                SrmError::PlanMismatch {
+                    authorized: "a".into(),
+                    presented: "b".into(),
+                },
+            ] {
+                assert_eq!(
+                    srm_code(&e),
+                    ttrpc::Code::FAILED_PRECONDITION,
+                    "{} is a per-request failure, not a degraded guest",
+                    e
+                );
+            }
+        }
+
+        /// RM-8: only stop signals are teardown. Misclassifying, say, SIGHUP would let a
+        /// quarantined monitor be told to reload a running workload.
+        #[test]
+        fn only_stop_signals_count_as_teardown() {
+            for sig in [libc::SIGTERM, libc::SIGKILL] {
+                assert!(is_teardown_signal(sig as u32), "signal {} tears down", sig);
+            }
+            for sig in [libc::SIGHUP, libc::SIGUSR1, libc::SIGUSR2, libc::SIGINT] {
+                assert!(
+                    !is_teardown_signal(sig as u32),
+                    "signal {} keeps the workload running and must stay gated",
+                    sig
+                );
+            }
+        }
+
+        /// RM-8 end to end at this layer: the ids and call order `remove_container` and
+        /// `signal_process` use must still work once the monitor is quarantined, while the
+        /// build-up paths (`create_container`, `exec_process`) stay refused.
+        #[test]
+        fn a_quarantined_monitor_can_still_be_torn_down() {
+            let mut m = ReferenceMonitor::new();
+            let create = srm_op_id("create", &["ctr1"]);
+            m.prepare(create.clone(), 0, "d1").unwrap();
+            m.execute(&create, "d1").unwrap();
+            m.commit(&create, "container-created").unwrap();
+
+            m.quarantine("policy state rollback failed after exec_process");
+
+            for gated in [
+                srm_op_id("create", &["ctr2"]),
+                srm_op_id("exec", &["ctr1", "e1"]),
+            ] {
+                assert!(
+                    matches!(
+                        m.prepare(gated.clone(), m.state_version(), "d"),
+                        Err(SrmError::Quarantined(_))
+                    ),
+                    "{} builds capability and must stay refused",
+                    gated
+                );
+            }
+
+            // A non-teardown signal is still gated ...
+            let hup = srm_op_id(
+                "signal",
+                &["ctr1", "e1", &(libc::SIGHUP as u32).to_string()],
+            );
+            assert!(matches!(
+                m.prepare(hup, m.state_version(), "d"),
+                Err(SrmError::Quarantined(_))
+            ));
+
+            // ... but SIGKILL then removal complete, the same way the handlers drive them.
+            let kill = srm_op_id(
+                "signal",
+                &["ctr1", "e1", &(libc::SIGKILL as u32).to_string()],
+            );
+            m.prepare_teardown(kill.clone(), m.state_version(), "d2")
+                .unwrap();
+            m.execute(&kill, "d2").unwrap();
+            commit_or_quarantine(&mut m, &kill, "signal-delivered", "signal_process");
+            retire_or_warn(&mut m, &kill);
+
+            let remove = srm_op_id("remove", &["ctr1"]);
+            m.prepare_teardown(remove.clone(), m.state_version(), "d3")
+                .unwrap();
+            m.execute(&remove, "d3").unwrap();
+            commit_or_quarantine(&mut m, &remove, "container-removed", "remove_container");
+            assert_eq!(
+                m.transaction(&remove).map(|t| t.state.clone()),
+                Some(TxnState::Committed),
+                "teardown must commit even while quarantined"
             );
         }
     }
