@@ -260,11 +260,18 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
 - **Gap:** the host-supplied `container_id` is an untrusted alias — it can be forged,
   reused, or replayed to drive illegal lifecycle transitions.
 - **Fix:** the enforcer mints its own occurrence handle per container and drives it through
-  `created → running → stopped → removed`. Lifecycle RPCs are gated on occurrence state,
-  with a monotonic per-alias generation as a replay guard and optional per-declaration
-  cardinality.
+  `created → running → stopped → removed`. Lifecycle RPCs are gated on occurrence state.
 - **Guarantee:** start-before-create, exec/signal on an unknown or not-running occurrence,
-  operations on a removed occurrence, and replay of a stale generation are all rejected.
+  and operations on a removed occurrence are all rejected — by the occurrence machine, not
+  by policy.
+- **Limits:** the registry additionally carries a monotonic per-alias **generation** and an
+  optional per-declaration **cardinality** bound. Both are implemented and unit-tested, and
+  neither is currently *armed*: `create` is called with `(None, None)` for the declaration
+  index and bound, and `assert_generation` has no caller. They are forward-looking
+  capabilities, not delivered guarantees. Arming them requires an operation that carries an
+  occurrence handle across a call — no agent RPC does today, since the host presents only
+  the `container_id` alias and every gate resolves it to the *live* occurrence. The parity
+  implementation (hcsshim) enforces no cardinality either.
 - **Commits:** `96a0d641c` (registry), `2434d3ef2` (wiring).
 - **Validated:** unit + **live attack** — `StartContainer` on a never-created id and
   `SignalProcess` on an unknown id are denied under an allow-all policy (the gate is the
