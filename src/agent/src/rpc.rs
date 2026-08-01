@@ -1117,42 +1117,124 @@ impl agent_ttrpc::AgentService for AgentService {
         req: protocols::agent::StartContainerRequest,
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "start_container", req);
+
+        // FR-6: bracket authorization with a policy-state snapshot, as the other gated
+        // handlers do. `StartContainerRequest` emits no `ops` under the reference policy,
+        // so there is normally nothing to revert -- but that is a property of one policy,
+        // not of the request, so every failure path below unwinds it.
+        #[cfg(feature = "strict-policy")]
+        let policy_before = crate::AGENT_POLICY.lock().await.snapshot_state().ok();
+
         is_allowed(&req).await?;
+
+        #[cfg(feature = "strict-policy")]
+        let policy_snapshot = capture_policy_snapshot(policy_before).await;
 
         // FR-9: a container may only be started from the `created` state. This rejects
         // start-before-create and double-start against the enforcer's own occurrence
         // record (the host container_id is an untrusted alias).
         #[cfg(feature = "strict-policy")]
-        crate::OCCURRENCES
-            .lock()
-            .await
-            .start(&req.container_id)
-            .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
+        if let Err(e) = crate::OCCURRENCES.lock().await.start(&req.container_id) {
+            rollback_policy_state(&policy_snapshot, "start_container occurrence").await;
+            return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e));
+        }
 
+        // FR-6: start is the point at which a container's capability actually
+        // materialises -- until then it is a bundle on disk with no process. Leaving it
+        // ungated meant a quarantined monitor still admitted it, so the set of operations
+        // reachable from a degraded guest was not purely destructive, and it was the only
+        // edge in create -> start -> signal -> remove with no audit record and no refusal
+        // of a duplicate in flight.
         #[cfg(feature = "strict-policy")]
         {
+            use kata_security_reference_monitor::Prepared;
+
+            // Namespaced by kind: the create for this container is keyed `create/<cid>`,
+            // and an un-kinded start would collide with the create it follows.
+            let op_id = srm_op_id("start", &[&req.container_id]);
+            let digest = plan_digest(&req);
+            let txn_guard = {
+                let mut srm = crate::SRM.lock().await;
+                let version = srm.state_version();
+                // Deliberately `prepare`, not `prepare_teardown`: a start builds
+                // capability, so it must be refused while the monitor is quarantined.
+                let prepared = srm.prepare(op_id.clone(), version, digest.clone());
+                let guard = srm.guard(&op_id);
+                drop(srm);
+                match prepared {
+                    Ok(Prepared::New) => {}
+                    // A double start is already refused by the occurrence registry above,
+                    // so a committed transaction here means the operation id was reused
+                    // rather than that this is a legitimate replay. Refuse instead of
+                    // reporting a start that did not happen. Reaching this arm should be
+                    // impossible: the transaction is retired the moment the start commits.
+                    Ok(Prepared::AlreadyCommitted(_)) => {
+                        guard.disarm();
+                        unstart_or_warn(&req.container_id).await;
+                        rollback_policy_state(&policy_snapshot, "duplicate start_container").await;
+                        return Err(ttrpc_error(
+                            ttrpc::Code::FAILED_PRECONDITION,
+                            format!("start transaction {op_id} already committed"),
+                        ));
+                    }
+                    Err(e) => {
+                        guard.disarm();
+                        unstart_or_warn(&req.container_id).await;
+                        rollback_policy_state(&policy_snapshot, "start_container prepare").await;
+                        return Err(ttrpc_error(srm_code(&e), e));
+                    }
+                }
+                let mut srm = crate::SRM.lock().await;
+                if let Err(e) = srm.execute(&op_id, &digest) {
+                    abort_or_quarantine(&mut srm, &op_id, "start_container execute");
+                    drop(srm);
+                    guard.disarm();
+                    unstart_or_warn(&req.container_id).await;
+                    rollback_policy_state(&policy_snapshot, "start_container execute").await;
+                    return Err(ttrpc_error(srm_code(&e), e));
+                }
+                guard
+            };
+
             return match self.do_start_container(req.clone()).await {
                 Ok(_) => {
                     // FR-14: a workload container is now running; freeze the network so
-                    // post-start network mutation is refused.
+                    // post-start network mutation is refused. Do this before recording the
+                    // commit: a freeze without a commit costs availability, a commit
+                    // without a freeze costs containment, and the host controls when this
+                    // future is cancelled (ttrpc honours its `timeout_nano`).
                     crate::NET_PHASE.lock().await.to_workload_running();
+                    {
+                        let mut srm = crate::SRM.lock().await;
+                        commit_or_quarantine(
+                            &mut srm,
+                            &op_id,
+                            "container-started",
+                            "start_container",
+                        );
+                        // Retire immediately, as `exec_process` does. A committed
+                        // transaction is a replay-cache entry, and this one would buy
+                        // nothing -- a double start is already refused by the occurrence
+                        // registry -- while `remove_container` is the only other place
+                        // that could free it. Retiring there instead is not sound: a
+                        // removal racing this start finds the transaction still `Executed`,
+                        // its retire fails, and the id is then stranded `Committed` with no
+                        // owner left, making the container id permanently unstartable.
+                        retire_or_warn(&mut srm, &op_id);
+                    }
+                    txn_guard.disarm();
                     Ok(Empty::new())
                 }
                 Err(e) => {
+                    {
+                        let mut srm = crate::SRM.lock().await;
+                        abort_or_quarantine(&mut srm, &op_id, "start_container");
+                    }
+                    txn_guard.disarm();
                     // Runtime start failed: roll the occurrence back to `created` so the
                     // trusted state matches reality and a legitimate retry is possible.
-                    // `remove()` must not be used here -- it is terminal, and would leave
-                    // the container permanently unstartable while releasing its
-                    // cardinality slot.
-                    if let Err(re) = crate::OCCURRENCES.lock().await.unstart(&req.container_id) {
-                        error!(
-                            sl(),
-                            "failed to roll occurrence {} back to created after a failed \
-                             start: {:?}; the container is left unstartable",
-                            req.container_id,
-                            re
-                        );
-                    }
+                    unstart_or_warn(&req.container_id).await;
+                    rollback_policy_state(&policy_snapshot, "start_container").await;
                     Err(ttrpc_error(ttrpc::Code::INTERNAL, e))
                 }
             };
@@ -1258,9 +1340,12 @@ impl agent_ttrpc::AgentService for AgentService {
                             "container-removed",
                             "remove_container",
                         );
-                        // The container id is now free again. Retire both transactions so
-                        // a later create for the same id is a genuinely new operation
-                        // rather than an idempotent replay of the create just undone.
+                        // The container id is now free again. Retire every transaction
+                        // keyed on it -- the create and the removal itself -- so a later
+                        // create for the same id is a genuinely new operation rather than
+                        // an idempotent replay of the one just undone. The start
+                        // transaction is retired by `start_container` on commit and so is
+                        // never outstanding here.
                         let create_op_id = srm_op_id("create", &[&req.container_id]);
                         for id in [&create_op_id, &op_id] {
                             retire_or_warn(&mut srm, id);
@@ -2805,6 +2890,23 @@ fn abort_or_quarantine(
             e
         );
         srm.quarantine(format!("{context} failed with unprovable state"));
+    }
+}
+
+/// FR-9: roll a container's occurrence back to `created` after a failed start.
+///
+/// `remove()` must not be used here -- it is terminal, and would leave the container
+/// permanently unstartable while releasing its cardinality slot (F-34).
+#[cfg(feature = "strict-policy")]
+async fn unstart_or_warn(container_id: &str) {
+    if let Err(e) = crate::OCCURRENCES.lock().await.unstart(container_id) {
+        error!(
+            sl(),
+            "failed to roll occurrence {} back to created after a failed start: {:?}; \
+             the container is left unstartable",
+            container_id,
+            e
+        );
     }
 }
 
@@ -5132,10 +5234,11 @@ COMMIT
         use super::*;
         use kata_security_reference_monitor::{Prepared, ReferenceMonitor, SrmError, TxnState};
 
-        /// The four operation ids `rpc.rs` builds, as the call sites build them.
+        /// The five operation ids `rpc.rs` builds, as the call sites build them.
         fn all_op_ids(cid: &str, exec: &str, signal: u32) -> Vec<String> {
             vec![
                 srm_op_id("create", &[cid]),
+                srm_op_id("start", &[cid]),
                 srm_op_id("remove", &[cid]),
                 srm_op_id("exec", &[cid, exec]),
                 srm_op_id("signal", &[cid, exec, &signal.to_string()]),
@@ -5258,7 +5361,7 @@ COMMIT
         }
 
         #[test]
-        fn the_four_operation_kinds_never_share_an_id() {
+        fn the_operation_kinds_never_share_an_id() {
             let ids = all_op_ids("ctr1", "exec1", 15);
             let unique: std::collections::HashSet<_> = ids.iter().collect();
             assert_eq!(
@@ -5584,6 +5687,41 @@ COMMIT
                 Some(TxnState::Committed),
                 "teardown must commit even while quarantined"
             );
+        }
+
+        /// F-39: a start builds capability, so a quarantined monitor must refuse it --
+        /// even for a container whose create committed before the quarantine. This asserts
+        /// the *monitor* property the handler now relies on: that `prepare` (as opposed to
+        /// `prepare_teardown`) is refused under quarantine for an already-created
+        /// container. It does not exercise `start_container` itself -- see the F-39 notes
+        /// for why a handler-level barrier is not available here.
+        #[test]
+        fn a_quarantined_monitor_refuses_to_start_an_already_created_container() {
+            let mut m = ReferenceMonitor::new();
+            let create = srm_op_id("create", &["ctr1"]);
+            m.prepare(create.clone(), 0, "d1").unwrap();
+            m.execute(&create, "d1").unwrap();
+            m.commit(&create, "container-created").unwrap();
+
+            // The container exists and is startable at this point.
+            let start = srm_op_id("start", &["ctr1"]);
+            assert!(m.prepare(start.clone(), m.state_version(), "d2").is_ok());
+            m.abort(&start).unwrap();
+
+            m.quarantine("policy state rollback failed after exec_process");
+
+            assert!(
+                matches!(
+                    m.prepare(start.clone(), m.state_version(), "d2"),
+                    Err(SrmError::Quarantined(_))
+                ),
+                "start materialises the container's capability and must be refused"
+            );
+
+            // Teardown of the same container is still admitted, so the sandbox can be
+            // cleaned up rather than left with a created-but-unstartable container.
+            let remove = srm_op_id("remove", &["ctr1"]);
+            assert!(m.prepare_teardown(remove, m.state_version(), "d3").is_ok());
         }
     }
 }

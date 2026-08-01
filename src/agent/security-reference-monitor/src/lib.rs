@@ -297,11 +297,12 @@ impl ReferenceMonitor {
     /// running and leaves sandbox-level destroy — strictly more destructive and not gated
     /// here — as the only escape.
     ///
-    /// Caveat: the claim is scoped to SRM-tracked transitions. `StartContainer` takes no
-    /// transaction, so a container created and committed *before* the quarantine can still
-    /// be started after it. That gap predates RM-8 and is tracked separately; it does not
-    /// flow from the teardown exemption, but the exemption's rationale must not be read as
-    /// asserting the quarantined sandbox is globally frozen.
+    /// Caveat: the claim is scoped to SRM-tracked transitions. `StartContainer` now takes a
+    /// non-teardown transaction, so a container created and committed *before* the
+    /// quarantine can no longer be started after it; what remains outside the claim is any
+    /// state transition the agent performs without minting a transaction at all. The
+    /// exemption's rationale must not be read as asserting the quarantined sandbox is
+    /// globally frozen.
     pub fn quarantine(&mut self, reason: impl Into<String>) {
         if self.quarantined.is_none() {
             self.quarantined = Some(reason.into());
