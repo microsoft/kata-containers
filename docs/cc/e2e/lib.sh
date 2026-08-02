@@ -72,6 +72,50 @@ skip_if_done() {
 
 need() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
 
+# ------------------------------------------------------------------ path guard
+# True when every member of a tarball is confined to ./opt/kata/. On failure the
+# reason is printed on stdout and the return is non-zero; nothing is printed on
+# success. It lives here, rather than inline in the one call site, so that
+# test-path-guard.sh exercises the same copy the install path runs — a guard and
+# a test that each carry their own transcription of the predicate can drift apart
+# silently, and the drift is invisible precisely when the guard has been weakened.
+#
+# The caller extracts as root into /, so every path in the archive is trusted.
+# Today these tarballs only contain ./opt/kata/..., but a packaging change that
+# widened them would overwrite arbitrary root-owned files.
+tarball_confined() {
+  local t="$1" listing escaping stray
+  # List and filter in separate steps. Folding them into one pipeline with
+  # `|| true` would let a tar failure (corrupt archive, missing zstd) produce an
+  # empty stream that reads exactly like a clean archive — the guard would then
+  # pass by failing, which is the bug class this function exists to avoid.
+  listing=$(tar --zstd -tf "$t" 2>/dev/null) || { echo "cannot list $t"; return 1; }
+  [ -n "$listing" ] || { echo "$t lists no members"; return 1; }
+  if grep -q '\.\.' <<<"$listing"; then
+    echo "$t contains .. in a member path"; return 1
+  fi
+  # Prefix matching alone would accept a symlink member under ./opt/kata/ that
+  # points outside it, and any subsequent member written through that link. The
+  # rootfs tarball legitimately carries one symlink (kata-containers.img ->
+  # kata-ubuntu-noble.image), so reject by target, not by member type: a relative
+  # target that stays inside the payload is fine, absolute or ..-escaping is not.
+  escaping=$(tar --zstd -tvf "$t" 2>/dev/null | grep ' -> ' | awk -F' -> ' '$2 ~ /^\/|\.\./' || true)
+  if [ -n "$escaping" ]; then
+    echo "$t contains symlinks pointing outside the payload:
+$escaping"; return 1
+  fi
+  # Some tarballs carry the ancestor directories as their own entries (./, ./opt,
+  # ./opt/kata). Those are the path to the payload, not a widening of it, and
+  # extracting them changes nothing, so allow exactly those three and no more.
+  stray=$(grep -v '^\./opt/kata/' <<<"$listing" \
+    | grep -vx '\./' | grep -vx '\./opt/' | grep -vx '\./opt/kata/' || true)
+  if [ -n "$stray" ]; then
+    echo "$t contains paths outside ./opt/kata/:
+$stray"; return 1
+  fi
+  return 0
+}
+
 # Wait until a shell predicate succeeds.  wait_for <timeout-s> <desc> <cmd...>
 wait_for() {
   local timeout="$1" desc="$2"; shift 2

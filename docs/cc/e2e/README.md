@@ -23,6 +23,23 @@ hidden by state the original node had accumulated by hand.
 | `05-smoke-test.sh` | The pod that boots is provably the locally built guest (verity pin), and an undeclared `exec` is denied. Mediation is live. |
 | `06-policy-fragment-e2e.sh` | FR-1 signed policy fragments: every verification invariant holds, and the OCI delivery artifact matches the contract the guest fetcher depends on. |
 
+`test-path-guard.sh` is not a stage. It is a six-case unit test of
+`tarball_confined()` in `lib.sh` — the predicate stage 04 consults before
+extracting a build artifact as root into `/`. It needs no VM and no cluster, only
+`tar` and `zstd`, so run it anywhere the suite is edited:
+
+```bash
+bash docs/cc/e2e/test-path-guard.sh    # expects 6/6
+```
+
+The guard is deliberately defined once and shared: a test carrying its own
+transcription of the predicate can keep passing after the real guard has been
+weakened, and that divergence is invisible exactly when it matters. Two of the
+six cases exist because the obvious implementations get them wrong — a tarball
+whose members are listed by a `tar` that *failed* looks identical to a clean one,
+and the rootfs tarball legitimately contains a symlink, so symlinks must be
+judged by target rather than rejected by type.
+
 ## Quick start
 
 ```bash

@@ -181,40 +181,14 @@ fi  # end of the build block skipped by E2E_SKIP_BUILD
 # them only primes the local cache: without this the cluster keeps booting the
 # nightly image and every result downstream is a false green.
 install_tarball() {
-  local t="$1"
+  local t="$1" why
   [ -f "$t" ] || die "expected tarball missing: $t"
-  # Extracting into / trusts every path in the archive. Today these tarballs only
-  # contain ./opt/kata/..., but a packaging change that widened them would silently
-  # overwrite arbitrary root-owned files — including stage 03's genpolicy-settings
-  # patch, which would re-break every pod at CreateContainerRequest.
-  #
-  # Some tarballs also carry the ancestor directories as their own entries
-  # (./, ./opt/). Those are the path to the payload, not a widening of it, and
-  # extracting them changes nothing, so allow exactly those three and no more.
-  #
-  # List and filter in separate steps. Folding them into one pipeline with
-  # `|| true` would let a tar failure (corrupt archive, missing zstd) produce an
-  # empty stream that reads exactly like a clean archive — the guard would then
-  # pass by failing, which is the bug class this file exists to avoid.
-  local listing stray
-  listing=$(tar --zstd -tf "$t") || die "cannot list $t"
-  [ -n "$listing" ] || die "$t lists no members — refusing to extract into /"
-  # Prefix matching alone would accept a symlink member under ./opt/kata/ that
-  # points outside it, and any subsequent member written through that link. The
-  # rootfs tarball legitimately carries one symlink (kata-containers.img ->
-  # kata-ubuntu-noble.image), so reject by target, not by member type: a relative
-  # target that stays inside the payload is fine, absolute or ..-escaping is not.
-  ! grep -q '\.\.' <<<"$listing" || die "$t contains .. in a member path — refusing to extract into /"
-  local escaping
-  escaping=$(tar --zstd -tvf "$t" | grep ' -> ' | awk -F' -> ' '$2 ~ /^\/|\.\./' || true)
-  [ -z "$escaping" ] || die "$t contains symlinks pointing outside the payload — refusing to extract into /:
-$escaping"
-  stray=$(grep -v '^\./opt/kata/' <<<"$listing" \
-    | grep -vx '\./' | grep -vx '\./opt/' | grep -vx '\./opt/kata/' || true)
-  if [ -n "$stray" ]; then
-    die "$t contains paths outside ./opt/kata/ — refusing to extract into /:
-$stray"
-  fi
+  # Extracting into / trusts every path in the archive; tarball_confined (lib.sh)
+  # is what makes that trust conditional. A packaging change that widened these
+  # tarballs would otherwise silently overwrite arbitrary root-owned files —
+  # including stage 03's genpolicy-settings patch, which would re-break every pod
+  # at CreateContainerRequest.
+  why=$(tarball_confined "$t") || die "refusing to extract into /: $why"
   log "installing $t into /"
   sudo tar --zstd -xf "$t" -C / || die "install of $t failed"
 }
