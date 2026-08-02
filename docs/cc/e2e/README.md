@@ -1,0 +1,171 @@
+# End-to-end reproduction on an Azure VM
+
+Scripted reproduction of the confidential-containers end-to-end path used to
+validate the hardened (`STRICT_POLICY`) guest stack, including the signed
+policy-fragment flow.
+
+Everything here is idempotent and resumable. Each stage records a marker under
+`~/.coco-e2e`; a re-run skips completed stages. `E2E_FORCE=1` re-runs anyway.
+
+## What each stage proves
+
+| Stage | Proves |
+| --- | --- |
+| `01-provision-vm.sh` | An Azure confidential VM exists and is reachable. Run from your workstation. |
+| `02-bootstrap-node.sh` | Toolchain, container engine, kubectl, Go, Rust and the repo checkout are present on the node. |
+| `03-deploy-cluster.sh` | A kubeadm cluster with `kata-deploy` and the CoCo KBS is up and the runtime classes are registered. |
+| `04-build-guest-stack.sh` | The hardened agent is built **and installed** into `/opt/kata`, the deployed guest image really changed, and the runtime is re-pinned to that image's dm-verity root hash. |
+| `05-smoke-test.sh` | The pod that boots is provably the locally built guest (verity pin), and an undeclared `exec` is denied. Mediation is live. |
+| `06-policy-fragment-e2e.sh` | FR-1 signed policy fragments: every verification invariant holds, and the OCI delivery artifact matches the contract the guest fetcher depends on. |
+
+## Quick start
+
+```bash
+# from your workstation
+./01-provision-vm.sh
+ssh coco-dev 'mkdir -p ~/coco-e2e'
+scp -r ./ coco-dev:~/coco-e2e/
+
+# on the node
+ssh coco-dev
+export E2E_NIGHTLY_SHA=<sha>          # see "CI nightly artifact" below
+cd ~/coco-e2e && ./run-all.sh
+```
+
+`run-all.sh` skips stage 01 automatically when the Azure CLI is absent (i.e. on
+the node). Force the decision with `E2E_SKIP_PROVISION=1` or `=0`.
+
+Individual stages:
+
+```bash
+./run-all.sh 04 05 06
+E2E_FORCE=1 ./run-all.sh 06
+```
+
+## Configuration
+
+All settings live at the top of `lib.sh` and are environment-overridable.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `E2E_RG` / `E2E_VM` | `jiria-coco-cvm-rg` / `coco-dev-1` | Azure resource group and VM name. |
+| `E2E_REGION` | `eastus` | See the region trap below. |
+| `E2E_VM_SIZE` | `Standard_DC16as_cc_v5` | SEV-SNP confidential VM SKU. |
+| `E2E_BRANCH` | `agent-unstart-failed-start` | Branch under test. |
+| `E2E_REPO_DIR` | `~/kata-containers` | Checkout on the node. |
+| `E2E_STRICT_POLICY` | `yes` | Pulls in the security reference monitor. |
+| `E2E_NIGHTLY_SHA` | *(required for stage 03)* | CI-nightly commit sha. |
+| `E2E_REGISTRY` | `localhost:5000` | Registry for the policy fragment. Loopback starts a throwaway `registry:2`. |
+| `E2E_SKIP_PROVISION` | `auto` | `auto` skips stage 01 when `az` is missing; `1` always skips, `0` always runs. |
+| `E2E_NS` | `coco-e2e` | Namespace for the stage-05 pod. |
+| `E2E_GO_VERSION` | `1.25.0` | Go toolchain installed by stage 02. |
+| `E2E_STATE_DIR` | `~/.coco-e2e` | Stage markers and stage-06 artifacts. |
+| `E2E_FRAGMENT_ISSUER` / `_FEED` / `_SVN` / `_MIN_SVN` / `_TAG` | `did:example:e2e-issuer` / `$E2E_REGISTRY/coco-e2e/fragment` / `2` / `1` / `e2e` | Stage-06 fragment identity and rollback floor. |
+| `E2E_FRAGMENT_WORK` | `$E2E_STATE_DIR/fragments` | Holds the issuer private key; created mode 700. |
+
+### CI nightly artifact
+
+Stage 03 needs `kata-tools-static.tar.zst` in `$E2E_REPO_DIR/kata-tools-artifacts/`.
+The *overall* nightly run is usually red — that is fine, only the build/publish
+jobs matter.
+
+```bash
+gh run list --workflow ci-nightly.yaml -L 5 --json databaseId,headSha,conclusion
+gh run download <id> -n kata-tools-static-tarball-amd64-<sha>-nightly
+mkdir -p ~/kata-containers/kata-tools-artifacts
+mv kata-tools-static.tar.zst ~/kata-containers/kata-tools-artifacts/
+export E2E_NIGHTLY_SHA=<sha>
+```
+
+## Traps these scripts already handle
+
+Each of these cost real debugging time; the scripts encode the fix, but knowing
+about them helps when something drifts.
+
+- **A stale tarball silently ships the wrong agent.** `kata-deploy-binaries.sh`
+  guards each packaging step with `[[ ! -f ${final_tarball_path} ]]`. If the
+  tarball exists it recompiles the agent, discards the result, and repackages the
+  old one. `USE_CACHE=no` does *not* bypass this. Stage 04 deletes the tarballs
+  first, and proves the hardening with a differential symbol test
+  (`src/agent/tests/test-setpolicy-absent.sh`) rather than a string match — a
+  hardened binary contains no rejection string because the handler is compiled
+  out entirely.
+- **Building is not installing.** The build only populates `build/*.tar.zst`;
+  until those are extracted into `/` the cluster keeps booting the CI-nightly
+  guest. Stage 04 installs them and fails if the deployed image is unchanged.
+- **The agent builds from a git checkout inside a container**, so uncommitted
+  working-tree changes are invisible. Stage 04 refuses to run on a dirty tree.
+- **`DOCKER_TAG` needs an `-amd64` suffix.** The manifest-list tag is only
+  published when the multi-arch merge job runs, and recent nightlies fail before
+  it. Without the suffix `kata-deploy` `ImagePullBackOff`s and the install times
+  out.
+- **`oci_version` in `genpolicy-settings.json` is stale (1.1.0)** while
+  containerd emits 1.3.0, which denies every pod at `CreateContainerRequest`.
+  Stage 03 patches it.
+- **`guest-pull` requires an explicit pod-level `securityContext`** — genpolicy
+  refuses images whose user/group would come from the image layers.
+- **The policy annotation is `cc_init_data`,** not the legacy
+  `io.katacontainers.config.agent.policy`. Any "did genpolicy run?" check must
+  look for the former.
+- **`install_libseccomp.sh` must be staged by hand.** The agent Dockerfile
+  `COPY`s it, but it only reaches that path via Makefile-only targets that
+  `kata-deploy-binaries.sh` skips.
+- **Changing the agent feature set needs a clean build** — flipping
+  `STRICT_POLICY` does not invalidate the cargo cache.
+- **Do not wait on a build with `pgrep -f`** — it matches the ssh command line
+  carrying the pattern and never exits. Poll for a marker in the log instead.
+- **`kubectl exec` into a genpolicy'd pod is denied by design**, and
+  `kubectl logs` is empty for these pods. Plan in-guest observation accordingly.
+
+### Region and quota
+
+Availability and quota are independent, and each one alone is a false green —
+check both. For AKS-based runs (not covered by these scripts) use `westus`:
+`eastus` is restricted for that subscription, and the `_cc_v6` SKUs have zero
+quota by default.
+
+```bash
+az vm list-skus --size Standard_DC16as_cc_v5 \
+  --query "[].{Loc:locationInfo[0].location, R:restrictions[0].reasonCode}" -o table
+az vm list-usage --location westus --query "[?contains(localName,'DCACCV5')]" -o table
+```
+
+## Policy fragments (stage 06)
+
+The fragment feature has two boundaries and the stage covers both:
+
+**Verification** — `fragment-demo` drives the real `FragmentStore`, the same one
+used by both the guest boot-pull path and the runtime `LoadPolicyFragment` push
+path. It asserts every positive and negative outcome internally (unsigned,
+unauthorized issuer, SVN rollback, revoked certificate, reordered log head,
+missing or foreign receipt), so a non-zero exit is a genuine regression.
+
+**Delivery** — the stage signs a fragment, packages it as an OCI artifact and
+pushes it. For a loopback registry it then reads the manifest back and asserts
+the contract the guest fetcher depends on:
+
+| Field | Value | Asserted |
+| --- | --- | --- |
+| `artifactType` | `application/x-ms-ccepolicy-frag` | yes |
+| COSE layer `mediaType` | `application/cose-x509+rego` | yes |
+| config `mediaType` | `application/vnd.oci.empty.v1+json` | no — contract only |
+
+Against a remote registry the read-back is skipped (no credentials are assumed);
+verify by hand with `oras manifest fetch`. The stage also asserts the negative
+case: `--plain-http` against a non-loopback registry must fail with the specific
+downgrade guard message, not merely a non-zero exit.
+
+It then prints the `policy_fragments[]` settings entry for the base policy and
+the `fragment-issuers.toml` trust root to deliver through measured initdata. Both
+are needed for a live boot-pull; the stage prints the exact wiring.
+
+The trust root is measured, so it must arrive through initdata (preferred) or the
+measured rootfs — never from the host. Fragment failures abort the VM by design.
+
+## Cleanup
+
+```bash
+az vm deallocate -g jiria-coco-cvm-rg -n coco-dev-1
+docker rm -f coco-e2e-registry
+rm -rf ~/.coco-e2e          # clears the stage markers
+```

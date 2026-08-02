@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# 02 — bootstrap the node: toolchain, container engine, kubectl, Go, repo checkout.
+# Run this ON the VM.
+set -uo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+skip_if_done 02-bootstrap-node
+
+step "02 — bootstrap node"
+
+log "installing base packages"
+sudo apt-get update -qq
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+  cmake curl git jq unzip wget build-essential pkg-config libssl-dev \
+  protobuf-compiler \
+  socat conntrack ebtables ethtool docker.io docker-buildx default-jre \
+  || die "apt install failed"
+
+# genpolicy's containerd-client / k8s-cri build scripts shell out to protoc; without
+# it the crate fails to build and the failure looks unrelated.
+need protoc
+
+# yq from snap: the apt package is a different, incompatible tool.
+command -v yq >/dev/null 2>&1 || sudo snap install yq || die "yq install failed"
+
+log "configuring docker access"
+sudo usermod -aG docker "$USER" || die "usermod failed"
+# Group ownership, not world-writable: a+rw on the docker socket is a
+# root-equivalent grant to every local account and it persists across reboots.
+sudo chgrp docker /var/run/docker.sock || true
+sudo chmod 660 /var/run/docker.sock || true
+
+if ! command -v kubectl >/dev/null 2>&1; then
+  log "installing kubectl"
+  ver=$(curl -fsSL https://dl.k8s.io/release/stable.txt) || die "could not resolve kubectl version"
+  curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${ver}/bin/linux/amd64/kubectl" \
+    || die "kubectl download failed"
+  sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl || die "kubectl install failed"
+fi
+kubectl version --client >/dev/null 2>&1 || die "kubectl is not usable after install"
+
+GO_VER="${E2E_GO_VERSION:-1.25.0}"
+if ! /usr/local/go/bin/go version 2>/dev/null | grep -q "go$GO_VER"; then
+  log "installing Go $GO_VER"
+  curl -fsSLo /tmp/go.tgz "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" \
+    || die "Go download failed"
+  sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tgz || die "Go install failed"
+fi
+/usr/local/go/bin/go version >/dev/null 2>&1 || die "Go is not usable after install"
+
+if ! "$HOME/.cargo/bin/cargo" --version >/dev/null 2>&1; then
+  log "installing Rust"
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path \
+    || die "rustup install failed"
+fi
+"$HOME/.cargo/bin/cargo" --version >/dev/null 2>&1 || die "cargo is not usable after install"
+
+load_toolchain
+
+# Non-interactive ssh sessions do not source ~/.bashrc, so scripts call
+# load_toolchain(); this block is purely for interactive convenience.
+if ! grep -q 'E2E toolchain' "$HOME/.bashrc" 2>/dev/null; then
+  cat >> "$HOME/.bashrc" <<'EOF'
+
+# --- E2E toolchain ---
+export GOROOT=/usr/local/go
+export GOPATH=$HOME/gopath
+export PATH=$GOPATH/bin:$GOROOT/bin:$HOME/.cargo/bin:$PATH
+EOF
+fi
+
+if [ ! -d "$E2E_REPO_DIR/.git" ]; then
+  log "cloning $E2E_REPO_URL"
+  git clone "$E2E_REPO_URL" "$E2E_REPO_DIR" || die "clone failed"
+fi
+log "checking out $E2E_BRANCH"
+git -C "$E2E_REPO_DIR" fetch --all --prune -q || die "fetch failed"
+git -C "$E2E_REPO_DIR" checkout -q "$E2E_BRANCH" || die "checkout $E2E_BRANCH failed"
+git -C "$E2E_REPO_DIR" pull -q --ff-only || warn "could not fast-forward $E2E_BRANCH"
+ok "repo at $(git -C "$E2E_REPO_DIR" rev-parse --short HEAD)"
+
+cd "$E2E_REPO_DIR" || die "cannot enter $E2E_REPO_DIR"
+[ -x ci/install_oras.sh ] && sudo ci/install_oras.sh || true
+[ -x ci/install_yq.sh ]   && sudo ci/install_yq.sh   || true
+
+ok "node bootstrapped — log out and back in for the docker group to apply"
+mark_done 02-bootstrap-node
