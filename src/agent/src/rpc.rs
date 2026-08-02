@@ -5,7 +5,6 @@
 
 use async_trait::async_trait;
 #[cfg(feature = "agent-policy")]
-#[cfg(not(feature = "strict-policy"))]
 use kata_agent_policy::policy::PolicyCopyFileRequest;
 use rustjail::{pipestream::PipeStream, process::StreamType};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
@@ -14,7 +13,6 @@ use tokio::time::{timeout, Duration};
 
 use std::convert::TryFrom;
 #[cfg(feature = "agent-policy")]
-#[cfg(not(feature = "strict-policy"))]
 use std::convert::TryInto as _;
 use std::ffi::{CString, OsStr};
 use std::fmt::Debug;
@@ -35,7 +33,6 @@ use cgroups::freezer::FreezerState;
 use oci::{Hooks, LinuxNamespace, Spec};
 use oci_spec::runtime as oci;
 #[cfg(feature = "agent-policy")]
-#[cfg(not(feature = "strict-policy"))]
 use protobuf::MessageDyn;
 use protobuf::MessageField;
 use protocols::agent::{
@@ -103,7 +100,6 @@ use crate::tracer::extract_carrier_from_ttrpc;
 use crate::policy::do_set_policy;
 #[cfg(feature = "agent-policy")]
 use crate::policy::is_allowed;
-#[cfg(not(feature = "strict-policy"))]
 use crate::policy::is_allowed_with_entrypoint;
 
 use opentelemetry::global;
@@ -2385,24 +2381,11 @@ impl agent_ttrpc::AgentService for AgentService {
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "copy_file", req);
 
-        // FR-10: a generic host->guest file copy lands host-chosen bytes at a host-chosen
-        // path with no content-addressing or execution-integrity guarantee. Strict builds
-        // refuse it outright (the safe default); trusted artifacts must instead arrive
-        // through a content-addressed, destination-classed channel. Advertised as
-        // "no-generic-copyfile" in the agent build features.
-        #[cfg(feature = "strict-policy")]
-        {
-            let _ = &req;
-            return Err(ttrpc_error(
-                ttrpc::Code::PERMISSION_DENIED,
-                anyhow!(
-                    "CopyFile is disabled in strict mode (no execution-integrity guarantee \
-                     for generic host-delivered files)"
-                ),
-            ));
-        }
-
-        #[cfg(not(feature = "strict-policy"))]
+        // F-42 step-1 experiment: strict builds no longer deny CopyFile outright. The
+        // request is routed through the policy gate that already existed on the non-strict
+        // path. PolicyCopyFileRequest exposes path, file_type, symlink_target, file_size,
+        // file_mode, dir_mode, uid, gid and offset to Rego -- strictly more than C-ACI's
+        // plan9_mount, which sees only the destination path.
         {
             #[cfg(feature = "agent-policy")]
             {
