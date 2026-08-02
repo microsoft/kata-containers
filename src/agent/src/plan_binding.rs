@@ -78,8 +78,7 @@ use crate::confidential_data_hub::SEALED_SECRET_PREFIX;
 /// but to a value the guest derives itself, so it is pinned to that value rather
 /// than waived. See [`ROOT_PATH_POINTER`]. `/root/readonly` is likewise absent:
 /// `setup_bundle` preserves it and it is security-critical.
-const RESOLUTION_REPLACEABLE_POINTERS: &[&str] =
-    &["/linux/namespaces", "/linux/resources/devices"];
+const RESOLUTION_REPLACEABLE_POINTERS: &[&str] = &["/linux/namespaces", "/linux/resources/devices"];
 
 /// The container rootfs pointer.
 ///
@@ -839,8 +838,11 @@ mod tests {
     #[test]
     fn unsealing_a_sealed_reference_is_accepted() {
         assert_allowed(|spec| {
-            spec["process"]["env"] =
-                json!(["PATH=/usr/bin", "TOKEN=actual-plaintext-secret", "MODE=strict"]);
+            spec["process"]["env"] = json!([
+                "PATH=/usr/bin",
+                "TOKEN=actual-plaintext-secret",
+                "MODE=strict"
+            ]);
         });
     }
 
@@ -889,11 +891,8 @@ mod tests {
         let authorized = spec_from(baseline());
         let mut mutated = baseline();
         // A genuine unsealed secret sits in the same list as the violation.
-        mutated["process"]["env"] = json!([
-            "PATH=/usr/bin",
-            "TOKEN=super-secret-plaintext",
-            "MODE=off"
-        ]);
+        mutated["process"]["env"] =
+            json!(["PATH=/usr/bin", "TOKEN=super-secret-plaintext", "MODE=off"]);
 
         let rendered = assert_within_resolution_bounds(
             &authorized,

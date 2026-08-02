@@ -379,8 +379,10 @@ impl AgentService {
                 // request" and retries — the exact confusion RM-7's DATA_LOSS code exists
                 // to prevent.
                 .map_err(|e| {
-                    anyhow::Error::new(e)
-                        .context(format!("FR-3: failed to bind executed OCI object to {}", op_id))
+                    anyhow::Error::new(e).context(format!(
+                        "FR-3: failed to bind executed OCI object to {}",
+                        op_id
+                    ))
                 })?;
             // The digests routinely differ, which on its own says nothing: the
             // resolution chain legitimately rewrites parts of the spec. What must

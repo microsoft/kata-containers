@@ -821,7 +821,10 @@ mod tests {
         m.quarantine("unprovable state");
 
         assert!(
-            matches!(m.execute("create/ctr1", "d1"), Err(SrmError::Quarantined(_))),
+            matches!(
+                m.execute("create/ctr1", "d1"),
+                Err(SrmError::Quarantined(_))
+            ),
             "a build-up transaction prepared before the quarantine must not execute after it"
         );
         m.execute("remove/ctr1", "d2")
