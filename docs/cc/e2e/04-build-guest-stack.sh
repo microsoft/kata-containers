@@ -186,8 +186,17 @@ install_tarball() {
   # contain ./opt/kata/..., but a packaging change that widened them would silently
   # overwrite arbitrary root-owned files — including stage 03's genpolicy-settings
   # patch, which would re-break every pod at CreateContainerRequest.
-  if tar --zstd -tf "$t" | grep -qv '^\./opt/kata/'; then
-    die "$t contains paths outside ./opt/kata/ — refusing to extract into /"
+  #
+  # Some tarballs also carry the ancestor directories as their own entries
+  # (./, ./opt/). Those are the path to the payload, not a widening of it, and
+  # extracting them changes nothing, so allow exactly those three and no more.
+  local stray
+  stray=$(tar --zstd -tf "$t" \
+    | grep -v '^\./opt/kata/' \
+    | grep -vx '\./' | grep -vx '\./opt/' | grep -vx '\./opt/kata/' || true)
+  if [ -n "$stray" ]; then
+    die "$t contains paths outside ./opt/kata/ — refusing to extract into /:
+$stray"
   fi
   log "installing $t into /"
   sudo tar --zstd -xf "$t" -C / || die "install of $t failed"
@@ -202,13 +211,25 @@ install_tarball build/kata-static-rootfs-image-coco-extension.tar.zst
 # Assert the deployed image IS the one we just built, not merely that it changed.
 # "It changed" would fail a byte-identical rebuild at the same commit (a correct
 # outcome reported as a failure) and would accept a change made by anything else.
-want=$(tar --zstd -xOf build/kata-static-rootfs-image.tar.zst "$IMG_IN_TARBALL" \
-        | sha256sum | cut -d' ' -f1)
-[ -n "$want" ] || die "could not read $IMG_IN_TARBALL out of the rootfs tarball"
+#
+# kata-containers.img is a symlink (to kata-ubuntu-noble.image) both in the
+# tarball and once installed. `tar -xO` on a symlink member emits no bytes, so
+# hashing its output digests the empty string -- which never matches, and which
+# a `[ -n "$want" ]` check cannot catch because sha256sum always produces a
+# hash. Unpack to a scratch dir instead and hash through the link, exactly as
+# the comparison against the installed copy does.
+REF=$(mktemp -d)
+trap 'rm -rf "$REF"' EXIT
+tar --zstd -xf build/kata-static-rootfs-image.tar.zst -C "$REF" \
+  || die "could not unpack the rootfs tarball for verification"
+REF_IMG="$REF/opt/kata/share/kata-containers/kata-containers.img"
+[ -s "$REF_IMG" ] || die "$IMG_IN_TARBALL is missing or empty in the rootfs tarball"
+want=$(sha256sum "$REF_IMG" | cut -d' ' -f1)
 [ -f "$IMG" ] || die "no $IMG after install"
+[ -s "$IMG" ] || die "$IMG is empty after install"
 after=$(sha256sum "$IMG" | cut -d' ' -f1)
-[ -n "$after" ] || die "could not hash $IMG after install"
 [ "$after" = "$want" ] || die "installed $IMG is not the image just built (want ${want:0:12}, got ${after:0:12})"
+rm -rf "$REF"; trap - EXIT
 ok "deployed guest image matches this build (${after:0:12})"
 
 # Record what stage 05 is entitled to assume it is testing.
