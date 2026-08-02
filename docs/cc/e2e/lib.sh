@@ -17,7 +17,13 @@ set -uo pipefail
 # availability and quota are independent, and each alone is a false green.
 : "${E2E_VM_SIZE:=Standard_DC16as_cc_v5}"
 : "${E2E_VM_IMAGE:=Canonical:ubuntu-24_04-lts:server:latest}"
-: "${E2E_ADMIN:=$(whoami)}"
+# Standard, not ConfidentialVM — see the comment in 01-provision-vm.sh. Set to
+# ConfidentialVM only with an image whose sku supports it (e.g. ...:cvm:latest).
+: "${E2E_VM_SECURITY_TYPE:=Standard}"
+# whoami returns DOMAIN\user on a Windows workstation, and cygwin/git-bash render
+# that as DOMAIN+user. Azure rejects both separators and upper case in an admin
+# name, so normalise here rather than failing deep inside az vm create.
+: "${E2E_ADMIN:=$(whoami | sed 's|.*[\\/+]||' | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9_-')}"
 : "${E2E_SSH_KEY:=$HOME/.ssh/id_rsa.pub}"
 
 # Repo under test.

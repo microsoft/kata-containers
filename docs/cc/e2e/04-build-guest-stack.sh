@@ -23,8 +23,16 @@ fi
 # A brand-new, never-committed source file is equally invisible to the container
 # build, and `git diff` cannot see it — so check for it separately rather than
 # relying on the diff alone.
-untracked=$(git ls-files --others --exclude-standard -- src/ tools/)
-[ -z "$untracked" ] || die "untracked new files under src//tools/ — commit or remove them:
+#
+# `helm dependency build` during stage 03 writes a Chart.lock and vendors its
+# dependency charts into the kata-deploy chart, both untracked and both entirely
+# normal. Excluding them keeps the gate about *source* the build would silently
+# ignore, instead of failing every clean-room run on its own predecessor's
+# byproducts.
+untracked=$(git ls-files --others --exclude-standard -- src/ tools/ \
+            ':!tools/packaging/kata-deploy/helm-chart/*/Chart.lock' \
+            ':!tools/packaging/kata-deploy/helm-chart/*/charts/')
+[ -z "$untracked" ] || die "untracked new files under src/ or tools/ — commit or remove them:
 $untracked"
 ok "working tree clean at $(git rev-parse --short HEAD)"
 

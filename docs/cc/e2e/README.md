@@ -68,7 +68,8 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | `E2E_FAST` | `0` | Dev-loop mode. Reduces assurance — see below. |
 | `E2E_SKIP_BUILD` | `0` | Install the tarballs already in `build/` without rebuilding. |
 | `E2E_REGION` | `eastus` | See the region trap below. |
-| `E2E_VM_SIZE` | `Standard_DC16as_cc_v5` | SEV-SNP confidential VM SKU. |
+| `E2E_VM_SIZE` | `Standard_DC16as_cc_v5` | Confidential-capable **host** SKU (nested virt). The node itself is a normal VM. |
+| `E2E_VM_SECURITY_TYPE` | `Standard` | See "The node is not a confidential VM" below. |
 | `E2E_BRANCH` | `agent-unstart-failed-start` | Branch under test. |
 | `E2E_REPO_DIR` | `~/kata-containers` | Checkout on the node. |
 | `E2E_STRICT_POLICY` | `yes` | Pulls in the security reference monitor. |
@@ -187,11 +188,37 @@ check both. For AKS-based runs (not covered by these scripts) use `westus`:
 `eastus` is restricted for that subscription, and the `_cc_v6` SKUs have zero
 quota by default.
 
+Restriction *type* matters as much as the reason code. A `Location` restriction
+means the SKU cannot be deployed in the region at all; a `Zone` restriction only
+blocks *zonal* deployments. `Standard_DC16as_cc_v5` in `eastus` reports
+`NotAvailableForSubscription` on all three zones yet deploys regionally without
+complaint, so stage 01 fails only on `Location` and warns on `Zone`.
+
 ```bash
 az vm list-skus --size Standard_DC16as_cc_v5 \
-  --query "[].{Loc:locationInfo[0].location, R:restrictions[0].reasonCode}" -o table
+  --query "[].{Loc:locationInfo[0].location, T:restrictions[0].type, R:restrictions[0].reasonCode}" -o table
 az vm list-usage --location westus --query "[?contains(localName,'DCACCV5')]" -o table
 ```
+
+### The node is not a confidential VM
+
+Tempting as the SKU name is, the node is provisioned with
+`--security-type Standard`. This suite exercises the `qemu-coco-dev` runtime
+class, which is the **non-attested dev path**: the guest is an ordinary VM, so
+what the node needs is a confidential-*capable* host SKU for nested
+virtualisation (the `_cc_` in `DC16as_cc_v5`), not a confidential VM of its own.
+Asking for `ConfidentialVM` also fails outright against the plain Ubuntu
+`server` image this suite is built around ("Use of ConfidentialVM setting is not
+supported for the provided image") — a `:cvm:` image sku is required for that.
+`E2E_VM_SECURITY_TYPE=ConfidentialVM` is available if you pair it with one.
+
+### Running stage 01 from Windows
+
+`01-provision-vm.sh` and `sync.sh` are the only workstation-side scripts. Under
+git-bash/cygwin, `whoami` returns `DOMAIN+user`, which Azure rejects as an admin
+name; `lib.sh` strips the domain and normalises the case. `jq` is required and
+is not part of git-bash — install it separately.
+
 
 ## Policy fragments (stage 06)
 

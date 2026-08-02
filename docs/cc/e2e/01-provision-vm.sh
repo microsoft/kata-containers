@@ -25,11 +25,23 @@ avail=$(az vm list-skus --all --size "$E2E_VM_SIZE" --location "$E2E_REGION" \
 if [ -z "$avail" ] || [ "$avail" = "null" ]; then
   die "$E2E_VM_SIZE is not offered in $E2E_REGION at all. Try westus/westeurope; see README."
 fi
-reason=$(echo "$avail" | jq -r '[.restrictions[]?.reasonCode] | join(",")')
-case "$reason" in
-  "") ok "SKU available in $E2E_REGION" ;;
-  *) die "$E2E_VM_SIZE restricted in $E2E_REGION ($reason). Try westus/westeurope; see README." ;;
-esac
+# Restrictions come in two flavours and they are not equivalent. A `Location`
+# restriction means the SKU cannot be deployed in the region at all. A `Zone`
+# restriction only blocks *zonal* deployments — a regional (no --zone) VM is
+# still allowed, which is exactly how coco-dev-1 was created in eastus while all
+# three of its zones were restricted. Failing on both would refuse the one
+# configuration known to work, so only Location is fatal. az vm create below
+# deliberately passes no --zone.
+loc_block=$(echo "$avail" | jq -r '[.restrictions[]? | select(.type=="Location") | .reasonCode] | join(",")')
+zone_block=$(echo "$avail" | jq -r '[.restrictions[]? | select(.type=="Zone") | .reasonCode] | join(",")')
+if [ -n "$loc_block" ]; then
+  die "$E2E_VM_SIZE restricted in $E2E_REGION ($loc_block). Try westus/westeurope; see README."
+fi
+if [ -n "$zone_block" ]; then
+  warn "$E2E_VM_SIZE is zone-restricted in $E2E_REGION ($zone_block) — deploying regionally (no zone)"
+else
+  ok "SKU available in $E2E_REGION"
+fi
 
 if ! az group show -n "$E2E_RG" >/dev/null 2>&1; then
   log "creating resource group $E2E_RG"
@@ -42,15 +54,25 @@ if az vm show -g "$E2E_RG" -n "$E2E_VM" >/dev/null 2>&1; then
 else
   [ -f "$E2E_SSH_KEY" ] || die "no ssh public key at $E2E_SSH_KEY (set E2E_SSH_KEY)"
   log "creating $E2E_VM ($E2E_VM_SIZE) in $E2E_REGION — this takes a few minutes"
+  # The security type is deliberately Standard by default. The qemu-coco-dev
+  # runtime class this suite exercises is the *non-attested* dev path: the guest
+  # is a normal VM, so what the node needs is a confidential-capable host SKU for
+  # nested virtualisation (the _cc_ in DC16as_cc_v5), not a confidential VM of its
+  # own. Asking for ConfidentialVM here also fails outright against the plain
+  # ubuntu 'server' image, which is the image this suite is built around.
+  SEC_ARGS=()
+  if [ "$E2E_VM_SECURITY_TYPE" = "ConfidentialVM" ]; then
+    SEC_ARGS=(--security-type ConfidentialVM
+              --os-disk-security-encryption-type VMGuestStateOnly
+              --enable-vtpm true --enable-secure-boot true)
+  fi
   az vm create \
     -g "$E2E_RG" -n "$E2E_VM" -l "$E2E_REGION" \
     --size "$E2E_VM_SIZE" \
     --image "$E2E_VM_IMAGE" \
     --admin-username "$E2E_ADMIN" \
     --ssh-key-values "$E2E_SSH_KEY" \
-    --security-type ConfidentialVM \
-    --os-disk-security-encryption-type VMGuestStateOnly \
-    --enable-vtpm true --enable-secure-boot true \
+    "${SEC_ARGS[@]+"${SEC_ARGS[@]}"}" \
     --os-disk-size-gb 256 \
     -o none || die "az vm create failed"
   ok "VM created"
