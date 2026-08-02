@@ -20,6 +20,12 @@ LB=tools/packaging/kata-deploy/local-build
 if ! git diff --quiet HEAD -- src/ tools/; then
   die "uncommitted changes in src/ or tools/ — commit them; the container build only sees committed state"
 fi
+# A brand-new, never-committed source file is equally invisible to the container
+# build, and `git diff` cannot see it — so check for it separately rather than
+# relying on the diff alone.
+untracked=$(git ls-files --others --exclude-standard -- src/ tools/)
+[ -z "$untracked" ] || die "untracked new files under src//tools/ — commit or remove them:
+$untracked"
 ok "working tree clean at $(git rev-parse --short HEAD)"
 
 # TRAP 2: kata-deploy-binaries.sh wraps each packaging step in
@@ -33,13 +39,18 @@ rm -f build/kata-static-agent.tar.zst \
       build/kata-static-rootfs-image-coco-extension.tar.zst \
       "$LB/build/kata-static-agent.tar.zst"
 
-# Group membership from stage 02 only takes effect on a new login session, so this
-# script may still be outside the docker group. Fix ownership rather than granting
-# world write, which would be a root-equivalent grant to every local account.
-sudo chgrp docker /var/run/docker.sock 2>/dev/null || true
-sudo chmod 660 /var/run/docker.sock 2>/dev/null || true
-docker info >/dev/null 2>&1 \
-  || die "cannot talk to docker as $USER — log out and back in so the 'docker' group applies"
+# `docker.io` already ships the socket as root:docker 0660, so the only thing the
+# old `chmod a+rw` achieved was granting THIS login session access — `usermod -aG`
+# does not apply until the next login. Re-exec under the docker group instead of
+# widening the socket to every local account.
+if ! docker info >/dev/null 2>&1; then
+  if id -nG "$USER" | tr ' ' '\n' | grep -qx docker && [ -z "${E2E_SG_REEXEC:-}" ]; then
+    log "not yet in an active 'docker' group session — re-executing under sg docker"
+    export E2E_SG_REEXEC=1
+    exec sg docker -c "$(printf '%q ' bash "$0" "$@")"
+  fi
+  die "cannot talk to docker as $USER — run 02-bootstrap-node.sh, then log out and back in"
+fi
 
 # static-build/agent/Dockerfile does `COPY install_libseccomp.sh`, but that file
 # is not in git at that path — the Makefile-only copy-scripts targets stage it in
@@ -94,19 +105,34 @@ build_component rootfs-image-coco-extension
 install_tarball() {
   local t="$1"
   [ -f "$t" ] || die "expected tarball missing: $t"
+  # Extracting into / trusts every path in the archive. Today these tarballs only
+  # contain ./opt/kata/..., but a packaging change that widened them would silently
+  # overwrite arbitrary root-owned files — including stage 03's genpolicy-settings
+  # patch, which would re-break every pod at CreateContainerRequest.
+  if tar --zstd -tf "$t" | grep -qv '^\./opt/kata/'; then
+    die "$t contains paths outside ./opt/kata/ — refusing to extract into /"
+  fi
   log "installing $t into /"
   sudo tar --zstd -xf "$t" -C / || die "install of $t failed"
 }
 
 IMG=/opt/kata/share/kata-containers/kata-containers.img
-before=$(sha256sum "$IMG" 2>/dev/null | cut -d' ' -f1 || echo none)
+IMG_IN_TARBALL=./opt/kata/share/kata-containers/kata-containers.img
 
 install_tarball build/kata-static-rootfs-image.tar.zst
 install_tarball build/kata-static-rootfs-image-coco-extension.tar.zst
 
+# Assert the deployed image IS the one we just built, not merely that it changed.
+# "It changed" would fail a byte-identical rebuild at the same commit (a correct
+# outcome reported as a failure) and would accept a change made by anything else.
+want=$(tar --zstd -xOf build/kata-static-rootfs-image.tar.zst "$IMG_IN_TARBALL" \
+        | sha256sum | cut -d' ' -f1)
+[ -n "$want" ] || die "could not read $IMG_IN_TARBALL out of the rootfs tarball"
+[ -f "$IMG" ] || die "no $IMG after install"
 after=$(sha256sum "$IMG" | cut -d' ' -f1)
-[ "$after" != "$before" ] || die "$IMG is byte-identical after install — the build did not replace the deployed image"
-ok "guest image replaced (${before:0:12} -> ${after:0:12})"
+[ -n "$after" ] || die "could not hash $IMG after install"
+[ "$after" = "$want" ] || die "installed $IMG is not the image just built (want ${want:0:12}, got ${after:0:12})"
+ok "deployed guest image matches this build (${after:0:12})"
 
 # Record what stage 05 is entitled to assume it is testing.
 echo "$after" > "$E2E_STATE_DIR/guest-image-sha256"
@@ -134,8 +160,15 @@ for CFG in "${CFGS[@]}"; do
     "$CFG"
   grep -q "^kernel_verity_params = \"root_hash=" "$CFG" \
     || die "kernel_verity_params not set in $CFG after patching"
+  grep -q "^verity_params = \"root_hash=" "$CFG" \
+    || die "verity_params (coco-extension) not set in $CFG after patching"
 done
 ok "dm-verity re-pointed in ${#CFGS[@]} config(s)"
+
+# Stage 05 must check the same files this stage actually patched, rather than
+# guessing a path that a layout change would invalidate.
+printf '%s\n' "${CFGS[@]}" > "$E2E_STATE_DIR/guest-config-paths"
+tr -d '\n' < "$BASE_HASH" > "$E2E_STATE_DIR/guest-verity-params"
 
 ok "guest stack built and installed"
 mark_done 04-build-guest-stack

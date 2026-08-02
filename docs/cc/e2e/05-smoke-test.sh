@@ -27,16 +27,20 @@ IMG=/opt/kata/share/kata-containers/kata-containers.img
 
 # The runtime pins the guest to a dm-verity root hash. If the configured hash is
 # the one from our build, then a pod that reaches Running can only have booted our
-# image: any other rootfs fails verity and never starts.
-BASE_HASH=/opt/kata/share/kata-containers/root_hash_base.txt
-CFG=/opt/kata/share/defaults/kata-containers/runtime-rs/runtimes/qemu-coco-dev-runtime-rs/configuration-qemu-coco-dev-runtime-rs.toml
-if [ -f "$BASE_HASH" ] && [ -f "$CFG" ]; then
-  grep -qF "$(tr -d '\n' < "$BASE_HASH")" "$CFG" \
-    || die "runtime config dm-verity hash does not match the installed image — re-run stage 04"
-  ok "guest pinned by dm-verity to the locally built image"
-else
-  die "cannot confirm the dm-verity pin: missing $BASE_HASH or $CFG"
-fi
+# image: any other rootfs fails verity and never starts. Stage 04 patches every
+# config it finds, so read back exactly what it recorded instead of guessing.
+PARAMS_REC="$E2E_STATE_DIR/guest-verity-params"
+CFG_REC="$E2E_STATE_DIR/guest-config-paths"
+[ -s "$PARAMS_REC" ] || die "no recorded dm-verity parameters — re-run stage 04"
+[ -s "$CFG_REC" ]    || die "no recorded runtime config paths — re-run stage 04"
+mapfile -t CFGS < "$CFG_REC"
+[ "${#CFGS[@]}" -gt 0 ] || die "no runtime config paths recorded by stage 04"
+for CFG in "${CFGS[@]}"; do
+  [ -f "$CFG" ] || die "runtime config recorded by stage 04 is gone: $CFG"
+  grep -qF "$(cat "$PARAMS_REC")" "$CFG" \
+    || die "dm-verity hash in $CFG does not match the installed image — re-run stage 04"
+done
+ok "guest pinned by dm-verity to the locally built image (${#CFGS[@]} config(s))"
 ok "testing guest built from $(cat "$E2E_STATE_DIR/guest-image-commit" 2>/dev/null || echo unknown)"
 
 kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"

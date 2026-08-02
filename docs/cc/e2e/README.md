@@ -14,7 +14,7 @@ Everything here is idempotent and resumable. Each stage records a marker under
 | `01-provision-vm.sh` | An Azure confidential VM exists and is reachable. Run from your workstation. |
 | `02-bootstrap-node.sh` | Toolchain, container engine, kubectl, Go, Rust and the repo checkout are present on the node. |
 | `03-deploy-cluster.sh` | A kubeadm cluster with `kata-deploy` and the CoCo KBS is up and the runtime classes are registered. |
-| `04-build-guest-stack.sh` | The hardened agent is built **and installed** into `/opt/kata`, the deployed guest image really changed, and the runtime is re-pinned to that image's dm-verity root hash. |
+| `04-build-guest-stack.sh` | The hardened agent is built **and installed** into `/opt/kata`, the deployed guest image is byte-for-byte the one just built, and the runtime is re-pinned to that image's dm-verity root hashes. |
 | `05-smoke-test.sh` | The pod that boots is provably the locally built guest (verity pin), and an undeclared `exec` is denied. Mediation is live. |
 | `06-policy-fragment-e2e.sh` | FR-1 signed policy fragments: every verification invariant holds, and the OCI delivery artifact matches the contract the guest fetcher depends on. |
 
@@ -31,6 +31,11 @@ ssh coco-dev
 export E2E_NIGHTLY_SHA=<sha>          # see "CI nightly artifact" below
 cd ~/coco-e2e && ./run-all.sh
 ```
+
+Stage 02 adds you to the `docker` group. Group membership only applies to a new
+login session, so if stage 02 warns about it, reconnect (`exit`, then `ssh
+coco-dev`) before running stage 04. Stage 04 re-execs itself under `sg docker`
+when it can, so a single-session run usually still works.
 
 `run-all.sh` skips stage 01 automatically when the Azure CLI is absent (i.e. on
 the node). Force the decision with `E2E_SKIP_PROVISION=1` or `=0`.
@@ -92,7 +97,9 @@ about them helps when something drifts.
   out entirely.
 - **Building is not installing.** The build only populates `build/*.tar.zst`;
   until those are extracted into `/` the cluster keeps booting the CI-nightly
-  guest. Stage 04 installs them and fails if the deployed image is unchanged.
+  guest. Stage 04 installs them and fails unless the deployed image hashes equal
+  to the copy inside the tarball it just built (so a byte-identical rebuild is a
+  pass, and a change made by anything else is a failure).
 - **The agent builds from a git checkout inside a container**, so uncommitted
   working-tree changes are invisible. Stage 04 refuses to run on a dirty tree.
 - **`DOCKER_TAG` needs an `-amd64` suffix.** The manifest-list tag is only

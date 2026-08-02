@@ -24,10 +24,17 @@ command -v yq >/dev/null 2>&1 || sudo snap install yq || die "yq install failed"
 
 log "configuring docker access"
 sudo usermod -aG docker "$USER" || die "usermod failed"
-# Group ownership, not world-writable: a+rw on the docker socket is a
-# root-equivalent grant to every local account and it persists across reboots.
-sudo chgrp docker /var/run/docker.sock || true
-sudo chmod 660 /var/run/docker.sock || true
+# The docker.io package already ships /var/run/docker.sock as root:docker 0660, so
+# there is nothing to fix here — and widening it to a+rw would be a root-equivalent
+# grant to every local account. The membership added above does not apply to THIS
+# session, so verify under `sg` and tell the operator to reconnect if needed.
+if ! docker info >/dev/null 2>&1 && ! sg docker -c 'docker info' >/dev/null 2>&1; then
+  die "docker is not usable by $USER even under the docker group — check 'systemctl status docker'"
+fi
+if ! docker info >/dev/null 2>&1; then
+  warn "docker group membership added but not active in this session"
+  warn "log out and back in (or reconnect ssh) before running 04-build-guest-stack.sh"
+fi
 
 if ! command -v kubectl >/dev/null 2>&1; then
   log "installing kubectl"

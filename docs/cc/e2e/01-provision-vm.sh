@@ -20,7 +20,7 @@ log "subscription: $SUB"
 # Availability and quota are independent — each one alone is a false green, so
 # check both before blaming the deployment.
 log "checking SKU availability for $E2E_VM_SIZE in $E2E_REGION"
-avail=$(az vm list-skus --size "$E2E_VM_SIZE" --location "$E2E_REGION" \
+avail=$(az vm list-skus --all --size "$E2E_VM_SIZE" --location "$E2E_REGION" \
           --query "[?name=='$E2E_VM_SIZE'] | [0]" -o json 2>/dev/null || true)
 if [ -z "$avail" ] || [ "$avail" = "null" ]; then
   die "$E2E_VM_SIZE is not offered in $E2E_REGION at all. Try westus/westeurope; see README."
