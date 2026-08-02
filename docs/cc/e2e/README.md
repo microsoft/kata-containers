@@ -22,15 +22,25 @@ Everything here is idempotent and resumable. Each stage records a marker under
 
 ```bash
 # from your workstation
-./01-provision-vm.sh
-ssh coco-dev 'mkdir -p ~/coco-e2e'
-scp -r ./ coco-dev:~/coco-e2e/
+./01-provision-vm.sh                  # provisions, and adds the ssh alias
+./sync.sh                             # copies the suite to the node
 
 # on the node
 ssh coco-dev
 export E2E_NIGHTLY_SHA=<sha>          # see "CI nightly artifact" below
 cd ~/coco-e2e && ./run-all.sh
 ```
+
+`sync.sh` can also drive stages remotely, forwarding the knobs that change what a
+run means (`E2E_FAST`, `E2E_SKIP_BUILD`, `E2E_FORCE`, `E2E_BRANCH`, …):
+
+```bash
+E2E_FAST=1 ./sync.sh 04 05
+```
+
+Always use `sync.sh` rather than a bare `scp`: a Windows checkout carries no
+executable bit and `scp` preserves that, so hand-copied scripts arrive
+non-executable. `sync.sh` `chmod +x`s them on arrival.
 
 Stage 02 adds you to the `docker` group. Group membership only applies to a new
 login session, so if stage 02 warns about it, reconnect (`exit`, then `ssh
@@ -54,6 +64,9 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `E2E_RG` / `E2E_VM` | `jiria-coco-cvm-rg` / `coco-dev-1` | Azure resource group and VM name. |
+| `E2E_SSH_HOST` | `coco-dev` | ssh alias the workstation-side helpers use. Override with `E2E_VM` for a parallel environment. |
+| `E2E_FAST` | `0` | Dev-loop mode. Reduces assurance — see below. |
+| `E2E_SKIP_BUILD` | `0` | Install the tarballs already in `build/` without rebuilding. |
 | `E2E_REGION` | `eastus` | See the region trap below. |
 | `E2E_VM_SIZE` | `Standard_DC16as_cc_v5` | SEV-SNP confidential VM SKU. |
 | `E2E_BRANCH` | `agent-unstart-failed-start` | Branch under test. |
@@ -81,6 +94,49 @@ mkdir -p ~/kata-containers/kata-tools-artifacts
 mv kata-tools-static.tar.zst ~/kata-containers/kata-tools-artifacts/
 export E2E_NIGHTLY_SHA=<sha>
 ```
+
+## Parallel environments
+
+Stage 03 is destructive — it redeploys `kata-deploy` over whatever is on the
+node. To keep a known-good cluster as a fallback, stand a second node up beside
+it instead of re-running 03 on the first:
+
+```bash
+E2E_VM=coco-dev-2 E2E_SSH_HOST=coco-dev-2 ./01-provision-vm.sh
+E2E_VM=coco-dev-2 E2E_SSH_HOST=coco-dev-2 ./sync.sh
+```
+
+Stage 01 appends an ssh alias for `$E2E_SSH_HOST` when none exists, and warns
+rather than rewriting one that does (an existing entry may be hand-tuned, and a
+redeployed VM changes IP). Nothing else is shared: `E2E_STATE_DIR` lives on each
+node, and `E2E_REGISTRY=localhost:5000` is loopback-only.
+
+Deallocate both when finished — see [Cleanup](#cleanup).
+
+## Dev loop
+
+A full stage 04 is a 40–60 minute clean build, which is far too slow to iterate
+against. `E2E_FAST=1` cuts it down:
+
+| Change | What it does | Why it is sound |
+| --- | --- | --- |
+| Keeps `src/agent/target` | Incremental cargo build | The stale-artifact trap is about *tarballs*, not the target dir; the tarballs are still deleted. |
+| Reuses `rootfs-image-coco-extension` | Skips a second image build | The extension image contains no `kata-agent` — it packages the prebuilt CoCo guest components and pause bundle. It is rebuilt whenever the `tools/` tree hash changes. |
+| **Skips the differential SetPolicy test** | Avoids two more agent builds | **This one weakens the run.** |
+
+That last row matters: the `strings`-based check only asserts the SRM is present
+and the bypass symbol is not. The `SetPolicy` handler is *compiled out*, so its
+absence can only be shown against a non-strict control binary — which is what
+`src/agent/tests/test-setpolicy-absent.sh` does. `E2E_FAST` prints a loud warning
+where it skips it.
+
+**Do not report a result from an `E2E_FAST` run.** Use it while iterating, then
+re-run stage 04 clean (`E2E_FORCE=1 ./run-all.sh 04 05`) before believing
+anything.
+
+`E2E_SKIP_BUILD=1` goes further and only installs the tarballs already sitting in
+`build/`, for iterating on stages 05/06 against a guest stack you just built. It
+fails loudly if those tarballs are absent.
 
 ## Traps these scripts already handle
 

@@ -60,21 +60,39 @@ IP=$(az vm show -d -g "$E2E_RG" -n "$E2E_VM" --query publicIps -o tsv)
 [ -n "$IP" ] || die "could not resolve public IP for $E2E_VM"
 ok "VM $E2E_VM is up at $IP"
 
+# Writing the ssh alias here is what makes a second, parallel environment
+# practical: E2E_VM=coco-dev-2 E2E_SSH_HOST=coco-dev-2 gets its own entry and the
+# original stays untouched. Only ever adds a missing entry — an existing one may
+# have been hand-tuned, and a redeployed VM changes IP, so say so rather than
+# silently rewriting it.
+SSH_CFG="$HOME/.ssh/config"
+if grep -qE "^[[:space:]]*Host[[:space:]]+$E2E_SSH_HOST([[:space:]]|$)" "$SSH_CFG" 2>/dev/null; then
+  cur=$(ssh -G "$E2E_SSH_HOST" 2>/dev/null | awk '/^hostname /{print $2}')
+  if [ "$cur" = "$IP" ]; then
+    ok "ssh alias '$E2E_SSH_HOST' already points at $IP"
+  else
+    warn "ssh alias '$E2E_SSH_HOST' points at $cur but the VM is at $IP — update $SSH_CFG by hand"
+  fi
+else
+  log "adding ssh alias '$E2E_SSH_HOST' to $SSH_CFG"
+  mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+  cat >> "$SSH_CFG" <<EOF
+
+Host $E2E_SSH_HOST
+    HostName $IP
+    User $E2E_ADMIN
+    StrictHostKeyChecking accept-new
+EOF
+  chmod 600 "$SSH_CFG"
+fi
+
+HERE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cat <<EOF
 
-Add this to ~/.ssh/config so the rest of the scripts can reach it as 'coco-dev':
+Copy this directory to the VM and continue there:
 
-  Host coco-dev
-      HostName $IP
-      User $E2E_ADMIN
-      StrictHostKeyChecking accept-new
-
-Then copy this directory to the VM and continue there:
-
-  cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  ssh coco-dev 'mkdir -p ~/coco-e2e'
-  scp -r ./ coco-dev:~/coco-e2e/
-  ssh coco-dev 'bash ~/coco-e2e/02-bootstrap-node.sh'
+  $HERE_DIR/sync.sh
+  ssh $E2E_SSH_HOST 'bash ~/coco-e2e/02-bootstrap-node.sh'
 
 Remember to deallocate when you are finished:
 

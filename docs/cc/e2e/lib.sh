@@ -9,6 +9,9 @@ set -uo pipefail
 
 : "${E2E_RG:=jiria-coco-cvm-rg}"
 : "${E2E_VM:=coco-dev-1}"
+# ssh alias the workstation-side helpers use to reach the node. Override together
+# with E2E_VM to drive a second, parallel environment from the same checkout.
+: "${E2E_SSH_HOST:=coco-dev}"
 : "${E2E_REGION:=eastus}"
 # Standard_DC16as_cc_v5 is a SEV-SNP CC SKU. See README for the region/quota trap:
 # availability and quota are independent, and each alone is a false green.
@@ -27,6 +30,12 @@ set -uo pipefail
 : "${E2E_AGENT_POLICY:=yes}"
 : "${E2E_STRICT_POLICY:=yes}"
 : "${E2E_INIT_DATA:=yes}"
+
+# Dev-loop controls. The defaults are the slow, paranoid path: a clean rebuild of
+# everything. E2E_FAST=1 trades that for iteration speed and is only safe for the
+# cases documented in the README.
+: "${E2E_FAST:=0}"
+: "${E2E_SKIP_BUILD:=0}"
 
 # Local dev registry used by the policy-fragment step.
 : "${E2E_REGISTRY:=localhost:5000}"

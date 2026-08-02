@@ -32,12 +32,47 @@ ok "working tree clean at $(git rev-parse --short HEAD)"
 # [[ ! -f ${final_tarball_path} ]]. If a tarball already exists it recompiles the
 # agent, throws the result away, and repackages the STALE tarball. USE_CACHE=no
 # does not bypass this. Delete the tarballs first, every time.
-log "removing stale tarballs and target dir"
-rm -rf src/agent/target build/agent
+#
+# The coco-extension image is keyed on the tools/ tree because that is where its
+# only local input lives (the components.toml manifest emitted by
+# kata-deploy-binaries.sh); its other inputs are prebuilt CoCo guest-component and
+# pause artefacts. It contains no kata-agent, so an agent-only change cannot
+# affect it. E2E_FAST reuses it when that key is unchanged.
+EXT_TARBALL=build/kata-static-rootfs-image-coco-extension.tar.zst
+EXT_KEY_FILE="$E2E_STATE_DIR/ext-build-key"
+EXT_KEY=$(git rev-parse HEAD:tools)
+REBUILD_EXT=1
+
+if [ "$E2E_SKIP_BUILD" = "1" ]; then
+  warn "E2E_SKIP_BUILD: installing the existing tarballs without rebuilding"
+  for t in build/kata-static-rootfs-image.tar.zst "$EXT_TARBALL"; do
+    [ -f "$t" ] || die "E2E_SKIP_BUILD set but $t does not exist — run without it once"
+  done
+else
+
+if [ "$E2E_FAST" = "1" ] &&
+   [ -f "$EXT_TARBALL" ] &&
+   [ -f "/opt/kata/share/kata-containers/root_hash_coco-extension.txt" ] &&
+   [ "$(cat "$EXT_KEY_FILE" 2>/dev/null || true)" = "$EXT_KEY" ]; then
+  REBUILD_EXT=0
+  warn "E2E_FAST: reusing the coco-extension image (tools/ tree unchanged at ${EXT_KEY:0:12})"
+fi
+
+log "removing stale tarballs"
+rm -rf build/agent
 rm -f build/kata-static-agent.tar.zst \
       build/kata-static-rootfs-image.tar.zst \
-      build/kata-static-rootfs-image-coco-extension.tar.zst \
       "$LB/build/kata-static-agent.tar.zst"
+[ "$REBUILD_EXT" = "1" ] && rm -f "$EXT_TARBALL"
+
+# The stale-tarball trap is about tarballs, not about the cargo target dir, so the
+# incremental cache can be kept for iteration. Cargo re-resolves feature flags on
+# its own; the hardening assertions below still run either way.
+if [ "$E2E_FAST" = "1" ]; then
+  warn "E2E_FAST: keeping src/agent/target (incremental agent build)"
+else
+  rm -rf src/agent/target
+fi
 
 # `docker.io` already ships the socket as root:docker 0660, so the only thing the
 # old `chmod a+rw` achieved was granting THIS login session access — `usermod -aG`
@@ -89,15 +124,28 @@ rm -rf "$CHK"
 # string to grep for -- its absence has to be proved against a non-strict control
 # binary. src/agent/tests/test-setpolicy-absent.sh does exactly that (and fails if
 # the probe itself stops working), so call it rather than reimplementing it.
-log "running the differential SetPolicy-removal test"
-src/agent/tests/test-setpolicy-absent.sh || die "SetPolicy removal test failed"
+#
+# It costs two more debug builds of kata-agent, which dominates an iteration, so
+# E2E_FAST drops it. That weakens the run: the strings check above is an
+# artefact-level assertion, this is the only proof that the handler is gone.
+if [ "$E2E_FAST" = "1" ]; then
+  warn "E2E_FAST: SKIPPING the differential SetPolicy-removal test — re-run without E2E_FAST before trusting a result"
+else
+  log "running the differential SetPolicy-removal test"
+  src/agent/tests/test-setpolicy-absent.sh || die "SetPolicy removal test failed"
+fi
 ok "hardened agent verified"
 
 mkdir -p "$LB/build"
 cp build/kata-static-agent.tar.zst "$LB/build/"
 
 build_component rootfs-image
-build_component rootfs-image-coco-extension
+if [ "$REBUILD_EXT" = "1" ]; then
+  build_component rootfs-image-coco-extension
+  echo "$EXT_KEY" > "$EXT_KEY_FILE"
+fi
+
+fi  # end of the build block skipped by E2E_SKIP_BUILD
 
 # Installing the tarballs is what actually puts our agent in the guest. Building
 # them only primes the local cache: without this the cluster keeps booting the
