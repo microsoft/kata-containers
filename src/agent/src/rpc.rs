@@ -5443,6 +5443,76 @@ COMMIT
             );
         }
 
+        /// FR-3: the binding is only sound if the two objects it compares are
+        /// captured at the right moments, and that is a property of the *order*
+        /// of statements in `do_create_container`, not of any value the tests
+        /// above can observe.
+        ///
+        /// The tests above prove that `enforce_plan_binding` decides correctly
+        /// once it is called with an authorized object and an executed one. They
+        /// cannot see (a) that `authorized_oci` is cloned before the first
+        /// in-guest transformer runs, nor (b) that the check is reached after
+        /// `setup_bundle` has rebound the rootfs. A regression that moved the
+        /// clone below `add_devices` would authorize an already-transformed
+        /// spec against itself; one that moved the check above `setup_bundle`
+        /// would compare the plan before the rebinding it exists to police.
+        /// Either leaves every other test in this module green.
+        ///
+        /// Asserting this end to end means driving `do_create_container`, which
+        /// needs `baremount` and therefore root — it would be `skip_if_not_root!`
+        /// gated and skipped in ordinary runs, i.e. no coverage where the
+        /// regression would actually land. Reading the ordering out of the source
+        /// is coarse, but it runs everywhere and fails loudly on exactly the
+        /// rearrangement described above.
+        #[test]
+        fn the_authorized_object_is_captured_before_the_guest_transforms_it() {
+            const SOURCE: &str = include_str!("rpc.rs");
+
+            // Bound the search to the body of `do_create_container`, so that the
+            // anchors this test names in its own source cannot satisfy it.
+            let start = SOURCE
+                .find("    async fn do_create_container(")
+                .expect("do_create_container should be present");
+            let end = start
+                + SOURCE[start + 1..]
+                    .find("\n    async fn ")
+                    .expect("do_create_container should be followed by another method");
+            let body = &SOURCE[start..end];
+
+            let offset_of = |anchor: &str| -> usize {
+                assert_eq!(
+                    body.matches(anchor).count(),
+                    1,
+                    "anchor is no longer unique within do_create_container, so this \
+                     test can no longer tell where it sits: {}",
+                    anchor
+                );
+                body.find(anchor).unwrap()
+            };
+
+            let clone_of_authorized = offset_of("let authorized_oci = oci.clone();");
+            let first_transform =
+                offset_of("add_devices(&cid, &sl(), &req.devices, &mut oci, &self.sandbox)");
+            let rootfs_rebinding = offset_of("let olddir = setup_bundle(&cid, &mut oci)?;");
+            let binding_check = offset_of("enforce_plan_binding(");
+
+            // (a) Nothing may transform `oci` between the host handing it over and
+            // the clone, or the "authorized" object is one the guest already edited.
+            assert!(
+                clone_of_authorized < first_transform,
+                "authorized_oci is cloned after add_devices: the object being \
+                 authorized has already been transformed in-guest"
+            );
+
+            // (b) The executed object must be the fully resolved one, which is only
+            // true once setup_bundle has rebound the rootfs.
+            assert!(
+                rootfs_rebinding < binding_check,
+                "enforce_plan_binding runs before setup_bundle: it would compare \
+                 the plan before the rootfs rebinding it exists to police"
+            );
+        }
+
         #[test]
         fn the_operation_kinds_never_share_an_id() {
             let ids = all_op_ids("ctr1", "exec1", 15);
