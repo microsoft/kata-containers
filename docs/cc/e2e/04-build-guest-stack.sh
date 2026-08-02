@@ -101,14 +101,20 @@ fi
 "$LB/kata-deploy-copy-libseccomp-installer.sh" agent || die "libseccomp stage (agent) failed"
 "$LB/kata-deploy-copy-libseccomp-installer.sh" tools || die "libseccomp stage (tools) failed"
 
+# USE_CACHE=no is about the agent: with the cache on, the build downloads a
+# published tarball, rebuilds the agent, throws the result away and repackages
+# the STALE one. For components we do not modify that trap does not apply, and
+# pulling the published artefact instead of building it from source saves the
+# best part of an hour -- so those pass cache=yes.
 build_component() {
-  log "building $1"
-  USE_CACHE=no \
+  local comp="$1" cache="${2:-no}"
+  log "building $comp (cache=$cache)"
+  USE_CACHE="$cache" \
   AGENT_POLICY="$E2E_AGENT_POLICY" \
   STRICT_POLICY="$E2E_STRICT_POLICY" \
   INIT_DATA="$E2E_INIT_DATA" \
   DEBUG=1 \
-    "$LB/kata-deploy-binaries.sh" --build="$1" || die "build $1 failed"
+    "$LB/kata-deploy-binaries.sh" --build="$comp" || die "build $comp failed"
 }
 
 build_component agent
@@ -149,6 +155,14 @@ cp build/kata-static-agent.tar.zst "$LB/build/"
 
 build_component rootfs-image
 if [ "$REBUILD_EXT" = "1" ]; then
+  # The extension image is assembled from prebuilt inputs rather than compiled:
+  # install_image_coco_extension unpacks the CoCo guest components and the pause
+  # bundle into a rootfs. Both must already exist as tarballs or it dies on a
+  # bare `tar: Cannot open`. Nothing builds them implicitly, so build them here.
+  # They contain no kata-agent, so our change cannot affect them -- take the
+  # published artefact.
+  build_component coco-guest-components yes
+  build_component pause-image yes
   build_component rootfs-image-coco-extension
   echo "$EXT_KEY" > "$EXT_KEY_FILE"
 fi
