@@ -115,6 +115,16 @@ build_component() {
   INIT_DATA="$E2E_INIT_DATA" \
   DEBUG=1 \
     "$LB/kata-deploy-binaries.sh" --build="$comp" || die "build $comp failed"
+
+  # Components are produced into build/ but consumed out of $LB/build/ -- the
+  # extension image reads its inputs from there and dies on a bare
+  # `tar: Cannot open` if they are missing. Stage every component we build, so
+  # that adding one later cannot reintroduce this.
+  local t="build/kata-static-$comp.tar.zst"
+  if [ -f "$t" ]; then
+    mkdir -p "$LB/build"
+    cp "$t" "$LB/build/" || die "could not stage $t for later components"
+  fi
 }
 
 build_component agent
@@ -149,9 +159,6 @@ else
   src/agent/tests/test-setpolicy-absent.sh || die "SetPolicy removal test failed"
 fi
 ok "hardened agent verified"
-
-mkdir -p "$LB/build"
-cp build/kata-static-agent.tar.zst "$LB/build/"
 
 build_component rootfs-image
 if [ "$REBUILD_EXT" = "1" ]; then
