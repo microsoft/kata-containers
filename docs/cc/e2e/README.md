@@ -7,6 +7,11 @@ policy-fragment flow.
 Everything here is idempotent and resumable. Each stage records a marker under
 `~/.coco-e2e`; a re-run skips completed stages. `E2E_FORCE=1` re-runs anyway.
 
+Stages 01–06 have been run start to finish from an empty resource group. That
+exercise is worth repeating after any substantial change: standing a second node
+up beside a working one turned up seven defects in this suite, every one of them
+hidden by state the original node had accumulated by hand.
+
 ## What each stage proves
 
 | Stage | Proves |
@@ -180,6 +185,26 @@ about them helps when something drifts.
   carrying the pattern and never exits. Poll for a marker in the log instead.
 - **`kubectl exec` into a genpolicy'd pod is denied by design**, and
   `kubectl logs` is empty for these pods. Plan in-guest observation accordingly.
+- **The extension image is assembled, not compiled.** It unpacks the CoCo guest
+  components and the pause bundle into a rootfs, so both must already exist as
+  tarballs. Nothing builds them implicitly; stage 04 builds them from the cache
+  (they contain no `kata-agent`, so the stale-tarball trap above does not apply
+  and the published artefact is the correct input).
+- **Components are built into `build/` but consumed out of the local-build build
+  directory.** `build_component` stages every tarball it produces into both, so
+  a later component never has to be taught about an earlier one.
+- **`kata-containers.img` is a symlink, in the tarball and once installed.**
+  `tar -xO` on a symlink member emits no bytes, so hashing it digests the empty
+  string. Any comparison against tarball contents must unpack and hash through
+  the link — and note that an `[ -n "$hash" ]` guard cannot catch this, because
+  hashing empty input still produces a hash.
+- **The extension tarball ships its ancestor directories (`./`, `./opt/`) as
+  entries.** A path allow-list over archive members has to permit them, or it
+  rejects a perfectly well-formed archive.
+- **`helm dependency build` (stage 03) writes untracked files** into the
+  kata-deploy chart — a `Chart.lock` and vendored dependency charts. Stage 04's
+  dirty-tree check excludes them, or every clean-room run fails on its
+  predecessor's output.
 
 ### Region and quota
 
