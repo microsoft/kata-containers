@@ -132,6 +132,7 @@ build_component agent
 # Verify the produced binary rather than trusting the flags — silent staleness
 # here would invalidate every strict-policy result downstream.
 CHK=$(mktemp -d)
+trap 'rm -rf "$CHK"' EXIT
 tar -xf build/kata-static-agent.tar.zst -C "$CHK" || die "cannot open agent tarball"
 BIN="$CHK/usr/bin/kata-agent"
 [ -f "$BIN" ] || die "no kata-agent in the tarball"
@@ -142,7 +143,7 @@ bypass=$(strings -a "$BIN" | grep -c AllowRequestsFailingPolicy || true)
 log "binary check: srm=$srm bypass=$bypass"
 [ "$srm"    -gt 100 ] || die "STRICT_POLICY did not take: only $srm SRM symbols (expected >100)"
 [ "$bypass" -eq 0 ]   || die "policy-failure bypass symbol present ($bypass) — not a hardened build"
-rm -rf "$CHK"
+rm -rf "$CHK"; trap - EXIT
 
 # The SetPolicy handler is *compiled out* under strict-policy, so there is no
 # string to grep for -- its absence has to be proved against a non-strict control
@@ -190,9 +191,25 @@ install_tarball() {
   # Some tarballs also carry the ancestor directories as their own entries
   # (./, ./opt/). Those are the path to the payload, not a widening of it, and
   # extracting them changes nothing, so allow exactly those three and no more.
-  local stray
-  stray=$(tar --zstd -tf "$t" \
-    | grep -v '^\./opt/kata/' \
+  #
+  # List and filter in separate steps. Folding them into one pipeline with
+  # `|| true` would let a tar failure (corrupt archive, missing zstd) produce an
+  # empty stream that reads exactly like a clean archive — the guard would then
+  # pass by failing, which is the bug class this file exists to avoid.
+  local listing stray
+  listing=$(tar --zstd -tf "$t") || die "cannot list $t"
+  [ -n "$listing" ] || die "$t lists no members — refusing to extract into /"
+  # Prefix matching alone would accept a symlink member under ./opt/kata/ that
+  # points outside it, and any subsequent member written through that link. The
+  # rootfs tarball legitimately carries one symlink (kata-containers.img ->
+  # kata-ubuntu-noble.image), so reject by target, not by member type: a relative
+  # target that stays inside the payload is fine, absolute or ..-escaping is not.
+  ! grep -q '\.\.' <<<"$listing" || die "$t contains .. in a member path — refusing to extract into /"
+  local escaping
+  escaping=$(tar --zstd -tvf "$t" | grep ' -> ' | awk -F' -> ' '$2 ~ /^\/|\.\./' || true)
+  [ -z "$escaping" ] || die "$t contains symlinks pointing outside the payload — refusing to extract into /:
+$escaping"
+  stray=$(grep -v '^\./opt/kata/' <<<"$listing" \
     | grep -vx '\./' | grep -vx '\./opt/' | grep -vx '\./opt/kata/' || true)
   if [ -n "$stray" ]; then
     die "$t contains paths outside ./opt/kata/ — refusing to extract into /:

@@ -21,7 +21,8 @@ log "subscription: $SUB"
 # check both before blaming the deployment.
 log "checking SKU availability for $E2E_VM_SIZE in $E2E_REGION"
 avail=$(az vm list-skus --all --size "$E2E_VM_SIZE" --location "$E2E_REGION" \
-          --query "[?name=='$E2E_VM_SIZE'] | [0]" -o json 2>/dev/null || true)
+          --query "[?name=='$E2E_VM_SIZE'] | [0]" -o json) \
+  || die "az vm list-skus failed — check 'az login' and the active subscription"
 if [ -z "$avail" ] || [ "$avail" = "null" ]; then
   die "$E2E_VM_SIZE is not offered in $E2E_REGION at all. Try westus/westeurope; see README."
 fi
@@ -65,6 +66,10 @@ else
     SEC_ARGS=(--security-type ConfidentialVM
               --os-disk-security-encryption-type VMGuestStateOnly
               --enable-vtpm true --enable-secure-boot true)
+  elif [ "$E2E_VM_SECURITY_TYPE" != "Standard" ]; then
+    # Silently dropping an unrecognised value would hand back a VM whose posture
+    # is not the one that was asked for, with nothing to say so.
+    die "unsupported E2E_VM_SECURITY_TYPE=$E2E_VM_SECURITY_TYPE (expected Standard or ConfidentialVM)"
   fi
   az vm create \
     -g "$E2E_RG" -n "$E2E_VM" -l "$E2E_REGION" \

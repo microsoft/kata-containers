@@ -16,7 +16,7 @@ hidden by state the original node had accumulated by hand.
 
 | Stage | Proves |
 | --- | --- |
-| `01-provision-vm.sh` | An Azure confidential VM exists and is reachable. Run from your workstation. |
+| `01-provision-vm.sh` | An Azure VM on a confidential-capable host SKU exists and is reachable. The node itself is a plain VM, not a confidential one — see "the node is not a confidential VM" below. Run from your workstation. |
 | `02-bootstrap-node.sh` | Toolchain, container engine, kubectl, Go, Rust and the repo checkout are present on the node. |
 | `03-deploy-cluster.sh` | A kubeadm cluster with `kata-deploy` and the CoCo KBS is up and the runtime classes are registered. |
 | `04-build-guest-stack.sh` | The hardened agent is built **and installed** into `/opt/kata`, the deployed guest image is byte-for-byte the one just built, and the runtime is re-pinned to that image's dm-verity root hashes. |
