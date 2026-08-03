@@ -86,8 +86,9 @@ mod tracer;
 #[cfg(feature = "agent-policy")]
 mod policy;
 
-// BL-8: boot-time OCI pull + SRM verify + inject of declared policy fragments. Only in
-// strict confidential builds, where the SRM `FRAGMENTS` store exists.
+// BL-8: the measured base policy's declared policy-fragment requirements, and the
+// fail-closed gate that keeps containers from starting until the host has delivered them.
+// Only in strict confidential builds, where the SRM `FRAGMENTS` store exists.
 #[cfg(feature = "strict-policy")]
 mod policy_fragments;
 
@@ -579,21 +580,30 @@ async fn start_sandbox(
         }
     }
 
-    // BL-8: pull, SRM-verify, and inject every fragment the measured base policy declares,
-    // after the base policy is set from init-data and the fragment trust root is seeded, but
-    // before the ttRPC server serves any request. Fail-closed: abort the VM on any failure
-    // so no request is ever served under a partially-composed policy.
+    // BL-8: record the fragment requirements the measured base policy declares, after the
+    // base policy is set from init-data and the fragment trust root is seeded.
+    //
+    // The guest does NOT fetch them. This runs before rpc::start() below, and the guest's
+    // interfaces and routes are configured only by the update_interface/update_routes ttRPC
+    // handlers — so at this point there is no network at all and a pull could never
+    // succeed. Delivery is the host's job (as in C-ACI/hcsshim), arriving through
+    // rpc::load_policy_fragment; verification stays here, against the measured trust root.
+    //
+    // Fail-closed is preserved by refusing container creation while any declaration is
+    // outstanding, not by aborting here — the bytes legitimately have not arrived yet.
+    // Failing to *read* the declarations is still fatal: an unreadable requirement list
+    // must not be mistaken for an empty one.
     #[cfg(feature = "strict-policy")]
-    match policy_fragments::load_declared_fragments().await {
+    match policy_fragments::record_declared_fragments().await {
         Ok(n) if n > 0 => info!(
             logger,
-            "FR-1/BL-8: injected {} boot-declared fragment(s)", n
+            "FR-1/BL-8: {} declared fragment(s) outstanding; containers blocked until delivered", n
         ),
         Ok(_) => {}
         Err(e) => {
             error!(
                 logger,
-                "FR-1/BL-8: boot fragment pull failed, aborting VM: {:?}", e
+                "FR-1/BL-8: could not read declared policy fragments, aborting VM: {:?}", e
             );
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             std::process::abort();

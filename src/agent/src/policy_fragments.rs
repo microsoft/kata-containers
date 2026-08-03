@@ -3,38 +3,50 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-//! BL-8 — boot-time pull, verify, and inject of declared signed policy fragments.
+//! BL-8 — the measured base policy's declared policy-fragment requirements.
 //!
-//! The measured base policy (set from init-data before this runs) may declare
-//! `data.agent_policy.policy_fragments[]` entries — each naming an `issuer`
-//! (`did:x509`), a `feed` (OCI reference), and a `minimum_svn`. For every such entry this
-//! module:
-//!   1. pulls the COSE_Sign1(rego) fragment artifact from the feed's OCI registry,
-//!   2. reconstructs the `PolicyFragment` from the (untrusted) COSE payload,
-//!   3. verifies it through the **coco-parity SRM `FragmentStore`** — the *same*
-//!      verify → apply → commit sequence the runtime ttRPC push path
-//!      (`rpc::load_policy_fragment`) uses, so FR-1d (did:x509), FR-1f (transparency
-//!      receipts), FR-1i (rollback floor), and FR-1j (append-only ordering) all apply to
-//!      OCI-delivered fragments too — and injects the verified Rego module.
+//! The measured base policy may declare `data.agent_policy.policy_fragments[]` entries —
+//! each naming an `issuer` (`did:x509`), a `feed` (OCI reference), and a `minimum_svn`.
+//! A declaration is a *requirement*: the sandbox must not run containers until every
+//! declared fragment has been delivered and verified.
 //!
-//! Everything is fail-closed: if any declared fragment cannot be fetched, verified, or
-//! injected, the whole operation returns `Err` and the boot path aborts the VM rather than
-//! serving requests under a partially-composed policy. Both delivery paths (boot pull and
-//! runtime push) share the single global `FRAGMENTS` store, so FR-1j ordering and FR-1i
-//! rollback state remain one monotonic chain.
+//! # Why the guest does not fetch
+//!
+//! This module used to pull each declared fragment from its OCI registry at boot. That
+//! could never work. `load_declared_fragments()` ran inside `start_sandbox()` *before*
+//! `rpc::start()`, but the guest's interfaces and routes are configured only by the
+//! `update_interface` / `update_routes` ttRPC handlers, which cannot run until that server
+//! is serving. The guest kernel cmdline also masks `systemd-networkd`. At that point the
+//! guest has only `lo`, so DNS could not resolve and every non-loopback feed failed —
+//! meaning any pod that declared a fragment failed to boot.
+//!
+//! Delivery is therefore the host's job, which is also what C-ACI/hcsshim does: the host
+//! pulls the artifact and passes the bytes in (`ResourceTypePolicyFragment` ->
+//! `InjectFragment`), and the guest verifies the COSE signature against a *measured* trust
+//! root. Untrusted delivery, trusted verification — the guest needing no network is the
+//! point, not a limitation. Here the bytes arrive through `rpc::load_policy_fragment`.
+//!
+//! # What still makes this fail-closed
+//!
+//! Moving the fetch out means the host now chooses *when* — and whether — to deliver. So
+//! the declaration is recorded at boot as an outstanding requirement and container
+//! creation is refused while any requirement is unsatisfied (see
+//! `assert_all_declared_satisfied`). A host that pushes nothing, pushes late, or pushes a
+//! fragment for the wrong feed cannot get a container started. That is the fail-closed
+//! guarantee the boot-time abort used to provide, enforced at the point where it is
+//! actually observable.
+//!
+//! Verification itself is unchanged and still happens entirely in the guest, through the
+//! same SRM `FragmentStore` as before, so FR-1d (did:x509), FR-1f (receipts), FR-1i
+//! (rollback floor) and FR-1j (ordering) continue to apply.
 
-use anyhow::{anyhow, bail, Context, Result};
-use oci_client::client::{ClientConfig, ClientProtocol};
-use oci_client::secrets::RegistryAuth;
-use oci_client::{Client, Reference};
+use anyhow::{bail, Result};
 use slog::info;
+use tokio::sync::Mutex;
 
-use crate::{AGENT_POLICY, FRAGMENTS};
+use crate::AGENT_POLICY;
 
-/// OCI layer media type carrying the COSE_Sign1(rego) fragment envelope.
-const COSE_LAYER_MEDIA_TYPE: &str = "application/cose-x509+rego";
-/// Expected OCI artifactType for a kata policy fragment.
-const FRAGMENT_ARTIFACT_TYPE: &str = "application/x-ms-ccepolicy-frag";
+pub use kata_agent_policy::policy::FragmentSpec;
 
 macro_rules! sl {
     () => {
@@ -42,17 +54,24 @@ macro_rules! sl {
     };
 }
 
-/// Fetch, verify, and inject every fragment the measured base policy declares.
+lazy_static! {
+    /// Fragment requirements declared by the measured base policy that have not yet been
+    /// satisfied by a verified delivery. Emptied entry by entry as fragments arrive.
+    static ref PENDING: Mutex<Vec<FragmentSpec>> = Mutex::new(Vec::new());
+}
+
+/// Record every fragment requirement the measured base policy declares.
 ///
-/// Returns the number of fragments injected (0 when none are declared). Any failure is
-/// fatal and propagated so the boot path can fail closed. Declarations are processed in
-/// base-policy order so the single FR-1j ordering chain advances deterministically.
-pub async fn load_declared_fragments() -> Result<usize> {
+/// Called from the boot path once the base policy is set from initdata. Performs no I/O:
+/// it only reads the already-measured policy, so it cannot fail for environmental reasons.
+/// Returns the number of outstanding requirements.
+///
+/// A failure to *read* the declarations is still fatal to the boot path — an unreadable
+/// requirement list must not be silently treated as "no requirements".
+pub async fn record_declared_fragments() -> Result<usize> {
     let specs = {
         let mut policy = AGENT_POLICY.lock().await;
-        policy
-            .fragment_specs()
-            .context("reading policy_fragments from the base policy")?
+        policy.fragment_specs()?
     };
 
     if specs.is_empty() {
@@ -60,199 +79,183 @@ pub async fn load_declared_fragments() -> Result<usize> {
         return Ok(0);
     }
 
-    info!(
-        sl!(),
-        "policy-fragments: base policy declares {} fragment(s)",
-        specs.len()
-    );
-
-    let mut injected = 0usize;
     for spec in &specs {
-        let cose = fetch_fragment(&spec.feed)
-            .await
-            .with_context(|| format!("fetching fragment for feed {}", spec.feed))?;
-        verify_and_inject(&spec.issuer, &spec.feed, spec.minimum_svn, &cose)
-            .await
-            .with_context(|| format!("verifying/injecting fragment for feed {}", spec.feed))?;
-        injected += 1;
+        info!(
+            sl!(),
+            "policy-fragments: awaiting delivery of feed {} (issuer {}, minimum_svn {})",
+            spec.feed,
+            spec.issuer,
+            spec.minimum_svn
+        );
     }
 
+    let n = specs.len();
+    *PENDING.lock().await = specs;
     info!(
         sl!(),
-        "policy-fragments: injected {}/{} verified fragment(s)",
-        injected,
-        specs.len()
+        "policy-fragments: {} declared fragment(s) outstanding; containers are blocked until each is delivered and verified",
+        n
     );
-    Ok(injected)
+    Ok(n)
 }
 
-/// Verify an OCI-pulled COSE fragment through the SRM and inject it, mirroring
-/// `rpc::load_policy_fragment` (verify → apply → commit, atomic and fail-closed).
-async fn verify_and_inject(
-    decl_issuer: &str,
-    decl_feed: &str,
-    minimum_svn: u64,
-    cose_sign1: &[u8],
-) -> Result<()> {
-    // Reconstruct the fragment from the (untrusted) COSE payload. The SRM re-verifies the
-    // COSE signature against exactly these reconstructed fields, so a forged payload cannot
-    // pass; parsing here only tells us which fields the envelope claims to bind.
-    let fragment = kata_security_reference_monitor::PolicyFragment::from_cose_envelope(cose_sign1)
-        .ok_or_else(|| {
-            anyhow!("fragment COSE envelope is not a kata-policy-fragment/v3 statement")
-        })?;
+/// Cross-check a *verified* fragment against the measured declarations and mark any it
+/// satisfies as delivered.
+///
+/// Called from `rpc::load_policy_fragment` after the SRM has verified and committed the
+/// fragment. Returns an error when the fragment names a declared feed but contradicts the
+/// declaration — a valid signature over the wrong issuer, or an SVN below the measured
+/// floor, must not satisfy the requirement. The declaration's `minimum_svn` is measured
+/// and per-feed, so it binds independently of the trust root's per-issuer floor.
+///
+/// A fragment for a feed that was never declared is not an error: the runtime push path
+/// predates BL-8 and stays open for fragments the base policy did not pre-declare. It
+/// simply satisfies nothing.
+pub async fn satisfy_declared_fragment(issuer: &str, feed: &str, svn: u64) -> Result<()> {
+    let mut pending = PENDING.lock().await;
+    let satisfied = satisfy_in(&mut pending, issuer, feed, svn)?;
 
-    // The pulled artifact must match what the measured base policy declared. This is a
-    // defence-in-depth cross-check on top of the SRM's own issuer/feed/SVN gates.
-    if fragment.issuer != decl_issuer {
-        bail!(
-            "pulled fragment issuer {:?} does not match declared issuer {:?}",
-            fragment.issuer,
-            decl_issuer
+    if satisfied > 0 {
+        info!(
+            sl!(),
+            "policy-fragments: feed {} satisfied by svn {}; {} declaration(s) still outstanding",
+            feed,
+            svn,
+            pending.len()
         );
-    }
-    if fragment.feed != decl_feed {
-        bail!(
-            "pulled fragment feed {:?} does not match declared feed {:?}",
-            fragment.feed,
-            decl_feed
-        );
-    }
-    if fragment.svn < minimum_svn {
-        bail!(
-            "pulled fragment svn {} is below declared minimum_svn {}",
-            fragment.svn,
-            minimum_svn
-        );
-    }
-
-    // Verify through the SRM. Routing is identical to the runtime push path: an
-    // x5chain-bearing envelope (or a store requiring x509) is always verified as did:x509;
-    // there is no permissive fallback.
-    let verified = {
-        let store = FRAGMENTS.lock().await;
-        let r = if store.require_x509()
-            || (store.has_did_x509_anchors()
-                && kata_security_reference_monitor::did_x509::cose_has_x5chain(cose_sign1))
-        {
-            store.verify_cose_x509(&fragment, cose_sign1)
-        } else {
-            store.verify_cose(&fragment, cose_sign1)
-        };
-        r.map_err(|e| anyhow!("SRM rejected boot-pulled fragment: {e}"))?
-    };
-
-    if let Some(module) = &verified.policy_module {
-        AGENT_POLICY
-            .lock()
-            .await
-            .apply_fragment_module(
-                &format!("fragment:{}:{}", verified.issuer, verified.svn),
-                module,
-                &verified.includes,
-            )
-            .map_err(|e| anyhow!("applying boot-pulled fragment module: {e}"))?;
-    }
-
-    // FR-1i: persist the SVN high-water marks after commit so a restart cannot reopen a
-    // rollback window.
-    {
-        let mut store = FRAGMENTS.lock().await;
-        store.commit(&verified);
-        crate::persist_fragment_svn_state(&store.export_svn_state());
     }
     Ok(())
 }
 
-/// Pull the raw COSE_Sign1 bytes for a fragment feed from its OCI registry.
+/// The cross-check and removal itself, over an explicit requirement list.
 ///
-/// `feed` is an OCI reference (e.g. `contoso.azurecr.io/frag/infra:1`). The manifest is
-/// resolved, the COSE layer selected by media type, and its blob downloaded. No
-/// verification happens here — the returned bytes are untrusted until SRM-verified.
-async fn fetch_fragment(feed: &str) -> Result<Vec<u8>> {
-    let reference: Reference = feed
-        .parse()
-        .with_context(|| format!("invalid OCI reference for feed: {feed}"))?;
-
-    // Registries are HTTPS by default; only fall back to plain HTTP for an explicit
-    // localhost/loopback dev registry.
-    let protocol = if is_plain_http_registry(&reference) {
-        ClientProtocol::Http
-    } else {
-        ClientProtocol::Https
-    };
-    let client = Client::new(ClientConfig {
-        protocol,
-        ..Default::default()
-    });
-
-    // Fragments are public artifacts pinned by digest/tag; anonymous pull.
-    let auth = RegistryAuth::Anonymous;
-
-    let (manifest, _digest) = client
-        .pull_image_manifest(&reference, &auth)
-        .await
-        .with_context(|| format!("failed to pull manifest for {reference}"))?;
-
-    if let Some(at) = &manifest.artifact_type {
-        if at != FRAGMENT_ARTIFACT_TYPE {
-            info!(
-                sl!(),
-                "policy-fragments: unexpected artifactType {at} (want {FRAGMENT_ARTIFACT_TYPE}) for {reference} — continuing"
+/// Split out from the global so it can be tested directly: the tests would otherwise race
+/// each other through `PENDING`, and a shared-state test that passes only when run alone is
+/// worse than no test. Returns how many requirements this delivery satisfied.
+fn satisfy_in(
+    pending: &mut Vec<FragmentSpec>,
+    issuer: &str,
+    feed: &str,
+    svn: u64,
+) -> Result<usize> {
+    for spec in pending.iter() {
+        if spec.feed != feed {
+            continue;
+        }
+        if spec.issuer != issuer {
+            bail!(
+                "fragment for declared feed {feed:?} is signed by issuer {issuer:?}, but the measured policy declares issuer {:?}",
+                spec.issuer
+            );
+        }
+        if svn < spec.minimum_svn {
+            bail!(
+                "fragment for declared feed {feed:?} has svn {svn}, below the measured minimum_svn {}",
+                spec.minimum_svn
             );
         }
     }
 
-    let layer = manifest
-        .layers
-        .iter()
-        .find(|l| l.media_type == COSE_LAYER_MEDIA_TYPE)
-        .ok_or_else(|| {
-            anyhow!(
-                "no {COSE_LAYER_MEDIA_TYPE} layer in manifest for {reference} (have: {})",
-                manifest
-                    .layers
-                    .iter()
-                    .map(|l| l.media_type.clone())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })?;
-
-    let mut buf: Vec<u8> = Vec::with_capacity(layer.size.max(0) as usize);
-    client
-        .pull_blob(&reference, layer, &mut buf)
-        .await
-        .with_context(|| format!("failed to download fragment layer {}", layer.digest))?;
-
-    if buf.is_empty() {
-        bail!("downloaded fragment layer is empty for {reference}");
-    }
-    Ok(buf)
+    let before = pending.len();
+    pending.retain(|spec| !(spec.feed == feed && spec.issuer == issuer && svn >= spec.minimum_svn));
+    Ok(before - pending.len())
 }
 
-/// Only treat an explicit localhost/loopback registry as plain-HTTP; all other registries
-/// must use TLS.
-fn is_plain_http_registry(reference: &Reference) -> bool {
-    let registry = reference.registry();
-    registry.starts_with("localhost")
-        || registry.starts_with("127.0.0.1")
-        || registry.starts_with("[::1]")
+/// Fail unless every declared fragment has been delivered and verified.
+///
+/// This is the fail-closed gate. It replaces the boot-time `abort()`: because delivery is
+/// now the host's responsibility, the requirement has to be enforced at the point the
+/// sandbox would otherwise start doing work under an incompletely composed policy.
+pub async fn assert_all_declared_satisfied() -> Result<()> {
+    assert_satisfied_in(&PENDING.lock().await)
+}
+
+/// The gate itself, over an explicit requirement list. Split out for the same reason as
+/// [`satisfy_in`] — so it can be tested without racing other tests through `PENDING`.
+fn assert_satisfied_in(pending: &[FragmentSpec]) -> Result<()> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let outstanding = pending
+        .iter()
+        .map(|s| format!("{} (issuer {}, minimum_svn {})", s.feed, s.issuer, s.minimum_svn))
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!(
+        "the measured base policy declares {} policy fragment(s) that have not been delivered and verified: {outstanding}",
+        pending.len()
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn spec(issuer: &str, feed: &str, minimum_svn: u64) -> FragmentSpec {
+        FragmentSpec {
+            issuer: issuer.to_string(),
+            feed: feed.to_string(),
+            minimum_svn,
+        }
+    }
+
     #[test]
-    fn plain_http_only_for_localhost() {
-        let local: Reference = "localhost:5001/frag/infra:1".parse().unwrap();
-        assert!(is_plain_http_registry(&local));
+    fn no_declarations_is_satisfied() {
+        assert!(assert_satisfied_in(&[]).is_ok());
+    }
 
-        let loopback: Reference = "127.0.0.1:5001/frag/infra:1".parse().unwrap();
-        assert!(is_plain_http_registry(&loopback));
+    #[test]
+    fn outstanding_declaration_blocks_until_delivered() {
+        let mut pending = vec![spec("did:x509:i", "reg.io/frag:1", 2)];
+        let err = assert_satisfied_in(&pending).unwrap_err().to_string();
+        assert!(err.contains("reg.io/frag:1"), "unhelpful error: {}", err);
 
-        let remote: Reference = "contoso.azurecr.io/frag/infra:1".parse().unwrap();
-        assert!(!is_plain_http_registry(&remote));
+        // A matching delivery clears it, and only then may containers start.
+        assert_eq!(satisfy_in(&mut pending, "did:x509:i", "reg.io/frag:1", 2).unwrap(), 1);
+        assert!(assert_satisfied_in(&pending).is_ok());
+    }
+
+    #[test]
+    fn higher_svn_satisfies_the_floor() {
+        let mut pending = vec![spec("did:x509:i", "reg.io/frag:1", 2)];
+        satisfy_in(&mut pending, "did:x509:i", "reg.io/frag:1", 7).unwrap();
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn svn_below_the_measured_floor_is_rejected_and_does_not_satisfy() {
+        let mut pending = vec![spec("did:x509:i", "reg.io/frag:1", 5)];
+        assert!(satisfy_in(&mut pending, "did:x509:i", "reg.io/frag:1", 4).is_err());
+        // Still outstanding: a rejected delivery must not clear the requirement.
+        assert_eq!(pending.len(), 1);
+        assert!(assert_satisfied_in(&pending).is_err());
+    }
+
+    #[test]
+    fn wrong_issuer_for_a_declared_feed_is_rejected() {
+        let mut pending = vec![spec("did:x509:good", "reg.io/frag:1", 1)];
+        assert!(satisfy_in(&mut pending, "did:x509:evil", "reg.io/frag:1", 9).is_err());
+        assert_eq!(pending.len(), 1);
+    }
+
+    #[test]
+    fn undeclared_feed_satisfies_nothing_but_is_allowed() {
+        let mut pending = vec![spec("did:x509:i", "reg.io/frag:1", 1)];
+        assert_eq!(
+            satisfy_in(&mut pending, "did:x509:other", "reg.io/other:1", 3).unwrap(),
+            0
+        );
+        assert_eq!(pending.len(), 1);
+    }
+
+    #[test]
+    fn each_declaration_must_be_satisfied_individually() {
+        let mut pending = vec![
+            spec("did:x509:i", "reg.io/a:1", 1),
+            spec("did:x509:i", "reg.io/b:1", 1),
+        ];
+        satisfy_in(&mut pending, "did:x509:i", "reg.io/a:1", 1).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(assert_satisfied_in(&pending).is_err());
     }
 }

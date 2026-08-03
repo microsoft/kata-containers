@@ -1055,6 +1055,19 @@ impl agent_ttrpc::AgentService for AgentService {
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "create_container", req);
 
+        // BL-8 fail-closed gate. The measured base policy may declare policy fragments that
+        // the host is responsible for delivering (the guest has no network of its own — see
+        // policy_fragments.rs). Refuse to create anything until every declaration has been
+        // delivered and verified, otherwise a host that simply never pushes would get the
+        // workload running under a policy missing the grants it was measured to include.
+        //
+        // Before is_allowed(), because the point is that the active policy is not yet the
+        // policy that was measured — its verdict is not the one to act on.
+        #[cfg(feature = "strict-policy")]
+        crate::policy_fragments::assert_all_declared_satisfied()
+            .await
+            .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
+
         // FR-6: snapshot policy state before authorization. The policy applies its
         // pstate mutations during is_allowed; if the create fails we restore this
         // snapshot so no committed enforcer state survives a failed operation.
@@ -2628,6 +2641,21 @@ impl agent_ttrpc::AgentService for AgentService {
             store.commit(&verified);
             crate::persist_fragment_svn_state(&store.export_svn_state());
         }
+
+        // BL-8: this delivery may satisfy a fragment the measured base policy declared.
+        // Cross-check it against that declaration — a valid signature over the wrong issuer,
+        // or an SVN under the measured per-feed floor, must not clear the requirement.
+        // Deliberately after commit, so the SVN/ordering chain still advances exactly as it
+        // does for any other verified fragment; this gate governs whether containers may
+        // start, not whether the fragment was genuine.
+        crate::policy_fragments::satisfy_declared_fragment(
+            &verified.issuer,
+            &verified.feed,
+            verified.svn,
+        )
+        .await
+        .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
+
         Ok(Empty::new())
     }
 
