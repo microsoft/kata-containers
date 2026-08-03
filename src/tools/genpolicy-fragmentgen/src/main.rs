@@ -60,6 +60,18 @@ struct Cli {
     /// Allow plain-HTTP push to a localhost/loopback dev registry only.
     #[arg(long)]
     plain_http: bool,
+
+    /// Registry username for an authenticated push. Anonymous when omitted.
+    /// For Azure Container Registry with a token from `az acr login --expose-token`,
+    /// this is the all-zero GUID. Falls back to $FRAGMENTGEN_USERNAME.
+    #[arg(long)]
+    username: Option<String>,
+
+    /// Registry password or token for an authenticated push. Falls back to
+    /// $FRAGMENTGEN_PASSWORD, which is the preferred form: a value passed on the
+    /// command line is readable by every local account via /proc/<pid>/cmdline.
+    #[arg(long)]
+    password: Option<String>,
 }
 
 fn read_hex_or_binary(bytes: Vec<u8>) -> Vec<u8> {
@@ -80,7 +92,12 @@ fn read_hex_or_binary(bytes: Vec<u8>) -> Vec<u8> {
     bytes
 }
 
-async fn push_artifact(reference: &str, plain_http: bool, cose: &[u8]) -> Result<()> {
+async fn push_artifact(
+    reference: &str,
+    plain_http: bool,
+    auth: &RegistryAuth,
+    cose: &[u8],
+) -> Result<()> {
     let reference: Reference = reference
         .parse()
         .with_context(|| format!("invalid OCI reference {reference:?}"))?;
@@ -91,6 +108,12 @@ async fn push_artifact(reference: &str, plain_http: bool, cose: &[u8]) -> Result
         || registry.starts_with("[::1]");
     if plain_http && !is_local {
         bail!("--plain-http is only allowed for localhost/loopback registries (got {registry})");
+    }
+    // Credentials would travel in the clear over plain HTTP. That combination is
+    // never necessary — a loopback dev registry does not authenticate — so refuse
+    // it outright rather than leaking a token to anything sniffing lo.
+    if plain_http && !matches!(auth, RegistryAuth::Anonymous) {
+        bail!("--plain-http cannot be combined with registry credentials");
     }
     let protocol = if plain_http && is_local {
         ClientProtocol::Http
@@ -120,7 +143,7 @@ async fn push_artifact(reference: &str, plain_http: bool, cose: &[u8]) -> Result
             &reference,
             std::slice::from_ref(&layer),
             config,
-            &RegistryAuth::Anonymous,
+            auth,
             Some(manifest),
         )
         .await
@@ -153,7 +176,23 @@ async fn main() -> Result<()> {
     println!("  }}");
 
     if let Some(reference) = &cli.push {
-        push_artifact(reference, cli.plain_http, &cose).await?;
+        // Only a complete pair is credentials; a lone username would otherwise
+        // silently degrade to an anonymous push that fails much later with an
+        // opaque 401.
+        let user = cli
+            .username
+            .clone()
+            .or_else(|| std::env::var("FRAGMENTGEN_USERNAME").ok());
+        let pass = cli
+            .password
+            .clone()
+            .or_else(|| std::env::var("FRAGMENTGEN_PASSWORD").ok());
+        let auth = match (user, pass) {
+            (Some(u), Some(p)) => RegistryAuth::Basic(u, p),
+            (None, None) => RegistryAuth::Anonymous,
+            _ => bail!("registry username and password must be given together"),
+        };
+        push_artifact(reference, cli.plain_http, &auth, &cose).await?;
         println!();
         println!(
             "Pushed {}-byte fragment artifact to {reference}",

@@ -222,7 +222,10 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | `E2E_REPO_DIR` | `~/kata-containers` | Checkout on the node. |
 | `E2E_STRICT_POLICY` | `yes` | Pulls in the security reference monitor. |
 | `E2E_NIGHTLY_SHA` | *(required for stage 03)* | CI-nightly commit sha. |
-| `E2E_REGISTRY` | `localhost:5000` | Registry for the policy fragment. Loopback starts a throwaway `registry:2`. |
+| `E2E_REGISTRY` | `localhost:5000` | Registry for the policy fragment. Loopback starts a throwaway `registry:2`. Overridden when `E2E_ACR` resolves. |
+| `E2E_ACR` | *(empty)* | `auto` provisions/adopts a guest-reachable ACR so stage 07's fetch cases can run; a name adopts that registry; empty stays on loopback. |
+| `E2E_ACR_RG` / `_SKU` | `$E2E_RG` / `Basic` | Where and how `ensure_acr` creates the registry. |
+| `E2E_ACR_LOGIN_SERVER` / `_USERNAME` / `_PASSWORD` | *(empty)* | Pre-provisioned registry. Set these and nothing shells out to `az` — use when the node has no Azure credentials. |
 | `E2E_SKIP_PROVISION` | `auto` | `auto` skips stage 01 when `az` is missing; `1` always skips, `0` always runs. |
 | `E2E_NS` | `coco-e2e` | Namespace for the stage-05 pod. |
 | `E2E_GO_VERSION` | `1.25.0` | Go toolchain installed by stage 02. |
@@ -410,8 +413,8 @@ unauthorized issuer, SVN rollback, revoked certificate, reordered log head,
 missing or foreign receipt), so a non-zero exit is a genuine regression.
 
 **Delivery** — the stage signs a fragment, packages it as an OCI artifact and
-pushes it. For a loopback registry it then reads the manifest back and asserts
-the contract the guest fetcher depends on:
+pushes it, then reads the manifest back and asserts the contract the guest
+fetcher depends on:
 
 | Field | Value | Asserted |
 | --- | --- | --- |
@@ -419,10 +422,12 @@ the contract the guest fetcher depends on:
 | COSE layer `mediaType` | `application/cose-x509+rego` | yes |
 | config `mediaType` | `application/vnd.oci.empty.v1+json` | no — contract only |
 
-Against a remote registry the read-back is skipped (no credentials are assumed);
-verify by hand with `oras manifest fetch`. The stage also asserts the negative
-case: `--plain-http` against a non-loopback registry must fail with the specific
-downgrade guard message, not merely a non-zero exit.
+Against a remote registry the read-back is done *anonymously* over HTTPS, using
+the same token dance the guest's OCI client performs. That is deliberate: it
+doubles as a preflight that anonymous pull really is enabled, which is what the
+guest depends on. The stage also asserts the negative case: `--plain-http`
+against a non-loopback registry must fail with the specific downgrade guard
+message, not merely a non-zero exit.
 
 It then prints the `policy_fragments[]` settings entry for the base policy and
 the `fragment-issuers.toml` trust root to deliver through measured initdata. Both
@@ -469,17 +474,36 @@ HTTP is permitted only for `localhost` / `127.0.0.1` / `[::1]`. Inside the guest
 that loopback is the *guest's own*, where nothing is listening; a host-IP HTTP
 registry is refused outright by the downgrade guard. A working good path
 therefore needs an HTTPS registry with a publicly trusted certificate, anonymous
-pull, and guest egress. To unlock it, re-run 06 against such a registry:
+pull, and guest egress. Set `E2E_ACR=auto` and stage 06 provisions one:
 
 ```bash
-az acr create -g <rg> -n <acr> --sku Basic
-az acr update -n <acr> --anonymous-pull-enabled true
-E2E_REGISTRY=<acr>.azurecr.io ./run-all.sh 06 07   # 06 must be re-run: 07 consumes its artifacts
+E2E_ACR=auto E2E_FORCE=1 ./run-all.sh 06 07   # 06 must be re-run: 07 consumes its artifacts
 ```
 
-Without it the stage still runs 07a and 07b and says plainly which cases it
-skipped. That is the same egress-and-TLS caveat that makes this deployment-time
-configuration rather than something the suite can synthesise.
+`ensure_acr` creates or adopts a registry whose name is derived from the
+subscription and resource group, so repeated runs reuse the same one rather than
+littering the subscription. It *asserts* `anonymousPullEnabled` and repairs it if
+missing — an adopted registry can have it off, and it can be turned off later.
+Push uses a short-lived token from `az acr login --expose-token`, passed to
+`genpolicy-fragmentgen` through `FRAGMENTGEN_USERNAME` / `FRAGMENTGEN_PASSWORD`
+rather than argv, since `/proc/<pid>/cmdline` is world-readable.
+
+The feed is baked into the COSE payload at signing time and the guest fetches
+*that*, so the registry is decided before 06c signs. Mirroring the artifact into
+a registry afterwards would not repoint the guest.
+
+If the node has no Azure credentials, provision from the workstation and hand the
+values over instead — nothing then shells out to `az`:
+
+```bash
+E2E_ACR_LOGIN_SERVER=<acr>.azurecr.io \
+E2E_ACR_USERNAME=00000000-0000-0000-0000-000000000000 \
+E2E_ACR_PASSWORD=$(az acr login -n <acr> --expose-token --query accessToken -o tsv) \
+E2E_FORCE=1 ./run-all.sh 06 07
+```
+
+Without a reachable registry the stage still runs 07a and 07b and says plainly
+which cases it skipped. A missing registry costs coverage, not correctness.
 
 ## Cleanup
 

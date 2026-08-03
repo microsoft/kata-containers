@@ -46,6 +46,16 @@ set -uo pipefail
 # Local dev registry used by the policy-fragment step.
 : "${E2E_REGISTRY:=localhost:5000}"
 
+# Guest-reachable registry for the live boot-pull (stage 07). The guest resolves
+# the fragment feed itself and allows plain HTTP only for its own loopback
+# (policy_fragments.rs:236), so a real fetch needs HTTPS with a publicly trusted
+# certificate and anonymous pull. E2E_ACR=auto provisions an ACR that satisfies
+# both; set it to a registry name to reuse one, or to "" to stay on the loopback
+# registry and skip 07c/07d.
+: "${E2E_ACR:=}"
+: "${E2E_ACR_RG:=$E2E_RG}"
+: "${E2E_ACR_SKU:=Basic}"
+
 E2E_STATE_DIR="${E2E_STATE_DIR:-$HOME/.coco-e2e}"
 mkdir -p "$E2E_STATE_DIR"
 
@@ -201,4 +211,87 @@ load_toolchain() {
   export PATH="$PATH:$HOME/.cargo/bin:/usr/local/go/bin:$HOME/gopath/bin"
   export GOROOT="${GOROOT:-/usr/local/go}"
   export GOPATH="${GOPATH:-$HOME/gopath}"
+}
+
+# Provision (or adopt) the guest-reachable registry the live boot-pull needs, and
+# export ACR_LOGIN_SERVER / ACR_USERNAME / ACR_PASSWORD.
+#
+# Returns non-zero — without dying — when it cannot get there, so callers can
+# fall back to the loopback registry. A missing registry costs coverage, not
+# correctness: the stages that need it skip themselves and say so.
+#
+# Two ways in:
+#   1. Pre-provisioned. Export E2E_ACR_LOGIN_SERVER (+ optionally
+#      E2E_ACR_USERNAME/E2E_ACR_PASSWORD) and nothing here shells out to az.
+#      Use this when the node has no Azure credentials — provision from the
+#      workstation and hand the values over.
+#   2. E2E_ACR set. Creates or adopts that registry with `az` wherever this runs.
+ensure_acr() {
+  if [ -n "${E2E_ACR_LOGIN_SERVER:-}" ]; then
+    ACR_LOGIN_SERVER="$E2E_ACR_LOGIN_SERVER"
+    ACR_USERNAME="${E2E_ACR_USERNAME:-}"
+    ACR_PASSWORD="${E2E_ACR_PASSWORD:-}"
+    export ACR_LOGIN_SERVER ACR_USERNAME ACR_PASSWORD
+    ok "using pre-provisioned registry $ACR_LOGIN_SERVER"
+    return 0
+  fi
+
+  [ -n "${E2E_ACR:-}" ] || return 1
+
+  command -v az >/dev/null 2>&1 || {
+    warn "az is not installed here — cannot provision a registry"
+    warn "provision one elsewhere and re-run with E2E_ACR_LOGIN_SERVER/_USERNAME/_PASSWORD set"
+    return 1
+  }
+  az account show >/dev/null 2>&1 || {
+    warn "az is not logged in here — run 'az login' or set E2E_ACR_LOGIN_SERVER/_USERNAME/_PASSWORD"
+    return 1
+  }
+
+  local name="$E2E_ACR"
+  if [ "$name" = auto ]; then
+    # Derive a stable, globally-unique-ish name from the subscription and
+    # resource group so repeated runs adopt the same registry instead of
+    # littering the subscription. ACR names are 5-50 lowercase alphanumerics.
+    local sub seed
+    sub=$(az account show --query id -o tsv) || return 1
+    seed=$(printf '%s/%s' "$sub" "$E2E_ACR_RG" | sha256sum | cut -c1-12)
+    name="cocoe2e$seed"
+  fi
+
+  if az acr show -n "$name" -g "$E2E_ACR_RG" >/dev/null 2>&1; then
+    log "adopting existing registry $name"
+  else
+    log "creating registry $name in $E2E_ACR_RG ($E2E_ACR_SKU, $E2E_REGION)"
+    az acr create -n "$name" -g "$E2E_ACR_RG" --sku "$E2E_ACR_SKU" \
+        --location "$E2E_REGION" --anonymous-pull-enabled true -o none || {
+      warn "could not create registry $name"
+      return 1
+    }
+  fi
+
+  # Assert rather than assume: the guest pulls the fragment anonymously, and
+  # anonymous pull can be off on an adopted registry or turned off later. The
+  # Basic SKU only gained this in 2021, so it can also legitimately be absent.
+  local anon
+  anon=$(az acr show -n "$name" -g "$E2E_ACR_RG" \
+           --query anonymousPullEnabled -o tsv 2>/dev/null) || anon=""
+  if [ "$anon" != true ]; then
+    log "enabling anonymous pull on $name (was: ${anon:-unset})"
+    az acr update -n "$name" -g "$E2E_ACR_RG" --anonymous-pull-enabled true -o none || {
+      warn "could not enable anonymous pull on $name — the guest could not fetch the fragment"
+      return 1
+    }
+  fi
+
+  ACR_LOGIN_SERVER=$(az acr show -n "$name" -g "$E2E_ACR_RG" --query loginServer -o tsv) || return 1
+  # A refresh token beats admin credentials: it is short-lived and does not
+  # require the registry's admin user to be enabled at all.
+  ACR_PASSWORD=$(az acr login -n "$name" --expose-token --query accessToken -o tsv 2>/dev/null) || {
+    warn "could not mint a push token for $name"
+    return 1
+  }
+  ACR_USERNAME=00000000-0000-0000-0000-000000000000
+  export ACR_LOGIN_SERVER ACR_USERNAME ACR_PASSWORD
+  ok "registry ready: $ACR_LOGIN_SERVER (anonymous pull on)"
 }
