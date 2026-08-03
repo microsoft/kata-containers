@@ -52,13 +52,41 @@ gha deploy-kata
 gha deploy-coco-kbs
 gha install-kbs-client
 
+# The kata-tools tarball and the kata-deploy image both come from the *upstream*
+# CI-nightly, so every genpolicy input on disk is upstream's — including
+# rules.rego, which genpolicy reads at runtime rather than compiling in. Without
+# this, stage 05 generates its pod policy from upstream rules and nothing in the
+# suite exercises ours (e.g. the FR-4A storage bijection).
+#
+# Our genpolicy changes are data-only, so staging the repo copies is exact and
+# needs no rebuild. This has to happen after deploy-kata: that step also writes
+# /opt/kata from the kata-deploy image and would clobber an earlier copy, which
+# is the same reason the oci_version patch below sits here.
+DEFAULTS=/opt/kata/share/defaults/kata-containers
+for f in rules.rego genpolicy-settings.json; do
+  src="$E2E_REPO_DIR/src/tools/genpolicy/$f"
+  [ -f "$src" ] || die "missing $src — genpolicy inputs are not where 03 expects them"
+  sudo install -D --mode 0644 "$src" "$DEFAULTS/$f" \
+    || die "could not stage $f into $DEFAULTS"
+done
+ok "staged genpolicy inputs from $E2E_BRANCH"
+
 # containerd 2.3.3 emits OCI spec 1.3.0 while the shipped settings still say
 # 1.1.0, which denies *every* pod at CreateContainerRequest. Fix once here.
-SETTINGS=/opt/kata/share/defaults/kata-containers/genpolicy-settings.json
+SETTINGS="$DEFAULTS/genpolicy-settings.json"
 if grep -q '"oci_version": "1.1.0"' "$SETTINGS" 2>/dev/null; then
   log "patching oci_version 1.1.0 -> 1.3.0 in $SETTINGS"
   sudo sed -i 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' "$SETTINGS"
 fi
+
+# The staging above is only worth anything if it survived to disk. rules.rego is
+# untouched by the patch, so it must still be byte-identical to the repo copy;
+# anything else means something rewrote /opt/kata after we did.
+if [ "$(sudo sha256sum "$DEFAULTS/rules.rego" | cut -d' ' -f1)" \
+   != "$(sha256sum "$E2E_REPO_DIR/src/tools/genpolicy/rules.rego" | cut -d' ' -f1)" ]; then
+  die "installed rules.rego is not the branch copy — policy would be generated from upstream rules"
+fi
+ok "genpolicy rules.rego matches $E2E_BRANCH"
 
 wait_for 300 "all nodes Ready" all_nodes_ready
 

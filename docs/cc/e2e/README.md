@@ -141,14 +141,23 @@ This is the step that clones the repo to `~/kata-containers` (`E2E_REPO_DIR`) at
 *overall* nightly run is usually red — that is fine, only the build/publish jobs
 matter.
 
+The nightly belongs to **upstream `kata-containers/kata-containers`**, not to
+this fork — `ci-nightly.yaml` does not exist here, so `gh` returns a 404 unless
+you pass `-R`. That also means everything the tarball carries is upstream's,
+including the genpolicy inputs; stage 03 restages `rules.rego` and
+`genpolicy-settings.json` from your branch afterwards so the run exercises our
+policy rather than upstream's.
+
 `gh` is **not** among the packages stage 02 installs, so the simplest path is to
 download on your workstation, where `gh` is already authenticated, and copy it
 over:
 
 ```bash
 # workstation
-gh run list --workflow ci-nightly.yaml -L 5 --json databaseId,headSha,conclusion
-gh run download <id> -n kata-tools-static-tarball-amd64-<sha>-nightly
+gh run list -R kata-containers/kata-containers --workflow ci-nightly.yaml -L 5 \
+  --json databaseId,headSha,conclusion
+gh run download <id> -R kata-containers/kata-containers \
+  -n kata-tools-static-tarball-amd64-<sha>-nightly
 ssh coco-dev 'mkdir -p ~/kata-containers/kata-tools-artifacts'
 scp kata-tools-static.tar.zst coco-dev:~/kata-containers/kata-tools-artifacts/
 ```
@@ -284,6 +293,14 @@ about them helps when something drifts.
   guest. Stage 04 installs them and fails unless the deployed image hashes equal
   to the copy inside the tarball it just built (so a byte-identical rebuild is a
   pass, and a change made by anything else is a failure).
+- **The host-side genpolicy inputs come from upstream, not from your branch.**
+  `kata-tools-static.tar.zst` and the `kata-deploy` image are both built from
+  upstream `main`, and genpolicy reads `rules.rego` at *runtime* — so a pod
+  policy would be generated from upstream's rules even though the repo has ours.
+  Stage 03 restages `rules.rego` and `genpolicy-settings.json` from
+  `$E2E_REPO_DIR` after `deploy-kata` (which also writes `/opt/kata` and would
+  otherwise clobber them), re-applies the `oci_version` patch, and then asserts
+  the installed `rules.rego` is byte-identical to the repo copy.
 - **The agent builds from a git checkout inside a container**, so uncommitted
   working-tree changes are invisible. Stage 04 refuses to run on a dirty tree.
 - **`DOCKER_TAG` needs an `-amd64` suffix.** The manifest-list tag is only
