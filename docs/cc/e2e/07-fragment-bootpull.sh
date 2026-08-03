@@ -86,6 +86,19 @@ trap 'rm -rf "$WORK"' EXIT
 GENPOLICY=/opt/kata/bin/genpolicy
 if ! "$GENPOLICY" --help 2>&1 | grep -q -- '--initdata_path'; then
   warn "$GENPOLICY does not accept --initdata_path — building genpolicy from $E2E_BRANCH"
+  # src/version.rs is generated from src/version.rs.in by genpolicy's Makefile and
+  # is gitignored, so a bare `cargo build` fails with E0583 on a fresh checkout.
+  # Reproduce just that one substitution rather than invoking `make`, whose build
+  # target also cross-compiles to $TRIPLE and runs `cargo test --no-run`.
+  GP_SRC="$E2E_REPO_DIR/src/tools/genpolicy"
+  [ -f "$GP_SRC/src/version.rs.in" ] || die "missing $GP_SRC/src/version.rs.in"
+  GP_COMMIT=$(git -C "$E2E_REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
+  [ -n "$(git -C "$E2E_REPO_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ] \
+    && GP_COMMIT="$GP_COMMIT-dirty"
+  sed -e "s|@COMMIT_INFO@|$GP_COMMIT|g" "$GP_SRC/src/version.rs.in" > "$GP_SRC/src/version.rs" \
+    || die "could not generate $GP_SRC/src/version.rs"
+  log "generated genpolicy src/version.rs ($GP_COMMIT)"
+
   # genpolicy is a member of the root workspace (see the repo-root Cargo.toml),
   # so the artifact lands in the workspace target dir, not under src/tools.
   ( cd "$E2E_REPO_DIR" && cargo build --release -p genpolicy ) \
