@@ -301,6 +301,12 @@ about them helps when something drifts.
   `$E2E_REPO_DIR` after `deploy-kata` (which also writes `/opt/kata` and would
   otherwise clobber them), re-applies the `oci_version` patch, and then asserts
   the installed `rules.rego` is byte-identical to the repo copy.
+- **Upstream CI steps prompt when a human runs them.** `gha-run.sh` is written
+  for GitHub Actions, where stdin is never a TTY. Over an interactive ssh session
+  it is, so `install-bats` — which calls `add-apt-repository` without `-y`
+  (`gha-run-k8s-common.sh:175,177`) — parks on *"Press [ENTER] to continue"* and
+  waits forever, immediately before stage 04's 40–60 minute build. Stage 03's
+  `gha` wrapper closes stdin so the prompts take their default.
 - **The agent builds from a git checkout inside a container**, so uncommitted
   working-tree changes are invisible. Stage 04 refuses to run on a dirty tree.
 - **`DOCKER_TAG` needs an `-amd64` suffix.** The manifest-list tag is only

@@ -36,7 +36,14 @@ ART_DIR="$E2E_REPO_DIR/kata-tools-artifacts"
 
 gha() {
   log "gha-run.sh $1"
-  ( cd "$E2E_REPO_DIR" && bash tests/integration/kubernetes/gha-run.sh "$@" ) \
+  # stdin is closed deliberately. gha-run.sh is written for GitHub Actions, where
+  # stdin is never a TTY, so a few upstream steps prompt only when a human runs
+  # them -- install-bats calls add-apt-repository without -y
+  # (gha-run-k8s-common.sh:175,177) and parks on "Press [ENTER] to continue".
+  # That would stall the stage indefinitely, right before the 40-60 minute build
+  # in stage 04. Every sudo here already runs unattended, so nothing else wants
+  # stdin; closing it makes the prompts take their default and proceed.
+  ( cd "$E2E_REPO_DIR" && bash tests/integration/kubernetes/gha-run.sh "$@" ) </dev/null \
     || die "gha-run.sh $1 failed"
 }
 
