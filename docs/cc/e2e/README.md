@@ -22,6 +22,7 @@ hidden by state the original node had accumulated by hand.
 | `04-build-guest-stack.sh` | The hardened agent is built **and installed** into `/opt/kata`, the deployed guest image is byte-for-byte the one just built, and the runtime is re-pinned to that image's dm-verity root hashes. |
 | `05-smoke-test.sh` | The pod that boots is provably the locally built guest (verity pin), and an undeclared `exec` is denied. Mediation is live. |
 | `06-policy-fragment-e2e.sh` | FR-1 signed policy fragments: every verification invariant holds, and the OCI delivery artifact matches the contract the guest fetcher depends on. |
+| `07-fragment-bootpull.sh` | BL-8 live boot-pull: the guest itself fetches, verifies and injects a declared fragment on a running cluster, and a declaration it cannot satisfy aborts the VM. |
 
 `test-path-guard.sh` is not a stage. It is a six-case unit test of
 `tarball_confined()` in `lib.sh` — the predicate stage 04 consults before
@@ -184,16 +185,22 @@ hashes equal to the copy inside the tarball it just built.
 ./run-all.sh 04
 ```
 
-**9. Prove it** (`05`, `06`).
+**9. Prove it** (`05`, `06`, `07`).
 
 ```bash
-./run-all.sh 05 06
+./run-all.sh 05 06 07
 ```
 
 Stage 05 passes only if the booted pod is provably the guest you just built (a
 verity pin) and an undeclared `exec` is denied. Stage 06 asserts every
-policy-fragment verification invariant and the OCI delivery contract. A green
-`05` and `06` on a run that did **not** set `E2E_FAST` is the end state.
+policy-fragment verification invariant and the OCI delivery contract. Stage 07
+takes it onto the cluster: it declares a fragment in the base policy and lets the
+guest do the fetching. A green `05`, `06` and `07` on a run that did **not** set
+`E2E_FAST` is the end state.
+
+Stage 07 always runs its control and its fail-closed negative. Its *good path*
+needs a feed the guest can reach over TLS and pull anonymously — see
+[Live boot-pull (stage 07)](#live-boot-pull-stage-07).
 
 **10. Clean up** — see [Cleanup](#cleanup). Deallocate the VM; leave the shared
 VNET alone if other VMs in the resource group use it.
@@ -222,6 +229,8 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | `E2E_STATE_DIR` | `~/.coco-e2e` | Stage markers and stage-06 artifacts. |
 | `E2E_FRAGMENT_ISSUER` / `_FEED` / `_SVN` / `_MIN_SVN` / `_TAG` | `did:example:e2e-issuer` / `$E2E_REGISTRY/coco-e2e/fragment` / `2` / `1` / `e2e` | Stage-06 fragment identity and rollback floor. |
 | `E2E_FRAGMENT_WORK` | `$E2E_STATE_DIR/fragments` | Holds the issuer private key; created mode 700. |
+| `E2E_FRAGMENT_UNREACHABLE_FEED` | `localhost:5000/coco-e2e/absent:e2e` | Stage-07 fail-closed fixture. Loopback is deliberate: it is unfetchable from inside the guest no matter what the node's egress looks like. |
+| `E2E_FRAGMENT_NEG_WAIT` | `150` | Seconds stage 07 waits before concluding a pod will never reach Running. |
 
 ### CI nightly artifact
 
@@ -417,10 +426,60 @@ downgrade guard message, not merely a non-zero exit.
 
 It then prints the `policy_fragments[]` settings entry for the base policy and
 the `fragment-issuers.toml` trust root to deliver through measured initdata. Both
-are needed for a live boot-pull; the stage prints the exact wiring.
+are needed for a live boot-pull; stage 07 consumes them directly.
 
 The trust root is measured, so it must arrive through initdata (preferred) or the
 measured rootfs — never from the host. Fragment failures abort the VM by design.
+
+## Live boot-pull (stage 07)
+
+Stage 06 stops at the delivery boundary: it proves the artifact is correct and
+that `FragmentStore` accepts and rejects the right things. It never asks the
+guest to do anything. Stage 07 closes that gap on the cluster from 03/04.
+
+**The oracle.** In a strict-policy guest the boot-pull is fail-closed: if a
+declared fragment cannot be fetched or verified, the agent calls
+`std::process::abort()` before the ttRPC server ever answers, so the VM dies and
+the pod never reaches Running. That makes pod phase sound in *both* directions —
+Running with a non-empty declaration means the fragment was fetched, verified
+**and** injected, and there is nothing to read out of the guest to confirm it.
+
+**Why the control is load-bearing.** A pod that fails to start is weak evidence
+on its own; almost any unrelated breakage produces the same symptom. So 07 first
+boots an otherwise identical pod with an empty declaration. If *that* does not
+reach Running the stage aborts rather than reporting a pass, because no
+fail-closed result below it would mean anything.
+
+| Case | Declaration | Expected | Runs |
+| --- | --- | --- | --- |
+| `07a` | `policy_fragments := []` | Running | always — control |
+| `07b` | unreachable feed | never Running | always |
+| `07c` | the real feed from 06 | Running | only if the feed is guest-reachable |
+| `07d` | the real feed, `minimum_svn` raised above the fragment's | never Running | only if the feed is guest-reachable |
+
+**How the declaration gets in.** genpolicy has no `policy_fragments` support, so
+the stage appends the entry to a *copy* of `rules.rego` and passes it with `-p`.
+The staged `/opt/kata/share/defaults/kata-containers/rules.rego` is never
+touched — stage 03 asserts its hash and stage 05 depends on it. The trust root
+goes in through `--initdata_path=`, which is where the guest expects a measured
+`fragment-issuers.toml` to arrive.
+
+**Why 07c/07d are conditional.** The guest resolves the feed itself, and plain
+HTTP is permitted only for `localhost` / `127.0.0.1` / `[::1]`. Inside the guest
+that loopback is the *guest's own*, where nothing is listening; a host-IP HTTP
+registry is refused outright by the downgrade guard. A working good path
+therefore needs an HTTPS registry with a publicly trusted certificate, anonymous
+pull, and guest egress. To unlock it, re-run 06 against such a registry:
+
+```bash
+az acr create -g <rg> -n <acr> --sku Basic
+az acr update -n <acr> --anonymous-pull-enabled true
+E2E_REGISTRY=<acr>.azurecr.io ./run-all.sh 06 07   # 06 must be re-run: 07 consumes its artifacts
+```
+
+Without it the stage still runs 07a and 07b and says plainly which cases it
+skipped. That is the same egress-and-TLS caveat that makes this deployment-time
+configuration rather than something the suite can synthesise.
 
 ## Cleanup
 

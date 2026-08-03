@@ -116,8 +116,56 @@ $stray"; return 1
   return 0
 }
 
+# ------------------------------------------------------- guest-provenance guard
+# Fail unless the guest currently deployed is the one stage 04 built and installed.
+#
+# Every cluster-level assertion in stages 05+ is a statement about the hardened
+# agent. Run against the CI-nightly guest instead, they all still "pass" — the pod
+# boots, and the negatives fail for the wrong reason (no strict-policy build means
+# no mediation and no boot-pull at all). That is a false green in the direction
+# that matters, so the check is a hard gate rather than a warning.
+#
+# It lives here so 05 and 07 share one copy: two transcriptions of the same
+# predicate drift apart silently, and the drift is invisible exactly when one of
+# them has been weakened.
+assert_local_guest_installed() {
+  local rec="$E2E_STATE_DIR/guest-image-sha256"
+  local img=/opt/kata/share/kata-containers/kata-containers.img
+  [ -f "$rec" ] || die "no record of a locally built guest image — run 04-build-guest-stack.sh first"
+  [ -f "$img" ] || die "missing $img"
+  [ "$(sha256sum "$img" | cut -d' ' -f1)" = "$(cat "$rec")" ] \
+    || die "$img is not the image stage 04 installed — re-run stage 04 (E2E_FORCE=1)"
+
+  # The runtime pins the guest to a dm-verity root hash. If the configured hash is
+  # the one from our build, then a pod that reaches Running can only have booted
+  # our image: any other rootfs fails verity and never starts. Stage 04 patches
+  # every config it finds, so read back exactly what it recorded instead of
+  # guessing which config the runtime class resolves to.
+  local params_rec="$E2E_STATE_DIR/guest-verity-params"
+  local cfg_rec="$E2E_STATE_DIR/guest-config-paths"
+  [ -s "$params_rec" ] || die "no recorded dm-verity parameters — re-run stage 04"
+  [ -s "$cfg_rec" ]    || die "no recorded runtime config paths — re-run stage 04"
+  local cfgs=()
+  mapfile -t cfgs < "$cfg_rec"
+  [ "${#cfgs[@]}" -gt 0 ] || die "no runtime config paths recorded by stage 04"
+  local cfg
+  for cfg in "${cfgs[@]}"; do
+    [ -f "$cfg" ] || die "runtime config recorded by stage 04 is gone: $cfg"
+    grep -qF "$(cat "$params_rec")" "$cfg" \
+      || die "dm-verity hash in $cfg does not match the installed image — re-run stage 04"
+  done
+  ok "guest pinned by dm-verity to the locally built image (${#cfgs[@]} config(s))"
+  ok "testing guest built from $(cat "$E2E_STATE_DIR/guest-image-commit" 2>/dev/null || echo unknown)"
+}
+
 # Wait until a shell predicate succeeds.  wait_for <timeout-s> <desc> <cmd...>
-wait_for() {
+# Fatal on timeout. Use wait_for_soft when the caller needs to print diagnostics
+# before giving up — `if ! wait_for ...` never runs its else branch, because the
+# timeout exits the script from inside the callee.
+wait_for() { wait_for_soft "$@" || die "timed out after ${1}s waiting for: $2"; }
+
+# Same, but returns 1 on timeout instead of exiting.
+wait_for_soft() {
   local timeout="$1" desc="$2"; shift 2
   local deadline=$(( $(date +%s) + timeout ))
   log "waiting up to ${timeout}s for: $desc"
@@ -125,7 +173,7 @@ wait_for() {
     if "$@" >/dev/null 2>&1; then ok "$desc"; return 0; fi
     sleep 5
   done
-  die "timed out after ${timeout}s waiting for: $desc"
+  return 1
 }
 
 # True only when at least one node exists and every node reports Ready. A

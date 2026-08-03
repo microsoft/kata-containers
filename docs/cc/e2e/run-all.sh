@@ -12,7 +12,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/lib.sh"
 
 ALL=(01-provision-vm 02-bootstrap-node 03-deploy-cluster
-     04-build-guest-stack 05-smoke-test 06-policy-fragment-e2e)
+     04-build-guest-stack 05-smoke-test 06-policy-fragment-e2e
+     07-fragment-bootpull)
 
 if [ "$#" -gt 0 ]; then
   SELECTED=()

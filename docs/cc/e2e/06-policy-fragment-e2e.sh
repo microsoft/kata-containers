@@ -161,7 +161,9 @@ ok "plain-HTTP refused for a non-loopback registry (expected)"
 step "06f — wiring for a live boot-pull"
 cat <<EOF
 
-To exercise the guest boot-pull path (BL-8) on the cluster from 03/04:
+Stage 07 (07-fragment-bootpull.sh) does all of this for you against the cluster
+from 03/04. The wiring below is what it applies, recorded here so the artifacts
+are usable by hand too.
 
  1. Add this to the BASE policy's data.agent_policy.policy_fragments[]:
 

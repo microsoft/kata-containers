@@ -16,32 +16,8 @@ trap 'rm -rf "$WORK"' EXIT
 
 # ------------------------------------------------- preflight: what are we testing?
 # Without this the stage happily exercises the CI nightly guest image and reports
-# PASS, which would prove nothing about the hardening. Stage 04 records the image
-# it installed; require that the deployed image is still that one.
-REC="$E2E_STATE_DIR/guest-image-sha256"
-[ -f "$REC" ] || die "no record of a locally built guest image — run 04-build-guest-stack.sh first"
-IMG=/opt/kata/share/kata-containers/kata-containers.img
-[ -f "$IMG" ] || die "missing $IMG"
-[ "$(sha256sum "$IMG" | cut -d' ' -f1)" = "$(cat "$REC")" ] \
-  || die "$IMG is not the image stage 04 installed — re-run stage 04 (E2E_FORCE=1)"
-
-# The runtime pins the guest to a dm-verity root hash. If the configured hash is
-# the one from our build, then a pod that reaches Running can only have booted our
-# image: any other rootfs fails verity and never starts. Stage 04 patches every
-# config it finds, so read back exactly what it recorded instead of guessing.
-PARAMS_REC="$E2E_STATE_DIR/guest-verity-params"
-CFG_REC="$E2E_STATE_DIR/guest-config-paths"
-[ -s "$PARAMS_REC" ] || die "no recorded dm-verity parameters — re-run stage 04"
-[ -s "$CFG_REC" ]    || die "no recorded runtime config paths — re-run stage 04"
-mapfile -t CFGS < "$CFG_REC"
-[ "${#CFGS[@]}" -gt 0 ] || die "no runtime config paths recorded by stage 04"
-for CFG in "${CFGS[@]}"; do
-  [ -f "$CFG" ] || die "runtime config recorded by stage 04 is gone: $CFG"
-  grep -qF "$(cat "$PARAMS_REC")" "$CFG" \
-    || die "dm-verity hash in $CFG does not match the installed image — re-run stage 04"
-done
-ok "guest pinned by dm-verity to the locally built image (${#CFGS[@]} config(s))"
-ok "testing guest built from $(cat "$E2E_STATE_DIR/guest-image-commit" 2>/dev/null || echo unknown)"
+# PASS, which would prove nothing about the hardening.
+assert_local_guest_installed
 
 kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
