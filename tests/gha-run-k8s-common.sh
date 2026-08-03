@@ -736,6 +736,18 @@ function helm_helper() {
 		yq -i ".node-feature-discovery.enabled = false" "${values_yaml}"
 	fi
 
+	# CBL-Mariner / Azure Linux dom0 benches are nested VMs (L1VH) whose guest
+	# CPUID does not expose VMX/SVM. With NFD enabled, the kata-deploy DaemonSet's
+	# required nodeAffinity on feature.node.kubernetes.io/cpu-cpuid.{VMX,SVM}
+	# (amd64 only -- arm64 is arch-gated and exempt) never matches, so ZERO
+	# kata-deploy pods schedule and the install blocks for the full
+	# KATA_DEPLOY_WAIT_TIMEOUT. These single-node benches are known kata-capable,
+	# so disable the NFD virtualization gate here (same rationale as the *azure*
+	# carve-out above; KATA_HOST_OS is exported by the caller, e.g. 06-*).
+	if [[ "${KATA_HOST_OS:-}" == "cbl-mariner" ]]; then
+		yq -i ".node-feature-discovery.enabled = false" "${values_yaml}"
+	fi
+
 	if [[ -z "${HELM_IMAGE_REFERENCE}" ]]; then
 		die "HELM_IMAGE_REFERENCE environment variable cannot be empty."
 	fi
