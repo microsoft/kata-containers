@@ -157,7 +157,11 @@ EOF
 
 # Generate a policy over the given rules + initdata and apply the pod.
 apply_case() {
-  local pod="$1" rules="$2" yaml="$WORK/$pod.yaml"
+  # Separate statements on purpose: bash expands every word of a declaration
+  # command before performing any of its assignments, so `yaml` could not refer
+  # to `pod` on the same line.
+  local pod="$1" rules="$2"
+  local yaml="$WORK/$pod.yaml"
   render_pod "$pod" > "$yaml"
   "$GENPOLICY" -y "$yaml" -p "$rules" -j "$SETTINGS" \
     --initdata-path="$WORK/initdata.toml" >/dev/null \
