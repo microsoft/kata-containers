@@ -23,6 +23,7 @@ tokio-util = { workspace = true }
 url = { workspace = true }
 tracing = { workspace = true }
 oci-spec = { workspace = true }
+oci-client = { workspace = true }
 strum = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 

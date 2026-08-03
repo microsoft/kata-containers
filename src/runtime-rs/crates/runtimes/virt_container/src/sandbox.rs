@@ -861,6 +861,17 @@ impl Sandbox for VirtSandbox {
             .context(format!("connect to address {:?}", &address))?;
         self.set_agent_policy().await.context("set agent policy")?;
 
+        // BL-8: deliver the declared policy fragments before anything can run under the
+        // not-yet-complete policy. The guest refuses to create containers while a fragment
+        // its measured policy declares is still outstanding, so this must happen before
+        // create_sandbox.
+        crate::policy_fragment::deliver_declared_fragments(
+            &self.agent,
+            &sandbox_config.annotations,
+        )
+        .await
+        .context("deliver declared policy fragments")?;
+
         self.resource_manager
             .setup_after_start_vm()
             .await

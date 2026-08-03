@@ -28,8 +28,9 @@ use crate::{
         VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
         WriteStreamRequest,
     },
-    GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest, OomEventResponse,
-    SetPolicyRequest, WaitProcessResponse, WriteStreamResponse,
+    GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest,
+    LoadPolicyFragmentRequest, OomEventResponse, SetPolicyRequest, WaitProcessResponse,
+    WriteStreamResponse,
 };
 
 fn trans_vec<F: Sized + Clone, T: From<F>>(from: Vec<F>) -> Vec<T> {
@@ -750,6 +751,20 @@ impl From<SetPolicyRequest> for agent::SetPolicyRequest {
     fn from(from: SetPolicyRequest) -> Self {
         Self {
             policy: from.policy,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<LoadPolicyFragmentRequest> for agent::LoadPolicyFragmentRequest {
+    fn from(from: LoadPolicyFragmentRequest) -> Self {
+        // issuer/feed/svn/grants are deliberately left unset: the guest reconstructs them
+        // from the envelope it verifies. See LoadPolicyFragmentRequest in types.rs.
+        Self {
+            cose_sign1: from.cose_sign1,
+            receipt: from.receipt,
+            receipt_ledger: from.receipt_ledger,
+            receipt_proof: from.receipt_proof,
             ..Default::default()
         }
     }

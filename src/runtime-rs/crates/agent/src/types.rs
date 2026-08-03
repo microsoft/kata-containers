@@ -621,6 +621,21 @@ pub struct SetPolicyRequest {
     pub policy: String,
 }
 
+/// BL-8: a policy fragment the host fetched on the guest's behalf.
+///
+/// Deliberately carries only the COSE_Sign1 envelope and the (unsigned) transparency
+/// receipt fields — never a URL, and never the issuer/feed/SVN. The guest derives those
+/// from the envelope it verifies, so the host cannot describe a fragment into being
+/// something it is not. This mirrors hcsshim's `SecurityPolicyFragment` resource, which
+/// likewise passes bytes and a media type only.
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct LoadPolicyFragmentRequest {
+    pub cose_sign1: Vec<u8>,
+    pub receipt: String,
+    pub receipt_ledger: String,
+    pub receipt_proof: String,
+}
+
 #[derive(PartialEq, Clone, Default, Debug)]
 pub struct GetDiagnosticDataRequest {
     pub log_type: String,

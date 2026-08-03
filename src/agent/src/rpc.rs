@@ -2563,35 +2563,57 @@ impl agent_ttrpc::AgentService for AgentService {
                 )
             })?)
         };
-        let fragment = kata_security_reference_monitor::PolicyFragment {
-            issuer: req.issuer.clone(),
-            feed: req.feed.clone(),
-            svn: req.svn,
-            grants: req.grants.to_vec(),
-            policy_module: policy_module.clone(),
-            includes: req.includes.to_vec(),
-            requires: req.requires.to_vec(),
-            receipt: if req.receipt.is_empty() {
-                None
-            } else {
-                Some(req.receipt.clone())
-            },
-            receipt_ledger: if req.receipt_ledger.is_empty() {
-                None
-            } else {
-                Some(req.receipt_ledger.clone())
-            },
-            prev_log_head: if req.prev_log_head.is_empty() {
-                None
-            } else {
-                Some(req.prev_log_head.clone())
-            },
-            receipt_proof: if req.receipt_proof.is_empty() {
-                None
-            } else {
-                Some(req.receipt_proof.clone())
-            },
-            signature: req.signature.clone(),
+        // BL-8: an hcsshim-shaped push carries only the COSE envelope — the host fetched
+        // bytes it cannot read. Derive the signed fields from the envelope itself rather
+        // than making the caller restate them. Verification binds the two either way
+        // (`verify_cose` requires the payload to equal `signing_bytes()`), so this removes
+        // a needless failure mode, not a check. The receipt fields are not covered by the
+        // issuer signature, so they must still come from the request.
+        let fragment = if req.issuer.is_empty() && !req.cose_sign1.is_empty() {
+            let mut f = kata_security_reference_monitor::PolicyFragment::from_cose_envelope(
+                &req.cose_sign1,
+            )
+            .ok_or_else(|| {
+                ttrpc_error(
+                    ttrpc::Code::INVALID_ARGUMENT,
+                    "cose_sign1 is not a decodable policy-fragment envelope".to_string(),
+                )
+            })?;
+            f.receipt = (!req.receipt.is_empty()).then(|| req.receipt.clone());
+            f.receipt_ledger = (!req.receipt_ledger.is_empty()).then(|| req.receipt_ledger.clone());
+            f.receipt_proof = (!req.receipt_proof.is_empty()).then(|| req.receipt_proof.clone());
+            f
+        } else {
+            kata_security_reference_monitor::PolicyFragment {
+                issuer: req.issuer.clone(),
+                feed: req.feed.clone(),
+                svn: req.svn,
+                grants: req.grants.to_vec(),
+                policy_module: policy_module.clone(),
+                includes: req.includes.to_vec(),
+                requires: req.requires.to_vec(),
+                receipt: if req.receipt.is_empty() {
+                    None
+                } else {
+                    Some(req.receipt.clone())
+                },
+                receipt_ledger: if req.receipt_ledger.is_empty() {
+                    None
+                } else {
+                    Some(req.receipt_ledger.clone())
+                },
+                prev_log_head: if req.prev_log_head.is_empty() {
+                    None
+                } else {
+                    Some(req.prev_log_head.clone())
+                },
+                receipt_proof: if req.receipt_proof.is_empty() {
+                    None
+                } else {
+                    Some(req.receipt_proof.clone())
+                },
+                signature: req.signature.clone(),
+            }
         };
 
         // FR-1a: verify → apply → commit, atomically. Verification does not mutate the

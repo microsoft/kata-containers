@@ -131,5 +131,6 @@ impl_agent!(
     add_swap | crate::AddSwapRequest | crate::Empty | None,
     add_swap_path | crate::AddSwapPathRequest | crate::Empty | None,
     set_policy | crate::SetPolicyRequest | crate::Empty | None,
+    load_policy_fragment | crate::LoadPolicyFragmentRequest | crate::Empty | None,
     get_diagnostic_data | crate::GetDiagnosticDataRequest | crate::GetDiagnosticDataResponse | None
 );
