@@ -222,7 +222,7 @@ apply_case e2e-frag-unfetchable "$WORK/rules-bad.rego"
 if expect_never_running e2e-frag-unfetchable "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
   ok "pod never reached Running — boot-pull failed closed (expected)"
   kubectl describe pod e2e-frag-unfetchable -n "$NS" 2>/dev/null \
-    | grep -i 'sandbox\|failed' | tail -5 | sed 's/^/    /' || true
+    | grep -i 'sandbox\|failed' | tail -3 | cut -c1-200 | sed 's/^/    /' || true
 else
   diagnose e2e-frag-unfetchable
   cleanup_pod e2e-frag-unfetchable
