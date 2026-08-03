@@ -221,6 +221,10 @@ render_rules "$WORK/rules-bad.rego" \
 apply_case e2e-frag-unfetchable "$WORK/rules-bad.rego"
 if expect_never_running e2e-frag-unfetchable "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
   ok "pod never reached Running — boot-pull failed closed (expected)"
+  # Necessary but not sufficient on its own. Until 07c passes, this outcome is
+  # indistinguishable from "the guest has no network at all, so every declared
+  # feed is unfetchable" — the fail-closed direction is confirmed, the fetch
+  # path is not. 07c is what separates them.
   kubectl describe pod e2e-frag-unfetchable -n "$NS" 2>/dev/null \
     | grep -i 'sandbox\|failed' | tail -3 | cut -c1-200 | sed 's/^/    /' || true
 else
@@ -244,6 +248,12 @@ else
        bash -c "kubectl get pod e2e-frag-good -n $NS -o jsonpath='{.status.phase}' | grep -qx Running"; then
     diagnose e2e-frag-good
     cleanup_pod e2e-frag-good
+    warn "the guest has no network at boot-pull time: load_declared_fragments() runs inside"
+    warn "start_sandbox() before rpc::start(), and the guest's interfaces and routes are only"
+    warn "configured later by the update_interface/update_routes ttRPC handlers. The guest"
+    warn "kernel cmdline also masks systemd-networkd, so nothing else brings a link up."
+    warn "If that is the cause, no registry configuration can fix it — the fetch has to move"
+    warn "to the host, as the load_policy_fragment RPC already does."
     die "the declared fragment did not boot — fetch, verification, or injection failed"
   fi
   # Sound only because 07b established that any failure is fatal: had the fetch,
