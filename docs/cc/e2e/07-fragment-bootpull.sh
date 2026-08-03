@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# 07 — live boot-pull of a declared policy fragment (BL-8), on the cluster.
+# 07 — live delivery of a declared policy fragment (BL-8), on the cluster.
 #
 # Stage 06 stops at the delivery boundary: it signs a fragment, publishes it, and
 # prints the wiring. Nothing there boots a VM, so nothing there proves the guest
 # actually consumes a declaration. This stage closes that gap.
 #
-# The whole stage rests on one property of the agent (src/agent/src/main.rs, the
-# BL-8 block): a declared fragment that cannot be fetched, verified, or injected
-# is fatal — the agent aborts the VM before the ttRPC server serves any request.
-# That makes pod phase a sound oracle in *both* directions:
+# Delivery is host-side. The guest cannot fetch its own fragments: at that point
+# in boot it has no interfaces, because those arrive only via the ttRPC handlers
+# it has not started serving yet. So the shim pulls the artifact and pushes the
+# COSE bytes over LoadPolicyFragment, and the guest — which is the only party
+# holding trust anchors — verifies them and refuses to create any container while
+# a fragment its *measured* policy declares is still unsatisfied.
 #
-#   declaration absent            -> Running   (control: the wiring is inert)
-#   declaration unfetchable       -> never Running (fail-closed)
-#   declaration good + reachable  -> Running   => fetched AND verified AND injected
+# That gate makes pod phase a sound oracle in both directions:
 #
-# The last inference is only valid because of the second: if any step had failed,
-# the VM would be gone. So "Running with a non-empty policy_fragments[]" is proof
-# of a completed boot-pull, without needing to read anything out of the guest.
+#   declaration absent             -> Running       (control: the wiring is inert)
+#   declared, never delivered      -> never Running (fail-closed)
+#   declared, delivered, valid     -> Running       => delivered AND verified AND injected
+#
+# The last inference is only valid because of the second: had any step failed,
+# the gate would still be shut. So "Running with a non-empty policy_fragments[]"
+# is proof of a completed delivery, without reading anything out of the guest.
 #
 # The control is not optional decoration. Without it, a pod that fails to start
 # for an unrelated reason (a bad rules.rego patch, a broken node) would read as a
@@ -26,7 +30,7 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 skip_if_done 07-fragment-bootpull
 
-step "07 — boot-pull of declared policy fragments (BL-8)"
+step "07 — delivery of declared policy fragments (BL-8)"
 load_toolchain
 load_coco_env
 need jq
@@ -34,7 +38,7 @@ need kubectl
 
 # Same preflight as the smoke test: without the locally built guest this stage
 # would exercise the CI nightly agent, which has no strict-policy build and
-# therefore no boot-pull at all — and would report a green control plus a green
+# therefore no fragment gate at all — and would report a green control plus a green
 # "fail-closed" (the pod fails for a different reason entirely).
 assert_local_guest_installed
 
@@ -59,19 +63,9 @@ FEED=$(jq -r .feed          "$ENTRY") || die "could not read feed from $ENTRY"
 SVN=$(jq -r .minimum_svn    "$ENTRY") || die "could not read minimum_svn from $ENTRY"
 [ -n "$ISSUER" ] && [ -n "$FEED" ] && [ -n "$SVN" ] || die "incomplete entry in $ENTRY"
 
-# Is the published feed reachable from inside the guest? The guest resolves the
-# feed itself, so a loopback registry on the *host* is not the same address: the
-# guest's localhost is its own, and nothing is listening there. That makes a
-# loopback feed a perfect fail-closed fixture and a useless good-path one.
-FEED_REG="${FEED%%/*}"
-case "$FEED_REG" in
-  localhost*|127.0.0.1*|\[::1\]*) GUEST_REACHABLE=0 ;;
-  *)                              GUEST_REACHABLE=1 ;;
-esac
-
-# Always-unreachable declaration for the fail-closed case. A loopback address is
-# guaranteed to refuse the connection inside the guest regardless of node egress,
-# so this negative cannot go green for an environmental reason.
+# A declaration the host will never be able to satisfy, for the fail-closed case.
+# It is never offered via the delivery annotation either, so this negative cannot
+# go green for an environmental reason.
 UNREACHABLE_FEED="${E2E_FRAGMENT_UNREACHABLE_FEED:-localhost:5000/coco-e2e/absent:e2e}"
 
 WORK=$(mktemp -d)
@@ -135,12 +129,24 @@ render_pod() {
   # Mirrors 05-smoke-test.sh: with PULL_TYPE=guest-pull genpolicy refuses images
   # whose user/group would come from the layers, so the securityContext must be
   # explicit at pod level.
+  #
+  # $2, when set, is the fragment delivery hint. BL-8 delivery is host-side: the
+  # shim fetches each reference and pushes the COSE envelope over the
+  # LoadPolicyFragment RPC. The annotation only says *what to offer* — the
+  # issuer, feed and SVN floor come from the measured policy, so a case that
+  # omits it (or names the wrong thing) exercises the fail-closed path.
+  local frag_anno=""
+  if [ -n "${2:-}" ]; then
+    frag_anno="
+  annotations:
+    io.katacontainers.config.agent.policy_fragments: \"$2\""
+  fi
   cat <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
   name: $1
-  namespace: $NS
+  namespace: $NS$frag_anno
 spec:
   runtimeClassName: kata-qemu-coco-dev-runtime-rs
   restartPolicy: Never
@@ -160,9 +166,9 @@ apply_case() {
   # Separate statements on purpose: bash expands every word of a declaration
   # command before performing any of its assignments, so `yaml` could not refer
   # to `pod` on the same line.
-  local pod="$1" rules="$2"
+  local pod="$1" rules="$2" deliver="${3:-}"
   local yaml="$WORK/$pod.yaml"
-  render_pod "$pod" > "$yaml"
+  render_pod "$pod" "$deliver" > "$yaml"
   "$GENPOLICY" -y "$yaml" -p "$rules" -j "$SETTINGS" \
     --initdata-path="$WORK/initdata.toml" >/dev/null \
     || die "genpolicy failed for $pod"
@@ -215,71 +221,69 @@ ok "control booted — patching policy_fragments is inert when the list is empty
 cleanup_pod e2e-frag-none
 
 # ====================================================== 07b — fail-closed (BL-8)
-step "07b — a declared but unfetchable fragment must abort the VM"
+step "07b — a declared but undelivered fragment must not run containers"
 render_rules "$WORK/rules-bad.rego" \
   "[{\"issuer\": \"$ISSUER\", \"feed\": \"$UNREACHABLE_FEED\", \"minimum_svn\": 1}]"
+# No delivery annotation on purpose: the measured policy declares a fragment the
+# host never offers. This is the case that matters, because delivery is now the
+# host's job and the host is untrusted — a host that simply withholds a fragment
+# must not get a container out of it.
 apply_case e2e-frag-unfetchable "$WORK/rules-bad.rego"
 if expect_never_running e2e-frag-unfetchable "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
-  ok "pod never reached Running — boot-pull failed closed (expected)"
-  # Necessary but not sufficient on its own. Until 07c passes, this outcome is
-  # indistinguishable from "the guest has no network at all, so every declared
-  # feed is unfetchable" — the fail-closed direction is confirmed, the fetch
-  # path is not. 07c is what separates them.
+  ok "pod never reached Running — the unsatisfied declaration held the gate (expected)"
+  # Necessary but not sufficient on its own: a guest that never runs anything at
+  # all would also pass this. 07c is what shows the gate opens for a fragment
+  # that is actually delivered and verified.
   kubectl describe pod e2e-frag-unfetchable -n "$NS" 2>/dev/null \
     | grep -i 'sandbox\|failed' | tail -3 | cut -c1-200 | sed 's/^/    /' || true
 else
   diagnose e2e-frag-unfetchable
   cleanup_pod e2e-frag-unfetchable
-  die "pod is Running despite declaring an unfetchable fragment — boot-pull is not wired, or it is not fail-closed"
+  die "pod is Running despite an undelivered declared fragment — the fail-closed gate is not wired"
 fi
 cleanup_pod e2e-frag-unfetchable
 
-# ================================================== 07c/07d — the reachable feed
-if [ "$GUEST_REACHABLE" != "1" ]; then
-  warn "feed $FEED is a loopback registry — the guest cannot reach it, so the good path is skipped"
-  warn "to exercise 07c/07d, re-run 06 with E2E_REGISTRY set to a TLS registry the guest"
-  warn "can reach and pull anonymously (e.g. an ACR with anonymous pull enabled), then re-run 07"
-else
-  step "07c — good path: a reachable, valid fragment must boot"
-  render_rules "$WORK/rules-good.rego" \
-    "[{\"issuer\": \"$ISSUER\", \"feed\": \"$FEED\", \"minimum_svn\": $SVN}]"
-  apply_case e2e-frag-good "$WORK/rules-good.rego"
-  if ! wait_for_soft 300 "pod e2e-frag-good Running" \
-       bash -c "kubectl get pod e2e-frag-good -n $NS -o jsonpath='{.status.phase}' | grep -qx Running"; then
-    diagnose e2e-frag-good
-    cleanup_pod e2e-frag-good
-    warn "the guest has no network at boot-pull time: load_declared_fragments() runs inside"
-    warn "start_sandbox() before rpc::start(), and the guest's interfaces and routes are only"
-    warn "configured later by the update_interface/update_routes ttRPC handlers. The guest"
-    warn "kernel cmdline also masks systemd-networkd, so nothing else brings a link up."
-    warn "If that is the cause, no registry configuration can fix it — the fetch has to move"
-    warn "to the host, as the load_policy_fragment RPC already does."
-    die "the declared fragment did not boot — fetch, verification, or injection failed"
-  fi
-  # Sound only because 07b established that any failure is fatal: had the fetch,
-  # the signature check, the SVN floor, or the injection failed, this VM would
-  # have aborted instead of reaching Running.
-  ok "pod booted with a declared fragment => it was fetched, SRM-verified and injected"
-  sudo journalctl -t kata --since '-10m' 2>/dev/null | grep -i 'FR-1' | tail -5 \
-    | sed 's/^/    /' || true
+# ================================================ 07c/07d — the delivered feed
+# No reachability gate here any more. Delivery is host-side, so the shim fetches
+# the artifact and pushes the bytes in — a loopback dev registry is as usable as
+# an ACR, because it only has to be reachable from the node.
+step "07c — good path: a delivered, valid fragment must let containers run"
+render_rules "$WORK/rules-good.rego" \
+  "[{\"issuer\": \"$ISSUER\", \"feed\": \"$FEED\", \"minimum_svn\": $SVN}]"
+apply_case e2e-frag-good "$WORK/rules-good.rego" "$FEED"
+if ! wait_for_soft 300 "pod e2e-frag-good Running" \
+     bash -c "kubectl get pod e2e-frag-good -n $NS -o jsonpath='{.status.phase}' | grep -qx Running"; then
+  diagnose e2e-frag-good
   cleanup_pod e2e-frag-good
-
-  step "07d — negative: an SVN floor above the published fragment must abort"
-  # Same reachable artifact, so the fetch succeeds and the rejection can only come
-  # from verification. This is what separates a working trust gate from a working
-  # network path — 07b alone cannot tell them apart.
-  render_rules "$WORK/rules-rollback.rego" \
-    "[{\"issuer\": \"$ISSUER\", \"feed\": \"$FEED\", \"minimum_svn\": $((SVN + 1))}]"
-  apply_case e2e-frag-rollback "$WORK/rules-rollback.rego"
-  if expect_never_running e2e-frag-rollback "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
-    ok "pod never reached Running — the SVN rollback floor held (expected)"
-  else
-    diagnose e2e-frag-rollback
-    cleanup_pod e2e-frag-rollback
-    die "pod is Running with minimum_svn above the fragment's SVN — the rollback floor is not enforced"
-  fi
-  cleanup_pod e2e-frag-rollback
+  warn "the host fetches $FEED and pushes it over LoadPolicyFragment. Check, in order:"
+  warn "  - can the node pull it?  crane manifest $FEED  (or the 06 read-back)"
+  warn "  - did the shim try?      journalctl -t kata | grep policy-fragments"
+  warn "  - did the guest reject it? look for a FAILED_PRECONDITION from the RPC"
+  die "the declared fragment did not let the pod run — delivery, verification, or injection failed"
 fi
+# Sound only because 07b established that an unsatisfied declaration blocks:
+# had the fetch, the signature check, the SVN floor or the injection failed,
+# this pod would have been held at create_container instead of reaching Running.
+ok "pod ran with a declared fragment => it was delivered, SRM-verified and injected"
+sudo journalctl -t kata --since '-10m' 2>/dev/null | grep -i 'FR-1\|policy-fragments' | tail -5 \
+  | sed 's/^/    /' || true
+cleanup_pod e2e-frag-good
 
-ok "boot-pull e2e passed"
+step "07d — negative: an SVN floor above the published fragment must be refused"
+# Same artifact, and it is offered — so the fetch succeeds and the rejection can
+# only come from verification. This is what separates a working trust gate from
+# a host that simply failed to deliver; 07b alone cannot tell those apart.
+render_rules "$WORK/rules-rollback.rego" \
+  "[{\"issuer\": \"$ISSUER\", \"feed\": \"$FEED\", \"minimum_svn\": $((SVN + 1))}]"
+apply_case e2e-frag-rollback "$WORK/rules-rollback.rego" "$FEED"
+if expect_never_running e2e-frag-rollback "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
+  ok "pod never reached Running — the SVN rollback floor held (expected)"
+else
+  diagnose e2e-frag-rollback
+  cleanup_pod e2e-frag-rollback
+  die "pod is Running with minimum_svn above the fragment's SVN — the rollback floor is not enforced"
+fi
+cleanup_pod e2e-frag-rollback
+
+ok "fragment delivery e2e passed"
 mark_done 07-fragment-bootpull

@@ -22,7 +22,7 @@ hidden by state the original node had accumulated by hand.
 | `04-build-guest-stack.sh` | The hardened agent is built **and installed** into `/opt/kata`, the deployed guest image is byte-for-byte the one just built, and the runtime is re-pinned to that image's dm-verity root hashes. |
 | `05-smoke-test.sh` | The pod that boots is provably the locally built guest (verity pin), and an undeclared `exec` is denied. Mediation is live. |
 | `06-policy-fragment-e2e.sh` | FR-1 signed policy fragments: every verification invariant holds, and the OCI delivery artifact matches the contract the guest fetcher depends on. |
-| `07-fragment-bootpull.sh` | BL-8 live boot-pull: the guest itself fetches, verifies and injects a declared fragment on a running cluster, and a declaration it cannot satisfy aborts the VM. |
+| `07-fragment-bootpull.sh` | BL-8 live delivery: the host fetches a declared fragment and pushes it in, the guest verifies and injects it on a running cluster, and a declaration left unsatisfied blocks container creation. |
 
 `test-path-guard.sh` is not a stage. It is a six-case unit test of
 `tarball_confined()` in `lib.sh` — the predicate stage 04 consults before
@@ -200,7 +200,7 @@ guest do the fetching. A green `05`, `06` and `07` on a run that did **not** set
 
 Stage 07 always runs its control and its fail-closed negative. Its *good path*
 needs a feed the guest can reach over TLS and pull anonymously — see
-[Live boot-pull (stage 07)](#live-boot-pull-stage-07).
+[Live fragment delivery (stage 07)](#live-fragment-delivery-stage-07).
 
 **10. Clean up** — see [Cleanup](#cleanup). Deallocate the VM; leave the shared
 VNET alone if other VMs in the resource group use it.
@@ -223,7 +223,7 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | `E2E_STRICT_POLICY` | `yes` | Pulls in the security reference monitor. |
 | `E2E_NIGHTLY_SHA` | *(required for stage 03)* | CI-nightly commit sha. |
 | `E2E_REGISTRY` | `localhost:5000` | Registry for the policy fragment. Loopback starts a throwaway `registry:2`. Overridden when `E2E_ACR` resolves. |
-| `E2E_ACR` | *(empty)* | `auto` provisions/adopts a guest-reachable ACR so stage 07's fetch cases can run; a name adopts that registry; empty stays on loopback. |
+| `E2E_ACR` | *(empty)* | `auto` provisions/adopts an ACR so stage 07 exercises a real TLS pull; a name adopts that registry; empty stays on loopback, which now also works. |
 | `E2E_ACR_RG` / `_SKU` | `$E2E_RG` / `Standard` | Where and how `ensure_acr` creates the registry. Anonymous pull needs Standard or better; Basic rejects it. |
 | `E2E_ACR_LOGIN_SERVER` / `_USERNAME` / `_PASSWORD` | *(empty)* | Pre-provisioned registry. Set these and nothing shells out to `az` — use when the node has no Azure credentials. |
 | `E2E_SKIP_PROVISION` | `auto` | `auto` skips stage 01 when `az` is missing; `1` always skips, `0` always runs. |
@@ -407,7 +407,7 @@ is not part of git-bash — install it separately.
 The fragment feature has two boundaries and the stage covers both:
 
 **Verification** — `fragment-demo` drives the real `FragmentStore`, the same one
-used by both the guest boot-pull path and the runtime `LoadPolicyFragment` push
+used by the runtime `LoadPolicyFragment` push
 path. It asserts every positive and negative outcome internally (unsigned,
 unauthorized issuer, SVN rollback, revoked certificate, reordered log head,
 missing or foreign receipt), so a non-zero exit is a genuine regression.
@@ -431,23 +431,34 @@ message, not merely a non-zero exit.
 
 It then prints the `policy_fragments[]` settings entry for the base policy and
 the `fragment-issuers.toml` trust root to deliver through measured initdata. Both
-are needed for a live boot-pull; stage 07 consumes them directly.
+are needed for live delivery; stage 07 consumes them directly.
 
 The trust root is measured, so it must arrive through initdata (preferred) or the
 measured rootfs — never from the host. Fragment failures abort the VM by design.
 
-## Live boot-pull (stage 07)
+## Live fragment delivery (stage 07)
 
 Stage 06 stops at the delivery boundary: it proves the artifact is correct and
 that `FragmentStore` accepts and rejects the right things. It never asks the
 guest to do anything. Stage 07 closes that gap on the cluster from 03/04.
 
-**The oracle.** In a strict-policy guest the boot-pull is fail-closed: if a
-declared fragment cannot be fetched or verified, the agent calls
-`std::process::abort()` before the ttRPC server ever answers, so the VM dies and
-the pod never reaches Running. That makes pod phase sound in *both* directions —
-Running with a non-empty declaration means the fragment was fetched, verified
-**and** injected, and there is nothing to read out of the guest to confirm it.
+**Who fetches.** The host does. The guest has no interfaces at the point
+fragments must be loaded — they arrive only through the `update_interface` /
+`update_routes` ttRPC handlers, which cannot run before the agent serves — so an
+in-guest pull can never succeed. The shim pulls each artifact named by the
+`io.katacontainers.config.agent.policy_fragments` pod annotation and pushes the
+COSE envelope over `LoadPolicyFragment`. This is how hcsshim does it too.
+
+**Why an untrusted fetcher is fine.** The annotation says only *what to offer*.
+Every trust anchor — authorized issuers, accepted feeds, per-feed SVN floors —
+comes from the **measured** policy, and the guest refuses to create a container
+while any fragment that policy declares is still unsatisfied. A host that
+substitutes, downgrades, reorders or withholds a fragment gets a visible failure,
+never a silent bypass.
+
+**The oracle.** That gate makes pod phase sound in *both* directions — Running
+with a non-empty declaration means the fragment was delivered, verified **and**
+injected, and there is nothing to read out of the guest to confirm it.
 
 **Why the control is load-bearing.** A pod that fails to start is weak evidence
 on its own; almost any unrelated breakage produces the same symptom. So 07 first
@@ -458,9 +469,9 @@ fail-closed result below it would mean anything.
 | Case | Declaration | Expected | Runs |
 | --- | --- | --- | --- |
 | `07a` | `policy_fragments := []` | Running | always — control |
-| `07b` | unreachable feed | never Running | always |
-| `07c` | the real feed from 06 | Running | only if the feed is guest-reachable |
-| `07d` | the real feed, `minimum_svn` raised above the fragment's | never Running | only if the feed is guest-reachable |
+| `07b` | a feed that is declared but never offered for delivery | never Running | always |
+| `07c` | the real feed from 06, offered via the annotation | Running | always |
+| `07d` | the real feed, `minimum_svn` raised above the fragment''s | never Running | always |
 
 **How the declaration gets in.** genpolicy has no `policy_fragments` support, so
 the stage appends the entry to a *copy* of `rules.rego` and passes it with `-p`.
@@ -469,12 +480,12 @@ touched — stage 03 asserts its hash and stage 05 depends on it. The trust root
 goes in through `--initdata-path=`, which is where the guest expects a measured
 `fragment-issuers.toml` to arrive.
 
-**Why 07c/07d are conditional.** The guest resolves the feed itself, and plain
-HTTP is permitted only for `localhost` / `127.0.0.1` / `[::1]`. Inside the guest
-that loopback is the *guest's own*, where nothing is listening; a host-IP HTTP
-registry is refused outright by the downgrade guard. A working good path
-therefore needs an HTTPS registry with a publicly trusted certificate, anonymous
-pull, and guest egress. Set `E2E_ACR=auto` and stage 06 provisions one:
+**An ACR is optional.** Because the *host* fetches, the throwaway loopback
+registry works for 07c/07d — the node is the one that has to reach it. This was
+not always true: when the guest fetched, a loopback feed was unreachable by
+construction, so the good path could not run at all without a publicly trusted,
+anonymously pullable HTTPS registry. Use an ACR when you want the pull to
+traverse real TLS and real auth:
 
 ```bash
 E2E_ACR=auto E2E_FORCE=1 ./run-all.sh 06 07   # 06 must be re-run: 07 consumes its artifacts
