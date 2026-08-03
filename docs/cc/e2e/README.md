@@ -79,6 +79,116 @@ Individual stages:
 E2E_FORCE=1 ./run-all.sh 06
 ```
 
+## Clean-room run from nothing
+
+Follow this top to bottom for a fresh node. Steps 1–4 run on your workstation,
+5 onwards on the node. The Quick start above is the terse version, for a node
+that is already bootstrapped.
+
+Two orderings here are not obvious and each costs a run if you get them wrong:
+the CI-nightly artifact has to be staged **after** step 5 — stage 02 is what
+creates the checkout it goes into — and **before** step 7; and the docker group
+needs a fresh login in between.
+
+**1. Workstation prerequisites.**
+
+```bash
+az login && az account set -s <subscription>
+az --version && jq --version        # stage 01 checks both and fails fast
+ls ~/.ssh/id_rsa.pub                # E2E_SSH_KEY — stage 01 uploads this
+```
+
+`jq` is not part of git-bash; install it separately. Note that `bash` on a
+Windows PATH is often WSL, which keeps its own `~/.ssh/config` and so will not
+resolve the `coco-dev` alias — run the workstation-side scripts from git-bash.
+
+**2. Check region and quota.** They are independent, and each alone is a false
+green. See [Region and quota](#region-and-quota).
+
+**3. Provision the node** (`01`). Defaults target `E2E_VM=coco-dev-1` /
+`E2E_SSH_HOST=coco-dev`; override both together for a second, parallel node.
+
+```bash
+./01-provision-vm.sh                # or: E2E_VM=coco-dev-2 E2E_SSH_HOST=coco-dev-2 ./01-provision-vm.sh
+```
+
+Stage 01 appends an ssh alias when none exists and warns rather than rewriting
+one that does. If you are reusing the name of a VM you deleted, delete the stale
+alias first or you will connect to a dead address.
+
+**4. Copy the suite.**
+
+```bash
+./sync.sh
+```
+
+Always `sync.sh`, never a bare `scp` — a Windows checkout carries no executable
+bit and `scp` preserves that. `sync.sh` `chmod +x`s the scripts on arrival.
+
+**5. Bootstrap the node** (`02`), then reconnect.
+
+```bash
+ssh coco-dev
+cd ~/coco-e2e && ./run-all.sh 02
+exit && ssh coco-dev                # docker group only applies to a new session
+```
+
+This is the step that clones the repo to `~/kata-containers` (`E2E_REPO_DIR`) at
+`E2E_BRANCH`, so nothing before it can write into that tree.
+
+**6. Stage the CI-nightly artifact.** Stage 03 needs
+`kata-tools-static.tar.zst` in `$E2E_REPO_DIR/kata-tools-artifacts/`. The
+*overall* nightly run is usually red — that is fine, only the build/publish jobs
+matter.
+
+`gh` is **not** among the packages stage 02 installs, so the simplest path is to
+download on your workstation, where `gh` is already authenticated, and copy it
+over:
+
+```bash
+# workstation
+gh run list --workflow ci-nightly.yaml -L 5 --json databaseId,headSha,conclusion
+gh run download <id> -n kata-tools-static-tarball-amd64-<sha>-nightly
+ssh coco-dev 'mkdir -p ~/kata-containers/kata-tools-artifacts'
+scp kata-tools-static.tar.zst coco-dev:~/kata-containers/kata-tools-artifacts/
+```
+
+Then, on the node, for every shell that runs stage 03:
+
+```bash
+export E2E_NIGHTLY_SHA=<sha>        # the same sha as the artifact
+```
+
+**7. Deploy the cluster** (`03`). Destructive: it redeploys `kata-deploy` over
+whatever is on the node.
+
+```bash
+./run-all.sh 03
+```
+
+**8. Build and install the guest stack** (`04`). A clean build is **40–60
+minutes**; that is normal, not a hang. Do not poll for it with `pgrep -f`.
+Stage 04 refuses to run on a dirty tree, and fails unless the deployed image
+hashes equal to the copy inside the tarball it just built.
+
+```bash
+./run-all.sh 04
+```
+
+**9. Prove it** (`05`, `06`).
+
+```bash
+./run-all.sh 05 06
+```
+
+Stage 05 passes only if the booted pod is provably the guest you just built (a
+verity pin) and an undeclared `exec` is denied. Stage 06 asserts every
+policy-fragment verification invariant and the OCI delivery contract. A green
+`05` and `06` on a run that did **not** set `E2E_FAST` is the end state.
+
+**10. Clean up** — see [Cleanup](#cleanup). Deallocate the VM; leave the shared
+VNET alone if other VMs in the resource group use it.
+
 ## Configuration
 
 All settings live at the top of `lib.sh` and are environment-overridable.
@@ -106,17 +216,12 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 
 ### CI nightly artifact
 
-Stage 03 needs `kata-tools-static.tar.zst` in `$E2E_REPO_DIR/kata-tools-artifacts/`.
-The *overall* nightly run is usually red — that is fine, only the build/publish
-jobs matter.
-
-```bash
-gh run list --workflow ci-nightly.yaml -L 5 --json databaseId,headSha,conclusion
-gh run download <id> -n kata-tools-static-tarball-amd64-<sha>-nightly
-mkdir -p ~/kata-containers/kata-tools-artifacts
-mv kata-tools-static.tar.zst ~/kata-containers/kata-tools-artifacts/
-export E2E_NIGHTLY_SHA=<sha>
-```
+Stage 03 needs `kata-tools-static.tar.zst` in `$E2E_REPO_DIR/kata-tools-artifacts/`,
+and `E2E_NIGHTLY_SHA` set to the matching commit sha. The procedure — including
+why it has to happen between stages 02 and 03, and why `gh` runs on the
+workstation rather than the node — is
+[step 6 of the clean-room run](#clean-room-run-from-nothing). It is written down
+once, there.
 
 ## Parallel environments
 

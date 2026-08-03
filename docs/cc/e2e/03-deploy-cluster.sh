@@ -32,7 +32,7 @@ load_coco_env "$ENV_FILE"
 
 ART_DIR="$E2E_REPO_DIR/kata-tools-artifacts"
 [ -f "$ART_DIR/kata-tools-static.tar.zst" ] \
-  || die "missing $ART_DIR/kata-tools-static.tar.zst — download it first (see README step 3)"
+  || die "missing $ART_DIR/kata-tools-static.tar.zst — download it first (see README, 'Clean-room run from nothing', step 6)"
 
 gha() {
   log "gha-run.sh $1"
