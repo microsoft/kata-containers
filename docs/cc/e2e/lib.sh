@@ -54,7 +54,7 @@ set -uo pipefail
 # registry and skip 07c/07d.
 : "${E2E_ACR:=}"
 : "${E2E_ACR_RG:=$E2E_RG}"
-: "${E2E_ACR_SKU:=Basic}"
+: "${E2E_ACR_SKU:=Standard}"
 
 E2E_STATE_DIR="${E2E_STATE_DIR:-$HOME/.coco-e2e}"
 mkdir -p "$E2E_STATE_DIR"
@@ -263,16 +263,19 @@ ensure_acr() {
     log "adopting existing registry $name"
   else
     log "creating registry $name in $E2E_ACR_RG ($E2E_ACR_SKU, $E2E_REGION)"
+    # Anonymous pull is deliberately not set here: older az does not accept
+    # --anonymous-pull-enabled on `acr create`. The assertion below turns it on
+    # either way, and has to run anyway for adopted registries.
     az acr create -n "$name" -g "$E2E_ACR_RG" --sku "$E2E_ACR_SKU" \
-        --location "$E2E_REGION" --anonymous-pull-enabled true -o none || {
+        --location "$E2E_REGION" -o none || {
       warn "could not create registry $name"
       return 1
     }
   fi
 
   # Assert rather than assume: the guest pulls the fragment anonymously, and
-  # anonymous pull can be off on an adopted registry or turned off later. The
-  # Basic SKU only gained this in 2021, so it can also legitimately be absent.
+  # anonymous pull can be off on an adopted registry or turned off later. It also
+  # requires Standard or better — Basic rejects it outright.
   local anon
   anon=$(az acr show -n "$name" -g "$E2E_ACR_RG" \
            --query anonymousPullEnabled -o tsv 2>/dev/null) || anon=""

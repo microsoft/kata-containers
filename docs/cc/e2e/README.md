@@ -224,7 +224,7 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | `E2E_NIGHTLY_SHA` | *(required for stage 03)* | CI-nightly commit sha. |
 | `E2E_REGISTRY` | `localhost:5000` | Registry for the policy fragment. Loopback starts a throwaway `registry:2`. Overridden when `E2E_ACR` resolves. |
 | `E2E_ACR` | *(empty)* | `auto` provisions/adopts a guest-reachable ACR so stage 07's fetch cases can run; a name adopts that registry; empty stays on loopback. |
-| `E2E_ACR_RG` / `_SKU` | `$E2E_RG` / `Basic` | Where and how `ensure_acr` creates the registry. |
+| `E2E_ACR_RG` / `_SKU` | `$E2E_RG` / `Standard` | Where and how `ensure_acr` creates the registry. Anonymous pull needs Standard or better; Basic rejects it. |
 | `E2E_ACR_LOGIN_SERVER` / `_USERNAME` / `_PASSWORD` | *(empty)* | Pre-provisioned registry. Set these and nothing shells out to `az` — use when the node has no Azure credentials. |
 | `E2E_SKIP_PROVISION` | `auto` | `auto` skips stage 01 when `az` is missing; `1` always skips, `0` always runs. |
 | `E2E_NS` | `coco-e2e` | Namespace for the stage-05 pod. |
@@ -493,22 +493,27 @@ The feed is baked into the COSE payload at signing time and the guest fetches
 a registry afterwards would not repoint the guest.
 
 If the node has no Azure credentials, provision from the workstation and hand the
-values over instead — nothing then shells out to `az`:
+values over instead — nothing then shells out to `az`. The e2e node is this case:
 
 ```bash
+az acr create -n <acr> -g <rg> --sku Standard
+az acr update -n <acr> -g <rg> --anonymous-pull-enabled true
+
 E2E_ACR_LOGIN_SERVER=<acr>.azurecr.io \
 E2E_ACR_USERNAME=00000000-0000-0000-0000-000000000000 \
 E2E_ACR_PASSWORD=$(az acr login -n <acr> --expose-token --query accessToken -o tsv) \
 E2E_FORCE=1 ./run-all.sh 06 07
 ```
 
-Without a reachable registry the stage still runs 07a and 07b and says plainly
-which cases it skipped. A missing registry costs coverage, not correctness.
+The token is short-lived (hours), so mint it right before the run. Without a
+reachable registry the stage still runs 07a and 07b and says plainly which cases
+it skipped. A missing registry costs coverage, not correctness.
 
 ## Cleanup
 
 ```bash
 az vm deallocate -g jiria-coco-cvm-rg -n coco-dev-1
+az acr delete -g <rg> -n <acr> --yes   # a Standard registry bills per day
 docker rm -f coco-e2e-registry
 rm -rf ~/.coco-e2e          # clears the stage markers
 ```
