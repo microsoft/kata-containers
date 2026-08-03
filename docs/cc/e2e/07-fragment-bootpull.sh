@@ -79,13 +79,13 @@ trap 'rm -rf "$WORK"' EXIT
 
 # ------------------------------------------------------------------- genpolicy
 # The declaration is delivered by patching the base policy, and the trust root by
-# initdata, so this stage needs a genpolicy that accepts --initdata_path. The
+# initdata, so this stage needs a genpolicy that accepts --initdata-path. The
 # installed binary comes from the upstream CI nightly (see CI-9), which may
 # predate that flag; fall back to the branch copy rather than failing, and always
 # log which one ran — the provenance of the tool is part of the result.
 GENPOLICY=/opt/kata/bin/genpolicy
-if ! "$GENPOLICY" --help 2>&1 | grep -q -- '--initdata_path'; then
-  warn "$GENPOLICY does not accept --initdata_path — building genpolicy from $E2E_BRANCH"
+if ! "$GENPOLICY" --help 2>&1 | grep -q -- '--initdata-path'; then
+  warn "$GENPOLICY does not accept --initdata-path — building genpolicy from $E2E_BRANCH"
   # src/version.rs is generated from src/version.rs.in by genpolicy's Makefile and
   # is gitignored, so a bare `cargo build` fails with E0583 on a fresh checkout.
   # Reproduce just that one substitution rather than invoking `make`, whose build
@@ -105,8 +105,8 @@ if ! "$GENPOLICY" --help 2>&1 | grep -q -- '--initdata_path'; then
     || die "could not build genpolicy from the branch"
   GENPOLICY="$E2E_REPO_DIR/target/release/genpolicy"
   [ -x "$GENPOLICY" ] || die "genpolicy built but $GENPOLICY is missing"
-  "$GENPOLICY" --help 2>&1 | grep -q -- '--initdata_path' \
-    || die "branch genpolicy still lacks --initdata_path — cannot deliver the trust root"
+  "$GENPOLICY" --help 2>&1 | grep -q -- '--initdata-path' \
+    || die "branch genpolicy still lacks --initdata-path — cannot deliver the trust root"
 fi
 log "using genpolicy: $GENPOLICY"
 
@@ -160,7 +160,7 @@ apply_case() {
   local pod="$1" rules="$2" yaml="$WORK/$pod.yaml"
   render_pod "$pod" > "$yaml"
   "$GENPOLICY" -y "$yaml" -p "$rules" -j "$SETTINGS" \
-    --initdata_path="$WORK/initdata.toml" >/dev/null \
+    --initdata-path="$WORK/initdata.toml" >/dev/null \
     || die "genpolicy failed for $pod"
   # This build delivers the policy through initdata, not the legacy agent.policy
   # annotation, so a "did the policy land?" check must look for cc_init_data.

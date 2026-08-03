@@ -461,7 +461,7 @@ fail-closed result below it would mean anything.
 the stage appends the entry to a *copy* of `rules.rego` and passes it with `-p`.
 The staged `/opt/kata/share/defaults/kata-containers/rules.rego` is never
 touched — stage 03 asserts its hash and stage 05 depends on it. The trust root
-goes in through `--initdata_path=`, which is where the guest expects a measured
+goes in through `--initdata-path=`, which is where the guest expects a measured
 `fragment-issuers.toml` to arrive.
 
 **Why 07c/07d are conditional.** The guest resolves the feed itself, and plain
