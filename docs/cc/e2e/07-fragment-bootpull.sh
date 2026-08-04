@@ -19,6 +19,18 @@
 #   declared required, delivered, valid       -> Running       => delivered AND verified AND injected
 #   declared optional, never delivered        -> Running       (C-ACI parity: lazy delivery)
 #
+# 07f-07k extend the same oracle to *delegation* — declarations a delivered
+# fragment carries in its own signed module. Because those are marked
+# `required: true`, the pod-phase reading inverts cleanly: a nested declaration
+# that gets registered becomes an obligation the host never satisfies and blocks,
+# while one that is dropped blocks nothing. So:
+#
+#   delegation not granted                    -> Running       (off by default)
+#   granted, child withheld                   -> never Running (it was registered)
+#   granted, child delivered                  -> Running       (the chain completes)
+#   granted same-issuer, foreign child        -> Running       (out of scope, dropped)
+#   granted by explicit list / any-authorized -> never Running (in scope, registered)
+#
 # The third inference is only valid because of the second: had any step failed,
 # the gate would still be shut. So "Running with a non-empty policy_fragments[]"
 # is proof of a completed delivery, without reading anything out of the guest.
@@ -102,6 +114,24 @@ SVN=$(jq -r .minimum_svn    "$ENTRY") || die "could not read minimum_svn from $E
 # guest still decides whether they satisfy the declaration.
 REF=$(tr -d '[:space:]' < "$REF_FILE")
 [ -n "$REF" ] || die "empty reference in $REF_FILE"
+
+# BL-8 delegation fixtures (06g). Read here so a fixture set predating this stage
+# fails immediately and says which stage to re-run, rather than surfacing as an
+# empty annotation twenty minutes later.
+NESTED_FIXTURES="$FRAG/nested-fixtures.json"
+[ -s "$NESTED_FIXTURES" ] \
+  || die "missing $NESTED_FIXTURES — re-run 06-policy-fragment-e2e.sh (E2E_FORCE=1) to publish the delegation fixtures"
+OTHER_ISSUER=$(jq -r .other_issuer          "$NESTED_FIXTURES")
+CHILD_REF=$(jq -r .child.ref                "$NESTED_FIXTURES")
+PARENT_SAME_FEED=$(jq -r .parent_same.feed  "$NESTED_FIXTURES")
+PARENT_SAME_REF=$(jq -r .parent_same.ref    "$NESTED_FIXTURES")
+PARENT_FGN_FEED=$(jq -r .parent_foreign.feed "$NESTED_FIXTURES")
+PARENT_FGN_REF=$(jq -r .parent_foreign.ref  "$NESTED_FIXTURES")
+NESTED_SVN=$(jq -r .svn                     "$NESTED_FIXTURES")
+for v in "$OTHER_ISSUER" "$CHILD_REF" "$PARENT_SAME_FEED" "$PARENT_SAME_REF" \
+         "$PARENT_FGN_FEED" "$PARENT_FGN_REF" "$NESTED_SVN"; do
+  [ -n "$v" ] && [ "$v" != "null" ] || die "incomplete delegation fixtures in $NESTED_FIXTURES"
+done
 
 # $REF_FILE persists on disk; the artifact it names does not necessarily still
 # exist. Stage 06 starts its registry with `docker run -d` -- no --restart, no
@@ -438,6 +468,131 @@ if ! wait_for_soft 300 "pod e2e-frag-optional Running" \
 fi
 ok "pod ran with an undelivered optional declaration — enforcement is opt-in (expected)"
 cleanup_pod e2e-frag-optional
+
+# ================================= 07f–07k — delegated (nested) declarations
+# A delivered fragment may declare further fragments in its own signed module.
+# Two separate properties have to hold, and each is tested against its own
+# control rather than inferred from the other:
+#
+#   1. the declarations are read and registered when the measured policy granted
+#      the parent delegation — and are *not* when it did not, which is the
+#      default; and
+#   2. what they may name is bounded by the scope that grant set.
+#
+# The oracle is pod phase, and it is decidable only because the declaration each
+# parent carries is marked `required: true` (see 06g). Registered => an
+# obligation the host never satisfies => create_container refused => the pod
+# never runs. Dropped => no obligation => the pod runs. The parent fragment, its
+# delivery and the base declaration are otherwise identical across a pair, so a
+# difference in outcome has exactly one available explanation.
+#
+# Pairing is not decoration. A "blocked" case on its own is equally consistent
+# with a parent that simply failed to deliver, and a "runs" case on its own with
+# a gate that is never armed; only the pair distinguishes them. Every case below
+# marks its parent `required: true` too, so a delivery failure turns the "runs"
+# half of each pair red instead of quietly passing.
+#
+# Budget roughly ${E2E_FRAGMENT_NEG_WAIT:-180}s for each of the three negatives.
+
+# A base-policy declaration for a parent fragment, with the delegation scope
+# under test. $2 is raw JSON so every allow_nested form (string, list, absent)
+# can be expressed without another quoting layer.
+nested_decl() {
+  local feed="$1" allow="$2"
+  if [ -n "$allow" ]; then
+    printf '[{"issuer": "%s", "feed": "%s", "minimum_svn": %s, "required": true, "allow_nested": %s}]' \
+      "$ISSUER" "$feed" "$NESTED_SVN" "$allow"
+  else
+    printf '[{"issuer": "%s", "feed": "%s", "minimum_svn": %s, "required": true}]' \
+      "$ISSUER" "$feed" "$NESTED_SVN"
+  fi
+}
+
+# $1 pod, $2 rules file, $3 delivery annotation, $4 what a pass means.
+expect_delegation_blocked() {
+  local pod="$1"
+  apply_case "$pod" "$2" "$3"
+  if expect_never_running "$pod" "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
+    ok "$pod never reached Running — $4 (expected)"
+  else
+    diagnose "$pod"
+    cleanup_pod "$pod"
+    die "$pod is Running — $4 did not happen"
+  fi
+  cleanup_pod "$pod"
+}
+
+expect_delegation_runs() {
+  local pod="$1"
+  apply_case "$pod" "$2" "$3"
+  if ! wait_for_soft 300 "pod $pod Running" \
+       bash -c "kubectl get pod $pod -n $NS -o jsonpath='{.status.phase}' | grep -qx Running"; then
+    diagnose "$pod"
+    cleanup_pod "$pod"
+    die "$pod did not reach Running — $4 did not hold"
+  fi
+  ok "$pod ran — $4 (expected)"
+  cleanup_pod "$pod"
+}
+
+step "07f — delegation is off unless the measured policy grants it"
+# The control for 07g. Same fragment, same delivery, no allow_nested at all. The
+# parent's signed module still declares a required child, and it must be ignored:
+# a policy written before delegation existed must not acquire it by upgrade, and
+# a fragment must not be able to bind the guest to obligations its declaration
+# never authorized.
+render_rules "$WORK/rules-nest-off.rego" "$(nested_decl "$PARENT_SAME_FEED" "")"
+expect_delegation_runs e2e-frag-nest-off "$WORK/rules-nest-off.rego" "$PARENT_SAME_REF" \
+  "an undeclared delegation was ignored"
+
+step "07g — a granted delegation is registered and gates on its child"
+# Differs from 07f in one field. The nested declaration is now in scope, so it is
+# registered as an obligation — and the child is deliberately not delivered, so
+# it stays outstanding and containers must be refused.
+render_rules "$WORK/rules-nest-on.rego" "$(nested_decl "$PARENT_SAME_FEED" '"same-issuer"')"
+expect_delegation_blocked e2e-frag-nest-on "$WORK/rules-nest-on.rego" "$PARENT_SAME_REF" \
+  "the delegated declaration was registered and its undelivered child held the gate"
+
+step "07h — good path: delivering the delegated child releases the gate"
+# 07g with the child added to the delivery list. This is what shows the chain
+# completes rather than merely blocking: the child is a fragment no *measured*
+# declaration ever named, authorized solely by the parent's signed module, and it
+# is still verified through the SRM before it can satisfy anything.
+#
+# Order matters and the runtime preserves it: the child's feed only becomes
+# acceptable once the parent has been delivered and its declarations registered.
+render_rules "$WORK/rules-nest-good.rego" "$(nested_decl "$PARENT_SAME_FEED" '"same-issuer"')"
+expect_delegation_runs e2e-frag-nest-good "$WORK/rules-nest-good.rego" \
+  "$PARENT_SAME_REF,$CHILD_REF" \
+  "the delegated child was fetched, verified and satisfied the nested obligation"
+
+step "07i — same-issuer must not admit a foreign issuer"
+# The scope check itself. Identical grant to 07g, but the parent now names a
+# *different* issuer in its nested declaration. It must be dropped, so no
+# obligation is created and the pod runs — the same outcome as 07f, reached for a
+# different reason, which 07j then separates.
+render_rules "$WORK/rules-nest-foreign.rego" "$(nested_decl "$PARENT_FGN_FEED" '"same-issuer"')"
+expect_delegation_runs e2e-frag-nest-foreign "$WORK/rules-nest-foreign.rego" "$PARENT_FGN_REF" \
+  "a nested declaration outside the same-issuer scope was dropped"
+
+step "07j — an explicit issuer list admits exactly what it names"
+# 07i with the foreign issuer named in the grant. Same fragment, same delivery,
+# only the scope changes — so the declaration is now in scope, registered, and
+# never satisfiable. Together with 07i this shows the scope is actually consulted
+# rather than the foreign case failing for some unrelated reason.
+render_rules "$WORK/rules-nest-list.rego" \
+  "$(nested_decl "$PARENT_FGN_FEED" "[\"$OTHER_ISSUER\"]")"
+expect_delegation_blocked e2e-frag-nest-list "$WORK/rules-nest-list.rego" "$PARENT_FGN_REF" \
+  "the explicitly listed issuer was admitted and its undelivered child held the gate"
+
+step "07k — any-authorized admits an issuer the parent does not share"
+# The third scope form, and the most permissive one. Same fixture as 07i/07j; it
+# must behave like 07j rather than 07i. Worth asserting separately because
+# "permits everything" is the one mode a bug could produce by accident, and 07i
+# alone would still pass if any-authorized had silently collapsed to same-issuer.
+render_rules "$WORK/rules-nest-any.rego" "$(nested_decl "$PARENT_FGN_FEED" '"any-authorized"')"
+expect_delegation_blocked e2e-frag-nest-any "$WORK/rules-nest-any.rego" "$PARENT_FGN_REF" \
+  "any-authorized admitted the foreign issuer and its undelivered child held the gate"
 
 ok "fragment delivery e2e passed"
 mark_done 07-fragment-bootpull

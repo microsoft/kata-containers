@@ -160,6 +160,29 @@ fn main() {
                 receipt,
                 receipt_ledger: f.get("ledger").cloned(),
                 receipt_proof: f.get("proof").cloned(),
+                // FR-1f: further countersignatures, for a conjunctive
+                // `required_receipt_from`. Comma-separated `<ledger>:<receipt>` pairs;
+                // the ledger name is what the requirement list matches on.
+                extra_receipts: f
+                    .get("extra-receipts")
+                    .map(|s| {
+                        s.split(',')
+                            .map(|x| x.trim())
+                            .filter(|x| !x.is_empty())
+                            .map(|x| match x.split_once(':') {
+                                Some((ledger, receipt)) => {
+                                    (ledger.to_string(), receipt.to_string())
+                                }
+                                None => {
+                                    eprintln!(
+                                        "--extra-receipts entries must be <ledger>:<receipt>, got {x:?}"
+                                    );
+                                    std::process::exit(2);
+                                }
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 // FR-1j: the append-only log head this fragment is applied on top of.
                 prev_log_head: f
                     .get("prev-head")

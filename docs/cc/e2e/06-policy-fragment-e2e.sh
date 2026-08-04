@@ -12,7 +12,8 @@
 #   B. Delivery boundary — sign a real fragment, package it as an OCI artifact,
 #      push it, and assert the artifact contract the guest fetcher depends on
 #      (artifactType + layer mediaType). Then emit the base-policy settings entry
-#      and the measured trust root needed for a live boot-pull.
+#      and the measured trust root needed for a live boot-pull. It also publishes
+#      the parent/child artifacts stage 07 uses to exercise delegation.
 #
 # Only B needs a registry; only the optional live check needs a cluster.
 set -uo pipefail
@@ -206,6 +207,121 @@ fi
 echo "$out" | grep -q -- "--plain-http is only allowed for localhost/loopback registries" \
   || { echo "$out" | tail -10; die "push failed, but not via the plain-HTTP guard"; }
 ok "plain-HTTP refused for a non-loopback registry (expected)"
+
+# ============================================== 06g — nested delegation fixtures
+step "06g — fixtures for delegated (nested) declarations"
+# BL-8 delegation lets a *delivered* fragment declare further fragments in its own
+# signed module. Testing that live needs three more artifacts, and which of them
+# stage 07 delivers is what each of its cases varies:
+#
+#   child           an ordinary fragment — the thing a delegation resolves to.
+#   parent-same     declares the child, naming the SAME issuer that signs it.
+#   parent-foreign  declares a child under a DIFFERENT issuer, on a feed that is
+#                   never published.
+#
+# The foreign issuer deliberately has no key and signs nothing. Every case using
+# it expects the nested declaration to be either dropped or left outstanding, so
+# nothing is ever fetched for it — and a DID that *cannot* sign is the stronger
+# fixture, because a scope check that wrongly admitted it could not then be
+# rescued by a signature failure further down and still look correct.
+OTHER_ISSUER="${E2E_FRAGMENT_OTHER_ISSUER:-did:example:e2e-other-issuer}"
+CHILD_FEED="$E2E_REGISTRY/coco-e2e/fragment-child"
+PARENT_SAME_FEED="$E2E_REGISTRY/coco-e2e/fragment-parent-same"
+PARENT_FOREIGN_FEED="$E2E_REGISTRY/coco-e2e/fragment-parent-foreign"
+# Declared by parent-foreign and never published, by design.
+FOREIGN_CHILD_FEED="$E2E_REGISTRY/coco-e2e/fragment-child-foreign"
+
+# Sign a module for a feed and push it as an OCI artifact. 06c/06d assert the
+# artifact contract in full; this only has to reproduce the same steps.
+publish_fragment() {
+  local name="$1" feed="$2" svn="$3" rego="$4"
+  SIGN sign --issuer "$ISSUER" --feed "$feed" --svn "$svn" \
+       --module "$rego" --key "$PRIV" --cose > "$WORK/$name.sign.txt" \
+    || die "signing $name failed"
+  grep '^cose_sign1_hex=' "$WORK/$name.sign.txt" | cut -d= -f2 > "$WORK/$name.cose.hex"
+  [ -s "$WORK/$name.cose.hex" ] || die "signer did not emit cose_sign1_hex for $name"
+  # Same argv hygiene as 06d: credentials go through the environment only.
+  if [ -n "${ACR_PASSWORD:-}" ]; then
+    export FRAGMENTGEN_USERNAME="$ACR_USERNAME" FRAGMENTGEN_PASSWORD="$ACR_PASSWORD"
+  fi
+  FRAGGEN --cose "$WORK/$name.cose.hex" --push "$feed:$TAG" $PLAIN_HTTP \
+    > "$WORK/$name.push.txt" || { tail -20 "$WORK/$name.push.txt"; die "pushing $name failed"; }
+  unset FRAGMENTGEN_USERNAME FRAGMENTGEN_PASSWORD
+  ok "published $name -> $feed:$TAG (svn $svn)"
+}
+
+cat > "$WORK/child.rego" <<'EOF'
+package agent_policy.fragments
+
+# The far end of a delegation. Nothing about it is special: a delegated fragment
+# passes exactly the same gates as a declared one — issuer, SVN floor, receipts,
+# ordering. What makes it delegated is only that no *measured* declaration named
+# it; its authorization came from the parent fragment's signed module.
+e2e_nested_child_loaded := true
+EOF
+
+# Unquoted heredocs below: the issuer and feed must be substituted in, because a
+# fragment's declarations are baked into the module *before* it is signed.
+cat > "$WORK/parent-same.rego" <<EOF
+package agent_policy.fragments
+
+# A fragment's own declarations live at data.<its package>.policy_fragments and
+# are covered by its COSE signature, so the host can neither add, remove nor edit
+# one. Whether they are *honoured* is decided by the measured declaration that
+# authorized this fragment (allow_nested) — which is what stage 07 varies.
+#
+# required: true is deliberate and load-bearing. A nested declaration that gets
+# registered and is never satisfied blocks container creation; one that is
+# dropped blocks nothing. That difference is the only externally visible signal
+# that delegation happened at all, and it is what makes every 07 delegation case
+# decidable from pod phase alone.
+policy_fragments := [{
+  "issuer": "$ISSUER",
+  "feed": "$CHILD_FEED",
+  "minimum_svn": 1,
+  "required": true,
+}]
+
+e2e_parent_same_loaded := true
+EOF
+
+cat > "$WORK/parent-foreign.rego" <<EOF
+package agent_policy.fragments
+
+# Identical to parent-same except for the issuer it names. Under a same-issuer
+# grant this declaration must be dropped; under a grant that names this issuer
+# explicitly it must be registered. Its feed is never published, so "registered"
+# means permanently outstanding, which is the observable outcome.
+policy_fragments := [{
+  "issuer": "$OTHER_ISSUER",
+  "feed": "$FOREIGN_CHILD_FEED",
+  "minimum_svn": 1,
+  "required": true,
+}]
+
+e2e_parent_foreign_loaded := true
+EOF
+
+publish_fragment child          "$CHILD_FEED"          "$SVN" "$WORK/child.rego"
+publish_fragment parent-same    "$PARENT_SAME_FEED"    "$SVN" "$WORK/parent-same.rego"
+publish_fragment parent-foreign "$PARENT_FOREIGN_FEED" "$SVN" "$WORK/parent-foreign.rego"
+
+# One file rather than six, so a partially written fixture set cannot look
+# complete to stage 07. The feed and the reference are both recorded for the same
+# reason as fragment-ref.txt: the feed is the trust identity the COSE envelope
+# commits to and carries no tag, the reference is what the host actually fetches.
+jq -n \
+  --arg other  "$OTHER_ISSUER" \
+  --arg cf "$CHILD_FEED"          --arg cr "$CHILD_FEED:$TAG" \
+  --arg sf "$PARENT_SAME_FEED"    --arg sr "$PARENT_SAME_FEED:$TAG" \
+  --arg ff "$PARENT_FOREIGN_FEED" --arg fr "$PARENT_FOREIGN_FEED:$TAG" \
+  --argjson svn "$SVN" \
+  '{other_issuer: $other, svn: $svn,
+    child:          {feed: $cf, ref: $cr},
+    parent_same:    {feed: $sf, ref: $sr},
+    parent_foreign: {feed: $ff, ref: $fr}}' \
+  > "$WORK/nested-fixtures.json" || die "could not write the nested fixture manifest"
+ok "nested delegation fixtures recorded: $WORK/nested-fixtures.json"
 
 # ---------------------------------------------------------------- wiring output
 step "06f — wiring for a live boot-pull"
