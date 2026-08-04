@@ -65,8 +65,15 @@ gha install-kbs-client
 # this, stage 05 generates its pod policy from upstream rules and nothing in the
 # suite exercises ours (e.g. the FR-4A storage bijection).
 #
-# Our genpolicy changes are data-only, so staging the repo copies is exact and
-# needs no rebuild. This has to happen after deploy-kata: that step also writes
+# Staging the inputs is necessary but NOT sufficient. genpolicy re-serializes
+# request_defaults through a typed struct, so the *binary* also has to know each
+# key the settings declare or it drops it silently. The nightly binary predates
+# SignalProcessRequest.allowed_signals and dropped it, which denied SIGKILL and
+# left started pods unstoppable. Stage 07 therefore builds genpolicy from the
+# branch and asserts no request_defaults key was lost; stage 05 still runs the
+# installed one, so treat a 05-only failure around a new settings key as this.
+#
+# This has to happen after deploy-kata: that step also writes
 # /opt/kata from the kata-deploy image and would clobber an earlier copy, which
 # is the same reason the oci_version patch below sits here.
 DEFAULTS=/opt/kata/share/defaults/kata-containers

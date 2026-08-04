@@ -108,36 +108,40 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 # ------------------------------------------------------------------- genpolicy
-# The declaration is delivered by patching the base policy, and the trust root by
-# initdata, so this stage needs a genpolicy that accepts --initdata-path. The
-# installed binary comes from the upstream CI nightly (see CI-9), which may
-# predate that flag; fall back to the branch copy rather than failing, and always
-# log which one ran — the provenance of the tool is part of the result.
-GENPOLICY=/opt/kata/bin/genpolicy
-if ! "$GENPOLICY" --help 2>&1 | grep -q -- '--initdata-path'; then
-  warn "$GENPOLICY does not accept --initdata-path — building genpolicy from $E2E_BRANCH"
-  # src/version.rs is generated from src/version.rs.in by genpolicy's Makefile and
-  # is gitignored, so a bare `cargo build` fails with E0583 on a fresh checkout.
-  # Reproduce just that one substitution rather than invoking `make`, whose build
-  # target also cross-compiles to $TRIPLE and runs `cargo test --no-run`.
-  GP_SRC="$E2E_REPO_DIR/src/tools/genpolicy"
-  [ -f "$GP_SRC/src/version.rs.in" ] || die "missing $GP_SRC/src/version.rs.in"
-  GP_COMMIT=$(git -C "$E2E_REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
-  [ -n "$(git -C "$E2E_REPO_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ] \
-    && GP_COMMIT="$GP_COMMIT-dirty"
-  sed -e "s|@COMMIT_INFO@|$GP_COMMIT|g" "$GP_SRC/src/version.rs.in" > "$GP_SRC/src/version.rs" \
-    || die "could not generate $GP_SRC/src/version.rs"
-  log "generated genpolicy src/version.rs ($GP_COMMIT)"
+# Always build genpolicy from the branch. The installed binary comes from the
+# upstream CI nightly (see CI-9) and is not rebuilt by any stage, so it lags the
+# branch by however long the nightly is old.
+#
+# This used to be conditional on `--initdata-path` being absent, which looked
+# like a currency check and was not one: the nightly already had that flag, so
+# the probe passed and the stale tool ran. It then silently dropped every
+# request_defaults key it did not know — including SignalProcessRequest, whose
+# allowed_signals the branch's rules.rego reads. The generated policies denied
+# SIGKILL, and pods that started could never be stopped or removed.
+#
+# A tool is only interchangeable with its source when it is built from it. Do
+# not reintroduce a feature probe here.
+#
+# src/version.rs is generated from src/version.rs.in by genpolicy's Makefile and
+# is gitignored, so a bare `cargo build` fails with E0583 on a fresh checkout.
+# Reproduce just that one substitution rather than invoking `make`, whose build
+# target also cross-compiles to $TRIPLE and runs `cargo test --no-run`.
+[ -f "$GP_SRC/src/version.rs.in" ] || die "missing $GP_SRC/src/version.rs.in"
+GP_COMMIT=$(git -C "$E2E_REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
+[ -n "$(git -C "$E2E_REPO_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ] \
+  && GP_COMMIT="$GP_COMMIT-dirty"
+sed -e "s|@COMMIT_INFO@|$GP_COMMIT|g" "$GP_SRC/src/version.rs.in" > "$GP_SRC/src/version.rs" \
+  || die "could not generate $GP_SRC/src/version.rs"
 
-  # genpolicy is a member of the root workspace (see the repo-root Cargo.toml),
-  # so the artifact lands in the workspace target dir, not under src/tools.
-  ( cd "$E2E_REPO_DIR" && cargo build --release -p genpolicy ) \
-    || die "could not build genpolicy from the branch"
-  GENPOLICY="$E2E_REPO_DIR/target/release/genpolicy"
-  [ -x "$GENPOLICY" ] || die "genpolicy built but $GENPOLICY is missing"
-  "$GENPOLICY" --help 2>&1 | grep -q -- '--initdata-path' \
-    || die "branch genpolicy still lacks --initdata-path — cannot deliver the trust root"
-fi
+# genpolicy is a member of the root workspace (see the repo-root Cargo.toml),
+# so the artifact lands in the workspace target dir, not under src/tools.
+log "building genpolicy from $E2E_BRANCH ($GP_COMMIT)"
+( cd "$E2E_REPO_DIR" && cargo build --release -p genpolicy ) \
+  || die "could not build genpolicy from the branch"
+GENPOLICY="$E2E_REPO_DIR/target/release/genpolicy"
+[ -x "$GENPOLICY" ] || die "genpolicy built but $GENPOLICY is missing"
+"$GENPOLICY" --help 2>&1 | grep -q -- '--initdata-path' \
+  || die "branch genpolicy lacks --initdata-path — cannot deliver the trust root"
 log "using genpolicy: $GENPOLICY"
 
 # -------------------------------------------------------------------- fixtures
@@ -211,8 +215,55 @@ apply_case() {
   # This build delivers the policy through initdata, not the legacy agent.policy
   # annotation, so a "did the policy land?" check must look for cc_init_data.
   grep -q 'cc_init_data' "$yaml" || die "no cc_init_data annotation for $pod"
+  assert_request_defaults_survived "$yaml" "$pod"
   kubectl delete pod "$pod" -n "$NS" --ignore-not-found >/dev/null 2>&1 || true
   kubectl apply -f "$yaml" >/dev/null || die "kubectl apply failed for $pod"
+}
+
+# genpolicy does not copy request_defaults through as opaque JSON: it
+# deserializes the settings into a typed struct and re-serializes that struct
+# into the policy. Any key the binary's struct does not declare is dropped
+# without a word. rules.rego then reads an undefined value, the rule becomes
+# undefined, and the fail-closed default denies the endpoint -- a denial that
+# looks like a policy decision and is really a missing field.
+#
+# That is how SignalProcessRequest.allowed_signals vanished and left pods
+# unstoppable. Compare the key sets rather than trusting the tool: what the
+# settings declare is exactly what the generated policy must carry.
+assert_request_defaults_survived() {
+  local yaml="$1" pod="$2" missing
+  missing=$(python3 - "$yaml" "$SETTINGS" <<'PY'
+import base64, gzip, json, re, sys
+
+yaml_path, settings_path = sys.argv[1], sys.argv[2]
+blob = re.search(r'cc_init_data:\s*"?([A-Za-z0-9+/=]+)"?', open(yaml_path).read())
+if not blob:
+    print("could not read the cc_init_data annotation")
+    raise SystemExit(0)
+policy = gzip.decompress(base64.b64decode(blob.group(1))).decode("utf-8", "replace")
+
+# The policy is rego text with a JSON data block appended; pull just the
+# request_defaults object out by brace matching.
+i = policy.find('"request_defaults"')
+if i < 0:
+    print("the generated policy has no request_defaults block at all")
+    raise SystemExit(0)
+depth, start = 0, None
+for k in range(i + len('"request_defaults"'), len(policy)):
+    if policy[k] == "{":
+        if depth == 0:
+            start = k
+        depth += 1
+    elif policy[k] == "}":
+        depth -= 1
+        if depth == 0:
+            break
+got = set(json.loads(policy[start:k + 1]))
+want = set(json.load(open(settings_path))["request_defaults"])
+print(" ".join(sorted(want - got)))
+PY
+  ) || die "could not inspect the generated policy for $pod"
+  [ -z "$missing" ] || die "genpolicy dropped request_defaults key(s) [$missing] from $pod's policy — the binary predates the settings; it must be built from this branch"
 }
 
 pod_phase() { kubectl get pod "$1" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null; }
