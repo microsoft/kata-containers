@@ -2673,6 +2673,7 @@ impl agent_ttrpc::AgentService for AgentService {
                         .apply_fragment_module(
                             &format!("fragment:{}:{}", verified.issuer, verified.svn),
                             module,
+                            &verified.feed,
                             &effective,
                             scope.parameters.as_deref(),
                         )

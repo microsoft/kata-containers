@@ -645,12 +645,25 @@ impl AgentPolicy {
     /// scoped to one of the fragment's `includes`), so a fragment can only *add* rules in
     /// its own namespace and can never redefine or shadow a base `agent_policy` rule. The
     /// base policy is authored to consult `data.agent_policy.fragments.*`.
+    ///
+    /// One further form is permitted: `agent_policy.fragments["<feed>"]`, quoted, naming
+    /// **this fragment's own verified feed and nothing else**. It exists because the
+    /// generated `rules.rego` looks a fragment's contribution up by feed
+    /// (`data.agent_policy.fragments[spec.feed]`, the container-contribution contract), and
+    /// a feed is an OCI reference — `localhost:5000/coco-e2e/fragment` — which is not a
+    /// Rego identifier and therefore cannot be a rule name. Without this form that whole
+    /// contract is unreachable: a fragment can never contribute a container. The feed comes
+    /// from the COSE envelope the SRM already verified, not from the module, so the key a
+    /// fragment writes under is pinned to the identity it was signed with; it cannot squat
+    /// the namespace of another feed.
+    ///
     /// Returns the rego package the module was applied under, so the caller can find what
     /// the fragment itself declares (see [`Self::nested_fragment_specs`]).
     pub fn apply_fragment_module(
         &mut self,
         name: &str,
         rego: &str,
+        feed: &str,
         includes: &[String],
         parameters: Option<&str>,
     ) -> Result<String> {
@@ -661,11 +674,13 @@ impl AgentPolicy {
         for ns in includes {
             allowed.push(format!("agent_policy.fragments.{ns}"));
         }
-        if !allowed.iter().any(|a| a == &pkg) {
+        if !allowed.iter().any(|a| a == &pkg) && !Self::is_own_feed_package(&pkg, feed) {
             bail!(
-                "fragment module package {:?} is outside the permitted fragment namespaces {:?}",
+                "fragment module package {:?} is outside the permitted fragment namespaces {:?} \
+                 (and is not this fragment's own feed {:?})",
                 pkg,
-                allowed
+                allowed,
+                feed
             );
         }
 
@@ -780,6 +795,32 @@ impl AgentPolicy {
             }
         }
         None
+    }
+
+    /// Whether `pkg` is the quoted-feed form `agent_policy.fragments["<feed>"]` naming
+    /// exactly `feed`.
+    ///
+    /// The comparison is on the decoded string, not on the source text, so whitespace
+    /// inside the brackets is tolerated while a different feed — or a second segment
+    /// smuggled in after the bracket — is not. A fragment therefore cannot reach any
+    /// namespace but the one its verified feed names.
+    fn is_own_feed_package(pkg: &str, feed: &str) -> bool {
+        if feed.is_empty() {
+            return false;
+        }
+        let Some(rest) = pkg.strip_prefix("agent_policy.fragments[") else {
+            return false;
+        };
+        let Some(inner) = rest.strip_suffix(']') else {
+            return false;
+        };
+        let inner = inner.trim();
+        let Some(quoted) = inner.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
+            return false;
+        };
+        // A feed containing a quote or backslash could otherwise be spelled several ways;
+        // refuse rather than guess at an unescaping the parser may not share.
+        !quoted.contains('"') && !quoted.contains('\\') && quoted == feed
     }
 
     async fn log_eval_input(&mut self, ep: &str, input: &str) {
@@ -1237,7 +1278,9 @@ mod tests {
         p.apply_fragment_module(
             "frag",
             "package agent_policy.fragments\ndefault allowed := true\n",
+            "reg/a",
             &[],
+            None,
         )
         .expect("an additive fragment must still apply after activation");
 
@@ -1511,7 +1554,7 @@ mod tests {
             {\"issuer\": \"did:x509:0:sha256:BBB::CN:child\", \"feed\": \"reg/child:1\", \"minimum_svn\": 5, \"required\": true}\n\
             ]\n";
         let pkg = p
-            .apply_fragment_module("fragment:test", module, &["infra".to_string()], None)
+            .apply_fragment_module("fragment:test", module, "reg/parent", &["infra".to_string()], None)
             .unwrap();
         assert_eq!(pkg, "agent_policy.fragments.infra");
 
@@ -1547,7 +1590,7 @@ mod tests {
 
         // Apply a verified fragment module in the reserved namespace.
         let module = "package agent_policy.fragments\nexec_allowed := true\n";
-        p.apply_fragment_module("frag:issuerA:1", module, &[], None)
+        p.apply_fragment_module("frag:issuerA:1", module, "reg/a", &[], None)
             .unwrap();
         assert!(
             eval_bool(&mut p, "ExecProcessRequest"),
@@ -1562,16 +1605,58 @@ mod tests {
         let mut p = AgentPolicy::new();
         // A module trying to live in the base package is refused.
         let base_ns = "package agent_policy\ndefault ExecProcessRequest := true\n";
-        assert!(p.apply_fragment_module("evil", base_ns, &[], None).is_err());
+        assert!(p.apply_fragment_module("evil", base_ns, "reg/a", &[], None).is_err());
 
         // A sub-namespace not in `includes` is refused; one that is, is accepted.
         let mount_ns = "package agent_policy.fragments.mount\nallowed := true\n";
         assert!(p
-            .apply_fragment_module("m", mount_ns, &["exec".to_string()], None)
+            .apply_fragment_module("m", mount_ns, "reg/a", &["exec".to_string()], None)
             .is_err());
         assert!(p
-            .apply_fragment_module("m", mount_ns, &["mount".to_string()], None)
+            .apply_fragment_module("m", mount_ns, "reg/a", &["mount".to_string()], None)
             .is_ok());
+    }
+
+    /// F-69: a fragment may declare `agent_policy.fragments["<feed>"]` for its own verified
+    /// feed — that is the only way to satisfy the container-contribution contract, because a
+    /// feed is an OCI reference and cannot be a Rego identifier. Any *other* feed is refused,
+    /// so the quoted form cannot be used to squat another publisher's namespace.
+    #[test]
+    fn test_fragment_may_only_claim_its_own_feed_namespace() {
+        let feed = "localhost:5000/coco-e2e/fragment";
+        let own = format!(
+            "package agent_policy.fragments[\"{feed}\"]\n\
+             issuer := \"did:example:e2e\"\nsvn := \"1\"\ncontainers := []\n"
+        );
+
+        let mut p = AgentPolicy::new();
+        assert!(
+            p.apply_fragment_module("own", &own, feed, &[], None).is_ok(),
+            "a fragment must be able to write under its own verified feed"
+        );
+
+        // Same module, delivered under a different verified feed: refused.
+        let mut q = AgentPolicy::new();
+        assert!(
+            q.apply_fragment_module("other", &own, "localhost:5000/someone-else", &[], None)
+                .is_err(),
+            "a fragment must not be able to claim another feed's namespace"
+        );
+
+        // Whitespace inside the brackets is tolerated; the decoded feed is what is compared.
+        let spaced = format!(
+            "package agent_policy.fragments[ \"{feed}\" ]\ncontainers := []\n"
+        );
+        let mut r = AgentPolicy::new();
+        assert!(r.apply_fragment_module("spaced", &spaced, feed, &[], None).is_ok());
+
+        // A trailing segment after the bracket is not the sanctioned form.
+        let suffixed =
+            format!("package agent_policy.fragments[\"{feed}\"].extra\ncontainers := []\n");
+        let mut s = AgentPolicy::new();
+        assert!(s
+            .apply_fragment_module("suffixed", &suffixed, feed, &[], None)
+            .is_err());
     }
 
     /// FR-1k: a parameterised fragment reads its values through `parameter(name)`, falls
@@ -1584,7 +1669,7 @@ mod tests {
             bound := parameter(\"host\")\n\
             defaulted := parameter(\"missing_here\")\n\
             unknown := parameter(\"other\")\n";
-        p.apply_fragment_module("frag", module, &[], Some("{\"host\": \"supplied\"}"))
+        p.apply_fragment_module("frag", module, "reg/a", &[], Some("{\"host\": \"supplied\"}"))
             .unwrap();
 
         let get = |p: &mut AgentPolicy, rule: &str| {
@@ -1602,7 +1687,7 @@ mod tests {
         // The same module with the parameter left out falls back to the declared default,
         // proving `parameters_api` is consulted rather than the value being required.
         let mut q = AgentPolicy::new();
-        q.apply_fragment_module("frag", module, &[], Some("{}"))
+        q.apply_fragment_module("frag", module, "reg/a", &[], Some("{}"))
             .unwrap();
         assert_eq!(get(&mut q, "bound"), "\"fallback\"");
     }
@@ -1615,16 +1700,16 @@ mod tests {
         let mut p = AgentPolicy::new();
         let module = "package agent_policy.fragments\nx := 1\n";
         assert!(p
-            .apply_fragment_module("a", module, &[], Some("[1, 2]"))
+            .apply_fragment_module("a", module, "reg/a", &[], Some("[1, 2]"))
             .is_err());
         assert!(p
-            .apply_fragment_module("b", module, &[], Some("\"scalar\""))
+            .apply_fragment_module("b", module, "reg/a", &[], Some("\"scalar\""))
             .is_err());
         assert!(p
-            .apply_fragment_module("c", module, &[], Some("{ not json"))
+            .apply_fragment_module("c", module, "reg/a", &[], Some("{ not json"))
             .is_err());
         // A fragment that is not parameterised is unaffected.
-        assert!(p.apply_fragment_module("d", module, &[], None).is_ok());
+        assert!(p.apply_fragment_module("d", module, "reg/a", &[], None).is_ok());
     }
 
     /// FR-1l: a policy may state the enforcement framework it was written against. Equal or

@@ -1961,7 +1961,18 @@ TtyWinResizeRequest if {
 #
 # Runtime data contract: a verified fragment for feed F contributes, under this namespace, a
 # keyed entry `data.agent_policy.fragments[F] == {"issuer": <did/id>, "svn": <n>,
-# "containers": [<container-policy>, ...]}`. At genpolicy generation time no fragment is loaded
+# "containers": [<container-policy>, ...]}`. Because a feed is an OCI reference
+# (`myregistry.io/fragments/sidecar`) and not a Rego identifier, a fragment writes that key by
+# declaring its package with a quoted path segment:
+#
+#     package agent_policy.fragments["myregistry.io/fragments/sidecar"]
+#     issuer := "did:x509:..."
+#     svn := 3
+#     containers := [ ... ]
+#
+# The agent accepts that form only when the quoted segment equals the feed the SRM verified
+# from the fragment's own COSE envelope, so a fragment can only ever populate its own key and
+# never another publisher's. At genpolicy generation time no fragment is loaded
 # (`data.agent_policy.fragments` is empty) and an unloaded / under-versioned / wrong-issuer
 # fragment contributes nothing => behaviour identical to a monolithic policy (no regression).
 
