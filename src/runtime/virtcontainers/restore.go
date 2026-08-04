@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/persist"
 	persistapi "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/persist/api"
@@ -66,8 +67,9 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 	if drv == nil {
 		return nil, fmt.Errorf("restore: nil persist driver")
 	}
+	cleanupSafe := true
 	defer func() {
-		if err != nil {
+		if err != nil && cleanupSafe {
 			_ = drv.Destroy(newID)
 		}
 	}()
@@ -104,8 +106,14 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 	}
 	defer func() {
 		if err != nil {
+			if !cleanupSafe {
+				s.Logger().WithError(err).Error("preserving restore resources because VMM stop was not confirmed")
+				return
+			}
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), restoreFailureCleanupTimeout)
+			defer cancel()
 			if s.restoreNetFence {
-				_ = s.network.Run(ctx, func() error {
+				_ = s.network.Run(cleanupCtx, func() error {
 					for _, ep := range s.network.Endpoints() {
 						cleanupRestoreTCFence(ep)
 					}
@@ -114,7 +122,7 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 			}
 			// Delete accepts only terminal or pre-running states.
 			s.state.State = types.StateStopped
-			s.Delete(ctx)
+			s.Delete(cleanupCtx)
 		}
 	}()
 
@@ -171,10 +179,18 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 	vmAssigned := false
 	defer func() {
 		if err != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), restoreFailureCleanupTimeout)
+			defer cancel()
 			if vmAssigned {
-				s.stopVM(ctx)
+				if abortErr := s.AbortRestore(cleanupCtx); abortErr != nil {
+					cleanupSafe = false
+					s.Logger().WithError(abortErr).Error("failed to abort partially restored sandbox")
+				}
 			} else {
-				vm.Stop(ctx)
+				if stopErr := vm.Stop(cleanupCtx); stopErr != nil {
+					cleanupSafe = false
+					s.Logger().WithError(stopErr).Error("failed to stop unassigned restored VM")
+				}
 			}
 		}
 	}()
@@ -183,6 +199,7 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 		return nil, fmt.Errorf("assign restored vm to sandbox: %w", err)
 	}
 	vmAssigned = true
+	s.restoredVM = vm
 
 	if err = adoptPauseContainer(s, origSandboxID); err != nil {
 		return nil, fmt.Errorf("adopt restored pause container: %w", err)
@@ -194,22 +211,28 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 
 // FinalizeRestoreNetwork replaces guest identity before enabling TC redirects.
 func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) (err error) {
-	// Keep forwarding closed on failure.
+	defer func() {
+		if err != nil {
+			s.cleanupFailedRestore(err)
+		}
+	}()
+
 	eps := s.network.Endpoints()
 	if len(eps) != 1 {
 		return fmt.Errorf("kata restore failed: expected exactly one adopted CNI endpoint, found %d", len(eps))
 	}
-	defer func() {
-		if err != nil {
-			_ = s.network.Run(ctx, func() error {
-				cleanupRestoreTCFence(eps[0])
-				return nil
-			})
-		}
-	}()
+	if s.restoredVM == nil {
+		return fmt.Errorf("kata restore failed: restored VM lifecycle is unavailable")
+	}
 
-	if err = s.hypervisor.ResumeVM(ctx); err != nil {
+	if err = s.restoredVM.Resume(ctx); err != nil {
 		return fmt.Errorf("kata restore failed: resume: %w", err)
+	}
+	if err = s.restoredVM.ReseedRNG(ctx); err != nil {
+		return fmt.Errorf("kata restore failed: reseed guest RNG: %w", err)
+	}
+	if err = s.restoredVM.SyncTime(ctx); err != nil {
+		return fmt.Errorf("kata restore failed: sync guest time: %w", err)
 	}
 
 	// The restored NIC still has the source identity, so select it by name.
@@ -327,7 +350,51 @@ func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) (err error) {
 		return fmt.Errorf("kata restore failed: mark adopted workloads running: %w", serr)
 	}
 	s.restoreActivated = true
+	s.restoredVM = nil
 	s.Logger().WithField("guest-nic", guestNICName).Info("restored network activated")
+	return nil
+}
+
+const restoreFailureCleanupTimeout = 30 * time.Second
+
+// cleanupFailedRestore stops the VMM before releasing the TAP resources it is
+// using. Cleanup must not inherit a failed or canceled task RPC context.
+func (s *Sandbox) cleanupFailedRestore(cause error) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), restoreFailureCleanupTimeout)
+	defer cancel()
+
+	s.Logger().WithError(cause).Error("restore finalization failed; stopping restored VM")
+	if abortErr := s.AbortRestore(cleanupCtx); abortErr != nil {
+		s.Logger().WithError(abortErr).Error("failed to abort restored VM after finalization error")
+	}
+}
+
+// AbortRestore makes a failed restore terminal. The VMM is stopped and reaped
+// before any TAP descriptor or link is released.
+func (s *Sandbox) AbortRestore(ctx context.Context) error {
+	if stopErr := s.hypervisor.StopVM(ctx, false); stopErr != nil {
+		return fmt.Errorf("stop restored VM: %w", stopErr)
+	}
+	s.restoredVM = nil
+	for _, c := range s.containers {
+		c.state.State = types.StateStopped
+	}
+	s.state.State = types.StateStopped
+
+	if cleanupErr := s.network.Run(ctx, func() error {
+		for _, endpoint := range s.network.Endpoints() {
+			cleanupRestoreTCFence(endpoint)
+		}
+		return nil
+	}); cleanupErr != nil {
+		s.Logger().WithError(cleanupErr).Error("failed to clean restore network fence")
+	}
+	if cleanupErr := s.network.RemoveEndpoints(ctx, s, nil, false); cleanupErr != nil {
+		s.Logger().WithError(cleanupErr).Error("failed to remove restore network endpoints")
+	}
+	if releaseErr := s.Release(ctx); releaseErr != nil {
+		s.Logger().WithError(releaseErr).Warn("failed to release sandbox after aborting restore")
+	}
 	return nil
 }
 
@@ -363,7 +430,10 @@ func adoptPauseContainer(s *Sandbox, origSandboxID string) error {
 }
 
 // RestoreContainer adopts the persisted workload whose CRI container name matches the target's.
-func (s *Sandbox) RestoreContainer(_ context.Context, contConfig ContainerConfig) (VCContainer, error) {
+func (s *Sandbox) RestoreContainer(ctx context.Context, contConfig ContainerConfig) (VCContainer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("kata restore failed: workload adoption canceled: %w", err)
+	}
 	if spec := contConfig.CustomSpec; spec != nil && spec.Hooks != nil {
 		h := spec.Hooks
 		if len(h.Prestart) > 0 || len(h.CreateRuntime) > 0 || len(h.CreateContainer) > 0 ||

@@ -8,9 +8,12 @@ package containerdshim
 import (
 	"context"
 	"fmt"
+	"time"
 
+	eventstypes "github.com/containerd/containerd/api/events"
 	"github.com/containerd/containerd/api/types/task"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/katautils"
 )
@@ -20,7 +23,10 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 	defer func() {
 		if retErr != nil {
 			// notify the wait goroutine to continue
-			c.exitCh <- exitCode255
+			select {
+			case c.exitCh <- exitCode255:
+			default:
+			}
 		}
 	}()
 	// start a container
@@ -32,6 +38,9 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 	if s.sandbox == nil {
 		err := fmt.Errorf("Bug, the sandbox hasn't been created for this container %s", c.id)
 		return err
+	}
+	if s.restoreFailed {
+		return fmt.Errorf("kata restore failed: pod sandbox restore is terminal; recreate the pod sandbox")
 	}
 
 	if c.cType.IsSandbox() && s.restoredSandbox {
@@ -69,6 +78,11 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 		// The first workload start resumes the VM and restores its network
 		// identity; later workload starts find the guest already live.
 		if !s.restoreFinalized {
+			defer func() {
+				if retErr != nil && !s.restoreFinalized {
+					s.failRestoredSandbox(retErr)
+				}
+			}()
 			if err := s.sandbox.FinalizeRestoreNetwork(ctx); err != nil {
 				return err
 			}
@@ -126,6 +140,54 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 	go wait(ctx, s, c, "")
 
 	return nil
+}
+
+const restoredSandboxFailureCleanupTimeout = 30 * time.Second
+
+// failRestoredSandbox makes a failed first workload start fatal to the pause
+// task. CRI must recreate the pod sandbox rather than retry adoption in a VM
+// that has already been stopped.
+func (s *service) failRestoredSandbox(cause error) {
+	if s.restoreFailed {
+		return
+	}
+	s.restoreFailed = true
+
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), restoredSandboxFailureCleanupTimeout)
+	defer cancel()
+	shimLog.WithError(cause).Error("restored sandbox failed before first workload start completed")
+	abortErr := s.sandbox.AbortRestore(cleanupCtx)
+	if abortErr != nil {
+		shimLog.WithError(abortErr).Warn("failed to abort terminal restored sandbox")
+		return
+	}
+	if err := s.sandbox.Delete(cleanupCtx); err != nil {
+		shimLog.WithError(err).Warn("failed to delete terminal restored sandbox")
+	}
+
+	exitedAt := time.Now()
+	var pauseTask *container
+	for _, taskContainer := range s.containers {
+		taskContainer.status = task.Status_STOPPED
+		taskContainer.exit = exitCode255
+		taskContainer.exitTime = exitedAt
+		select {
+		case taskContainer.exitCh <- exitCode255:
+		default:
+		}
+		if taskContainer.cType.IsSandbox() {
+			pauseTask = taskContainer
+		}
+	}
+	if pauseTask != nil {
+		s.send(&eventstypes.TaskExit{
+			ContainerID: pauseTask.id,
+			ID:          pauseTask.id,
+			Pid:         s.hpid,
+			ExitStatus:  exitCode255,
+			ExitedAt:    timestamppb.New(exitedAt),
+		})
+	}
 }
 
 // armDeferredRestoredPauseTask attaches pause-task I/O after the restored VM is resumed.

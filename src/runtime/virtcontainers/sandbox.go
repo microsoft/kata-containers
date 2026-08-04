@@ -275,8 +275,9 @@ type Sandbox struct {
 	// containers.
 	hotplugNetworkConfigApplied bool
 
-	restoreNetFence bool
+	restoreNetFence  bool
 	restoreActivated bool
+	restoredVM       *VM
 }
 
 // ID returns the sandbox identifier string.
@@ -2138,8 +2139,12 @@ func (s *Sandbox) Stop(ctx context.Context, force bool) error {
 		}
 	}
 
-	if err := s.stopVM(ctx); err != nil && !force {
-		return err
+	if err := s.stopVM(ctx); err != nil {
+		// A restored VMM may still own out-of-band TAP FDs. Never tear down
+		// that network while the process could still be alive.
+		if s.restoreNetFence || !force {
+			return err
+		}
 	}
 
 	// shutdown console watcher if exists

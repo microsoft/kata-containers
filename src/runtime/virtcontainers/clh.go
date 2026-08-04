@@ -2031,18 +2031,23 @@ func (clh *cloudHypervisor) terminate(ctx context.Context, waitOnly bool) (err e
 
 	clh.Logger().Debug("Stopping Cloud Hypervisor")
 
+	var shutdownErr error
 	if pidRunning && !waitOnly {
 		clhRunning, _ := clh.isClhRunning(uint(clh.getClhStopSandboxTimeout()))
 		if clhRunning {
 			ctx, cancel := context.WithTimeout(context.Background(), clh.getClhStopSandboxTimeout()*time.Second)
-			defer cancel()
-			if _, err = clh.client().ShutdownVMM(ctx); err != nil {
-				return err
+			_, shutdownErr = clh.client().ShutdownVMM(ctx)
+			cancel()
+			if shutdownErr != nil {
+				clh.Logger().WithError(shutdownErr).Warn("graceful VMM shutdown failed; waiting for process exit")
 			}
 		}
 	}
 
 	if err = utils.WaitLocalProcess(pid, uint(clh.getClhStopSandboxTimeout()), syscall.Signal(0), clh.Logger()); err != nil {
+		if shutdownErr != nil {
+			return fmt.Errorf("graceful VMM shutdown failed: %v; wait for VMM process: %w", shutdownErr, err)
+		}
 		return err
 	}
 
