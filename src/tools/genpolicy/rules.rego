@@ -1992,8 +1992,28 @@ base_container_entries := [{"ref": {"base": true, "idx": i}, "container": c} |
     some i, c in policy_data.containers
 ]
 
+# A policy can declare a trusted fragment in two places, and both are measured, so both
+# have to be honoured here.
+#
+#   * `policy_data.fragments` — BL-7. Comes from `genpolicy-settings.json`, is serialized
+#     into `policy_data` at generation time, and is what a settings-driven deployment uses.
+#   * `policy_fragments` — BL-8. A rule in the generated policy text; this is the list the
+#     *agent* reads to decide what the host must deliver and what it must refuse.
+#
+# Reading only the first was a silent hole in the other direction from the usual one: a
+# fragment declared for delivery (BL-8), fetched by the host, verified by the SRM and
+# applied into the engine still contributed **no containers**, because the rule that reads
+# its contribution was looking at a list the BL-8 declaration never appears in. Nothing
+# reported an error — the fragment loaded, and the container it carried was simply refused.
+# Declaring the same fragment twice, in two different files, would have been the only way to
+# make it work, with divergence between the two failing silently.
+#
+# Duplicates across the two are harmless: they produce identical container entries with
+# identical references, and `container_by_ref` needs only one matching declaration.
+all_fragment_specs := array.concat(policy_data.fragments, policy_fragments)
+
 fragment_container_entries := [{"ref": {"feed": spec.feed, "svn": to_number(mod.svn), "idx": j}, "container": c} |
-    some spec in policy_data.fragments
+    some spec in all_fragment_specs
     mod := data.agent_policy.fragments[spec.feed]
     mod.issuer == spec.issuer
     to_number(mod.svn) >= spec.minimum_svn
@@ -2017,7 +2037,7 @@ container_by_ref(ref) := c if {
 
 container_by_ref(ref) := c if {
     not ref.base
-    some spec in policy_data.fragments
+    some spec in all_fragment_specs
     spec.feed == ref.feed
     mod := data.agent_policy.fragments[ref.feed]
     mod.issuer == spec.issuer
