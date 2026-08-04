@@ -139,6 +139,15 @@ FRAGGEN --cose "$WORK/fragment.cose.hex" --push "$FEED:$TAG" $PLAIN_HTTP \
 unset FRAGMENTGEN_USERNAME FRAGMENTGEN_PASSWORD
 ok "pushed $FEED:$TAG"
 
+# Record the reference the artifact was pushed to, which is not the same thing as
+# the feed. The feed is a trust identity: it is what the COSE envelope commits to
+# and what the measured policy names, and it carries no tag. Fetching needs an OCI
+# reference, tag included. Stage 07 needs both -- the feed for the declaration, the
+# reference for the delivery annotation -- and inferring one from the other means
+# guessing the tag, which silently resolves to :latest and fails as a missing
+# manifest well away from the cause.
+printf '%s\n' "$FEED:$TAG" > "$WORK/fragment-ref.txt"
+
 # fragmentgen prints a human-readable header before the entry, so the raw capture
 # is not valid JSON. Extract just the object so step 06f emits something that can
 # be pasted straight into the base policy.

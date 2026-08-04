@@ -55,13 +55,23 @@ RULES_SRC="$DEFAULTS/rules.rego"
 FRAG="${E2E_FRAGMENT_WORK:-$E2E_STATE_DIR/fragments}"
 ENTRY="$FRAG/fragment-entry.json"
 ISSUERS="$FRAG/fragment-issuers.toml"
+REF_FILE="$FRAG/fragment-ref.txt"
 [ -s "$ENTRY" ]   || die "missing $ENTRY — run 06-policy-fragment-e2e.sh first"
 [ -s "$ISSUERS" ] || die "missing $ISSUERS — run 06-policy-fragment-e2e.sh first"
+[ -s "$REF_FILE" ] || die "missing $REF_FILE — re-run 06-policy-fragment-e2e.sh"
 
 ISSUER=$(jq -r .issuer      "$ENTRY") || die "could not read issuer from $ENTRY"
 FEED=$(jq -r .feed          "$ENTRY") || die "could not read feed from $ENTRY"
 SVN=$(jq -r .minimum_svn    "$ENTRY") || die "could not read minimum_svn from $ENTRY"
 [ -n "$ISSUER" ] && [ -n "$FEED" ] && [ -n "$SVN" ] || die "incomplete entry in $ENTRY"
+
+# What the host is told to fetch, which is deliberately not $FEED. $FEED is the
+# trust identity the policy declares and the envelope commits to; it has no tag.
+# $REF is the OCI reference 06 actually pushed to. Keeping them separate here is
+# the point of the test: the annotation only says which bytes to offer, and the
+# guest still decides whether they satisfy the declaration.
+REF=$(tr -d '[:space:]' < "$REF_FILE")
+[ -n "$REF" ] || die "empty reference in $REF_FILE"
 
 # A declaration the host will never be able to satisfy, for the fail-closed case.
 # It is never offered via the delivery annotation either, so this negative cannot
@@ -250,13 +260,13 @@ cleanup_pod e2e-frag-unfetchable
 step "07c — good path: a delivered, valid fragment must let containers run"
 render_rules "$WORK/rules-good.rego" \
   "[{\"issuer\": \"$ISSUER\", \"feed\": \"$FEED\", \"minimum_svn\": $SVN}]"
-apply_case e2e-frag-good "$WORK/rules-good.rego" "$FEED"
+apply_case e2e-frag-good "$WORK/rules-good.rego" "$REF"
 if ! wait_for_soft 300 "pod e2e-frag-good Running" \
      bash -c "kubectl get pod e2e-frag-good -n $NS -o jsonpath='{.status.phase}' | grep -qx Running"; then
   diagnose e2e-frag-good
   cleanup_pod e2e-frag-good
-  warn "the host fetches $FEED and pushes it over LoadPolicyFragment. Check, in order:"
-  warn "  - can the node pull it?  crane manifest $FEED  (or the 06 read-back)"
+  warn "the host fetches $REF and pushes it over LoadPolicyFragment. Check, in order:"
+  warn "  - can the node pull it?  crane manifest $REF  (or the 06 read-back)"
   warn "  - did the shim try?      journalctl -t kata | grep policy-fragments"
   warn "  - did the guest reject it? look for a FAILED_PRECONDITION from the RPC"
   die "the declared fragment did not let the pod run — delivery, verification, or injection failed"
@@ -275,7 +285,7 @@ step "07d — negative: an SVN floor above the published fragment must be refuse
 # a host that simply failed to deliver; 07b alone cannot tell those apart.
 render_rules "$WORK/rules-rollback.rego" \
   "[{\"issuer\": \"$ISSUER\", \"feed\": \"$FEED\", \"minimum_svn\": $((SVN + 1))}]"
-apply_case e2e-frag-rollback "$WORK/rules-rollback.rego" "$FEED"
+apply_case e2e-frag-rollback "$WORK/rules-rollback.rego" "$REF"
 if expect_never_running e2e-frag-rollback "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
   ok "pod never reached Running — the SVN rollback floor held (expected)"
 else
