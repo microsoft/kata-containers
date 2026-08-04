@@ -270,10 +270,20 @@ uses `policy.rs::nested_fragment_specs`, scoped to the package the module was ac
 accepted under, so two fragments in different namespaces cannot see or overwrite each
 other's.
 
-C-ACI/hcsshim has the equivalent capability — `candidate_fragments` grows with fragments
-contributed by already-loaded fragments — but with no scope attribute: any loaded fragment
-may declare any feed. Ours is the same capability with an explicit, per-declaration bound on
-who may be delegated to, and defaults to off.
+C-ACI/hcsshim has the equivalent capability, and — usefully — puts the switch in the same
+place we do. `candidate_fragments` is the union of the base policy's `fragments` array and
+the declarations contributed by already-loaded fragments, and whether a given fragment's own
+declarations are harvested is decided by `includes: ["fragments"]` on **the declaration that
+authorized it**, not by anything the fragment itself asserts. So delegation is parent-granted
+and opt-in there too.
+
+The difference is the *scope*. hcsshim's switch is a bare boolean: once a declaration says
+`includes: ["fragments"]`, the fragment behind it may name any `(issuer, feed)` pair it
+likes, and `fragment_issuer_feed_ok` compares only the incoming fragment against the
+candidate — never the candidate against the issuer that declared it. There is also no depth
+cap and no cycle guard (`update_issuer` appends, so a re-load of the same feed simply stacks
+another entry). `allow_nested` is that same parent-granted opt-in with the reach written
+down, plus the depth cap and first-declaration-wins rule.
 
 ---
 
