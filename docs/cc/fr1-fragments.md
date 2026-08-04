@@ -539,6 +539,17 @@ fragment admitting a second container by *its* layer root hashes. 07l withholds
 the fragment and the pod must never run; 07m delivers it and both containers must
 become ready. They differ in exactly one field.
 
+**Known limitation — one version per feed per boot.** Two modules from the same
+feed at different SVNs both declare the same package, so both define `containers`
+and `svn` as complete rules and regorus reports a conflict when the second is
+applied. That is fail-closed (the delivery is refused; nothing already applied
+changes), and it is consistent with the exact-SVN pin in §4.15, which already
+means a container authorized under one fragment version is not re-evaluated
+against another's. It does mean a rolling fragment upgrade has to happen across a
+sandbox boundary rather than inside a live sandbox. Fragments that use the shared
+`agent_policy.fragments` package are unaffected only to the extent that they
+declare distinct rule names, which is the same constraint stated differently.
+
 ---
 
 ## 5. Measured configuration
