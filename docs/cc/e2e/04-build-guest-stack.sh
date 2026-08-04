@@ -76,7 +76,12 @@ rm -rf build/agent
 # how stage 07 came to test a guest-side fetch that this branch had already
 # replaced, and it cost a full debugging cycle because every artefact check
 # upstream of the image passed. Cheaper to rebuild the tree than to trust it.
-rm -rf build/rootfs-image
+#
+# sudo, and anchored to $E2E_REPO_DIR rather than a relative path: the tree is
+# populated by a build container running as root, so an unprivileged rm deletes
+# only what it can and leaves a half-gutted rootfs behind -- which the next build
+# then fails on. Delete it completely or not at all.
+sudo rm -rf "$E2E_REPO_DIR/build/rootfs-image"
 rm -f build/kata-static-agent.tar.zst \
       build/kata-static-rootfs-image.tar.zst \
       "$LB/build/kata-static-agent.tar.zst"
