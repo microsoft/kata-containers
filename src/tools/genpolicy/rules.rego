@@ -2057,8 +2057,17 @@ container_by_ref(ref) := c if {
 # never bypass.
 #
 # What this rule adds is the outer bound: a policy that declares no fragments has no reason
-# to accept any, so the endpoint stays shut for it. `policy_fragments` is undefined in such
-# a policy, which leaves the body undefined and falls through to the default.
+# to accept any, so the endpoint stays shut for it.
+#
+# `policy_fragments` must be *defined* for that to work. Rego's undefined-is-fail-closed
+# behaviour applies to evaluation, not to compilation: a bare reference to a rule nothing
+# declares is an unsafe variable, and regorus rejects the whole module rather than leaving
+# this one rule undefined. That is not fail-closed, it is fail-to-load -- the agent cannot
+# build its engine at all, so every request is refused and no pod can start. genpolicy does
+# not emit `policy_fragments` (only base policies that declare fragments append it), which
+# is the ordinary case, so the default below is what keeps the ordinary case working.
+default policy_fragments := []
+
 default LoadPolicyFragmentRequest := false
 
 LoadPolicyFragmentRequest if {
