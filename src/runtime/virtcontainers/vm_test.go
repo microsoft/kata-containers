@@ -70,6 +70,8 @@ func TestNewVM(t *testing.T) {
 
 	err = vm.ReseedRNG(context.Background())
 	assert.Nil(err)
+	err = vm.SyncTime(context.Background())
+	assert.Nil(err)
 
 	// restore a VM from a snapshot
 	vmFromSnapshot, err := NewVMFromSnapshot(ctx, config, testDir)

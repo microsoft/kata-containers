@@ -13,9 +13,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/config"
@@ -79,6 +81,7 @@ type clhClientMock struct {
 	vmInfo          chclient.VmInfo
 	restoreRequest  *chclient.RestoreConfig
 	snapshotRequest *chclient.VmSnapshotConfig
+	shutdownVMM     func() error
 }
 
 func (c *clhClientMock) VmmPingGet(ctx context.Context) (chclient.VmmPingResponse, *http.Response, error) {
@@ -86,7 +89,46 @@ func (c *clhClientMock) VmmPingGet(ctx context.Context) (chclient.VmmPingRespons
 }
 
 func (c *clhClientMock) ShutdownVMM(ctx context.Context) (*http.Response, error) {
+	if c.shutdownVMM != nil {
+		return nil, c.shutdownVMM()
+	}
 	return nil, nil
+}
+
+func TestClhTerminateReapsProcessWhenShutdownRequestFails(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	require.NoError(t, cmd.Start())
+	reaped := false
+	t.Cleanup(func() {
+		if !reaped {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	})
+
+	shutdownErr := errors.New("VMM disconnected during shutdown")
+	mockClient := &clhClientMock{
+		shutdownVMM: func() error {
+			require.NoError(t, cmd.Process.Kill())
+			return shutdownErr
+		},
+	}
+	clh := &cloudHypervisor{
+		id:        "reap-after-shutdown-error",
+		APIClient: mockClient,
+		state: CloudHypervisorState{
+			PID: cmd.Process.Pid,
+		},
+		config: HypervisorConfig{
+			VMStorePath: t.TempDir(),
+			SharedFS:    config.NoSharedFS,
+		},
+	}
+
+	require.NoError(t, clh.StopVM(context.Background(), false))
+	_, waitErr := syscall.Wait4(cmd.Process.Pid, nil, syscall.WNOHANG, nil)
+	assert.ErrorIs(t, waitErr, syscall.ECHILD)
+	reaped = true
 }
 
 func (c *clhClientMock) CreateVM(ctx context.Context, vmConfig chclient.VmConfig) (*http.Response, error) {

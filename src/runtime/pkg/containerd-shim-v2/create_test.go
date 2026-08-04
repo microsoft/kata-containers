@@ -8,10 +8,12 @@ package containerdshim
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"testing"
+	"time"
 
 	taskAPI "github.com/containerd/containerd/api/runtime/task/v2"
 	"github.com/containerd/containerd/namespaces"
@@ -19,6 +21,7 @@ import (
 	crioption "github.com/containerd/cri-containerd/pkg/api/runtimeoptions/v1"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/config"
 	ktu "github.com/kata-containers/kata-containers/src/runtime/pkg/katatestutils"
@@ -218,6 +221,124 @@ func TestCreateContainerSuccess(t *testing.T) {
 	ctx := namespaces.WithNamespace(context.Background(), "UnitTest")
 	_, err = s.Create(ctx, req)
 	assert.NoError(err)
+}
+
+func TestCreateRestoredContainerIsNotAbandonedOnCancellation(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	stopped := false
+	deleted := false
+	sandbox := &vcmock.Sandbox{
+		MockID: testSandboxID,
+		RestoreContainerFunc: func(containerConfig vc.ContainerConfig) (vc.VCContainer, error) {
+			close(entered)
+			<-release
+			return &vcmock.Container{}, nil
+		},
+		AbortRestoreFunc: func() error {
+			stopped = true
+			return nil
+		},
+		DeleteFunc: func() error {
+			deleted = true
+			return nil
+		},
+	}
+
+	tmpdir, bundlePath, ociConfigFile := ktu.SetupOCIConfigFile(t)
+	runtimeConfig, err := newTestRuntimeConfig(tmpdir, true)
+	require.NoError(t, err)
+	spec, err := compatoci.ParseConfigJSON(bundlePath)
+	require.NoError(t, err)
+	spec.Annotations = map[string]string{
+		testContainerTypeAnnotation: testContainerTypeContainer,
+		testSandboxIDAnnotation:     testSandboxID,
+	}
+	require.NoError(t, ktu.WriteOCIConfigFile(spec, ociConfigFile))
+
+	s := &service{
+		id:              testSandboxID,
+		sandbox:         sandbox,
+		restoredSandbox: true,
+		containers:      make(map[string]*container),
+		config:          &runtimeConfig,
+		ctx:             context.Background(),
+	}
+	req := &taskAPI.CreateTaskRequest{ID: testContainerID, Bundle: bundlePath, Terminal: true}
+	ctx, cancel := context.WithCancel(namespaces.WithNamespace(context.Background(), "UnitTest"))
+	result := make(chan error, 1)
+	go func() {
+		_, createErr := s.Create(ctx, req)
+		result <- createErr
+	}()
+
+	<-entered
+	cancel()
+	select {
+	case createErr := <-result:
+		t.Fatalf("restore Create returned before its sandbox mutation completed: %v", createErr)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	createErr := <-result
+	require.Error(t, createErr)
+	assert.ErrorIs(t, createErr, context.Canceled)
+	assert.True(t, s.restoreFailed)
+	assert.True(t, stopped)
+	assert.True(t, deleted)
+	assert.NotContains(t, s.containers, testContainerID)
+}
+
+func TestCreateRestoredContainerAdoptionErrorFailsSandbox(t *testing.T) {
+	adoptionErr := errors.New("kata restore failed: workload \"busybox\" is already adopted")
+	stopped := false
+	deleted := false
+	sandbox := &vcmock.Sandbox{
+		MockID: testSandboxID,
+		RestoreContainerFunc: func(vc.ContainerConfig) (vc.VCContainer, error) {
+			return nil, adoptionErr
+		},
+		AbortRestoreFunc: func() error {
+			stopped = true
+			return nil
+		},
+		DeleteFunc: func() error {
+			deleted = true
+			return nil
+		},
+	}
+
+	tmpdir, bundlePath, ociConfigFile := ktu.SetupOCIConfigFile(t)
+	runtimeConfig, err := newTestRuntimeConfig(tmpdir, true)
+	require.NoError(t, err)
+	spec, err := compatoci.ParseConfigJSON(bundlePath)
+	require.NoError(t, err)
+	spec.Annotations = map[string]string{
+		testContainerTypeAnnotation: testContainerTypeContainer,
+		testSandboxIDAnnotation:     testSandboxID,
+	}
+	require.NoError(t, ktu.WriteOCIConfigFile(spec, ociConfigFile))
+
+	s := &service{
+		id:              testSandboxID,
+		sandbox:         sandbox,
+		restoredSandbox: true,
+		containers:      make(map[string]*container),
+		config:          &runtimeConfig,
+		ctx:             context.Background(),
+	}
+	_, err = s.Create(namespaces.WithNamespace(context.Background(), "UnitTest"), &taskAPI.CreateTaskRequest{
+		ID: testContainerID, Bundle: bundlePath, Terminal: true,
+	})
+	require.ErrorContains(t, err, "already adopted")
+	assert.True(t, s.restoreFailed)
+	assert.True(t, stopped)
+	assert.True(t, deleted)
+
+	_, err = s.Create(namespaces.WithNamespace(context.Background(), "UnitTest"), &taskAPI.CreateTaskRequest{
+		ID: "retry-container", Bundle: bundlePath, Terminal: true,
+	})
+	assert.ErrorContains(t, err, "pod sandbox restore is terminal")
 }
 
 func TestCreateContainerFail(t *testing.T) {

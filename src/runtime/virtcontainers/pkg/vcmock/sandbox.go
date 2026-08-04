@@ -92,6 +92,9 @@ func (s *Sandbox) Resume() error {
 
 // Delete implements the VCSandbox function of the same name.
 func (s *Sandbox) Delete(ctx context.Context) error {
+	if s.DeleteFunc != nil {
+		return s.DeleteFunc()
+	}
 	return nil
 }
 
@@ -115,6 +118,14 @@ func (s *Sandbox) RestoreContainer(ctx context.Context, conf vc.ContainerConfig)
 func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) error {
 	if s.FinalizeRestoreNetworkFunc != nil {
 		return s.FinalizeRestoreNetworkFunc()
+	}
+	return fmt.Errorf("%s: %s (%+v): sandboxID: %v", mockErrorPrefix, getSelf(), s, s.MockID)
+}
+
+// AbortRestore implements the VCSandbox function of the same name.
+func (s *Sandbox) AbortRestore(ctx context.Context) error {
+	if s.AbortRestoreFunc != nil {
+		return s.AbortRestoreFunc()
 	}
 	return fmt.Errorf("%s: %s (%+v): sandboxID: %v", mockErrorPrefix, getSelf(), s, s.MockID)
 }

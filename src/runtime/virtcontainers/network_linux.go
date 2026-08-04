@@ -1196,6 +1196,9 @@ func activateRestoreTCFence(ctx context.Context, endpoint Endpoint) (err error) 
 // cleanupRestoreTCFence releases restore TAP FDs and removes its redirects and link.
 func cleanupRestoreTCFence(endpoint Endpoint) {
 	netPair := endpoint.NetworkPair()
+	if netPair == nil {
+		return
+	}
 	for _, fd := range netPair.VMFds {
 		if fd != nil {
 			_ = fd.Close()
