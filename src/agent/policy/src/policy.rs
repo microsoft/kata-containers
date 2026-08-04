@@ -75,17 +75,37 @@ struct MetadataResponse {
 }
 
 /// BL-8: a boot-time fragment declaration from the measured base policy
-/// (`data.agent_policy.policy_fragments[]`). The agent pulls the COSE artifact at `feed`
-/// and verifies it (issuer/SVN/receipt/ordering) through the SRM `FragmentStore`.
+/// (`data.agent_policy.policy_fragments[]`). The host fetches the COSE artifact for `feed`
+/// and pushes it in; the guest verifies it (issuer/SVN/receipt/ordering) through the SRM
+/// `FragmentStore`.
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct FragmentSpec {
-    /// `did:x509` issuer the pulled fragment must be signed by.
+    /// `did:x509` issuer the fragment must be signed by.
     pub issuer: String,
-    /// OCI reference (e.g. `contoso.azurecr.io/frag/infra:1`) to pull the COSE artifact from.
+    /// OCI reference (e.g. `contoso.azurecr.io/frag/infra:1`) the fragment is published at.
     pub feed: String,
     /// Minimum acceptable SVN (rollback floor) for this feed.
     #[serde(default)]
     pub minimum_svn: u64,
+    /// Whether this fragment must be present before any container may be created.
+    ///
+    /// Defaults to `false`, which is C-ACI/hcsshim behaviour: a declaration authorizes a
+    /// fragment and states the terms it must meet, but delivery is lazy and a fragment that
+    /// never arrives simply contributes nothing. That is already safe, because a container
+    /// only the fragment would have permitted still does not match the base policy and is
+    /// refused on its own merits. hcsshim has no equivalent of this flag at all.
+    ///
+    /// Setting it to `true` is *stricter* than C-ACI: it converts the declaration from a
+    /// permission into an obligation, so a host that withholds the fragment cannot run the
+    /// workload under a policy that is missing grants it was measured to include. Use it
+    /// when the fragment carries something whose absence is not fail-safe — a deny rule, an
+    /// audit obligation, or a constraint the base policy assumes has been composed in.
+    ///
+    /// `false` never means "unchecked". An optional fragment that *is* delivered is
+    /// verified exactly as a required one: same issuer binding, same SVN floor, same
+    /// receipt and ordering gates. The flag governs only whether absence is tolerated.
+    #[serde(default)]
+    pub required: bool,
 }
 
 impl AgentPolicy {
@@ -423,12 +443,13 @@ impl AgentPolicy {
 
     /// BL-8: read the boot-time fragment declarations the measured base policy exposes at
     /// `data.agent_policy.policy_fragments`. Each declaration names an `issuer`
-    /// (`did:x509`), a `feed` (OCI reference to pull), and a `minimum_svn`. The agent's
-    /// boot OCI-pull path fetches each declared fragment and verifies it through the SRM.
+    /// (`did:x509`), a `feed` (OCI reference), a `minimum_svn`, and optionally `required`.
+    /// The host delivers each fragment over `LoadPolicyFragment` and the guest verifies it
+    /// through the SRM.
     ///
     /// Returns an empty vector when the base policy declares none (or the value is absent /
-    /// not an array) — a base policy that declares no fragments boots with zero network
-    /// calls and no behavioural change.
+    /// not an array) — a base policy that declares no fragments is unaffected by any of
+    /// this.
     pub fn fragment_specs(&mut self) -> Result<Vec<FragmentSpec>> {
         self.engine.set_input_json("{}")?;
         let results = self
@@ -979,6 +1000,29 @@ mod tests {
         assert_eq!(specs[1].feed, "reg/frag/net:3");
         // minimum_svn defaults to 0 when omitted.
         assert_eq!(specs[1].minimum_svn, 0);
+        // `required` defaults to false when omitted: a declaration is a permission, not an
+        // obligation, unless the policy explicitly says otherwise (C-ACI parity).
+        assert!(!specs[0].required);
+        assert!(!specs[1].required);
+    }
+
+    /// BL-8: `required: true` is parsed off the declaration, so a policy can demand that a
+    /// specific fragment be present while leaving others optional.
+    #[test]
+    fn test_fragment_specs_parse_required_flag() {
+        let mut p = AgentPolicy::new();
+        let base = "package agent_policy\n\
+            policy_fragments := [\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:signer\", \"feed\": \"reg/must:1\", \"minimum_svn\": 2, \"required\": true},\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:signer\", \"feed\": \"reg/may:1\", \"required\": false}\n\
+            ]\n";
+        p.engine
+            .add_policy("agent_policy".to_string(), base.to_string())
+            .unwrap();
+        let specs = p.fragment_specs().unwrap();
+        assert_eq!(specs.len(), 2);
+        assert!(specs[0].required, "explicit required:true must be honoured");
+        assert!(!specs[1].required);
     }
 
     /// TC-F1.1: a verified fragment module flips a specific decision from deny→allow, and

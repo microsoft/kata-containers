@@ -14,13 +14,17 @@
 #
 # That gate makes pod phase a sound oracle in both directions:
 #
-#   declaration absent             -> Running       (control: the wiring is inert)
-#   declared, never delivered      -> never Running (fail-closed)
-#   declared, delivered, valid     -> Running       => delivered AND verified AND injected
+#   declaration absent                        -> Running       (control: wiring is inert)
+#   declared required, never delivered        -> never Running (fail-closed)
+#   declared required, delivered, valid       -> Running       => delivered AND verified AND injected
+#   declared optional, never delivered        -> Running       (C-ACI parity: lazy delivery)
 #
-# The last inference is only valid because of the second: had any step failed,
+# The third inference is only valid because of the second: had any step failed,
 # the gate would still be shut. So "Running with a non-empty policy_fragments[]"
 # is proof of a completed delivery, without reading anything out of the guest.
+#
+# The fourth is what shows the enforcement is opt-in rather than unconditional,
+# and it differs from the second by exactly one field.
 #
 # The control is not optional decoration. Without it, a pod that fails to start
 # for an unrelated reason (a bad rules.rego patch, a broken node) would read as a
@@ -342,11 +346,16 @@ cleanup_pod e2e-frag-none
 # ====================================================== 07b — fail-closed (BL-8)
 step "07b — a declared but undelivered fragment must not run containers"
 render_rules "$WORK/rules-bad.rego" \
-  "[{\"issuer\": \"$ISSUER\", \"feed\": \"$UNREACHABLE_FEED\", \"minimum_svn\": 1}]"
+  "[{\"issuer\": \"$ISSUER\", \"feed\": \"$UNREACHABLE_FEED\", \"minimum_svn\": 1, \"required\": true}]"
 # No delivery annotation on purpose: the measured policy declares a fragment the
 # host never offers. This is the case that matters, because delivery is now the
 # host's job and the host is untrusted — a host that simply withholds a fragment
 # must not get a container out of it.
+#
+# "required": true is what arms that gate. Without it the declaration is lazy,
+# which is C-ACI/hcsshim behaviour, and this pod would legitimately boot — that
+# is 07e below. Asserting both directions is the only way to show the flag is
+# actually read rather than the gate being unconditional or dead.
 apply_case e2e-frag-unfetchable "$WORK/rules-bad.rego"
 if expect_never_running e2e-frag-unfetchable "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
   ok "pod never reached Running — the unsatisfied declaration held the gate (expected)"
@@ -368,7 +377,7 @@ cleanup_pod e2e-frag-unfetchable
 # an ACR, because it only has to be reachable from the node.
 step "07c — good path: a delivered, valid fragment must let containers run"
 render_rules "$WORK/rules-good.rego" \
-  "[{\"issuer\": \"$ISSUER\", \"feed\": \"$FEED\", \"minimum_svn\": $SVN}]"
+  "[{\"issuer\": \"$ISSUER\", \"feed\": \"$FEED\", \"minimum_svn\": $SVN, \"required\": true}]"
 apply_case e2e-frag-good "$WORK/rules-good.rego" "$REF"
 if ! wait_for_soft 300 "pod e2e-frag-good Running" \
      bash -c "kubectl get pod e2e-frag-good -n $NS -o jsonpath='{.status.phase}' | grep -qx Running"; then
@@ -393,7 +402,7 @@ step "07d — negative: an SVN floor above the published fragment must be refuse
 # only come from verification. This is what separates a working trust gate from
 # a host that simply failed to deliver; 07b alone cannot tell those apart.
 render_rules "$WORK/rules-rollback.rego" \
-  "[{\"issuer\": \"$ISSUER\", \"feed\": \"$FEED\", \"minimum_svn\": $((SVN + 1))}]"
+  "[{\"issuer\": \"$ISSUER\", \"feed\": \"$FEED\", \"minimum_svn\": $((SVN + 1)), \"required\": true}]"
 apply_case e2e-frag-rollback "$WORK/rules-rollback.rego" "$REF"
 if expect_never_running e2e-frag-rollback "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
   ok "pod never reached Running — the SVN rollback floor held (expected)"
@@ -403,6 +412,32 @@ else
   die "pod is Running with minimum_svn above the fragment's SVN — the rollback floor is not enforced"
 fi
 cleanup_pod e2e-frag-rollback
+
+# ============================================ 07e — enforcement is opt-in (BL-8)
+step "07e — an undelivered *optional* declaration must still boot"
+# Identical to 07b in every respect except the flag: same unreachable feed, same
+# absent delivery annotation. Only "required" differs, so a difference in outcome
+# can be attributed to nothing else.
+#
+# This is C-ACI/hcsshim parity. There, fragment injection is lazy and nothing
+# obliges the host to send anything; an undelivered fragment simply contributes no
+# grants, and a container only it would have permitted fails to match the composed
+# policy on its own merits. Blocking unconditionally would make every declaration
+# an availability dependency on the host for no security gain.
+#
+# Pairing this with 07b is what makes either meaningful: 07b alone is satisfied by
+# a gate that is simply always shut, and 07e alone by one that is never armed.
+render_rules "$WORK/rules-optional.rego" \
+  "[{\"issuer\": \"$ISSUER\", \"feed\": \"$UNREACHABLE_FEED\", \"minimum_svn\": 1, \"required\": false}]"
+apply_case e2e-frag-optional "$WORK/rules-optional.rego"
+if ! wait_for_soft 300 "pod e2e-frag-optional Running" \
+     bash -c "kubectl get pod e2e-frag-optional -n $NS -o jsonpath='{.status.phase}' | grep -qx Running"; then
+  diagnose e2e-frag-optional
+  cleanup_pod e2e-frag-optional
+  die "an optional declaration blocked the pod — the BL-8 gate is enforcing declarations the policy did not mark required"
+fi
+ok "pod ran with an undelivered optional declaration — enforcement is opt-in (expected)"
+cleanup_pod e2e-frag-optional
 
 ok "fragment delivery e2e passed"
 mark_done 07-fragment-bootpull

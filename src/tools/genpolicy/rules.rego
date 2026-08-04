@@ -1980,6 +1980,16 @@ all_policy_containers := array.concat(policy_data.containers, fragment_container
 # which is fail-closed and therefore safe, but it is also indistinguishable from a rejected
 # fragment and it leaves the delivery path unusable.
 #
+# Each declaration carries an optional `required` flag, read by the agent and not by this
+# rule. It defaults to false, which is C-ACI/hcsshim behaviour: delivery is lazy, and a
+# fragment that never arrives contributes no grants, so anything only it would have
+# permitted is refused by the composed policy on its own merits. `required: true` is
+# stricter than C-ACI — it makes the declaration an obligation, so the agent refuses to
+# create any container until that fragment has been delivered and verified. Use it when the
+# fragment's absence is not fail-safe (a deny rule, an audit obligation, a constraint the
+# base policy assumes has been composed in). Either way a delivered fragment is verified
+# identically; `required` governs only whether absence is an error.
+#
 # The rule is coarse by construction, because the request carries nothing finer to bind to.
 # The host sends only the COSE envelope: issuer, feed and SVN are derived from the bytes the
 # guest verifies rather than from anything the host asserts, precisely so that a lying host

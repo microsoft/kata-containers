@@ -1057,9 +1057,11 @@ impl agent_ttrpc::AgentService for AgentService {
 
         // BL-8 fail-closed gate. The measured base policy may declare policy fragments that
         // the host is responsible for delivering (the guest has no network of its own — see
-        // policy_fragments.rs). Refuse to create anything until every declaration has been
-        // delivered and verified, otherwise a host that simply never pushes would get the
-        // workload running under a policy missing the grants it was measured to include.
+        // policy_fragments.rs). Refuse to create anything while a declaration the policy
+        // marked `required: true` is undelivered, otherwise a host that simply never pushes
+        // would get the workload running under a policy missing grants it was measured to
+        // include. Declarations without that flag are lazy (C-ACI/hcsshim behaviour) and do
+        // not gate: an undelivered fragment grants nothing, so it cannot widen what runs.
         //
         // Before is_allowed(), because the point is that the active policy is not yet the
         // policy that was measured — its verdict is not the one to act on.

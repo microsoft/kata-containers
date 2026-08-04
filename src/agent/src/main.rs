@@ -589,15 +589,19 @@ async fn start_sandbox(
     // succeed. Delivery is the host's job (as in C-ACI/hcsshim), arriving through
     // rpc::load_policy_fragment; verification stays here, against the measured trust root.
     //
-    // Fail-closed is preserved by refusing container creation while any declaration is
-    // outstanding, not by aborting here — the bytes legitimately have not arrived yet.
-    // Failing to *read* the declarations is still fatal: an unreadable requirement list
-    // must not be mistaken for an empty one.
+    // Fail-closed is preserved by refusing container creation while any declaration marked
+    // `required` is outstanding, not by aborting here — the bytes legitimately have not
+    // arrived yet. Declarations without that flag are lazy, as in C-ACI/hcsshim: an
+    // undelivered fragment grants nothing, so its absence cannot widen what runs. Failing to
+    // *read* the declarations is still fatal: an unreadable list must not be mistaken for an
+    // empty one.
     #[cfg(feature = "strict-policy")]
     match policy_fragments::record_declared_fragments().await {
         Ok(n) if n > 0 => info!(
             logger,
-            "FR-1/BL-8: {} declared fragment(s) outstanding; containers blocked until delivered", n
+            "FR-1/BL-8: {} declared fragment(s) recorded; see policy-fragments logs for which \
+             are required",
+            n
         ),
         Ok(_) => {}
         Err(e) => {

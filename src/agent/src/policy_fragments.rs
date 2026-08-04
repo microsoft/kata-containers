@@ -6,9 +6,9 @@
 //! BL-8 — the measured base policy's declared policy-fragment requirements.
 //!
 //! The measured base policy may declare `data.agent_policy.policy_fragments[]` entries —
-//! each naming an `issuer` (`did:x509`), a `feed` (OCI reference), and a `minimum_svn`.
-//! A declaration is a *requirement*: the sandbox must not run containers until every
-//! declared fragment has been delivered and verified.
+//! each naming an `issuer` (`did:x509`), a `feed` (OCI reference), a `minimum_svn`, and
+//! optionally `required`. A declaration always states the *terms* a fragment for that feed
+//! must meet. Whether its **absence** is tolerated is the policy's choice, via `required`.
 //!
 //! # Why the guest does not fetch
 //!
@@ -28,17 +28,31 @@
 //!
 //! # What still makes this fail-closed
 //!
-//! Moving the fetch out means the host now chooses *when* — and whether — to deliver. So
-//! the declaration is recorded at boot as an outstanding requirement and container
-//! creation is refused while any requirement is unsatisfied (see
-//! `assert_all_declared_satisfied`). A host that pushes nothing, pushes late, or pushes a
-//! fragment for the wrong feed cannot get a container started. That is the fail-closed
-//! guarantee the boot-time abort used to provide, enforced at the point where it is
-//! actually observable.
+//! Moving the fetch out means the host now chooses *when* — and whether — to deliver. Two
+//! separate things keep that safe, and it is worth being clear about which does what.
 //!
-//! Verification itself is unchanged and still happens entirely in the guest, through the
-//! same SRM `FragmentStore` as before, so FR-1d (did:x509), FR-1f (receipts), FR-1i
-//! (rollback floor) and FR-1j (ordering) continue to apply.
+//! The first applies always and needs no opt-in: a fragment that never arrives contributes
+//! no grants, so a container only that fragment would have permitted does not match the
+//! composed policy and is refused on its own merits. Withholding a fragment can therefore
+//! only ever *reduce* what runs. This is exactly C-ACI/hcsshim's position, where fragments
+//! are injected lazily and nothing obliges the host to send any of them.
+//!
+//! The second is opt-in, because it is stricter than C-ACI. A fragment may carry something
+//! whose absence is *not* fail-safe — a deny rule, an audit obligation, a constraint the
+//! base policy was written assuming had been composed in. For those, silence is not a safe
+//! default, and the policy says so by setting `required: true`. Such a declaration is
+//! recorded at boot as an outstanding obligation and container creation is refused while it
+//! is unsatisfied (see [`assert_all_declared_satisfied`]). A host that pushes nothing,
+//! pushes late, or pushes a fragment for the wrong feed cannot get a container started.
+//!
+//! `required: false` is not `unchecked`. Every delivered fragment — optional or not — is
+//! verified identically and cross-checked against its declaration, so a fragment that
+//! arrives with the wrong issuer or an SVN below the measured floor is rejected either way.
+//! The flag decides only whether *absence* is an error.
+//!
+//! Verification itself happens entirely in the guest, through the SRM `FragmentStore`, so
+//! FR-1d (did:x509), FR-1f (receipts), FR-1i (rollback floor) and FR-1j (ordering) apply
+//! regardless of `required`.
 
 use anyhow::{bail, Result};
 use slog::info;
@@ -55,8 +69,13 @@ macro_rules! sl {
 }
 
 lazy_static! {
-    /// Fragment requirements declared by the measured base policy that have not yet been
-    /// satisfied by a verified delivery. Emptied entry by entry as fragments arrive.
+    /// Fragment declarations from the measured base policy that have not yet been satisfied
+    /// by a verified delivery. Emptied entry by entry as fragments arrive.
+    ///
+    /// Optional (`required: false`) declarations are tracked here too, even though their
+    /// absence never blocks anything: they still have to be cross-checked against the
+    /// delivery that claims to satisfy them, so a fragment arriving for a declared feed with
+    /// the wrong issuer or too low an SVN is rejected whether or not it was mandatory.
     static ref PENDING: Mutex<Vec<FragmentSpec>> = Mutex::new(Vec::new());
 }
 
@@ -82,10 +101,15 @@ pub async fn record_declared_fragments() -> Result<usize> {
     for spec in &specs {
         info!(
             sl!(),
-            "policy-fragments: awaiting delivery of feed {} (issuer {}, minimum_svn {})",
+            "policy-fragments: expecting feed {} (issuer {}, minimum_svn {}, {})",
             spec.feed,
             spec.issuer,
-            spec.minimum_svn
+            spec.minimum_svn,
+            if spec.required {
+                "required — containers blocked until delivered"
+            } else {
+                "optional — absence contributes no grants"
+            }
         );
     }
 
@@ -108,12 +132,24 @@ pub async fn record_declared_fragments() -> Result<usize> {
     }
 
     let n = specs.len();
+    let required = specs.iter().filter(|s| s.required).count();
     *PENDING.lock().await = specs;
-    info!(
-        sl!(),
-        "policy-fragments: {} declared fragment(s) outstanding; containers are blocked until each is delivered and verified",
-        n
-    );
+    if required == 0 {
+        info!(
+            sl!(),
+            "policy-fragments: {} declared fragment(s), none required; delivery is lazy and \
+             containers are not gated on it",
+            n
+        );
+    } else {
+        info!(
+            sl!(),
+            "policy-fragments: {} declared fragment(s), {} required; containers are blocked \
+             until each required fragment is delivered and verified",
+            n,
+            required
+        );
+    }
     Ok(n)
 }
 
@@ -179,29 +215,36 @@ fn satisfy_in(
     Ok(before - pending.len())
 }
 
-/// Fail unless every declared fragment has been delivered and verified.
+/// Fail unless every fragment the policy marked `required` has been delivered and verified.
 ///
-/// This is the fail-closed gate. It replaces the boot-time `abort()`: because delivery is
-/// now the host's responsibility, the requirement has to be enforced at the point the
-/// sandbox would otherwise start doing work under an incompletely composed policy.
+/// This is the opt-in fail-closed gate. It exists because delivery is the host's
+/// responsibility, so a requirement has to be enforced at the point the sandbox would
+/// otherwise start doing work under an incompletely composed policy.
+///
+/// Declarations without `required: true` are ignored here by design — see the module docs.
+/// Their absence is already fail-safe: an undelivered fragment grants nothing, so anything
+/// it would have permitted is refused by the composed policy anyway. Blocking on them would
+/// make every declaration an availability dependency on the host for no security gain, and
+/// would diverge from C-ACI/hcsshim, where fragment injection is lazy and unobligated.
 pub async fn assert_all_declared_satisfied() -> Result<()> {
     assert_satisfied_in(&PENDING.lock().await)
 }
 
-/// The gate itself, over an explicit requirement list. Split out for the same reason as
+/// The gate itself, over an explicit declaration list. Split out for the same reason as
 /// [`satisfy_in`] — so it can be tested without racing other tests through `PENDING`.
 fn assert_satisfied_in(pending: &[FragmentSpec]) -> Result<()> {
-    if pending.is_empty() {
+    let outstanding: Vec<&FragmentSpec> = pending.iter().filter(|s| s.required).collect();
+    if outstanding.is_empty() {
         return Ok(());
     }
-    let outstanding = pending
+    let detail = outstanding
         .iter()
         .map(|s| format!("{} (issuer {}, minimum_svn {})", s.feed, s.issuer, s.minimum_svn))
         .collect::<Vec<_>>()
         .join(", ");
     bail!(
-        "the measured base policy declares {} policy fragment(s) that have not been delivered and verified: {outstanding}",
-        pending.len()
+        "the measured base policy requires {} policy fragment(s) that have not been delivered and verified: {detail}",
+        outstanding.len()
     )
 }
 
@@ -214,6 +257,16 @@ mod tests {
             issuer: issuer.to_string(),
             feed: feed.to_string(),
             minimum_svn,
+            required: false,
+        }
+    }
+
+    /// A declaration the policy marked `required: true` — the only kind that gates
+    /// container creation.
+    fn req(issuer: &str, feed: &str, minimum_svn: u64) -> FragmentSpec {
+        FragmentSpec {
+            required: true,
+            ..spec(issuer, feed, minimum_svn)
         }
     }
 
@@ -224,13 +277,64 @@ mod tests {
 
     #[test]
     fn outstanding_declaration_blocks_until_delivered() {
-        let mut pending = vec![spec("did:x509:i", "reg.io/frag:1", 2)];
+        let mut pending = vec![req("did:x509:i", "reg.io/frag:1", 2)];
         let err = assert_satisfied_in(&pending).unwrap_err().to_string();
         assert!(err.contains("reg.io/frag:1"), "unhelpful error: {}", err);
 
         // A matching delivery clears it, and only then may containers start.
         assert_eq!(satisfy_in(&mut pending, "did:x509:i", "reg.io/frag:1", 2).unwrap(), 1);
         assert!(assert_satisfied_in(&pending).is_ok());
+    }
+
+    /// The enforcement is opt-in: a declaration the policy did not mark `required` states
+    /// the terms a fragment must meet, but never blocks on its absence. This is C-ACI
+    /// parity — an undelivered fragment simply contributes no grants.
+    #[test]
+    fn optional_declaration_does_not_block() {
+        let pending = vec![spec("did:x509:i", "reg.io/frag:1", 2)];
+        assert!(
+            assert_satisfied_in(&pending).is_ok(),
+            "an undelivered optional fragment must not gate container creation"
+        );
+    }
+
+    /// Mixed policies are the point of a per-declaration flag: one mandatory baseline
+    /// alongside optional add-ons. Only the mandatory one holds the gate, and the error
+    /// names it rather than the optional ones.
+    #[test]
+    fn only_required_declarations_hold_the_gate() {
+        let mut pending = vec![
+            spec("did:x509:i", "reg.io/optional:1", 1),
+            req("did:x509:i", "reg.io/mandatory:1", 1),
+        ];
+        let err = assert_satisfied_in(&pending).unwrap_err().to_string();
+        assert!(err.contains("reg.io/mandatory:1"), "unhelpful error: {}", err);
+        assert!(
+            !err.contains("reg.io/optional:1"),
+            "an optional declaration must not be reported as outstanding: {}",
+            err
+        );
+
+        // Delivering only the required one opens the gate, even though the optional
+        // declaration is still outstanding.
+        satisfy_in(&mut pending, "did:x509:i", "reg.io/mandatory:1", 1).unwrap();
+        assert!(assert_satisfied_in(&pending).is_ok());
+        assert_eq!(pending.len(), 1, "the optional declaration is still tracked");
+    }
+
+    /// `required: false` is not `unchecked`. An optional fragment that is actually
+    /// delivered must meet its declared terms exactly as a required one does.
+    #[test]
+    fn optional_declarations_are_still_cross_checked_on_delivery() {
+        let mut pending = vec![spec("did:x509:good", "reg.io/frag:1", 5)];
+        assert!(
+            satisfy_in(&mut pending, "did:x509:evil", "reg.io/frag:1", 9).is_err(),
+            "wrong issuer must be rejected even for an optional declaration"
+        );
+        assert!(
+            satisfy_in(&mut pending, "did:x509:good", "reg.io/frag:1", 4).is_err(),
+            "svn below the measured floor must be rejected even for an optional declaration"
+        );
     }
 
     #[test]
@@ -242,7 +346,7 @@ mod tests {
 
     #[test]
     fn svn_below_the_measured_floor_is_rejected_and_does_not_satisfy() {
-        let mut pending = vec![spec("did:x509:i", "reg.io/frag:1", 5)];
+        let mut pending = vec![req("did:x509:i", "reg.io/frag:1", 5)];
         assert!(satisfy_in(&mut pending, "did:x509:i", "reg.io/frag:1", 4).is_err());
         // Still outstanding: a rejected delivery must not clear the requirement.
         assert_eq!(pending.len(), 1);
@@ -269,8 +373,8 @@ mod tests {
     #[test]
     fn each_declaration_must_be_satisfied_individually() {
         let mut pending = vec![
-            spec("did:x509:i", "reg.io/a:1", 1),
-            spec("did:x509:i", "reg.io/b:1", 1),
+            req("did:x509:i", "reg.io/a:1", 1),
+            req("did:x509:i", "reg.io/b:1", 1),
         ];
         satisfy_in(&mut pending, "did:x509:i", "reg.io/a:1", 1).unwrap();
         assert_eq!(pending.len(), 1);

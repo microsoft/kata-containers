@@ -53,6 +53,14 @@ pub struct FragmentSpec {
     pub issuer: String,
     pub feed: String,
     pub minimum_svn: i64,
+
+    /// BL-8: whether the guest must refuse to create containers until this fragment has
+    /// been delivered and verified. Optional in the settings and defaulting to false, which
+    /// is C-ACI/hcsshim behaviour — the declaration authorizes the fragment and fixes the
+    /// terms it must meet, but its absence is tolerated because an undelivered fragment
+    /// simply grants nothing. Set it only for fragments whose absence is not fail-safe.
+    #[serde(default)]
+    pub required: bool,
 }
 
 /// Representation of the policy_data field from the output policy text.
