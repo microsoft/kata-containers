@@ -480,6 +480,11 @@ feature, so `crypto.sha256` is not available inside the policy.
 hcsshim has no analogue of either the bug or the mechanism: it keeps no persisted
 per-container policy state, so it has nothing to name and nothing to re-bind.
 
+Re-verified live after the change: stage 07 is 11/11 green with the state value an
+object rather than a number, so every rule that reads it -- the exec family through
+`get_state_container`, and `RemoveContainer` / `SignalProcess` / the per-container
+lifecycle gates for defined-ness -- still behaves as before.
+
 ---
 
 ## 5. Measured configuration
