@@ -68,6 +68,15 @@ fi
 
 log "removing stale tarballs"
 rm -rf build/agent
+# The unpacked rootfs tree has to go with them. It is a build cache that the
+# rootfs build reuses wholesale when it is present, and reusing it keeps
+# whatever kata-agent was installed the first time it was populated -- so a
+# freshly built, correctly verified agent tarball can sit in build/ while the
+# image ships an agent that is days old. That is not hypothetical: it is exactly
+# how stage 07 came to test a guest-side fetch that this branch had already
+# replaced, and it cost a full debugging cycle because every artefact check
+# upstream of the image passed. Cheaper to rebuild the tree than to trust it.
+rm -rf build/rootfs-image
 rm -f build/kata-static-agent.tar.zst \
       build/kata-static-rootfs-image.tar.zst \
       "$LB/build/kata-static-agent.tar.zst"
@@ -143,6 +152,14 @@ bypass=$(strings -a "$BIN" | grep -c AllowRequestsFailingPolicy || true)
 log "binary check: srm=$srm bypass=$bypass"
 [ "$srm"    -gt 100 ] || die "STRICT_POLICY did not take: only $srm SRM symbols (expected >100)"
 [ "$bypass" -eq 0 ]   || die "policy-failure bypass symbol present ($bypass) — not a hardened build"
+
+# Fingerprint the verified binary so the image build can be held to it below.
+# rootfs.sh strips the agent on the way in, so neither a hash of the file nor its
+# mtime survives the trip (it arrives by tar, which preserves the *build* mtime,
+# and is then rewritten by strip). The string literals in the loaded sections do
+# survive stripping untouched, so hash those: identical here and in the rootfs
+# means the same binary, and any real agent change moves it.
+AGENT_FP=$(strings -d "$BIN" | sha256sum | cut -d' ' -f1)
 rm -rf "$CHK"; trap - EXIT
 
 # The SetPolicy handler is *compiled out* under strict-policy, so there is no
@@ -162,6 +179,23 @@ fi
 ok "hardened agent verified"
 
 build_component rootfs-image
+
+# Every check above proves the agent *tarball* is right. None of them prove the
+# image contains it, and that is the gap that let stage 07 spend a run testing an
+# agent from a previous day: the rootfs build reused a cached tree and quietly
+# kept the agent already in it. Assert the agent that actually landed in the
+# rootfs is the one just verified, so a stale image fails here -- naming the
+# cause -- instead of surfacing later as an unexplained guest failure.
+ROOTFS_AGENT=$(find build/rootfs-image/builddir -path '*/usr/bin/kata-agent' -type f 2>/dev/null | head -1)
+[ -n "$ROOTFS_AGENT" ] \
+  || die "no kata-agent under build/rootfs-image/builddir — the rootfs build installed no agent"
+got_fp=$(strings -d "$ROOTFS_AGENT" | sha256sum | cut -d' ' -f1)
+if [ "$got_fp" != "$AGENT_FP" ]; then
+  warn "rootfs agent: $ROOTFS_AGENT ($(date -r "$ROOTFS_AGENT" '+%F %T'))"
+  warn "expected fingerprint ${AGENT_FP:0:16}, got ${got_fp:0:16}"
+  die "the image would ship an agent that is not the one built in this run — stale rootfs cache"
+fi
+ok "rootfs carries the agent built in this run (${AGENT_FP:0:12})"
 if [ "$REBUILD_EXT" = "1" ]; then
   # The extension image is assembled from prebuilt inputs rather than compiled:
   # install_image_coco_extension unpacks the CoCo guest components and the pause
