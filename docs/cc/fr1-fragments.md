@@ -285,6 +285,38 @@ cap and no cycle guard (`update_issuer` appends, so a re-load of the same feed s
 another entry). `allow_nested` is that same parent-granted opt-in with the reach written
 down, plus the depth cap and first-declaration-wins rule.
 
+### 4.11 Gate parity with hcsshim on the load path
+
+Every check hcsshim performs before accepting a fragment has an equivalent or stronger
+counterpart here. Audited 2026-08-04 against `pkg/securitypolicy/framework.rego` and the
+Go verification path.
+
+| hcsshim gate | ours | verdict |
+| --- | --- | --- |
+| COSE_Sign1 signature + cert chain (`cosesign1.UnpackAndValidateCOSE1CertChain`) | `fragments.rs::verify_cose` / `verify_cose_x509` | parity |
+| did:x509 → issuer identity (`didx509resolver.Resolve`) | `did_x509.rs:290-349`, derived DID must equal declared issuer | parity |
+| issuer+feed must match a candidate (`fragment_issuer_feed_ok`) | `declare_feed` allow-list; otherwise `UndeclaredFeed` | parity |
+| SVN ≥ `minimum_svn` (`header_svn_ok`, `svn_ok_if_defined`) | single signed `svn`, and `min_required()` takes the **max** with the trust root's issuer-wide floor | **stronger** — a declaration cannot sink below the issuer floor; hcsshim honours the per-declaration value alone |
+| `required_receipts` (`fragment_receipts_ok`) | `require_receipt` (global) + `required_receipt_from` (per issuer/feed) | parity, plus an `allowed_ledgers` allow-list on the *presented* ledger |
+| module confined to a namespace (`add_module`, `input.namespace`) | `apply_fragment_module` package confinement | parity |
+| — | `required`: fragment must be present before containers start | **ours only** |
+| — | `allow_nested` issuer scope, depth cap, first-declaration-wins | **ours only** (hcsshim opt-in is unscoped, uncapped, and stacks duplicates) |
+| — | SVN high-water marks persisted across agent restart (FR-1i) | **ours only** |
+| — | Stage-2 transparency inclusion + consistency proofs (§4.4) | **ours only** |
+
+Deltas that are **not** gates — surface hcsshim has and we do not, none of which is a check we
+skip:
+
+- `TTL:<subject>` as a receipt requirement, which indirects through *which* Trust List
+  supplied the validating key. We scope by ledger name and do not track per-key TTL
+  provenance.
+- Fragment `parameters`, and the richer `includes` vocabulary (`external_processes`,
+  `platform_rules`, `transparency_trust_lists`).
+- Metadata-only load — hcsshim can accept a fragment and deliberately *not* add its module
+  (`add_module := "namespace" in fragment.includes`).
+- Semver `framework_version` negotiation via `apply_defaults`. We version the statement
+  format (`kata-policy-fragment/v3`) but do not negotiate defaults across versions.
+
 ---
 
 ## 5. Measured configuration
