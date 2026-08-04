@@ -74,6 +74,78 @@ struct MetadataResponse {
     ops: Option<json_patch::Patch>,
 }
 
+/// BL-8: whether a delivered fragment may itself declare further fragments, and whose.
+///
+/// One attribute carries both the switch and the scope, so the two cannot drift apart —
+/// there is no way to enable delegation without saying how far it reaches.
+///
+/// Authored in rego as the `allow_nested` field of a declaration:
+///
+/// ```text
+/// (omitted) | false        no delegation                              (default)
+/// "same-issuer"           nested declarations may name only the delivering
+///                         fragment's own issuer
+/// "any-authorized"        any issuer the measured trust root authorizes
+/// ["did:x509:a", ...]     only these issuers
+/// ```
+///
+/// `true` is deliberately **not** accepted: it enables delegation without saying whose, and
+/// picking a scope on the author's behalf is exactly the kind of silent assumption this
+/// gate exists to prevent. It is rejected with a message naming the valid forms.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+pub enum AllowNested {
+    /// `false` — no delegation. `true` is parsed here so it can be rejected by name.
+    Flag(bool),
+    /// `"same-issuer"` / `"any-authorized"` / `"none"`.
+    Mode(String),
+    /// An explicit issuer allow-list.
+    Issuers(Vec<String>),
+}
+
+impl Default for AllowNested {
+    fn default() -> Self {
+        AllowNested::Flag(false)
+    }
+}
+
+/// The resolved, validated form of [`AllowNested`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum NestedScope {
+    /// The fragment may not declare further fragments.
+    None,
+    /// Nested declarations must name the delivering fragment's own issuer.
+    SameIssuer,
+    /// Nested declarations may name any issuer the measured trust root authorizes.
+    AnyAuthorized,
+    /// Nested declarations may name only these issuers.
+    Issuers(Vec<String>),
+}
+
+impl NestedScope {
+    /// Whether `issuer` may appear in a nested declaration carried by a fragment signed by
+    /// `parent_issuer`.
+    ///
+    /// Note this is a *scope* check only. It never widens trust on its own: the nested
+    /// fragment must still be signed by an issuer the measured trust root authorizes, or
+    /// `verify_cose` rejects it as `UnauthorizedIssuer` regardless of what any declaration
+    /// says. `AnyAuthorized` therefore means "anyone the trust root already trusts", not
+    /// "anyone".
+    pub fn permits(&self, parent_issuer: &str, issuer: &str) -> bool {
+        match self {
+            NestedScope::None => false,
+            NestedScope::SameIssuer => issuer == parent_issuer,
+            NestedScope::AnyAuthorized => true,
+            NestedScope::Issuers(list) => list.iter().any(|i| i == issuer),
+        }
+    }
+
+    /// Whether delegation is enabled at all.
+    pub fn is_enabled(&self) -> bool {
+        !matches!(self, NestedScope::None)
+    }
+}
+
 /// BL-8: a boot-time fragment declaration from the measured base policy
 /// (`data.agent_policy.policy_fragments[]`). The host fetches the COSE artifact for `feed`
 /// and pushes it in; the guest verifies it (issuer/SVN/receipt/ordering) through the SRM
@@ -106,6 +178,50 @@ pub struct FragmentSpec {
     /// receipt and ordering gates. The flag governs only whether absence is tolerated.
     #[serde(default)]
     pub required: bool,
+    /// Whether this fragment may itself declare further fragments, and whose. Defaults to
+    /// no delegation. See [`AllowNested`].
+    #[serde(default)]
+    pub allow_nested: AllowNested,
+}
+
+impl FragmentSpec {
+    /// Resolve and validate [`Self::allow_nested`].
+    ///
+    /// Fails closed on anything unrecognised rather than defaulting to permissive *or* to
+    /// silently disabled: a policy author who mistypes `"same_issuer"` must find out at
+    /// boot, not discover months later that delegation was quietly off (or, worse, on).
+    pub fn nested_scope(&self) -> Result<NestedScope> {
+        match &self.allow_nested {
+            AllowNested::Flag(false) => Ok(NestedScope::None),
+            AllowNested::Flag(true) => bail!(
+                "fragment declaration for feed {:?}: allow_nested = true does not say which \
+                 issuers may be delegated to; use \"same-issuer\", \"any-authorized\", or an \
+                 explicit list of issuer strings",
+                self.feed
+            ),
+            AllowNested::Mode(m) => match m.as_str() {
+                "none" => Ok(NestedScope::None),
+                "same-issuer" => Ok(NestedScope::SameIssuer),
+                "any-authorized" => Ok(NestedScope::AnyAuthorized),
+                other => bail!(
+                    "fragment declaration for feed {:?}: unknown allow_nested value {other:?}; \
+                     expected \"none\", \"same-issuer\", \"any-authorized\", false, or a list \
+                     of issuer strings",
+                    self.feed
+                ),
+            },
+            AllowNested::Issuers(list) => {
+                if list.is_empty() {
+                    bail!(
+                        "fragment declaration for feed {:?}: allow_nested is an empty issuer \
+                         list, which permits nothing; use false to disable delegation",
+                        self.feed
+                    );
+                }
+                Ok(NestedScope::Issuers(list.clone()))
+            }
+        }
+    }
 }
 
 impl AgentPolicy {
@@ -415,12 +531,14 @@ impl AgentPolicy {
     /// scoped to one of the fragment's `includes`), so a fragment can only *add* rules in
     /// its own namespace and can never redefine or shadow a base `agent_policy` rule. The
     /// base policy is authored to consult `data.agent_policy.fragments.*`.
+    /// Returns the rego package the module was applied under, so the caller can find what
+    /// the fragment itself declares (see [`Self::nested_fragment_specs`]).
     pub fn apply_fragment_module(
         &mut self,
         name: &str,
         rego: &str,
         includes: &[String],
-    ) -> Result<()> {
+    ) -> Result<String> {
         let pkg = Self::rego_package(rego)
             .ok_or_else(|| anyhow::anyhow!("fragment module has no package declaration"))?;
 
@@ -438,23 +556,40 @@ impl AgentPolicy {
 
         // Additive merge; never resets the engine, never touches the one-shot lock.
         self.engine.add_policy(name.to_string(), rego.to_string())?;
-        Ok(())
+        Ok(pkg)
+    }
+
+    /// BL-8: read the fragment declarations a *delivered* fragment carries in its own
+    /// module, at `data.<package>.policy_fragments`.
+    ///
+    /// These are signed: `policy_module` is covered by the fragment statement's
+    /// `signing_bytes()`, so the declarations a fragment makes are bound to the same COSE
+    /// signature as everything else it carries. The host cannot add, remove or edit one.
+    ///
+    /// Reading them is only *permitted* when the declaration that authorized this fragment
+    /// enabled delegation, and what they may name is bounded by that declaration's scope —
+    /// see `NestedScope`. This function performs no authorization itself; it only reads.
+    pub fn nested_fragment_specs(&mut self, package: &str) -> Result<Vec<FragmentSpec>> {
+        self.query_fragment_specs(&format!("data.{package}.policy_fragments"))
     }
 
     /// BL-8: read the boot-time fragment declarations the measured base policy exposes at
     /// `data.agent_policy.policy_fragments`. Each declaration names an `issuer`
-    /// (`did:x509`), a `feed` (OCI reference), a `minimum_svn`, and optionally `required`.
-    /// The host delivers each fragment over `LoadPolicyFragment` and the guest verifies it
-    /// through the SRM.
+    /// (`did:x509`), a `feed` (OCI reference), a `minimum_svn`, and optionally `required`
+    /// and `allow_nested`. The host delivers each fragment over `LoadPolicyFragment` and the
+    /// guest verifies it through the SRM.
     ///
     /// Returns an empty vector when the base policy declares none (or the value is absent /
     /// not an array) — a base policy that declares no fragments is unaffected by any of
     /// this.
     pub fn fragment_specs(&mut self) -> Result<Vec<FragmentSpec>> {
+        self.query_fragment_specs("data.agent_policy.policy_fragments")
+    }
+
+    /// Shared parse for a `policy_fragments[]` array at an arbitrary rego path.
+    fn query_fragment_specs(&mut self, query: &str) -> Result<Vec<FragmentSpec>> {
         self.engine.set_input_json("{}")?;
-        let results = self
-            .engine
-            .eval_query("data.agent_policy.policy_fragments".to_string(), false)?;
+        let results = self.engine.eval_query(query.to_string(), false)?;
         let value = match results
             .result
             .first()
@@ -1023,6 +1158,168 @@ mod tests {
         assert_eq!(specs.len(), 2);
         assert!(specs[0].required, "explicit required:true must be honoured");
         assert!(!specs[1].required);
+    }
+
+    /// BL-8: `allow_nested` defaults to no delegation, so a policy written before the
+    /// attribute existed cannot have acquired the capability by upgrade.
+    #[test]
+    fn test_fragment_specs_default_to_no_delegation() {
+        let mut p = AgentPolicy::new();
+        let base = "package agent_policy\n\
+            policy_fragments := [\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:signer\", \"feed\": \"reg/frag:1\"}\n\
+            ]\n";
+        p.engine
+            .add_policy("agent_policy".to_string(), base.to_string())
+            .unwrap();
+        let specs = p.fragment_specs().unwrap();
+        let scope = specs[0].nested_scope().unwrap();
+        assert_eq!(scope, NestedScope::None);
+        assert!(!scope.is_enabled());
+        assert!(
+            !scope.permits("did:x509:0:sha256:AAA::CN:signer", "did:x509:0:sha256:AAA::CN:signer"),
+            "no delegation means not even the fragment's own issuer"
+        );
+    }
+
+    /// BL-8: each accepted `allow_nested` form resolves to the scope it names, and the scope
+    /// admits exactly the issuers it should.
+    #[test]
+    fn test_allow_nested_scopes_resolve_and_bound_issuers() {
+        let parent = "did:x509:0:sha256:AAA::CN:parent";
+        let other = "did:x509:0:sha256:BBB::CN:other";
+        let third = "did:x509:0:sha256:CCC::CN:third";
+
+        let mut p = AgentPolicy::new();
+        let base = format!(
+            "package agent_policy\n\
+            policy_fragments := [\n\
+            {{\"issuer\": \"{parent}\", \"feed\": \"reg/a:1\", \"allow_nested\": \"same-issuer\"}},\n\
+            {{\"issuer\": \"{parent}\", \"feed\": \"reg/b:1\", \"allow_nested\": \"any-authorized\"}},\n\
+            {{\"issuer\": \"{parent}\", \"feed\": \"reg/c:1\", \"allow_nested\": [\"{other}\"]}},\n\
+            {{\"issuer\": \"{parent}\", \"feed\": \"reg/d:1\", \"allow_nested\": false}},\n\
+            {{\"issuer\": \"{parent}\", \"feed\": \"reg/e:1\", \"allow_nested\": \"none\"}}\n\
+            ]\n"
+        );
+        p.engine.add_policy("agent_policy".to_string(), base).unwrap();
+        let specs = p.fragment_specs().unwrap();
+        assert_eq!(specs.len(), 5);
+
+        // same-issuer: the delivering fragment's issuer only.
+        let same = specs[0].nested_scope().unwrap();
+        assert_eq!(same, NestedScope::SameIssuer);
+        assert!(same.permits(parent, parent));
+        assert!(!same.permits(parent, other));
+
+        // any-authorized: bounded by the trust root, not by the declaration.
+        let any = specs[1].nested_scope().unwrap();
+        assert_eq!(any, NestedScope::AnyAuthorized);
+        assert!(any.permits(parent, other));
+
+        // explicit list: exactly the issuers named, and notably not the parent's own unless
+        // it is listed — an explicit list is the whole answer, not an addition to a default.
+        let list = specs[2].nested_scope().unwrap();
+        assert_eq!(list, NestedScope::Issuers(vec![other.to_string()]));
+        assert!(list.permits(parent, other));
+        assert!(!list.permits(parent, third));
+        assert!(!list.permits(parent, parent));
+
+        // Both spellings of "off".
+        assert_eq!(specs[3].nested_scope().unwrap(), NestedScope::None);
+        assert_eq!(specs[4].nested_scope().unwrap(), NestedScope::None);
+    }
+
+    /// BL-8: `allow_nested: true` names no scope, so it is rejected rather than guessed at.
+    /// Guessing either way would be wrong — permissive silently widens delegation, and
+    /// silently disabling it leaves the author believing a control is on when it is not.
+    #[test]
+    fn test_allow_nested_true_is_rejected() {
+        let mut p = AgentPolicy::new();
+        let base = "package agent_policy\n\
+            policy_fragments := [\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:signer\", \"feed\": \"reg/frag:1\", \"allow_nested\": true}\n\
+            ]\n";
+        p.engine
+            .add_policy("agent_policy".to_string(), base.to_string())
+            .unwrap();
+        let specs = p.fragment_specs().unwrap();
+        let err = specs[0].nested_scope().unwrap_err().to_string();
+        assert!(
+            err.contains("does not say which issuers"),
+            "error must tell the author what is missing, got: {}", err
+        );
+        assert!(err.contains("same-issuer"), "error must name a valid form");
+    }
+
+    /// BL-8: an unrecognised mode string fails closed instead of being treated as "off".
+    /// A typo like `same_issuer` must surface at boot, not silently disable delegation.
+    #[test]
+    fn test_allow_nested_unknown_mode_is_rejected() {
+        let mut p = AgentPolicy::new();
+        let base = "package agent_policy\n\
+            policy_fragments := [\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:signer\", \"feed\": \"reg/frag:1\", \"allow_nested\": \"same_issuer\"}\n\
+            ]\n";
+        p.engine
+            .add_policy("agent_policy".to_string(), base.to_string())
+            .unwrap();
+        let err = specs_err(&mut p);
+        assert!(err.contains("same_issuer"), "error must quote the bad value: {}", err);
+    }
+
+    /// BL-8: an empty issuer list permits nothing, which is almost certainly an authoring
+    /// mistake rather than an intent. Reject so it cannot be confused with `false`.
+    #[test]
+    fn test_allow_nested_empty_list_is_rejected() {
+        let mut p = AgentPolicy::new();
+        let base = "package agent_policy\n\
+            policy_fragments := [\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:signer\", \"feed\": \"reg/frag:1\", \"allow_nested\": []}\n\
+            ]\n";
+        p.engine
+            .add_policy("agent_policy".to_string(), base.to_string())
+            .unwrap();
+        let err = specs_err(&mut p);
+        assert!(err.contains("empty issuer list"), "got: {}", err);
+    }
+
+    fn specs_err(p: &mut AgentPolicy) -> String {
+        let specs = p.fragment_specs().unwrap();
+        specs[0].nested_scope().unwrap_err().to_string()
+    }
+
+    /// BL-8: a delivered fragment's own declarations are read from its module's package, so
+    /// two fragments in different namespaces cannot see or overwrite each other's.
+    #[test]
+    fn test_nested_fragment_specs_are_read_per_package() {
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy(
+                "agent_policy".to_string(),
+                "package agent_policy\ndefault SetPolicyRequest := false\n".to_string(),
+            )
+            .unwrap();
+
+        let module = "package agent_policy.fragments.infra\n\
+            policy_fragments := [\n\
+            {\"issuer\": \"did:x509:0:sha256:BBB::CN:child\", \"feed\": \"reg/child:1\", \"minimum_svn\": 5, \"required\": true}\n\
+            ]\n";
+        let pkg = p
+            .apply_fragment_module("fragment:test", module, &["infra".to_string()])
+            .unwrap();
+        assert_eq!(pkg, "agent_policy.fragments.infra");
+
+        let nested = p.nested_fragment_specs(&pkg).unwrap();
+        assert_eq!(nested.len(), 1);
+        assert_eq!(nested[0].feed, "reg/child:1");
+        assert_eq!(nested[0].minimum_svn, 5);
+        assert!(nested[0].required);
+        // A fragment that declares none, and a namespace nobody wrote to, both read empty
+        // rather than erroring — declaring nothing is the overwhelmingly common case.
+        assert!(p
+            .nested_fragment_specs("agent_policy.fragments.absent")
+            .unwrap()
+            .is_empty());
     }
 
     /// TC-F1.1: a verified fragment module flips a specific decision from deny→allow, and

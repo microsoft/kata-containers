@@ -201,6 +201,80 @@ Enforcement lives in `agent/src/policy_fragments.rs`
 `rpc.rs::create_container` *before* `is_allowed()` — the point being that the active policy
 is not yet the measured one, so its verdict is not the one to act on.
 
+### 4.10 Delegated declarations — `allow_nested` (BL-8)
+
+A base policy has to name every fragment it expects at build time. That is fine for a fixed
+composition and awkward for a layered one: an infrastructure fragment that itself depends on
+a networking fragment forces the dependency up into the base policy, where the author may not
+know it exists and certainly cannot track its version.
+
+`allow_nested` lets a declaration delegate that. A fragment may carry fragment declarations
+of its own, in its Rego module at `policy_fragments` inside its own package, and the agent
+registers them as though the base policy had declared them.
+
+Nested declarations are **signed**. `policy_module` is covered by the fragment statement's
+`signing_bytes()`, so they ride the same COSE signature as everything else the fragment
+carries. The host cannot add, remove, or edit one — which is why the declarations live in the
+module and not in a new statement field: adding a signed field would bump the statement
+format from `kata-policy-fragment/v3` to v4 and invalidate every artifact signed to date.
+
+Delegation is off unless the *authorizing* declaration turns it on, and one attribute carries
+both the switch and its reach, so the two cannot drift apart:
+
+| `allow_nested` | nested declarations may name |
+| --- | --- |
+| omitted / `false` / `"none"` | *nothing* — no delegation (default) |
+| `"same-issuer"` | the delivering fragment's own issuer only |
+| `"any-authorized"` | any issuer the measured trust root authorizes |
+| `["did:x509:…", …]` | exactly the issuers listed |
+
+`true` is **rejected**, not interpreted. It enables delegation without saying to whom, and
+both possible guesses are wrong: permissive silently widens the scope, and silently treating
+it as off leaves the author believing a control is on when it is not. The error names the
+valid forms. Unknown mode strings and empty issuer lists are rejected for the same reason — a
+typo like `same_issuer` must surface at boot, not become a quiet no-op. At boot this is
+fatal; a malformed declaration arriving later, inside a fragment, is dropped rather than
+allowed to take down a running sandbox.
+
+**Delegation cannot widen trust.** A declaration only says a feed is expected. The fragment
+behind it must still be signed by an issuer the *measured trust root* authorizes, or
+`verify_cose` rejects it as `UnauthorizedIssuer` — so `"any-authorized"` means "anyone the
+trust root already trusts", never "anyone". `min_required()` keeps the issuer-wide SVN floor
+binding (F-55), so a nested declaration can raise the rollback bar but never lower it. What
+delegation buys is composition, not privilege.
+
+Bounds and behaviours worth knowing:
+
+- **Depth is capped at 4.** Each level must opt in through its own `allow_nested`, so a chain
+  cannot extend itself silently; the cap is a backstop against a cycle (A declares B, B
+  declares A) rather than the primary control. No legitimate composition needs depth — an
+  issuer wanting five fragments declares five, it does not build a linked list.
+- **First declaration wins.** A feed already declared keeps its original terms, so a
+  re-declaration cannot reset a cycle's depth counter or relax an SVN floor a shallower
+  declaration set.
+- **Out-of-scope declarations are dropped, not fatal.** The delivering fragment is verified
+  and committed by the time its declarations are read, so failing the RPC would leave the
+  engine holding a module the host was told had failed. Dropping is fail-closed anyway: an
+  unregistered declaration authorizes no feed, so the fragment behind it is refused as
+  `UndeclaredFeed` and grants nothing. Each drop is logged with the reason.
+- **A fragment nobody declared gets no delegation.** The runtime push path stays open, but
+  nothing granted such a fragment a scope, so its nested declarations are ignored.
+- **A nested declaration may set `required: true`**, which blocks *subsequent* container
+  creation. It cannot retroactively stop containers already running. This is a denial-of-
+  service vector, but only from a signer the trust root authorizes and a parent that
+  explicitly delegated to it — which is the delegation working as asked, not a bypass.
+
+Registration lives in `policy_fragments.rs::register_nested_fragments`, called from
+`rpc.rs::load_policy_fragment` after verify, inject, and commit. Reading the declarations
+uses `policy.rs::nested_fragment_specs`, scoped to the package the module was actually
+accepted under, so two fragments in different namespaces cannot see or overwrite each
+other's.
+
+C-ACI/hcsshim has the equivalent capability — `candidate_fragments` grows with fragments
+contributed by already-loaded fragments — but with no scope attribute: any loaded fragment
+may declare any feed. Ours is the same capability with an explicit, per-declaration bound on
+who may be delegated to, and defaults to off.
+
 ---
 
 ## 5. Measured configuration

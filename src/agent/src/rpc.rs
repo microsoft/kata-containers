@@ -2645,17 +2645,21 @@ impl agent_ttrpc::AgentService for AgentService {
             r.map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?
         };
 
-        if let Some(module) = &verified.policy_module {
-            crate::AGENT_POLICY
-                .lock()
-                .await
-                .apply_fragment_module(
-                    &format!("fragment:{}:{}", verified.issuer, verified.svn),
-                    module,
-                    &verified.includes,
-                )
-                .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
-        }
+        let fragment_package = if let Some(module) = &verified.policy_module {
+            Some(
+                crate::AGENT_POLICY
+                    .lock()
+                    .await
+                    .apply_fragment_module(
+                        &format!("fragment:{}:{}", verified.issuer, verified.svn),
+                        module,
+                        &verified.includes,
+                    )
+                    .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?,
+            )
+        } else {
+            None
+        };
 
         // FR-1i: persist the SVN high-water marks after commit so an agent restart cannot
         // reopen a rollback window. The store on the (encrypted-scratch / sealed) path is
@@ -2679,6 +2683,28 @@ impl agent_ttrpc::AgentService for AgentService {
         )
         .await
         .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
+
+        // BL-8: a fragment may carry fragment declarations of its own, in its signed module.
+        // They are honoured only if the declaration that authorized *this* fragment enabled
+        // delegation, and only within the issuer scope it set; everything else is dropped.
+        //
+        // Read after commit and injection so the declarations come from the module the
+        // engine actually accepted, and so a fragment that failed verification never gets to
+        // influence the feed allow-list.
+        if let Some(pkg) = fragment_package {
+            let nested = crate::AGENT_POLICY
+                .lock()
+                .await
+                .nested_fragment_specs(&pkg)
+                .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
+            crate::policy_fragments::register_nested_fragments(
+                &verified.issuer,
+                &verified.feed,
+                nested,
+            )
+            .await
+            .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
+        }
 
         Ok(Empty::new())
     }

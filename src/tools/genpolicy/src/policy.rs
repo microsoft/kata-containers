@@ -61,6 +61,18 @@ pub struct FragmentSpec {
     /// simply grants nothing. Set it only for fragments whose absence is not fail-safe.
     #[serde(default)]
     pub required: bool,
+
+    /// BL-8: whether this fragment may itself declare further fragments, and whose. Passed
+    /// through verbatim so the agent validates it — genpolicy has no trust context with
+    /// which to judge an issuer scope, and a settings-time check here would only be a
+    /// second place to keep the accepted forms in sync. Omitted from the emitted policy
+    /// when unset, so existing settings produce byte-identical output.
+    ///
+    /// Accepted forms: `false`, `"none"`, `"same-issuer"`, `"any-authorized"`, or a list of
+    /// issuer strings. Bare `true` is rejected by the agent, because it enables delegation
+    /// without saying to whom.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_nested: Option<serde_json::Value>,
 }
 
 /// Representation of the policy_data field from the output policy text.

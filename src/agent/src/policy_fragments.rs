@@ -55,18 +55,27 @@
 //! regardless of `required`.
 
 use anyhow::{bail, Result};
-use slog::info;
+use slog::{info, warn};
+use std::collections::HashMap;
 use tokio::sync::Mutex;
 
 use crate::AGENT_POLICY;
 
-pub use kata_agent_policy::policy::FragmentSpec;
+pub use kata_agent_policy::policy::{FragmentSpec, NestedScope};
 
 macro_rules! sl {
     () => {
         slog_scope::logger()
     };
 }
+
+/// How many levels of delegated declaration are followed before the chain is cut.
+///
+/// Each level must already opt in through its own `allow_nested`, so a chain cannot extend
+/// itself silently — this is a backstop against a cycle (A declares B, B declares A) rather
+/// than the primary control. Kept small because no legitimate composition needs depth: an
+/// issuer that wants five fragments declares five, it does not build a linked list.
+const MAX_NESTING_DEPTH: u8 = 4;
 
 lazy_static! {
     /// Fragment declarations from the measured base policy that have not yet been satisfied
@@ -77,6 +86,15 @@ lazy_static! {
     /// delivery that claims to satisfy them, so a fragment arriving for a declared feed with
     /// the wrong issuer or too low an SVN is rejected whether or not it was mandatory.
     static ref PENDING: Mutex<Vec<FragmentSpec>> = Mutex::new(Vec::new());
+
+    /// Every `(issuer, feed)` that has been declared, with the delegation scope its
+    /// declaration granted and how deep in a delegation chain it sits.
+    ///
+    /// Separate from `PENDING` because a declaration is *removed* from there once
+    /// satisfied, and the scope has to outlive that: a fragment's own nested declarations
+    /// are read at delivery time, which is precisely the moment it stops being pending.
+    static ref DELEGATION: Mutex<HashMap<(String, String), (NestedScope, u8)>> =
+        Mutex::new(HashMap::new());
 }
 
 /// Record every fragment requirement the measured base policy declares.
@@ -124,10 +142,20 @@ pub async fn record_declared_fragments() -> Result<usize> {
     // alongside the trust root, the fragment must still be signed by an issuer the trust
     // root authorized, and min_required() keeps the issuer-wide floor in force, so a
     // declaration can raise the SVN bar but never lower it.
+    //
+    // Delegation scopes are resolved here rather than at use, so a malformed `allow_nested`
+    // aborts the boot (the caller treats an Err as fatal) instead of surfacing much later
+    // as a fragment that mysteriously cannot delegate.
     {
         let mut store = crate::FRAGMENTS.lock().await;
+        let mut delegation = DELEGATION.lock().await;
         for spec in &specs {
+            let scope = spec.nested_scope()?;
             store.declare_feed(spec.issuer.clone(), spec.feed.clone(), spec.minimum_svn);
+            delegation.insert(
+                (spec.issuer.clone(), spec.feed.clone()),
+                (scope, 0),
+            );
         }
     }
 
@@ -248,6 +276,158 @@ fn assert_satisfied_in(pending: &[FragmentSpec]) -> Result<()> {
     )
 }
 
+/// BL-8: register the fragment declarations a just-delivered fragment carries in its own
+/// signed module.
+///
+/// Called from `rpc::load_policy_fragment` after the fragment has been verified, injected
+/// and committed. `parent_issuer`/`parent_feed` identify the fragment that carried them.
+///
+/// Delegation is off unless the declaration that authorized the *parent* said otherwise,
+/// and even then it is bounded by that declaration's `allow_nested` scope. Everything that
+/// does not clear the scope is dropped, loudly, rather than rejected: the parent fragment
+/// is already verified and committed at this point, so failing the RPC would leave the
+/// engine holding a module the host was told had failed. Dropping is fail-closed anyway —
+/// an unregistered declaration authorizes no feed, so the fragment behind it can never be
+/// accepted (`UndeclaredFeed`) and grants nothing.
+///
+/// Delegation cannot widen trust. A nested declaration only says "this feed is expected";
+/// the fragment it names must still be signed by an issuer the *measured trust root*
+/// authorizes or `verify_cose` rejects it as `UnauthorizedIssuer`, and `min_required()`
+/// keeps the issuer-wide SVN floor binding, so a nested declaration can raise the bar but
+/// never lower it. What delegation actually buys is composition: an issuer can publish a
+/// fragment that pulls in its own dependencies without the base policy having to enumerate
+/// them at build time.
+///
+/// Returns the number of declarations registered.
+pub async fn register_nested_fragments(
+    parent_issuer: &str,
+    parent_feed: &str,
+    nested: Vec<FragmentSpec>,
+) -> Result<usize> {
+    if nested.is_empty() {
+        return Ok(0);
+    }
+
+    let (scope, depth) = match DELEGATION
+        .lock()
+        .await
+        .get(&(parent_issuer.to_string(), parent_feed.to_string()))
+        .cloned()
+    {
+        Some(entry) => entry,
+        None => {
+            // The runtime push path: a fragment nobody declared. Nothing granted it
+            // delegation, so it has none.
+            warn!(
+                sl!(),
+                "policy-fragments: fragment {} (issuer {}) declares {} nested fragment(s) but was \
+                 not itself declared by the measured policy; ignoring them",
+                parent_feed,
+                parent_issuer,
+                nested.len()
+            );
+            return Ok(0);
+        }
+    };
+
+    if !scope.is_enabled() {
+        warn!(
+            sl!(),
+            "policy-fragments: fragment {} declares {} nested fragment(s) but its declaration \
+             does not set allow_nested; ignoring them",
+            parent_feed,
+            nested.len()
+        );
+        return Ok(0);
+    }
+
+    if depth + 1 > MAX_NESTING_DEPTH {
+        warn!(
+            sl!(),
+            "policy-fragments: fragment {} is at delegation depth {} and its {} nested \
+             declaration(s) would exceed the maximum of {}; ignoring them",
+            parent_feed,
+            depth,
+            nested.len(),
+            MAX_NESTING_DEPTH
+        );
+        return Ok(0);
+    }
+
+    let mut store = crate::FRAGMENTS.lock().await;
+    let mut delegation = DELEGATION.lock().await;
+    let mut pending = PENDING.lock().await;
+    let mut registered = 0usize;
+
+    for spec in nested {
+        if !scope.permits(parent_issuer, &spec.issuer) {
+            warn!(
+                sl!(),
+                "policy-fragments: fragment {} may not delegate to issuer {} (feed {}); the \
+                 allow_nested scope of its declaration does not cover it",
+                parent_feed,
+                spec.issuer,
+                spec.feed
+            );
+            continue;
+        }
+
+        // A declaration already registered stays as it is. Re-registering would reset a
+        // cycle's depth counter and could also silently relax an SVN floor that a shallower
+        // declaration set.
+        let key = (spec.issuer.clone(), spec.feed.clone());
+        if delegation.contains_key(&key) {
+            info!(
+                sl!(),
+                "policy-fragments: nested declaration for feed {} (issuer {}) is already \
+                 registered; keeping the existing terms",
+                spec.feed,
+                spec.issuer
+            );
+            continue;
+        }
+
+        let child_scope = match spec.nested_scope() {
+            Ok(s) => s,
+            Err(e) => {
+                // Unlike the boot path this is not fatal: a malformed nested declaration
+                // must not take down a sandbox that was running fine. It is dropped whole.
+                warn!(
+                    sl!(),
+                    "policy-fragments: nested declaration for feed {} carried by {} is \
+                     malformed and was ignored: {}",
+                    spec.feed,
+                    parent_feed,
+                    e
+                );
+                continue;
+            }
+        };
+
+        store.declare_feed(spec.issuer.clone(), spec.feed.clone(), spec.minimum_svn);
+        delegation.insert(key, (child_scope, depth + 1));
+        info!(
+            sl!(),
+            "policy-fragments: fragment {} delegated to feed {} (issuer {}, minimum_svn {}, {}) \
+             at depth {}",
+            parent_feed,
+            spec.feed,
+            spec.issuer,
+            spec.minimum_svn,
+            if spec.required {
+                "required"
+            } else {
+                "optional"
+            },
+            depth + 1
+        );
+        pending.push(spec);
+        registered += 1;
+    }
+
+    Ok(registered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,6 +438,7 @@ mod tests {
             feed: feed.to_string(),
             minimum_svn,
             required: false,
+            ..Default::default()
         }
     }
 

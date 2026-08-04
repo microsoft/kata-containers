@@ -1990,6 +1990,21 @@ all_policy_containers := array.concat(policy_data.containers, fragment_container
 # base policy assumes has been composed in). Either way a delivered fragment is verified
 # identically; `required` governs only whether absence is an error.
 #
+# A declaration may also carry `allow_nested`, which decides whether the fragment it names
+# may itself declare further fragments, and whose. It is absent by default, meaning no
+# delegation, so a policy written before the attribute existed cannot acquire the capability
+# by upgrade. The accepted forms are `false` / "none", "same-issuer" (the delivering
+# fragment's own issuer only), "any-authorized" (any issuer the measured trust root
+# authorizes), or an explicit list of issuer strings. Bare `true` is rejected by the agent
+# because it enables delegation without saying to whom.
+#
+# Delegation does not widen trust. A nested declaration only says a feed is expected; the
+# fragment behind it must still be signed by an issuer the measured trust root authorizes,
+# and the issuer-wide SVN floor still binds, so a nested declaration can raise the bar but
+# never lower it. Nested declarations live in the delivering fragment's signed Rego module
+# (at `policy_fragments` inside its own package), so they are covered by the same COSE
+# signature as everything else it carries and the host cannot edit them.
+#
 # The rule is coarse by construction, because the request carries nothing finer to bind to.
 # The host sends only the COSE envelope: issuer, feed and SVN are derived from the bytes the
 # guest verifies rather than from anything the host asserts, precisely so that a lying host
