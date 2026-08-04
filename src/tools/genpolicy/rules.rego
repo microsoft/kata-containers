@@ -108,7 +108,8 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
 
     # Check if any element from the allowed-container set (base + composed fragment
     # containers) allows the input request.
-    some idx, p_container in all_policy_containers
+    some entry in all_policy_container_entries
+    p_container := entry.container
     print("======== CreateContainerRequest: trying next policy container")
 
     p_pidns := p_container.sandbox_pidns
@@ -144,9 +145,11 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
 
     # save to policy state
     # key: input.container_id
-    # val: index of p_container in the policy_data.containers array
+    # val: a stable reference to the policy container that authorized it. NOT its index
+    #      in the combined set: that set grows as fragments load, so an index recorded
+    #      now can name a different container later (see all_policy_container_entries).
     print("CreateContainerRequest: adding container_id=", input.container_id, " to state")
-    add_p_container_to_state := state_allows(input.container_id, idx)
+    add_p_container_to_state := state_allows(input.container_id, entry.ref)
 
     ops := concat_op_if_not_null(ret.ops, add_p_container_to_state)
 
@@ -1723,8 +1726,8 @@ allow_interactive_exec(p_container, i_process) if {
 }
 
 get_state_container(container_id):= p_container if {
-    idx := get_state_val(container_id)
-    p_container := all_policy_containers[idx]
+    ref := get_state_val(container_id)
+    p_container := container_by_ref(ref)
 }
 
 ExecProcessRequest if {
@@ -1961,17 +1964,56 @@ TtyWinResizeRequest if {
 # "containers": [<container-policy>, ...]}`. At genpolicy generation time no fragment is loaded
 # (`data.agent_policy.fragments` is empty) and an unloaded / under-versioned / wrong-issuer
 # fragment contributes nothing => behaviour identical to a monolithic policy (no regression).
-fragment_containers := [c |
+
+# The full allowed-container set: base policy containers plus verified fragment-contributed
+# containers. All container-matching rules iterate this set.
+#
+# Each element carries a **stable reference** next to the container, because policy state
+# has to be able to name the container that authorized a running container_id, and the set
+# itself is not stable: `fragment_container_entries` is a comprehension over the fragments that
+# are *currently loaded*, so delivering another fragment inserts entries and shifts every
+# position after them. Recording a position would silently re-bind a running container to a
+# different policy entry the next time a fragment arrives, and the host chooses fragment
+# delivery order and timing. A reference names the source instead — the measured base array,
+# or a specific (feed, svn) — so it means the same thing however the combined set is
+# rebuilt.
+base_container_entries := [{"ref": {"base": true, "idx": i}, "container": c} |
+    some i, c in policy_data.containers
+]
+
+fragment_container_entries := [{"ref": {"feed": spec.feed, "svn": to_number(mod.svn), "idx": j}, "container": c} |
     some spec in policy_data.fragments
     mod := data.agent_policy.fragments[spec.feed]
     mod.issuer == spec.issuer
     to_number(mod.svn) >= spec.minimum_svn
-    some c in mod.containers
+    some j, c in mod.containers
 ]
 
-# The full allowed-container set: base policy containers plus verified fragment-contributed
-# containers. All container-matching rules iterate this set.
-all_policy_containers := array.concat(policy_data.containers, fragment_containers)
+all_policy_container_entries := array.concat(base_container_entries, fragment_container_entries)
+
+# Resolve a reference recorded by CreateContainerRequest back to a policy container.
+#
+# The fragment arm re-runs the declaration gates rather than trusting the reference: the
+# fragment must still be one the measured base policy declares, from the issuer it declares,
+# at or above the declared SVN floor. The recorded SVN must match exactly, so a container
+# authorized by one version of a fragment is never later evaluated against the containers of
+# another version of it. Both arms are undefined when they do not hold, which makes the
+# calling rule undefined and falls through to the fail-closed default.
+container_by_ref(ref) := c if {
+    ref.base == true
+    c := policy_data.containers[ref.idx]
+}
+
+container_by_ref(ref) := c if {
+    not ref.base
+    some spec in policy_data.fragments
+    spec.feed == ref.feed
+    mod := data.agent_policy.fragments[ref.feed]
+    mod.issuer == spec.issuer
+    to_number(mod.svn) >= spec.minimum_svn
+    to_number(mod.svn) == ref.svn
+    c := mod.containers[ref.idx]
+}
 
 # ---- BL-8: delivery of fragments the base policy declares ----
 # Fragments the measured base policy declares in `policy_fragments[]` are fetched by the
