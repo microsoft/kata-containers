@@ -712,12 +712,22 @@ data, _ = json.JSONDecoder().raw_decode(policy, start)
 hits = [c for c in data.get("containers", []) if marker in json.dumps(c)]
 if len(hits) != 1:
     sys.exit(f"expected exactly one container matching {marker!r}, found {len(hits)}")
-print(json.dumps(hits[0]))
+# Indented, not compact. The agent raises regorus' 1024-column source-line limit, so
+# a single-line entry would parse, but a fragment is a human-reviewable artifact —
+# it is signed, published and audited, and a several-kilobyte line is not reviewable.
+print(json.dumps(hits[0], indent=2))
 PY
 }
 
 log "generating the two-container reference policy to lift the sidecar entry from"
-render_sidecar_pod "$SIDECAR_POD" two > "$WORK/sidecar-ref.yaml"
+# The reference pod carries the same delivery annotation as the case that will run,
+# because genpolicy stamps pod-level annotations onto *every* container entry and the
+# runtime stamps them onto every container's OCI spec. An entry lifted from a pod
+# without the annotation therefore never matches the real request: the input carries
+# io.katacontainers.config.agent.policy_fragments and the entry does not, and
+# allow_anno_key_value refuses it. A fragment author has to write the entry against
+# the pod their container will actually run in.
+render_sidecar_pod "$SIDECAR_POD" two "$SIDECAR_REF" > "$WORK/sidecar-ref.yaml"
 "$GENPOLICY" -y "$WORK/sidecar-ref.yaml" -p "$WORK/rules-none.rego" -j "$SETTINGS" \
   --initdata-path="$WORK/initdata.toml" >/dev/null \
   || die "genpolicy failed for the two-container reference pod"
