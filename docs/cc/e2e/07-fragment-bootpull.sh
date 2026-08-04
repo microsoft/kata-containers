@@ -99,6 +99,38 @@ SVN=$(jq -r .minimum_svn    "$ENTRY") || die "could not read minimum_svn from $E
 REF=$(tr -d '[:space:]' < "$REF_FILE")
 [ -n "$REF" ] || die "empty reference in $REF_FILE"
 
+# $REF_FILE persists on disk; the artifact it names does not necessarily still
+# exist. Stage 06 starts its registry with `docker run -d` -- no --restart, no
+# volume -- so a node reboot leaves localhost:5000 refusing connections with the
+# ref file still cheerfully asserting the fragment is there. Without this probe
+# the first thing to notice is 07c timing out after five minutes, and the stage's
+# own diagnostics then point at delivery/verification/injection rather than at a
+# registry that is simply down. Resolve the manifest before creating any pod, so
+# a stale fixture fails immediately and says so.
+REF_PATH="${REF#*/}"                 # repo/name:tag
+REF_HOST="${REF%%/*}"
+REF_TAG="${REF_PATH##*:}"
+REF_REPO="${REF_PATH%:*}"
+# Only the loopback dev registry is probed directly. A real registry (ACR) speaks
+# HTTPS and wants a token, so a bare GET proves nothing there; the reboot trap
+# this guards against is specific to the throwaway container 06 starts anyway.
+case "${REF_HOST%%:*}" in
+  localhost | 127.0.0.1)
+    if ! curl -fsS -o /dev/null \
+         -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+         "http://$REF_HOST/v2/$REF_REPO/manifests/$REF_TAG" 2>/dev/null; then
+      warn "the node cannot resolve $REF"
+      warn "stage 06 publishes it to a registry started without --restart or a volume,"
+      warn "so a reboot empties it. Re-run: E2E_FORCE=1 ./run-all.sh 06 07"
+      die "the fragment 06 published is not fetchable — nothing to deliver"
+    fi
+    ok "the published fragment is still fetchable from this node ($REF)"
+    ;;
+  *)
+    log "registry $REF_HOST is not loopback — skipping the reachability probe"
+    ;;
+esac
+
 # A declaration the host will never be able to satisfy, for the fail-closed case.
 # It is never offered via the delivery annotation either, so this negative cannot
 # go green for an environmental reason.

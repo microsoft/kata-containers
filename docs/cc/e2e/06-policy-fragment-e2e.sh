@@ -128,7 +128,13 @@ if [ "$REG_HOST" = "localhost" ] || [ "$REG_HOST" = "127.0.0.1" ]; then
   if ! curl -fsS "http://$E2E_REGISTRY/v2/" >/dev/null 2>&1; then
     log "starting a local OCI registry at $E2E_REGISTRY"
     docker rm -f coco-e2e-registry >/dev/null 2>&1 || true
-    docker run -d --name coco-e2e-registry -p "${E2E_REGISTRY##*:}:5000" \
+    # --restart and a named volume so a node reboot does not silently empty the
+    # registry: fragment-ref.txt persists on disk and would keep asserting the
+    # artifact exists, leaving stage 07 to fail at the fetch minutes later with
+    # diagnostics pointing at delivery rather than at a registry that went away.
+    docker run -d --name coco-e2e-registry --restart unless-stopped \
+      -v coco-e2e-registry-data:/var/lib/registry \
+      -p "${E2E_REGISTRY##*:}:5000" \
       registry:2 >/dev/null || die "could not start the local registry"
     wait_for 60 "registry $E2E_REGISTRY responding" curl -fsS "http://$E2E_REGISTRY/v2/"
   fi
