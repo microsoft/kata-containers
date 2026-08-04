@@ -550,6 +550,48 @@ sandbox boundary rather than inside a live sandbox. Fragments that use the share
 `agent_policy.fragments` package are unaffected only to the extent that they
 declare distinct rule names, which is the same constraint stated differently.
 
+### 4.17 Both declaration lists are read (FR-1m)
+
+A policy can declare a trusted fragment in two places, and both of them are
+measured:
+
+* `policy_data.fragments` — BL-7. Serialized out of `genpolicy-settings.json` at
+  generation time. Always present, possibly empty. This is what a settings-driven
+  deployment uses.
+* `policy_fragments` — BL-8. A rule in the generated policy text. **This is the
+  list the agent reads to decide what the host must deliver**, and the one an
+  annotation-driven deployment populates.
+
+`fragment_container_entries` and `container_by_ref` originally read only the
+first. The consequence was silent and total: a fragment declared for delivery was
+fetched by the host, verified by the SRM, applied into the engine, and logged as
+delivered — and then contributed no containers, because the rule that reads its
+contribution was looking at a list the declaration never appears in. Nothing
+errored. The only way to make it work was to declare the same fragment twice, in
+two different files, with any divergence between them failing silently.
+
+Both rules now read `all_fragment_specs := array.concat(policy_data.fragments,
+policy_fragments)`. Duplicates across the two are harmless: they produce identical
+container entries with identical references, and `container_by_ref` needs only one
+matching declaration.
+
+### 4.18 Authoring note — a fragment entry belongs to a pod shape
+
+A fragment's container entry is compared against the real
+`CreateContainerRequest`, and that request carries the pod's annotations: the
+runtime stamps pod-level annotations onto every container's OCI spec, and
+genpolicy stamps them onto every generated container entry. An entry lifted or
+authored against a pod *without* the delivery annotation therefore never matches a
+pod that has one — `allow_anno_key_value` refuses the unexpected
+`io.katacontainers.config.agent.policy_fragments` key, and the container is denied
+with no mention of the fragment.
+
+This is not a gap; it is the annotation gate doing its job, and it is the same
+constraint C-ACI fragment authors work under. It is recorded here because the
+failure looks exactly like "the fragment did not load". A fragment author must
+generate the entry against the pod shape the container will actually run in,
+delivery annotation included. Stage 07 does this explicitly.
+
 ---
 
 ## 5. Measured configuration
