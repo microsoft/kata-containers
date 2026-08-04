@@ -23,6 +23,8 @@ import (
 // Mutable and not constant so we can mock in tests
 var urandomDev = "/dev/urandom"
 
+const failedVMCreationCleanupTimeout = 30 * time.Second
+
 // VM is abstraction of a virtual machine.
 type VM struct {
 	hypervisor Hypervisor
@@ -143,7 +145,11 @@ func newVM(ctx context.Context, config VMConfig, restoreSnapshotDir string) (*VM
 	defer func() {
 		if err != nil {
 			virtLog.WithField("vm", id).WithError(err).Info("clean up vm")
-			hypervisor.StopVM(ctx, false)
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), failedVMCreationCleanupTimeout)
+			defer cancel()
+			if stopErr := hypervisor.StopVM(cleanupCtx, false); stopErr != nil {
+				virtLog.WithField("vm", id).WithError(stopErr).Error("failed to stop VM after creation error")
+			}
 		}
 	}()
 

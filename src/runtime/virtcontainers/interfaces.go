@@ -49,6 +49,7 @@ type VCSandbox interface {
 	CreateContainer(ctx context.Context, contConfig ContainerConfig) (VCContainer, error)
 	RestoreContainer(ctx context.Context, contConfig ContainerConfig) (VCContainer, error)
 	FinalizeRestoreNetwork(ctx context.Context) error
+	AbortRestore(ctx context.Context) error
 	DeleteContainer(ctx context.Context, containerID string) (VCContainer, error)
 	StartContainer(ctx context.Context, containerID string) (VCContainer, error)
 	StopContainer(ctx context.Context, containerID string, force bool) (VCContainer, error)

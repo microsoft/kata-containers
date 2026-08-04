@@ -298,6 +298,18 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 	return container, nil
 }
 
+func isRestoreCreateRequest(s *service, r *taskAPI.CreateTaskRequest) bool {
+	if s.restoredSandbox {
+		return true
+	}
+	ociSpec, _, err := loadSpec(r)
+	if err != nil {
+		return false
+	}
+	_, restore := ociSpec.Annotations[annotations.RestoreFrom]
+	return restore
+}
+
 func loadSpec(r *taskAPI.CreateTaskRequest) (*specs.Spec, string, error) {
 	// Checks the MUST and MUST NOT from OCI runtime specification
 	bundlePath, err := validBundle(r.ID, r.Bundle)
