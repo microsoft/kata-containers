@@ -92,10 +92,16 @@ EOF
 ok "trust root written: $WORK/fragment-issuers.toml"
 
 cat > "$WORK/fragment.rego" <<'EOF'
-package agent_policy
+package agent_policy.fragments
 
 # Minimal, observable fragment: a successful injection makes this visible to
 # policy evaluation, so the live boot-pull check has something to assert on.
+#
+# The package is agent_policy.fragments, not agent_policy: the guest confines
+# fragment modules to the fragment namespace so an injected module can never
+# redefine or shadow a base rule (policy.rs apply_fragment_module, TC-F1.2).
+# A fragment in the base package is refused at injection -- after a successful
+# fetch and signature check -- so only a live boot-pull shows it up.
 e2e_fragment_loaded := true
 EOF
 
