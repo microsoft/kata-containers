@@ -220,6 +220,26 @@ fn default_true() -> bool {
     true
 }
 
+/// FR-1l: the enforcement framework version this agent implements.
+///
+/// Bumped when a gate is added that a policy could reasonably depend on, so a policy can
+/// state a floor and be refused rather than under-enforced by an older agent. Deliberately
+/// not tied to the agent version: two agents may differ in ways policy cannot observe.
+pub const POLICY_FRAMEWORK_VERSION: &str = "1.0.0";
+
+/// Parse a strict `major.minor.patch`. Returns `None` on anything else, including the
+/// pre-release and build-metadata suffixes semver allows — accepting them would mean
+/// deciding how they order, and there is no version here that needs them.
+fn parse_semver(s: &str) -> Option<(u64, u64, u64)> {
+    let mut it = s.trim().split('.');
+    let out = (
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+    );
+    it.next().is_none().then_some(out)
+}
+
 impl Default for FragmentSpec {
     /// Hand-written rather than derived so it cannot drift from the serde defaults: a
     /// derived impl would give `allow_module: false`, which is the opposite of what an
@@ -567,6 +587,7 @@ impl AgentPolicy {
         self.engine = Self::new_engine();
         self.engine
             .add_policy("agent_policy".to_string(), policy.to_string())?;
+        self.check_framework_version()?;
         self.update_allow_failures_flag().await?;
         #[cfg(feature = "strict-policy")]
         {
@@ -575,8 +596,47 @@ impl AgentPolicy {
         Ok(())
     }
 
-    /// FR-1a: apply a verified policy fragment's Rego module to the live engine.
+    /// FR-1l: refuse a policy that expects a newer enforcement framework than this agent
+    /// implements.
     ///
+    /// A policy declares `framework_version` (semver) if it wants to be sure of what it is
+    /// running on. Absent, it is treated as legacy and allowed — that is every policy
+    /// written before this check existed, and refusing them would be a compatibility break
+    /// with no security benefit, since such a policy by definition expects nothing newer.
+    ///
+    /// The asymmetry is the point. A policy **older** than the agent is fine: the agent
+    /// implements every gate it names, and any gate the policy does not name is simply not
+    /// requested. A policy **newer** than the agent is not: it was authored expecting checks
+    /// this binary has never heard of, and an unknown rule name in Rego is not an error but
+    /// an undefined value, so those checks would not fail loudly — they would silently not
+    /// happen, and the policy would appear to be enforced while the gates it was written for
+    /// were absent. Downgrading the enforcer is exactly the move an adversary would want, so
+    /// this fails closed. Mirrors hcsshim, whose `apply_defaults` has cases for equal and
+    /// older framework versions and deliberately none for newer.
+    fn check_framework_version(&mut self) -> Result<()> {
+        let declared = match self.engine.eval_rule("data.agent_policy.framework_version".into()) {
+            Ok(v) => match v.as_string() {
+                Ok(s) => s.to_string(),
+                Err(_) => return Ok(()),
+            },
+            Err(_) => return Ok(()),
+        };
+        let policy = parse_semver(&declared).ok_or_else(|| {
+            anyhow::anyhow!("policy framework_version {declared:?} is not a semver x.y.z")
+        })?;
+        let ours = parse_semver(POLICY_FRAMEWORK_VERSION)
+            .expect("POLICY_FRAMEWORK_VERSION is a compile-time constant");
+        if policy > ours {
+            bail!(
+                "policy declares framework_version {declared}, but this agent implements \
+                 {POLICY_FRAMEWORK_VERSION}; refusing to enforce a policy written for gates \
+                 this build does not have"
+            );
+        }
+        Ok(())
+    }
+
+    /// FR-1a: apply a verified policy fragment's Rego module to the live engine.    ///
     /// This is the **only** sanctioned runtime extension of an active policy. Unlike
     /// `set_policy` it is **additive** — it adds a named module via `add_policy` and does
     /// NOT rebuild the engine, so it bypasses the FR-12 one-shot lock without weakening it
@@ -1565,6 +1625,35 @@ mod tests {
             .is_err());
         // A fragment that is not parameterised is unaffected.
         assert!(p.apply_fragment_module("d", module, &[], None).is_ok());
+    }
+
+    /// FR-1l: a policy may state the enforcement framework it was written against. Equal or
+    /// older is enforced; newer is refused, because gates this build lacks would silently
+    /// not run rather than fail. An absent or unparseable declaration is legacy, not an
+    /// error — only a malformed *explicit* one is.
+    #[tokio::test]
+    async fn test_framework_version_floor_is_enforced() {
+        let base = "package agent_policy\ndefault SetPolicyRequest := false\n";
+        let with = |v: &str| format!("{base}framework_version := \"{v}\"\n");
+
+        // No declaration at all: every policy written before this check existed.
+        assert!(AgentPolicy::new().set_policy(base).await.is_ok());
+        // Older and equal are fine.
+        assert!(AgentPolicy::new().set_policy(&with("0.9.0")).await.is_ok());
+        assert!(AgentPolicy::new()
+            .set_policy(&with(POLICY_FRAMEWORK_VERSION))
+            .await
+            .is_ok());
+        // Newer in any component is refused.
+        for v in ["1.0.1", "1.1.0", "2.0.0"] {
+            assert!(
+                AgentPolicy::new().set_policy(&with(v)).await.is_err(),
+                "expected {v} to be refused"
+            );
+        }
+        // An explicit but malformed version is an error, not a silent legacy fallback.
+        assert!(AgentPolicy::new().set_policy(&with("1.0")).await.is_err());
+        assert!(AgentPolicy::new().set_policy(&with("v1.0.0")).await.is_err());
     }
 
     /// A miniature policy that reproduces the `pstate` mechanics of the generated

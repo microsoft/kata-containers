@@ -317,8 +317,33 @@ skip:
   set per declaration: delivery is explicit and a feed is declared once, so there is exactly
   one intended instantiation. hcsshim itself forbids multiple sets when the fragment claims
   a namespace.
-- Semver `framework_version` negotiation via `apply_defaults`. We version the statement
-  format (`kata-policy-fragment/v3`) but do not negotiate defaults across versions.
+- Semver `framework_version` negotiation via `apply_defaults`, i.e. filling in fields an
+  older policy could not have named. Ours is done in Rust with `#[serde(default)]` on every
+  added field, so an older declaration parses under a newer agent with the same effect. The
+  security-relevant half of that mechanism — refusing a policy *newer* than the enforcer —
+  is implemented, see §4.14.
+
+### 4.14 Framework version floor (FR-1l)
+
+A policy may declare `framework_version` (semver) to state what it was written against. Equal
+or older is enforced; **newer is refused**.
+
+The asymmetry is the point. A policy older than the agent is safe: the agent implements every
+gate it names, and a gate the policy does not name is simply not requested. A policy newer
+than the agent is not, and the reason is a property of Rego: an unknown rule name is not an
+error but an undefined value. A policy written for gates this binary has never heard of would
+not fail loudly — those gates would silently not happen, while the policy looked enforced.
+Downgrading the enforcer is exactly the move an adversary would want, so this fails closed.
+hcsshim reaches the same conclusion structurally: `apply_defaults` has cases for equal and
+older framework versions and deliberately none for newer, so a newer policy leaves the rule
+undefined and denies.
+
+An absent declaration is legacy and allowed — that is every policy written before the check
+existed, and such a policy by definition expects nothing newer. An *explicit but malformed*
+one is an error, so a typo cannot be mistaken for "unversioned". `POLICY_FRAMEWORK_VERSION`
+is compiled into the agent and bumped when a gate is added that a policy could depend on; it
+is deliberately not the agent version, since two agents may differ in ways policy cannot
+observe.
 
 ### 4.13 Parameterised fragments (FR-1k)
 
