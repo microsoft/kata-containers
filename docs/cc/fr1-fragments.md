@@ -270,6 +270,27 @@ uses `policy.rs::nested_fragment_specs`, scoped to the package the module was ac
 accepted under, so two fragments in different namespaces cannot see or overwrite each
 other's.
 
+**Live coverage.** Delegation is proven on a real CVM cluster by stage 07 cases `07f`–`07k`,
+not by unit tests alone. The oracle is pod phase: a nested declaration marked `required: true`
+becomes an obligation the host never satisfies, so *registered* means `create_container` is
+refused and the pod never runs, while *dropped* means it boots. That reads the scope decision
+in both directions from outside the guest.
+
+| Case | Grant on the parent declaration | Delivered | Pod | Reads |
+| --- | --- | --- | --- | --- |
+| `07f` | *(none)* | parent | Running | delegation is off unless granted |
+| `07g` | `"same-issuer"` | parent | never Running | the nested declaration was registered |
+| `07h` | `"same-issuer"` | parent + child | Running | the chain completes: child fetched, verified, obligation satisfied |
+| `07i` | `"same-issuer"` | parent (declares a foreign issuer) | Running | out-of-scope declaration dropped |
+| `07j` | `["<foreign did>"]` | parent (same) | never Running | an explicit list admits exactly what it names |
+| `07k` | `"any-authorized"` | parent (same) | never Running | the permissive scope admits an issuer the parent does not share |
+
+`07i` and `07j` deliver the *same* fragment and differ only in the grant, so a pass cannot be
+a delivery failure wearing a scope check's clothes. The "foreign" issuer is a did:x509 string
+that never signs anything, which is deliberately the stronger fixture: a scope check that
+wrongly admitted it cannot then be rescued by a downstream signature failure and still look
+correct.
+
 C-ACI/hcsshim has the equivalent capability, and — usefully — puts the switch in the same
 place we do. `candidate_fragments` is the union of the base policy's `fragments` array and
 the declarations contributed by already-loaded fragments, and whether a given fragment's own
@@ -476,6 +497,27 @@ cross-alg rejection), `merkle::tests::*` (inclusion + consistency across sizes).
 `fr1-cose-attack.sh` (COSE), `fr1-x509-attack.sh` (did:x509 valid/untrusted/revoked/rotated),
 `fr1-ordering-attack.sh` (out-of-order rejected), `fr1-ttl-attack.sh` (inclusion+consistency
 accepted, rewound-log + missing-proof rejected). Aggregated as `negative-matrix.sh` stages.
+
+**Live E2E on a cluster** (`docs/cc/e2e/`, an Azure confidential VM with `kata-deploy`) —
+stage 06 signs and publishes fixtures to a real registry; stage 07 runs **eleven cases**
+against pods on the dm-verity-pinned guest, using pod phase as the oracle:
+
+| Case | Proves |
+| --- | --- |
+| `07a` | control — an empty `policy_fragments` list is inert |
+| `07b` | a declared, `required`, undelivered fragment refuses `CreateContainer` |
+| `07c` | good path — a delivered fragment is fetched, SRM-verified, injected, and the pod runs |
+| `07d` | an SVN floor above the published fragment is refused |
+| `07e` | an undelivered *optional* declaration still boots — enforcement is opt-in |
+| `07f`–`07k` | the four `allow_nested` scopes and the full parent→child chain (see §4.10) |
+
+Every negative is paired with a control differing in exactly one field, so a blocked pod
+cannot be an environment failure and a running pod cannot be a gate that was never armed.
+Verified green 2026-08-04 on `coco-dev-2`, 11/11.
+
+Conjunctive receipt requirements (§4.12), fragment parameters (§4.13) and the framework
+version floor (§4.14) are unit-tested only. A live case for the receipt conjunction needs a
+second mock ledger fixture; tracked in `docs/cc/backlog.md`.
 
 ---
 
