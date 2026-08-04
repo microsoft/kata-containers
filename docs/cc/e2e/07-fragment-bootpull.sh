@@ -616,7 +616,11 @@ expect_delegation_blocked e2e-frag-nest-any "$WORK/rules-nest-any.rego" "$PARENT
 #   3. generate the base policy from the *one*-container pod, then append the
 #      sidecar to the yaml after generation. The base policy therefore has no
 #      entry that could match the sidecar, and only the fragment can authorize it.
-# 07l withholds the fragment, 07m delivers it. They differ in exactly one field.
+# 07l withholds the fragment and the sidecar must never become ready; 07m delivers
+# it and the sidecar must. They differ in exactly one field. Note that pod *phase*
+# is not the oracle here: a pod is Running once every container has been created
+# and one is up, so the sandbox and the base-policy container legitimately come up
+# in both cases and only the sidecar's own status separates them.
 step "07l/07m — a fragment contributes a container the base policy does not have"
 
 SIDECAR_POD=e2e-frag-sidecar
@@ -785,15 +789,38 @@ EOF
 
 log "07l — without the fragment, the extra container has no policy entry"
 apply_sidecar_case "$SIDECAR_POD" ""
-if expect_never_running "$SIDECAR_POD" "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
-  ok "pod never reached Running — the undelivered fragment left the sidecar unauthorized (expected)"
-  kubectl describe pod "$SIDECAR_POD" -n "$NS" 2>/dev/null \
-    | grep -i 'sandbox\|failed\|policy' | tail -3 | cut -c1-200 | sed 's/^/    /' || true
-else
+# Pod *phase* is the wrong oracle here, and usefully so: a pod is Running once
+# every container has been created and one of them is up, so the sandbox and the
+# base-policy container come up exactly as they should while the sidecar is
+# refused. The assertion has to be per-container.
+sidecar_ready() {
+  kubectl get pod "$SIDECAR_POD" -n "$NS" \
+    -o jsonpath='{range .status.containerStatuses[?(@.name=="sidecar")]}{.ready}{end}' \
+    2>/dev/null | grep -qx true
+}
+SIDECAR_DEADLINE=$(( $(date +%s) + ${E2E_FRAGMENT_NEG_WAIT:-180} ))
+SIDECAR_LEAKED=0
+log "watching $SIDECAR_POD for ${E2E_FRAGMENT_NEG_WAIT:-180}s — the sidecar must never become ready"
+while [ "$(date +%s)" -lt "$SIDECAR_DEADLINE" ]; do
+  if sidecar_ready; then SIDECAR_LEAKED=1; break; fi
+  sleep 5
+done
+if [ "$SIDECAR_LEAKED" = "1" ]; then
   diagnose "$SIDECAR_POD"
   cleanup_pod "$SIDECAR_POD"
-  die "pod is Running without the fragment — the base policy is matching the sidecar, so 07m would prove nothing"
+  die "the sidecar is running without the fragment — the base policy is matching it, so 07m would prove nothing"
 fi
+# Necessary but not sufficient: a sandbox that never started would also pass. The
+# base-policy container must be up, so the only thing that failed is the one the
+# measured policy has no entry for.
+kubectl get pod "$SIDECAR_POD" -n "$NS" \
+  -o jsonpath='{range .status.containerStatuses[?(@.name=="busybox")]}{.ready}{end}' 2>/dev/null \
+  | grep -qx true \
+  || { diagnose "$SIDECAR_POD"; cleanup_pod "$SIDECAR_POD"
+       die "the base-policy container is not running either — the sandbox failed for some unrelated reason"; }
+ok "busybox ran and the sidecar was refused — the base policy has no entry for it (expected)"
+kubectl get events -n "$NS" --field-selector "involvedObject.name=$SIDECAR_POD" 2>/dev/null \
+  | grep -i 'sidecar' | tail -3 | cut -c1-200 | sed 's/^/    /' || true
 cleanup_pod "$SIDECAR_POD"
 # Deleting the pod is not enough: the next case reuses the name, and a sandbox
 # still shutting down would make kubectl apply race the old one.
@@ -803,8 +830,7 @@ wait_for_soft 120 "$SIDECAR_POD gone" \
 
 log "07m — delivering the fragment admits it"
 apply_sidecar_case "$SIDECAR_POD" "$SIDECAR_REF"
-if ! wait_for_soft 300 "pod $SIDECAR_POD Running 2/2" \
-     bash -c "kubectl get pod $SIDECAR_POD -n $NS -o jsonpath='{.status.phase}' | grep -qx Running"; then
+if ! wait_for_soft 300 "$SIDECAR_POD sidecar ready" bash -c "sidecar_ready() { kubectl get pod $SIDECAR_POD -n $NS -o jsonpath='{range .status.containerStatuses[?(@.name==\"sidecar\")]}{.ready}{end}' 2>/dev/null | grep -qx true; }; sidecar_ready"; then
   diagnose "$SIDECAR_POD"
   cleanup_pod "$SIDECAR_POD"
   warn "the fragment carries the sidecar's own policy entry, so check in order:"
@@ -813,13 +839,7 @@ if ! wait_for_soft 300 "pod $SIDECAR_POD Running 2/2" \
   warn "  - does the lifted entry still match? re-run with E2E_FORCE=1 after any rules.rego change"
   die "the sidecar did not run with its fragment delivered — the container contribution path is broken"
 fi
-READY=$(kubectl get pod "$SIDECAR_POD" -n "$NS" \
-        -o jsonpath='{range .status.containerStatuses[*]}{.name}={.ready} {end}' 2>/dev/null)
-case "$READY" in
-  *sidecar=true*) ok "both containers running — the fragment authorized a container the measured policy never contained" ;;
-  *) diagnose "$SIDECAR_POD"; cleanup_pod "$SIDECAR_POD"
-     die "the sandbox is Running but the sidecar is not ready ($READY) — it was not authorized by the fragment" ;;
-esac
+ok "both containers running — the fragment authorized a container the measured policy never contained"
 cleanup_pod "$SIDECAR_POD"
 
 fi   # sidecar fixtures available
