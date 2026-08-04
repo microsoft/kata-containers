@@ -600,9 +600,23 @@ impl FragmentStore {
 
     /// The minimum SVN the next fragment for `(issuer, feed)` must carry (declarative floor
     /// combined with the monotonic high-water mark of accepted fragments).
+    ///
+    /// FR-1i: a named feed's floor never sinks below its issuer's. The issuer-wide floor
+    /// from the measured trust root is held at `(issuer, "")`, and a named feed carries its
+    /// own entry, so consulting only the named key let a per-feed `min_svn = 0` override a
+    /// trust root demanding 5 — accepting a fragment the attested floor forbids. Take the
+    /// stricter of the two: a per-feed floor may raise the bar, never lower it.
     fn min_required(&self, issuer: &str, feed: &str) -> u64 {
         let key = (issuer.to_string(), feed.to_string());
-        let floor = self.feeds.get(&key).copied().unwrap_or(0);
+        let mut floor = self.feeds.get(&key).copied().unwrap_or(0);
+        if !feed.is_empty() {
+            let issuer_floor = self
+                .feeds
+                .get(&(issuer.to_string(), String::new()))
+                .copied()
+                .unwrap_or(0);
+            floor = floor.max(issuer_floor);
+        }
         match self.last_svn.get(&key) {
             Some(last) => (last + 1).max(floor),
             None => floor,
@@ -1708,6 +1722,49 @@ mod tests {
         let mut p = frag_feed("issuerA", "prod", 10);
         sign(&sk, &mut p);
         assert!(store.load(&p).is_ok());
+    }
+
+    /// TC-F1.24 (FR-1i): a per-feed floor may raise the issuer-wide floor but never lower
+    /// it. `set_min_svn` records the trust root's issuer-wide floor under `(issuer, "")`,
+    /// while a named feed carries its own entry; consulting only the named entry let a
+    /// feed declared with `min_svn = 0` accept a fragment the attested floor forbids.
+    #[test]
+    fn per_feed_floor_cannot_sink_below_the_issuer_floor() {
+        let (sk, pk) = keypair(1);
+        let mut store = FragmentStore::new(true);
+        store.authorize_issuer("issuerA", &pk).unwrap();
+        store.set_min_svn("issuerA", 5);
+        // A laxer per-feed floor must not win.
+        store.declare_feed("issuerA", "prod", 0);
+
+        let mut below = frag_feed("issuerA", "prod", 4);
+        sign(&sk, &mut below);
+        assert!(matches!(
+            store.load(&below).unwrap_err(),
+            FragmentError::RolledBackSvn { min_required: 5, .. }
+        ));
+
+        let mut at_floor = frag_feed("issuerA", "prod", 5);
+        sign(&sk, &mut at_floor);
+        assert!(store.load(&at_floor).is_ok());
+    }
+
+    /// TC-F1.25 (FR-1i): a per-feed floor above the issuer-wide floor still binds, so the
+    /// stricter-of-the-two rule does not weaken an explicitly raised bar.
+    #[test]
+    fn per_feed_floor_above_the_issuer_floor_still_binds() {
+        let (sk, pk) = keypair(1);
+        let mut store = FragmentStore::new(true);
+        store.authorize_issuer("issuerA", &pk).unwrap();
+        store.set_min_svn("issuerA", 2);
+        store.declare_feed("issuerA", "prod", 9);
+
+        let mut below = frag_feed("issuerA", "prod", 8);
+        sign(&sk, &mut below);
+        assert!(matches!(
+            store.load(&below).unwrap_err(),
+            FragmentError::RolledBackSvn { min_required: 9, .. }
+        ));
     }
 
     /// TC-F1.15 / TC-F1.16 (FR-1f): with a transparency anchor configured, a fragment whose

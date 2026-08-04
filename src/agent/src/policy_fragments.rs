@@ -89,6 +89,24 @@ pub async fn record_declared_fragments() -> Result<usize> {
         );
     }
 
+    // FR-1e: a declaration in the measured base policy authorizes its own (issuer, feed)
+    // pair. Without this the SRM's feed allow-list is populated only from the trust root's
+    // [[issuer.feed]] blocks, so a declared named feed was rejected as UndeclaredFeed no
+    // matter what the host delivered -- the requirement could be stated but never
+    // satisfied, and the sandbox stayed blocked forever. C-ACI/hcsshim likewise treats the
+    // security policy's fragment declaration as the authorization.
+    //
+    // This grants no trust the policy did not already carry: the base policy is measured
+    // alongside the trust root, the fragment must still be signed by an issuer the trust
+    // root authorized, and min_required() keeps the issuer-wide floor in force, so a
+    // declaration can raise the SVN bar but never lower it.
+    {
+        let mut store = crate::FRAGMENTS.lock().await;
+        for spec in &specs {
+            store.declare_feed(spec.issuer.clone(), spec.feed.clone(), spec.minimum_svn);
+        }
+    }
+
     let n = specs.len();
     *PENDING.lock().await = specs;
     info!(
