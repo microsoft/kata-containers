@@ -19,7 +19,7 @@ hidden by state the original node had accumulated by hand.
 | `01-provision-vm.sh` | An Azure VM on a confidential-capable host SKU exists and is reachable. The node itself is a plain VM, not a confidential one — see "the node is not a confidential VM" below. Run from your workstation. |
 | `02-bootstrap-node.sh` | Toolchain, container engine, kubectl, Go, Rust and the repo checkout are present on the node. |
 | `03-deploy-cluster.sh` | A kubeadm cluster with `kata-deploy` and the CoCo KBS is up and the runtime classes are registered. |
-| `04-build-guest-stack.sh` | The hardened agent is built **and installed** into `/opt/kata`, the deployed guest image is byte-for-byte the one just built, and the runtime is re-pinned to that image's dm-verity root hashes. |
+| `04-build-guest-stack.sh` | The hardened agent is built **and installed** into `/opt/kata`, the deployed guest image is byte-for-byte the one just built, the runtime is re-pinned to that image's dm-verity root hashes, and the runtime-rs shim is rebuilt and installed so host-side changes are under test too — asserted by the commit the shim reports. |
 | `05-smoke-test.sh` | The pod that boots is provably the locally built guest (verity pin), and an undeclared `exec` is denied. Mediation is live. |
 | `06-policy-fragment-e2e.sh` | FR-1 signed policy fragments: every verification invariant holds, and the OCI delivery artifact matches the contract the guest fetcher depends on. |
 | `07-fragment-bootpull.sh` | BL-8 live delivery: the host fetches a declared fragment and pushes it in, the guest verifies and injects it on a running cluster, and a declaration left unsatisfied blocks container creation. |

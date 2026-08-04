@@ -254,6 +254,50 @@ for CFG in "${CFGS[@]}"; do
 done
 ok "dm-verity re-pointed in ${#CFGS[@]} config(s)"
 
+# ------------------------------------------------------------------ the shim
+# Everything above rebuilds the *guest*. The runtime-rs shim is host-side and is
+# not in any of those tarballs — it arrives from the CI-nightly kata-tools build
+# in stage 03 and is otherwise never replaced. So a change under src/runtime-rs
+# would silently not be under test: the guest would be new, the host old, and a
+# stage that depends on both (07's fragment delivery) would fail as though the
+# guest change were wrong.
+SHIM_DST=/opt/kata/runtime-rs/bin/containerd-shim-kata-v2
+if [ -e "$SHIM_DST" ]; then
+  log "building runtime-rs shim"
+  # Build through make, not cargo: crates/shim/src/config.rs is generated from a
+  # template by the Makefile and is not in git, so a direct cargo build fails on
+  # a missing module. The Makefile targets musl, which the pinned toolchain
+  # needs installed separately from the host target.
+  RUST_CHANNEL=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml | head -1)
+  [ -n "$RUST_CHANNEL" ] || die "could not read the pinned toolchain from rust-toolchain.toml"
+  if ! rustup target list --toolchain "$RUST_CHANNEL" --installed 2>/dev/null \
+       | grep -qx x86_64-unknown-linux-musl; then
+    log "adding the musl target to toolchain $RUST_CHANNEL"
+    rustup target add --toolchain "$RUST_CHANNEL" x86_64-unknown-linux-musl \
+      || die "could not add the musl target"
+  fi
+  need musl-gcc
+  ( cd src/runtime-rs && make ) || die "could not build the runtime-rs shim"
+
+  SHIM_SRC="$E2E_REPO_DIR/target/x86_64-unknown-linux-musl/release/containerd-shim-kata-v2"
+  [ -x "$SHIM_SRC" ] || die "runtime-rs build produced no shim at $SHIM_SRC"
+
+  sudo cp "$SHIM_DST" "$SHIM_DST.bak.$(date +%s)"
+  sudo install -m 0755 "$SHIM_SRC" "$SHIM_DST"
+  # The shim reports the commit it was built from, so assert it rather than
+  # merely checking the binary changed — that is what makes "the host side is
+  # under test" a fact instead of an assumption.
+  want=$(git rev-parse HEAD)
+  got=$("$SHIM_DST" --version 2>&1 | sed -n 's/.*commit: *\([0-9a-f]*\).*/\1/p')
+  [ "$got" = "$want" ] \
+    || die "installed shim reports commit ${got:-<none>}, expected $want"
+  ok "runtime-rs shim installed from this build (${want:0:12})"
+  # containerd caches nothing about the shim binary, but any shim already
+  # running for a live sandbox is the old one; stage 07 creates fresh pods.
+else
+  warn "no runtime-rs shim at $SHIM_DST — host-side changes are NOT under test"
+fi
+
 # Stage 05 must check the same files this stage actually patched, rather than
 # guessing a path that a layout change would invalidate.
 printf '%s\n' "${CFGS[@]}" > "$E2E_STATE_DIR/guest-config-paths"
