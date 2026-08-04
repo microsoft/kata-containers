@@ -427,6 +427,14 @@ an extra receipt is a receipt, not a way around the scope. Receipts are **not** 
 the issuer signature (a receipt countersigns the statement and so cannot be inside it), which
 is why carrying several needs no `kata-policy-fragment` version bump.
 
+**Compatibility.** This narrows what is accepted, so the change is fail-closed: the effect is
+a fragment being refused, never one admitted. It reaches only the fragment verification path
+in `FragmentStore`, which nothing but `rpc.rs::load_policy_fragment` calls -- a policy that
+declares no fragments cannot be affected. Within that path it reaches only a scope naming
+more than one requirement, whether that comes from `required_receipt_from` on a measured
+issuer or feed, or from a declaration's own `requires`. Single-entry lists, which is what
+every configuration in the tree uses, are unchanged.
+
 ---
 
 ## 5. Measured configuration
