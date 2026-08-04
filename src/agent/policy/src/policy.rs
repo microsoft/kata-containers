@@ -150,7 +150,7 @@ impl NestedScope {
 /// (`data.agent_policy.policy_fragments[]`). The host fetches the COSE artifact for `feed`
 /// and pushes it in; the guest verifies it (issuer/SVN/receipt/ordering) through the SRM
 /// `FragmentStore`.
-#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq)]
 pub struct FragmentSpec {
     /// `did:x509` issuer the fragment must be signed by.
     pub issuer: String,
@@ -182,6 +182,48 @@ pub struct FragmentSpec {
     /// no delegation. See [`AllowNested`].
     #[serde(default)]
     pub allow_nested: AllowNested,
+    /// FR-1c: the policy namespaces under `agent_policy.fragments.` this fragment may
+    /// contribute a module to. Empty (the default) grants only the shared
+    /// `agent_policy.fragments` package.
+    ///
+    /// The fragment statement carries an `includes` list of its own, but that is signed by
+    /// the fragment's issuer and so states only what *that issuer* intended. Left as the
+    /// sole authority it would let any trust-root-authorized issuer claim any namespace,
+    /// including one the base policy meant a different issuer to fill. This field is the
+    /// measured policy's grant; the effective scope is the intersection of the two, so
+    /// neither side can widen the other. hcsshim does the same, taking `includes` from the
+    /// matched candidate declaration rather than from the delivered fragment.
+    #[serde(default)]
+    pub includes: Vec<String>,
+    /// FR-1c: whether this fragment's Rego module may be applied at all. Defaults to true.
+    ///
+    /// Setting it to false accepts the fragment for its SVN, receipt and ordering record
+    /// while contributing no rules — hcsshim's `add_module` behaviour. Useful to pin a
+    /// version, or to require that an artifact exist and be countersigned, without granting
+    /// it any policy surface.
+    #[serde(default = "default_true")]
+    pub allow_module: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for FragmentSpec {
+    /// Hand-written rather than derived so it cannot drift from the serde defaults: a
+    /// derived impl would give `allow_module: false`, which is the opposite of what an
+    /// omitted field means when the declaration is parsed.
+    fn default() -> Self {
+        Self {
+            issuer: String::new(),
+            feed: String::new(),
+            minimum_svn: 0,
+            required: false,
+            allow_nested: AllowNested::default(),
+            includes: Vec::new(),
+            allow_module: true,
+        }
+    }
 }
 
 impl FragmentSpec {
@@ -1286,6 +1328,54 @@ mod tests {
     fn specs_err(p: &mut AgentPolicy) -> String {
         let specs = p.fragment_specs().unwrap();
         specs[0].nested_scope().unwrap_err().to_string()
+    }
+
+    /// F-62: the declaration carries the namespace grant and the module switch, and both
+    /// default safely — no named namespaces, module allowed.
+    #[test]
+    fn test_fragment_specs_parse_module_grant() {
+        let mut p = AgentPolicy::new();
+        let base = "package agent_policy\n\
+            policy_fragments := [\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:s\", \"feed\": \"reg/a:1\", \"includes\": [\"infra\", \"net\"]},\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:s\", \"feed\": \"reg/b:1\", \"allow_module\": false},\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:s\", \"feed\": \"reg/c:1\"}\n\
+            ]\n";
+        p.engine
+            .add_policy("agent_policy".to_string(), base.to_string())
+            .unwrap();
+        let specs = p.fragment_specs().unwrap();
+
+        assert_eq!(specs[0].includes, vec!["infra".to_string(), "net".to_string()]);
+        assert!(
+            specs[0].allow_module,
+            "allow_module must default to true, or every existing declaration silently \
+             stops contributing rules"
+        );
+
+        // Metadata-only: accepted for its SVN/receipt record, contributes no rules.
+        assert!(!specs[1].allow_module);
+
+        // Omitting both grants no named namespace but still applies the module — the
+        // shared package remains available.
+        assert!(specs[2].includes.is_empty());
+        assert!(specs[2].allow_module);
+    }
+
+    /// F-62: `FragmentSpec::default()` must agree with what serde produces for an empty
+    /// declaration. A derived Default would give `allow_module: false` and quietly disable
+    /// module injection anywhere the struct is built from defaults.
+    #[test]
+    fn test_fragment_spec_default_matches_serde_default() {
+        let from_serde: FragmentSpec =
+            serde_json::from_str(r#"{"issuer":"i","feed":"f"}"#).unwrap();
+        let from_default = FragmentSpec {
+            issuer: "i".to_string(),
+            feed: "f".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(from_serde, from_default);
+        assert!(from_default.allow_module);
     }
 
     /// BL-8: a delivered fragment's own declarations are read from its module's package, so

@@ -152,10 +152,15 @@ pub async fn record_declared_fragments() -> Result<usize> {
         for spec in &specs {
             let scope = spec.nested_scope()?;
             store.declare_feed(spec.issuer.clone(), spec.feed.clone(), spec.minimum_svn);
-            delegation.insert(
-                (spec.issuer.clone(), spec.feed.clone()),
-                (scope, 0),
+            // FR-1c: the declaration, not the fragment, decides which policy namespaces
+            // this feed may contribute to and whether its module is applied at all.
+            store.grant_module_scope(
+                spec.issuer.clone(),
+                spec.feed.clone(),
+                &spec.includes,
+                spec.allow_module,
             );
+            delegation.insert((spec.issuer.clone(), spec.feed.clone()), (scope, 0));
         }
     }
 
@@ -274,6 +279,25 @@ fn assert_satisfied_in(pending: &[FragmentSpec]) -> Result<()> {
         "the measured base policy requires {} policy fragment(s) that have not been delivered and verified: {detail}",
         outstanding.len()
     )
+}
+
+/// FR-1c: the namespaces a fragment may actually contribute a module to.
+///
+/// The intersection of what the measured policy granted (`granted`) and what the fragment's
+/// signed statement asked for (`requested`). Neither side can widen the other: the grant
+/// bounds an issuer that would otherwise be able to claim any namespace, and the request
+/// bounds a fragment to what its own author intended, so a mis-scoped grant does not hand a
+/// fragment surface it never meant to take.
+///
+/// An empty result still permits the shared `agent_policy.fragments` package — that is
+/// handled by `apply_fragment_module`, which always allows the shared package. The named
+/// namespaces are what this gates.
+pub fn effective_namespaces(granted: &[String], requested: &[String]) -> Vec<String> {
+    requested
+        .iter()
+        .filter(|ns| granted.iter().any(|g| g == *ns))
+        .cloned()
+        .collect()
 }
 
 /// BL-8: register the fragment declarations a just-delivered fragment carries in its own
@@ -405,6 +429,12 @@ pub async fn register_nested_fragments(
         };
 
         store.declare_feed(spec.issuer.clone(), spec.feed.clone(), spec.minimum_svn);
+        store.grant_module_scope(
+            spec.issuer.clone(),
+            spec.feed.clone(),
+            &spec.includes,
+            spec.allow_module,
+        );
         delegation.insert(key, (child_scope, depth + 1));
         info!(
             sl!(),
@@ -449,6 +479,52 @@ mod tests {
             required: true,
             ..spec(issuer, feed, minimum_svn)
         }
+    }
+
+    /// F-62: a fragment may only contribute to namespaces the measured policy granted it.
+    /// Without the intersection, any trust-root-authorized issuer could claim any namespace
+    /// — including one the base policy intended a different issuer to fill.
+    #[test]
+    fn a_fragment_cannot_claim_a_namespace_it_was_not_granted() {
+        let granted = vec!["infra".to_string(), "net".to_string()];
+
+        // Asking for a subset of the grant: allowed.
+        assert_eq!(
+            effective_namespaces(&granted, &["infra".to_string()]),
+            vec!["infra".to_string()]
+        );
+
+        // Asking for something outside the grant: dropped, not silently honoured. This is
+        // the squatting case — `secrets` belongs to somebody else.
+        assert!(effective_namespaces(&granted, &["secrets".to_string()]).is_empty());
+
+        // A mix keeps only the granted part.
+        assert_eq!(
+            effective_namespaces(&granted, &["net".to_string(), "secrets".to_string()]),
+            vec!["net".to_string()]
+        );
+    }
+
+    /// F-62: the grant cannot widen the fragment either. A policy that over-grants does not
+    /// hand a fragment surface its own signed statement never asked for.
+    #[test]
+    fn a_grant_cannot_widen_what_the_fragment_asked_for() {
+        let granted = vec!["infra".to_string(), "net".to_string(), "secrets".to_string()];
+        assert_eq!(
+            effective_namespaces(&granted, &["infra".to_string()]),
+            vec!["infra".to_string()]
+        );
+        // Nothing requested → nothing named granted, regardless of how broad the grant is.
+        assert!(effective_namespaces(&granted, &[]).is_empty());
+    }
+
+    /// F-62: no grant means no *named* namespaces. The shared `agent_policy.fragments`
+    /// package stays available (enforced in `apply_fragment_module`), so a fragment that
+    /// predates the grant keeps working; what it loses is the ability to self-assign a
+    /// named namespace.
+    #[test]
+    fn an_ungranted_feed_gets_no_named_namespaces() {
+        assert!(effective_namespaces(&[], &["infra".to_string()]).is_empty());
     }
 
     #[test]

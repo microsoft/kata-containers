@@ -405,6 +405,45 @@ pub struct FragmentStore {
     /// Monotonic (raise-only by size) and persisted, so the external log cannot be rewound
     /// across a restart.
     ttl_heads: HashMap<String, (u64, [u8; 32])>,
+    /// FR-1c: per-`(issuer, feed)` grant of *which* policy namespaces a fragment may
+    /// contribute a module to, and whether its module may be applied at all.
+    ///
+    /// The measured policy owns this, not the fragment. See [`ModuleScope`].
+    module_scope: HashMap<(String, String), ModuleScope>,
+}
+
+/// FR-1c: what a fragment for a given `(issuer, feed)` is permitted to contribute.
+///
+/// The fragment statement carries its own `includes` list, but that is the fragment
+/// *asking*, not being granted: it is signed by the fragment's issuer, so it says only what
+/// that issuer intended, and every authorized issuer would otherwise be able to claim any
+/// namespace — including one the base policy meant a different issuer to fill. The grant
+/// here comes from measured state (a `policy_fragments[]` declaration, or the trust root's
+/// feed entry), which is the same authority that decided the issuer was trusted at all.
+/// This mirrors hcsshim, where `load_fragment` passes `fragment.includes` from the matched
+/// *candidate declaration* into `update_issuer`, never the delivered fragment's own.
+///
+/// The effective scope is the intersection of the grant and the fragment's own request, so
+/// neither side can widen the other.
+#[derive(Clone, Debug)]
+pub struct ModuleScope {
+    /// Namespaces under `agent_policy.fragments.` this feed may contribute to. Empty means
+    /// only the shared `agent_policy.fragments` package is available.
+    pub namespaces: Vec<String>,
+    /// Whether the fragment's Rego module may be applied at all. `false` accepts the
+    /// fragment for its SVN, receipt and ordering record while contributing no rules —
+    /// hcsshim's `add_module` behaviour, useful for pinning a version or recording an
+    /// attestation without granting policy surface.
+    pub allow_module: bool,
+}
+
+impl Default for ModuleScope {
+    fn default() -> Self {
+        Self {
+            namespaces: Vec::new(),
+            allow_module: true,
+        }
+    }
 }
 
 impl FragmentStore {
@@ -450,6 +489,41 @@ impl FragmentStore {
         min_svn: u64,
     ) {
         self.feeds.insert((issuer.into(), feed.into()), min_svn);
+    }
+
+    /// FR-1c: grant the policy namespaces a `(issuer, feed)` may contribute a module to,
+    /// and whether its module may be applied at all.
+    ///
+    /// Called from measured state only — the BL-8 declaration in the base policy, or the
+    /// trust root's feed entry. See [`ModuleScope`] for why the fragment's own `includes`
+    /// is not sufficient authority.
+    pub fn grant_module_scope(
+        &mut self,
+        issuer: impl Into<String>,
+        feed: impl Into<String>,
+        namespaces: &[String],
+        allow_module: bool,
+    ) {
+        self.module_scope.insert(
+            (issuer.into(), feed.into()),
+            ModuleScope {
+                namespaces: namespaces.to_vec(),
+                allow_module,
+            },
+        );
+    }
+
+    /// FR-1c: the module scope granted to a `(issuer, feed)`.
+    ///
+    /// Defaults to "shared namespace only, module allowed" when nothing was granted. That
+    /// default is deliberate: it keeps a fragment that predates the grant working in the
+    /// shared `agent_policy.fragments` package, while denying it the named namespaces it
+    /// could previously have claimed for itself.
+    pub fn module_scope(&self, issuer: &str, feed: &str) -> ModuleScope {
+        self.module_scope
+            .get(&(issuer.to_string(), feed.to_string()))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// FR-1f (trust list): load the Transparency Trust List — a set of `(ledger_id, keys)`

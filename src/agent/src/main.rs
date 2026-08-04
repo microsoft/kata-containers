@@ -1046,6 +1046,20 @@ struct FragmentFeedConfig {
     /// FR-1f (trust list): ledgers allowed to back receipts for this feed.
     #[serde(default)]
     allowed_ledgers: Vec<String>,
+    /// FR-1c: policy namespaces under `agent_policy.fragments.` a fragment on this feed may
+    /// contribute a module to. Empty grants only the shared `agent_policy.fragments`
+    /// package. The fragment's own `includes` cannot widen this.
+    #[serde(default)]
+    includes: Vec<String>,
+    /// FR-1c: whether a fragment on this feed may apply its Rego module at all. False
+    /// accepts the fragment for its SVN/receipt/ordering record but contributes no rules.
+    #[serde(default = "default_true_cfg")]
+    allow_module: bool,
+}
+
+#[cfg(feature = "strict-policy")]
+fn default_true_cfg() -> bool {
+    true
 }
 
 #[cfg(feature = "strict-policy")]
@@ -1215,6 +1229,16 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
                     issuer.id.clone(),
                     feed.name.clone(),
                     &feed.required_receipt_from,
+                );
+            }
+            // FR-1c: the trust root is measured state, so it is a valid authority for the
+            // namespace grant on feeds the base policy does not separately declare.
+            if !feed.includes.is_empty() || !feed.allow_module {
+                store.grant_module_scope(
+                    issuer.id.clone(),
+                    feed.name.clone(),
+                    &feed.includes,
+                    feed.allow_module,
                 );
             }
         }

@@ -73,6 +73,28 @@ pub struct FragmentSpec {
     /// without saying to whom.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_nested: Option<serde_json::Value>,
+
+    /// FR-1c (F-62): policy namespaces under `agent_policy.fragments.` this fragment may
+    /// contribute a module to. The fragment's own signed `includes` cannot widen this — the
+    /// effective scope is the intersection — so the measured policy stays in control of
+    /// which issuer may populate which namespace. Omitted when unset.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub includes: Vec<String>,
+
+    /// FR-1c: whether the fragment's Rego module may be applied at all. Defaults to true;
+    /// `false` accepts the fragment for its SVN/receipt/ordering record while contributing
+    /// no rules. Emitted only when explicitly disabled, so existing settings produce
+    /// byte-identical output.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub allow_module: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 /// Representation of the policy_data field from the output policy text.

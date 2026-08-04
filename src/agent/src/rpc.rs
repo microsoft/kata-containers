@@ -2645,20 +2645,47 @@ impl agent_ttrpc::AgentService for AgentService {
             r.map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?
         };
 
-        let fragment_package = if let Some(module) = &verified.policy_module {
-            Some(
-                crate::AGENT_POLICY
-                    .lock()
-                    .await
-                    .apply_fragment_module(
-                        &format!("fragment:{}:{}", verified.issuer, verified.svn),
-                        module,
-                        &verified.includes,
-                    )
-                    .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?,
-            )
-        } else {
-            None
+        // FR-1c: the fragment's own `includes` says where it *wants* to contribute; the
+        // measured policy says where it *may*. Take the intersection, so neither side can
+        // widen the other, and honour a grant that withholds module injection entirely.
+        //
+        // Without this the fragment was the sole authority over its own namespace, which
+        // let any trust-root-authorized issuer populate a namespace the base policy meant a
+        // different issuer to fill (F-62). hcsshim reads `includes` off the matched
+        // candidate declaration for exactly this reason.
+        let scope = {
+            let store = crate::FRAGMENTS.lock().await;
+            store.module_scope(&verified.issuer, &verified.feed)
+        };
+
+        let fragment_package = match &verified.policy_module {
+            Some(module) if scope.allow_module => {
+                let effective = crate::policy_fragments::effective_namespaces(
+                    &scope.namespaces,
+                    &verified.includes,
+                );
+                Some(
+                    crate::AGENT_POLICY
+                        .lock()
+                        .await
+                        .apply_fragment_module(
+                            &format!("fragment:{}:{}", verified.issuer, verified.svn),
+                            module,
+                            &effective,
+                        )
+                        .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?,
+                )
+            }
+            Some(_) => {
+                info!(
+                    sl(),
+                    "policy-fragments: fragment {} accepted but its module was not applied — \
+                     the measured grant for this feed sets allow_module = false",
+                    verified.feed
+                );
+                None
+            }
+            None => None,
         };
 
         // FR-1i: persist the SVN high-water marks after commit so an agent restart cannot
