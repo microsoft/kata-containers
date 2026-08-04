@@ -1972,3 +1972,28 @@ fragment_containers := [c |
 # The full allowed-container set: base policy containers plus verified fragment-contributed
 # containers. All container-matching rules iterate this set.
 all_policy_containers := array.concat(policy_data.containers, fragment_containers)
+
+# ---- BL-8: delivery of fragments the base policy declares ----
+# Fragments the measured base policy declares in `policy_fragments[]` are fetched by the
+# host and pushed to the agent one at a time over LoadPolicyFragmentRequest. That endpoint
+# has to be policy-covered like every other one: an undefined rule makes allow_request bail,
+# which is fail-closed and therefore safe, but it is also indistinguishable from a rejected
+# fragment and it leaves the delivery path unusable.
+#
+# The rule is coarse by construction, because the request carries nothing finer to bind to.
+# The host sends only the COSE envelope: issuer, feed and SVN are derived from the bytes the
+# guest verifies rather than from anything the host asserts, precisely so that a lying host
+# cannot describe a fragment into acceptance. Coarse is sufficient here. The Security
+# Reference Monitor verifies the envelope against the measured trust anchors and refuses
+# anything not signed by a declared issuer at or above the declared minimum SVN, so a
+# permitted call grants the host no power beyond offering bytes -- its worst case is denial,
+# never bypass.
+#
+# What this rule adds is the outer bound: a policy that declares no fragments has no reason
+# to accept any, so the endpoint stays shut for it. `policy_fragments` is undefined in such
+# a policy, which leaves the body undefined and falls through to the default.
+default LoadPolicyFragmentRequest := false
+
+LoadPolicyFragmentRequest if {
+    count(policy_fragments) > 0
+}
