@@ -451,14 +451,30 @@ COSE envelope over `LoadPolicyFragment`. This is how hcsshim does it too.
 
 **Why an untrusted fetcher is fine.** The annotation says only *what to offer*.
 Every trust anchor — authorized issuers, accepted feeds, per-feed SVN floors —
-comes from the **measured** policy, and the guest refuses to create a container
-while any fragment that policy declares is still unsatisfied. A host that
-substitutes, downgrades, reorders or withholds a fragment gets a visible failure,
-never a silent bypass.
+comes from the **measured** policy, and the guest verifies the COSE envelope
+against it. A host that substitutes, downgrades or reorders a fragment gets a
+visible failure, never a silent bypass. The host is a courier, not an authority.
 
-**The oracle.** That gate makes pod phase sound in *both* directions — Running
-with a non-empty declaration means the fragment was delivered, verified **and**
-injected, and there is nothing to read out of the guest to confirm it.
+**Withholding, and the `required` flag.** The one attack a courier keeps is
+saying nothing. That is already fail-safe by default: an undelivered fragment
+contributes no grants, so a container only it would have permitted fails to match
+the composed policy and is refused on its own merits. Withholding can only reduce
+what runs. This is C-ACI/hcsshim behaviour, where injection is lazy and nothing
+obliges the host to send anything.
+
+It is *not* fail-safe when the fragment carries something whose absence is
+permissive — a deny rule, an audit obligation, a constraint the base policy
+assumes was composed in. A declaration can therefore set `"required": true`,
+which makes the guest refuse `CreateContainer` until that fragment is delivered
+and verified. This is stricter than C-ACI, which has no equivalent. The flag is
+per declaration, so a policy can demand a mandatory baseline while leaving
+optional add-ons optional. It governs only whether *absence* is an error:
+a delivered fragment is verified identically either way.
+
+**The oracle.** The `required` gate makes pod phase sound in *both* directions —
+Running with a non-empty required declaration means the fragment was delivered,
+verified **and** injected, and there is nothing to read out of the guest to
+confirm it.
 
 **Why the control is load-bearing.** A pod that fails to start is weak evidence
 on its own; almost any unrelated breakage produces the same symptom. So 07 first
@@ -469,9 +485,15 @@ fail-closed result below it would mean anything.
 | Case | Declaration | Expected | Runs |
 | --- | --- | --- | --- |
 | `07a` | `policy_fragments := []` | Running | always — control |
-| `07b` | a feed that is declared but never offered for delivery | never Running | always |
-| `07c` | the real feed from 06, offered via the annotation | Running | always |
-| `07d` | the real feed, `minimum_svn` raised above the fragment''s | never Running | always |
+| `07b` | a `required` feed that is declared but never offered for delivery | never Running | always |
+| `07c` | the real feed from 06, `required`, offered via the annotation | Running | always |
+| `07d` | the real feed, `required`, `minimum_svn` raised above the fragment''s | never Running | always |
+| `07e` | same as `07b` but `"required": false` | Running | always |
+
+`07b` and `07e` differ by exactly one field, so a difference in outcome can be
+attributed to nothing else. Asserting both is the only way to show the flag is
+actually read: `07b` alone is satisfied by a gate that is simply always shut, and
+`07e` alone by one that is never armed.
 
 **How the declaration gets in.** genpolicy has no `policy_fragments` support, so
 the stage appends the entry to a *copy* of `rules.rego` and passes it with `-p`.
@@ -499,9 +521,11 @@ Push uses a short-lived token from `az acr login --expose-token`, passed to
 `genpolicy-fragmentgen` through `FRAGMENTGEN_USERNAME` / `FRAGMENTGEN_PASSWORD`
 rather than argv, since `/proc/<pid>/cmdline` is world-readable.
 
-The feed is baked into the COSE payload at signing time and the guest fetches
-*that*, so the registry is decided before 06c signs. Mirroring the artifact into
-a registry afterwards would not repoint the guest.
+The feed is baked into the COSE payload at signing time and the guest checks the
+delivered envelope against *that*, so the registry is decided before 06c signs.
+Mirroring the artifact into a registry afterwards would not change what the guest
+will accept. (The feed is a trust identity and carries no tag; the tagged OCI
+reference the host actually pulls is written separately to `fragment-ref.txt`.)
 
 If the node has no Azure credentials, provision from the workstation and hand the
 values over instead — nothing then shells out to `az`. The e2e node is this case:
@@ -519,6 +543,44 @@ E2E_FORCE=1 ./run-all.sh 06 07
 The token is short-lived (hours), so mint it right before the run. Without a
 reachable registry the stage still runs 07a and 07b and says plainly which cases
 it skipped. A missing registry costs coverage, not correctness.
+
+### Re-running 07 on its own
+
+Stage 07 consumes what 06 produced — `fragment-entry.json`, `fragment-issuers.toml`
+and `fragment-ref.txt` under `~/.coco-e2e/fragments/` — and the COSE envelope
+commits to its feed, so these cannot be regenerated independently without drifting
+from what was published. 07 alone is fine:
+
+```bash
+E2E_FORCE=1 ./run-all.sh 07
+```
+
+`E2E_FORCE=1` is required, not optional: completed stages are marked done in
+`~/.coco-e2e` and a bare re-run silently skips them.
+
+Re-run **06 first** in three cases:
+
+- the fragment fixture or issuer key changed
+- the node rebooted — before the registry gained `--restart unless-stopped` and a
+  named volume this emptied it, leaving `fragment-ref.txt` pointing at nothing
+- the artefacts above are missing
+
+Stage 07 now resolves the manifest before creating any pod, so a stale fixture
+fails in seconds with a clear message instead of costing a five-minute pod
+timeout that reads like a delivery failure. Note the probe is loopback-only: a
+real ACR speaks HTTPS and wants a token, so a bare `GET` would prove nothing.
+
+If you probe a registry by hand, send the `Accept` header — without it an OCI
+registry returns `404` for a manifest that is perfectly present:
+
+```bash
+curl -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+  http://localhost:5000/v2/coco-e2e/fragment/manifests/e2e
+```
+
+Re-run **04 first** after any change to the agent, the SRM, or the fragment
+declaration handling — 07 exercises the installed guest, and stage 04 is what
+rebuilds it.
 
 ## Cleanup
 

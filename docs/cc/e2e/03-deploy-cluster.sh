@@ -14,6 +14,18 @@ cd "$E2E_REPO_DIR" || die "no repo at $E2E_REPO_DIR — run 02 first"
 # DOCKER_TAG must carry the -amd64 suffix: ci-nightly publishes the manifest-list
 # tag only when the multi-arch merge job runs, and recent nightlies fail before
 # it. Without the suffix kata-deploy ImagePullBackOffs 42 times and times out.
+#
+# When a cluster is already running, the sha it was deployed with is on the
+# daemonset image, so recover it rather than making the caller hunt for a value
+# that only has to match what is already installed. Restaging genpolicy inputs is
+# the common reason to re-run this stage and it should not require archaeology.
+if [ -z "${E2E_NIGHTLY_SHA:-}" ]; then
+  E2E_NIGHTLY_SHA=$(kubectl -n kube-system get daemonset kata-deploy \
+    -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null \
+    | sed -n 's/.*kata-deploy-ci:\([0-9a-f]\{40\}\)-nightly.*/\1/p')
+  [ -n "$E2E_NIGHTLY_SHA" ] \
+    && log "recovered E2E_NIGHTLY_SHA=$E2E_NIGHTLY_SHA from the running kata-deploy"
+fi
 : "${E2E_NIGHTLY_SHA:?set E2E_NIGHTLY_SHA to the CI-nightly commit sha (see README)}"
 
 ENV_FILE="$HOME/coco-env.sh"
@@ -48,16 +60,37 @@ gha() {
 }
 
 gha install-kata-tools kata-tools-artifacts
-gha deploy-k8s
-gha install-bats
 
-# A half-installed daemonset does not self-heal, so clear it before (re)deploying.
-kubectl -n kube-system delete daemonset kata-deploy --ignore-not-found >/dev/null 2>&1 || true
-helm uninstall kata-deploy -n kube-system >/dev/null 2>&1 || true
-gha deploy-kata
+# Bringing the cluster up is not idempotent, and this stage is the only documented
+# way to restage the genpolicy inputs below -- so every rules.rego edit used to
+# demand a full redeploy, which then failed. `deploy-k8s` runs
+# `kubectl taint ... node-role.kubernetes.io/control-plane-` unconditionally and
+# exits non-zero when the taint is already gone, i.e. on every second run. The
+# stage would then burn 5 x 180s retrying something that could not succeed, and
+# fail with a healthy cluster sitting right there.
+#
+# So bring the cluster up only when there is not already one. Restaging is the
+# common case by far and must stay cheap. E2E_REDEPLOY=1 forces the full path.
+cluster_is_up() {
+  kubectl get nodes >/dev/null 2>&1 \
+    && kubectl -n kube-system get daemonset kata-deploy >/dev/null 2>&1
+}
 
-gha deploy-coco-kbs
-gha install-kbs-client
+if [ "${E2E_REDEPLOY:-0}" != "1" ] && cluster_is_up; then
+  log "cluster and kata-deploy are already up — skipping bring-up (E2E_REDEPLOY=1 forces it)"
+  log "restaging genpolicy inputs only"
+else
+  gha deploy-k8s
+  gha install-bats
+
+  # A half-installed daemonset does not self-heal, so clear it before (re)deploying.
+  kubectl -n kube-system delete daemonset kata-deploy --ignore-not-found >/dev/null 2>&1 || true
+  helm uninstall kata-deploy -n kube-system >/dev/null 2>&1 || true
+  gha deploy-kata
+
+  gha deploy-coco-kbs
+  gha install-kbs-client
+fi
 
 # The kata-tools tarball and the kata-deploy image both come from the *upstream*
 # CI-nightly, so every genpolicy input on disk is upstream's — including

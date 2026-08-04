@@ -149,6 +149,58 @@ and is rejected (`LogHeadMismatch`). `export_fragment_log` yields a deterministi
 customer-auditable record of the exact applied sequence; the head persists raise-only across
 restart.
 
+### 4.9 Declared fragments and optional enforcement (BL-8)
+The measured base policy may declare the fragments it expects, in
+`data.agent_policy.policy_fragments[]`:
+
+```rego
+policy_fragments := [
+    {"issuer": "did:x509:0:sha256:AAA::CN:signer", "feed": "contoso.azurecr.io/frag/infra:1",
+     "minimum_svn": 2, "required": true},
+    {"issuer": "did:x509:0:sha256:AAA::CN:signer", "feed": "contoso.azurecr.io/frag/telemetry:1",
+     "minimum_svn": 1},
+]
+```
+
+**The guest does not fetch these.** At the point declarations are read the guest has only
+`lo` — its interfaces and routes arrive via the `update_interface` / `update_routes` ttRPC
+handlers, which cannot run until the server is serving. Delivery is the host's job, exactly
+as in C-ACI/hcsshim (`ResourceTypePolicyFragment` → `InjectFragment` there;
+`LoadPolicyFragment` here). The host is a **courier, not an authority**: it chooses which
+bytes to offer and can withhold them, but the guest holds the trust anchors and does all
+verification, so the host cannot forge, downgrade, or substitute a fragment. Withholding is
+the one attack it retains.
+
+A declaration always fixes the *terms* a fragment for that feed must meet — issuer, SVN
+floor — and authorizes that `(issuer, feed)` pair (FR-1e). Whether its **absence** is
+tolerated is the policy's choice:
+
+| `required` | Behaviour | Equivalent in C-ACI/hcsshim |
+| --- | --- | --- |
+| `false` (default) | Delivery is lazy. An undelivered fragment contributes no grants. | Yes — hcsshim injection is lazy and unobligated |
+| `true` | `CreateContainer` is refused until the fragment is delivered and verified. | **No equivalent** — this is stricter than C-ACI |
+
+The default is `false` because absence is already fail-safe in the common case: a container
+only the missing fragment would have permitted does not match the composed policy and is
+refused on its own merits, so withholding can only ever *reduce* what runs. Making every
+declaration blocking would turn it into an availability dependency on the host for no
+security gain.
+
+Set `required: true` when absence is **not** fail-safe — a fragment carrying a deny rule, an
+audit obligation, or a constraint the base policy was written assuming had been composed in.
+Silence is not a safe default for those. Because the flag is per-declaration, one policy can
+demand a mandatory baseline while leaving optional add-ons optional.
+
+`required: false` is **not** `unchecked`. A delivered fragment is verified identically either
+way — same issuer binding, same SVN floor, same receipt and ordering gates — and is still
+cross-checked against its declaration, so one arriving with the wrong issuer or an SVN below
+the measured floor is rejected regardless. The flag governs only whether absence is an error.
+
+Enforcement lives in `agent/src/policy_fragments.rs`
+(`record_declared_fragments` / `assert_all_declared_satisfied`), called from
+`rpc.rs::create_container` *before* `is_allowed()` — the point being that the active policy
+is not yet the measured one, so its verdict is not the one to act on.
+
 ---
 
 ## 5. Measured configuration
