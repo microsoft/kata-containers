@@ -49,6 +49,32 @@ RULES_SRC="$DEFAULTS/rules.rego"
 [ -f "$SETTINGS" ]  || die "missing $SETTINGS — run 03-deploy-cluster.sh first"
 [ -f "$RULES_SRC" ] || die "missing $RULES_SRC — run 03-deploy-cluster.sh first"
 
+# Stage 03 installs both genpolicy inputs from the branch and asserts they match.
+# Re-assert it here, because 03 may have run many commits ago and these two files
+# are a matched pair: rules.rego reads its thresholds and allow-lists out of
+# genpolicy-settings.json, so a rules.rego that is newer than the settings beside
+# it generates policies that deny things the branch means to allow. That failure
+# does not look like a stale file -- it looks like a working pod that cannot be
+# signalled, or a container that cannot be created -- and it is expensive to chase.
+#
+# The settings are not compared verbatim: 03 rewrites oci_version on the way in,
+# because containerd emits 1.3.0 while the branch copy still says 1.1.0 and the
+# mismatch denies every pod at CreateContainerRequest. Apply the same rewrite to
+# the branch copy before comparing, so this checks staleness and not that one
+# deliberate edit.
+GP_SRC="$E2E_REPO_DIR/src/tools/genpolicy"
+have_rules=$(sudo sha256sum "$DEFAULTS/rules.rego" | cut -d' ' -f1)
+want_rules=$(sha256sum "$GP_SRC/rules.rego" | cut -d' ' -f1)
+[ "$have_rules" = "$want_rules" ] \
+  || die "staged rules.rego is not the branch copy — re-run 03-deploy-cluster.sh"
+
+have_set=$(sudo sha256sum "$SETTINGS" | cut -d' ' -f1)
+want_set=$(sed 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' "$GP_SRC/genpolicy-settings.json" \
+           | sha256sum | cut -d' ' -f1)
+[ "$have_set" = "$want_set" ] \
+  || die "staged genpolicy-settings.json is not the branch copy — re-run 03-deploy-cluster.sh"
+ok "genpolicy inputs staged from this branch"
+
 # Artifacts from stage 06. The COSE envelope commits to its feed, so the entry and
 # the trust root must be the ones 06 actually produced — regenerating them here
 # would silently drift from what was published.
