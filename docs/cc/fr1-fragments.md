@@ -487,6 +487,60 @@ lifecycle gates for defined-ness -- still behaves as before.
 
 ---
 
+### 4.16 The package a contributing fragment declares (FR-1m)
+
+A fragment that contributes a container has to write the key `rules.rego` reads:
+
+```rego
+fragment_container_entries := [... |
+    some spec in policy_data.fragments
+    mod := data.agent_policy.fragments[spec.feed]
+    ...
+]
+```
+
+`spec.feed` is an OCI reference — `myregistry.io/fragments/sidecar` — and a Rego
+rule name must be a bare identifier, so no module can define that key by rule
+name. The only way to write it is a quoted package path segment:
+
+```rego
+package agent_policy.fragments["myregistry.io/fragments/sidecar"]
+
+issuer := "did:x509:..."
+svn := 3
+containers := [ ... ]     # full container policy entries, layer root hashes and all
+```
+
+regorus accepts that package form. `apply_fragment_module` did not: it compared
+the raw package text against exactly `agent_policy.fragments` and
+`agent_policy.fragments.<include>`. So the contract documented in `rules.rego`
+was unreachable — a fragment could be declared, delivered, verified, version-
+floored, delegated and receipt-checked, and still never contribute a container.
+Fail-closed, and therefore not a bypass, but it made the delivery machinery a
+transport with nothing to transport. Every e2e fixture defined identifier-named
+rules in the shared package, which is why eleven green cases never touched it.
+
+The agent now also accepts exactly `agent_policy.fragments["<feed>"]`, where
+`<feed>` is the feed **the SRM verified from the fragment's own COSE envelope** —
+not anything the module says about itself. The comparison is on the decoded
+string, so whitespace inside the brackets is tolerated while a different feed, or
+a segment appended after the bracket, is not.
+
+That is stricter than the shared package it sits beside. Two fragments writing
+into `agent_policy.fragments` share one namespace and can collide; a fragment
+writing under its own feed key cannot reach any other publisher's key, because
+the key is the signed identity. hcsshim has no equivalent: its fragments are
+namespaced by the fragment's declared `namespace` field, which the fragment
+itself chooses.
+
+Covered live by stage 07 cases 07l/07m, which build the C-ACI sidecar shape — a
+base policy pinning one workload by layer root hash, and a separately signed
+fragment admitting a second container by *its* layer root hashes. 07l withholds
+the fragment and the pod must never run; 07m delivers it and both containers must
+become ready. They differ in exactly one field.
+
+---
+
 ## 5. Measured configuration
 
 Seeded at boot by `main.rs::seed_fragment_trust_root` from a measured-rootfs file
