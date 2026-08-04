@@ -594,5 +594,235 @@ render_rules "$WORK/rules-nest-any.rego" "$(nested_decl "$PARENT_FGN_FEED" '"any
 expect_delegation_blocked e2e-frag-nest-any "$WORK/rules-nest-any.rego" "$PARENT_FGN_REF" \
   "any-authorized admitted the foreign issuer and its undelivered child held the gate"
 
+# ================================ 07l/07m — a fragment that contributes a container
+# Everything above proves the *delivery* path: declarations, scopes, SVN floors,
+# delegation. None of it exercises what a fragment is ultimately for — adding a
+# container the measured base policy does not contain. That is the C-ACI sidecar
+# shape: the base policy pins a workload to a known set of layer root hashes, and
+# a separately signed fragment admits one further container, also by its layer
+# hashes, which cannot run unless the fragment is loaded.
+#
+# It is worth asserting separately because it is the only case that reaches
+# `fragment_container_entries`, and therefore the only one that would have caught
+# F-69 (a feed is an OCI reference, so a fragment can only write its own key with
+# a quoted package path — which the agent used to refuse, making this contract
+# unreachable in practice while every delivery test still passed).
+#
+# Construction, in order:
+#   1. generate a policy for the *two*-container pod and lift the sidecar's entry
+#      out of it — that entry carries the sidecar's real layer root hashes, so the
+#      fragment is admitting a specific image, not a name;
+#   2. sign that entry into a fragment published under its own feed;
+#   3. generate the base policy from the *one*-container pod, then append the
+#      sidecar to the yaml after generation. The base policy therefore has no
+#      entry that could match the sidecar, and only the fragment can authorize it.
+# 07l withholds the fragment, 07m delivers it. They differ in exactly one field.
+step "07l/07m — a fragment contributes a container the base policy does not have"
+
+SIDECAR_POD=e2e-frag-sidecar
+SIDECAR_FEED="${FEED}-sidecar"
+SIDECAR_TAG="${REF##*:}"
+SIDECAR_REF="$SIDECAR_FEED:$SIDECAR_TAG"
+# The sidecar is distinguished by its command, not by its name: the extractor has
+# to find one entry inside a generated policy, and the container name appears in
+# annotations that are easy to confuse with the pause container's.
+SIDECAR_MARK="sleep-601-e2e-sidecar"
+
+SIDECAR_PLAIN_HTTP=""
+case "${FEED%%/*}" in
+  localhost*|127.0.0.1*) SIDECAR_PLAIN_HTTP="--plain-http" ;;
+esac
+
+FRAG_KEY="$FRAG/key.txt"
+SIDECAR_PRIV=""
+[ -s "$FRAG_KEY" ] && SIDECAR_PRIV=$(grep '^private_key_hex=' "$FRAG_KEY" | cut -d= -f2)
+
+if [ -z "$SIDECAR_PRIV" ]; then
+  warn "no issuer key at $FRAG_KEY — re-run 06-policy-fragment-e2e.sh to publish a fresh one"
+  warn "skipping 07l/07m (fragment-contributed container)"
+elif [ -z "$SIDECAR_PLAIN_HTTP" ] && [ -z "${ACR_PASSWORD:-}" ]; then
+  # Signing needs only the key; pushing needs the registry. Say which half is
+  # missing, because "skipped" otherwise looks like the case does not exist.
+  warn "no push credentials for ${FEED%%/*} — export ACR_USERNAME/ACR_PASSWORD to run 07l/07m"
+  warn "skipping 07l/07m (fragment-contributed container)"
+else
+
+SIGN()    { ( cd "$E2E_REPO_DIR" && cargo run -q --example sign-fragment \
+              -p kata-security-reference-monitor -- "$@" ); }
+FRAGGEN() { ( cd "$E2E_REPO_DIR" && cargo run -q -p genpolicy-fragmentgen -- "$@" ); }
+
+# $1 pod name, $2 "one"|"two" (whether the sidecar is declared), $3 delivery hint.
+render_sidecar_pod() {
+  local frag_anno=""
+  if [ -n "${3:-}" ]; then
+    frag_anno="
+  annotations:
+    io.katacontainers.config.agent.policy_fragments: \"$3\""
+  fi
+  cat <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $1
+  namespace: $NS$frag_anno
+spec:
+  runtimeClassName: kata-qemu-coco-dev-runtime-rs
+  restartPolicy: Never
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+    supplementalGroups: [10]
+  containers:
+    - name: busybox
+      image: quay.io/prometheus/busybox:latest
+      command: ["sleep", "600"]
+EOF
+  [ "$2" = "two" ] && cat <<EOF
+    - name: sidecar
+      image: quay.io/prometheus/busybox:latest
+      command: ["sh", "-c", "echo $SIDECAR_MARK; sleep 600"]
+EOF
+  return 0
+}
+
+# Lift one container entry out of a generated policy. The policy travels as a
+# gzipped, base64'd initdata blob; policy_data is a JSON object embedded in the
+# rego text, so it is decoded with a real JSON parser rather than brace matching —
+# genpolicy emits regexes containing braces, which naive matching truncates.
+extract_container_entry() {
+  python3 - "$1" "$SIDECAR_MARK" <<'PY'
+import base64, gzip, json, re, sys
+
+yaml_path, marker = sys.argv[1], sys.argv[2]
+blob = re.search(r'cc_init_data:\s*"?([A-Za-z0-9+/=]+)"?', open(yaml_path).read())
+if not blob:
+    sys.exit("could not read the cc_init_data annotation")
+policy = gzip.decompress(base64.b64decode(blob.group(1))).decode("utf-8", "replace")
+
+i = policy.find("policy_data := {")
+if i < 0:
+    sys.exit("the generated policy has no policy_data block")
+start = policy.index("{", i)
+data, _ = json.JSONDecoder().raw_decode(policy, start)
+
+hits = [c for c in data.get("containers", []) if marker in json.dumps(c)]
+if len(hits) != 1:
+    sys.exit(f"expected exactly one container matching {marker!r}, found {len(hits)}")
+print(json.dumps(hits[0]))
+PY
+}
+
+log "generating the two-container reference policy to lift the sidecar entry from"
+render_sidecar_pod "$SIDECAR_POD" two > "$WORK/sidecar-ref.yaml"
+"$GENPOLICY" -y "$WORK/sidecar-ref.yaml" -p "$WORK/rules-none.rego" -j "$SETTINGS" \
+  --initdata-path="$WORK/initdata.toml" >/dev/null \
+  || die "genpolicy failed for the two-container reference pod"
+extract_container_entry "$WORK/sidecar-ref.yaml" > "$WORK/sidecar-entry.json" \
+  || die "could not lift the sidecar entry out of the reference policy"
+[ -s "$WORK/sidecar-entry.json" ] || die "empty sidecar entry"
+# Prove the entry really pins the image rather than just naming it: without layer
+# root hashes the fragment would be admitting any image under that name, and the
+# test would pass while asserting nothing about integrity.
+grep -q 'root_hash\|dm-verity\|verity' "$WORK/sidecar-entry.json" \
+  || warn "the lifted sidecar entry carries no verity root hash — check PULL_TYPE=guest-pull"
+ok "lifted the sidecar container entry ($(wc -c < "$WORK/sidecar-entry.json") bytes)"
+
+# The package path is the fragment's own feed, quoted, because a feed is an OCI
+# reference and not a Rego identifier. The agent accepts that form only when the
+# quoted segment matches the feed its COSE envelope was signed for, so this key
+# cannot be written by anyone but this feed's publisher.
+{
+  printf 'package agent_policy.fragments["%s"]\n\n' "$SIDECAR_FEED"
+  printf 'issuer := "%s"\n' "$ISSUER"
+  printf 'svn := %s\n' "$SVN"
+  printf 'containers := [%s]\n' "$(cat "$WORK/sidecar-entry.json")"
+} > "$WORK/sidecar.rego"
+
+log "signing and publishing the sidecar fragment to $SIDECAR_REF"
+SIGN sign --issuer "$ISSUER" --feed "$SIDECAR_FEED" --svn "$SVN" \
+     --module "$WORK/sidecar.rego" --key "$SIDECAR_PRIV" --cose > "$WORK/sidecar.sign.txt" \
+  || { tail -20 "$WORK/sidecar.sign.txt"; die "signing the sidecar fragment failed"; }
+grep '^cose_sign1_hex=' "$WORK/sidecar.sign.txt" | cut -d= -f2 > "$WORK/sidecar.cose.hex"
+[ -s "$WORK/sidecar.cose.hex" ] || die "the signer emitted no cose_sign1_hex for the sidecar fragment"
+if [ -n "${ACR_PASSWORD:-}" ]; then
+  export FRAGMENTGEN_USERNAME="$ACR_USERNAME" FRAGMENTGEN_PASSWORD="$ACR_PASSWORD"
+fi
+FRAGGEN --cose "$WORK/sidecar.cose.hex" --push "$SIDECAR_REF" $SIDECAR_PLAIN_HTTP \
+  > "$WORK/sidecar.push.txt" \
+  || { tail -20 "$WORK/sidecar.push.txt"; die "pushing the sidecar fragment failed"; }
+unset FRAGMENTGEN_USERNAME FRAGMENTGEN_PASSWORD
+ok "published the sidecar fragment -> $SIDECAR_REF (svn $SVN)"
+
+# required is deliberately absent (lazy, C-ACI behaviour). The gate under test is
+# not the obligation gate — it is whether the sidecar has a matching container
+# entry at all. Making the declaration required would block the sandbox for the
+# wrong reason in 07l and prove nothing.
+render_rules "$WORK/rules-sidecar.rego" \
+  "[{\"issuer\": \"$ISSUER\", \"feed\": \"$SIDECAR_FEED\", \"minimum_svn\": $SVN}]"
+
+# $1 pod, $2 delivery annotation. The base policy is generated from the
+# one-container pod; the sidecar is appended to the yaml afterwards, so it is
+# present in the workload and absent from the measured policy.
+apply_sidecar_case() {
+  local yaml="$WORK/$1.yaml"
+  render_sidecar_pod "$1" one "${2:-}" > "$yaml"
+  "$GENPOLICY" -y "$yaml" -p "$WORK/rules-sidecar.rego" -j "$SETTINGS" \
+    --initdata-path="$WORK/initdata.toml" >/dev/null \
+    || die "genpolicy failed for $1"
+  grep -q 'cc_init_data' "$yaml" || die "no cc_init_data annotation for $1"
+  assert_request_defaults_survived "$yaml" "$1"
+  # Append after generation: this is the container the measured policy has never
+  # seen. genpolicy would otherwise add an entry for it and the test would be
+  # asserting nothing.
+  cat >> "$yaml" <<EOF
+    - name: sidecar
+      image: quay.io/prometheus/busybox:latest
+      command: ["sh", "-c", "echo $SIDECAR_MARK; sleep 600"]
+EOF
+  kubectl delete pod "$1" -n "$NS" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl apply -f "$yaml" >/dev/null || die "kubectl apply failed for $1"
+}
+
+log "07l — without the fragment, the extra container has no policy entry"
+apply_sidecar_case "$SIDECAR_POD" ""
+if expect_never_running "$SIDECAR_POD" "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
+  ok "pod never reached Running — the undelivered fragment left the sidecar unauthorized (expected)"
+  kubectl describe pod "$SIDECAR_POD" -n "$NS" 2>/dev/null \
+    | grep -i 'sandbox\|failed\|policy' | tail -3 | cut -c1-200 | sed 's/^/    /' || true
+else
+  diagnose "$SIDECAR_POD"
+  cleanup_pod "$SIDECAR_POD"
+  die "pod is Running without the fragment — the base policy is matching the sidecar, so 07m would prove nothing"
+fi
+cleanup_pod "$SIDECAR_POD"
+# Deleting the pod is not enough: the next case reuses the name, and a sandbox
+# still shutting down would make kubectl apply race the old one.
+wait_for_soft 120 "$SIDECAR_POD gone" \
+  bash -c "! kubectl get pod $SIDECAR_POD -n $NS >/dev/null 2>&1" \
+  || kubectl delete pod "$SIDECAR_POD" -n "$NS" --force --grace-period=0 >/dev/null 2>&1 || true
+
+log "07m — delivering the fragment admits it"
+apply_sidecar_case "$SIDECAR_POD" "$SIDECAR_REF"
+if ! wait_for_soft 300 "pod $SIDECAR_POD Running 2/2" \
+     bash -c "kubectl get pod $SIDECAR_POD -n $NS -o jsonpath='{.status.phase}' | grep -qx Running"; then
+  diagnose "$SIDECAR_POD"
+  cleanup_pod "$SIDECAR_POD"
+  warn "the fragment carries the sidecar's own policy entry, so check in order:"
+  warn "  - was it applied?  journalctl -t kata | grep 'fragment module'"
+  warn "  - was the package refused? look for 'outside the permitted fragment namespaces'"
+  warn "  - does the lifted entry still match? re-run with E2E_FORCE=1 after any rules.rego change"
+  die "the sidecar did not run with its fragment delivered — the container contribution path is broken"
+fi
+READY=$(kubectl get pod "$SIDECAR_POD" -n "$NS" \
+        -o jsonpath='{range .status.containerStatuses[*]}{.name}={.ready} {end}' 2>/dev/null)
+case "$READY" in
+  *sidecar=true*) ok "both containers running — the fragment authorized a container the measured policy never contained" ;;
+  *) diagnose "$SIDECAR_POD"; cleanup_pod "$SIDECAR_POD"
+     die "the sandbox is Running but the sidecar is not ready ($READY) — it was not authorized by the fragment" ;;
+esac
+cleanup_pod "$SIDECAR_POD"
+
+fi   # sidecar fixtures available
+
 ok "fragment delivery e2e passed"
 mark_done 07-fragment-bootpull
