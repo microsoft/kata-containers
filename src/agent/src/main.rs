@@ -1004,6 +1004,14 @@ struct FragmentLedgerConfig {
     /// DER in hex plus its COSE algorithm name.
     #[serde(default)]
     key: Vec<FragmentLedgerKeyConfig>,
+    /// FR-1f (trust list): Trust List subject(s) that vouched for this ledger's keys.
+    ///
+    /// Recording provenance is what lets a scope require `TTL:<subject>` — "a receipt
+    /// validated by a key subject S vouched for" — rather than only naming the ledger,
+    /// which is self-asserted metadata on the receipt. Absent here, `TTL:` requirements
+    /// against this ledger are unmet, which is the fail-closed reading.
+    #[serde(default)]
+    ttl_subjects: Vec<String>,
 }
 
 #[cfg(feature = "strict-policy")]
@@ -1131,17 +1139,15 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
     }
     // FR-1f (trust list): load named ledgers with rotatable keys.
     if !cfg.ledger.is_empty() {
-        let mut entries: Vec<(String, Vec<[u8; 32]>)> = Vec::with_capacity(cfg.ledger.len());
         for l in &cfg.ledger {
             let mut keys = Vec::with_capacity(l.pubkey_hex.len());
             for k in &l.pubkey_hex {
                 keys.push(decode_hex32(k).with_context(|| format!("ledger {} key", l.id))?);
             }
-            entries.push((l.id.clone(), keys));
+            store
+                .load_trust_list_with_subjects(l.id.clone(), &keys, &l.ttl_subjects)
+                .map_err(|e| anyhow::anyhow!("load transparency trust list: {}", e))?;
         }
-        store
-            .load_transparency_trust_list(&entries)
-            .map_err(|e| anyhow::anyhow!("load transparency trust list: {}", e))?;
         // BL-2: additional non-Ed25519 ledger keys (ES256/ES384/PS256/RS256).
         for l in &cfg.ledger {
             for k in &l.key {
@@ -1159,7 +1165,7 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
                     .with_context(|| format!("ledger {} spki_hex", l.id))?;
                 let pk = kata_security_reference_monitor::cose_keys::PublicKey::from_spki_der(&der)
                     .ok_or_else(|| anyhow::anyhow!("ledger {} invalid SPKI key", l.id))?;
-                store.add_ledger_key(l.id.clone(), pk, alg);
+                store.add_ledger_key_from_ttl(l.id.clone(), pk, alg, &l.ttl_subjects);
             }
         }
         info!(logger, "FR-1: transparency trust list loaded"; "ledgers" => cfg.ledger.len());

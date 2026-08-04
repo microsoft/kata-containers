@@ -297,25 +297,53 @@ Go verification path.
 | did:x509 → issuer identity (`didx509resolver.Resolve`) | `did_x509.rs:290-349`, derived DID must equal declared issuer | parity |
 | issuer+feed must match a candidate (`fragment_issuer_feed_ok`) | `declare_feed` allow-list; otherwise `UndeclaredFeed` | parity |
 | SVN ≥ `minimum_svn` (`header_svn_ok`, `svn_ok_if_defined`) | single signed `svn`, and `min_required()` takes the **max** with the trust root's issuer-wide floor | **stronger** — a declaration cannot sink below the issuer floor; hcsshim honours the per-declaration value alone |
-| `required_receipts` (`fragment_receipts_ok`) | `require_receipt` (global) + `required_receipt_from` (per issuer/feed) | parity, plus an `allowed_ledgers` allow-list on the *presented* ledger |
+| `required_receipts` (`fragment_receipts_ok`) | `require_receipt` (global) + `required_receipt_from` (per issuer/feed), conjunctive, with `*` / `TTL:<subject>` / ledger-name entries | parity, plus an `allowed_ledgers` allow-list on the *presented* ledger |
 | module confined to a namespace (`add_module`, `input.namespace`) | `apply_fragment_module` package confinement | parity |
+| metadata-only load (`add_module` false) | `allow_module` on the measured grant | parity |
 | — | `required`: fragment must be present before containers start | **ours only** |
 | — | `allow_nested` issuer scope, depth cap, first-declaration-wins | **ours only** (hcsshim opt-in is unscoped, uncapped, and stacks duplicates) |
+| — | namespace grant comes from measured state, never the fragment's own `includes` | parity (hcsshim reads the declaration too); we additionally intersect with the request |
 | — | SVN high-water marks persisted across agent restart (FR-1i) | **ours only** |
 | — | Stage-2 transparency inclusion + consistency proofs (§4.4) | **ours only** |
 
 Deltas that are **not** gates — surface hcsshim has and we do not, none of which is a check we
 skip:
 
-- `TTL:<subject>` as a receipt requirement, which indirects through *which* Trust List
-  supplied the validating key. We scope by ledger name and do not track per-key TTL
-  provenance.
 - Fragment `parameters`, and the richer `includes` vocabulary (`external_processes`,
   `platform_rules`, `transparency_trust_lists`).
-- Metadata-only load — hcsshim can accept a fragment and deliberately *not* add its module
-  (`add_module := "namespace" in fragment.includes`).
 - Semver `framework_version` negotiation via `apply_defaults`. We version the statement
   format (`kata-policy-fragment/v3`) but do not negotiate defaults across versions.
+
+### 4.12 Receipt requirement grammar (FR-1f)
+
+`required_receipt_from` is a **conjunction**: a fragment is accepted only when *every* entry
+is satisfied by some validated receipt. This matches hcsshim's `fragment_receipts_ok`, which
+evaluates `every requirement in required_receipts`. Requiring all of them is the point — a
+list is how a policy says "countersigned by the vendor *and* logged publicly", and an any-of
+reading would silently downgrade that to "either will do". A single-entry list, which is what
+every existing configuration uses, means exactly what it always did.
+
+| entry | satisfied by |
+| --- | --- |
+| `*` | any receipt that validated. Still requires a receipt to be present. |
+| `TTL:<subject>` | a receipt validated by a key that Trust List `<subject>` vouched for |
+| anything else | a receipt presented under, and validated by, that ledger id |
+
+`TTL:` indirects through *provenance* rather than the ledger id because the ledger id is
+self-asserted metadata carried on the receipt, whereas the subject is a property of the
+measured key material that actually validated it. Subjects are recorded per ledger key in the
+measured trust root (`[[ledger]] ttl_subjects`); a key loaded without them satisfies `*` and
+ledger-name entries but never a `TTL:` one — a requirement naming a subject nothing vouched
+for is unmet, not vacuously true. When several keys of a ledger accept the same signature,
+the union of their subjects is taken, so the outcome does not depend on key insertion order.
+
+Satisfying a conjunction needs more than one receipt, so `LoadPolicyFragmentRequest` carries
+`extra_receipts`, a list of `<ledger>=<hex signature>` entries, each an additional Stage-1
+detached signature over the same fragment statement. Each must verify against a key of the
+ledger it names and is subject to the same `allowed_ledgers` scope as the primary receipt —
+an extra receipt is a receipt, not a way around the scope. Receipts are **not** covered by
+the issuer signature (a receipt countersigns the statement and so cannot be inside it), which
+is why carrying several needs no `kata-policy-fragment` version bump.
 
 ---
 
@@ -335,6 +363,8 @@ require_x509 = false                   # FR-1d: when true, all fragments must ca
 [[ledger]]                             # FR-1f transparency trust list
 id = "acl"
 pubkey_hex = ["<64 hex>", "<rotated>"] # Ed25519 keys; multiple ⇒ rotation
+ttl_subjects = ["vendor"]              # FR-1f: Trust List subjects vouching for these keys
+                                       #   (enables `TTL:vendor` requirements — see §4.12)
   [[ledger.key]]                       # BL-2: non-Ed25519 ledger key (ES256/ES384/PS256/RS256)
   alg = "es256"
   spki_hex = "<SubjectPublicKeyInfo DER, hex>"
@@ -353,7 +383,7 @@ required_receipt_from = ["acl"]        # FR-1f per-issuer required receipts
   name = "prod"
   min_svn = 0
   allowed_ledgers = ["acl"]
-  required_receipt_from = ["acl"]
+  required_receipt_from = ["acl", "TTL:vendor"]  # conjunctive — see §4.12
 ```
 
 Runtime SVN/ordering/tree-head state is persisted to `/run/kata/fragment-svn.state`

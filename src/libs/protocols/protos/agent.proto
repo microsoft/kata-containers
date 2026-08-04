@@ -671,6 +671,16 @@ message LoadPolicyFragmentRequest {
 	// (`kata-ttl-proof/v1`) anchoring the fragment statement in an append-only transparency
 	// log at a signed, monotonic tree head. Verified against the transparency trust list.
 	string receipt_proof = 13;
+
+	// FR-1f (trust list): additional Stage-1 countersignatures, as "<ledger>=<hex sig>"
+	// entries, each a detached signature over the same fragment statement.
+	//
+	// A scope's `required_receipts` list is a conjunction, so a policy demanding (say)
+	// a vendor countersignature *and* a public-log entry cannot be satisfied by a single
+	// receipt. Like `receipt`, these are not covered by the issuer signature — a receipt
+	// countersigns the statement and so cannot be inside it — which is why adding them
+	// needs no fragment statement version bump.
+	repeated string extra_receipts = 14;
 }
 
 message GetDiagnosticDataRequest {

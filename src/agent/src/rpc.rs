@@ -2584,6 +2584,7 @@ impl agent_ttrpc::AgentService for AgentService {
             f.receipt = (!req.receipt.is_empty()).then(|| req.receipt.clone());
             f.receipt_ledger = (!req.receipt_ledger.is_empty()).then(|| req.receipt_ledger.clone());
             f.receipt_proof = (!req.receipt_proof.is_empty()).then(|| req.receipt_proof.clone());
+            f.extra_receipts = parse_extra_receipts(&req.extra_receipts)?;
             f
         } else {
             kata_security_reference_monitor::PolicyFragment {
@@ -2615,6 +2616,7 @@ impl agent_ttrpc::AgentService for AgentService {
                     Some(req.receipt_proof.clone())
                 },
                 signature: req.signature.clone(),
+                extra_receipts: parse_extra_receipts(&req.extra_receipts)?,
             }
         };
 
@@ -2848,6 +2850,35 @@ impl health_ttrpc::Health for HealthService {
 
         Ok(rep)
     }
+}
+
+/// FR-1f (trust list): parse `extra_receipts` wire entries of the form `<ledger>=<hex sig>`.
+///
+/// Ledger and signature are carried in one string rather than as parallel lists so the two
+/// cannot be misaligned by a truncated or reordered request — a mismatch would silently
+/// check a signature against the wrong ledger's keys. A malformed entry is rejected rather
+/// than skipped: dropping it would quietly weaken a conjunctive requirement into one the
+/// remaining receipts happen to satisfy.
+#[cfg(feature = "strict-policy")]
+fn parse_extra_receipts(entries: &[String]) -> ttrpc::Result<Vec<(String, String)>> {
+    entries
+        .iter()
+        .map(|e| {
+            let (ledger, sig) = e.split_once('=').ok_or_else(|| {
+                ttrpc_error(
+                    ttrpc::Code::INVALID_ARGUMENT,
+                    "extra_receipts entry must be <ledger>=<hex signature>".to_string(),
+                )
+            })?;
+            if ledger.is_empty() || sig.is_empty() {
+                return Err(ttrpc_error(
+                    ttrpc::Code::INVALID_ARGUMENT,
+                    "extra_receipts entry has an empty ledger or signature".to_string(),
+                ));
+            }
+            Ok((ledger.to_string(), sig.to_string()))
+        })
+        .collect()
 }
 
 fn get_memory_info(
