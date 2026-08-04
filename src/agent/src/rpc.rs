@@ -2674,6 +2674,7 @@ impl agent_ttrpc::AgentService for AgentService {
                             &format!("fragment:{}:{}", verified.issuer, verified.svn),
                             module,
                             &effective,
+                            scope.parameters.as_deref(),
                         )
                         .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?,
                 )

@@ -154,11 +154,13 @@ pub async fn record_declared_fragments() -> Result<usize> {
             store.declare_feed(spec.issuer.clone(), spec.feed.clone(), spec.minimum_svn);
             // FR-1c: the declaration, not the fragment, decides which policy namespaces
             // this feed may contribute to and whether its module is applied at all.
+            // FR-1k: and, for a parameterised fragment, with what values.
             store.grant_module_scope(
                 spec.issuer.clone(),
                 spec.feed.clone(),
                 &spec.includes,
                 spec.allow_module,
+                spec.parameters.as_ref().map(|p| p.to_string()),
             );
             delegation.insert((spec.issuer.clone(), spec.feed.clone()), (scope, 0));
         }
@@ -434,6 +436,7 @@ pub async fn register_nested_fragments(
             spec.feed.clone(),
             &spec.includes,
             spec.allow_module,
+            spec.parameters.as_ref().map(|p| p.to_string()),
         );
         delegation.insert(key, (child_scope, depth + 1));
         info!(

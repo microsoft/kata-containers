@@ -1063,6 +1063,11 @@ struct FragmentFeedConfig {
     /// accepts the fragment for its SVN/receipt/ordering record but contributes no rules.
     #[serde(default = "default_true_cfg")]
     allow_module: bool,
+    /// FR-1k: values to instantiate a parameterised fragment on this feed with, as a TOML
+    /// table. The fragment reads them via `parameter("name")`; a name it does not supply
+    /// falls back to the fragment's own declared default.
+    #[serde(default)]
+    parameters: Option<toml::Value>,
 }
 
 #[cfg(feature = "strict-policy")]
@@ -1239,12 +1244,22 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
             }
             // FR-1c: the trust root is measured state, so it is a valid authority for the
             // namespace grant on feeds the base policy does not separately declare.
-            if !feed.includes.is_empty() || !feed.allow_module {
+            // FR-1k: same for parameter bindings.
+            if !feed.includes.is_empty() || !feed.allow_module || feed.parameters.is_some() {
+                // Re-serialized to JSON because the policy engine takes a JSON object; the
+                // TOML table is only the authoring surface.
+                let parameters = match &feed.parameters {
+                    Some(p) => Some(serde_json::to_string(p).with_context(|| {
+                        format!("issuer {} feed {} parameters", issuer.id, feed.name)
+                    })?),
+                    None => None,
+                };
                 store.grant_module_scope(
                     issuer.id.clone(),
                     feed.name.clone(),
                     &feed.includes,
                     feed.allow_module,
+                    parameters,
                 );
             }
         }

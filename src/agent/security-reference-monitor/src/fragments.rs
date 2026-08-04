@@ -554,6 +554,14 @@ pub struct ModuleScope {
     /// hcsshim's `add_module` behaviour, useful for pinning a version or recording an
     /// attestation without granting policy surface.
     pub allow_module: bool,
+    /// FR-1k: parameter values to instantiate the fragment's Rego with, as a JSON object.
+    ///
+    /// A parameterised fragment reads these via `parameter("name")` instead of hard-coding
+    /// values, so one signed artefact can serve several deployments without being re-signed
+    /// per value. They are authority-bearing — a parameter can decide which env var value or
+    /// command a rule admits — so like the namespace grant they come from measured state,
+    /// never from the host or from the fragment itself.
+    pub parameters: Option<String>,
 }
 
 impl Default for ModuleScope {
@@ -561,6 +569,7 @@ impl Default for ModuleScope {
         Self {
             namespaces: Vec::new(),
             allow_module: true,
+            parameters: None,
         }
     }
 }
@@ -622,12 +631,14 @@ impl FragmentStore {
         feed: impl Into<String>,
         namespaces: &[String],
         allow_module: bool,
+        parameters: Option<String>,
     ) {
         self.module_scope.insert(
             (issuer.into(), feed.into()),
             ModuleScope {
                 namespaces: namespaces.to_vec(),
                 allow_module,
+                parameters,
             },
         );
     }

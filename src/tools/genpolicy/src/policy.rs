@@ -87,6 +87,11 @@ pub struct FragmentSpec {
     /// byte-identical output.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub allow_module: bool,
+
+    /// FR-1k: values to instantiate a parameterised fragment with, passed through verbatim.
+    /// The fragment reads them via `parameter("name")`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Value>,
 }
 
 fn default_true() -> bool {
