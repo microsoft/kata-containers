@@ -316,6 +316,18 @@ if [ -e "$SHIM_DST" ]; then
       || die "could not add the musl target"
   fi
   need musl-gcc
+  # Force crates/shim/src/config.rs to be regenerated. It is produced from
+  # config.rs.in by a plain timestamp rule in the Makefile, so once it exists it
+  # is never rebuilt -- and it is where @COMMIT@ is substituted. The shim
+  # therefore keeps reporting whatever commit was current the first time it was
+  # generated, however many times it is rebuilt afterwards.
+  #
+  # That makes the currency check below compare against a frozen constant: it
+  # fails spuriously the moment any shim input changes, and would keep passing
+  # for a genuinely stale binary if the file happened to be regenerated. Deleting
+  # it costs one sed and one relink, and is what makes the assertion mean
+  # anything at all.
+  rm -f src/runtime-rs/crates/shim/src/config.rs
   ( cd src/runtime-rs && make ) || die "could not build the runtime-rs shim"
 
   SHIM_SRC="$E2E_REPO_DIR/target/x86_64-unknown-linux-musl/release/containerd-shim-kata-v2"
