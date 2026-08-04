@@ -437,6 +437,51 @@ every configuration in the tree uses, are unchanged.
 
 ---
 
+### 4.15 Naming a fragment-contributed container in policy state (FR-1m)
+
+`CreateContainerRequest` records, in `pstate`, which policy container authorized the
+container it just admitted; later requests read it back (`ExecProcessRequest` through
+`get_state_container`, and `RemoveContainer` / `SignalProcess` / the per-container lifecycle
+gates for defined-ness). The set it has to name into is
+`base_container_entries ++ fragment_container_entries`, and the fragment half is a
+comprehension over the fragments **currently loaded**.
+
+That set is therefore not stable. Delivering a fragment that the base policy declares
+*earlier* in `policy_fragments[]` inserts its containers ahead of ones already recorded and
+shifts every position after them. Recording a position would let the host re-bind a running
+container to a different policy entry by choosing when to deliver a second, entirely
+legitimate fragment:
+
+```
+base declares [A, B], B delivered first
+  B only         : ["BASE0", "B0"]                 <- B0 recorded at index 1
+  B then A loads : ["BASE0", "A0", "A1", "B0"]     <- index 1 is now A0
+```
+
+State therefore records a **reference**, not a position: `{"base": true, "idx": i}` into the
+measured base array, or `{"feed": f, "svn": n, "idx": j}` into one specific version of one
+fragment. `container_by_ref` resolves it and re-runs the declaration gates rather than
+trusting the stored value -- the fragment must still be declared by the measured base policy,
+from the issuer that declaration names, at or above its SVN floor -- and it pins the recorded
+SVN **exactly**. A container admitted under one version of a fragment is consequently never
+evaluated against the containers of another version of it. Both arms are undefined when any
+of that fails, which makes the calling rule undefined and falls through to the fail-closed
+default.
+
+The exact-SVN pin has one cost, taken deliberately: an exec into a container whose
+authorizing fragment has since been upgraded is denied rather than silently re-resolved. The
+denial is fail-closed, it is host-triggered (the host chose to deliver the upgrade), and the
+alternative -- accepting a newer version's container list for a container admitted under an
+older one -- is the re-binding this section exists to prevent, in slower motion.
+
+A content digest would remove the pin, but regorus is vendored here without the `crypto`
+feature, so `crypto.sha256` is not available inside the policy.
+
+hcsshim has no analogue of either the bug or the mechanism: it keeps no persisted
+per-container policy state, so it has nothing to name and nothing to re-bind.
+
+---
+
 ## 5. Measured configuration
 
 Seeded at boot by `main.rs::seed_fragment_trust_root` from a measured-rootfs file
