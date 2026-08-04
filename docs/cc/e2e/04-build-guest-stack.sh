@@ -284,14 +284,21 @@ if [ -e "$SHIM_DST" ]; then
 
   sudo cp "$SHIM_DST" "$SHIM_DST.bak.$(date +%s)"
   sudo install -m 0755 "$SHIM_SRC" "$SHIM_DST"
-  # The shim reports the commit it was built from, so assert it rather than
-  # merely checking the binary changed — that is what makes "the host side is
-  # under test" a fact instead of an assumption.
-  want=$(git rev-parse HEAD)
-  got=$("$SHIM_DST" --version 2>&1 | sed -n 's/.*commit: *\([0-9a-f]*\).*/\1/p')
-  [ "$got" = "$want" ] \
-    || die "installed shim reports commit ${got:-<none>}, expected $want"
-  ok "runtime-rs shim installed from this build (${want:0:12})"
+  # The shim reports the commit it was built from. Do not require that to equal
+  # HEAD: cargo rightly does not relink for a commit that touched only docs, so
+  # the binary would be stale-but-correct and the stage would fail for no reason.
+  # What matters is that nothing the shim is built *from* has changed since.
+  SHIM_INPUTS=(src/runtime-rs src/libs src/dragonball Cargo.toml Cargo.lock)
+  got=$("$SHIM_DST" --version 2>&1 | sed -n 's/.*commit: *\([0-9a-f]\{7,\}\).*/\1/p')
+  [ -n "$got" ] || die "installed shim does not report a commit — is it the runtime-rs shim?"
+  git merge-base --is-ancestor "$got" HEAD 2>/dev/null \
+    || die "installed shim reports commit $got, which is not in this branch's history"
+  stale=$(git log --oneline "$got..HEAD" -- "${SHIM_INPUTS[@]}")
+  [ -z "$stale" ] || {
+    printf '%s\n' "$stale" | sed 's/^/    /'
+    die "shim was built at ${got:0:12} but the above commits changed ${SHIM_INPUTS[*]} since — the build did not pick them up"
+  }
+  ok "runtime-rs shim installed and current (built at ${got:0:12})"
   # containerd caches nothing about the shim binary, but any shim already
   # running for a live sandbox is the old one; stage 07 creates fresh pods.
 else
