@@ -7,23 +7,30 @@
 //! The host-supplied `container_id` is an untrusted alias: the host chooses it and
 //! can reuse, forge or replay it. The trusted enforcer therefore mints its own
 //! *occurrence handle* for every container it creates and drives that occurrence
-//! through an explicit lifecycle state machine. All lifecycle-mutating RPCs
-//! (Start/Exec/Signal/Pause/Resume/Remove) are gated on the occurrence state, so a
-//! host cannot start a container that was never created, exec into a container that
-//! is not running, or replay a stale/removed occurrence.
+//! through an explicit lifecycle state machine.
 //!
-//! Two abuses from the analysis are closed here:
-//!  - **Illegal lifecycle transitions** (start-before-create, exec-on-unknown-id,
-//!    signal a non-running occurrence, operate on a removed occurrence).
-//!  - **Cardinality** (optional, opt-in per declaration): a policy declaration that
-//!    is meant to admit exactly N containers cannot be satisfied by more than N
-//!    distinct occurrences (Attack #15 — two distinct ids satisfying one
-//!    declaration).
+//! The RPCs gated on occurrence state are exactly the five the mediation manifest
+//! classes `LifecycleGated`: `CreateContainer`, `StartContainer`, `ExecProcess`,
+//! `SignalProcess` and `RemoveContainer`. `PauseContainer` and `ResumeContainer` are
+//! **not** gated here — they are policy-gated only, and resolve the alias through the
+//! sandbox's own container map. So a host cannot start a container that was never
+//! created, start one twice, exec into or signal one that has not been started, or
+//! operate on a removed occurrence.
 //!
-//! Replay of a *previous* generation of an alias (host reuses a container_id after
-//! the occurrence was removed) is rejected: a fresh create re-mints the occurrence
-//! with a new, monotonically increasing generation; operations that carry an older
-//! generation are refused.
+//! What is *not* armed today (implemented and unit-tested, no caller in the agent):
+//!  - **Cardinality** (optional, per declaration): `create` is called with `None` for
+//!    both the declaration index and the bound, so a declaration meant to admit N
+//!    containers is not held to N (Attack #15). The parity implementation (hcsshim)
+//!    enforces no cardinality either.
+//!  - **Generation** (per-alias replay guard): `assert_generation` has no caller. No
+//!    agent RPC carries an occurrence handle or generation across a call — the host
+//!    presents only the alias and every gate resolves it to the *live* occurrence —
+//!    so a stale generation is not expressible over the wire. Arming it requires such
+//!    an RPC to exist first.
+//!
+//! Both are retained as forward-looking capabilities, not delivered guarantees. Note
+//! that a removed alias *can* be created again (with a fresh generation); the baseline
+//! stack refuses id reuse outright for the lifetime of the UVM.
 
 use std::collections::HashMap;
 use std::fmt;

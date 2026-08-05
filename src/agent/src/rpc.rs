@@ -1492,11 +1492,20 @@ impl agent_ttrpc::AgentService for AgentService {
 
             // FR-9: an exec is only permitted into a running occurrence. This rejects
             // exec on an unknown container_id or one that has not been started.
-            crate::OCCURRENCES
+            //
+            // The policy delta is reverted before returning, as on every other early
+            // return in this handler: `ExecProcessRequest` emits no `ops` under the
+            // reference policy, but that is a property of one policy and not of the
+            // request, which is why the snapshot is taken at all. `start_container`
+            // brackets the same gate the same way.
+            if let Err(e) = crate::OCCURRENCES
                 .lock()
                 .await
                 .require_running(&req.container_id, "exec")
-                .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
+            {
+                rollback_policy_state(&policy_snapshot, "exec_process occurrence").await;
+                return Err(ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e));
+            }
 
             let op_id = srm_op_id("exec", &[&req.container_id, &req.exec_id]);
             let digest = plan_digest(&req);
