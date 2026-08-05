@@ -126,6 +126,11 @@ ready_of() {
     -o jsonpath="{.status.containerStatuses[?(@.name=='$1')].ready}" 2>/dev/null
 }
 
+# wait_for runs its argument as a command, not as a shell string, so the
+# predicates have to be functions.
+pod_running()     { [ "$(kubectl get pod "$POD" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ]; }
+container_ready() { [ "$(ready_of "$1")" = true ]; }
+
 wipe_pod() {
   kubectl delete pod "$POD" -n "$NS" --ignore-not-found --now >/dev/null 2>&1 || true
   for _ in $(seq 1 30); do
@@ -144,7 +149,7 @@ render_pod "" > "$WORK/step1.yaml"
 "$GENPOLICY" -y "$WORK/step1.yaml" -p "$WORK/rules-none.rego" -j "$SETTINGS" \
   --initdata-path="$WORK/initdata.toml" >/dev/null || die "genpolicy failed"
 kubectl apply -f "$WORK/step1.yaml" >/dev/null
-wait_for 300 "pod $POD Running" "kubectl get pod $POD -n $NS -o jsonpath='{.status.phase}' | grep -q Running"
+wait_for 300 "pod $POD Running" pod_running
 ok "busybox is running, authorized by an entry in the measured policy"
 kubectl get pod "$POD" -n "$NS"
 pause
@@ -159,7 +164,7 @@ render_pod "" > "$WORK/step2.yaml"
   --initdata-path="$WORK/initdata.toml" >/dev/null || die "genpolicy failed"
 append_sidecar "$WORK/step2.yaml"
 kubectl apply -f "$WORK/step2.yaml" >/dev/null
-wait_for 300 "busybox ready" "[ \"\$(kubectl get pod $POD -n $NS -o jsonpath='{.status.containerStatuses[?(@.name==\"busybox\")].ready}')\" = true ]"
+wait_for 300 "busybox ready" container_ready busybox
 sleep 20
 sc=$(ready_of sidecar)
 [ "$sc" = "true" ] && die "the sidecar started without a fragment — the policy is not being enforced"
@@ -228,7 +233,7 @@ render_pod "$SIDECAR_REF" > "$WORK/step4.yaml"
   --initdata-path="$WORK/initdata.toml" >/dev/null || die "genpolicy failed"
 append_sidecar "$WORK/step4.yaml"
 kubectl apply -f "$WORK/step4.yaml" >/dev/null
-wait_for 300 "sidecar ready" "[ \"\$(kubectl get pod $POD -n $NS -o jsonpath='{.status.containerStatuses[?(@.name==\"sidecar\")].ready}')\" = true ]"
+wait_for 300 "sidecar ready" container_ready sidecar
 [ "$(ready_of busybox)" = "true" ] || die "busybox is not ready"
 ok "both containers running — the fragment authorized a container the measured policy never contained"
 kubectl get pod "$POD" -n "$NS"
