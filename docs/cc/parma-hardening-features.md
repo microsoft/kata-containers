@@ -272,10 +272,18 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   occurrence handle across a call — no agent RPC does today, since the host presents only
   the `container_id` alias and every gate resolves it to the *live* occurrence. The parity
   implementation (hcsshim) enforces no cardinality either.
+  Two further gaps, both recorded in `backlog.md`: `OccurrenceRegistry::stop()` has no
+  caller, so `Stopped` is unreachable and an occurrence is only ever retired by
+  `RemoveContainer` (RM-19); and a removed alias may be created again, whereas hcsshim
+  consumes a container id permanently — `create_container` requires `not container_started`
+  and that mark is never cleared (RM-20).
 - **Commits:** `96a0d641c` (registry), `2434d3ef2` (wiring).
-- **Validated:** unit + **live attack** — `StartContainer` on a never-created id and
-  `SignalProcess` on an unknown id are denied under an allow-all policy (the gate is the
-  occurrence machine, not the policy).
+- **Validated:** unit + **live attack**, now automated as e2e stage
+  `docs/cc/e2e/08-lifecycle-gates.sh`: a second `StartContainer` on a live container is
+  refused with `IllegalTransition` under the *reference* policy, and `StartContainer`,
+  `SignalProcess` and `ExecProcess` on a never-created id are refused with `UnknownAlias`
+  under a lifecycle-permissive policy — i.e. with the policy layer removed, so the refusal
+  can only come from the occurrence machine.
 
 ### FR-7 — Complete-mediation manifest
 - **Gap:** without a machine-checked inventory, a newly added RPC could ship unmediated.
