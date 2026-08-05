@@ -598,9 +598,8 @@ expect_delegation_blocked e2e-frag-nest-any "$WORK/rules-nest-any.rego" "$PARENT
 # Everything above proves the *delivery* path: declarations, scopes, SVN floors,
 # delegation. None of it exercises what a fragment is ultimately for — adding a
 # container the measured base policy does not contain. That is the C-ACI sidecar
-# shape: the base policy pins a workload to a known set of layer root hashes, and
-# a separately signed fragment admits one further container, also by its layer
-# hashes, which cannot run unless the fragment is loaded.
+# shape: the base policy admits one workload, and a separately signed fragment
+# admits one further container that cannot run unless the fragment is loaded.
 #
 # It is worth asserting separately because it is the only case that reaches
 # `fragment_container_entries`, and therefore the only one that would have caught
@@ -610,8 +609,8 @@ expect_delegation_blocked e2e-frag-nest-any "$WORK/rules-nest-any.rego" "$PARENT
 #
 # Construction, in order:
 #   1. generate a policy for the *two*-container pod and lift the sidecar's entry
-#      out of it — that entry carries the sidecar's real layer root hashes, so the
-#      fragment is admitting a specific image, not a name;
+#      out of it — that entry is the real generated entry for that container, so
+#      the fragment admits exactly it and nothing else;
 #   2. sign that entry into a fragment published under its own feed;
 #   3. generate the base policy from the *one*-container pod, then append the
 #      sidecar to the yaml after generation. The base policy therefore has no
@@ -734,11 +733,19 @@ render_sidecar_pod "$SIDECAR_POD" two "$SIDECAR_REF" > "$WORK/sidecar-ref.yaml"
 extract_container_entry "$WORK/sidecar-ref.yaml" > "$WORK/sidecar-entry.json" \
   || die "could not lift the sidecar entry out of the reference policy"
 [ -s "$WORK/sidecar-entry.json" ] || die "empty sidecar entry"
-# Prove the entry really pins the image rather than just naming it: without layer
-# root hashes the fragment would be admitting any image under that name, and the
-# test would pass while asserting nothing about integrity.
-grep -q 'root_hash\|dm-verity\|verity' "$WORK/sidecar-entry.json" \
-  || warn "the lifted sidecar entry carries no verity root hash — check PULL_TYPE=guest-pull"
+# How strongly the entry pins the image depends on the image path. Under host-pull
+# with dm-verity it carries the layer root hash and the image is pinned by content.
+# Under guest-pull — what this cluster runs — `storages` is empty and the entry
+# pins the image reference plus argv, env, mounts and user, with image integrity
+# enforced by the guest's own image-verification policy. Report which one is in
+# force rather than asserting the stronger claim, so the case does not read as
+# proving content pinning when it is not.
+if grep -q 'root_hash\|dm-verity\|verity' "$WORK/sidecar-entry.json"; then
+  log "the sidecar entry carries a dm-verity root hash — the image is pinned by content"
+else
+  log "guest-pull: the sidecar entry pins the image reference and process shape,"
+  log "and image integrity is enforced by the guest's image-verification policy"
+fi
 ok "lifted the sidecar container entry ($(wc -c < "$WORK/sidecar-entry.json") bytes)"
 
 # The package path is the fragment's own feed, quoted, because a feed is an OCI

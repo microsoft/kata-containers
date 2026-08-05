@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hand-runnable demo of the C-ACI sidecar shape: a measured base policy that pins
-# one workload by layer root hash, and a separately signed fragment that admits a
-# second container by *its* layer root hashes.
+# one workload, and a separately signed fragment that admits a second container.
+# What `pins` a container depends on the image path: dm-verity layer root hashes
+# under host-pull, image reference plus argv/env/mounts/user under guest-pull.
 #
 #   1. a container starts under a policy that contains it
 #   2. a sidecar the policy has never seen is refused, and the pod keeps running
@@ -199,9 +200,20 @@ assert len(hits) == 1, f"expected one sidecar entry, found {len(hits)}"
 print(json.dumps(hits[0], indent=2))
 PY
 [ -s "$WORK/entry.json" ] || die "could not lift the sidecar entry"
-grep -q 'root_hash\|verity' "$WORK/entry.json" \
-  && ok "the entry pins the image by dm-verity root hash, not by name" \
-  || warn "the entry carries no root hash — guest-pull may be off"
+# What the entry pins depends on how images reach the guest. With dm-verity
+# (host-pull) it carries the layer root hash and the image is pinned by content.
+# With guest-pull — what this cluster uses — `storages` is empty and the entry
+# pins the image *reference* plus argv, env, mounts, user/gid and annotations;
+# image integrity is then enforced by the guest's own image-verification policy,
+# not by this entry. Either way the fragment authorizes one specific container,
+# but it is worth being exact about which property is doing the work.
+if grep -q 'root_hash\|verity' "$WORK/entry.json"; then
+  PINNED_BY="its dm-verity layer root hash"
+  ok "the entry pins the image by dm-verity root hash"
+else
+  PINNED_BY="its image reference, argv, env, mounts and user — image integrity is enforced separately by the guest's image-verification policy"
+  log "guest-pull: the entry pins the image reference and process shape, not a layer root hash"
+fi
 
 # The package is the fragment's own feed, quoted: a feed is an OCI reference and
 # not a bare Rego identifier. The agent accepts that form only for the feed the
@@ -240,7 +252,7 @@ kubectl get pod "$POD" -n "$NS"
 kubectl logs "$POD" -n "$NS" -c sidecar 2>/dev/null | head -1 || true
 
 step "what just happened"
-cat <<'EOF'
+cat <<EOF
   step 2 and step 4 run the same image, the same command, the same pod.
   The difference is a signed, versioned artifact fetched from a registry by the
   host and verified inside the guest before it can authorize anything:
@@ -249,7 +261,7 @@ cat <<'EOF'
     * the fragment is COSE_Sign1-signed and its feed must match the declaration
     * its SVN must be at or above the floor the policy declares
     * it may only write under its own signed feed's namespace
-    * the container it admits is pinned by dm-verity root hash, not by image name
+    * the container it admits is pinned by $PINNED_BY
 
   Withhold the fragment (step 2) and the container simply never runs.
 EOF

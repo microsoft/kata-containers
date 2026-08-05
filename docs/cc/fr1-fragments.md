@@ -534,10 +534,20 @@ namespaced by the fragment's declared `namespace` field, which the fragment
 itself chooses.
 
 Covered live by stage 07 cases 07l/07m, which build the C-ACI sidecar shape — a
-base policy pinning one workload by layer root hash, and a separately signed
-fragment admitting a second container by *its* layer root hashes. 07l withholds
-the fragment and the pod must never run; 07m delivers it and both containers must
-become ready. They differ in exactly one field.
+base policy admitting one workload, and a separately signed fragment admitting a
+second container that the base policy never contained. 07l withholds the fragment
+and the sidecar must never run; 07m delivers it and both containers must become
+ready. They differ in exactly one field.
+
+How strongly the entry pins the image depends on how images reach the guest, and
+it is worth stating exactly. Under **host-pull with dm-verity** the entry carries
+the layer root hash, so the image is pinned by content. Under **guest-pull** —
+what the e2e cluster runs — `storages` is empty and the entry pins the image
+*reference* plus argv, env, mounts, user/gid and annotations; image integrity is
+enforced separately, by the guest's own image-verification policy. In both cases
+the fragment authorizes one specific container and nothing else, but the property
+doing the pinning is not the same one, and claiming layer hashes under guest-pull
+would overstate it.
 
 **Known limitation — one version per feed per boot.** Two modules from the same
 feed at different SVNs both declare the same package, so both define `containers`
