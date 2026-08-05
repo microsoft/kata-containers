@@ -493,7 +493,16 @@ fn default_signal_process_request() -> SignalProcessRequestDefaults {
 
 /// Settings specific to each kata agent endpoint, loaded from
 /// genpolicy-settings.json.
+///
+/// `deny_unknown_fields` is load-bearing, not hygiene (RM-21). These settings are
+/// deserialized here and then *re-serialized* into the generated policy, so a key this
+/// binary does not know would be dropped silently -- and `rules.rego` reads several of
+/// them by path. When `SignalProcessRequest.allowed_signals` went missing that way, the
+/// signal rule became undefined, every signal was denied fail-closed, and no pod on the
+/// cluster could be killed. Failing at generation time turns a version skew between the
+/// binary, `rules.rego` and `genpolicy-settings.json` into an error a human reads.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RequestDefaults {
     /// Settings for CreateContainerRequest.
     pub CreateContainerRequest: CreateContainerRequestDefaults,

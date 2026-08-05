@@ -94,6 +94,17 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     # policy_data.containers information.
     allow_create_container_input
 
+    # RM-20: a container id is consumed for the sandbox's lifetime. RemoveContainerRequest
+    # deletes the id's own state key (so no stale id -> container reference survives) but
+    # records a separate tombstone, and a create for a tombstoned id is refused here.
+    # Without this the same host-chosen id could name a second container, which is the
+    # property the baseline relies on to make an untrusted id harmless: hcsshim's
+    # create_container requires `not container_started` and never clears that mark, not
+    # even in shutdown_container. get_state_val is undefined for an absent key, and `not`
+    # over an undefined expression succeeds, so this admits every first create.
+    not get_state_val(retired_key(input.container_id))
+    print("CreateContainerRequest: container id", input.container_id, "has not been used before")
+
     i_oci := input.OCI
     i_storages := input.storages
     i_devices := input.devices
@@ -247,6 +258,13 @@ get_state_val(key) = value if {
 get_state_path(key) = path if {
     # prepend "/pstate/" to key
     path := concat("/", ["/pstate", key])
+}
+
+# RM-20: state key under which a removed container id is tombstoned. Namespaced so it can
+# never collide with a container id's own key -- a container id is hex, so it cannot start
+# with "retired:".
+retired_key(container_id) = key if {
+    key := concat("", ["retired:", container_id])
 }
 
 # Helper functions to conditionally concatenate op is not null
@@ -1879,10 +1897,15 @@ RemoveContainerRequest:= {"ops": ops, "allowed": true} if {
     p_container_index := get_state_val(input.container_id)
     print("RemoveContainerRequest: container", input.container_id, "known at index", p_container_index)
 
-    # Delete input.container_id from p_state
+    # Delete input.container_id from p_state, and tombstone the id so it can never name a
+    # second container in this sandbox (RM-20). Deleting is still right -- it is what makes
+    # every later start/exec/signal/remove for the id undefined and therefore denied -- but
+    # on its own it also frees the id for reuse, which the baseline never does.
     ops_builder1 := []
     del_container := state_del_key(input.container_id)
-    ops := concat_op_if_not_null(ops_builder1, del_container)
+    ops_builder2 := concat_op_if_not_null(ops_builder1, del_container)
+    retire_container := state_allows(retired_key(input.container_id), input.container_id)
+    ops := concat_op_if_not_null(ops_builder2, retire_container)
 
     print("RemoveContainerRequest: true")
 }
