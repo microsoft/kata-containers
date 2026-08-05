@@ -35,6 +35,10 @@ type SandboxState struct {
 	// SandboxContainer specifies which container is used to start the sandbox/vm
 	SandboxContainer string
 
+	// AgentContainerIDMap maps current host container IDs to the canonical IDs
+	// held by the agent. It is nil for sandboxes that were not restored.
+	AgentContainerIDMap map[string]string `json:",omitempty"`
+
 	// SandboxCgroupPath is the sandbox cgroup path
 	SandboxCgroupPath string
 
