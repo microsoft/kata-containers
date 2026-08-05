@@ -81,12 +81,20 @@ GENPOLICY="$E2E_REPO_DIR/target/release/genpolicy"
 [ -x "$GENPOLICY" ] || die "genpolicy built but $GENPOLICY is missing"
 ok "using genpolicy from the branch: $GENPOLICY"
 
+# The rules come from the branch too, and for the same reason: /opt/kata carries
+# whatever the last kata-deploy or stage 03 run installed, which is not
+# necessarily this commit. Testing a branch gate against a stale rules.rego
+# passes or fails for reasons that have nothing to do with the branch.
+REF_RULES="$E2E_REPO_DIR/src/tools/genpolicy/rules.rego"
+[ -r "$REF_RULES" ] || die "cannot read the branch rules.rego at $REF_RULES"
+ok "using rules.rego from the branch: $REF_RULES"
+
 # ------------------------------------------------------------------- fixtures
 # The lifecycle-permissive rules file. Appending extra rule bodies is enough: rego
 # ORs the bodies of a rule, so these sit alongside the real ones and win whenever
 # the real body is undefined. A body of just print(...) is true.
 make_permissive_rules() {
-  cp /opt/kata/share/defaults/kata-containers/rules.rego "$WORK/permissive.rego"
+  cp "$REF_RULES" "$WORK/permissive.rego"
   cat >> "$WORK/permissive.rego" <<'EOF'
 
 # ---- e2e FR-9 fixture only (never installed) --------------------------------
@@ -118,6 +126,10 @@ PY
 }
 
 # render_pod <name> <rules.rego>
+# POD_WITH_EXITER=1 adds a second container that runs to completion immediately.
+# The pod stays Running on the first container, so its sandbox -- and the exited
+# container's occurrence -- remain reachable over vsock, which is what makes the
+# post-exit gates (08h/08i) observable at all.
 render_pod() {
   local pod=$1 rules=$2
   cat > "$WORK/$pod.yaml" <<EOF
@@ -138,6 +150,13 @@ spec:
       image: quay.io/prometheus/busybox:latest
       command: ["sleep", "900"]
 EOF
+  if [ "${POD_WITH_EXITER:-0}" = 1 ]; then
+    cat >> "$WORK/$pod.yaml" <<EOF
+    - name: exiter
+      image: quay.io/prometheus/busybox:latest
+      command: ["true"]
+EOF
+  fi
   "$GENPOLICY" -y "$WORK/$pod.yaml" \
     -p "$rules" \
     -j /opt/kata/share/defaults/kata-containers/genpolicy-settings.json \
@@ -188,11 +207,25 @@ guest_cid() {
   ps -ef | grep "[s]andbox-$1" | sed -n 's/.*guest-cid=\([0-9]*\).*/\1/p' | head -1
 }
 
-# container_id <pod>
+# container_id <pod> [container-name]
 container_id() {
+  local pod=$1 name=${2:-}
+  if [ -n "$name" ]; then
+    kubectl get pod "$pod" -n "$NS" \
+      -o jsonpath="{.status.containerStatuses[?(@.name=='$name')].containerID}" 2>/dev/null \
+      | sed 's|containerd://||'
+  else
+    kubectl get pod "$pod" -n "$NS" \
+      -o jsonpath='{.status.containerStatuses[0].containerID}' 2>/dev/null \
+      | sed 's|containerd://||'
+  fi
+}
+
+# container_terminated <pod> <container-name>
+container_terminated() {
   kubectl get pod "$1" -n "$NS" \
-    -o jsonpath='{.status.containerStatuses[0].containerID}' 2>/dev/null \
-    | sed 's|containerd://||'
+    -o jsonpath="{.status.containerStatuses[?(@.name=='$2')].state.terminated.exitCode}" \
+    2>/dev/null | grep -qx 0
 }
 
 # agent_call <cid> <command-string> -- returns the agent's reply (or error) on stdout
@@ -219,7 +252,7 @@ expect_refusal() {
 
 # =============================================================== reference pod
 step "08 — reference policy (what a real workload sees)"
-start_pod fr9-reference /opt/kata/share/defaults/kata-containers/rules.rego
+start_pod fr9-reference "$REF_RULES"
 
 REF_SB=$(sandbox_id fr9-reference)   || die "could not find the sandbox for fr9-reference"
 REF_CID=$(guest_cid "$REF_SB")
@@ -256,7 +289,7 @@ kubectl delete pod fr9-reference -n "$NS" --ignore-not-found >/dev/null 2>&1 || 
 # ============================================================== permissive pod
 step "08 — lifecycle-permissive policy (the occurrence machine, alone)"
 make_permissive_rules
-start_pod fr9-permissive "$WORK/permissive.rego"
+POD_WITH_EXITER=1 start_pod fr9-permissive "$WORK/permissive.rego"
 
 P_SB=$(sandbox_id fr9-permissive) || die "could not find the sandbox for fr9-permissive"
 P_CID=$(guest_cid "$P_SB")
@@ -298,21 +331,74 @@ out=$(agent_call "$P_CID" "StartContainer json://{\"container_id\":\"$P_CT\"}")
 expect_refusal "08f — a second StartContainer is refused even with policy neutralised (IllegalTransition)" \
   "$out" FAILED_PRECONDITION 'IllegalTransition'
 
-# --- 08g ---------------------------------------------------------------------
-# Characterisation, not a guarantee. F-72: the registry has no `stop()` caller, so
-# an occurrence never enters `Stopped`; what actually retires it is RemoveContainer.
-# Measured here: with a cooperating shim the retirement is immediate on exit, so
-# the "exited but still Running" window is not reachable by a host that follows
-# the protocol. A host that simply never calls RemoveContainer holds the window
-# open indefinitely -- which is the residual F-72 documents, and which hcsshim
-# shares (it records containerTerminated but does not gate exec or signal on it).
-step "08g — characterisation: when is an occurrence retired?"
-log "signalling the live container with signal 0 (a liveness probe, delivers nothing)"
-before=$(agent_call "$P_CID" "SignalProcess json://{\"container_id\":\"$P_CT\",\"exec_id\":\"$P_CT\",\"signal\":0}")
-if echo "$before" | grep -q 'FAILED_PRECONDITION'; then
-  fail_case "08g: a running container's occurrence should accept signal 0"
+# --- 08g/08h/08i -------------------------------------------------------------
+# RM-19: the occurrence follows the container, not the host's bookkeeping. The
+# agent's own SIGCHLD reaper moves an occurrence to `stopped` when the container's
+# init exits, so a host that never calls WaitProcess or RemoveContainer cannot
+# hold a dead container's occurrence open and exec into it. This is the property
+# hcsshim gets from the same place (its exit callback), and the one F-72 recorded
+# as missing here.
+#
+# The split matters and is asserted below: exec after exit must be refused, but
+# signal after exit must still be allowed. The shim signals containers it has
+# already reaped while tearing a pod down -- gating signal on `running` makes
+# every pod on the node unkillable, which is exactly the F-75 outage this stage
+# now guards against.
+step "08g — post-exit gates (RM-19)"
+wait_for 120 "the exiter container to run to completion" container_terminated fr9-permissive exiter
+X_CT=$(container_id fr9-permissive exiter)
+[ -n "$X_CT" ] || die "could not read the container id for the exited container"
+log "exited container=${X_CT:0:12}"
+
+# The reaper runs in the guest, asynchronously from kubelet's view of the pod.
+# Give it a moment rather than racing it.
+sleep 3
+
+out=$(agent_call "$P_CID" "ExecProcess json://{\"container_id\":\"$X_CT\",\"exec_id\":\"post-exit\"}")
+if echo "$out" | grep -q 'code: FAILED_PRECONDITION' \
+   && echo "$out" | grep -qE 'IllegalTransition|UnknownAlias'; then
+  # Which of the two appears says *who* retired the occurrence, and both are the
+  # occurrence machine: IllegalTransition means the reaper stopped it and the
+  # host has not removed the container yet; UnknownAlias means the shim had
+  # already called RemoveContainer. A cooperating shim usually gets there first,
+  # which is exactly why the reaper matters -- an uncooperative one never does,
+  # and before RM-19 that left the occurrence `running` and the exec admitted.
+  if echo "$out" | grep -q 'IllegalTransition'; then
+    ok "08g — ExecProcess into a container whose init has exited is refused (IllegalTransition: the reaper stopped the occurrence)"
+  else
+    ok "08g — ExecProcess into a container whose init has exited is refused (UnknownAlias: the shim removed it before the probe)"
+  fi
 else
-  ok "08g — a running occurrence accepts the probe"
+  echo "$out" | tail -3
+  fail_case "08g: exec into a container whose init has exited must be refused by the occurrence machine"
+fi
+
+# --- 08h ---------------------------------------------------------------------
+# The regression test for the split gate, and for F-75. Signals must keep flowing
+# to a container the shim has already reaped, or kubelet can never complete a
+# kill: the pod hangs in Terminating forever and its sandbox leaks. That is not a
+# subtle failure -- it took the whole node out on the first run of this stage --
+# so it is asserted as an end-to-end property rather than as an agent probe:
+# a graceful delete must actually finish.
+step "08h — a pod with an exited container still deletes gracefully (F-75, split signal gate)"
+t0=$(date +%s)
+if kubectl delete pod fr9-permissive -n "$NS" --wait=true --timeout=90s >/dev/null 2>&1; then
+  ok "08h — graceful delete completed in $(( $(date +%s) - t0 ))s (signals still reach reaped containers)"
+else
+  kubectl get pod fr9-permissive -n "$NS" -o wide 2>/dev/null || true
+  fail_case "08h: the pod did not delete within 90s -- signals are being refused, which is the F-75 outage"
+fi
+
+# --- 08i ---------------------------------------------------------------------
+# RM-20 at the policy layer. The enforcer's one-way latch is covered by the
+# occurrence unit tests (a removed alias cannot be recreated); what is checked
+# here is that the *generated policy* carries the matching tombstone, so a host
+# that reuses a container id is refused before the enforcer is even consulted.
+step "08i — container ids are not reusable (RM-20)"
+if policy_text fr9-permissive | grep -q 'retired:'; then
+  ok "08i — the generated policy tombstones removed container ids (create for a reused id is refused at the policy layer)"
+else
+  fail_case "08i: the generated policy has no retired-id tombstone -- a removed container id could name a second container"
 fi
 
 kubectl delete pod fr9-permissive -n "$NS" --ignore-not-found >/dev/null 2>&1 || true

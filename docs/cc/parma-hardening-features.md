@@ -261,9 +261,12 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   reused, or replayed to drive illegal lifecycle transitions.
 - **Fix:** the enforcer mints its own occurrence handle per container and drives it through
   `created → running → stopped → removed`. Lifecycle RPCs are gated on occurrence state.
-- **Guarantee:** start-before-create, exec/signal on an unknown or not-running occurrence,
-  and operations on a removed occurrence are all rejected — by the occurrence machine, not
-  by policy.
+- **Guarantee:** start-before-create, exec/signal on an unknown occurrence, **exec** on a
+  not-running occurrence, operations on a removed occurrence, and **reuse of a container id
+  that has already been removed** are all rejected — by the occurrence machine, not by
+  policy. Signal is deliberately *not* closed on a stopped occurrence: the shim signals
+  containers it has already reaped while tearing a pod down, and refusing those leaves every
+  pod on the node stuck `Terminating`.
 - **Limits:** the registry additionally carries a monotonic per-alias **generation** and an
   optional per-declaration **cardinality** bound. Both are implemented and unit-tested, and
   neither is currently *armed*: `create` is called with `(None, None)` for the declaration
@@ -271,19 +274,17 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   capabilities, not delivered guarantees. Arming them requires an operation that carries an
   occurrence handle across a call — no agent RPC does today, since the host presents only
   the `container_id` alias and every gate resolves it to the *live* occurrence. The parity
-  implementation (hcsshim) enforces no cardinality either.
-  Two further gaps, both recorded in `backlog.md`: `OccurrenceRegistry::stop()` has no
-  caller, so `Stopped` is unreachable and an occurrence is only ever retired by
-  `RemoveContainer` (RM-19); and a removed alias may be created again, whereas hcsshim
-  consumes a container id permanently — `create_container` requires `not container_started`
-  and that mark is never cleared (RM-20).
+  implementation (hcsshim) enforces no cardinality either. The generation counter is in any
+  case now moot for in-sandbox replay, since an alias cannot be reused at all (RM-20).
 - **Commits:** `96a0d641c` (registry), `2434d3ef2` (wiring).
 - **Validated:** unit + **live attack**, now automated as e2e stage
   `docs/cc/e2e/08-lifecycle-gates.sh`: a second `StartContainer` on a live container is
-  refused with `IllegalTransition` under the *reference* policy, and `StartContainer`,
+  refused with `IllegalTransition` under the *reference* policy; `StartContainer`,
   `SignalProcess` and `ExecProcess` on a never-created id are refused with `UnknownAlias`
   under a lifecycle-permissive policy — i.e. with the policy layer removed, so the refusal
-  can only come from the occurrence machine.
+  can only come from the occurrence machine; and, on a container whose init has exited while
+  its pod sandbox is still alive, `ExecProcess` is refused with `IllegalTransition` while
+  `SignalProcess` is still admitted.
 
 ### FR-7 — Complete-mediation manifest
 - **Gap:** without a machine-checked inventory, a newly added RPC could ship unmediated.
