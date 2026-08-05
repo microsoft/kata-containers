@@ -481,6 +481,54 @@ struct Lifecycle {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     preStop: Option<LifecycleHandler>,
+
+    /// K8s 1.33 `lifecycle.stopSignal`: the signal the kubelet sends to stop this
+    /// container. When present it is the container's own declaration of which signal
+    /// it expects, so the policy narrows the per-container signal set to it (F-76).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stopSignal: Option<String>,
+}
+
+/// Signal name -> number, for the Linux architectures kata supports (x86_64, aarch64,
+/// s390x and ppc64le share these numbers; only mips/alpha differ, and neither is a kata
+/// target). Used to translate `lifecycle.stopSignal` into the numeric set `rules.rego`
+/// compares against `SignalProcessRequest.signal`.
+fn signal_number(name: &str) -> Option<u32> {
+    let n = match name.trim().to_ascii_uppercase().as_str() {
+        "SIGHUP" => 1,
+        "SIGINT" => 2,
+        "SIGQUIT" => 3,
+        "SIGILL" => 4,
+        "SIGTRAP" => 5,
+        "SIGABRT" | "SIGIOT" => 6,
+        "SIGBUS" => 7,
+        "SIGFPE" => 8,
+        "SIGKILL" => 9,
+        "SIGUSR1" => 10,
+        "SIGSEGV" => 11,
+        "SIGUSR2" => 12,
+        "SIGPIPE" => 13,
+        "SIGALRM" => 14,
+        "SIGTERM" => 15,
+        "SIGSTKFLT" => 16,
+        "SIGCHLD" => 17,
+        "SIGCONT" => 18,
+        "SIGSTOP" => 19,
+        "SIGTSTP" => 20,
+        "SIGTTIN" => 21,
+        "SIGTTOU" => 22,
+        "SIGURG" => 23,
+        "SIGXCPU" => 24,
+        "SIGXFSZ" => 25,
+        "SIGVTALRM" => 26,
+        "SIGPROF" => 27,
+        "SIGWINCH" => 28,
+        "SIGIO" | "SIGPOLL" => 29,
+        "SIGPWR" => 30,
+        "SIGSYS" => 31,
+        _ => return None,
+    };
+    Some(n)
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
@@ -818,6 +866,17 @@ impl Container {
         }
 
         (yaml_has_command, yaml_has_args)
+    }
+
+    /// F-76: the container's own stop signal, if the pod spec declares one
+    /// (`lifecycle.stopSignal`, K8s 1.33+). Returns `None` when unset or when the name is
+    /// not a signal this policy knows, in which case the caller falls back to the
+    /// settings-wide default set.
+    pub fn get_stop_signal(&self) -> Option<u32> {
+        self.lifecycle
+            .as_ref()
+            .and_then(|l| l.stopSignal.as_deref())
+            .and_then(signal_number)
     }
 
     pub fn get_exec_commands(&self) -> Vec<Vec<String>> {

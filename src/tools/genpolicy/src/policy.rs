@@ -381,6 +381,13 @@ pub struct ContainerPolicy {
 
     /// Runtime-assigned annotation key-value pairs for validation of input annotations.
     runtime_anno_patterns: BTreeMap<String, String>,
+
+    /// F-76: signal numbers `SignalProcessRequest` may deliver to *this* container,
+    /// mirroring hcsshim's per-container `securityPolicyContainer.Signals`. Enforced in
+    /// addition to the sandbox-wide `request_defaults.SignalProcessRequest.allowed_signals`
+    /// ceiling, so a container (including one carried by a policy fragment) is signalable
+    /// only with what its own declaration admits.
+    allowed_signals: Vec<u32>,
 }
 
 /// See Reference / Kubernetes API / Config and Storage Resources / Volume.
@@ -478,16 +485,62 @@ pub struct SignalProcessRequestDefaults {
     /// Signal numbers the Host is allowed to send to Guest container processes.
     /// Any signal not in this list is rejected, and signals targeting a container
     /// that was not created under this policy are rejected regardless of the signal.
+    ///
+    /// This is the sandbox-wide *ceiling*: `rules.rego` requires a signal to be in this
+    /// list **and** in the target container's own `allowed_signals` (F-76), so a policy
+    /// fragment can never widen the set beyond what the measured base policy admits.
     pub allowed_signals: Vec<u32>,
+
+    /// Optional narrower set for the pause (sandbox) container, whose only lifecycle
+    /// signals are stop and kill. Absent means "same as `allowed_signals`".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_container_allowed_signals: Option<Vec<u32>>,
 }
+
+impl SignalProcessRequestDefaults {
+    /// Per-container signal set emitted into the generated policy (F-76 / hcsshim
+    /// `securityPolicyContainer.Signals` parity). Precedence:
+    ///   1. the container's own `lifecycle.stopSignal`, plus SIGKILL, which the kubelet
+    ///      always retains as the ungraceful fallback after the termination grace period;
+    ///   2. `pause_container_allowed_signals` for the pause container;
+    ///   3. the sandbox-wide `allowed_signals`.
+    /// The result is always intersected with `allowed_signals` by `rules.rego`, so no
+    /// path here can widen the sandbox ceiling.
+    pub fn signals_for_container(&self, is_pause_container: bool, stop_signal: Option<u32>) -> Vec<u32> {
+        if let Some(signal) = stop_signal {
+            let mut signals = vec![signal];
+            if signal != SIGKILL {
+                signals.push(SIGKILL);
+            }
+            signals.sort_unstable();
+            return signals;
+        }
+
+        if is_pause_container {
+            if let Some(signals) = &self.pause_container_allowed_signals {
+                return signals.clone();
+            }
+        }
+
+        self.allowed_signals.clone()
+    }
+}
+
+const SIGKILL: u32 = 9;
 
 /// Default signal allowlist used when `SignalProcessRequest` is absent from
 /// genpolicy-settings.json. Covers the standard container-lifecycle signals
-/// (SIGHUP/INT/QUIT/KILL/USR1/USR2/TERM/CONT/STOP/WINCH) while rejecting less
-/// common signals that a malicious Host could otherwise inject into a workload.
+/// (SIGHUP/INT/QUIT/KILL/USR1/USR2/TERM/WINCH) while rejecting less common signals that
+/// a malicious Host could otherwise inject into a workload.
+///
+/// SIGSTOP(19) and SIGCONT(18) are deliberately **not** here (F-77): nothing in the CRI
+/// lifecycle sends them -- `docker pause` and the CRI equivalents use the cgroup freezer,
+/// not signals -- while admitting them lets a malicious Host freeze any workload process
+/// indefinitely (an availability attack) and single-step it for timing observation.
 fn default_signal_process_request() -> SignalProcessRequestDefaults {
     SignalProcessRequestDefaults {
-        allowed_signals: vec![1, 2, 3, 9, 10, 12, 15, 18, 19, 28],
+        allowed_signals: vec![1, 2, 3, 9, 10, 12, 15, 28],
+        pause_container_allowed_signals: None,
     }
 }
 
@@ -884,6 +937,12 @@ impl AgentPolicy {
             resource.use_sandbox_pidns()
         };
         let exec_commands = yaml_container.get_exec_commands();
+        let allowed_signals = self
+            .config
+            .settings
+            .request_defaults
+            .SignalProcessRequest
+            .signals_for_container(is_pause_container, yaml_container.get_stop_signal());
 
         let mut devices: Vec<agent::Device> = vec![];
         if let Some(volumeDevices) = &yaml_container.volumeDevices {
@@ -992,6 +1051,7 @@ impl AgentPolicy {
             sandbox_pidns,
             exec_commands,
             runtime_anno_patterns,
+            allowed_signals,
         }
     }
 

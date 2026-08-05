@@ -25,6 +25,8 @@ spec:
       command:
         - sleep
         - "3600"
+      lifecycle:
+        stopSignal: SIGHUP
       livenessProbe:
         exec:
           command:

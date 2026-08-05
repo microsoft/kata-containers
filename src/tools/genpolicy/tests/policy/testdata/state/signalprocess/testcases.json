@@ -706,5 +706,85 @@
       "exec_id": "",
       "signal": 9
     }
+  },
+  {
+    "allowed": false,
+    "description": "SIGSTOP(19) to first container is denied (freeze attack, F-77)",
+    "kind": "SignalProcessRequest",
+    "request": {
+      "container_id": "88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9",
+      "exec_id": "",
+      "signal": 19
+    }
+  },
+  {
+    "allowed": false,
+    "description": "SIGCONT(18) to first container is denied (F-77)",
+    "kind": "SignalProcessRequest",
+    "request": {
+      "container_id": "88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9",
+      "exec_id": "",
+      "signal": 18
+    }
+  },
+  {
+    "allowed": true,
+    "description": "SIGHUP(1) to second container is allowed (its declared stop signal)",
+    "kind": "SignalProcessRequest",
+    "request": {
+      "container_id": "22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9",
+      "exec_id": "",
+      "signal": 1
+    }
+  },
+  {
+    "allowed": true,
+    "description": "SIGKILL(9) to second container is allowed (kubelet ungraceful fallback)",
+    "kind": "SignalProcessRequest",
+    "request": {
+      "container_id": "22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9",
+      "exec_id": "",
+      "signal": 9
+    }
+  },
+  {
+    "allowed": false,
+    "description": "SIGTERM(15) to second container is denied by its per-container set (F-76)",
+    "kind": "SignalProcessRequest",
+    "request": {
+      "container_id": "22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9",
+      "exec_id": "",
+      "signal": 15
+    }
+  },
+  {
+    "allowed": false,
+    "description": "SIGUSR1(10) to second container is denied by its per-container set (F-76)",
+    "kind": "SignalProcessRequest",
+    "request": {
+      "container_id": "22941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9",
+      "exec_id": "",
+      "signal": 10
+    }
+  },
+  {
+    "allowed": true,
+    "description": "SIGTERM(15) to first container is still allowed (no per-container narrowing)",
+    "kind": "SignalProcessRequest",
+    "request": {
+      "container_id": "88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9",
+      "exec_id": "",
+      "signal": 15
+    }
+  },
+  {
+    "allowed": true,
+    "description": "SIGUSR1(10) to first container is still allowed",
+    "kind": "SignalProcessRequest",
+    "request": {
+      "container_id": "88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9",
+      "exec_id": "",
+      "signal": 10
+    }
   }
 ]

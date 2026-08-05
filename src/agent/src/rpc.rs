@@ -254,6 +254,14 @@ impl AgentService {
 
         kata_sys_util::validate::verify_id(&cid)?;
 
+        // F-78: `verify_id` above is an upstream sanity check -- it accepts any Unicode
+        // alphanumeric string of length > 1, with no bound on length. Strict builds hold
+        // the host to the shape a CRI runtime actually produces (64 lowercase hex),
+        // matching hcsshim's `checkValidContainerID` under a confidential policy.
+        #[cfg(feature = "strict-policy")]
+        kata_security_reference_monitor::validate_container_id(&cid)
+            .map_err(|e| anyhow!("refusing CreateContainer: {}", e))?;
+
         let use_sandbox_pidns = req.sandbox_pidns();
 
         let mut oci = match req.OCI.into_option() {

@@ -415,9 +415,11 @@
                 10,
                 12,
                 15,
-                18,
-                19,
                 28
+            ],
+            "pause_container_allowed_signals": [
+                9,
+                15
             ]
         }
     }

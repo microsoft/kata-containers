@@ -1911,26 +1911,37 @@ RemoveContainerRequest:= {"ops": ops, "allowed": true} if {
 }
 
 # Gate SignalProcessRequest instead of allowing every signal unconditionally.
-# A signal is permitted only when (1) its number is in the policy's allowed_signals
-# set and (2) it targets a container this policy authorized to run (tracked in
-# persisted state by CreateContainerRequest and cleared by RemoveContainerRequest).
-# This mirrors the reference behavior of gating which signals the Host may deliver
-# and to which known container processes, closing the "any signal to any container"
-# gap of the previous unconditional default.
+# A signal is permitted only when (1) its number is in the policy's sandbox-wide
+# allowed_signals set, (2) it targets a container this policy authorized to run (tracked
+# in persisted state by CreateContainerRequest and cleared by RemoveContainerRequest),
+# and (3) its number is in *that container's own* allowed_signals set.
+#
+# (3) is the hcsshim parity property (F-76): the reference stack stores a per-container
+# `Signals` list on securityPolicyContainer and consults the signalled container's own
+# list, so a signal admitted for one workload is not thereby admitted for every other
+# process in the sandbox. Checking (1) as well as (3) makes the sandbox-wide list a
+# ceiling rather than a second source of truth: a container carried by a policy fragment
+# is resolved through get_state_container -> container_by_ref, which re-runs the fragment
+# declaration gates, and even then it can only ever narrow what the measured base policy
+# admits -- a fragment cannot widen the signal surface.
 SignalProcessRequest if {
     print("SignalProcessRequest: input =", input)
 
-    # (1) The signal number must be explicitly allowed by policy.
+    # (1) The signal number must be explicitly allowed by the sandbox-wide policy.
     i_signal := input.signal
     some allowed_signal in policy_data.request_defaults.SignalProcessRequest.allowed_signals
     i_signal == allowed_signal
-    print("SignalProcessRequest: signal", i_signal, "is allowed")
+    print("SignalProcessRequest: signal", i_signal, "is allowed sandbox-wide")
 
-    # (2) The target container must be known to this policy (present in state).
-    # get_state_val is undefined for an unknown/removed container_id, which makes
-    # this rule undefined and falls through to the fail-closed default.
-    p_container_index := get_state_val(input.container_id)
-    print("SignalProcessRequest: container", input.container_id, "known at index", p_container_index)
+    # (2)+(3) The target container must be known to this policy (present in state), and
+    # the signal must be in that container's own set. get_state_container is undefined for
+    # an unknown/removed container_id -- and p_container.allowed_signals is undefined for a
+    # container entry generated before this field existed -- which makes this rule
+    # undefined and falls through to the fail-closed default.
+    p_container := get_state_container(input.container_id)
+    some container_signal in p_container.allowed_signals
+    i_signal == container_signal
+    print("SignalProcessRequest: signal", i_signal, "is allowed for container", input.container_id)
 
     print("SignalProcessRequest: true")
 }

@@ -118,6 +118,8 @@ pub enum OccurrenceError {
         presented: u64,
         current: u64,
     },
+    /// The host-supplied container id is not of the shape a container runtime produces.
+    MalformedAlias(String),
 }
 
 impl fmt::Display for OccurrenceError {
@@ -155,11 +157,49 @@ impl fmt::Display for OccurrenceError {
                 f,
                 "stale generation for alias {alias}: presented {presented}, current {current}"
             ),
+            OccurrenceError::MalformedAlias(a) => write!(
+                f,
+                "container id {a:?} is malformed: expected {CONTAINER_ID_LEN} lowercase \
+                 hex characters"
+            ),
         }
     }
 }
 
 impl std::error::Error for OccurrenceError {}
+
+/// Length of a container id as produced by every CRI runtime kata runs under: containerd
+/// and CRI-O both mint ids as 32 random bytes rendered lowercase hex.
+pub const CONTAINER_ID_LEN: usize = 64;
+
+/// F-78: validate the *shape* of a host-supplied container id before it is admitted.
+///
+/// This is hcsshim parity: the reference stack refuses any container id that is not 64
+/// lowercase hex characters (`checkValidContainerID`) whenever it is enforcing a
+/// confidential policy, and it does so at every enforcement entry point. The id is
+/// untrusted input that the guest goes on to use as a map key, a log field and a path
+/// component under `/run/kata-containers/<id>`; constraining it to the shape the runtime
+/// actually produces removes that whole class of input from the attack surface (path
+/// traversal, log/field injection, unbounded-length ids retained for the sandbox's
+/// lifetime by the alias-retirement map) instead of relying on each consumer to be
+/// careful.
+///
+/// The agent applies this at container *admission* (`CreateContainer`). The other
+/// lifecycle RPCs need no separate check: an alias they name is either one admitted here
+/// -- and therefore already validated -- or unknown to the registry and to the policy,
+/// which refuses it fail-closed.
+pub fn validate_container_id(id: &str) -> Result<(), OccurrenceError> {
+    let valid = id.len() == CONTAINER_ID_LEN
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+
+    if valid {
+        Ok(())
+    } else {
+        Err(OccurrenceError::MalformedAlias(id.to_string()))
+    }
+}
 
 /// Registry of container occurrences and their lifecycle states.
 #[derive(Debug, Default)]
@@ -424,6 +464,40 @@ impl OccurrenceRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_container_id_accepts_runtime_shaped_ids() {
+        let id = "a".repeat(64);
+        assert!(validate_container_id(&id).is_ok());
+        assert!(validate_container_id(
+            "88941c1e6546ae2aef276f738b162fc379e61467120544e13e5ca5bd204862b9"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn validate_container_id_rejects_malformed_ids() {
+        for bad in [
+            "",
+            "c1",
+            &"a".repeat(63),
+            &"a".repeat(65),
+            // uppercase hex: no CRI runtime emits it, and accepting both cases would let
+            // one container id name two distinct aliases in the registry.
+            &"A".repeat(64),
+            // non-hex, path traversal and whitespace/newline (log injection) attempts,
+            // padded to the expected length so only the charset check can reject them.
+            &format!("{}{}", "../".repeat(2), "a".repeat(58)),
+            &format!("{}{}", "z".repeat(1), "a".repeat(63)),
+            &format!("{}{}", "\n".repeat(1), "a".repeat(63)),
+        ] {
+            assert_eq!(
+                validate_container_id(bad),
+                Err(OccurrenceError::MalformedAlias(bad.to_string())),
+                "expected {bad:?} to be rejected"
+            );
+        }
+    }
 
     #[test]
     fn create_start_exec_stop_remove_happy_path() {

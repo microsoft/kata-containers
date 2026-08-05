@@ -60,7 +60,7 @@ pub use did_x509::{DidX509Anchor, DidX509Policy};
 pub use fragments::{FragmentError, FragmentStore, PolicyFragment};
 pub use handle_binding::{CheckedHandle, HandleError};
 pub use network_phase::{NetOp, NetPhaseError, NetworkPhase, NetworkPhaseMachine};
-pub use occurrence::{Lifecycle, Occurrence, OccurrenceError, OccurrenceRegistry};
+pub use occurrence::{validate_container_id, Lifecycle, Occurrence, OccurrenceError, OccurrenceRegistry};
 pub use resource_graph::{
     verify_ordered_bijection, PresentedResource, ResourceDeclaration, ResourceGraphError,
     ResourceKind, VerifiedResourceHandle,
