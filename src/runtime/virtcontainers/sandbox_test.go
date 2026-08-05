@@ -839,11 +839,15 @@ func TestRemoveContainerSuccess(t *testing.T) {
 		containers: map[string]*Container{
 			testContainerID: {id: testContainerID},
 		},
+		agentContainerIDMap: map[string]string{
+			testContainerID: "agent-container-id",
+		},
 	}
 	err := sandbox.removeContainer(testContainerID)
 	assert.Nil(t, err, "Should not have returned an error: %v", err)
 
 	assert.Equal(t, len(sandbox.containers), 0, "Containers list from sandbox structure should be empty")
+	assert.Contains(t, sandbox.agentContainerIDMap, testContainerID)
 }
 
 func TestCreateContainer(t *testing.T) {
@@ -875,9 +879,11 @@ func TestDeleteContainer(t *testing.T) {
 	contConfig := newTestContainerConfigNoop(contID)
 	_, err = s.CreateContainer(context.Background(), contConfig)
 	assert.Nil(t, err, "Failed to create container %+v in sandbox %+v: %v", contConfig, s, err)
+	s.agentContainerIDMap = map[string]string{contID: "agent-container-id"}
 
 	_, err = s.DeleteContainer(context.Background(), contID)
 	assert.Nil(t, err, "Failed to delete container %s in sandbox %s: %v", contID, s.ID(), err)
+	assert.NotContains(t, s.agentContainerIDMap, contID)
 }
 
 func TestStartContainer(t *testing.T) {

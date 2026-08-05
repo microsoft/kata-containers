@@ -32,6 +32,7 @@ func (s *Sandbox) dumpVersion(ss *persistapi.SandboxState) {
 
 func (s *Sandbox) dumpState(ss *persistapi.SandboxState, cs map[string]persistapi.ContainerState) {
 	ss.SandboxContainer = s.id
+	ss.AgentContainerIDMap = cloneAgentContainerIDMap(s.agentContainerIDMap)
 	ss.GuestMemoryBlockSizeMB = s.state.GuestMemoryBlockSizeMB
 	ss.GuestMemoryHotplugProbe = s.state.GuestMemoryHotplugProbe
 	ss.State = string(s.state.State)
@@ -58,6 +59,18 @@ func (s *Sandbox) dumpState(ss *persistapi.SandboxState, cs map[string]persistap
 			delete(cs, id)
 		}
 	}
+}
+
+func cloneAgentContainerIDMap(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(source))
+	for hostID, agentID := range source {
+		cloned[hostID] = agentID
+	}
+	return cloned
 }
 
 func (s *Sandbox) dumpHypervisor(ss *persistapi.SandboxState) {
@@ -294,6 +307,7 @@ func (s *Sandbox) Save() error {
 
 func (s *Sandbox) loadState(ss persistapi.SandboxState) {
 	s.state.PersistVersion = ss.PersistVersion
+	s.agentContainerIDMap = cloneAgentContainerIDMap(ss.AgentContainerIDMap)
 	s.state.GuestMemoryBlockSizeMB = ss.GuestMemoryBlockSizeMB
 	s.state.BlockIndexMap = ss.HypervisorState.BlockIndexMap
 	s.state.State = types.StateString(ss.State)

@@ -74,8 +74,7 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 		}
 	}()
 
-	origSandboxID, err := seedPersist(snapshotDir, newID, drv)
-	if err != nil {
+	if err := seedPersist(snapshotDir, newID, drv); err != nil {
 		return nil, fmt.Errorf("seed persist for restore: %w", err)
 	}
 
@@ -201,7 +200,7 @@ func RestoreSandbox(ctx context.Context, snapshotDir string, opts RestoreOpts) (
 	vmAssigned = true
 	s.restoredVM = vm
 
-	if err = adoptPauseContainer(s, origSandboxID); err != nil {
+	if err = adoptPauseContainer(s); err != nil {
 		return nil, fmt.Errorf("adopt restored pause container: %w", err)
 	}
 
@@ -401,8 +400,107 @@ func (s *Sandbox) AbortRestore(ctx context.Context) error {
 // private raw_flags bit for restore-only identity replacement; keep in sync with kata-agent.
 const kataIfaceRestoreReplace uint32 = 0x4000_0000
 
+// rekeySandboxAgentContainerIDMap maintains direct mappings from current host
+// container IDs to the progenitor pod's canonical agent container IDs.
+func rekeySandboxAgentContainerIDMap(state *persistapi.SandboxState, newSandboxID string) error {
+	oldSandboxID := state.SandboxContainer
+	if oldSandboxID == "" {
+		return fmt.Errorf("kata restore failed: snapshot has an empty sandbox container id")
+	}
+
+	containerIDs := make(map[string]struct{}, len(state.Config.ContainerConfigs))
+	// On the first restore, host and agent IDs are still identical.
+	if state.AgentContainerIDMap == nil {
+		state.AgentContainerIDMap = make(map[string]string, len(state.Config.ContainerConfigs))
+		for _, config := range state.Config.ContainerConfigs {
+			if config.ID == "" {
+				return fmt.Errorf("kata restore failed: snapshot has a container with an empty id")
+			}
+			if _, exists := state.AgentContainerIDMap[config.ID]; exists {
+				return fmt.Errorf("kata restore failed: snapshot has duplicate container id %q", config.ID)
+			}
+			state.AgentContainerIDMap[config.ID] = config.ID
+		}
+	}
+
+	// Validate one canonical agent ID for every persisted container ID.
+	for _, config := range state.Config.ContainerConfigs {
+		if _, exists := containerIDs[config.ID]; exists {
+			return fmt.Errorf("kata restore failed: snapshot has duplicate container id %q", config.ID)
+		}
+		containerIDs[config.ID] = struct{}{}
+		agentID, exists := state.AgentContainerIDMap[config.ID]
+		if !exists || agentID == "" {
+			return fmt.Errorf("kata restore failed: container %q has no canonical agent id", config.ID)
+		}
+	}
+	if len(containerIDs) != len(state.AgentContainerIDMap) {
+		return fmt.Errorf("kata restore failed: agent container id map does not match the persisted containers")
+	}
+
+	// Rekey the pause host ID without changing its progenitor agent ID.
+	agentSandboxID, exists := state.AgentContainerIDMap[oldSandboxID]
+	if !exists || agentSandboxID == "" {
+		return fmt.Errorf("kata restore failed: sandbox container %q has no canonical agent id", oldSandboxID)
+	}
+	if oldSandboxID != newSandboxID {
+		if _, exists := state.AgentContainerIDMap[newSandboxID]; exists {
+			return fmt.Errorf("kata restore failed: target sandbox id %q already exists in the agent container id map", newSandboxID)
+		}
+		delete(state.AgentContainerIDMap, oldSandboxID)
+		state.AgentContainerIDMap[newSandboxID] = agentSandboxID
+	}
+
+	// Rewrite the persisted pause config for the current host generation.
+	pauseContainerFound := false
+	for index := range state.Config.ContainerConfigs {
+		config := &state.Config.ContainerConfigs[index]
+		if config.Annotations[criContainerTypeAnnotation] != criSandboxType {
+			continue
+		}
+		if pauseContainerFound || config.ID != oldSandboxID {
+			return fmt.Errorf("kata restore failed: snapshot pause container does not match sandbox id %q", oldSandboxID)
+		}
+		pauseContainerFound = true
+		config.ID = newSandboxID
+		if config.Annotations == nil {
+			config.Annotations = make(map[string]string)
+		}
+		config.Annotations[ociBundlePathAnnotation] = filepath.Join(containerdBundleBase, newSandboxID)
+		config.Annotations[criSandboxIDAnnotation] = newSandboxID
+	}
+	if !pauseContainerFound {
+		return fmt.Errorf("kata restore failed: snapshot has no pause container for sandbox %q", oldSandboxID)
+	}
+
+	state.SandboxContainer = newSandboxID
+	return nil
+}
+
+func (s *Sandbox) rekeyAgentContainerID(oldHostID, newHostID string) (string, error) {
+	if s.agentContainerIDMap == nil {
+		return "", fmt.Errorf("kata restore failed: sandbox has no agent container id map")
+	}
+	agentID, exists := s.agentContainerIDMap[oldHostID]
+	if !exists || agentID == "" {
+		return "", fmt.Errorf("kata restore failed: container %q has no canonical agent id", oldHostID)
+	}
+	if oldHostID != newHostID {
+		if _, exists := s.agentContainerIDMap[newHostID]; exists {
+			return "", fmt.Errorf("kata restore failed: target container id %q already exists in the agent container id map", newHostID)
+		}
+		delete(s.agentContainerIDMap, oldHostID)
+		s.agentContainerIDMap[newHostID] = agentID
+	}
+	return agentID, nil
+}
+
 // adoptPauseContainer rekeys host bookkeeping while preserving the pause process's guest ID.
-func adoptPauseContainer(s *Sandbox, origSandboxID string) error {
+func adoptPauseContainer(s *Sandbox) error {
+	agentID, exists := s.agentContainerIDMap[s.id]
+	if !exists || agentID == "" {
+		return fmt.Errorf("pause container %q has no canonical agent id", s.id)
+	}
 	for i := range s.config.Containers {
 		cc := &s.config.Containers[i]
 		if cc.ID != s.id {
@@ -417,7 +515,7 @@ func adoptPauseContainer(s *Sandbox, origSandboxID string) error {
 		if err != nil {
 			return fmt.Errorf("new pause container: %w", err)
 		}
-		c.process = Process{Token: origSandboxID, Pid: -1}
+		c.process = Process{Token: agentID, Pid: -1}
 		if err := s.addContainer(c); err != nil {
 			return fmt.Errorf("add pause container: %w", err)
 		}
@@ -442,12 +540,9 @@ func (s *Sandbox) RestoreContainer(ctx context.Context, contConfig ContainerConf
 		}
 	}
 
-	idx, guestID, err := guestWorkloadIndexByName(s, contConfig.Annotations[criContainerNameAnnotation])
+	idx, persistedHostID, err := guestWorkloadIndexByName(s, contConfig.Annotations[criContainerNameAnnotation])
 	if err != nil {
 		return nil, err
-	}
-	if guestID == "" {
-		return nil, fmt.Errorf("kata restore failed: persisted workload has an empty guest id")
 	}
 
 	if s.containers[s.id] == nil {
@@ -455,11 +550,17 @@ func (s *Sandbox) RestoreContainer(ctx context.Context, contConfig ContainerConf
 	}
 
 	savedCopy := s.config.Containers[idx]
+	savedIDMap := cloneAgentContainerIDMap(s.agentContainerIDMap)
+	agentID, err := s.rekeyAgentContainerID(persistedHostID, contConfig.ID)
+	if err != nil {
+		return nil, err
+	}
 	s.config.Containers[idx] = contConfig
 	rollback := true
 	defer func() {
 		if rollback {
 			s.config.Containers[idx] = savedCopy
+			s.agentContainerIDMap = savedIDMap
 		}
 	}()
 
@@ -467,7 +568,7 @@ func (s *Sandbox) RestoreContainer(ctx context.Context, contConfig ContainerConf
 	if err != nil {
 		return nil, err
 	}
-	c.process = Process{Token: guestID, Pid: -1}
+	c.process = Process{Token: agentID, Pid: -1}
 	if err = s.addContainer(c); err != nil {
 		return nil, err
 	}
@@ -546,27 +647,25 @@ func (s *Sandbox) markAdoptedWorkloadsRunning() error {
 	return nil
 }
 
-// seedPersist rekeys snapshot state for the new sandbox without changing the guest workload ID.
-func seedPersist(snapshotDir, newID string, store persistapi.PersistDriver) (string, error) {
+// seedPersist rekeys snapshot state for the new sandbox without changing agent IDs.
+func seedPersist(snapshotDir, newID string, store persistapi.PersistDriver) error {
 	raw, err := os.ReadFile(filepath.Join(snapshotDir, "persist.json"))
 	if err != nil {
-		return "", fmt.Errorf("read snapshot persist.json: %w", err)
+		return fmt.Errorf("read snapshot persist.json: %w", err)
 	}
 	var ss persistapi.SandboxState
 	if err := json.Unmarshal(raw, &ss); err != nil {
-		return "", fmt.Errorf("decode snapshot persist.json: %w", err)
+		return fmt.Errorf("decode snapshot persist.json: %w", err)
 	}
 	if HypervisorType(ss.Config.HypervisorType) != ClhHypervisor {
-		return "", fmt.Errorf("kata restore failed: snapshot hypervisor %q is not %q; only cloud-hypervisor restore is supported", ss.Config.HypervisorType, ClhHypervisor)
+		return fmt.Errorf("kata restore failed: snapshot hypervisor %q is not %q; only cloud-hypervisor restore is supported", ss.Config.HypervisorType, ClhHypervisor)
 	}
 
-	origSandboxID := ss.SandboxContainer
-	if origSandboxID == "" {
-		return "", fmt.Errorf("kata restore failed: snapshot has an empty sandbox container id")
+	if err := rekeySandboxAgentContainerIDMap(&ss, newID); err != nil {
+		return err
 	}
 
 	ss.AgentState.URL = fmt.Sprintf("hvsock:///run/vc/vm/%s/clh.sock:1024", newID)
-	ss.SandboxContainer = newID
 	ss.SandboxCgroupPath = ""
 	ss.OverheadCgroupPath = ""
 	ss.CgroupPaths = nil
@@ -575,20 +674,10 @@ func seedPersist(snapshotDir, newID string, store persistapi.PersistDriver) (str
 	ss.HypervisorState.APISocket = ""
 	ss.Config.HypervisorConfig.VMid = ""
 
-	// Rekey only the pause container; workload IDs remain guest-owned.
-	for i := range ss.Config.ContainerConfigs {
-		cc := &ss.Config.ContainerConfigs[i]
-		if cc.Annotations[criContainerTypeAnnotation] == criSandboxType {
-			cc.ID = newID
-			cc.Annotations[ociBundlePathAnnotation] = filepath.Join(containerdBundleBase, newID)
-			cc.Annotations[criSandboxIDAnnotation] = newID
-		}
-	}
-
 	if err := store.ToDisk(ss, map[string]persistapi.ContainerState{}); err != nil {
-		return "", err
+		return err
 	}
-	return origSandboxID, nil
+	return nil
 }
 
 const (
