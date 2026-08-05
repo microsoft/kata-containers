@@ -1591,13 +1591,17 @@ impl agent_ttrpc::AgentService for AgentService {
 
         is_allowed(&req).await?;
 
-        // FR-9: a signal may only be delivered to a running occurrence. This rejects
-        // signalling an unknown, not-yet-started, or already-removed occurrence.
+        // FR-9: a signal may only be delivered to an occurrence that has been started and
+        // not removed. This rejects signalling an unknown, never-started, or already
+        // removed occurrence. `Stopped` is deliberately admitted: the shim signals a
+        // container whose init has already exited as part of stopping the pod, and
+        // refusing that would leave the container unkillable and the pod wedged in
+        // `Terminating`. A signal delivered then reaches nothing an exec could not.
         #[cfg(feature = "strict-policy")]
         crate::OCCURRENCES
             .lock()
             .await
-            .require_running(&req.container_id, "signal")
+            .require_started(&req.container_id, "signal")
             .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?;
 
         // FR-6: wrap signal delivery in an SRM transaction for a consistent audit record

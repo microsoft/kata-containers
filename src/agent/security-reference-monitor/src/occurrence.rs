@@ -14,8 +14,20 @@
 //! `SignalProcess` and `RemoveContainer`. `PauseContainer` and `ResumeContainer` are
 //! **not** gated here — they are policy-gated only, and resolve the alias through the
 //! sandbox's own container map. So a host cannot start a container that was never
-//! created, start one twice, exec into or signal one that has not been started, or
-//! operate on a removed occurrence.
+//! created, start one twice, exec into one that is not running, signal one that was
+//! never started, operate on a removed occurrence, or reuse a container id.
+//!
+//! Exec and signal are gated differently on purpose. `ExecProcess` requires `Running`,
+//! because it introduces new execution. `SignalProcess` requires only that the
+//! occurrence has been *started* (`Running` or `Stopped`): a signal to a container whose
+//! init has already exited reaches nothing new, and the host must be able to send one —
+//! the shim signals an exited container while stopping the pod, so refusing it would
+//! leave the container unkillable.
+//!
+//! `Stopped` is reached from the agent's own SIGCHLD reaper when a container's init
+//! process exits, not from a host RPC, so the state follows the container rather than
+//! the host's say-so. A host that never calls `WaitProcess` or `RemoveContainer` cannot
+//! hold the occurrence in `Running` after its init has gone.
 //!
 //! What is *not* armed today (implemented and unit-tested, no caller in the agent):
 //!  - **Cardinality** (optional, per declaration): `create` is called with `None` for
@@ -26,11 +38,11 @@
 //!    agent RPC carries an occurrence handle or generation across a call — the host
 //!    presents only the alias and every gate resolves it to the *live* occurrence —
 //!    so a stale generation is not expressible over the wire. Arming it requires such
-//!    an RPC to exist first.
+//!    an RPC to exist first. With id reuse now refused outright the guard has nothing
+//!    left to catch in-sandbox: an alias can no longer be recreated, so no second
+//!    generation of it can exist.
 //!
-//! Both are retained as forward-looking capabilities, not delivered guarantees. Note
-//! that a removed alias *can* be created again (with a fresh generation); the baseline
-//! stack refuses id reuse outright for the lifetime of the UVM.
+//! Both are retained as forward-looking capabilities, not delivered guarantees.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -91,6 +103,9 @@ pub enum OccurrenceError {
     },
     /// An occurrence already exists for this alias and has not been removed.
     AliasInUse(String),
+    /// The alias named an occurrence that has already been removed. A container id is
+    /// consumed for the sandbox's lifetime and may never name a second occurrence.
+    AliasRetired(String),
     /// Admitting this occurrence would exceed the declaration's allowed cardinality.
     CardinalityExceeded {
         declaration_index: usize,
@@ -120,6 +135,11 @@ impl fmt::Display for OccurrenceError {
             OccurrenceError::AliasInUse(a) => {
                 write!(f, "alias {a} is already bound to a live occurrence")
             }
+            OccurrenceError::AliasRetired(a) => write!(
+                f,
+                "alias {a} named an occurrence that has been removed; a container id is \
+                 consumed for the sandbox's lifetime and cannot be reused"
+            ),
             OccurrenceError::CardinalityExceeded {
                 declaration_index,
                 allowed,
@@ -167,7 +187,13 @@ impl OccurrenceRegistry {
 
     /// Create (register) a new occurrence for `alias`.
     ///
-    /// * Rejects a duplicate alias that is still bound to a live (non-removed) occurrence.
+    /// * Rejects a duplicate alias that is still bound to a live occurrence.
+    /// * Rejects an alias that has *ever* named an occurrence in this sandbox, even one
+    ///   since removed: the id is consumed for the sandbox's lifetime (RM-20). This is the
+    ///   parity behaviour — hcsshim's `create_container` requires `not container_started`
+    ///   and never clears that mark, not even on `shutdown_container` — and it is what
+    ///   makes "the host-supplied id is an untrusted alias" harmless: an id names at most
+    ///   one occurrence, so no stale reference to it can ever be revived.
     /// * If `declaration_index` and `max_cardinality` are supplied, rejects the create
     ///   when admitting it would exceed the declaration's allowed count.
     ///
@@ -181,9 +207,10 @@ impl OccurrenceRegistry {
         let alias = alias.into();
 
         if let Some(existing) = self.by_alias.get(&alias) {
-            if existing.state != Lifecycle::Removed {
-                return Err(OccurrenceError::AliasInUse(alias));
+            if existing.state == Lifecycle::Removed {
+                return Err(OccurrenceError::AliasRetired(alias));
             }
+            return Err(OccurrenceError::AliasInUse(alias));
         }
 
         if let (Some(idx), Some(max)) = (declaration_index, max_cardinality) {
@@ -323,7 +350,11 @@ impl OccurrenceRegistry {
         self.transition(alias, "unstart", &[Lifecycle::Running], Lifecycle::Created)
     }
 
-    /// Require that an alias refers to a running occurrence (exec/signal gating).
+    /// Require that an alias refers to a running occurrence (exec gating).
+    ///
+    /// This is the strict form: `Created` (never started), `Stopped` (init has exited) and
+    /// unknown/removed are all refused. Use it for operations that would introduce new
+    /// execution into the container.
     pub fn require_running(
         &self,
         alias: &str,
@@ -340,7 +371,36 @@ impl OccurrenceRegistry {
         Ok(())
     }
 
+    /// Require that an alias refers to a started, not-yet-removed occurrence (signal
+    /// gating): `Running` or `Stopped`.
+    ///
+    /// Signalling is deliberately weaker than exec. A signal delivered after the init
+    /// process has exited reaches nothing it could not already reach, and the host has to
+    /// be able to send one: the shim signals a container whose init has already exited as
+    /// part of stopping the pod, so refusing it would leave the container unkillable and
+    /// the pod wedged in `Terminating`. What stays refused is what matters — signalling an
+    /// occurrence that was never started, one that was never created, or one that has been
+    /// removed.
+    pub fn require_started(
+        &self,
+        alias: &str,
+        action: &'static str,
+    ) -> Result<(), OccurrenceError> {
+        let o = self.get_live(alias)?;
+        if o.state != Lifecycle::Running && o.state != Lifecycle::Stopped {
+            return Err(OccurrenceError::IllegalTransition {
+                alias: alias.to_string(),
+                from: o.state,
+                action,
+            });
+        }
+        Ok(())
+    }
+
     /// Stop: `Running` → `Stopped` (idempotent if already stopped).
+    ///
+    /// Driven by the agent's own SIGCHLD reaper when a container's init process exits, so
+    /// the recorded state follows the container rather than the host's say-so.
     pub fn stop(&mut self, alias: &str) -> Result<(), OccurrenceError> {
         self.transition(
             alias,
@@ -489,30 +549,119 @@ mod tests {
     }
 
     #[test]
-    fn removed_alias_can_be_recreated_with_new_generation() {
+    fn removed_alias_cannot_be_recreated() {
+        // RM-20: a container id is consumed for the sandbox's lifetime, matching the
+        // baseline (hcsshim's `container_started` mark is never cleared). Without this an
+        // id could name a second occurrence and a stale reference to it could be revived.
         let mut r = OccurrenceRegistry::new();
         r.create("c1", None, None).unwrap();
-        assert_eq!(r.generation("c1"), Some(0));
         r.remove("c1").unwrap();
-        r.create("c1", None, None).unwrap();
-        assert_eq!(r.generation("c1"), Some(1));
+        assert_eq!(
+            r.create("c1", None, None).unwrap_err(),
+            OccurrenceError::AliasRetired("c1".into())
+        );
+        // The retirement is permanent, not a one-shot refusal.
+        assert_eq!(
+            r.create("c1", None, None).unwrap_err(),
+            OccurrenceError::AliasRetired("c1".into())
+        );
+        assert_eq!(r.state("c1"), None);
     }
 
     #[test]
     fn stale_generation_is_rejected() {
         let mut r = OccurrenceRegistry::new();
         r.create("c1", None, None).unwrap();
-        r.remove("c1").unwrap();
-        r.create("c1", None, None).unwrap(); // now generation 1
         assert_eq!(
-            r.assert_generation("c1", 0).unwrap_err(),
+            r.assert_generation("c1", 1).unwrap_err(),
             OccurrenceError::StaleGeneration {
                 alias: "c1".into(),
-                presented: 0,
-                current: 1,
+                presented: 1,
+                current: 0,
             }
         );
-        r.assert_generation("c1", 1).unwrap();
+        r.assert_generation("c1", 0).unwrap();
+    }
+
+    #[test]
+    fn exec_is_denied_after_the_init_process_exits() {
+        // RM-19: the reaper stops the occurrence when init exits, and an exec into a
+        // container that is no longer running must not be admitted.
+        let mut r = OccurrenceRegistry::new();
+        r.create("c1", None, None).unwrap();
+        r.start("c1").unwrap();
+        r.stop("c1").unwrap();
+        assert_eq!(
+            r.require_running("c1", "exec").unwrap_err(),
+            OccurrenceError::IllegalTransition {
+                alias: "c1".into(),
+                from: Lifecycle::Stopped,
+                action: "exec",
+            }
+        );
+    }
+
+    #[test]
+    fn signal_is_allowed_after_the_init_process_exits_but_not_before_start() {
+        // Deliberately weaker than exec: the shim signals an exited container while
+        // stopping the pod, and refusing that leaves the pod wedged in Terminating.
+        let mut r = OccurrenceRegistry::new();
+        r.create("c1", None, None).unwrap();
+        assert_eq!(
+            r.require_started("c1", "signal").unwrap_err(),
+            OccurrenceError::IllegalTransition {
+                alias: "c1".into(),
+                from: Lifecycle::Created,
+                action: "signal",
+            }
+        );
+        r.start("c1").unwrap();
+        r.require_started("c1", "signal").unwrap();
+        r.stop("c1").unwrap();
+        r.require_started("c1", "signal").unwrap();
+        r.remove("c1").unwrap();
+        assert_eq!(
+            r.require_started("c1", "signal").unwrap_err(),
+            OccurrenceError::UnknownAlias("c1".into())
+        );
+        assert_eq!(
+            r.require_started("ghost", "signal").unwrap_err(),
+            OccurrenceError::UnknownAlias("ghost".into())
+        );
+    }
+
+    #[test]
+    fn stop_is_idempotent_and_denied_before_start() {
+        let mut r = OccurrenceRegistry::new();
+        r.create("c1", None, None).unwrap();
+        assert_eq!(
+            r.stop("c1").unwrap_err(),
+            OccurrenceError::IllegalTransition {
+                alias: "c1".into(),
+                from: Lifecycle::Created,
+                action: "stop",
+            }
+        );
+        r.start("c1").unwrap();
+        r.stop("c1").unwrap();
+        r.stop("c1").unwrap();
+        assert_eq!(r.state("c1"), Some(Lifecycle::Stopped));
+    }
+
+    #[test]
+    fn a_stopped_occurrence_cannot_be_started_again() {
+        let mut r = OccurrenceRegistry::new();
+        r.create("c1", None, None).unwrap();
+        r.start("c1").unwrap();
+        r.stop("c1").unwrap();
+        assert_eq!(
+            r.start("c1").unwrap_err(),
+            OccurrenceError::IllegalTransition {
+                alias: "c1".into(),
+                from: Lifecycle::Stopped,
+                action: "start",
+            }
+        );
     }
 
     #[test]

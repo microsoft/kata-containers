@@ -99,6 +99,35 @@ async fn handle_sigchild(logger: Logger, sandbox: Arc<Mutex<Sandbox>>) -> Result
             // close the socket file to notify readStdio to close terminal specifically
             // in case this process's terminal has been inherited by its children.
             p.notify_term_close();
+
+            // FR-9 (RM-19): if what just exited was a container's *init* process, retire
+            // the occurrence to `stopped`. Doing it here, in the agent's own reaper,
+            // rather than on WaitProcess/RemoveContainer is the point: those are host
+            // RPCs, and a host that simply never calls them would otherwise hold the
+            // occurrence in `running` indefinitely and keep exec admissible into a
+            // container that no longer has a process behind it.
+            //
+            // The sandbox lock is released before taking the occurrence lock: every other
+            // occurrence call site takes OCCURRENCES on its own, and nesting the two in
+            // one order here while rpc.rs may nest them in the other is how deadlocks are
+            // built.
+            #[cfg(feature = "strict-policy")]
+            {
+                let stopped = sandbox.find_init_container_id(raw_pid);
+                drop(sandbox);
+                if let Some(cid) = stopped {
+                    // Err here is not a failure: a container removed while its init was
+                    // being reaped has no live occurrence left to stop.
+                    if let Err(e) = crate::OCCURRENCES.lock().await.stop(&cid) {
+                        info!(logger, "no live occurrence to stop for exited init";
+                                      "container-id" => &cid,
+                                      "error" => format!("{e:?}"));
+                    } else {
+                        info!(logger, "occurrence stopped: init process exited";
+                                      "container-id" => &cid);
+                    }
+                }
+            }
         }
     }
 }

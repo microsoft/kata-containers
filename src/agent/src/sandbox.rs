@@ -300,8 +300,20 @@ impl Sandbox {
             .find(|&c| c.config.container_name == name)
     }
 
-    pub fn find_process(&mut self, pid: pid_t) -> Option<&mut Process> {
-        for (_, c) in self.containers.iter_mut() {
+    /// FR-9: the id of the container whose *init* process has this pid, if any.
+    ///
+    /// Used by the SIGCHLD reaper to stop the container's occurrence when its init exits,
+    /// so the recorded lifecycle state follows the container rather than the host's
+    /// say-so: a host that never calls `WaitProcess` or `RemoveContainer` cannot keep an
+    /// occurrence in `running` after the process behind it is gone.
+    pub fn find_init_container_id(&self, pid: pid_t) -> Option<String> {
+        self.containers
+            .iter()
+            .find(|(_, c)| c.init_process_pid == pid)
+            .map(|(id, _)| id.clone())
+    }
+
+    pub fn find_process(&mut self, pid: pid_t) -> Option<&mut Process> {        for (_, c) in self.containers.iter_mut() {
             for p in c.processes.values_mut() {
                 if p.pid == pid {
                     return Some(p);
