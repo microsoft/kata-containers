@@ -132,9 +132,15 @@ pub struct DiskConfig {
     pub direct: bool,
     #[serde(default)]
     pub iommu: bool,
-    //#[serde(default = "default_diskconfig_num_queues")]
+    #[serde(
+        default = "default_diskconfig_num_queues",
+        skip_serializing_if = "usize_is_zero"
+    )]
     pub num_queues: usize,
-    //#[serde(default = "default_diskconfig_queue_size")]
+    #[serde(
+        default = "default_diskconfig_queue_size",
+        skip_serializing_if = "u16_is_zero"
+    )]
     pub queue_size: u16,
     #[serde(default)]
     pub vhost_user: bool,
@@ -508,6 +514,14 @@ fn u16_is_zero(v: &u16) -> bool {
     *v == 0
 }
 
+fn default_diskconfig_num_queues() -> usize {
+    convert::DEFAULT_DISK_QUEUES
+}
+
+fn default_diskconfig_queue_size() -> u16 {
+    convert::DEFAULT_DISK_QUEUE_SIZE
+}
+
 // Type used to simplify conversion from a generic Hypervisor config
 // to a CH specific VmConfig.
 #[derive(Debug, Clone, Default)]
@@ -570,6 +584,30 @@ pub fn guest_protection_is_snp(guest_protection_to_use: GuestProtection) -> bool
 mod tests {
     use super::*;
     use kata_sys_util::protection::SevSnpDetails;
+
+    #[test]
+    fn test_disk_config_queue_serde_defaults() {
+        let json = serde_json::to_value(DiskConfig::default()).unwrap();
+        assert!(json.get("num_queues").is_none());
+        assert!(json.get("queue_size").is_none());
+
+        let disk: DiskConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(disk.num_queues, convert::DEFAULT_DISK_QUEUES);
+        assert_eq!(disk.queue_size, convert::DEFAULT_DISK_QUEUE_SIZE);
+
+        let json = serde_json::to_value(DiskConfig {
+            num_queues: 2,
+            queue_size: 256,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(json["num_queues"], 2);
+        assert_eq!(json["queue_size"], 256);
+
+        let disk: DiskConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(disk.num_queues, 2);
+        assert_eq!(disk.queue_size, 256);
+    }
 
     #[test]
     fn test_guest_protection_is_tdx() {

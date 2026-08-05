@@ -49,6 +49,14 @@ EOF
 sudo reboot
 ```
 
+The single-layer EROFS flow additionally requires an EROFS-enabled host
+kernel, validated with `kernel-mshv-6.6.137.mshv2-2.azl3`.
+
+```bash
+sudo dnf install -y erofs-utils
+sudo modprobe erofs
+```
+
 ## Variant I: Utilize released components to assemble the UVM
 
 While the priorly installed `kata-packages-host` package delivers all host-side components, the tools required to assemble the UVM components are delivered through the `kata-packages-uvm-build` package.
@@ -73,7 +81,7 @@ You environment is ready. Continue with section *Run Kata (Confidential) Contain
 ### Install AzL3 build dependencies
 
 ```
-sudo dnf -y install git golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel cmake fuse-devel kata-packages-uvm-build
+sudo dnf -y install git golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel cmake fuse-devel kata-packages-uvm-build curl cpio
 ```
 
 Continue with the section *Build the Kata(-CC) host and guest components from source and install*.
@@ -131,15 +139,57 @@ OPENSSL_NO_VENDOR=1 cargo build --release --no-default-features --features sev_s
 popd
 ```
 
-The Azure Linux `kernel-uvm` 6.6.137.mshv1 bzImage currently triple-faults
-during IGVM boot. Use a `kernel-uvm-6.1.58.mshv8-1.azl3` bzImage for
-development. Extract it without replacing the host package:
+For the single-layer EROFS flow, install containerd 2.3.3:
 
+```bash
+CONTAINERD_VERSION=2.3.3
+curl -fsSLO \
+	"https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/containerd-${CONTAINERD_VERSION}-linux-amd64.tar.gz"
+curl -fsSLO \
+	"https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/containerd-${CONTAINERD_VERSION}-linux-amd64.tar.gz.sha256sum"
+sha256sum --check "containerd-${CONTAINERD_VERSION}-linux-amd64.tar.gz.sha256sum"
+
+sudo systemctl stop containerd
+sudo tar --directory /usr --extract --gzip \
+	--file "containerd-${CONTAINERD_VERSION}-linux-amd64.tar.gz"
+sudo systemctl start containerd
+
+containerd --version
 ```
-mkdir -p kernel-uvm-6.1.58
-rpm2cpio /path/to/kernel-uvm-6.1.58.mshv8-1.azl3.x86_64.rpm |
-	(cd kernel-uvm-6.1.58 && cpio -idm)
+
+The Azure Linux `kernel-uvm` 6.6.137.mshv1 bzImage currently triple-faults
+during IGVM boot. Build the known-good `kernel-uvm-6.1.58.mshv8` kernel with
+EROFS enabled:
+
+```bash
+sudo dnf install -y \
+	bc bison flex dwarves ncurses-devel elfutils-libelf-devel
+
+mkdir -p kernel-uvm-6.1.58/{srpm,source,build}
+pushd kernel-uvm-6.1.58
+
+curl -fsSLO \
+	https://packages.microsoft.com/azurelinux/3.0/prod/base/srpms/Packages/k/kernel-uvm-6.1.58.mshv8-1.azl3.src.rpm
+
+rpm2cpio kernel-uvm-6.1.58.mshv8-1.azl3.src.rpm |
+	(cd srpm && cpio -idm)
+
+tar --extract \
+	--file srpm/kernel-uvm-6.1.58.mshv8.tar.gz \
+	--directory source \
+	--strip-components=1
+
+cp srpm/config build/.config
+source/scripts/config --file build/.config --enable EROFS_FS
+
+make --directory source O="${PWD}/build" olddefconfig
+make --directory source O="${PWD}/build" --jobs "$(nproc)" bzImage
+
+IGVM_KERNEL="${PWD}/build/arch/x86/boot/bzImage"
+popd
 ```
+
+Use the resulting `IGVM_KERNEL` path in the standard ConfPods build.
 
 ## Build and deploy
 
@@ -151,11 +201,13 @@ sudo make deploy
 popd
 ```
 
-To build and install Kata-CC components, use the `all-confpods` and `deploy-confpods` targets:
+To build and install Kata-CC components, use the `all-confpods` and
+`deploy-confpods` targets. The ConfPods flow builds and installs runtime-rs as
+the default Kata-CC shim:
 ```
 pushd kata-containers/tools/osbuilder/node-builder/azure-linux
 CLH_SNP_BIN=/path/to/cloud-hypervisor/target/release/cloud-hypervisor
-IGVM_KERNEL=/path/to/kernel-uvm-6.1.58/usr/share/cloud-hypervisor/bzImage
+IGVM_KERNEL=/path/to/kernel-uvm-6.1.58/build/arch/x86/boot/bzImage
 make \
 	AGENT_POLICY_FILE=allow-all.rego \
 	CLH_SNP_PATH="${CLH_SNP_BIN}" \
@@ -179,97 +231,6 @@ Notes:
   - `CLH_SNP_PATH=<path>` selects the prebuilt SNP-enabled Cloud Hypervisor binary referenced by the generated runtime-rs configuration.
   - The legacy tardev/tarfs stack is disabled because its source is absent. Use `BUILD_TARFS=yes` on branches that include it.
   - For build and deployment of both Kata and Kata-CC artifacts, first run the `make all` and `make deploy` commands to build and install the Kata Containers for AKS components followed by `make clean`, and then run `make all-confpods` and `make deploy-confpods` to build and install the Confidential Containers for AKS components - or vice versa (using `make clean-confpods`).
-
-## Build and boot a development SEV-SNP UVM
-
-Use the prepared SEV-SNP inputs to build only the UVM:
-
-```
-pushd kata-containers/tools/osbuilder/node-builder/azure-linux
-make package
-sudo make \
-	IGVM_KERNEL=/path/to/kernel-uvm-6.1.58/usr/share/cloud-hypervisor/bzImage \
-	uvm-confpods
-popd
-```
-
-Outputs in `tools/osbuilder`:
-
-- `kata-containers.img`: measured guest disk
-- `kata-containers-igvm.img`: production IGVM
-- `kata-containers-igvm-debug.img`: debug IGVM
-- `igvm-measurement.cose` and `igvm-debug-measurement.cose`: measurements
-
-Save this configuration as `vm.json` and replace the artifact paths:
-
-```json
-{
-  "cpus": {
-    "boot_vcpus": 1,
-    "max_vcpus": 1,
-    "nested": false
-  },
-  "memory": {
-    "size": 2147483648,
-    "shared": false
-  },
-  "payload": {
-    "igvm": "/absolute/path/to/kata-containers-igvm-debug.img",
-    "host_data": "0000000000000000000000000000000000000000000000000000000000000000"
-  },
-  "disks": [
-    {
-      "path": "/absolute/path/to/kata-containers.img",
-      "readonly": true,
-      "image_type": "Raw"
-    }
-  ],
-  "serial": {
-    "mode": "Off"
-  },
-  "console": {
-    "mode": "Tty"
-  },
-  "platform": {
-    "sev_snp": true,
-    "num_pci_segments": 10
-  }
-}
-```
-
-Cloud Hypervisor must include the `sev_snp` feature. Start it, then run the
-API calls from another terminal:
-
-```
-sudo /path/to/cloud-hypervisor-sev-snp \
-	--api-socket /run/cloud-hypervisor-snp.sock
-
-sudo curl --fail --unix-socket /run/cloud-hypervisor-snp.sock \
-	-X PUT http://localhost/api/v1/vm.create \
-	-H 'Content-Type: application/json' \
-	--data-binary @vm.json
-sudo curl --fail --unix-socket /run/cloud-hypervisor-snp.sock \
-	-X PUT http://localhost/api/v1/vm.boot
-```
-
-Inspect the VM:
-
-```
-sudo curl --fail --unix-socket /run/cloud-hypervisor-snp.sock \
-	http://localhost/api/v1/vm.info | jq
-```
-
-To tear it down, shut down a running VM and then stop Cloud Hypervisor:
-
-```
-sudo curl --fail --unix-socket /run/cloud-hypervisor-snp.sock \
-	-X PUT http://localhost/api/v1/vm.shutdown
-sudo curl --fail --unix-socket /run/cloud-hypervisor-snp.sock \
-	-X PUT http://localhost/api/v1/vmm.shutdown
-```
-
-After `vm.shutdown`, the VM state is `Created`; repeating that request returns
-`VM is not running`.
 
 ## Debug builds
 
@@ -357,9 +318,48 @@ sudo ctr -n k8s.io run \
   docker.io/library/busybox:latest "${id}" uname -a
 ```
 
-  The current development milestone boots the SEV-SNP UVM, starts
-  `kata-agent`, and creates the sandbox. Container creation then fails because
-  the overlayfs rootfs has no transport when `shared_fs = "none"`.
+  With `shared_fs = "none"`, use containerd's EROFS snapshotter to pass a
+  single-layer image to the guest as a raw virtio-blk device:
+
+  ```toml
+[plugins."io.containerd.snapshotter.v1.erofs"]
+  default_size = "0"
+
+[plugins."io.containerd.service.v1.diff-service"]
+  default = ["erofs", "walking"]
+```
+
+  Restart containerd and verify the plugins:
+
+  ```bash
+sudo modprobe erofs
+sudo systemctl restart containerd
+sudo ctr plugins ls | grep erofs
+```
+
+  ```bash
+NS=erofs-repro
+IMAGE=docker.io/library/busybox:latest
+
+sudo ctr -n "${NS}" images pull \
+  --snapshotter erofs \
+  --platform linux/amd64 \
+  "${IMAGE}"
+
+sudo ctr -n "${NS}" run --rm \
+  --snapshotter erofs \
+  --runtime io.containerd.kata-cc.v2 \
+  --runtime-config-path \
+  /opt/confidential-containers/share/defaults/kata-containers/runtime-rs/configuration.toml \
+  "${IMAGE}" "erofs-snp-$(date +%s)" sh -c '
+    uname -a
+    grep -w erofs /proc/filesystems
+    mount | grep "overlay on / "
+  '
+```
+
+  BusyBox currently has one `linux/amd64` OCI layer. Container-layer verity
+  and multi-layer Cloud Hypervisor support are not yet implemented.
 
 For further usage we refer to the upstream `crictl` (or `ctr`) and CNI documentation.
 
