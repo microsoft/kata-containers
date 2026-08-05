@@ -251,7 +251,8 @@ type Sandbox struct {
 	sandboxController  resCtrl.ResourceController
 	overheadController resCtrl.ResourceController
 
-	containers map[string]*Container
+	containers          map[string]*Container
+	agentContainerIDMap map[string]string
 
 	id string
 
@@ -1853,6 +1854,9 @@ func (s *Sandbox) DeleteContainer(ctx context.Context, containerID string) (VCCo
 	for idx, contConfig := range s.config.Containers {
 		if contConfig.ID == containerID {
 			s.config.Containers = append(s.config.Containers[:idx], s.config.Containers[idx+1:]...)
+			if s.agentContainerIDMap != nil {
+				delete(s.agentContainerIDMap, containerID)
+			}
 			break
 		}
 	}

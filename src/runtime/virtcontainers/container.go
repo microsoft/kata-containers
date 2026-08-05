@@ -366,10 +366,13 @@ func (c *Container) ID() string {
 	return c.id
 }
 
-// agentID returns the persisted guest ID when host bookkeeping was rekeyed during restore.
+// agentID returns the canonical guest ID when host bookkeeping was rekeyed during restore.
 func (c *Container) agentID() string {
-	if c.process.Token != "" {
-		return c.process.Token
+	if c.sandbox != nil && c.sandbox.agentContainerIDMap != nil {
+		if agentID, ok := c.sandbox.agentContainerIDMap[c.id]; ok && agentID != "" {
+			return agentID
+		}
+		c.Logger().Warn("container has no canonical agent ID in the agent container ID map")
 	}
 	return c.id
 }
