@@ -42,7 +42,10 @@ CTL="$E2E_REPO_DIR/target/release/kata-agent-ctl"
 FAILURES=0
 
 cleanup() {
-  kubectl delete pod fr9-reference fr9-permissive -n "$NS" --ignore-not-found >/dev/null 2>&1 || true
+  # --wait=false: a graceful delete blocks on SIGTERM/SIGKILL reaching the guest,
+  # and this stage exists precisely to poke at the paths that can refuse them.
+  kubectl delete pod fr9-reference fr9-permissive -n "$NS" \
+    --ignore-not-found --wait=false >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -62,6 +65,22 @@ fi
 [ -x "$CTL" ] || die "kata-agent-ctl not found at $CTL"
 ok "kata-agent-ctl ready"
 
+# ------------------------------------------------------------------- genpolicy
+# Build genpolicy from the branch, for the reason stage 03 documents: the binary
+# re-serialises request_defaults through a typed struct, so an installed binary
+# that predates a settings key drops it silently. The nightly one predates
+# SignalProcessRequest.allowed_signals, and without that key the rule is
+# undefined and *every* signal is denied -- which leaves every pod this stage
+# starts unkillable and stuck Terminating, long after the stage has "passed".
+if [ ! -x "$E2E_REPO_DIR/target/release/genpolicy" ]; then
+  log "building genpolicy from $E2E_BRANCH"
+  ( cd "$E2E_REPO_DIR" && cargo build --release -p genpolicy ) \
+    || die "could not build genpolicy from the branch"
+fi
+GENPOLICY="$E2E_REPO_DIR/target/release/genpolicy"
+[ -x "$GENPOLICY" ] || die "genpolicy built but $GENPOLICY is missing"
+ok "using genpolicy from the branch: $GENPOLICY"
+
 # ------------------------------------------------------------------- fixtures
 # The lifecycle-permissive rules file. Appending extra rule bodies is enough: rego
 # ORs the bodies of a rule, so these sit alongside the real ones and win whenever
@@ -77,6 +96,25 @@ StartContainerRequest if { print("e2e-fr9: permissive start") }
 SignalProcessRequest if { print("e2e-fr9: permissive signal") }
 ExecProcessRequest if { print("e2e-fr9: permissive exec") }
 EOF
+}
+
+# policy_text <pod> -- the generated policy, decoded out of the cc_init_data annotation
+policy_text() {
+  local pod=$1
+  python3 - "$WORK/$pod.yaml" <<'PY'
+import base64, gzip, io, sys
+import re
+y = open(sys.argv[1]).read()
+m = re.search(r'cc_init_data:\s*([A-Za-z0-9+/=]+)', y)
+if not m:
+    sys.exit(0)
+raw = base64.b64decode(m.group(1))
+try:
+    raw = gzip.decompress(raw)
+except Exception:
+    pass
+sys.stdout.write(raw.decode('utf8', 'ignore'))
+PY
 }
 
 # render_pod <name> <rules.rego>
@@ -100,11 +138,17 @@ spec:
       image: quay.io/prometheus/busybox:latest
       command: ["sleep", "900"]
 EOF
-  /opt/kata/bin/genpolicy -y "$WORK/$pod.yaml" \
+  "$GENPOLICY" -y "$WORK/$pod.yaml" \
     -p "$rules" \
     -j /opt/kata/share/defaults/kata-containers/genpolicy-settings.json \
     >/dev/null 2>&1 || die "genpolicy failed for $pod"
   grep -q 'cc_init_data' "$WORK/$pod.yaml" || die "$pod: genpolicy did not inject a policy"
+  # The generated policy must carry every settings key the rules read. If
+  # allowed_signals is missing the pod boots and passes every case below, then
+  # can never be killed -- so check it here rather than discovering it as a
+  # namespace full of Terminating pods.
+  policy_text "$pod" | grep -q '"allowed_signals"' \
+    || die "$pod: generated policy has no request_defaults.SignalProcessRequest.allowed_signals — genpolicy is older than genpolicy-settings.json and dropped it; the pod would be unkillable"
 }
 
 pod_running() { kubectl get pod "$1" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null | grep -qx Running; }
