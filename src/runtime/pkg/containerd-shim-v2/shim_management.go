@@ -508,8 +508,8 @@ func packageErofsSnapshotDisks(destDir string, cfg map[string]interface{}) (bool
 		if !ok || sourcePath == "" {
 			continue
 		}
-		baseName := filepath.Base(sourcePath)
-		if baseName != "layer.erofs" && baseName != "rwlayer.img" {
+		baseName, ok := erofsSnapshotDiskBaseName(sourcePath)
+		if !ok {
 			continue
 		}
 
@@ -527,6 +527,21 @@ func packageErofsSnapshotDisks(destDir string, cfg map[string]interface{}) (bool
 	}
 
 	return changed, nil
+}
+
+func erofsSnapshotDiskBaseName(path string) (string, bool) {
+	baseName := filepath.Base(path)
+	for {
+		if baseName == "layer.erofs" || baseName == "rwlayer.img" {
+			return baseName, true
+		}
+
+		prefix, remainder, found := strings.Cut(baseName, "-")
+		if !found || prefix == "" || strings.Trim(prefix, "0123456789") != "" {
+			return "", false
+		}
+		baseName = remainder
+	}
 }
 
 func copySnapshotFile(sourcePath, destinationPath string) error {
