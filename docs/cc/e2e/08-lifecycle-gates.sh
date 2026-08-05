@@ -169,16 +169,18 @@ start_pod() {
 # by default.
 
 # sandbox_id <pod>
+# Read it off the pod's workload container rather than looking for a sandbox
+# container: with containerd's sandbox API the pod sandbox is no longer listed
+# by `ctr container ls`, so scanning for io.cri-containerd.kind == sandbox finds
+# nothing on a current node. The workload container always carries the id.
 sandbox_id() {
-  local pod=$1 c info
-  for c in $(sudo ctr -n k8s.io c ls -q 2>/dev/null); do
-    info=$(sudo ctr -n k8s.io c info "$c" 2>/dev/null) || continue
-    echo "$info" | grep -q "\"io.kubernetes.pod.name\": \"$pod\"" || continue
-    echo "$info" | grep -q '"io.cri-containerd.kind": "sandbox"' || continue
-    echo "$c"
-    return 0
-  done
-  return 1
+  local pod=$1 ct sb
+  ct=$(container_id "$pod") || return 1
+  [ -n "$ct" ] || return 1
+  sb=$(sudo ctr -n k8s.io c info "$ct" 2>/dev/null \
+    | sed -n 's/.*"io.kubernetes.cri.sandbox-id": "\([a-f0-9]*\)".*/\1/p' | head -1)
+  [ -n "$sb" ] || return 1
+  echo "$sb"
 }
 
 # guest_cid <sandbox-id>
