@@ -75,10 +75,14 @@ func TestMakeConfigSelfContainedPackagesErofsDisks(t *testing.T) {
 	stableDisk := filepath.Join(stableDir, "kata-containers.img")
 	lowerDisk := filepath.Join(erofsDir, "layer.erofs")
 	writableDisk := filepath.Join(erofsDir, "rwlayer.img")
+	prefixedLowerDisk := filepath.Join(erofsDir, "1-layer.erofs")
+	prefixedWritableDisk := filepath.Join(erofsDir, "3-3-rwlayer.img")
 	require.NoError(t, os.WriteFile(memoryRanges, []byte("memory"), 0o600))
 	require.NoError(t, os.WriteFile(stableDisk, []byte("base image"), 0o600))
 	require.NoError(t, os.WriteFile(lowerDisk, []byte("read-only layer"), 0o600))
 	require.NoError(t, os.WriteFile(writableDisk, []byte("writable layer"), 0o600))
+	require.NoError(t, os.WriteFile(prefixedLowerDisk, []byte("prefixed read-only layer"), 0o600))
+	require.NoError(t, os.WriteFile(prefixedWritableDisk, []byte("prefixed writable layer"), 0o600))
 
 	config := map[string]interface{}{
 		"memory": map[string]interface{}{
@@ -88,6 +92,8 @@ func TestMakeConfigSelfContainedPackagesErofsDisks(t *testing.T) {
 			map[string]interface{}{"id": "_disk0", "path": stableDisk},
 			map[string]interface{}{"id": "_disk3", "path": lowerDisk},
 			map[string]interface{}{"id": "_disk4", "path": writableDisk},
+			map[string]interface{}{"id": "_disk5", "path": prefixedLowerDisk},
+			map[string]interface{}{"id": "_disk6", "path": prefixedWritableDisk},
 		},
 	}
 	configJSON, err := json.Marshal(config)
@@ -113,13 +119,17 @@ func TestMakeConfigSelfContainedPackagesErofsDisks(t *testing.T) {
 	require.NoError(t, json.Unmarshal(updatedConfig, &restoredConfig))
 	require.Len(t, restoredConfig.Memory.Zones, 1)
 	assert.Equal(t, memoryRanges, restoredConfig.Memory.Zones[0].File)
-	require.Len(t, restoredConfig.Disks, 3)
+	require.Len(t, restoredConfig.Disks, 5)
 	assert.Equal(t, stableDisk, restoredConfig.Disks[0].Path)
 
 	expectedLowerDisk := filepath.Join(snapshotDir, "disks", "1-layer.erofs")
 	expectedWritableDisk := filepath.Join(snapshotDir, "disks", "2-rwlayer.img")
+	expectedPrefixedLowerDisk := filepath.Join(snapshotDir, "disks", "3-layer.erofs")
+	expectedPrefixedWritableDisk := filepath.Join(snapshotDir, "disks", "4-rwlayer.img")
 	assert.Equal(t, expectedLowerDisk, restoredConfig.Disks[1].Path)
 	assert.Equal(t, expectedWritableDisk, restoredConfig.Disks[2].Path)
+	assert.Equal(t, expectedPrefixedLowerDisk, restoredConfig.Disks[3].Path)
+	assert.Equal(t, expectedPrefixedWritableDisk, restoredConfig.Disks[4].Path)
 
 	require.NoError(t, os.RemoveAll(erofsDir))
 	lowerContent, err := os.ReadFile(expectedLowerDisk)
@@ -128,4 +138,10 @@ func TestMakeConfigSelfContainedPackagesErofsDisks(t *testing.T) {
 	writableContent, err := os.ReadFile(expectedWritableDisk)
 	require.NoError(t, err)
 	assert.Equal(t, "writable layer", string(writableContent))
+	prefixedLowerContent, err := os.ReadFile(expectedPrefixedLowerDisk)
+	require.NoError(t, err)
+	assert.Equal(t, "prefixed read-only layer", string(prefixedLowerContent))
+	prefixedWritableContent, err := os.ReadFile(expectedPrefixedWritableDisk)
+	require.NoError(t, err)
+	assert.Equal(t, "prefixed writable layer", string(prefixedWritableContent))
 }
