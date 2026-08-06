@@ -1259,7 +1259,8 @@ mod tests {
             .expect_err("an unverified lower layer must be refused in strict builds");
         assert!(
             err.to_string().contains("RM-31"),
-            "unexpected error: {err}"
+            "unexpected error: {}",
+            err
         );
     }
 

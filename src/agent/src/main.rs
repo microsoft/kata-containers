@@ -566,26 +566,38 @@ async fn start_sandbox(
     // the verified read-only-layer (dm-verity) allowlist, and the verified guest-pull image
     // allowlist — from measured guest state, *preferring* the attestation-bound initdata
     // section over the measured-rootfs file. Seeded after initdata is parsed and before the
-    // ttRPC server (and the BL-8 boot fragment pull) run. Fail-closed semantics are
-    // unchanged: absent config ⇒ no authorized issuer/layer/image.
+    // ttRPC server (and the BL-8 boot fragment pull) run.
+    //
+    // RM-36 (F-94): a seeding failure is **fatal**. It used to be `warn!`-and-continue, which
+    // meant an unparseable measured trust root produced a booting, apparently-healthy,
+    // unprotected pod — the fail-open direction, and the one an operator is least likely to
+    // notice. Fifty lines above, an initdata measurement mismatch already aborts; a trust
+    // root that exists but cannot be read is the same class of fault and now gets the same
+    // treatment. Note this deliberately does not cover *absent* config: that is F-93, and the
+    // three roots differ there (FR-1's store defaults closed, the two allowlists default to
+    // not-required until something produces their files).
     #[cfg(feature = "strict-policy")]
     {
         let idrv = initdata_return_value.as_ref();
-        if let Err(e) =
+        let seeded = async {
             seed_fragment_trust_root(logger, idrv.and_then(|r| r._fragment_issuers.as_deref()))
                 .await
-        {
-            warn!(logger, "FR-1: fragment trust root not seeded: {:?}", e);
+                .context("FR-1: fragment trust root")?;
+            seed_verified_layers(logger, idrv.and_then(|r| r._verified_layers.as_deref()))
+                .await
+                .context("FR-4C: verified layers")?;
+            seed_verified_images(logger, idrv.and_then(|r| r._verified_images.as_deref()))
+                .await
+                .context("BL-3: verified images")
         }
-        if let Err(e) =
-            seed_verified_layers(logger, idrv.and_then(|r| r._verified_layers.as_deref())).await
-        {
-            warn!(logger, "FR-4C: verified layers not seeded: {:?}", e);
-        }
-        if let Err(e) =
-            seed_verified_images(logger, idrv.and_then(|r| r._verified_images.as_deref())).await
-        {
-            warn!(logger, "BL-3: verified images not seeded: {:?}", e);
+        .await;
+        if let Err(e) = seeded {
+            error!(
+                logger,
+                "SRM trust root is present but unusable, aborting VM: {:?}", e
+            );
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            std::process::abort();
         }
     }
 
@@ -1512,9 +1524,11 @@ fn default_layer_algorithm() -> String {
     "sha256".to_string()
 }
 
-// FR-4C: configure the verified-layer allowlist from measured state. Absent/empty config
-// leaves verification not required (opt-in); when require_verified_layers is set but no
-// layer is authorized, every read-only layer is rejected (fail-closed).
+// FR-4C: configure the verified-layer allowlist from measured state. Absent config leaves
+// verification not required (opt-in, see F-93 -- nothing in the tree produces this file yet);
+// but a config that *exists* is treated as an intent to verify, so `require` is closed
+// before the content is parsed and only an explicit `require_verified_layers = false`
+// reopens it. When required but no layer is authorized, every read-only layer is rejected.
 #[cfg(feature = "strict-policy")]
 async fn seed_verified_layers(logger: &Logger, initdata_cfg: Option<&str>) -> Result<()> {
     let text = match resolve_measured_config(
@@ -1533,6 +1547,17 @@ async fn seed_verified_layers(logger: &Logger, initdata_cfg: Option<&str>) -> Re
             return Ok(());
         }
     };
+
+    // RM-36 (F-94): close the gate *before* parsing. Two things follow. A parse failure now
+    // leaves verification required with an empty allowlist -- fail-closed -- rather than
+    // leaving the `new(false)` default in place, which silently disabled the control. And an
+    // operator who writes this file listing root hashes but omits `require_verified_layers`
+    // no longer gets an inert allowlist that logs `required: false`. Turning the gate off
+    // must be something the measured config *says*, not something it fails to say.
+    {
+        VERIFIED_LAYERS.lock().await.set_require(true);
+    }
+
     let cfg: VerifiedLayersConfig = toml::from_str(&text).context("parse verified-layers.toml")?;
 
     let mut store = VERIFIED_LAYERS.lock().await;
@@ -1572,9 +1597,11 @@ struct VerifiedImageConfig {
     digest: String,
 }
 
-// BL-3: configure the verified guest-pull image allowlist from measured state. Absent/empty
-// config leaves verification not required (opt-in); when require_verified_images is set but no
-// image is authorized, every guest-pull image is rejected (fail-closed).
+// BL-3: configure the verified guest-pull image allowlist from measured state. Absent config
+// leaves verification not required (opt-in, see F-93 -- nothing in the tree produces this file
+// yet); but a config that *exists* is treated as an intent to verify, so `require` is closed
+// before the content is parsed and only an explicit `require_verified_images = false` reopens
+// it. When required but no image is authorized, every guest-pull image is rejected.
 #[cfg(feature = "strict-policy")]
 async fn seed_verified_images(logger: &Logger, initdata_cfg: Option<&str>) -> Result<()> {
     let text = match resolve_measured_config(
@@ -1593,6 +1620,13 @@ async fn seed_verified_images(logger: &Logger, initdata_cfg: Option<&str>) -> Re
             return Ok(());
         }
     };
+
+    // RM-36 (F-94): see `seed_verified_layers` -- close the gate before parsing so a parse
+    // failure and a config that omits the flag both land fail-closed.
+    {
+        VERIFIED_IMAGES.lock().await.set_require(true);
+    }
+
     let cfg: VerifiedImagesConfig = toml::from_str(&text).context("parse verified-images.toml")?;
 
     let mut store = VERIFIED_IMAGES.lock().await;
@@ -1733,6 +1767,101 @@ mod tests {
 
             let msg = format!("{msg}, result: {result:?}");
             assert_result!(d.result, result, msg);
+        }
+    }
+
+    // RM-36 (F-94/F-95): the trust-root *seeding* path had no tests at all, while the stores
+    // it configures had six apiece -- so the half that decides whether the gate is on was the
+    // untested half. These drive `seed_verified_images` / `seed_verified_layers` through the
+    // initdata argument (which takes precedence over the measured-rootfs path, so no file or
+    // env override is needed) and assert the resulting `require` flag, which is the only bit
+    // that determines whether the allowlist enforces anything.
+    //
+    // Serialised because the stores are process-wide `lazy_static` singletons.
+    #[cfg(feature = "strict-policy")]
+    mod trust_root_seeding {
+        use super::*;
+
+        const DIGEST: &str =
+            "sha256:aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44";
+
+        fn logger() -> Logger {
+            slog::Logger::root(slog::Discard, o!())
+        }
+
+        /// A malformed measured allowlist must leave the gate **closed**. Before RM-36 the
+        /// parse error propagated to a `warn!` and the store kept its `new(false)` default,
+        /// so an unparseable trust root disabled verification entirely.
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn malformed_images_config_fails_closed() {
+            VERIFIED_IMAGES.lock().await.set_require(false);
+            let err = seed_verified_images(&logger(), Some("this is not valid toml {{{"))
+                .await
+                .expect_err("a malformed measured allowlist must be an error");
+            assert!(format!("{err:#}").contains("verified-images.toml"));
+            assert!(
+                VERIFIED_IMAGES.lock().await.is_required(),
+                "a parse failure left image verification disabled"
+            );
+        }
+
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn malformed_layers_config_fails_closed() {
+            VERIFIED_LAYERS.lock().await.set_require(false);
+            let err = seed_verified_layers(&logger(), Some("[[layer]] oops"))
+                .await
+                .expect_err("a malformed measured allowlist must be an error");
+            assert!(format!("{err:#}").contains("verified-layers.toml"));
+            assert!(
+                VERIFIED_LAYERS.lock().await.is_required(),
+                "a parse failure left layer verification disabled"
+            );
+        }
+
+        /// A config that exists and lists entries but omits `require_verified_images` is an
+        /// operator who meant to verify. It used to produce an inert allowlist that logged
+        /// `required: false`.
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn config_without_require_flag_still_enforces() {
+            VERIFIED_IMAGES.lock().await.set_require(false);
+            let cfg = format!("[[image]]\ndigest = \"{DIGEST}\"\n");
+            seed_verified_images(&logger(), Some(&cfg)).await.unwrap();
+            let store = VERIFIED_IMAGES.lock().await;
+            assert!(
+                store.is_required(),
+                "an allowlist that names images did not enforce"
+            );
+            assert_eq!(store.len(), 1);
+        }
+
+        /// Turning the gate off must be something the measured config *says*. The explicit
+        /// escape hatch still works, so this is not a one-way door.
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn explicit_false_still_disables() {
+            VERIFIED_IMAGES.lock().await.set_require(true);
+            seed_verified_images(&logger(), Some("require_verified_images = false\n"))
+                .await
+                .unwrap();
+            assert!(!VERIFIED_IMAGES.lock().await.is_required());
+        }
+
+        /// Absent config is deliberately *not* covered by RM-36 -- that is F-93 (nothing in
+        /// the tree produces these files yet). Pinned so the distinction is a decision rather
+        /// than an accident, and so flipping it later is a deliberate test change.
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn absent_config_leaves_verification_off() {
+            VERIFIED_LAYERS.lock().await.set_require(false);
+            // No initdata section, and the measured-rootfs path does not exist off-guest.
+            seed_verified_layers(&logger(), None).await.unwrap();
+            assert!(
+                !VERIFIED_LAYERS.lock().await.is_required(),
+                "F-93 changed behaviour; update this test deliberately"
+            );
         }
     }
 }
