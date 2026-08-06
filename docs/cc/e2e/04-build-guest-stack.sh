@@ -402,6 +402,55 @@ else
   warn "no runtime-rs shim at $SHIM_DST — host-side changes are NOT under test"
 fi
 
+# ------------------------------------------------------------------ genpolicy
+# Same argument as the shim, and the same failure mode as stage 03's
+# oci_version patch. genpolicy is host-side, arrives from the CI-nightly
+# kata-tools build in stage 03, and is otherwise never replaced -- but it
+# deserialises genpolicy-settings.json through a *typed* struct, so a binary
+# that predates a settings key drops that key silently and generates a policy
+# that does not say what the settings say.
+#
+# That is not hypothetical. The Aug-2 nightly predates SignalProcessRequest.
+# allowed_signals (added with the per-container signal sets), so it emitted
+# policies with no allowed signals at all: SIGKILL was denied, kubelet could
+# never complete a kill, and every pod stages 05-07 started hung in
+# `Terminating` while the stage that started it reported PASS. Stage 08 already
+# builds genpolicy from the branch for exactly this reason; installing it here
+# gives every other stage the same guarantee instead of each having to know.
+GENPOLICY_DST=/opt/kata/bin/genpolicy
+if [ -e "$GENPOLICY_DST" ]; then
+  log "building genpolicy"
+  ( cd "$E2E_REPO_DIR" && cargo build --release -p genpolicy ) \
+    || die "could not build genpolicy"
+  GENPOLICY_SRC="$E2E_REPO_DIR/target/release/genpolicy"
+  [ -x "$GENPOLICY_SRC" ] || die "genpolicy build produced no binary at $GENPOLICY_SRC"
+  sudo cp "$GENPOLICY_DST" "$GENPOLICY_DST.bak.$(date +%s)"
+  sudo install -m 0755 "$GENPOLICY_SRC" "$GENPOLICY_DST"
+
+  # The installed rules and settings must come from the branch too, for the same
+  # reason: a branch binary reading stale rules is no better than the reverse.
+  for f in rules.rego genpolicy-settings.json; do
+    src="$E2E_REPO_DIR/src/tools/genpolicy/$f"
+    dst="/opt/kata/share/defaults/kata-containers/$f"
+    [ -r "$src" ] || die "cannot read $src"
+    sudo cp "$dst" "$dst.bak.$(date +%s)"
+    sudo install -m 0644 "$src" "$dst"
+  done
+
+  # Re-apply stage 03's oci_version patch: it patches the *installed* settings,
+  # and the line above just overwrote them with the repo copy. Skipping this
+  # denies every CreateContainerRequest on the node.
+  sudo sed -i 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' \
+    /opt/kata/share/defaults/kata-containers/genpolicy-settings.json
+  grep -q '"oci_version": "1.3.0"' \
+    /opt/kata/share/defaults/kata-containers/genpolicy-settings.json \
+    || die "oci_version patch did not survive the settings install"
+
+  ok "genpolicy, rules.rego and settings installed from the branch"
+else
+  warn "no genpolicy at $GENPOLICY_DST — stages 05-07 will use whatever is installed"
+fi
+
 # Stage 05 must check the same files this stage actually patched, rather than
 # guessing a path that a layout change would invalidate.
 printf '%s\n' "${CFGS[@]}" > "$E2E_STATE_DIR/guest-config-paths"
