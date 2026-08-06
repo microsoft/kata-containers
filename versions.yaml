@@ -209,9 +209,10 @@ assets:
     url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/"
     version: "v6.18.35"
     nvidia:
-      description: "Linux kernel optimised for virtual machines"
-      url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/"
+      description: "NVIDIA NV-Kernels tree (Grace/GB200 ATS + coherent-memory patches)"
+      url: "https://github.com/NVIDIA/NV-Kernels.git"
       version: "v6.18.35"
+      ref: "linux-nvidia-6.18-v6.18.35"
 
   kernel-arm-experimental:
     description: "Linux kernel with cpu/mem hotplug support on arm64"
@@ -241,7 +242,7 @@ externals:
     desc: "NVIDIA compute stack"
     driver:
       desc: "NVIDIA kernel driver"
-      version: "595.58.03"
+      version: "610.43.02"
       # yamllint disable-line rule:line-length
       url: "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/"
     cuda:
