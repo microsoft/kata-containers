@@ -278,7 +278,21 @@ clh_install_igvm_tooling() {
   local sh="$E2E_REPO_DIR/tools/osbuilder/igvm-builder/igvm_builder.sh"
   [ -x "$sh" ] || die "missing $sh"
   log "installing IGVM build tooling"
-  ( cd "$(dirname "$sh")" && ./igvm_builder.sh -i ) || die "igvm_builder.sh -i failed"
+  ( cd "$(dirname "$sh")" && sudo ./igvm_builder.sh -i ) || die "igvm_builder.sh -i failed"
+
+  # The installer skips the pip step whenever the extracted tooling folder is
+  # already present, and on Azure Linux the plain `pip3 install` inside it is
+  # refused because the site-packages tree is dnf-managed. Either way the igvm
+  # module ends up missing, which only surfaces much later as a build failure.
+  if ! python3 -c "import igvm" >/dev/null 2>&1; then
+    local src="$(dirname "$sh")/igvm-tooling/src"
+    [ -d "$src" ] || die "igvm tooling sources missing at $src"
+    log "installing the msigvm module explicitly"
+    ( cd "$src" && sudo pip3 install --no-deps --break-system-packages ./ ) \
+      || die "pip3 install msigvm failed"
+    python3 -c "import igvm" >/dev/null 2>&1 \
+      || die "msigvm installed but 'import igvm' still fails"
+  fi
   ok "IGVM tooling installed"
 }
 
