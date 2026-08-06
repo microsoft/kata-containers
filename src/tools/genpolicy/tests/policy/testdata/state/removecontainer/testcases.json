@@ -632,8 +632,16 @@
     }
   },
   {
+    "allowed": true,
+    "description": "removing a container that was never created is a no-op (RM-26)",
+    "kind": "RemoveContainerRequest",
+    "request": {
+      "container_id": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  {
     "allowed": false,
-    "description": "removing an unknown container is denied",
+    "description": "the no-op removal still tombstones the id, so a second removal is denied (RM-20)",
     "kind": "RemoveContainerRequest",
     "request": {
       "container_id": "0000000000000000000000000000000000000000000000000000000000000000"
