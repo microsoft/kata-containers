@@ -102,6 +102,7 @@ impl Container {
             config_layer,
             passwd,
             group,
+            image_layers,
         })
     }
 }

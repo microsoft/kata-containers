@@ -628,6 +628,22 @@ pub struct CommonData {
     /// Default capabilities for a privileged container.
     pub privileged_caps: Vec<String>,
 
+    /// RM-38: how the guest's read-only image layers are expected to be verified.
+    ///
+    /// * `"none"` (default) — emit no layer declarations. The guest's only trust root
+    ///   for layer content is whatever the initdata supplies.
+    /// * `"host-erofs-dm-verity"` — the host presents each image layer as its own
+    ///   dm-verity backed EROFS lower layer (containerd's erofs snapshotter in
+    ///   *unmerged* mode). Declare one storage per layer so the policy pins how many
+    ///   lower layers a container may present and requires every one of them to be
+    ///   verity backed.
+    ///
+    /// The name and the "none" default are inherited from the upstream setting that
+    /// once selected the tarfs equivalent; the key survived the removal of that code
+    /// with no field behind it, so until now any value here was silently ignored.
+    #[serde(default = "default_image_layer_verification")]
+    pub image_layer_verification: String,
+
     /// Expected apparmor profile for containers whose pod spec does not pin a
     /// specific (Localhost/Unconfined) profile. Defaults to empty, meaning the
     /// apparmor profile is left unconstrained for such containers, because the
@@ -912,6 +928,11 @@ impl AgentPolicy {
         );
 
         let mut storages = Default::default();
+        get_erofs_layer_storages(
+            &mut storages,
+            &self.config.settings.common.image_layer_verification,
+            yaml_container.registry.get_image_layers().len(),
+        );
         resource.get_container_mounts_and_storages(
             &mut mounts,
             &mut storages,
@@ -1481,6 +1502,78 @@ fn add_missing_strings(src: &Vec<String>, dest: &mut Vec<String>) {
     debug!("src = {:?}, dest = {:?}", src, dest)
 }
 
+fn default_image_layer_verification() -> String {
+    IMAGE_LAYER_VERIFICATION_NONE.to_string()
+}
+
+pub const IMAGE_LAYER_VERIFICATION_NONE: &str = "none";
+pub const IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY: &str = "host-erofs-dm-verity";
+
+/// Marker driver for a declared EROFS lower layer.
+///
+/// The presented storage's real driver is a block driver chosen at runtime (`blk`,
+/// `scsi`, `mmioblk`, ...), so the declaration cannot name it. This marker instead tells
+/// `rules.rego` which matching rule applies, in the same spirit as the empty
+/// driver/source that marks a host-chosen emptyDir device.
+pub const EROFS_VERITY_LAYER_DRIVER: &str = "erofs-verity-layer";
+
+/// RM-38: declare one dm-verity backed EROFS lower layer per image layer.
+///
+/// In unmerged mode containerd gives each image layer its own `layer.erofs`, and
+/// runtime-rs presents each as a GPT partition of a single VMDK block device, carrying
+/// the layer's dm-verity parameters in `X-kata.dmverity.*` storage options. Nothing in
+/// the generated policy described those storages, so a policy-enforcing guest could not
+/// run an EROFS workload at all, and the layers a container mounted were constrained
+/// only by the initdata trust store.
+///
+/// What is declared here is everything the generator can *know*: how many lower layers
+/// there are, that each is EROFS, that each must be dm-verity backed, and where they
+/// mount. What it deliberately does not declare is the root hash of each layer.
+/// genpolicy cannot predict it: unlike the tarfs scheme this replaces — which measured
+/// the registry blob itself with in-tree code — the EROFS image is built locally on each
+/// node by `mkfs.erofs`, so its hash depends on the node's erofs-utils version and the
+/// differ's flags. Declaring a predicted hash would make policy generation and node
+/// image updates a coupled pair, and a mismatch denies every pod. The root hash's
+/// *authenticity* therefore still rests on the initdata trust store; see RM-42 for the
+/// options for closing that (derive with pinned tooling, or sign out of band).
+///
+/// The layer count is the load-bearing part: it comes from the image manifest, so a host
+/// cannot add an extra lower layer to a container's stack, nor drop one, without the
+/// count disagreeing with the declaration.
+fn get_erofs_layer_storages(
+    storages: &mut Vec<agent::Storage>,
+    image_layer_verification: &str,
+    layer_count: usize,
+) {
+    if image_layer_verification != IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY {
+        return;
+    }
+
+    debug!("Declaring {layer_count} erofs dm-verity lower layers");
+
+    for partition_number in 1..=layer_count {
+        storages.push(agent::Storage {
+            driver: EROFS_VERITY_LAYER_DRIVER.to_string(),
+            driver_options: Vec::new(),
+            // Assigned by the host at runtime: the guest device path for the VMDK that
+            // spans every partition. Every layer of a container shares it.
+            source: String::new(),
+            fstype: "erofs".to_string(),
+            options: vec![
+                "X-kata.overlay-lower".to_string(),
+                "X-kata.multi-layer=true".to_string(),
+                "X-kata.gpt-partitioned=true".to_string(),
+                format!("X-kata.partition-number={partition_number}"),
+                "X-kata.dmverity-enabled=true".to_string(),
+            ],
+            mount_point: "^$(cpath)/$(bundle-id)/rootfs$".to_string(),
+            fs_group: protobuf::MessageField::none(),
+            shared: false,
+            special_fields: ::protobuf::SpecialFields::new(),
+        });
+    }
+}
+
 pub fn get_kata_namespaces(
     is_pause_container: bool,
     use_host_network: bool,
@@ -1531,6 +1624,68 @@ fn normalize_image_reference(image: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::normalize_image_reference;
+    use super::{
+        get_erofs_layer_storages, IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY,
+        IMAGE_LAYER_VERIFICATION_NONE,
+    };
+
+    #[test]
+    fn erofs_layers_not_declared_by_default() {
+        // The default must stay inert: an existing deployment that has not opted into
+        // erofs layer verification must generate exactly the policy it did before.
+        let mut storages = Vec::new();
+        get_erofs_layer_storages(&mut storages, IMAGE_LAYER_VERIFICATION_NONE, 4);
+        assert!(storages.is_empty());
+
+        let mut storages = Vec::new();
+        get_erofs_layer_storages(&mut storages, "something-else", 4);
+        assert!(storages.is_empty());
+    }
+
+    #[test]
+    fn erofs_layers_declared_one_per_image_layer() {
+        let mut storages = Vec::new();
+        get_erofs_layer_storages(&mut storages, IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY, 3);
+        assert_eq!(storages.len(), 3);
+
+        for (i, storage) in storages.iter().enumerate() {
+            assert_eq!(storage.driver, super::EROFS_VERITY_LAYER_DRIVER);
+            assert_eq!(storage.fstype, "erofs");
+            assert_eq!(storage.mount_point, "^$(cpath)/$(bundle-id)/rootfs$");
+            assert!(storage.source.is_empty());
+            assert!(storage.driver_options.is_empty());
+
+            // Partition numbers are 1-based and must be distinct, so that the policy
+            // pins the order of the layer stack rather than just its size.
+            assert!(storage
+                .options
+                .contains(&format!("X-kata.partition-number={}", i + 1)));
+
+            // Every layer must be required to be verity backed. A layer declared
+            // without this is a layer the guest would mount unverified.
+            assert!(storage
+                .options
+                .contains(&"X-kata.dmverity-enabled=true".to_string()));
+
+            // RM-42: no root hash is declared -- genpolicy cannot predict the hash of
+            // an erofs image built locally by mkfs.erofs. rules.rego requires that one
+            // is *present* without constraining its value.
+            assert!(!storage
+                .options
+                .iter()
+                .any(|o| o.starts_with("X-kata.dmverity.roothash=")));
+        }
+    }
+
+    #[test]
+    fn erofs_single_layer_image_declares_one_storage() {
+        let mut storages = Vec::new();
+        get_erofs_layer_storages(&mut storages, IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY, 1);
+        assert_eq!(storages.len(), 1);
+        assert!(storages[0]
+            .options
+            .contains(&"X-kata.partition-number=1".to_string()));
+    }
 
     #[test]
     fn normalizes_bare_docker_hub_names() {

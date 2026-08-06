@@ -244,12 +244,17 @@ mod tests {
         let genpolicy_dir = path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
         for base in ["rules.rego", "genpolicy-settings.json"] {
-            fs::copy(genpolicy_dir.join(base), workdir.join(base))
-                .context(format!(
-                    "{:?} --> {:?}",
-                    genpolicy_dir.join(base),
-                    workdir.join(base)
-                ))
+            // A test case may ship its own settings to exercise a non-default
+            // configuration (e.g. image_layer_verification); fall back to the shipped
+            // defaults otherwise, so that most cases keep testing what users get.
+            let source = if testdata_dir.join(base).exists() {
+                testdata_dir.join(base)
+            } else {
+                genpolicy_dir.join(base)
+            };
+
+            fs::copy(&source, workdir.join(base))
+                .context(format!("{:?} --> {:?}", &source, workdir.join(base)))
                 .expect("copying files around should not fail");
         }
 
@@ -369,6 +374,18 @@ mod tests {
     #[tokio::test]
     async fn test_create_container_security_context_fsgroup() {
         runtests("createcontainer/security_context/fsgroup").await;
+    }
+
+    #[tokio::test]
+    async fn test_create_container_erofs_layers() {
+        // RM-38/RM-41: a container whose image layers are presented by the host as
+        // dm-verity backed erofs lower layers (containerd's erofs snapshotter in
+        // unmerged mode). Before RM-38 the generated policy said nothing about these
+        // storages at all, so such a workload could not run under policy; before RM-41
+        // the duplicate-identity check rejected every image with more than one layer,
+        // because all of a container's layers are partitions of a single block device
+        // and share driver, source and mount point.
+        runtests("createcontainer/erofs_layers").await;
     }
 
     #[tokio::test]

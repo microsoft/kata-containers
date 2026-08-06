@@ -32,6 +32,7 @@ pub struct Container {
     pub config_layer: DockerConfigLayer,
     pub passwd: String,
     pub group: String,
+    pub image_layers: Vec<ImageLayer>,
 }
 
 /// Image config layer properties.
@@ -206,7 +207,18 @@ impl Container {
             config_layer,
             passwd,
             group,
+            image_layers,
         })
+    }
+
+    /// RM-38: the image's layers, in manifest order (base layer first).
+    ///
+    /// Only the layer *count* and ordering are used today, to declare how many
+    /// dm-verity backed EROFS lower layers a container may present. The diff_ids are
+    /// retained because they identify the layers independently of how a snapshotter
+    /// happens to package them.
+    pub fn get_image_layers(&self) -> &[ImageLayer] {
+        &self.image_layers
     }
 
     pub fn get_gid_from_passwd_uid(&self, uid: u32) -> Result<u32> {
@@ -765,4 +777,136 @@ fn parse_group_file(group: &str) -> Result<Vec<GroupRecord>> {
     }
 
     Ok(records)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn container_with_image_user(user: &str) -> Container {
+        Container {
+            image: "test-image".to_string(),
+            config_layer: DockerConfigLayer {
+                config: DockerImageConfig {
+                    User: Some(user.to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            passwd:
+                "root:x:0:0:root:/root:/bin/sh\nwww-data:x:33:33:www-data:/var/www:/sbin/nologin\n"
+                    .to_string(),
+            group: "root:x:0:\nwww-data:x:33:\nstaff:x:50:\nwheel:x:10:\n".to_string(),
+            image_layers: Vec::new(),
+        }
+    }
+
+    fn create_tar_layer(path: &Path, entries: &[(&str, &str)]) {
+        let layer_file = std::fs::File::create(path).unwrap();
+        let mut archive = tar::Builder::new(layer_file);
+
+        for (entry_path, content) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            archive
+                .append_data(&mut header, entry_path, Cursor::new(content.as_bytes()))
+                .unwrap();
+        }
+
+        archive.finish().unwrap();
+    }
+
+    #[test]
+    fn image_user_group_component_matches_kubernetes_path() {
+        let cases = [
+            "33:10",
+            "33:wheel",
+            "www-data:50",
+            "www-data:staff",
+            "www-data:thisgroupdoesnotexist",
+        ];
+
+        for image_user in cases {
+            let container = container_with_image_user(image_user);
+            let mut process = policy::KataProcess::default();
+
+            container.get_process(&mut process, false, false);
+
+            assert_eq!(process.User.UID, 33, "image user: {image_user}");
+            assert_eq!(process.User.GID, 33, "image user: {image_user}");
+            assert_eq!(
+                process
+                    .User
+                    .AdditionalGids
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>(),
+                vec![33],
+                "image user: {image_user}"
+            );
+        }
+    }
+
+    #[test]
+    fn reads_passwd_and_group_with_dot_slash_tar_paths() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let layer_path = temp_dir.path().join("layer.tar");
+        let passwd = "root:x:0:0:root:/root:/bin/sh\n";
+        let group = "root:x:0:\n";
+
+        create_tar_layer(
+            &layer_path,
+            &[("./etc/passwd", passwd), ("./etc/group", group)],
+        );
+
+        assert_eq!(
+            get_users_from_decompressed_layer(&layer_path).unwrap(),
+            (passwd.to_string(), group.to_string())
+        );
+    }
+
+    #[test]
+    fn normalizes_layer_paths_with_curdir_components() {
+        let cases = [
+            ("etc/passwd", Some(PASSWD_FILE_TAR_PATH)),
+            ("./etc/passwd", Some(PASSWD_FILE_TAR_PATH)),
+            ("././etc/passwd", Some(PASSWD_FILE_TAR_PATH)),
+            ("etc/./passwd", Some(PASSWD_FILE_TAR_PATH)),
+            ("./etc/./passwd", Some(PASSWD_FILE_TAR_PATH)),
+            ("etc/.wh.passwd", Some(PASSWD_FILE_WHITEOUT_TAR_PATH)),
+            ("./etc/.wh.passwd", Some(PASSWD_FILE_WHITEOUT_TAR_PATH)),
+            (".", None),
+            ("./", None),
+            ("../etc/passwd", None),
+            ("etc/../passwd", None),
+            ("/etc/passwd", None),
+        ];
+
+        for (path, expected) in cases {
+            assert_eq!(
+                normalized_layer_path(Path::new(path)),
+                expected.map(str::to_string),
+                "path: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn reads_whiteout_with_dot_slash_tar_path() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let layer_path = temp_dir.path().join("layer.tar");
+
+        create_tar_layer(
+            &layer_path,
+            &[("./etc/.wh.passwd", ""), ("./etc/.wh.group", "")],
+        );
+
+        assert_eq!(
+            get_users_from_decompressed_layer(&layer_path).unwrap(),
+            (WHITEOUT_MARKER.to_string(), WHITEOUT_MARKER.to_string())
+        );
+    }
 }

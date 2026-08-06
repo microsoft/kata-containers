@@ -1332,7 +1332,17 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id, p_oci) if {
     # below close that, in both directions.
     #
     # 1. No presented storage may repeat another's identity.
-    storage_identities := {[s.driver, s.source, s.mount_point] | some s in i_storages}
+    #
+    # RM-41: [driver, source, mount_point] alone is not an identity for EROFS image
+    # layers. runtime-rs attaches *one* block device spanning every layer's GPT
+    # partition and clones it per partition, so all N of a container's lower layers
+    # present the same driver, the same guest device path and the same mount point;
+    # only the partition number and the dm-verity parameters differ. Without a
+    # discriminator this check would reject every multi-layer image outright, and were
+    # the count check ever relaxed it would also stop distinguishing "N distinct layers"
+    # from "the same layer N times". The root hash is the natural discriminator: it is
+    # what makes one layer a different layer from another.
+    storage_identities := {storage_identity(s) | some s in i_storages}
     print("allow_storages: distinct identities =", count(storage_identities))
     count(storage_identities) == i_count
 
@@ -1391,6 +1401,118 @@ storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id) if {
     allow_host_chosen_device(p_storage)
     allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id)
 }
+
+# RM-38: a dm-verity backed EROFS image layer.
+#
+# In unmerged mode each image layer is its own erofs image, presented as one GPT
+# partition of a single block device. Neither the block driver nor the guest device path
+# is predictable at policy generation time, so — as with the host-chosen emptyDir
+# devices above — the declaration cannot name them and instead carries the marker driver
+# "erofs-verity-layer". This body then checks everything that *is* predictable and
+# constrains the shape of the rest.
+#
+# The security-relevant part is the option handling. Every declared option must be
+# present, and every *extra* presented option must be one of the dm-verity parameters
+# whose value is assigned at runtime. That inverted check is what makes the rule safe:
+# it means a host cannot bolt an unrecognised X-kata option (say, one that disables
+# verification, or an overlay-upper marker) onto a layer that the policy believes is a
+# read-only verity-protected lower layer.
+storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id) if {
+    print("storage_pair_matches erofs: start")
+
+    p_storage.driver == "erofs-verity-layer"
+
+    # Presented as a block device whose id the host chose.
+    i_storage.driver in erofs_block_drivers
+
+    p_storage.driver_options == i_storage.driver_options
+    p_storage.fs_group == i_storage.fs_group
+
+    # protobuf omits false booleans from some JSON encodings, so read defensively.
+    object.get(i_storage, "shared", false) == false
+    object.get(p_storage, "shared", false) == false
+
+    p_storage.fstype == i_storage.fstype
+    p_storage.fstype == "erofs"
+
+    allow_erofs_layer_mount_point(p_storage, i_storage, bundle_id)
+    allow_erofs_verity_options(p_storage, i_storage)
+
+    print("storage_pair_matches erofs: true")
+}
+
+# The layer mounts under the container's own bundle directory. Pinning it here is what
+# stops a layer from being redirected at another container's rootfs, or at a sandbox
+# path: bundle_id is taken from the request being evaluated, not from the storage.
+allow_erofs_layer_mount_point(p_storage, i_storage, bundle_id) if {
+    mount1 := p_storage.mount_point
+    mount2 := replace(mount1, "$(cpath)", policy_data.common.cpath)
+    mount3 := replace(mount2, "$(bundle-id)", bundle_id)
+
+    print("allow_erofs_layer_mount_point: regex =", mount3)
+    regex.match(mount3, i_storage.mount_point)
+}
+
+erofs_block_drivers := {"blk", "scsi", "mmioblk", "nvdimm", "local"}
+
+allow_erofs_verity_options(p_storage, i_storage) if {
+    print("allow_erofs_verity_options: p_options =", p_storage.options)
+    print("allow_erofs_verity_options: i_options =", i_storage.options)
+
+    # No option may be repeated: a set built from the presented options would otherwise
+    # let a duplicate stand in for a required distinct one.
+    count({o | some o in i_storage.options}) == count(i_storage.options)
+
+    # Every declared option is present, verbatim.
+    every p_option in p_storage.options {
+        p_option in i_storage.options
+    }
+
+    # The layer must actually be verity backed. This is redundant with the declaration
+    # (genpolicy always emits it) but is stated here so the rule remains correct if a
+    # declaration is ever hand-edited.
+    "X-kata.dmverity-enabled=true" in i_storage.options
+
+    # A root hash must be among the runtime-assigned options. Its *value* is not
+    # constrained here — see RM-42: genpolicy cannot predict the hash of an erofs image
+    # that mkfs.erofs builds on the node. Authenticity of the hash still rests on the
+    # guest's initdata trust store; this rule guarantees only that one is supplied, so a
+    # layer cannot be mounted unverified.
+    some roothash in i_storage.options
+    startswith(roothash, "X-kata.dmverity.roothash=")
+
+    # Anything the declaration did not ask for must be a runtime-assigned dm-verity
+    # parameter of the expected shape.
+    every i_option in i_storage.options {
+        allow_erofs_extra_option(p_storage, i_option)
+    }
+
+    print("allow_erofs_verity_options: true")
+}
+
+allow_erofs_extra_option(p_storage, i_option) if {
+    i_option in p_storage.options
+}
+allow_erofs_extra_option(_, i_option) if {
+    erofs_verity_dynamic_option(i_option)
+}
+
+erofs_verity_dynamic_option(o) if regex.match("^X-kata\\.dmverity\\.roothash=[0-9a-f]{64}$", o)
+erofs_verity_dynamic_option(o) if regex.match("^X-kata\\.dmverity\\.hashoffset=[0-9]+$", o)
+erofs_verity_dynamic_option(o) if regex.match("^X-kata\\.dmverity\\.no-superblock=(true|false)$", o)
+erofs_verity_dynamic_option(o) if regex.match("^X-kata\\.dmverity\\.salt=[0-9a-f]{2,128}$", o)
+
+# RM-41: identity of a presented storage, for the duplicate check in allow_storages.
+# The dm-verity root hash is appended so that the N lower layers of a multi-layer image
+# — which necessarily share driver, source and mount point — are distinguished from one
+# another. concat over a sorted array is total: it yields "" for the storages that carry
+# no root hash, leaving their identity exactly as it was before.
+storage_identity(s) := [s.driver, s.source, s.mount_point, verity_discriminator(s)]
+
+verity_discriminator(s) := concat(",", sort([o |
+    some o in object.get(s, "options", [])
+    startswith(o, "X-kata.dmverity.roothash=")
+]))
 
 # RM-35: restrict the blk/scsi bodies above to declarations that actually opted into
 # host-chosen block backing.
