@@ -53,6 +53,7 @@ const OPT_MULTI_LAYER: &str = "X-kata.multi-layer=true";
 const OPT_GPT_PARTITIONED: &str = "X-kata.gpt-partitioned=true";
 const OPT_MKDIR_PATH: &str = "X-kata.mkdir.path=";
 const OPT_PARTITION_NUMBER: &str = "X-kata.partition-number=";
+const OPT_DMVERITY_ENABLED: &str = "X-kata.dmverity-enabled=true";
 
 #[derive(Debug)]
 pub struct MultiLayerErofsHandler {}

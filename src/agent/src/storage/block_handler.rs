@@ -33,6 +33,7 @@ use crate::device::scsi_device_handler::get_scsi_device_name;
 use crate::storage::{
     common_storage_handler, new_device, set_ownership, StorageContext, StorageHandler,
 };
+use kata_types::mount::KATA_BLOCK_VOLUME_CREATE_FS;
 use slog::Logger;
 #[cfg(target_arch = "s390x")]
 use std::str::FromStr;
@@ -54,9 +55,7 @@ async fn handle_block_storage(
     storage: &Storage,
     dev_num: &str,
 ) -> Result<Arc<dyn StorageDevice>> {
-    let has_ephemeral_encryption = storage
-        .driver_options
-        .contains(&"encryption_key=ephemeral".to_string());
+    let options = block_storage_driver_options(storage)?;
 
     // FR-5: in strict builds, writable scratch (a block emptyDir, identified by the
     // create-filesystem option) must be encrypted. Enforce the invariant on the host's
@@ -77,7 +76,7 @@ async fn handle_block_storage(
             dev_num,
             "luks2",
             &storage.mount_point,
-            "-O ^has_journal -m 0 -i 163840 -I 128",
+            &mkfs_opts,
         )
         .await?;
         set_ownership(logger, storage)?;
@@ -90,6 +89,9 @@ async fn handle_block_storage(
 
         new_device(storage.mount_point.clone())
     } else {
+        if options.should_create_filesystem {
+            ensure_block_filesystem(logger, storage).await?;
+        }
         let path = common_storage_handler(logger, storage)?;
         new_device(path)
     }
@@ -172,6 +174,17 @@ fn block_storage_driver_options(storage: &Storage) -> Result<BlockStorageDriverO
         has_ephemeral_encryption,
         should_create_filesystem,
     })
+}
+
+const EPHEMERAL_ENCRYPTION_DRIVER_OPTION: &str = "encryption_key=ephemeral";
+const MKFS_EXT4: &str = "mkfs.ext4";
+const BLOCK_EMPTYDIR_EXT4_MKFS_OPTS: [&str; 8] =
+    ["-O", "^has_journal", "-m", "0", "-i", "163840", "-I", "128"];
+
+#[derive(Debug, Eq, PartialEq)]
+struct BlockStorageDriverOptions {
+    has_ephemeral_encryption: bool,
+    should_create_filesystem: bool,
 }
 
 fn should_create_block_filesystem(storage: &Storage) -> bool {

@@ -100,6 +100,7 @@ use crate::tracer::extract_carrier_from_ttrpc;
 use crate::policy::do_set_policy;
 #[cfg(feature = "agent-policy")]
 use crate::policy::is_allowed;
+#[cfg(feature = "agent-policy")]
 use crate::policy::is_allowed_with_entrypoint;
 
 use opentelemetry::global;
@@ -3562,7 +3563,7 @@ fn do_copy_file(req: &CopyFileRequest, shared_dir: &PathBuf) -> Result<()> {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(req.file_mode))?;
 
         unistd::chown(
-            &path,
+            path,
             Some(Uid::from_raw(req.uid as u32)),
             Some(Gid::from_raw(req.gid as u32)),
         )?;
@@ -3576,7 +3577,7 @@ fn do_copy_file(req: &CopyFileRequest, shared_dir: &PathBuf) -> Result<()> {
         if path.exists() || path.is_symlink() {
             // Use appropriate removal method based on path type
             if path.is_symlink() {
-                unistd::unlink(&path)?;
+                unistd::unlink(path)?;
             } else if path.is_dir() {
                 fs::remove_dir_all(&path)?;
             } else {
@@ -3588,7 +3589,7 @@ fn do_copy_file(req: &CopyFileRequest, shared_dir: &PathBuf) -> Result<()> {
         let symlink_target = PathBuf::from(OsStr::from_bytes(&req.data));
         // Use BorrowedFd to wrap AT_FDCWD for symlinkat
         let cwd_fd = unsafe { BorrowedFd::borrow_raw(libc::AT_FDCWD) };
-        unistd::symlinkat(&symlink_target, cwd_fd, &path)?;
+        unistd::symlinkat(&symlink_target, cwd_fd, path)?;
 
         // Set symlink ownership (permissions not supported for symlinks)
         let path_str = CString::new(path.as_os_str().as_bytes())?;
@@ -3599,7 +3600,7 @@ fn do_copy_file(req: &CopyFileRequest, shared_dir: &PathBuf) -> Result<()> {
         return Ok(());
     }
 
-    let mut tmpfile = path.clone();
+    let mut tmpfile = path.to_path_buf();
     tmpfile.set_extension("tmp");
 
     let file = OpenOptions::new()
