@@ -55,6 +55,8 @@ const OPT_MULTI_LAYER: &str = "X-kata.multi-layer=true";
 const OPT_GPT_PARTITIONED: &str = "X-kata.gpt-partitioned=true";
 const OPT_MKDIR_PATH: &str = "X-kata.mkdir.path=";
 const OPT_PARTITION_NUMBER: &str = "X-kata.partition-number=";
+
+/// dm-verity related storage options
 #[allow(dead_code)]
 const OPT_DMVERITY_ENABLED: &str = "X-kata.dmverity-enabled=true";
 #[cfg(feature = "devicemapper")]
@@ -182,6 +184,7 @@ pub async fn handle_multi_layer_erofs_group(
             upper_storage = Some(*storage);
         } else if is_lower_storage(storage) {
             // Each GPT partition is provided as a separate storage entry by the host
+            // No special handling needed here - just add to erofs_storages
             if !has_gpt_partition && is_gpt_partitioned(storage) {
                 has_gpt_partition = true;
             }
@@ -279,64 +282,95 @@ pub async fn handle_multi_layer_erofs_group(
 
     let mut lower_mounts = Vec::new();
     let mut verity_devices = Vec::new();
-    let mut base_device_cache: HashMap<String, String> = HashMap::new();
 
-    // Errors are captured rather than propagated with `?` so that layers mounted
-    // before the failure can be unwound; leaving them behind would strand both the
-    // mounts and any dm-verity mappings created for them.
-    let mut mount_err: Option<anyhow::Error> = None;
-
-    for (index, erofs) in erofs_storages.iter().enumerate() {
-        let lower_mount = temp_base.join(format!("lower-{}", index));
-        if let Err(e) = fs::create_dir_all(&lower_mount).context(format!(
-            "failed to create lower mount dir {}",
-            lower_mount.display()
-        )) {
-            mount_err = Some(e);
-            break;
-        }
-
-        let base_dev_path = if is_gpt_partitioned(erofs) {
-            if !base_device_cache.contains_key(&erofs.source) {
-                match resolve_base_device_path(erofs, sandbox).await {
-                    Ok(path) => {
-                        base_device_cache.insert(erofs.source.clone(), path);
-                    }
-                    Err(e) => {
-                        mount_err = Some(e);
-                        break;
-                    }
-                }
-            }
-            base_device_cache.get(&erofs.source).cloned()
+    // Pre-resolve all base device paths outside the parallel block to avoid
+    // contention on the sandbox lock and the HashMap.
+    let erofs_count = erofs_storages.len();
+    let mut resolved_base_devs: Vec<Option<String>> = Vec::with_capacity(erofs_count);
+    let mut base_device_cache: HashMap<String, String> = HashMap::with_capacity(erofs_count);
+    for erofs in &erofs_storages {
+        let base_dev = if is_gpt_partitioned(erofs) {
+            Some(
+                base_device_cache
+                    .entry(erofs.source.clone())
+                    .or_insert(resolve_base_device_path(erofs, sandbox).await?)
+                    .clone(),
+            )
         } else {
             None
         };
+        resolved_base_devs.push(base_dev);
+    }
 
-        match wait_and_mount_layer(erofs, &lower_mount, sandbox, &logger, base_dev_path).await {
-            Ok(mount_info) => {
-                lower_mounts.push(lower_mount);
+    // Pre-create all lower mount directories so they are ready before
+    // concurrent mounting begins.
+    let lower_mount_paths: Vec<PathBuf> = (0..erofs_count)
+        .map(|index| temp_base.join(format!("lower-{}", index)))
+        .collect();
+    for lm in &lower_mount_paths {
+        fs::create_dir_all(lm)
+            .context(format!("failed to create lower mount dir {}", lm.display()))?;
+    }
 
-                // Collect dm-verity device for cleanup
-                if let Some(verity_dev) = mount_info.verity_device {
-                    verity_devices.push(verity_dev);
-                }
+    // Concurrently create dm-verity devices and mount layers.
+    // No worry about that because each layer has independent device nodes and mount points,
+    // so there is no ordering dependency during creation — only the final lowerdir list must
+    // preserve the original sort order.
+    let futures: Vec<_> = erofs_storages
+        .iter()
+        .enumerate()
+        .zip(resolved_base_devs)
+        .map(|((index, erofs), base_dev_path)| {
+            let lower_mount = lower_mount_paths[index].clone();
+            let sandbox = Arc::clone(sandbox);
+            let logger = logger.clone();
+            async move {
+                wait_and_mount_layer(erofs, &lower_mount, &sandbox, &logger, base_dev_path)
+                    .await
+                    .map(|mount_info| (index, lower_mount, mount_info))
             }
+        })
+        .collect();
+
+    info!(
+        logger,
+        "Starting concurrent mounting of EROFS layers";
+        "layer-count" => erofs_count,
+    );
+
+    let mut results: Vec<(usize, PathBuf, LayerMountInfo)> = Vec::with_capacity(erofs_count);
+    let mut failed_verity_devices: Vec<String> = Vec::new();
+    let mut failed_mount_points: Vec<PathBuf> = Vec::new();
+    let mut first_err: Option<anyhow::Error> = None;
+
+    for result in futures::future::join_all(futures).await {
+        match result {
+            Ok(t) => results.push(t),
             Err(e) => {
-                mount_err = Some(e);
-                break;
+                if first_err.is_none() {
+                    first_err = Some(e);
+                }
             }
         }
     }
 
-    if let Some(e) = mount_err {
-        // Unmount layers before destroying dm-verity devices, otherwise the devices
-        // are still busy and the teardown silently fails.
-        for mp in lower_mounts.iter().rev() {
-            if let Err(umount_err) = nix::mount::umount(mp.as_path()) {
+    if let Some(e) = first_err {
+        // Collect resources from successfully created layers
+        let mut sort_results: Vec<_> = results;
+        sort_results.sort_by_key(|(index, _, _)| *index);
+        for (_, lower_mount, mount_info) in sort_results {
+            if let Some(verity_dev) = mount_info.verity_device {
+                failed_verity_devices.push(verity_dev);
+            }
+            failed_mount_points.push(lower_mount);
+        }
+
+        // Unmount layers before destroying dm-verity devices.
+        for mp in failed_mount_points.iter().rev() {
+            if let Err(umount_err) = nix::mount::umount(mp) {
                 warn!(
                     logger,
-                    "failed to unmount layer during mount cleanup";
+                    "failed to unmount layer during concurrent-mount cleanup";
                     "mount-point" => mp.display(),
                     "error" => format!("{:#}", umount_err),
                 );
@@ -344,11 +378,22 @@ pub async fn handle_multi_layer_erofs_group(
         }
 
         #[cfg(feature = "devicemapper")]
-        if !verity_devices.is_empty() {
-            cleanup_dmverity_devices(&verity_devices, &logger);
+        if !failed_verity_devices.is_empty() {
+            cleanup_dmverity_devices(&failed_verity_devices, &logger);
         }
 
-        return Err(e.context("failed to mount one or more EROFS layers"));
+        return Err(e.context("failed to mount one or more EROFS layers concurrently"));
+    }
+
+    // Restore the original sort order so that lowerdir precedence
+    // matches the host-supplied partition ordering.
+    results.sort_by_key(|(index, _, _)| *index);
+
+    for (_, lower_mount, mount_info) in results {
+        lower_mounts.push(lower_mount);
+        if let Some(verity_dev) = mount_info.verity_device {
+            verity_devices.push(verity_dev);
+        }
     }
 
     // If any mkdir directive refers to {{ mount 1 }}, resolve it now using the first lower mount.
@@ -840,6 +885,7 @@ async fn wait_and_mount_layer(
         "devname" => &dev_path,
         "mount-point" => layer_mount.display(),
         "gpt-mode" => is_gpt,
+        "dmverity-enabled" => dmverity_enabled,
     );
 
     create_mount_destination(Path::new(&dev_path), layer_mount, "", &layer.fstype)
