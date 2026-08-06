@@ -260,6 +260,8 @@ ensure_branch_genpolicy() {
   export GENPOLICY
   ok "using genpolicy from the branch: $GENPOLICY"
 }
+
+# Provision (or adopt) the guest-reachable registry the live boot-pull needs, and
 # export ACR_LOGIN_SERVER / ACR_USERNAME / ACR_PASSWORD.
 #
 # Returns non-zero — without dying — when it cannot get there, so callers can

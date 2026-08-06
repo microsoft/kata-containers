@@ -62,10 +62,7 @@ PLAIN_HTTP=""
 case "${FEED%%/*}" in localhost*|127.0.0.1*) PLAIN_HTTP="--plain-http" ;; esac
 
 load_toolchain 2>/dev/null || true
-log "building genpolicy from the branch (the installed one is upstream's)"
-( cd "$E2E_REPO_DIR" && cargo build --release -p genpolicy ) >/dev/null \
-  || die "could not build genpolicy"
-GENPOLICY="$E2E_REPO_DIR/target/release/genpolicy"
+ensure_branch_genpolicy
 
 SIGN()    { ( cd "$E2E_REPO_DIR" && cargo run -q --example sign-fragment \
               -p kata-security-reference-monitor -- "$@" ); }
