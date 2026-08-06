@@ -211,6 +211,7 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
+| `E2E_PLATFORM` | `qemu-coco-dev` | Which hypervisor stack to validate. `clh-snp` selects Cloud Hypervisor + MSHV with real SEV-SNP — see "Platforms" below. |
 | `E2E_RG` / `E2E_VM` | `jiria-coco-cvm-rg` / `coco-dev-1` | Azure resource group and VM name. |
 | `E2E_SSH_HOST` | `coco-dev` | ssh alias the workstation-side helpers use. Override with `E2E_VM` for a parallel environment. |
 | `E2E_FAST` | `0` | Dev-loop mode. Reduces assurance — see below. |
@@ -382,9 +383,46 @@ az vm list-skus --size Standard_DC16as_cc_v5 \
 az vm list-usage --location westus --query "[?contains(localName,'DCACCV5')]" -o table
 ```
 
+### Platforms
+
+`E2E_PLATFORM` selects the stack under test. Everything that differs between them
+is derived in one `case` block at the top of `lib.sh`, so the stages themselves
+stay declarative.
+
+| | `qemu-coco-dev` (default) | `clh-snp` |
+| --- | --- | --- |
+| Hypervisor | QEMU + KVM | Cloud Hypervisor + MSHV |
+| Guest | ordinary VM, **not attested** | real SEV-SNP CVM |
+| Node OS | Ubuntu 24.04 | Azure Linux 3 |
+| Installed by | kata-deploy (Helm) | `make all-confpods` from `tools/osbuilder/node-builder/azure-linux` |
+| Prefix | `/opt/kata` | `/opt/confidential-containers` |
+| RuntimeClass | `kata-qemu-coco-dev-runtime-rs` | `kata-cc` |
+| genpolicy | ships in the kata-deploy image | **none** — built from the branch |
+| Verity pin | patched into `configuration-*.toml` | baked into the IGVM kernel cmdline |
+
+The two answer different questions. `qemu-coco-dev` is fast and exercises the
+policy logic, the agent and the guest-pull path, which is most of what changes
+day to day. It cannot say anything about attestation, the SNP boot path, or
+anything MSHV-specific — for example the pathrs kernel-version panic is invisible
+under QEMU because it needs a version string containing an MSHV suffix.
+`clh-snp` covers those at the cost of a multi-hour native build.
+
+**`clh-snp` prerequisites the suite handles for you:** the MSHV host kernel and
+the `Dom0` grub entry (stage 02 — this needs one reboot, and the stage says so),
+containerd 2.3.x, cloud-hypervisor built with `--features sev_snp`, and the
+6.1.58 UVM kernel rebuilt from the distro SRPM with `CONFIG_EROFS_FS` enabled
+(stage 04). The packaged UVM kernel is not usable: 6.6.137.mshv1 triple-faults
+during IGVM boot, and the packaged 6.1.58 has EROFS off.
+
+Note that `AGENT_POLICY_FILE=allow-all.rego`, which the node-builder README
+passes, is deliberately **not** used here — it would make stages 05–08 vacuous.
+The default for a release build is `allow-set-policy.rego`, which is what these
+tests need.
+
 ### The node is not a confidential VM
 
-Tempting as the SKU name is, the node is provisioned with
+This applies to the default `qemu-coco-dev` platform. Tempting as the SKU name
+is, the node is provisioned with
 `--security-type Standard`. This suite exercises the `qemu-coco-dev` runtime
 class, which is the **non-attested dev path**: the guest is an ordinary VM, so
 what the node needs is a confidential-*capable* host SKU for nested
@@ -393,6 +431,11 @@ Asking for `ConfidentialVM` also fails outright against the plain Ubuntu
 `server` image this suite is built around ("Use of ConfidentialVM setting is not
 supported for the provided image") — a `:cvm:` image sku is required for that.
 `E2E_VM_SECURITY_TYPE=ConfidentialVM` is available if you pair it with one.
+
+`clh-snp` also uses `Standard`, for a different reason: there the node is the
+*hypervisor root partition* (MSHV Dom0) that launches SNP guests, so it must not
+itself be a CVM. Confidentiality on that path comes from the guest's IGVM
+measurement, not from the node.
 
 ### Running stage 01 from Windows
 

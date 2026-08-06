@@ -13,13 +13,88 @@ set -uo pipefail
 # with E2E_VM to drive a second, parallel environment from the same checkout.
 : "${E2E_SSH_HOST:=coco-dev}"
 : "${E2E_REGION:=eastus}"
-# Standard_DC16as_cc_v5 is a SEV-SNP CC SKU. See README for the region/quota trap:
-# availability and quota are independent, and each alone is a false green.
-: "${E2E_VM_SIZE:=Standard_DC16as_cc_v5}"
-: "${E2E_VM_IMAGE:=Canonical:ubuntu-24_04-lts:server:latest}"
-# Standard, not ConfidentialVM — see the comment in 01-provision-vm.sh. Set to
-# ConfidentialVM only with an image whose sku supports it (e.g. ...:cvm:latest).
-: "${E2E_VM_SECURITY_TYPE:=Standard}"
+
+# ------------------------------------------------------------------- platform
+# Which hypervisor/accelerator stack the suite validates against.
+#
+#   qemu-coco-dev  QEMU + KVM, guest is a *non-attested* dev VM. Installed by
+#                  upstream kata-deploy (Helm) under /opt/kata. This is the
+#                  historical default and every stage was written for it.
+#   clh-snp        Cloud Hypervisor + MSHV with real SEV-SNP, built from source
+#                  on Azure Linux 3 by tools/osbuilder/node-builder/azure-linux
+#                  and installed under /opt/confidential-containers. kata-deploy
+#                  is not involved at all on this path.
+#
+# The split matters because the two differ in more than a hypervisor name: the
+# install prefix, the shim binary, the containerd handler and the RuntimeClass
+# are all different, and only the QEMU path ships a genpolicy binary. Anything
+# platform-dependent is derived here so the stages stay declarative.
+: "${E2E_PLATFORM:=qemu-coco-dev}"
+case "$E2E_PLATFORM" in
+  qemu-coco-dev)
+    # Standard_DC16as_cc_v5 is a SEV-SNP CC SKU. See README for the region/quota
+    # trap: availability and quota are independent, and each alone is a false green.
+    : "${E2E_VM_SIZE:=Standard_DC16as_cc_v5}"
+    : "${E2E_VM_IMAGE:=Canonical:ubuntu-24_04-lts:server:latest}"
+    # Standard, not ConfidentialVM — see the comment in 01-provision-vm.sh. The
+    # guest here is an ordinary VM, so what the node needs is a confidential-capable
+    # *host* for nested virt, not a confidential VM of its own.
+    : "${E2E_VM_SECURITY_TYPE:=Standard}"
+    : "${E2E_OS_DISK_GB:=256}"
+    : "${E2E_PKG:=apt}"
+    : "${E2E_RUNTIMECLASS:=kata-qemu-coco-dev-runtime-rs}"
+    : "${E2E_KATA_PREFIX:=/opt/kata}"
+    # The QEMU guest boots a plain rootfs image.
+    : "${E2E_GUEST_IMAGE_NAME:=kata-containers.img}"
+    ;;
+  clh-snp)
+    # The guest is a real SEV-SNP CVM here, so unlike the QEMU path the *node*
+    # must itself be a CC SKU running as an MSHV Dom0 — nested virt is not enough.
+    # DC16 rather than DC4: this platform compiles cloud-hypervisor, the UVM
+    # kernel and the full Rust runtime natively on the node, so cores are the
+    # dominant cost of stage 04. DC4as_cc_v5 is also NotAvailableForSubscription
+    # in eastus, whereas DC16 is the size the AzL3/MSHV repro was validated on.
+    : "${E2E_VM_SIZE:=Standard_DC16as_cc_v5}"
+    : "${E2E_VM_IMAGE:=MicrosoftCBLMariner:azure-linux-3:azure-linux-3-gen2:latest}"
+    : "${E2E_VM_SECURITY_TYPE:=Standard}"
+    # 60 GB is what the node-builder README asks for; the guest-stack build needs
+    # considerably more than that, so keep the suite's larger disk.
+    : "${E2E_OS_DISK_GB:=256}"
+    : "${E2E_PKG:=dnf}"
+    # Handler name comes from the shim binary the confpods flow installs,
+    # containerd-shim-kata-cc-v2 -> io.containerd.kata-cc.v2 -> "kata-cc".
+    : "${E2E_RUNTIMECLASS:=kata-cc}"
+    : "${E2E_KATA_PREFIX:=/opt/confidential-containers}"
+    # Both platforms install a rootfs image under the same name. What differs is
+    # what boots it: on SNP the kernel and the launch measurement live in a
+    # separate IGVM file, and the rootfs' dm-verity root hash is baked into the
+    # kernel command line *inside* that IGVM (uvm_build.sh passes
+    # DM_VERITY_FORMAT=kernelinit). So the verity pin is not visible in
+    # configuration.toml the way it is on the QEMU path, and the IGVM is the
+    # artefact that has to be attested instead.
+    : "${E2E_GUEST_IMAGE_NAME:=kata-containers.img}"
+    : "${E2E_GUEST_IGVM_NAME:=kata-containers-igvm.img}"
+    ;;
+  *)
+    echo "unsupported E2E_PLATFORM=$E2E_PLATFORM (expected qemu-coco-dev or clh-snp)" >&2
+    exit 1
+    ;;
+esac
+
+# Where the *installed* kata payload lives. Only ever used for things the
+# platform actually installs — notably not genpolicy, which the confpods flow
+# does not ship at all (see genpolicy_defaults below).
+E2E_KATA_DEFAULTS="$E2E_KATA_PREFIX/share/defaults/kata-containers"
+E2E_GUEST_IMAGE="$E2E_KATA_PREFIX/share/kata-containers/$E2E_GUEST_IMAGE_NAME"
+E2E_GUEST_IGVM="$E2E_KATA_PREFIX/share/kata-containers/${E2E_GUEST_IGVM_NAME:-}"
+
+# Component versions for the clh-snp build. Pinned rather than floating: the
+# node-builder README is explicit that AzL's packaged kernel-uvm 6.6.137.mshv1
+# triple-faults during IGVM boot, so the UVM kernel is a specific older one that
+# has to be rebuilt with EROFS support.
+: "${E2E_CLH_REPO:=https://github.com/microsoft/cloud-hypervisor.git}"
+: "${E2E_CLH_TAG:=msft/v51.1.101}"
+: "${E2E_UVM_KERNEL_VERSION:=6.1.58.mshv8}"
 # whoami returns DOMAIN\user on a Windows workstation, and cygwin/git-bash render
 # that as DOMAIN+user. Azure rejects both separators and upper case in an admin
 # name, so normalise here rather than failing deep inside az vm create.
@@ -140,7 +215,7 @@ $stray"; return 1
 # them has been weakened.
 assert_local_guest_installed() {
   local rec="$E2E_STATE_DIR/guest-image-sha256"
-  local img=/opt/kata/share/kata-containers/kata-containers.img
+  local img="$E2E_GUEST_IMAGE"
   [ -f "$rec" ] || die "no record of a locally built guest image — run 04-build-guest-stack.sh first"
   [ -f "$img" ] || die "missing $img"
   [ "$(sha256sum "$img" | cut -d' ' -f1)" = "$(cat "$rec")" ] \
@@ -151,6 +226,23 @@ assert_local_guest_installed() {
   # our image: any other rootfs fails verity and never starts. Stage 04 patches
   # every config it finds, so read back exactly what it recorded instead of
   # guessing which config the runtime class resolves to.
+  #
+  # On clh-snp that hash is not in any config file to read back: uvm_build.sh
+  # bakes it into the guest kernel command line inside the IGVM. The IGVM is
+  # therefore the artefact that carries the pin, and asserting it is the one we
+  # built is the same claim by a different route — a tampered rootfs fails verity
+  # against a hash the IGVM measurement covers.
+  if [ "$E2E_PLATFORM" = "clh-snp" ]; then
+    local igvm_rec="$E2E_STATE_DIR/guest-igvm-sha256"
+    [ -s "$igvm_rec" ] || die "no recorded IGVM digest — re-run stage 04"
+    [ -f "$E2E_GUEST_IGVM" ] || die "missing $E2E_GUEST_IGVM"
+    [ "$(sha256sum "$E2E_GUEST_IGVM" | cut -d' ' -f1)" = "$(cat "$igvm_rec")" ] \
+      || die "$E2E_GUEST_IGVM is not the IGVM stage 04 installed — re-run stage 04 (E2E_FORCE=1)"
+    ok "guest pinned by IGVM measurement to the locally built image"
+    ok "testing guest built from $(cat "$E2E_STATE_DIR/guest-image-commit" 2>/dev/null || echo unknown)"
+    return 0
+  fi
+
   local params_rec="$E2E_STATE_DIR/guest-verity-params"
   local cfg_rec="$E2E_STATE_DIR/guest-config-paths"
   [ -s "$params_rec" ] || die "no recorded dm-verity parameters — re-run stage 04"
@@ -261,6 +353,52 @@ ensure_branch_genpolicy() {
   ok "using genpolicy from the branch: $GENPOLICY"
 }
 
+# Export GP_RULES / GP_SETTINGS — the rules.rego and genpolicy-settings.json that
+# genpolicy should be driven with on this platform.
+#
+# These are deliberately NOT derived from $E2E_KATA_DEFAULTS unconditionally,
+# because the two platforms disagree about whether that directory has genpolicy
+# inputs in it at all:
+#
+#   qemu-coco-dev  kata-deploy lays down upstream's copies and stage 03 then
+#                  overwrites them with the branch's, plus the oci_version patch
+#                  that matches the installed containerd. Use those — re-deriving
+#                  them here would drop the patch and deny every pod at
+#                  CreateContainerRequest.
+#   clh-snp        the confpods flow installs no genpolicy, no rules.rego and no
+#                  settings whatsoever (grep the node-builder scripts: genpolicy
+#                  is never mentioned). There is nothing to consume, so stage the
+#                  branch copies into a suite-owned directory and apply the same
+#                  oci_version patch stage 03 applies on the other platform.
+ensure_genpolicy_defaults() {
+  case "$E2E_PLATFORM" in
+    qemu-coco-dev)
+      GP_RULES="$E2E_KATA_DEFAULTS/rules.rego"
+      GP_SETTINGS="$E2E_KATA_DEFAULTS/genpolicy-settings.json"
+      [ -f "$GP_RULES" ]    || die "missing $GP_RULES — run stage 03 first"
+      [ -f "$GP_SETTINGS" ] || die "missing $GP_SETTINGS — run stage 03 first"
+      ;;
+    clh-snp)
+      local src="$E2E_REPO_DIR/src/tools/genpolicy" dst="$E2E_STATE_DIR/genpolicy"
+      mkdir -p "$dst"
+      for f in rules.rego genpolicy-settings.json; do
+        [ -f "$src/$f" ] || die "missing $src/$f — genpolicy inputs are not where the suite expects them"
+        install -m 0644 "$src/$f" "$dst/$f" || die "could not stage $f into $dst"
+      done
+      GP_RULES="$dst/rules.rego"
+      GP_SETTINGS="$dst/genpolicy-settings.json"
+      # containerd 2.3.x emits OCI spec 1.3.0 while the branch's settings still
+      # say 1.1.0, which denies *every* pod at CreateContainerRequest.
+      if grep -q '"oci_version": "1.1.0"' "$GP_SETTINGS" 2>/dev/null; then
+        log "patching oci_version 1.1.0 -> 1.3.0 in $GP_SETTINGS"
+        sed -i 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' "$GP_SETTINGS"
+      fi
+      ;;
+  esac
+  export GP_RULES GP_SETTINGS
+  ok "genpolicy inputs: $GP_RULES"
+}
+
 # Provision (or adopt) the guest-reachable registry the live boot-pull needs, and
 # export ACR_LOGIN_SERVER / ACR_USERNAME / ACR_PASSWORD.
 #
@@ -346,3 +484,11 @@ ensure_acr() {
   export ACR_LOGIN_SERVER ACR_USERNAME ACR_PASSWORD
   ok "registry ready: $ACR_LOGIN_SERVER (anonymous pull on)"
 }
+
+# Platform-specific helpers, sourced last so they can use everything above. Only
+# the selected platform's module is loaded: the clh-snp one assumes Azure Linux
+# and would be nothing but a loaded footgun on the QEMU path.
+if [ "$E2E_PLATFORM" = "clh-snp" ]; then
+  # shellcheck source=platform-clh-snp.sh
+  . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/platform-clh-snp.sh"
+fi

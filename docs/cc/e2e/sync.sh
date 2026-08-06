@@ -28,7 +28,9 @@ ok "suite synced to $E2E_SSH_HOST:~/coco-e2e"
 # silently different from what was asked for locally.
 env_prefix=""
 for v in E2E_FAST E2E_SKIP_BUILD E2E_FORCE E2E_NIGHTLY_SHA E2E_BRANCH \
-         E2E_STRICT_POLICY E2E_AGENT_POLICY E2E_REGISTRY E2E_NS; do
+         E2E_STRICT_POLICY E2E_AGENT_POLICY E2E_REGISTRY E2E_NS \
+         E2E_PLATFORM E2E_REPO_URL E2E_INIT_DATA E2E_STATE_DIR \
+         E2E_CLH_TAG E2E_UVM_KERNEL_VERSION; do
   if [ -n "${!v:-}" ]; then
     env_prefix+="$v=$(printf '%q' "${!v}") "
   fi

@@ -29,9 +29,9 @@ set -euo pipefail
 
 NS="${E2E_NS:-coco-e2e}"
 POD=demo-frag-sidecar
-DEFAULTS=/opt/kata/share/defaults/kata-containers
-SETTINGS="$DEFAULTS/genpolicy-settings.json"
-RULES_SRC="$DEFAULTS/rules.rego"
+ensure_genpolicy_defaults
+SETTINGS="$GP_SETTINGS"
+RULES_SRC="$GP_RULES"
 FRAG="$HOME/.coco-e2e/fragments"
 ENTRY="$FRAG/fragment-entry.json"
 E2E_REPO_DIR="${E2E_REPO_DIR:-$HOME/kata-containers}"
@@ -98,7 +98,7 @@ metadata:
   name: $POD
   namespace: $NS$anno
 spec:
-  runtimeClassName: kata-qemu-coco-dev-runtime-rs
+  runtimeClassName: $E2E_RUNTIMECLASS
   restartPolicy: Never
   securityContext:
     runAsUser: 0

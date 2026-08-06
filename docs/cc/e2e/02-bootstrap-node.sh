@@ -6,35 +6,46 @@ set -uo pipefail
 skip_if_done 02-bootstrap-node
 
 step "02 — bootstrap node"
+log "platform: $E2E_PLATFORM"
 
-log "installing base packages"
-sudo apt-get update -qq
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  cmake curl git jq unzip wget build-essential pkg-config libssl-dev \
-  protobuf-compiler \
-  socat conntrack ebtables ethtool docker.io docker-buildx default-jre \
-  || die "apt install failed"
+if [ "$E2E_PLATFORM" = "clh-snp" ]; then
+  # Azure Linux 3: dnf, no docker, and the host side of the CC stack. The guest
+  # stack is built natively by the node-builder in stage 04 rather than in a
+  # container, so nothing here needs a container engine.
+  clh_bootstrap_node
+else
+  log "installing base packages"
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    cmake curl git jq unzip wget build-essential pkg-config libssl-dev \
+    protobuf-compiler \
+    socat conntrack ebtables ethtool docker.io docker-buildx default-jre \
+    || die "apt install failed"
+
+  # yq from snap: the apt package is a different, incompatible tool. On the
+  # clh-snp path ci/install_yq.sh below provides it instead — AzL3 has no snap.
+  command -v yq >/dev/null 2>&1 || sudo snap install yq || die "yq install failed"
+
+  log "configuring docker access"
+  sudo usermod -aG docker "$USER" || die "usermod failed"
+  # The docker.io package already ships /var/run/docker.sock as root:docker 0660, so
+  # there is nothing to fix here — and widening it to a+rw would be a root-equivalent
+  # grant to every local account. The membership added above does not apply to THIS
+  # session, so verify under `sg` and tell the operator to reconnect if needed.
+  if ! docker info >/dev/null 2>&1 && ! sg docker -c 'docker info' >/dev/null 2>&1; then
+    die "docker is not usable by $USER even under the docker group — check 'systemctl status docker'"
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    warn "docker group membership added but not active in this session"
+    warn "log out and back in (or reconnect ssh) before running 04-build-guest-stack.sh"
+  fi
+  _boot_hint=" — log out and back in for the docker group to apply"
+fi
 
 # genpolicy's containerd-client / k8s-cri build scripts shell out to protoc; without
-# it the crate fails to build and the failure looks unrelated.
+# it the crate fails to build and the failure looks unrelated. Both platforms
+# install it above, so this is a shared post-condition rather than a step.
 need protoc
-
-# yq from snap: the apt package is a different, incompatible tool.
-command -v yq >/dev/null 2>&1 || sudo snap install yq || die "yq install failed"
-
-log "configuring docker access"
-sudo usermod -aG docker "$USER" || die "usermod failed"
-# The docker.io package already ships /var/run/docker.sock as root:docker 0660, so
-# there is nothing to fix here — and widening it to a+rw would be a root-equivalent
-# grant to every local account. The membership added above does not apply to THIS
-# session, so verify under `sg` and tell the operator to reconnect if needed.
-if ! docker info >/dev/null 2>&1 && ! sg docker -c 'docker info' >/dev/null 2>&1; then
-  die "docker is not usable by $USER even under the docker group — check 'systemctl status docker'"
-fi
-if ! docker info >/dev/null 2>&1; then
-  warn "docker group membership added but not active in this session"
-  warn "log out and back in (or reconnect ssh) before running 04-build-guest-stack.sh"
-fi
 
 if ! command -v kubectl >/dev/null 2>&1; then
   log "installing kubectl"
@@ -89,5 +100,5 @@ cd "$E2E_REPO_DIR" || die "cannot enter $E2E_REPO_DIR"
 [ -x ci/install_oras.sh ] && sudo ci/install_oras.sh || true
 [ -x ci/install_yq.sh ]   && sudo ci/install_yq.sh   || true
 
-ok "node bootstrapped — log out and back in for the docker group to apply"
+ok "node bootstrapped${_boot_hint:-}"
 mark_done 02-bootstrap-node

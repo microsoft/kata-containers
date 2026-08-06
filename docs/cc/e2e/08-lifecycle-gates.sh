@@ -132,7 +132,7 @@ metadata:
   name: $pod
   namespace: $NS
 spec:
-  runtimeClassName: kata-qemu-coco-dev-runtime-rs
+  runtimeClassName: $E2E_RUNTIMECLASS
   restartPolicy: Never
   securityContext:
     runAsUser: 0
@@ -152,7 +152,7 @@ EOF
   fi
   "$GENPOLICY" -y "$WORK/$pod.yaml" \
     -p "$rules" \
-    -j /opt/kata/share/defaults/kata-containers/genpolicy-settings.json \
+    -j "$GP_SETTINGS" \
     >/dev/null 2>&1 || die "genpolicy failed for $pod"
   grep -q 'cc_init_data' "$WORK/$pod.yaml" || die "$pod: genpolicy did not inject a policy"
   # The generated policy must carry every settings key the rules read. If

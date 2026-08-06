@@ -59,11 +59,12 @@ need kubectl
 assert_local_guest_installed
 
 NS="${E2E_NS:-coco-e2e}"
-DEFAULTS=/opt/kata/share/defaults/kata-containers
-SETTINGS="$DEFAULTS/genpolicy-settings.json"
-RULES_SRC="$DEFAULTS/rules.rego"
-[ -f "$SETTINGS" ]  || die "missing $SETTINGS — run 03-deploy-cluster.sh first"
-[ -f "$RULES_SRC" ] || die "missing $RULES_SRC — run 03-deploy-cluster.sh first"
+# Resolve the genpolicy inputs for whichever platform is in use: on the QEMU path
+# stage 03 stages them into the installed defaults directory; on clh-snp nothing
+# installs them, so they are staged straight from the branch.
+ensure_genpolicy_defaults
+SETTINGS="$GP_SETTINGS"
+RULES_SRC="$GP_RULES"
 
 # Stage 03 installs both genpolicy inputs from the branch and asserts they match.
 # Re-assert it here, because 03 may have run many commits ago and these two files
@@ -78,8 +79,13 @@ RULES_SRC="$DEFAULTS/rules.rego"
 # mismatch denies every pod at CreateContainerRequest. Apply the same rewrite to
 # the branch copy before comparing, so this checks staleness and not that one
 # deliberate edit.
+#
+# On clh-snp ensure_genpolicy_defaults has just staged both files from the branch,
+# so this is a tautology there — kept unconditional rather than skipped, because a
+# tautology costs nothing and a platform-conditional assertion is one more thing
+# that can rot.
 GP_SRC="$E2E_REPO_DIR/src/tools/genpolicy"
-have_rules=$(sudo sha256sum "$DEFAULTS/rules.rego" | cut -d' ' -f1)
+have_rules=$(sudo sha256sum "$RULES_SRC" | cut -d' ' -f1)
 want_rules=$(sha256sum "$GP_SRC/rules.rego" | cut -d' ' -f1)
 [ "$have_rules" = "$want_rules" ] \
   || die "staged rules.rego is not the branch copy — re-run 03-deploy-cluster.sh"
@@ -234,7 +240,7 @@ metadata:
   name: $1
   namespace: $NS$frag_anno
 spec:
-  runtimeClassName: kata-qemu-coco-dev-runtime-rs
+  runtimeClassName: $E2E_RUNTIMECLASS
   restartPolicy: Never
   securityContext:
     runAsUser: 0
@@ -649,7 +655,7 @@ metadata:
   name: $1
   namespace: $NS$frag_anno
 spec:
-  runtimeClassName: kata-qemu-coco-dev-runtime-rs
+  runtimeClassName: $E2E_RUNTIMECLASS
   restartPolicy: Never
   securityContext:
     runAsUser: 0

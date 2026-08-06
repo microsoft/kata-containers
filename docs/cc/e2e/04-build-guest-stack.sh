@@ -13,6 +13,52 @@ load_toolchain
 load_coco_env
 cd "$E2E_REPO_DIR" || die "no repo at $E2E_REPO_DIR"
 
+# ------------------------------------------------------------------- clh-snp
+# Entirely different build system: the node-builder compiles the host and guest
+# components natively and installs them under /opt/confidential-containers, so
+# none of the kata-deploy local-build machinery below applies. It ends with its
+# own mark_done rather than falling through.
+if [ "$E2E_PLATFORM" = "clh-snp" ]; then
+  clh_assert_snp_host
+  clh_install_igvm_tooling
+  clh_build_cloud_hypervisor
+  clh_build_uvm_kernel
+  clh_build_and_deploy
+
+  # Note the absence of the clean-tree gate below: it exists because the QEMU
+  # agent is built inside a container from a *git checkout*, so uncommitted work
+  # is invisible there. The node-builder runs `make` against the working tree
+  # directly, so uncommitted changes are picked up and the gate would reject
+  # exactly the iteration loop this platform is used for. The commit is recorded
+  # with a -dirty marker instead, so a result can still be traced.
+  [ -f "$E2E_GUEST_IMAGE" ] || die "no $E2E_GUEST_IMAGE after deploy-confpods"
+  [ -f "$E2E_GUEST_IGVM" ]  || die "no $E2E_GUEST_IGVM after deploy-confpods"
+  sha256sum "$E2E_GUEST_IMAGE" | cut -d' ' -f1 > "$E2E_STATE_DIR/guest-image-sha256"
+  sha256sum "$E2E_GUEST_IGVM"  | cut -d' ' -f1 > "$E2E_STATE_DIR/guest-igvm-sha256"
+  { git rev-parse HEAD; git diff --quiet HEAD -- src/ tools/ || printf -- '-dirty'; } \
+    | tr -d '\n' > "$E2E_STATE_DIR/guest-image-commit"
+
+  CLH_CFG="$E2E_KATA_DEFAULTS/runtime-rs/configuration.toml"
+  [ -f "$CLH_CFG" ] || die "no shim configuration at $CLH_CFG after deploy-confpods"
+  printf '%s\n' "$CLH_CFG" > "$E2E_STATE_DIR/guest-config-paths"
+
+  # Kept for the record even though assert_local_guest_installed does not read it
+  # on this platform: when a boot fails, the first question is always which root
+  # hash the IGVM was built around, and it is otherwise only in a build tree that
+  # `make clean-confpods` will delete.
+  RH=$(find tools/osbuilder -maxdepth 1 -name 'root_hash_*.txt' | head -1)
+  if [ -n "$RH" ]; then
+    tr -d '\n' < "$RH" > "$E2E_STATE_DIR/guest-verity-params"
+    ok "recorded dm-verity root hash from $(basename "$RH")"
+  else
+    warn "no root_hash_*.txt under tools/osbuilder — cannot record the verity parameters"
+  fi
+
+  ok "guest stack built and installed (clh-snp)"
+  mark_done 04-build-guest-stack
+  exit 0
+fi
+
 LB=tools/packaging/kata-deploy/local-build
 
 # TRAP 1: the agent builds inside a container from a *git checkout*, so

@@ -19,32 +19,51 @@ cd "$E2E_REPO_DIR" || die "no repo at $E2E_REPO_DIR — run 02 first"
 # daemonset image, so recover it rather than making the caller hunt for a value
 # that only has to match what is already installed. Restaging genpolicy inputs is
 # the common reason to re-run this stage and it should not require archaeology.
-if [ -z "${E2E_NIGHTLY_SHA:-}" ]; then
-  E2E_NIGHTLY_SHA=$(kubectl -n kube-system get daemonset kata-deploy \
-    -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null \
-    | sed -n 's/.*kata-deploy-ci:\([0-9a-f]\{40\}\)-nightly.*/\1/p')
-  [ -n "$E2E_NIGHTLY_SHA" ] \
-    && log "recovered E2E_NIGHTLY_SHA=$E2E_NIGHTLY_SHA from the running kata-deploy"
+#
+# None of this applies to clh-snp: there is no kata-deploy there at all. The guest
+# stack is built from the branch by the node-builder in stage 04, so there is no
+# upstream nightly to pin against and no /opt/kata to restage into.
+if [ "$E2E_PLATFORM" != "clh-snp" ]; then
+  if [ -z "${E2E_NIGHTLY_SHA:-}" ]; then
+    E2E_NIGHTLY_SHA=$(kubectl -n kube-system get daemonset kata-deploy \
+      -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null \
+      | sed -n 's/.*kata-deploy-ci:\([0-9a-f]\{40\}\)-nightly.*/\1/p')
+    [ -n "$E2E_NIGHTLY_SHA" ] \
+      && log "recovered E2E_NIGHTLY_SHA=$E2E_NIGHTLY_SHA from the running kata-deploy"
+  fi
+  : "${E2E_NIGHTLY_SHA:?set E2E_NIGHTLY_SHA to the CI-nightly commit sha (see README)}"
 fi
-: "${E2E_NIGHTLY_SHA:?set E2E_NIGHTLY_SHA to the CI-nightly commit sha (see README)}"
 
 ENV_FILE="$HOME/coco-env.sh"
-cat > "$ENV_FILE" <<EOF
-export KATA_HYPERVISOR="qemu-coco-dev-runtime-rs"
+{
+  # KATA_HYPERVISOR only steers deploy_kata(), which validates it against
+  # ALL_HYPERVISORS and which clh-snp never calls. Emitting it on clh-snp would be
+  # a claim the run cannot back up, so it is left out entirely there; likewise
+  # DOCKER_TAG, which names a kata-deploy image that is never pulled.
+  if [ "$E2E_PLATFORM" != "clh-snp" ]; then
+    echo 'export KATA_HYPERVISOR="qemu-coco-dev-runtime-rs"'
+    echo "export DOCKER_TAG=\"${E2E_NIGHTLY_SHA}-nightly-amd64\""
+    echo 'export KATA_HOST_OS="ubuntu"'
+  else
+    echo 'export KATA_HOST_OS="cbl-mariner"'
+  fi
+  cat <<'EOF'
 export KBS="true" KBS_INGRESS="nodeport" PULL_TYPE="guest-pull"
-export SNAPSHOTTER="nydus" KATA_HOST_OS="ubuntu" K8S_TEST_HOST_TYPE="all"
+export SNAPSHOTTER="nydus" K8S_TEST_HOST_TYPE="all"
 export CONTAINER_ENGINE_VERSION="latest" CONTAINER_ENGINE="containerd"
 export USE_EXPERIMENTAL_SETUP_SNAPSHOTTER="true" AUTO_GENERATE_POLICY="yes"
 export DOCKER_REGISTRY="ghcr.io" DOCKER_REPO="kata-containers/kata-deploy-ci"
-export DOCKER_TAG="${E2E_NIGHTLY_SHA}-nightly-amd64"
 export GH_PR_NUMBER="nightly" KUBERNETES="vanilla"
 EOF
+} > "$ENV_FILE"
 ok "wrote $ENV_FILE"
 load_coco_env "$ENV_FILE"
 
-ART_DIR="$E2E_REPO_DIR/kata-tools-artifacts"
-[ -f "$ART_DIR/kata-tools-static.tar.zst" ] \
-  || die "missing $ART_DIR/kata-tools-static.tar.zst — download it first (see README, 'Clean-room run from nothing', step 6)"
+if [ "$E2E_PLATFORM" != "clh-snp" ]; then
+  ART_DIR="$E2E_REPO_DIR/kata-tools-artifacts"
+  [ -f "$ART_DIR/kata-tools-static.tar.zst" ] \
+    || die "missing $ART_DIR/kata-tools-static.tar.zst — download it first (see README, 'Clean-room run from nothing', step 6)"
+fi
 
 gha() {
   log "gha-run.sh $1"
@@ -59,7 +78,7 @@ gha() {
     || die "gha-run.sh $1 failed"
 }
 
-gha install-kata-tools kata-tools-artifacts
+[ "$E2E_PLATFORM" = "clh-snp" ] || gha install-kata-tools kata-tools-artifacts
 
 # Bringing the cluster up is not idempotent, and this stage is the only documented
 # way to restage the genpolicy inputs below -- so every rules.rego edit used to
@@ -72,21 +91,35 @@ gha install-kata-tools kata-tools-artifacts
 # So bring the cluster up only when there is not already one. Restaging is the
 # common case by far and must stay cheap. E2E_REDEPLOY=1 forces the full path.
 cluster_is_up() {
-  kubectl get nodes >/dev/null 2>&1 \
-    && kubectl -n kube-system get daemonset kata-deploy >/dev/null 2>&1
+  kubectl get nodes >/dev/null 2>&1 || return 1
+  # On clh-snp there is no kata-deploy daemonset to look for; the RuntimeClass the
+  # node-builder install is registered under is the equivalent liveness signal.
+  if [ "$E2E_PLATFORM" = "clh-snp" ]; then
+    kubectl get runtimeclass "$E2E_RUNTIMECLASS" >/dev/null 2>&1
+  else
+    kubectl -n kube-system get daemonset kata-deploy >/dev/null 2>&1
+  fi
 }
 
 if [ "${E2E_REDEPLOY:-0}" != "1" ] && cluster_is_up; then
-  log "cluster and kata-deploy are already up — skipping bring-up (E2E_REDEPLOY=1 forces it)"
+  log "cluster and runtime are already up — skipping bring-up (E2E_REDEPLOY=1 forces it)"
   log "restaging genpolicy inputs only"
 else
   gha deploy-k8s
   gha install-bats
 
-  # A half-installed daemonset does not self-heal, so clear it before (re)deploying.
-  kubectl -n kube-system delete daemonset kata-deploy --ignore-not-found >/dev/null 2>&1 || true
-  helm uninstall kata-deploy -n kube-system >/dev/null 2>&1 || true
-  gha deploy-kata
+  if [ "$E2E_PLATFORM" = "clh-snp" ]; then
+    # No kata-deploy: the shim, IGVM and configuration are installed straight onto
+    # the host by `make deploy-confpods` in stage 04. All this stage owes the
+    # cluster is a RuntimeClass pointing at that handler, so stage 05 has
+    # something to schedule against even before the build has run.
+    clh_register_runtimeclass
+  else
+    # A half-installed daemonset does not self-heal, so clear it before (re)deploying.
+    kubectl -n kube-system delete daemonset kata-deploy --ignore-not-found >/dev/null 2>&1 || true
+    helm uninstall kata-deploy -n kube-system >/dev/null 2>&1 || true
+    gha deploy-kata
+  fi
 
   gha deploy-coco-kbs
   gha install-kbs-client
@@ -109,7 +142,14 @@ fi
 # This has to happen after deploy-kata: that step also writes
 # /opt/kata from the kata-deploy image and would clobber an earlier copy, which
 # is the same reason the oci_version patch below sits here.
-DEFAULTS=/opt/kata/share/defaults/kata-containers
+#
+# clh-snp has no such race and no such directory — the node-builder installs no
+# genpolicy at all — so there the branch inputs are staged under the state dir by
+# ensure_genpolicy_defaults() at the point of use instead of into a system path.
+if [ "$E2E_PLATFORM" = "clh-snp" ]; then
+  log "clh-snp: skipping /opt/kata staging — genpolicy inputs come from the branch at use time"
+else
+DEFAULTS="$E2E_KATA_DEFAULTS"
 for f in rules.rego genpolicy-settings.json; do
   src="$E2E_REPO_DIR/src/tools/genpolicy/$f"
   [ -f "$src" ] || die "missing $src — genpolicy inputs are not where 03 expects them"
@@ -134,6 +174,7 @@ if [ "$(sudo sha256sum "$DEFAULTS/rules.rego" | cut -d' ' -f1)" \
   die "installed rules.rego is not the branch copy — policy would be generated from upstream rules"
 fi
 ok "genpolicy rules.rego matches $E2E_BRANCH"
+fi
 
 wait_for 300 "all nodes Ready" all_nodes_ready
 

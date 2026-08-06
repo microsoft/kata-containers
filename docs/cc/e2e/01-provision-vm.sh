@@ -10,6 +10,7 @@ set -uo pipefail
 skip_if_done 01-provision-vm
 
 step "01 — provision Azure CVM"
+log "platform: $E2E_PLATFORM ($E2E_VM_SIZE, $E2E_VM_IMAGE)"
 need az
 need jq
 
@@ -78,7 +79,7 @@ else
     --admin-username "$E2E_ADMIN" \
     --ssh-key-values "$E2E_SSH_KEY" \
     "${SEC_ARGS[@]+"${SEC_ARGS[@]}"}" \
-    --os-disk-size-gb 256 \
+    --os-disk-size-gb "$E2E_OS_DISK_GB" \
     -o none || die "az vm create failed"
   ok "VM created"
 fi

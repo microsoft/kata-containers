@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+# Platform module for E2E_PLATFORM=clh-snp — Cloud Hypervisor + MSHV + SEV-SNP on
+# Azure Linux 3.
+#
+# Sourced by stages 02/03/04 when the platform is clh-snp. It exists as a separate
+# file rather than as branches inside those stages because the two platforms share
+# almost nothing below the Kubernetes layer: different package manager, different
+# builder, different install prefix, and no kata-deploy at all. Keeping the new
+# path out of the working QEMU path is also what stops this from regressing a
+# suite that currently passes 8/8.
+#
+# The recipe follows tools/osbuilder/node-builder/azure-linux/README.md, with two
+# deliberate departures, both of which are load-bearing:
+#
+#   1. The README's dev flow passes AGENT_POLICY_FILE=allow-all.rego. That would
+#      make the guest agent accept every request unconditionally, which is exactly
+#      what stages 05-08 exist to prove it does not. We keep the release default,
+#      allow-set-policy.rego, so genpolicy-generated policy is what is enforced.
+#   2. The README stops at `ctr`. This suite is Kubernetes-based, so we also
+#      register a RuntimeClass and label the node.
+#
+# shellcheck shell=bash
+
+# --------------------------------------------------------------------- packages
+# Build dependencies from the node-builder README, with one deliberate omission:
+# `rust` and `cargo`. The README lists them, but AzL3 packages a Rust that can be
+# older than versions.yaml requires, and installing them is actively harmful here
+# because load_toolchain() *appends* ~/.cargo/bin to PATH — so a distro
+# /usr/bin/cargo would shadow the rustup toolchain and the build would fail deep
+# inside a long compile with an error that names neither Rust nor its version.
+# Stage 02 installs rustup for both platforms; that is the one we want.
+CLH_HOST_PKGS=(
+  git golang build-essential protobuf-compiler protobuf-devel
+  expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel
+  device-mapper-devel cmake fuse-devel kata-packages-uvm-build curl cpio
+  jq unzip wget tar which python3-pip erofs-utils
+)
+
+clh_need_azl3() {
+  local v
+  v=$(sed -n 's/^VERSION_ID="\?\([^"]*\)"\?/\1/p' /etc/os-release | head -1)
+  [ "$v" = "3.0" ] \
+    || die "E2E_PLATFORM=clh-snp requires Azure Linux 3 (found VERSION_ID=${v:-unknown})"
+}
+
+# The whole point of this platform is that the guest is a real SNP CVM. If the
+# host is not an MSHV Dom0 the stack will still build and will still deploy, and
+# then every pod will fail to start for reasons that look like anything but "the
+# node was never confidential". Fail here instead, where it is one line to read.
+# AzL3 boots the plain kernel by default, not the MSHV Dom0 entry, so a freshly
+# provisioned CC-SKU node has no /dev/mshv and nothing confidential is possible.
+# /etc/grub.d/50_mariner_mshv_menuentry already emits a "Dom0" entry that
+# chainloads HvLoader.efi with MSHV_ENABLE/MSHV_SEV_SNP; stock /etc/default/grub
+# just never selects it (GRUB_TIMEOUT=0, no GRUB_DEFAULT).
+#
+# This does not reboot on its own: stage 02 is running *on* the node over ssh, so
+# a reboot here would look like a stage failure. Configure, then say plainly what
+# is needed.
+clh_enable_dom0() {
+  if [ -e /dev/mshv ]; then
+    ok "already running as MSHV Dom0 ($(uname -r))"
+    return 0
+  fi
+
+  # The host kernel must have EROFS as well as MSHV: the erofs snapshotter mounts
+  # layers on the *host* side.
+  log "installing MSHV host kernel"
+  sudo dnf -y install kernel-mshv kernel-mshv-devel \
+    || die "could not install kernel-mshv.
+If the EROFS-enabled build is still unpublished, install
+kernel-mshv-6.6.137.mshv2-2.azl3 (+ -devel) by hand from the Azure Linux buddy
+build artifact, then re-run this stage."
+
+  log "selecting the Dom0 boot entry"
+  sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=5/' /etc/default/grub
+  grep -q '^GRUB_DEFAULT=' /etc/default/grub \
+    && sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT="Dom0"/' /etc/default/grub \
+    || echo 'GRUB_DEFAULT="Dom0"' | sudo tee -a /etc/default/grub >/dev/null
+  sudo grub2-mkconfig -o /boot/grub2/grub.cfg >/dev/null 2>&1 \
+    || die "grub2-mkconfig failed"
+
+  die "node configured to boot as MSHV Dom0, but it is still running the plain kernel.
+Reboot it and re-run this stage:
+
+    az vm restart -g \$E2E_RG -n \$E2E_VM      # or: sudo reboot
+
+After the reboot, /dev/mshv must exist and 'modprobe erofs' must succeed.
+Note /dev/sev does NOT appear on the host — MSHV owns the PSP, so /dev/mshv is
+the indicator to check."
+}
+
+clh_assert_snp_host() {
+  [ -e /dev/mshv ] \
+    || die "no /dev/mshv — this node is not running as an MSHV Dom0. Re-run stage 02, then reboot."
+  sudo modprobe erofs 2>/dev/null || true
+  grep -qw erofs /proc/filesystems \
+    || die "the running host kernel has no EROFS support — the erofs snapshotter cannot mount layers.
+Install the EROFS-enabled kernel-mshv build and reboot."
+  ok "MSHV Dom0 with EROFS ($(uname -r))"
+}
+
+# ------------------------------------------------------------------- bootstrap
+clh_bootstrap_node() {
+  clh_need_azl3
+
+  log "installing host and build packages (dnf)"
+  sudo dnf -y install "${CLH_HOST_PKGS[@]}" || die "dnf install of build packages failed"
+  sudo dnf -y install kata-packages-host || die "dnf install kata-packages-host failed"
+
+  # Belt and braces for the PATH-shadowing trap described above: if something
+  # else on the node has pulled in a distro cargo, say so now rather than at
+  # minute 40 of the guest build.
+  if command -v cargo >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
+    local resolved; resolved=$(command -v cargo)
+    [ "$resolved" = "$HOME/.cargo/bin/cargo" ] \
+      || warn "cargo resolves to $resolved, not the rustup toolchain — prepend \$HOME/.cargo/bin to PATH if the build fails on a version requirement"
+  fi
+
+  clh_install_containerd
+  clh_configure_containerd
+  clh_enable_dom0
+  ok "node bootstrapped for clh-snp"
+}
+
+# containerd 2.3.x is required for the EROFS flow: earlier releases have no EROFS
+# differ, so the single-layer path silently falls back to the walking differ and
+# nothing under test is exercised.
+clh_install_containerd() {
+  local want="${E2E_CONTAINERD_VERSION:-2.3.3}" have=""
+  have=$(containerd --version 2>/dev/null | awk '{print $3}' | sed 's/^v//')
+  if [ "$have" = "$want" ]; then
+    ok "containerd $want already installed"
+    return 0
+  fi
+  log "installing containerd $want (found: ${have:-none})"
+  local url="https://github.com/containerd/containerd/releases/download/v${want}/containerd-${want}-linux-amd64.tar.gz"
+  curl -fsSLo /tmp/containerd.tgz "$url" || die "containerd download failed"
+  sudo systemctl stop containerd 2>/dev/null || true
+  sudo tar -C /usr/local -xzf /tmp/containerd.tgz || die "containerd unpack failed"
+  # The unit file ships in the source tree, not in the binary tarball.
+  if [ ! -f /etc/systemd/system/containerd.service ]; then
+    curl -fsSLo /tmp/containerd.service \
+      https://raw.githubusercontent.com/containerd/containerd/main/containerd.service \
+      || die "containerd unit download failed"
+    sudo install -m 0644 /tmp/containerd.service /etc/systemd/system/containerd.service
+  fi
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now containerd || die "containerd failed to start"
+  ok "containerd $(containerd --version | awk '{print $3}') installed"
+}
+
+# Register the kata and kata-cc handlers, and point the EROFS snapshotter at the
+# differ. Written as a whole-file render rather than an append so that re-running
+# the stage is idempotent — appending would stack duplicate TOML tables, and
+# containerd fails to start on those.
+clh_configure_containerd() {
+  local cfg=/etc/containerd/config.toml
+  log "writing $cfg"
+  sudo mkdir -p /etc/containerd
+  [ -f "$cfg" ] && sudo cp -n "$cfg" "$cfg.pre-e2e"
+  sudo tee "$cfg" >/dev/null <<'EOF'
+version = 3
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata]
+  runtime_type = "io.containerd.kata.v2"
+  snapshotter = "erofs"
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata-cc]
+  runtime_type = "io.containerd.kata-cc.v2"
+  snapshotter = "erofs"
+  [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata-cc.options]
+    ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/runtime-rs/configuration.toml"
+
+[plugins.'io.containerd.snapshotter.v1.erofs']
+  # A non-zero default size would pad every layer to a fixed extent, which
+  # defeats the single-layer EROFS path this stack exists to exercise.
+  default_size = "0"
+
+[plugins.'io.containerd.service.v1.diff-service']
+  default = ["erofs", "walking"]
+EOF
+  sudo systemctl restart containerd || die "containerd failed to restart with the new config"
+  ok "containerd configured with kata / kata-cc handlers and the EROFS differ"
+}
+
+# ---------------------------------------------------------------- build inputs
+# Cloud Hypervisor has to be the Microsoft fork built with the sev_snp feature;
+# upstream CLH has no SNP support and the resulting binary boots nothing.
+clh_build_cloud_hypervisor() {
+  local dir="${E2E_CLH_DIR:-$HOME/cloud-hypervisor}"
+  CLH_SNP_BIN="$dir/target/release/cloud-hypervisor"
+  if [ -x "$CLH_SNP_BIN" ] && [ "${E2E_FORCE:-0}" != "1" ]; then
+    ok "cloud-hypervisor already built: $CLH_SNP_BIN"
+    export CLH_SNP_BIN; return 0
+  fi
+  if [ ! -d "$dir/.git" ]; then
+    log "cloning $E2E_CLH_REPO ($E2E_CLH_TAG)"
+    git clone --depth 1 --branch "$E2E_CLH_TAG" "$E2E_CLH_REPO" "$dir" \
+      || die "cloud-hypervisor clone failed"
+  fi
+  log "building cloud-hypervisor with the sev_snp feature"
+  # OPENSSL_NO_VENDOR=1 makes the build use the distro OpenSSL. Without it the
+  # vendored build needs a perl/ssl toolchain AzL3 does not ship by default.
+  ( cd "$dir" && OPENSSL_NO_VENDOR=1 cargo build --release --no-default-features --features sev_snp ) \
+    || die "cloud-hypervisor build failed"
+  [ -x "$CLH_SNP_BIN" ] || die "cloud-hypervisor built but $CLH_SNP_BIN is missing"
+  export CLH_SNP_BIN
+  ok "cloud-hypervisor: $CLH_SNP_BIN"
+}
+
+# The UVM kernel is pinned and rebuilt rather than taken from the distro: AzL's
+# kernel-uvm 6.6.137.mshv1 triple-faults during IGVM boot, and the packaged
+# 6.1.58 has no EROFS support, which the single-layer image flow requires.
+clh_build_uvm_kernel() {
+  local dir="${E2E_UVM_KERNEL_DIR:-$HOME/kernel-uvm-6.1.58}"
+  IGVM_KERNEL="$dir/build/arch/x86/boot/bzImage"
+  if [ -f "$IGVM_KERNEL" ] && [ "${E2E_FORCE:-0}" != "1" ]; then
+    ok "UVM kernel already built: $IGVM_KERNEL"
+    export IGVM_KERNEL; return 0
+  fi
+
+  # Why build a kernel at all: AzL3's packaged kernel-uvm (6.6.137.mshv1)
+  # triple-faults during IGVM boot, and the packaged 6.1.58 has EROFS off, which
+  # the single-layer image flow requires. So the guest kernel is rebuilt from the
+  # distro SRPM with exactly one config change.
+  local ver="$E2E_UVM_KERNEL_VERSION"           # e.g. 6.1.58.mshv8
+  local srpm="kernel-uvm-${ver}-1.azl3.src.rpm"
+  local url="https://packages.microsoft.com/azurelinux/3.0/prod/base/srpms/Packages/k/$srpm"
+
+  sudo dnf -y install bc bison flex dwarves ncurses-devel elfutils-libelf-devel \
+    cpio rpm-build tar >/dev/null || die "UVM kernel build deps failed"
+
+  mkdir -p "$dir"/{srpm,source,build} || die "cannot create $dir"
+  (
+    set -e
+    cd "$dir"
+    [ -f "$srpm" ] || { log "downloading $srpm"; curl -fsSLO "$url"; }
+    rpm2cpio "$srpm" | ( cd srpm && cpio -idm ) 2>/dev/null
+    if [ ! -f source/Makefile ]; then
+      tar --extract --file "srpm/kernel-uvm-${ver}.tar.gz" --directory source --strip-components=1
+    fi
+    cp srpm/config build/.config
+    source/scripts/config --file build/.config --enable EROFS_FS
+    make --directory source O="$PWD/build" olddefconfig >/dev/null
+    make --directory source O="$PWD/build" --jobs "$(nproc)" bzImage
+  ) || die "UVM kernel build failed (see above)"
+
+  [ -f "$IGVM_KERNEL" ] || die "UVM kernel built but $IGVM_KERNEL is missing"
+
+  # EROFS has to actually be in the kernel that gets measured into the IGVM. A
+  # kernel that merely built is not evidence of that: olddefconfig can silently
+  # drop an option whose dependencies are unmet.
+  grep -qE '^CONFIG_EROFS_FS=[ym]' "$dir/build/.config" \
+    || die "the UVM kernel was built without CONFIG_EROFS_FS — the single-layer image flow will not work"
+  ok "UVM kernel has CONFIG_EROFS_FS"
+
+  export IGVM_KERNEL
+  ok "UVM kernel: $IGVM_KERNEL"
+}
+
+clh_install_igvm_tooling() {
+  local sh="$E2E_REPO_DIR/tools/osbuilder/igvm-builder/igvm_builder.sh"
+  [ -x "$sh" ] || die "missing $sh"
+  log "installing IGVM build tooling"
+  ( cd "$(dirname "$sh")" && ./igvm_builder.sh -i ) || die "igvm_builder.sh -i failed"
+  ok "IGVM tooling installed"
+}
+
+# ------------------------------------------------------- build + install kata
+clh_build_and_deploy() {
+  local nb="$E2E_REPO_DIR/tools/osbuilder/node-builder/azure-linux"
+  [ -d "$nb" ] || die "missing $nb — is this branch the right one?"
+
+  : "${CLH_SNP_BIN:?clh_build_cloud_hypervisor must run first}"
+  : "${IGVM_KERNEL:?clh_build_uvm_kernel must run first}"
+
+  # The Kata and Kata-CC flows share intermediate build state and will otherwise
+  # install a mix of the two. The README is explicit that they must not be
+  # interleaved without a clean.
+  log "cleaning any previous confpods build"
+  ( cd "$nb" && make clean-confpods ) || warn "make clean-confpods returned non-zero (first run?)"
+
+  # Note what is NOT passed: AGENT_POLICY_FILE. The release default is
+  # allow-set-policy.rego, which permits SetPolicy and then enforces whatever
+  # policy was set. The README's allow-all.rego is a dev convenience that would
+  # make every gate in stages 05-08 pass vacuously.
+  local mk=(make CLH_SNP_PATH="$CLH_SNP_BIN" IGVM_KERNEL="$IGVM_KERNEL")
+  [ "${E2E_BUILD_TARFS:-no}" = "yes" ] && mk+=(BUILD_TARFS=yes)
+
+  log "building kata-cc host and guest components (this takes a while)"
+  ( cd "$nb" && "${mk[@]}" all-confpods ) || die "make all-confpods failed"
+
+  log "installing kata-cc components"
+  ( cd "$nb" && sudo "${mk[@]}" deploy-confpods ) || die "make deploy-confpods failed"
+
+  local cfg="$E2E_KATA_DEFAULTS/runtime-rs/configuration.toml"
+  [ -f "$cfg" ] || die "expected shim config at $cfg after deploy-confpods"
+  [ -f "$E2E_GUEST_IMAGE" ] || die "expected guest IGVM at $E2E_GUEST_IMAGE after deploy-confpods"
+  ok "kata-cc installed (shim config: $cfg)"
+}
+
+# ------------------------------------------------------------------ kubernetes
+# kata-deploy does not apply here — it installs a payload image built for the
+# upstream layout, under /opt/kata, with handlers this node does not have. The
+# node-builder has already installed everything, so all Kubernetes needs is a
+# RuntimeClass pointing at the handler and a node that admits it.
+clh_register_runtimeclass() {
+  local node
+  node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}') \
+    || die "no Kubernetes node — bring the cluster up first"
+
+  log "registering RuntimeClass $E2E_RUNTIMECLASS"
+  kubectl apply -f - <<EOF || die "could not create RuntimeClass $E2E_RUNTIMECLASS"
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: $E2E_RUNTIMECLASS
+handler: $E2E_RUNTIMECLASS
+overhead:
+  podFixed:
+    memory: "600Mi"
+scheduling:
+  nodeSelector:
+    katacontainers.io/kata-runtime: "true"
+EOF
+
+  kubectl label node "$node" katacontainers.io/kata-runtime=true --overwrite \
+    || die "could not label node $node"
+  ok "RuntimeClass $E2E_RUNTIMECLASS registered; node $node labelled"
+}
