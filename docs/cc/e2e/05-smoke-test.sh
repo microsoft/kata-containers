@@ -19,6 +19,12 @@ trap 'rm -rf "$WORK"' EXIT
 # PASS, which would prove nothing about the hardening.
 assert_local_guest_installed
 
+# genpolicy must come from the branch, not from /opt/kata: the installed binary
+# is whatever the CI nightly shipped, and its settings schema drifts from the
+# branch in both directions. See ensure_branch_genpolicy() in lib.sh. The rules
+# and settings still come from /opt/kata, which stage 03 installs from the branch.
+ensure_branch_genpolicy
+
 kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
 # With PULL_TYPE=guest-pull genpolicy refuses images whose user/group would come
@@ -43,7 +49,7 @@ spec:
 EOF
 
 log "generating policy (edits the YAML in place)"
-/opt/kata/bin/genpolicy -y "$WORK/pod.yaml" \
+"$GENPOLICY" -y "$WORK/pod.yaml" \
   -p /opt/kata/share/defaults/kata-containers/rules.rego \
   -j /opt/kata/share/defaults/kata-containers/genpolicy-settings.json \
   || die "genpolicy failed"

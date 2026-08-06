@@ -174,9 +174,8 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 # ------------------------------------------------------------------- genpolicy
-# Always build genpolicy from the branch. The installed binary comes from the
-# upstream CI nightly (see CI-9) and is not rebuilt by any stage, so it lags the
-# branch by however long the nightly is old.
+# Always build genpolicy from the branch; see ensure_branch_genpolicy() in lib.sh
+# for why an installed binary cannot stand in for one built from source.
 #
 # This used to be conditional on `--initdata-path` being absent, which looked
 # like a currency check and was not one: the nightly already had that flag, so
@@ -185,30 +184,11 @@ trap 'rm -rf "$WORK"' EXIT
 # allowed_signals the branch's rules.rego reads. The generated policies denied
 # SIGKILL, and pods that started could never be stopped or removed.
 #
-# A tool is only interchangeable with its source when it is built from it. Do
-# not reintroduce a feature probe here.
-#
-# src/version.rs is generated from src/version.rs.in by genpolicy's Makefile and
-# is gitignored, so a bare `cargo build` fails with E0583 on a fresh checkout.
-# Reproduce just that one substitution rather than invoking `make`, whose build
-# target also cross-compiles to $TRIPLE and runs `cargo test --no-run`.
-[ -f "$GP_SRC/src/version.rs.in" ] || die "missing $GP_SRC/src/version.rs.in"
-GP_COMMIT=$(git -C "$E2E_REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
-[ -n "$(git -C "$E2E_REPO_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ] \
-  && GP_COMMIT="$GP_COMMIT-dirty"
-sed -e "s|@COMMIT_INFO@|$GP_COMMIT|g" "$GP_SRC/src/version.rs.in" > "$GP_SRC/src/version.rs" \
-  || die "could not generate $GP_SRC/src/version.rs"
-
-# genpolicy is a member of the root workspace (see the repo-root Cargo.toml),
-# so the artifact lands in the workspace target dir, not under src/tools.
-log "building genpolicy from $E2E_BRANCH ($GP_COMMIT)"
-( cd "$E2E_REPO_DIR" && cargo build --release -p genpolicy ) \
-  || die "could not build genpolicy from the branch"
-GENPOLICY="$E2E_REPO_DIR/target/release/genpolicy"
-[ -x "$GENPOLICY" ] || die "genpolicy built but $GENPOLICY is missing"
+# The assertion below is a capability gate on the *branch* build, not a currency
+# probe on an installed one — it must stay after the build, never replace it.
+ensure_branch_genpolicy
 "$GENPOLICY" --help 2>&1 | grep -q -- '--initdata-path' \
   || die "branch genpolicy lacks --initdata-path — cannot deliver the trust root"
-log "using genpolicy: $GENPOLICY"
 
 # -------------------------------------------------------------------- fixtures
 # The trust root travels as a measured initdata key, which is the provenance the

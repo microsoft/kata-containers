@@ -66,20 +66,13 @@ fi
 ok "kata-agent-ctl ready"
 
 # ------------------------------------------------------------------- genpolicy
-# Build genpolicy from the branch, for the reason stage 03 documents: the binary
-# re-serialises request_defaults through a typed struct, so an installed binary
-# that predates a settings key drops it silently. The nightly one predates
-# SignalProcessRequest.allowed_signals, and without that key the rule is
-# undefined and *every* signal is denied -- which leaves every pod this stage
+# Build genpolicy from the branch, for the reason ensure_branch_genpolicy()
+# documents: the binary re-serialises request_defaults through a typed struct, so
+# an installed binary that predates a settings key drops it silently. The nightly
+# one predates SignalProcessRequest.allowed_signals, and without that key the rule
+# is undefined and *every* signal is denied -- which leaves every pod this stage
 # starts unkillable and stuck Terminating, long after the stage has "passed".
-if [ ! -x "$E2E_REPO_DIR/target/release/genpolicy" ]; then
-  log "building genpolicy from $E2E_BRANCH"
-  ( cd "$E2E_REPO_DIR" && cargo build --release -p genpolicy ) \
-    || die "could not build genpolicy from the branch"
-fi
-GENPOLICY="$E2E_REPO_DIR/target/release/genpolicy"
-[ -x "$GENPOLICY" ] || die "genpolicy built but $GENPOLICY is missing"
-ok "using genpolicy from the branch: $GENPOLICY"
+ensure_branch_genpolicy
 
 # The rules come from the branch too, and for the same reason: /opt/kata carries
 # whatever the last kata-deploy or stage 03 run installed, which is not

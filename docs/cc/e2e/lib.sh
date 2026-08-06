@@ -213,7 +213,53 @@ load_toolchain() {
   export GOPATH="${GOPATH:-$HOME/gopath}"
 }
 
-# Provision (or adopt) the guest-reachable registry the live boot-pull needs, and
+# Build genpolicy from the branch and export GENPOLICY pointing at it.
+#
+# The binary installed under /opt/kata comes from the upstream CI nightly and is
+# not rebuilt by any stage, so it lags the branch by however long the nightly is
+# old. genpolicy re-serialises its settings through a typed struct, so the two
+# desync in both directions:
+#
+#   - a binary that PREDATES a settings key drops it silently (CI-9: the nightly
+#     predated SignalProcessRequest.allowed_signals, so generated policies denied
+#     SIGKILL and every pod started was left unkillable);
+#   - a binary that POSTDATES the branch rejects the settings outright
+#     ("Merged settings are invalid: missing field ..."), which reads like a
+#     porting defect but is only a vintage mismatch.
+#
+# A tool is only interchangeable with its source when it is built from it. Do not
+# reintroduce a feature probe here: a probe for one flag says nothing about the
+# settings schema, and the nightly has passed such probes while still being stale.
+#
+# Only the binary is branch-built. The settings and rules under /opt/kata are
+# installed from the branch by stage 03 (with the deliberate oci_version patch it
+# applies to match the installed runtime), so callers should keep using those.
+#
+# src/version.rs is generated from src/version.rs.in by genpolicy's Makefile and
+# is gitignored, so a bare `cargo build` fails with E0583 on a fresh checkout.
+# Reproduce just that one substitution rather than invoking `make`, whose build
+# target also cross-compiles to $TRIPLE and runs `cargo test --no-run`.
+ensure_branch_genpolicy() {
+  local gp_src="$E2E_REPO_DIR/src/tools/genpolicy" gp_commit
+
+  [ -f "$gp_src/src/version.rs.in" ] || die "missing $gp_src/src/version.rs.in"
+  gp_commit=$(git -C "$E2E_REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
+  [ -n "$(git -C "$E2E_REPO_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ] \
+    && gp_commit="$gp_commit-dirty"
+  sed -e "s|@COMMIT_INFO@|$gp_commit|g" "$gp_src/src/version.rs.in" > "$gp_src/src/version.rs" \
+    || die "could not generate $gp_src/src/version.rs"
+
+  # genpolicy is a member of the root workspace (see the repo-root Cargo.toml),
+  # so the artifact lands in the workspace target dir, not under src/tools.
+  log "building genpolicy from ${E2E_BRANCH:-the branch} ($gp_commit)"
+  ( cd "$E2E_REPO_DIR" && cargo build --release -p genpolicy ) \
+    || die "could not build genpolicy from the branch"
+
+  GENPOLICY="$E2E_REPO_DIR/target/release/genpolicy"
+  [ -x "$GENPOLICY" ] || die "genpolicy built but $GENPOLICY is missing"
+  export GENPOLICY
+  ok "using genpolicy from the branch: $GENPOLICY"
+}
 # export ACR_LOGIN_SERVER / ACR_USERNAME / ACR_PASSWORD.
 #
 # Returns non-zero — without dying — when it cannot get there, so callers can
