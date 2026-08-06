@@ -340,12 +340,15 @@ $(sed 's/^/      /' "$WORK/fragment-entry.json")
 
 $(sed 's/^/      /' "$WORK/fragment-issuers.toml")
 
- 3. Boot a pod (see 05-smoke-test.sh) and confirm injection:
+ 3. Boot a pod (see 05-smoke-test.sh) and confirm injection by behaviour: a pod
+    whose policy depends on the fragment runs, and one whose declaration is
+    unsatisfied is held at create_container. Any failure aborts the VM —
+    fail-closed is correct.
 
-      journalctl -t kata -g 'FR-1' | tail -40
-
-    Expect: config sourced from measured initdata, then the fragment fetched,
-    verified and injected. Any failure aborts the VM — fail-closed is correct.
+    Note there is no log to read for this. A strict guest discards its own log
+    stream rather than forwarding it to the host (FR-7 / F-79), so
+    `journalctl -t kata` shows the shim's view only. To watch the guest side,
+    rebuild the agent without the `strict-policy` feature.
 
 EOF
 

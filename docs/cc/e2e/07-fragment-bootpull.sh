@@ -337,8 +337,9 @@ diagnose() {
   local pod="$1"
   warn "diagnostics for $pod:"
   kubectl describe pod "$pod" -n "$NS" 2>&1 | tail -25 | sed 's/^/    /'
-  # Guest agent logs reach the host journal only when the runtime has debug
-  # enabled, so treat this as informational and never as the assertion.
+  # A strict guest discards its own log stream instead of forwarding it to the host
+  # (FR-7 / F-79), so what follows is the shim's view, not the guest's. It was already
+  # informational and never the assertion; it is now also expected to be thin.
   sudo journalctl -t kata --since '-10m' 2>/dev/null | grep -i 'FR-1\|fragment' \
     | tail -15 | sed 's/^/    /' || true
 }
@@ -837,7 +838,8 @@ if ! wait_for_soft 300 "$SIDECAR_POD sidecar ready" bash -c "sidecar_ready() { k
   diagnose "$SIDECAR_POD"
   cleanup_pod "$SIDECAR_POD"
   warn "the fragment carries the sidecar's own policy entry, so check in order:"
-  warn "  - was it applied?  journalctl -t kata | grep 'fragment module'"
+  warn "  - was it applied?  no guest log to read: a strict guest discards its own log"
+  warn "                     stream (FR-7 / F-79). Rebuild without strict-policy to watch it."
   warn "  - was the package refused? look for 'outside the permitted fragment namespaces'"
   warn "  - does the lifted entry still match? re-run with E2E_FORCE=1 after any rules.rego change"
   die "the sidecar did not run with its fragment delivered — the container contribution path is broken"
