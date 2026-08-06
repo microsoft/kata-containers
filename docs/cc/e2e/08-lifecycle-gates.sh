@@ -277,41 +277,41 @@ out=$(agent_call "$REF_CID" 'StartContainer json://{"container_id":"ghost-never-
 expect_refusal "08b — under the reference policy an unknown container id is refused by policy first (occurrence gate is defence in depth)" \
   "$out" PERMISSION_DENIED 'blocked by policy'
 
-# --- 08g / 08h ---------------------------------------------------------------
+# --- 08k / 08l ---------------------------------------------------------------
 # F-77: SIGSTOP and SIGCONT are no longer in the shipped allow-list. Nothing in the
 # CRI lifecycle sends them -- pausing a container uses the cgroup freezer, not
 # signals -- while admitting them lets a malicious host freeze any workload process
 # indefinitely and single-step it for timing observation. 19 and 18 were inherited
 # from upstream's list; these two cases keep them out.
 out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":19}")
-expect_refusal "08g — SIGSTOP(19) is refused by policy (F-77: the host cannot freeze a workload)" \
+expect_refusal "08k — SIGSTOP(19) is refused by policy (F-77: the host cannot freeze a workload)" \
   "$out" PERMISSION_DENIED 'blocked by policy'
 
 out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":18}")
-expect_refusal "08h — SIGCONT(18) is refused by policy (F-77)" \
+expect_refusal "08l — SIGCONT(18) is refused by policy (F-77)" \
   "$out" PERMISSION_DENIED 'blocked by policy'
 
-# --- 08i / 08j ---------------------------------------------------------------
+# --- 08m / 08n ---------------------------------------------------------------
 # F-76: the signal allow-list is per container, not per sandbox -- hcsshim's
 # securityPolicyContainer.Signals parity. The pause container's set is narrowed to
 # {SIGKILL, SIGTERM} by pause_container_allowed_signals, so a signal that is
 # perfectly legal for the workload container must still be refused for the pause
 # container of the *same* sandbox. Under a sandbox-global list both would be
 # admitted, which is exactly the gap this pair is here to catch: a regression that
-# reverts to the global list still passes 08g/08h but fails 08j.
+# reverts to the global list still passes 08k/08l but fails 08n.
 #
 # The pause container is addressed by the sandbox id: containerd creates a pod's
 # sandbox container with the sandbox id as its container id.
 out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":28}")
 if echo "$out" | grep -q 'blocked by policy'; then
   echo "$out" | tail -3
-  fail_case "08i — SIGWINCH(28) should be allowed for the workload container"
+  fail_case "08m — SIGWINCH(28) should be allowed for the workload container"
 else
-  ok "08i — SIGWINCH(28) is allowed for the workload container (positive control for 08j)"
+  ok "08m — SIGWINCH(28) is allowed for the workload container (positive control for 08n)"
 fi
 
 out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_SB\",\"exec_id\":\"\",\"signal\":28}")
-expect_refusal "08j — the same SIGWINCH(28) is refused for the pause container of the same sandbox (F-76: per-container signal sets)" \
+expect_refusal "08n — the same SIGWINCH(28) is refused for the pause container of the same sandbox (F-76: per-container signal sets)" \
   "$out" PERMISSION_DENIED 'blocked by policy'
 
 kubectl delete pod fr9-reference -n "$NS" --ignore-not-found >/dev/null 2>&1 || true

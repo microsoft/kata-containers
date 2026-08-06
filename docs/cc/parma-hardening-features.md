@@ -664,6 +664,41 @@ external ledger are flagged and tracked in `docs/cc/backlog.md`.
   read-only infrastructure set with a documented reviewed-allow rationale in `rules.rego`
   (no attacker-constrainable payload); the diagnostics surface the reference runtime gates is
   hard-disabled in the strict build.
+- **Signals are scoped per container, not per sandbox (F-76).** Each generated container
+  entry carries its own `allowed_signals`, and `SignalProcessRequest` resolves the target
+  through `get_state_container` — which, for a container delivered by a policy fragment,
+  re-runs that fragment's declaration gates — and requires the signal to be in *that
+  container's* set as well as in the sandbox-wide list. This is the reference stack's
+  `securityPolicyContainer.Signals` behaviour: a signal admitted for one workload is not
+  thereby admitted for every process in the sandbox. Because both checks must pass, the
+  sandbox-wide list is a **ceiling**: a fragment can narrow the signal surface of the
+  container it carries, never widen it. A container's set is taken from its own
+  `lifecycle.stopSignal` (K8s 1.33) plus `SIGKILL` where the pod declares one, from
+  `pause_container_allowed_signals` for the pause container, and otherwise from the
+  sandbox-wide default.
+- **`SIGSTOP`/`SIGCONT` are not in the shipped allow-list (F-77).** Nothing in the CRI
+  lifecycle sends them — pausing a container uses the cgroup freezer — while admitting them
+  lets a malicious host freeze any workload process indefinitely (availability) and
+  single-step it for timing observation. They were inherited from upstream's list.
+- **Container ids are format-validated at admission (F-78).** `verify_id` upstream accepts
+  any Unicode alphanumeric string longer than one character with no length bound, and the id
+  then serves as a map key, a log field, and a path component under `/run/kata-containers/`.
+  Strict builds require the shape a CRI runtime actually produces — 64 lowercase hex —
+  matching the reference stack's `checkValidContainerID` under a confidential policy. The
+  check is at `CreateContainer`; every other lifecycle RPC can only name an id admitted
+  there, or one that the occurrence registry and the policy refuse fail-closed.
+- **Limits:** the per-exec-process dimension of the reference stack
+  (`containerExecProcess.Signals`) has no equivalent here. Exec ids are host-generated
+  strings that the policy never sees, and the container-level kill the shim issues during
+  pod teardown carries an *empty* `exec_id` (meaning "all processes in the container"), so
+  requiring a known exec id would make pods unkillable. The container-level scoping above is
+  what is enforced.
+- **Validated:** rego policy unit tests (`tests/policy/testdata/state/signalprocess`, 20
+  cases) cover the per-container narrowing and the `SIGSTOP`/`SIGCONT` denials; SRM unit
+  tests cover the id format; e2e stage `08-lifecycle-gates.sh` proves it live — cases 08k/08l
+  refuse `SIGSTOP`/`SIGCONT` under the reference policy, and 08m/08n send the *same*
+  `SIGWINCH` to the workload container (allowed) and to the pause container of the same
+  sandbox (refused), which a regression to a sandbox-global list would fail.
 - **Commits:** `2a6c1c3ae`, `c806264bf`, `109317082`, `54a652dd0`.
 
 ### Measured-initdata trust roots (FR-1i / FR-4C / FR-4D provenance) — PR #10
