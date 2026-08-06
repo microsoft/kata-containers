@@ -11,7 +11,7 @@
 //! - Storage with X-kata.overlay-lower: erofs layers (lowerdir)
 //! - Creates overlay to combine them
 //! - Supports X-kata.mkdir.path options to create directories in upper layer before overlay mount
-//! - Supports GPT-partitioned disks where each layer is a separate partition
+//! - Supports GPT-partitioned disks with dm-verity integrity verification for each partition
 
 use std::collections::HashMap;
 use std::fs;
@@ -30,6 +30,8 @@ use crate::storage::{StorageContext, StorageHandler};
 use anyhow::{anyhow, Context, Result};
 use kata_sys_util::mount::{create_mount_destination, Mounter};
 use kata_types::device::{DRIVER_BLK_PCI_TYPE, DRIVER_SCSI_TYPE};
+#[cfg(feature = "devicemapper")]
+use kata_types::dmverity::{cleanup_dmverity_devices, create_dmverity_device, DmVerityInfo};
 use kata_types::mount::StorageDevice;
 use protocols::agent::Storage;
 use safe_path::scoped_join;
@@ -54,6 +56,22 @@ const OPT_GPT_PARTITIONED: &str = "X-kata.gpt-partitioned=true";
 const OPT_MKDIR_PATH: &str = "X-kata.mkdir.path=";
 const OPT_PARTITION_NUMBER: &str = "X-kata.partition-number=";
 const OPT_DMVERITY_ENABLED: &str = "X-kata.dmverity-enabled=true";
+#[cfg(feature = "devicemapper")]
+const OPT_DMVERITY_ROOT_HASH: &str = "X-kata.dmverity.roothash=";
+#[cfg(feature = "devicemapper")]
+const OPT_DMVERITY_HASH_OFFSET: &str = "X-kata.dmverity.hashoffset=";
+#[cfg(feature = "devicemapper")]
+const OPT_DMVERITY_BLOCK_SIZE: &str = "X-kata.dmverity.blocksize=";
+#[cfg(feature = "devicemapper")]
+const OPT_DMVERITY_HASH_SIZE: &str = "X-kata.dmverity.hashsize=";
+#[cfg(feature = "devicemapper")]
+const OPT_DMVERITY_HASH_ALGORITHM: &str = "X-kata.dmverity.algorithm=";
+#[cfg(feature = "devicemapper")]
+const OPT_DMVERITY_SALT: &str = "X-kata.dmverity.salt=";
+#[cfg(feature = "devicemapper")]
+const OPT_DMVERITY_HASH_TYPE: &str = "X-kata.dmverity.hashtype=";
+#[cfg(feature = "devicemapper")]
+const OPT_DMVERITY_NO_SUPERBLOCK: &str = "X-kata.dmverity.no-superblock=";
 
 #[derive(Debug)]
 pub struct MultiLayerErofsHandler {}

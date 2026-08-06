@@ -33,6 +33,10 @@ pub mod handler;
 /// Constants and data types related to Kubernetes/kubelet.
 pub mod k8s;
 
+/// dm-verity related constants and data types.
+#[cfg(feature = "devicemapper")]
+pub mod dmverity;
+
 /// Constants and data types related to mount point.
 pub mod mount;
 
