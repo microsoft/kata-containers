@@ -215,9 +215,19 @@ assets:
     url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/"
     version: "v6.18.35"
     nvidia:
-      description: "Linux kernel optimised for virtual machines"
-      url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/"
-      version: "v6.18.35"
+      # EXPERIMENT (2026-08-20): build the GB200 UVM kernel from Microsoft's
+      # Azure Linux (CBL-Mariner) 6.18 tree instead of NVIDIA's NV-Kernels fork,
+      # so the guest kernel is Microsoft-serviced (supply-chain control, fast
+      # in-production fixes). Our ATS .config fragment (gpu/nvidia.arm64.conf.in)
+      # rides on top unchanged. Prior NVIDIA source: NV-Kernels
+      # linux-nvidia-6.18-v6.18.35, ref 651246157b8c28807092ba040b2aa2e83d312ac6.
+      description: "Microsoft Azure Linux (CBL-Mariner) kernel 6.18 for GB200 UVM; tag rolling-lts/kata/6.18.34.mshv1"
+      url: "https://github.com/microsoft/CBL-Mariner-Linux-Kernel.git"
+      version: "v6.18.34"
+      # SHA (not tag name): git fetch --depth 1 lands a tag in FETCH_HEAD without
+      # creating a local ref, so checkout must be by a fetchable commit SHA.
+      # Tip of tag rolling-lts/kata/6.18.34.mshv1 (same source as script 02).
+      ref: "5309bbe44d1dc65bded68c14451f5198111aae0f"
 
   kernel-arm-experimental:
     description: "Linux kernel with cpu/mem hotplug support on arm64"
@@ -247,7 +257,7 @@ externals:
     desc: "NVIDIA compute stack"
     driver:
       desc: "NVIDIA kernel driver"
-      version: "595.58.03"
+      version: "610.43.02"
       # yamllint disable-line rule:line-length
       url: "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/"
     cuda:

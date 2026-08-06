@@ -19,6 +19,21 @@ CONFIG_MEMORY_FAILURE=y
 CONFIG_MTRR=y
 CONFIG_X86_PAT=y
 
+# NVIDIA UVM enables UVM_IS_CONFIG_HMM only when both CONFIG_HMM_MIRROR and
+# CONFIG_DEVICE_PRIVATE are set. HMM_MIRROR is a promptless, select-only symbol
+# (mm/Kconfig), so a bare CONFIG_HMM_MIRROR=y is silently dropped; enable an
+# in-tree selector that does `select HMM_MIRROR`. TEST_HMM is the lightest one
+# (needs TRANSPARENT_HUGEPAGE + DEVICE_PRIVATE, pulls in no GPU/DRM stack); its
+# module is built but never loaded. kata builds the config with
+# `merge_config.sh -r -n` (allnoconfig base), which forces every prompted symbol
+# and menuconfig gate off unless a fragment sets it. TEST_HMM lives under
+# `if RUNTIME_TESTING_MENU`, so that gate must be enabled here or TEST_HMM is
+# dropped and nothing selects HMM_MIRROR.
+CONFIG_TRANSPARENT_HUGEPAGE=y
+CONFIG_DEVICE_PRIVATE=y
+CONFIG_RUNTIME_TESTING_MENU=y
+CONFIG_TEST_HMM=m
+
 # CC related configs
 CONFIG_CRYPTO_ECC=y
 CONFIG_CRYPTO_ECDH=y
