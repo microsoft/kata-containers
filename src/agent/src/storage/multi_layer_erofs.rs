@@ -198,6 +198,11 @@ pub async fn handle_multi_layer_erofs_group(
         ));
     }
 
+    // RM-31 (F-90): refuse unverified read-only layers before anything is mounted, so a
+    // rejected group leaves no partially-assembled overlay behind.
+    #[cfg(feature = "strict-policy")]
+    require_verity_for_lower_layers(&erofs_storages)?;
+
     // Only sort erofs layers by partition number in GPT mode.
     // In GPT mode, each storage carries X-kata.partition-number=N and layers
     // must be ordered by partition number so that the overlay lowerdir
@@ -546,6 +551,51 @@ fn is_lower_storage(storage: &Storage) -> bool {
 /// Check if dm-verity is enabled for this storage
 fn is_dmverity_enabled(storage: &Storage) -> bool {
     storage.options.iter().any(|o| o == OPT_DMVERITY_ENABLED)
+}
+
+/// RM-31 (F-90): in strict builds, every read-only lower layer must be dm-verity backed.
+///
+/// `is_dmverity_enabled` reads `X-kata.dmverity-enabled` out of host-supplied storage
+/// options, and the host does not merely relay that flag -- it *decides* it. runtime-rs
+/// emits dm-verity options only when a host-side snapshotter annotation is present
+/// (`erofs_rootfs.rs`, `extract_dmverity_annotation`). When it is absent the guest
+/// received no verity options at all and `wait_and_mount_layer` mounted the raw
+/// partition: no verity device, no root-digest check against `VERIFIED_LAYERS`, and no
+/// error. The integrity control was not bypassed, it was simply never reached, and the
+/// party it defends against chose that.
+///
+/// The guest does not need to be told which layers ought to be protected -- it can see
+/// them. `is_lower_storage` identifies EROFS read-only lower layers structurally, and in
+/// a strict build there is no legitimate unverified one: a lower layer is by construction
+/// immutable container content. So requiring verity over exactly that set needs no policy
+/// vocabulary and no new host input.
+///
+/// This is the same move the codebase already makes for scratch encryption, where
+/// `verify_effective_scratch_encryption` (`block_handler.rs`) deliberately checks the
+/// *effective* protection of the mount rather than the host's claim about it.
+///
+/// Note this also closes the non-GPT escape as a side effect: dm-verity requires a GPT
+/// partition, so a host presenting non-GPT lower layers is now refused rather than
+/// silently served unverified.
+///
+/// What this does **not** establish is that the root digest is one the tenant approved --
+/// dm-verity only proves content matches *some* hash, and that hash still arrives from the
+/// host. `VERIFIED_LAYERS` is what supplies the second half, which is why this gate is only
+/// meaningful in strict builds where that store is required (see F-93/F-94).
+#[cfg(feature = "strict-policy")]
+fn require_verity_for_lower_layers(storages: &[&Storage]) -> Result<()> {
+    for storage in storages {
+        if !is_dmverity_enabled(storage) {
+            return Err(anyhow!(
+                "RM-31: read-only layer {:?} is not dm-verity protected; strict policy \
+                 requires every erofs lower layer to carry {}=true. Refusing to mount \
+                 unverified container content.",
+                storage.source,
+                OPT_DMVERITY_ENABLED.trim_end_matches("=true"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Parse dm-verity configuration from storage options
@@ -1173,6 +1223,57 @@ mod tests {
             ..Default::default()
         };
         assert!(is_lower_storage(&s2));
+    }
+
+    // --- RM-31 (F-90): strict builds require verity on every lower layer ---
+
+    #[cfg(feature = "strict-policy")]
+    fn erofs_lower(source: &str, verity: bool) -> Storage {
+        let mut options = vec![OPT_MULTI_LAYER.to_string()];
+        if verity {
+            options.push(OPT_DMVERITY_ENABLED.to_string());
+        }
+        Storage {
+            source: source.to_string(),
+            fstype: EROFS_TYPE.to_string(),
+            options,
+            ..Default::default()
+        }
+    }
+
+    /// The honest case: every lower layer carries the verity flag.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn test_require_verity_accepts_fully_verified_layers() {
+        let a = erofs_lower("/dev/vda", true);
+        let b = erofs_lower("/dev/vdb", true);
+        assert!(require_verity_for_lower_layers(&[&a, &b]).is_ok());
+    }
+
+    /// The F-90 case: the host simply omits the flag and the layer used to be mounted raw.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn test_require_verity_rejects_unverified_layer() {
+        let s = erofs_lower("/dev/vda", false);
+        let err = require_verity_for_lower_layers(&[&s])
+            .expect_err("an unverified lower layer must be refused in strict builds");
+        assert!(
+            err.to_string().contains("RM-31"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// A single unverified layer poisons the group: partial verification is no
+    /// verification, since overlay precedence lets one unverified layer shadow files
+    /// from every verified one beneath it.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn test_require_verity_rejects_partially_verified_group() {
+        let verified = erofs_lower("/dev/vda", true);
+        let unverified = erofs_lower("/dev/vdb", false);
+        assert!(require_verity_for_lower_layers(&[&verified, &unverified]).is_err());
+        // Order must not matter -- the check is over the whole set.
+        assert!(require_verity_for_lower_layers(&[&unverified, &verified]).is_err());
     }
 
     // --- is_multi_layer_storage ---
