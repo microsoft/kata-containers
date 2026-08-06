@@ -860,7 +860,7 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
     print("allow_by_bundle_or_sandbox_id: p_matches =", p_matches)
     count(p_matches) == count(i_oci.Mounts)
 
-    allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
+    allow_storages(p_storages, i_storages, bundle_id, sandbox_id, p_oci)
 
     print("allow_by_bundle_or_sandbox_id: true")
 }
@@ -1313,7 +1313,7 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
 ######################################################################
 # Create container Storages
 
-allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
+allow_storages(p_storages, i_storages, bundle_id, sandbox_id, p_oci) if {
     print("allow_storages: p_storages =", p_storages)
     print("allow_storages: i_storages =", i_storages)
 
@@ -1338,7 +1338,7 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
 
     # 2. Every presented storage is covered by a declaration (as before) ...
     every i_storage in i_storages {
-        allow_storage(p_storages, i_storage, bundle_id, sandbox_id)
+        allow_storage(p_storages, i_storage, bundle_id, sandbox_id, p_oci)
     }
 
     # ... and every declaration is covered by a presented storage, so no declared
@@ -1359,7 +1359,7 @@ storage_is_presented(p_storage, i_storages, bundle_id, sandbox_id) if {
     print("storage_is_presented: true for", p_storage)
 }
 
-allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
+allow_storage(p_storages, i_storage, bundle_id, sandbox_id, p_oci) if {
     some p_storage in p_storages
 
     print("allow_storage: p_storage =", p_storage)
@@ -1389,15 +1389,99 @@ storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id) if {
     regex.match("^[0-9a-f]{2}(/[0-9a-f]{2})?$", i_storage.source)
     allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id)
 }
-allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
+allow_storage(p_storages, i_storage, bundle_id, sandbox_id, p_oci) if {
     i_storage.driver == "image_guest_pull"
     print("allow_storage with image_guest_pull: start")
     i_storage.fstype == "overlay"
     i_storage.fs_group == null
     i_storage.shared == false
     count(i_storage.options) == 0
-    # TODO: Check Mount Point, Source, Driver Options, etc.
+
+    # RM-29: bind the pulled image to *this* container's declaration, and bind the
+    # bundle it unpacks into to *this* container's id.
+    #
+    # This storage carries the container root filesystem, and it has no p_storage:
+    # genpolicy emits no declaration for it, which is why it is subtracted from the
+    # cardinality check above and why this body used to check nothing but shape. The
+    # effect was that `source` -- the image reference -- and `mount_point` were entirely
+    # host-chosen. Since the *process* spec is checked against this container's
+    # declaration and the *root filesystem* was checked against nothing, the policy
+    # authorized a set of images and a set of process specs and permitted any pairing
+    # between them rather than the declared pairings.
+    #
+    # The declaration does name the image, in an annotation genpolicy fills from the pod
+    # spec (policy.rs, "io.kubernetes.cri.image-name"), and the runtime builds `source`
+    # from the same annotation (virtual_volume.rs::get_image_reference). Comparing the
+    # presented source against the *declared* value -- not against the input annotation,
+    # which is host-supplied and unconstrained -- is what binds code to container. It is
+    # the property hcsshim gets from data.metadata.matches[input.containerID].
+    #
+    # Two guest-pull storages naming *different* images are refused here; two naming the
+    # *same* image are refused by the distinct-identities check in allow_storages, since
+    # the mount point is pinned below and their identities therefore coincide. So the
+    # cardinality exemption can no longer admit a second root filesystem.
+    allow_image_guest_pull_source(p_oci, i_storage)
+
+    # The agent derives the unpack directory from the container id and ignores
+    # mount_point entirely, so this is defence in depth rather than the load-bearing
+    # check -- but a storage naming another container's bundle has no honest reason to
+    # exist, and leaving it unconstrained is what let probe B pass.
+    p_mount_point := replace(policy_data.common.root_path, "$(bundle-id)", bundle_id)
+    print("allow_storage with image_guest_pull: p_mount_point =", p_mount_point, "i_mount_point =", i_storage.mount_point)
+    i_storage.mount_point == p_mount_point
+
     print("allow_storage with image_guest_pull: true")
+}
+
+# The image reference this container's declaration names. Digest-pinned references are
+# compared by digest rather than by string, because the two sides spell the same image
+# differently: genpolicy records the canonical reference from the registry
+# (`ghcr.io/x/gid:latest@sha256:bdbb...`) while the runtime passes through the reference
+# from the pod spec (`ghcr.io/x/gid@sha256:bdbb...`). Requiring string equality would
+# deny every legitimate guest pull. The digest is also the *right* thing to compare: it
+# is what pins content, it is what VERIFIED_IMAGES checks in the guest, and two
+# references sharing a digest name the same bytes whatever the registry path says.
+allow_image_guest_pull_source(p_oci, i_storage) if {
+    p_image := p_oci.Annotations["io.kubernetes.cri.image-name"]
+    p_digest := image_pinned_digest(p_image)
+    i_digest := image_pinned_digest(i_storage.source)
+    print("allow_image_guest_pull_source 1: p_digest =", p_digest, "i_digest =", i_digest)
+    p_digest == i_digest
+    print("allow_image_guest_pull_source 1: true")
+}
+# An unpinned declaration has no digest to compare, so fall back to the exact reference.
+# This is weaker -- a tag is not a stable identity -- but it is no weaker than the tag
+# the tenant wrote, and a strict guest refuses unpinned references outright in
+# VerifiedImageStore::authorize (ImageError::UnpinnedImage).
+allow_image_guest_pull_source(p_oci, i_storage) if {
+    p_image := p_oci.Annotations["io.kubernetes.cri.image-name"]
+    not contains(p_image, "@")
+    print("allow_image_guest_pull_source 2: unpinned p_image =", p_image, "i_source =", i_storage.source)
+    i_storage.source == p_image
+    print("allow_image_guest_pull_source 2: true")
+}
+# The pause container is the one case with no declared image: genpolicy deliberately
+# omits the annotation for it (policy.rs, `if !is_pause_container`), and the runtime
+# names its rootfs with the literal "pause" -- get_image_reference returns that for
+# ContainerType::PodSandbox -- because the pause image ships inside the measured guest
+# rootfs and is never pulled. Admitting the sentinel only for a declaration that is
+# *both* image-less and typed "sandbox" keeps the pause path from becoming a wildcard
+# that any container could claim.
+allow_image_guest_pull_source(p_oci, i_storage) if {
+    not p_oci.Annotations["io.kubernetes.cri.image-name"]
+    p_oci.Annotations["io.kubernetes.cri.container-type"] == "sandbox"
+    print("allow_image_guest_pull_source 3: sandbox container, i_source =", i_storage.source)
+    i_storage.source == "pause"
+    print("allow_image_guest_pull_source 3: true")
+}
+
+# The `algorithm:hex` digest pinned in an OCI reference of the form `name@algorithm:hex`.
+# Undefined when the reference is not pinned, which is what makes the two bodies above
+# mutually exclusive rather than overlapping.
+image_pinned_digest(image_ref) := digest if {
+    contains(image_ref, "@")
+    parts := split(image_ref, "@")
+    digest := lower(parts[count(parts) - 1])
 }
 # NOTE: the former scsi/blk allow_storage variants are now expressed as bodies of
 # storage_pair_matches above, so the generic p_storage-consuming allow_storage variant
@@ -1639,10 +1723,31 @@ allow_sandbox_storages(i_storages) if {
     print("allow_sandbox_storages: i_storages =", i_storages)
 
     p_storages := policy_data.sandbox.storages
+
+    # RM-30: the repetition half of the bijection allow_storages received in 1b335c0e2,
+    # which stopped short of this rule. The body below was purely existential -- every
+    # presented storage had to match *some* declaration, with no distinctness check --
+    # so the host could present one declared storage several times.
+    #
+    # Injection was already bounded, because allow_sandbox_storage demands exact
+    # equality against a declared entry, and exact equality also makes distinctness
+    # cheap to state: no two presented storages may be the same object.
+    i_set := {s | some s in i_storages}
+    print("allow_sandbox_storages: distinct =", count(i_set), "presented =", count(i_storages))
+    count(i_set) == count(i_storages)
+
     every i_storage in i_storages {
         allow_sandbox_storage(p_storages, i_storage)
     }
 
+    # NOTE: the *omission* half is deliberately not closed here, and this is the reason.
+    # The presented list is legitimately a strict subset of the declared one -- the
+    # genpolicy test corpus contains a sandbox that declares an ephemeral `shm` tmpfs
+    # and presents no storages at all -- so a cardinality or reverse-coverage check of
+    # the kind allow_storages uses denies ordinary pods. Closing omission needs genpolicy
+    # to record which sandbox storages are *required* rather than merely permitted, which
+    # is a policy-format change; until then a dropped sandbox mount is indistinguishable
+    # from a pod that never needed it. Tracked as the residual of RM-30.
     print("allow_sandbox_storages: true")
 }
 
