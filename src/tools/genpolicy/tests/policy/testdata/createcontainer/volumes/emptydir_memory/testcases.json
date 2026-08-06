@@ -1,0 +1,479 @@
+[
+  {
+    "allowed": true,
+    "description": "memory emptyDir: honest ephemeral tmpfs storage is allowed",
+    "kind": "CreateContainerRequest",
+    "request": {
+      "OCI": {
+        "Annotations": {
+          "io.katacontainers.pkg.oci.bundle_path": "/run/containerd/io.containerd.runtime.v2.task/k8s.io/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "io.katacontainers.pkg.oci.container_type": "pod_container",
+          "io.kubernetes.cri.container-name": "dummy",
+          "io.kubernetes.cri.container-type": "container",
+          "io.kubernetes.cri.sandbox-id": "0000000000000000000000000000000000000000000000000000000000000000",
+          "io.kubernetes.cri.sandbox-name": "dummy",
+          "io.kubernetes.cri.sandbox-namespace": "default"
+        },
+        "Linux": {
+          "GIDMappings": [],
+          "MaskedPaths": [
+            "/proc/acpi",
+            "/proc/asound",
+            "/proc/kcore",
+            "/proc/keys",
+            "/proc/latency_stats",
+            "/proc/timer_list",
+            "/proc/timer_stats",
+            "/proc/sched_debug",
+            "/sys/firmware",
+            "/proc/scsi"
+          ],
+          "MountLabel": "",
+          "Namespaces": [
+            {
+              "Path": "",
+              "Type": "ipc"
+            },
+            {
+              "Path": "",
+              "Type": "uts"
+            },
+            {
+              "Path": "",
+              "Type": "mount"
+            },
+            {
+              "Path": "/run/netns/podns",
+              "Type": "network"
+            }
+          ],
+          "ReadonlyPaths": [
+            "/proc/bus",
+            "/proc/fs",
+            "/proc/irq",
+            "/proc/sys",
+            "/proc/sysrq-trigger"
+          ],
+          "Resources": {
+            "Devices": []
+          },
+          "RootfsPropagation": ""
+        },
+        "Mounts": [
+          {
+            "destination": "/mnt/mem",
+            "options": [
+              "rbind",
+              "rprivate",
+              "rw"
+            ],
+            "source": "/run/kata-containers/sandbox/ephemeral/mem-volume",
+            "type_": "bind"
+          }
+        ],
+        "Process": {
+          "Args": [
+            "/pause"
+          ],
+          "Capabilities": {
+            "Ambient": [],
+            "Bounding": [
+              "CAP_CHOWN",
+              "CAP_DAC_OVERRIDE",
+              "CAP_FSETID",
+              "CAP_FOWNER",
+              "CAP_MKNOD",
+              "CAP_NET_RAW",
+              "CAP_SETGID",
+              "CAP_SETUID",
+              "CAP_SETFCAP",
+              "CAP_SETPCAP",
+              "CAP_NET_BIND_SERVICE",
+              "CAP_SYS_CHROOT",
+              "CAP_KILL",
+              "CAP_AUDIT_WRITE"
+            ],
+            "Effective": [
+              "CAP_CHOWN",
+              "CAP_DAC_OVERRIDE",
+              "CAP_FSETID",
+              "CAP_FOWNER",
+              "CAP_MKNOD",
+              "CAP_NET_RAW",
+              "CAP_SETGID",
+              "CAP_SETUID",
+              "CAP_SETFCAP",
+              "CAP_SETPCAP",
+              "CAP_NET_BIND_SERVICE",
+              "CAP_SYS_CHROOT",
+              "CAP_KILL",
+              "CAP_AUDIT_WRITE"
+            ],
+            "Permitted": [
+              "CAP_CHOWN",
+              "CAP_DAC_OVERRIDE",
+              "CAP_FSETID",
+              "CAP_FOWNER",
+              "CAP_MKNOD",
+              "CAP_NET_RAW",
+              "CAP_SETGID",
+              "CAP_SETUID",
+              "CAP_SETFCAP",
+              "CAP_SETPCAP",
+              "CAP_NET_BIND_SERVICE",
+              "CAP_SYS_CHROOT",
+              "CAP_KILL",
+              "CAP_AUDIT_WRITE"
+            ]
+          },
+          "Cwd": "/",
+          "NoNewPrivileges": false,
+          "SelinuxLabel": "",
+          "User": {
+            "AdditionalGids": [
+              0
+            ],
+            "GID": 0,
+            "UID": 65535,
+            "Username": ""
+          }
+        },
+        "Root": {
+          "Path": "/run/kata-containers/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+          "Readonly": false
+        },
+        "Version": "1.1.0"
+      },
+      "storages": [
+        {
+          "driver": "ephemeral",
+          "driver_options": [],
+          "fs_group": null,
+          "fstype": "tmpfs",
+          "mount_point": "/run/kata-containers/sandbox/ephemeral/mem-volume",
+          "options": [],
+          "source": "tmpfs",
+          "shared": false
+        }
+      ]
+    }
+  },
+  {
+    "allowed": false,
+    "description": "RM-35: a host-attached blk device may not satisfy an ephemeral tmpfs declaration",
+    "kind": "CreateContainerRequest",
+    "request": {
+      "OCI": {
+        "Annotations": {
+          "io.katacontainers.pkg.oci.bundle_path": "/run/containerd/io.containerd.runtime.v2.task/k8s.io/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "io.katacontainers.pkg.oci.container_type": "pod_container",
+          "io.kubernetes.cri.container-name": "dummy",
+          "io.kubernetes.cri.container-type": "container",
+          "io.kubernetes.cri.sandbox-id": "0000000000000000000000000000000000000000000000000000000000000000",
+          "io.kubernetes.cri.sandbox-name": "dummy",
+          "io.kubernetes.cri.sandbox-namespace": "default"
+        },
+        "Linux": {
+          "GIDMappings": [],
+          "MaskedPaths": [
+            "/proc/acpi",
+            "/proc/asound",
+            "/proc/kcore",
+            "/proc/keys",
+            "/proc/latency_stats",
+            "/proc/timer_list",
+            "/proc/timer_stats",
+            "/proc/sched_debug",
+            "/sys/firmware",
+            "/proc/scsi"
+          ],
+          "MountLabel": "",
+          "Namespaces": [
+            {
+              "Path": "",
+              "Type": "ipc"
+            },
+            {
+              "Path": "",
+              "Type": "uts"
+            },
+            {
+              "Path": "",
+              "Type": "mount"
+            },
+            {
+              "Path": "/run/netns/podns",
+              "Type": "network"
+            }
+          ],
+          "ReadonlyPaths": [
+            "/proc/bus",
+            "/proc/fs",
+            "/proc/irq",
+            "/proc/sys",
+            "/proc/sysrq-trigger"
+          ],
+          "Resources": {
+            "Devices": []
+          },
+          "RootfsPropagation": ""
+        },
+        "Mounts": [
+          {
+            "destination": "/mnt/mem",
+            "options": [
+              "rbind",
+              "rprivate",
+              "rw"
+            ],
+            "source": "/run/kata-containers/sandbox/ephemeral/mem-volume",
+            "type_": "bind"
+          }
+        ],
+        "Process": {
+          "Args": [
+            "/pause"
+          ],
+          "Capabilities": {
+            "Ambient": [],
+            "Bounding": [
+              "CAP_CHOWN",
+              "CAP_DAC_OVERRIDE",
+              "CAP_FSETID",
+              "CAP_FOWNER",
+              "CAP_MKNOD",
+              "CAP_NET_RAW",
+              "CAP_SETGID",
+              "CAP_SETUID",
+              "CAP_SETFCAP",
+              "CAP_SETPCAP",
+              "CAP_NET_BIND_SERVICE",
+              "CAP_SYS_CHROOT",
+              "CAP_KILL",
+              "CAP_AUDIT_WRITE"
+            ],
+            "Effective": [
+              "CAP_CHOWN",
+              "CAP_DAC_OVERRIDE",
+              "CAP_FSETID",
+              "CAP_FOWNER",
+              "CAP_MKNOD",
+              "CAP_NET_RAW",
+              "CAP_SETGID",
+              "CAP_SETUID",
+              "CAP_SETFCAP",
+              "CAP_SETPCAP",
+              "CAP_NET_BIND_SERVICE",
+              "CAP_SYS_CHROOT",
+              "CAP_KILL",
+              "CAP_AUDIT_WRITE"
+            ],
+            "Permitted": [
+              "CAP_CHOWN",
+              "CAP_DAC_OVERRIDE",
+              "CAP_FSETID",
+              "CAP_FOWNER",
+              "CAP_MKNOD",
+              "CAP_NET_RAW",
+              "CAP_SETGID",
+              "CAP_SETUID",
+              "CAP_SETFCAP",
+              "CAP_SETPCAP",
+              "CAP_NET_BIND_SERVICE",
+              "CAP_SYS_CHROOT",
+              "CAP_KILL",
+              "CAP_AUDIT_WRITE"
+            ]
+          },
+          "Cwd": "/",
+          "NoNewPrivileges": false,
+          "SelinuxLabel": "",
+          "User": {
+            "AdditionalGids": [
+              0
+            ],
+            "GID": 0,
+            "UID": 65535,
+            "Username": ""
+          }
+        },
+        "Root": {
+          "Path": "/run/kata-containers/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+          "Readonly": false
+        },
+        "Version": "1.1.0"
+      },
+      "storages": [
+        {
+          "driver": "blk",
+          "driver_options": [],
+          "fs_group": null,
+          "fstype": "tmpfs",
+          "mount_point": "/run/kata-containers/sandbox/ephemeral/mem-volume",
+          "options": [],
+          "source": "00/00",
+          "shared": false
+        }
+      ]
+    }
+  },
+  {
+    "allowed": false,
+    "description": "RM-35: a host-attached scsi device may not satisfy an ephemeral tmpfs declaration",
+    "kind": "CreateContainerRequest",
+    "request": {
+      "OCI": {
+        "Annotations": {
+          "io.katacontainers.pkg.oci.bundle_path": "/run/containerd/io.containerd.runtime.v2.task/k8s.io/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "io.katacontainers.pkg.oci.container_type": "pod_container",
+          "io.kubernetes.cri.container-name": "dummy",
+          "io.kubernetes.cri.container-type": "container",
+          "io.kubernetes.cri.sandbox-id": "0000000000000000000000000000000000000000000000000000000000000000",
+          "io.kubernetes.cri.sandbox-name": "dummy",
+          "io.kubernetes.cri.sandbox-namespace": "default"
+        },
+        "Linux": {
+          "GIDMappings": [],
+          "MaskedPaths": [
+            "/proc/acpi",
+            "/proc/asound",
+            "/proc/kcore",
+            "/proc/keys",
+            "/proc/latency_stats",
+            "/proc/timer_list",
+            "/proc/timer_stats",
+            "/proc/sched_debug",
+            "/sys/firmware",
+            "/proc/scsi"
+          ],
+          "MountLabel": "",
+          "Namespaces": [
+            {
+              "Path": "",
+              "Type": "ipc"
+            },
+            {
+              "Path": "",
+              "Type": "uts"
+            },
+            {
+              "Path": "",
+              "Type": "mount"
+            },
+            {
+              "Path": "/run/netns/podns",
+              "Type": "network"
+            }
+          ],
+          "ReadonlyPaths": [
+            "/proc/bus",
+            "/proc/fs",
+            "/proc/irq",
+            "/proc/sys",
+            "/proc/sysrq-trigger"
+          ],
+          "Resources": {
+            "Devices": []
+          },
+          "RootfsPropagation": ""
+        },
+        "Mounts": [
+          {
+            "destination": "/mnt/mem",
+            "options": [
+              "rbind",
+              "rprivate",
+              "rw"
+            ],
+            "source": "/run/kata-containers/sandbox/ephemeral/mem-volume",
+            "type_": "bind"
+          }
+        ],
+        "Process": {
+          "Args": [
+            "/pause"
+          ],
+          "Capabilities": {
+            "Ambient": [],
+            "Bounding": [
+              "CAP_CHOWN",
+              "CAP_DAC_OVERRIDE",
+              "CAP_FSETID",
+              "CAP_FOWNER",
+              "CAP_MKNOD",
+              "CAP_NET_RAW",
+              "CAP_SETGID",
+              "CAP_SETUID",
+              "CAP_SETFCAP",
+              "CAP_SETPCAP",
+              "CAP_NET_BIND_SERVICE",
+              "CAP_SYS_CHROOT",
+              "CAP_KILL",
+              "CAP_AUDIT_WRITE"
+            ],
+            "Effective": [
+              "CAP_CHOWN",
+              "CAP_DAC_OVERRIDE",
+              "CAP_FSETID",
+              "CAP_FOWNER",
+              "CAP_MKNOD",
+              "CAP_NET_RAW",
+              "CAP_SETGID",
+              "CAP_SETUID",
+              "CAP_SETFCAP",
+              "CAP_SETPCAP",
+              "CAP_NET_BIND_SERVICE",
+              "CAP_SYS_CHROOT",
+              "CAP_KILL",
+              "CAP_AUDIT_WRITE"
+            ],
+            "Permitted": [
+              "CAP_CHOWN",
+              "CAP_DAC_OVERRIDE",
+              "CAP_FSETID",
+              "CAP_FOWNER",
+              "CAP_MKNOD",
+              "CAP_NET_RAW",
+              "CAP_SETGID",
+              "CAP_SETUID",
+              "CAP_SETFCAP",
+              "CAP_SETPCAP",
+              "CAP_NET_BIND_SERVICE",
+              "CAP_SYS_CHROOT",
+              "CAP_KILL",
+              "CAP_AUDIT_WRITE"
+            ]
+          },
+          "Cwd": "/",
+          "NoNewPrivileges": false,
+          "SelinuxLabel": "",
+          "User": {
+            "AdditionalGids": [
+              0
+            ],
+            "GID": 0,
+            "UID": 65535,
+            "Username": ""
+          }
+        },
+        "Root": {
+          "Path": "/run/kata-containers/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+          "Readonly": false
+        },
+        "Version": "1.1.0"
+      },
+      "storages": [
+        {
+          "driver": "scsi",
+          "driver_options": [],
+          "fs_group": null,
+          "fstype": "tmpfs",
+          "mount_point": "/run/kata-containers/sandbox/ephemeral/mem-volume",
+          "options": [],
+          "source": "0:0",
+          "shared": false
+        }
+      ]
+    }
+  }
+]

@@ -1382,12 +1382,52 @@ storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id) if {
 storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id) if {
     i_storage.driver == "scsi"
     regex.match("^[0-9]+:[0-9]+$", i_storage.source)
+    allow_host_chosen_device(p_storage)
     allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id)
 }
 storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id) if {
     i_storage.driver == "blk"
     regex.match("^[0-9a-f]{2}(/[0-9a-f]{2})?$", i_storage.source)
+    allow_host_chosen_device(p_storage)
     allow_storage_base(p_storage, i_storage, bundle_id, sandbox_id)
+}
+
+# RM-35: restrict the blk/scsi bodies above to declarations that actually opted into
+# host-chosen block backing.
+#
+# Those two bodies exist because a device id -- a SCSI address or a PCI path -- is
+# assigned at runtime and cannot be predicted when the policy is generated, so they
+# key on the *presented* driver and check only the shape of the presented source.
+# That is unavoidable for the source. What was avoidable is that they said nothing
+# about p_storage: any declaration at all could be satisfied by a presented block
+# device, including declarations written for `ephemeral`, `local` or `overlayfs`
+# storage, whose author never contemplated a host-attached disk appearing in their
+# place.
+#
+# Only two declarations are meant to be backed by a host-chosen device --
+# emptyDir_encrypted and emptyDir_plain -- and both mark themselves the same way:
+# an empty driver and an empty source (the generator cannot fill either), and a
+# mount point derived from the device id rather than fixed. Requiring that marking
+# turns "any declaration" into "a declaration that asked for this", which is the
+# part of the binding that can be established at generation time.
+#
+# What this deliberately does NOT do is pin *which* device is presented. That is
+# hcsshim's data.metadata.devices[path] property, and it is inherently stateful --
+# the device is authorized by the digest recorded when it was mounted, not by a
+# value known to the generator. Closing that needs the policy to carry mount state
+# across calls, which is out of scope here; the residual is tracked as RM-35's
+# open half. The exact `options` and `driver_options` equality in
+# allow_storage_base, the bijection in allow_storages, and `create_filesystem` on
+# both surviving declarations (the agent formats the device, destroying whatever
+# content the host put there) are what stand in the meantime.
+allow_host_chosen_device(p_storage) if {
+    print("allow_host_chosen_device: start")
+
+    p_storage.driver == ""
+    p_storage.source == ""
+    contains(p_storage.mount_point, "$(b64_device_id)")
+
+    print("allow_host_chosen_device: true")
 }
 allow_storage(p_storages, i_storage, bundle_id, sandbox_id, p_oci) if {
     i_storage.driver == "image_guest_pull"
