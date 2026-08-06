@@ -1412,14 +1412,20 @@ storage_pair_matches(p_storage, i_storage, bundle_id, sandbox_id) if {
 # part of the binding that can be established at generation time.
 #
 # What this deliberately does NOT do is pin *which* device is presented. That is
-# hcsshim's data.metadata.devices[path] property, and it is inherently stateful --
-# the device is authorized by the digest recorded when it was mounted, not by a
-# value known to the generator. Closing that needs the policy to carry mount state
-# across calls, which is out of scope here; the residual is tracked as RM-35's
-# open half. The exact `options` and `driver_options` equality in
-# allow_storage_base, the bijection in allow_storages, and `create_filesystem` on
-# both surviving declarations (the agent formats the device, destroying whatever
-# content the host put there) are what stand in the meantime.
+# hcsshim's data.metadata.devices[path] property. Note the blocker is NOT that this
+# policy lacks state -- it has some: `pstate` (see state_allows above) already records
+# container_id -> authorizing policy container, the direct analogue of hcsshim's
+# data.metadata.matches. The blocker is that hcsshim can record a device's identity
+# because its *guest* produces one: it reads the dm-verity superblock off the device
+# on every read-only mount and refuses the mount if it cannot. Kata's agent never
+# measures a block device, so there is nothing trustworthy to record -- the only hash
+# it ever sees arrives in host-supplied storage.options. Closing this therefore needs
+# RM-31 (measure in the guest) and RM-34 (a declaration to compare against) first;
+# state is already available. Tracked as RM-35's open half. The exact `options` and
+# `driver_options` equality in allow_storage_base, the bijection in allow_storages,
+# and `create_filesystem` on both surviving declarations (the agent formats the
+# device, destroying whatever content the host put there) are what stand in the
+# meantime.
 allow_host_chosen_device(p_storage) if {
     print("allow_host_chosen_device: start")
 
