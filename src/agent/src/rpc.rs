@@ -574,6 +574,36 @@ impl AgentService {
         // Drop the host guest mapping for this container so we can reuse the
         // PCI slots for the next containers
 
+        // RM-26: a removal the policy admitted for an id with no container behind it is a
+        // no-op, not an error.
+        //
+        // `rules.rego` now admits `RemoveContainerRequest` for a container id that was
+        // never created (no state key and no tombstone), because refusing it left pods
+        // stuck in `Terminating` whenever a `CreateContainerRequest` was denied -- the
+        // shim's cleanup removal was denied too and it had no other exit. Returning
+        // `Invalid container id` here would reintroduce exactly that deadlock one layer
+        // down, so the guest has to agree with the policy: there is nothing to destroy,
+        // and saying so is the whole point.
+        //
+        // Resource cleanup still runs. A create that failed part-way (an SRM abort, a
+        // storage error) can leave mounts or dm-verity devices behind without ever
+        // registering a container, and this is the only path that reclaims them.
+        //
+        // Confined to strict builds so the upstream contract is unchanged elsewhere.
+        #[cfg(feature = "strict-policy")]
+        {
+            let mut sandbox = self.sandbox.lock().await;
+            if sandbox.get_container(&cid).is_none() {
+                info!(
+                    sl(),
+                    "no container to remove for {}; treating the removal as a no-op", cid
+                );
+                sandbox.bind_watcher.remove_container(&cid).await;
+                remove_container_resources(&mut sandbox, &cid).await?;
+                return Ok(());
+            }
+        }
+
         if req.timeout == 0 {
             let mut sandbox = self.sandbox.lock().await;
             sandbox.bind_watcher.remove_container(&cid).await;

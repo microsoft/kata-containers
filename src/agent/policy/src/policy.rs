@@ -1846,6 +1846,65 @@ SignalProcessRequest if {
         );
     }
 
+    /// RM-26: a removal for a container id the policy never admitted is allowed exactly
+    /// once, and the tombstone it writes keeps it single-shot.
+    ///
+    /// Unlike the tests above, this one evaluates the **real** `rules.rego` rather than a
+    /// model of it. The property is a two-rule interaction — the strict rule must stay
+    /// undefined for a tombstoned id while the new no-op rule admits an untouched one — and
+    /// a hand-written miniature would prove the model, not the shipped policy.
+    ///
+    /// Why the no-op exists: when a `CreateContainerRequest` is denied, the shim's cleanup
+    /// path still issues `RemoveContainerRequest` for the same id. With only the strict
+    /// rule, no state key was ever written for that id, so the removal was denied too, the
+    /// shim retried forever and the pod sat in `Terminating` until it was force-deleted.
+    #[cfg(feature = "strict-policy")]
+    #[tokio::test]
+    async fn removing_a_never_created_container_is_a_single_shot_no_op() {
+        let cid = "ctr-never-created";
+        let req = format!(r#"{{"container_id": "{cid}"}}"#);
+
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy(
+                "rules.rego".to_string(),
+                include_str!("../../../tools/genpolicy/rules.rego").to_string(),
+            )
+            .unwrap();
+        // `rules.rego` is only half a policy: genpolicy appends the `policy_data` document
+        // when it generates one, and without it regorus refuses to compile the module at
+        // all ("use of undefined variable `policy_data` is unsafe"). Supply an empty one.
+        // The rules under test never read it -- they work purely off `pstate` -- so an
+        // empty document is enough to make the real rules compile without modelling them.
+        p.engine
+            .add_policy(
+                "policy_data.rego".to_string(),
+                "package agent_policy\npolicy_data := {}\n".to_string(),
+            )
+            .unwrap();
+        p.restore_state(r#"{"pstate": {}}"#).unwrap();
+
+        let first = p.allow_request("RemoveContainerRequest", &req).await;
+        assert!(
+            matches!(first, Ok((true, _))),
+            "removing an id with no container behind it must succeed, or a denied create \
+             leaves the pod with no way to finish terminating; got {:?}",
+            first
+        );
+
+        assert!(
+            p.snapshot_state().unwrap().contains(&format!("retired:{cid}")),
+            "the no-op path must still burn the id (RM-20), so removal is single-shot \
+             however it was admitted"
+        );
+
+        assert!(
+            is_denied(p.allow_request("RemoveContainerRequest", &req).await),
+            "the second removal must be denied: an id carrying a tombstone is exactly the \
+             replay the strict rule exists to refuse"
+        );
+    }
+
     /// F-19: reverting this request's own `pstate` delta undoes the removal's deletion, so
     /// a container whose teardown failed stays signallable and the removal stays retryable.
     /// This is the regression test for the rollback that `remove_container` performs on the

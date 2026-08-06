@@ -1910,6 +1910,40 @@ RemoveContainerRequest:= {"ops": ops, "allowed": true} if {
     print("RemoveContainerRequest: true")
 }
 
+# RM-26: removing an id this policy never admitted is a successful no-op.
+#
+# The rule above is deliberately undefined for an unknown container_id, and on its own
+# that produced a deadlock during teardown. When a CreateContainerRequest is denied, the
+# shim's cleanup path still issues RemoveContainerRequest for the same id -- but no state
+# key was ever written for it, so the removal was denied too. The shim retried, the
+# kubelet waited, and the pod sat in `Terminating` until someone force-deleted it. Each
+# individual decision was correct; the composition had no exit. That failure mode is
+# worse than it looks: an operator experiences a *correctly enforced* denial as a hung
+# workload, which is exactly the pressure that gets policies loosened.
+#
+# Admitting the no-op gives up nothing. There is no container behind the id, so there is
+# nothing to destroy and no state to delete -- the request cannot have an effect beyond
+# the tombstone written below. What it must NOT do is re-admit the cases the strict rule
+# closes, so it is guarded on *both* keys: an id with live state takes the rule above,
+# and an id that is already tombstoned (a genuine second remove of a container that did
+# run) still falls through to the fail-closed default.
+#
+# The tombstone is written here as well, so removal stays single-shot per id no matter
+# which path admitted it (RM-20). This does let the host burn an id by removing it before
+# creating it, but that is not a new capability: the host chooses the ids and decides
+# whether to send the create at all, so it can only deny itself.
+RemoveContainerRequest := {"ops": ops, "allowed": true} if {
+    print("RemoveContainerRequest: input =", input)
+
+    not get_state_val(input.container_id)
+    not get_state_val(retired_key(input.container_id))
+    print("RemoveContainerRequest: container", input.container_id, "was never admitted; no-op removal")
+
+    ops := concat_op_if_not_null([], state_allows(retired_key(input.container_id), input.container_id))
+
+    print("RemoveContainerRequest: true (no-op)")
+}
+
 # Gate SignalProcessRequest instead of allowing every signal unconditionally.
 # A signal is permitted only when (1) its number is in the policy's sandbox-wide
 # allowed_signals set, (2) it targets a container this policy authorized to run (tracked

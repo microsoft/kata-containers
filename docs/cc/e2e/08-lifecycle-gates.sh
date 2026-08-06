@@ -314,6 +314,35 @@ out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_SB\",
 expect_refusal "08n — the same SIGWINCH(28) is refused for the pause container of the same sandbox (F-76: per-container signal sets)" \
   "$out" PERMISSION_DENIED 'blocked by policy'
 
+# --- 08o / 08p ---------------------------------------------------------------
+# RM-26: removing a container id the policy never admitted must succeed, exactly
+# once.
+#
+# Refusing it is what left pods stuck in Terminating: when a CreateContainer is
+# denied, the shim's cleanup still issues RemoveContainer for the same id, that
+# was denied too, and the composition had no exit -- every individual decision
+# correct, the pod unkillable. An operator experiences a correctly enforced
+# denial as a hung workload, which is exactly the pressure that gets policies
+# loosened, so this is asserted rather than left to the unit test.
+#
+# 08b directly above is the control that keeps this honest: it uses the *same*
+# ghost id and shows StartContainer for it is still refused. The no-op is scoped
+# to removal -- where there is nothing to act on -- not to unknown ids generally.
+out=$(agent_call "$REF_CID" 'RemoveContainer json://{"container_id":"ghost-never-created"}')
+if echo "$out" | grep -qi 'error\|code:'; then
+  echo "$out" | tail -3
+  fail_case "08o — RemoveContainer for a never-created id must succeed as a no-op (RM-26), or a denied create leaves the pod stuck Terminating"
+else
+  ok "08o — RemoveContainer for a never-created id succeeds as a no-op (RM-26)"
+fi
+
+# The no-op still burns the id, so removal stays single-shot however it was
+# admitted (RM-20). A second attempt now carries a tombstone and must be refused
+# -- that is what stops 08o from becoming a general "remove any id" hole.
+out=$(agent_call "$REF_CID" 'RemoveContainer json://{"container_id":"ghost-never-created"}')
+expect_refusal "08p — the second RemoveContainer for the same id is refused: the no-op tombstoned it (RM-20 preserved)" \
+  "$out" PERMISSION_DENIED 'blocked by policy'
+
 kubectl delete pod fr9-reference -n "$NS" --ignore-not-found >/dev/null 2>&1 || true
 
 # ============================================================== permissive pod
