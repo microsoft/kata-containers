@@ -115,3 +115,11 @@ devicemapper = ["kata-types/devicemapper"]
 # NOT be enabled in a shipped image: the agent's environment is host-influenced, so an
 # attacker who could set that variable could point the check at a tree they control.
 tsm-test-override = []
+# Test-only, same contract as tsm-test-override: lets KATA_FRAGMENT_SVN_STATE,
+# KATA_FRAGMENT_ISSUERS and KATA_TRUSTED_CDI_DIGESTS redirect measured/persisted security
+# state at paths a test controls. MUST NOT be enabled in a shipped image. The kernel passes
+# unrecognised `key=value` command line parameters to init as environment variables, so in a
+# confidential guest the agent's environment is chosen by the host; each of these paths backs
+# a guarantee (fragment SVN rollback protection, the fragment issuer trust root, the CDI spec
+# allow-list) that the host must not be able to relocate.
+test-path-override = []

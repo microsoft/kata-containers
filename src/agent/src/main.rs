@@ -25,6 +25,9 @@ use const_format::concatcp;
 use initdata::{InitdataReturnValue, AA_CONFIG_PATH, CDH_CONFIG_PATH};
 use nix::fcntl::OFlag;
 use nix::sys::reboot::{reboot, RebootMode};
+// Only the non-strict logger path binds a vsock listener; a strict build discards the log
+// stream (FR-7 / F-79) and therefore never constructs one.
+#[cfg(not(feature = "strict-policy"))]
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, VsockAddr};
 use nix::unistd::{self, dup, sync, Pid};
 use std::env;
@@ -244,6 +247,22 @@ fn announce(logger: &Logger, config: &AgentConfig) {
 // output to the vsock port specified, or stdout.
 async fn create_logger_task(rfd: RawFd, vsock_port: u32, shutdown: Receiver<bool>) -> Result<()> {
     let mut reader = PipeStream::from_fd(rfd);
+
+    // FR-7 (F-79): a strict confidential build does not forward the agent's log stream to
+    // the host at all — matching the baseline, where runtime logging defaults to off and the
+    // GCS logger is wired to io.Discard. Both sinks below are host-visible (vsock directly,
+    // stdout via the guest console), and both the verbosity and the port are chosen on the
+    // kernel command line, which this build already treats as untrusted for the debug
+    // console. The stream is still *drained* into a sink rather than left unread: the writer
+    // end is a pipe shared by every logger in the process, so abandoning the reader would
+    // block the agent as soon as the pipe filled.
+    #[cfg(feature = "strict-policy")]
+    let mut writer: Box<dyn AsyncWrite + Unpin + Send> = {
+        let _ = vsock_port;
+        Box::new(tokio::io::sink())
+    };
+
+    #[cfg(not(feature = "strict-policy"))]
     let mut writer: Box<dyn AsyncWrite + Unpin + Send> = if vsock_port > 0 {
         let listenfd = socket::socket(
             AddressFamily::Vsock,
@@ -340,7 +359,19 @@ async fn real_main(init_mode: bool) -> std::result::Result<(), Box<dyn std::erro
         ttrpc_log_guard = Ok(slog_stdlog::init()?);
     }
 
-    if config.tracing {
+    // FR-7 (F-80): the OpenTelemetry exporter is a vsock channel out of the guest that
+    // carries decoded RPC requests — `trace_rpc_call!` records `req=?$req`, so an enabled
+    // trace exports whole CreateContainer OCI specs, exec argument vectors and mount lists.
+    // It is enabled by a plain kernel command line flag, so a strict build refuses it
+    // outright; the baseline has no host-facing span exporter in its confidential path at
+    // all. `config.tracing` is already forced false by the strict config allow-list — this
+    // gate is here so that neither place can quietly become the only one.
+    #[cfg(feature = "strict-policy")]
+    let tracing_enabled = false;
+    #[cfg(not(feature = "strict-policy"))]
+    let tracing_enabled = config.tracing;
+
+    if tracing_enabled {
         tracer::setup_tracing(NAME, &logger)?;
     }
 
@@ -1033,7 +1064,21 @@ fn resolve_measured_config(
         );
         return Some(text.to_string());
     }
-    let path = std::env::var(env_var).unwrap_or_else(|_| default_path.to_string());
+    let path = {
+        // FR-7 (F-86): test-only redirection, gated the same way as the SVN state path.
+        // Misdirecting this one costs availability rather than integrity — an unreadable
+        // trust root yields no authorized issuers and fragments fail closed — but it is the
+        // same class of host-influenced input and gets the same treatment.
+        #[cfg(feature = "test-path-override")]
+        {
+            std::env::var(env_var).unwrap_or_else(|_| default_path.to_string())
+        }
+        #[cfg(not(feature = "test-path-override"))]
+        {
+            let _ = env_var;
+            default_path.to_string()
+        }
+    };
     match std::fs::read_to_string(&path) {
         Ok(t) => {
             info!(logger, "{}: trust-root config sourced from measured rootfs", label; "path" => &path);
@@ -1045,13 +1090,26 @@ fn resolve_measured_config(
 
 // FR-1i: runtime SVN high-water state, persisted so an agent restart cannot reopen a
 // rollback window. Must live on sealed/encrypted-scratch storage (in a confidential guest
-// the writable scratch is memory-/disk-encrypted). Overridable via KATA_FRAGMENT_SVN_STATE.
+// the writable scratch is memory-/disk-encrypted).
 #[cfg(feature = "strict-policy")]
 const FRAGMENT_SVN_STATE_PATH: &str = "/run/kata/fragment-svn.state";
 
+// FR-7 (F-86): the path is fixed in a shipped strict build. `KATA_FRAGMENT_SVN_STATE` only
+// exists under `test-path-override`, which is deliberately not implied by `strict-policy`.
+// The agent's environment is host-influenced — the kernel hands unrecognised `key=value`
+// command line parameters to init as environment variables — so honouring the variable
+// unconditionally would let the host name a path that is never populated. The import at boot
+// is a silent no-op when the file cannot be read, so that would reset the SVN floor to zero
+// on every boot and defeat exactly the rollback protection FR-1i exists to provide, leaving
+// no trace. Same hazard, and same remedy, as `KATA_AGENT_TSM_ROOT` in hostdata.rs.
 #[cfg(feature = "strict-policy")]
 fn fragment_svn_state_path() -> String {
-    std::env::var("KATA_FRAGMENT_SVN_STATE").unwrap_or_else(|_| FRAGMENT_SVN_STATE_PATH.to_string())
+    #[cfg(feature = "test-path-override")]
+    if let Ok(p) = std::env::var("KATA_FRAGMENT_SVN_STATE") {
+        return p;
+    }
+
+    FRAGMENT_SVN_STATE_PATH.to_string()
 }
 
 // FR-1i: write the exported SVN snapshot to the persistence path (best-effort).
@@ -1572,6 +1630,48 @@ mod tests {
     use test_utils::TestUserType;
     use test_utils::{assert_result, skip_if_not_root, skip_if_root};
 
+    // FR-7 (F-86): the paths backing fragment SVN rollback protection and the fragment
+    // issuer trust root must not be relocatable by the host. Both are read only in strict
+    // builds, so the environment override that used to serve tests was reachable exactly
+    // where it must not be: the kernel hands unrecognised `key=value` command line
+    // parameters to init as environment variables, and in a confidential guest the command
+    // line is the host's. Redirecting the SVN state path is silent and total -- the boot-time
+    // import is a no-op when the file cannot be read, so the floor restarts at zero every
+    // boot -- which is why this is asserted rather than left to review.
+    //
+    // Compiled out under `test-path-override`, which is what re-enables the redirection.
+    #[cfg(all(feature = "strict-policy", not(feature = "test-path-override")))]
+    #[test]
+    fn measured_state_paths_are_not_relocatable_by_the_environment() {
+        std::env::set_var("KATA_FRAGMENT_SVN_STATE", "/tmp/attacker-svn.state");
+        let path = super::fragment_svn_state_path();
+        std::env::remove_var("KATA_FRAGMENT_SVN_STATE");
+        assert_eq!(
+            path,
+            super::FRAGMENT_SVN_STATE_PATH,
+            "the host relocated the fragment SVN high-water file, resetting the rollback floor"
+        );
+
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let planted = dir.path().join("attacker-issuers.toml");
+        std::fs::write(&planted, "require_receipt = false\n").expect("write planted config");
+        std::env::set_var("KATA_FRAGMENT_ISSUERS", &planted);
+        let resolved = super::resolve_measured_config(
+            &logger,
+            "FR-1",
+            None,
+            "KATA_FRAGMENT_ISSUERS",
+            "/nonexistent/measured/issuers.toml",
+        );
+        std::env::remove_var("KATA_FRAGMENT_ISSUERS");
+        // The planted file is readable, so honouring the variable would yield Some(..).
+        assert!(
+            resolved.is_none(),
+            "the host redirected the fragment issuer trust root at a file it planted"
+        );
+    }
+
     #[tokio::test]
     async fn test_create_logger_task() {
         #[derive(Debug)]
@@ -1581,12 +1681,22 @@ mod tests {
             result: Result<()>,
         }
 
+        // FR-7 (F-79): a strict build discards the agent log stream and never binds a vsock
+        // listener, so the privileged-port case cannot fail on EACCES any more -- the port is
+        // not used at all. That difference is itself the assertion: if a future change
+        // reinstated the listener, this case would start returning EACCES again.
+        #[cfg(feature = "strict-policy")]
+        let privileged_port_result: Result<()> = Ok(());
+        #[cfg(not(feature = "strict-policy"))]
+        let privileged_port_result: Result<()> =
+            Err(anyhow!(nix::errno::Errno::from_raw(libc::EACCES)));
+
         let tests = &[
             TestData {
                 // non-root user cannot use privileged vsock port
                 vsock_port: 1,
                 test_user: TestUserType::NonRootOnly,
-                result: Err(anyhow!(nix::errno::Errno::from_raw(libc::EACCES))),
+                result: privileged_port_result,
             },
             TestData {
                 // passing vsock_port 0 causes logger task to write to stdout

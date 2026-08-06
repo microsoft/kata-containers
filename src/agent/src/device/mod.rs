@@ -1152,12 +1152,20 @@ pub fn measure_cdi_specs(
     Ok(out)
 }
 
-/// Load the authorized (measured) CDI spec digests from the trusted guest path. The path
-/// may be overridden via `KATA_TRUSTED_CDI_DIGESTS` (used by tests).
+/// Load the authorized (measured) CDI spec digests from the trusted guest path.
+///
+/// FR-7 (F-86): the path is fixed in a shipped build. `KATA_TRUSTED_CDI_DIGESTS` is honoured
+/// only under `test-path-override`, because the agent's environment is host-influenced and
+/// this function is compiled only into strict builds — exactly where the host must not get
+/// to choose it. Misdirecting it costs availability rather than integrity (`authorize_cdi`
+/// is closed-door on an empty set), but the fix is the same one line.
 #[cfg(feature = "strict-policy")]
 pub fn load_authorized_cdi_digests() -> HashSet<String> {
-    let path = std::env::var("KATA_TRUSTED_CDI_DIGESTS")
-        .unwrap_or_else(|_| TRUSTED_CDI_DIGESTS_PATH.to_string());
+    #[cfg(feature = "test-path-override")]
+    let path =
+        std::env::var("KATA_TRUSTED_CDI_DIGESTS").unwrap_or_else(|_| TRUSTED_CDI_DIGESTS_PATH.to_string());
+    #[cfg(not(feature = "test-path-override"))]
+    let path = TRUSTED_CDI_DIGESTS_PATH.to_string();
     match fs::read_to_string(&path) {
         Ok(s) => s
             .lines()

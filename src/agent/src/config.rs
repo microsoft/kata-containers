@@ -81,6 +81,12 @@ const TRACING_ENV_VAR: &str = "KATA_AGENT_TRACING";
 // to initialize agent policy engine.
 const POLICY_FILE_VAR: &str = "KATA_AGENT_POLICY_FILE";
 
+// FR-7 (F-79/F-81): the verbosity a strict confidential build logs at. The stream is
+// discarded before it can leave the guest, so this only bounds the work the agent does
+// formatting records the host will never see; what matters is that the host cannot choose it.
+#[cfg(feature = "strict-policy")]
+const STRICT_LOG_LEVEL: slog::Level = slog::Level::Info;
+
 const ERR_INVALID_LOG_LEVEL: &str = "invalid log level";
 const ERR_INVALID_LOG_LEVEL_PARAM: &str = "invalid log level parameter";
 const ERR_INVALID_GET_VALUE_PARAM: &str = "expected name=value";
@@ -412,6 +418,7 @@ impl AgentConfig {
                 let mut config =
                     AgentConfig::from_config_file(config_file).context("AgentConfig from args")?;
                 config.override_config_from_envs();
+                config.apply_strict_confidential_overrides();
                 return Ok(config);
             } else {
                 panic!("The config argument wasn't formed properly: {:?}", args);
@@ -430,8 +437,10 @@ impl AgentConfig {
             // or if it can't be parsed properly.
             if param.starts_with(format!("{CONFIG_FILE}=").as_str()) {
                 let config_file = get_string_value(param)?;
-                return AgentConfig::from_config_file(&config_file)
-                    .context("AgentConfig from kernel cmdline");
+                let mut config = AgentConfig::from_config_file(&config_file)
+                    .context("AgentConfig from kernel cmdline")?;
+                config.apply_strict_confidential_overrides();
+                return Ok(config);
             }
 
             // parse cmdline flags
@@ -671,6 +680,10 @@ impl AgentConfig {
 
         config.override_config_from_envs();
 
+        // FR-7 (F-81): last, so that nothing the host supplied through any of the three
+        // channels — cmdline, config file, environment — survives the strict allow-list.
+        config.apply_strict_confidential_overrides();
+
         Ok(config)
     }
 
@@ -680,6 +693,106 @@ impl AgentConfig {
             .with_context(|| format!("Failed to read config file {file}"))?;
         AgentConfig::from_str(&config)
     }
+
+    /// FR-7 (F-81): the single place that answers "which host-supplied configuration does a
+    /// strict confidential guest honour?".
+    ///
+    /// Every field here arrives from the kernel command line, an agent config file named by
+    /// it, or the agent's environment — all three chosen by the host, so all three are
+    /// untrusted input in a confidential guest. The branch already treats the cmdline that
+    /// way for the debug console ("regardless of host config", `main.rs`); this generalises
+    /// the same judgement to the rest of the surface, the way hcsshim funnels the equivalent
+    /// decisions through `SetConfidentialOptions`.
+    ///
+    /// The exhaustive destructure below is the point of the function: adding a field to
+    /// `AgentConfig` fails to compile in a strict build until someone states, here, whether a
+    /// strict guest honours it. Fields bound with a leading underscore are *deliberately*
+    /// honoured, each for the reason given.
+    ///
+    /// Note this cannot be expressed as "ignore the cmdline" wholesale: the guest genuinely
+    /// needs the host to tell it where to listen and how big to size buffers. The question is
+    /// only ever whether a given option lets the host weaken a guarantee the TEE is supposed
+    /// to provide.
+    #[cfg(feature = "strict-policy")]
+    fn apply_strict_confidential_overrides(&mut self) {
+        let Self {
+            // Denied: an un-mediated interactive shell into the guest. Also gated at the use
+            // site in main.rs; both, because either alone would silently become the only one.
+            debug_console,
+            debug_console_vport,
+            // Denied: `dev_mode` exists to relax the guest for development.
+            dev_mode,
+            // Denied (F-79): the log stream is discarded in strict builds, so neither the
+            // host-selected verbosity nor the host-selected vsock port may have an effect.
+            // Zeroing the port also means no log listener is bound at all.
+            log_level,
+            log_vport,
+            // Denied (F-80): the OpenTelemetry exporter ships decoded RPC request payloads
+            // — full OCI specs, exec arguments, mount lists — to the host over vsock.
+            tracing,
+            // Denied: forced on. This selects dm-integrity for the guest's ephemeral and
+            // encrypted storage; letting the host turn it off would let the host downgrade a
+            // guest integrity guarantee from outside the guest.
+            secure_storage_integrity,
+            // Honoured: liveness only. A host that wants any of these to expire can simply
+            // not answer the operation they bound; the timeout adds no capability.
+            hotplug_timeout: _,
+            cdh_api_timeout: _,
+            image_pull_timeout: _,
+            cdi_timeout: _,
+            launch_process_timeout: _,
+            // Honoured: CDI devices requested this way are still authorized against the
+            // measured spec digests (`authorize_cdi`, closed-door on an empty set), and the
+            // resulting OCI spec is still policy-checked at CreateContainer.
+            visible_cdi_devices: _,
+            // Honoured: buffer sizing, guest-internal cgroup layout. The resulting container
+            // spec is policy-checked; none of these three names anything outside the guest.
+            container_pipe_size: _,
+            cgroup_no_v1: _,
+            unified_cgroup_hierarchy: _,
+            // Honoured: where the agent listens for the shim, and the IO passthrough port.
+            // The host owns that transport by construction — it is the party connecting.
+            server_addr: _,
+            passfd_listener_port: _,
+            // Honoured: the host already owns the guest's network path entirely, so proxy
+            // selection moves no trust boundary. What protects fetched content is signature
+            // and digest verification in the guest, not the route it arrived by.
+            https_proxy: _,
+            no_proxy: _,
+            // Honoured: these select which guest components launch and which CDH REST
+            // features they expose. Turning them off costs availability (sealed secrets stop
+            // resolving); turning them on exposes CDH only *inside* the guest, to workloads
+            // the policy already authorized. Revisit if CDH ever gains a host-facing surface.
+            guest_components_rest_api: _,
+            guest_components_procs: _,
+            // Honoured: memory reclaim tuning. The host already decides how much memory the
+            // guest has.
+            mem_agent: _,
+            // Denied: pinned to the compiled-in default. A strict rootfs ships no rego file
+            // at all (enforced by tools/osbuilder's strict-policy install test), so today
+            // this variable can only name a path that does not exist — but that makes the
+            // protection a property of the image build rather than of the agent, and the
+            // agent should not depend on it.
+            #[cfg(feature = "agent-policy")]
+            policy_file,
+        } = self;
+
+        *debug_console = false;
+        *debug_console_vport = 0;
+        *dev_mode = false;
+        *log_level = STRICT_LOG_LEVEL;
+        *log_vport = 0;
+        *tracing = false;
+        *secure_storage_integrity = true;
+        #[cfg(feature = "agent-policy")]
+        {
+            *policy_file = String::from("");
+        }
+    }
+
+    /// No-op outside strict builds: a non-confidential guest honours what it is told.
+    #[cfg(not(feature = "strict-policy"))]
+    fn apply_strict_confidential_overrides(&mut self) {}
 
     #[instrument]
     fn override_config_from_envs(&mut self) {
@@ -898,6 +1011,10 @@ mod tests {
         const TEST_SERVER_ADDR: &str = "vsock://-1:1024";
 
         #[derive(Debug)]
+        // The fields a strict build pins are still declared and still printed in the failure
+        // message, but the strict run compares against the pinned values instead of reading
+        // them -- see the expectation block below.
+        #[cfg_attr(feature = "strict-policy", allow(dead_code))]
         struct TestData<'a> {
             contents: &'a str,
             env_vars: Vec<&'a str>,
@@ -1497,18 +1614,39 @@ mod tests {
             let config =
                 AgentConfig::from_cmdline(filename, vec![]).expect("Failed to parse command line");
 
-            assert_eq!(d.debug_console, config.debug_console, "{msg}");
-            assert_eq!(d.dev_mode, config.dev_mode, "{msg}");
+            // FR-7 (F-81): the table describes what a non-strict agent takes from the host.
+            // A strict build refuses this subset whatever the cmdline or environment said,
+            // so the expectations are pinned rather than the cases duplicated -- the point of
+            // running the table under strict at all is to prove the refusal holds for every
+            // spelling of the input, including the ones that set nothing.
+            #[cfg(feature = "strict-policy")]
+            let (exp_debug_console, exp_dev_mode, exp_log_level, exp_tracing, exp_storage) =
+                (false, false, STRICT_LOG_LEVEL, false, true);
+            #[cfg(not(feature = "strict-policy"))]
+            let (exp_debug_console, exp_dev_mode, exp_log_level, exp_tracing, exp_storage) = (
+                d.debug_console,
+                d.dev_mode,
+                d.log_level,
+                d.tracing,
+                d.secure_storage_integrity,
+            );
+            #[cfg(all(feature = "agent-policy", feature = "strict-policy"))]
+            let exp_policy_file = "";
+            #[cfg(all(feature = "agent-policy", not(feature = "strict-policy")))]
+            let exp_policy_file = d.policy_file;
+
+            assert_eq!(exp_debug_console, config.debug_console, "{msg}");
+            assert_eq!(exp_dev_mode, config.dev_mode, "{msg}");
             assert_eq!(d.cgroup_no_v1, config.cgroup_no_v1, "{msg}");
             assert_eq!(
                 d.unified_cgroup_hierarchy, config.unified_cgroup_hierarchy,
                 "{msg}"
             );
-            assert_eq!(d.log_level, config.log_level, "{msg}");
+            assert_eq!(exp_log_level, config.log_level, "{msg}");
             assert_eq!(d.hotplug_timeout, config.hotplug_timeout, "{msg}");
             assert_eq!(d.container_pipe_size, config.container_pipe_size, "{msg}");
             assert_eq!(d.server_addr, config.server_addr, "{msg}");
-            assert_eq!(d.tracing, config.tracing, "{msg}");
+            assert_eq!(exp_tracing, config.tracing, "{msg}");
             assert_eq!(d.https_proxy, config.https_proxy, "{msg}");
             assert_eq!(d.no_proxy, config.no_proxy, "{msg}");
             assert_eq!(
@@ -1520,11 +1658,11 @@ mod tests {
                 "{msg}"
             );
             assert_eq!(
-                d.secure_storage_integrity, config.secure_storage_integrity,
+                exp_storage, config.secure_storage_integrity,
                 "{msg}"
             );
             #[cfg(feature = "agent-policy")]
-            assert_eq!(d.policy_file, config.policy_file, "{msg}");
+            assert_eq!(exp_policy_file, config.policy_file, "{msg}");
 
             assert_eq!(d.mem_agent, config.mem_agent, "{msg}");
 
@@ -1538,8 +1676,16 @@ mod tests {
     // Run in serial to stop the env set interfering with test_from_cmdline
     #[serial]
     fn test_from_cmdline_with_args_overwrites() {
+        // FR-7 (F-81): `dev_mode` is one of the options a strict build refuses to take from
+        // the host, so what this case proves there is that the config file cannot set it
+        // either -- the file is named by the host on the same untrusted command line.
+        #[cfg(feature = "strict-policy")]
+        let expected_dev_mode = false;
+        #[cfg(not(feature = "strict-policy"))]
+        let expected_dev_mode = true;
+
         let expected = AgentConfig {
-            dev_mode: true,
+            dev_mode: expected_dev_mode,
             server_addr: "unix:///tmp/overwrite.socket".to_string(),
             ..Default::default()
         };
@@ -1575,6 +1721,79 @@ mod tests {
         assert_eq!(expected.tracing, config.tracing);
     }
 
+    // FR-7 (F-79/F-80/F-81): every option a strict confidential guest refuses to take from
+    // the host, asserted through the real parsing path rather than by calling the override
+    // directly -- the property that matters is that no host-reachable route sets them, and
+    // `from_cmdline` has three exits.
+    //
+    // The honoured options at the end are load-bearing: without them a broken
+    // implementation that reset the whole struct to Default would pass.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn strict_refuses_host_supplied_observability_and_dev_options() {
+        let cmdline = format!(
+            "{DEBUG_CONSOLE_FLAG} {DEV_MODE_FLAG} {LOG_LEVEL_OPTION}=trace \
+             {LOG_VPORT_OPTION}=1234 {DEBUG_CONSOLE_VPORT_OPTION}=1026 \
+             {TRACE_MODE_OPTION}=true {SECURE_STORAGE_INTEGRITY_OPTION}=false \
+             {HOTPLUG_TIMOUT_OPTION}=17 {SERVER_ADDR_OPTION}=vsock://-1:4242 \
+             {CONTAINER_PIPE_SIZE_OPTION}=2097152"
+        );
+
+        let dir = tempdir().expect("failed to create tmpdir");
+        let file_path = dir.path().join("cmdline");
+        let filename = file_path.to_str().expect("failed to create filename");
+        let mut file = File::create(filename).expect("failed to create file");
+        file.write_all(cmdline.as_bytes())
+            .expect("failed to write cmdline");
+
+        let config = AgentConfig::from_cmdline(filename, vec![]).expect("failed to parse cmdline");
+
+        assert!(!config.debug_console, "debug console honoured in strict");
+        assert_eq!(config.debug_console_vport, 0, "debug console vport honoured");
+        assert!(!config.dev_mode, "dev mode honoured in strict");
+        assert_eq!(config.log_level, STRICT_LOG_LEVEL, "log level host-chosen");
+        assert_eq!(config.log_vport, 0, "log vport honoured in strict");
+        assert!(!config.tracing, "tracing honoured in strict");
+        assert!(
+            config.secure_storage_integrity,
+            "host was able to turn storage integrity off"
+        );
+
+        // Deliberately still host-configurable -- see the rationale on each field in
+        // apply_strict_confidential_overrides.
+        assert_eq!(config.hotplug_timeout, time::Duration::from_secs(17));
+        assert_eq!(config.server_addr, "vsock://-1:4242");
+        assert_eq!(config.container_pipe_size, 2097152);
+    }
+
+    // The environment is the third host-reachable route into the config -- the kernel hands
+    // unrecognised `key=value` command line parameters to init as environment variables --
+    // and it is applied *after* the cmdline, so the allow-list has to run after it too.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn strict_refuses_host_supplied_options_arriving_through_the_environment() {
+        let dir = tempdir().expect("failed to create tmpdir");
+        let file_path = dir.path().join("cmdline");
+        let filename = file_path.to_str().expect("failed to create filename");
+        File::create(filename).expect("failed to create file");
+
+        env::set_var(LOG_LEVEL_ENV_VAR, "trace");
+        env::set_var(TRACING_ENV_VAR, "true");
+        env::set_var(POLICY_FILE_VAR, "/tmp/attacker.rego");
+
+        let config = AgentConfig::from_cmdline(filename, vec![]).expect("failed to parse cmdline");
+
+        env::remove_var(LOG_LEVEL_ENV_VAR);
+        env::remove_var(TRACING_ENV_VAR);
+        env::remove_var(POLICY_FILE_VAR);
+
+        assert_eq!(config.log_level, STRICT_LOG_LEVEL, "log level host-chosen");
+        assert!(!config.tracing, "tracing enabled from the environment");
+        assert_eq!(
+            config.policy_file, "",
+            "the policy path was redirected from the environment"
+        );
+    }
     #[rstest]
     #[case("", Err(anyhow!(ERR_INVALID_LOG_LEVEL)))]
     #[case("foo", Err(anyhow!(ERR_INVALID_LOG_LEVEL)))]

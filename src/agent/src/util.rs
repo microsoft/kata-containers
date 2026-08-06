@@ -62,6 +62,9 @@ pub fn get_vsock_incoming(fd: RawFd) -> Incoming {
     unsafe { VsockListener::from_raw_fd(fd).incoming() }
 }
 
+// Used only by the non-strict logger path; a strict build discards the agent log stream
+// (FR-7 / F-79) and never accepts a log connection.
+#[cfg_attr(feature = "strict-policy", allow(dead_code))]
 #[instrument]
 pub async fn get_vsock_stream(fd: RawFd) -> Result<VsockStream> {
     let stream = get_vsock_incoming(fd)

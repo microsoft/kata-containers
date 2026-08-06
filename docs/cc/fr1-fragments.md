@@ -607,7 +607,7 @@ delivery annotation included. Stage 07 does this explicitly.
 ## 5. Measured configuration
 
 Seeded at boot by `main.rs::seed_fragment_trust_root` from a measured-rootfs file
-(`/etc/kata/fragment-issuers.toml`, override `KATA_FRAGMENT_ISSUERS`); absent config ⇒ no
+(`/etc/kata/fragment-issuers.toml`; redirectable via `KATA_FRAGMENT_ISSUERS` only under the test-only `test-path-override` feature — see F-86); absent config ⇒ no
 authorized issuer ⇒ fail-closed. Shape:
 
 ```toml
@@ -645,7 +645,7 @@ required_receipt_from = ["acl"]        # FR-1f per-issuer required receipts
 ```
 
 Runtime SVN/ordering/tree-head state is persisted to `/run/kata/fragment-svn.state`
-(override `KATA_FRAGMENT_SVN_STATE`) and re-imported raise-only at boot.
+and re-imported raise-only at boot. The path is fixed in a shipped build: `KATA_FRAGMENT_SVN_STATE` is honoured only under the test-only `test-path-override` feature, because the agent's environment is host-influenced (the kernel passes unrecognised `key=value` command line parameters to init as environment variables) and a redirected path would silently reset the rollback floor on every boot (F-86).
 
 ---
 
