@@ -29,6 +29,7 @@ use ttrpc::{
 };
 
 use anyhow::{anyhow, Context, Result};
+use pathrs::flags::OpenFlags;
 use cgroups::freezer::FreezerState;
 use oci::{Hooks, LinuxNamespace, Spec};
 use oci_spec::runtime as oci;
@@ -36,6 +37,7 @@ use oci_spec::runtime as oci;
 use protobuf::MessageDyn;
 use protobuf::MessageField;
 use protocols::agent::{
+    ResizeVolumeRequest,
     AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest, GetIPTablesRequest,
     GetIPTablesResponse, GuestDetailsResponse, Interfaces, Metrics, OOMEvent, ReadStreamResponse,
     Routes, SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse, VolumeStatsRequest,
@@ -64,7 +66,6 @@ use nix::unistd::{self, Pid};
 use rustjail::process::ProcessOperations;
 #[cfg(all(test, not(target_arch = "powerpc64")))]
 use std::os::fd::AsRawFd;
-use std::os::fd::BorrowedFd;
 
 #[cfg(target_arch = "s390x")]
 use crate::ccw;
@@ -115,7 +116,7 @@ use std::os::unix::prelude::PermissionsExt;
 use std::process::{Command, Stdio};
 
 use nix::unistd::{Gid, Uid};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
@@ -138,6 +139,14 @@ const IP6TABLES_SAVE: &str = "/sbin/ip6tables-save";
 const USR_IP6TABLES_RESTORE: &str = "/usr/sbin/ip6tables-save";
 const IP6TABLES_RESTORE: &str = "/sbin/ip6tables-restore";
 const KATA_GUEST_SHARE_DIR: &str = "/run/kata-containers/shared/containers/";
+
+/// This mask is applied to parent directories implicitly created for CopyFile requests.
+const IMPLICIT_DIRECTORY_PERMISSION_MASK: u32 = 0o777;
+
+/// This mask is applied to files and directories created for CopyFile requests.
+/// In addition to the permissions, it allows setuid/setgid/sticky bits.
+/// Note that the setuid bit does not have an effect on Linux, though.
+const FILE_PERMISSION_MASK: u32 = 0o7777;
 
 const ERR_CANNOT_GET_WRITER: &str = "Cannot get writer";
 const ERR_INVALID_BLOCK_SIZE: &str = "Invalid block size";
@@ -2439,6 +2448,20 @@ impl agent_ttrpc::AgentService for AgentService {
         }
     }
 
+    async fn resize_volume(
+        &self,
+        ctx: &TtrpcContext,
+        req: ResizeVolumeRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "resize_volume", req);
+        is_allowed(&req).await?;
+
+        Err(ttrpc_error(
+            ttrpc::Code::UNIMPLEMENTED,
+            "resize_volume is not implemented in kata-agent",
+        ))
+    }
+
     async fn get_metrics(
         &self,
         ctx: &TtrpcContext,
@@ -2796,6 +2819,7 @@ impl agent_ttrpc::AgentService for AgentService {
         _ctx: &::ttrpc::r#async::TtrpcContext,
         config: protocols::agent::MemAgentMemcgConfig,
     ) -> ::ttrpc::Result<Empty> {
+        is_allowed(&config).await?;
         if let Some(ma) = &self.oma {
             ma.memcg_set_config_async(mem_agent_memcgconfig_to_memcg_optionconfig(&config))
                 .await
@@ -2820,6 +2844,7 @@ impl agent_ttrpc::AgentService for AgentService {
         _ctx: &::ttrpc::r#async::TtrpcContext,
         config: protocols::agent::MemAgentCompactConfig,
     ) -> ::ttrpc::Result<Empty> {
+        is_allowed(&config).await?;
         if let Some(ma) = &self.oma {
             ma.compact_set_config_async(mem_agent_compactconfig_to_compact_optionconfig(&config))
                 .await
@@ -3527,124 +3552,146 @@ fn do_copy_file(req: &CopyFileRequest, shared_dir: &PathBuf) -> Result<()> {
             shared_dir, req.path
         ))?;
 
-    if !path.starts_with(CONTAINER_BASE) {
-        return Err(anyhow!(
-            "Path {:?} does not start with {}",
-            path,
-            CONTAINER_BASE
-        ));
-    }
+    // The shared directory might not exist yet, but we need to create it in order to open the root.
+    std::fs::create_dir_all(shared_dir)?;
+    let root = pathrs::Root::open(shared_dir)?;
 
     // Create parent directories if missing
     if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            let dir = parent.to_path_buf();
-            // Attempt to create directory, ignore AlreadyExists errors
-            if let Err(e) = fs::create_dir_all(&dir) {
-                if e.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(e.into());
-                }
-            }
+        let dir = root
+            .mkdir_all(
+                parent,
+                &std::fs::Permissions::from_mode(req.dir_mode & IMPLICIT_DIRECTORY_PERMISSION_MASK),
+            )
+            .context("mkdir_all parent")?
+            .reopen(OpenFlags::O_DIRECTORY)
+            .context("reopen parent")?;
 
-            // Set directory permissions and ownership
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(req.dir_mode))?;
-            unistd::chown(
-                &dir,
-                Some(Uid::from_raw(req.uid as u32)),
-                Some(Gid::from_raw(req.gid as u32)),
-            )?;
-        }
+        // TODO(burgerdev): why are we only applying this to the immediate parent?
+        unistd::fchown(
+            dir,
+            Some(Uid::from_raw(req.uid as u32)),
+            Some(Gid::from_raw(req.gid as u32)),
+        )
+        .context("fchown parent")?
     }
 
     let sflag = stat::SFlag::from_bits_truncate(req.file_mode);
 
     if sflag.contains(stat::SFlag::S_IFDIR) {
-        // Remove existing non-directory file if present
-        if path.exists() && !path.is_dir() {
-            fs::remove_file(&path)?;
-        }
-
-        fs::create_dir(&path).or_else(|e| {
-            if e.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(e);
+        // Directories are somewhat special: for backwards compatibility, we need to preserve an
+        // existing directory at path, so we can't just remove_all. Instead, we try to remove a
+        // file and just don't propagate the error if it's a directory or doesn't exist.
+        root.remove_file(path).or_else(|e| match e.kind() {
+            pathrs::error::ErrorKind::OsError(Some(errno))
+                if errno == libc::ENOENT || errno == libc::EISDIR =>
+            {
+                Ok(())
             }
-            Ok(())
+            _ => Err(e),
         })?;
 
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(req.file_mode))?;
+        // mkdir_all does not support the setuid/setgid/sticky bits, so we first create the
+        // directory with the stricter mask and then change permissions with the correct mask.
+        let dir = root
+            .mkdir_all(
+                path,
+                &std::fs::Permissions::from_mode(
+                    req.file_mode & IMPLICIT_DIRECTORY_PERMISSION_MASK,
+                ),
+            )
+            .context("mkdir_all dir")?
+            .reopen(OpenFlags::O_DIRECTORY)
+            .context("reopen dir")?;
+        dir.set_permissions(std::fs::Permissions::from_mode(
+            req.file_mode & FILE_PERMISSION_MASK,
+        ))?;
 
-        unistd::chown(
-            path,
+        unistd::fchown(
+            dir,
             Some(Uid::from_raw(req.uid as u32)),
             Some(Gid::from_raw(req.gid as u32)),
-        )?;
+        )
+        .context("fchown dir")?;
 
         return Ok(());
     }
 
+    // Remove any existing file if we're not resuming a chunked upload.
+    if req.offset == 0 {
+        // Remove anything that might already exist at the target location.
+        // This is safe even for a symlink leaf, remove_all removes the named inode in its parent dir.
+        root.remove_all(path).or_else(|e| match e.kind() {
+            pathrs::error::ErrorKind::OsError(Some(errno)) if errno == libc::ENOENT => Ok(()),
+            _ => Err(e),
+        })?;
+    }
+
     // Handle symlink creation
     if sflag.contains(stat::SFlag::S_IFLNK) {
-        // Clean up existing path (whether symlink, dir, or file)
-        if path.exists() || path.is_symlink() {
-            // Use appropriate removal method based on path type
-            if path.is_symlink() {
-                unistd::unlink(path)?;
-            } else if path.is_dir() {
-                fs::remove_dir_all(&path)?;
-            } else {
-                fs::remove_file(&path)?;
-            }
-        }
-
         // Create new symbolic link
         let symlink_target = PathBuf::from(OsStr::from_bytes(&req.data));
-        // Use BorrowedFd to wrap AT_FDCWD for symlinkat
-        let cwd_fd = unsafe { BorrowedFd::borrow_raw(libc::AT_FDCWD) };
-        unistd::symlinkat(&symlink_target, cwd_fd, path)?;
+        root.create(path, &pathrs::InodeType::Symlink(symlink_target))
+            .context("create symlink")?;
 
-        // Set symlink ownership (permissions not supported for symlinks)
-        let path_str = CString::new(path.as_os_str().as_bytes())?;
+        // Set symlink ownership.
+        // At the time of writing this, there was no API for creating the symlink and opening a
+        // handle to the created inode. Best we can do is to resolve it again under the root and
+        // hope that its still the same inode, but at least we guarantee that we're changing
+        // ownership only within the shared directory.
+        nix::unistd::fchownat(
+            root,
+            path,
+            Some(Uid::from_raw(req.uid as u32)),
+            Some(Gid::from_raw(req.gid as u32)),
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        )
+        .context("fchownat")?;
 
-        let ret = unsafe { libc::lchown(path_str.as_ptr(), req.uid as u32, req.gid as u32) };
-        Errno::result(ret).map(drop)?;
-
+        // Symlinks don't have permissions on Linux!
         return Ok(());
     }
 
     let mut tmpfile = path.to_path_buf();
     tmpfile.set_extension("tmp");
 
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(req.offset == 0) // Only truncate when offset is 0
-        .open(&tmpfile)?;
+    // Write file content.
+    let flags = if req.offset == 0 {
+        OpenFlags::O_RDWR | OpenFlags::O_CREAT | OpenFlags::O_TRUNC
+    } else {
+        OpenFlags::O_RDWR | OpenFlags::O_CREAT
+    };
+    let file = root
+        .create_file(
+            &tmpfile,
+            flags,
+            &std::fs::Permissions::from_mode(req.file_mode & FILE_PERMISSION_MASK),
+        )
+        .context("create_file")?;
+    file.write_all_at(req.data.as_slice(), req.offset as u64)
+        .context("write_all_at")?;
 
-    file.write_all_at(req.data.as_slice(), req.offset as u64)?;
-    let st = stat::stat(&tmpfile)?;
+    // Check whether we're waiting for more data.
 
+    let st = nix::sys::stat::fstat(&file).context("fstat")?;
     if st.st_size != req.file_size {
         return Ok(());
     }
 
-    file.set_permissions(std::fs::Permissions::from_mode(req.file_mode))?;
+    // Things like umask can change the permissions after create, make sure that they stay
+    file.set_permissions(std::fs::Permissions::from_mode(
+        req.file_mode & FILE_PERMISSION_MASK,
+    ))
+    .context("set_permissions")?;
 
-    unistd::chown(
-        &tmpfile,
+    unistd::fchown(
+        file,
         Some(Uid::from_raw(req.uid as u32)),
         Some(Gid::from_raw(req.gid as u32)),
-    )?;
+    )
+    .context("fchown")?;
 
-    // Remove existing target path before rename
-    if path.exists() || path.is_symlink() {
-        if path.is_dir() {
-            fs::remove_dir_all(&path)?;
-        } else {
-            fs::remove_file(&path)?;
-        }
-    }
-
-    fs::rename(tmpfile, path)?;
+    nix::fcntl::renameat(&root, &tmpfile, &root, path).context("renameat")?;
 
     Ok(())
 }
@@ -3998,6 +4045,7 @@ mod tests {
 
     use super::*;
     use crate::{namespace::Namespace, protocols::agent_ttrpc_async::AgentService as _};
+    use anyhow::{bail, ensure};
     use nix::mount;
     use nix::sched::{unshare, CloneFlags};
     use oci::{

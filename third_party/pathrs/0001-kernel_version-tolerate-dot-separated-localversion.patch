@@ -1,0 +1,15 @@
+--- /home/azureuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pathrs-0.2.4/src/utils/kernel_version.rs	2006-07-24 01:21:28.000000000 +0000
++++ /home/azureuser/kata-containers/third_party/pathrs/src/utils/kernel_version.rs	2026-08-06 04:04:51.643853230 +0000
+@@ -112,9 +112,10 @@
+ /// [`KernelVersion`] that can be used for comparisons.
+ fn parse_kernel_version(kver_str: &str) -> Option<KernelVersion> {
+     // Strip off any of the non-version suffixes from the kver string.
+-    let kver_str = &kver_str[..kver_str
++    let kver_str = kver_str[..kver_str
+         .find(|ch: char| !ch.is_ascii_digit() && ch != '.')
+-        .unwrap_or(kver_str.len())];
++        .unwrap_or(kver_str.len())]
++        .trim_end_matches('.');
+ 
+     let kver = kver_str
+         .split('.')

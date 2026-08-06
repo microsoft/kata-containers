@@ -224,6 +224,11 @@ gpt = "4.1.0"
 # the optimiser the whole picture. These overrides only affect the
 # kata-deploy crate; agent / runtime-rs / dragonball compile with their
 # usual defaults.
+pathrs = "0.2.4"
+
 [profile.release.package."kata-deploy"]
 opt-level = "z"
 codegen-units = 1
+
+[patch.crates-io]
+pathrs = { path = "third_party/pathrs" }

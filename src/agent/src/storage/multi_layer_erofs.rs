@@ -1179,4 +1179,62 @@ mod tests {
             part
         );
     }
+    // --- parse_dmverity_options ---
+
+    #[cfg(feature = "devicemapper")]
+    #[test]
+    fn test_parse_dmverity_options_required_fields_and_blocknum() {
+        // Test required fields and blocknum calculation.
+        //
+        // dm-verity roothash and hashoffset are mandatory — without them the
+        // verity table cannot be constructed. blocknum is computed as
+        // offset/blocksize and must be non-zero for a valid verity device.
+        // Uses hashoffset=8192, blocksize=4096 so blocknum = 8192/4096 = 2.
+        let make_valid_dmverity_storage = || -> Storage {
+            Storage {
+                options: vec![
+                    OPT_DMVERITY_ENABLED.to_string(),
+                    format!("{}{}", OPT_DMVERITY_ROOT_HASH, "aabbccdd"),
+                    format!("{}{}", OPT_DMVERITY_HASH_OFFSET, "8192"),
+                    format!("{}{}", OPT_DMVERITY_BLOCK_SIZE, "4096"),
+                    format!("{}{}", OPT_DMVERITY_HASH_SIZE, "4096"),
+                    format!("{}{}", OPT_DMVERITY_SALT, "0000000000000000"),
+                    format!("{}{}", OPT_DMVERITY_NO_SUPERBLOCK, "false"),
+                ],
+                ..Default::default()
+            }
+        };
+
+        // Missing roothash
+        let mut s = make_valid_dmverity_storage();
+        s.options.retain(|o| !o.starts_with(OPT_DMVERITY_ROOT_HASH));
+        let err = parse_dmverity_options(&s).unwrap_err();
+        assert!(
+            err.to_string().contains("roothash is required"),
+            "expected roothash error, got: {}",
+            err
+        );
+
+        // hashoffset=0
+        let mut s = make_valid_dmverity_storage();
+        s.options
+            .retain(|o| !o.starts_with(OPT_DMVERITY_HASH_OFFSET));
+        s.options
+            .push(format!("{}{}", OPT_DMVERITY_HASH_OFFSET, "0"));
+        let err = parse_dmverity_options(&s).unwrap_err();
+        assert!(
+            err.to_string().contains("hashoffset is required"),
+            "expected hashoffset error, got: {}",
+            err
+        );
+
+        // Valid case: verify blocknum = offset / blocksize
+        let s = make_valid_dmverity_storage();
+        let info = parse_dmverity_options(&s).expect("valid options should succeed");
+        assert_eq!(info.blocknum, 2); // 8192 / 4096
+        assert_eq!(info.offset, 8192);
+        assert_eq!(info.blocksize, 4096);
+        assert_eq!(info.salt.as_deref(), Some("0000000000000000"));
+        assert!(!info.no_superblock);
+    }
 }
