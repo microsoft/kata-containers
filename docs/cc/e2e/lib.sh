@@ -393,6 +393,20 @@ ensure_genpolicy_defaults() {
         log "patching oci_version 1.1.0 -> 1.3.0 in $GP_SETTINGS"
         sed -i 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' "$GP_SETTINGS"
       fi
+      # This platform has no virtio-fs: the container rootfs arrives as an erofs
+      # block storage that runtime-rs mounts under its passthrough share, so the
+      # agent sees Root.Path = /run/kata-containers/shared/containers/passthrough/
+      # <id>/rootfs. The shipped root_path only describes the virtio-fs layout
+      # (/run/kata-containers/<id>/rootfs), so allow_by_bundle_or_sandbox_id
+      # never matches and every pod is denied. "cpath" already tolerates the
+      # passthrough segment; mirror that here. The added groups must stay
+      # non-capturing — rules.rego reads capture group 1 as the bundle id.
+      if grep -q '"root_path": "/run/kata-containers/\$(bundle-id)/rootfs"' "$GP_SETTINGS" 2>/dev/null; then
+        log "patching root_path to accept the runtime-rs passthrough layout"
+        sed -i \
+          's|"root_path": "/run/kata-containers/\$(bundle-id)/rootfs"|"root_path": "/run/kata-containers/(?:shared/containers/(?:passthrough/)?)?$(bundle-id)/rootfs"|' \
+          "$GP_SETTINGS"
+      fi
       ;;
   esac
   export GP_RULES GP_SETTINGS
