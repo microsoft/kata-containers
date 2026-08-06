@@ -234,6 +234,18 @@ pub struct AgentService {
 }
 
 impl AgentService {
+    /// Construct a service instance for tests. Used by the FR-7 mediation conformance
+    /// sweep in `mediation.rs`, which lives in another module and so cannot reach the
+    /// private fields directly.
+    #[cfg(test)]
+    pub(crate) fn new_for_test(sandbox: Arc<Mutex<Sandbox>>) -> Self {
+        Self {
+            sandbox,
+            init_mode: true,
+            oma: None,
+        }
+    }
+
     #[instrument]
     async fn do_create_container(
         &self,
@@ -1031,6 +1043,31 @@ impl AgentService {
 
         Ok(resp)
     }
+
+    /// Authorize before reading, then read.
+    ///
+    /// The previous order was inverted: `do_read_stream` ran first and the policy verdict
+    /// was applied afterwards by clearing the response. Reading a pipe is **destructive** —
+    /// the bytes are consumed — so a caller the policy denied still drained the container's
+    /// stdout/stderr, discarding output the legitimate reader would otherwise have received,
+    /// and could distinguish container/exec states from the error it got back. The
+    /// authorization also came too late to prevent the read from blocking on the stream.
+    ///
+    /// The host-visible contract is unchanged: a denied read still returns an empty
+    /// response rather than an error, so `kubectl logs` behaves as before. What changes is
+    /// that a denied read now has no effect at all.
+    async fn do_read_stream_gated(
+        &self,
+        req: &protocols::agent::ReadStreamRequest,
+        stdout: bool,
+    ) -> ttrpc::Result<ReadStreamResponse> {
+        if is_allowed(req).await.is_err() {
+            // Policy does not allow reading logs. Return an empty response without
+            // touching the stream.
+            return Ok(ReadStreamResponse::new());
+        }
+        self.do_read_stream(req, stdout).await.map_ttrpc_err(same)
+    }
 }
 
 fn mem_agent_memcgconfig_to_memcg_optionconfig(
@@ -1823,12 +1860,7 @@ impl agent_ttrpc::AgentService for AgentService {
         _ctx: &TtrpcContext,
         req: protocols::agent::ReadStreamRequest,
     ) -> ttrpc::Result<ReadStreamResponse> {
-        let mut response = self.do_read_stream(&req, true).await.map_ttrpc_err(same)?;
-        if is_allowed(&req).await.is_err() {
-            // Policy does not allow reading logs, so we redact the log messages.
-            response.clear_data();
-        }
-        Ok(response)
+        self.do_read_stream_gated(&req, true).await
     }
 
     async fn read_stderr(
@@ -1836,12 +1868,7 @@ impl agent_ttrpc::AgentService for AgentService {
         _ctx: &TtrpcContext,
         req: protocols::agent::ReadStreamRequest,
     ) -> ttrpc::Result<ReadStreamResponse> {
-        let mut response = self.do_read_stream(&req, false).await.map_ttrpc_err(same)?;
-        if is_allowed(&req).await.is_err() {
-            // Policy does not allow reading logs, so we redact the log messages.
-            response.clear_data();
-        }
-        Ok(response)
+        self.do_read_stream_gated(&req, false).await
     }
 
     async fn close_stdin(

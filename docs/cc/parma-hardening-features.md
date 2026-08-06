@@ -288,13 +288,28 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
 
 ### FR-7 — Complete-mediation manifest
 - **Gap:** without a machine-checked inventory, a newly added RPC could ship unmediated.
-- **Fix:** a manifest classifies every agent ttRPC method by its enforcement point; build
-  tests fail if the proto and manifest drift, if the manifest lists a removed method, or if
-  a mediated handler does not reach its enforcement point.
+- **Fix:** a manifest classifies every agent ttRPC method by its enforcement point and by
+  the request type the policy engine sees; build tests fail if the proto and manifest drift,
+  if the manifest lists a removed method, if a request type is wrong, or — the substantive
+  check — if any RPC the build exposes can be invoked successfully under a policy that
+  denies everything.
 - **Guarantee:** every host-reachable RPC is provably mediated; there is no always-allow
   escape hatch (the strict default is closed-door).
 - **Commit:** `d68c96708`.
-- **Validated:** three build-time CI tests.
+- **Validated:** four tests. Three are static (proto↔manifest sync, request-type agreement,
+  and no unmediated class). The fourth is a **runtime conformance sweep**: it installs a
+  policy that defines every entry point as `false`, calls all 43 RPCs, and requires each one
+  to be refused by the policy engine rather than by an incidental error. Run it with
+  `cargo test --features agent-policy mediation` and `--features strict-policy mediation`.
+- **Why behavioural:** the original proof `include_str!`d `rpc.rs` and asserted the substring
+  `is_allowed` appeared inside each handler's source span, which is cfg-blind, order-blind
+  and dead-code-blind. It certified `CopyFile` as policy-gated when strict builds deny it
+  without consulting the policy, and certified `SetPolicy` in strict builds where the handler
+  is not compiled in. The sweep replaces the proxy with the property, and the manifest is now
+  `cfg`-aware — RPCs absent from a build are declared `CompiledOut` rather than claimed as
+  gated. Its first two runs found a live ordering defect (`ReadStdout`/`ReadStderr` read the
+  stream *before* authorizing, so a denied caller still consumed the container's output) and
+  a second misclassification (`GetDiagnosticData` in strict).
 
 ### FR-4A — Ordered bijective resource graph
 - **Gap:** verifying only that *some* declared resource matches each presented one, with
