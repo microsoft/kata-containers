@@ -95,6 +95,13 @@ impl CloudHypervisorInner {
                 DeviceType::Network(_) => self.pending_devices.insert(0, device.clone()),
                 DeviceType::Vfio(_) => self.pending_devices.insert(0, device.clone()),
                 DeviceType::Protection(_) => self.pending_devices.insert(0, device.clone()),
+                DeviceType::Block(ref block) => {
+                    // Cold-plug rather than defer: the guest agent scans /dev for
+                    // the initdata disk while it starts up, so a hot-plug after
+                    // boot arrives too late and the agent falls back to its
+                    // baked-in default policy.
+                    self.cold_plug_blocks.push(block.config.clone());
+                }
                 _ => {
                     debug!(
                         sl!(),

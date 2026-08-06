@@ -542,6 +542,12 @@ pub struct NamedHypervisorConfig {
     // - The user has requested that guest protection be used.
     pub guest_protection_to_use: GuestProtection,
     pub protection_device: Option<ProtectionDevConfig>,
+
+    // Block devices that must be present at boot rather than hot-plugged.
+    // Initdata is the motivating case: the guest agent scans /dev for the
+    // initdata disk during start-up, so a device added after boot is missed
+    // and the agent silently falls back to its baked-in default policy.
+    pub cold_plug_disks: Option<Vec<DiskConfig>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]

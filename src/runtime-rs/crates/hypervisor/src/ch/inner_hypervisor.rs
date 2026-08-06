@@ -27,7 +27,7 @@ use ch_config::{
     VmResize,
 };
 use ch_config::{
-    guest_protection_is_snp, guest_protection_is_tdx, NamedHypervisorConfig, VmConfig,
+    guest_protection_is_snp, guest_protection_is_tdx, DiskConfig, NamedHypervisorConfig, VmConfig,
 };
 use core::future::poll_fn;
 use futures::future::join_all;
@@ -220,6 +220,20 @@ impl CloudHypervisorInner {
 
         let kernel_params = self.get_kernel_params().await?;
 
+        let cold_plug_disks: Vec<DiskConfig> = self
+            .cold_plug_blocks
+            .iter()
+            .cloned()
+            .map(DiskConfig::try_from)
+            .collect::<Result<Vec<_>>>()
+            .context("failed to convert cold-plug block devices")?;
+
+        let cold_plug_disks = if cold_plug_disks.is_empty() {
+            None
+        } else {
+            Some(cold_plug_disks)
+        };
+
         let named_cfg = NamedHypervisorConfig {
             kernel_params,
             sandbox_path,
@@ -229,6 +243,7 @@ impl CloudHypervisorInner {
             shared_fs_devices,
             host_devices,
             protection_device,
+            cold_plug_disks,
             ..Default::default()
         };
 

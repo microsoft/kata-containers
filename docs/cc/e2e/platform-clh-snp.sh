@@ -180,10 +180,18 @@ version = 3
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata]
   runtime_type = "io.containerd.kata.v2"
   snapshotter = "erofs"
+  pod_annotations = ["io.katacontainers.*"]
+  container_annotations = ["io.katacontainers.*"]
 
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata-cc]
   runtime_type = "io.containerd.kata-cc.v2"
   snapshotter = "erofs"
+  # Without these passthrough lists containerd strips every io.katacontainers.*
+  # annotation before it reaches the shim, so the genpolicy-generated policy
+  # (delivered as cc_init_data) is silently dropped and the guest keeps running
+  # the baked-in default policy.
+  pod_annotations = ["io.katacontainers.*"]
+  container_annotations = ["io.katacontainers.*"]
   [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata-cc.options]
     ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/runtime-rs/configuration.toml"
 

@@ -5,6 +5,7 @@
 
 use super::HypervisorState;
 use crate::device::DeviceType;
+use crate::BlockConfig;
 use crate::VmmState;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -48,6 +49,10 @@ pub struct CloudHypervisorInner {
     /// List of devices that will be added to the VM once it boots
     pub(crate) pending_devices: Vec<DeviceType>,
 
+    /// Block devices requested before the VM was started. These are cold-plugged
+    /// into the initial VmConfig rather than hot-plugged after boot, because the
+    /// guest agent enumerates them during start-up (notably the initdata disk).
+    pub(crate) cold_plug_blocks: Vec<BlockConfig>,
     pub(crate) _capabilities: Capabilities,
 
     pub(crate) shutdown_tx: Option<Sender<bool>>,
@@ -110,6 +115,7 @@ impl CloudHypervisorInner {
             run_dir: String::default(),
             netns: None,
             pending_devices: vec![],
+            cold_plug_blocks: vec![],
             device_ids: HashMap::<String, String>::new(),
             _capabilities: capabilities,
             shutdown_tx: Some(tx),
@@ -182,6 +188,7 @@ impl Persist for CloudHypervisorInner {
             guest_protection_to_use: hypervisor_state.guest_protection_to_use.clone(),
 
             pending_devices: vec![],
+            cold_plug_blocks: vec![],
             device_ids: HashMap::<String, String>::new(),
             tasks: None,
             shutdown_tx: Some(tx),

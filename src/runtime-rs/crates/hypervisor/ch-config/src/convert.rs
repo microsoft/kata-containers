@@ -170,6 +170,10 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
             disks.push(disk);
         };
 
+        if let Some(extra) = n.cold_plug_disks {
+            disks.extend(extra);
+        }
+
         let disks = if !disks.is_empty() { Some(disks) } else { None };
 
         let serial = get_serial_cfg(debug, guest_protection_to_use.clone());
