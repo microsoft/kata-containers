@@ -239,6 +239,12 @@ kbs_install_cli() {
 			# shellcheck disable=2086,2248
 			sudo dnf install -y ${pkgs}
 			;;
+		azurelinux|mariner)
+			local pkgs="make gcc binutils glibc-devel kernel-headers openssl-devel perl-devel"
+
+			# shellcheck disable=2086,2248
+			sudo dnf install -y ${pkgs}
+			;;
 		*)
 			>&2 echo "ERROR: running on unsupported distro"
 			return 1

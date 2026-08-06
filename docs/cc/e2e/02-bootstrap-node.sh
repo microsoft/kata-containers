@@ -98,7 +98,12 @@ ok "repo at $(git -C "$E2E_REPO_DIR" rev-parse --short HEAD)"
 
 cd "$E2E_REPO_DIR" || die "cannot enter $E2E_REPO_DIR"
 [ -x ci/install_oras.sh ] && sudo ci/install_oras.sh || true
-[ -x ci/install_yq.sh ]   && sudo ci/install_yq.sh   || true
+# INSTALL_IN_GOPATH defaults to true, and under sudo that resolves against
+# root's HOME, so yq lands in /root/go/bin — invisible to every later stage and
+# to gha-run.sh, which aborts with "yq command is not in your $PATH". Force the
+# system location instead. sudo scrubs the environment, hence `sudo env`.
+[ -x ci/install_yq.sh ] && sudo env INSTALL_IN_GOPATH=false ci/install_yq.sh || true
+command -v yq >/dev/null || die "yq is still not on PATH after ci/install_yq.sh"
 
 ok "node bootstrapped${_boot_hint:-}"
 mark_done 02-bootstrap-node

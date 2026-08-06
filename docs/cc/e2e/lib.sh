@@ -491,4 +491,11 @@ ensure_acr() {
 if [ "$E2E_PLATFORM" = "clh-snp" ]; then
   # shellcheck source=platform-clh-snp.sh
   . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/platform-clh-snp.sh"
+
+  # The stages run under `set -uo pipefail` without -e, so a module that fails
+  # to parse would otherwise degrade into "command not found" on every clh_*
+  # call and the stage would still report PASS. Fail loudly instead.
+  command -v clh_bootstrap_node >/dev/null \
+    || die "platform-clh-snp.sh did not load cleanly — clh_* helpers are missing.
+A common cause is CRLF line endings after editing the file on Windows."
 fi

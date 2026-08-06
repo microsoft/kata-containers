@@ -105,16 +105,24 @@ if [ "${E2E_REDEPLOY:-0}" != "1" ] && cluster_is_up; then
   log "cluster and runtime are already up — skipping bring-up (E2E_REDEPLOY=1 forces it)"
   log "restaging genpolicy inputs only"
 else
-  gha deploy-k8s
-  gha install-bats
-
   if [ "$E2E_PLATFORM" = "clh-snp" ]; then
+    # gha-run.sh's deploy-k8s and install-bats are written for Ubuntu runners:
+    # both shell out to apt-get, and install-bats also calls add-apt-repository.
+    # Neither exists on Azure Linux, so they fail before doing any work. The
+    # platform module brings the same cluster up with the distro's own kubeadm.
+    # bats is only needed by upstream's k8s test suite, which this suite does not
+    # run, so nothing replaces it.
+    clh_deploy_k8s
+
     # No kata-deploy: the shim, IGVM and configuration are installed straight onto
     # the host by `make deploy-confpods` in stage 04. All this stage owes the
     # cluster is a RuntimeClass pointing at that handler, so stage 05 has
     # something to schedule against even before the build has run.
     clh_register_runtimeclass
   else
+    gha deploy-k8s
+    gha install-bats
+
     # A half-installed daemonset does not self-heal, so clear it before (re)deploying.
     kubectl -n kube-system delete daemonset kata-deploy --ignore-not-found >/dev/null 2>&1 || true
     helm uninstall kata-deploy -n kube-system >/dev/null 2>&1 || true

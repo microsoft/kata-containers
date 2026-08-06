@@ -16,7 +16,12 @@ need ssh
 need scp
 
 ssh "$E2E_SSH_HOST" 'mkdir -p ~/coco-e2e' || die "cannot reach $E2E_SSH_HOST over ssh"
-scp -q "$HERE"/*.sh "$HERE"/README.md "$E2E_SSH_HOST:~/coco-e2e/" || die "scp failed"
+# env*.sh is workstation-side site config, not part of the suite: it names a
+# resource group, a VM and a platform. Shipping it puts a file on the node that
+# describes a *different* environment, which is worth nothing there and is an
+# easy way to run the wrong thing by hand later. The knobs that matter are
+# forwarded explicitly below.
+scp -q $(ls "$HERE"/*.sh | grep -v '/env.*\.sh$') "$HERE"/README.md "$E2E_SSH_HOST:~/coco-e2e/" || die "scp failed"
 # Windows checkouts carry no executable bit, and scp preserves that, so the
 # scripts arrive non-executable and every invocation fails with Permission denied.
 ssh "$E2E_SSH_HOST" 'chmod +x ~/coco-e2e/*.sh' || die "chmod failed"
@@ -29,12 +34,20 @@ ok "suite synced to $E2E_SSH_HOST:~/coco-e2e"
 env_prefix=""
 for v in E2E_FAST E2E_SKIP_BUILD E2E_FORCE E2E_NIGHTLY_SHA E2E_BRANCH \
          E2E_STRICT_POLICY E2E_AGENT_POLICY E2E_REGISTRY E2E_NS \
-         E2E_PLATFORM E2E_REPO_URL E2E_INIT_DATA E2E_STATE_DIR \
+         E2E_PLATFORM E2E_REPO_URL E2E_INIT_DATA \
          E2E_CLH_TAG E2E_UVM_KERNEL_VERSION; do
   if [ -n "${!v:-}" ]; then
     env_prefix+="$v=$(printf '%q' "${!v}") "
   fi
 done
+
+# E2E_STATE_DIR is an absolute path under the *local* $HOME, which does not
+# exist on the node — forwarding it verbatim makes every mark_done fail. Keep
+# the environment's identity (the directory name) and let the remote shell
+# resolve $HOME itself.
+if [ -n "${E2E_STATE_DIR:-}" ]; then
+  env_prefix+="E2E_STATE_DIR=\$HOME/$(basename "$E2E_STATE_DIR") "
+fi
 
 log "running on $E2E_SSH_HOST: $*"
 # -t so ^C reaches the remote side rather than orphaning a multi-hour build.

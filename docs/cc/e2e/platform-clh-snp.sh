@@ -96,6 +96,14 @@ clh_assert_snp_host() {
   grep -qw erofs /proc/filesystems \
     || die "the running host kernel has no EROFS support — the erofs snapshotter cannot mount layers.
 Install the EROFS-enabled kernel-mshv build and reboot."
+
+  # When EROFS ships as a module rather than built in, make sure it is loaded on
+  # every boot: containerd starts before anything would autoload it, and it then
+  # falls back to overlayfs silently instead of failing loudly.
+  if ! grep -qx erofs /etc/modules-load.d/erofs.conf 2>/dev/null; then
+    echo erofs | sudo tee /etc/modules-load.d/erofs.conf >/dev/null
+  fi
+
   ok "MSHV Dom0 with EROFS ($(uname -r))"
 }
 
@@ -160,6 +168,14 @@ clh_configure_containerd() {
   [ -f "$cfg" ] && sudo cp -n "$cfg" "$cfg.pre-e2e"
   sudo tee "$cfg" >/dev/null <<'EOF'
 version = 3
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc]
+  runtime_type = "io.containerd.runc.v2"
+  [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
+    # kubelet defaults to the systemd cgroup driver. Leaving runc on cgroupfs
+    # gives two writers for the same hierarchy, which shows up much later as
+    # pods that start and then die under memory pressure.
+    SystemdCgroup = true
 
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata]
   runtime_type = "io.containerd.kata.v2"
@@ -327,4 +343,66 @@ EOF
   kubectl label node "$node" katacontainers.io/kata-runtime=true --overwrite \
     || die "could not label node $node"
   ok "RuntimeClass $E2E_RUNTIMECLASS registered; node $node labelled"
+}
+
+# ------------------------------------------------------------------ kubernetes
+# gha-run.sh deploy-k8s and install-bats are apt-flavoured (they call apt-get and
+# add-apt-repository), so on Azure Linux they fail before doing anything at all.
+# Azure Linux ships kubeadm, kubelet and cri-tools in its own cloud-native repo,
+# so the cluster is brought up natively here rather than borrowing upstream's
+# Ubuntu path.
+CLH_POD_CIDR="10.244.0.0/16"
+CLH_FLANNEL_URL="https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml"
+
+clh_deploy_k8s() {
+  if kubectl get nodes >/dev/null 2>&1; then
+    ok "kubernetes already up"
+    return 0
+  fi
+
+  log "installing kubeadm/kubelet/cri-tools from the Azure Linux cloud-native repo"
+  sudo dnf -y install kubeadm kubelet kubectl cri-tools iproute-tc socat conntrack ethtool \
+    || die "dnf install of the kubernetes packages failed"
+
+  # Stage 02 drops a kubectl into /usr/local/bin, which precedes /usr/bin on
+  # PATH. Leaving it there lets kubectl and the cluster drift apart
+  # independently, so make the distro package the single source of truth.
+  if [ -f /usr/local/bin/kubectl ] && [ ! -L /usr/local/bin/kubectl ]; then
+    sudo ln -sf /usr/bin/kubectl /usr/local/bin/kubectl
+  fi
+
+  log "preparing the host for kubelet"
+  sudo swapoff -a || true
+  printf 'overlay\nbr_netfilter\n' | sudo tee /etc/modules-load.d/k8s.conf >/dev/null
+  sudo modprobe overlay || true
+  sudo modprobe br_netfilter || true
+  sudo tee /etc/sysctl.d/99-k8s.conf >/dev/null <<'EOS'
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOS
+  sudo sysctl --system >/dev/null 2>&1 || true
+  sudo systemctl enable --now kubelet >/dev/null 2>&1 || true
+
+  log "kubeadm init (a couple of minutes)"
+  sudo kubeadm init \
+    --pod-network-cidr="$CLH_POD_CIDR" \
+    --cri-socket=unix:///run/containerd/containerd.sock \
+    --ignore-preflight-errors=Mem,NumCPU \
+    || die "kubeadm init failed — see 'sudo journalctl -u kubelet'"
+
+  mkdir -p "$HOME/.kube"
+  sudo install -o "$(id -u)" -g "$(id -g)" -m 0600 \
+    /etc/kubernetes/admin.conf "$HOME/.kube/config" \
+    || die "could not install the kubeconfig"
+
+  log "installing the flannel CNI"
+  kubectl apply -f "$CLH_FLANNEL_URL" || die "flannel apply failed"
+
+  # Single node: nothing can ever schedule unless the control-plane taint goes.
+  # A second run has nothing left to remove and kubectl exits non-zero on that.
+  kubectl taint nodes --all node-role.kubernetes.io/control-plane- >/dev/null 2>&1 || true
+
+  wait_for 300 "node Ready" all_nodes_ready
+  ok "kubernetes up"
 }
