@@ -240,7 +240,7 @@ kbs_install_cli() {
 			sudo dnf install -y ${pkgs}
 			;;
 		azurelinux|mariner)
-			local pkgs="make gcc binutils glibc-devel kernel-headers openssl-devel perl-devel"
+			local pkgs="make gcc binutils glibc-devel kernel-headers openssl-devel perl-devel perl-FindBin perl-IPC-Cmd perl-Pod-Html perl-Time-Piece"
 
 			# shellcheck disable=2086,2248
 			sudo dnf install -y ${pkgs}
