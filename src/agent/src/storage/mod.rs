@@ -305,7 +305,21 @@ pub async fn add_storages(
                 }
             }
             mount_list.extend(result.temp_mount_points);
-            mount_list.extend(result.verity_devices);
+            mount_list.extend(result.verity_devices.clone());
+
+            // Record verity devices so the dm mappings can be torn down when the
+            // container goes away; unmounting alone leaves the devices behind.
+            if let Some(ref cid) = cid {
+                if !result.verity_devices.is_empty() {
+                    let mut sandbox_guard = sandbox.lock().await;
+                    sandbox_guard
+                        .container_verity_devices
+                        .entry(cid.clone())
+                        .or_insert_with(Vec::new)
+                        .extend(result.verity_devices.clone());
+                }
+            }
+
             continue;
         }
 

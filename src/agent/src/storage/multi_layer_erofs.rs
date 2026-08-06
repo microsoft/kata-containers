@@ -55,6 +55,7 @@ const OPT_MULTI_LAYER: &str = "X-kata.multi-layer=true";
 const OPT_GPT_PARTITIONED: &str = "X-kata.gpt-partitioned=true";
 const OPT_MKDIR_PATH: &str = "X-kata.mkdir.path=";
 const OPT_PARTITION_NUMBER: &str = "X-kata.partition-number=";
+#[allow(dead_code)]
 const OPT_DMVERITY_ENABLED: &str = "X-kata.dmverity-enabled=true";
 #[cfg(feature = "devicemapper")]
 const OPT_DMVERITY_ROOT_HASH: &str = "X-kata.dmverity.roothash=";
@@ -280,32 +281,74 @@ pub async fn handle_multi_layer_erofs_group(
     let mut verity_devices = Vec::new();
     let mut base_device_cache: HashMap<String, String> = HashMap::new();
 
+    // Errors are captured rather than propagated with `?` so that layers mounted
+    // before the failure can be unwound; leaving them behind would strand both the
+    // mounts and any dm-verity mappings created for them.
+    let mut mount_err: Option<anyhow::Error> = None;
+
     for (index, erofs) in erofs_storages.iter().enumerate() {
         let lower_mount = temp_base.join(format!("lower-{}", index));
-        fs::create_dir_all(&lower_mount).context(format!(
+        if let Err(e) = fs::create_dir_all(&lower_mount).context(format!(
             "failed to create lower mount dir {}",
             lower_mount.display()
-        ))?;
+        )) {
+            mount_err = Some(e);
+            break;
+        }
 
         let base_dev_path = if is_gpt_partitioned(erofs) {
-            Some(
-                base_device_cache
-                    .entry(erofs.source.clone())
-                    .or_insert(resolve_base_device_path(erofs, sandbox).await?)
-                    .clone(),
-            )
+            if !base_device_cache.contains_key(&erofs.source) {
+                match resolve_base_device_path(erofs, sandbox).await {
+                    Ok(path) => {
+                        base_device_cache.insert(erofs.source.clone(), path);
+                    }
+                    Err(e) => {
+                        mount_err = Some(e);
+                        break;
+                    }
+                }
+            }
+            base_device_cache.get(&erofs.source).cloned()
         } else {
             None
         };
 
-        let mount_info =
-            wait_and_mount_layer(erofs, &lower_mount, sandbox, &logger, base_dev_path).await?;
-        lower_mounts.push(lower_mount);
+        match wait_and_mount_layer(erofs, &lower_mount, sandbox, &logger, base_dev_path).await {
+            Ok(mount_info) => {
+                lower_mounts.push(lower_mount);
 
-        // Collect dm-verity device for cleanup
-        if let Some(verity_dev) = mount_info.verity_device {
-            verity_devices.push(verity_dev);
+                // Collect dm-verity device for cleanup
+                if let Some(verity_dev) = mount_info.verity_device {
+                    verity_devices.push(verity_dev);
+                }
+            }
+            Err(e) => {
+                mount_err = Some(e);
+                break;
+            }
         }
+    }
+
+    if let Some(e) = mount_err {
+        // Unmount layers before destroying dm-verity devices, otherwise the devices
+        // are still busy and the teardown silently fails.
+        for mp in lower_mounts.iter().rev() {
+            if let Err(umount_err) = nix::mount::umount(mp.as_path()) {
+                warn!(
+                    logger,
+                    "failed to unmount layer during mount cleanup";
+                    "mount-point" => mp.display(),
+                    "error" => format!("{:#}", umount_err),
+                );
+            }
+        }
+
+        #[cfg(feature = "devicemapper")]
+        if !verity_devices.is_empty() {
+            cleanup_dmverity_devices(&verity_devices, &logger);
+        }
+
+        return Err(e.context("failed to mount one or more EROFS layers"));
     }
 
     // If any mkdir directive refers to {{ mount 1 }}, resolve it now using the first lower mount.
@@ -728,21 +771,22 @@ async fn wait_and_mount_layer(
 
     let is_gpt = is_gpt_partitioned(layer);
     let partition_num = get_partition_number(layer);
+    let dmverity_enabled = is_dmverity_enabled(layer);
 
     // Get the base device path
-    let dev_path = match base_dev_path {
+    let base_dev_path = match base_dev_path {
         Some(path) => path,
         None => resolve_base_device_path(layer, sandbox).await?,
     };
 
     // For GPT-partitioned disks, use the partition device path
-    let dev_path = if is_gpt {
+    let partition_path = if is_gpt {
         if let Some(part_num) = partition_num {
-            let path = get_partition_device_path(&dev_path, part_num);
+            let path = get_partition_device_path(&base_dev_path, part_num);
             info!(
                 logger,
                 "GPT-partitioned mode: using partition device";
-                "base-device" => &dev_path,
+                "base-device" => &base_dev_path,
                 "partition-number" => part_num,
                 "partition-device" => &path,
             );
@@ -750,7 +794,7 @@ async fn wait_and_mount_layer(
             // Wait for partition device node to appear
             wait_for_partition_device(&path, logger).await?;
 
-            path
+            Some(path)
         } else {
             return Err(anyhow!(
                 "GPT-partitioned storage missing partition number: {:?}",
@@ -758,8 +802,34 @@ async fn wait_and_mount_layer(
             ));
         }
     } else {
+        // Non-GPT mode: no partition path
+        None
+    };
+
+    // Determine the device path to mount.
+    // If dm-verity is enabled, create a verity device and mount that instead, so the
+    // layer is read through the verified mapping rather than the raw partition.
+    let (dev_path, verity_device_path) = if dmverity_enabled {
+        // dm-verity mode: create verity device from partition
+        let partition = partition_path.as_ref().ok_or_else(|| {
+            anyhow!("dm-verity requires GPT-partitioned storage with partition number")
+        })?;
+
+        // Create dm-verity device
+        let verity_device = create_partition_dmverity_device(partition, layer, logger).await?;
+        info!(
+            logger,
+            "Using dm-verity device for mount";
+            "partition" => partition,
+            "verity-device" => &verity_device,
+        );
+        (verity_device.clone(), Some(verity_device))
+    } else if let Some(ref partition) = partition_path {
+        // GPT mode without dm-verity: use partition directly
+        (partition.clone(), None)
+    } else {
         // Non-GPT mode: use base device directly
-        dev_path.clone()
+        (base_dev_path.clone(), None)
     };
 
     info!(
@@ -819,7 +889,7 @@ async fn wait_and_mount_layer(
     track_temporary_mount_for_cleanup(sandbox, layer_mount, logger).await?;
 
     Ok(LayerMountInfo {
-        verity_device: None,
+        verity_device: verity_device_path,
     })
 }
 

@@ -120,6 +120,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 
+#[cfg(feature = "devicemapper")]
+use kata_types::dmverity::cleanup_dmverity_devices;
 use kata_types::k8s;
 
 pub const CONTAINER_BASE: &str = "/run/kata-containers";
@@ -3385,6 +3387,15 @@ async fn remove_container_resources(sandbox: &mut Sandbox, cid: &str) -> Result<
                 err
             );
         }
+    }
+
+    // Cleanup dm-verity devices for this container (after all mounts are unmounted)
+    if let Some(verity_devices) = sandbox.container_verity_devices.remove(cid) {
+        #[cfg(feature = "devicemapper")]
+        if !verity_devices.is_empty() {
+            cleanup_dmverity_devices(&verity_devices, &sandbox.logger);
+        }
+        let _ = verity_devices;
     }
 
     sandbox.container_mounts.remove(cid);
