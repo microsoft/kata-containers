@@ -10,6 +10,22 @@ use crate::utils::toml as toml_utils;
 use anyhow::Result;
 use log::{info, warn};
 use std::fs;
+
+/// Filesystem UUID pinned into every layer's EROFS image.
+///
+/// mkfs.erofs generates a random UUID unless told otherwise, which is the only
+/// remaining source of non-determinism once the build timestamp and tar sort order
+/// are fixed. The nil UUID is used because EROFS layers are read-only and mounted by
+/// device path rather than by UUID, so sharing one value across layers is harmless.
+const EROFS_REPRODUCIBLE_UUID: &str = "00000000-0000-0000-0000-000000000000";
+
+/// Build the `mkfs_options` array for containerd's EROFS differ.
+///
+/// Every option here exists to make a layer's EROFS image a pure function of the
+/// layer's content, so that its dm-verity root hash can be predicted ahead of time.
+fn erofs_mkfs_options() -> String {
+    format!("[\"-T0\",\"--mkfs-time\",\"--sort=none\",\"-U\",\"{EROFS_REPRODUCIBLE_UUID}\"]")
+}
 use std::path::Path;
 
 pub async fn configure_erofs_snapshotter(config: &Config, configuration_file: &Path) -> Result<()> {
@@ -86,10 +102,19 @@ pub async fn configure_erofs_snapshotter(config: &Config, configuration_file: &P
     )?;
 
     // Erofs differ plugin options (requires erofs-utils >= 1.8.2 on the host).
+    //
+    // These make a layer's EROFS image, and therefore its dm-verity root hash, a
+    // deterministic function of the layer content: `-T0 --mkfs-time` pins the build
+    // timestamp, `--sort=none` removes tar ordering variance, and `-U` pins the
+    // filesystem UUID, which mkfs.erofs otherwise generates at random. Without the
+    // UUID the other two are not enough -- builds of identical input differ in
+    // exactly 20 bytes, the superblock's uuid[16] and the checksum covering it, and
+    // every build yields a different root hash. Reproducibility is what lets a
+    // policy generator declare the hash a layer must have (RM-38/RM-39).
     toml_utils::set_toml_value(
         configuration_file,
         ".plugins.\"io.containerd.differ.v1.erofs\".mkfs_options",
-        "[\"-T0\",\"--mkfs-time\",\"--sort=none\"]",
+        &erofs_mkfs_options(),
     )?;
     toml_utils::set_toml_value(
         configuration_file,
@@ -410,4 +435,65 @@ pub async fn uninstall_snapshotter(snapshotter: &str, config: &Config) -> Result
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The differ options must pin every input that would otherwise vary between
+    /// builds of identical layer content. Dropping any of these silently breaks
+    /// reproducibility of the dm-verity root hash, which a policy generator relies
+    /// on being able to predict, so assert on each one individually.
+    #[test]
+    fn erofs_mkfs_options_pin_all_sources_of_nondeterminism() {
+        let opts = erofs_mkfs_options();
+
+        // Build timestamp.
+        assert!(opts.contains("\"-T0\""), "missing -T0 in {opts}");
+        assert!(opts.contains("\"--mkfs-time\""), "missing --mkfs-time in {opts}");
+        // Tar entry ordering.
+        assert!(opts.contains("\"--sort=none\""), "missing --sort=none in {opts}");
+        // Filesystem UUID: random unless pinned, and the last thing to vary once
+        // the timestamp and sort order are fixed.
+        assert!(opts.contains("\"-U\""), "missing -U in {opts}");
+        assert!(
+            opts.contains(EROFS_REPRODUCIBLE_UUID),
+            "missing UUID value in {opts}"
+        );
+    }
+
+    /// The value is passed to mkfs.erofs verbatim; it rejects anything that is not a
+    /// canonical 8-4-4-4-12 hex UUID (notably it does not accept "nil" as a keyword).
+    #[test]
+    fn erofs_uuid_is_canonically_formatted() {
+        let groups: Vec<&str> = EROFS_REPRODUCIBLE_UUID.split('-').collect();
+        assert_eq!(groups.len(), 5, "expected 5 hyphen-separated groups");
+        assert_eq!(
+            groups.iter().map(|g| g.len()).collect::<Vec<_>>(),
+            vec![8, 4, 4, 4, 12]
+        );
+        assert!(
+            EROFS_REPRODUCIBLE_UUID
+                .chars()
+                .all(|c| c == '-' || c.is_ascii_hexdigit()),
+            "non-hex character in UUID"
+        );
+    }
+
+    /// The options are written into containerd's TOML as a literal array, so a
+    /// quoting mistake would produce a malformed config rather than a build error.
+    #[test]
+    fn erofs_mkfs_options_parse_as_a_toml_string_array() {
+        let doc = format!("opts = {}", erofs_mkfs_options())
+            .parse::<toml_edit::DocumentMut>()
+            .expect("mkfs_options is not valid TOML");
+        let arr = doc["opts"].as_array().expect("not an array");
+        assert_eq!(
+            arr.iter()
+                .map(|v| v.as_str().expect("non-string element"))
+                .collect::<Vec<_>>(),
+            vec!["-T0", "--mkfs-time", "--sort=none", "-U", EROFS_REPRODUCIBLE_UUID]
+        );
+    }
 }
