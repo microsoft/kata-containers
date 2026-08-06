@@ -17,7 +17,7 @@ use crate::utils;
 use crate::yaml;
 
 use anyhow::Result;
-use log::debug;
+use log::{debug, warn};
 use oci_spec::runtime as oci;
 use protocols::agent;
 use serde::{Deserialize, Serialize};
@@ -1442,13 +1442,9 @@ fn get_container_annotations(
     }
 
     if !is_pause_container {
-        let mut image_name = yaml_container.image.clone();
-        if image_name.find(':').is_none() {
-            image_name += ":latest";
-        }
         annotations
             .entry("io.kubernetes.cri.image-name".to_string())
-            .or_insert(image_name);
+            .or_insert(normalize_image_reference(&yaml_container.image));
     }
 
     annotations.insert(
@@ -1507,4 +1503,83 @@ pub fn get_kata_namespaces(
     });
 
     namespaces
+}
+
+/// Normalize a pod-spec image reference into the canonical form the container
+/// runtime presents at CreateContainer time.
+///
+/// The runtime does not echo back the string from the pod spec. containerd
+/// resolves the image and reports its canonical name, so a pod spec that says
+/// `busybox:latest` arrives as `docker.io/library/busybox:latest`. Because the
+/// guest-pull rules compare the declared image against the presented one, the
+/// policy has to declare the same spelling or every unqualified Docker Hub
+/// reference is denied.
+fn normalize_image_reference(image: &str) -> String {
+    match image.parse::<oci_client::Reference>() {
+        Ok(reference) => reference.whole(),
+        Err(e) => {
+            warn!("Failed to parse image reference {image}: {e}. Using it verbatim.");
+            let mut image_name = image.to_string();
+            if image_name.find(':').is_none() {
+                image_name += ":latest";
+            }
+            image_name
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_image_reference;
+
+    #[test]
+    fn normalizes_bare_docker_hub_names() {
+        assert_eq!(
+            normalize_image_reference("busybox"),
+            "docker.io/library/busybox:latest"
+        );
+        assert_eq!(
+            normalize_image_reference("busybox:latest"),
+            "docker.io/library/busybox:latest"
+        );
+        assert_eq!(
+            normalize_image_reference("redis:7"),
+            "docker.io/library/redis:7"
+        );
+    }
+
+    #[test]
+    fn normalizes_namespaced_docker_hub_names() {
+        assert_eq!(
+            normalize_image_reference("bitnami/nginx:1.25"),
+            "docker.io/bitnami/nginx:1.25"
+        );
+    }
+
+    #[test]
+    fn leaves_fully_qualified_references_alone() {
+        for image in [
+            "quay.io/prometheus/busybox:latest",
+            "ghcr.io/burgerdev/weird-images/gid:latest",
+            "registry.k8s.io/pause:3.9",
+            "myregistry:5000/app:1",
+        ] {
+            assert_eq!(normalize_image_reference(image), image);
+        }
+    }
+
+    #[test]
+    fn preserves_digests() {
+        let pinned = "ghcr.io/burgerdev/weird-images/gid:latest@sha256:bdbb485bb9e3baf381a2957b9369b6051c6113097a5f8dcee27faff17624a2c0";
+        assert_eq!(normalize_image_reference(pinned), pinned);
+        assert_eq!(
+            normalize_image_reference("busybox@sha256:bdbb485bb9e3baf381a2957b9369b6051c6113097a5f8dcee27faff17624a2c0"),
+            "docker.io/library/busybox@sha256:bdbb485bb9e3baf381a2957b9369b6051c6113097a5f8dcee27faff17624a2c0"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_verbatim_reference_when_parsing_fails() {
+        assert_eq!(normalize_image_reference("NOT A REFERENCE"), "NOT A REFERENCE:latest");
+    }
 }

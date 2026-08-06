@@ -352,6 +352,11 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_container_image_short_name() {
+        runtests("createcontainer/image_short_name").await;
+    }
+
+    #[tokio::test]
     async fn test_create_container_security_context() {
         runtests("createcontainer/security_context/runas").await;
     }
