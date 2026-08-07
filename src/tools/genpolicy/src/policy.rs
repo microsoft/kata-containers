@@ -911,7 +911,13 @@ impl AgentPolicy {
             .settings
             .get_container_settings(is_pause_container);
         let mut root = c_settings.Root.clone();
-        root.Readonly = yaml_container.read_only_root_filesystem();
+        // The pause container is not described by any Kubernetes container spec, so it has no
+        // securityContext to read `readOnlyRootFilesystem` from. Applying the app container's
+        // flag to it produces a policy the runtime can never satisfy when the sandbox rootfs is
+        // a read-only block device (host-pulled EROFS layers), so keep the settings value.
+        if !is_pause_container {
+            root.Readonly = yaml_container.read_only_root_filesystem();
+        }
 
         let namespace = resource.get_namespace().unwrap_or_default();
 
@@ -1574,7 +1580,13 @@ fn get_erofs_layer_storages(
 
     debug!("Declaring {} erofs dm-verity lower layers", image_layers.len());
 
-    for (index, layer) in image_layers.iter().enumerate() {
+    // Number the partitions topmost layer first. `image_layers` is in OCI manifest order
+    // (base first), but the runtime assigns GPT partitions in the order containerd's
+    // snapshotter lists the erofs mounts, which is overlayfs lowerdir order -- topmost
+    // first. Numbering base-first made the declared partition number disagree with the
+    // presented one for every image with more than one layer, so the policy could never
+    // be satisfied even when the root hashes matched exactly.
+    for (index, layer) in image_layers.iter().rev().enumerate() {
         let partition_number = index + 1;
         let mut options = vec![
             "X-kata.overlay-lower".to_string(),
@@ -1732,7 +1744,10 @@ mod tests {
             assert!(storage.driver_options.is_empty());
 
             // Partition numbers are 1-based and must be distinct, so that the policy
-            // pins the order of the layer stack rather than just its size.
+            // pins the order of the layer stack rather than just its size. They count
+            // the topmost layer first, matching the order the runtime assigns GPT
+            // partitions (containerd's overlayfs lowerdir order), which is the reverse
+            // of the OCI manifest order `image_layers` arrives in.
             assert!(storage
                 .options
                 .contains(&format!("X-kata.partition-number={}", i + 1)));
@@ -1745,10 +1760,51 @@ mod tests {
 
             // RM-42: the layer's derived root hash is declared, so the mounted bytes
             // are bound to this specific layer rather than to "some verity device".
-            assert!(storage
-                .options
-                .contains(&format!("X-kata.dmverity.roothash={}", layers[i].verity_hash)));
+            // Paired with the reversed numbering above: partition 1 carries the last
+            // manifest layer's hash.
+            assert!(storage.options.contains(&format!(
+                "X-kata.dmverity.roothash={}",
+                layers[layers.len() - 1 - i].verity_hash
+            )));
         }
+    }
+
+    /// The partition a layer is declared under must be the one the runtime will present
+    /// it on. `image_layers` is OCI manifest order (base first), while the runtime
+    /// numbers partitions in containerd's overlayfs lowerdir order (topmost first), so
+    /// the declaration counts backwards. Numbering the same direction as the manifest
+    /// made every multi-layer image unsatisfiable even though its root hashes were
+    /// correct, which reads like a verity mismatch and is not.
+    #[test]
+    fn erofs_layer_partitions_are_numbered_topmost_first() {
+        let layers = layers_with_hashes(3);
+        let mut storages = Vec::new();
+        get_erofs_layer_storages(&mut storages, IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY, &layers);
+
+        let partition_of = |hash: &str| -> String {
+            let s = storages
+                .iter()
+                .find(|s| s.options.contains(&format!("X-kata.dmverity.roothash={hash}")))
+                .expect("every layer hash must be declared");
+            s.options
+                .iter()
+                .find(|o| o.starts_with("X-kata.partition-number="))
+                .expect("every declaration carries a partition number")
+                .clone()
+        };
+
+        assert_eq!(
+            partition_of(&layers[2].verity_hash),
+            "X-kata.partition-number=1"
+        );
+        assert_eq!(
+            partition_of(&layers[1].verity_hash),
+            "X-kata.partition-number=2"
+        );
+        assert_eq!(
+            partition_of(&layers[0].verity_hash),
+            "X-kata.partition-number=3"
+        );
     }
 
     /// Each layer must carry its own hash. Emitting a shared or copied value would
