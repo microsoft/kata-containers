@@ -35,3 +35,9 @@ CONFIG_INFINIBAND_USER_MAD=m
 CONFIG_NET_VENDOR_MELLANOX=y
 CONFIG_MLX5_CORE=m
 CONFIG_MLX5_INFINIBAND=m
+
+# The UVM is a leaf guest and never hosts VMs, so KVM is unneeded. Disabling it
+# also avoids a build collision on the NVIDIA NV-Kernels arm64 tree, whose ARM
+# CCA/Realm patches define kvm_arch_has_private_mem() as a macro that clashes
+# with the generic static inline in linux/kvm_host.h.
+# CONFIG_KVM is not set
