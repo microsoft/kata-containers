@@ -17,7 +17,9 @@
 
 #![cfg(feature = "devicemapper")]
 
-use kata_types::dmverity::{create_dmverity_device, destroy_dmverity_device};
+use kata_types::dmverity::{
+    build_dmverity_device_name, create_dmverity_device, destroy_partition_dmverity_device,
+};
 use kata_types::mount::DmVerityInfo;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -149,9 +151,15 @@ fn good_root_hash_activates() {
         .expect("device with the correct root hash must activate");
     assert!(Path::new(&dev).exists(), "{} should exist", dev);
 
-    // The eager read must have succeeded on real content.
-    let name = dev.rsplit('/').next().unwrap().to_string();
-    destroy_dmverity_device(&name).ok();
+    // Tear down through the same path production uses, and check it removes the node too --
+    // `create_dmverity_device` always creates the node itself, so teardown always owns it.
+    let logger = slog_scope::logger();
+    destroy_partition_dmverity_device(&dev, &logger).expect("teardown must succeed");
+    assert!(
+        !Path::new(&dev).exists(),
+        "{} should have been removed by teardown",
+        dev
+    );
 }
 
 /// The case RM-52 exists for: a hash that does not match the device's tree must fail
@@ -189,6 +197,19 @@ fn wrong_root_hash_fails_at_creation() {
         msg
     );
 
-    let name = format!("{}-{}", "dm-verity", wrong);
-    destroy_dmverity_device(&name).ok();
+    // The failure path must not leave the rejected mapping live in the kernel. Before this
+    // was fixed, every failed verification leaked an active dm device (observed directly:
+    // `dmsetup ls` listing devices for images that had long since been deleted).
+    let name = build_dmverity_device_name(Path::new(&fx.loop_dev), &info);
+    let live = Command::new("dmsetup")
+        .args(["ls"])
+        .output()
+        .expect("dmsetup ls");
+    let live = String::from_utf8_lossy(&live.stdout);
+    assert!(
+        !live.contains(&name),
+        "a device rejected by verification was left active: {} still in:\n{}",
+        name,
+        live
+    );
 }

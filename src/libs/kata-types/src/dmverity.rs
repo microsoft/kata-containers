@@ -161,11 +161,10 @@ pub fn destroy_partition_dmverity_device(verity_device_path: &str, logger: &Logg
         "device-name" => &device_name,
     );
 
-    // Only remove the device node manually if we created it via mknod.
-    // When udev is running, it handles node lifecycle automatically.
-    if !has_udev() {
-        remove_dm_dev_node(verity_device_path);
-    }
+    // Remove the device node unconditionally: `create_dmverity_device` always creates it
+    // itself via mknod (udev is told not to manage these devices), so ownership of the node
+    // does not depend on whether udevd happens to be running.
+    remove_dm_dev_node(verity_device_path);
 
     Ok(())
 }
@@ -281,9 +280,8 @@ pub async fn create_dmverity_device(
     let data_blocksize = verity_info.blocksize;
 
     // Offload all blocking ioctl operations to a dedicated thread.
-    // Always use no-udev DmOptions inside spawn_blocking to avoid DM_UDEV_WAIT
-    // blocking on udevd event processing. When udev is running, we wait for the
-    // device node asynchronously after the ioctl completes (via wait_for_dm_dev_node).
+    // Always use no-udev DmOptions inside spawn_blocking to avoid DM_UDEV_WAIT blocking on
+    // udevd event processing; the device node is then created by us (see Step 3).
     let dev_path = tokio::task::spawn_blocking(move || -> Result<DmSetupResult> {
         let dm = DM::new()?;
         let verity_name = DmName::new(&verity_name_string)?;
@@ -301,6 +299,10 @@ pub async fn create_dmverity_device(
         // Step 1: Create device as read-only
         dm.device_create(verity_name, None, ro_opts)?;
 
+        // Everything after creation runs inside a closure so that any failure tears the
+        // mapping back down. Without this a rejected device -- exactly the case where the
+        // content failed to verify -- is left live in the kernel.
+        let configure = || -> Result<String> {
         // Calculate hash start block.
         let hash_start_block: u64 = if verity_info.no_superblock {
             verity_info.offset / verity_info.hashsize
@@ -378,6 +380,22 @@ pub async fn create_dmverity_device(
         // leaked a device. Since we disable the rules, we own the node.
         let device_info = dm.device_info(&id)?;
         create_dm_dev_node(&verity_name_string, device_info.device())
+        };
+
+        match configure() {
+            Ok(path) => Ok(path),
+            Err(e) => {
+                if let Err(cleanup_err) = dm.device_remove(&id, no_udev_dm_options()) {
+                    warn!(
+                        slog_scope::logger(),
+                        "failed to remove dm-verity device after a setup failure";
+                        "device" => &verity_name_string,
+                        "cleanup_error" => %cleanup_err,
+                    );
+                }
+                Err(e)
+            }
+        }
     })
     .await
     .context("spawn_blocking for dm-verity ioctl panicked")??;
@@ -392,7 +410,20 @@ pub async fn create_dmverity_device(
     // policy" really amounts to -- the kernel hashes the block and walks the tree to the
     // supplied root, which is strictly stronger than re-deriving a root digest in userspace
     // and comparing, because it verifies the bytes actually being served.
-    verify_first_block(&dev_path, data_blocksize).await?;
+    // A failure here means the content did not verify. Tear the mapping down rather than
+    // leaving a rejected device live in the kernel.
+    if let Err(e) = verify_first_block(&dev_path, data_blocksize).await {
+        let logger = slog_scope::logger();
+        if let Err(cleanup_err) = destroy_partition_dmverity_device(&dev_path, &logger) {
+            warn!(
+                logger,
+                "failed to remove dm-verity device after verification failed";
+                "device" => &dev_path,
+                "cleanup_error" => %cleanup_err,
+            );
+        }
+        return Err(e);
+    }
 
     Ok(dev_path)
 }
