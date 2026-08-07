@@ -131,11 +131,8 @@ pub fn build_dmverity_device_name(source_device_path: &Path, verity_info: &DmVer
     name
 }
 
-/// Result of dm-verity device setup, indicating whether the device node is ready or if we need to wait for udev.
-enum DmSetupResult {
-    Ready(String),
-    NeedUdevWait,
-}
+/// Result of dm-verity device setup.
+type DmSetupResult = String;
 
 /// Destroy a dm-verity device by name.
 pub fn destroy_dmverity_device(verity_device_name: &str) -> Result<()> {
@@ -278,7 +275,6 @@ pub async fn create_dmverity_device(
     let source_path = source_device_path.to_path_buf();
 
     let verity_name_string = build_dmverity_device_name(&source_path, &verity_info);
-    let verity_name_for_wait = verity_name_string.clone();
     // Owned copy for the read-back inside the closure: `verity_info` itself is still needed
     // after the closure has consumed its clone.
     let expected_root_hash = verity_info.hash.clone();
@@ -288,7 +284,7 @@ pub async fn create_dmverity_device(
     // Always use no-udev DmOptions inside spawn_blocking to avoid DM_UDEV_WAIT
     // blocking on udevd event processing. When udev is running, we wait for the
     // device node asynchronously after the ioctl completes (via wait_for_dm_dev_node).
-    let dev_path_or_need_udev = tokio::task::spawn_blocking(move || -> Result<DmSetupResult> {
+    let dev_path = tokio::task::spawn_blocking(move || -> Result<DmSetupResult> {
         let dm = DM::new()?;
         let verity_name = DmName::new(&verity_name_string)?;
         let id = DevId::Name(verity_name);
@@ -371,37 +367,20 @@ pub async fn create_dmverity_device(
             })?;
         verify_table_root_digest(&verity_target.3, &expected_root_hash)?;
 
-        // Step 3: Ensure the device node exists under /dev/mapper/.
-        let result = if has_udev() {
-            DmSetupResult::NeedUdevWait
-        } else {
-            info!(
-                slog_scope::logger(),
-                "udev is not running; creating dm-verity device node manually";
-                "device-name" => &verity_name_string,
-            );
-            let device_info = dm.device_info(&id)?;
-            let path = create_dm_dev_node(&verity_name_string, device_info.device())?;
-            DmSetupResult::Ready(path)
-        };
-
-        Ok(result)
+        // Step 3: Create the device node under /dev/mapper/.
+        //
+        // This is done unconditionally, and deliberately does not depend on whether udevd is
+        // running. Device creation above always passes `no_udev_dm_options()`, which sets
+        // DM_UDEV_DISABLE_DM_RULES_FLAG — udev is explicitly told *not* to manage this
+        // device, so waiting for udev to create the node can only ever time out. Doing that
+        // left the mapping live in the kernel with no usable node and no cleanup, so on any
+        // host or guest where udevd happens to be running every dm-verity mount failed and
+        // leaked a device. Since we disable the rules, we own the node.
+        let device_info = dm.device_info(&id)?;
+        create_dm_dev_node(&verity_name_string, device_info.device())
     })
     .await
     .context("spawn_blocking for dm-verity ioctl panicked")??;
-
-    // If udev is running, wait asynchronously for the device node (non-blocking poll).
-    let dev_path = match dev_path_or_need_udev {
-        DmSetupResult::Ready(path) => path,
-        DmSetupResult::NeedUdevWait => {
-            info!(
-                slog_scope::logger(),
-                "Waiting for udev to create dm-verity device node";
-                "device-name" => &verity_name_for_wait,
-            );
-            wait_for_dm_dev_node(&verity_name_for_wait).await?
-        }
-    };
 
     // RM-52: force the kernel to prove, now, that this device's hash tree actually roots at
     // the policy-approved hash.
@@ -484,11 +463,13 @@ mod tests {
         let msg = format!("{err:#}");
         assert!(
             msg.contains("does not match the policy-approved hash"),
-            "{msg}"
+            "{}",
+            msg
         );
         assert!(
             msg.contains(other),
-            "error must name the hash actually in force: {msg}"
+            "error must name the hash actually in force: {}",
+            msg
         );
     }
 
