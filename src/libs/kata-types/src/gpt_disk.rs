@@ -52,6 +52,28 @@ const CRC_32: Crc<u32> = Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
 const GPT_META_HEAD_IMG: &str = "gpt_meta_head.img";
 /// Temporary full GPT image used to synthesize head metadata
 const GPT_META_FULL_IMG: &str = "gpt_meta_full.img";
+/// Annotation key used by containerd to specify dm-verity metadata path
+const X_CONTAINERD_DMVERITY: &str = "X-containerd.dmverity";
+/// dm-verity v1 superblock magic number: the ASCII string "verity" followed by two NUL bytes.
+const DM_VERITY_MAGIC: [u8; 8] = [0x76, 0x65, 0x72, 0x69, 0x74, 0x79, 0x00, 0x00];
+/// dm-verity superblock version that we support
+const DM_VERITY_SB_VERSION: u32 = 1;
+/// Default dm-verity salt used by containerd's erofs snapshotter.
+const CONTAINERD_DEFAULT_DMVERITY_SALT: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+/// Maximum expected size of dm-verity metadata JSON file (arbitrary limit to prevent abuse)
+const MAX_DMVERITY_METADATA_SIZE: u64 = 65536;
+/// dm-verity data and hash block size used by containerd's EROFS differ in its
+/// default (`--tar=f`) mode.
+///
+/// containerd does not record this in the `.dmverity` sidecar, so it was previously
+/// an undeclared agreement between the differ's default and the agent's fallback
+/// constant: the agent computed `blocknum = hashoffset / blocksize` from a value
+/// nobody had told it. It is now emitted explicitly so the policy can pin it and a
+/// divergence surfaces as a policy denial rather than a corrupt verity table.
+///
+/// Note that containerd forces 512 in tar-index mode; see RM-49.
+pub const DEFAULT_DMVERITY_BLOCK_SIZE: u32 = 4096;
 
 /// Represents a read-only EROFS layer to be placed in a GPT partition
 #[derive(Debug, Clone)]
@@ -99,6 +121,223 @@ pub struct GptMetadataFiles {
     pub head_sectors: u64,
     /// Paths to generated padding files (between partitions)
     pub pad_paths: Vec<PathBuf>,
+}
+/// dm-verity metadata structure matching containerd's JSON format
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DmVerityMetadata {
+    /// Root hash of the dm-verity tree
+    pub roothash: String,
+    /// Offset in bytes where the hash data starts
+    pub hashoffset: u64,
+    /// Salt value for dm-verity (hex-encoded, optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub salt: Option<String>,
+    /// Data block size in bytes. containerd does not currently write this into the
+    /// sidecar, so it is optional and falls back to
+    /// [`DEFAULT_DMVERITY_BLOCK_SIZE`]. The field exists so that the value travels
+    /// with the metadata if containerd ever starts emitting it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocksize: Option<u32>,
+    /// Hash block size in bytes. See [`DmVerityMetadata::blocksize`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hashsize: Option<u32>,
+}
+
+/// Parse dm-verity metadata from a JSON file
+/// The metadata path looks like: "/var/lib/containerd/.../layer.erofs.dmverity"
+/// and the file is expected to be in the format produced by containerd's dm-verity implementation, e.g.:
+/// ```json
+/// {
+///   "roothash": "abcdef1234567890...",
+///   "hashoffset": 12345678,
+/// }```
+pub fn parse_dmverity_metadata_file(path: &str) -> Result<DmVerityMetadata> {
+    let file_meta = fs::metadata(path).context("failed to stat dm-verity metadata file")?;
+    if file_meta.len() > MAX_DMVERITY_METADATA_SIZE {
+        return Err(anyhow!(
+            "dm-verity metadata file too large: {} bytes (max {})",
+            file_meta.len(),
+            MAX_DMVERITY_METADATA_SIZE
+        ));
+    }
+
+    let content = fs::read_to_string(path).context("failed to read dm-verity metadata file")?;
+    let meta: DmVerityMetadata =
+        serde_json::from_str(&content).context("failed to parse dm-verity metadata JSON")?;
+    Ok(meta)
+}
+
+/// Extract dm-verity metadata path from mount annotations
+pub fn extract_dmverity_annotation(
+    annotations: &std::collections::HashMap<String, String>,
+) -> Option<&str> {
+    annotations.get(X_CONTAINERD_DMVERITY).map(|s| s.as_str())
+}
+
+/// Check whether a dm-verity v1 superblock exists at the given offset in an EROFS image file.
+///
+/// The dm-verity v1 superblock starts with the ASCII signature "verity\0\0".
+/// This is critical for correctly computing `hash_start_block` in the dm-verity table:
+/// - With superblock: hash tree starts after the superblock (hashoffset + superblock_size)
+/// - Without superblock: hash tree starts directly at hashoffset
+fn has_verity_superblock(erofs_path: &str, hashoffset: u64) -> bool {
+    let mut file = match fs::File::open(erofs_path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    if file.seek(SeekFrom::Start(hashoffset)).is_err() {
+        return false;
+    }
+
+    let mut magic = [0u8; 8];
+    if file.read_exact(&mut magic).is_err() {
+        return false;
+    }
+
+    // dm-verity v1 superblock signature: "verity\0\0" (ASCII, 8 bytes)
+    magic == DM_VERITY_MAGIC
+}
+
+/// Read the salt from a dm-verity v1 superblock embedded in an EROFS image file.
+///
+/// The dm-verity v1 superblock is located at `hashoffset` bytes from the start
+/// of the file. Its layout matches the go-dmverity `Superblock` struct
+/// (see `pkg/verity/superblock.go`), serialized in little-endian:
+///
+/// Offset  Size   Field
+///   0       8    Signature ("verity\0\0")
+///   8       4    Version (uint32, must be 1)
+///  12       4    HashType (uint32, 0 or 1)
+///  16      16    UUID
+///  32      32    Algorithm (null-terminated, e.g. "sha256")
+///  64       4    DataBlockSize (uint32)
+///  68       4    HashBlockSize (uint32)
+///  72       8    DataBlocks (uint64)
+///  80       2    SaltSize (uint16)
+///  82       6    Pad1
+///  88     256    Salt
+/// 344     168    Pad2
+/// Total: 512 bytes
+///
+/// We only need to extract the salt. If the superblock cannot be read or
+/// parsed, we return None and the agent will use its default salt.
+fn read_verity_superblock_salt(erofs_path: &str, hashoffset: u64) -> Option<String> {
+    let mut file = fs::File::open(erofs_path).ok()?;
+    file.seek(SeekFrom::Start(hashoffset)).ok()?;
+
+    // Read the fixed portion of the superblock up to and including salt_size
+    // We need bytes 0..82 to get the salt_size field
+    let mut sb_header = [0u8; 88];
+    file.read_exact(&mut sb_header).ok()?;
+
+    // Verify magic
+    if sb_header[0..8] != DM_VERITY_MAGIC {
+        return None;
+    }
+
+    // Verify version
+    let version = u32::from_le_bytes(sb_header[8..12].try_into().ok()?);
+    if version != DM_VERITY_SB_VERSION {
+        return None;
+    }
+
+    // salt_size is at offset 80 (uint16, LE)
+    let salt_size = u16::from_le_bytes(sb_header[80..82].try_into().ok()?) as usize;
+
+    if salt_size == 0 {
+        // No salt used
+        return None;
+    }
+
+    if salt_size > 256 {
+        return None;
+    }
+
+    // Read salt bytes (starts at offset 88 in the superblock, after Pad1)
+    // We already read up to offset 82 (sb_header is 88 bytes), so we need
+    // to skip 88 - 82 = 6 bytes of Pad1, then read salt_size bytes.
+    // Actually, sb_header is 88 bytes which includes the 6 bytes of Pad1
+    // (offset 82..88). So the file cursor is now at offset 88, which is
+    // exactly where the salt starts. We can read directly.
+    let mut salt_bytes = vec![0u8; salt_size];
+    file.read_exact(&mut salt_bytes).ok()?;
+
+    // Encode as lowercase hex string
+    let salt_hex: String = salt_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    Some(salt_hex)
+}
+
+/// Generate dm-verity storage options for kata-agent
+pub fn generate_dmverity_options(
+    metadata: &DmVerityMetadata,
+    erofs_path: Option<&str>,
+) -> Vec<String> {
+    // Auto-detect whether a dm-verity v1 superblock exists at hashoffset.
+    let no_superblock = if let Some(path) = erofs_path {
+        !has_verity_superblock(path, metadata.hashoffset)
+    } else {
+        // Cannot detect without the file path; default to no-superblock=false
+        // which matches the containerd erofs snapshotter default behavior
+        false
+    };
+
+    let mut options = vec![
+        "X-kata.dmverity-enabled=true".to_string(),
+        format!("X-kata.dmverity.roothash={}", metadata.roothash),
+        format!("X-kata.dmverity.hashoffset={}", metadata.hashoffset),
+        format!("X-kata.dmverity.no-superblock={}", no_superblock),
+        // Emit the geometry explicitly. The agent has always understood these
+        // options but nothing ever sent them, so it fell back to 4096 and happened
+        // to be right only because the differ runs in its default mode. Stating them
+        // makes the value reviewable in the policy instead of implicit.
+        format!(
+            "X-kata.dmverity.blocksize={}",
+            metadata.blocksize.unwrap_or(DEFAULT_DMVERITY_BLOCK_SIZE)
+        ),
+        format!(
+            "X-kata.dmverity.hashsize={}",
+            metadata.hashsize.unwrap_or(DEFAULT_DMVERITY_BLOCK_SIZE)
+        ),
+    ];
+
+    let salt_resolved = if let Some(ref salt_hex) = metadata.salt {
+        // Priority 1: salt from .dmverity JSON metadata
+        info!(
+            sl!(),
+            "Using dm-verity salt from .dmverity metadata: {} ({} bytes)",
+            salt_hex,
+            salt_hex.len() / 2
+        );
+        Some(salt_hex.clone())
+    } else if let Some(path) = erofs_path {
+        if !no_superblock {
+            // Priority 2: read salt from superblock (only when superblock exists)
+            read_verity_superblock_salt(path, metadata.hashoffset).or_else(|| {
+            info!(
+                sl!(),
+                    "Failed to read dm-verity salt from superblock, using containerd default salt (32 zero bytes)"
+                );
+                Some(CONTAINERD_DEFAULT_DMVERITY_SALT.to_string())
+            })
+        } else {
+            // Priority 3: NoSuperblock mode — use containerd's default salt
+            Some(CONTAINERD_DEFAULT_DMVERITY_SALT.to_string())
+        }
+    } else {
+        // No EROFS path provided and no salt in metadata — fall back to containerd default
+        info!(
+            sl!(),
+            "No EROFS path for salt detection, using containerd default salt (32 zero bytes)"
+        );
+        Some(CONTAINERD_DEFAULT_DMVERITY_SALT.to_string())
+    };
+
+    if let Some(salt) = salt_resolved {
+        options.push(format!("X-kata.dmverity.salt={}", salt));
+    }
+
+    options
 }
 
 /// Extract snapshot ID from a source path
@@ -460,4 +699,53 @@ pub fn generate_padding_file(output_path: &Path, size_sectors: u64) -> Result<u6
     );
 
     Ok(size_sectors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn metadata() -> DmVerityMetadata {
+        DmVerityMetadata {
+            roothash: "a".repeat(64),
+            hashoffset: 8134656,
+            salt: None,
+            blocksize: None,
+            hashsize: None,
+        }
+    }
+
+    /// RM-48: the verity geometry must be stated, not inferred. The agent computes
+    /// `blocknum = hashoffset / blocksize`, so leaving the block size to a built-in
+    /// default means a security-relevant divisor that never appears in the policy.
+    #[test]
+    fn dmverity_options_always_declare_the_geometry() {
+        let options = generate_dmverity_options(&metadata(), None);
+        assert!(options.contains(&"X-kata.dmverity.blocksize=4096".to_string()));
+        assert!(options.contains(&"X-kata.dmverity.hashsize=4096".to_string()));
+    }
+
+    /// When containerd starts recording the geometry in the sidecar, that value must
+    /// win over our fallback -- otherwise enabling tar-index mode (which forces 512)
+    /// would produce a table that silently disagrees with the device.
+    #[test]
+    fn dmverity_options_prefer_the_sidecar_geometry() {
+        let mut md = metadata();
+        md.blocksize = Some(512);
+        md.hashsize = Some(512);
+        let options = generate_dmverity_options(&md, None);
+        assert!(options.contains(&"X-kata.dmverity.blocksize=512".to_string()));
+        assert!(options.contains(&"X-kata.dmverity.hashsize=512".to_string()));
+        assert!(!options.iter().any(|o| o.ends_with("blocksize=4096")));
+    }
+
+    /// A sidecar that omits the fields must still deserialize; containerd does not
+    /// write them today, so requiring them would break every real image.
+    #[test]
+    fn dmverity_metadata_parses_without_geometry() {
+        let md: DmVerityMetadata =
+            serde_json::from_str(r#"{"roothash":"abc","hashoffset":4096}"#).unwrap();
+        assert_eq!(md.blocksize, None);
+        assert_eq!(md.hashsize, None);
+    }
 }

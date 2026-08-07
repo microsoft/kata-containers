@@ -30,6 +30,15 @@ use std::fs;
 fn erofs_mkfs_options() -> String {
     "[\"-T0\",\"--mkfs-time\",\"--sort=none\"]".to_string()
 }
+
+/// Bind the transfer service's unpacker for the `erofs` snapshotter to the `erofs`
+/// differ, so layer construction cannot silently fall back to a path that produces
+/// no dm-verity metadata. See RM-50 and the call site for why this matters.
+fn erofs_unpack_config() -> String {
+    "[{platform = \"linux/amd64\", snapshotter = \"erofs\", differ = \"erofs\"}, \
+     {platform = \"linux/arm64\", snapshotter = \"erofs\", differ = \"erofs\"}]"
+        .to_string()
+}
 use std::path::Path;
 
 pub async fn configure_erofs_snapshotter(config: &Config, configuration_file: &Path) -> Result<()> {
@@ -122,6 +131,30 @@ pub async fn configure_erofs_snapshotter(config: &Config, configuration_file: &P
         configuration_file,
         ".plugins.\"io.containerd.differ.v1.erofs\".enable_tar_index",
         "false",
+    )?;
+
+    // Force image pulls through the transfer service and bind it explicitly to the
+    // EROFS differ (RM-50).
+    //
+    // Only the differ builds a layer the way the policy expects: with the
+    // reproducibility options above, containerd's derived `-U`, and a dm-verity hash
+    // tree. When it is bypassed -- as the client-side unpacker used by
+    // `ctr image pull --local` does -- the EROFS *snapshotter* converts the extracted
+    // directory itself with a bare `mkfs.erofs --quiet -Enoinline_data <out> <dir>`.
+    // That embeds live mtimes and a random UUID and writes no dm-verity metadata at
+    // all, even with `enable_dmverity = true`. Such a layer can never match a
+    // policy-declared root hash, so it fails closed, but it fails as an opaque mount
+    // refusal. Stating both settings makes the verified configuration explicit rather
+    // than a happy accident of containerd's fallback ordering.
+    toml_utils::set_toml_value(
+        configuration_file,
+        ".plugins.\"io.containerd.cri.v1.images\".use_local_image_pull",
+        "false",
+    )?;
+    toml_utils::set_toml_value(
+        configuration_file,
+        ".plugins.\"io.containerd.transfer.v1.local\".unpack_config",
+        &erofs_unpack_config(),
     )?;
 
     toml_utils::set_toml_value(
@@ -456,6 +489,35 @@ mod tests {
         assert!(opts.contains("\"--mkfs-time\""), "missing --mkfs-time in {opts}");
         // Tar entry ordering.
         assert!(opts.contains("\"--sort=none\""), "missing --sort=none in {opts}");
+    }
+
+    /// The unpack binding is the difference between layers that carry dm-verity and
+    /// layers that silently do not, so it must name the erofs differ for every
+    /// platform we build and must be valid TOML -- an unparseable value would take
+    /// containerd down rather than degrade it (RM-50).
+    #[test]
+    fn erofs_unpack_config_binds_the_differ_and_is_valid_toml() {
+        let cfg = erofs_unpack_config();
+        let doc: toml_edit::DocumentMut = format!("unpack_config = {cfg}")
+            .parse()
+            .expect("unpack_config must be TOML");
+        let entries = doc["unpack_config"]
+            .as_array()
+            .expect("array of inline tables");
+        assert_eq!(entries.len(), 2, "one entry per supported platform");
+        let mut platforms = Vec::new();
+        for entry in entries.iter() {
+            let table = entry.as_inline_table().expect("inline table");
+            assert_eq!(table["snapshotter"].as_str(), Some("erofs"));
+            assert_eq!(
+                table["differ"].as_str(),
+                Some("erofs"),
+                "bypassing the erofs differ produces layers with no dm-verity metadata"
+            );
+            platforms.push(table["platform"].as_str().unwrap().to_string());
+        }
+        assert!(platforms.contains(&"linux/amd64".to_string()));
+        assert!(platforms.contains(&"linux/arm64".to_string()));
     }
 
     /// containerd's differ appends its own `-U <uuid-of-layer-digest>` after these

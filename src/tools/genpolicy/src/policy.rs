@@ -1519,6 +1519,11 @@ pub const IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY: &str = "host-erofs-dm-verity
 /// driver/source that marks a host-chosen emptyDir device.
 pub const EROFS_VERITY_LAYER_DRIVER: &str = "erofs-verity-layer";
 
+/// dm-verity data and hash block size for containerd's EROFS differ in its default
+/// (`--tar=f`) mode. Must track `kata_types::gpt_disk::DEFAULT_DMVERITY_BLOCK_SIZE`;
+/// a mismatch shows up immediately as a policy denial rather than silently.
+pub const EROFS_VERITY_BLOCK_SIZE: u32 = 4096;
+
 /// RM-38/RM-42: declare one dm-verity backed EROFS lower layer per image layer.
 ///
 /// In unmerged mode containerd gives each image layer its own `layer.erofs`, and
@@ -1560,14 +1565,29 @@ fn get_erofs_layer_storages(
             "X-kata.gpt-partitioned=true".to_string(),
             format!("X-kata.partition-number={partition_number}"),
             "X-kata.dmverity-enabled=true".to_string(),
+            // Pin the verity geometry (RM-48). The agent derives
+            // `blocknum = hashoffset / blocksize`, so an undeclared block size means a
+            // host-chosen divisor feeding a security-relevant calculation. These are
+            // static for containerd's default differ mode, so declaring them literally
+            // requires an exact match.
+            format!("X-kata.dmverity.blocksize={EROFS_VERITY_BLOCK_SIZE}"),
+            format!("X-kata.dmverity.hashsize={EROFS_VERITY_BLOCK_SIZE}"),
         ];
 
-        // An empty hash means derivation was disabled or unavailable. Declaring
-        // `roothash=` would be worse than declaring nothing: it would pin the layer
-        // to a value no host can ever present, denying every pod.
-        if !layer.verity_hash.is_empty() {
-            options.push(format!("X-kata.dmverity.roothash={}", layer.verity_hash));
-        }
+        // Every declared layer must carry a derived root hash. Both registry paths
+        // hard-fail if derivation is unavailable, so an empty hash here means an
+        // invariant was broken rather than that the user opted out. Emitting the
+        // declaration anyway would silently regress to the pre-RM-42 behaviour --
+        // "some dm-verity device" rather than "this content" -- which is exactly
+        // the gap this option closes, so fail loudly instead.
+        assert!(
+            !layer.verity_hash.is_empty(),
+            "layer {} of the image has no derived dm-verity root hash, but \
+             image_layer_verification is {IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY}; \
+             refusing to generate a policy that would accept any verity device",
+            layer.diff_id,
+        );
+        options.push(format!("X-kata.dmverity.roothash={}", layer.verity_hash));
 
         storages.push(agent::Storage {
             driver: EROFS_VERITY_LAYER_DRIVER.to_string(),
@@ -1736,28 +1756,19 @@ mod tests {
         assert_eq!(hashes.len(), 4);
     }
 
-    /// With derivation disabled the declaration must omit the option entirely.
-    /// Emitting an empty `roothash=` would pin every layer to a value no host can
-    /// present, turning a downgrade in strictness into a total outage.
+    /// A layer with no derived hash must abort generation rather than fall back to
+    /// the weaker "some dm-verity device" declaration. Silently degrading here would
+    /// reintroduce the exact gap RM-42 closes, and it would do so invisibly: the
+    /// policy would still look like it verified the layers.
     #[test]
-    fn erofs_layers_omit_root_hash_when_underived() {
+    #[should_panic(expected = "no derived dm-verity root hash")]
+    fn erofs_layers_refuse_to_declare_underived_layers() {
         let mut storages = Vec::new();
         get_erofs_layer_storages(
             &mut storages,
             IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY,
             &layers_without_hashes(2),
         );
-        assert_eq!(storages.len(), 2);
-        for storage in &storages {
-            assert!(!storage
-                .options
-                .iter()
-                .any(|o| o.starts_with("X-kata.dmverity.roothash=")));
-            // The shape constraints must still be declared.
-            assert!(storage
-                .options
-                .contains(&"X-kata.dmverity-enabled=true".to_string()));
-        }
     }
 
     #[test]
