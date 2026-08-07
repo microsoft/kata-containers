@@ -93,8 +93,16 @@ result to equal the payload byte for byte — the envelope's signature covers th
 rather than the parsed struct, and re-encoding catches any ambiguity, including ones not
 enumerated above. The C-ACI baseline sidesteps the whole class by signing CBOR, where issuer,
 feed and SVN sit in protected headers and CWT claims and field boundaries are length-prefixed
-(see F-144); validating a text format is the narrower fix that keeps existing v3 signatures
-valid.
+(see F-144). Re-encoding the statement the same way remains the structural fix and is *not*
+blocked by compatibility — nothing is signed against v3 yet, and the format has already been
+bumped twice on this branch. It was deferred on scope: validation is provably sufficient
+(every colliding pair has exactly one member refused, so the encoding is injective over the
+accepted domain), it is small enough to review against the proof, and a wire-format change is
+a decision to take on its own rather than inside a security fix. Two things to carry into it
+if it is taken: CBOR is not automatically canonical — decoders accept indefinite-length
+items, unsorted or duplicate map keys, and non-minimal integers — so the statement wants a
+fixed-arity array rather than a map, and the re-encode check must stay, because that is what
+enforces canonical form.
 
 ---
 
@@ -233,8 +241,15 @@ registers them as though the base policy had declared them.
 Nested declarations are **signed**. `policy_module` is covered by the fragment statement's
 `signing_bytes()`, so they ride the same COSE signature as everything else the fragment
 carries. The host cannot add, remove, or edit one — which is why the declarations live in the
-module and not in a new statement field: adding a signed field would bump the statement
-format from `kata-policy-fragment/v3` to v4 and invalidate every artifact signed to date.
+module rather than in a new statement field: reusing the existing signed field kept the
+statement format fixed, where a new field would have meant another version bump.
+
+> Note: an earlier revision of this document justified that choice by saying a bump would
+> "invalidate every artifact signed to date". That is not true and should not be cited. The
+> statement format has already gone `v1` → `v2` → `v3` within this branch as fields were
+> added, no signed artifact exists in the tree (every test signs at runtime, and the only
+> signers are in-tree tooling), and the branch is unreleased. A version bump is cheap here;
+> weigh one on its own merits.
 
 Delegation is off unless the *authorizing* declaration turns it on, and one attribute carries
 both the switch and its reach, so the two cannot drift apart:

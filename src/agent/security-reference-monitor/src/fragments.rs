@@ -226,9 +226,13 @@ impl PolicyFragment {
     ///
     /// Contrast the C-ACI baseline, where COSE_Sign1 signs CBOR: issuer, feed and SVN live
     /// in protected headers and CWT claims, so field boundaries are length-prefixed and
-    /// typed and this class of confusion cannot be expressed at all. Validating a text
-    /// format is the narrower fix; it keeps existing v3 signatures valid, where re-encoding
-    /// would invalidate every fragment already signed.
+    /// typed and this class of confusion cannot be expressed at all. Re-encoding the
+    /// statement that way is the structural fix and is *not* blocked by compatibility —
+    /// nothing is signed against v3 yet, and the format has already gone v1 → v2 → v3 on
+    /// this branch as fields were added. It was deferred on scope, not cost: this gate is
+    /// provably sufficient, and a wire-format change deserves its own decision. The reason
+    /// to prefer length-prefixing eventually is that v2 and v3 each added a field and
+    /// neither added validation for it — a gate has to be remembered, an encoding does not.
     ///
     /// Known residual: [`id`](Self::id) joins issuer, feed and SVN with `/`, and neither
     /// may ban `/` — an issuer is a `did:x509` and a feed is an OCI reference. So
