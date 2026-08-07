@@ -72,6 +72,36 @@ pub fn baremount(
     options: &str,
     logger: &Logger,
 ) -> Result<()> {
+    baremount_at(
+        source,
+        destination,
+        destination,
+        fs_type,
+        flags,
+        options,
+        logger,
+    )
+}
+
+/// Mount `source` at `destination`, performing the syscall against `target`.
+///
+/// FR-4B: `destination` is the logical path — used for the already-mounted check, for
+/// logging, and for error messages — while `target` is what the kernel actually resolves.
+/// Passing a `/proc/self/fd/N` magic link as `target` binds the mount to a descriptor
+/// captured at authorization time, so the mount lands on the object that was checked even
+/// if the path has since been swapped. When the two are the same path this is an ordinary
+/// mount.
+#[allow(clippy::too_many_arguments)]
+#[instrument]
+pub fn baremount_at(
+    source: &Path,
+    destination: &Path,
+    target: &Path,
+    fs_type: &str,
+    flags: MsFlags,
+    options: &str,
+    logger: &Logger,
+) -> Result<()> {
     let logger = logger.new(o!("subsystem" => "baremount"));
 
     if source.as_os_str().is_empty() {
@@ -104,14 +134,7 @@ pub fn baremount(
         flags
     );
 
-    nix::mount::mount(
-        Some(source),
-        destination,
-        Some(fs_type),
-        flags,
-        Some(options),
-    )
-    .map_err(|e| {
+    nix::mount::mount(Some(source), target, Some(fs_type), flags, Some(options)).map_err(|e| {
         anyhow!(
             "failed to mount {} to {}, with error: {}",
             source.display(),

@@ -4117,6 +4117,7 @@ dependencies = [
  "der",
  "ecdsa",
  "ed25519-dalek",
+ "libc",
  "p256",
  "p384",
  "rand_core 0.6.4",

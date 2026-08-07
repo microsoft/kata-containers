@@ -20,8 +20,9 @@ use slog::Logger;
 use tokio::sync::Mutex;
 use tracing::instrument;
 
-use crate::mount::baremount;
+use crate::mount::baremount_at;
 use crate::sandbox::Sandbox;
+use crate::storage::BoundDestination;
 use crate::storage::{
     common_storage_handler, new_device, parse_options, StorageContext, StorageHandler, MODE_SETGID,
 };
@@ -208,6 +209,11 @@ pub async fn update_ephemeral_mounts(
                         .collect();
                     let (flags, options) = parse_mount_options(&opts)?;
 
+                    // FR-4B: this endpoint mounts host-supplied source/mount_point pairs
+                    // just like the CreateContainer path, so it gets the same binding —
+                    // otherwise it would be the obvious way around it.
+                    let bound_dst = BoundDestination::capture(mount_path)?;
+
                     info!(logger, "mounting storage";
                         "mount-source" => src_path.display(),
                         "mount-destination" => mount_path.display(),
@@ -215,9 +221,10 @@ pub async fn update_ephemeral_mounts(
                         "mount-options" => options.as_str(),
                     );
 
-                    baremount(
+                    baremount_at(
                         src_path,
                         mount_path,
+                        &bound_dst.target(mount_path),
                         storage.fstype.as_str(),
                         flags,
                         options.as_str(),

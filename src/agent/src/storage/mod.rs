@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -28,7 +28,7 @@ use self::fs_handler::{OverlayfsHandler, VirtioFsHandler};
 use self::image_pull_handler::ImagePullHandler;
 use self::local_handler::LocalHandler;
 use self::multi_layer_erofs::{handle_multi_layer_erofs_group, is_multi_layer_storage};
-use crate::mount::{baremount, is_mounted, remove_mounts};
+use crate::mount::{baremount_at, is_mounted, remove_mounts};
 use crate::sandbox::Sandbox;
 
 mod bind_watcher_handler;
@@ -419,21 +419,10 @@ fn mount_storage(logger: &Logger, storage: &Storage) -> Result<()> {
     create_mount_destination(src_path, mount_path, "", &storage.fstype)
         .context("Could not create mountpoint")?;
 
-    // FR-4B: capture the identity of the just-validated mount destination so we can bind
-    // the mount to the *checked* object. If the path is swapped (symlink/`..` rename)
-    // between this check and the mount below, the mount is refused rather than following
-    // the swap. Strict builds only.
-    #[cfg(feature = "strict-policy")]
-    let checked_dst = if mount_path.exists() {
-        Some(
-            kata_security_reference_monitor::CheckedHandle::capture(
-                mount_path.to_string_lossy().as_ref(),
-            )
-            .context("FR-4B: capturing mount destination handle")?,
-        )
-    } else {
-        None
-    };
+    // FR-4B: pin the just-validated mount destination and mount onto the descriptor rather
+    // than re-resolving the path, so a symlink flip or parent rename between here and the
+    // syscall cannot redirect the mount.
+    let bound_dst = BoundDestination::capture(mount_path)?;
 
     info!(logger, "mounting storage";
         "mount-source" => src_path.display(),
@@ -442,22 +431,104 @@ fn mount_storage(logger: &Logger, storage: &Storage) -> Result<()> {
         "mount-options" => options.as_str(),
     );
 
-    // FR-4B: re-verify the destination identity immediately before the mount syscall.
-    #[cfg(feature = "strict-policy")]
-    if let Some(handle) = &checked_dst {
-        handle
-            .verify_unchanged()
-            .map_err(|e| anyhow!("FR-4B: mount destination swapped: {}", e))?;
-    }
-
-    baremount(
+    baremount_at(
         src_path,
         mount_path,
+        &bound_dst.target(mount_path),
         storage.fstype.as_str(),
         flags,
         options.as_str(),
         &logger,
     )
+}
+
+/// FR-4B: the mount destination, pinned to the object that was authorized.
+///
+/// A path checked at authorization time can be swapped before the mount syscall re-resolves
+/// it. `BoundDestination` removes the second resolution: in strict builds it holds an
+/// `O_PATH` descriptor captured right after the destination is created, and hands the
+/// syscall the `/proc/self/fd/N` link for that descriptor, so the mount lands on the object
+/// that was checked no matter what happened to the name in between.
+///
+/// In non-strict builds it is a zero-sized pass-through, so the surrounding code has a
+/// single shape and cannot accidentally diverge between the two configurations.
+#[cfg(feature = "strict-policy")]
+pub(crate) struct BoundDestination(kata_security_reference_monitor::CheckedHandle);
+
+#[cfg(not(feature = "strict-policy"))]
+pub(crate) struct BoundDestination;
+
+impl BoundDestination {
+    /// Pin `path`. Failure is fatal rather than skipped: a destination we cannot open is a
+    /// destination we cannot bind to, and proceeding would silently drop the guarantee.
+    #[cfg(feature = "strict-policy")]
+    pub(crate) fn capture(path: &Path) -> Result<Self> {
+        let handle = kata_security_reference_monitor::CheckedHandle::capture(
+            path.to_string_lossy().as_ref(),
+        )
+        .with_context(|| format!("FR-4B: pinning mount destination {}", path.display()))?;
+        // Not the control — the descriptor is — but it turns an attempted swap into an
+        // explicit error instead of a mount that quietly lands somewhere unexpected.
+        handle
+            .verify_unchanged()
+            .map_err(|e| anyhow!("FR-4B: mount destination swapped: {}", e))?;
+        Ok(BoundDestination(handle))
+    }
+
+    #[cfg(not(feature = "strict-policy"))]
+    pub(crate) fn capture(_path: &Path) -> Result<Self> {
+        Ok(BoundDestination)
+    }
+
+    /// The path to hand to the mount syscall.
+    #[cfg(feature = "strict-policy")]
+    pub(crate) fn target(&self, _fallback: &Path) -> PathBuf {
+        self.0.bound_target()
+    }
+
+    #[cfg(not(feature = "strict-policy"))]
+    pub(crate) fn target(&self, fallback: &Path) -> PathBuf {
+        fallback.to_path_buf()
+    }
+}
+
+#[cfg(test)]
+mod bound_destination_tests {
+    use super::*;
+
+    /// The mount target handed to the syscall must resolve to the same inode as the path we
+    /// pinned — that equivalence is the whole basis for substituting one for the other.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn target_resolves_to_the_pinned_object() {
+        use std::os::unix::fs::MetadataExt;
+
+        let dir = std::env::temp_dir().join(format!("fr4b-bd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let bound = BoundDestination::capture(&dir).unwrap();
+        let target = bound.target(&dir);
+        assert!(target.starts_with("/proc/self/fd/"));
+
+        let via_name = std::fs::metadata(&dir).unwrap();
+        let via_handle = std::fs::metadata(&target).unwrap();
+        assert_eq!(
+            (via_handle.dev(), via_handle.ino()),
+            (via_name.dev(), via_name.ino())
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A destination that cannot be pinned must fail the mount rather than fall back to
+    /// mounting by name — the previous implementation skipped its check silently when the
+    /// path did not exist.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn capturing_a_missing_destination_fails_the_mount() {
+        let missing = Path::new("/definitely/not/here/fr4b-dest");
+        assert!(BoundDestination::capture(missing).is_err());
+    }
 }
 
 #[instrument]
@@ -562,6 +633,7 @@ pub fn recursive_ownership_change(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mount::baremount;
     use anyhow::Error;
     use nix::mount::MsFlags;
     use protocols::agent::FSGroup;

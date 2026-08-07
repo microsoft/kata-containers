@@ -6,6 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# FR-4B: O_PATH descriptors for handle-bound operations.
+libc = "0.2"
 ed25519-dalek = { version = "2", default-features = false }
 coset = "0.3"
 # FR-1d / BL-2: did:x509 issuer identity — X.509 chain parsing + multi-algorithm signature
