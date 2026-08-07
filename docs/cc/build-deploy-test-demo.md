@@ -145,16 +145,39 @@ run in the pinned builder image automatically):
 
 ```bash
 cd tools/packaging/kata-deploy/local-build
-STRICT_POLICY=yes AGENT_POLICY=yes make agent-tarball rootfs-image-tarball genpolicy-tarball
+STRICT_POLICY=yes AGENT_POLICY=yes USE_CACHE=no \
+  make agent-tarball rootfs-image-tarball genpolicy-tarball
 # → build/kata-static-{agent,rootfs-image,genpolicy}.tar.zst
 ```
 
-Verify the strict agent is in the artifact (the guest rootfs embeds it):
+Build the **variant your runtime class actually boots**. A `kata-*-coco-dev` config boots
+`kata-containers-confidential.img`, which comes from `rootfs-image-confidential-tarball` — the
+plain `rootfs-image-tarball` above produces the *base* image and will not affect it.
+
+`USE_CACHE=no` is deliberate: the default (`yes`) pulls prebuilt `cached-artefacts/agent` and
+`cached-artefacts/rootfs-image` from `ghcr.io/kata-containers` over the local build, and the
+hardening flags are not part of any stage's cache identity.
+
+Verify the strict agent is in the artifact. Check the **built image**, not the tarball:
+`make rootfs-image-tarball` does not reliably regenerate `kata-static-rootfs-image.tar.zst`,
+so grepping the tarball routinely reads a stale artifact from a previous build.
 
 ```bash
-tar --zstd -xOf build/kata-static-rootfs-image.tar.zst 2>/dev/null | strings \
-  | grep -m1 "boot fragment pull failed, aborting VM"   # BL-8 string present ⇒ strict build
+IMG=build/rootfs-image/destdir/opt/kata/share/kata-containers/kata-ubuntu-noble.image
+stat -c '%y' "$IMG"                      # confirm this is from the build you just ran
+sudo mount -o loop,ro "$IMG" /mnt && strings /mnt/usr/bin/kata-agent > /tmp/ag.txt
+
+grep -c "strict-policy: no explicit policy provided" /tmp/ag.txt   # ≥1 ⇒ strict build
+grep -c "verification read failed" /tmp/ag.txt                     # ≥1 ⇒ dm-verity compiled in
+grep -c "dm-verity support not compiled in" /tmp/ag.txt            #  0 ⇒ not the stub
+sudo umount /mnt
 ```
+
+The last two matter as much as the first: `STRICT_POLICY=yes` now implies `USE_DEVMAPPER=yes`
+(strict requires every EROFS lower layer to be dm-verity protected, and without the
+`devicemapper` feature the code that would set those devices up is a stub that always fails —
+so the combination without it refuses every confidential pod). If the stub string is present,
+the flag did not reach the agent build and the whole verification chain is dead code.
 
 Install onto the node and register a strict RuntimeClass (**environment-specific** — adapt
 paths/handler to your Kata install):
