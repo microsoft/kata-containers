@@ -14,6 +14,11 @@ path = ""
 kernel = "/opt/kata/share/kata-containers/vmlinux.container"
 image = "/opt/kata/share/kata-containers/kata-containers.img"
 
+# OpenVMM cannot hot-plug devices, so discover kubelet-allocated VFIO devices
+# and attach them through a PCIe root port before the guest boots.
+cold_plug_vfio = "root-port"
+hot_plug_vfio = "no-port"
+
 # rootfs filesystem type:
 #   - ext4 (default)
 #   - xfs
@@ -138,6 +143,10 @@ create_container_timeout = @DEFCREATECONTAINERTIMEOUT@
 [runtime]
 enable_debug = true
 keep_abnormal = false
+
+# Kubelet Pod Resources API socket used to discover the devices allocated to
+# this pod while preparing the sandbox VM.
+pod_resource_api_sock = "/var/lib/kubelet/pod-resources/kubelet.sock"
 
 # Internetworking model
 internetworking_model = "@DEFNETWORKMODEL_OPENVMM@"
