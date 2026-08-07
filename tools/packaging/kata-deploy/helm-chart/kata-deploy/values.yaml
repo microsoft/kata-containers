@@ -283,6 +283,17 @@ snapshotter:
   # erofs snapshotter. When empty, kata-deploy uses its built-in default
   # (merged).
   erofsMergeMode: ""
+  # EROFS snapshotter mode. Controls the rw-layer backing strategy.
+  # Valid values: "" (default), "disk", or "memory".
+  erofsSnapshotterMode: ""
+  # Enable dm-verity integrity verification for EROFS lower layers.
+  # Independent of erofsSnapshotterMode — works with both disk and memory.
+  # Requires erofsMergeMode: "unmerged". dm-verity verifies each lower layer as
+  # its own block device, which only exists in the unmerged layout; in merged mode
+  # the dm-verity options are stripped before the storage is built, so layers would
+  # be unverified while appearing to be protected. kata-deploy refuses the
+  # combination rather than deploying it.
+  erofsDmverity: false
 
 # Shim configuration
 # By default (disableAll: false), all shims with enabled: ~ (null) are enabled.

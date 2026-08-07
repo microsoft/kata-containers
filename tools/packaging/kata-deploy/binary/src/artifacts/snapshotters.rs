@@ -41,6 +41,22 @@ fn erofs_unpack_config() -> String {
 }
 use std::path::Path;
 
+/// Reject dm-verity on the merged EROFS layout (RM-40).
+///
+/// Split out from `configure_erofs_snapshotter` so the rule itself can be tested
+/// without constructing a full `Config` and touching the filesystem.
+fn check_dmverity_requires_unmerged(erofs_dmverity: bool, unmerged: bool) -> Result<()> {
+    if erofs_dmverity && !unmerged {
+        return Err(anyhow::anyhow!(
+            "erofs snapshotter: EROFS_DMVERITY requires EROFS_MERGE_MODE=unmerged. \
+             In merged mode the dm-verity options are stripped before the storage is \
+             built, so layer content would be unverified despite dm-verity appearing \
+             to be enabled."
+        ));
+    }
+    Ok(())
+}
+
 pub async fn configure_erofs_snapshotter(config: &Config, configuration_file: &Path) -> Result<()> {
     info!("Configuring erofs-snapshotter");
 
@@ -49,6 +65,34 @@ pub async fn configure_erofs_snapshotter(config: &Config, configuration_file: &P
     // Go runtime can consume. In the default "merged" mode we force containerd
     // to merge layers into a single `fsmeta.erofs`, which is runtime-rs only.
     let unmerged = config.erofs_merge_mode.as_deref() == Some("unmerged");
+
+    // dm-verity layer integrity only exists in unmerged mode (RM-40).
+    //
+    // The GPT+VMDK path gives each layer its own block device and attaches
+    // dm-verity options per partition. The fsmerge path builds a single merged
+    // image and strips every `X-kata.` option before constructing the storage, so
+    // no roothash, salt or hashoffset can reach the guest even in principle.
+    // Enabling dm-verity on a merged deployment therefore produces a containerd
+    // config that genuinely writes per-layer dm-verity metadata which the runtime
+    // then silently ignores -- unverified container content on a deployment the
+    // operator has every reason to believe is verified. In a strict guest RM-31
+    // catches it, but only as an unexplained startup failure. Refuse the
+    // combination outright, mirroring the Go-shim guard above.
+    if config.erofs_dmverity && !unmerged {
+        warn!("##########################################################################");
+        warn!("#                                                                        #");
+        warn!("#  EROFS dm-verity was requested with the merged layer layout.           #");
+        warn!("#                                                                        #");
+        warn!("#  dm-verity verifies erofs lower layers per block device, which only    #");
+        warn!("#  exists in unmerged mode. In merged mode the metadata is generated     #");
+        warn!("#  and then discarded, leaving container content UNVERIFIED while        #");
+        warn!("#  appearing to be protected.                                            #");
+        warn!("#                                                                        #");
+        warn!("#  Set EROFS_MERGE_MODE=unmerged, or disable EROFS_DMVERITY.             #");
+        warn!("#                                                                        #");
+        warn!("##########################################################################");
+    }
+    check_dmverity_requires_unmerged(config.erofs_dmverity, unmerged)?;
 
     // The Go runtime does not support fsmerged EROFS (fsmeta.erofs).
     // If the snapshotter handler mapping explicitly pairs a Go shim with
@@ -489,6 +533,28 @@ mod tests {
         assert!(opts.contains("\"--mkfs-time\""), "missing --mkfs-time in {opts}");
         // Tar entry ordering.
         assert!(opts.contains("\"--sort=none\""), "missing --sort=none in {opts}");
+    }
+
+    /// RM-40: dm-verity on the merged layout is the one combination that must be
+    /// refused. It is not merely unsupported -- it produces a deployment that looks
+    /// verified and is not, because the runtime strips the dm-verity options before
+    /// building the storage. Every other combination must still be allowed.
+    #[test]
+    fn dmverity_is_refused_on_the_merged_layout() {
+        assert!(check_dmverity_requires_unmerged(true, false).is_err());
+
+        assert!(check_dmverity_requires_unmerged(true, true).is_ok());
+        assert!(check_dmverity_requires_unmerged(false, false).is_ok());
+        assert!(check_dmverity_requires_unmerged(false, true).is_ok());
+    }
+
+    /// The error has to name both knobs, since the operator set one of them and has
+    /// no reason to suspect the other is involved.
+    #[test]
+    fn dmverity_merge_mode_error_names_both_settings() {
+        let err = check_dmverity_requires_unmerged(true, false).unwrap_err().to_string();
+        assert!(err.contains("EROFS_DMVERITY"), "{err}");
+        assert!(err.contains("EROFS_MERGE_MODE=unmerged"), "{err}");
     }
 
     /// The unpack binding is the difference between layers that carry dm-verity and
