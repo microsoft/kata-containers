@@ -58,7 +58,15 @@ ifeq ($(INIT_DATA),yes)
 endif
 
 ##VAR USE_DEVMAPPER=yes|no define if agent enables dm-verity (devicemapper) support
+## Implied by STRICT_POLICY: strict requires every erofs lower layer to be dm-verity
+## protected (require_verity_for_lower_layers), and without this feature the device
+## creation path is a stub that always errors, so STRICT_POLICY=yes USE_DEVMAPPER=no
+## builds an agent that refuses every confidential pod. Fail-closed, but unusable.
 USE_DEVMAPPER ?= no
+
+ifeq ($(STRICT_POLICY),yes)
+    override USE_DEVMAPPER = yes
+endif
 
 # Enable the devicemapper feature (links libdevmapper for dm-verity) with GNU libc
 ifeq ($(USE_DEVMAPPER),yes)
