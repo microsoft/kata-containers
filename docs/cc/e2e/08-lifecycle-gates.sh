@@ -74,6 +74,13 @@ ok "kata-agent-ctl ready"
 # starts unkillable and stuck Terminating, long after the stage has "passed".
 ensure_branch_genpolicy
 
+# genpolicy also needs a settings file. Only ensure_genpolicy_defaults() knows
+# which one is right for this platform -- and, on clh-snp, is the thing that
+# stages it out of the branch and applies the oci_version/root_path patches at
+# all. This stage overrides GP_RULES with REF_RULES below on purpose, but
+# GP_SETTINGS must come from here or it is simply never set.
+ensure_genpolicy_defaults
+
 # The rules come from the branch too, and for the same reason: /opt/kata carries
 # whatever the last kata-deploy or stage 03 run installed, which is not
 # necessarily this commit. Testing a branch gate against a stale rules.rego
