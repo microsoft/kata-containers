@@ -2638,25 +2638,6 @@ fn do_commit_volume_revision(req: &protocols::agent::CommitVolumeRevisionRequest
         bail!("only ATOMIC_K8S volume sources support revision commits")
     }
 
-    // runtime-rs must not supply the revision or visible_paths for AtomicK8s
-    // volumes.  The agent derives them from the file paths it received, which
-    // prevents a compromised host from directing symlinks to arbitrary paths
-    // inside the guest.
-    if !req.revision.is_empty() {
-        bail!(
-            "AtomicK8s commit must not supply a revision string (got {:?}); \
-             the agent derives it from received file paths",
-            req.revision
-        );
-    }
-    if !req.visible_paths.is_empty() {
-        bail!(
-            "AtomicK8s commit must not supply visible_paths (got {:?}); \
-             the agent derives them from received file paths",
-            req.visible_paths
-        );
-    }
-
     // Use the revision and visible names tracked while receiving files.
     let revision = source
         .pending_revision
@@ -4333,11 +4314,10 @@ COMMIT
 
         {
             let mut sources = MANAGED_VOLUME_SOURCES.lock().expect("lock");
-            sources.clear();
             sources.insert(
-                "v1".to_string(),
+                "v_reject_symlink".to_string(),
                 ManagedVolumeSource {
-                    host_volume_id: "h1".to_string(),
+                    host_volume_id: "h_reject".to_string(),
                     guest_path: guest_path.clone(),
                     volume_type: VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S,
                     active_revision: None,
@@ -4349,7 +4329,7 @@ COMMIT
 
         // Sending a symlink to an AtomicK8s volume must be rejected.
         let req = protocols::agent::PutVolumeFileRequest {
-            agent_volume_id: "v1".to_string(),
+            agent_volume_id: "v_reject_symlink".to_string(),
             relative_path: "..data".to_string(),
             file_mode: libc::S_IFLNK,
             data: b"..2026_07_31_16_20_52.3621362187".to_vec(),
@@ -4359,6 +4339,11 @@ COMMIT
             do_put_volume_file(&req).is_err(),
             "symlink to AtomicK8s volume should be rejected"
         );
+
+        MANAGED_VOLUME_SOURCES
+            .lock()
+            .expect("lock")
+            .remove("v_reject_symlink");
     }
 
     #[test]
@@ -4413,11 +4398,8 @@ COMMIT
         };
         do_put_volume_file(&putreq).expect("put file");
 
-        // Commit: revision and visible_paths must be empty; agent derives them.
         let commit = protocols::agent::CommitVolumeRevisionRequest {
             agent_volume_id: "v1".to_string(),
-            revision: String::new(),
-            visible_paths: vec![],
             garbage_collect_previous: true,
             ..Default::default()
         };

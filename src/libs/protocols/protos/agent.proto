@@ -644,15 +644,6 @@ message PutVolumeFileRequest {
 
 message CommitVolumeRevisionRequest {
     string agent_volume_id = 1;
-    // Deprecated / unused for VOLUME_SOURCE_TYPE_ATOMIC_K8S: must be empty.
-    // The agent derives the revision directory name from the file paths it
-    // received via PutVolumeFile (e.g. "..2026_01_02_03_04_05.123456789"),
-    // preventing the host from directing symlinks to arbitrary destinations
-    // inside the guest.
-    string revision = 2;
-    // Deprecated / unused for VOLUME_SOURCE_TYPE_ATOMIC_K8S: must be empty.
-    // The agent derives visible entry names from received file paths.
-    repeated string visible_paths = 3;
     bool garbage_collect_previous = 4;
 }
 

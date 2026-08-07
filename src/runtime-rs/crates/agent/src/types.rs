@@ -601,8 +601,6 @@ pub struct PutVolumeFileRequest {
 #[derive(PartialEq, Clone, Default, Debug)]
 pub struct CommitVolumeRevisionRequest {
     pub agent_volume_id: String,
-    pub revision: String,
-    pub visible_paths: Vec<String>,
     pub garbage_collect_previous: bool,
 }
 

@@ -195,8 +195,6 @@ impl FsWatcher {
                 } else {
                     let commit_req = agent::CommitVolumeRevisionRequest {
                         agent_volume_id: volume_id_sync.clone(),
-                        revision: String::new(),
-                        visible_paths: vec![],
                         garbage_collect_previous: true,
                     };
                     if let Err(e) = agent_sync.commit_volume_revision(commit_req).await {
@@ -293,8 +291,6 @@ impl FsWatcher {
                             Ok(()) => {
                                 let commit_req = agent::CommitVolumeRevisionRequest {
                                     agent_volume_id: agent_volume_id.clone(),
-                                    revision: String::new(),
-                                    visible_paths: vec![],
                                     garbage_collect_previous: true,
                                 };
                                 if let Err(e) =
@@ -731,8 +727,6 @@ impl ShareFsVolume {
             // runtime-rs does not supply them here.
             let req = agent::CommitVolumeRevisionRequest {
                 agent_volume_id: agent_volume_id.to_string(),
-                revision: String::new(),
-                visible_paths: vec![],
                 garbage_collect_previous: true,
             };
             agent

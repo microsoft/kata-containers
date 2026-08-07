@@ -877,8 +877,6 @@ impl From<CommitVolumeRevisionRequest> for agent::CommitVolumeRevisionRequest {
     fn from(from: CommitVolumeRevisionRequest) -> Self {
         Self {
             agent_volume_id: from.agent_volume_id,
-            revision: from.revision,
-            visible_paths: from.visible_paths,
             garbage_collect_previous: from.garbage_collect_previous,
             ..Default::default()
         }
