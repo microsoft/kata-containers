@@ -513,6 +513,70 @@ impl AgentPolicy {
         )
     }
 
+    /// Ask the policy why it refused `ep`.
+    ///
+    /// The endpoint rule only ever fails to produce a value, so the refusal itself carries
+    /// no detail. `rules.rego` therefore defines a companion `reason` rule that re-derives
+    /// which checks no policy container satisfied; this evaluates it with `rule` set to the
+    /// endpoint name, exactly as the C-ACI baseline queries `data.policy.reason` after a
+    /// denial.
+    ///
+    /// Strictly diagnostic. It runs only after the request has already been refused, so a
+    /// failure here costs a good error message and nothing else — which is also why
+    /// injecting `rule` into the input is safe even if a request ever carried that field:
+    /// the allow decision has already been made from the unmodified input.
+    async fn denial_reasons(&mut self, ep: &str, ep_input: &str) -> Vec<String> {
+        let mut input: serde_json::Value = match serde_json::from_str(ep_input) {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        };
+        let Some(obj) = input.as_object_mut() else {
+            return Vec::new();
+        };
+        obj.insert("rule".to_string(), serde_json::Value::String(ep.to_string()));
+
+        if self.engine.set_input_json(&input.to_string()).is_err() {
+            return Vec::new();
+        }
+        // Discard the prints this evaluation generates so they cannot bleed into the next
+        // request's trace.
+        let results = self
+            .engine
+            .eval_query("data.agent_policy.reason".to_string(), false);
+        let _ = self.engine.take_prints();
+
+        let Ok(results) = results else {
+            return Vec::new();
+        };
+        // An older policy defines no `reason` rule at all; that is not an error, it just
+        // means no attribution is available.
+        let Some(first) = results.result.first() else {
+            return Vec::new();
+        };
+        let Some(expr) = first.expressions.first() else {
+            return Vec::new();
+        };
+        let Ok(json) = serde_json::to_value(&expr.value) else {
+            return Vec::new();
+        };
+        // `errors` is a Rego *set*. regorus serializes a set as a JSON object whose keys
+        // are the members (`{"some error": true}`), not as an array — so read the keys.
+        // Arrays are accepted too, so this keeps working if that representation ever
+        // changes or a policy defines `errors` as a list.
+        let mut reasons: Vec<String> = match json.get("errors") {
+            Some(serde_json::Value::Object(map)) => map.keys().cloned().collect(),
+            Some(serde_json::Value::Array(items)) => items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect(),
+            _ => Vec::new(),
+        };
+        // Rego sets have no inherent order; sort so the same denial always reads the same
+        // way and two runs can be diffed.
+        reasons.sort();
+        reasons
+    }
+
     /// Ask regorus if an API call should be allowed or not.
     pub async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
@@ -577,12 +641,28 @@ impl AgentPolicy {
         }
 
         // FR-8: on denial, emit a structured, rule-attributable decision object. It
-        // records the endpoint, the denied rule, and the request's top-level field names
-        // (never values), so denials are auditable without leaking env values, sealed
-        // secrets, or policy text.
+        // records the endpoint, the checks that failed, and the request's top-level field
+        // names (never values), so denials are auditable without leaking env values,
+        // sealed secrets, or policy text.
+        //
+        // RM-64: the same explanation is returned to the caller, and the `print()` trace no
+        // longer is. Returning the trace was both useless and unsafe. Useless because it is
+        // unstructured and far larger than the message budget, so containerd truncated away
+        // whatever mattered. Unsafe because it embeds the evaluated input verbatim --
+        // `allow_create_container_input: input = {...}` carries every environment variable
+        // *value* and the full command line -- and the denial crosses the guest/host
+        // boundary on its way to the shim, so a refused request handed the host exactly the
+        // workload data a confidential guest exists to keep from it. The baseline redacts
+        // env values before a decision leaves the UVM; this reports names only.
+        //
+        // The trace is still available to whoever holds the guest, at debug level, via
+        // `log_eval_input`.
         if !allow {
-            let decision = crate::decision::DecisionObject::for_denial(ep, ep_input);
+            let reasons = self.denial_reasons(ep, ep_input).await;
+            let decision =
+                crate::decision::DecisionObject::for_denial_with_reasons(ep, ep_input, reasons);
             self.log_decision(&decision).await;
+            return Ok((false, decision.explain()));
         }
 
         Ok((allow, prints))
@@ -1766,7 +1846,8 @@ mod tests {
         for v in ["1.0.1", "1.1.0", "2.0.0"] {
             assert!(
                 AgentPolicy::new().set_policy(&with(v)).await.is_err(),
-                "expected {v} to be refused"
+                "expected {} to be refused",
+                v
             );
         }
         // An explicit but malformed version is an error, not a silent legacy fallback.
@@ -1877,6 +1958,206 @@ SignalProcessRequest if {
             is_denied(p.allow_request("RemoveContainerRequest", &req).await),
             "and the removal cannot be retried either -- the container is stranded"
         );
+    }
+
+    /// RM-64: build an `AgentPolicy` over the real `rules.rego` plus a `policy_data`
+    /// declaring `containers`, so the denial-reason rules can be evaluated against the
+    /// shipped policy rather than a model of it.
+    fn policy_with_containers(containers_json: &str) -> AgentPolicy {
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy(
+                "rules.rego".to_string(),
+                include_str!("../../../tools/genpolicy/rules.rego").to_string(),
+            )
+            .unwrap();
+        p.engine
+            .add_policy(
+                "policy_data.rego".to_string(),
+                format!(
+                    "package agent_policy\npolicy_data := {{\"containers\": {containers_json}, \
+                     \"fragments\": []}}\n"
+                ),
+            )
+            .unwrap();
+        p
+    }
+
+    /// RM-64: a denial says which check failed, not merely that one did.
+    ///
+    /// This reproduces RM-63 -- a workload with `readOnlyRootFilesystem: false` makes
+    /// genpolicy declare `Readonly = false` for the pause container while the runtime
+    /// presents `true`. Before this, the operator got the endpoint name and a `print()`
+    /// trace that containerd truncated away; there was nothing to distinguish it from any
+    /// other create-container denial.
+    #[tokio::test]
+    async fn a_denial_names_the_field_that_did_not_match() {
+        let containers = r#"[{
+            "sandbox_pidns": false,
+            "storages": [],
+            "OCI": {
+                "Version": "1.1.0",
+                "Root": {"Readonly": true},
+                "Process": {"Args": ["/bin/sh"], "Cwd": "/", "Env": ["PATH=/usr/bin"]},
+                "Mounts": [],
+                "Annotations": {}
+            }
+        }]"#;
+        let request = r#"{
+            "container_id": "c1",
+            "sandbox_pidns": false,
+            "storages": [],
+            "OCI": {
+                "Version": "1.1.0",
+                "Root": {"Readonly": false},
+                "Process": {"Args": ["/bin/sh"], "Cwd": "/", "Env": ["PATH=/usr/bin"]},
+                "Mounts": [],
+                "Annotations": {}
+            }
+        }"#;
+
+        let mut p = policy_with_containers(containers);
+        let (allowed, explanation) = p
+            .allow_request("CreateContainerRequest", request)
+            .await
+            .unwrap();
+
+        assert!(!allowed, "the request must still be refused");
+        assert!(
+            explanation.contains("Root.Readonly"),
+            "the denial does not name the field that failed: {}",
+            explanation
+        );
+        // The point of the change is that this survives truncation, so it must lead.
+        let head: String = explanation.chars().take(200).collect();
+        assert!(
+            head.contains("Root.Readonly"),
+            "the reason must precede the trace, or containerd truncates it away: {}",
+            head
+        );
+    }
+
+    /// RM-64 for the case that motivated it: RM-62, where the declared and presented
+    /// dm-verity root hashes are identical and only the partition numbers are swapped.
+    ///
+    /// This is the failure worth calling out explicitly, because it *looks* like image
+    /// corruption -- a verity mismatch -- and is actually a layer-ordering disagreement.
+    /// Diagnosing it originally took a hand-built `rules.rego` with the largest `print()`
+    /// calls stubbed out just to fit the trace under containerd's limit.
+    #[tokio::test]
+    async fn a_verity_ordering_mismatch_is_distinguishable_from_a_content_mismatch() {
+        let containers = r#"[{
+            "sandbox_pidns": false,
+            "storages": [
+                {"driver": "erofs-verity-layer",
+                 "options": ["X-kata.dmverity.roothash=aaa", "X-kata.dmverity.partition-number=1"]},
+                {"driver": "erofs-verity-layer",
+                 "options": ["X-kata.dmverity.roothash=bbb", "X-kata.dmverity.partition-number=2"]}
+            ],
+            "OCI": {
+                "Version": "1.1.0",
+                "Root": {"Readonly": true},
+                "Process": {"Args": ["/bin/sh"], "Cwd": "/", "Env": []},
+                "Mounts": [],
+                "Annotations": {}
+            }
+        }]"#;
+        // Same two hashes, swapped onto each other's partitions.
+        let request = r#"{
+            "container_id": "c1",
+            "sandbox_pidns": false,
+            "storages": [
+                {"fstype": "erofs",
+                 "options": ["X-kata.dmverity.roothash=bbb", "X-kata.dmverity.partition-number=1"]},
+                {"fstype": "erofs",
+                 "options": ["X-kata.dmverity.roothash=aaa", "X-kata.dmverity.partition-number=2"]}
+            ],
+            "OCI": {
+                "Version": "1.1.0",
+                "Root": {"Readonly": true},
+                "Process": {"Args": ["/bin/sh"], "Cwd": "/", "Env": []},
+                "Mounts": [],
+                "Annotations": {}
+            }
+        }"#;
+
+        let mut p = policy_with_containers(containers);
+        let (allowed, explanation) = p
+            .allow_request("CreateContainerRequest", request)
+            .await
+            .unwrap();
+
+        assert!(!allowed);
+        assert!(
+            explanation.contains("dm-verity layers"),
+            "the denial does not mention the verity layers: {}",
+            explanation
+        );
+        // Both hashes are present on both sides; the message has to show the pairing so
+        // the reader can see the positions are what differ.
+        assert!(
+            explanation.contains("partition 1 = bbb") && explanation.contains("partition 1 = aaa"),
+            "the message must show both pairings so an ordering fault is visible as one: {}",
+            explanation
+        );
+    }
+
+    /// The reasons must not leak workload data, and neither must anything else in the
+    /// denial. The message crosses the guest/host boundary, so an environment variable
+    /// value or a command line in it is data a confidential guest has handed to the host
+    /// it is meant to be protected from. Variables are reported by name only and command
+    /// arguments are not reported at all -- the same posture the C-ACI baseline takes when
+    /// it redacts env values before a decision leaves the UVM.
+    #[tokio::test]
+    async fn a_denial_reports_env_names_but_never_values() {
+        let containers = r#"[{
+            "sandbox_pidns": false,
+            "storages": [],
+            "OCI": {
+                "Version": "1.1.0",
+                "Root": {"Readonly": true},
+                "Process": {"Args": ["/bin/sh"], "Cwd": "/", "Env": ["PATH=/usr/bin"]},
+                "Mounts": [],
+                "Annotations": {}
+            }
+        }]"#;
+        let request = r#"{
+            "container_id": "c1",
+            "sandbox_pidns": false,
+            "storages": [],
+            "OCI": {
+                "Version": "1.1.0",
+                "Root": {"Readonly": true},
+                "Process": {
+                    "Args": ["/bin/sh", "-c", "launch --token hunter2"],
+                    "Cwd": "/",
+                    "Env": ["PATH=/usr/bin", "API_KEY=supersecretvalue"]
+                },
+                "Mounts": [],
+                "Annotations": {}
+            }
+        }"#;
+
+        let mut p = policy_with_containers(containers);
+        let (allowed, explanation) = p
+            .allow_request("CreateContainerRequest", request)
+            .await
+            .unwrap();
+
+        assert!(!allowed);
+        assert!(
+            explanation.contains("API_KEY"),
+            "the undeclared variable's name must be reported: {}",
+            explanation
+        );
+        for leaked in ["supersecretvalue", "hunter2", "launch --token"] {
+            assert!(
+                !explanation.contains(leaked),
+                "the denial leaked a value ({}) across the guest/host boundary: {}",
+                leaked,
+                explanation
+            );
+        }
     }
 
     /// RM-26: a removal for a container id the policy never admitted is allowed exactly

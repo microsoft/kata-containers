@@ -2472,3 +2472,240 @@ default LoadPolicyFragmentRequest := false
 LoadPolicyFragmentRequest if {
     count(policy_fragments) > 0
 }
+
+# ---------------------------------------------------------------------------
+# FR-8 / RM-64: denial reasons.
+#
+# When a request is refused, the endpoint rule simply fails to produce a value and the
+# agent has nothing to tell the operator beyond "denied". The only diagnostic available
+# was the `print()` trace, which is unstructured, is the largest thing in the message,
+# and is truncated by containerd before it reaches anyone -- so three unrelated defects
+# (a dm-verity gap, an inverted partition ordering and a Root.Readonly mismatch) all
+# presented as the same opaque failure.
+#
+# This mirrors the C-ACI baseline, whose Rego framework accumulates a set of failure
+# strings (`data.framework.errors`) and exposes them through `data.policy.reason`, which
+# the enforcer queries on denial. The agent does the same: on refusal it re-evaluates
+# `data.agent_policy.reason` with `rule` set to the endpoint name.
+#
+# Two properties this deliberately keeps:
+#
+#   - **Diagnostic only.** Nothing here participates in the allow decision. The agent
+#     evaluates it *after* the request has already been refused, so a bug in this section
+#     can make a message wrong but cannot make a denied request succeed. That is also why
+#     injecting `rule` into the input is safe even if a request ever carried that field.
+#
+#   - **Names, never values.** Environment variables are reported by name only and
+#     command arguments are not reported at all, matching the redaction the baseline
+#     applies before a decision leaves the guest. Paths, mount destinations, root hashes
+#     and partition numbers *are* reported: all of them appear in the policy itself, so
+#     they reveal nothing the holder of the policy does not already have.
+#
+# The set is a set of *candidate* explanations, not a single root cause. Each entry means
+# "no policy container satisfied this particular check", so several can be true at once
+# and a container failing two checks contributes two entries. That is the same semantics
+# the baseline has, and it is more useful than guessing which one mattered.
+# ---------------------------------------------------------------------------
+
+reason := {"errors": errors}
+
+# A container id may only be used once per sandbox (RM-20). This is checked before any
+# candidate is considered, so it is reported on its own.
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    get_state_val(retired_key(input.container_id))
+    msg := sprintf("container id %v has already been used in this sandbox and cannot be reused", [input.container_id])
+}
+
+errors["the policy declares no containers, so no CreateContainerRequest can be allowed"] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) == 0
+}
+
+# Below: one error per discriminating field, emitted when *no* candidate container agrees
+# with the request on that field. Each names the presented value and the set of values the
+# policy would have accepted, which is the comparison an operator otherwise has to
+# reconstruct by hand from a truncated trace.
+
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    not candidate_agrees_on_readonly
+    accepted := {c.container.OCI.Root.Readonly | some c in all_policy_container_entries}
+    msg := sprintf("Root.Readonly: request has %v, policy accepts %v", [input.OCI.Root.Readonly, accepted])
+}
+
+candidate_agrees_on_readonly if {
+    some entry in all_policy_container_entries
+    entry.container.OCI.Root.Readonly == input.OCI.Root.Readonly
+}
+
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    not candidate_agrees_on_pidns
+    accepted := {c.container.sandbox_pidns | some c in all_policy_container_entries}
+    msg := sprintf("sandbox_pidns: request has %v, policy accepts %v", [input.sandbox_pidns, accepted])
+}
+
+candidate_agrees_on_pidns if {
+    some entry in all_policy_container_entries
+    entry.container.sandbox_pidns == input.sandbox_pidns
+}
+
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    not candidate_agrees_on_oci_version
+    accepted := {c.container.OCI.Version | some c in all_policy_container_entries}
+    msg := sprintf("OCI.Version: request has %v, policy accepts %v", [input.OCI.Version, accepted])
+}
+
+candidate_agrees_on_oci_version if {
+    some entry in all_policy_container_entries
+    entry.container.OCI.Version == input.OCI.Version
+}
+
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    i_namespace := input.OCI.Annotations[S_NAMESPACE_KEY]
+    not candidate_agrees_on_namespace
+    accepted := {c.container.OCI.Annotations[S_NAMESPACE_KEY] | some c in all_policy_container_entries}
+    msg := sprintf("sandbox namespace: request has %v, policy accepts %v", [i_namespace, accepted])
+}
+
+candidate_agrees_on_namespace if {
+    some entry in all_policy_container_entries
+    entry.container.OCI.Annotations[S_NAMESPACE_KEY] == input.OCI.Annotations[S_NAMESPACE_KEY]
+}
+
+# Command arguments are compared but never reported: unlike mounts and hashes they are
+# workload data rather than policy data, and the baseline redacts them for the same reason.
+errors["command: no policy container declares this container's argument list"] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    not candidate_agrees_on_args
+}
+
+candidate_agrees_on_args if {
+    some entry in all_policy_container_entries
+    entry.container.OCI.Process.Args == input.OCI.Process.Args
+}
+
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    not candidate_agrees_on_cwd
+    accepted := {c.container.OCI.Process.Cwd | some c in all_policy_container_entries}
+    msg := sprintf("working directory: request has %v, policy accepts %v", [input.OCI.Process.Cwd, accepted])
+}
+
+candidate_agrees_on_cwd if {
+    some entry in all_policy_container_entries
+    entry.container.OCI.Process.Cwd == input.OCI.Process.Cwd
+}
+
+# Environment variables: names only. A value can be a password or a sealed secret, and the
+# name alone is enough to say which variable was not expected.
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    unmatched := unmatched_env_names
+    count(unmatched) > 0
+    msg := sprintf("environment variables no policy container declares: %v", [unmatched])
+}
+
+unmatched_env_names := {name |
+    some i_env in input.OCI.Process.Env
+    not env_declared_by_some_candidate(i_env)
+    name := split(i_env, "=")[0]
+}
+
+env_declared_by_some_candidate(i_env) if {
+    some entry in all_policy_container_entries
+    some p_env in entry.container.OCI.Process.Env
+    p_env == i_env
+}
+
+# Mount destinations. These are declared in the policy, so reporting them leaks nothing,
+# and "which mount was not expected" is the single most common create-container question.
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    unmatched := unmatched_mount_destinations
+    count(unmatched) > 0
+    msg := sprintf("mount destinations no policy container declares: %v", [unmatched])
+}
+
+unmatched_mount_destinations := {dest |
+    some i_mount in input.OCI.Mounts
+    not mount_destination_declared_by_some_candidate(i_mount.destination)
+    dest := i_mount.destination
+}
+
+mount_destination_declared_by_some_candidate(dest) if {
+    some entry in all_policy_container_entries
+    some p_mount in entry.container.OCI.Mounts
+    p_mount.destination == dest
+}
+
+# Storage shape. A count mismatch is reported separately from a content mismatch because
+# the two have completely different causes: the first means the runtime and genpolicy
+# disagree about how the image is laid out (how many layers, whether a scratch device is
+# present), the second means they agree on the shape and disagree on what is in it.
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    not candidate_agrees_on_storage_count
+    accepted := {count(c.container.storages) | some c in all_policy_container_entries}
+    msg := sprintf("storage count: request presents %v storages, policy declares %v", [count(input.storages), accepted])
+}
+
+candidate_agrees_on_storage_count if {
+    some entry in all_policy_container_entries
+    count(entry.container.storages) == count(input.storages)
+}
+
+# dm-verity root hashes (RM-42). Reported with the partition number each was presented on,
+# because a *correct* set of hashes on the *wrong* partitions is a real and previously
+# observed failure (RM-62) that is otherwise indistinguishable from a genuine content
+# mismatch -- the hashes match byte for byte and only the positions are swapped.
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    presented := presented_verity_roothashes
+    count(presented) > 0
+    declared := declared_verity_roothashes
+    presented != declared
+    msg := sprintf("dm-verity layers: request presents %v, policy declares %v (hashes that match but sit on different partition numbers mean the layer ordering disagrees, not the layer contents)", [presented, declared])
+}
+
+presented_verity_roothashes := {entry |
+    some i_storage in input.storages
+    i_storage.fstype == "erofs"
+    some o in i_storage.options
+    startswith(o, "X-kata.dmverity.roothash=")
+    some p in i_storage.options
+    startswith(p, "X-kata.dmverity.partition-number=")
+    entry := sprintf("partition %v = %v", [trim_prefix(p, "X-kata.dmverity.partition-number="), trim_prefix(o, "X-kata.dmverity.roothash=")])
+}
+
+declared_verity_roothashes := {entry |
+    some c in all_policy_container_entries
+    some p_storage in c.container.storages
+    p_storage.driver == "erofs-verity-layer"
+    some o in p_storage.options
+    startswith(o, "X-kata.dmverity.roothash=")
+    some p in p_storage.options
+    startswith(p, "X-kata.dmverity.partition-number=")
+    entry := sprintf("partition %v = %v", [trim_prefix(p, "X-kata.dmverity.partition-number="), trim_prefix(o, "X-kata.dmverity.roothash=")])
+}
+
+# ExecProcessRequest is the other endpoint an operator hits routinely, and its denial is
+# even more opaque because there is no candidate list to inspect -- the request simply is
+# not in the allow list.
+errors[msg] if {
+    input.rule == "ExecProcessRequest"
+    msg := sprintf("no policy rule permits this exec; the command must match a declared exec_process entry or an ExecProcessRequest.regex in the policy settings (requested command has %v arguments)", [count(input.process.Args)])
+}

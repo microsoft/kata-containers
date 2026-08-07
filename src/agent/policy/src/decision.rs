@@ -28,11 +28,20 @@ pub struct DecisionObject {
     pub endpoint: String,
     /// The decision. Always `deny` for objects produced on denial.
     pub decision: &'static str,
-    /// The Rego rule (query path) that produced the denial — rule attribution.
+    /// The Rego query path that was evaluated. This identifies the *endpoint*, not the
+    /// check that failed inside it — every denial of a given RPC produces the same value,
+    /// so it carries no attribution on its own. [`Self::reasons`] is what discriminates.
     pub failed_rule: String,
     /// Names of the top-level request fields bound during evaluation. Field *names* only,
     /// never their values.
     pub bound_state_keys: Vec<String>,
+    /// Which checks no policy container satisfied, from the policy's own `reason` rule.
+    ///
+    /// This is the attribution: it distinguishes a root-hash mismatch from a mount
+    /// mismatch from a `Root.Readonly` mismatch, all of which are otherwise the same
+    /// bare "denied". Empty when the policy predates the `reason` rule, so an older
+    /// policy still produces a valid (if less specific) record rather than an error.
+    pub reasons: Vec<String>,
 }
 
 impl DecisionObject {
@@ -40,16 +49,54 @@ impl DecisionObject {
     /// names from the (JSON) request input. Values are deliberately discarded so no
     /// request data can leak into the audit record.
     pub fn for_denial(endpoint: &str, request_input_json: &str) -> Self {
+        Self::for_denial_with_reasons(endpoint, request_input_json, Vec::new())
+    }
+
+    /// As [`Self::for_denial`], but carrying the policy's own account of which checks
+    /// failed. `reasons` comes from the `reason` rule in `rules.rego` and is already
+    /// redaction-safe by construction: it reports environment variables by name only and
+    /// omits command arguments entirely.
+    pub fn for_denial_with_reasons(
+        endpoint: &str,
+        request_input_json: &str,
+        reasons: Vec<String>,
+    ) -> Self {
         let mut bound_state_keys = extract_top_level_keys(request_input_json);
         // Deterministic ordering for stable, comparable audit records.
         bound_state_keys.sort();
         DecisionObject {
             endpoint: endpoint.to_string(),
             decision: "deny",
-            // The denied rule is the endpoint's query path; it evaluated to false.
+            // The endpoint's query path. See the field's doc comment: this is not
+            // attribution, `reasons` is.
             failed_rule: format!("data.agent_policy.{endpoint}"),
             bound_state_keys,
+            reasons,
         }
+    }
+
+    /// The operator-facing explanation, ordered so the most useful part survives
+    /// truncation.
+    ///
+    /// The denial message passes through containerd, which truncates it. Whatever is
+    /// printed first is therefore what the operator actually gets, so the specific
+    /// reasons lead and everything bulkier follows. This is the same ordering the C-ACI
+    /// baseline applies when it trims a decision to fit: shed the large context first and
+    /// keep the human-readable strings longest.
+    pub fn explain(&self) -> String {
+        if self.reasons.is_empty() {
+            return format!(
+                "{} was refused and the active policy provides no reason rule, so the \
+                 specific check that failed is not recoverable. Regenerate the policy with \
+                 a current genpolicy to get attributable denials.",
+                self.endpoint
+            );
+        }
+        format!(
+            "{} was refused because no policy container satisfied: {}",
+            self.endpoint,
+            self.reasons.join("; ")
+        )
     }
 
     /// Serialize to a single-line JSON audit record. Serialization only ever includes the
@@ -138,5 +185,70 @@ mod tests {
         let d = DecisionObject::for_denial("SomeRequest", "\"not-an-object\"");
         assert!(d.bound_state_keys.is_empty());
         assert_eq!(d.decision, "deny");
+    }
+
+    /// RM-64: the explanation leads with the specific failed checks. containerd truncates
+    /// the denial message, so anything after the first few hundred bytes is lost — if the
+    /// reasons did not come first they would not reach an operator at all.
+    #[test]
+    fn explanation_leads_with_the_specific_reasons() {
+        let d = DecisionObject::for_denial_with_reasons(
+            "CreateContainerRequest",
+            r#"{"container_id":"c1"}"#,
+            vec![
+                "Root.Readonly: request has false, policy accepts {true}".to_string(),
+                "mount destinations no policy container declares: {\"/tmp\"}".to_string(),
+            ],
+        );
+        let explanation = d.explain();
+        assert!(
+            explanation.contains("Root.Readonly: request has false"),
+            "explanation dropped a reason: {}",
+            explanation
+        );
+        assert!(
+            explanation.contains("/tmp"),
+            "explanation dropped a reason: {}",
+            explanation
+        );
+
+        // The discriminating detail must survive an aggressive truncation.
+        let truncated: String = explanation.chars().take(120).collect();
+        assert!(
+            truncated.contains("Root.Readonly"),
+            "the first reason did not survive truncation: {}",
+            truncated
+        );
+    }
+
+    /// A policy generated before the `reason` rule existed yields no reasons. That must
+    /// produce an actionable message rather than an empty one, because the operator's fix
+    /// (regenerate the policy) is not otherwise discoverable.
+    #[test]
+    fn missing_reasons_still_explain_what_to_do() {
+        let d = DecisionObject::for_denial("CreateContainerRequest", r#"{"container_id":"c1"}"#);
+        let explanation = d.explain();
+        assert!(explanation.contains("CreateContainerRequest"));
+        assert!(
+            explanation.contains("genpolicy"),
+            "explanation names no remedy: {}",
+            explanation
+        );
+    }
+
+    /// The reasons are carried into the audit record too, not just the returned error.
+    #[test]
+    fn reasons_are_serialized_into_the_audit_record() {
+        let d = DecisionObject::for_denial_with_reasons(
+            "CreateContainerRequest",
+            r#"{"container_id":"c1"}"#,
+            vec!["storage count: request presents 3 storages, policy declares {2}".to_string()],
+        );
+        let json = d.to_json();
+        assert!(
+            json.contains("storage count"),
+            "audit record dropped the reasons: {}",
+            json
+        );
     }
 }
