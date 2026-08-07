@@ -7,7 +7,7 @@
 #
 #   ./sync.sh                       # copy only
 #   ./sync.sh 04 05                 # copy, then run those stages on the node
-#   E2E_SSH_HOST=coco-dev-2 ./sync.sh 02
+#   E2E_SSH_HOST=coco-e2e-2 ./sync.sh 02
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/lib.sh"

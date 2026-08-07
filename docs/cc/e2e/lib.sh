@@ -7,11 +7,11 @@ set -uo pipefail
 # ----------------------------------------------------------------- configuration
 # Everything here can be overridden from the environment.
 
-: "${E2E_RG:=jiria-coco-cvm-rg}"
-: "${E2E_VM:=coco-dev-1}"
+: "${E2E_RG:=coco-e2e-rg}"
+: "${E2E_VM:=coco-e2e-1}"
 # ssh alias the workstation-side helpers use to reach the node. Override together
 # with E2E_VM to drive a second, parallel environment from the same checkout.
-: "${E2E_SSH_HOST:=coco-dev}"
+: "${E2E_SSH_HOST:=coco-e2e}"
 : "${E2E_REGION:=eastus}"
 
 # ------------------------------------------------------------------- platform
@@ -101,9 +101,11 @@ E2E_GUEST_IGVM="$E2E_KATA_PREFIX/share/kata-containers/${E2E_GUEST_IGVM_NAME:-}"
 : "${E2E_ADMIN:=$(whoami | sed 's|.*[\\/+]||' | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9_-')}"
 : "${E2E_SSH_KEY:=$HOME/.ssh/id_rsa.pub}"
 
-# Repo under test.
-: "${E2E_REPO_URL:=https://github.com/abhishek179/kata-containers-coco.git}"
-: "${E2E_BRANCH:=agent-unstart-failed-start}"
+# Repo under test. These default to where *this* branch lives, so a fresh clone
+# followed by `02-bootstrap-node.sh` reproduces the branch under test rather than
+# some other fork. Override both together to drive a different fork/branch.
+: "${E2E_REPO_URL:=https://github.com/microsoft/kata-containers.git}"
+: "${E2E_BRANCH:=manifold-cc}"
 : "${E2E_REPO_DIR:=$HOME/kata-containers}"
 
 # Guest-stack build flags. STRICT_POLICY=yes is what pulls in the security reference

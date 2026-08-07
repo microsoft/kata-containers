@@ -49,7 +49,7 @@ judged by target rather than rejected by type.
 ./sync.sh                             # copies the suite to the node
 
 # on the node
-ssh coco-dev
+ssh coco-e2e
 export E2E_NIGHTLY_SHA=<sha>          # see "CI nightly artifact" below
 cd ~/coco-e2e && ./run-all.sh
 ```
@@ -67,7 +67,7 @@ non-executable. `sync.sh` `chmod +x`s them on arrival.
 
 Stage 02 adds you to the `docker` group. Group membership only applies to a new
 login session, so if stage 02 warns about it, reconnect (`exit`, then `ssh
-coco-dev`) before running stage 04. Stage 04 re-execs itself under `sg docker`
+coco-e2e`) before running stage 04. Stage 04 re-execs itself under `sg docker`
 when it can, so a single-session run usually still works.
 
 `run-all.sh` skips stage 01 automatically when the Azure CLI is absent (i.e. on
@@ -101,16 +101,16 @@ ls ~/.ssh/id_rsa.pub                # E2E_SSH_KEY — stage 01 uploads this
 
 `jq` is not part of git-bash; install it separately. Note that `bash` on a
 Windows PATH is often WSL, which keeps its own `~/.ssh/config` and so will not
-resolve the `coco-dev` alias — run the workstation-side scripts from git-bash.
+resolve the `coco-e2e` alias — run the workstation-side scripts from git-bash.
 
 **2. Check region and quota.** They are independent, and each alone is a false
 green. See [Region and quota](#region-and-quota).
 
-**3. Provision the node** (`01`). Defaults target `E2E_VM=coco-dev-1` /
-`E2E_SSH_HOST=coco-dev`; override both together for a second, parallel node.
+**3. Provision the node** (`01`). Defaults target `E2E_VM=coco-e2e-1` /
+`E2E_SSH_HOST=coco-e2e`; override both together for a second, parallel node.
 
 ```bash
-./01-provision-vm.sh                # or: E2E_VM=coco-dev-2 E2E_SSH_HOST=coco-dev-2 ./01-provision-vm.sh
+./01-provision-vm.sh                # or: E2E_VM=coco-e2e-2 E2E_SSH_HOST=coco-e2e-2 ./01-provision-vm.sh
 ```
 
 Stage 01 appends an ssh alias when none exists and warns rather than rewriting
@@ -129,9 +129,9 @@ bit and `scp` preserves that. `sync.sh` `chmod +x`s the scripts on arrival.
 **5. Bootstrap the node** (`02`), then reconnect.
 
 ```bash
-ssh coco-dev
+ssh coco-e2e
 cd ~/coco-e2e && ./run-all.sh 02
-exit && ssh coco-dev                # docker group only applies to a new session
+exit && ssh coco-e2e                # docker group only applies to a new session
 ```
 
 This is the step that clones the repo to `~/kata-containers` (`E2E_REPO_DIR`) at
@@ -159,8 +159,8 @@ gh run list -R kata-containers/kata-containers --workflow ci-nightly.yaml -L 5 \
   --json databaseId,headSha,conclusion
 gh run download <id> -R kata-containers/kata-containers \
   -n kata-tools-static-tarball-amd64-<sha>-nightly
-ssh coco-dev 'mkdir -p ~/kata-containers/kata-tools-artifacts'
-scp kata-tools-static.tar.zst coco-dev:~/kata-containers/kata-tools-artifacts/
+ssh coco-e2e 'mkdir -p ~/kata-containers/kata-tools-artifacts'
+scp kata-tools-static.tar.zst coco-e2e:~/kata-containers/kata-tools-artifacts/
 ```
 
 Then, on the node, for every shell that runs stage 03:
@@ -212,14 +212,15 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `E2E_PLATFORM` | `qemu-coco-dev` | Which hypervisor stack to validate. `clh-snp` selects Cloud Hypervisor + MSHV with real SEV-SNP — see "Platforms" below. |
-| `E2E_RG` / `E2E_VM` | `jiria-coco-cvm-rg` / `coco-dev-1` | Azure resource group and VM name. |
-| `E2E_SSH_HOST` | `coco-dev` | ssh alias the workstation-side helpers use. Override with `E2E_VM` for a parallel environment. |
+| `E2E_RG` / `E2E_VM` | `coco-e2e-rg` / `coco-e2e-1` | Azure resource group and VM name. The suite creates the RG if it is absent, so leaving these at their defaults provisions a fresh, self-owned environment rather than reusing anyone else's. |
+| `E2E_SSH_HOST` | `coco-e2e` | ssh alias the workstation-side helpers use. Override with `E2E_VM` for a parallel environment. |
 | `E2E_FAST` | `0` | Dev-loop mode. Reduces assurance — see below. |
 | `E2E_SKIP_BUILD` | `0` | Install the tarballs already in `build/` without rebuilding. |
 | `E2E_REGION` | `eastus` | See the region trap below. |
 | `E2E_VM_SIZE` | `Standard_DC16as_cc_v5` | Confidential-capable **host** SKU (nested virt). The node itself is a normal VM. |
 | `E2E_VM_SECURITY_TYPE` | `Standard` | See "The node is not a confidential VM" below. |
-| `E2E_BRANCH` | `agent-unstart-failed-start` | Branch under test. |
+| `E2E_BRANCH` | `manifold-cc` | Branch under test. Defaults with `E2E_REPO_URL` to where this branch lives. |
+| `E2E_REPO_URL` | `https://github.com/microsoft/kata-containers.git` | Fork the node clones. Override together with `E2E_BRANCH`. |
 | `E2E_REPO_DIR` | `~/kata-containers` | Checkout on the node. |
 | `E2E_STRICT_POLICY` | `yes` | Pulls in the security reference monitor. |
 | `E2E_NIGHTLY_SHA` | *(required for stage 03)* | CI-nightly commit sha. |
@@ -252,8 +253,8 @@ node. To keep a known-good cluster as a fallback, stand a second node up beside
 it instead of re-running 03 on the first:
 
 ```bash
-E2E_VM=coco-dev-2 E2E_SSH_HOST=coco-dev-2 ./01-provision-vm.sh
-E2E_VM=coco-dev-2 E2E_SSH_HOST=coco-dev-2 ./sync.sh
+E2E_VM=coco-e2e-2 E2E_SSH_HOST=coco-e2e-2 ./01-provision-vm.sh
+E2E_VM=coco-e2e-2 E2E_SSH_HOST=coco-e2e-2 ./sync.sh
 ```
 
 Stage 01 appends an ssh alias for `$E2E_SSH_HOST` when none exists, and warns
@@ -628,7 +629,7 @@ rebuilds it.
 ## Cleanup
 
 ```bash
-az vm deallocate -g jiria-coco-cvm-rg -n coco-dev-1
+az vm deallocate -g "$E2E_RG" -n "$E2E_VM"
 az acr delete -g <rg> -n <acr> --yes   # a Standard registry bills per day
 docker rm -f coco-e2e-registry
 rm -rf ~/.coco-e2e          # clears the stage markers

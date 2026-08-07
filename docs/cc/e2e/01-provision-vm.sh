@@ -30,8 +30,8 @@ fi
 # Restrictions come in two flavours and they are not equivalent. A `Location`
 # restriction means the SKU cannot be deployed in the region at all. A `Zone`
 # restriction only blocks *zonal* deployments — a regional (no --zone) VM is
-# still allowed, which is exactly how coco-dev-1 was created in eastus while all
-# three of its zones were restricted. Failing on both would refuse the one
+# still allowed, which is exactly how this suite's node was created in eastus
+# while all three of its zones were restricted. Failing on both would refuse the one
 # configuration known to work, so only Location is fatal. az vm create below
 # deliberately passes no --zone.
 loc_block=$(echo "$avail" | jq -r '[.restrictions[]? | select(.type=="Location") | .reasonCode] | join(",")')
@@ -89,7 +89,7 @@ IP=$(az vm show -d -g "$E2E_RG" -n "$E2E_VM" --query publicIps -o tsv)
 ok "VM $E2E_VM is up at $IP"
 
 # Writing the ssh alias here is what makes a second, parallel environment
-# practical: E2E_VM=coco-dev-2 E2E_SSH_HOST=coco-dev-2 gets its own entry and the
+# practical: E2E_VM=coco-e2e-2 E2E_SSH_HOST=coco-e2e-2 gets its own entry and the
 # original stays untouched. Only ever adds a missing entry — an existing one may
 # have been hand-tuned, and a redeployed VM changes IP, so say so rather than
 # silently rewriting it.
