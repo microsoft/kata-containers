@@ -91,6 +91,10 @@ pub struct PolicyFragment {
     pub signature: Vec<u8>,
 }
 
+/// The section markers of the `kata-policy-fragment/v3` statement. A line-oriented field may
+/// not contain any of these, because the parser splits on them.
+const STATEMENT_DELIMITERS: [&str; 4] = ["--includes--", "--requires--", "--module--", "--prevhead--"];
+
 impl PolicyFragment {
     /// This fragment's composition identifier: `"<issuer>/<feed>/<svn>"`.
     pub fn id(&self) -> String {
@@ -109,6 +113,13 @@ impl PolicyFragment {
     /// `receipt`/`receipt_ledger`/`receipt_proof` are NOT part of the signed statement and
     /// must be supplied by the caller (e.g. from OCI manifest annotations) if the ledger
     /// issued a transparency receipt.
+    ///
+    /// F-144: the parse is only accepted if re-encoding the result reproduces the payload
+    /// byte for byte. The envelope's signature covers the payload, not this struct, so
+    /// without that check a fragment could be verified against bytes that decode to fields
+    /// nobody signed for. Re-encoding is the strongest form of the check available here
+    /// because it holds for any ambiguity in the format, including ones not yet identified,
+    /// rather than only the ones [`validate_statement`](Self::validate_statement) enumerates.
     pub fn from_cose_payload(payload: &[u8]) -> Option<Self> {
         let text = std::str::from_utf8(payload).ok()?;
         // Split off the FR-1j predecessor-head suffix first (module is the only multi-line
@@ -169,6 +180,7 @@ impl PolicyFragment {
             extra_receipts: Vec::new(),
             signature: Vec::new(),
         })
+        .filter(|f| f.signing_bytes() == payload)
     }
 
     /// BL-8: reconstruct a `PolicyFragment` directly from a COSE_Sign1 envelope (as pulled
@@ -180,6 +192,95 @@ impl PolicyFragment {
         let sign1 = coset::CoseSign1::from_slice(cose_sign1).ok()?;
         let payload = sign1.payload.as_ref()?;
         Self::from_cose_payload(payload)
+    }
+
+    /// F-144: reject any fragment whose fields the `kata-policy-fragment/v3` statement
+    /// cannot encode unambiguously.
+    ///
+    /// The statement is a flat, newline-delimited text format with literal `--includes--`,
+    /// `--requires--`, `--module--` and `--prevhead--` marker lines, and it escapes nothing.
+    /// Without this gate the encoding is not injective, which is not theoretical:
+    /// `grants = ["alpha", "beta"]` and `grants = ["alpha\nbeta"]` produce byte-identical
+    /// signing input, and `requires = ["--module--", "r1"], module = "M"` collides with
+    /// `requires = [], module = "r1\n--module--\nM"` — so a signature meant to bind a
+    /// composition dependency also validates a fragment that has none. An issuer signs one
+    /// meaning and the verifier can read another.
+    ///
+    /// Every colliding pair has exactly one member that is rejected here, so on the
+    /// accepted domain the encoding is injective and a signature commits to one reading.
+    ///
+    /// Rejected, for each line-oriented field:
+    /// - a newline or carriage return, which would split one value into several (`lines()`
+    ///   also strips a trailing `\r`, so a value ending in one would not round-trip);
+    /// - any section delimiter as a *substring*, not merely as the whole value: the module
+    ///   split searches the whole statement rather than whole lines, so a grant of
+    ///   `x--module--` would end the metadata section early;
+    /// - an empty list entry, which the parser discards.
+    ///
+    /// `policy_module` is deliberately *not* constrained, because it is already
+    /// unambiguous: it is bounded by the first `--module--` (the metadata above it having
+    /// been validated) and the *last* `\n--prevhead--\n`, which is the one this encoder
+    /// appends. A module may therefore contain either marker and still round-trip exactly —
+    /// arbitrary Rego has to be expressible. An empty-but-present module is rejected only
+    /// because it is indistinguishable from `None` and means the same thing.
+    ///
+    /// Contrast the C-ACI baseline, where COSE_Sign1 signs CBOR: issuer, feed and SVN live
+    /// in protected headers and CWT claims, so field boundaries are length-prefixed and
+    /// typed and this class of confusion cannot be expressed at all. Validating a text
+    /// format is the narrower fix; it keeps existing v3 signatures valid, where re-encoding
+    /// would invalidate every fragment already signed.
+    ///
+    /// Known residual: [`id`](Self::id) joins issuer, feed and SVN with `/`, and neither
+    /// may ban `/` — an issuer is a `did:x509` and a feed is an OCI reference. So
+    /// `(issuer "a/b", feed "c")` and `(issuer "a", feed "b/c")` share an id and could
+    /// satisfy each other's `requires`. Both issuers must already be authorized with the
+    /// matching feed declared, which is why this is recorded rather than fixed: closing it
+    /// means changing the id format, and `requires` entries are inside signed statements.
+    pub fn validate_statement(&self) -> Result<(), FragmentError> {
+        fn check(field: &str, value: &str) -> Result<(), FragmentError> {
+            let bad = |reason: &str| FragmentError::MalformedStatement {
+                field: field.to_string(),
+                reason: reason.to_string(),
+            };
+            if value.contains('\n') || value.contains('\r') {
+                return Err(bad("contains a line break"));
+            }
+            for d in STATEMENT_DELIMITERS {
+                if value.contains(d) {
+                    return Err(bad(&format!("contains the section delimiter {d:?}")));
+                }
+            }
+            Ok(())
+        }
+        fn check_entry(field: &str, value: &str) -> Result<(), FragmentError> {
+            if value.is_empty() {
+                return Err(FragmentError::MalformedStatement {
+                    field: field.to_string(),
+                    reason: "is empty, and an empty entry is dropped by the parser".to_string(),
+                });
+            }
+            check(field, value)
+        }
+
+        check("issuer", &self.issuer)?;
+        check("feed", &self.feed)?;
+        for g in &self.grants {
+            check_entry("grants", g)?;
+        }
+        for i in &self.includes {
+            check_entry("includes", i)?;
+        }
+        for r in &self.requires {
+            check_entry("requires", r)?;
+        }
+        if self.policy_module.as_deref() == Some("") {
+            return Err(FragmentError::MalformedStatement {
+                field: "policy_module".to_string(),
+                reason: "is present but empty, which is indistinguishable from absent"
+                    .to_string(),
+            });
+        }
+        Ok(())
     }
 
     /// Canonical byte encoding of the fragment *statement* that both the issuer signature
@@ -315,6 +416,11 @@ pub enum FragmentError {
         last_size: u64,
         presented_size: u64,
     },
+    /// F-144: a field cannot be represented unambiguously by the
+    /// `kata-policy-fragment/v3` statement encoding, so the fragment is refused rather than
+    /// signed over bytes that mean something else. See
+    /// [`PolicyFragment::validate_statement`].
+    MalformedStatement { field: String, reason: String },
 }
 
 impl fmt::Display for FragmentError {
@@ -370,6 +476,10 @@ impl fmt::Display for FragmentError {
             FragmentError::LogRolledBack { ledger, last_size, presented_size } => write!(
                 f,
                 "transparency log {ledger} rolled back: last size {last_size}, presented {presented_size}"
+            ),
+            FragmentError::MalformedStatement { field, reason } => write!(
+                f,
+                "fragment statement field {field} cannot be encoded unambiguously: {reason}"
             ),
         }
     }
@@ -963,6 +1073,11 @@ impl FragmentStore {
         fragment: &PolicyFragment,
         statement: &[u8],
     ) -> Result<VerifiedFragment, FragmentError> {
+        // F-144: refuse a fragment whose fields the statement encoding cannot represent
+        // unambiguously, so the bytes the issuer signed have exactly one reading. Enforced
+        // here because it is the one point every verification path funnels through.
+        fragment.validate_statement()?;
+
         // 3. FR-1e: the (issuer, feed) pair must be declared/accepted.
         let feed_key = (fragment.issuer.clone(), fragment.feed.clone());
         if !self.feeds.contains_key(&feed_key) {
@@ -2793,5 +2908,196 @@ mod tests {
                 .collect(),
         );
         assert_eq!(store.verify(&f).unwrap_err(), FragmentError::InvalidReceipt);
+    }
+
+    /// F-144: the v3 statement encoding is only injective because ambiguous fields are
+    /// refused. Both collisions are real — the bytes are identical — so what makes a
+    /// signature commit to one reading is that exactly one member of each pair is rejected.
+    #[test]
+    fn ambiguous_statement_fields_are_refused_so_signing_bytes_stay_injective() {
+        // Two grants, or one grant containing a newline.
+        let split = PolicyFragment {
+            grants: vec!["alpha".into(), "beta".into()],
+            ..Default::default()
+        };
+        let joined = PolicyFragment {
+            grants: vec!["alpha\nbeta".into()],
+            ..Default::default()
+        };
+        assert_eq!(split.signing_bytes(), joined.signing_bytes());
+        assert!(split.validate_statement().is_ok());
+        assert!(matches!(
+            joined.validate_statement(),
+            Err(FragmentError::MalformedStatement { .. })
+        ));
+
+        // A dependency declared in `requires`, or the same bytes with no dependency at all
+        // and the delimiter smuggled into the module.
+        let with_dep = PolicyFragment {
+            requires: vec!["--module--".into(), "r1".into()],
+            policy_module: Some("M".into()),
+            ..Default::default()
+        };
+        let without_dep = PolicyFragment {
+            requires: vec![],
+            policy_module: Some("r1\n--module--\nM".into()),
+            ..Default::default()
+        };
+        assert_eq!(with_dep.signing_bytes(), without_dep.signing_bytes());
+        assert!(
+            matches!(
+                with_dep.validate_statement(),
+                Err(FragmentError::MalformedStatement { .. })
+            ),
+            "the reading that silently loses a dependency must not be the accepted one"
+        );
+        // The surviving reading is self-consistent: it parses back to itself.
+        assert!(without_dep.validate_statement().is_ok());
+        let parsed = PolicyFragment::from_cose_payload(&without_dep.signing_bytes()).unwrap();
+        assert!(parsed.requires.is_empty());
+        assert_eq!(parsed.policy_module.as_deref(), Some("r1\n--module--\nM"));
+    }
+
+    /// F-144: a delimiter need only be a *substring* to be dangerous — the module split
+    /// searches the whole statement, not whole lines — and an empty entry is dropped by the
+    /// parser, so both are refused.
+    #[test]
+    fn statement_validation_covers_substrings_and_empty_entries() {
+        for (label, f) in [
+            (
+                "grant embedding a delimiter",
+                PolicyFragment {
+                    grants: vec!["x--module--".into()],
+                    ..Default::default()
+                },
+            ),
+            (
+                "empty grant",
+                PolicyFragment {
+                    grants: vec![String::new()],
+                    ..Default::default()
+                },
+            ),
+            (
+                "issuer with a carriage return",
+                PolicyFragment {
+                    issuer: "did:x509:0:sha256:A\r".into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "include with a newline",
+                PolicyFragment {
+                    includes: vec!["exec\nmount".into()],
+                    ..Default::default()
+                },
+            ),
+            (
+                "feed embedding a delimiter",
+                PolicyFragment {
+                    feed: "reg/x--prevhead--y".into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "present but empty module",
+                PolicyFragment {
+                    policy_module: Some(String::new()),
+                    ..Default::default()
+                },
+            ),
+        ] {
+            assert!(
+                matches!(
+                    f.validate_statement(),
+                    Err(FragmentError::MalformedStatement { .. })
+                ),
+                "{} must be refused",
+                label
+            );
+        }
+    }
+
+    /// F-144: a module may contain the delimiters — it has to, since it carries arbitrary
+    /// Rego — and still round-trips exactly, because it is bounded by the first
+    /// `--module--` and the *last* `--prevhead--`. The fix must not cost that.
+    #[test]
+    fn a_module_containing_delimiters_is_still_accepted_and_roundtrips() {
+        let f = PolicyFragment {
+            issuer: "did:x509:0:sha256:AAAA::CN:signer".into(),
+            feed: "reg/frag:1".into(),
+            svn: 3,
+            grants: vec!["exec".into()],
+            policy_module: Some(
+                "package agent_policy.fragments\n# --module--\n# --prevhead--\nallow := true"
+                    .into(),
+            ),
+            prev_log_head: Some(vec![0xde, 0xad]),
+            ..Default::default()
+        };
+        assert!(f.validate_statement().is_ok());
+        let parsed = PolicyFragment::from_cose_payload(&f.signing_bytes()).expect("parses");
+        assert_eq!(parsed.policy_module, f.policy_module);
+        assert_eq!(parsed.grants, f.grants);
+        assert_eq!(parsed.prev_log_head, f.prev_log_head);
+    }
+
+    /// F-144: the COSE signature covers the payload, not the parsed struct, so a payload
+    /// that is not the canonical encoding of what it decodes to is refused outright. This
+    /// holds for any ambiguity in the format, not only the ones `validate_statement` names.
+    #[test]
+    fn from_cose_payload_refuses_a_non_canonical_payload() {
+        let canonical =
+            b"kata-policy-fragment/v3\nI\nF\n1\na\nb\n--includes--\n--requires--\n--module--\nM\n--prevhead--\n";
+        assert!(PolicyFragment::from_cose_payload(canonical).is_some());
+
+        // Grants in an order this encoder would never emit (it sorts).
+        let unsorted =
+            b"kata-policy-fragment/v3\nI\nF\n1\nb\na\n--includes--\n--requires--\n--module--\nM\n--prevhead--\n";
+        assert!(PolicyFragment::from_cose_payload(unsorted).is_none());
+
+        // A blank line the parser would silently drop.
+        let padded =
+            b"kata-policy-fragment/v3\nI\nF\n1\na\n\nb\n--includes--\n--requires--\n--module--\nM\n--prevhead--\n";
+        assert!(PolicyFragment::from_cose_payload(padded).is_none());
+
+        // Leading zeroes on the SVN: parses as 1, re-encodes as "1".
+        let padded_svn =
+            b"kata-policy-fragment/v3\nI\nF\n01\na\nb\n--includes--\n--requires--\n--module--\nM\n--prevhead--\n";
+        assert!(PolicyFragment::from_cose_payload(padded_svn).is_none());
+    }
+
+    /// F-144: the gate is on the verification path, not merely available to callers — a
+    /// correctly signed fragment with an ambiguous field is still refused, by every entry
+    /// point, before any grant of its is applied.
+    #[test]
+    fn a_correctly_signed_but_ambiguous_fragment_is_refused_by_verify() {
+        let (sk, pk) = keypair(9);
+        let mut store = FragmentStore::default();
+        store.authorize_issuer("issuerA", &pk).unwrap();
+        store.declare_feed("issuerA", "", 0);
+
+        let mut f = PolicyFragment {
+            issuer: "issuerA".into(),
+            svn: 1,
+            grants: vec!["alpha\nbeta".into()],
+            ..Default::default()
+        };
+        sign(&sk, &mut f);
+        // The signature itself is valid: this is refused for what it says, not for who said it.
+        assert!(matches!(
+            store.verify(&f).unwrap_err(),
+            FragmentError::MalformedStatement { .. }
+        ));
+
+        // The unambiguous spelling of the same intent verifies.
+        let mut ok = PolicyFragment {
+            issuer: "issuerA".into(),
+            svn: 1,
+            grants: vec!["alpha".into(), "beta".into()],
+            ..Default::default()
+        };
+        sign(&sk, &mut ok);
+        assert!(store.verify(&ok).is_ok());
     }
 }

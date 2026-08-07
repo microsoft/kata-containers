@@ -78,6 +78,24 @@ including the asserted predecessor, can be altered without invalidating the sign
 receipt/ledger id and the transparency proof are countersignatures/assertions *over* that
 statement and are deliberately outside it.
 
+The statement is a flat, newline-delimited text format with literal `--includes--`,
+`--requires--`, `--module--` and `--prevhead--` marker lines, and it escapes nothing, so it
+is injective only over a restricted domain. `validate_statement` enforces that domain as gate
+0 of `check_gates`, which every verification path funnels through: no line-oriented field may
+contain a line break or any marker as a substring, and no list entry may be empty. Without
+it, `grants = ["alpha", "beta"]` and `grants = ["alpha\nbeta"]` sign to identical bytes, as
+do `requires = ["--module--", "r1"], module = "M"` and `requires = [], module =
+"r1\n--module--\nM"` — the second of which silently has no dependency at all. `policy_module`
+is deliberately unconstrained: it is bounded by the *first* `--module--` and the *last*
+`--prevhead--`, so it round-trips whatever it contains, which arbitrary Rego requires. On the
+OCI-pull path `from_cose_payload` additionally re-encodes what it parsed and requires the
+result to equal the payload byte for byte — the envelope's signature covers the payload
+rather than the parsed struct, and re-encoding catches any ambiguity, including ones not
+enumerated above. The C-ACI baseline sidesteps the whole class by signing CBOR, where issuer,
+feed and SVN sit in protected headers and CWT claims and field boundaries are length-prefixed
+(see F-144); validating a text format is the narrower fix that keeps existing v3 signatures
+valid.
+
 ---
 
 ## 4. Capability detail
