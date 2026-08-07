@@ -11,6 +11,9 @@ tokio = { workspace = true, features = ["fs", "io-util"] }
 
 anyhow.workspace = true
 
+# Encoding the structured decision object onto the host-bound denial (FR-8 / RM-66).
+base64.workspace = true
+
 # Configuration
 serde.workspace = true
 serde_json.workspace = true

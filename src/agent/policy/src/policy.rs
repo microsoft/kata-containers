@@ -662,7 +662,12 @@ impl AgentPolicy {
             let decision =
                 crate::decision::DecisionObject::for_denial_with_reasons(ep, ep_input, reasons);
             self.log_decision(&decision).await;
-            return Ok((false, decision.explain()));
+            // RM-66: the structured object goes out on the error, not only into the
+            // guest-local log file. That file is opened only at Debug and a strict guest
+            // pins itself to Info, so `log_decision` above is a no-op in exactly the
+            // configuration FR-8 exists for -- and a file inside a confidential guest
+            // could never have been an audit trail anyway.
+            return Ok((false, decision.to_host_error()));
         }
 
         Ok((allow, prints))
@@ -2150,13 +2155,19 @@ SignalProcessRequest if {
             "the undeclared variable's name must be reported: {}",
             explanation
         );
-        for leaked in ["supersecretvalue", "hunter2", "launch --token"] {
-            assert!(
-                !explanation.contains(leaked),
-                "the denial leaked a value ({}) across the guest/host boundary: {}",
-                leaked,
-                explanation
-            );
+        // RM-66: the message now carries a base64 decision object, which would hide a leak
+        // from a substring check on the message alone. Assert on the decoded payload too.
+        let decoded = crate::decision::extract_decision_json(&explanation)
+            .expect("the denial carried no decision object");
+        for surface in [explanation.as_str(), decoded.as_str()] {
+            for leaked in ["supersecretvalue", "hunter2", "launch --token"] {
+                assert!(
+                    !surface.contains(leaked),
+                    "the denial leaked a value ({}) across the guest/host boundary: {}",
+                    leaked,
+                    surface
+                );
+            }
         }
     }
 
