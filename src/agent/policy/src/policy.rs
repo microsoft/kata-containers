@@ -785,27 +785,47 @@ impl AgentPolicy {
         includes: &[String],
         parameters: Option<&str>,
     ) -> Result<String> {
-        let pkg = Self::rego_package(rego)
-            .ok_or_else(|| anyhow::anyhow!("fragment module has no package declaration"))?;
+        const FRAGMENTS: &str = "agent_policy.fragments";
+        let canonical = Self::rego_package(rego)?;
 
-        let mut allowed = vec!["agent_policy.fragments".to_string()];
-        for ns in includes {
-            allowed.push(format!("agent_policy.fragments.{ns}"));
-        }
-        if !allowed.iter().any(|a| a == &pkg) && !Self::is_own_feed_package(&pkg, feed) {
-            bail!(
-                "fragment module package {:?} is outside the permitted fragment namespaces {:?} \
-                 (and is not this fragment's own feed {:?})",
-                pkg,
-                allowed,
-                feed
-            );
-        }
+        // The shared package needs no grant; anything deeper must be named either by this
+        // fragment's `includes` or by its own verified feed. Exactly one level is
+        // permitted, so a granted namespace cannot be used as a springboard into a
+        // sibling's subtree.
+        let segment = if canonical == FRAGMENTS {
+            None
+        } else {
+            match canonical.strip_prefix("agent_policy.fragments.") {
+                Some(s) if includes.iter().any(|ns| ns.as_str() == s) => Some(s),
+                Some(s) if !feed.is_empty() && s == feed => Some(s),
+                _ => bail!(
+                    "fragment module package {canonical:?} is outside the permitted fragment \
+                     namespaces: {FRAGMENTS}, {FRAGMENTS}.<ns> for ns in {includes:?}, or this \
+                     fragment's own feed {feed:?}"
+                ),
+            }
+        };
+
+        // regorus reports the path dot-joined, which is not a usable rego reference when a
+        // segment holds an OCI feed (`reg/name:1`). Re-quote the segment that was just
+        // authorized so callers can build queries against it.
+        let pkg = match segment {
+            None => FRAGMENTS.to_string(),
+            Some(s) => format!("{FRAGMENTS}[{}]", serde_json::to_string(s)?),
+        };
 
         let rego = match parameters {
             Some(p) => Self::instantiate_parameters(rego, &pkg, p)?,
             None => rego.to_string(),
         };
+
+        // Belt and braces: what is handed to the engine must still be the module that was
+        // authorized. Appending parameter bindings cannot move a module, so a disagreement
+        // here would mean the two parses differ — fail closed rather than load it.
+        let applied = Self::rego_package(&rego)?;
+        if applied != canonical {
+            bail!("fragment module would land in {applied:?}, not the authorized {canonical:?}");
+        }
 
         // Additive merge; never resets the engine, never touches the one-shot lock.
         self.engine.add_policy(name.to_string(), rego)?;
@@ -901,44 +921,31 @@ impl AgentPolicy {
         Ok(specs)
     }
 
-    /// Extract the top-level `package` path from a Rego module (e.g. "agent_policy.fragments").
-    fn rego_package(rego: &str) -> Option<String> {
-        for line in rego.lines() {
-            let l = line.trim();
-            if let Some(rest) = l.strip_prefix("package ") {
-                let pkg = rest.trim();
-                if !pkg.is_empty() {
-                    return Some(pkg.to_string());
-                }
-            }
-        }
-        None
-    }
-
-    /// Whether `pkg` is the quoted-feed form `agent_policy.fragments["<feed>"]` naming
-    /// exactly `feed`.
+    /// Extract the top-level `package` path from a Rego module (e.g. "agent_policy.fragments"),
+    /// dot-joined and with the leading `data.` removed.
     ///
-    /// The comparison is on the decoded string, not on the source text, so whitespace
-    /// inside the brackets is tolerated while a different feed — or a second segment
-    /// smuggled in after the bracket — is not. A fragment therefore cannot reach any
-    /// namespace but the one its verified feed names.
-    fn is_own_feed_package(pkg: &str, feed: &str) -> bool {
-        if feed.is_empty() {
-            return false;
-        }
-        let Some(rest) = pkg.strip_prefix("agent_policy.fragments[") else {
-            return false;
-        };
-        let Some(inner) = rest.strip_suffix(']') else {
-            return false;
-        };
-        let inner = inner.trim();
-        let Some(quoted) = inner.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
-            return false;
-        };
-        // A feed containing a quote or backslash could otherwise be spelled several ways;
-        // refuse rather than guess at an unescaping the parser may not share.
-        !quoted.contains('"') && !quoted.contains('\\') && quoted == feed
+    /// The path comes from the same parser that will execute the module, never from a scan
+    /// of the source text. Scanning is a confusion attack waiting to happen: regorus accepts
+    /// any whitespace — including a tab or a newline — between `package` and the path, so a
+    /// scan keyed on the literal `"package "` walks straight past the real declaration and
+    /// can then be steered onto a decoy in a comment or a raw string. That was F-143. A
+    /// module whose real package was `package<TAB>agent_policy` passed the namespace check
+    /// on the strength of a `package agent_policy.fragments` line hidden in a backtick
+    /// string, loaded into the base package, and redefined base rules — a total policy
+    /// bypass. hcsshim avoids this by pinning the declaration to line 0 and matching a
+    /// literal space; taking the answer from the parser is stronger still, because it cannot
+    /// drift from the parser no matter what the grammar goes on to accept.
+    ///
+    /// Parsing happens in a throwaway engine, so a module that is malformed or unauthorized
+    /// never reaches the live one.
+    fn rego_package(rego: &str) -> Result<String> {
+        let mut scratch = regorus::Engine::new();
+        let path = scratch
+            .add_policy("fragment.rego".to_string(), rego.to_string())
+            .map_err(|e| anyhow::anyhow!("fragment module does not parse: {e}"))?;
+        path.strip_prefix("data.")
+            .map(str::to_string)
+            .ok_or_else(|| anyhow::anyhow!("unexpected rego package path {path:?}"))
     }
 
     async fn log_eval_input(&mut self, ep: &str, input: &str) {
@@ -1674,7 +1681,7 @@ mod tests {
         let pkg = p
             .apply_fragment_module("fragment:test", module, "reg/parent", &["infra".to_string()], None)
             .unwrap();
-        assert_eq!(pkg, "agent_policy.fragments.infra");
+        assert_eq!(pkg, "agent_policy.fragments[\"infra\"]");
 
         let nested = p.nested_fragment_specs(&pkg).unwrap();
         assert_eq!(nested.len(), 1);
@@ -1775,6 +1782,104 @@ mod tests {
         assert!(s
             .apply_fragment_module("suffixed", &suffixed, feed, &[], None)
             .is_err());
+    }
+
+    /// F-143: the package a fragment is *authorized* under must be the package it actually
+    /// loads into. The namespace check used to read the source text with a scan for the
+    /// literal `"package "`, which regorus does not require — it accepts any whitespace
+    /// after the keyword. A module could therefore declare `package<TAB>agent_policy`, which
+    /// the scan skipped, and park a decoy `package agent_policy.fragments` inside a raw
+    /// string for the scan to find instead. The result was a module in the base package,
+    /// free to redefine base rules.
+    #[test]
+    fn test_fragment_package_is_taken_from_the_parser_not_the_source_text() {
+        let decoy = "\ndecoy := `\npackage agent_policy.fragments\n`\n";
+
+        // Every separator regorus accepts after `package` must be read as the real
+        // declaration, so none of these reach the base package.
+        for (label, header) in [
+            ("tab", "package\tagent_policy"),
+            ("newline", "package\n agent_policy"),
+            ("crlf", "package\r\n agent_policy"),
+            ("many-spaces", "package   agent_policy"),
+        ] {
+            let mut p = AgentPolicy::new();
+            let module = format!("{header}{decoy}");
+            let err = p
+                .apply_fragment_module("evil", &module, "reg/a", &["infra".to_string()], None)
+                .expect_err(&format!("{label}: base package must be refused"));
+            assert!(
+                format!("{err}").contains("outside the permitted fragment namespaces"),
+                "{}: unexpected error {}",
+                label,
+                err
+            );
+        }
+
+        // The same decoy alongside a genuinely permitted package is still fine: the decoy
+        // is inert, because nothing reads it.
+        let mut p = AgentPolicy::new();
+        assert!(p
+            .apply_fragment_module(
+                "honest",
+                &format!("package agent_policy.fragments.infra{decoy}"),
+                "reg/a",
+                &["infra".to_string()],
+                None
+            )
+            .is_ok());
+    }
+
+    /// F-143: the end-to-end consequence — a fragment that escapes into the base package can
+    /// add a satisfying definition beside `default X := false` and flip every decision.
+    #[tokio::test]
+    async fn test_fragment_cannot_escape_its_namespace_to_flip_a_denial() {
+        let containers = r#"[{
+            "sandbox_pidns": false, "storages": [],
+            "OCI": {"Version":"1.1.0","Root":{"Readonly":true},
+                    "Process":{"Args":["/bin/sh"],"Cwd":"/","Env":["PATH=/usr/bin"]},
+                    "Mounts":[],"Annotations":{}}
+        }]"#;
+        let request = r#"{"container_id":"c1","sandbox_pidns":false,"storages":[],
+            "OCI":{"Version":"1.1.0","Root":{"Readonly":true},
+                   "Process":{"Args":["/bin/evil"],"Cwd":"/","Env":["PATH=/usr/bin"]},
+                   "Mounts":[],"Annotations":{}}}"#;
+
+        let mut p = policy_with_containers(containers);
+        let (before, _) = p
+            .allow_request("CreateContainerRequest", request)
+            .await
+            .unwrap();
+        assert!(!before, "the request must be denied to begin with");
+
+        let evil = "package\tagent_policy\n\ndecoy := `\npackage agent_policy.fragments\n`\n\n\
+                    CreateContainerRequest if { true }\n";
+        assert!(p
+            .apply_fragment_module("evil", evil, "somefeed", &["infra".to_string()], None)
+            .is_err());
+
+        let (after, _) = p
+            .allow_request("CreateContainerRequest", request)
+            .await
+            .unwrap();
+        assert!(!after, "a refused fragment must not have changed the verdict");
+    }
+
+    /// F-143: a module that does not parse is refused before it can touch the live engine,
+    /// so a malformed fragment cannot leave the policy half-loaded.
+    #[test]
+    fn test_unparseable_fragment_never_reaches_the_engine() {
+        let mut p = AgentPolicy::new();
+        assert!(p
+            .apply_fragment_module("broken", "package agent_policy.fragments\nx := (", "reg/a", &[], None)
+            .is_err());
+        assert!(p
+            .apply_fragment_module("no-package", "x := 1\n", "reg/a", &[], None)
+            .is_err());
+        // The engine is still usable afterwards.
+        assert!(p
+            .apply_fragment_module("good", "package agent_policy.fragments\nx := 1\n", "reg/a", &[], None)
+            .is_ok());
     }
 
     /// FR-1k: a parameterised fragment reads its values through `parameter(name)`, falls
