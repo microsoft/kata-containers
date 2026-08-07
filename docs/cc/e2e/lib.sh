@@ -409,6 +409,20 @@ ensure_genpolicy_defaults() {
           's|"root_path": "/run/kata-containers/\$(bundle-id)/rootfs"|"root_path": "/run/kata-containers/(?:shared/containers/(?:passthrough/)?)?$(bundle-id)/rootfs"|' \
           "$GP_SETTINGS"
       fi
+      # This platform runs containerd's erofs snapshotter in dm-verity mode, so
+      # every image layer arrives as a GPT partition on a host-attached VMDK.
+      # Since allow_storages became a bijection, a storage the policy does not
+      # declare is denied outright -- and the shipped settings say
+      # image_layer_verification "none", which declares no layers at all. The
+      # denial is "request presents N storages, policy declares {0}". Turn the
+      # erofs layer model on so genpolicy derives a root hash per layer and
+      # declares each one (RM-34/RM-42).
+      if grep -q '"image_layer_verification": "none"' "$GP_SETTINGS" 2>/dev/null; then
+        log "patching image_layer_verification -> host-erofs-dm-verity"
+        sed -i \
+          's|"image_layer_verification": "none"|"image_layer_verification": "host-erofs-dm-verity"|' \
+          "$GP_SETTINGS"
+      fi
       ;;
   esac
   export GP_RULES GP_SETTINGS
