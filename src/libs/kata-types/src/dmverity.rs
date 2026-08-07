@@ -8,6 +8,7 @@ use anyhow::{anyhow, Context, Result};
 use devicemapper::{DevId, DmFlags, DmName, DmOptions, DmUdevFlags, DM};
 use nix::sys::stat::{self, Mode, SFlag};
 use slog::Logger;
+use std::convert::TryFrom;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -221,6 +222,53 @@ pub async fn wait_for_dm_dev_node(name: &str) -> Result<String> {
     ))
 }
 
+/// Index of the root digest in a dm-verity target table line.
+///
+/// The verity table is ten space-separated fields:
+/// `version data_dev hash_dev data_block_size hash_block_size num_data_blocks
+///  hash_start_block algorithm root_digest salt`
+const VERITY_TABLE_ROOT_DIGEST_FIELD: usize = 8;
+
+/// Number of fields in a dm-verity target table line (optional trailing feature
+/// arguments may follow, so this is a minimum rather than an exact count).
+const VERITY_TABLE_MIN_FIELDS: usize = 10;
+
+/// Extract the root digest from a dm-verity target table line as reported by the kernel.
+fn table_root_digest(table_params: &str) -> Result<&str> {
+    let fields: Vec<&str> = table_params.split_whitespace().collect();
+    if fields.len() < VERITY_TABLE_MIN_FIELDS {
+        return Err(anyhow!(
+            "dm-verity table has {} fields, expected at least {}: {:?}",
+            fields.len(),
+            VERITY_TABLE_MIN_FIELDS,
+            table_params
+        ));
+    }
+    Ok(fields[VERITY_TABLE_ROOT_DIGEST_FIELD])
+}
+
+/// RM-52: confirm the root hash the kernel is actually enforcing is the one the policy
+/// approved.
+///
+/// The kernel faithfully enforces whatever root hash it was handed; it has no way to know
+/// that hash came from the policy. This closes that gap from the other side by reading the
+/// *active* table back out of the kernel and comparing the digest in force against the
+/// expected value, so a mismatch introduced anywhere between the policy check and the
+/// ioctl — a formatting bug, a wrong variable, a stale device — is caught rather than
+/// silently enforcing the wrong content.
+fn verify_table_root_digest(table_params: &str, expected_hash: &str) -> Result<()> {
+    let in_force = table_root_digest(table_params)?;
+    if !in_force.eq_ignore_ascii_case(expected_hash.trim()) {
+        return Err(anyhow!(
+            "dm-verity root hash read back from the active table does not match the \
+             policy-approved hash: in force {:?}, expected {:?}. Refusing to use this device.",
+            in_force,
+            expected_hash
+        ));
+    }
+    Ok(())
+}
+
 /// Create a dm-verity device using devicemapper, offloading blocking ioctls to a dedicated thread.
 pub async fn create_dmverity_device(
     verity_info: &DmVerityInfo,
@@ -231,6 +279,10 @@ pub async fn create_dmverity_device(
 
     let verity_name_string = build_dmverity_device_name(&source_path, &verity_info);
     let verity_name_for_wait = verity_name_string.clone();
+    // Owned copy for the read-back inside the closure: `verity_info` itself is still needed
+    // after the closure has consumed its clone.
+    let expected_root_hash = verity_info.hash.clone();
+    let data_blocksize = verity_info.blocksize;
 
     // Offload all blocking ioctl operations to a dedicated thread.
     // Always use no-udev DmOptions inside spawn_blocking to avoid DM_UDEV_WAIT
@@ -303,6 +355,22 @@ pub async fn create_dmverity_device(
         dm.table_load(&id, verity_table.as_slice(), ro_opts)?;
         dm.device_suspend(&id, opts)?;
 
+        // Step 2b (RM-52): read the *active* table back and confirm the root hash the kernel
+        // is enforcing is the one we were asked to enforce. See `verify_table_root_digest`.
+        let (_, active) = dm
+            .table_status(
+                &id,
+                DmOptions::default().set_flags(DmFlags::DM_STATUS_TABLE),
+            )
+            .context("failed to read back the active dm-verity table")?;
+        let verity_target = active
+            .iter()
+            .find(|(_, _, target_type, _)| target_type == "verity")
+            .ok_or_else(|| {
+                anyhow!("no verity target in the active dm table for {verity_name_string}")
+            })?;
+        verify_table_root_digest(&verity_target.3, &expected_root_hash)?;
+
         // Step 3: Ensure the device node exists under /dev/mapper/.
         let result = if has_udev() {
             DmSetupResult::NeedUdevWait
@@ -335,5 +403,126 @@ pub async fn create_dmverity_device(
         }
     };
 
+    // RM-52: force the kernel to prove, now, that this device's hash tree actually roots at
+    // the policy-approved hash.
+    //
+    // dm-verity verifies lazily: the table loads happily against a device whose hash tree
+    // roots somewhere else entirely, and the mismatch only surfaces as an opaque EIO on the
+    // first read of a data block. Reading one block here converts that into an immediate,
+    // named failure at mount time. This is what "compare the device's root hash against the
+    // policy" really amounts to -- the kernel hashes the block and walks the tree to the
+    // supplied root, which is strictly stronger than re-deriving a root digest in userspace
+    // and comparing, because it verifies the bytes actually being served.
+    verify_first_block(&dev_path, data_blocksize).await?;
+
     Ok(dev_path)
+}
+
+/// Read the first data block through the verity device, so the kernel verifies its hash
+/// chain up to the root digest before anything mounts or executes from it.
+async fn verify_first_block(dev_path: &str, blocksize: u64) -> Result<()> {
+    use std::io::Read;
+
+    let path = dev_path.to_string();
+    // A block size of 0 would mean a malformed table; the kernel would have rejected it, but
+    // guard rather than construct a zero-length read that trivially "succeeds".
+    let len = usize::try_from(blocksize).context("dm-verity block size does not fit in usize")?;
+    if len == 0 {
+        return Err(anyhow!(
+            "dm-verity block size is 0 for {dev_path}; refusing to skip verification"
+        ));
+    }
+
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let mut f = std::fs::File::open(&path)
+            .with_context(|| format!("failed to open verity device {path} for verification"))?;
+        let mut buf = vec![0u8; len];
+        f.read_exact(&mut buf).map_err(|e| {
+            anyhow!(
+                "dm-verity verification read failed on {}: {}. The device's hash tree does \
+                 not match the policy-approved root hash, or the device is corrupt.",
+                path,
+                e
+            )
+        })?;
+        Ok(())
+    })
+    .await
+    .context("spawn_blocking for dm-verity verification read panicked")?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HASH: &str = "c59e4fec79c754743340241f1a3656c1d858eb7934bfadceb770410a85b48f28";
+
+    /// A real verity table line as the kernel reports it: the device fields come back as
+    /// major:minor rather than the paths we passed in, which is exactly why the root digest
+    /// is located positionally rather than by matching what we sent.
+    fn table_line(hash: &str) -> String {
+        format!("1 254:0 254:0 4096 4096 1986 1986 sha256 {hash} 0000000000000000000000000000000000000000000000000000000000000000")
+    }
+
+    #[test]
+    fn root_digest_is_read_from_the_right_field() {
+        assert_eq!(table_root_digest(&table_line(HASH)).unwrap(), HASH);
+    }
+
+    #[test]
+    fn matching_root_digest_is_accepted() {
+        verify_table_root_digest(&table_line(HASH), HASH).unwrap();
+    }
+
+    /// The whole point of the read-back: if the digest the kernel is enforcing is not the one
+    /// the policy approved, refuse the device rather than serve content bound to some other
+    /// hash.
+    #[test]
+    fn mismatched_root_digest_is_rejected() {
+        let other = "aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44";
+        let err = verify_table_root_digest(&table_line(other), HASH).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("does not match the policy-approved hash"),
+            "{msg}"
+        );
+        assert!(
+            msg.contains(other),
+            "error must name the hash actually in force: {msg}"
+        );
+    }
+
+    /// A single flipped nibble must not pass.
+    #[test]
+    fn near_miss_root_digest_is_rejected() {
+        let near = format!("0{}", &HASH[1..]);
+        assert_ne!(near, HASH);
+        verify_table_root_digest(&table_line(&near), HASH).unwrap_err();
+    }
+
+    /// The kernel lower-cases hex digests; a declaration that spelled the hash in upper case
+    /// names the same content and must not be treated as a mismatch.
+    #[test]
+    fn root_digest_comparison_ignores_case_and_surrounding_space() {
+        verify_table_root_digest(&table_line(HASH), &format!("  {}  ", HASH.to_uppercase()))
+            .unwrap();
+    }
+
+    /// A truncated table must be an error, not an out-of-bounds index or a silent pass.
+    #[test]
+    fn malformed_table_is_rejected() {
+        let err = verify_table_root_digest("1 254:0 254:0 4096", HASH).unwrap_err();
+        assert!(format!("{err:#}").contains("expected at least"));
+    }
+
+    /// dm-verity tables may carry optional feature arguments after the salt; the digest is
+    /// still at a fixed offset, so trailing fields must not disturb it.
+    #[test]
+    fn trailing_feature_arguments_do_not_shift_the_digest() {
+        let line = format!(
+            "{} 2 restart_on_corruption ignore_zero_blocks",
+            table_line(HASH)
+        );
+        assert_eq!(table_root_digest(&line).unwrap(), HASH);
+    }
 }
