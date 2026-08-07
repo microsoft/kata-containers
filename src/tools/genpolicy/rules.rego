@@ -2694,8 +2694,8 @@ presented_verity_roothashes := {entry |
     some o in i_storage.options
     startswith(o, "X-kata.dmverity.roothash=")
     some p in i_storage.options
-    startswith(p, "X-kata.dmverity.partition-number=")
-    entry := sprintf("partition %v = %v", [trim_prefix(p, "X-kata.dmverity.partition-number="), trim_prefix(o, "X-kata.dmverity.roothash=")])
+    startswith(p, "X-kata.partition-number=")
+    entry := sprintf("partition %v = %v", [trim_prefix(p, "X-kata.partition-number="), trim_prefix(o, "X-kata.dmverity.roothash=")])
 }
 
 declared_verity_roothashes := {entry |
@@ -2705,8 +2705,8 @@ declared_verity_roothashes := {entry |
     some o in p_storage.options
     startswith(o, "X-kata.dmverity.roothash=")
     some p in p_storage.options
-    startswith(p, "X-kata.dmverity.partition-number=")
-    entry := sprintf("partition %v = %v", [trim_prefix(p, "X-kata.dmverity.partition-number="), trim_prefix(o, "X-kata.dmverity.roothash=")])
+    startswith(p, "X-kata.partition-number=")
+    entry := sprintf("partition %v = %v", [trim_prefix(p, "X-kata.partition-number="), trim_prefix(o, "X-kata.dmverity.roothash=")])
 }
 
 # ExecProcessRequest is the other endpoint an operator hits routinely, and its denial is

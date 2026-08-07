@@ -2050,9 +2050,9 @@ SignalProcessRequest if {
             "sandbox_pidns": false,
             "storages": [
                 {"driver": "erofs-verity-layer",
-                 "options": ["X-kata.dmverity.roothash=aaa", "X-kata.dmverity.partition-number=1"]},
+                 "options": ["X-kata.dmverity.roothash=aaa", "X-kata.partition-number=1"]},
                 {"driver": "erofs-verity-layer",
-                 "options": ["X-kata.dmverity.roothash=bbb", "X-kata.dmverity.partition-number=2"]}
+                 "options": ["X-kata.dmverity.roothash=bbb", "X-kata.partition-number=2"]}
             ],
             "OCI": {
                 "Version": "1.1.0",
@@ -2068,9 +2068,9 @@ SignalProcessRequest if {
             "sandbox_pidns": false,
             "storages": [
                 {"fstype": "erofs",
-                 "options": ["X-kata.dmverity.roothash=bbb", "X-kata.dmverity.partition-number=1"]},
+                 "options": ["X-kata.dmverity.roothash=bbb", "X-kata.partition-number=1"]},
                 {"fstype": "erofs",
-                 "options": ["X-kata.dmverity.roothash=aaa", "X-kata.dmverity.partition-number=2"]}
+                 "options": ["X-kata.dmverity.roothash=aaa", "X-kata.partition-number=2"]}
             ],
             "OCI": {
                 "Version": "1.1.0",
