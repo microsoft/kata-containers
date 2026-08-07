@@ -166,7 +166,14 @@ EOF
   # allowed_signals is missing the pod boots and passes every case below, then
   # can never be killed -- so check it here rather than discovering it as a
   # namespace full of Terminating pods.
-  policy_text "$pod" | grep -q '"allowed_signals"' \
+  #
+  # Matched via a here-string rather than a pipe on purpose: `grep -q` exits at
+  # the first match, which SIGPIPEs the still-writing python producer, and under
+  # `set -o pipefail` that turns a successful match into a failed pipeline. The
+  # policy only has to be large enough for the producer not to have finished
+  # yet, so the bug is a size-dependent race that appears the moment the policy
+  # grows. A here-string has no producer process, so it cannot happen.
+  grep -q '"allowed_signals"' <<<"$(policy_text "$pod")" \
     || die "$pod: generated policy has no request_defaults.SignalProcessRequest.allowed_signals — genpolicy is older than genpolicy-settings.json and dropped it; the pod would be unkillable"
 }
 
@@ -290,7 +297,7 @@ expect_refusal "08a — a second StartContainer is refused by the occurrence mac
 # is caught here rather than silently relying on FR-9 to catch it.
 out=$(agent_call "$REF_CID" 'StartContainer json://{"container_id":"ghost-never-created"}')
 expect_refusal "08b — under the reference policy an unknown container id is refused by policy first (occurrence gate is defence in depth)" \
-  "$out" PERMISSION_DENIED 'blocked by policy'
+  "$out" PERMISSION_DENIED 'was refused'
 
 # --- 08k / 08l ---------------------------------------------------------------
 # F-77: SIGSTOP and SIGCONT are no longer in the shipped allow-list. Nothing in the
@@ -300,11 +307,11 @@ expect_refusal "08b — under the reference policy an unknown container id is re
 # from upstream's list; these two cases keep them out.
 out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":19}")
 expect_refusal "08k — SIGSTOP(19) is refused by policy (F-77: the host cannot freeze a workload)" \
-  "$out" PERMISSION_DENIED 'blocked by policy'
+  "$out" PERMISSION_DENIED 'was refused'
 
 out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":18}")
 expect_refusal "08l — SIGCONT(18) is refused by policy (F-77)" \
-  "$out" PERMISSION_DENIED 'blocked by policy'
+  "$out" PERMISSION_DENIED 'was refused'
 
 # --- 08m / 08n ---------------------------------------------------------------
 # F-76: the signal allow-list is per container, not per sandbox -- hcsshim's
@@ -318,7 +325,7 @@ expect_refusal "08l — SIGCONT(18) is refused by policy (F-77)" \
 # The pause container is addressed by the sandbox id: containerd creates a pod's
 # sandbox container with the sandbox id as its container id.
 out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":28}")
-if echo "$out" | grep -q 'blocked by policy'; then
+if echo "$out" | grep -q 'was refused'; then
   echo "$out" | tail -3
   fail_case "08m — SIGWINCH(28) should be allowed for the workload container"
 else
@@ -327,7 +334,7 @@ fi
 
 out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_SB\",\"exec_id\":\"\",\"signal\":28}")
 expect_refusal "08n — the same SIGWINCH(28) is refused for the pause container of the same sandbox (F-76: per-container signal sets)" \
-  "$out" PERMISSION_DENIED 'blocked by policy'
+  "$out" PERMISSION_DENIED 'was refused'
 
 # --- 08o / 08p ---------------------------------------------------------------
 # RM-26: removing a container id the policy never admitted must succeed, exactly
@@ -362,7 +369,7 @@ fi
 # -- that is what stops 08o from becoming a general "remove any id" hole.
 out=$(agent_call "$REF_CID" 'RemoveContainer json://{"container_id":"ghost-never-created"}')
 expect_refusal "08p — the second RemoveContainer for the same id is refused: the no-op tombstoned it (RM-20 preserved)" \
-  "$out" PERMISSION_DENIED 'blocked by policy'
+  "$out" PERMISSION_DENIED 'was refused'
 
 kubectl delete pod fr9-reference -n "$NS" --ignore-not-found >/dev/null 2>&1 || true
 
@@ -384,7 +391,7 @@ log "sandbox=${P_SB:0:12} cid=$P_CID container=${P_CT:0:12}"
 # under the reference policy this same call is refused (signal 0 is not in
 # allowed_signals).
 out=$(agent_call "$P_CID" "SignalProcess json://{\"container_id\":\"$P_CT\",\"exec_id\":\"$P_CT\",\"signal\":0}")
-if echo "$out" | grep -q 'blocked by policy'; then
+if echo "$out" | grep -q 'was refused'; then
   die "the permissive fixture did not take -- policy is still refusing, so 08c-08f would prove nothing"
 fi
 ok "08-pre — the lifecycle endpoints are policy-permissive on this pod"
@@ -475,7 +482,7 @@ fi
 # here is that the *generated policy* carries the matching tombstone, so a host
 # that reuses a container id is refused before the enforcer is even consulted.
 step "08i — container ids are not reusable (RM-20)"
-if policy_text fr9-permissive | grep -q 'retired:'; then
+if grep -q 'retired:' <<<"$(policy_text fr9-permissive)"; then
   ok "08i — the generated policy tombstones removed container ids (create for a reused id is refused at the policy layer)"
 else
   fail_case "08i: the generated policy has no retired-id tombstone -- a removed container id could name a second container"

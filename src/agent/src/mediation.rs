@@ -319,6 +319,10 @@ mod tests {
         let sandbox = crate::sandbox::Sandbox::new(&logger).expect("sandbox");
         let svc = crate::rpc::AgentService::new_for_test(Arc::new(Mutex::new(sandbox)));
         let ctx = TtrpcContext {
+            // Not a real connection: the sweep calls the handlers directly rather than
+            // over a socket, and no handler reads the descriptor. -1 is the conventional
+            // "no fd" sentinel and fails loudly if anything ever does read it.
+            fd: -1,
             mh: ttrpc::proto::MessageHeader::default(),
             metadata: std::collections::HashMap::new(),
             timeout_nano: 0,
@@ -352,8 +356,14 @@ mod tests {
                 status.message()
             );
             if class != EnforcementClass::DeniedUnconditionally {
+                // The policy engine's denial text comes from `DecisionObject::explain()`,
+                // which always names the endpoint and the words "was refused" in both its
+                // attributable and its no-reason-rule branches. Handlers that refuse
+                // without consulting the policy word their errors differently (e.g.
+                // "guest diagnostics are disabled in strict mode"), so this still
+                // discriminates the policy engine from the handler.
                 assert!(
-                    status.message().contains("blocked by policy"),
+                    status.message().contains("was refused"),
                     "RPC `{rpc}` ({class:?}) was denied by something other than the policy \
                      engine: `{}`",
                     status.message()
