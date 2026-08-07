@@ -303,83 +303,83 @@ pub async fn create_dmverity_device(
         // mapping back down. Without this a rejected device -- exactly the case where the
         // content failed to verify -- is left live in the kernel.
         let configure = || -> Result<String> {
-        // Calculate hash start block.
-        let hash_start_block: u64 = if verity_info.no_superblock {
-            verity_info.offset / verity_info.hashsize
-        } else {
-            let superblock_blocks = 512_u64.div_ceil(verity_info.hashsize);
-            (verity_info.offset / verity_info.hashsize) + superblock_blocks
-        };
+            // Calculate hash start block.
+            let hash_start_block: u64 = if verity_info.no_superblock {
+                verity_info.offset / verity_info.hashsize
+            } else {
+                let superblock_blocks = 512_u64.div_ceil(verity_info.hashsize);
+                (verity_info.offset / verity_info.hashsize) + superblock_blocks
+            };
 
-        let salt = verity_info.salt.as_deref().unwrap_or("-");
-        let source_display = source_path.display().to_string();
-        let verity_params = format!(
-            "{} {} {} {} {} {} {} {} {} {}",
-            verity_info.hash_type,
-            source_display,
-            source_display,
-            verity_info.blocksize,
-            verity_info.hashsize,
-            verity_info.blocknum,
-            hash_start_block,
-            verity_info.hashtype,
-            verity_info.hash,
-            salt
-        );
+            let salt = verity_info.salt.as_deref().unwrap_or("-");
+            let source_display = source_path.display().to_string();
+            let verity_params = format!(
+                "{} {} {} {} {} {} {} {} {} {}",
+                verity_info.hash_type,
+                source_display,
+                source_display,
+                verity_info.blocksize,
+                verity_info.hashsize,
+                verity_info.blocknum,
+                hash_start_block,
+                verity_info.hashtype,
+                verity_info.hash,
+                salt
+            );
 
-        let verity_table = vec![(
-            0,
-            verity_info.blocknum * verity_info.blocksize / 512,
-            "verity".into(),
-            verity_params.clone(),
-        )];
+            let verity_table = vec![(
+                0,
+                verity_info.blocknum * verity_info.blocksize / 512,
+                "verity".into(),
+                verity_params.clone(),
+            )];
 
-        info!(
-            slog_scope::logger(),
-            "dm-verity table parameters";
-            "device" => &source_display,
-            "data_blocks" => verity_info.blocknum,
-            "data_block_size" => verity_info.blocksize,
-            "hash_block_size" => verity_info.hashsize,
-            "hash_start_block" => hash_start_block,
-            "hash_algorithm" => &verity_info.hashtype,
-            "hash_type" => verity_info.hash_type,
-            "no_superblock" => verity_info.no_superblock,
-            "salt" => salt,
-            "table_params" => &verity_params,
-        );
+            info!(
+                slog_scope::logger(),
+                "dm-verity table parameters";
+                "device" => &source_display,
+                "data_blocks" => verity_info.blocknum,
+                "data_block_size" => verity_info.blocksize,
+                "hash_block_size" => verity_info.hashsize,
+                "hash_start_block" => hash_start_block,
+                "hash_algorithm" => &verity_info.hashtype,
+                "hash_type" => verity_info.hash_type,
+                "no_superblock" => verity_info.no_superblock,
+                "salt" => salt,
+                "table_params" => &verity_params,
+            );
 
-        // Step 2: Load table and resume (activate)
-        dm.table_load(&id, verity_table.as_slice(), ro_opts)?;
-        dm.device_suspend(&id, opts)?;
+            // Step 2: Load table and resume (activate)
+            dm.table_load(&id, verity_table.as_slice(), ro_opts)?;
+            dm.device_suspend(&id, opts)?;
 
-        // Step 2b (RM-52): read the *active* table back and confirm the root hash the kernel
-        // is enforcing is the one we were asked to enforce. See `verify_table_root_digest`.
-        let (_, active) = dm
-            .table_status(
-                &id,
-                DmOptions::default().set_flags(DmFlags::DM_STATUS_TABLE),
-            )
-            .context("failed to read back the active dm-verity table")?;
-        let verity_target = active
-            .iter()
-            .find(|(_, _, target_type, _)| target_type == "verity")
-            .ok_or_else(|| {
-                anyhow!("no verity target in the active dm table for {verity_name_string}")
-            })?;
-        verify_table_root_digest(&verity_target.3, &expected_root_hash)?;
+            // Step 2b (RM-52): read the *active* table back and confirm the root hash the kernel
+            // is enforcing is the one we were asked to enforce. See `verify_table_root_digest`.
+            let (_, active) = dm
+                .table_status(
+                    &id,
+                    DmOptions::default().set_flags(DmFlags::DM_STATUS_TABLE),
+                )
+                .context("failed to read back the active dm-verity table")?;
+            let verity_target = active
+                .iter()
+                .find(|(_, _, target_type, _)| target_type == "verity")
+                .ok_or_else(|| {
+                    anyhow!("no verity target in the active dm table for {verity_name_string}")
+                })?;
+            verify_table_root_digest(&verity_target.3, &expected_root_hash)?;
 
-        // Step 3: Create the device node under /dev/mapper/.
-        //
-        // This is done unconditionally, and deliberately does not depend on whether udevd is
-        // running. Device creation above always passes `no_udev_dm_options()`, which sets
-        // DM_UDEV_DISABLE_DM_RULES_FLAG — udev is explicitly told *not* to manage this
-        // device, so waiting for udev to create the node can only ever time out. Doing that
-        // left the mapping live in the kernel with no usable node and no cleanup, so on any
-        // host or guest where udevd happens to be running every dm-verity mount failed and
-        // leaked a device. Since we disable the rules, we own the node.
-        let device_info = dm.device_info(&id)?;
-        create_dm_dev_node(&verity_name_string, device_info.device())
+            // Step 3: Create the device node under /dev/mapper/.
+            //
+            // This is done unconditionally, and deliberately does not depend on whether udevd is
+            // running. Device creation above always passes `no_udev_dm_options()`, which sets
+            // DM_UDEV_DISABLE_DM_RULES_FLAG — udev is explicitly told *not* to manage this
+            // device, so waiting for udev to create the node can only ever time out. Doing that
+            // left the mapping live in the kernel with no usable node and no cleanup, so on any
+            // host or guest where udevd happens to be running every dm-verity mount failed and
+            // leaked a device. Since we disable the rules, we own the node.
+            let device_info = dm.device_info(&id)?;
+            create_dm_dev_node(&verity_name_string, device_info.device())
         };
 
         match configure() {

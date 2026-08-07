@@ -29,19 +29,18 @@ use ttrpc::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use pathrs::flags::OpenFlags;
 use cgroups::freezer::FreezerState;
 use oci::{Hooks, LinuxNamespace, Spec};
 use oci_spec::runtime as oci;
+use pathrs::flags::OpenFlags;
 #[cfg(feature = "agent-policy")]
 use protobuf::MessageDyn;
 use protobuf::MessageField;
 use protocols::agent::{
-    ResizeVolumeRequest,
     AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest, GetIPTablesRequest,
     GetIPTablesResponse, GuestDetailsResponse, Interfaces, Metrics, OOMEvent, ReadStreamResponse,
-    Routes, SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse, VolumeStatsRequest,
-    WaitProcessResponse, WriteStreamResponse,
+    ResizeVolumeRequest, Routes, SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse,
+    VolumeStatsRequest, WaitProcessResponse, WriteStreamResponse,
 };
 use protocols::csi::{
     volume_usage::Unit as VolumeUsage_Unit, VolumeCondition, VolumeStatsResponse, VolumeUsage,

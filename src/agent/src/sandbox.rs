@@ -317,7 +317,8 @@ impl Sandbox {
             .map(|(id, _)| id.clone())
     }
 
-    pub fn find_process(&mut self, pid: pid_t) -> Option<&mut Process> {        for (_, c) in self.containers.iter_mut() {
+    pub fn find_process(&mut self, pid: pid_t) -> Option<&mut Process> {
+        for (_, c) in self.containers.iter_mut() {
             for p in c.processes.values_mut() {
                 if p.pid == pid {
                     return Some(p);

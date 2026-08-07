@@ -274,7 +274,12 @@ fn assert_satisfied_in(pending: &[FragmentSpec]) -> Result<()> {
     }
     let detail = outstanding
         .iter()
-        .map(|s| format!("{} (issuer {}, minimum_svn {})", s.feed, s.issuer, s.minimum_svn))
+        .map(|s| {
+            format!(
+                "{} (issuer {}, minimum_svn {})",
+                s.feed, s.issuer, s.minimum_svn
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     bail!(
@@ -512,7 +517,11 @@ mod tests {
     /// hand a fragment surface its own signed statement never asked for.
     #[test]
     fn a_grant_cannot_widen_what_the_fragment_asked_for() {
-        let granted = vec!["infra".to_string(), "net".to_string(), "secrets".to_string()];
+        let granted = vec![
+            "infra".to_string(),
+            "net".to_string(),
+            "secrets".to_string(),
+        ];
         assert_eq!(
             effective_namespaces(&granted, &["infra".to_string()]),
             vec!["infra".to_string()]
@@ -542,7 +551,10 @@ mod tests {
         assert!(err.contains("reg.io/frag:1"), "unhelpful error: {}", err);
 
         // A matching delivery clears it, and only then may containers start.
-        assert_eq!(satisfy_in(&mut pending, "did:x509:i", "reg.io/frag:1", 2).unwrap(), 1);
+        assert_eq!(
+            satisfy_in(&mut pending, "did:x509:i", "reg.io/frag:1", 2).unwrap(),
+            1
+        );
         assert!(assert_satisfied_in(&pending).is_ok());
     }
 
@@ -568,7 +580,11 @@ mod tests {
             req("did:x509:i", "reg.io/mandatory:1", 1),
         ];
         let err = assert_satisfied_in(&pending).unwrap_err().to_string();
-        assert!(err.contains("reg.io/mandatory:1"), "unhelpful error: {}", err);
+        assert!(
+            err.contains("reg.io/mandatory:1"),
+            "unhelpful error: {}",
+            err
+        );
         assert!(
             !err.contains("reg.io/optional:1"),
             "an optional declaration must not be reported as outstanding: {}",
@@ -579,7 +595,11 @@ mod tests {
         // declaration is still outstanding.
         satisfy_in(&mut pending, "did:x509:i", "reg.io/mandatory:1", 1).unwrap();
         assert!(assert_satisfied_in(&pending).is_ok());
-        assert_eq!(pending.len(), 1, "the optional declaration is still tracked");
+        assert_eq!(
+            pending.len(),
+            1,
+            "the optional declaration is still tracked"
+        );
     }
 
     /// `required: false` is not `unchecked`. An optional fragment that is actually

@@ -381,38 +381,134 @@ mod tests {
             }};
         }
 
-        sweep!("CreateContainer", svc.create_container(&ctx, ag::CreateContainerRequest::default()));
-        sweep!("StartContainer", svc.start_container(&ctx, ag::StartContainerRequest::default()));
-        sweep!("RemoveContainer", svc.remove_container(&ctx, ag::RemoveContainerRequest::default()));
-        sweep!("ExecProcess", svc.exec_process(&ctx, ag::ExecProcessRequest::default()));
-        sweep!("SignalProcess", svc.signal_process(&ctx, ag::SignalProcessRequest::default()));
-        sweep!("WaitProcess", svc.wait_process(&ctx, ag::WaitProcessRequest::default()));
-        sweep!("UpdateContainer", svc.update_container(&ctx, ag::UpdateContainerRequest::default()));
-        sweep!("UpdateEphemeralMounts", svc.update_ephemeral_mounts(&ctx, ag::UpdateEphemeralMountsRequest::default()));
-        sweep!("PauseContainer", svc.pause_container(&ctx, ag::PauseContainerRequest::default()));
-        sweep!("ResumeContainer", svc.resume_container(&ctx, ag::ResumeContainerRequest::default()));
-        sweep!("RemoveStaleVirtiofsShareMounts", svc.remove_stale_virtiofs_share_mounts(&ctx, ag::RemoveStaleVirtiofsShareMountsRequest::default()));
-        sweep!("WriteStdin", svc.write_stdin(&ctx, ag::WriteStreamRequest::default()));
-        sweep!("CloseStdin", svc.close_stdin(&ctx, ag::CloseStdinRequest::default()));
-        sweep!("TtyWinResize", svc.tty_win_resize(&ctx, ag::TtyWinResizeRequest::default()));
-        sweep!("UpdateInterface", svc.update_interface(&ctx, ag::UpdateInterfaceRequest::default()));
-        sweep!("UpdateRoutes", svc.update_routes(&ctx, ag::UpdateRoutesRequest::default()));
-        sweep!("AddARPNeighbors", svc.add_arp_neighbors(&ctx, ag::AddARPNeighborsRequest::default()));
-        sweep!("SetIPTables", svc.set_ip_tables(&ctx, ag::SetIPTablesRequest::default()));
-        sweep!("MemAgentMemcgSet", svc.mem_agent_memcg_set(&ctx, ag::MemAgentMemcgConfig::default()));
-        sweep!("MemAgentCompactSet", svc.mem_agent_compact_set(&ctx, ag::MemAgentCompactConfig::default()));
-        sweep!("CreateSandbox", svc.create_sandbox(&ctx, ag::CreateSandboxRequest::default()));
-        sweep!("DestroySandbox", svc.destroy_sandbox(&ctx, ag::DestroySandboxRequest::default()));
-        sweep!("OnlineCPUMem", svc.online_cpu_mem(&ctx, ag::OnlineCPUMemRequest::default()));
-        sweep!("ReseedRandomDev", svc.reseed_random_dev(&ctx, ag::ReseedRandomDevRequest::default()));
-        sweep!("MemHotplugByProbe", svc.mem_hotplug_by_probe(&ctx, ag::MemHotplugByProbeRequest::default()));
-        sweep!("SetGuestDateTime", svc.set_guest_date_time(&ctx, ag::SetGuestDateTimeRequest::default()));
-        sweep!("CopyFile", svc.copy_file(&ctx, ag::CopyFileRequest::default()));
+        sweep!(
+            "CreateContainer",
+            svc.create_container(&ctx, ag::CreateContainerRequest::default())
+        );
+        sweep!(
+            "StartContainer",
+            svc.start_container(&ctx, ag::StartContainerRequest::default())
+        );
+        sweep!(
+            "RemoveContainer",
+            svc.remove_container(&ctx, ag::RemoveContainerRequest::default())
+        );
+        sweep!(
+            "ExecProcess",
+            svc.exec_process(&ctx, ag::ExecProcessRequest::default())
+        );
+        sweep!(
+            "SignalProcess",
+            svc.signal_process(&ctx, ag::SignalProcessRequest::default())
+        );
+        sweep!(
+            "WaitProcess",
+            svc.wait_process(&ctx, ag::WaitProcessRequest::default())
+        );
+        sweep!(
+            "UpdateContainer",
+            svc.update_container(&ctx, ag::UpdateContainerRequest::default())
+        );
+        sweep!(
+            "UpdateEphemeralMounts",
+            svc.update_ephemeral_mounts(&ctx, ag::UpdateEphemeralMountsRequest::default())
+        );
+        sweep!(
+            "PauseContainer",
+            svc.pause_container(&ctx, ag::PauseContainerRequest::default())
+        );
+        sweep!(
+            "ResumeContainer",
+            svc.resume_container(&ctx, ag::ResumeContainerRequest::default())
+        );
+        sweep!(
+            "RemoveStaleVirtiofsShareMounts",
+            svc.remove_stale_virtiofs_share_mounts(
+                &ctx,
+                ag::RemoveStaleVirtiofsShareMountsRequest::default()
+            )
+        );
+        sweep!(
+            "WriteStdin",
+            svc.write_stdin(&ctx, ag::WriteStreamRequest::default())
+        );
+        sweep!(
+            "CloseStdin",
+            svc.close_stdin(&ctx, ag::CloseStdinRequest::default())
+        );
+        sweep!(
+            "TtyWinResize",
+            svc.tty_win_resize(&ctx, ag::TtyWinResizeRequest::default())
+        );
+        sweep!(
+            "UpdateInterface",
+            svc.update_interface(&ctx, ag::UpdateInterfaceRequest::default())
+        );
+        sweep!(
+            "UpdateRoutes",
+            svc.update_routes(&ctx, ag::UpdateRoutesRequest::default())
+        );
+        sweep!(
+            "AddARPNeighbors",
+            svc.add_arp_neighbors(&ctx, ag::AddARPNeighborsRequest::default())
+        );
+        sweep!(
+            "SetIPTables",
+            svc.set_ip_tables(&ctx, ag::SetIPTablesRequest::default())
+        );
+        sweep!(
+            "MemAgentMemcgSet",
+            svc.mem_agent_memcg_set(&ctx, ag::MemAgentMemcgConfig::default())
+        );
+        sweep!(
+            "MemAgentCompactSet",
+            svc.mem_agent_compact_set(&ctx, ag::MemAgentCompactConfig::default())
+        );
+        sweep!(
+            "CreateSandbox",
+            svc.create_sandbox(&ctx, ag::CreateSandboxRequest::default())
+        );
+        sweep!(
+            "DestroySandbox",
+            svc.destroy_sandbox(&ctx, ag::DestroySandboxRequest::default())
+        );
+        sweep!(
+            "OnlineCPUMem",
+            svc.online_cpu_mem(&ctx, ag::OnlineCPUMemRequest::default())
+        );
+        sweep!(
+            "ReseedRandomDev",
+            svc.reseed_random_dev(&ctx, ag::ReseedRandomDevRequest::default())
+        );
+        sweep!(
+            "MemHotplugByProbe",
+            svc.mem_hotplug_by_probe(&ctx, ag::MemHotplugByProbeRequest::default())
+        );
+        sweep!(
+            "SetGuestDateTime",
+            svc.set_guest_date_time(&ctx, ag::SetGuestDateTimeRequest::default())
+        );
+        sweep!(
+            "CopyFile",
+            svc.copy_file(&ctx, ag::CopyFileRequest::default())
+        );
         sweep!("AddSwap", svc.add_swap(&ctx, ag::AddSwapRequest::default()));
-        sweep!("AddSwapPath", svc.add_swap_path(&ctx, ag::AddSwapPathRequest::default()));
-        sweep!("ResizeVolume", svc.resize_volume(&ctx, ag::ResizeVolumeRequest::default()));
-        sweep!("StatsContainer", svc.stats_container(&ctx, ag::StatsContainerRequest::default()));
-        sweep!("GetDiagnosticData", svc.get_diagnostic_data(&ctx, ag::GetDiagnosticDataRequest::default()));
+        sweep!(
+            "AddSwapPath",
+            svc.add_swap_path(&ctx, ag::AddSwapPathRequest::default())
+        );
+        sweep!(
+            "ResizeVolume",
+            svc.resize_volume(&ctx, ag::ResizeVolumeRequest::default())
+        );
+        sweep!(
+            "StatsContainer",
+            svc.stats_container(&ctx, ag::StatsContainerRequest::default())
+        );
+        sweep!(
+            "GetDiagnosticData",
+            svc.get_diagnostic_data(&ctx, ag::GetDiagnosticDataRequest::default())
+        );
 
         // ReadStdout/ReadStderr are `PolicyGatedRedacted`: a denial returns an empty
         // success, so "no error" is not evidence of mediation on its own. The request
@@ -422,9 +518,11 @@ mod tests {
         // matters because reading a pipe consumes its bytes.
         for (rpc, stdout) in [("ReadStdout", true), ("ReadStderr", false)] {
             let resp = if stdout {
-                svc.read_stdout(&ctx, ag::ReadStreamRequest::default()).await
+                svc.read_stdout(&ctx, ag::ReadStreamRequest::default())
+                    .await
             } else {
-                svc.read_stderr(&ctx, ag::ReadStreamRequest::default()).await
+                svc.read_stderr(&ctx, ag::ReadStreamRequest::default())
+                    .await
             };
             let resp = resp.unwrap_or_else(|e| {
                 panic!(
@@ -442,17 +540,44 @@ mod tests {
             swept.insert(rpc);
         }
 
-        sweep!("ListInterfaces", svc.list_interfaces(&ctx, ag::ListInterfacesRequest::default()));
-        sweep!("ListRoutes", svc.list_routes(&ctx, ag::ListRoutesRequest::default()));
-        sweep!("GetIPTables", svc.get_ip_tables(&ctx, ag::GetIPTablesRequest::default()));
-        sweep!("GetMetrics", svc.get_metrics(&ctx, ag::GetMetricsRequest::default()));
-        sweep!("GetGuestDetails", svc.get_guest_details(&ctx, ag::GuestDetailsRequest::default()));
-        sweep!("GetOOMEvent", svc.get_oom_event(&ctx, ag::GetOOMEventRequest::default()));
-        sweep!("GetVolumeStats", svc.get_volume_stats(&ctx, ag::VolumeStatsRequest::default()));
+        sweep!(
+            "ListInterfaces",
+            svc.list_interfaces(&ctx, ag::ListInterfacesRequest::default())
+        );
+        sweep!(
+            "ListRoutes",
+            svc.list_routes(&ctx, ag::ListRoutesRequest::default())
+        );
+        sweep!(
+            "GetIPTables",
+            svc.get_ip_tables(&ctx, ag::GetIPTablesRequest::default())
+        );
+        sweep!(
+            "GetMetrics",
+            svc.get_metrics(&ctx, ag::GetMetricsRequest::default())
+        );
+        sweep!(
+            "GetGuestDetails",
+            svc.get_guest_details(&ctx, ag::GuestDetailsRequest::default())
+        );
+        sweep!(
+            "GetOOMEvent",
+            svc.get_oom_event(&ctx, ag::GetOOMEventRequest::default())
+        );
+        sweep!(
+            "GetVolumeStats",
+            svc.get_volume_stats(&ctx, ag::VolumeStatsRequest::default())
+        );
         #[cfg(not(feature = "strict-policy"))]
-        sweep!("SetPolicy", svc.set_policy(&ctx, ag::SetPolicyRequest::default()));
+        sweep!(
+            "SetPolicy",
+            svc.set_policy(&ctx, ag::SetPolicyRequest::default())
+        );
         #[cfg(feature = "strict-policy")]
-        sweep!("LoadPolicyFragment", svc.load_policy_fragment(&ctx, ag::LoadPolicyFragmentRequest::default()));
+        sweep!(
+            "LoadPolicyFragment",
+            svc.load_policy_fragment(&ctx, ag::LoadPolicyFragmentRequest::default())
+        );
 
         // Every manifest entry must have been visited. Without this, an RPC could be
         // dropped from the sweep and the test would still pass — the same "absence of a

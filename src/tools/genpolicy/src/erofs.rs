@@ -37,7 +37,8 @@ const UUID_NAMESPACE_URL: [u8; 16] = [
 /// aufs whiteouts, `--quiet` suppresses progress output, `-Enoinline_data`
 /// keeps file data out of inodes so that the layout is stable, and `-b4096`
 /// sets the block size.
-const CONTAINERD_FIXED_OPTS: &[&str] = &["--tar=f", "--aufs", "--quiet", "-Enoinline_data", "-b4096"];
+const CONTAINERD_FIXED_OPTS: &[&str] =
+    &["--tar=f", "--aufs", "--quiet", "-Enoinline_data", "-b4096"];
 
 /// The `mkfs_options` kata-deploy writes into containerd's differ configuration.
 /// Must stay in sync with `erofs_mkfs_options()` in
@@ -81,7 +82,10 @@ pub fn layer_uuid(layer_digest: &str) -> String {
 /// `mkfs_options`, and `mkfs.erofs` honours the last `-U` on the command line
 /// (RM-46).
 pub fn mkfs_args(image_path: &Path, layer_digest: &str) -> Vec<String> {
-    let mut args: Vec<String> = CONTAINERD_FIXED_OPTS.iter().map(|s| s.to_string()).collect();
+    let mut args: Vec<String> = CONTAINERD_FIXED_OPTS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     args.extend(KATA_MKFS_OPTS.iter().map(|s| s.to_string()));
     args.push("-U".to_string());
     args.push(layer_uuid(layer_digest));
@@ -152,12 +156,7 @@ pub fn erofs_utils_version() -> Result<String> {
         .output()
         .map_err(|e| anyhow!("failed to run mkfs.erofs --version: {e}"))?;
     let text = String::from_utf8_lossy(&output.stdout);
-    Ok(text
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_string())
+    Ok(text.lines().next().unwrap_or_default().trim().to_string())
 }
 
 #[cfg(test)]

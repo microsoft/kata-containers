@@ -1162,8 +1162,8 @@ pub fn measure_cdi_specs(
 #[cfg(feature = "strict-policy")]
 pub fn load_authorized_cdi_digests() -> HashSet<String> {
     #[cfg(feature = "test-path-override")]
-    let path =
-        std::env::var("KATA_TRUSTED_CDI_DIGESTS").unwrap_or_else(|_| TRUSTED_CDI_DIGESTS_PATH.to_string());
+    let path = std::env::var("KATA_TRUSTED_CDI_DIGESTS")
+        .unwrap_or_else(|_| TRUSTED_CDI_DIGESTS_PATH.to_string());
     #[cfg(not(feature = "test-path-override"))]
     let path = TRUSTED_CDI_DIGESTS_PATH.to_string();
     match fs::read_to_string(&path) {

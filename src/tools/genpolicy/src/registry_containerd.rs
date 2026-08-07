@@ -87,7 +87,6 @@ impl Container {
         if config.settings.cluster_config.guest_pull && (v1_policy || !is_pause_container) {
             info!("Guest pull is enabled, skipping passwd/group file parsing");
         } else {
-
             // Find the last layer with an /etc/* file, respecting whiteouts.
             info!("Parsing users and groups in image layers");
             for layer in &image_layers {

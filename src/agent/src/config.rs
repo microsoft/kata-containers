@@ -1657,10 +1657,7 @@ mod tests {
                 d.guest_components_procs, config.guest_components_procs,
                 "{msg}"
             );
-            assert_eq!(
-                exp_storage, config.secure_storage_integrity,
-                "{msg}"
-            );
+            assert_eq!(exp_storage, config.secure_storage_integrity, "{msg}");
             #[cfg(feature = "agent-policy")]
             assert_eq!(exp_policy_file, config.policy_file, "{msg}");
 
@@ -1749,7 +1746,10 @@ mod tests {
         let config = AgentConfig::from_cmdline(filename, vec![]).expect("failed to parse cmdline");
 
         assert!(!config.debug_console, "debug console honoured in strict");
-        assert_eq!(config.debug_console_vport, 0, "debug console vport honoured");
+        assert_eq!(
+            config.debug_console_vport, 0,
+            "debug console vport honoured"
+        );
         assert!(!config.dev_mode, "dev mode honoured in strict");
         assert_eq!(config.log_level, STRICT_LOG_LEVEL, "log level host-chosen");
         assert_eq!(config.log_vport, 0, "log vport honoured in strict");

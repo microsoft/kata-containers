@@ -183,7 +183,10 @@ mod tests {
     fn metadata(container_type: Option<&str>) -> HashMap<String, String> {
         let mut m = HashMap::new();
         if let Some(t) = container_type {
-            m.insert("io.kubernetes.cri.container-type".to_string(), t.to_string());
+            m.insert(
+                "io.kubernetes.cri.container-type".to_string(),
+                t.to_string(),
+            );
         }
         m
     }

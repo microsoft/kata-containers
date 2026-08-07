@@ -509,7 +509,11 @@ impl SignalProcessRequestDefaults {
     ///
     /// The result is always intersected with `allowed_signals` by `rules.rego`, so no
     /// path here can widen the sandbox ceiling.
-    pub fn signals_for_container(&self, is_pause_container: bool, stop_signal: Option<u32>) -> Vec<u32> {
+    pub fn signals_for_container(
+        &self,
+        is_pause_container: bool,
+        stop_signal: Option<u32>,
+    ) -> Vec<u32> {
         if let Some(signal) = stop_signal {
             let mut signals = vec![signal];
             if signal != SIGKILL {
@@ -1680,7 +1684,10 @@ fn get_erofs_layer_storages(
         return;
     }
 
-    debug!("Declaring {} erofs dm-verity lower layers", image_layers.len());
+    debug!(
+        "Declaring {} erofs dm-verity lower layers",
+        image_layers.len()
+    );
 
     // Number the partitions topmost layer first. `image_layers` is in OCI manifest order
     // (base first), but the runtime assigns GPT partitions in the order containerd's
@@ -1823,7 +1830,11 @@ mod tests {
         // The default must stay inert: an existing deployment that has not opted into
         // erofs layer verification must generate exactly the policy it did before.
         let mut storages = Vec::new();
-        get_erofs_layer_storages(&mut storages, IMAGE_LAYER_VERIFICATION_NONE, &layers_with_hashes(4));
+        get_erofs_layer_storages(
+            &mut storages,
+            IMAGE_LAYER_VERIFICATION_NONE,
+            &layers_with_hashes(4),
+        );
         assert!(storages.is_empty());
 
         let mut storages = Vec::new();
@@ -1835,7 +1846,11 @@ mod tests {
     fn erofs_layers_declared_one_per_image_layer() {
         let layers = layers_with_hashes(3);
         let mut storages = Vec::new();
-        get_erofs_layer_storages(&mut storages, IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY, &layers);
+        get_erofs_layer_storages(
+            &mut storages,
+            IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY,
+            &layers,
+        );
         assert_eq!(storages.len(), 3);
 
         for (i, storage) in storages.iter().enumerate() {
@@ -1881,12 +1896,19 @@ mod tests {
     fn erofs_layer_partitions_are_numbered_topmost_first() {
         let layers = layers_with_hashes(3);
         let mut storages = Vec::new();
-        get_erofs_layer_storages(&mut storages, IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY, &layers);
+        get_erofs_layer_storages(
+            &mut storages,
+            IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY,
+            &layers,
+        );
 
         let partition_of = |hash: &str| -> String {
             let s = storages
                 .iter()
-                .find(|s| s.options.contains(&format!("X-kata.dmverity.roothash={hash}")))
+                .find(|s| {
+                    s.options
+                        .contains(&format!("X-kata.dmverity.roothash={hash}"))
+                })
                 .expect("every layer hash must be declared");
             s.options
                 .iter()
@@ -2008,6 +2030,9 @@ mod tests {
 
     #[test]
     fn falls_back_to_the_verbatim_reference_when_parsing_fails() {
-        assert_eq!(normalize_image_reference("NOT A REFERENCE"), "NOT A REFERENCE:latest");
+        assert_eq!(
+            normalize_image_reference("NOT A REFERENCE"),
+            "NOT A REFERENCE:latest"
+        );
     }
 }
