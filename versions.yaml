@@ -209,10 +209,12 @@ assets:
     url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/"
     version: "v6.18.35"
     nvidia:
-      description: "NVIDIA NV-Kernels tree (Grace/GB200 ATS + coherent-memory patches)"
+      description: "NVIDIA NV-Kernels (Grace/GB200 ATS + coherent patches); tag linux-nvidia-6.18-v6.18.35"
       url: "https://github.com/NVIDIA/NV-Kernels.git"
       version: "v6.18.35"
-      ref: "linux-nvidia-6.18-v6.18.35"
+      # SHA (not tag name): git fetch --depth 1 lands a tag in FETCH_HEAD without
+      # creating a local ref, so checkout must be by a fetchable commit SHA.
+      ref: "651246157b8c28807092ba040b2aa2e83d312ac6"
 
   kernel-arm-experimental:
     description: "Linux kernel with cpu/mem hotplug support on arm64"
