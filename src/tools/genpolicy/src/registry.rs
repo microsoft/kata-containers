@@ -68,6 +68,20 @@ pub struct ImageLayer {
     pub diff_id: String,
     pub passwd: String,
     pub group: String,
+
+    /// RM-42: the dm-verity root hash the host's EROFS snapshotter will produce
+    /// for this layer, derived locally by rebuilding the layer image. Empty when
+    /// derivation is disabled, in which case the generated policy constrains only
+    /// the *shape* of a layer's verity options and not the content they attest.
+    #[serde(default)]
+    pub verity_hash: String,
+
+    /// Identifies the inputs `verity_hash` was derived from, so that a cache entry
+    /// is not reused across a change that would invalidate it. The hash depends on
+    /// the layer's compressed digest (which seeds the filesystem UUID) and on the
+    /// erofs-utils version, neither of which is captured by `diff_id`.
+    #[serde(default)]
+    pub verity_key: String,
 }
 
 /// See https://docs.docker.com/reference/dockerfile/#volume.
@@ -167,21 +181,25 @@ impl Container {
         let mut passwd = String::new();
         let mut group = String::new();
 
+        // RM-38 needs the layer list on every path, so resolve it unconditionally.
+        let image_layers = get_image_layers(
+            &config.layers_cache,
+            &mut client,
+            &reference,
+            &manifest,
+            &config_layer,
+            config.settings.common.image_layer_verification
+                == crate::policy::IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY,
+        )
+        .await
+        .unwrap();
+
         // Nydus/guest_pull doesn't make available passwd/group files from layers properly.
         // See issue https://github.com/kata-containers/kata-containers/issues/11162
         let v1_policy = config.settings.cluster_config.pause_container_id_policy == "v1";
         if config.settings.cluster_config.guest_pull && (v1_policy || !is_pause_container) {
             info!("Guest pull is enabled, skipping passwd/group file parsing");
         } else {
-            let image_layers = get_image_layers(
-                &config.layers_cache,
-                &mut client,
-                &reference,
-                &manifest,
-                &config_layer,
-            )
-            .await
-            .unwrap();
 
             // Find the last layer with an /etc/* file, respecting whiteouts.
             info!("Parsing users and groups in image layers");
@@ -507,6 +525,7 @@ async fn get_image_layers(
     reference: &Reference,
     manifest: &manifest::OciImageManifest,
     config_layer: &DockerConfigLayer,
+    derive_verity: bool,
 ) -> Result<Vec<ImageLayer>> {
     let mut layer_index = 0;
     let mut layers = Vec::new();
@@ -524,6 +543,7 @@ async fn get_image_layers(
                     reference,
                     &layer.digest,
                     &config_layer.rootfs.diff_ids[layer_index].clone(),
+                    derive_verity,
                 )
                 .await?;
                 imageLayer.diff_id = config_layer.rootfs.diff_ids[layer_index].clone();
@@ -539,16 +559,47 @@ async fn get_image_layers(
     Ok(layers)
 }
 
+/// The inputs a derived dm-verity root hash depends on, beyond the layer content
+/// itself: the compressed digest (which seeds the EROFS filesystem UUID) and the
+/// erofs-utils version that builds the image. Used to invalidate cache entries
+/// rather than silently reuse a hash derived under different conditions.
+pub fn verity_cache_key(layer_digest: &str) -> Result<String> {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let version = match VERSION.get() {
+        Some(v) => v.clone(),
+        None => {
+            let v = crate::erofs::erofs_utils_version()?;
+            let _ = VERSION.set(v.clone());
+            v
+        }
+    };
+    Ok(format!("{layer_digest}|{version}"))
+}
+
 async fn get_users_from_layer(
     layers_cache: &ImageLayersCache,
     client: &mut Client,
     reference: &Reference,
     layer_digest: &str,
     diff_id: &str,
+    derive_verity: bool,
 ) -> Result<ImageLayer> {
+    let verity_key = if derive_verity {
+        verity_cache_key(layer_digest)?
+    } else {
+        String::new()
+    };
+
     if let Some(layer) = layers_cache.get_layer(diff_id) {
-        info!("get_users_from_layer: using cache file");
-        return Ok(layer);
+        // A cached entry is only usable if it was derived under the same
+        // conditions. The cache is keyed by diff_id, which does not capture the
+        // compressed digest or the erofs-utils version, so reusing a stale hash
+        // would produce a policy that denies every pod for no visible reason.
+        if !derive_verity || layer.verity_key == verity_key {
+            info!("get_users_from_layer: using cache file");
+            return Ok(layer);
+        }
+        info!("get_users_from_layer: cached layer predates the current erofs derivation inputs, recomputing");
     }
 
     let temp_dir = tempfile::tempdir_in(".")?;
@@ -573,6 +624,18 @@ async fn get_users_from_layer(
         bail!(format!("Failed to decompress image layer, error {e}"));
     };
 
+    let verity_hash = if derive_verity {
+        match crate::erofs::layer_root_hash(&decompressed_path, layer_digest) {
+            Ok(hash) => hash,
+            Err(e) => {
+                temp_dir.close()?;
+                bail!("Failed to derive dm-verity root hash for layer {layer_digest}: {e}");
+            }
+        }
+    } else {
+        String::new()
+    };
+
     match get_users_from_decompressed_layer(&decompressed_path) {
         Err(e) => {
             temp_dir.close()?;
@@ -583,6 +646,8 @@ async fn get_users_from_layer(
                 diff_id: diff_id.to_string(),
                 passwd,
                 group,
+                verity_hash,
+                verity_key,
             };
             layers_cache.insert_layer(&layer);
             Ok(layer)

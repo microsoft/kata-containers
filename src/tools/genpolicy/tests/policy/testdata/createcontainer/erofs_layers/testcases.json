@@ -329,7 +329,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=1",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=1fae13a5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "X-kata.dmverity.roothash=$(roothash-1)",
             "X-kata.dmverity.hashoffset=4194304",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -349,7 +349,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=2",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=2bcd44f0bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "X-kata.dmverity.roothash=$(roothash-2)",
             "X-kata.dmverity.hashoffset=8388608",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -369,7 +369,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=3",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=3e0f1122cccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "X-kata.dmverity.roothash=$(roothash-3)",
             "X-kata.dmverity.hashoffset=12582912",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -389,7 +389,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=4",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=4a5b6c7ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "X-kata.dmverity.roothash=$(roothash-4)",
             "X-kata.dmverity.hashoffset=16777216",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -731,7 +731,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=1",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=1fae13a5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "X-kata.dmverity.roothash=$(roothash-1)",
             "X-kata.dmverity.hashoffset=4194304",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -751,7 +751,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=2",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=2bcd44f0bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "X-kata.dmverity.roothash=$(roothash-2)",
             "X-kata.dmverity.hashoffset=8388608",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -771,7 +771,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=3",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=3e0f1122cccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "X-kata.dmverity.roothash=$(roothash-3)",
             "X-kata.dmverity.hashoffset=12582912",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -791,7 +791,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=4",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=3e0f1122cccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "X-kata.dmverity.roothash=$(roothash-3)",
             "X-kata.dmverity.hashoffset=16777216",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -1133,7 +1133,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=1",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=1fae13a5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "X-kata.dmverity.roothash=$(roothash-1)",
             "X-kata.dmverity.hashoffset=4194304",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -1153,7 +1153,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=2",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=2bcd44f0bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "X-kata.dmverity.roothash=$(roothash-2)",
             "X-kata.dmverity.hashoffset=8388608",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -1188,7 +1188,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=4",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=4a5b6c7ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "X-kata.dmverity.roothash=$(roothash-4)",
             "X-kata.dmverity.hashoffset=16777216",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -1530,7 +1530,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=1",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=1fae13a5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "X-kata.dmverity.roothash=$(roothash-1)",
             "X-kata.dmverity.hashoffset=4194304",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -1550,7 +1550,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=2",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=2bcd44f0bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "X-kata.dmverity.roothash=$(roothash-2)",
             "X-kata.dmverity.hashoffset=8388608",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -1570,7 +1570,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=3",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=3e0f1122cccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "X-kata.dmverity.roothash=$(roothash-3)",
             "X-kata.dmverity.hashoffset=12582912",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -1912,7 +1912,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=1",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=1fae13a5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "X-kata.dmverity.roothash=$(roothash-1)",
             "X-kata.dmverity.hashoffset=4194304",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -1932,7 +1932,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=2",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=2bcd44f0bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "X-kata.dmverity.roothash=$(roothash-2)",
             "X-kata.dmverity.hashoffset=8388608",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -1952,7 +1952,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=3",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=3e0f1122cccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "X-kata.dmverity.roothash=$(roothash-3)",
             "X-kata.dmverity.hashoffset=12582912",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -1972,7 +1972,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=4",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=4a5b6c7ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "X-kata.dmverity.roothash=$(roothash-4)",
             "X-kata.dmverity.hashoffset=16777216",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -2334,7 +2334,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=1",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=1fae13a5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "X-kata.dmverity.roothash=$(roothash-1)",
             "X-kata.dmverity.hashoffset=4194304",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000",
@@ -2355,7 +2355,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=2",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=2bcd44f0bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "X-kata.dmverity.roothash=$(roothash-2)",
             "X-kata.dmverity.hashoffset=8388608",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -2375,7 +2375,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=3",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=3e0f1122cccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "X-kata.dmverity.roothash=$(roothash-3)",
             "X-kata.dmverity.hashoffset=12582912",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -2395,7 +2395,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=4",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=4a5b6c7ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "X-kata.dmverity.roothash=$(roothash-4)",
             "X-kata.dmverity.hashoffset=16777216",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -2737,7 +2737,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=1",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=1fae13a5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "X-kata.dmverity.roothash=$(roothash-1)",
             "X-kata.dmverity.hashoffset=4194304",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -2756,7 +2756,7 @@
             "X-kata.multi-layer=true",
             "X-kata.partition-number=2",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=2bcd44f0bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "X-kata.dmverity.roothash=$(roothash-2)",
             "X-kata.dmverity.hashoffset=8388608",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -2776,7 +2776,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=3",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=3e0f1122cccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "X-kata.dmverity.roothash=$(roothash-3)",
             "X-kata.dmverity.hashoffset=12582912",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -2796,7 +2796,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=4",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=4a5b6c7ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "X-kata.dmverity.roothash=$(roothash-4)",
             "X-kata.dmverity.hashoffset=16777216",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -3138,7 +3138,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=1",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=1fae13a5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "X-kata.dmverity.roothash=$(roothash-1)",
             "X-kata.dmverity.hashoffset=4194304",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -3158,7 +3158,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=2",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=2bcd44f0bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "X-kata.dmverity.roothash=$(roothash-2)",
             "X-kata.dmverity.hashoffset=8388608",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -3178,7 +3178,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=3",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=3e0f1122cccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "X-kata.dmverity.roothash=$(roothash-3)",
             "X-kata.dmverity.hashoffset=12582912",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -3198,7 +3198,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=4",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=4a5b6c7ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "X-kata.dmverity.roothash=$(roothash-4)",
             "X-kata.dmverity.hashoffset=16777216",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -3540,7 +3540,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=1",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=1fae13a5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "X-kata.dmverity.roothash=$(roothash-1)",
             "X-kata.dmverity.hashoffset=4194304",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -3560,7 +3560,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=2",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=2bcd44f0bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "X-kata.dmverity.roothash=$(roothash-2)",
             "X-kata.dmverity.hashoffset=8388608",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -3600,7 +3600,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=4",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=4a5b6c7ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "X-kata.dmverity.roothash=$(roothash-4)",
             "X-kata.dmverity.hashoffset=16777216",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -3942,7 +3942,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=1",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=1fae13a5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "X-kata.dmverity.roothash=$(roothash-1)",
             "X-kata.dmverity.hashoffset=4194304",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -3962,7 +3962,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=2",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=2bcd44f0bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "X-kata.dmverity.roothash=$(roothash-2)",
             "X-kata.dmverity.hashoffset=8388608",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -3982,7 +3982,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=3",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=3e0f1122cccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "X-kata.dmverity.roothash=$(roothash-3)",
             "X-kata.dmverity.hashoffset=12582912",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
@@ -4002,7 +4002,7 @@
             "X-kata.gpt-partitioned=true",
             "X-kata.partition-number=4",
             "X-kata.dmverity-enabled=true",
-            "X-kata.dmverity.roothash=4a5b6c7ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "X-kata.dmverity.roothash=$(roothash-4)",
             "X-kata.dmverity.hashoffset=16777216",
             "X-kata.dmverity.no-superblock=false",
             "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"

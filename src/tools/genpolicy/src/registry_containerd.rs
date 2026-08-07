@@ -69,16 +69,24 @@ impl Container {
         let mut passwd = String::new();
         let mut group = String::new();
 
+        // RM-38 needs the layer list on every path, so resolve it unconditionally.
+        let image_layers = get_image_layers(
+            &config.layers_cache,
+            &manifest,
+            &config_layer,
+            &ctrd_client,
+            config.settings.common.image_layer_verification
+                == crate::policy::IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY,
+        )
+        .await
+        .unwrap();
+
         // Nydus/guest_pull doesn't make available passwd/group files from layers properly.
         // See issue https://github.com/kata-containers/kata-containers/issues/11162
         let v1_policy = config.settings.cluster_config.pause_container_id_policy == "v1";
         if config.settings.cluster_config.guest_pull && (v1_policy || !is_pause_container) {
             info!("Guest pull is enabled, skipping passwd/group file parsing");
         } else {
-            let image_layers =
-                get_image_layers(&config.layers_cache, &manifest, &config_layer, &ctrd_client)
-                    .await
-                    .unwrap();
 
             // Find the last layer with an /etc/* file, respecting whiteouts.
             info!("Parsing users and groups in image layers");
@@ -290,6 +298,7 @@ pub async fn get_image_layers(
     manifest: &serde_json::Value,
     config_layer: &DockerConfigLayer,
     client: &containerd_client::Client,
+    derive_verity: bool,
 ) -> Result<Vec<ImageLayer>> {
     let mut layer_index = 0;
     let mut layersVec = Vec::new();
@@ -307,6 +316,7 @@ pub async fn get_image_layers(
                     layer["digest"].as_str().unwrap(),
                     client,
                     &config_layer.rootfs.diff_ids[layer_index].clone(),
+                    derive_verity,
                 )
                 .await?;
                 imageLayer.diff_id = config_layer.rootfs.diff_ids[layer_index].clone();
@@ -326,10 +336,22 @@ async fn get_users_from_layer(
     layer_digest: &str,
     client: &containerd_client::Client,
     diff_id: &str,
+    derive_verity: bool,
 ) -> Result<ImageLayer> {
+    let verity_key = if derive_verity {
+        crate::registry::verity_cache_key(layer_digest)?
+    } else {
+        String::new()
+    };
+
     if let Some(layer) = layers_cache.get_layer(diff_id) {
-        info!("Using cache file");
-        return Ok(layer);
+        // See the equivalent check in registry.rs: the cache key does not cover
+        // the inputs a derived root hash depends on.
+        if !derive_verity || layer.verity_key == verity_key {
+            info!("Using cache file");
+            return Ok(layer);
+        }
+        info!("Cached layer predates the current erofs derivation inputs, recomputing");
     }
 
     let temp_dir = tempfile::tempdir_in(".")?;
@@ -353,6 +375,18 @@ async fn get_users_from_layer(
         ));
     }
 
+    let verity_hash = if derive_verity {
+        match crate::erofs::layer_root_hash(&decompressed_path, layer_digest) {
+            Ok(hash) => hash,
+            Err(e) => {
+                temp_dir.close()?;
+                bail!("Failed to derive dm-verity root hash for layer {layer_digest}: {e}");
+            }
+        }
+    } else {
+        String::new()
+    };
+
     match get_users_from_decompressed_layer(&decompressed_path) {
         Err(e) => {
             temp_dir.close()?;
@@ -363,6 +397,8 @@ async fn get_users_from_layer(
                 diff_id: diff_id.to_string(),
                 passwd,
                 group,
+                verity_hash,
+                verity_key,
             };
             layers_cache.insert_layer(&layer);
             Ok(layer)

@@ -7,7 +7,7 @@
 mod tests {
     use anyhow::Context;
     use std::fmt::{self, Display};
-    use std::fs::{self, File};
+    use std::fs;
     use std::path;
     use std::str;
 
@@ -174,10 +174,11 @@ mod tests {
 
         // Run through the test cases and evaluate the canned requests.
 
-        let case_file =
-            File::open(testdata_dir.join("testcases.json")).expect("test case file should open");
+        let raw_cases =
+            fs::read_to_string(testdata_dir.join("testcases.json")).expect("test cases readable");
         let test_cases: Vec<TestCase> =
-            serde_json::from_reader(case_file).expect("test case file should parse");
+            serde_json::from_str(&resolve_roothashes(&raw_cases, &policy))
+                .expect("test case file should parse");
 
         for test_case in test_cases {
             println!("\n== case: {} ==\n", test_case.description);
@@ -201,6 +202,41 @@ mod tests {
                 logs, results.1
             );
         }
+    }
+
+    /// Resolve `$(roothash-N)` placeholders in a test case file against the root
+    /// hashes the generated policy actually declares, in declaration order.
+    ///
+    /// RM-42 derives each EROFS layer's dm-verity root hash from the layer content
+    /// and the host's erofs-utils version, so the values are not knowable when the
+    /// fixture is written. Baking them in would either make the suite depend on a
+    /// particular erofs-utils build or -- worse -- leave stale hashes behind, which
+    /// would make every negative case deny for the wrong reason and quietly stop
+    /// testing what it claims to test.
+    ///
+    /// Index 0 is the pause container's single layer; the workload container's
+    /// layers follow. A layer-count change breaks this loudly rather than silently.
+    fn resolve_roothashes(cases: &str, policy: &str) -> String {
+        let mut resolved = cases.to_string();
+        let hashes: Vec<&str> = policy
+            .match_indices("X-kata.dmverity.roothash=")
+            .filter_map(|(i, m)| {
+                let rest = &policy[i + m.len()..];
+                let hash = rest.get(..64)?;
+                hash.bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                    .then_some(hash)
+            })
+            .collect();
+        for (index, hash) in hashes.iter().enumerate() {
+            resolved = resolved.replace(&format!("$(roothash-{index})"), hash);
+        }
+        assert!(
+            !resolved.contains("$(roothash-"),
+            "unresolved root hash placeholder: the policy declared {} layer(s)",
+            hashes.len()
+        );
+        resolved
     }
 
     fn decode_policy(initdata_anno: &str) -> String {

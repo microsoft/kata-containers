@@ -1473,13 +1473,23 @@ allow_erofs_verity_options(p_storage, i_storage) if {
     # declaration is ever hand-edited.
     "X-kata.dmverity-enabled=true" in i_storage.options
 
-    # A root hash must be among the runtime-assigned options. Its *value* is not
-    # constrained here — see RM-42: genpolicy cannot predict the hash of an erofs image
-    # that mkfs.erofs builds on the node. Authenticity of the hash still rests on the
-    # guest's initdata trust store; this rule guarantees only that one is supplied, so a
-    # layer cannot be mounted unverified.
-    some roothash in i_storage.options
-    startswith(roothash, "X-kata.dmverity.roothash=")
+    # Exactly one root hash must be present among the runtime-assigned options.
+    #
+    # "At least one" is not enough: the duplicate check above only rejects options that
+    # are byte-identical, so a storage could carry both the declared root hash and a
+    # second, different one. Which of the two the guest would act on is an
+    # implementation detail of option parsing, and relying on it would be a way to
+    # smuggle an undeclared hash past a policy that looks like it pinned one.
+    #
+    # When the declaration carries `X-kata.dmverity.roothash=<hash>` (RM-42, derived by
+    # rebuilding the layer's erofs image with containerd's own mkfs.erofs invocation),
+    # the "every declared option is present" check above binds that exact value, and
+    # this count makes it the only one — so the mounted layer is bound to the image the
+    # policy was generated for. When the declaration carries no hash, because derivation
+    # was disabled or unavailable, this still guarantees that a layer cannot be mounted
+    # unverified; the hash's authenticity then rests on the initdata trust store as
+    # before.
+    count([o | some o in i_storage.options; startswith(o, "X-kata.dmverity.roothash=")]) == 1
 
     # Anything the declaration did not ask for must be a runtime-assigned dm-verity
     # parameter of the expected shape.
