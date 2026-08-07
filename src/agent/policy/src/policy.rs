@@ -477,6 +477,42 @@ impl AgentPolicy {
         Ok(())
     }
 
+    /// Explain why the policy produced no result for `ep`.
+    ///
+    /// The raw regorus failure is `unexpected eval_query result len QueryResults { result: [] }`,
+    /// which names neither the cause nor the fix. It surfaces to the operator as a sandbox
+    /// creation failure on whatever RPC happened to be first (typically
+    /// `UpdateInterfaceRequest`), which points at networking rather than policy.
+    ///
+    /// Under `strict-policy` the overwhelmingly common cause is that no policy was ever
+    /// supplied: unlike the permissive build, a strict guest deliberately ships no
+    /// `/etc/kata-opa/default-policy.rego` allow-all fallback, so *every* request is refused
+    /// until an authorized policy is activated.
+    #[cfg(feature = "strict-policy")]
+    fn describe_missing_result(&self, ep: &str) -> String {
+        if !self.policy_activated {
+            return format!(
+                "no policy has been activated, so \"{ep}\" cannot be allowed. A strict-policy \
+                 guest ships no default policy and has no allow-all fallback, so every request \
+                 is refused until an authorized policy is provided. Generate one with genpolicy \
+                 and attach it to the workload."
+            );
+        }
+        Self::describe_undefined_rule(ep)
+    }
+
+    #[cfg(not(feature = "strict-policy"))]
+    fn describe_missing_result(&self, ep: &str) -> String {
+        Self::describe_undefined_rule(ep)
+    }
+
+    fn describe_undefined_rule(ep: &str) -> String {
+        format!(
+            "the active policy defines no rule \"{ep}\", so the request cannot be allowed. \
+             Regenerate the policy with a genpolicy build that knows about \"{ep}\"."
+        )
+    }
+
     /// Ask regorus if an API call should be allowed or not.
     pub async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
@@ -497,10 +533,7 @@ impl AgentPolicy {
             if self.allow_failures {
                 return Ok((true, prints));
             }
-            bail!(
-                "policy check: unexpected eval_query result len {:?}",
-                results
-            );
+            bail!("policy check: {}", self.describe_missing_result(ep));
         }
 
         if results.result[0].expressions.len() != 1 {
