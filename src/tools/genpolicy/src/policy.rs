@@ -646,6 +646,23 @@ pub struct CommonData {
     #[serde(default = "default_image_layer_verification")]
     pub image_layer_verification: String,
 
+    /// RM-51: require every guest-pull image reference to be pinned by a manifest digest.
+    ///
+    /// Guest pull (`image_guest_pull`) unpacks into the guest's own filesystem, so there
+    /// is no read-only block device and no dm-verity root hash to bind — the manifest
+    /// digest is the *only* thing that identifies the content, and pinning it transitively
+    /// pins every layer digest the manifest lists. A tag names whatever the host chooses to
+    /// serve.
+    ///
+    /// The guest used to catch unpinned references separately, in
+    /// `VerifiedImageStore::authorize`; that store has been removed in favour of the policy
+    /// carrying the binding, so this is where the requirement lives now.
+    ///
+    /// Defaults to `false` so that tag-based pod specs keep working on non-strict
+    /// deployments. Strict/PARMA deployments must set this to `true`.
+    #[serde(default)]
+    pub require_pinned_image_digests: bool,
+
     /// Expected apparmor profile for containers whose pod spec does not pin a
     /// specific (Localhost/Unconfined) profile. Defaults to empty, meaning the
     /// apparmor profile is left unconstrained for such containers, because the

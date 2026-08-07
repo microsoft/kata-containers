@@ -473,6 +473,15 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   strict (musl) and strict+`devicemapper` (gnu) feature sets.
 - **Follow-up:** live validation needs a `devicemapper` agent build + a GPT/EROFS verity
   image; optional defense-in-depth is a dm-table read-back of the effective root hash.
+- **Superseded (RM-51):** the measured allowlist has been **removed**. The generated policy
+  now declares each EROFS layer's dm-verity root hash directly (RM-42/RM-44), derived by
+  rebuilding the layer with containerd's own `mkfs.erofs` invocation, and
+  `allow_erofs_verity_options` requires the presented options to carry exactly that hash.
+  That is strictly stronger than the allowlist it replaces: it is per container and per
+  layer *in order*, where `verified-layers.toml` was a flat, image-agnostic set. The TOML
+  was also erofs-utils-version-coupled, so a hand-maintained list would rot into an
+  unexplained deny on a toolchain bump. `VerifiedLayerStore` and its measured-config seed
+  are deleted.
 
 ### FR-4D — Verified guest-pull images (image manifest-digest authorization)
 - **Gap:** in the confidential guest-pull path the agent asks the Confidential Data Hub (CDH)
@@ -496,6 +505,14 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   empty-allowlist fail-closed, normalized/algorithm-bound, multi-image); agent builds strict
   clean; SRM crate 109 tests.
 - **Follow-up:** live validation needs a guest-pull-enabled (CDH) agent + pod.
+- **Superseded (RM-51):** the measured allowlist has been **removed**. `allow_image_guest_pull_source`
+  already compares the *manifest digest* per container, so the allowlist's digest check was
+  redundant. Its one unique behaviour -- refusing an unpinned reference -- moved into the
+  policy as the `require_pinned_image_digests` setting: with it set, an unpinned reference
+  matches no rule body and is denied. Guest pull unpacks into the guest's own filesystem, so
+  there is no read-only block device and no dm-verity hash to bind; the manifest digest is the
+  only content identifier, and pinning it transitively pins every layer the manifest lists.
+  `VerifiedImageStore` and its measured-config seed are deleted.
 
 ### FR-14 — Network phase binding
 - **Gap:** a host that can add a route, rewrite iptables, or spoof ARP *after* the workload
@@ -718,8 +735,8 @@ external ledger are flagged and tracked in `docs/cc/backlog.md`.
 
 ### Measured-initdata trust roots (FR-1i / FR-4C / FR-4D provenance) — PR #10
 - **What:** the SRM trust roots — the policy-fragment issuer config (`fragment-issuers.toml`),
-  the verified read-only-layer dm-verity allowlist (`verified-layers.toml`), and the verified
-  guest-pull image-digest allowlist (`verified-images.toml`) — can now be carried in the
+  and (until RM-51 removed them) the verified-layer and verified-image allowlists — can now
+  be carried in the
   **measured initdata section** as well-known keys, instead of relying only on files in the
   measured rootfs. Each is resolved with provenance precedence: the attestation-bound initdata
   section first, else the measured-rootfs file (a shared `resolve_measured_config` helper logs

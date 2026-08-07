@@ -560,9 +560,9 @@ fn is_dmverity_enabled(storage: &Storage) -> bool {
 /// emits dm-verity options only when a host-side snapshotter annotation is present
 /// (`erofs_rootfs.rs`, `extract_dmverity_annotation`). When it is absent the guest
 /// received no verity options at all and `wait_and_mount_layer` mounted the raw
-/// partition: no verity device, no root-digest check against `VERIFIED_LAYERS`, and no
-/// error. The integrity control was not bypassed, it was simply never reached, and the
-/// party it defends against chose that.
+/// partition: no verity device, no root-hash check of any kind, and no error. The
+/// integrity control was not bypassed, it was simply never reached, and the party it
+/// defends against chose that.
 ///
 /// The guest does not need to be told which layers ought to be protected -- it can see
 /// them. `is_lower_storage` identifies EROFS read-only lower layers structurally, and in
@@ -580,8 +580,9 @@ fn is_dmverity_enabled(storage: &Storage) -> bool {
 ///
 /// What this does **not** establish is that the root digest is one the tenant approved --
 /// dm-verity only proves content matches *some* hash, and that hash still arrives from the
-/// host. `VERIFIED_LAYERS` is what supplies the second half, which is why this gate is only
-/// meaningful in strict builds where that store is required (see F-93/F-94).
+/// host. The generated policy supplies that second half: it declares each layer's derived
+/// root hash and `allow_erofs_verity_options` requires the presented options to carry
+/// exactly that one (RM-42/RM-51).
 #[cfg(feature = "strict-policy")]
 fn require_verity_for_lower_layers(storages: &[&Storage]) -> Result<()> {
     for storage in storages {
@@ -696,25 +697,6 @@ async fn create_partition_dmverity_device(
     // Parse dm-verity options from storage
     let verity_info =
         parse_dmverity_options(storage).context("Failed to parse dm-verity options")?;
-
-    // FR-4C: authorize the layer's root digest against the measured allowlist BEFORE creating
-    // the dm-verity device. dm-verity only proves "content matches this root hash"; this gate
-    // proves the root hash is one the tenant approved, so a host cannot substitute a layer
-    // with a matching self-computed hash. The Kata analogue of runhcs
-    // EnforceDeviceMountPolicy(target, RootDigest). Fail-closed in strict builds.
-    #[cfg(feature = "strict-policy")]
-    {
-        let store = crate::VERIFIED_LAYERS.lock().await;
-        store
-            .verify(&verity_info.hashtype, &verity_info.hash)
-            .map_err(|e| {
-                anyhow!(
-                    "FR-4C: dm-verity layer not authorized for partition {}: {}",
-                    partition_path,
-                    e
-                )
-            })?;
-    }
 
     // Create dm-verity device
     let verity_device_path = create_dmverity_device(&verity_info, Path::new(partition_path))

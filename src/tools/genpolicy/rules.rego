@@ -1481,15 +1481,23 @@ allow_erofs_verity_options(p_storage, i_storage) if {
     # implementation detail of option parsing, and relying on it would be a way to
     # smuggle an undeclared hash past a policy that looks like it pinned one.
     #
-    # When the declaration carries `X-kata.dmverity.roothash=<hash>` (RM-42, derived by
+    # The declaration carries `X-kata.dmverity.roothash=<hash>` (RM-42, derived by
     # rebuilding the layer's erofs image with containerd's own mkfs.erofs invocation),
     # the "every declared option is present" check above binds that exact value, and
     # this count makes it the only one — so the mounted layer is bound to the image the
-    # policy was generated for. When the declaration carries no hash, because derivation
-    # was disabled or unavailable, this still guarantees that a layer cannot be mounted
-    # unverified; the hash's authenticity then rests on the initdata trust store as
-    # before.
+    # policy was generated for.
     count([o | some o in i_storage.options; startswith(o, "X-kata.dmverity.roothash=")]) == 1
+
+    # The *declaration* must pin a root hash too (RM-51). Without this, a declaration
+    # that simply omitted the hash would still satisfy every check above: the presented
+    # layer would be required to be verity backed and to carry exactly one root hash,
+    # but that hash would be whatever the host chose. That used to be acceptable because
+    # the guest cross-checked it against the measured initdata allowlist
+    # (verified-layers.toml); that store is gone, so the policy is now the only thing
+    # that says which content a layer may have, and it has to actually say it.
+    # genpolicy always emits the hash and fails closed when it cannot derive one
+    # (RM-47), so this only rejects a hand-edited or stale declaration.
+    count([o | some o in p_storage.options; startswith(o, "X-kata.dmverity.roothash=")]) == 1
 
     # Anything the declaration did not ask for must be a runtime-assigned dm-verity
     # parameter of the expected shape.
@@ -1617,8 +1625,16 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, p_oci) if {
 # (`ghcr.io/x/gid:latest@sha256:bdbb...`) while the runtime passes through the reference
 # from the pod spec (`ghcr.io/x/gid@sha256:bdbb...`). Requiring string equality would
 # deny every legitimate guest pull. The digest is also the *right* thing to compare: it
-# is what pins content, it is what VERIFIED_IMAGES checks in the guest, and two
-# references sharing a digest name the same bytes whatever the registry path says.
+# is what pins content, and two references sharing a digest name the same bytes whatever
+# the registry path says.
+#
+# RM-51: whether an unpinned reference is admitted at all is controlled by
+# `require_pinned_image_digests`. Guest pull unpacks into the guest's own filesystem, so
+# there is no read-only block device and no dm-verity root hash to bind — the manifest
+# digest is the *only* thing that identifies the content, and pinning it transitively pins
+# every layer digest the manifest lists. A tag names whatever the host decides to serve.
+# The guest used to catch that separately, in VerifiedImageStore::authorize
+# (ImageError::UnpinnedImage); that store is gone, so the requirement lives here now.
 allow_image_guest_pull_source(p_oci, i_storage) if {
     p_image := p_oci.Annotations["io.kubernetes.cri.image-name"]
     p_digest := image_pinned_digest(p_image)
@@ -1627,11 +1643,12 @@ allow_image_guest_pull_source(p_oci, i_storage) if {
     p_digest == i_digest
     print("allow_image_guest_pull_source 1: true")
 }
-# An unpinned declaration has no digest to compare, so fall back to the exact reference.
-# This is weaker -- a tag is not a stable identity -- but it is no weaker than the tag
-# the tenant wrote, and a strict guest refuses unpinned references outright in
-# VerifiedImageStore::authorize (ImageError::UnpinnedImage).
+# An unpinned reference is admitted only where pinning is not required. Strict
+# deployments set `require_pinned_image_digests` and get no such body, so an unpinned
+# reference has no matching rule and is denied. Where pinning is not required this is
+# still no weaker than the tag the tenant wrote.
 allow_image_guest_pull_source(p_oci, i_storage) if {
+    not policy_data.common.require_pinned_image_digests
     p_image := p_oci.Annotations["io.kubernetes.cri.image-name"]
     not contains(p_image, "@")
     print("allow_image_guest_pull_source 2: unpinned p_image =", p_image, "i_source =", i_storage.source)

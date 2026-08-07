@@ -397,6 +397,15 @@ mod tests {
         runtests("createcontainer/image_short_name").await;
     }
 
+    /// RM-51: the same request as `image_short_name`, but generated with
+    /// `require_pinned_image_digests` on. The tag-named guest-pull image must now be
+    /// denied — this is the check that replaced the removed `VerifiedImageStore`
+    /// unpinned-reference refusal in the guest.
+    #[tokio::test]
+    async fn test_create_container_require_pinned_images() {
+        runtests("createcontainer/require_pinned_images").await;
+    }
+
     #[tokio::test]
     async fn test_create_container_security_context() {
         runtests("createcontainer/security_context/runas").await;

@@ -29,12 +29,10 @@ const CDH_CONFIG_KEY: &str = "cdh.toml";
 const POLICY_KEY: &str = "policy.rego";
 
 // BL-5: SRM trust-root config keys carried in the measured initdata section. When present,
-// these bind the fragment-issuer trust root and the verified-layer / verified-image
-// allowlists to the initdata digest (attestation-measured), instead of relying only on a
-// file in the measured rootfs. Absent keys fall back to the rootfs file (backward-compatible).
+// these bind the fragment-issuer trust root to the initdata digest (attestation-measured),
+// instead of relying only on a file in the measured rootfs. Absent keys fall back to the
+// rootfs file (backward-compatible).
 const FRAGMENT_ISSUERS_KEY: &str = "fragment-issuers.toml";
-const VERIFIED_LAYERS_KEY: &str = "verified-layers.toml";
-const VERIFIED_IMAGES_KEY: &str = "verified-images.toml";
 
 /// The path of initdata toml
 pub const INITDATA_TOML_PATH: &str = concatcp!(INITDATA_PATH, "/initdata.toml");
@@ -138,8 +136,6 @@ pub struct InitdataReturnValue {
     // BL-5: SRM trust-root configs sourced from the measured initdata section (each is the
     // TOML text of the corresponding `/etc/kata/*.toml`), when the initdata declares them.
     pub _fragment_issuers: Option<String>,
-    pub _verified_layers: Option<String>,
-    pub _verified_images: Option<String>,
 }
 
 pub async fn initialize_initdata(logger: &Logger) -> Result<Option<InitdataReturnValue>> {
@@ -196,8 +192,6 @@ pub async fn initialize_initdata(logger: &Logger) -> Result<Option<InitdataRetur
         digest,
         _policy: initdata.get_coco_data(POLICY_KEY).cloned(),
         _fragment_issuers: initdata.get_coco_data(FRAGMENT_ISSUERS_KEY).cloned(),
-        _verified_layers: initdata.get_coco_data(VERIFIED_LAYERS_KEY).cloned(),
-        _verified_images: initdata.get_coco_data(VERIFIED_IMAGES_KEY).cloned(),
     };
 
     Ok(Some(res))
@@ -216,9 +210,9 @@ mod tests {
         assert_eq!(initdata, INITDATA_PLAINTEXT);
     }
 
-    // BL-5: the SRM trust-root configs (fragment issuers + verified-layer/-image allowlists)
-    // are carried as measured initdata keys — extractable by the agent and covered by the
-    // initdata digest that is bound to TEE attestation.
+    // BL-5: the SRM fragment-issuer trust root is carried as a measured initdata key —
+    // extractable by the agent and covered by the initdata digest that is bound to TEE
+    // attestation.
     #[test]
     fn initdata_carries_and_measures_srm_trust_roots() {
         use kata_types::initdata::InitData;
@@ -229,8 +223,6 @@ mod tests {
             "algorithm = \"sha256\"\n",
             "[data]\n",
             "\"fragment-issuers.toml\" = \"require_receipt = true\\n\"\n",
-            "\"verified-layers.toml\" = \"require_verified_layers = true\\n\"\n",
-            "\"verified-images.toml\" = \"require_verified_images = true\\n\"\n",
         );
         let id: InitData = toml::from_str(content).expect("parse initdata");
         id.validate().expect("valid initdata");
@@ -240,8 +232,6 @@ mod tests {
                 .map(|s| s.as_str()),
             Some("require_receipt = true\n")
         );
-        assert!(id.get_coco_data("verified-layers.toml").is_some());
-        assert!(id.get_coco_data("verified-images.toml").is_some());
 
         // Measured: flipping a trust-root value changes the initdata content digest, so a
         // tampered trust root cannot pass attestation unnoticed.

@@ -53,8 +53,6 @@ pub mod network_phase;
 pub mod occurrence;
 pub mod resource_graph;
 pub mod scratch;
-pub mod verified_images;
-pub mod verified_layers;
 pub use cdi::{authorize_cdi, CdiDeviceRequest, CdiError, MeasuredCdiSpec, VerifiedCdiDevice};
 pub use did_x509::{DidX509Anchor, DidX509Policy};
 pub use fragments::{FragmentError, FragmentStore, PolicyFragment};
@@ -69,8 +67,6 @@ pub use scratch::{
     classify_scratch, dm_target_types, enforce_scratch, ScratchClass, ScratchError,
     ScratchRequirement,
 };
-pub use verified_images::{ImageError, VerifiedImageStore};
-pub use verified_layers::{LayerError, VerifiedLayerStore};
 
 /// Host-independent identifier for a single mutating operation (idempotency key).
 pub type OperationId = String;
