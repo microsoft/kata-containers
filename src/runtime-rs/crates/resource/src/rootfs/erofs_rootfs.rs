@@ -648,10 +648,12 @@ impl ErofsMultiLayerRootfs {
                     // Mount[1]: erofs layers -> virtio-blk via VMDK /dev/vdX2
                     //
                     // Two modes are supported:
-                    // 1. fsmerge mode: Single erofs mount with `device=` options pointing to additional files.
-                    //    This is used when containerd has already merged layers into a single file.
-                    // 2. GPT+VMDK mode: Multiple independent erofs mounts (each mount is a separate layer file).
-                    //    This is used when containerd does NOT use fsmerge, and we need to create GPT partitions.
+                    // 1. fsmerge mode: Single erofs mount carrying `device=` options that point
+                    //    to additional files. Used when containerd has already merged layers.
+                    // 2. GPT+VMDK mode: independent erofs layer files (one mount each), which we
+                    //    expose as GPT partitions of one VMDK. This is the only shape the agent
+                    //    can dm-verity protect, so every independent-layer image uses it,
+                    //    whether it has one layer or many.
 
                     // In GPT mode, all erofs layers are processed in bulk on the first
                     // encounter. Skip subsequent erofs mounts but continue iterating
@@ -673,8 +675,21 @@ impl ErofsMultiLayerRootfs {
                         .collect();
                     let total_erofs_mounts = erofs_mounts_indexed.len();
 
-                    // GPT+VMDK mode: Multiple independent erofs layer files
-                    if total_erofs_mounts > 1 {
+                    // fsmerge mode is identified by `device=` options, not by the layer
+                    // count: containerd has already merged the layers into one file plus
+                    // sidecar devices. Everything else is a stack of independent layer
+                    // files and takes the GPT+VMDK path -- including a single-layer image.
+                    //
+                    // Selecting on the count alone sent single-layer images (notably the
+                    // pause image, so every pod) down the fsmerge branch, which never
+                    // derives dm-verity options. The agent can only build a verity device
+                    // over a GPT partition (`wait_and_mount_layer`), so those layers were
+                    // mounted unverified, and under a strict policy RM-31 refused them
+                    // outright. Routing them here keeps one verity shape for every image.
+                    let is_fsmerge = is_fsmerge_layout(&erofs_mounts_indexed);
+
+                    // GPT+VMDK mode: independent erofs layer files
+                    if !is_fsmerge {
                         info!(
                             sl!(),
                             "multi-layer erofs: using GPT+VMDK mode for {} independent layers",
@@ -1006,6 +1021,25 @@ fn overlay_like(fs_type: &str) -> bool {
     )
 }
 
+/// Distinguish containerd's fsmerge layout from a stack of independent layer files.
+///
+/// fsmerge is identified by `device=` options, never by the number of layers: containerd
+/// has already merged the layers into a single file plus sidecar devices, and names those
+/// sidecars with `device=`. Every other layout is a set of independent layer files that we
+/// expose as GPT partitions of one VMDK.
+///
+/// Selecting on the layer count instead sent single-layer images -- notably the pause
+/// image, so every pod -- down the fsmerge branch, which never derives dm-verity options
+/// from the snapshotter's `X-containerd.dmverity` annotation. Since the agent can only
+/// build a verity device over a GPT partition (`wait_and_mount_layer`), those layers
+/// mounted unverified, and a strict-policy guest refused them outright (RM-31). Keying on
+/// `device=` keeps one verity shape for every image regardless of layer count.
+fn is_fsmerge_layout(erofs_mounts: &[(usize, &Mount)]) -> bool {
+    erofs_mounts
+        .iter()
+        .any(|(_, m)| m.options.iter().any(|o| o.starts_with("device=")))
+}
+
 /// Check if mounts represent a multi-layer EROFS rootfs.
 ///
 /// Matches what the containerd erofs snapshotter sends for an active snapshot:
@@ -1033,7 +1067,7 @@ pub fn is_erofs_multi_layer(rootfs_mounts: &[Mount]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_erofs_multi_layer, EROFS_ROOTFS_TYPE, RW_LAYER_ROOTFS_TYPE};
+    use super::{is_erofs_multi_layer, is_fsmerge_layout, EROFS_ROOTFS_TYPE, RW_LAYER_ROOTFS_TYPE};
     use kata_types::mount::Mount;
     use std::path::PathBuf;
 
@@ -1044,6 +1078,45 @@ mod tests {
             destination: PathBuf::from("/"),
             ..Default::default()
         }
+    }
+
+    /// A single independent layer file must not be mistaken for fsmerge. It has no
+    /// `device=` sidecars, so it belongs on the GPT+VMDK path where the agent can
+    /// dm-verity protect it -- the regression that left every pod's pause image
+    /// mounted unverified.
+    #[test]
+    fn single_independent_layer_is_not_fsmerge() {
+        let m = mount(
+            EROFS_ROOTFS_TYPE,
+            &[
+                "ro",
+                "X-containerd.dmverity=/var/lib/containerd/snapshots/75/layer.erofs.dmverity",
+            ],
+        );
+        assert!(!is_fsmerge_layout(&[(0, &m)]));
+    }
+
+    #[test]
+    fn several_independent_layers_are_not_fsmerge() {
+        let a = mount(EROFS_ROOTFS_TYPE, &["ro"]);
+        let b = mount(EROFS_ROOTFS_TYPE, &["ro"]);
+        assert!(!is_fsmerge_layout(&[(0, &a), (1, &b)]));
+    }
+
+    /// containerd's merged layout names its extra layer files with `device=`; that, and
+    /// only that, selects fsmerge.
+    #[test]
+    fn device_option_selects_fsmerge() {
+        let m = mount(
+            EROFS_ROOTFS_TYPE,
+            &["ro", "device=/var/lib/containerd/snapshots/76/layer.erofs"],
+        );
+        assert!(is_fsmerge_layout(&[(0, &m)]));
+    }
+
+    #[test]
+    fn no_erofs_mounts_is_not_fsmerge() {
+        assert!(!is_fsmerge_layout(&[]));
     }
 
     #[test]
