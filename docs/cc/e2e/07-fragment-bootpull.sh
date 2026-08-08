@@ -80,22 +80,29 @@ RULES_SRC="$GP_RULES"
 # the branch copy before comparing, so this checks staleness and not that one
 # deliberate edit.
 #
-# On clh-snp ensure_genpolicy_defaults has just staged both files from the branch,
-# so this is a tautology there — kept unconditional rather than skipped, because a
-# tautology costs nothing and a platform-conditional assertion is one more thing
-# that can rot.
-GP_SRC="$E2E_REPO_DIR/src/tools/genpolicy"
-have_rules=$(sudo sha256sum "$RULES_SRC" | cut -d' ' -f1)
-want_rules=$(sha256sum "$GP_SRC/rules.rego" | cut -d' ' -f1)
-[ "$have_rules" = "$want_rules" ] \
-  || die "staged rules.rego is not the branch copy — re-run 03-deploy-cluster.sh"
+# On clh-snp this assertion is skipped, and the "tautology costs nothing" reasoning
+# it used to carry was wrong. ensure_genpolicy_defaults re-stages both files from
+# the branch on every invocation there, so there is no staleness left to detect --
+# but it then applies four patches to the settings (oci_version, root_path,
+# image_layer_verification, pause_container_image), and reversing only the first
+# leaves the comparison guaranteed to fail. A check that cannot pass is worse than
+# no check, so gate it on the platform whose staging it actually describes.
+if [ "$E2E_PLATFORM" = "qemu-coco-dev" ]; then
+  GP_SRC="$E2E_REPO_DIR/src/tools/genpolicy"
+  have_rules=$(sudo sha256sum "$RULES_SRC" | cut -d' ' -f1)
+  want_rules=$(sha256sum "$GP_SRC/rules.rego" | cut -d' ' -f1)
+  [ "$have_rules" = "$want_rules" ] \
+    || die "staged rules.rego is not the branch copy — re-run 03-deploy-cluster.sh"
 
-have_set=$(sudo sha256sum "$SETTINGS" | cut -d' ' -f1)
-want_set=$(sed 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' "$GP_SRC/genpolicy-settings.json" \
-           | sha256sum | cut -d' ' -f1)
-[ "$have_set" = "$want_set" ] \
-  || die "staged genpolicy-settings.json is not the branch copy — re-run 03-deploy-cluster.sh"
-ok "genpolicy inputs staged from this branch"
+  have_set=$(sudo sha256sum "$SETTINGS" | cut -d' ' -f1)
+  want_set=$(sed 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' "$GP_SRC/genpolicy-settings.json" \
+             | sha256sum | cut -d' ' -f1)
+  [ "$have_set" = "$want_set" ] \
+    || die "staged genpolicy-settings.json is not the branch copy — re-run 03-deploy-cluster.sh"
+  ok "genpolicy inputs staged from this branch"
+else
+  ok "genpolicy inputs re-staged from this branch by ensure_genpolicy_defaults"
+fi
 
 # Artifacts from stage 06. The COSE envelope commits to its feed, so the entry and
 # the trust root must be the ones 06 actually produced — regenerating them here
@@ -140,13 +147,14 @@ for v in "$OTHER_ISSUER" "$CHILD_REF" "$PARENT_SAME_FEED" "$PARENT_SAME_REF" \
 done
 
 # $REF_FILE persists on disk; the artifact it names does not necessarily still
-# exist. Stage 06 starts its registry with `docker run -d` -- no --restart, no
-# volume -- so a node reboot leaves localhost:5000 refusing connections with the
-# ref file still cheerfully asserting the fragment is there. Without this probe
-# the first thing to notice is 07c timing out after five minutes, and the stage's
-# own diagnostics then point at delivery/verification/injection rather than at a
-# registry that is simply down. Resolve the manifest before creating any pod, so
-# a stale fixture fails immediately and says so.
+# exist. Stage 06's registry survives a reboot on the docker path but not on the
+# containerd one, and either way it can be removed by hand, so a node reboot can
+# leave localhost:5000 refusing connections with the ref file still cheerfully
+# asserting the fragment is there. Without this probe the first thing to notice
+# is 07c timing out after five minutes, and the stage's own diagnostics then
+# point at delivery/verification/injection rather than at a registry that is
+# simply down. Resolve the manifest before creating any pod, so a stale fixture
+# fails immediately and says so.
 REF_PATH="${REF#*/}"                 # repo/name:tag
 REF_HOST="${REF%%/*}"
 REF_TAG="${REF_PATH##*:}"

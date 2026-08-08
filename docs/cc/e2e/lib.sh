@@ -327,6 +327,60 @@ load_toolchain() {
 # reintroduce a feature probe here: a probe for one flag says nothing about the
 # settings schema, and the nightly has passed such probes while still being stale.
 #
+# Bring up the throwaway OCI registry stage 06 pushes the signed fragment to, and
+# stage 07 has the guest pull it back from.
+#
+# Docker is not a given here. The qemu-coco-dev path installs it in stage 02 for
+# the containerised kata build, but the clh-snp path builds the guest stack
+# natively and deliberately installs no container engine, so on that platform the
+# only thing available is containerd's own `ctr` -- which is present regardless,
+# since it is what the cluster runs on.
+#
+# The registry is only started when one is not already answering, so this is safe
+# to call repeatedly and recovers on its own after a reboot has taken the
+# container away.
+registry_up() {
+  local addr="$1" port="${1##*:}"
+
+  curl -fsS "http://$addr/v2/" >/dev/null 2>&1 && return 0
+  log "starting a local OCI registry at $addr"
+
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker rm -f coco-e2e-registry >/dev/null 2>&1 || true
+    # --restart and a named volume so a node reboot does not silently empty the
+    # registry: fragment-ref.txt persists on disk and would keep asserting the
+    # artifact exists, leaving stage 07 to fail at the fetch minutes later with
+    # diagnostics pointing at delivery rather than at a registry that went away.
+    docker run -d --name coco-e2e-registry --restart unless-stopped \
+      -v coco-e2e-registry-data:/var/lib/registry \
+      -p "$port:5000" \
+      registry:2 >/dev/null || die "could not start the local registry"
+  elif command -v ctr >/dev/null 2>&1; then
+    # A namespace of our own, not k8s.io: anything the kubelet can see there it
+    # also considers itself responsible for, and image GC would eventually
+    # collect a container the cluster has no Pod for.
+    local ns="--namespace coco-e2e" img="docker.io/library/registry:2"
+    sudo ctr $ns task kill -s SIGKILL coco-e2e-registry >/dev/null 2>&1 || true
+    sudo ctr $ns container rm coco-e2e-registry >/dev/null 2>&1 || true
+    sudo ctr $ns image pull "$img" >/dev/null 2>&1 \
+      || die "could not pull $img"
+    # Bind-mounted state rather than the container's own writable layer, which
+    # `container rm` above would discard on the next run. ctr has no equivalent
+    # of --restart, so a reboot does drop the registry; the curl probe at the top
+    # is what makes that recoverable rather than silent.
+    sudo mkdir -p /var/lib/coco-e2e-registry || die "could not create registry state dir"
+    sudo ctr $ns run -d --net-host \
+      --env "REGISTRY_HTTP_ADDR=0.0.0.0:$port" \
+      --mount "type=bind,src=/var/lib/coco-e2e-registry,dst=/var/lib/registry,options=rbind:rw" \
+      "$img" coco-e2e-registry >/dev/null \
+      || die "could not start the local registry under containerd"
+  else
+    die "no container engine available to host the local registry at $addr"
+  fi
+
+  wait_for 60 "registry $addr responding" curl -fsS "http://$addr/v2/"
+}
+
 # Only the binary is branch-built. The settings and rules under /opt/kata are
 # installed from the branch by stage 03 (with the deliberate oci_version patch it
 # applies to match the installed runtime), so callers should keep using those.
