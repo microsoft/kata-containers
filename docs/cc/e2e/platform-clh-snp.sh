@@ -104,6 +104,22 @@ Install the EROFS-enabled kernel-mshv build and reboot."
     echo erofs | sudo tee /etc/modules-load.d/erofs.conf >/dev/null
   fi
 
+  # dm-verity is the other module this stack needs early. containerd's erofs
+  # differ probes for it at plugin-load time, and if it is missing the probe
+  # does not merely disable verity — it fails the differ, which cascades into
+  # the diff service, the CRI image service and finally the whole CRI plugin.
+  # The node then looks like containerd is up while kubelet cannot talk to it
+  # at all. Load it before containerd is configured, and persist it.
+  sudo modprobe dm-verity 2>/dev/null || true
+  grep -qw dm_verity /proc/modules \
+    || die "the running host kernel has no dm-verity support — containerd's erofs
+differ cannot compute per-layer hash trees, so no layer will carry the
+X-containerd.dmverity annotation and any policy asking for
+image_layer_verification = host-erofs-dm-verity will refuse every container."
+  if ! grep -qx dm-verity /etc/modules-load.d/dm-verity.conf 2>/dev/null; then
+    echo dm-verity | sudo tee /etc/modules-load.d/dm-verity.conf >/dev/null
+  fi
+
   ok "MSHV Dom0 with EROFS ($(uname -r))"
 }
 
@@ -199,6 +215,44 @@ version = 3
   # A non-zero default size would pad every layer to a fixed extent, which
   # defeats the single-layer EROFS path this stack exists to exercise.
   default_size = "0"
+
+[plugins.'io.containerd.differ.v1.erofs']
+  # The differ is what computes each layer's dm-verity hash tree and writes the
+  # .dmverity metadata file next to layer.erofs. Without it the snapshotter
+  # still produces perfectly good EROFS layers, but no mount ever carries the
+  # X-containerd.dmverity annotation, so runtime-rs finds nothing to attach and
+  # presents the layers with no verity options at all.
+  #
+  # That is invisible until the policy asks for verity. With
+  # image_layer_verification = "host-erofs-dm-verity" genpolicy declares a
+  # roothash per layer, the presented storages carry none, the pair fails to
+  # match, and the request is refused. Leaving this false while the policy is
+  # strict is the host half of a contract only one side was honouring.
+  #
+  # NOTE: the differ probes for the dm_verity kernel module at plugin-load time.
+  # If it is missing, the probe does not merely disable verity -- it fails the
+  # differ, the diff service, the CRI image service and finally the whole CRI
+  # plugin, leaving a node where containerd is "active" but kubelet cannot talk
+  # to it. clh_assert_snp_host() loads and persists the module first.
+  enable_dmverity = true
+  # These three must match erofs_mkfs_options() in
+  # tools/packaging/kata-deploy/binary/src/artifacts/snapshotters.rs, because
+  # genpolicy reproduces containerd's mkfs.erofs invocation byte-for-byte to
+  # predict each layer's root hash (see src/tools/genpolicy/src/erofs.rs).
+  # -T0/--mkfs-time pin the build timestamp and --sort=none removes tar ordering
+  # variance; without them the same layer content yields a different image, and
+  # therefore a different root hash, on every unpack. The policy then declares a
+  # hash the host will never present, and every container is refused.
+  mkfs_options = ["-T0", "--mkfs-time", "--sort=none"]
+  enable_tar_index = false
+
+# NOTE: kata-deploy additionally sets use_local_image_pull = false and binds the
+# transfer service's unpacker to the erofs differ (RM-50). On the containerd
+# build used here that combination makes CRI pulls fail outright with "no unpack
+# platforms defined", and it is not needed: diff-service `default` already puts
+# the erofs differ first, so the local pull path produces dm-verity metadata too
+# (verified by the .dmverity sidecar appearing after a local pull). Left out
+# deliberately rather than forgotten.
 
 [plugins.'io.containerd.service.v1.diff-service']
   default = ["erofs", "walking"]
