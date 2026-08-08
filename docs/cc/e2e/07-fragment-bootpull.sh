@@ -446,7 +446,7 @@ step "07e — an undelivered *optional* declaration must still boot"
 #
 # This is C-ACI/hcsshim parity. There, fragment injection is lazy and nothing
 # obliges the host to send anything; an undelivered fragment simply contributes no
-# grants, and a container only it would have permitted fails to match the composed
+# rules, and a container only it would have permitted fails to match the composed
 # policy on its own merits. Blocking unconditionally would make every declaration
 # an availability dependency on the host for no security gain.
 #

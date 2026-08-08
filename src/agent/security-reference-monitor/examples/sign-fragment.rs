@@ -16,7 +16,6 @@
 //!   cargo run --example sign-fragment -- sign \
 //!       --issuer issuerA --feed reg/frag:1 --svn 1 --receipt r1 \
 //!       --includes exec \
-//!       --grants exec/allow-debug,exec/allow-probe \
 //!       --module /path/to/fragment.rego \
 //!       --key <privkey-hex>
 //!
@@ -239,15 +238,6 @@ fn main() {
                 issuer,
                 feed: f.get("feed").cloned().unwrap_or_default(),
                 svn,
-                grants: f
-                    .get("grants")
-                    .map(|s| {
-                        s.split(',')
-                            .map(|x| x.trim().to_string())
-                            .filter(|x| !x.is_empty())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
                 policy_module: module,
                 includes,
                 requires: f
