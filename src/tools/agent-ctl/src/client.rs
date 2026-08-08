@@ -2219,9 +2219,14 @@ fn agent_cmd_sandbox_add_swap(
 
 // FR-1: load a signed policy fragment. Arguments are space-separated key=value pairs to
 // avoid protobuf-bytes-in-JSON ambiguity:
-//   LoadPolicyFragment issuer=<id> svn=<n> includes=<csv> receipt=<r> \
-//       receipt_ledger=<ledger-id> prev_head=<hex> proof=<ttl-proof-file> \
-//       module=<path-to-rego> sig=<hex> cose=<hex>
+//   LoadPolicyFragment cose=<hex> receipt=<r> receipt_ledger=<ledger-id> \
+//       proof=<ttl-proof-file> extra_receipts=<ledger>:<hex>,...
+//
+// F-151: the fragment is carried entirely by the COSE_Sign1 envelope, matching what
+// runtime-rs sends. The guest derives issuer, feed, SVN, grants, includes, requires,
+// the module and the ordering head from the envelope it verifies, and now rejects a
+// request that tries to describe any of them. The receipt fields are countersignatures
+// over the same statement rather than part of it, so they stay separate.
 fn agent_cmd_load_policy_fragment(
     ctx: &Context,
     client: &AgentServiceClient,
@@ -2248,38 +2253,13 @@ fn agent_cmd_load_policy_fragment(
             .collect()
     };
 
-    let includes: Vec<String> = get("includes")
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    let policy_module = match kv.get("module") {
-        Some(p) if !p.is_empty() => {
-            std::fs::read(p).map_err(|e| anyhow!("read fragment module file: {e}"))?
-        }
-        _ => Vec::new(),
-    };
-    let signature = hex_decode(&get("sig"))?;
-    let svn: u64 = get("svn").parse().unwrap_or(0);
-
     let mut req = protocols::agent::LoadPolicyFragmentRequest::new();
-    req.issuer = get("issuer");
-    req.feed = get("feed");
-    req.svn = svn;
-    req.includes = includes;
-    req.requires = get("requires")
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
+    req.cose_sign1 = match kv.get("cose") {
+        Some(c) if !c.is_empty() => hex_decode(c)?,
+        _ => return Err(anyhow!("cose=<hex> is required: the guest accepts only a COSE_Sign1 envelope")),
+    };
     req.receipt = get("receipt");
     req.receipt_ledger = get("receipt_ledger");
-    // FR-1j: append-only ordering — the log head this fragment applies on top of.
-    if let Some(ph) = kv.get("prev_head") {
-        if !ph.is_empty() {
-            req.prev_log_head = hex_decode(ph)?;
-        }
-    }
     // FR-1f Stage 2: transparency inclusion + consistency proof (from a file or inline).
     if let Some(pf) = kv.get("proof") {
         if !pf.is_empty() {
@@ -2289,14 +2269,11 @@ fn agent_cmd_load_policy_fragment(
             };
         }
     }
-    req.signature = signature;
-    req.policy_module = policy_module;
-    // FR-1h: optional COSE_Sign1 envelope (hex) — verified instead of the detached sig.
-    if let Some(c) = kv.get("cose") {
-        if !c.is_empty() {
-            req.cose_sign1 = hex_decode(c)?;
-        }
-    }
+    req.extra_receipts = get("extra_receipts")
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
 
     let ctx = clone_context(ctx);
     info!(sl!(), "sending request"; "request" => format!("{:?}", req));

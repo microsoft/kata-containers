@@ -49,13 +49,16 @@ $SIGNER gen-key      # -> private_key_hex=... public_key_hex=...
 
 # 3. Author a fragment module and sign it.
 printf 'package agent_policy.fragments\nexec_allowed := true\n' > /tmp/frag.rego
+# --cose emits the COSE_Sign1 envelope, which is the only form the guest accepts.
 $SIGNER sign --issuer issuerA --svn 1 --receipt r1 --includes exec \
-        --module /tmp/frag.rego --key <private_key_hex>   # -> signature_hex=...
+        --module /tmp/frag.rego --key <private_key_hex> \
+        --cose                                   # -> cose_sign1_hex=...
 
-# 4. Boot a strict guest with fragment-demo.rego as the base policy, then over vsock:
+# 4. Boot a strict guest with fragment-demo.rego as the base policy, then over vsock.
+#    Only the envelope and the receipt fields are sent: everything the issuer signed is
+#    derived from the envelope by the guest, and describing it is refused (F-151).
 kata-agent-ctl connect --server-address vsock://<CID>:1024 \
-  -c "LoadPolicyFragment issuer=issuerA svn=1 receipt=r1 includes=exec \
-      module=/tmp/frag.rego sig=<signature_hex>"
+  -c "LoadPolicyFragment cose=<cose_sign1_hex> receipt=r1"
 ```
 
 Before the fragment, an exec is **denied**; after it, the same exec is **allowed**; a

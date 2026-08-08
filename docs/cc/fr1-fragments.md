@@ -742,8 +742,9 @@ and re-imported raise-only at boot. The path is fixed in a shipped build: `KATA_
   ordering (`--prev-head`), statements for a ledger (`--emit-statement`); `verify-x509`
   offline verifier.
 - `mock-ledger` — RFC 6962 transparency-log stand-in emitting `kata-ttl-proof/v1` proofs.
-- `agent-ctl LoadPolicyFragment` — key=value args (`issuer= svn= feed= includes= requires=
-  receipt= receipt_ledger= prev_head= proof= module= sig= cose=`).
+- `agent-ctl LoadPolicyFragment` — key=value args (`cose= receipt= receipt_ledger= proof=
+  extra_receipts=`). `cose=` is required and carries every signed field; the guest refuses a
+  request that describes any of them (F-151).
 - `fragment-demo` — offline, no-cluster/no-openssl demo asserting every capability.
 
 **Unit tests** — fragment/identity tests (of 98 in the SRM crate): `fragments::tests::*`

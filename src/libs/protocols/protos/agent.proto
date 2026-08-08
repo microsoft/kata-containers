@@ -632,40 +632,46 @@ message SetPolicyRequest {
 	string policy = 1;
 }
 
-// FR-1: a signed, add-only policy fragment. The signature covers a canonical encoding of
-// the issuer, svn, sorted grants, and receipt; see the guest-side verifier.
+// FR-1: a signed, add-only policy fragment.
+//
+// The fragment is carried entirely by `cose_sign1`. Every field the issuer signed is
+// derived from that envelope by the guest, which verifies it; the host is a courier and
+// never an authority. Fields 1-3, 5-9 and 12 are the obsolete host-described form and are
+// **rejected** by the guest if set (F-151) -- they are retained only so the wire numbering
+// stays stable, and no client should populate them. runtime-rs, the production courier,
+// already sends the envelope and the receipt fields alone.
+//
+// The receipt fields are not part of the signed statement -- they are countersignatures
+// over it -- so they are carried separately and verified in their own right.
 message LoadPolicyFragmentRequest {
-	// Identifier of the issuer that signed the fragment.
+	// Obsolete (F-151): derived from `cose_sign1`; rejected by the guest if set.
 	string issuer = 1;
-	// Security version number; must strictly increase per issuer.
+	// Obsolete (F-151): derived from `cose_sign1`; rejected by the guest if set.
 	uint64 svn = 2;
-	// Additional grants introduced by this fragment (add-only).
+	// Obsolete (F-151): derived from `cose_sign1`; rejected by the guest if set.
 	repeated string grants = 3;
 	// Transparency receipt identifier/blob (required in strict mode).
 	string receipt = 4;
-	// Detached Ed25519 signature over the fragment's canonical bytes.
+	// Obsolete (F-151): the detached-signature form; rejected by the guest if set.
 	bytes signature = 5;
-	// FR-1c: a signed Rego module (text) the fragment contributes to the policy engine.
-	// Must declare a package under the reserved fragment namespace.
+	// Obsolete (F-151): derived from `cose_sign1`; rejected by the guest if set.
 	bytes policy_module = 6;
-	// FR-1c: the policy namespaces this fragment is scoped to contribute to.
+	// Obsolete (F-151): derived from `cose_sign1`; rejected by the guest if set.
 	repeated string includes = 7;
-	// FR-1e: the logical feed (scope) under the issuer; the base policy declares accepted
-	// (issuer, feed) pairs and their SVN floor.
+	// Obsolete (F-151): derived from `cose_sign1`; rejected by the guest if set.
 	string feed = 8;
-	// FR-1g: identifiers of fragments that must already be loaded before this one.
+	// Obsolete (F-151): derived from `cose_sign1`; rejected by the guest if set.
 	repeated string requires = 9;
-	// FR-1h: optional COSE_Sign1 (CBOR) envelope carrying the fragment statement as its
-	// payload, for interop with COSE tooling. When present, it is verified instead of the
-	// detached `signature`.
+	// FR-1h: the COSE_Sign1 (CBOR) envelope carrying the fragment statement as its payload.
+	// Required: it is the only accepted form, and the sole source of the signed fields.
 	bytes cose_sign1 = 10;
 	// FR-1f (trust list): the transparency ledger this receipt is claimed to originate
 	// from. Selects which ledger's key(s) the receipt is verified against and is subject to
 	// per-(issuer,feed) allowed_ledgers / required_receipts scoping. Empty = default ledger.
 	string receipt_ledger = 11;
-	// FR-1j: the append-only ordering log head this fragment asserts it is applied on top
-	// of. In ordered mode the agent requires this to equal its current log head (rejecting
-	// reordering/omission/insertion); it is bound into the issuer signature.
+	// Obsolete (F-151): bound into the issuer signature, so it is derived from
+	// `cose_sign1`; rejected by the guest if set. FR-1j ordering is unaffected -- the
+	// agent still requires the envelope's log head to equal its current one.
 	bytes prev_log_head = 12;
 	// FR-1f Stage 2: an optional transparency inclusion + consistency proof
 	// (`kata-ttl-proof/v1`) anchoring the fragment statement in an append-only transparency
