@@ -30,6 +30,15 @@ use x509_cert::Certificate;
 
 /// COSE header parameter label for `x5chain` (RFC 9360).
 const COSE_HEADER_X5CHAIN: i64 = 33;
+
+/// Upper bound on the number of certificates in a presented `x5chain`.
+///
+/// The chain arrives from the untrusted host and every certificate in it is fingerprinted
+/// and DER-parsed *before* any anchor has matched, so without a bound a host can choose how
+/// much work the guest does on a request it will ultimately refuse. 100 is hcsshim's
+/// number (`internal/tools/securitypolicy/cosesign1/check.go`), and it is far above any
+/// legitimate chain: real ones are leaf plus one or two intermediates plus a root.
+const MAX_X5CHAIN_CERTS: usize = 100;
 /// id-at-commonName (2.5.4.3).
 const AT_COMMON_NAME: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.4.3");
 
@@ -110,6 +119,14 @@ fn extract_x5chain(sign1: &coset::CoseSign1) -> Result<Vec<Vec<u8>>, FragmentErr
     let certs = match val {
         Value::Bytes(b) => vec![b],
         Value::Array(arr) => {
+            // Checked against the array length before draining it, so an oversized chain is
+            // refused without allocating for it.
+            if arr.len() > MAX_X5CHAIN_CERTS {
+                return Err(FragmentError::CertChainTooLong {
+                    len: arr.len(),
+                    max: MAX_X5CHAIN_CERTS,
+                });
+            }
             let mut out = Vec::with_capacity(arr.len());
             for v in arr {
                 match v {
@@ -129,10 +146,22 @@ fn extract_x5chain(sign1: &coset::CoseSign1) -> Result<Vec<Vec<u8>>, FragmentErr
 
 /// Whether a COSE_Sign1 envelope carries an `x5chain` header (used to route to the
 /// `did:x509` verification path without attempting a full verification first).
+///
+/// This asks only whether the header is *present*, deliberately not whether its contents are
+/// well-formed. Routing on validity would let a host steer an envelope away from the X.509
+/// path by malforming the chain it presents — an oversized or corrupt chain would fall
+/// through to the raw-key path rather than being refused. Presence is the honest question;
+/// anything wrong with the chain is then reported by `verify_x509_cose`.
 pub fn cose_has_x5chain(cose_sign1: &[u8]) -> bool {
     use coset::CborSerializable;
     match coset::CoseSign1::from_slice(cose_sign1) {
-        Ok(sign1) => extract_x5chain(&sign1).is_ok(),
+        Ok(sign1) => {
+            let has = |rest: &[(coset::Label, coset::cbor::value::Value)]| {
+                rest.iter()
+                    .any(|(l, _)| matches!(l, coset::Label::Int(i) if *i == COSE_HEADER_X5CHAIN))
+            };
+            has(&sign1.protected.header.rest) || has(&sign1.unprotected.rest)
+        }
         Err(_) => false,
     }
 }
@@ -747,7 +776,79 @@ mod tests {
             FragmentError::InvalidCertChain
         );
     }
-    // ---- BL-2: multi-algorithm leaf/chain (ES384, RSA RS256) ----
+    // ---- F-163: the presented chain is length-bounded (hcsshim parity) ----
+
+    /// Build `[leaf, root, root, ...]` padded to exactly `total` certificates. Padding with
+    /// copies of the root is deliberate: it costs no extra key generation, and because the
+    /// anchor is located by *first* fingerprint match the padding sits past `ca_idx`, so it
+    /// is fingerprinted and parsed but never path-validated — which is precisely the work an
+    /// attacker would be buying with a long chain.
+    fn padded_chain(total: usize) -> (Vec<Vec<u8>>, SigningKey, Vec<u8>) {
+        let root_sk = SigningKey::random(&mut OsRng);
+        let leaf_sk = SigningKey::random(&mut OsRng);
+        let root = mint_ca("root-ca", &root_sk);
+        let leaf = mint_leaf(
+            "issuerX",
+            &leaf_sk,
+            "root-ca",
+            &root_sk,
+            Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        );
+        let mut chain = vec![leaf, root.clone()];
+        while chain.len() < total {
+            chain.push(root.clone());
+        }
+        (chain, leaf_sk, root)
+    }
+
+    /// A chain at exactly the limit still verifies. Without this the rejection test below
+    /// would also pass with the bound set absurdly low, or applied with the wrong comparison.
+    #[test]
+    fn a_chain_at_the_length_limit_is_still_accepted() {
+        let (chain, leaf_sk, root) = padded_chain(MAX_X5CHAIN_CERTS);
+        assert_eq!(chain.len(), MAX_X5CHAIN_CERTS);
+        let anchor = anchor_for(&root, "did:x509:test:issuerX");
+        let mut anchors = HashMap::new();
+        anchors.insert(anchor.did.clone(), anchor);
+
+        let cose = cose_with_chain(&payload(), &leaf_sk, &chain);
+        let did = verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap();
+        assert_eq!(did, "did:x509:test:issuerX");
+    }
+
+    /// One certificate past the limit is refused, and refused *as* an over-length chain
+    /// rather than as a generic malformed one, so the reason reaches the operator.
+    #[test]
+    fn a_chain_past_the_length_limit_is_refused() {
+        let (chain, leaf_sk, root) = padded_chain(MAX_X5CHAIN_CERTS + 1);
+        let anchor = anchor_for(&root, "did:x509:test:issuerX");
+        let mut anchors = HashMap::new();
+        anchors.insert(anchor.did.clone(), anchor);
+
+        let cose = cose_with_chain(&payload(), &leaf_sk, &chain);
+        assert_eq!(
+            verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap_err(),
+            FragmentError::CertChainTooLong {
+                len: MAX_X5CHAIN_CERTS + 1,
+                max: MAX_X5CHAIN_CERTS,
+            }
+        );
+    }
+
+    /// The length bound must not become a routing lever. `verify_envelope_with` picks the
+    /// X.509 path on `cose_has_x5chain`, so if that predicate answered "no" for an
+    /// over-length chain the envelope would fall through to the raw-key path and the new
+    /// error would never be raised — turning a refusal into a detour.
+    #[test]
+    fn an_over_length_chain_is_still_routed_to_the_x509_path() {
+        let (chain, leaf_sk, _root) = padded_chain(MAX_X5CHAIN_CERTS + 1);
+        let cose = cose_with_chain(&payload(), &leaf_sk, &chain);
+        assert!(
+            cose_has_x5chain(&cose),
+            "an over-length chain must still be recognised as carrying one"
+        );
+    }
+
     use p384::ecdsa::{DerSignature as P384DerSig, Signature as P384Sig, SigningKey as P384Sk};
     use rsa::pkcs1v15::{Signature as RsaPkcsSig, SigningKey as RsaPkcsSk};
     use rsa::signature::SignatureEncoding as _RsaSigEnc;
