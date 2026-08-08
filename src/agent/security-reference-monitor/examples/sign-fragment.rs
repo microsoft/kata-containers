@@ -16,11 +16,19 @@
 //!   cargo run --example sign-fragment -- sign \
 //!       --issuer issuerA --svn 1 --receipt r1 \
 //!       --includes exec \
+//!       --grants exec/allow-debug,exec/allow-probe \
 //!       --module /path/to/fragment.rego \
 //!       --key <privkey-hex>
 //!
 //! The signer prints the signature hex; feed it, the module file, and the other fields to
 //! `kata-agent-ctl`'s `LoadPolicyFragment` command.
+//!
+//! The signed statement is deterministically-encoded CBOR, so it is not readable as text.
+//! `sign` therefore also prints `statement_diag=` -- the signed bytes decoded into CBOR
+//! diagnostic notation (RFC 8949 §8) -- and `--emit-statement-diag <path>` writes the same
+//! rendering to a file. `--emit-statement` still writes the raw signed bytes, which a
+//! transparency ledger records as a Merkle leaf and which must stay byte-exact.
+
 
 use ed25519_dalek::{Signer, SigningKey};
 use kata_security_reference_monitor::PolicyFragment;
@@ -39,6 +47,51 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
         .collect()
+}
+
+/// Render a CBOR value in diagnostic notation (RFC 8949 §8).
+///
+/// The signing statement is deterministically-encoded CBOR, so it is not readable as text
+/// and `signature_hex` alone does not tell a developer *what* was signed. Everything the
+/// statement can hold is covered explicitly; anything else falls through to `Debug` rather
+/// than being silently dropped, so an unexpected shape is visible instead of invisible.
+fn cbor_diag(v: &ciborium::value::Value) -> String {
+    use ciborium::value::Value;
+    match v {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Integer(i) => i128::from(*i).to_string(),
+        // Quoted and escaped, so a value containing a quote, a newline or a control
+        // character is unambiguous on screen -- the ambiguity class that v3 signed over.
+        Value::Text(s) => format!("{:?}", s),
+        Value::Bytes(b) => format!("h'{}'", hex_encode(b)),
+        Value::Array(items) => format!(
+            "[{}]",
+            items.iter().map(cbor_diag).collect::<Vec<_>>().join(", ")
+        ),
+        Value::Map(entries) => format!(
+            "{{{}}}",
+            entries
+                .iter()
+                .map(|(k, val)| format!("{}: {}", cbor_diag(k), cbor_diag(val)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        other => format!("{:?}", other),
+    }
+}
+
+/// Decode statement bytes and render them for human inspection.
+///
+/// Decodes the *signed bytes themselves* rather than re-printing the fields they were built
+/// from, so an encoding bug shows up here instead of being masked by a pretty-printer that
+/// agrees with the input by construction. Undecodable bytes are reported with their hex,
+/// since that case is itself the thing worth seeing.
+fn statement_diag(bytes: &[u8]) -> String {
+    match ciborium::from_reader::<ciborium::value::Value, _>(bytes) {
+        Ok(v) => cbor_diag(&v),
+        Err(e) => format!("<undecodable: {}; hex={}>", e, hex_encode(bytes)),
+    }
 }
 
 /// Decode the first `CERTIFICATE` block of a PEM string into DER (for the x5chain header).
@@ -145,7 +198,15 @@ fn main() {
                 issuer,
                 feed: f.get("feed").cloned().unwrap_or_default(),
                 svn,
-                grants: vec![],
+                grants: f
+                    .get("grants")
+                    .map(|s| {
+                        s.split(',')
+                            .map(|x| x.trim().to_string())
+                            .filter(|x| !x.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 policy_module: module,
                 includes,
                 requires: f
@@ -192,6 +253,10 @@ fn main() {
             let sig = sk.sign(&fragment.signing_bytes());
             println!("signature_hex={}", hex_encode(&sig.to_bytes()));
 
+            // The statement is binary CBOR, so print what was actually signed in diagnostic
+            // notation. Decoded from the signed bytes, not rebuilt from the fields.
+            println!("statement_diag={}", statement_diag(&fragment.signing_bytes()));
+
             // FR-1j: print the next log head = sha256(prev_head || sha256(statement)), so a
             // client can chain the following fragment onto this one.
             if let Some(prev_hex) = f.get("prev-head") {
@@ -205,9 +270,18 @@ fn main() {
             }
 
             // FR-1f Stage 2: optionally write this fragment's canonical statement bytes to a
-            // file so a (mock) transparency ledger can record it as a Merkle leaf.
+            // file so a (mock) transparency ledger can record it as a Merkle leaf. These are
+            // the raw signed bytes and must stay byte-exact -- use --emit-statement-diag for
+            // a readable rendering, never this file.
             if let Some(path) = f.get("emit-statement") {
                 std::fs::write(path, fragment.signing_bytes()).expect("write statement file");
+            }
+
+            // Readable companion to --emit-statement, for diffing and review. Never fed back
+            // into signing or verification.
+            if let Some(path) = f.get("emit-statement-diag") {
+                std::fs::write(path, statement_diag(&fragment.signing_bytes()))
+                    .expect("write statement diag file");
             }
 
             // FR-1f: optionally also emit a transparency receipt = a signature over the
