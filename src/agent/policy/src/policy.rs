@@ -777,6 +777,11 @@ impl AgentPolicy {
     ///
     /// Returns the rego package the module was applied under, so the caller can find what
     /// the fragment itself declares (see [`Self::nested_fragment_specs`]).
+    ///
+    /// `issuer` and `svn` are the values the SRM verified off the COSE envelope. They are
+    /// not used to authorize anything here — that already happened — but the module is
+    /// refused if it *describes itself* as anything else; see
+    /// [`Self::assert_self_description`].
     pub fn apply_fragment_module(
         &mut self,
         name: &str,
@@ -784,6 +789,8 @@ impl AgentPolicy {
         feed: &str,
         includes: &[String],
         parameters: Option<&str>,
+        issuer: &str,
+        svn: u64,
     ) -> Result<String> {
         const FRAGMENTS: &str = "agent_policy.fragments";
         let canonical = Self::rego_package(rego)?;
@@ -827,9 +834,99 @@ impl AgentPolicy {
             bail!("fragment module would land in {applied:?}, not the authorized {canonical:?}");
         }
 
+        // F-160: the generated base policy resolves a fragment's contribution through the
+        // module's *own* `issuer` and `svn` rules. Pin them to the envelope before the
+        // module can be consulted, so those are re-checks and not restatements.
+        Self::assert_self_description(&rego, &pkg, issuer, svn)?;
+
         // Additive merge; never resets the engine, never touches the one-shot lock.
         self.engine.add_policy(name.to_string(), rego)?;
         Ok(pkg)
+    }
+
+    /// F-160: refuse a fragment whose module describes itself as a different fragment than
+    /// the envelope the SRM verified.
+    ///
+    /// `rules.rego` admits a fragment's containers via
+    /// `mod := data.agent_policy.fragments[spec.feed]`, then `mod.issuer == spec.issuer` and
+    /// `to_number(mod.svn) >= spec.minimum_svn` — and both of those come from rules the
+    /// fragment author wrote into the module body. The feed is already pinned (it is the
+    /// package name, taken from the verified envelope), but nothing bound the other two, so
+    /// the base policy's independent re-check was a check against the fragment's own
+    /// account of itself. That is the shape retired in F-158: a gate over a self-asserted
+    /// field looks protective and decides nothing.
+    ///
+    /// No exploit followed from it today — the SRM's own gates use the envelope values, and
+    /// only one module can occupy a given feed — but it could not have caught a divergence,
+    /// and it would mislead the next reader. hcsshim treats the same question as
+    /// first-class: `svn_ok_if_defined` requires the CWT header SVN and the Rego-declared
+    /// SVN to *match* when both are present.
+    ///
+    /// A module that declares neither is left alone: it is not lying, it simply contributes
+    /// no containers, because `to_number(mod.svn)` is then undefined and the base policy's
+    /// comprehension yields nothing. Fail-closed already covers that case.
+    ///
+    /// Evaluation happens in a throwaway engine on the *final* module text — after parameter
+    /// instantiation, so a parameterised self-description is judged as it will actually
+    /// evaluate — and before the live engine has seen it, so a module that fails this check
+    /// never lands anywhere. That ordering matters: regorus has no remove-policy, so a
+    /// check performed after `add_policy` could not undo itself. hcsshim has to call
+    /// `RemoveModule` on exactly this path because it adds first.
+    fn assert_self_description(rego: &str, pkg: &str, issuer: &str, svn: u64) -> Result<()> {
+        let mut scratch = regorus::Engine::new();
+        scratch
+            .add_policy("fragment.rego".to_string(), rego.to_string())
+            .map_err(|e| anyhow::anyhow!("fragment module does not parse: {e}"))?;
+        scratch.set_input_json("{}")?;
+
+        if let Some(v) = Self::eval_scalar(&mut scratch, format!("data.{pkg}.issuer"))? {
+            let declared = v.as_str().ok_or_else(|| {
+                anyhow::anyhow!("fragment module declares a non-string issuer: {v}")
+            })?;
+            if declared != issuer {
+                bail!(
+                    "fragment module declares issuer {declared:?}, but the envelope it arrived \
+                     in was signed by {issuer:?}"
+                );
+            }
+        }
+
+        if let Some(v) = Self::eval_scalar(&mut scratch, format!("data.{pkg}.svn"))? {
+            // The base policy reads this through `to_number`, so a string is the expected
+            // form; accept a bare number too rather than make the check depend on which one
+            // the author chose.
+            let declared = match &v {
+                serde_json::Value::Number(n) => n.as_u64(),
+                serde_json::Value::String(s) => s.parse::<u64>().ok(),
+                _ => None,
+            }
+            .ok_or_else(|| {
+                anyhow::anyhow!("fragment module declares an svn that is not a whole number: {v}")
+            })?;
+            if declared != svn {
+                bail!(
+                    "fragment module declares svn {declared}, but the envelope it arrived in \
+                     carries svn {svn}"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Evaluate a single rego path, returning `None` when it is undefined.
+    fn eval_scalar(engine: &mut regorus::Engine, query: String) -> Result<Option<serde_json::Value>> {
+        let results = engine.eval_query(query, false)?;
+        let value = match results
+            .result
+            .first()
+            .and_then(|r| r.expressions.first())
+            .map(|e| &e.value)
+        {
+            None | Some(regorus::Value::Undefined) => return Ok(None),
+            Some(v) => v,
+        };
+        Ok(Some(serde_json::from_str(&serde_json::to_string(value)?)?))
     }
 
     /// FR-1k: bind a parameterised fragment's `parameter("name")` calls to concrete values.
@@ -1406,6 +1503,8 @@ mod tests {
             "reg/a",
             &[],
             None,
+            "",
+            0,
         )
         .expect("an additive fragment must still apply after activation");
 
@@ -1679,7 +1778,7 @@ mod tests {
             {\"issuer\": \"did:x509:0:sha256:BBB::CN:child\", \"feed\": \"reg/child:1\", \"minimum_svn\": 5, \"required\": true}\n\
             ]\n";
         let pkg = p
-            .apply_fragment_module("fragment:test", module, "reg/parent", &["infra".to_string()], None)
+            .apply_fragment_module("fragment:test", module, "reg/parent", &["infra".to_string()], None, "", 0)
             .unwrap();
         assert_eq!(pkg, "agent_policy.fragments[\"infra\"]");
 
@@ -1715,7 +1814,7 @@ mod tests {
 
         // Apply a verified fragment module in the reserved namespace.
         let module = "package agent_policy.fragments\nexec_allowed := true\n";
-        p.apply_fragment_module("frag:issuerA:1", module, "reg/a", &[], None)
+        p.apply_fragment_module("frag:issuerA:1", module, "reg/a", &[], None, "", 0)
             .unwrap();
         assert!(
             eval_bool(&mut p, "ExecProcessRequest"),
@@ -1730,15 +1829,15 @@ mod tests {
         let mut p = AgentPolicy::new();
         // A module trying to live in the base package is refused.
         let base_ns = "package agent_policy\ndefault ExecProcessRequest := true\n";
-        assert!(p.apply_fragment_module("evil", base_ns, "reg/a", &[], None).is_err());
+        assert!(p.apply_fragment_module("evil", base_ns, "reg/a", &[], None, "", 0).is_err());
 
         // A sub-namespace not in `includes` is refused; one that is, is accepted.
         let mount_ns = "package agent_policy.fragments.mount\nallowed := true\n";
         assert!(p
-            .apply_fragment_module("m", mount_ns, "reg/a", &["exec".to_string()], None)
+            .apply_fragment_module("m", mount_ns, "reg/a", &["exec".to_string()], None, "", 0)
             .is_err());
         assert!(p
-            .apply_fragment_module("m", mount_ns, "reg/a", &["mount".to_string()], None)
+            .apply_fragment_module("m", mount_ns, "reg/a", &["mount".to_string()], None, "", 0)
             .is_ok());
     }
 
@@ -1756,15 +1855,24 @@ mod tests {
 
         let mut p = AgentPolicy::new();
         assert!(
-            p.apply_fragment_module("own", &own, feed, &[], None).is_ok(),
+            p.apply_fragment_module("own", &own, feed, &[], None, "did:example:e2e", 1)
+                .is_ok(),
             "a fragment must be able to write under its own verified feed"
         );
 
         // Same module, delivered under a different verified feed: refused.
         let mut q = AgentPolicy::new();
         assert!(
-            q.apply_fragment_module("other", &own, "localhost:5000/someone-else", &[], None)
-                .is_err(),
+            q.apply_fragment_module(
+                "other",
+                &own,
+                "localhost:5000/someone-else",
+                &[],
+                None,
+                "did:example:e2e",
+                1
+            )
+            .is_err(),
             "a fragment must not be able to claim another feed's namespace"
         );
 
@@ -1773,15 +1881,147 @@ mod tests {
             "package agent_policy.fragments[ \"{feed}\" ]\ncontainers := []\n"
         );
         let mut r = AgentPolicy::new();
-        assert!(r.apply_fragment_module("spaced", &spaced, feed, &[], None).is_ok());
+        assert!(r.apply_fragment_module("spaced", &spaced, feed, &[], None, "", 0).is_ok());
 
         // A trailing segment after the bracket is not the sanctioned form.
         let suffixed =
             format!("package agent_policy.fragments[\"{feed}\"].extra\ncontainers := []\n");
         let mut s = AgentPolicy::new();
         assert!(s
-            .apply_fragment_module("suffixed", &suffixed, feed, &[], None)
+            .apply_fragment_module("suffixed", &suffixed, feed, &[], None, "", 0)
             .is_err());
+    }
+
+    /// F-160: a fragment's module describes itself with `issuer` and `svn` rules, and the
+    /// generated base policy resolves its containers through exactly those. They must
+    /// therefore agree with the envelope the SRM verified, or the re-check in `rules.rego`
+    /// is only the fragment restating its own claim.
+    #[test]
+    fn test_fragment_self_description_must_match_the_verified_envelope() {
+        let feed = "localhost:5000/coco-e2e/fragment";
+        let module = |issuer: &str, svn: &str| {
+            format!(
+                "package agent_policy.fragments[\"{feed}\"]\n\
+                 issuer := \"{issuer}\"\nsvn := \"{svn}\"\ncontainers := []\n"
+            )
+        };
+        let truth = "did:x509:0:sha256:AAA::CN:signer";
+
+        // Agreement loads.
+        let mut p = AgentPolicy::new();
+        p.apply_fragment_module("ok", &module(truth, "4"), feed, &[], None, truth, 4)
+            .expect("a module that describes itself accurately must load");
+
+        // A module claiming a different issuer than the one that signed the envelope.
+        let mut q = AgentPolicy::new();
+        let err = q
+            .apply_fragment_module(
+                "wrong-issuer",
+                &module("did:x509:0:sha256:BBB::CN:other", "4"),
+                feed,
+                &[],
+                None,
+                truth,
+                4,
+            )
+            .expect_err("a module must not claim an issuer that did not sign it");
+        assert!(err.to_string().contains("declares issuer"), "{}", err);
+
+        // A module inflating its SVN past the envelope's, which is what would let it clear a
+        // `minimum_svn` floor the envelope itself does not meet.
+        let mut r = AgentPolicy::new();
+        let err = r
+            .apply_fragment_module("wrong-svn", &module(truth, "99"), feed, &[], None, truth, 4)
+            .expect_err("a module must not claim an svn its envelope does not carry");
+        assert!(err.to_string().contains("declares svn 99"), "{}", err);
+
+        // Declaring neither is not a lie: such a fragment simply contributes no containers,
+        // because the base policy's `to_number(mod.svn)` is undefined. Fail-closed already.
+        let mut s = AgentPolicy::new();
+        s.apply_fragment_module(
+            "silent",
+            &format!("package agent_policy.fragments[\"{feed}\"]\ncontainers := []\n"),
+            feed,
+            &[],
+            None,
+            truth,
+            4,
+        )
+        .expect("a module that describes nothing must still load");
+
+        // The check runs on the module as it will evaluate, so a self-description built from
+        // measured parameters is judged after instantiation, not before.
+        let mut t = AgentPolicy::new();
+        let parameterised = format!(
+            "package agent_policy.fragments[\"{feed}\"]\n\
+             issuer := parameter(\"iss\")\nsvn := \"4\"\ncontainers := []\n"
+        );
+        t.apply_fragment_module(
+            "param-ok",
+            &parameterised,
+            feed,
+            &[],
+            Some(&format!("{{\"iss\": \"{truth}\"}}")),
+            truth,
+            4,
+        )
+        .expect("a parameterised self-description that resolves correctly must load");
+
+        let mut u = AgentPolicy::new();
+        assert!(
+            u.apply_fragment_module(
+                "param-bad",
+                &parameterised,
+                feed,
+                &[],
+                Some("{\"iss\": \"did:x509:0:sha256:BBB::CN:other\"}"),
+                truth,
+                4,
+            )
+            .is_err(),
+            "a parameterised self-description that resolves to the wrong issuer must not load"
+        );
+    }
+
+    /// F-160: a module that fails the self-description check must not have reached the live
+    /// engine. regorus has no remove-policy, so the check has to run before `add_policy`
+    /// rather than undo itself afterwards — hcsshim, which adds first, has to call
+    /// `RemoveModule` on this path.
+    #[test]
+    fn test_a_rejected_self_description_leaves_the_engine_untouched() {
+        let feed = "localhost:5000/coco-e2e/fragment";
+        let mut p = AgentPolicy::new();
+        let module = format!(
+            "package agent_policy.fragments[\"{feed}\"]\n\
+             issuer := \"did:x509:0:sha256:BBB::CN:other\"\nsvn := \"4\"\n\
+             containers := [\"smuggled\"]\n"
+        );
+        assert!(p
+            .apply_fragment_module(
+                "rejected",
+                &module,
+                feed,
+                &[],
+                None,
+                "did:x509:0:sha256:AAA::CN:signer",
+                4
+            )
+            .is_err());
+
+        // Nothing from the refused module is visible to the engine.
+        let found = Self_eval(&mut p, &format!("data.agent_policy.fragments[\"{feed}\"]"));
+        assert!(
+            found.is_none(),
+            "a refused fragment module must not be queryable: {:?}",
+            found
+        );
+    }
+
+    /// Helper: evaluate a rego path in a policy under test, `None` when undefined.
+    #[allow(non_snake_case)]
+    fn Self_eval(p: &mut AgentPolicy, query: &str) -> Option<serde_json::Value> {
+        p.engine.set_input_json("{}").unwrap();
+        AgentPolicy::eval_scalar(&mut p.engine, query.to_string()).unwrap()
     }
 
     /// F-143: the package a fragment is *authorized* under must be the package it actually
@@ -1806,7 +2046,7 @@ mod tests {
             let mut p = AgentPolicy::new();
             let module = format!("{header}{decoy}");
             let err = p
-                .apply_fragment_module("evil", &module, "reg/a", &["infra".to_string()], None)
+                .apply_fragment_module("evil", &module, "reg/a", &["infra".to_string()], None, "", 0)
                 .expect_err(&format!("{label}: base package must be refused"));
             assert!(
                 format!("{err}").contains("outside the permitted fragment namespaces"),
@@ -1825,7 +2065,9 @@ mod tests {
                 &format!("package agent_policy.fragments.infra{decoy}"),
                 "reg/a",
                 &["infra".to_string()],
-                None
+                None,
+                "",
+                0,
             )
             .is_ok());
     }
@@ -1855,7 +2097,7 @@ mod tests {
         let evil = "package\tagent_policy\n\ndecoy := `\npackage agent_policy.fragments\n`\n\n\
                     CreateContainerRequest if { true }\n";
         assert!(p
-            .apply_fragment_module("evil", evil, "somefeed", &["infra".to_string()], None)
+            .apply_fragment_module("evil", evil, "somefeed", &["infra".to_string()], None, "", 0)
             .is_err());
 
         let (after, _) = p
@@ -1871,14 +2113,14 @@ mod tests {
     fn test_unparseable_fragment_never_reaches_the_engine() {
         let mut p = AgentPolicy::new();
         assert!(p
-            .apply_fragment_module("broken", "package agent_policy.fragments\nx := (", "reg/a", &[], None)
+            .apply_fragment_module("broken", "package agent_policy.fragments\nx := (", "reg/a", &[], None, "", 0)
             .is_err());
         assert!(p
-            .apply_fragment_module("no-package", "x := 1\n", "reg/a", &[], None)
+            .apply_fragment_module("no-package", "x := 1\n", "reg/a", &[], None, "", 0)
             .is_err());
         // The engine is still usable afterwards.
         assert!(p
-            .apply_fragment_module("good", "package agent_policy.fragments\nx := 1\n", "reg/a", &[], None)
+            .apply_fragment_module("good", "package agent_policy.fragments\nx := 1\n", "reg/a", &[], None, "", 0)
             .is_ok());
     }
 
@@ -1892,7 +2134,7 @@ mod tests {
             bound := parameter(\"host\")\n\
             defaulted := parameter(\"missing_here\")\n\
             unknown := parameter(\"other\")\n";
-        p.apply_fragment_module("frag", module, "reg/a", &[], Some("{\"host\": \"supplied\"}"))
+        p.apply_fragment_module("frag", module, "reg/a", &[], Some("{\"host\": \"supplied\"}"), "", 0)
             .unwrap();
 
         let get = |p: &mut AgentPolicy, rule: &str| {
@@ -1910,7 +2152,7 @@ mod tests {
         // The same module with the parameter left out falls back to the declared default,
         // proving `parameters_api` is consulted rather than the value being required.
         let mut q = AgentPolicy::new();
-        q.apply_fragment_module("frag", module, "reg/a", &[], Some("{}"))
+        q.apply_fragment_module("frag", module, "reg/a", &[], Some("{}"), "", 0)
             .unwrap();
         assert_eq!(get(&mut q, "bound"), "\"fallback\"");
     }
@@ -1923,16 +2165,16 @@ mod tests {
         let mut p = AgentPolicy::new();
         let module = "package agent_policy.fragments\nx := 1\n";
         assert!(p
-            .apply_fragment_module("a", module, "reg/a", &[], Some("[1, 2]"))
+            .apply_fragment_module("a", module, "reg/a", &[], Some("[1, 2]"), "", 0)
             .is_err());
         assert!(p
-            .apply_fragment_module("b", module, "reg/a", &[], Some("\"scalar\""))
+            .apply_fragment_module("b", module, "reg/a", &[], Some("\"scalar\""), "", 0)
             .is_err());
         assert!(p
-            .apply_fragment_module("c", module, "reg/a", &[], Some("{ not json"))
+            .apply_fragment_module("c", module, "reg/a", &[], Some("{ not json"), "", 0)
             .is_err());
         // A fragment that is not parameterised is unaffected.
-        assert!(p.apply_fragment_module("d", module, "reg/a", &[], None).is_ok());
+        assert!(p.apply_fragment_module("d", module, "reg/a", &[], None, "", 0).is_ok());
     }
 
     /// FR-1l: a policy may state the enforcement framework it was written against. Equal or
