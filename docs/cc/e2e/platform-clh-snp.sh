@@ -411,10 +411,17 @@ clh_build_and_deploy() {
     local srm dmv
     srm=$(strings -a "$abin" | grep -c security_reference_monitor || true)
     dmv=$(strings -a "$abin" | grep -c 'dm-verity support not compiled in' || true)
-    log "agent binary check: srm=$srm devmapper_stub=$dmv"
+    log "agent binary check: strict=${E2E_STRICT_POLICY} srm=$srm devmapper_stub=$dmv"
     [ "$dmv" -eq 0 ] || die "agent built without --features devicemapper (USE_DEVMAPPER did not take)"
-    [ "${E2E_STRICT_POLICY}" != "yes" ] || [ "$srm" -gt 100 ] \
-      || die "STRICT_POLICY did not take: only $srm SRM symbols (expected >100)"
+    # Assert in whichever direction was asked for, so a non-strict leg is
+    # verified too rather than silently accepted (see 04-build-guest-stack.sh).
+    if [ "${E2E_STRICT_POLICY}" = "yes" ]; then
+      [ "$srm" -gt 100 ] \
+        || die "STRICT_POLICY did not take: only $srm SRM symbols (expected >100)"
+    else
+      [ "$srm" -le 100 ] \
+        || die "E2E_STRICT_POLICY=${E2E_STRICT_POLICY} but the agent carries $srm SRM symbols — the knob did not reach the build"
+    fi
   else
     warn "no agent binary at $abin — skipping build verification"
   fi
