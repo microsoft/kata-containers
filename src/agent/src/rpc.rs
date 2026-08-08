@@ -2694,6 +2694,15 @@ impl agent_ttrpc::AgentService for AgentService {
         // fragment store; the module is applied to the live policy engine only after it
         // verifies, and the store's SVN/grant state is committed only after the apply
         // succeeds. A failed apply leaves both the engine and the store unchanged.
+        //
+        // F-159: "atomically" is only true while this guard is held. The individual store
+        // locks below are taken and dropped three separate times, and the apply runs under a
+        // different lock entirely, so without serializing the whole sequence two concurrent
+        // loads interleave: both pass the SVN gate against the same pre-state, the later
+        // apply wins the engine, and the later commit sets the high-water mark -- which lets
+        // an older fragment both take effect and lower the floor.
+        let _load_txn = crate::FRAGMENT_LOAD.lock().await;
+
         // FR-1d: if the envelope carries an x5chain (or x509 is required), the SRM verifies
         // the did:x509 certificate-chain identity. That routing lives in the SRM so that
         // every caller gets it, and so no caller can pick the weaker path.
@@ -2741,6 +2750,8 @@ impl agent_ttrpc::AgentService for AgentService {
                             &verified.feed,
                             &effective,
                             scope.parameters.as_deref(),
+                            &verified.issuer,
+                            verified.svn,
                         )
                         .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?,
                 )

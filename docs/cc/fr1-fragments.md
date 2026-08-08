@@ -172,9 +172,31 @@ making. The escaping remains load-bearing either way, since `id()` also backs
 ### 4.1 Core: signed, authorized, add-only, monotonic (FR-1a/1b/1c)
 `FragmentStore` (in `fragments.rs`) is the verifier and add-only accumulator. `authorize_issuer`
 registers a measured Ed25519 key; `set_min_svn`/`declare_feed` set floors; `verify` runs the
-gates without mutating; `commit` advances the SVN high-water mark and records the id; `load` = verify+commit. `apply_fragment_module`
+gates without mutating; `commit` raises the SVN high-water mark and records the id; `load` = verify+commit. `apply_fragment_module`
 (`policy.rs`) merges a verified module additively and refuses a package outside its `includes`
 namespace. Fail-closed: with no authorized issuers, every fragment is rejected.
+
+**The whole load is serialized** (`FRAGMENT_LOAD` in `main.rs`). `verify`→apply→`commit` spans
+three separate store-lock acquisitions plus the policy-engine lock, and the agent's ttrpc server
+dispatches concurrently, so without an outer guard two parallel loads both clear the SVN gate
+against the same pre-state: the later apply wins the engine and the later commit sets the mark,
+which let a host install a superseded fragment *and* lower the anti-rollback floor (persisted, so
+a restart did not recover — F-159). The store guard itself cannot be widened, because nested
+fragment registration re-enters it and the boot path takes the policy-engine lock first.
+`commit` is additionally **raise-only**, so the invariant holds inside the store rather than
+depending on callers committing in order. hcsshim closes the same window with
+`WithMetadataRollback`'s transaction lock.
+
+**A fragment cannot describe itself as another fragment.** The generated base policy resolves a
+fragment's containers through the module's own `issuer` and `svn` rules
+(`fragment_container_entries`, `container_by_ref`), so those must agree with the verified
+envelope or the re-check is only the fragment restating its claim (F-160 — the shape retired in
+F-158). `apply_fragment_module` refuses a divergent self-description, evaluated in a throwaway
+engine on the final module text (after parameter instantiation, before the live engine sees it —
+regorus has no remove-policy). A module declaring neither field still loads and simply
+contributes no containers, since `to_number(mod.svn)` is then undefined. hcsshim's
+`svn_ok_if_defined` likewise requires the COSE header SVN and the Rego SVN to match when both
+are present.
 
 ### 4.2 did:x509 issuer identity (FR-1d)
 `did_x509.rs` parses the COSE `x5chain` (header 33), path-validates leaf→CA with per-cert
@@ -420,6 +442,11 @@ Go verification path.
 | — | namespace grant comes from measured state, never the fragment's own `includes` | parity (hcsshim reads the declaration too); we additionally intersect with the request |
 | — | SVN high-water marks persisted across agent restart (FR-1i) | **ours only** |
 | — | Stage-2 transparency inclusion + consistency proofs (§4.4) | **ours only** |
+| — | certificate revocation checked during chain validation | **ours only** (`cosesign1go` does no OCSP/CRL) |
+| header SVN and Rego SVN must agree (`svn_ok_if_defined`) | module self-description pinned to the verified envelope (§4.1) | parity — ours also pins the issuer, not just the SVN |
+| concurrent/nested loads rejected (`WithMetadataRollback` transaction lock) | whole load serialized behind `FRAGMENT_LOAD` (§4.1) | parity — we serialize where hcsshim fails closed |
+| framework/API version compatibility (`framework_version`, `api_version`) | — | **hcsshim only** — see F-161; we version by base-policy measurement instead |
+| cert chain bounded to 1–100 certs | — | **hcsshim only** (DoS mitigation) |
 
 Deltas that are **not** gates — surface hcsshim has and we do not, none of which is a check we
 skip:

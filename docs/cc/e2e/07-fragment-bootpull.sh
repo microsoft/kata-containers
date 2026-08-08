@@ -854,6 +854,70 @@ if ! wait_for_soft 300 "$SIDECAR_POD sidecar ready" bash -c "sidecar_ready() { k
 fi
 ok "both containers running — the fragment authorized a container the measured policy never contained"
 cleanup_pod "$SIDECAR_POD"
+wait_for_soft 120 "$SIDECAR_POD gone" \
+  bash -c "! kubectl get pod $SIDECAR_POD -n $NS >/dev/null 2>&1" \
+  || kubectl delete pod "$SIDECAR_POD" -n "$NS" --force --grace-period=0 >/dev/null 2>&1 || true
+
+# 07n (F-160) — the same sidecar fragment, but its module lies about its own SVN.
+#
+# The base policy resolves a fragment's containers through the module's *own*
+# `issuer` and `svn` rules, so a module that inflates its SVN could clear a
+# `minimum_svn` floor its signed envelope does not meet. The envelope here is
+# signed at the honest SVN and the declaration asks for exactly that, so the SRM's
+# own gates are all satisfied — nothing but the self-description check stands
+# between this fragment and the engine. If that check regresses, the pod boots.
+#
+# 07m and 07n differ in one character of the module and nothing else: same issuer,
+# same feed, same envelope SVN, same declaration, same container entry.
+#
+# The oracle is *not* 07l's per-container one. Boot delivery is mandatory: a
+# fragment the guest refuses fails the whole sandbox, so the pod never reaches
+# Running at all. That is the stronger outcome and it lets the case assert on the
+# refusal reason, which is what makes it a test of this gate rather than of any
+# refusal that happens to occur.
+SIDECAR_LIE_SVN=$(( SVN + 7 ))
+SIDECAR_LIAR_REF="$SIDECAR_FEED:liar"
+log "07n — a fragment whose module claims svn $SIDECAR_LIE_SVN while its envelope carries $SVN"
+{
+  printf 'package agent_policy.fragments["%s"]\n\n' "$SIDECAR_FEED"
+  printf 'issuer := "%s"\n' "$ISSUER"
+  printf 'svn := %s\n' "$SIDECAR_LIE_SVN"
+  printf 'containers := [%s]\n' "$(cat "$WORK/sidecar-entry.json")"
+} > "$WORK/sidecar-liar.rego"
+
+SIGN sign --issuer "$ISSUER" --feed "$SIDECAR_FEED" --svn "$SVN" \
+     --module "$WORK/sidecar-liar.rego" --key "$SIDECAR_PRIV" > "$WORK/sidecar-liar.sign.txt" \
+  || { tail -20 "$WORK/sidecar-liar.sign.txt"; die "signing the lying sidecar fragment failed"; }
+grep '^cose_sign1_hex=' "$WORK/sidecar-liar.sign.txt" | cut -d= -f2 > "$WORK/sidecar-liar.cose.hex"
+[ -s "$WORK/sidecar-liar.cose.hex" ] || die "the signer emitted no cose_sign1_hex for the lying fragment"
+if [ -n "${ACR_PASSWORD:-}" ]; then
+  export FRAGMENTGEN_USERNAME="$ACR_USERNAME" FRAGMENTGEN_PASSWORD="$ACR_PASSWORD"
+fi
+FRAGGEN --cose "$WORK/sidecar-liar.cose.hex" --push "$SIDECAR_LIAR_REF" $SIDECAR_PLAIN_HTTP \
+  > "$WORK/sidecar-liar.push.txt" \
+  || { tail -20 "$WORK/sidecar-liar.push.txt"; die "pushing the lying fragment failed"; }
+unset FRAGMENTGEN_USERNAME FRAGMENTGEN_PASSWORD
+ok "published the lying sidecar fragment -> $SIDECAR_LIAR_REF (envelope svn $SVN, module claims $SIDECAR_LIE_SVN)"
+
+apply_sidecar_case "$SIDECAR_POD" "$SIDECAR_LIAR_REF"
+if ! expect_never_running "$SIDECAR_POD" "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
+  diagnose "$SIDECAR_POD"
+  cleanup_pod "$SIDECAR_POD"
+  die "the pod booted from a fragment that misdescribed its own SVN — the F-160 binding has regressed"
+fi
+# Necessary but not sufficient: any broken sandbox never reaches Running either.
+# The refusal has to name *this* gate, or the case is green for the wrong reason.
+if ! kubectl describe pod "$SIDECAR_POD" -n "$NS" 2>/dev/null \
+     | grep -q 'declares svn .* but the envelope it arrived in carries svn'; then
+  diagnose "$SIDECAR_POD"
+  cleanup_pod "$SIDECAR_POD"
+  die "the sandbox failed, but not for the self-description mismatch — something else refused this fragment first, so the case proves nothing"
+fi
+ok "07n — the module was refused for describing itself as an SVN its envelope does not carry"
+cleanup_pod "$SIDECAR_POD"
+wait_for_soft 120 "$SIDECAR_POD gone" \
+  bash -c "! kubectl get pod $SIDECAR_POD -n $NS >/dev/null 2>&1" \
+  || kubectl delete pod "$SIDECAR_POD" -n "$NS" --force --grace-period=0 >/dev/null 2>&1 || true
 
 fi   # sidecar fixtures available
 

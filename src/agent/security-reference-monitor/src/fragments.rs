@@ -1572,11 +1572,20 @@ impl FragmentStore {
 
     /// Commit a previously [`verify`](Self::verify)-ed fragment: advance the `(issuer, feed)`
     /// SVN high-water mark and record the fragment id (for composition).
+    ///
+    /// F-159: the mark is **raise-only**, like `ttl_heads` below. `verify` already refuses
+    /// anything at or under the current mark, so in a serialized sequence this is a no-op —
+    /// but an unconditional insert makes the anti-rollback invariant depend on the caller
+    /// never committing two fragments out of order, and that is exactly what a concurrent
+    /// pair of loads does. Keeping it local means a lost race can at worst fail to advance
+    /// the mark; it can never move it backwards, and never write a lowered value through
+    /// `export_svn_state` into the sealed store.
     pub fn commit(&mut self, verified: &VerifiedFragment) {
-        self.last_svn.insert(
-            (verified.issuer.clone(), verified.feed.clone()),
-            verified.svn,
-        );
+        let mark = self
+            .last_svn
+            .entry((verified.issuer.clone(), verified.feed.clone()))
+            .or_insert(verified.svn);
+        *mark = (*mark).max(verified.svn);
         self.loaded_ids.insert(verified.id.clone());
         // FR-1j: advance the append-only ordering log head (ordered mode only).
         if self.log_genesis.is_some() {
@@ -2550,6 +2559,45 @@ mod tests {
 
         let mut at_floor = frag_feed("issuerA", "prod", 5);
         assert!(load(&mut store, &sk, &at_floor).is_ok());
+    }
+
+    /// F-159: the SVN high-water mark is raise-only, so a `commit` that arrives out of order
+    /// cannot move it backwards.
+    ///
+    /// `verify` refuses anything at or under the mark, so a *serialized* caller can never
+    /// present this case — but `load_policy_fragment` verifies, applies and commits under
+    /// separate locks, and two concurrent loads both clear the gate against the same
+    /// pre-state before either commits. The losing commit then arrives with the lower SVN.
+    /// An unconditional insert would write it, lowering the floor *and* persisting the
+    /// lowered value through `export_svn_state` into the sealed store, so a restart would
+    /// not recover. Keeping the invariant inside `commit` means the worst a lost race can do
+    /// is fail to advance the mark.
+    #[test]
+    fn committing_out_of_order_cannot_lower_the_svn_high_water_mark() {
+        let (sk, pk) = keypair(1);
+        let mut store = FragmentStore::new(false);
+        store.authorize_issuer("issuerA", &pk).unwrap();
+        store.declare_feed("issuerA", "prod", 0);
+
+        // Verify both against the same pre-state, as two concurrent loads would.
+        let newer = verify(&store, &sk, &frag_feed("issuerA", "prod", 9)).unwrap();
+        let older = verify(&store, &sk, &frag_feed("issuerA", "prod", 5)).unwrap();
+
+        // The newer one lands first; the older one's commit arrives afterwards.
+        store.commit(&newer);
+        assert_eq!(store.min_required("issuerA", "prod"), 10);
+        store.commit(&older);
+
+        assert_eq!(
+            store.min_required("issuerA", "prod"),
+            10,
+            "a late commit must not reopen the rollback window"
+        );
+        assert!(
+            !store.export_svn_state().contains("prod\t5"),
+            "the lowered mark must never reach the sealed store: {}",
+            store.export_svn_state()
+        );
     }
 
     /// TC-F1.25 (FR-1i): a per-feed floor above the issuer-wide floor still binds, so the

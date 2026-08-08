@@ -175,6 +175,24 @@ lazy_static! {
         Mutex::new(kata_security_reference_monitor::FragmentStore::new(true));
 }
 
+// F-159: serializes a whole LoadPolicyFragment, so verify -> apply -> commit really is the
+// atomic step its callers assume. The store lock alone cannot do this: the apply runs under
+// AGENT_POLICY, and register_nested_fragments re-enters FRAGMENTS, so holding the store
+// guard across the sequence would both invert the boot path's AGENT_POLICY -> FRAGMENTS
+// order and deadlock on the re-entry. This is the outermost lock and nothing beneath it
+// takes it.
+//
+// Without it two concurrent loads each read the SVN floor before either commits, so both
+// clear the monotonicity gate; whichever applies last wins the engine, and the losing
+// fragment's commit then writes its own (lower) SVN as the high-water mark. A host that can
+// issue two RPCs in parallel could therefore install a superseded fragment *and* lower the
+// anti-rollback floor -- the guarantee FR-1 exists to provide. hcsshim closes the same
+// window with regoEnforcer.WithMetadataRollback's transactionLock.
+#[cfg(feature = "strict-policy")]
+lazy_static! {
+    static ref FRAGMENT_LOAD: Mutex<()> = Mutex::new(());
+}
+
 // FR-14: network phase state machine. Network-mutating RPCs are permitted only during
 // sandbox setup; once a workload container starts the network surface is frozen. Strict
 // builds only; agent-internal.
