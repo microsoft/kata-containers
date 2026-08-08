@@ -183,7 +183,13 @@ build_component() {
   local t="build/kata-static-$comp.tar.zst"
   if [ -f "$t" ]; then
     mkdir -p "$LB/build"
-    cp "$t" "$LB/build/" || die "could not stage $t for later components"
+    # In some trees `build/` is itself a symlink to $LB/build, so the two paths
+    # name the same file and `cp` refuses. That is the desired end state, not an
+    # error: compare resolved directories and skip the copy rather than failing
+    # the whole guest build for a component already exactly where it needs to be.
+    if [ "$(cd "$(dirname "$t")" && pwd -P)" != "$(cd "$LB/build" && pwd -P)" ]; then
+      cp "$t" "$LB/build/" || die "could not stage $t for later components"
+    fi
   fi
 }
 
