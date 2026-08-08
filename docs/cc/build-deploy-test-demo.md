@@ -117,7 +117,7 @@ G=target/$TGT/release/genpolicy-fragmentgen
 KEY=$($S gen-key | awk -F= '/private_key_hex/{print $2}')
 printf 'package agent_policy.fragments\nsvn := 3\nexec_allowed := true\n' > /tmp/frag.rego
 $S sign --issuer did:x509:0:sha256:AAA::CN:signer --feed localhost:5000/frag/infra:1 --svn 3 \
-   --includes exec --module /tmp/frag.rego --key "$KEY" --cose | awk -F= '/cose_sign1_hex/{print $2}' > /tmp/frag.cose.hex
+   --includes exec --module /tmp/frag.rego --key "$KEY" | awk -F= '/cose_sign1_hex/{print $2}' > /tmp/frag.cose.hex
 $G --cose /tmp/frag.cose.hex                       # emit the base-policy policy_fragments[] entry (offline)
 # with a registry:  $G --cose /tmp/frag.cose.hex --push localhost:5000/frag/infra:1 --plain-http
 ```

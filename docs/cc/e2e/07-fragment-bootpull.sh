@@ -756,7 +756,7 @@ ok "lifted the sidecar container entry ($(wc -c < "$WORK/sidecar-entry.json") by
 
 log "signing and publishing the sidecar fragment to $SIDECAR_REF"
 SIGN sign --issuer "$ISSUER" --feed "$SIDECAR_FEED" --svn "$SVN" \
-     --module "$WORK/sidecar.rego" --key "$SIDECAR_PRIV" --cose > "$WORK/sidecar.sign.txt" \
+     --module "$WORK/sidecar.rego" --key "$SIDECAR_PRIV" > "$WORK/sidecar.sign.txt" \
   || { tail -20 "$WORK/sidecar.sign.txt"; die "signing the sidecar fragment failed"; }
 grep '^cose_sign1_hex=' "$WORK/sidecar.sign.txt" | cut -d= -f2 > "$WORK/sidecar.cose.hex"
 [ -s "$WORK/sidecar.cose.hex" ] || die "the signer emitted no cose_sign1_hex for the sidecar fragment"

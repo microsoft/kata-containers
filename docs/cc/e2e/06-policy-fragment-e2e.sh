@@ -107,15 +107,14 @@ e2e_fragment_loaded := true
 EOF
 
 step "06c — sign the fragment"
-# --cose is what makes the signer emit the COSE_Sign1 envelope (FR-1h); without it
-# only the raw signature is printed and the OCI packaging step has nothing to push.
+# The signer's only output is the COSE_Sign1 envelope (FR-1h): the fragment *is* the
+# envelope, so there is nothing else to emit and nothing to opt into.
 SIGN sign \
   --issuer "$ISSUER" \
   --feed   "$FEED" \
   --svn    "$SVN" \
   --module "$WORK/fragment.rego" \
-  --key    "$PRIV" \
-  --cose > "$WORK/sign.txt" || die "signing failed"
+  --key    "$PRIV" > "$WORK/sign.txt" || die "signing failed"
 
 grep '^cose_sign1_hex=' "$WORK/sign.txt" | cut -d= -f2 > "$WORK/fragment.cose.hex"
 [ -s "$WORK/fragment.cose.hex" ] || die "signer did not emit cose_sign1_hex"
@@ -224,7 +223,7 @@ FOREIGN_CHILD_FEED="$E2E_REGISTRY/coco-e2e/fragment-child-foreign"
 publish_fragment() {
   local name="$1" feed="$2" svn="$3" rego="$4"
   SIGN sign --issuer "$ISSUER" --feed "$feed" --svn "$svn" \
-       --module "$rego" --key "$PRIV" --cose > "$WORK/$name.sign.txt" \
+       --module "$rego" --key "$PRIV" > "$WORK/$name.sign.txt" \
     || die "signing $name failed"
   grep '^cose_sign1_hex=' "$WORK/$name.sign.txt" | cut -d= -f2 > "$WORK/$name.cose.hex"
   [ -s "$WORK/$name.cose.hex" ] || die "signer did not emit cose_sign1_hex for $name"

@@ -2687,43 +2687,29 @@ impl agent_ttrpc::AgentService for AgentService {
         }
 
         // Everything the issuer signed comes out of the envelope. The receipt fields are not
-        // covered by the issuer signature -- they are countersignatures over the same
-        // statement -- so they still come from the request and are verified separately.
-        let fragment = {
-            let mut f = kata_security_reference_monitor::PolicyFragment::from_cose_envelope(
-                &req.cose_sign1,
-            )
-            .ok_or_else(|| {
-                ttrpc_error(
-                    ttrpc::Code::INVALID_ARGUMENT,
-                    "cose_sign1 is not a decodable policy-fragment envelope".to_string(),
-                )
-            })?;
-            f.receipt = (!req.receipt.is_empty()).then(|| req.receipt.clone());
-            f.receipt_ledger = (!req.receipt_ledger.is_empty()).then(|| req.receipt_ledger.clone());
-            f.receipt_proof = (!req.receipt_proof.is_empty()).then(|| req.receipt_proof.clone());
-            f.extra_receipts = parse_extra_receipts(&req.extra_receipts)?;
-            f
-        };
-
-        // FR-1a: verify → apply → commit, atomically. Verification does not mutate the
+        // covered by the issuer signature -- they are countersignatures over the same signed
+        // bytes -- so they still come from the request and are verified separately.
+        //
+        // FR-1a: verify -> apply -> commit, atomically. Verification does not mutate the
         // fragment store; the module is applied to the live policy engine only after it
         // verifies, and the store's SVN/grant state is committed only after the apply
         // succeeds. A failed apply leaves both the engine and the store unchanged.
-        // FR-1d: if the envelope carries an x5chain (or x509 is required), verify the
-        // did:x509 certificate-chain identity. Routing is deterministic and offers no
-        // downgrade: an x5chain-bearing envelope is always verified as x509.
+        // FR-1d: if the envelope carries an x5chain (or x509 is required), the SRM verifies
+        // the did:x509 certificate-chain identity. That routing lives in the SRM so that
+        // every caller gets it, and so no caller can pick the weaker path.
+        let extra_receipts = parse_extra_receipts(&req.extra_receipts)?;
         let verified = {
             let store = crate::FRAGMENTS.lock().await;
-            let r = if store.require_x509()
-                || (store.has_did_x509_anchors()
-                    && kata_security_reference_monitor::did_x509::cose_has_x5chain(&req.cose_sign1))
-            {
-                store.verify_cose_x509(&fragment, &req.cose_sign1)
-            } else {
-                store.verify_cose(&fragment, &req.cose_sign1)
-            };
-            r.map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?
+            store
+                .verify_envelope_with(&req.cose_sign1, |f| {
+                    f.receipt = (!req.receipt.is_empty()).then(|| req.receipt.clone());
+                    f.receipt_ledger =
+                        (!req.receipt_ledger.is_empty()).then(|| req.receipt_ledger.clone());
+                    f.receipt_proof =
+                        (!req.receipt_proof.is_empty()).then(|| req.receipt_proof.clone());
+                    f.extra_receipts = extra_receipts;
+                })
+                .map_err(|e| ttrpc_error(ttrpc::Code::FAILED_PRECONDITION, e))?
         };
 
         // FR-1c: the fragment's own `includes` says where it *wants* to contribute; the
@@ -2970,7 +2956,7 @@ fn caller_described_fragment_field(
         ("prev_log_head", !req.prev_log_head.is_empty()),
     ]
     .into_iter()
-    .find_map(|&(name, present)| present.then_some(name))
+    .find_map(|(name, present)| present.then_some(name))
 }
 
 fn parse_extra_receipts(entries: &[String]) -> ttrpc::Result<Vec<(String, String)>> {

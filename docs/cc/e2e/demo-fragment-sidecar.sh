@@ -225,7 +225,7 @@ log "the fragment declares:"
 head -4 "$WORK/sidecar.rego" | sed 's/^/      /'
 
 SIGN sign --issuer "$ISSUER" --feed "$SIDECAR_FEED" --svn "$SVN" \
-     --module "$WORK/sidecar.rego" --key "$PRIV" --cose > "$WORK/sign.txt" \
+     --module "$WORK/sidecar.rego" --key "$PRIV" > "$WORK/sign.txt" \
   || { tail -20 "$WORK/sign.txt"; die "signing failed"; }
 grep '^cose_sign1_hex=' "$WORK/sign.txt" | cut -d= -f2 > "$WORK/cose.hex"
 FRAGGEN --cose "$WORK/cose.hex" --push "$SIDECAR_REF" $PLAIN_HTTP > "$WORK/push.txt" \

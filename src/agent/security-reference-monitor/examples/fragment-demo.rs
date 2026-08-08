@@ -31,7 +31,7 @@ use kata_security_reference_monitor::{FragmentError, FragmentStore, PolicyFragme
 // ---- x509 minting (in-process P-256 PKI; needs only the dev-deps the tests already use) --
 use const_oid::ObjectIdentifier;
 use coset::cbor::value::Value;
-use coset::{iana, CborSerializable, CoseSign1Builder, HeaderBuilder};
+use coset::{iana, CborSerializable};
 use p256::ecdsa::{DerSignature, Signature as EcSignature, SigningKey as EcSigningKey};
 use p256::pkcs8::EncodePublicKey;
 use rand_core::OsRng;
@@ -51,6 +51,43 @@ fn ed_key(seed: u8) -> (SigningKey, [u8; 32]) {
     let sk = SigningKey::from_bytes(&[seed; 32]);
     let pk = sk.verifying_key().to_bytes();
     (sk, pk)
+}
+
+// The fragment *is* its COSE_Sign1 envelope, so the demo signs into one and hands the store
+// nothing else -- the same thing the guest does with what arrives over the RPC. Receipts are
+// countersignatures over the same signed bytes and legitimately travel outside the envelope,
+// so they are re-attached after parsing.
+fn tbs_of(f: &PolicyFragment) -> Vec<u8> {
+    f.to_unsigned_cose(coset::iana::Algorithm::EdDSA).tbs_data(b"")
+}
+
+fn env(sk: &SigningKey, f: &PolicyFragment) -> Vec<u8> {
+    use coset::CborSerializable;
+    let mut s = f.to_unsigned_cose(coset::iana::Algorithm::EdDSA);
+    s.signature = sk.sign(&s.tbs_data(b"")).to_bytes().to_vec();
+    s.to_vec().expect("serialize COSE_Sign1")
+}
+
+fn verify_frag(
+    store: &FragmentStore,
+    sk: &SigningKey,
+    f: &PolicyFragment,
+) -> Result<kata_security_reference_monitor::fragments::VerifiedFragment, FragmentError> {
+    store.verify_envelope_with(&env(sk, f), |g| {
+        g.receipt = f.receipt.clone();
+        g.receipt_ledger = f.receipt_ledger.clone();
+        g.receipt_proof = f.receipt_proof.clone();
+        g.extra_receipts = f.extra_receipts.clone();
+    })
+}
+
+fn load_frag(
+    store: &mut FragmentStore,
+    sk: &SigningKey,
+    f: &PolicyFragment,
+) -> Result<Vec<String>, FragmentError> {
+    let v = verify_frag(store, sk, f)?;
+    Ok(store.commit(&v))
 }
 
 fn ok(label: &str) {
@@ -73,76 +110,76 @@ fn section1_core() {
     store.authorize_issuer("issuerA", &pk).unwrap();
 
     // Unauthorized issuer -> rejected (fail-closed).
-    let mut rogue = PolicyFragment {
+    let rogue = PolicyFragment {
         issuer: "attacker".into(),
         svn: 1,
         ..Default::default()
     };
-    rogue.signature = sk.sign(&rogue.signing_bytes()).to_bytes().to_vec();
     assert!(matches!(
-        store.verify(&rogue),
+        verify_frag(&store, &sk, &rogue),
         Err(FragmentError::UnauthorizedIssuer(_))
     ));
     ok("unknown issuer rejected");
 
     // A properly signed fragment from an authorized issuer is accepted.
-    let mut f = PolicyFragment {
+    let f = PolicyFragment {
         issuer: "issuerA".into(),
         svn: 1,
         grants: vec!["exec:tool".into()],
         ..Default::default()
     };
-    f.signature = sk.sign(&f.signing_bytes()).to_bytes().to_vec();
-    assert!(store.load(&f).is_ok());
+    assert!(load_frag(&mut store, &sk, &f).is_ok());
     ok("authorized + signed fragment accepted, grant added");
 
-    // Tampering after signing invalidates the signature.
-    let mut t = f.clone();
-    t.grants = vec!["exec:tool".into(), "exec:evil".into()];
+    // Tampering after signing invalidates the signature. The grants live in the *protected*
+    // header, which is inside the COSE Sig_structure, so swapping them in a signed envelope
+    // breaks the signature rather than going unnoticed.
+    let mut widened = f.clone();
+    widened.grants = vec!["exec:tool".into(), "exec:evil".into()];
+    let mut tampered = coset::CoseSign1::from_slice(&env(&sk, &f)).unwrap();
+    tampered.protected = coset::CoseSign1::from_slice(&env(&sk, &widened))
+        .unwrap()
+        .protected;
     assert!(matches!(
-        store.verify(&t),
+        store.verify_envelope(&tampered.to_vec().unwrap()),
         Err(FragmentError::InvalidSignature)
     ));
     ok("tampered fragment rejected (grants bound into signature)");
 
     // Monotonic SVN: replaying the same SVN is rejected.
-    let mut replay = PolicyFragment {
+    let replay = PolicyFragment {
         issuer: "issuerA".into(),
         svn: 1,
         ..Default::default()
     };
-    replay.signature = sk.sign(&replay.signing_bytes()).to_bytes().to_vec();
     assert!(matches!(
-        store.verify(&replay),
+        verify_frag(&store, &sk, &replay),
         Err(FragmentError::RolledBackSvn { .. })
     ));
     ok("rolled-back SVN rejected (anti-replay)");
 
     // Add-only: a fragment relaxing a root constraint is rejected.
     store.add_root_constraint("allow-all");
-    let mut broad = PolicyFragment {
+    let broad = PolicyFragment {
         issuer: "issuerA".into(),
         svn: 2,
         grants: vec!["allow-all".into()],
         ..Default::default()
     };
-    broad.signature = sk.sign(&broad.signing_bytes()).to_bytes().to_vec();
     assert!(matches!(
-        store.verify(&broad),
+        verify_frag(&store, &sk, &broad),
         Err(FragmentError::RootConstraintRelaxation(_))
     ));
     ok("root-constraint relaxation rejected (add-only)");
 }
 
 // ---------------------------------------------------------------------------------------
-fn signed_with_receipt(
-    issuer_sk: &SigningKey,
-    f: &mut PolicyFragment,
-    ledger: &str,
-    ledger_sk: &SigningKey,
-) {
-    f.signature = issuer_sk.sign(&f.signing_bytes()).to_bytes().to_vec();
-    let rsig = ledger_sk.sign(&f.signing_bytes());
+/// Attach a transparency receipt: a ledger countersignature over the *same* signed bytes
+/// the issuer signs. `tbs_data` does not depend on the issuer's signature, so a ledger can
+/// compute this without the issuer key -- which is why the receipt can be produced
+/// independently and still bind to exactly this fragment.
+fn signed_with_receipt(f: &mut PolicyFragment, ledger: &str, ledger_sk: &SigningKey) {
+    let rsig = ledger_sk.sign(&tbs_of(f));
     f.receipt = Some(
         rsig.to_bytes()
             .iter()
@@ -178,8 +215,8 @@ fn section2_trust_list() {
         svn: 1,
         ..Default::default()
     };
-    signed_with_receipt(&issuer_sk, &mut f, "ledgerA", &led_a_sk);
-    assert!(store.verify(&f).is_ok());
+    signed_with_receipt(&mut f, "ledgerA", &led_a_sk);
+    assert!(verify_frag(&store, &issuer_sk, &f).is_ok());
     ok("receipt from allowed ledger accepted");
 
     // Receipt from a non-allowed ledger -> rejected.
@@ -189,23 +226,22 @@ fn section2_trust_list() {
         svn: 1,
         ..Default::default()
     };
-    signed_with_receipt(&issuer_sk, &mut g, "ledgerB", &led_b_sk);
+    signed_with_receipt(&mut g, "ledgerB", &led_b_sk);
     assert!(matches!(
-        store.verify(&g),
+        verify_frag(&store, &issuer_sk, &g),
         Err(FragmentError::LedgerNotAllowed { .. })
     ));
     ok("receipt from disallowed ledger rejected (allowed_ledgers)");
 
     // No receipt where one is required -> rejected.
-    let mut h = PolicyFragment {
+    let h = PolicyFragment {
         issuer: "issuerA".into(),
         feed: "prod".into(),
         svn: 1,
         ..Default::default()
     };
-    h.signature = issuer_sk.sign(&h.signing_bytes()).to_bytes().to_vec();
     assert!(matches!(
-        store.verify(&h),
+        verify_frag(&store, &issuer_sk, &h),
         Err(FragmentError::MissingReceipt)
     ));
     ok("missing required receipt rejected (required_receipts)");
@@ -217,8 +253,8 @@ fn section2_trust_list() {
         svn: 2,
         ..Default::default()
     };
-    signed_with_receipt(&issuer_sk, &mut r, "ledgerA", &led_a2_sk);
-    assert!(store.verify(&r).is_ok());
+    signed_with_receipt(&mut r, "ledgerA", &led_a2_sk);
+    assert!(verify_frag(&store, &issuer_sk, &r).is_ok());
     ok("receipt signed by rotated ledger key accepted (rotation)");
 }
 
@@ -270,27 +306,21 @@ fn mint_leaf(cn: &str, leaf_sk: &EcSigningKey, ca_cn: &str, ca_sk: &EcSigningKey
     b.build::<DerSignature>().unwrap().to_der().unwrap()
 }
 
-fn cose_x509(statement: &[u8], leaf_sk: &EcSigningKey, chain: &[Vec<u8>]) -> Vec<u8> {
-    let mut unprotected = coset::Header::default();
-    unprotected.rest.push((
+/// Sign a fragment into a did:x509 envelope: the same protected header and payload the
+/// Ed25519 path produces, signed by an EC P-256 leaf, with the chain in the *unprotected*
+/// x5chain header (COSE label 33) where RFC 9360 and hcsshim's `sign1util` put it.
+///
+/// The chain is not the identity — the leaf key having produced this signature is, and that
+/// is what gets checked against the measured `did:x509` anchor.
+fn cose_x509(f: &PolicyFragment, leaf_sk: &EcSigningKey, chain: &[Vec<u8>]) -> Vec<u8> {
+    let mut s = f.to_unsigned_cose(iana::Algorithm::ES256);
+    s.unprotected.rest.push((
         coset::Label::Int(33),
         Value::Array(chain.iter().map(|c| Value::Bytes(c.clone())).collect()),
     ));
-    CoseSign1Builder::new()
-        .protected(
-            HeaderBuilder::new()
-                .algorithm(iana::Algorithm::ES256)
-                .build(),
-        )
-        .unprotected(unprotected)
-        .payload(statement.to_vec())
-        .create_signature(b"", |tbs| {
-            let s: EcSignature = leaf_sk.sign(tbs);
-            s.to_bytes().to_vec()
-        })
-        .build()
-        .to_vec()
-        .unwrap()
+    let sig: EcSignature = leaf_sk.sign(&s.tbs_data(b""));
+    s.signature = sig.to_bytes().to_vec();
+    s.to_vec().unwrap()
 }
 
 fn section3_did_x509() {
@@ -317,8 +347,8 @@ fn section3_did_x509() {
         svn: 1,
         ..Default::default()
     };
-    let cose = cose_x509(&f.signing_bytes(), &leaf1_sk, &[leaf1.clone(), ca.clone()]);
-    assert!(store.verify_cose_x509(&f, &cose).is_ok());
+    let cose = cose_x509(&f, &leaf1_sk, &[leaf1.clone(), ca.clone()]);
+    assert!(store.verify_envelope(&cose).is_ok());
     ok("valid did:x509 chain accepted (identity = CA + policy, not a pinned key)");
 
     // Untrusted CA -> rejected.
@@ -326,9 +356,9 @@ fn section3_did_x509() {
     let other_ca = mint_ca("evil-ca", &other_ca_sk);
     let evil_leaf_sk = EcSigningKey::random(&mut OsRng);
     let evil_leaf = mint_leaf("issuerX", &evil_leaf_sk, "evil-ca", &other_ca_sk);
-    let cose_evil = cose_x509(&f.signing_bytes(), &evil_leaf_sk, &[evil_leaf, other_ca]);
+    let cose_evil = cose_x509(&f, &evil_leaf_sk, &[evil_leaf, other_ca]);
     assert!(matches!(
-        store.verify_cose_x509(&f, &cose_evil),
+        store.verify_envelope(&cose_evil),
         Err(FragmentError::UntrustedCa)
     ));
     ok("chain to an untrusted CA rejected");
@@ -341,8 +371,8 @@ fn section3_did_x509() {
         svn: 2,
         ..Default::default()
     };
-    let cose2 = cose_x509(&f2.signing_bytes(), &leaf2_sk, &[leaf2, ca.clone()]);
-    assert!(store.verify_cose_x509(&f2, &cose2).is_ok());
+    let cose2 = cose_x509(&f2, &leaf2_sk, &[leaf2, ca.clone()]);
+    assert!(store.verify_envelope(&cose2).is_ok());
     ok("rotated leaf (new key, same CA) accepted with no config change");
 
     // Revocation: revoke leaf1's fingerprint; even a valid chain is now rejected.
@@ -353,23 +383,22 @@ fn section3_did_x509() {
         svn: 3,
         ..Default::default()
     };
-    let cose3 = cose_x509(&f3.signing_bytes(), &leaf1_sk, &[leaf1, ca]);
+    let cose3 = cose_x509(&f3, &leaf1_sk, &[leaf1, ca]);
     assert!(matches!(
-        store.verify_cose_x509(&f3, &cose3),
+        store.verify_envelope(&cose3),
         Err(FragmentError::RevokedCertificate)
     ));
     ok("revoked leaf rejected (measured revocation list)");
 }
 
 // ---------------------------------------------------------------------------------------
-fn ordered_frag(issuer: &str, svn: u64, prev_head: &[u8], sk: &SigningKey) -> PolicyFragment {
-    let mut f = PolicyFragment {
+fn ordered_frag(issuer: &str, svn: u64, prev_head: &[u8]) -> PolicyFragment {
+    let f = PolicyFragment {
         issuer: issuer.into(),
         svn,
         prev_log_head: Some(prev_head.to_vec()),
         ..Default::default()
     };
-    f.signature = sk.sign(&f.signing_bytes()).to_bytes().to_vec();
     f
 }
 
@@ -384,11 +413,11 @@ fn section4_ordering() {
     println!("  genesis head = {}", hexs(&h0));
 
     // Apply A then B in order.
-    let a = ordered_frag("issuerA", 1, &h0, &sk);
-    store.load(&a).unwrap();
+    let a = ordered_frag("issuerA", 1, &h0);
+    load_frag(&mut store, &sk, &a).unwrap();
     let h1 = store.log_head().to_vec();
-    let b = ordered_frag("issuerA", 2, &h1, &sk);
-    store.load(&b).unwrap();
+    let b = ordered_frag("issuerA", 2, &h1);
+    load_frag(&mut store, &sk, &b).unwrap();
     let h2 = store.log_head().to_vec();
     ok(&format!(
         "in-order A→B accepted; head advanced {} → {} → {}",
@@ -398,9 +427,9 @@ fn section4_ordering() {
     ));
 
     // A fragment asserting the stale genesis head (a reorder/insertion) is rejected.
-    let stale = ordered_frag("issuerA", 3, &h0, &sk);
+    let stale = ordered_frag("issuerA", 3, &h0);
     assert!(matches!(
-        store.load(&stale),
+        load_frag(&mut store, &sk, &stale),
         Err(FragmentError::LogHeadMismatch { .. })
     ));
     assert_eq!(store.log_head(), h2.as_slice());
@@ -413,8 +442,8 @@ fn section4_ordering() {
     restarted.set_log_genesis(b"kata-fragment-log/v1");
     restarted.import_svn_state(&snap);
     assert_eq!(restarted.log_head(), h2.as_slice());
-    let c = ordered_frag("issuerA", 3, &h2, &sk);
-    assert!(restarted.load(&c).is_ok());
+    let c = ordered_frag("issuerA", 3, &h2);
+    assert!(load_frag(&mut restarted, &sk, &c).is_ok());
     ok("log head persisted across restart (raise-only); next in-order fragment applied");
 
     // The exportable, customer-auditable ordered record.
@@ -462,14 +491,13 @@ fn ttl_proof(
     encode_transparency_proof(size, &root, &sig, index as u64, &incl, &cons)
 }
 
-fn ttl_frag(issuer_sk: &SigningKey, svn: u64, ledger: &str) -> PolicyFragment {
-    let mut f = PolicyFragment {
+fn ttl_frag(svn: u64, ledger: &str) -> PolicyFragment {
+    let f = PolicyFragment {
         issuer: "issuerA".into(),
         svn,
         receipt_ledger: Some(ledger.into()),
         ..Default::default()
     };
-    f.signature = issuer_sk.sign(&f.signing_bytes()).to_bytes().to_vec();
     f
 }
 
@@ -484,47 +512,47 @@ fn section5_transparency_log() {
         .unwrap();
 
     // Ledger records fragment A as leaf 0; the agent accepts its inclusion proof.
-    let fa = ttl_frag(&issuer_sk, 1, "acl");
+    let fa = ttl_frag(1, "acl");
     let mut ledger = MerkleTree::new();
-    ledger.push(fa.signing_bytes());
+    ledger.push(tbs_of(&fa));
     let mut a = fa.clone();
     a.receipt_proof = Some(ttl_proof(&ledger, &led_sk, "acl", 0, None));
-    assert!(store.load(&a).is_ok());
+    assert!(load_frag(&mut store, &issuer_sk, &a).is_ok());
     ok(&format!(
         "inclusion proof accepted (log size {})",
         ledger.size()
     ));
 
     // Ledger grows: fragment B at leaf 1, with a consistency proof from size 1 → accepted.
-    let fb = ttl_frag(&issuer_sk, 2, "acl");
-    ledger.push(fb.signing_bytes());
+    let fb = ttl_frag(2, "acl");
+    ledger.push(tbs_of(&fb));
     let mut b = fb.clone();
     b.receipt_proof = Some(ttl_proof(&ledger, &led_sk, "acl", 1, Some(1)));
-    assert!(store.load(&b).is_ok());
+    assert!(load_frag(&mut store, &issuer_sk, &b).is_ok());
     ok(&format!(
         "append-only growth accepted with consistency proof (size {})",
         ledger.size()
     ));
 
     // Forged inclusion: claim a statement never recorded in the log → rejected.
-    let forged = ttl_frag(&issuer_sk, 3, "acl");
+    let forged = ttl_frag(3, "acl");
     let mut fbad = forged.clone();
     // Reuse B's proof (wrong statement for that leaf) → inclusion recompute fails.
     fbad.receipt_proof = Some(ttl_proof(&ledger, &led_sk, "acl", 1, Some(1)));
     assert!(matches!(
-        store.verify(&fbad),
+        verify_frag(&store, &issuer_sk, &fbad),
         Err(FragmentError::InvalidInclusionProof)
     ));
     ok("forged inclusion (statement not in log) rejected");
 
     // Rewound log: present an older, smaller signed tree head after the head advanced → rejected.
-    let fc = ttl_frag(&issuer_sk, 3, "acl");
+    let fc = ttl_frag(3, "acl");
     let mut small = MerkleTree::new();
-    small.push(fc.signing_bytes());
+    small.push(tbs_of(&fc));
     let mut c = fc.clone();
     c.receipt_proof = Some(ttl_proof(&small, &led_sk, "acl", 0, None));
     assert!(matches!(
-        store.verify(&c),
+        verify_frag(&store, &issuer_sk, &c),
         Err(FragmentError::LogRolledBack { .. })
     ));
     ok("rewound (shrinking) transparency log rejected — append-only ordering enforced");

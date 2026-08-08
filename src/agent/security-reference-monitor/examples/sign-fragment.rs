@@ -4,31 +4,33 @@
 
 //! FR-1 offline fragment signer / key generator (developer tooling).
 //!
-//! Reuses [`PolicyFragment::signing_bytes`] so the signature format is guaranteed to match
-//! what the guest verifies. Not a production signing tool — for tests, demos, and local
-//! development of the signed-policy-fragment feature.
+//! Builds the envelope through [`PolicyFragment::to_unsigned_cose`], so the format is by
+//! construction the one the guest verifies. Not a production signing tool — for tests,
+//! demos, and local development of the signed-policy-fragment feature.
 //!
 //! Usage:
 //!   # generate an Ed25519 keypair (hex); put the public key in fragment-issuers.toml
 //!   cargo run --example sign-fragment -- gen-key
 //!
-//!   # sign a fragment; prints the detached signature (hex)
+//!   # sign a fragment; prints the COSE_Sign1 envelope (hex)
 //!   cargo run --example sign-fragment -- sign \
-//!       --issuer issuerA --svn 1 --receipt r1 \
+//!       --issuer issuerA --feed reg/frag:1 --svn 1 --receipt r1 \
 //!       --includes exec \
 //!       --grants exec/allow-debug,exec/allow-probe \
 //!       --module /path/to/fragment.rego \
 //!       --key <privkey-hex>
 //!
-//! The signer prints the signature hex; feed it, the module file, and the other fields to
-//! `kata-agent-ctl`'s `LoadPolicyFragment` command.
+//! The output is a single `cose_sign1_hex=` value, and that is the whole fragment: the
+//! payload is the Rego module and issuer/feed/SVN live in the protected header, which is
+//! the wire format C-ACI/hcsshim uses. There is no detached signature and no separate
+//! statement to pass alongside it — feed the hex to `kata-agent-ctl`'s `LoadPolicyFragment`
+//! command and nothing else.
 //!
-//! The signed statement is deterministically-encoded CBOR, so it is not readable as text.
-//! `sign` therefore also prints `statement_diag=` -- the signed bytes decoded into CBOR
-//! diagnostic notation (RFC 8949 §8) -- and `--emit-statement-diag <path>` writes the same
-//! rendering to a file. `--emit-statement` still writes the raw signed bytes, which a
-//! transparency ledger records as a Merkle leaf and which must stay byte-exact.
-
+//! CBOR is not readable as text, so `sign` also prints `envelope_diag=` — the emitted bytes
+//! decoded into CBOR diagnostic notation (RFC 8949 §8) — and `--emit-statement-diag <path>`
+//! writes the same rendering to a file. `--emit-statement` writes the COSE `Sig_structure`,
+//! which is what a transparency ledger records as a Merkle leaf and what receipts
+//! countersign; those bytes must stay byte-exact.
 
 use ed25519_dalek::{Signer, SigningKey};
 use kata_security_reference_monitor::PolicyFragment;
@@ -51,10 +53,10 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
 
 /// Render a CBOR value in diagnostic notation (RFC 8949 §8).
 ///
-/// The signing statement is deterministically-encoded CBOR, so it is not readable as text
-/// and `signature_hex` alone does not tell a developer *what* was signed. Everything the
-/// statement can hold is covered explicitly; anything else falls through to `Debug` rather
-/// than being silently dropped, so an unexpected shape is visible instead of invisible.
+/// A COSE_Sign1 is binary, so `cose_sign1_hex` alone does not tell a developer *what* was
+/// signed. Everything a fragment envelope can hold is covered explicitly; anything else falls
+/// through to `Debug` rather than being silently dropped, so an unexpected shape is visible
+/// instead of invisible.
 fn cbor_diag(v: &ciborium::value::Value) -> String {
     use ciborium::value::Value;
     match v {
@@ -62,7 +64,7 @@ fn cbor_diag(v: &ciborium::value::Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Integer(i) => i128::from(*i).to_string(),
         // Quoted and escaped, so a value containing a quote, a newline or a control
-        // character is unambiguous on screen -- the ambiguity class that v3 signed over.
+        // character is unambiguous on screen -- the ambiguity class v3 signed over.
         Value::Text(s) => format!("{:?}", s),
         Value::Bytes(b) => format!("h'{}'", hex_encode(b)),
         Value::Array(items) => format!(
@@ -81,17 +83,56 @@ fn cbor_diag(v: &ciborium::value::Value) -> String {
     }
 }
 
-/// Decode statement bytes and render them for human inspection.
+/// Render a byte string that is *itself* meaningful: the protected header is embedded CBOR
+/// and the payload is a Rego module, and printing either as raw hex hides exactly the thing
+/// a reviewer needs to see.
 ///
-/// Decodes the *signed bytes themselves* rather than re-printing the fields they were built
-/// from, so an encoding bug shows up here instead of being masked by a pretty-printer that
-/// agrees with the input by construction. Undecodable bytes are reported with their hex,
-/// since that case is itself the thing worth seeing.
-fn statement_diag(bytes: &[u8]) -> String {
-    match ciborium::from_reader::<ciborium::value::Value, _>(bytes) {
-        Ok(v) => cbor_diag(&v),
-        Err(e) => format!("<undecodable: {}; hex={}>", e, hex_encode(bytes)),
+/// Falls back to hex when the bytes are not what they should be, because that case is itself
+/// worth seeing rather than papering over.
+fn nested_diag(b: &[u8]) -> String {
+    if let Ok(v) = ciborium::from_reader::<ciborium::value::Value, _>(b) {
+        if matches!(v, ciborium::value::Value::Map(_)) {
+            return format!("<< {} >>", cbor_diag(&v));
+        }
     }
+    match std::str::from_utf8(b) {
+        Ok(s) => format!("{:?}", s),
+        Err(_) => format!("h'{}'", hex_encode(b)),
+    }
+}
+
+/// Decode an emitted COSE_Sign1 and render it for human inspection.
+///
+/// Decodes the *emitted bytes themselves* rather than re-printing the fields they were built
+/// from, so an encoding bug shows up here instead of being masked by a pretty-printer that
+/// agrees with the input by construction. The protected header and the payload are decoded
+/// one level further, since both are meaningful and neither is readable as hex.
+fn statement_diag(bytes: &[u8]) -> String {
+    use ciborium::value::Value;
+    let v: Value = match ciborium::from_reader(bytes) {
+        Ok(v) => v,
+        Err(e) => return format!("<undecodable: {}; hex={}>", e, hex_encode(bytes)),
+    };
+    // COSE_Sign1 = [protected: bstr, unprotected: map, payload: bstr/null, signature: bstr].
+    if let Value::Array(items) = &v {
+        if items.len() == 4 {
+            let part = |i: usize| match &items[i] {
+                Value::Bytes(b) => nested_diag(b),
+                other => cbor_diag(other),
+            };
+            return format!(
+                "[protected: {}, unprotected: {}, payload: {}, signature: {}]",
+                part(0),
+                cbor_diag(&items[1]),
+                part(2),
+                match &items[3] {
+                    Value::Bytes(b) => format!("h'{}'", hex_encode(b)),
+                    other => cbor_diag(other),
+                }
+            );
+        }
+    }
+    cbor_diag(&v)
 }
 
 /// Decode the first `CERTIFICATE` block of a PEM string into DER (for the x5chain header).
@@ -248,44 +289,53 @@ fn main() {
                 prev_log_head: f
                     .get("prev-head")
                     .map(|h| hex_decode(h).expect("decode prev-head hex")),
-                signature: vec![],
+                // `tbs` is an output of parsing an envelope, never an input to building one.
+                ..Default::default()
             };
-            let sig = sk.sign(&fragment.signing_bytes());
-            println!("signature_hex={}", hex_encode(&sig.to_bytes()));
 
-            // The statement is binary CBOR, so print what was actually signed in diagnostic
-            // notation. Decoded from the signed bytes, not rebuilt from the fields.
-            println!("statement_diag={}", statement_diag(&fragment.signing_bytes()));
+            // The fragment *is* the envelope now: there is no detached signature and no
+            // separate statement to carry alongside it. The unsigned COSE_Sign1 comes from
+            // the library, so this tool cannot drift from what the guest verifies.
+            use coset::{iana, CborSerializable};
+            let mut sign1 = fragment.to_unsigned_cose(iana::Algorithm::EdDSA);
+            let tbs = sign1.tbs_data(b"");
+            sign1.signature = sk.sign(&tbs).to_bytes().to_vec();
+            let cose_bytes = sign1.to_vec().expect("serialize COSE_Sign1");
+            println!("cose_sign1_hex={}", hex_encode(&cose_bytes));
 
-            // FR-1j: print the next log head = sha256(prev_head || sha256(statement)), so a
-            // client can chain the following fragment onto this one.
+            // The envelope is binary CBOR, so print what was actually signed in diagnostic
+            // notation. Decoded from the emitted bytes, not rebuilt from the fields.
+            println!("envelope_diag={}", statement_diag(&cose_bytes));
+
+            // FR-1j: print the next log head = sha256(prev_head || sha256(signed bytes)), so
+            // a client can chain the following fragment onto this one.
             if let Some(prev_hex) = f.get("prev-head") {
                 use sha2::{Digest, Sha256};
                 let prev = hex_decode(prev_hex).expect("decode prev-head hex");
-                let stmt_hash = Sha256::digest(fragment.signing_bytes());
+                let stmt_hash = Sha256::digest(&tbs);
                 let mut h = Sha256::new();
                 h.update(&prev);
                 h.update(stmt_hash);
                 println!("next_log_head={}", hex_encode(&h.finalize()));
             }
 
-            // FR-1f Stage 2: optionally write this fragment's canonical statement bytes to a
-            // file so a (mock) transparency ledger can record it as a Merkle leaf. These are
-            // the raw signed bytes and must stay byte-exact -- use --emit-statement-diag for
-            // a readable rendering, never this file.
+            // FR-1f Stage 2: optionally write the bytes a transparency ledger records as a
+            // Merkle leaf -- the COSE `Sig_structure`, not the whole envelope. It has to be
+            // the signed bytes rather than the serialized envelope, or an intermediary could
+            // add an unprotected header and give one signed fragment two ledger identities.
             if let Some(path) = f.get("emit-statement") {
-                std::fs::write(path, fragment.signing_bytes()).expect("write statement file");
+                std::fs::write(path, &tbs).expect("write statement file");
             }
 
             // Readable companion to --emit-statement, for diffing and review. Never fed back
             // into signing or verification.
             if let Some(path) = f.get("emit-statement-diag") {
-                std::fs::write(path, statement_diag(&fragment.signing_bytes()))
+                std::fs::write(path, statement_diag(&cose_bytes))
                     .expect("write statement diag file");
             }
 
-            // FR-1f: optionally also emit a transparency receipt = a signature over the
-            // same statement by a transparency ledger key (--receipt-key <hex>). Tag the
+            // FR-1f: optionally also emit a transparency receipt = a signature over the same
+            // signed bytes by a transparency ledger key (--receipt-key <hex>). Tag the
             // originating ledger with --ledger <id> so the trust list can scope/verify it.
             if let Some(rk_hex) = f.get("receipt-key") {
                 let rk_vec = hex_decode(rk_hex).expect("decode receipt key hex");
@@ -293,7 +343,7 @@ fn main() {
                     let mut rk = [0u8; 32];
                     rk.copy_from_slice(&rk_vec);
                     let ask = SigningKey::from_bytes(&rk);
-                    let rsig = ask.sign(&fragment.signing_bytes());
+                    let rsig = ask.sign(&tbs);
                     println!("receipt_hex={}", hex_encode(&rsig.to_bytes()));
                     if let Some(ledger) = f.get("ledger") {
                         println!("receipt_ledger={}", ledger);
@@ -301,28 +351,12 @@ fn main() {
                 }
             }
 
-            // FR-1h: optionally emit a COSE_Sign1 (CBOR) envelope carrying the statement as
-            // payload, signed by the issuer key (EdDSA) — for the COSE load path.
-            if f.contains_key("cose") {
-                use coset::{iana, CborSerializable, CoseSign1Builder, HeaderBuilder};
-                let protected = HeaderBuilder::new()
-                    .algorithm(iana::Algorithm::EdDSA)
-                    .build();
-                let sign1 = CoseSign1Builder::new()
-                    .protected(protected)
-                    .payload(fragment.signing_bytes())
-                    .create_signature(b"", |tbs| sk.sign(tbs).to_bytes().to_vec())
-                    .build();
-                println!("cose_sign1_hex={}", hex_encode(&sign1.to_vec().unwrap()));
-            }
-
-            // FR-1d: optionally emit a did:x509 COSE_Sign1 envelope: the statement is signed
-            // by an EC P-256 leaf key (ES256) and the leaf→CA chain is carried in the
+            // FR-1d: optionally emit a did:x509 envelope instead: same protected header and
+            // payload, signed by an EC P-256 leaf key (ES256), with the leaf->CA chain in the
             // x5chain header (COSE label 33). --x509-key <leaf-priv-pem>
             // --x509-chain <leaf.pem,intermediate.pem,...,ca.pem> (leaf first).
             if let (Some(key_pem), Some(chain_paths)) = (f.get("x509-key"), f.get("x509-chain")) {
                 use coset::cbor::value::Value;
-                use coset::{iana, CborSerializable, CoseSign1Builder, HeaderBuilder};
                 use p256::ecdsa::{signature::Signer, Signature, SigningKey};
                 use p256::pkcs8::DecodePrivateKey;
 
@@ -340,47 +374,37 @@ fn main() {
                     let der = pem_cert_to_der(&pem).expect("decode CERTIFICATE pem");
                     chain.push(Value::Bytes(der));
                 }
-                let mut unprotected = coset::Header::default();
-                unprotected
+
+                let mut sign1 = fragment.to_unsigned_cose(iana::Algorithm::ES256);
+                // x5chain goes in the *unprotected* header, which is where hcsshim's
+                // `sign1util` puts it and where COSE X509 (RFC 9360) allows it. The chain is
+                // not the identity: the leaf key having produced this signature is, and that
+                // is checked against the measured `did:x509` anchor.
+                sign1
+                    .unprotected
                     .rest
                     .push((coset::Label::Int(33), Value::Array(chain)));
-                let protected = HeaderBuilder::new()
-                    .algorithm(iana::Algorithm::ES256)
-                    .build();
-                let sign1 = CoseSign1Builder::new()
-                    .protected(protected)
-                    .unprotected(unprotected)
-                    .payload(fragment.signing_bytes())
-                    .create_signature(b"", |tbs| {
-                        let sig: Signature = leaf_sk.sign(tbs);
-                        sig.to_bytes().to_vec()
-                    })
-                    .build();
-                println!("cose_sign1_hex={}", hex_encode(&sign1.to_vec().unwrap()));
+                let tbs = sign1.tbs_data(b"");
+                let sig: Signature = leaf_sk.sign(&tbs);
+                sign1.signature = sig.to_bytes().to_vec();
+                println!(
+                    "cose_sign1_x509_hex={}",
+                    hex_encode(&sign1.to_vec().unwrap())
+                );
             }
         }
         // FR-1d dev/verification tool: verify a did:x509 COSE fragment offline against a CA
         // fingerprint + policy, exactly as the agent would. Proves openssl-minted PKI interop.
-        //   verify-x509 --issuer <did> --svn <n> --includes <csv> --module <rego> \
-        //       --cose <hex> --ca-fp <sha256-hex> [--eku <oid>] [--revoked <sha256-hex,...>]
+        //   verify-x509 --issuer <did> --cose <hex> --ca-fp <sha256-hex> \
+        //       [--eku <oid>] [--revoked <sha256-hex,...>]
         "verify-x509" => {
             use kata_security_reference_monitor::did_x509::{DidX509Anchor, DidX509Policy};
-            use kata_security_reference_monitor::{FragmentStore, PolicyFragment};
+            use kata_security_reference_monitor::FragmentStore;
             let f = parse_flags(&argv[2..]);
+            // `--issuer` names the anchor to trust, not the fragment: the issuer the
+            // envelope claims is read out of the envelope and must match what the chain
+            // proves. There is nothing left for the caller to describe.
             let issuer = f.get("issuer").cloned().unwrap_or_default();
-            let svn: u64 = f.get("svn").and_then(|s| s.parse().ok()).unwrap_or(0);
-            let includes: Vec<String> = f
-                .get("includes")
-                .map(|s| {
-                    s.split(',')
-                        .map(|x| x.trim().to_string())
-                        .filter(|x| !x.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default();
-            let module = f.get("module").map(|p| {
-                String::from_utf8(std::fs::read(p).expect("read module")).expect("module utf8")
-            });
             let cose =
                 hex_decode(f.get("cose").expect("--cose required")).expect("decode cose hex");
             let ca_fp_vec =
@@ -414,15 +438,7 @@ fn main() {
                     .collect();
                 store.set_revoked_certs(fps);
             }
-            let fragment = PolicyFragment {
-                issuer,
-                feed: f.get("feed").cloned().unwrap_or_default(),
-                svn,
-                includes,
-                policy_module: module,
-                ..Default::default()
-            };
-            match store.verify_cose_x509(&fragment, &cose) {
+            match store.verify_envelope(&cose) {
                 Ok(v) => println!("verify=OK issuer={} svn={}", v.issuer, v.svn),
                 Err(e) => {
                     println!("verify=ERR {e}");

@@ -49,10 +49,11 @@ $SIGNER gen-key      # -> private_key_hex=... public_key_hex=...
 
 # 3. Author a fragment module and sign it.
 printf 'package agent_policy.fragments\nexec_allowed := true\n' > /tmp/frag.rego
-# --cose emits the COSE_Sign1 envelope, which is the only form the guest accepts.
+# The signer's output is the COSE_Sign1 envelope -- the payload is the Rego module and
+# issuer/feed/SVN are protected headers, so the envelope is the whole fragment.
 $SIGNER sign --issuer issuerA --svn 1 --receipt r1 --includes exec \
-        --module /tmp/frag.rego --key <private_key_hex> \
-        --cose                                   # -> cose_sign1_hex=...
+        --module /tmp/frag.rego --key <private_key_hex>
+                                                 # -> cose_sign1_hex=...
 
 # 4. Boot a strict guest with fragment-demo.rego as the base policy, then over vsock.
 #    Only the envelope and the receipt fields are sent: everything the issuer signed is

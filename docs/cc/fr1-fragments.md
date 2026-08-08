@@ -40,7 +40,7 @@ fragment store is mutated.
 | **FR-1f** | **transparency receipts + Trust List** — multi-ledger, `allowed_ledgers` scoping, policy-driven `required_receipts`, ledger key rotation | `fragments.rs::{load_transparency_trust_list,set_allowed_ledgers,require_receipt_for}` | `ff8a4d5b9`, `c6b52c2ba`, `db24d40f5` |
 | **FR-1f Stage 2** | **transparency-log inclusion + consistency** — RFC 6962 Merkle inclusion proof + monotonic, persisted signed tree head (append-only log) | `merkle.rs`; `fragments.rs` (`TransparencyProof`, `ttl_heads`) | `62fb8d45a` |
 | **FR-1g** | **composition** — a fragment may `require` already-loaded fragments (no cycles/unbounded depth) | `fragments.rs` (`requires`); `UnsatisfiedRequirement` | `ff8a4d5b9`, `c6b52c2ba` |
-| **FR-1h** | **COSE_Sign1 envelope** interop (pure-Rust `coset`, no Go) | `fragments.rs::verify_cose` | `c0ea3cb25`, `f7ed23319`, `93e1ff6e5` |
+| **FR-1h** | **COSE_Sign1 envelope** interop (pure-Rust `coset`, no Go) | `fragments.rs::verify_envelope` | `c0ea3cb25`, `f7ed23319`, `93e1ff6e5` |
 | **FR-1i** | **SVN rollback protection across restart** — raise-only persisted high-water marks | `fragments.rs::{export_svn_state,import_svn_state}`; `main.rs` persist | `c0ea3cb25`, `f7ed23319` |
 | **FR-1j** | **append-only application ordering** — signed rolling log head; reject reorder/omit/insert; exportable auditable log | `fragments.rs::{set_log_genesis,log_head,export_fragment_log}` (gate 8, `commit`) | `8efdaa65e` |
 | tools/demo | offline signer, agent-ctl command, mock ledger, self-contained capability demo | `examples/{sign-fragment,mock-ledger,fragment-demo}.rs`; `agent-ctl` | `392d890a8`, `69228f3b5`, `a63b9d5b3` |
@@ -50,16 +50,17 @@ fragment store is mutated.
 
 ## 3. Verification pipeline (order of gates)
 
-Every fragment is verified by a chain of fail-closed gates before it is committed. Both the
-native detached-signature path (`verify`), the COSE path (`verify_cose`), and the did:x509
-path (`verify_cose_x509`) converge on the shared `check_gates`:
+Every fragment is verified by a chain of fail-closed gates before it is committed. There is a
+single entry point, `verify_envelope`, which takes the COSE_Sign1 bytes and nothing else; the
+did:x509-versus-raw-key routing happens inside it, so no caller can select the weaker path.
+Both routes converge on the shared `check_gates`:
 
 1. **Issuer identity + signature.** Either (a) the issuer is in the measured authorized set and
-   an Ed25519 signature verifies over the canonical statement, or (b) a did:x509 chain in the
+   an Ed25519 signature verifies over the COSE `Sig_structure`, or (b) a did:x509 chain in the
    COSE `x5chain` path-validates to a measured CA (each issuer cert `CA:TRUE`, in-date),
    satisfies the did:x509 policy (subject CN / EKU / DNS SAN), is not revoked, and the leaf key
-   signs the statement — and the derived did equals the declared issuer. No downgrade: an
-   x5chain-bearing envelope is always verified as did:x509.
+   signs the envelope — and the derived did equals the issuer the envelope claims. No
+   downgrade: an x5chain-bearing envelope is always verified as did:x509.
 2. **Feed declared** (FR-1e) — `(issuer, feed)` must be an accepted pair.
 3. **Monotonic SVN** (FR-1b/1e/1i) — `svn ≥ max(declared floor, persisted high-water + 1)`.
 4. **Transparency receipt** (FR-1f) — if required for the scope: a Stage-1 detached ledger
@@ -70,58 +71,79 @@ path (`verify_cose_x509`) converge on the shared `check_gates`:
 6. **Add-only** — a fragment may only add grants; it may never introduce a grant that relaxes
    a declared root constraint.
 7. **Ordering** (FR-1j) — in ordered mode, the fragment's *signed* `prev_log_head` must equal
-   the store's current rolling head; the head then advances by hashing the statement in.
+   the store's current rolling head; the head then advances by hashing the signed bytes in.
 
-The statement (`signing_bytes`, `kata-policy-fragment/v4`) binds issuer, feed, SVN, sorted
-grants, sorted includes, sorted requires, module, **and** `prev_log_head` — so none of these,
-including the asserted predecessor, can be altered without invalidating the signature. The
-receipt/ledger id and the transparency proof are countersignatures/assertions *over* that
-statement and are deliberately outside it.
+## Wire format: the C-ACI/hcsshim envelope
 
-The statement is a **CBOR fixed-arity array** (RM-71). Every field is length-prefixed and
-typed, so no value can terminate a field early or be re-read as a different field, whatever
-it contains. This is what the C-ACI/hcsshim baseline has always done — COSE_Sign1 over CBOR,
-with issuer/feed/SVN in protected headers and CWT claims.
+A fragment **is** a COSE_Sign1 envelope. The payload is the Rego module and the metadata lives
+in the protected header:
 
-v3 was a flat, newline-delimited text format with literal `--includes--`, `--requires--`,
-`--module--` and `--prevhead--` marker lines that escaped nothing, and was therefore injective
-only over a domain `validate_statement` had to enforce as gate 0. Outside that domain distinct
-fragments shared signing bytes — `grants = ["alpha", "beta"]` encoded identically to
-`grants = ["alpha\nbeta"]`, and `requires = ["--module--", "r1"], module = "M"` collided with
-`requires = [], module = "r1\n--module--\nM"`, the second of which silently has no dependency
-at all. One signature, two readings (F-144). Both collisions are now simply absent: a
-two-element array is not a one-element array whatever the elements contain, and both members
-of each former pair are accepted and round-trip to themselves.
+| protected label | value |
+| --- | --- |
+| 1 | `alg` — EdDSA, ES256, ES384, PS256 or RS256 |
+| 3 | content type `application/cose-x509+rego` |
+| 15 | CWT claims: `1` = issuer, `2` = feed, `"svn"` = uint |
+| `"iss"` / `"feed"` | string keys, accepted on read (this is what `sign1util create` writes) |
+| `kata-includes` / `kata-requires` / `kata-grants` | arrays, omitted when empty |
+| `kata-prev-log-head` | bstr, omitted when absent |
 
-Three details matter and are easy to get wrong:
+An absent payload means no module, which is hcsshim's `add_module: false`. `x5chain` (label
+33) rides in the *unprotected* header, per RFC 9360 and `sign1util`; the chain is not the
+identity, the leaf key having produced the signature is.
 
-- **A fixed-arity array, not a map.** CBOR maps admit duplicate, unsorted and
-  non-minimally-encoded keys, and decoders disagree about which duplicate wins — a map would
-  reintroduce at the key level the ambiguity being removed. Pinning the arity
-  (`STATEMENT_ARITY`) means a field can be neither appended nor omitted.
-- **CBOR is not automatically canonical.** Decoders accept indefinite-length items,
-  non-minimal integers and trailing data, so "it parsed" says nothing about the bytes.
-  Nothing relies on the decoder refusing those: `from_cose_payload` re-encodes what it parsed
-  and requires the result to equal the payload byte for byte. That check is what makes the
-  encoding canonical and it must stay — it is why `signing_bytes` has to remain the single
-  definition of the format.
-- **The version tag is element 0, inside the signed bytes**, so a v3 statement cannot be
-  replayed as v4 or vice versa. The version is authenticated, not advisory.
+This is C-ACI's actual format, not a format inspired by it, so a fragment produced by an
+existing C-ACI signing pipeline is one this guest verifies. Two divergences are deliberate,
+and both are kata being stricter:
 
-`validate_statement` survives the change but no longer carries the injectivity argument, and
-its remaining checks are justified by two consumers that are still textual: `export_fragment_log`
-renders a tab-delimited `index<TAB>fragment-id<TAB>statement-sha256` record, so a control
-character in an issuer forges the record meant to prove what was applied (F-146); and
-`make_id` renders its components verbatim apart from the escaped `/` and `%`. The
-delimiter-substring ban went away with the delimiters, and values v3 had to refuse — an issuer
-containing `--module--`, a feed containing `--prevhead--` — are now accepted and round-trip.
-The empty-entry check is retained as hygiene rather than as a disambiguator: CBOR round-trips
-an empty string faithfully, but an empty grant grants nothing and an empty `requires` entry
-matches no id, so it is far likelier to be a bug in the signer than an intent.
+- **Receipts bind the `Sig_structure`.** hcsshim carries receipts in the *unprotected* header,
+  where any intermediary can strip them.
+- **`prev_log_head` is protected** and hcsshim has no ordering log at all (FR-1j is a kata
+  superset).
 
-`policy_module` is unconstrained and carried as a CBOR text item (or `null` when absent, which
-is now distinct from `""` without needing a sentinel), so it round-trips arbitrary Rego,
-markers and all.
+Kata is also stricter on read: where an envelope carries both CWT claims and `iss`/`feed`
+string keys that *disagree*, hcsshim silently prefers the CWT and kata refuses the envelope.
+An envelope that says two things about who signed it has no single correct reading.
+
+### What replaced the bespoke statement, and why
+
+Until RM-75 the payload was a bespoke `kata-policy-fragment/vN` statement — v3 a flat
+newline-delimited text format, v4 a fixed-arity CBOR array. That statement existed for exactly
+one reason: the load path once accepted a fragment with a **detached** signature and no
+envelope, and a detached signature needs some byte string to sign. Closing that path (F-151)
+left the statement serving nothing while still costing a hand-rolled canonical encoding — the
+encoding whose ambiguities produced F-144, F-145 and F-146 in turn.
+
+v3 used literal `--includes--`, `--requires--`, `--module--` and `--prevhead--` marker lines
+that escaped nothing, so it was injective only over a domain `validate_statement` had to
+enforce as gate 0. Outside that domain distinct fragments shared signing bytes:
+`grants = ["alpha", "beta"]` encoded identically to `grants = ["alpha\nbeta"]`, and
+`requires = ["--module--", "r1"], module = "M"` collided with
+`requires = [], module = "r1\n--module--\nM"` — the second of which silently has no dependency
+at all. One signature, two readings (F-144).
+
+Those collisions are now absent rather than fenced off, and the reasoning is shorter than v4's
+was. The signature covers the COSE `Sig_structure`, which embeds the protected header's
+*original bytes*; there is therefore exactly one reading of any envelope that verifies, and no
+canonical form has to be reconstructed to check the bytes against. v4 needed a re-encode-and-
+compare step precisely because it lacked that property. What remains is a duplicate-label
+check, kept as defence in depth: CBOR maps admit duplicate keys and decoders disagree about
+which wins, which would reintroduce F-144 at the key level. (In practice `coset` rejects them
+first.)
+
+The signed bytes are the `Sig_structure`, not the serialized envelope. That matters for the
+FR-1j ordering log and for receipts: hashing the whole COSE_Sign1 would let a malleable
+signature encoding, or an added unprotected header, give one signed fragment two identities.
+`tbs_data` also does not depend on the signature, so a transparency ledger can compute its
+Merkle leaf without the issuer key.
+
+`validate_statement` survives the format change, with two live consumers that are still
+textual: `export_fragment_log` renders a tab-delimited
+`index<TAB>fragment-id<TAB>statement-sha256` record, so a control character in an issuer forges
+the record meant to prove what was applied (F-146); and `make_id` renders its components
+verbatim apart from the escaped `/` and `%`. The delimiter-substring ban went away with the
+delimiters — an issuer containing `--module--` is now accepted and round-trips. The
+empty-entry check is retained as hygiene: an empty grant grants nothing and an empty `requires`
+entry matches no id, so it is likelier a signer bug than an intent.
 
 A fragment's composition id — the value a dependent puts in its `requires` list — is
 `<issuer>/<feed>/<svn>` with `/` and `%` percent-encoded in the first two components
@@ -130,7 +152,7 @@ banned: an issuer is a `did:x509` and a feed is an OCI reference, and both legit
 contain `/`. A plain join is therefore not injective — `(issuer "a/b", feed "c")` and
 `(issuer "a", feed "b/c")` collapse to the same id, so a fragment depending on one would be
 satisfied by the other (F-145). Escaping keeps the id a single readable string, so neither
-the statement format nor the `repeated string requires` wire type changes, and it fixes the
+the envelope format nor the `repeated string requires` wire type changes, and it fixes the
 audit log at the same time since that renders the same id. A hand-written, unescaped entry
 matches nothing and fails closed as an unsatisfied requirement.
 
@@ -196,7 +218,7 @@ already-loaded fragments (identified by `issuer/feed/svn`), so composition is ex
 cycle-free by construction.
 
 ### 4.6 COSE_Sign1 envelope (FR-1h)
-`verify_cose` accepts a COSE_Sign1 (CBOR) envelope whose payload equals the statement, verified
+`verify_envelope` accepts a COSE_Sign1 (CBOR) envelope and reads the fragment out of it, verified
 via the pure-Rust `coset` crate — interop with standard COSE tooling with no Go dependency. The
 did:x509 path (FR-1d) rides inside the same envelope via `x5chain`.
 
@@ -278,17 +300,17 @@ of its own, in its Rego module at `policy_fragments` inside its own package, and
 registers them as though the base policy had declared them.
 
 Nested declarations are **signed**. `policy_module` is covered by the fragment statement's
-`signing_bytes()`, so they ride the same COSE signature as everything else the fragment
-carries. The host cannot add, remove, or edit one — which is why the declarations live in the
-module rather than in a new statement field: reusing the existing signed field kept the
-statement format fixed, where a new field would have meant another version bump.
+payload, so they ride the same COSE signature as everything else the fragment carries. The
+host cannot add, remove, or edit one — which is why the declarations live in the module rather
+than in a new header field: the module is already signed, where a new field would have been
+one more thing for a verifier and a signer to agree about.
 
-> Note: an earlier revision of this document justified that choice by saying a bump would
-> "invalidate every artifact signed to date". That is not true and should not be cited. The
-> statement format has already gone `v1` → `v2` → `v3` within this branch as fields were
-> added, no signed artifact exists in the tree (every test signs at runtime, and the only
-> signers are in-tree tooling), and the branch is unreleased. A version bump is cheap here;
-> weigh one on its own merits.
+> Note: an earlier revision of this document justified that choice by saying a format change
+> would "invalidate every artifact signed to date". That is not true and should not be cited.
+> The bespoke statement went `v1` → `v2` → `v3` → `v4` within this branch as fields were
+> added, and was then removed entirely (RM-75); no signed artifact exists in the tree (every
+> test signs at runtime, and the only signers are in-tree tooling), and the branch is
+> unreleased. Format changes are cheap here; weigh one on its own merits.
 
 Delegation is off unless the *authorizing* declaration turns it on, and one attribute carries
 both the switch and its reach, so the two cannot drift apart:
@@ -310,7 +332,7 @@ allowed to take down a running sandbox.
 
 **Delegation cannot widen trust.** A declaration only says a feed is expected. The fragment
 behind it must still be signed by an issuer the *measured trust root* authorizes, or
-`verify_cose` rejects it as `UnauthorizedIssuer` — so `"any-authorized"` means "anyone the
+`verify_envelope` rejects it as `UnauthorizedIssuer` — so `"any-authorized"` means "anyone the
 trust root already trusts", never "anyone". `min_required()` keeps the issuer-wide SVN floor
 binding (F-55), so a nested declaration can raise the rollback bar but never lower it. What
 delegation buys is composition, not privilege.
@@ -386,7 +408,7 @@ Go verification path.
 
 | hcsshim gate | ours | verdict |
 | --- | --- | --- |
-| COSE_Sign1 signature + cert chain (`cosesign1.UnpackAndValidateCOSE1CertChain`) | `fragments.rs::verify_cose` / `verify_cose_x509` | parity |
+| COSE_Sign1 signature + cert chain (`cosesign1.UnpackAndValidateCOSE1CertChain`) | `fragments.rs::verify_envelope` | parity |
 | did:x509 → issuer identity (`didx509resolver.Resolve`) | `did_x509.rs:290-349`, derived DID must equal declared issuer | parity |
 | issuer+feed must match a candidate (`fragment_issuer_feed_ok`) | `declare_feed` allow-list; otherwise `UndeclaredFeed` | parity |
 | SVN ≥ `minimum_svn` (`header_svn_ok`, `svn_ok_if_defined`) | single signed `svn`, and `min_required()` takes the **max** with the trust root's issuer-wide floor | **stronger** — a declaration cannot sink below the issuer floor; hcsshim honours the per-declaration value alone |
@@ -493,11 +515,11 @@ the union of their subjects is taken, so the outcome does not depend on key inse
 
 Satisfying a conjunction needs more than one receipt, so `LoadPolicyFragmentRequest` carries
 `extra_receipts`, a list of `<ledger>=<hex signature>` entries, each an additional Stage-1
-detached signature over the same fragment statement. Each must verify against a key of the
+detached signature over the same signed bytes. Each must verify against a key of the
 ledger it names and is subject to the same `allowed_ledgers` scope as the primary receipt —
 an extra receipt is a receipt, not a way around the scope. Receipts are **not** covered by
 the issuer signature (a receipt countersigns the statement and so cannot be inside it), which
-is why carrying several needs no `kata-policy-fragment` version bump.
+is why carrying several needs no change to the envelope format.
 
 **Compatibility.** This narrows what is accepted, so the change is fail-closed: the effect is
 a fragment being refused, never one admitted. It reaches only the fragment verification path
@@ -737,9 +759,9 @@ and re-imported raise-only at boot. The path is fixed in a shipped build: `KATA_
 ## 6. Tooling, tests, and proofs
 
 **Tooling** (`src/agent/security-reference-monitor/examples/`, `src/tools/agent-ctl/`):
-- `sign-fragment` — Ed25519 keygen + signer; emits detached sig, COSE_Sign1 (`--cose`),
+- `sign-fragment` — Ed25519 keygen + signer; emits the COSE_Sign1 envelope (always) and
   did:x509 ES256 envelopes (`--x509-key/--x509-chain`), ledger-tagged receipts (`--ledger`),
-  ordering (`--prev-head`), statements for a ledger (`--emit-statement`); `verify-x509`
+  ordering (`--prev-head`), signed bytes for a ledger (`--emit-statement`); `verify-x509`
   offline verifier.
 - `mock-ledger` — RFC 6962 transparency-log stand-in emitting `kata-ttl-proof/v1` proofs.
 - `agent-ctl LoadPolicyFragment` — key=value args (`cose= receipt= receipt_ledger= proof=

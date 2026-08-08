@@ -20,6 +20,10 @@
 //! `src/agent/src/policy_fragments.rs`):
 //!   - artifactType: `application/x-ms-ccepolicy-frag`
 //!   - COSE layer mediaType: `application/cose-x509+rego`
+//!
+//! That media type is now accurate rather than aspirational (F-150): the envelope's payload
+//! really is a Rego module, and the envelope's own protected content-type header declares
+//! the same string, so the OCI layer descriptor and the signed bytes agree.
 //!   - empty config mediaType: `application/vnd.oci.empty.v1+json`
 
 use std::collections::BTreeMap;
@@ -48,7 +52,8 @@ const EMPTY_CONFIG_MEDIA_TYPE: &str = "application/vnd.oci.empty.v1+json";
 )]
 struct Cli {
     /// Path to the signed COSE_Sign1 fragment envelope (produced by the SRM `sign-fragment`
-    /// example). Its payload must be a `kata-policy-fragment/v4` statement.
+    /// example). Its payload is the Rego module and its protected header carries
+    /// issuer/feed/SVN, declared as content type `application/cose-x509+rego`.
     #[arg(long)]
     cose: PathBuf,
 
@@ -162,7 +167,7 @@ async fn main() -> Result<()> {
     // Reuse the guest's own parser so the emitted settings entry is exactly what the guest
     // will verify — no divergent re-implementation.
     let fragment = PolicyFragment::from_cose_envelope(&cose)
-        .ok_or_else(|| anyhow!("envelope payload is not a kata-policy-fragment/v4 statement"))?;
+        .map_err(|e| anyhow!("{:?} is not a policy-fragment COSE_Sign1 envelope: {e}", cli.cose))?;
 
     println!("issuer: {}", fragment.issuer);
     println!("feed:   {}", fragment.feed);

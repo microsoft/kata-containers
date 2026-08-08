@@ -2226,7 +2226,7 @@ fn agent_cmd_sandbox_add_swap(
 // runtime-rs sends. The guest derives issuer, feed, SVN, grants, includes, requires,
 // the module and the ordering head from the envelope it verifies, and now rejects a
 // request that tries to describe any of them. The receipt fields are countersignatures
-// over the same statement rather than part of it, so they stay separate.
+// over the same signed bytes rather than part of them, so they stay separate.
 fn agent_cmd_load_policy_fragment(
     ctx: &Context,
     client: &AgentServiceClient,
