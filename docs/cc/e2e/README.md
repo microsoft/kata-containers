@@ -222,7 +222,7 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | `E2E_BRANCH` | `manifold-cc` | Branch under test. Defaults with `E2E_REPO_URL` to where this branch lives. |
 | `E2E_REPO_URL` | `https://github.com/microsoft/kata-containers.git` | Fork the node clones. Override together with `E2E_BRANCH`. |
 | `E2E_REPO_DIR` | `~/kata-containers` | Checkout on the node. |
-| `E2E_STRICT_POLICY` | `yes` | Pulls in the security reference monitor. |
+| `E2E_STRICT_POLICY` | `yes` | Pulls in the security reference monitor. Set to `no` for a non-strict A/B leg — stage 04 asserts in whichever direction you ask for, so a non-strict build is verified too rather than silently accepted. Note that an operator `env.sh` must not `export` this unconditionally, or it will clobber a per-run override. |
 | `E2E_NIGHTLY_SHA` | *(required for stage 03)* | CI-nightly commit sha. |
 | `E2E_REGISTRY` | `localhost:5000` | Registry for the policy fragment. Loopback starts a throwaway `registry:2`. Overridden when `E2E_ACR` resolves. |
 | `E2E_ACR` | *(empty)* | `auto` provisions/adopts an ACR so stage 07 exercises a real TLS pull; a name adopts that registry; empty stays on loopback, which now also works. |

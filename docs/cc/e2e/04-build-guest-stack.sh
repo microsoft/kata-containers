@@ -200,9 +200,20 @@ BIN="$CHK/usr/bin/kata-agent"
 srm=$(strings -a "$BIN" | grep -c security_reference_monitor || true)
 bypass=$(strings -a "$BIN" | grep -c AllowRequestsFailingPolicy || true)
 
-log "binary check: srm=$srm bypass=$bypass"
-[ "$srm"    -gt 100 ] || die "STRICT_POLICY did not take: only $srm SRM symbols (expected >100)"
-[ "$bypass" -eq 0 ]   || die "policy-failure bypass symbol present ($bypass) — not a hardened build"
+log "binary check: strict=$E2E_STRICT_POLICY srm=$srm bypass=$bypass"
+# Assert in whichever direction was asked for. Checking only the strict shape
+# made E2E_STRICT_POLICY=no unrunnable here: the build correctly produced a
+# non-strict agent and the stage then died claiming "STRICT_POLICY did not
+# take", which says the opposite of what happened. Worse, it meant a non-strict
+# leg was never actually verified, so an A/B comparison could not distinguish a
+# genuine behavioural difference from a knob that had silently not been applied.
+if [ "$E2E_STRICT_POLICY" = "yes" ]; then
+  [ "$srm"    -gt 100 ] || die "STRICT_POLICY did not take: only $srm SRM symbols (expected >100)"
+  [ "$bypass" -eq 0 ]   || die "policy-failure bypass symbol present ($bypass) — not a hardened build"
+else
+  [ "$srm" -le 100 ] \
+    || die "E2E_STRICT_POLICY=$E2E_STRICT_POLICY but the agent carries $srm SRM symbols — the knob did not reach the build"
+fi
 
 # Fingerprint the verified binary so the image build can be held to it below.
 # rootfs.sh strips the agent on the way in, so neither a hash of the file nor its
