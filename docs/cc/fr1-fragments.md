@@ -68,8 +68,8 @@ Both routes converge on the shared `check_gates`:
    verified against a current trust-list key; Stage 2 also requires the signed tree head to be
    an append-only extension of the last-seen head (monotonic, consistency-proven).
 5. **Composition** (FR-1g) — every `requires` id must already be loaded.
-6. **Add-only** — a fragment may only add grants; it may never introduce a grant that relaxes
-   a declared root constraint.
+6. **Add-only** — a fragment may only add policy surface, and only within the scope measured
+   state granted its `(issuer, feed)`; see `ModuleScope` and the delegation table below.
 7. **Ordering** (FR-1j) — in ordered mode, the fragment's *signed* `prev_log_head` must equal
    the store's current rolling head; the head then advances by hashing the signed bytes in.
 
@@ -84,7 +84,7 @@ in the protected header:
 | 3 | content type `application/cose-x509+rego` |
 | 15 | CWT claims: `1` = issuer, `2` = feed, `"svn"` = uint |
 | `"iss"` / `"feed"` | string keys, accepted on read (this is what `sign1util create` writes) |
-| `kata-includes` / `kata-requires` / `kata-grants` | arrays, omitted when empty |
+| `kata-includes` / `kata-requires` | arrays, omitted when empty |
 | `kata-prev-log-head` | bstr, omitted when absent |
 
 An absent payload means no module, which is hcsshim's `add_module: false`. `x5chain` (label
@@ -116,7 +116,7 @@ encoding whose ambiguities produced F-144, F-145 and F-146 in turn.
 v3 used literal `--includes--`, `--requires--`, `--module--` and `--prevhead--` marker lines
 that escaped nothing, so it was injective only over a domain `validate_statement` had to
 enforce as gate 0. Outside that domain distinct fragments shared signing bytes:
-`grants = ["alpha", "beta"]` encoded identically to `grants = ["alpha\nbeta"]`, and
+`includes = ["alpha", "beta"]` encoded identically to `includes = ["alpha\nbeta"]`, and
 `requires = ["--module--", "r1"], module = "M"` collided with
 `requires = [], module = "r1\n--module--\nM"` — the second of which silently has no dependency
 at all. One signature, two readings (F-144).
@@ -142,7 +142,7 @@ textual: `export_fragment_log` renders a tab-delimited
 the record meant to prove what was applied (F-146); and `make_id` renders its components
 verbatim apart from the escaped `/` and `%`. The delimiter-substring ban went away with the
 delimiters — an issuer containing `--module--` is now accepted and round-trips. The
-empty-entry check is retained as hygiene: an empty grant grants nothing and an empty `requires`
+empty-entry check is retained as hygiene: an empty `includes` entry names no namespace and an empty `requires`
 entry matches no id, so it is likelier a signer bug than an intent.
 
 A fragment's composition id — the value a dependent puts in its `requires` list — is
@@ -172,7 +172,7 @@ making. The escaping remains load-bearing either way, since `id()` also backs
 ### 4.1 Core: signed, authorized, add-only, monotonic (FR-1a/1b/1c)
 `FragmentStore` (in `fragments.rs`) is the verifier and add-only accumulator. `authorize_issuer`
 registers a measured Ed25519 key; `set_min_svn`/`declare_feed` set floors; `verify` runs the
-gates without mutating; `commit` advances SVN/grants; `load` = verify+commit. `apply_fragment_module`
+gates without mutating; `commit` advances the SVN high-water mark and records the id; `load` = verify+commit. `apply_fragment_module`
 (`policy.rs`) merges a verified module additively and refuses a package outside its `includes`
 namespace. Fail-closed: with no authorized issuers, every fragment is rejected.
 
@@ -264,7 +264,7 @@ tolerated is the policy's choice:
 
 | `required` | Behaviour | Equivalent in C-ACI/hcsshim |
 | --- | --- | --- |
-| `false` (default) | Delivery is lazy. An undelivered fragment contributes no grants. | Yes — hcsshim injection is lazy and unobligated |
+| `false` (default) | Delivery is lazy. An undelivered fragment contributes no rules. | Yes — hcsshim injection is lazy and unobligated |
 | `true` | `CreateContainer` is refused until the fragment is delivered and verified. | **No equivalent** — this is stricter than C-ACI |
 
 The default is `false` because absence is already fail-safe in the common case: a container

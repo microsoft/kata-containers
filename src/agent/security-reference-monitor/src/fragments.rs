@@ -12,9 +12,11 @@
 //!    or tampered fragment, or one from an unknown/unauthorized issuer, is rejected.
 //!  - **Monotonic** per issuer: each accepted fragment must carry a strictly increasing
 //!    security version number (SVN); a replayed or rolled-back SVN is rejected.
-//!  - **Add-only and fail-closed**: a fragment may only *add* grants. It may never
-//!    introduce a grant that relaxes a declared root constraint (an invariant of the base
-//!    policy); such a fragment is rejected outright rather than partially applied.
+//!  - **Add-only and fail-closed**: a fragment may only *add* policy surface, and only
+//!    within what measured state already permits it to contribute. The scope comes from the
+//!    base policy's declaration for the `(issuer, feed)` — see [`ModuleScope`] — and is
+//!    intersected with the fragment's own request, so a fragment can never widen its own
+//!    reach; one that tries is rejected outright rather than partially applied.
 //!  - **Transparency-backed** (optional, enabled in strict mode): a fragment must carry a
 //!    transparency receipt so its issuance is auditable. (The receipt's cryptographic
 //!    verification against a transparency service is a separate, environment-specific
@@ -43,8 +45,6 @@ pub struct PolicyFragment {
     pub feed: String,
     /// Security version number; must strictly increase per `(issuer, feed)`.
     pub svn: u64,
-    /// Additional grants introduced by this fragment (add-only). Legacy/opaque form.
-    pub grants: Vec<String>,
     /// FR-1c: a signed Rego module (text) the fragment contributes to the policy engine
     /// (Model A). Must declare a package under the reserved fragment namespace.
     pub policy_module: Option<String>,
@@ -143,7 +143,6 @@ const HDR_FEED: &str = "feed";
 /// in the *unprotected* header (label 394), where any intermediary can strip them.
 const HDR_KATA_INCLUDES: &str = "kata-includes";
 const HDR_KATA_REQUIRES: &str = "kata-requires";
-const HDR_KATA_GRANTS: &str = "kata-grants";
 const HDR_KATA_PREV_LOG_HEAD: &str = "kata-prev-log-head";
 
 impl PolicyFragment {
@@ -189,7 +188,7 @@ impl PolicyFragment {
     /// | --- | --- |
     /// | 3 (content type) | `application/cose-x509+rego` |
     /// | 15 (CWT claims) | `{1: issuer, 2: feed, "svn": svn}` |
-    /// | `kata-includes` / `kata-requires` / `kata-grants` | arrays, omitted when empty |
+    /// | `kata-includes` / `kata-requires` | arrays, omitted when empty |
     /// | `kata-prev-log-head` | byte string, omitted when absent |
     ///
     /// The caller supplies the algorithm and any `x5chain`, since those belong to the
@@ -228,7 +227,6 @@ impl PolicyFragment {
         };
         texts(HDR_KATA_INCLUDES, &self.includes);
         texts(HDR_KATA_REQUIRES, &self.requires);
-        texts(HDR_KATA_GRANTS, &self.grants);
 
         if let Some(h) = &self.prev_log_head {
             rest.push((
@@ -438,7 +436,6 @@ impl PolicyFragment {
         };
         let includes = texts(HDR_KATA_INCLUDES)?;
         let requires = texts(HDR_KATA_REQUIRES)?;
-        let grants = texts(HDR_KATA_GRANTS)?;
 
         let prev_log_head = match by_text(HDR_KATA_PREV_LOG_HEAD) {
             None => None,
@@ -461,7 +458,6 @@ impl PolicyFragment {
             issuer,
             feed,
             svn,
-            grants,
             policy_module,
             includes,
             requires,
@@ -500,10 +496,11 @@ impl PolicyFragment {
     ///   the components verbatim otherwise, and that id is what a dependent names in
     ///   `requires` and what appears in the log.
     ///
-    /// An empty list entry is refused because it is never meaningful: an empty grant grants
-    /// nothing and an empty `requires` entry matches no id, so it is far more likely to be a
-    /// bug in the signer than an intent. That is no longer an *ambiguity* — CBOR round-trips
-    /// an empty string faithfully — so it is a hygiene check, and is documented as one.
+    /// An empty list entry is refused because it is never meaningful: an empty `includes`
+    /// entry names no namespace and an empty `requires` entry matches no id, so it is far
+    /// more likely to be a bug in the signer than an intent. That is no longer an
+    /// *ambiguity* — CBOR round-trips an empty string faithfully — so it is a hygiene
+    /// check, and is documented as one.
     ///
     /// `policy_module` is deliberately not constrained: arbitrary Rego has to be
     /// expressible, and CBOR carries it whatever it contains. An empty-but-present module is
@@ -531,9 +528,6 @@ impl PolicyFragment {
 
         check("issuer", &self.issuer)?;
         check("feed", &self.feed)?;
-        for g in &self.grants {
-            check_entry("grants", g)?;
-        }
         for i in &self.includes {
             check_entry("includes", i)?;
         }
@@ -576,7 +570,6 @@ pub struct VerifiedFragment {
     pub feed: String,
     pub svn: u64,
     pub id: String,
-    pub grants: Vec<String>,
     pub policy_module: Option<String>,
     pub includes: Vec<String>,
     /// FR-1j: SHA-256 of the fragment statement, used to advance the ordering log head on
@@ -623,8 +616,6 @@ pub enum FragmentError {
     UndeclaredFeed { issuer: String, feed: String },
     /// FR-1g: a required (dependency) fragment has not been loaded.
     UnsatisfiedRequirement { requires: String },
-    /// The fragment introduces a grant that would relax a declared root constraint.
-    RootConstraintRelaxation(String),
     /// FR-1d: the X.509 certificate chain (`x5chain`) is malformed, an unsupported
     /// algorithm, or a link signature does not verify.
     InvalidCertChain,
@@ -695,9 +686,6 @@ impl fmt::Display for FragmentError {
             FragmentError::UnsatisfiedRequirement { requires } => {
                 write!(f, "required fragment not loaded: {requires}")
             }
-            FragmentError::RootConstraintRelaxation(g) => {
-                write!(f, "fragment would relax a root constraint: {g}")
-            }
             FragmentError::InvalidCertChain => write!(f, "invalid X.509 certificate chain"),
             FragmentError::UntrustedCa => write!(f, "no trusted CA anchor in certificate chain"),
             FragmentError::DidX509Mismatch => {
@@ -738,9 +726,7 @@ pub struct FragmentStore {
     last_svn: HashMap<(String, String), u64>,
     /// FR-1e: declared/accepted (issuer, feed) pairs and their SVN floor.
     feeds: HashMap<(String, String), u64>,
-    root_constraints: HashSet<String>,
     require_receipt: bool,
-    active_grants: HashSet<String>,
     /// FR-1f (trust list): the Transparency Trust List — a map of ledger id to that
     /// ledger's current verification key(s). Multiple keys per ledger support rotation: a
     /// receipt verifies if *any* current key of the named ledger validates it. When
@@ -1194,16 +1180,6 @@ impl FragmentStore {
         out
     }
 
-    /// Declare a grant that no fragment may ever introduce (a base-policy invariant).
-    pub fn add_root_constraint(&mut self, grant: impl Into<String>) {
-        self.root_constraints.insert(grant.into());
-    }
-
-    /// The set of grants currently active from all accepted fragments.
-    pub fn active_grants(&self) -> &HashSet<String> {
-        &self.active_grants
-    }
-
     /// F-147: true when a receipt is required — globally or by any scope — but no ledger
     /// key is loaded that could ever validate one, so every fragment will now be refused.
     /// The agent reports this at startup: the two are independent configuration options,
@@ -1566,14 +1542,7 @@ impl FragmentStore {
             }
         }
 
-        // 7. Add-only: reject any grant that would relax a root constraint.
-        for g in &fragment.grants {
-            if self.root_constraints.contains(g) {
-                return Err(FragmentError::RootConstraintRelaxation(g.clone()));
-            }
-        }
-
-        // 8. FR-1j: append-only ordering. In ordered mode the fragment's signed
+        // 7. FR-1j: append-only ordering. In ordered mode the fragment's signed
         //    `prev_log_head` must equal the store's current head, so any reordering,
         //    omission, or insertion (which would present a different predecessor head) is
         //    rejected fail-closed. `prev_log_head` is bound into `signing_bytes`, so the
@@ -1594,7 +1563,6 @@ impl FragmentStore {
             feed: fragment.feed.clone(),
             svn: fragment.svn,
             id: fragment.id(),
-            grants: fragment.grants.clone(),
             policy_module: fragment.policy_module.clone(),
             includes: fragment.includes.clone(),
             stmt_sha256,
@@ -1603,9 +1571,8 @@ impl FragmentStore {
     }
 
     /// Commit a previously [`verify`](Self::verify)-ed fragment: advance the `(issuer, feed)`
-    /// SVN high-water mark, record the fragment id (for composition), and accumulate its
-    /// grants. Returns the grants newly added.
-    pub fn commit(&mut self, verified: &VerifiedFragment) -> Vec<String> {
+    /// SVN high-water mark and record the fragment id (for composition).
+    pub fn commit(&mut self, verified: &VerifiedFragment) {
         self.last_svn.insert(
             (verified.issuer.clone(), verified.feed.clone()),
             verified.svn,
@@ -1631,24 +1598,18 @@ impl FragmentStore {
                 *entry = (*size, *root);
             }
         }
-        let mut added = Vec::new();
-        for g in &verified.grants {
-            if self.active_grants.insert(g.clone()) {
-                added.push(g.clone());
-            }
-        }
-        added
     }
 
     /// Verify and commit a fragment in one step. On any failure the store is left unchanged
-    /// (fail-closed). Returns the grants newly added.
+    /// (fail-closed).
     ///
     /// Callers that must apply the fragment's Rego module to the policy engine cannot use
     /// this: they need [`verify_envelope`](Self::verify_envelope), then the apply, then
     /// [`commit`](Self::commit), so a failed apply leaves the store untouched.
-    pub fn load_envelope(&mut self, cose_sign1: &[u8]) -> Result<Vec<String>, FragmentError> {
+    pub fn load_envelope(&mut self, cose_sign1: &[u8]) -> Result<(), FragmentError> {
         let verified = self.verify_envelope(cose_sign1)?;
-        Ok(self.commit(&verified))
+        self.commit(&verified);
+        Ok(())
     }
 
     /// FR-1i: export the per-`(issuer, feed)` SVN high-water marks as a stable text snapshot
@@ -1963,23 +1924,24 @@ mod tests {
         store: &mut FragmentStore,
         sk: &SigningKey,
         f: &PolicyFragment,
-    ) -> Result<Vec<String>, FragmentError> {
+    ) -> Result<(), FragmentError> {
         let verified = verify(store, sk, f)?;
-        Ok(store.commit(&verified))
+        store.commit(&verified);
+        Ok(())
     }
 
-    fn frag(issuer: &str, svn: u64, grants: &[&str]) -> PolicyFragment {
+    fn frag(issuer: &str, svn: u64, includes: &[&str]) -> PolicyFragment {
         PolicyFragment {
             issuer: issuer.to_string(),
             svn,
-            grants: grants.iter().map(|s| s.to_string()).collect(),
+            includes: includes.iter().map(|s| s.to_string()).collect(),
             ..Default::default()
         }
     }
 
     /// BL-8: `from_cose_envelope` reconstructs exactly the fields the envelope commits to,
     /// so a boot-pulled envelope can be run through the SRM gates with nothing supplied
-    /// alongside it. Round-trips issuer/feed/SVN/grants/module/includes/requires and the
+    /// alongside it. Round-trips issuer/feed/SVN/module/includes/requires and the
     /// FR-1j predecessor head, and the reconstruction must re-derive the identical
     /// `Sig_structure` — the bytes the signature is actually checked against.
     #[test]
@@ -1989,11 +1951,10 @@ mod tests {
             issuer: "did:x509:0:sha256:AAAA::CN:signer".into(),
             feed: "contoso.azurecr.io/frag/infra:1".into(),
             svn: 7,
-            grants: vec!["exec".into(), "mount".into()],
             policy_module: Some(
                 "package agent_policy.fragments\nallow := true\n# multi-line\nx := 1".into(),
             ),
-            includes: vec!["exec".into()],
+            includes: vec!["exec".into(), "mount".into()],
             requires: vec!["did:x509:0:sha256:BBBB::CN:dep/feed/2".into()],
             prev_log_head: Some(vec![0xde, 0xad, 0xbe, 0xef]),
             ..Default::default()
@@ -2003,14 +1964,13 @@ mod tests {
         assert_eq!(parsed.issuer, f.issuer);
         assert_eq!(parsed.feed, f.feed);
         assert_eq!(parsed.svn, f.svn);
-        assert_eq!(parsed.grants, f.grants);
         assert_eq!(parsed.policy_module, f.policy_module);
         assert_eq!(parsed.includes, f.includes);
         assert_eq!(parsed.requires, f.requires);
         assert_eq!(parsed.prev_log_head, f.prev_log_head);
         assert_eq!(parsed.signed_bytes(), tbs_of(&f));
 
-        // Minimal fragment (no grants/module/includes/requires/prevhead) also round-trips,
+        // Minimal fragment (no module/includes/requires/prevhead) also round-trips,
         // and an absent payload means an absent module rather than an empty one.
         let bare = PolicyFragment {
             issuer: "iss".into(),
@@ -2070,7 +2030,6 @@ mod tests {
         let mut f = PolicyFragment {
             issuer: "issuerA".into(),
             svn: 1,
-            grants: vec![],
             policy_module: Some("package agent_policy.fragments\nexec_allowed := true".into()),
             includes: vec!["exec".into()],
             ..Default::default()
@@ -2117,12 +2076,10 @@ mod tests {
         let mut f = frag("issuerA", 7, &["exec:x"]);
 
         let v = verify(&store, &sk, &f).unwrap();
-        // Not committed yet: no grants, SVN not advanced (a re-verify still succeeds).
-        assert!(store.active_grants().is_empty());
+        // Not committed yet: the SVN has not advanced, so a re-verify still succeeds.
         assert!(verify(&store, &sk, &f).is_ok());
 
         store.commit(&v);
-        assert!(store.active_grants().contains("exec:x"));
         // After commit the same SVN is now a rollback.
         assert!(matches!(
             verify(&store, &sk, &f).unwrap_err(),
@@ -2130,8 +2087,8 @@ mod tests {
         ));
     }
 
-    /// TC4.8: a valid signed add-only fragment (with receipt) is accepted and its grants
-    /// become active.
+    /// TC4.8: a valid signed fragment (with receipt) is accepted, and the commit takes —
+    /// a replay of the same SVN is refused afterwards.
     #[test]
     fn valid_signed_fragment_is_accepted() {
         let (sk, pk) = keypair(1);
@@ -2143,9 +2100,11 @@ mod tests {
             .unwrap();
         let mut f = frag("issuerA", 1, &["exec:container-x"]);
         signed_with_receipt(&sk, &mut f, "ledgerA", &ledger_sk);
-        let added = load(&mut store, &sk, &f).unwrap();
-        assert_eq!(added, vec!["exec:container-x".to_string()]);
-        assert!(store.active_grants().contains("exec:container-x"));
+        load(&mut store, &sk, &f).expect("valid signed fragment must be accepted");
+        assert!(matches!(
+            verify(&store, &sk, &f).unwrap_err(),
+            FragmentError::RolledBackSvn { .. }
+        ));
     }
 
     /// TC4.4: an envelope carrying an empty or garbage signature is rejected.
@@ -2222,23 +2181,6 @@ mod tests {
         // Strictly greater SVN is accepted.
         let mut f6 = frag("issuerA", 6, &["exec:w"]);
         assert!(load(&mut store, &sk, &f6).is_ok());
-    }
-
-    /// TC4.7: a fragment that tries to introduce a grant relaxing a root constraint is
-    /// rejected (add-only, fail-closed).
-    #[test]
-    fn over_broad_fragment_is_rejected() {
-        let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(false);
-        store.authorize_issuer("issuerA", &pk).unwrap();
-        store.add_root_constraint("allow-all");
-        let mut f = frag("issuerA", 1, &["exec:x", "allow-all"]);
-        assert_eq!(
-            load(&mut store, &sk, &f).unwrap_err(),
-            FragmentError::RootConstraintRelaxation("allow-all".into())
-        );
-        // Fail-closed: nothing from the rejected fragment was applied.
-        assert!(store.active_grants().is_empty());
     }
 
     /// A fragment with no transparency receipt is rejected when receipts are enforced.
@@ -2848,7 +2790,7 @@ mod tests {
         assert_eq!(v.svn, 3);
         assert_eq!(v.policy_module.as_deref(), Some(std::str::from_utf8(rego).unwrap()));
         // No kata-private headers were present, so the supersets are simply absent.
-        assert!(v.grants.is_empty() && v.includes.is_empty());
+        assert!(v.includes.is_empty());
     }
 
     fn ordered_frag(issuer: &str, svn: u64, prev_head: &[u8]) -> PolicyFragment {
@@ -3273,15 +3215,15 @@ mod tests {
     fn the_v3_statement_collisions_do_not_exist_in_the_envelope_format() {
         let (sk, _pk) = keypair(1);
 
-        // Two grants, or one grant containing a newline.
+        // Two includes, or one include containing a newline.
         let split = PolicyFragment {
             issuer: "issuerA".into(),
             svn: 1,
-            grants: vec!["alpha".into(), "beta".into()],
+            includes: vec!["alpha".into(), "beta".into()],
             ..Default::default()
         };
         let joined = PolicyFragment {
-            grants: vec!["alpha\nbeta".into()],
+            includes: vec!["alpha\nbeta".into()],
             ..split.clone()
         };
         assert_ne!(
@@ -3292,7 +3234,7 @@ mod tests {
         assert_eq!(
             PolicyFragment::from_cose_envelope(&envelope(&sk, &split))
                 .unwrap()
-                .grants,
+                .includes,
             vec!["alpha".to_string(), "beta".to_string()]
         );
 
@@ -3346,7 +3288,7 @@ mod tests {
             issuer: "did:x509:0:sha256:AAAA::CN:x--module--y".into(),
             feed: "reg/x--prevhead--y".into(),
             svn: 2,
-            grants: vec!["x--includes--".into(), "--requires--".into()],
+            includes: vec!["x--includes--".into(), "--requires--".into()],
             ..Default::default()
         };
         assert!(
@@ -3356,8 +3298,8 @@ mod tests {
         let parsed = PolicyFragment::from_cose_envelope(&envelope(&sk, &f)).expect("parses");
         assert_eq!(parsed.issuer, f.issuer);
         assert_eq!(parsed.feed, f.feed);
-        assert_eq!(parsed.grants, {
-            let mut g = f.grants.clone();
+        assert_eq!(parsed.includes, {
+            let mut g = f.includes.clone();
             g.sort();
             g
         });
@@ -3370,9 +3312,9 @@ mod tests {
     fn statement_validation_covers_control_characters_and_empty_entries() {
         for (label, f) in [
             (
-                "empty grant",
+                "empty include",
                 PolicyFragment {
-                    grants: vec![String::new()],
+                    includes: vec![String::new()],
                     ..Default::default()
                 },
             ),
@@ -3428,7 +3370,7 @@ mod tests {
             issuer: "did:x509:0:sha256:AAAA::CN:signer".into(),
             feed: "reg/frag:1".into(),
             svn: 3,
-            grants: vec!["exec".into()],
+            includes: vec!["exec".into()],
             policy_module: Some(
                 "package agent_policy.fragments\n# --module--\n# --prevhead--\nallow := true"
                     .into(),
@@ -3439,7 +3381,7 @@ mod tests {
         assert!(f.validate_statement().is_ok());
         let parsed = PolicyFragment::from_cose_envelope(&envelope(&sk, &f)).expect("parses");
         assert_eq!(parsed.policy_module, f.policy_module);
-        assert_eq!(parsed.grants, f.grants);
+        assert_eq!(parsed.includes, f.includes);
         assert_eq!(parsed.prev_log_head, f.prev_log_head);
     }
 
@@ -3484,7 +3426,7 @@ mod tests {
                 ..Default::default()
             };
             if crit {
-                protected.crit = vec![coset::RegisteredLabel::Text("kata-grants".into())];
+                protected.crit = vec![coset::RegisteredLabel::Text("kata-unknown".into())];
             }
             CoseSign1Builder::new()
                 .protected(protected)
@@ -3564,11 +3506,11 @@ mod tests {
             ),
             good_cwt_value(),
             (
-                Value::Text("kata-grants".into()),
+                Value::Text("kata-includes".into()),
                 Value::Array(vec![Value::Text("a".into())]),
             ),
             (
-                Value::Text("kata-grants".into()),
+                Value::Text("kata-includes".into()),
                 Value::Array(vec![Value::Text("b".into())]),
             ),
         ]));

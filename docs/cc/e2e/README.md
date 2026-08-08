@@ -501,7 +501,7 @@ visible failure, never a silent bypass. The host is a courier, not an authority.
 
 **Withholding, and the `required` flag.** The one attack a courier keeps is
 saying nothing. That is already fail-safe by default: an undelivered fragment
-contributes no grants, so a container only it would have permitted fails to match
+contributes no rules, so a container only it would have permitted fails to match
 the composed policy and is refused on its own merits. Withholding can only reduce
 what runs. This is C-ACI/hcsshim behaviour, where injection is lazy and nothing
 obliges the host to send anything.

@@ -85,9 +85,10 @@ fn load_frag(
     store: &mut FragmentStore,
     sk: &SigningKey,
     f: &PolicyFragment,
-) -> Result<Vec<String>, FragmentError> {
+) -> Result<(), FragmentError> {
     let v = verify_frag(store, sk, f)?;
-    Ok(store.commit(&v))
+    store.commit(&v);
+    Ok(())
 }
 
 fn ok(label: &str) {
@@ -125,17 +126,17 @@ fn section1_core() {
     let f = PolicyFragment {
         issuer: "issuerA".into(),
         svn: 1,
-        grants: vec!["exec:tool".into()],
+        includes: vec!["exec".into()],
         ..Default::default()
     };
     assert!(load_frag(&mut store, &sk, &f).is_ok());
-    ok("authorized + signed fragment accepted, grant added");
+    ok("authorized + signed fragment accepted");
 
-    // Tampering after signing invalidates the signature. The grants live in the *protected*
-    // header, which is inside the COSE Sig_structure, so swapping them in a signed envelope
+    // Tampering after signing invalidates the signature. The scope lives in the *protected*
+    // header, which is inside the COSE Sig_structure, so swapping it in a signed envelope
     // breaks the signature rather than going unnoticed.
     let mut widened = f.clone();
-    widened.grants = vec!["exec:tool".into(), "exec:evil".into()];
+    widened.includes = vec!["exec".into(), "mount".into()];
     let mut tampered = coset::CoseSign1::from_slice(&env(&sk, &f)).unwrap();
     tampered.protected = coset::CoseSign1::from_slice(&env(&sk, &widened))
         .unwrap()
@@ -144,7 +145,7 @@ fn section1_core() {
         store.verify_envelope(&tampered.to_vec().unwrap()),
         Err(FragmentError::InvalidSignature)
     ));
-    ok("tampered fragment rejected (grants bound into signature)");
+    ok("tampered fragment rejected (scope bound into signature)");
 
     // Monotonic SVN: replaying the same SVN is rejected.
     let replay = PolicyFragment {
@@ -157,20 +158,6 @@ fn section1_core() {
         Err(FragmentError::RolledBackSvn { .. })
     ));
     ok("rolled-back SVN rejected (anti-replay)");
-
-    // Add-only: a fragment relaxing a root constraint is rejected.
-    store.add_root_constraint("allow-all");
-    let broad = PolicyFragment {
-        issuer: "issuerA".into(),
-        svn: 2,
-        grants: vec!["allow-all".into()],
-        ..Default::default()
-    };
-    assert!(matches!(
-        verify_frag(&store, &sk, &broad),
-        Err(FragmentError::RootConstraintRelaxation(_))
-    ));
-    ok("root-constraint relaxation rejected (add-only)");
 }
 
 // ---------------------------------------------------------------------------------------
