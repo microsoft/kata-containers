@@ -281,17 +281,21 @@ fn policy_matches(policy: &DidX509Policy, leaf: &Certificate) -> bool {
 
 /// Verify a COSE_Sign1 fragment envelope that carries an `x5chain`, against the configured
 /// `did:x509` anchors and revocation list. On success returns the matched anchor's `did`
-/// (which the caller requires to equal `fragment.issuer`).
+/// (which the caller requires to equal the issuer the envelope declares).
 ///
 /// Steps (all fail-closed): parse the chain → for each anchor, locate its trusted CA in the
 /// chain by fingerprint → path-validate leaf→…→CA (signatures + validity) → check none of the
 /// chain certs is revoked → check the `did:x509` policy over the leaf → verify the COSE_Sign1
-/// signature with the leaf key over the statement.
+/// signature with the leaf key.
+///
+/// There is no separate payload-equality check any more, and none is needed. It existed
+/// because the fragment's fields were supplied by the caller next to the envelope, so
+/// something had to tie the two together; now they are parsed *out of* the envelope, and the
+/// COSE signature already covers the protected header and payload they come from.
 pub fn verify_x509_cose(
     anchors: &HashMap<String, DidX509Anchor>,
     revoked: &HashSet<[u8; 32]>,
     cose_sign1: &[u8],
-    statement: &[u8],
 ) -> Result<String, FragmentError> {
     use coset::CborSerializable;
 
@@ -300,12 +304,6 @@ pub fn verify_x509_cose(
     }
     let sign1 =
         coset::CoseSign1::from_slice(cose_sign1).map_err(|_| FragmentError::InvalidCertChain)?;
-
-    // The signed payload must be exactly the fragment statement.
-    match &sign1.payload {
-        Some(p) if p.as_slice() == statement => {}
-        _ => return Err(FragmentError::InvalidSignature),
-    }
 
     let chain_der = extract_x5chain(&sign1)?;
     let mut fps = Vec::with_capacity(chain_der.len());
@@ -489,12 +487,11 @@ mod tests {
         }
     }
 
-    fn frag(issuer: &str) -> PolicyFragment {
-        PolicyFragment {
-            issuer: issuer.to_string(),
-            svn: 1,
-            ..Default::default()
-        }
+    /// Any payload will do here. `verify_x509_cose` authenticates the *envelope* — chain,
+    /// policy, revocation, signature — and no longer inspects what is inside it, so these
+    /// tests no longer need to build a fragment at all.
+    fn payload() -> Vec<u8> {
+        b"package agent_policy.fragments.test\n".to_vec()
     }
 
     /// TC-F1.9: a leaf under a trusted CA, satisfying the did:x509 policy, verifies; the
@@ -513,11 +510,10 @@ mod tests {
         );
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
 
-        let f = frag("did:x509:test:issuerX");
-        let cose = cose_with_chain(&f.signing_bytes(), &leaf_sk, &[leaf, ca]);
+        let cose = cose_with_chain(&payload(), &leaf_sk, &[leaf, ca]);
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
-        let did = verify_x509_cose(&anchors, &HashSet::new(), &cose, &f.signing_bytes()).unwrap();
+        let did = verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap();
         assert_eq!(did, "did:x509:test:issuerX");
     }
 
@@ -539,12 +535,11 @@ mod tests {
         // Anchor trusts a different CA than the one in the chain.
         let anchor = anchor_for(&other_ca, "did:x509:test:issuerX");
 
-        let f = frag("did:x509:test:issuerX");
-        let cose = cose_with_chain(&f.signing_bytes(), &leaf_sk, &[leaf, ca]);
+        let cose = cose_with_chain(&payload(), &leaf_sk, &[leaf, ca]);
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
         assert_eq!(
-            verify_x509_cose(&anchors, &HashSet::new(), &cose, &f.signing_bytes()).unwrap_err(),
+            verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap_err(),
             FragmentError::UntrustedCa
         );
     }
@@ -565,13 +560,12 @@ mod tests {
         );
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
 
-        let f = frag("did:x509:test:issuerX");
         // COSE signed by an attacker key, not the leaf's key.
-        let cose = cose_with_chain(&f.signing_bytes(), &attacker_sk, &[leaf, ca]);
+        let cose = cose_with_chain(&payload(), &attacker_sk, &[leaf, ca]);
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
         assert_eq!(
-            verify_x509_cose(&anchors, &HashSet::new(), &cose, &f.signing_bytes()).unwrap_err(),
+            verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap_err(),
             FragmentError::InvalidSignature
         );
     }
@@ -592,12 +586,11 @@ mod tests {
         let leaf = mint_leaf("issuerX", &leaf_sk, "test-ca", &ca_sk, past);
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
 
-        let f = frag("did:x509:test:issuerX");
-        let cose = cose_with_chain(&f.signing_bytes(), &leaf_sk, &[leaf, ca]);
+        let cose = cose_with_chain(&payload(), &leaf_sk, &[leaf, ca]);
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
         assert_eq!(
-            verify_x509_cose(&anchors, &HashSet::new(), &cose, &f.signing_bytes()).unwrap_err(),
+            verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap_err(),
             FragmentError::CertExpired
         );
     }
@@ -618,14 +611,13 @@ mod tests {
         );
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
 
-        let f = frag("did:x509:test:issuerX");
-        let cose = cose_with_chain(&f.signing_bytes(), &leaf_sk, &[leaf.clone(), ca]);
+        let cose = cose_with_chain(&payload(), &leaf_sk, &[leaf.clone(), ca]);
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
         let mut revoked = HashSet::new();
         revoked.insert(fingerprint(&leaf));
         assert_eq!(
-            verify_x509_cose(&anchors, &revoked, &cose, &f.signing_bytes()).unwrap_err(),
+            verify_x509_cose(&anchors, &revoked, &cose).unwrap_err(),
             FragmentError::RevokedCertificate
         );
     }
@@ -649,9 +641,8 @@ mod tests {
             &ca_sk,
             Validity::from_now(Duration::from_secs(3600)).unwrap(),
         );
-        let f1 = frag("did:x509:test:issuerX");
-        let cose1 = cose_with_chain(&f1.signing_bytes(), &leaf1_sk, &[leaf1, ca.clone()]);
-        assert!(verify_x509_cose(&anchors, &HashSet::new(), &cose1, &f1.signing_bytes()).is_ok());
+        let cose1 = cose_with_chain(&payload(), &leaf1_sk, &[leaf1, ca.clone()]);
+        assert!(verify_x509_cose(&anchors, &HashSet::new(), &cose1).is_ok());
 
         // Rotated leaf: brand-new key, same CA + policy, no config change.
         let leaf2_sk = SigningKey::random(&mut OsRng);
@@ -662,9 +653,8 @@ mod tests {
             &ca_sk,
             Validity::from_now(Duration::from_secs(3600)).unwrap(),
         );
-        let f2 = frag("did:x509:test:issuerX");
-        let cose2 = cose_with_chain(&f2.signing_bytes(), &leaf2_sk, &[leaf2, ca]);
-        assert!(verify_x509_cose(&anchors, &HashSet::new(), &cose2, &f2.signing_bytes()).is_ok());
+        let cose2 = cose_with_chain(&payload(), &leaf2_sk, &[leaf2, ca]);
+        assert!(verify_x509_cose(&anchors, &HashSet::new(), &cose2).is_ok());
     }
 
     /// TC-F1.12d: the did:x509 policy is enforced — a leaf missing the required EKU is
@@ -690,12 +680,11 @@ mod tests {
                 ..Default::default()
             },
         };
-        let f = frag("did:x509:test:issuerX");
-        let cose = cose_with_chain(&f.signing_bytes(), &leaf_sk, &[leaf, ca]);
+        let cose = cose_with_chain(&payload(), &leaf_sk, &[leaf, ca]);
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
         assert_eq!(
-            verify_x509_cose(&anchors, &HashSet::new(), &cose, &f.signing_bytes()).unwrap_err(),
+            verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap_err(),
             FragmentError::DidX509Mismatch
         );
     }
@@ -721,9 +710,8 @@ mod tests {
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
 
-        let f = frag("did:x509:test:issuerX");
-        let cose = cose_with_chain(&f.signing_bytes(), &leaf_sk, &[leaf, intermediate, root]);
-        let did = verify_x509_cose(&anchors, &HashSet::new(), &cose, &f.signing_bytes()).unwrap();
+        let cose = cose_with_chain(&payload(), &leaf_sk, &[leaf, intermediate, root]);
+        let did = verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap();
         assert_eq!(did, "did:x509:test:issuerX");
     }
 
@@ -753,10 +741,9 @@ mod tests {
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
 
-        let f = frag("did:x509:test:issuerX");
-        let cose = cose_with_chain(&f.signing_bytes(), &subleaf_sk, &[subleaf, mid_leaf, root]);
+        let cose = cose_with_chain(&payload(), &subleaf_sk, &[subleaf, mid_leaf, root]);
         assert_eq!(
-            verify_x509_cose(&anchors, &HashSet::new(), &cose, &f.signing_bytes()).unwrap_err(),
+            verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap_err(),
             FragmentError::InvalidCertChain
         );
     }
@@ -921,10 +908,9 @@ mod tests {
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
-        let f = frag("did:x509:test:issuerX");
-        let cose = cose_es384(&f.signing_bytes(), &leaf_sk, &[leaf, ca]);
+        let cose = cose_es384(&payload(), &leaf_sk, &[leaf, ca]);
         assert_eq!(
-            verify_x509_cose(&anchors, &HashSet::new(), &cose, &f.signing_bytes()).unwrap(),
+            verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap(),
             "did:x509:test:issuerX"
         );
     }
@@ -940,18 +926,24 @@ mod tests {
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
-        let f = frag("did:x509:test:issuerX");
-        let cose = cose_rs256(&f.signing_bytes(), &leaf_sk, &[leaf, ca]);
+        let cose = cose_rs256(&payload(), &leaf_sk, &[leaf, ca]);
         assert_eq!(
-            verify_x509_cose(&anchors, &HashSet::new(), &cose, &f.signing_bytes()).unwrap(),
+            verify_x509_cose(&anchors, &HashSet::new(), &cose).unwrap(),
             "did:x509:test:issuerX"
         );
     }
 
-    /// TC-F1.15b: an RS256 envelope whose signature is over a different statement is rejected
-    /// (RSA path is not a rubber stamp).
+    /// TC-F1.15b: an RS256 envelope whose payload has been altered after signing is rejected
+    /// (the RSA path is not a rubber stamp).
+    ///
+    /// The payload is the policy module itself now, so this is the case that matters most on
+    /// this path: swapping in a different Rego module under a genuine issuer's signature.
+    /// There is no separate "presented statement" left to disagree with the payload, so the
+    /// only way to reach a mismatch is to tamper with the signed bytes directly.
     #[test]
-    fn tc_f1_15b_rsa_wrong_statement_rejected() {
+    fn tc_f1_15b_rsa_tampered_payload_rejected() {
+        use coset::CborSerializable;
+
         let ca_sk = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
         let leaf_sk = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
         let ca = mint_ca_rsa("rsa-ca", &ca_sk);
@@ -959,11 +951,17 @@ mod tests {
         let anchor = anchor_for(&ca, "did:x509:test:issuerX");
         let mut anchors = HashMap::new();
         anchors.insert(anchor.did.clone(), anchor);
-        let f = frag("did:x509:test:issuerX");
-        let cose = cose_rs256(b"a-different-statement", &leaf_sk, &[leaf, ca]);
-        // Payload mismatch -> InvalidSignature (payload must equal the presented statement).
+
+        let cose = cose_rs256(&payload(), &leaf_sk, &[leaf, ca]);
+        assert!(
+            verify_x509_cose(&anchors, &HashSet::new(), &cose).is_ok(),
+            "fixture must verify before it is tampered with"
+        );
+
+        let mut tampered = coset::CoseSign1::from_slice(&cose).unwrap();
+        tampered.payload = Some(b"package agent_policy.fragments.evil\nallow := true\n".to_vec());
         assert_eq!(
-            verify_x509_cose(&anchors, &HashSet::new(), &cose, &f.signing_bytes()).unwrap_err(),
+            verify_x509_cose(&anchors, &HashSet::new(), &tampered.to_vec().unwrap()).unwrap_err(),
             FragmentError::InvalidSignature
         );
     }
