@@ -17,6 +17,13 @@
 //! parsed. On mismatch the VM is aborted. This is the equivalent of hcsshim's
 //! `amdsevsnp.ValidateHostData()` check.
 //!
+//! On SEV-SNP, configfs-TSM (`CONFIG_TSM_REPORTS`) only exists from Linux 6.7. The guest
+//! kernels this stack ships are older, so there is a second, equivalent path: the
+//! `SNP_GET_REPORT` ioctl on `/dev/sev-guest`, which is how the report was fetched before
+//! configfs-TSM existed and which 6.7+ kernels still support. Both are serviced by the PSP
+//! via a firmware call from the guest, so neither depends on the host and the check stays
+//! fail-closed either way.
+//!
 //! When no TEE report provider is present the guest is not a confidential VM, so there is
 //! no launch measurement to bind to and nothing to verify; the check logs and returns.
 
@@ -60,6 +67,18 @@ const SNP_HOST_DATA_LEN: usize = 32;
 /// sysfs directory of the SEV-SNP guest driver (`DEVICE_NAME` in `sev-guest.c`), relative
 /// to [`fs_root`].
 const SEV_GUEST_DEV_DIR: &str = "sys/class/misc/sev-guest";
+
+/// Character device exposed by the same driver, relative to [`fs_root`]. This is the
+/// pre-configfs-TSM way to fetch an attestation report and the only one available on guest
+/// kernels older than 6.7.
+const SEV_GUEST_DEV: &str = "dev/sev-guest";
+
+/// Offset of `struct snp_report` within `struct msg_report_resp`, the payload
+/// `SNP_GET_REPORT` writes into `resp_data` (`u32 status`, `u32 report_size`, 24 reserved
+/// bytes, then the report). Unlike configfs-TSM's `outblob`, which is the bare report, the
+/// ioctl response carries this header, so [`SNP_HOST_DATA_OFFSET`] is relative to the slice
+/// taken from here rather than to the buffer itself.
+const SNP_REPORT_RESP_HDR_LEN: usize = 32;
 
 /// sysfs directory of the TDX guest driver (`KBUILD_MODNAME` in `tdx-guest.c`), relative
 /// to [`fs_root`].
@@ -267,14 +286,132 @@ fn read_measured_field(logger: &Logger) -> Result<Option<(Provider, Vec<u8>)>> {
     Ok(Some((provider, value)))
 }
 
-/// Fetch the SEV-SNP attestation report through configfs-TSM.
+/// `SNP_GET_REPORT` request body (`struct snp_report_req` in `include/uapi/linux/sev-guest.h`).
+#[repr(C)]
+struct SnpReportReq {
+    /// Mixed into REPORT_DATA. A HOSTDATA comparison does not depend on it, and the report
+    /// is read locally, so freshness is not a concern here; left zeroed.
+    user_data: [u8; 64],
+    /// VMPL to attest at. This stack runs the guest at VMPL0 (there is no SVSM), and the
+    /// firmware rejects a request for a level more privileged than the caller's.
+    vmpl: u32,
+    rsvd: [u8; 28],
+}
+
+/// `SNP_GET_REPORT` response body (`struct snp_report_resp`). The kernel requires the full
+/// 4000 bytes regardless of how much the firmware writes.
+#[repr(C)]
+struct SnpReportResp {
+    data: [u8; 4000],
+}
+
+/// ioctl argument (`struct snp_guest_request_ioctl`). Not packed in the kernel header, so
+/// `repr(C)` reproduces its layout, padding included.
+#[repr(C)]
+struct SnpGuestRequestIoctl {
+    msg_version: u8,
+    req_data: u64,
+    resp_data: u64,
+    /// `exitinfo2` in current kernels, `fw_err` in older ones. Same width and position, and
+    /// non-zero means the firmware refused the request.
+    exitinfo2: u64,
+}
+
+nix::ioctl_readwrite!(snp_get_report, b'S', 0x0, SnpGuestRequestIoctl);
+
+/// Fetch the SEV-SNP attestation report through the `/dev/sev-guest` ioctl.
+///
+/// Used when the guest kernel has the sev-guest driver but not configfs-TSM. The report is
+/// produced by the PSP in response to a firmware call made by the guest, exactly as in the
+/// configfs path, so this is not a weaker source: the host cannot influence the result.
+fn read_snp_report_ioctl(logger: &Logger, dev: &Path) -> Result<Vec<u8>> {
+    use std::convert::TryInto;
+    use std::os::unix::io::AsRawFd;
+
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dev)
+        .with_context(|| format!("open {}", dev.display()))?;
+
+    let req = SnpReportReq {
+        user_data: [0u8; 64],
+        vmpl: 0,
+        rsvd: [0u8; 28],
+    };
+    let mut resp = SnpReportResp { data: [0u8; 4000] };
+    let mut arg = SnpGuestRequestIoctl {
+        msg_version: 1,
+        req_data: &req as *const SnpReportReq as u64,
+        resp_data: &mut resp as *mut SnpReportResp as u64,
+        exitinfo2: 0,
+    };
+
+    // SAFETY: `file` is an open handle to the sev-guest device, and `arg` is a live,
+    // correctly-typed value whose `req_data`/`resp_data` point at `req` and `resp`. All
+    // three outlive the call, and the kernel writes only within `resp`.
+    unsafe { snp_get_report(file.as_raw_fd(), &mut arg) }
+        .with_context(|| format!("SNP_GET_REPORT on {}", dev.display()))?;
+
+    // The ioctl can succeed while the firmware refuses the request, in which case the
+    // response buffer is untouched and parsing it would read zeroes as a report.
+    if arg.exitinfo2 != 0 {
+        bail!(
+            "SNP_GET_REPORT was rejected by firmware: exitinfo2 0x{:x}",
+            arg.exitinfo2
+        );
+    }
+
+    let status = u32::from_le_bytes(resp.data[0..4].try_into().unwrap());
+    if status != 0 {
+        bail!("SNP_GET_REPORT returned status {status}");
+    }
+
+    let report_size = u32::from_le_bytes(resp.data[4..8].try_into().unwrap()) as usize;
+    // Bound the claimed size before slicing: the header plus a full report must fit, and the
+    // report must be long enough to contain HOSTDATA.
+    let end = SNP_REPORT_RESP_HDR_LEN
+        .checked_add(report_size)
+        .filter(|end| *end <= resp.data.len())
+        .ok_or_else(|| anyhow!("SNP_GET_REPORT claimed an implausible report size {report_size}"))?;
+    if report_size < SNP_HOST_DATA_OFFSET + SNP_HOST_DATA_LEN {
+        bail!(
+            "SNP_GET_REPORT returned {report_size} bytes, too short to contain HOSTDATA \
+             (expected at least {})",
+            SNP_HOST_DATA_OFFSET + SNP_HOST_DATA_LEN
+        );
+    }
+
+    let report = resp.data[SNP_REPORT_RESP_HDR_LEN..end].to_vec();
+    slog::debug!(
+        logger,
+        "read local SEV-SNP attestation report";
+        "provider" => "sev-guest ioctl",
+        "bytes" => report.len()
+    );
+
+    Ok(report)
+}
+
+/// Fetch the SEV-SNP attestation report, preferring configfs-TSM and falling back to the
+/// `/dev/sev-guest` ioctl on kernels older than 6.7.
 fn read_snp_report(logger: &Logger) -> Result<Vec<u8>> {
     let report_dir = fs_root().join(TSM_REPORT_DIR);
     if !report_dir.is_dir() {
+        let dev = fs_root().join(SEV_GUEST_DEV);
+        if dev.exists() {
+            slog::info!(
+                logger,
+                "no configfs-tsm report provider; falling back to the sev-guest ioctl";
+                "device" => dev.display().to_string()
+            );
+            return read_snp_report_ioctl(logger, &dev);
+        }
         bail!(
-            "{} is not present: the guest is SEV-SNP but exposes no configfs-tsm report \
+            "neither {} nor {} is present: the guest is SEV-SNP but exposes no report \
              provider, so the initdata cannot be bound to the launch measurement",
-            report_dir.display()
+            report_dir.display(),
+            dev.display()
         );
     }
 
@@ -376,6 +513,48 @@ mod tests {
     #[test]
     fn short_snp_report_is_rejected() {
         assert!(extract_snp_host_data(&[0u8; 8]).is_err());
+    }
+
+    // The ioctl fallback hands the kernel raw pointers into these structs, so their layout
+    // is an ABI contract with `include/uapi/linux/sev-guest.h` rather than an internal
+    // detail: a wrong size or offset would have the firmware write the report somewhere
+    // other than where it is read back from, and the failure would be a silent mismatch
+    // rather than a compile error. Neither struct is packed in the kernel header, so the
+    // padding after `msg_version` is part of the contract too.
+    #[test]
+    fn snp_ioctl_structs_match_the_kernel_abi() {
+        assert_eq!(std::mem::size_of::<super::SnpReportReq>(), 96);
+        assert_eq!(std::mem::size_of::<super::SnpReportResp>(), 4000);
+        assert_eq!(std::mem::size_of::<super::SnpGuestRequestIoctl>(), 32);
+
+        let arg = super::SnpGuestRequestIoctl {
+            msg_version: 1,
+            req_data: 0,
+            resp_data: 0,
+            exitinfo2: 0,
+        };
+        let base = &arg as *const _ as usize;
+        assert_eq!(&arg.req_data as *const _ as usize - base, 8);
+        assert_eq!(&arg.resp_data as *const _ as usize - base, 16);
+        assert_eq!(&arg.exitinfo2 as *const _ as usize - base, 24);
+    }
+
+    // HOSTDATA is read out of the ioctl response at a different offset than out of
+    // configfs-TSM's `outblob`, because the ioctl response prefixes the report with a
+    // status header. Getting this wrong reads 32 bytes of the report's signature area and
+    // compares it against the initdata digest, which fails closed but for the wrong reason.
+    #[test]
+    fn snp_report_resp_header_precedes_the_report() {
+        let mut data = [0u8; 4000];
+        data[4..8].copy_from_slice(&1184u32.to_le_bytes());
+        let at = super::SNP_REPORT_RESP_HDR_LEN + SNP_HOST_DATA_OFFSET;
+        data[at..at + SNP_HOST_DATA_LEN].copy_from_slice(&[0xA5u8; SNP_HOST_DATA_LEN]);
+
+        let report = &data[super::SNP_REPORT_RESP_HDR_LEN..super::SNP_REPORT_RESP_HDR_LEN + 1184];
+        assert_eq!(
+            extract_snp_host_data(report).unwrap(),
+            vec![0xA5u8; SNP_HOST_DATA_LEN]
+        );
     }
 
     fn fake_tdx_dev(value: Option<&[u8]>) -> tempfile::TempDir {
