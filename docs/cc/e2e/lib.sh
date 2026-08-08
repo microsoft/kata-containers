@@ -305,8 +305,25 @@ load_coco_env() {
 # source ~/.bashrc or ~/.cargo/env.
 load_toolchain() {
   export PATH="$PATH:$HOME/.cargo/bin:/usr/local/go/bin:$HOME/gopath/bin"
-  export GOROOT="${GOROOT:-/usr/local/go}"
   export GOPATH="${GOPATH:-$HOME/gopath}"
+  # Derive GOROOT from whichever `go` PATH actually resolves -- never a fixed path.
+  #
+  # These nodes carry two Go installs: the distro package (/usr/lib/golang, on
+  # PATH as /usr/bin/go) and a hand-unpacked /usr/local/go. Pinning GOROOT to one
+  # while PATH selects the other pairs a 1.26 driver with 1.25 tools, and the
+  # build dies deep in the runtime-go make with
+  #   compile: version "go1.25.0" does not match go tool version "go1.26.5"
+  # -- including for std packages like internal/itoa, which is the tell that the
+  # toolchain is mixed rather than the module cache being stale. It stayed hidden
+  # until the distro package was upgraded and the two versions drifted apart.
+  #
+  # `env -u GOROOT` matters: ~/.bashrc exports GOROOT=/usr/local/go, and `go env
+  # GOROOT` would otherwise just echo that back instead of the binary's own root.
+  if command -v go >/dev/null 2>&1; then
+    export GOROOT="$(env -u GOROOT go env GOROOT)"
+  else
+    export GOROOT="${GOROOT:-/usr/local/go}"
+  fi
 }
 
 # Build genpolicy from the branch and export GENPOLICY pointing at it.
