@@ -37,6 +37,10 @@ const CONTAINERD_LEGACY_CRI_PLUGIN_ID: &str = "cri";
 const CONTAINERD_CRI_IMAGES_PLUGIN_ID: &str = "\"io.containerd.cri.v1.images\"";
 /// Plugin table for CRI containerd in v2 (disable_snapshot_annotations lives here).
 const CONTAINERD_CRI_CONTAINERD_TABLE_V2: &str = "\"io.containerd.grpc.v1.cri\".containerd";
+const CONTAINERD_V2_RUNC_SYSTEMD_CGROUP: &str =
+    ".plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.runc.options.SystemdCgroup";
+const CONTAINERD_V3_RUNC_SYSTEMD_CGROUP: &str =
+    ".plugins.\"io.containerd.cri.v1.runtime\".containerd.runtimes.runc.options.SystemdCgroup";
 
 fn is_k3s_or_rke2(runtime: &str) -> bool {
     matches!(runtime, "k3s" | "k3s-agent" | "rke2-agent" | "rke2-server")
@@ -169,6 +173,46 @@ fn get_containerd_output_path(paths: &ContainerdPaths) -> PathBuf {
     } else {
         Path::new(&paths.config_file).to_path_buf()
     }
+}
+
+fn preserve_runc_cgroup_driver_in_v3_drop_in(
+    paths: &ContainerdPaths,
+    runtime: &str,
+    drop_in_file: &Path,
+) -> Result<()> {
+    if !paths.use_drop_in
+        || resolve_runtime_plugin_id(paths, runtime)? != CONTAINERD_V3_RUNTIME_PLUGIN_ID
+        || containerd_config_schema_version(paths, runtime) != Some(2)
+    {
+        return Ok(());
+    }
+
+    let Ok(systemd_cgroup) = toml_utils::get_toml_value(
+        Path::new(&paths.config_file),
+        CONTAINERD_V2_RUNC_SYSTEMD_CGROUP,
+    ) else {
+        return Ok(());
+    };
+
+    if !matches!(systemd_cgroup.as_str(), "true" | "false") {
+        anyhow::bail!(
+            "Invalid runc SystemdCgroup value '{}' in {}",
+            systemd_cgroup,
+            paths.config_file
+        );
+    }
+
+    toml_utils::set_toml_value(
+        drop_in_file,
+        CONTAINERD_V3_RUNC_SYSTEMD_CGROUP,
+        &systemd_cgroup,
+    )?;
+    log::info!(
+        "Preserved runc SystemdCgroup={} from legacy v2 config in native v3 drop-in",
+        systemd_cgroup
+    );
+
+    Ok(())
 }
 
 fn get_user_containerd_drop_in_output_path(paths: &ContainerdPaths) -> Result<(PathBuf, String)> {
@@ -502,6 +546,8 @@ pub async fn configure_containerd(config: &Config, runtime: &str) -> Result<()> 
         } else {
             log::info!("Drop-in file already exists");
         }
+
+        preserve_runc_cgroup_driver_in_v3_drop_in(&paths, runtime, Path::new(&drop_in_file))?;
 
         // Add the drop-in file to the imports array in the main config
         if let Some(imports_file) = &paths.imports_file {
@@ -956,6 +1002,65 @@ mod tests {
         assert_eq!(
             resolve_runtime_plugin_id(&paths, "k3s").unwrap(),
             CONTAINERD_V2_CRI_PLUGIN_ID
+        );
+    }
+
+    #[rstest]
+    #[case("true")]
+    #[case("false")]
+    fn test_preserve_runc_cgroup_driver_in_v3_drop_in(#[case] expected: &str) {
+        let main_config = NamedTempFile::new().unwrap();
+        std::fs::write(
+            main_config.path(),
+            format!(
+                "version = 2\n\n[plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.runc.options]\nSystemdCgroup = {expected}\n"
+            ),
+        )
+        .unwrap();
+        let drop_in = NamedTempFile::new().unwrap();
+        let paths = make_paths(main_config.path().to_str().unwrap(), true, None);
+
+        preserve_runc_cgroup_driver_in_v3_drop_in(&paths, "containerd", drop_in.path()).unwrap();
+
+        assert_eq!(
+            toml_utils::get_toml_value(drop_in.path(), CONTAINERD_V3_RUNC_SYSTEMD_CGROUP).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_preserve_runc_cgroup_driver_ignores_unset_v2_value() {
+        let main_config = NamedTempFile::new().unwrap();
+        std::fs::write(main_config.path(), "version = 2\n").unwrap();
+        let drop_in = NamedTempFile::new().unwrap();
+        let paths = make_paths(main_config.path().to_str().unwrap(), true, None);
+
+        preserve_runc_cgroup_driver_in_v3_drop_in(&paths, "containerd", drop_in.path()).unwrap();
+
+        assert!(
+            toml_utils::get_toml_value(drop_in.path(), CONTAINERD_V3_RUNC_SYSTEMD_CGROUP).is_err()
+        );
+    }
+
+    #[test]
+    fn test_preserve_runc_cgroup_driver_ignores_explicit_v2_drop_in() {
+        let main_config = NamedTempFile::new().unwrap();
+        std::fs::write(
+            main_config.path(),
+            "version = 2\n\n[plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.runc.options]\nSystemdCgroup = true\n",
+        )
+        .unwrap();
+        let drop_in = NamedTempFile::new().unwrap();
+        let paths = make_paths(
+            main_config.path().to_str().unwrap(),
+            true,
+            Some(CONTAINERD_V2_CRI_PLUGIN_ID),
+        );
+
+        preserve_runc_cgroup_driver_in_v3_drop_in(&paths, "k3s", drop_in.path()).unwrap();
+
+        assert!(
+            toml_utils::get_toml_value(drop_in.path(), CONTAINERD_V3_RUNC_SYSTEMD_CGROUP).is_err()
         );
     }
 
