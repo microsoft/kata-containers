@@ -128,16 +128,25 @@ This command installs the latest release of the [IGVM tooling](https://github.co
 ## Prepare SEV-SNP build inputs
 
 The ConfPods Make targets consume, but do not build or install, Cloud
-Hypervisor and the guest kernel. The current development stack uses Microsoft
-Cloud Hypervisor `msft/v51.1.101` built with `sev_snp`:
+Hypervisor and the guest kernel. The current development stack uses the
+upstream Cloud Hypervisor main branch after flat VMDK support was merged, with
+the MSHV compatibility patch from this repository:
 
-```
-git clone https://github.com/microsoft/cloud-hypervisor.git
+```bash
+git clone https://github.com/cloud-hypervisor/cloud-hypervisor.git
 pushd cloud-hypervisor
-git checkout msft/v51.1.101
-OPENSSL_NO_VENDOR=1 cargo build --release --no-default-features --features sev_snp
+git checkout aa9678da67f6336c4a41add9095c9c917b800ea9
+git apply ../kata-containers/cloud-hypervisor-mshv-vmdk-compat.patch
+OPENSSL_NO_VENDOR=1 cargo build \
+	--release \
+	--no-default-features \
+	--features mshv,sev_snp
 popd
 ```
+
+The compatibility patch fully reverts Cloud Hypervisor commit `4091e965`
+(`vmm: return all-ones for unregistered MMIO reads`) and applies AMD SME
+physical-address reduction only to the MSHV backend.
 
 For the single-layer EROFS flow, install containerd 2.3.3:
 
@@ -319,7 +328,8 @@ sudo ctr -n k8s.io run \
 ```
 
   With `shared_fs = "none"`, use containerd's EROFS snapshotter to pass a
-  single-layer image to the guest as a raw virtio-blk device:
+  single layer as a raw block device or multiple layers as one GPT-backed VMDK
+  block device:
 
   ```toml
 [plugins."io.containerd.snapshotter.v1.erofs"]
@@ -339,27 +349,36 @@ sudo ctr plugins ls | grep erofs
 
   ```bash
 NS=erofs-repro
-IMAGE=docker.io/library/busybox:latest
+IMAGE=docker.io/library/nginx:alpine
+ID="nginx-vmdk-$(date +%s)"
 
 sudo ctr -n "${NS}" images pull \
   --snapshotter erofs \
   --platform linux/amd64 \
   "${IMAGE}"
 
-sudo ctr -n "${NS}" run --rm \
+sudo ctr -n "${NS}" run -d \
   --snapshotter erofs \
   --runtime io.containerd.kata-cc.v2 \
   --runtime-config-path \
   /opt/confidential-containers/share/defaults/kata-containers/runtime-rs/configuration.toml \
-  "${IMAGE}" "erofs-snp-$(date +%s)" sh -c '
-    uname -a
-    grep -w erofs /proc/filesystems
+  "${IMAGE}" "${ID}"
+
+sudo ctr -n "${NS}" tasks exec \
+  --exec-id check \
+  "${ID}" sh -c '
+    wget -qO- http://127.0.0.1/
     mount | grep "overlay on / "
   '
+
+sudo ctr -n "${NS}" tasks kill "${ID}"
+sudo ctr -n "${NS}" tasks rm "${ID}"
+sudo ctr -n "${NS}" containers rm "${ID}"
 ```
 
-  BusyBox currently has one `linux/amd64` OCI layer. Container-layer verity
-  and multi-layer Cloud Hypervisor support are not yet implemented.
+  `nginx:alpine` currently has eight `linux/amd64` OCI layers. runtime-rs
+  combines them into a GPT-backed VMDK block device; the overlay mount should
+  show `lower-0` through `lower-7`. Container-layer verity is not yet enabled.
 
 For further usage we refer to the upstream `crictl` (or `ctr`) and CNI documentation.
 
