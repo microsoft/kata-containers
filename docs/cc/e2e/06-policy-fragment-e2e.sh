@@ -126,19 +126,7 @@ PLAIN_HTTP=""
 REG_HOST="${E2E_REGISTRY%%:*}"
 if [ "$REG_HOST" = "localhost" ] || [ "$REG_HOST" = "127.0.0.1" ]; then
   PLAIN_HTTP="--plain-http"
-  if ! curl -fsS "http://$E2E_REGISTRY/v2/" >/dev/null 2>&1; then
-    log "starting a local OCI registry at $E2E_REGISTRY"
-    docker rm -f coco-e2e-registry >/dev/null 2>&1 || true
-    # --restart and a named volume so a node reboot does not silently empty the
-    # registry: fragment-ref.txt persists on disk and would keep asserting the
-    # artifact exists, leaving stage 07 to fail at the fetch minutes later with
-    # diagnostics pointing at delivery rather than at a registry that went away.
-    docker run -d --name coco-e2e-registry --restart unless-stopped \
-      -v coco-e2e-registry-data:/var/lib/registry \
-      -p "${E2E_REGISTRY##*:}:5000" \
-      registry:2 >/dev/null || die "could not start the local registry"
-    wait_for 60 "registry $E2E_REGISTRY responding" curl -fsS "http://$E2E_REGISTRY/v2/"
-  fi
+  registry_up "$E2E_REGISTRY"
 fi
 
 TAG="${E2E_FRAGMENT_TAG:-e2e}"
@@ -347,8 +335,8 @@ $(sed 's/^/      /' "$WORK/fragment-issuers.toml")
 
     Note there is no log to read for this. A strict guest discards its own log
     stream rather than forwarding it to the host (FR-7 / F-79), so
-    `journalctl -t kata` shows the shim's view only. To watch the guest side,
-    rebuild the agent without the `strict-policy` feature.
+    'journalctl -t kata' shows the shim's view only. To watch the guest side,
+    rebuild the agent without the 'strict-policy' feature.
 
 EOF
 
