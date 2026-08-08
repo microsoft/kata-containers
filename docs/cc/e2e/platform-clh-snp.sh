@@ -387,7 +387,12 @@ clh_build_and_deploy() {
   # allow-set-policy.rego, which permits SetPolicy and then enforces whatever
   # policy was set. The README's allow-all.rego is a dev convenience that would
   # make every gate in stages 05-08 pass vacuously.
-  local mk=(make CLH_SNP_PATH="$CLH_SNP_BIN" IGVM_KERNEL="$IGVM_KERNEL")
+  #
+  # STRICT_POLICY/AGENT_POLICY match what the qemu stage 04 passes, so both
+  # platforms exercise the same agent. STRICT_POLICY=yes also implies
+  # USE_DEVMAPPER=yes, which the erofs dm-verity mount path requires.
+  local mk=(make CLH_SNP_PATH="$CLH_SNP_BIN" IGVM_KERNEL="$IGVM_KERNEL"
+            STRICT_POLICY="$E2E_STRICT_POLICY" AGENT_POLICY="$E2E_AGENT_POLICY")
   [ "${E2E_BUILD_TARFS:-no}" = "yes" ] && mk+=(BUILD_TARFS=yes)
 
   log "building kata-cc host and guest components (this takes a while)"
@@ -395,6 +400,24 @@ clh_build_and_deploy() {
 
   log "installing kata-cc components"
   ( cd "$nb" && sudo "${mk[@]}" deploy-confpods ) || die "make deploy-confpods failed"
+
+  # Verify the produced agent rather than trusting the flags. A node-builder
+  # agent without the devicemapper feature stubs out dm-verity device creation,
+  # and every CreateContainer then fails inside the guest with
+  # "dm-verity support not compiled in" — which surfaces only as an opaque
+  # sandbox timeout on the host.
+  local abin="$nb/agent-install/usr/bin/kata-agent"
+  if [ -f "$abin" ]; then
+    local srm dmv
+    srm=$(strings -a "$abin" | grep -c security_reference_monitor || true)
+    dmv=$(strings -a "$abin" | grep -c 'dm-verity support not compiled in' || true)
+    log "agent binary check: srm=$srm devmapper_stub=$dmv"
+    [ "$dmv" -eq 0 ] || die "agent built without --features devicemapper (USE_DEVMAPPER did not take)"
+    [ "${E2E_STRICT_POLICY}" != "yes" ] || [ "$srm" -gt 100 ] \
+      || die "STRICT_POLICY did not take: only $srm SRM symbols (expected >100)"
+  else
+    warn "no agent binary at $abin — skipping build verification"
+  fi
 
   local cfg="$E2E_KATA_DEFAULTS/runtime-rs/configuration.toml"
   [ -f "$cfg" ] || die "expected shim config at $cfg after deploy-confpods"

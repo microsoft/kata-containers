@@ -79,6 +79,12 @@ agent_make_flags=(
 
 if [[ "${CONF_PODS}" == "yes" ]]; then
 	agent_make_flags+=("AGENT_POLICY=yes")
+	# Confidential pods mount every image layer as a dm-verity protected EROFS
+	# device. Without the agent's devicemapper feature that code path is a stub
+	# that always errors, so every CreateContainer fails with
+	# "dm-verity support not compiled in".
+	agent_make_flags+=("USE_DEVMAPPER=${USE_DEVMAPPER:-yes}")
+	agent_make_flags+=("STRICT_POLICY=${STRICT_POLICY:-no}")
 fi
 
 pushd "${repo_dir}" || exit

@@ -9,6 +9,13 @@ export USE_RUNTIME_RS := no
 export BUILD_TARFS := no
 export IGVM_KERNEL :=
 
+# Forwarded to package_build.sh -> src/agent. STRICT_POLICY=yes pulls in the
+# security reference monitor and implies USE_DEVMAPPER=yes.
+STRICT_POLICY ?= no
+USE_DEVMAPPER ?= yes
+export STRICT_POLICY
+export USE_DEVMAPPER
+
 ifeq ($(BUILD_TYPE),debug)
 	export AGENT_BUILD_TYPE := debug
 	export AGENT_POLICY_FILE := allow-all.rego
