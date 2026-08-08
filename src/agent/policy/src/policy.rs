@@ -911,6 +911,44 @@ impl AgentPolicy {
             }
         }
 
+        if let Some(v) = Self::eval_scalar(&mut scratch, format!("data.{pkg}.framework_version"))? {
+            // FR-1l applied to fragments, which `check_framework_version` does not reach: it
+            // runs from `set_policy` and reads `data.agent_policy.framework_version`, while a
+            // fragment's module lands under `data.agent_policy.fragments.<feed>`. Without this
+            // a version a fragment declares is read by nothing.
+            //
+            // A fragment is the only policy input that is neither measured nor default-denied
+            // — third-party signed, delivered at runtime by an untrusted host — so its author
+            // has no other way to say what it needs to be enforced by. The failure mode is the
+            // one FR-1l exists for: an unknown rule name in Rego is an undefined value rather
+            // than an error, so a fragment written for gates this build lacks does not fail
+            // loudly, it silently does not get them.
+            //
+            // Absent stays legal, matching FR-1l — that is every fragment signed before this
+            // check existed, and such a fragment by definition expects nothing newer. An
+            // explicit but malformed one is an error, so a typo cannot pass as "unversioned".
+            // hcsshim checks the same thing as step 5 of `load_fragment`
+            // (`fragment_framework_version`).
+            let declared = v.as_str().ok_or_else(|| {
+                anyhow::anyhow!("fragment module declares a non-string framework_version: {v}")
+            })?;
+            let wanted = parse_semver(declared).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "fragment module declares framework_version {declared:?}, which is not a \
+                     semver x.y.z"
+                )
+            })?;
+            let ours = parse_semver(POLICY_FRAMEWORK_VERSION)
+                .expect("POLICY_FRAMEWORK_VERSION is a compile-time constant");
+            if wanted > ours {
+                bail!(
+                    "fragment module declares framework_version {declared}, but this agent \
+                     implements {POLICY_FRAMEWORK_VERSION}; refusing a fragment written for \
+                     gates this build does not have"
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -1981,6 +2019,94 @@ mod tests {
             .is_err(),
             "a parameterised self-description that resolves to the wrong issuer must not load"
         );
+    }
+
+    /// F-161 gap 2: `check_framework_version` runs from `set_policy` and reads
+    /// `data.agent_policy.framework_version`, so it never sees a fragment — whose module
+    /// lands under `data.agent_policy.fragments.<feed>`. A fragment is the only policy input
+    /// that is neither measured nor default-denied, so without this its author has no way to
+    /// state what it needs to be enforced by. hcsshim checks the same thing as step 5 of
+    /// `load_fragment`.
+    #[test]
+    fn test_a_fragment_may_not_require_a_newer_framework_than_this_agent() {
+        let feed = "localhost:5000/coco-e2e/fragment";
+        let truth = "did:x509:0:sha256:AAA::CN:signer";
+        let module = |fv: &str| {
+            format!(
+                "package agent_policy.fragments[\"{feed}\"]\n\
+                 issuer := \"{truth}\"\nsvn := \"4\"\n\
+                 framework_version := \"{fv}\"\ncontainers := []\n"
+            )
+        };
+        let (maj, min, patch) = parse_semver(POLICY_FRAMEWORK_VERSION).unwrap();
+
+        // Exactly what this agent implements is fine.
+        let mut p = AgentPolicy::new();
+        p.apply_fragment_module(
+            "same",
+            &module(POLICY_FRAMEWORK_VERSION),
+            feed,
+            &[],
+            None,
+            truth,
+            4,
+        )
+        .expect("a fragment asking for the version we implement must load");
+
+        // Older is fine: every gate it names exists, and one it does not name is not asked for.
+        let mut q = AgentPolicy::new();
+        q.apply_fragment_module(
+            "older",
+            &module(&format!("{}.0.0", maj.saturating_sub(1))),
+            feed,
+            &[],
+            None,
+            truth,
+            4,
+        )
+        .expect("a fragment older than the agent must load");
+
+        // Newer in any component is refused — the asymmetry FR-1l exists for.
+        for ahead in [
+            format!("{}.{}.{}", maj + 1, min, patch),
+            format!("{}.{}.{}", maj, min + 1, patch),
+            format!("{}.{}.{}", maj, min, patch + 1),
+        ] {
+            let mut r = AgentPolicy::new();
+            let err = r
+                .apply_fragment_module("ahead", &module(&ahead), feed, &[], None, truth, 4)
+                .expect_err("a fragment ahead of the agent must be refused");
+            assert!(
+                err.to_string().contains("refusing a fragment written for"),
+                "{}",
+                err
+            );
+        }
+
+        // Absent is legacy and allowed, matching FR-1l: that is every fragment signed before
+        // this check existed, and such a fragment by definition expects nothing newer.
+        let mut s = AgentPolicy::new();
+        s.apply_fragment_module(
+            "silent",
+            &format!(
+                "package agent_policy.fragments[\"{feed}\"]\n\
+                 issuer := \"{truth}\"\nsvn := \"4\"\ncontainers := []\n"
+            ),
+            feed,
+            &[],
+            None,
+            truth,
+            4,
+        )
+        .expect("a fragment that declares no framework_version must load");
+
+        // Explicit but malformed is an error, so a typo cannot pass as "unversioned" — which
+        // is the whole value of treating absent as legacy.
+        let mut t = AgentPolicy::new();
+        let err = t
+            .apply_fragment_module("typo", &module("1.0"), feed, &[], None, truth, 4)
+            .expect_err("a malformed framework_version must not be read as absent");
+        assert!(err.to_string().contains("not a semver"), "{}", err);
     }
 
     /// F-160: a module that fails the self-description check must not have reached the live

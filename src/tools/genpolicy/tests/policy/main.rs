@@ -157,6 +157,19 @@ mod tests {
         }
         let policy = decode_policy(&initdata_anno);
 
+        // FR-1l: every generated policy states the enforcement framework it was written
+        // against. Asserted here rather than in one dedicated case so that it holds for
+        // every resource shape the suite covers, and so that dropping the stamp fails
+        // loudly -- an unstamped policy is treated as legacy and silently skips the
+        // agent's floor, which is precisely the failure this check exists to prevent.
+        assert!(
+            policy.contains(&format!(
+                "framework_version := \"{}\"",
+                genpolicy::policy::POLICY_FRAMEWORK_VERSION
+            )),
+            "generated policy does not declare its framework_version"
+        );
+
         // write policy to a file
         fs::write(workdir.join("policy.rego"), &policy).unwrap();
 
@@ -479,5 +492,59 @@ mod tests {
     #[tokio::test]
     async fn test_create_container_fr16_oci_fields() {
         runtests("createcontainer/fr16").await;
+    }
+
+    /// FR-1l: the version genpolicy stamps must be the version the agent enforces.
+    ///
+    /// The two constants live in different crates on purpose — the agent's is the enforcer,
+    /// genpolicy's is the copy it stamps into every policy, and genpolicy keeps the policy
+    /// crate as a dev-dependency so the generator need not link the policy engine to read
+    /// one string. The cost of that separation is that a drift is silent: nothing in either
+    /// crate's own build can see both. Assert it here, the one place both are in scope.
+    #[test]
+    fn framework_version_matches_the_agent() {
+        assert_eq!(
+            genpolicy::policy::POLICY_FRAMEWORK_VERSION,
+            kata_agent_policy::policy::POLICY_FRAMEWORK_VERSION,
+            "genpolicy stamps a framework_version the agent does not implement; if the agent's \
+             framework version was bumped deliberately, bump genpolicy's constant to match"
+        );
+    }
+
+    /// FR-1l: a policy carrying the stamp genpolicy emits is accepted, and one naming a
+    /// newer framework is refused.
+    ///
+    /// The refusal case is what makes the acceptance meaningful: without it this test would
+    /// still pass if `check_framework_version` were deleted outright. Together they prove
+    /// the floor is armed — before genpolicy emitted the line at all, the gate existed but
+    /// returned `Ok` for every policy we generate, because it read a rule nothing wrote.
+    #[tokio::test]
+    async fn a_stamped_policy_is_accepted_and_a_newer_one_is_refused() {
+        let stamped = |version: &str| {
+            format!("package agent_policy\n\nframework_version := \"{version}\"\n")
+        };
+
+        let mut pol = AgentPolicy::new();
+        pol.set_policy(&stamped(genpolicy::policy::POLICY_FRAMEWORK_VERSION))
+            .await
+            .expect("the agent must accept a policy stamped with the version genpolicy emits");
+
+        // One major ahead of whatever the current version is, so this stays a real test
+        // after a version bump rather than silently becoming an "older policy" case.
+        let ours = genpolicy::policy::POLICY_FRAMEWORK_VERSION;
+        let major: u64 = ours.split('.').next().unwrap().parse().unwrap();
+        let ahead = format!("{}.0.0", major + 1);
+
+        let mut pol = AgentPolicy::new();
+        let err = pol
+            .set_policy(&stamped(&ahead))
+            .await
+            .expect_err("the agent must refuse a policy naming a newer framework than it implements");
+        let err = err.to_string();
+        assert!(
+            err.contains("framework_version"),
+            "refusal must name the framework version as the reason, got: {}",
+            err
+        );
     }
 }
