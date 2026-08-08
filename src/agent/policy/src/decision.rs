@@ -109,17 +109,24 @@ impl DecisionObject {
     /// reasons lead and everything bulkier follows. This is the same ordering the C-ACI
     /// baseline applies when it trims a decision to fit: shed the large context first and
     /// keep the human-readable strings longest.
+    ///
+    /// Both forms carry the phrase "blocked by policy". It is the operator-facing marker
+    /// that a refusal came from the policy engine rather than from an argument check, it
+    /// appears in docs and runbooks, and three test layers match on it -- the deny-all
+    /// mediation sweep asserts it specifically so that a validation error cannot pass for
+    /// enforcement (F-153). Attributability is added to that phrase, not substituted for
+    /// it.
     pub fn explain(&self) -> String {
         if self.reasons.is_empty() {
             return format!(
-                "{} was refused and the active policy provides no reason rule, so the \
-                 specific check that failed is not recoverable. Regenerate the policy with \
-                 a current genpolicy to get attributable denials.",
+                "{} is blocked by policy, and the active policy provides no reason rule, so \
+                 the specific check that failed is not recoverable. Regenerate the policy \
+                 with a current genpolicy to get attributable denials.",
                 self.endpoint
             );
         }
         format!(
-            "{} was refused because no policy container satisfied: {}",
+            "{} is blocked by policy: no policy container satisfied: {}",
             self.endpoint,
             self.reasons.join("; ")
         )
@@ -347,6 +354,39 @@ mod tests {
         );
     }
 
+    /// Every denial must carry the phrase "blocked by policy".
+    ///
+    /// It is the marker that a refusal came from the policy engine rather than from an
+    /// argument check. The deny-all mediation sweep asserts it for exactly that reason, so
+    /// that a validation error cannot masquerade as enforcement and let the sweep pass
+    /// without exercising its enforcement point; e2e stage 08 and the docs match on it too.
+    /// RM-66 replaced it with attributable wording in both branches and nothing caught the
+    /// change until the sweep was run (F-153), so it is asserted here at the source.
+    #[test]
+    fn every_denial_says_blocked_by_policy() {
+        let with_reasons = DecisionObject::for_denial_with_reasons(
+            "CreateContainerRequest",
+            r#"{"container_id":"c1"}"#,
+            vec!["Root.Readonly: request has false, policy accepts {true}".to_string()],
+        )
+        .explain();
+        let without_reasons =
+            DecisionObject::for_denial("CreateContainerRequest", r#"{"container_id":"c1"}"#)
+                .explain();
+
+        for explanation in [&with_reasons, &without_reasons] {
+            assert!(
+                explanation.contains("blocked by policy"),
+                "denial does not say `blocked by policy`, which the mediation sweep and \
+                 e2e stage 08 both match on: {}",
+                explanation
+            );
+        }
+        // Attributability is added to the phrase, not substituted for it.
+        assert!(with_reasons.contains("Root.Readonly"), "{}", with_reasons);
+        assert!(without_reasons.contains("genpolicy"), "{}", without_reasons);
+    }
+
     /// The reasons are carried into the audit record too, not just the returned error.
     #[test]
     fn reasons_are_serialized_into_the_audit_record() {
@@ -376,7 +416,7 @@ mod tests {
 
         // Prose first: containerd truncates, and this is what a human acts on.
         assert!(
-            msg.starts_with("CreateContainerRequest was refused"),
+            msg.starts_with("CreateContainerRequest is blocked by policy"),
             "prose did not lead: {}",
             msg
         );
