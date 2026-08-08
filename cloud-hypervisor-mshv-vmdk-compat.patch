@@ -1,0 +1,68 @@
+diff --git a/arch/src/lib.rs b/arch/src/lib.rs
+index 7e60a406..473c7df0 100644
+--- a/arch/src/lib.rs
++++ b/arch/src/lib.rs
+@@ -126,8 +126,8 @@ pub mod x86_64;
+ pub use x86_64::{
+     _NSIG, CpuidConfig, CpuidFeatureEntry, EntryPoint, arch_memory_regions, configure_system,
+     configure_vcpu, cpu_profile::CpuProfile, generate_common_cpuid, generate_ram_ranges,
+-    get_host_cpu_phys_bits, initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE,
+-    layout::CMDLINE_START, regs,
++    get_host_cpu_phys_bits, get_host_cpu_phys_bits_reduction, initramfs_load_addr, layout,
++    layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, regs,
+ };
+ 
+ /// Safe wrapper for `sysconf(_SC_PAGESIZE)`.
+diff --git a/arch/src/x86_64/mod.rs b/arch/src/x86_64/mod.rs
+index e065b84f..2a7bb70c 100644
+--- a/arch/src/x86_64/mod.rs
++++ b/arch/src/x86_64/mod.rs
+@@ -1539,6 +1539,22 @@ pub fn get_host_cpu_phys_bits(_hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
+     }
+ }
+ 
++pub fn get_host_cpu_phys_bits_reduction(hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
++    // SAFETY: call cpuid with valid leaves
++    #[allow(unused_unsafe)]
++    unsafe {
++        let leaf = x86_64::__cpuid(0x8000_0000);
++        if leaf.eax >= 0x8000_001f
++            && matches!(hypervisor.get_cpu_vendor(), CpuVendor::AMD)
++            && x86_64::__cpuid(0x8000_001f).eax & 0x1 != 0
++        {
++            ((x86_64::__cpuid(0x8000_001f).ebx >> 6) & 0x3f) as u8
++        } else {
++            0
++        }
++    }
++}
++
+ fn update_cpuid_topology(
+     cpuid: &mut Vec<CpuIdEntry>,
+     threads_per_core: u16,
+diff --git a/vmm/src/vm.rs b/vmm/src/vm.rs
+index 12a9fe0a..92879cba 100644
+--- a/vmm/src/vm.rs
++++ b/vmm/src/vm.rs
+@@ -478,7 +478,6 @@ impl VmOps for VmOpsHandler {
+     fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
+         if let Err(vm_device::BusError::MissingAddressRange) = self.mmio_bus.read(gpa, data) {
+             info!("Guest MMIO read from unregistered address 0x{gpa:x}");
+-            data.fill(0xff); // 0xff is sentinel value for invalid reads
+         }
+         Ok(())
+     }
+@@ -527,6 +526,13 @@ impl VmOps for VmOpsHandler {
+ pub fn physical_bits(hypervisor: &dyn hypervisor::Hypervisor, max_phys_bits: u8) -> u8 {
+     let host_phys_bits = get_host_cpu_phys_bits(hypervisor);
+ 
++    #[cfg(feature = "mshv")]
++    let host_phys_bits = if hypervisor.hypervisor_type() == hypervisor::HypervisorType::Mshv {
++        host_phys_bits.saturating_sub(arch::get_host_cpu_phys_bits_reduction(hypervisor))
++    } else {
++        host_phys_bits
++    };
++
+     cmp::min(host_phys_bits, max_phys_bits)
+ }
+ 
