@@ -459,7 +459,10 @@ Go verification path.
 | — | certificate revocation checked during chain validation | **ours only** (`cosesign1go` does no OCSP/CRL) |
 | header SVN and Rego SVN must agree (`svn_ok_if_defined`) | module self-description pinned to the verified envelope (§4.1) | parity — ours also pins the issuer, not just the SVN |
 | concurrent/nested loads rejected (`WithMetadataRollback` transaction lock) | whole load serialized behind `FRAGMENT_LOAD` (§4.1) | parity — we serialize where hcsshim fails closed |
-| framework/API version compatibility (`framework_version`, `api_version`) | — | **hcsshim only** — see F-161; we version by base-policy measurement instead |
+| `framework_version` floor on the base policy (denied if ahead) | `check_framework_version` (§4.14, FR-1l) | parity |
+| policy *must* declare `framework_version`; missing is an error | genpolicy stamps it into every generated policy (§4.14); absent stays legacy-allowed for policies already in the field | parity in effect — the floor is armed for everything we produce; we decline the hard requirement rather than break older policies, which by declaring nothing expect nothing newer |
+| `fragment_framework_version` checked on load (step 5) | `assert_self_description` applies the same floor to the fragment's module (§4.14) | parity |
+| `api_version` + per-endpoint `introducedVersion`/`default_results` | `default XRequest := false` + the FR-7 mediation manifest | parity by other means — same fail-closed outcome, no version to keep in sync |
 | cert chain bounded to 1–100 certs | `did_x509.rs::extract_x5chain` (`MAX_X5CHAIN_CERTS`) | parity — DoS mitigation; same bound as `cosesign1/check.go` |
 
 Deltas that are **not** gates — surface hcsshim has and we do not, none of which is a check we
@@ -500,6 +503,29 @@ one is an error, so a typo cannot be mistaken for "unversioned". `POLICY_FRAMEWO
 is compiled into the agent and bumped when a gate is added that a policy could depend on; it
 is deliberately not the agent version, since two agents may differ in ways policy cannot
 observe.
+
+**The floor has two arms**, both added under F-161.
+
+First, it has a **producer**: `genpolicy` stamps `framework_version` into every policy it
+generates, so the check is armed for the policies we actually ship rather than only for a
+hand-written policy that opts in. The constant is duplicated in `genpolicy::policy` rather
+than imported, because `kata-agent-policy` is a dev-dependency there and linking the policy
+engine into a host-side generator to read one string is not a trade worth making; the two are
+held equal by `framework_version_matches_the_agent` in genpolicy's `tests/policy`, where both
+crates are in scope, and every generation case in that suite asserts the stamp is present. We
+still treat an absent declaration as legacy rather than requiring it as hcsshim does: policies
+generated before this change are in the field, and refusing them would break compatibility
+without buying anything, since a policy that declares nothing expects nothing newer.
+
+Second, it covers **fragments as well as the base policy**. `check_framework_version` runs
+from `set_policy` and reads `data.agent_policy.framework_version`, while a fragment's module
+lands under `data.agent_policy.fragments.<feed>` — so `assert_self_description` applies the
+same rule to the fragment's own module at load time, mirroring hcsshim's
+`fragment_framework_version` (step 5 of `load_fragment`). This matters because a fragment is
+the only policy input that is neither measured nor default-denied, so its author has no other
+way to state what it needs. Exposure was nil in practice — fragments contribute `containers`
+and nothing else (§4.1), and an unread *permission* is a denial — but the gate is what keeps
+that true if a fragment ever expresses a restriction.
 
 ### 4.13 Parameterised fragments (FR-1k)
 

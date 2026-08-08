@@ -888,7 +888,15 @@ impl AgentPolicy {
         };
 
         let json_data = serde_json::to_string_pretty(&policy_data).unwrap();
-        let policy = format!("{}\npolicy_data := {json_data}", &self.rules);
+        // FR-1l: state the enforcement framework this policy was generated against, so the
+        // agent's `check_framework_version` floor refuses to enforce it on an older build
+        // that lacks gates the policy names. Absent is legal (legacy), which is what every
+        // policy generated before this emitted, so the only thing that changes is that ours
+        // are no longer legacy.
+        let policy = format!(
+            "{}\nframework_version := \"{}\"\npolicy_data := {json_data}",
+            &self.rules, POLICY_FRAMEWORK_VERSION,
+        );
         let mut initdata = self.config.initdata.clone();
         initdata.insert_data("policy.rego", policy.clone());
         let encoded = kata_types::initdata::encode_initdata(&initdata);
@@ -1639,6 +1647,16 @@ fn default_image_layer_verification() -> String {
 
 pub const IMAGE_LAYER_VERIFICATION_NONE: &str = "none";
 pub const IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY: &str = "host-erofs-dm-verity";
+
+/// FR-1l: the enforcement framework version emitted into every generated policy.
+///
+/// Must equal `kata_agent_policy::policy::POLICY_FRAMEWORK_VERSION`; that crate is only a
+/// dev-dependency here, because linking the agent's policy engine (and regorus with it)
+/// into a host-side generator to read one string is not a trade worth making. The
+/// equality is asserted instead by `framework_version_matches_the_agent` in
+/// `tests/policy`, where both crates are in scope, so a drift fails the build rather than
+/// producing policies that claim a floor the agent does not recognise.
+pub const POLICY_FRAMEWORK_VERSION: &str = "1.0.0";
 
 /// Marker driver for a declared EROFS lower layer.
 ///
