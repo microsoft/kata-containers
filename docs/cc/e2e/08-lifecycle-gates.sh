@@ -189,10 +189,16 @@ start_pod() {
 }
 
 # ------------------------------------------------------------------ discovery
-# The agent listens on vsock port 1024 inside the guest. Reaching it needs the
-# sandbox's guest CID, which only the hypervisor process knows, and the container
-# id the agent knows -- which is the CRI container id, not anything kubectl prints
-# by default.
+# The agent listens on vsock port 1024 inside the guest. Reaching it needs an
+# address only the hypervisor side knows, and the container id the agent knows --
+# which is the CRI container id, not anything kubectl prints by default.
+#
+# The address is not the same shape on both platforms. QEMU gives the guest a
+# real AF_VSOCK context id, so the host dials vsock://<cid>:1024. Cloud
+# Hypervisor uses hybrid vsock instead: there is no host-visible CID, and the
+# guest is reached through a unix socket that the shim creates per sandbox.
+# agent_addr() therefore returns a whole server address rather than a CID, so
+# the call sites below stay identical on both.
 
 # sandbox_id <pod>
 # Read it off the pod's workload container rather than looking for a sandbox
@@ -209,9 +215,24 @@ sandbox_id() {
   echo "$sb"
 }
 
-# guest_cid <sandbox-id>
-guest_cid() {
-  ps -ef | grep "[s]andbox-$1" | sed -n 's/.*guest-cid=\([0-9]*\).*/\1/p' | head -1
+# agent_addr <sandbox-id> -- the server address to reach that sandbox's agent
+agent_addr() {
+  local sb=$1 sock
+  if [ "$E2E_PLATFORM" = "clh-snp" ]; then
+    # The shim names this per sandbox under /run/kata. Wait for it: the pod can
+    # report Running a moment before the socket is observable to us.
+    sock="/run/kata/$sb/ch-vm.sock"
+    local i
+    for i in $(seq 1 20); do
+      sudo test -S "$sock" && { echo "unix://$sock"; return 0; }
+      sleep 1
+    done
+    return 1
+  fi
+  local cid
+  cid=$(ps -ef | grep "[s]andbox-$sb" | sed -n 's/.*guest-cid=\([0-9]*\).*/\1/p' | head -1)
+  [ -n "$cid" ] || return 1
+  echo "vsock://$cid:1024"
 }
 
 # container_id <pod> [container-name]
@@ -235,18 +256,26 @@ container_terminated() {
     2>/dev/null | grep -qx 0
 }
 
-# agent_call <cid> <command-string> -- returns the agent's reply (or error) on stdout
+# agent_call <address> <command-string> -- returns the agent's reply (or error) on stdout
+# A unix:// address is a hybrid vsock socket, not a plain domain socket, and
+# agent-ctl only treats it as one when told to.
+agent_hvsock_flag() {
+  case "$1" in unix://*) printf '%s' "--hybrid-vsock true" ;; *) printf '%s' "" ;; esac
+}
+
 agent_call() {
-  local cid=$1 cmd=$2
-  sudo "$CTL" -l error connect --server-address "vsock://$cid:1024" -n true -c "$cmd" 2>&1
+  local addr=$1 cmd=$2
+  # shellcheck disable=SC2046  # the flag is deliberately word-split (it is empty on qemu)
+  sudo "$CTL" -l error connect --server-address "$addr" $(agent_hvsock_flag "$addr") -n true -c "$cmd" 2>&1
 }
 
 # Same, but at info level, so a *successful* reply is visible ("response
 # received"). Refusals are proved by their ttrpc status and need only -l error;
 # successes have no output at that level at all.
 agent_call_verbose() {
-  local cid=$1 cmd=$2
-  sudo "$CTL" -l info connect --server-address "vsock://$cid:1024" -n true -c "$cmd" 2>&1
+  local addr=$1 cmd=$2
+  # shellcheck disable=SC2046
+  sudo "$CTL" -l info connect --server-address "$addr" $(agent_hvsock_flag "$addr") -n true -c "$cmd" 2>&1
 }
 
 # expect_refusal <label> <output> <expected-code> <expected-substring>
@@ -270,15 +299,15 @@ step "08 — reference policy (what a real workload sees)"
 start_pod fr9-reference "$REF_RULES"
 
 REF_SB=$(sandbox_id fr9-reference)   || die "could not find the sandbox for fr9-reference"
-REF_CID=$(guest_cid "$REF_SB")
+REF_AGENT=$(agent_addr "$REF_SB")
 REF_CT=$(container_id fr9-reference)
-[ -n "$REF_CID" ] || die "could not read the guest CID for sandbox $REF_SB"
+[ -n "$REF_AGENT" ] || die "could not work out the agent address for sandbox $REF_SB"
 [ -n "$REF_CT" ]  || die "could not read the container id for fr9-reference"
-log "sandbox=${REF_SB:0:12} cid=$REF_CID container=${REF_CT:0:12}"
+log "sandbox=${REF_SB:0:12} agent=$REF_AGENT container=${REF_CT:0:12}"
 
 # Connectivity first: if this fails the later refusals prove nothing, because an
 # unreachable agent also "refuses" everything.
-agent_call "$REF_CID" Check | grep -qi 'error' \
+agent_call "$REF_AGENT" Check | grep -qi 'error' \
   && die "cannot reach the agent over vsock -- the rest of this stage would be meaningless"
 ok "08-pre — agent reachable over vsock (the host can bypass the shim; that is the threat model)"
 
@@ -286,7 +315,7 @@ ok "08-pre — agent reachable over vsock (the host can bypass the shim; that is
 # The one FR-9 property visible under a real policy. The container is in policy
 # state, so StartContainerRequest is *allowed*; the only thing that can refuse a
 # second start is the occurrence machine.
-out=$(agent_call "$REF_CID" "StartContainer json://{\"container_id\":\"$REF_CT\"}")
+out=$(agent_call "$REF_AGENT" "StartContainer json://{\"container_id\":\"$REF_CT\"}")
 expect_refusal "08a — a second StartContainer is refused by the occurrence machine (IllegalTransition from Running), not by policy" \
   "$out" FAILED_PRECONDITION 'IllegalTransition'
 
@@ -295,7 +324,7 @@ expect_refusal "08a — a second StartContainer is refused by the occurrence mac
 # first and the occurrence gate is never reached. This is the expected order --
 # it is recorded so that a future change that lets an unknown id past the policy
 # is caught here rather than silently relying on FR-9 to catch it.
-out=$(agent_call "$REF_CID" 'StartContainer json://{"container_id":"ghost-never-created"}')
+out=$(agent_call "$REF_AGENT" 'StartContainer json://{"container_id":"ghost-never-created"}')
 expect_refusal "08b — under the reference policy an unknown container id is refused by policy first (occurrence gate is defence in depth)" \
   "$out" PERMISSION_DENIED 'was refused'
 
@@ -305,11 +334,11 @@ expect_refusal "08b — under the reference policy an unknown container id is re
 # signals -- while admitting them lets a malicious host freeze any workload process
 # indefinitely and single-step it for timing observation. 19 and 18 were inherited
 # from upstream's list; these two cases keep them out.
-out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":19}")
+out=$(agent_call "$REF_AGENT" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":19}")
 expect_refusal "08k — SIGSTOP(19) is refused by policy (F-77: the host cannot freeze a workload)" \
   "$out" PERMISSION_DENIED 'was refused'
 
-out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":18}")
+out=$(agent_call "$REF_AGENT" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":18}")
 expect_refusal "08l — SIGCONT(18) is refused by policy (F-77)" \
   "$out" PERMISSION_DENIED 'was refused'
 
@@ -324,7 +353,7 @@ expect_refusal "08l — SIGCONT(18) is refused by policy (F-77)" \
 #
 # The pause container is addressed by the sandbox id: containerd creates a pod's
 # sandbox container with the sandbox id as its container id.
-out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":28}")
+out=$(agent_call "$REF_AGENT" "SignalProcess json://{\"container_id\":\"$REF_CT\",\"exec_id\":\"\",\"signal\":28}")
 if echo "$out" | grep -q 'was refused'; then
   echo "$out" | tail -3
   fail_case "08m — SIGWINCH(28) should be allowed for the workload container"
@@ -332,7 +361,7 @@ else
   ok "08m — SIGWINCH(28) is allowed for the workload container (positive control for 08n)"
 fi
 
-out=$(agent_call "$REF_CID" "SignalProcess json://{\"container_id\":\"$REF_SB\",\"exec_id\":\"\",\"signal\":28}")
+out=$(agent_call "$REF_AGENT" "SignalProcess json://{\"container_id\":\"$REF_SB\",\"exec_id\":\"\",\"signal\":28}")
 expect_refusal "08n — the same SIGWINCH(28) is refused for the pause container of the same sandbox (F-76: per-container signal sets)" \
   "$out" PERMISSION_DENIED 'was refused'
 
@@ -356,7 +385,7 @@ expect_refusal "08n — the same SIGWINCH(28) is refused for the pause container
 # existed there is nothing to unmount, so the tool exits ENOENT even though the
 # agent answered Ok. That client-side noise is reached only after a successful
 # reply, but grepping for "error" would score it as a failure.
-out=$(agent_call_verbose "$REF_CID" 'RemoveContainer json://{"container_id":"ghost-never-created"}')
+out=$(agent_call_verbose "$REF_AGENT" 'RemoveContainer json://{"container_id":"ghost-never-created"}')
 if echo "$out" | grep -q 'response received'; then
   ok "08o — RemoveContainer for a never-created id succeeds as a no-op (RM-26)"
 else
@@ -367,7 +396,7 @@ fi
 # The no-op still burns the id, so removal stays single-shot however it was
 # admitted (RM-20). A second attempt now carries a tombstone and must be refused
 # -- that is what stops 08o from becoming a general "remove any id" hole.
-out=$(agent_call "$REF_CID" 'RemoveContainer json://{"container_id":"ghost-never-created"}')
+out=$(agent_call "$REF_AGENT" 'RemoveContainer json://{"container_id":"ghost-never-created"}')
 expect_refusal "08p — the second RemoveContainer for the same id is refused: the no-op tombstoned it (RM-20 preserved)" \
   "$out" PERMISSION_DENIED 'was refused'
 
@@ -379,18 +408,18 @@ make_permissive_rules
 POD_WITH_EXITER=1 start_pod fr9-permissive "$WORK/permissive.rego"
 
 P_SB=$(sandbox_id fr9-permissive) || die "could not find the sandbox for fr9-permissive"
-P_CID=$(guest_cid "$P_SB")
+P_AGENT=$(agent_addr "$P_SB")
 P_CT=$(container_id fr9-permissive)
-[ -n "$P_CID" ] || die "could not read the guest CID for sandbox $P_SB"
+[ -n "$P_AGENT" ] || die "could not work out the agent address for sandbox $P_SB"
 [ -n "$P_CT" ]  || die "could not read the container id for fr9-permissive"
-log "sandbox=${P_SB:0:12} cid=$P_CID container=${P_CT:0:12}"
+log "sandbox=${P_SB:0:12} agent=$P_AGENT container=${P_CT:0:12}"
 
 # Prove the fixture actually neutralised the policy, otherwise every case below
 # would "pass" for the wrong reason. A signal 0 to the live container is allowed
 # by the permissive rule *and* by the occurrence machine, so it must succeed --
 # under the reference policy this same call is refused (signal 0 is not in
 # allowed_signals).
-out=$(agent_call "$P_CID" "SignalProcess json://{\"container_id\":\"$P_CT\",\"exec_id\":\"$P_CT\",\"signal\":0}")
+out=$(agent_call "$P_AGENT" "SignalProcess json://{\"container_id\":\"$P_CT\",\"exec_id\":\"$P_CT\",\"signal\":0}")
 if echo "$out" | grep -q 'was refused'; then
   die "the permissive fixture did not take -- policy is still refusing, so 08c-08f would prove nothing"
 fi
@@ -399,22 +428,22 @@ ok "08-pre — the lifecycle endpoints are policy-permissive on this pod"
 # --- 08c/08d/08e -------------------------------------------------------------
 # With policy out of the way, an id the enforcer never minted an occurrence for
 # must still be refused -- by the occurrence machine, with UnknownAlias.
-out=$(agent_call "$P_CID" 'StartContainer json://{"container_id":"ghost-never-created"}')
+out=$(agent_call "$P_AGENT" 'StartContainer json://{"container_id":"ghost-never-created"}')
 expect_refusal "08c — StartContainer on a never-created id is refused by the occurrence machine (UnknownAlias)" \
   "$out" FAILED_PRECONDITION 'UnknownAlias'
 
-out=$(agent_call "$P_CID" 'SignalProcess json://{"container_id":"ghost-never-created","exec_id":"ghost","signal":15}')
+out=$(agent_call "$P_AGENT" 'SignalProcess json://{"container_id":"ghost-never-created","exec_id":"ghost","signal":15}')
 expect_refusal "08d — SignalProcess on a never-created id is refused by the occurrence machine (UnknownAlias)" \
   "$out" FAILED_PRECONDITION 'UnknownAlias'
 
-out=$(agent_call "$P_CID" 'ExecProcess json://{"container_id":"ghost-never-created","exec_id":"x1"}')
+out=$(agent_call "$P_AGENT" 'ExecProcess json://{"container_id":"ghost-never-created","exec_id":"x1"}')
 expect_refusal "08e — ExecProcess on a never-created id is refused by the occurrence machine (UnknownAlias)" \
   "$out" FAILED_PRECONDITION 'UnknownAlias'
 
 # --- 08f ---------------------------------------------------------------------
 # The double start again, this time with the policy layer removed: the refusal
 # can only be coming from the lifecycle machine.
-out=$(agent_call "$P_CID" "StartContainer json://{\"container_id\":\"$P_CT\"}")
+out=$(agent_call "$P_AGENT" "StartContainer json://{\"container_id\":\"$P_CT\"}")
 expect_refusal "08f — a second StartContainer is refused even with policy neutralised (IllegalTransition)" \
   "$out" FAILED_PRECONDITION 'IllegalTransition'
 
@@ -441,7 +470,7 @@ log "exited container=${X_CT:0:12}"
 # Give it a moment rather than racing it.
 sleep 3
 
-out=$(agent_call "$P_CID" "ExecProcess json://{\"container_id\":\"$X_CT\",\"exec_id\":\"post-exit\"}")
+out=$(agent_call "$P_AGENT" "ExecProcess json://{\"container_id\":\"$X_CT\",\"exec_id\":\"post-exit\"}")
 if echo "$out" | grep -q 'code: FAILED_PRECONDITION' \
    && echo "$out" | grep -qE 'IllegalTransition|UnknownAlias'; then
   # Which of the two appears says *who* retired the occurrence, and both are the
