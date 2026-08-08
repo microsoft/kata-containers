@@ -445,6 +445,44 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     result
 }
 
+// FR-7 (F-79) fallout: a strict build routes the agent's log stream into a sink, so the
+// `error!` that precedes each fatal startup abort below produces *no output at all* —
+// and because `kata-agent.service` carries `FailureAction=poweroff`, the VM then shuts
+// down silently. The observable symptom is a guest that powers off a few seconds into
+// boot having said nothing, which is close to undebuggable: it took days to attribute one
+// such abort to a missing kernel config option (RM-68).
+//
+// Emit a short reason straight to stderr as well, which reaches the guest console and
+// bypasses the sink entirely. What is disclosed is a fixed `&'static str` chosen at the
+// call site — never policy content, measurement values, or any formatted error — so this
+// adds nothing a host cannot already infer from the fact that the VM aborted at all,
+// while turning a silent poweroff into a one-line diagnosis.
+#[cfg(any(feature = "agent-policy", feature = "strict-policy"))]
+fn fatal_reason_line(reason: &'static str) -> String {
+    format!("kata-agent: fatal: {}; aborting VM\n", reason)
+}
+
+#[cfg(any(feature = "agent-policy", feature = "strict-policy"))]
+fn emit_fatal_reason(reason: &'static str) {
+    // Deliberately a raw, unbuffered write rather than a logger: `abort()` raises SIGABRT,
+    // which does not run destructors or flush buffered writers.
+    use std::io::Write;
+    let mut err = std::io::stderr();
+    let _ = err.write_all(fatal_reason_line(reason).as_bytes());
+    let _ = err.flush();
+}
+
+/// Abort the process (and so the VM) after a fatal startup failure.
+///
+/// The brief sleep gives a non-strict build's asynchronous logger a chance to drain before
+/// SIGABRT; the console line is written synchronously beforehand, so it survives regardless.
+#[cfg(any(feature = "agent-policy", feature = "strict-policy"))]
+async fn fatal_abort(reason: &'static str) -> ! {
+    emit_fatal_reason(reason);
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    std::process::abort();
+}
+
 #[instrument]
 async fn start_sandbox(
     logger: &Logger,
@@ -482,9 +520,7 @@ async fn start_sandbox(
     if let Err(e) = initialize_policy().await {
         error!(logger, "Failed to initialize agent policy: {:?}", e);
         // Continuing execution without a security policy could be dangerous.
-        // Give a brief moment for the logs to flush, then abort the process to stop the VM.
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        std::process::abort();
+        fatal_abort("agent policy failed to initialize").await;
     }
 
     let sandbox = Arc::new(Mutex::new(s));
@@ -529,8 +565,7 @@ async fn start_sandbox(
                     logger,
                     "FR-2: initdata does not match the launch measurement, aborting VM: {:?}", e
                 );
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                std::process::abort();
+                fatal_abort("initdata does not match the launch measurement (FR-2)").await;
             }
         }
     }
@@ -563,8 +598,7 @@ async fn start_sandbox(
                 logger,
                 "SRM trust root is present but unusable, aborting VM: {:?}", e
             );
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            std::process::abort();
+            fatal_abort("SRM trust root is present but unusable (RM-36)").await;
         }
     }
 
@@ -622,8 +656,7 @@ async fn start_sandbox(
                 logger,
                 "FR-1/BL-8: could not read declared policy fragments, aborting VM: {:?}", e
             );
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            std::process::abort();
+            fatal_abort("could not read declared policy fragments (FR-1/BL-8)").await;
         }
     }
 
@@ -1518,6 +1551,29 @@ mod tests {
         assert!(
             resolved.is_none(),
             "the host redirected the fragment issuer trust root at a file it planted"
+        );
+    }
+
+    // FR-7 (F-79) leaves a strict build with no host-visible log stream, so the `error!`
+    // preceding each fatal startup abort is swallowed and the VM just powers off. The
+    // console line below is the only thing that survives that, so pin its shape: a stable,
+    // greppable prefix, and nothing in it but the fixed reason handed in at the call site.
+    #[cfg(any(feature = "agent-policy", feature = "strict-policy"))]
+    #[test]
+    fn test_fatal_reason_line() {
+        let line = fatal_reason_line("initdata does not match the launch measurement (FR-2)");
+        assert_eq!(
+            line,
+            "kata-agent: fatal: initdata does not match the launch measurement (FR-2); \
+             aborting VM\n"
+        );
+        assert!(
+            line.starts_with("kata-agent: fatal: "),
+            "the prefix is what an operator greps a guest console for"
+        );
+        assert!(
+            line.ends_with('\n'),
+            "an unterminated line can be lost in console output interleaving"
         );
     }
 
