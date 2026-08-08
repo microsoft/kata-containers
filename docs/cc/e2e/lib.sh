@@ -342,7 +342,10 @@ load_toolchain() {
 registry_up() {
   local addr="$1" port="${1##*:}"
 
-  curl -fsS "http://$addr/v2/" >/dev/null 2>&1 && return 0
+  # --max-time, because a wedged registry is the interesting case: the one below
+  # kept its listener open and accepted connections while every handler blocked,
+  # so a probe without a deadline hangs here instead of rebuilding it.
+  curl -fsS --max-time 5 "http://$addr/v2/" >/dev/null 2>&1 && return 0
   log "starting a local OCI registry at $addr"
 
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -369,7 +372,16 @@ registry_up() {
     # of --restart, so a reboot does drop the registry; the curl probe at the top
     # is what makes that recoverable rather than silent.
     sudo mkdir -p /var/lib/coco-e2e-registry || die "could not create registry state dir"
+    # --log-uri is not optional. `ctr run -d` without it leaves stdout on a FIFO
+    # that nothing drains, so the registry runs until its logging fills the 64 KiB
+    # pipe buffer and then blocks in pipe_write forever. Because that happens in
+    # the logging path, which holds a lock the request handlers need, the symptom
+    # is not a dead container: the listener stays open and connections are still
+    # accepted, they simply never get answered. That reads as "the registry is up
+    # but delivery hangs", and it strands stage 07 in FailedCreatePodSandBox
+    # minutes later with diagnostics pointing at the fragment machinery.
     sudo ctr $ns run -d --net-host \
+      --log-uri "file:///var/log/coco-e2e-registry.log" \
       --env "REGISTRY_HTTP_ADDR=0.0.0.0:$port" \
       --mount "type=bind,src=/var/lib/coco-e2e-registry,dst=/var/lib/registry,options=rbind:rw" \
       "$img" coco-e2e-registry >/dev/null \
@@ -378,7 +390,7 @@ registry_up() {
     die "no container engine available to host the local registry at $addr"
   fi
 
-  wait_for 60 "registry $addr responding" curl -fsS "http://$addr/v2/"
+  wait_for 60 "registry $addr responding" curl -fsS --max-time 5 "http://$addr/v2/"
 }
 
 # Only the binary is branch-built. The settings and rules under /opt/kata are
