@@ -2658,23 +2658,38 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "load_policy_fragment", req);
         is_allowed(&req).await?;
 
-        let policy_module = if req.policy_module.is_empty() {
-            None
-        } else {
-            Some(String::from_utf8(req.policy_module.clone()).map_err(|e| {
-                ttrpc_error(
-                    ttrpc::Code::INVALID_ARGUMENT,
-                    format!("policy_module not UTF-8: {e}"),
-                )
-            })?)
-        };
-        // BL-8: an hcsshim-shaped push carries only the COSE envelope — the host fetched
-        // bytes it cannot read. Derive the signed fields from the envelope itself rather
-        // than making the caller restate them. Verification binds the two either way
-        // (`verify_cose` requires the payload to equal `signing_bytes()`), so this removes
-        // a needless failure mode, not a check. The receipt fields are not covered by the
-        // issuer signature, so they must still come from the request.
-        let fragment = if req.issuer.is_empty() && !req.cose_sign1.is_empty() {
+        // F-151: a fragment must arrive as a COSE_Sign1 envelope, and may not be described
+        // by the caller. runtime-rs -- the only production courier -- carries nothing else:
+        // its LoadPolicyFragmentRequest holds the envelope and the receipt fields and
+        // deliberately no issuer/feed/SVN, "so the host cannot describe a fragment into
+        // being something it is not". Honouring the described fields anyway made the guest's
+        // acceptance strictly broader than the courier's expression, and the party on the
+        // other end of this socket is the untrusted host.
+        //
+        // This was never a signature bypass -- a described fragment still had to carry a
+        // valid issuer signature over the statement, which the host cannot forge. What it
+        // cost was format surface: the bespoke signable statement exists only to give an
+        // envelope-free path something to sign.
+        if req.cose_sign1.is_empty() {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                "policy fragment must carry a cose_sign1 envelope".to_string(),
+            ));
+        }
+        if let Some(name) = caller_described_fragment_field(&req) {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                format!(
+                    "policy fragment field {name:?} is derived from the cose_sign1 envelope \
+                     and must not be set by the caller"
+                ),
+            ));
+        }
+
+        // Everything the issuer signed comes out of the envelope. The receipt fields are not
+        // covered by the issuer signature -- they are countersignatures over the same
+        // statement -- so they still come from the request and are verified separately.
+        let fragment = {
             let mut f = kata_security_reference_monitor::PolicyFragment::from_cose_envelope(
                 &req.cose_sign1,
             )
@@ -2689,57 +2704,18 @@ impl agent_ttrpc::AgentService for AgentService {
             f.receipt_proof = (!req.receipt_proof.is_empty()).then(|| req.receipt_proof.clone());
             f.extra_receipts = parse_extra_receipts(&req.extra_receipts)?;
             f
-        } else {
-            kata_security_reference_monitor::PolicyFragment {
-                issuer: req.issuer.clone(),
-                feed: req.feed.clone(),
-                svn: req.svn,
-                grants: req.grants.to_vec(),
-                policy_module: policy_module.clone(),
-                includes: req.includes.to_vec(),
-                requires: req.requires.to_vec(),
-                receipt: if req.receipt.is_empty() {
-                    None
-                } else {
-                    Some(req.receipt.clone())
-                },
-                receipt_ledger: if req.receipt_ledger.is_empty() {
-                    None
-                } else {
-                    Some(req.receipt_ledger.clone())
-                },
-                prev_log_head: if req.prev_log_head.is_empty() {
-                    None
-                } else {
-                    Some(req.prev_log_head.clone())
-                },
-                receipt_proof: if req.receipt_proof.is_empty() {
-                    None
-                } else {
-                    Some(req.receipt_proof.clone())
-                },
-                signature: req.signature.clone(),
-                extra_receipts: parse_extra_receipts(&req.extra_receipts)?,
-            }
         };
 
         // FR-1a: verify → apply → commit, atomically. Verification does not mutate the
         // fragment store; the module is applied to the live policy engine only after it
         // verifies, and the store's SVN/grant state is committed only after the apply
         // succeeds. A failed apply leaves both the engine and the store unchanged.
-        // FR-1h: if a COSE_Sign1 envelope is presented, verify through the COSE path.
         // FR-1d: if the envelope carries an x5chain (or x509 is required), verify the
         // did:x509 certificate-chain identity. Routing is deterministic and offers no
         // downgrade: an x5chain-bearing envelope is always verified as x509.
         let verified = {
             let store = crate::FRAGMENTS.lock().await;
-            let r = if req.cose_sign1.is_empty() {
-                if store.require_x509() {
-                    Err(kata_security_reference_monitor::FragmentError::UntrustedCa)
-                } else {
-                    store.verify(&fragment)
-                }
-            } else if store.require_x509()
+            let r = if store.require_x509()
                 || (store.has_did_x509_anchors()
                     && kata_security_reference_monitor::did_x509::cose_has_x5chain(&req.cose_sign1))
             {
@@ -2967,6 +2943,36 @@ impl health_ttrpc::Health for HealthService {
 /// than skipped: dropping it would quietly weaken a conjunctive requirement into one the
 /// remaining receipts happen to satisfy.
 #[cfg(feature = "strict-policy")]
+/// F-151: the name of the first signed field the caller tried to describe, if any.
+///
+/// Every field here is covered by the issuer signature and is derived from the COSE_Sign1
+/// envelope, so a caller setting one is either confused or probing. Reject rather than
+/// ignore: silently dropping the value would leave the caller believing it had constrained
+/// a fragment it had not, which is the worse of the two failures.
+///
+/// `svn` is checked against 0 rather than emptiness because it is a scalar, and 0 is also
+/// the proto default -- an unset field and an explicit `svn = 0` are indistinguishable on
+/// the wire. That costs nothing: SVN 0 is below every floor, so a fragment claiming it
+/// cannot be accepted through any path.
+#[cfg(feature = "strict-policy")]
+fn caller_described_fragment_field(
+    req: &protocols::agent::LoadPolicyFragmentRequest,
+) -> Option<&'static str> {
+    [
+        ("issuer", !req.issuer.is_empty()),
+        ("feed", !req.feed.is_empty()),
+        ("svn", req.svn != 0),
+        ("grants", !req.grants.is_empty()),
+        ("signature", !req.signature.is_empty()),
+        ("policy_module", !req.policy_module.is_empty()),
+        ("includes", !req.includes.is_empty()),
+        ("requires", !req.requires.is_empty()),
+        ("prev_log_head", !req.prev_log_head.is_empty()),
+    ]
+    .into_iter()
+    .find_map(|&(name, present)| present.then_some(name))
+}
+
 fn parse_extra_receipts(entries: &[String]) -> ttrpc::Result<Vec<(String, String)>> {
     entries
         .iter()
@@ -4105,6 +4111,57 @@ async fn cdh_handler_sealed_secrets(oci: &mut Spec) -> Result<()> {
 #[cfg(test)]
 #[allow(dead_code)]
 mod tests {
+
+    /// F-151: every signed field must be refused if the caller tries to describe it.
+    ///
+    /// Exhaustive by construction: the list is rebuilt from the same field set the guest
+    /// checks, and a field added to the request without being added to the check would
+    /// leave a host-describable field honoured again -- the exact regression this closes.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn every_signed_fragment_field_is_refused_from_the_caller() {
+        use protocols::agent::LoadPolicyFragmentRequest as R;
+
+        let described: Vec<(&str, Box<dyn Fn(&mut R)>)> = vec![
+            ("issuer", Box::new(|r: &mut R| r.issuer = "did:x509:0:a::b".into())),
+            ("feed", Box::new(|r: &mut R| r.feed = "contoso.io/frag".into())),
+            ("svn", Box::new(|r: &mut R| r.svn = 3)),
+            ("grants", Box::new(|r: &mut R| r.grants = vec!["g".into()])),
+            ("signature", Box::new(|r: &mut R| r.signature = vec![1, 2, 3])),
+            ("policy_module", Box::new(|r: &mut R| r.policy_module = b"package p".to_vec())),
+            ("includes", Box::new(|r: &mut R| r.includes = vec!["exec".into()])),
+            ("requires", Box::new(|r: &mut R| r.requires = vec!["a/b/1".into()])),
+            ("prev_log_head", Box::new(|r: &mut R| r.prev_log_head = vec![9])),
+        ];
+
+        for (name, set) in described {
+            let mut req = R::new();
+            req.cose_sign1 = vec![0xd2, 0x84]; // shape is irrelevant; the check precedes decoding
+            set(&mut req);
+            assert_eq!(
+                caller_described_fragment_field(&req),
+                Some(name),
+                "field `{name}` was accepted from the caller, so the guest still honours a \
+                 shape runtime-rs cannot send"
+            );
+        }
+    }
+
+    /// The courier's own shape must pass: envelope plus the receipt fields, nothing else.
+    /// Receipts are countersignatures over the statement rather than part of it, so they
+    /// are legitimately caller-supplied and must not be swept up by the same check.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn the_runtime_rs_request_shape_is_accepted() {
+        use protocols::agent::LoadPolicyFragmentRequest as R;
+        let mut req = R::new();
+        req.cose_sign1 = vec![0xd2, 0x84];
+        req.receipt = "r1".into();
+        req.receipt_ledger = "ledger-a".into();
+        req.receipt_proof = "{}".into();
+        req.extra_receipts = vec!["ledger-b=aabb".into()];
+        assert_eq!(caller_described_fragment_field(&req), None);
+    }
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;

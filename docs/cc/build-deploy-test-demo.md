@@ -212,8 +212,11 @@ Generic recipe (adapt injection to your image/deploy mechanism):
 # a) put the measured config + (optionally) the freshly built agent into the guest rootfs image
 # b) deploy a pod with runtimeClassName: <strict class> and a base policy annotation
 # c) drive it:
+# The fragment is carried entirely by the COSE_Sign1 envelope, exactly as runtime-rs
+# sends it: issuer, feed, SVN, grants, includes, requires and the module all come from
+# the envelope the guest verifies. Describing any of them is refused (F-151).
 kata-agent-ctl connect --server-address vsock://<GUEST_CID>:1024 \
-  -c "LoadPolicyFragment issuer=issuerA svn=1 includes=exec module=/path/frag.rego sig=<hex> \
+  -c "LoadPolicyFragment cose=<cose_sign1_hex> \
       receipt_ledger=acl proof=</path/receipt-file>"
 ```
 
