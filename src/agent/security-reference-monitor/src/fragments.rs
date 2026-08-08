@@ -957,13 +957,31 @@ impl FragmentStore {
 
     /// FR-1e: declare an accepted `(issuer, feed)` pair with its SVN floor (from measured
     /// state). A fragment whose `(issuer, feed)` is not declared is rejected.
+    ///
+    /// **Raise-only** (F-165). Two measured sources declare feeds into this map, in a fixed
+    /// order: the trust root at boot (`seed_fragment_trust_root`, from the operator's
+    /// attested issuer config) and then the base policy (`record_declared_fragments`, from
+    /// the per-pod `policy_fragments[]`). Both use the same key, so a plain `insert` let the
+    /// second silently discard the first — a per-pod declaration could drop the operator's
+    /// anti-rollback floor for a feed and admit a genuinely signed but superseded fragment.
+    ///
+    /// Neither input is host-controlled, so this was not remotely exploitable; it is a
+    /// weakening of the trust hierarchy between two *differently authored* measured
+    /// artifacts, and the floor is exactly the control an operator raises to retire a
+    /// vulnerable fragment version. Keeping the stricter value makes the invariant the code
+    /// already claimed — "a per-feed floor may raise the bar, never lower it" — true of the
+    /// declaration order as well as of the issuer/feed relationship, and makes it hold for
+    /// any future third declarer without that caller having to remember.
     pub fn declare_feed(
         &mut self,
         issuer: impl Into<String>,
         feed: impl Into<String>,
         min_svn: u64,
     ) {
-        self.feeds.insert((issuer.into(), feed.into()), min_svn);
+        self.feeds
+            .entry((issuer.into(), feed.into()))
+            .and_modify(|floor| *floor = (*floor).max(min_svn))
+            .or_insert(min_svn);
     }
 
     /// FR-1c: grant the policy namespaces a `(issuer, feed)` may contribute a module to,
@@ -2566,6 +2584,61 @@ mod tests {
         ));
 
         let mut at_floor = frag_feed("issuerA", "prod", 5);
+        assert!(load(&mut store, &sk, &at_floor).is_ok());
+    }
+
+    /// F-165 (FR-1e/FR-1i): a later feed declaration may raise the floor, never lower it.
+    ///
+    /// Three sources declare feeds into this map. Two are measured, in a fixed order: the
+    /// trust root at boot (`seed_fragment_trust_root`, from the operator's attested
+    /// `fragment-issuers.toml`), then the base policy (`record_declared_fragments`, from
+    /// the per-pod `policy_fragments[]`). The third is **not** measured:
+    /// `register_nested_fragments` declares feeds carried in a delivered fragment's own
+    /// signed module. All three used the same key, so a plain `insert` let a later one
+    /// silently discard an earlier floor.
+    ///
+    /// The nested path is the sharper of the two. Its guard skips a feed already present in
+    /// `DELEGATION`, but the trust root does not write there — so a feed the operator
+    /// pinned and the base policy did not re-declare could have its floor lowered by a
+    /// third-party fragment within the parent's `allow_nested` scope, admitting a genuinely
+    /// signed but superseded fragment on a guest whose high-water mark for that feed is
+    /// still below the floor (i.e. any fresh VM).
+    ///
+    /// The issuer-wide floor was never at risk (`min_required` maxes with `(issuer, "")`,
+    /// TC-F1.24), which is why this survived: the invariant held for the case that was
+    /// tested and not for the one that was not.
+    #[test]
+    fn a_later_feed_declaration_cannot_lower_an_earlier_floor() {
+        let (sk, pk) = keypair(1);
+        let mut store = FragmentStore::new(false);
+        store.authorize_issuer("issuerA", &pk).unwrap();
+        // Issuer-wide floor deliberately low, so the per-feed floor is the only thing
+        // standing between an old fragment and acceptance.
+        store.set_min_svn("issuerA", 0);
+
+        // The operator's trust root pins this feed at 10.
+        store.declare_feed("issuerA", "prod", 10);
+        // The per-pod base policy then declares the same feed with a laxer floor.
+        store.declare_feed("issuerA", "prod", 2);
+
+        // A genuinely signed but superseded fragment must still be refused.
+        let mut stale = frag_feed("issuerA", "prod", 3);
+        assert!(
+            matches!(
+                load(&mut store, &sk, &stale).unwrap_err(),
+                FragmentError::RolledBackSvn {
+                    min_required: 10,
+                    ..
+                }
+            ),
+            "a later declaration lowered the operator's per-feed floor"
+        );
+
+        // Raising is still allowed, so this is a floor and not a pin.
+        store.declare_feed("issuerA", "prod", 12);
+        let mut below = frag_feed("issuerA", "prod", 11);
+        assert!(load(&mut store, &sk, &below).is_err());
+        let mut at_floor = frag_feed("issuerA", "prod", 12);
         assert!(load(&mut store, &sk, &at_floor).is_ok());
     }
 

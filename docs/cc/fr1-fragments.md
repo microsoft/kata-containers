@@ -370,8 +370,9 @@ allowed to take down a running sandbox.
 behind it must still be signed by an issuer the *measured trust root* authorizes, or
 `verify_envelope` rejects it as `UnauthorizedIssuer` — so `"any-authorized"` means "anyone the
 trust root already trusts", never "anyone". `min_required()` keeps the issuer-wide SVN floor
-binding (F-55), so a nested declaration can raise the rollback bar but never lower it. What
-delegation buys is composition, not privilege.
+binding (F-55), and `declare_feed` is raise-only (F-165), so a nested declaration can raise
+the rollback bar for a feed but never lower it. What delegation buys is composition, not
+privilege.
 
 Bounds and behaviours worth knowing:
 
@@ -381,7 +382,11 @@ Bounds and behaviours worth knowing:
   issuer wanting five fragments declares five, it does not build a linked list.
 - **First declaration wins.** A feed already declared keeps its original terms, so a
   re-declaration cannot reset a cycle's depth counter or relax an SVN floor a shallower
-  declaration set.
+  declaration set. That guard is keyed on the delegation table, which the *trust root* does
+  not write to — so it did not by itself protect a feed the operator pinned and the base
+  policy never re-declared (F-165). The SVN floor is now raise-only in the store
+  (`declare_feed`), so the property holds for every declarer regardless of which table
+  remembers it.
 - **Out-of-scope declarations are dropped, not fatal.** The delivering fragment is verified
   and committed by the time its declarations are read, so failing the RPC would leave the
   engine holding a module the host was told had failed. Dropping is fail-closed anyway: an
@@ -849,7 +854,7 @@ cross-alg rejection), `merkle::tests::*` (inclusion + consistency across sizes).
 accepted, rewound-log + missing-proof rejected). Aggregated as `negative-matrix.sh` stages.
 
 **Live E2E on a cluster** (`docs/cc/e2e/`, an Azure confidential VM with `kata-deploy`) —
-stage 06 signs and publishes fixtures to a real registry; stage 07 runs **eleven cases**
+stage 06 signs and publishes fixtures to a real registry; stage 07 runs **fourteen cases**
 against pods on the dm-verity-pinned guest, using pod phase as the oracle:
 
 | Case | Proves |
@@ -860,14 +865,18 @@ against pods on the dm-verity-pinned guest, using pod phase as the oracle:
 | `07d` | an SVN floor above the published fragment is refused |
 | `07e` | an undelivered *optional* declaration still boots — enforcement is opt-in |
 | `07f`–`07k` | the four `allow_nested` scopes and the full parent→child chain (see §4.10) |
+| `07l`/`07m` | the C-ACI sidecar shape — a fragment contributing a container the base policy never held: withheld, the sidecar never runs; delivered, both containers run |
+| `07n` | a module whose self-description claims an SVN its envelope does not carry is refused, and refused *for that reason* (F-160) |
 
 Every negative is paired with a control differing in exactly one field, so a blocked pod
 cannot be an environment failure and a running pod cannot be a gate that was never armed.
-Verified green 2026-08-04 on `coco-dev-2`, 11/11.
+Verified green 2026-08-08 on `ccpolicy-snp` (`E2E_PLATFORM=clh-snp`, SEV-SNP/MSHV), 14/14.
 
-Conjunctive receipt requirements (§4.12), fragment parameters (§4.13) and the framework
-version floor (§4.14) are unit-tested only. A live case for the receipt conjunction needs a
-second mock ledger fixture; tracked in `docs/cc/backlog.md`.
+Conjunctive receipt requirements (§4.12) and fragment parameters (§4.13) are unit-tested
+only. A live case for the receipt conjunction needs a second mock ledger fixture; tracked in
+`docs/cc/backlog.md`. The framework version floor (§4.14) is unit-tested for its refusal
+paths and covered end-to-end for its *producer* — every genpolicy generation case asserts the
+stamp is present, so stages 04 and 06 exercise it on every run.
 
 ---
 
