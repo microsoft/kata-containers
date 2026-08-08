@@ -1486,6 +1486,19 @@ async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -
         store.import_svn_state(&snapshot);
         info!(logger, "FR-1: imported persisted fragment SVN state");
     }
+
+    // F-147: `require_receipt` and the ledger trust list are independent options, so a
+    // config can demand receipts while loading no key able to validate one. That is now
+    // fail-closed (every fragment is refused), but silently refusing everything is a poor
+    // way to learn about a typo, and before the gate was fixed this same combination
+    // silently accepted *any* receipt. Say so plainly at startup.
+    if store.receipt_gate_is_unsatisfiable() {
+        warn!(
+            logger,
+            "FR-1: transparency receipts are required but no ledger key is configured; \
+             every fragment will be refused (add a [[ledger]] entry or transparency_anchor_hex)"
+        );
+    }
     Ok(())
 }
 
