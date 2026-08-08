@@ -357,13 +357,16 @@ mod tests {
             );
             if class != EnforcementClass::DeniedUnconditionally {
                 // The policy engine's denial text comes from `DecisionObject::explain()`,
-                // which always names the endpoint and the words "was refused" in both its
-                // attributable and its no-reason-rule branches. Handlers that refuse
-                // without consulting the policy word their errors differently (e.g.
+                // which always names the endpoint and the phrase "blocked by policy" in
+                // both its attributable and its no-reason-rule branches. That phrase is
+                // the canonical operator-facing marker -- attributability is added to it,
+                // never substituted for it -- so matching on it is what keeps a mere
+                // validation error from passing for enforcement (F-153). Handlers that
+                // refuse without consulting the policy word their errors differently (e.g.
                 // "guest diagnostics are disabled in strict mode"), so this still
                 // discriminates the policy engine from the handler.
                 assert!(
-                    status.message().contains("was refused"),
+                    status.message().contains("blocked by policy"),
                     "RPC `{rpc}` ({class:?}) was denied by something other than the policy \
                      engine: `{}`",
                     status.message()
