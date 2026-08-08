@@ -662,6 +662,19 @@ authorized issuer ⇒ fail-closed. Shape:
 
 ```toml
 require_receipt = true                 # global default
+```
+
+> **`require_receipt` and `[[ledger]]` are independent options, and requiring receipts
+> without configuring a ledger key is a misconfiguration, not a weaker setting.** The Stage-1
+> receipt check used to be guarded on the trust list being non-empty, which made the gate
+> fail *open*: the presence check was satisfied by any non-empty string while verification
+> was skipped, so a garbage receipt was accepted where presenting none was correctly refused
+> (F-147). The guard is gone — a receipt no key can validate is now `InvalidReceipt` — and
+> `seed_fragment_trust_root` warns at startup when receipts are required but no ledger key is
+> loaded, because the resulting state refuses every fragment and that is easier to diagnose
+> from a log line than from a wall of rejections.
+
+```toml
 ordered = true                         # FR-1j append-only ordering
 # log_genesis_hex = "<hex>"            # optional; default measured constant
 require_x509 = false                   # FR-1d: when true, all fragments must carry a valid x5chain

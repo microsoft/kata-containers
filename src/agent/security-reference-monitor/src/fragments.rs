@@ -991,6 +991,16 @@ impl FragmentStore {
         &self.active_grants
     }
 
+    /// F-147: true when a receipt is required — globally or by any scope — but no ledger
+    /// key is loaded that could ever validate one, so every fragment will now be refused.
+    /// The agent reports this at startup: the two are independent configuration options,
+    /// and before the gate was fixed this combination silently accepted any receipt.
+    pub fn receipt_gate_is_unsatisfiable(&self) -> bool {
+        let required =
+            self.require_receipt || self.required_receipt_from.values().any(|r| !r.is_empty());
+        required && self.transparency_trust_list.is_empty()
+    }
+
     /// Whether any issuer is authorized (fail-closed indicator).
     pub fn has_authorized_issuers(&self) -> bool {
         !self.issuers.is_empty()
@@ -1202,7 +1212,15 @@ impl FragmentStore {
 
             // Stage 1: detached-signature receipt, verified against any current ledger key
             // (rotation) using that key's algorithm (BL-2 multi-alg).
-            if !receipt.is_empty() && !self.transparency_trust_list.is_empty() {
+            //
+            // F-147: this is deliberately NOT guarded on the trust list being non-empty. It
+            // was, and that made the gate fail *open*: with `require_receipt` on and no
+            // ledger keys loaded, the presence check above was satisfied by any non-empty
+            // string while verification was skipped entirely, so a garbage receipt was
+            // accepted where presenting none was correctly refused. An empty key set makes
+            // `validating_subjects` return `None`, which is the right answer — a receipt
+            // nothing can validate is not a valid receipt.
+            if !receipt.is_empty() {
                 let bytes = hex_to_bytes(receipt).map_err(|_| FragmentError::InvalidReceipt)?;
                 let subjects = validating_subjects(keys, statement, &bytes)
                     .ok_or(FragmentError::InvalidReceipt)?;
@@ -1702,7 +1720,6 @@ mod tests {
             issuer: issuer.to_string(),
             svn,
             grants: grants.iter().map(|s| s.to_string()).collect(),
-            receipt: Some("receipt-1".to_string()),
             signature: Vec::new(),
             ..Default::default()
         }
@@ -1762,7 +1779,7 @@ mod tests {
     #[test]
     fn min_svn_floor_is_enforced() {
         let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap();
         store.set_min_svn("issuerA", 5);
 
@@ -1801,7 +1818,7 @@ mod tests {
     #[test]
     fn module_and_includes_are_signature_bound() {
         let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap();
 
         let mut f = PolicyFragment {
@@ -1810,7 +1827,6 @@ mod tests {
             grants: vec![],
             policy_module: Some("package agent_policy.fragments\nexec_allowed := true".into()),
             includes: vec!["exec".into()],
-            receipt: Some("r".into()),
             signature: Vec::new(),
             ..Default::default()
         };
@@ -1842,7 +1858,7 @@ mod tests {
     #[test]
     fn verify_is_side_effect_free_until_commit() {
         let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap();
         let mut f = frag("issuerA", 7, &["exec:x"]);
         sign(&sk, &mut f);
@@ -1866,10 +1882,14 @@ mod tests {
     #[test]
     fn valid_signed_fragment_is_accepted() {
         let (sk, pk) = keypair(1);
+        let (ledger_sk, ledger_pk) = keypair(20);
         let mut store = FragmentStore::new(true);
         store.authorize_issuer("issuerA", &pk).unwrap();
+        store
+            .load_transparency_trust_list(&[("ledgerA".into(), vec![ledger_pk])])
+            .unwrap();
         let mut f = frag("issuerA", 1, &["exec:container-x"]);
-        sign(&sk, &mut f);
+        signed_with_receipt(&sk, &mut f, "ledgerA", &ledger_sk);
         let added = store.load(&f).unwrap();
         assert_eq!(added, vec!["exec:container-x".to_string()]);
         assert!(store.active_grants().contains("exec:container-x"));
@@ -1910,7 +1930,7 @@ mod tests {
     #[test]
     fn rolled_back_svn_is_rejected() {
         let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap();
 
         let mut f5 = frag("issuerA", 5, &["exec:x"]);
@@ -1944,7 +1964,7 @@ mod tests {
     #[test]
     fn over_broad_fragment_is_rejected() {
         let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap();
         store.add_root_constraint("allow-all");
         let mut f = frag("issuerA", 1, &["exec:x", "allow-all"]);
@@ -1974,7 +1994,6 @@ mod tests {
             issuer: issuer.to_string(),
             feed: feed.to_string(),
             svn,
-            receipt: Some("receipt-1".to_string()),
             ..Default::default()
         }
     }
@@ -2270,7 +2289,7 @@ mod tests {
     #[test]
     fn undeclared_feed_is_rejected() {
         let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap(); // declares default feed only
         let mut f = frag_feed("issuerA", "prod", 1);
         sign(&sk, &mut f);
@@ -2290,7 +2309,7 @@ mod tests {
     #[test]
     fn svn_floor_is_per_feed() {
         let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap();
         store.declare_feed("issuerA", "prod", 10);
         store.declare_feed("issuerA", "test", 0);
@@ -2322,7 +2341,7 @@ mod tests {
     #[test]
     fn per_feed_floor_cannot_sink_below_the_issuer_floor() {
         let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap();
         store.set_min_svn("issuerA", 5);
         // A laxer per-feed floor must not win.
@@ -2394,7 +2413,7 @@ mod tests {
     #[test]
     fn fragment_chaining_requires_loaded_dependencies() {
         let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap();
 
         // Base fragment (svn 1), id "issuerA//1".
@@ -2436,7 +2455,7 @@ mod tests {
         let (sk, pk) = keypair(1);
 
         // First "boot": accept svn 5 on the default feed.
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap();
         let mut f5 = frag_feed("issuerA", "", 5);
         sign(&sk, &mut f5);
@@ -2445,7 +2464,7 @@ mod tests {
         assert!(snapshot.contains("issuerA\t\t5"));
 
         // "Restart": a fresh store re-seeds issuers/floors, then imports the snapshot.
-        let mut restarted = FragmentStore::new(true);
+        let mut restarted = FragmentStore::new(false);
         restarted.authorize_issuer("issuerA", &pk).unwrap();
         restarted.import_svn_state(&snapshot);
 
@@ -2481,7 +2500,7 @@ mod tests {
         use coset::{iana, CborSerializable, CoseSign1Builder, HeaderBuilder};
 
         let (sk, pk) = keypair(1);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("issuerA", &pk).unwrap();
 
         // The fragment whose statement the COSE envelope carries.
@@ -2490,7 +2509,6 @@ mod tests {
             svn: 1,
             policy_module: Some("package agent_policy.fragments\nexec_allowed := true".into()),
             includes: vec!["exec".into()],
-            receipt: Some("r1".into()),
             ..Default::default()
         };
         let statement = fragment.signing_bytes();
@@ -3144,7 +3162,7 @@ mod tests {
     #[test]
     fn a_tab_in_the_issuer_cannot_forge_an_audit_log_line() {
         let (sk, pk) = keypair(21);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         let evil = "issuerA\tdeadbeef";
         store.authorize_issuer(evil, &pk).unwrap();
 
@@ -3157,7 +3175,7 @@ mod tests {
 
         // What the gate protects: every committed line has exactly three fields.
         let (sk2, pk2) = keypair(22);
-        let mut store2 = FragmentStore::new(true);
+        let mut store2 = FragmentStore::new(false);
         store2.authorize_issuer("issuerA", &pk2).unwrap();
         let mut good = frag_feed("issuerA", "", 1);
         sign(&sk2, &mut good);
@@ -3203,7 +3221,7 @@ mod tests {
     fn a_dependency_is_not_satisfied_by_a_different_issuer_feed_split() {
         let (sk_a, pk_a) = keypair(23);
         let (sk_z, pk_z) = keypair(24);
-        let mut store = FragmentStore::new(true);
+        let mut store = FragmentStore::new(false);
         store.authorize_issuer("a", &pk_a).unwrap();
         store.authorize_issuer("z", &pk_z).unwrap();
         store.declare_feed("a", "b/c", 0);
@@ -3230,5 +3248,54 @@ mod tests {
         honest.requires = vec![loaded.id()];
         sign(&sk_z, &mut honest);
         assert!(store.verify(&honest).is_ok());
+    }
+    /// F-147: a receipt that nothing can validate is not a valid receipt. The Stage-1 check
+    /// used to be guarded on the trust list being non-empty, so with `require_receipt` on
+    /// and no ledger key loaded the presence check was satisfied by any non-empty string
+    /// while verification was skipped entirely — presenting junk succeeded where presenting
+    /// nothing correctly failed, which is the signature of a fail-open.
+    #[test]
+    fn a_required_receipt_is_not_satisfied_by_an_unverifiable_string() {
+        let (sk, pk) = keypair(31);
+        let mut store = FragmentStore::new(true);
+        store.authorize_issuer("issuerA", &pk).unwrap();
+        assert!(store.receipt_gate_is_unsatisfiable());
+
+        let mut junk = frag_feed("issuerA", "", 1);
+        junk.receipt = Some("this-is-not-a-signature".into());
+        sign(&sk, &mut junk);
+        assert_eq!(
+            store.verify(&junk).unwrap_err(),
+            FragmentError::InvalidReceipt
+        );
+
+        // Nor does well-formed hex of the right length, absent a key to check it against.
+        let mut hexish = frag_feed("issuerA", "", 1);
+        hexish.receipt = Some("ab".repeat(64));
+        sign(&sk, &mut hexish);
+        assert_eq!(
+            store.verify(&hexish).unwrap_err(),
+            FragmentError::InvalidReceipt
+        );
+
+        // Control: an absent receipt keeps its own distinct error, so the two failures stay
+        // distinguishable to an operator.
+        let mut absent = frag_feed("issuerA", "", 1);
+        sign(&sk, &mut absent);
+        assert_eq!(
+            store.verify(&absent).unwrap_err(),
+            FragmentError::MissingReceipt
+        );
+
+        // With a ledger key loaded a genuine receipt still verifies: the gate is closed,
+        // not jammed shut.
+        let (ledger_sk, ledger_pk) = keypair(32);
+        store
+            .load_transparency_trust_list(&[("ledgerA".into(), vec![ledger_pk])])
+            .unwrap();
+        assert!(!store.receipt_gate_is_unsatisfiable());
+        let mut good = frag_feed("issuerA", "", 1);
+        signed_with_receipt(&sk, &mut good, "ledgerA", &ledger_sk);
+        assert!(store.verify(&good).is_ok());
     }
 }
