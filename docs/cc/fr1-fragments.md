@@ -82,10 +82,14 @@ The statement is a flat, newline-delimited text format with literal `--includes-
 `--requires--`, `--module--` and `--prevhead--` marker lines, and it escapes nothing, so it
 is injective only over a restricted domain. `validate_statement` enforces that domain as gate
 0 of `check_gates`, which every verification path funnels through: no line-oriented field may
-contain a line break or any marker as a substring, and no list entry may be empty. Without
+contain a control character or any marker as a substring, and no list entry may be empty. Without
 it, `grants = ["alpha", "beta"]` and `grants = ["alpha\nbeta"]` sign to identical bytes, as
 do `requires = ["--module--", "r1"], module = "M"` and `requires = [], module =
-"r1\n--module--\nM"` — the second of which silently has no dependency at all. `policy_module`
+"r1\n--module--\nM"` — the second of which silently has no dependency at all. Tab is banned
+for a second reason (F-146): `export_fragment_log` emits a tab-delimited
+`index<TAB>fragment-id<TAB>statement-sha256` record, so an issuer named `X<TAB><digest>`
+yields a four-field line that an auditor's parser splits into a different id and digest than
+were committed — forging the record that is meant to prove what was applied. `policy_module`
 is deliberately unconstrained: it is bounded by the *first* `--module--` and the *last*
 `--prevhead--`, so it round-trips whatever it contains, which arbitrary Rego requires. On the
 OCI-pull path `from_cose_payload` additionally re-encodes what it parsed and requires the
@@ -103,6 +107,19 @@ if it is taken: CBOR is not automatically canonical — decoders accept indefini
 items, unsorted or duplicate map keys, and non-minimal integers — so the statement wants a
 fixed-arity array rather than a map, and the re-encode check must stay, because that is what
 enforces canonical form.
+
+A fragment's composition id — the value a dependent puts in its `requires` list — is
+`<issuer>/<feed>/<svn>` with `/` and `%` percent-encoded in the first two components
+(`PolicyFragment::make_id`). The separator is escaped rather than banned because it cannot be
+banned: an issuer is a `did:x509` and a feed is an OCI reference, and both legitimately
+contain `/`. A plain join is therefore not injective — `(issuer "a/b", feed "c")` and
+`(issuer "a", feed "b/c")` collapse to the same id, so a fragment depending on one would be
+satisfied by the other (F-145). Escaping keeps the id a single readable string, so neither
+the statement format nor the `repeated string requires` wire type changes, and it fixes the
+audit log at the same time since that renders the same id. A hand-written, unescaped entry
+matches nothing and fails closed as an unsatisfied requirement. If `requires` later becomes a
+structured `(issuer, feed, svn)` triple under a CBOR statement, the escaping stays relevant:
+`id()` still backs `VerifiedFragment.id` and the exported log.
 
 ---
 

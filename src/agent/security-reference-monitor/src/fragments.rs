@@ -96,9 +96,32 @@ pub struct PolicyFragment {
 const STATEMENT_DELIMITERS: [&str; 4] = ["--includes--", "--requires--", "--module--", "--prevhead--"];
 
 impl PolicyFragment {
-    /// This fragment's composition identifier: `"<issuer>/<feed>/<svn>"`.
+    /// This fragment's composition identifier: `"<issuer>/<feed>/<svn>"`, with `/` and `%`
+    /// percent-encoded in the issuer and feed. See [`make_id`](Self::make_id).
     pub fn id(&self) -> String {
-        format!("{}/{}/{}", self.issuer, self.feed, self.svn)
+        Self::make_id(&self.issuer, &self.feed, self.svn)
+    }
+
+    /// Build the composition identifier for an `(issuer, feed, svn)` triple — the value a
+    /// dependent fragment puts in its `requires` list.
+    ///
+    /// F-145: the separator is escaped in the components rather than banned from them,
+    /// because it cannot be banned: an issuer is a `did:x509` and a feed is an OCI
+    /// reference, and both legitimately contain `/`. A plain join is therefore not
+    /// injective — `(issuer "a/b", feed "c")` and `(issuer "a", feed "b/c")` produce the
+    /// same id, so a fragment requiring one would be satisfied by the other. Escaping makes
+    /// the two ids distinct (`a%2Fb/c/1` vs `a/b%2Fc/1`) while keeping the id a single
+    /// readable string, so neither the statement format nor the `repeated string requires`
+    /// wire type has to change. `%` is escaped first, so the encoding is reversible and no
+    /// literal `%2F` in an issuer can impersonate a separator.
+    ///
+    /// A hand-written, unescaped requires entry simply matches nothing and fails closed as
+    /// an unsatisfied requirement, so this cannot silently weaken a dependency.
+    pub fn make_id(issuer: &str, feed: &str, svn: u64) -> String {
+        fn esc(s: &str) -> String {
+            s.replace('%', "%25").replace('/', "%2F")
+        }
+        format!("{}/{}/{}", esc(issuer), esc(feed), svn)
     }
 
     /// BL-8: reconstruct a `PolicyFragment` from a COSE_Sign1 payload produced by
@@ -210,8 +233,14 @@ impl PolicyFragment {
     /// accepted domain the encoding is injective and a signature commits to one reading.
     ///
     /// Rejected, for each line-oriented field:
-    /// - a newline or carriage return, which would split one value into several (`lines()`
-    ///   also strips a trailing `\r`, so a value ending in one would not round-trip);
+    /// - any control character. Newline and carriage return would split one value into
+    ///   several (`lines()` also strips a trailing `\r`, so a value ending in one would not
+    ///   round-trip). F-146: tab is banned for a second reason — `export_fragment_log`
+    ///   renders `index\tfragment-id\tstatement-sha256`, so an issuer containing a tab
+    ///   produces an extra field and an auditor's parser reads a different id and hash than
+    ///   were committed. That log is the record described as the non-repudiable proof of the
+    ///   applied sequence, so it must not be forgeable by an authorized issuer. The rest of
+    ///   the control range is banned on the same principle rather than case by case;
     /// - any section delimiter as a *substring*, not merely as the whole value: the module
     ///   split searches the whole statement rather than whole lines, so a grant of
     ///   `x--module--` would end the metadata section early;
@@ -234,20 +263,17 @@ impl PolicyFragment {
     /// to prefer length-prefixing eventually is that v2 and v3 each added a field and
     /// neither added validation for it — a gate has to be remembered, an encoding does not.
     ///
-    /// Known residual: [`id`](Self::id) joins issuer, feed and SVN with `/`, and neither
-    /// may ban `/` — an issuer is a `did:x509` and a feed is an OCI reference. So
-    /// `(issuer "a/b", feed "c")` and `(issuer "a", feed "b/c")` share an id and could
-    /// satisfy each other's `requires`. Both issuers must already be authorized with the
-    /// matching feed declared, which is why this is recorded rather than fixed: closing it
-    /// means changing the id format, and `requires` entries are inside signed statements.
+    /// The id ambiguity this gate used to leave open — a plain `issuer/feed/svn` join is not
+    /// injective when either component may contain `/` — is closed separately, by escaping
+    /// the separator in [`make_id`](Self::make_id) rather than by banning it here.
     pub fn validate_statement(&self) -> Result<(), FragmentError> {
         fn check(field: &str, value: &str) -> Result<(), FragmentError> {
             let bad = |reason: &str| FragmentError::MalformedStatement {
                 field: field.to_string(),
                 reason: reason.to_string(),
             };
-            if value.contains('\n') || value.contains('\r') {
-                return Err(bad("contains a line break"));
+            if let Some(c) = value.chars().find(|c| c.is_control()) {
+                return Err(bad(&format!("contains the control character {:?}", c)));
             }
             for d in STATEMENT_DELIMITERS {
                 if value.contains(d) {
@@ -940,6 +966,12 @@ impl FragmentStore {
     /// record: one `index\tfragment-id\tstatement-sha256` line per committed fragment, then
     /// a final `head\t<hex>` line. This is the non-repudiable proof of the exact applied
     /// sequence (empty when not in ordered mode / nothing committed this session).
+    ///
+    /// F-146: this format is only unambiguous because `validate_statement` bans control
+    /// characters — including tab — in the issuer and feed, and [`PolicyFragment::make_id`]
+    /// escapes the `/` separator. Without the first, an issuer named `X\t<hash>` yields a
+    /// four-field line that an auditor's parser splits into a different id and digest than
+    /// were committed. Do not relax either without re-encoding this log.
     pub fn export_fragment_log(&self) -> String {
         let mut out = String::new();
         for (i, (id, hash)) in self.ordered_log.iter().enumerate() {
@@ -3103,5 +3135,100 @@ mod tests {
         };
         sign(&sk, &mut ok);
         assert!(store.verify(&ok).is_ok());
+    }
+
+    /// F-146: a tab in the issuer is refused, because `export_fragment_log` is a
+    /// tab-delimited record. Without this an authorized issuer named `X\t<digest>` produces
+    /// a log line an auditor's parser splits into a different id and digest than the ones
+    /// actually committed — forging the record that is supposed to prove what was applied.
+    #[test]
+    fn a_tab_in_the_issuer_cannot_forge_an_audit_log_line() {
+        let (sk, pk) = keypair(21);
+        let mut store = FragmentStore::new(true);
+        let evil = "issuerA\tdeadbeef";
+        store.authorize_issuer(evil, &pk).unwrap();
+
+        let mut f = frag_feed(evil, "", 1);
+        sign(&sk, &mut f);
+        assert!(matches!(
+            store.verify(&f).unwrap_err(),
+            FragmentError::MalformedStatement { field, .. } if field == "issuer"
+        ));
+
+        // What the gate protects: every committed line has exactly three fields.
+        let (sk2, pk2) = keypair(22);
+        let mut store2 = FragmentStore::new(true);
+        store2.authorize_issuer("issuerA", &pk2).unwrap();
+        let mut good = frag_feed("issuerA", "", 1);
+        sign(&sk2, &mut good);
+        store2.load(&good).unwrap();
+        for line in store2.export_fragment_log().lines() {
+            if line.starts_with("head\t") {
+                continue;
+            }
+            assert_eq!(line.split('\t').count(), 3, "log line is ambiguous: {:?}", line);
+        }
+    }
+
+    /// F-145: the composition id is injective. A plain `issuer/feed/svn` join is not, and
+    /// neither component can ban the separator, so the separator is escaped instead.
+    #[test]
+    fn fragment_ids_are_injective_across_the_separator() {
+        // The collision that motivates the escaping: an unescaped join is ambiguous.
+        assert_eq!(
+            format!("{}/{}/{}", "a/b", "c", 1),
+            format!("{}/{}/{}", "a", "b/c", 1)
+        );
+
+        // Escaped, the two are distinguishable, and each is still readable.
+        assert_ne!(
+            PolicyFragment::make_id("a/b", "c", 1),
+            PolicyFragment::make_id("a", "b/c", 1)
+        );
+        assert_eq!(PolicyFragment::make_id("a/b", "c", 1), "a%2Fb/c/1");
+        assert_eq!(PolicyFragment::make_id("a", "b/c", 1), "a/b%2Fc/1");
+
+        // A literal "%2F" in an issuer cannot impersonate an escaped separator, because
+        // "%" is escaped first.
+        assert_ne!(
+            PolicyFragment::make_id("a%2Fb", "c", 1),
+            PolicyFragment::make_id("a/b", "c", 1)
+        );
+    }
+
+    /// F-145 end to end: a dependency on `(issuer "a/b", feed "c")` is NOT satisfied by a
+    /// loaded fragment from `(issuer "a", feed "b/c")`. Both issuers are authorized, which
+    /// is exactly the case the composition gate is supposed to keep separate.
+    #[test]
+    fn a_dependency_is_not_satisfied_by_a_different_issuer_feed_split() {
+        let (sk_a, pk_a) = keypair(23);
+        let (sk_z, pk_z) = keypair(24);
+        let mut store = FragmentStore::new(true);
+        store.authorize_issuer("a", &pk_a).unwrap();
+        store.authorize_issuer("z", &pk_z).unwrap();
+        store.declare_feed("a", "b/c", 0);
+
+        // Loaded: issuer "a", feed "b/c".
+        let mut loaded = frag_feed("a", "b/c", 1);
+        sign(&sk_a, &mut loaded);
+        store.load(&loaded).unwrap();
+
+        // Wanted: issuer "a/b", feed "c" — a different principal that has signed nothing.
+        let wanted = PolicyFragment::make_id("a/b", "c", 1);
+        assert_ne!(wanted, loaded.id());
+
+        let mut dependent = frag_feed("z", "", 1);
+        dependent.requires = vec![wanted.clone()];
+        sign(&sk_z, &mut dependent);
+        assert_eq!(
+            store.verify(&dependent).unwrap_err(),
+            FragmentError::UnsatisfiedRequirement { requires: wanted }
+        );
+
+        // The honest dependency on what actually loaded still works.
+        let mut honest = frag_feed("z", "", 1);
+        honest.requires = vec![loaded.id()];
+        sign(&sk_z, &mut honest);
+        assert!(store.verify(&honest).is_ok());
     }
 }
