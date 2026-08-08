@@ -210,7 +210,21 @@ verifier), with no cross-algorithm confusion (the algorithm must match the key t
 anchored on **CA fingerprint + policy**, so leaf **rotation** — and choice of leaf algorithm —
 needs no config change. Pure-Rust RustCrypto (`x509-cert`, `p256`, `p384`, `rsa`); no Go.
 Errors: `InvalidCertChain`, `UntrustedCa`, `DidX509Mismatch`, `RevokedCertificate`,
-`CertExpired`.
+`CertExpired`, `CertChainTooLong`.
+
+The chain is **length-bounded to `MAX_X5CHAIN_CERTS` = 100** before any certificate is
+touched. Every presented cert is fingerprinted and DER-parsed *before* a trust anchor has
+matched, so without a bound the host — which is untrusted and chooses what to deliver —
+decides how much work the guest does on a request it will refuse anyway. The check reads the
+CBOR array length, so an over-long chain is rejected without allocating for it. 100 is
+hcsshim's number (`cosesign1/check.go`) and is far above any real chain.
+
+Routing is deliberately decided on **header presence, not chain validity**:
+`cose_has_x5chain` selects the did:x509 path (`fragments.rs::verify_envelope_with`) by asking
+only whether label 33 is there. Were it to ask whether the chain *parsed*, a host could steer
+an envelope away from X.509 verification by malforming the chain it presents — the envelope
+would fall through to the raw-key path instead of being refused. Presence is the question
+being asked; anything wrong with the chain is then reported by `verify_x509_cose`.
 
 ### 4.3 Transparency receipts + Trust List (FR-1f)
 Receipts prove a fragment's issuance is publicly auditable. The store holds a
@@ -446,7 +460,7 @@ Go verification path.
 | header SVN and Rego SVN must agree (`svn_ok_if_defined`) | module self-description pinned to the verified envelope (§4.1) | parity — ours also pins the issuer, not just the SVN |
 | concurrent/nested loads rejected (`WithMetadataRollback` transaction lock) | whole load serialized behind `FRAGMENT_LOAD` (§4.1) | parity — we serialize where hcsshim fails closed |
 | framework/API version compatibility (`framework_version`, `api_version`) | — | **hcsshim only** — see F-161; we version by base-policy measurement instead |
-| cert chain bounded to 1–100 certs | — | **hcsshim only** (DoS mitigation) |
+| cert chain bounded to 1–100 certs | `did_x509.rs::extract_x5chain` (`MAX_X5CHAIN_CERTS`) | parity — DoS mitigation; same bound as `cosesign1/check.go` |
 
 Deltas that are **not** gates — surface hcsshim has and we do not, none of which is a check we
 skip:

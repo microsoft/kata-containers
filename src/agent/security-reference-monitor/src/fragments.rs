@@ -628,6 +628,10 @@ pub enum FragmentError {
     RevokedCertificate,
     /// FR-1d: a certificate in the chain is outside its validity window.
     CertExpired,
+    /// FR-1d: the presented `x5chain` holds more certificates than any legitimate chain
+    /// needs. Bounded so an untrusted host cannot make the guest parse an arbitrarily long
+    /// chain before it has authenticated anything.
+    CertChainTooLong { len: usize, max: usize },
     /// FR-1j: the fragment asserts a predecessor log head that is not the store's current
     /// head — a reordering, omission, or insertion in the append-only application log.
     LogHeadMismatch { expected: String, presented: String },
@@ -693,6 +697,10 @@ impl fmt::Display for FragmentError {
             }
             FragmentError::RevokedCertificate => write!(f, "certificate in chain is revoked"),
             FragmentError::CertExpired => write!(f, "certificate in chain is outside validity"),
+            FragmentError::CertChainTooLong { len, max } => write!(
+                f,
+                "certificate chain presents {len} certificates, more than the {max} permitted"
+            ),
             FragmentError::LogHeadMismatch { expected, presented } => write!(
                 f,
                 "fragment ordering log-head mismatch: expected {expected}, presented {presented}"
