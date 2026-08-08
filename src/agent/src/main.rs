@@ -567,26 +567,55 @@ async fn start_sandbox(
     // stop the guest from running under host-chosen initdata (policy, SRM trust roots,
     // AA/CDH config) in the meantime. Equivalent to hcsshim's `ValidateHostData()`.
     //
-    // Fail-closed: a mismatch, or a report we cannot read or parse, aborts the VM. When the
-    // guest has no TEE report provider it is not a confidential VM, so there is no launch
-    // measurement to bind to and nothing to verify.
+    // Fail-closed: a mismatch, or a report we cannot read or parse, aborts the VM. A guest with
+    // no TEE report provider at all cannot *prove* it is non-confidential, so F-166/R-2 makes
+    // that fatal too in a strict build: hcsshim's gcs-sidecar keeps its deny policy when no
+    // report is available, and F-6 showed the no-provider path is reachable on a genuinely
+    // confidential VM (Azure paravisor SNP, where `detect_provider()` finds neither sysfs dir).
+    // Treating it as "not a confidential VM" therefore hands the host an unmeasured initdata on
+    // exactly the platform C-ACI ships. `allow-unattested-initdata` restores the old
+    // warn-and-continue for non-confidential dev VMs; it is a *build-time* opt-out on purpose,
+    // because the agent's environment and kernel command line are host-chosen, so a runtime
+    // switch would hand the downgrade straight back.
     #[cfg(feature = "strict-policy")]
-    if let Some(idrv) = initdata_return_value.as_ref() {
+    let initdata_bound = if let Some(idrv) = initdata_return_value.as_ref() {
         match hostdata::verify_initdata_binding(logger, &idrv.digest) {
-            Ok(true) => info!(logger, "FR-2: initdata verified against launch measurement"),
-            Ok(false) => warn!(
-                logger,
-                "FR-2: no TEE report provider; initdata is NOT bound to a launch measurement"
-            ),
+            Ok(true) => {
+                info!(logger, "FR-2: initdata verified against launch measurement");
+                true
+            }
+            Ok(false) => {
+                #[cfg(not(feature = "allow-unattested-initdata"))]
+                {
+                    error!(
+                        logger,
+                        "FR-2: no TEE report provider, so the initdata cannot be bound to a \
+                         launch measurement and the guest cannot prove it is non-confidential; \
+                         aborting VM (F-166/R-2)"
+                    );
+                    fatal_abort("initdata is not bound to a launch measurement (FR-2/F-166)").await
+                }
+                #[cfg(feature = "allow-unattested-initdata")]
+                {
+                    warn!(
+                        logger,
+                        "FR-2: no TEE report provider; initdata is NOT bound to a launch \
+                         measurement. Measured trust roots will be taken from the rootfs only."
+                    );
+                    false
+                }
+            }
             Err(e) => {
                 error!(
                     logger,
                     "FR-2: initdata does not match the launch measurement, aborting VM: {:?}", e
                 );
-                fatal_abort("initdata does not match the launch measurement (FR-2)").await;
+                fatal_abort("initdata does not match the launch measurement (FR-2)").await
             }
         }
-    }
+    } else {
+        false
+    };
 
     // FR-1b / FR-4C / BL-3 (BL-5): seed the SRM trust roots — the policy-fragment issuers,
     // the verified read-only-layer (dm-verity) allowlist, and the verified guest-pull image
@@ -606,9 +635,13 @@ async fn start_sandbox(
     {
         let idrv = initdata_return_value.as_ref();
         let seeded = async {
-            seed_fragment_trust_root(logger, idrv.and_then(|r| r._fragment_issuers.as_deref()))
-                .await
-                .context("FR-1: fragment trust root")
+            seed_fragment_trust_root(
+                logger,
+                idrv.and_then(|r| r._fragment_issuers.as_deref()),
+                initdata_bound,
+            )
+            .await
+            .context("FR-1: fragment trust root")
         }
         .await;
         if let Err(e) = seeded {
@@ -1084,15 +1117,30 @@ fn resolve_measured_config(
     logger: &Logger,
     label: &str,
     initdata_cfg: Option<&str>,
+    initdata_bound: bool,
     env_var: &str,
     default_path: &str,
 ) -> Option<String> {
+    // F-166: the initdata section is only a *measured* source once FR-2 has bound it to the
+    // launch measurement. The precedence prefers it over the rootfs file, so consuming it
+    // unconditionally meant that whenever the binding did not happen the host chose the trust
+    // root — and did so in preference to a genuinely measured file sitting on disk. The rule
+    // lives here, with the precedence it qualifies, so that any root resolved through this
+    // helper inherits it rather than each caller having to remember.
     if let Some(text) = initdata_cfg {
-        info!(
+        if initdata_bound {
+            info!(
+                logger,
+                "{}: trust-root config sourced from measured initdata", label
+            );
+            return Some(text.to_string());
+        }
+        warn!(
             logger,
-            "{}: trust-root config sourced from measured initdata", label
+            "{}: ignoring the initdata trust-root config — it was not bound to a launch \
+             measurement, so it is not measured state; falling back to the rootfs",
+            label
         );
-        return Some(text.to_string());
     }
     let path = {
         // FR-7 (F-86): test-only redirection, gated the same way as the SVN state path.
@@ -1322,11 +1370,16 @@ fn decode_hex_vec(s: &str) -> Result<Vec<u8>> {
 // FR-1b: configure the global fragment store from measured state. Absent/empty config
 // leaves the store with no authorized issuers (fail-closed).
 #[cfg(feature = "strict-policy")]
-async fn seed_fragment_trust_root(logger: &Logger, initdata_cfg: Option<&str>) -> Result<()> {
+async fn seed_fragment_trust_root(
+    logger: &Logger,
+    initdata_cfg: Option<&str>,
+    initdata_bound: bool,
+) -> Result<()> {
     let text = match resolve_measured_config(
         logger,
         "FR-1",
         initdata_cfg,
+        initdata_bound,
         "KATA_FRAGMENT_ISSUERS",
         FRAGMENT_ISSUERS_PATH,
     ) {
@@ -1574,6 +1627,7 @@ mod tests {
             &logger,
             "FR-1",
             None,
+            true,
             "KATA_FRAGMENT_ISSUERS",
             "/nonexistent/measured/issuers.toml",
         );
@@ -1582,6 +1636,68 @@ mod tests {
         assert!(
             resolved.is_none(),
             "the host redirected the fragment issuer trust root at a file it planted"
+        );
+    }
+
+    // F-166: the initdata section outranks the measured-rootfs file, so it may only be used
+    // once FR-2 has bound it to the launch measurement. Unbound, it is host-chosen state --
+    // and the failure mode is silent, because an unbound initdata looks exactly like a bound
+    // one to this function. F-6 makes the unbound case reachable on a genuinely confidential
+    // VM (Azure paravisor SNP), so this is asserted rather than left to review.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn an_unbound_initdata_trust_root_is_refused_in_favour_of_measured_state() {
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let dir = tempfile::tempdir().expect("tmpdir");
+
+        let measured = dir.path().join("measured-issuers.toml");
+        std::fs::write(&measured, "require_receipt = true\n").expect("write measured config");
+        let measured_path = measured.to_str().expect("utf8 path");
+
+        let host_supplied = "require_receipt = false\n";
+
+        // Bound: the initdata section is measured state and wins, as BL-5 specifies.
+        let bound = super::resolve_measured_config(
+            &logger,
+            "FR-1",
+            Some(host_supplied),
+            true,
+            "KATA_FRAGMENT_ISSUERS_UNUSED_F166",
+            measured_path,
+        );
+        assert_eq!(
+            bound.as_deref(),
+            Some(host_supplied),
+            "a bound initdata trust root must still take precedence over the rootfs file"
+        );
+
+        // Unbound: it is not measured state, so the rootfs file must win instead.
+        let unbound = super::resolve_measured_config(
+            &logger,
+            "FR-1",
+            Some(host_supplied),
+            false,
+            "KATA_FRAGMENT_ISSUERS_UNUSED_F166",
+            measured_path,
+        );
+        assert_eq!(
+            unbound.as_deref(),
+            Some("require_receipt = true\n"),
+            "an unbound initdata trust root overrode genuinely measured state"
+        );
+
+        // Unbound with nothing measured to fall back to: fail closed, do not use the host's.
+        let nothing = super::resolve_measured_config(
+            &logger,
+            "FR-1",
+            Some(host_supplied),
+            false,
+            "KATA_FRAGMENT_ISSUERS_UNUSED_F166",
+            "/nonexistent/measured/issuers.toml",
+        );
+        assert!(
+            nothing.is_none(),
+            "an unbound initdata trust root was used when no measured state existed"
         );
     }
 
