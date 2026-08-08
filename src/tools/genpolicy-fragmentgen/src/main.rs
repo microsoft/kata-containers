@@ -48,7 +48,7 @@ const EMPTY_CONFIG_MEDIA_TYPE: &str = "application/vnd.oci.empty.v1+json";
 )]
 struct Cli {
     /// Path to the signed COSE_Sign1 fragment envelope (produced by the SRM `sign-fragment`
-    /// example). Its payload must be a `kata-policy-fragment/v3` statement.
+    /// example). Its payload must be a `kata-policy-fragment/v4` statement.
     #[arg(long)]
     cose: PathBuf,
 
@@ -162,7 +162,7 @@ async fn main() -> Result<()> {
     // Reuse the guest's own parser so the emitted settings entry is exactly what the guest
     // will verify — no divergent re-implementation.
     let fragment = PolicyFragment::from_cose_envelope(&cose)
-        .ok_or_else(|| anyhow!("envelope payload is not a kata-policy-fragment/v3 statement"))?;
+        .ok_or_else(|| anyhow!("envelope payload is not a kata-policy-fragment/v4 statement"))?;
 
     println!("issuer: {}", fragment.issuer);
     println!("feed:   {}", fragment.feed);

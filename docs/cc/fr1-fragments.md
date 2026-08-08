@@ -72,41 +72,56 @@ path (`verify_cose_x509`) converge on the shared `check_gates`:
 7. **Ordering** (FR-1j) — in ordered mode, the fragment's *signed* `prev_log_head` must equal
    the store's current rolling head; the head then advances by hashing the statement in.
 
-The statement (`signing_bytes`, `kata-policy-fragment/v3`) binds issuer, feed, SVN, sorted
-grants, module, sorted includes, sorted requires, **and** `prev_log_head` — so none of these,
+The statement (`signing_bytes`, `kata-policy-fragment/v4`) binds issuer, feed, SVN, sorted
+grants, sorted includes, sorted requires, module, **and** `prev_log_head` — so none of these,
 including the asserted predecessor, can be altered without invalidating the signature. The
 receipt/ledger id and the transparency proof are countersignatures/assertions *over* that
 statement and are deliberately outside it.
 
-The statement is a flat, newline-delimited text format with literal `--includes--`,
-`--requires--`, `--module--` and `--prevhead--` marker lines, and it escapes nothing, so it
-is injective only over a restricted domain. `validate_statement` enforces that domain as gate
-0 of `check_gates`, which every verification path funnels through: no line-oriented field may
-contain a control character or any marker as a substring, and no list entry may be empty. Without
-it, `grants = ["alpha", "beta"]` and `grants = ["alpha\nbeta"]` sign to identical bytes, as
-do `requires = ["--module--", "r1"], module = "M"` and `requires = [], module =
-"r1\n--module--\nM"` — the second of which silently has no dependency at all. Tab is banned
-for a second reason (F-146): `export_fragment_log` emits a tab-delimited
-`index<TAB>fragment-id<TAB>statement-sha256` record, so an issuer named `X<TAB><digest>`
-yields a four-field line that an auditor's parser splits into a different id and digest than
-were committed — forging the record that is meant to prove what was applied. `policy_module`
-is deliberately unconstrained: it is bounded by the *first* `--module--` and the *last*
-`--prevhead--`, so it round-trips whatever it contains, which arbitrary Rego requires. On the
-OCI-pull path `from_cose_payload` additionally re-encodes what it parsed and requires the
-result to equal the payload byte for byte — the envelope's signature covers the payload
-rather than the parsed struct, and re-encoding catches any ambiguity, including ones not
-enumerated above. The C-ACI baseline sidesteps the whole class by signing CBOR, where issuer,
-feed and SVN sit in protected headers and CWT claims and field boundaries are length-prefixed
-(see F-144). Re-encoding the statement the same way remains the structural fix and is *not*
-blocked by compatibility — nothing is signed against v3 yet, and the format has already been
-bumped twice on this branch. It was deferred on scope: validation is provably sufficient
-(every colliding pair has exactly one member refused, so the encoding is injective over the
-accepted domain), it is small enough to review against the proof, and a wire-format change is
-a decision to take on its own rather than inside a security fix. Two things to carry into it
-if it is taken: CBOR is not automatically canonical — decoders accept indefinite-length
-items, unsorted or duplicate map keys, and non-minimal integers — so the statement wants a
-fixed-arity array rather than a map, and the re-encode check must stay, because that is what
-enforces canonical form.
+The statement is a **CBOR fixed-arity array** (RM-71). Every field is length-prefixed and
+typed, so no value can terminate a field early or be re-read as a different field, whatever
+it contains. This is what the C-ACI/hcsshim baseline has always done — COSE_Sign1 over CBOR,
+with issuer/feed/SVN in protected headers and CWT claims.
+
+v3 was a flat, newline-delimited text format with literal `--includes--`, `--requires--`,
+`--module--` and `--prevhead--` marker lines that escaped nothing, and was therefore injective
+only over a domain `validate_statement` had to enforce as gate 0. Outside that domain distinct
+fragments shared signing bytes — `grants = ["alpha", "beta"]` encoded identically to
+`grants = ["alpha\nbeta"]`, and `requires = ["--module--", "r1"], module = "M"` collided with
+`requires = [], module = "r1\n--module--\nM"`, the second of which silently has no dependency
+at all. One signature, two readings (F-144). Both collisions are now simply absent: a
+two-element array is not a one-element array whatever the elements contain, and both members
+of each former pair are accepted and round-trip to themselves.
+
+Three details matter and are easy to get wrong:
+
+- **A fixed-arity array, not a map.** CBOR maps admit duplicate, unsorted and
+  non-minimally-encoded keys, and decoders disagree about which duplicate wins — a map would
+  reintroduce at the key level the ambiguity being removed. Pinning the arity
+  (`STATEMENT_ARITY`) means a field can be neither appended nor omitted.
+- **CBOR is not automatically canonical.** Decoders accept indefinite-length items,
+  non-minimal integers and trailing data, so "it parsed" says nothing about the bytes.
+  Nothing relies on the decoder refusing those: `from_cose_payload` re-encodes what it parsed
+  and requires the result to equal the payload byte for byte. That check is what makes the
+  encoding canonical and it must stay — it is why `signing_bytes` has to remain the single
+  definition of the format.
+- **The version tag is element 0, inside the signed bytes**, so a v3 statement cannot be
+  replayed as v4 or vice versa. The version is authenticated, not advisory.
+
+`validate_statement` survives the change but no longer carries the injectivity argument, and
+its remaining checks are justified by two consumers that are still textual: `export_fragment_log`
+renders a tab-delimited `index<TAB>fragment-id<TAB>statement-sha256` record, so a control
+character in an issuer forges the record meant to prove what was applied (F-146); and
+`make_id` renders its components verbatim apart from the escaped `/` and `%`. The
+delimiter-substring ban went away with the delimiters, and values v3 had to refuse — an issuer
+containing `--module--`, a feed containing `--prevhead--` — are now accepted and round-trip.
+The empty-entry check is retained as hygiene rather than as a disambiguator: CBOR round-trips
+an empty string faithfully, but an empty grant grants nothing and an empty `requires` entry
+matches no id, so it is far likelier to be a bug in the signer than an intent.
+
+`policy_module` is unconstrained and carried as a CBOR text item (or `null` when absent, which
+is now distinct from `""` without needing a sentinel), so it round-trips arbitrary Rego,
+markers and all.
 
 A fragment's composition id — the value a dependent puts in its `requires` list — is
 `<issuer>/<feed>/<svn>` with `/` and `%` percent-encoded in the first two components
@@ -117,9 +132,16 @@ contain `/`. A plain join is therefore not injective — `(issuer "a/b", feed "c
 satisfied by the other (F-145). Escaping keeps the id a single readable string, so neither
 the statement format nor the `repeated string requires` wire type changes, and it fixes the
 audit log at the same time since that renders the same id. A hand-written, unescaped entry
-matches nothing and fails closed as an unsatisfied requirement. If `requires` later becomes a
-structured `(issuer, feed, svn)` triple under a CBOR statement, the escaping stays relevant:
-`id()` still backs `VerifiedFragment.id` and the exported log.
+matches nothing and fails closed as an unsatisfied requirement.
+
+`requires` stayed a list of these id strings when the statement moved to CBOR (RM-71), rather
+than becoming a structured `(issuer, feed, svn)` triple as earlier notes anticipated. The
+triple was the right answer while the id was ambiguous, but escaping already made `make_id`
+injective, so the triple would buy no security property — and it is not free: `requires` is
+`repeated string requires = 9` on the ttRPC wire (`agent.proto`), so the triple means a
+breaking protocol change. A wire break for a property already held is not a trade worth
+making. The escaping remains load-bearing either way, since `id()` also backs
+`VerifiedFragment.id` and the exported log.
 
 ---
 

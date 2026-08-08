@@ -91,9 +91,17 @@ pub struct PolicyFragment {
     pub signature: Vec<u8>,
 }
 
-/// The section markers of the `kata-policy-fragment/v3` statement. A line-oriented field may
-/// not contain any of these, because the parser splits on them.
-const STATEMENT_DELIMITERS: [&str; 4] = ["--includes--", "--requires--", "--module--", "--prevhead--"];
+/// Version tag carried as element 0 of the statement array.
+///
+/// v1 → v2 → v3 added fields to a newline-delimited text encoding; v4 (RM-71) replaces that
+/// encoding with CBOR. The tag is inside the signed bytes, so a v3 statement cannot be
+/// replayed as v4 or vice versa — the version is authenticated, not advisory.
+const STATEMENT_VERSION: &str = "kata-policy-fragment/v4";
+
+/// Element count of the statement array. Fixed arity is part of the format: a decoder that
+/// tolerated a longer array would accept a field nobody signed for, and one that tolerated a
+/// shorter array would silently default a field the signer meant to set.
+const STATEMENT_ARITY: usize = 9;
 
 impl PolicyFragment {
     /// This fragment's composition identifier: `"<issuer>/<feed>/<svn>"`, with `/` and `%`
@@ -140,52 +148,54 @@ impl PolicyFragment {
     /// F-144: the parse is only accepted if re-encoding the result reproduces the payload
     /// byte for byte. The envelope's signature covers the payload, not this struct, so
     /// without that check a fragment could be verified against bytes that decode to fields
-    /// nobody signed for. Re-encoding is the strongest form of the check available here
-    /// because it holds for any ambiguity in the format, including ones not yet identified,
-    /// rather than only the ones [`validate_statement`](Self::validate_statement) enumerates.
+    /// nobody signed for. Under the v4 CBOR encoding this is also what enforces *canonical*
+    /// form: CBOR decoders accept indefinite-length items, non-minimal integers and trailing
+    /// data, none of which this encoder emits, and all of which re-encoding catches without
+    /// having to enumerate them.
     pub fn from_cose_payload(payload: &[u8]) -> Option<Self> {
-        let text = std::str::from_utf8(payload).ok()?;
-        // Split off the FR-1j predecessor-head suffix first (module is the only multi-line
-        // field, so splitting from the tail is unambiguous).
-        let (pre, prevhex) = text.rsplit_once("\n--prevhead--\n")?;
-        let (meta, module) = pre.split_once("--module--\n")?;
+        use ciborium::value::Value;
+        use std::convert::TryFrom;
 
-        let mut lines = meta.lines();
-        if lines.next()? != "kata-policy-fragment/v3" {
-            return None;
+        fn as_text(v: &Value) -> Option<String> {
+            match v {
+                Value::Text(s) => Some(s.clone()),
+                _ => None,
+            }
         }
-        let issuer = lines.next()?.to_string();
-        let feed = lines.next()?.to_string();
-        let svn: u64 = lines.next()?.parse().ok()?;
-
-        let mut grants = Vec::new();
-        let mut includes = Vec::new();
-        let mut requires = Vec::new();
-        // Section state: 0 = grants, 1 = includes, 2 = requires.
-        let mut section = 0u8;
-        for line in lines {
-            match line {
-                "--includes--" => section = 1,
-                "--requires--" => section = 2,
-                other if !other.is_empty() => match section {
-                    0 => grants.push(other.to_string()),
-                    1 => includes.push(other.to_string()),
-                    _ => requires.push(other.to_string()),
-                },
-                _ => {}
+        fn as_texts(v: &Value) -> Option<Vec<String>> {
+            match v {
+                Value::Array(a) => a.iter().map(as_text).collect(),
+                _ => None,
             }
         }
 
-        let prev_log_head = if prevhex.trim().is_empty() {
-            None
-        } else {
-            Some(hex_to_bytes(prevhex.trim()).ok()?)
+        let stmt: Value = ciborium::from_reader(payload).ok()?;
+        let items = match stmt {
+            Value::Array(items) if items.len() == STATEMENT_ARITY => items,
+            _ => return None,
         };
 
-        let policy_module = if module.is_empty() {
-            None
-        } else {
-            Some(module.to_string())
+        if as_text(&items[0])? != STATEMENT_VERSION {
+            return None;
+        }
+        let issuer = as_text(&items[1])?;
+        let feed = as_text(&items[2])?;
+        let svn = match &items[3] {
+            Value::Integer(i) => u64::try_from(*i).ok()?,
+            _ => return None,
+        };
+        let grants = as_texts(&items[4])?;
+        let includes = as_texts(&items[5])?;
+        let requires = as_texts(&items[6])?;
+        let policy_module = match &items[7] {
+            Value::Text(m) => Some(m.clone()),
+            Value::Null => None,
+            _ => return None,
+        };
+        let prev_log_head = match &items[8] {
+            Value::Bytes(b) => Some(b.clone()),
+            Value::Null => None,
+            _ => return None,
         };
 
         Some(PolicyFragment {
@@ -217,55 +227,40 @@ impl PolicyFragment {
         Self::from_cose_payload(payload)
     }
 
-    /// F-144: reject any fragment whose fields the `kata-policy-fragment/v3` statement
-    /// cannot encode unambiguously.
+    /// Reject fields that would be unsafe *downstream* of the statement encoding.
     ///
-    /// The statement is a flat, newline-delimited text format with literal `--includes--`,
-    /// `--requires--`, `--module--` and `--prevhead--` marker lines, and it escapes nothing.
-    /// Without this gate the encoding is not injective, which is not theoretical:
-    /// `grants = ["alpha", "beta"]` and `grants = ["alpha\nbeta"]` produce byte-identical
-    /// signing input, and `requires = ["--module--", "r1"], module = "M"` collides with
-    /// `requires = [], module = "r1\n--module--\nM"` — so a signature meant to bind a
-    /// composition dependency also validates a fragment that has none. An issuer signs one
-    /// meaning and the verifier can read another.
+    /// # What this gate is, and is no longer, for
     ///
-    /// Every colliding pair has exactly one member that is rejected here, so on the
-    /// accepted domain the encoding is injective and a signature commits to one reading.
+    /// Under v3 this gate carried the whole injectivity argument: the statement was a
+    /// newline-delimited text format that escaped nothing, so it was injective only over
+    /// the domain enforced here, and without it distinct fragments shared signing bytes
+    /// (F-144). **v4 encodes the statement as CBOR** — every field length-prefixed and
+    /// typed — so the encoding is now injective by construction and this gate is *not* what
+    /// makes a signature commit to one reading. The delimiter-substring check went away with
+    /// the delimiters.
     ///
-    /// Rejected, for each line-oriented field:
-    /// - any control character. Newline and carriage return would split one value into
-    ///   several (`lines()` also strips a trailing `\r`, so a value ending in one would not
-    ///   round-trip). F-146: tab is banned for a second reason — `export_fragment_log`
-    ///   renders `index\tfragment-id\tstatement-sha256`, so an issuer containing a tab
-    ///   produces an extra field and an auditor's parser reads a different id and hash than
-    ///   were committed. That log is the record described as the non-repudiable proof of the
-    ///   applied sequence, so it must not be forgeable by an authorized issuer. The rest of
-    ///   the control range is banned on the same principle rather than case by case;
-    /// - any section delimiter as a *substring*, not merely as the whole value: the module
-    ///   split searches the whole statement rather than whole lines, so a grant of
-    ///   `x--module--` would end the metadata section early;
-    /// - an empty list entry, which the parser discards.
+    /// What remains is real, but it is about two *other* consumers that are still textual:
     ///
-    /// `policy_module` is deliberately *not* constrained, because it is already
-    /// unambiguous: it is bounded by the first `--module--` (the metadata above it having
-    /// been validated) and the *last* `\n--prevhead--\n`, which is the one this encoder
-    /// appends. A module may therefore contain either marker and still round-trip exactly —
-    /// arbitrary Rego has to be expressible. An empty-but-present module is rejected only
-    /// because it is indistinguishable from `None` and means the same thing.
+    /// - **The audit log (F-146).** [`export_fragment_log`](FragmentStore::export_fragment_log)
+    ///   renders `index\tfragment-id\tstatement-sha256` per committed fragment. An issuer
+    ///   containing a tab produces a four-field line, and an auditor's parser reads a
+    ///   different id and digest than were committed — forging the record that is meant to
+    ///   be the non-repudiable proof of what was applied. A newline forges a whole extra
+    ///   record. The rest of the control range is banned on the same principle rather than
+    ///   case by case, and because a control character in a `did:x509` or an OCI reference
+    ///   is meaningless in the first place.
+    /// - **The composition id.** [`make_id`](Self::make_id) escapes `/` and `%` but renders
+    ///   the components verbatim otherwise, and that id is what a dependent names in
+    ///   `requires` and what appears in the log.
     ///
-    /// Contrast the C-ACI baseline, where COSE_Sign1 signs CBOR: issuer, feed and SVN live
-    /// in protected headers and CWT claims, so field boundaries are length-prefixed and
-    /// typed and this class of confusion cannot be expressed at all. Re-encoding the
-    /// statement that way is the structural fix and is *not* blocked by compatibility —
-    /// nothing is signed against v3 yet, and the format has already gone v1 → v2 → v3 on
-    /// this branch as fields were added. It was deferred on scope, not cost: this gate is
-    /// provably sufficient, and a wire-format change deserves its own decision. The reason
-    /// to prefer length-prefixing eventually is that v2 and v3 each added a field and
-    /// neither added validation for it — a gate has to be remembered, an encoding does not.
+    /// An empty list entry is refused because it is never meaningful: an empty grant grants
+    /// nothing and an empty `requires` entry matches no id, so it is far more likely to be a
+    /// bug in the signer than an intent. That is no longer an *ambiguity* — CBOR round-trips
+    /// an empty string faithfully — so it is a hygiene check, and is documented as one.
     ///
-    /// The id ambiguity this gate used to leave open — a plain `issuer/feed/svn` join is not
-    /// injective when either component may contain `/` — is closed separately, by escaping
-    /// the separator in [`make_id`](Self::make_id) rather than by banning it here.
+    /// `policy_module` is deliberately not constrained: arbitrary Rego has to be
+    /// expressible, and CBOR carries it whatever it contains. An empty-but-present module is
+    /// still refused because it is a no-op no signer intends.
     pub fn validate_statement(&self) -> Result<(), FragmentError> {
         fn check(field: &str, value: &str) -> Result<(), FragmentError> {
             let bad = |reason: &str| FragmentError::MalformedStatement {
@@ -275,18 +270,13 @@ impl PolicyFragment {
             if let Some(c) = value.chars().find(|c| c.is_control()) {
                 return Err(bad(&format!("contains the control character {:?}", c)));
             }
-            for d in STATEMENT_DELIMITERS {
-                if value.contains(d) {
-                    return Err(bad(&format!("contains the section delimiter {d:?}")));
-                }
-            }
             Ok(())
         }
         fn check_entry(field: &str, value: &str) -> Result<(), FragmentError> {
             if value.is_empty() {
                 return Err(FragmentError::MalformedStatement {
                     field: field.to_string(),
-                    reason: "is empty, and an empty entry is dropped by the parser".to_string(),
+                    reason: "is empty, and an empty entry is never meaningful".to_string(),
                 });
             }
             check(field, value)
@@ -314,52 +304,90 @@ impl PolicyFragment {
     }
 
     /// Canonical byte encoding of the fragment *statement* that both the issuer signature
-    /// and the transparency receipt cover. Deterministic and binds issuer, feed, SVN,
-    /// sorted grants, module, sorted includes, sorted requires, and (FR-1j) the asserted
-    /// predecessor log head — so none can be altered without invalidating the signature.
-    /// The receipt is NOT included (it is a separate signature over these same bytes,
-    /// created after the issuer signs); the `receipt_ledger` selector is also excluded.
+    /// and the transparency receipt cover: a CBOR fixed-arity array tagged
+    /// `kata-policy-fragment/v4`.
+    ///
+    /// Deterministic, and binds issuer, feed, SVN, sorted grants, sorted includes, sorted
+    /// requires, module, and (FR-1j) the asserted predecessor log head — so none can be
+    /// altered without invalidating the signature. The receipt is NOT included (it is a
+    /// separate signature over these same bytes, created after the issuer signs); the
+    /// `receipt_ledger` selector is also excluded.
+    ///
+    /// # Why CBOR (F-144, RM-71)
+    ///
+    /// v3 was a flat newline-delimited text format with literal `--includes--` /
+    /// `--requires--` / `--module--` / `--prevhead--` marker lines, and it escaped nothing.
+    /// It was therefore injective only over the restricted domain
+    /// [`validate_statement`](Self::validate_statement) enforced. Outside that domain
+    /// distinct fragments shared signing bytes: `grants = ["alpha", "beta"]` encoded
+    /// identically to `grants = ["alpha\nbeta"]`, and `requires = ["--module--", "r1"],
+    /// module = "M"` collided with `requires = [], module = "r1\n--module--\nM"` — so one
+    /// signature bound a composition dependency and also validated a fragment that had
+    /// none. An issuer signed one meaning and the verifier could read another.
+    ///
+    /// CBOR removes the class instead of fencing it. Every field is length-prefixed and
+    /// typed, so no value can terminate a field early or be re-read as a different field,
+    /// whatever it contains. This is what the C-ACI/hcsshim baseline has always done —
+    /// COSE_Sign1 over CBOR, with issuer/feed/SVN in protected headers and CWT claims — and
+    /// it is why the F-144/F-145/F-146 family cannot be expressed there at all.
+    ///
+    /// # Why a fixed-arity array and not a map
+    ///
+    /// A map would reintroduce at the key level the ambiguity being removed: CBOR maps admit
+    /// duplicate keys, unsorted keys and non-minimally-encoded keys, and decoders disagree
+    /// about which duplicate wins. An array has no keys to disagree about, and pinning the
+    /// arity ([`STATEMENT_ARITY`]) means a field can be neither appended nor omitted.
+    ///
+    /// # Canonical form is enforced by re-encoding, not assumed
+    ///
+    /// CBOR is *not* automatically canonical — decoders accept indefinite-length items,
+    /// non-minimal integers and trailing data, so "it parsed" says nothing about the bytes
+    /// having been the ones this encoder would produce. Nothing here relies on the decoder
+    /// rejecting those: [`from_cose_payload`](Self::from_cose_payload) re-encodes what it
+    /// parsed and requires the result to equal the payload byte for byte. That check is what
+    /// makes the encoding canonical, and it is the reason this function must stay the single
+    /// definition of the format.
     pub fn signing_bytes(&self) -> Vec<u8> {
+        use ciborium::value::Value;
+
         let mut grants = self.grants.clone();
         grants.sort();
         let mut includes = self.includes.clone();
         includes.sort();
         let mut requires = self.requires.clone();
         requires.sort();
-        let mut s = String::new();
-        s.push_str("kata-policy-fragment/v3\n");
-        s.push_str(&self.issuer);
-        s.push('\n');
-        s.push_str(&self.feed);
-        s.push('\n');
-        s.push_str(&self.svn.to_string());
-        s.push('\n');
-        for g in &grants {
-            s.push_str(g);
-            s.push('\n');
+
+        fn texts(v: &[String]) -> Value {
+            Value::Array(v.iter().map(|s| Value::Text(s.clone())).collect())
         }
-        s.push_str("--includes--\n");
-        for i in &includes {
-            s.push_str(i);
-            s.push('\n');
-        }
-        s.push_str("--requires--\n");
-        for r in &requires {
-            s.push_str(r);
-            s.push('\n');
-        }
-        s.push_str("--module--\n");
-        s.push_str(self.policy_module.as_deref().unwrap_or(""));
-        // FR-1j: bind the asserted predecessor log head into the signature so ordering
-        // cannot be forged by the (untrusted) delivery path. Empty when not part of an
-        // ordered log.
-        s.push_str("\n--prevhead--\n");
-        if let Some(h) = &self.prev_log_head {
-            for b in h {
-                s.push_str(&format!("{:02x}", b));
-            }
-        }
-        s.into_bytes()
+
+        let stmt = Value::Array(vec![
+            Value::Text(STATEMENT_VERSION.to_string()),
+            Value::Text(self.issuer.clone()),
+            Value::Text(self.feed.clone()),
+            Value::Integer(self.svn.into()),
+            texts(&grants),
+            texts(&includes),
+            texts(&requires),
+            // `null` and `""` are distinct CBOR items, so an absent module no longer needs a
+            // sentinel and cannot be confused with an empty one.
+            match &self.policy_module {
+                Some(m) => Value::Text(m.clone()),
+                None => Value::Null,
+            },
+            // FR-1j: bind the asserted predecessor log head into the signature so ordering
+            // cannot be forged by the (untrusted) delivery path. `null` when not part of an
+            // ordered log. A byte string, so it no longer needs hex framing.
+            match &self.prev_log_head {
+                Some(h) => Value::Bytes(h.clone()),
+                None => Value::Null,
+            },
+        ]);
+
+        let mut out = Vec::new();
+        ciborium::into_writer(&stmt, &mut out)
+            .expect("CBOR serialization into a Vec cannot fail");
+        out
     }
 }
 
@@ -2964,11 +2992,15 @@ mod tests {
         assert_eq!(store.verify(&f).unwrap_err(), FragmentError::InvalidReceipt);
     }
 
-    /// F-144: the v3 statement encoding is only injective because ambiguous fields are
-    /// refused. Both collisions are real — the bytes are identical — so what makes a
-    /// signature commit to one reading is that exactly one member of each pair is rejected.
+    /// F-144 / RM-71: the two v3 statement collisions are **gone**, not fenced off.
+    ///
+    /// Under v3 each of these pairs produced byte-identical signing input, so one signature
+    /// had two readings and `validate_statement` had to refuse one member of each pair to
+    /// keep the encoding injective. Under the v4 CBOR encoding the pairs simply encode
+    /// differently — a two-element array is not a one-element array whatever the elements
+    /// contain — so both members are now safe to accept and each parses back to itself.
     #[test]
-    fn ambiguous_statement_fields_are_refused_so_signing_bytes_stay_injective() {
+    fn v3_statement_collisions_do_not_exist_under_the_cbor_encoding() {
         // Two grants, or one grant containing a newline.
         let split = PolicyFragment {
             grants: vec!["alpha".into(), "beta".into()],
@@ -2978,15 +3010,21 @@ mod tests {
             grants: vec!["alpha\nbeta".into()],
             ..Default::default()
         };
-        assert_eq!(split.signing_bytes(), joined.signing_bytes());
-        assert!(split.validate_statement().is_ok());
-        assert!(matches!(
-            joined.validate_statement(),
-            Err(FragmentError::MalformedStatement { .. })
-        ));
+        assert_ne!(
+            split.signing_bytes(),
+            joined.signing_bytes(),
+            "a list of two is not a list of one under CBOR"
+        );
+        assert_eq!(
+            PolicyFragment::from_cose_payload(&split.signing_bytes())
+                .unwrap()
+                .grants,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
 
         // A dependency declared in `requires`, or the same bytes with no dependency at all
-        // and the delimiter smuggled into the module.
+        // and the old delimiter smuggled into the module. This was the dangerous one: the
+        // second reading silently has no composition dependency.
         let with_dep = PolicyFragment {
             requires: vec!["--module--".into(), "r1".into()],
             policy_module: Some("M".into()),
@@ -2997,34 +3035,55 @@ mod tests {
             policy_module: Some("r1\n--module--\nM".into()),
             ..Default::default()
         };
-        assert_eq!(with_dep.signing_bytes(), without_dep.signing_bytes());
-        assert!(
-            matches!(
-                with_dep.validate_statement(),
-                Err(FragmentError::MalformedStatement { .. })
-            ),
-            "the reading that silently loses a dependency must not be the accepted one"
+        assert_ne!(
+            with_dep.signing_bytes(),
+            without_dep.signing_bytes(),
+            "a signature must not bind both a dependency and its absence"
         );
-        // The surviving reading is self-consistent: it parses back to itself.
-        assert!(without_dep.validate_statement().is_ok());
-        let parsed = PolicyFragment::from_cose_payload(&without_dep.signing_bytes()).unwrap();
-        assert!(parsed.requires.is_empty());
-        assert_eq!(parsed.policy_module.as_deref(), Some("r1\n--module--\nM"));
+
+        // Both now round-trip to themselves, so neither reading can be substituted for the
+        // other: the dependency survives the encoding it used to be erasable by.
+        let a = PolicyFragment::from_cose_payload(&with_dep.signing_bytes()).unwrap();
+        assert_eq!(a.requires, vec!["--module--".to_string(), "r1".to_string()]);
+        assert_eq!(a.policy_module.as_deref(), Some("M"));
+        let b = PolicyFragment::from_cose_payload(&without_dep.signing_bytes()).unwrap();
+        assert!(b.requires.is_empty());
+        assert_eq!(b.policy_module.as_deref(), Some("r1\n--module--\nM"));
     }
 
-    /// F-144: a delimiter need only be a *substring* to be dangerous — the module split
-    /// searches the whole statement, not whole lines — and an empty entry is dropped by the
-    /// parser, so both are refused.
+    /// RM-71: the delimiter-substring ban is deliberately gone — there are no delimiters —
+    /// and values that v3 had to refuse are now accepted and round-trip. What survives is
+    /// the control-character ban, which protects the still-textual audit log (F-146) and the
+    /// composition id rather than the statement encoding.
     #[test]
-    fn statement_validation_covers_substrings_and_empty_entries() {
+    fn former_delimiter_values_are_now_safe_and_roundtrip() {
+        let f = PolicyFragment {
+            issuer: "did:x509:0:sha256:AAAA::CN:x--module--y".into(),
+            feed: "reg/x--prevhead--y".into(),
+            svn: 2,
+            grants: vec!["x--includes--".into(), "--requires--".into()],
+            ..Default::default()
+        };
+        assert!(
+            f.validate_statement().is_ok(),
+            "nothing splits on these any more"
+        );
+        let parsed = PolicyFragment::from_cose_payload(&f.signing_bytes()).expect("parses");
+        assert_eq!(parsed.issuer, f.issuer);
+        assert_eq!(parsed.feed, f.feed);
+        assert_eq!(parsed.grants, {
+            let mut g = f.grants.clone();
+            g.sort();
+            g
+        });
+    }
+
+    /// F-146: the control-character ban and the empty-entry check are what remain of
+    /// `validate_statement`, and each has a live reason — the tab-delimited audit log and
+    /// the composition id, not the statement encoding.
+    #[test]
+    fn statement_validation_covers_control_characters_and_empty_entries() {
         for (label, f) in [
-            (
-                "grant embedding a delimiter",
-                PolicyFragment {
-                    grants: vec!["x--module--".into()],
-                    ..Default::default()
-                },
-            ),
             (
                 "empty grant",
                 PolicyFragment {
@@ -3047,9 +3106,9 @@ mod tests {
                 },
             ),
             (
-                "feed embedding a delimiter",
+                "feed with a tab",
                 PolicyFragment {
-                    feed: "reg/x--prevhead--y".into(),
+                    feed: "reg/frag\tdeadbeef".into(),
                     ..Default::default()
                 },
             ),
@@ -3099,26 +3158,104 @@ mod tests {
     /// F-144: the COSE signature covers the payload, not the parsed struct, so a payload
     /// that is not the canonical encoding of what it decodes to is refused outright. This
     /// holds for any ambiguity in the format, not only the ones `validate_statement` names.
+    /// RM-71: CBOR is *not* automatically canonical — decoders accept indefinite-length
+    /// items, non-minimal integers and trailing data — so "it parsed" says nothing about the
+    /// bytes. The COSE signature covers the payload rather than the parsed struct, so a
+    /// payload that is not the canonical encoding of what it decodes to must be refused
+    /// outright. Re-encoding enforces that without enumerating the ways CBOR can be sloppy.
     #[test]
     fn from_cose_payload_refuses_a_non_canonical_payload() {
-        let canonical =
-            b"kata-policy-fragment/v3\nI\nF\n1\na\nb\n--includes--\n--requires--\n--module--\nM\n--prevhead--\n";
-        assert!(PolicyFragment::from_cose_payload(canonical).is_some());
+        use ciborium::value::Value;
+
+        let f = PolicyFragment {
+            issuer: "I".into(),
+            feed: "F".into(),
+            svn: 1,
+            grants: vec!["a".into(), "b".into()],
+            policy_module: Some("M".into()),
+            ..Default::default()
+        };
+        let canonical = f.signing_bytes();
+        assert!(PolicyFragment::from_cose_payload(&canonical).is_some());
+
+        let encode = |v: &Value| {
+            let mut b = Vec::new();
+            ciborium::into_writer(v, &mut b).unwrap();
+            b
+        };
+        let texts = |xs: &[&str]| {
+            Value::Array(xs.iter().map(|s| Value::Text(s.to_string())).collect())
+        };
+        let stmt = |svn: Value, grants: Value| {
+            Value::Array(vec![
+                Value::Text(STATEMENT_VERSION.to_string()),
+                Value::Text("I".into()),
+                Value::Text("F".into()),
+                svn,
+                grants,
+                Value::Array(vec![]),
+                Value::Array(vec![]),
+                Value::Text("M".into()),
+                Value::Null,
+            ])
+        };
 
         // Grants in an order this encoder would never emit (it sorts).
-        let unsorted =
-            b"kata-policy-fragment/v3\nI\nF\n1\nb\na\n--includes--\n--requires--\n--module--\nM\n--prevhead--\n";
-        assert!(PolicyFragment::from_cose_payload(unsorted).is_none());
+        let unsorted = encode(&stmt(Value::Integer(1.into()), texts(&["b", "a"])));
+        assert!(PolicyFragment::from_cose_payload(&unsorted).is_none());
 
-        // A blank line the parser would silently drop.
-        let padded =
-            b"kata-policy-fragment/v3\nI\nF\n1\na\n\nb\n--includes--\n--requires--\n--module--\nM\n--prevhead--\n";
-        assert!(PolicyFragment::from_cose_payload(padded).is_none());
+        // Trailing data after a complete, otherwise-canonical statement.
+        let mut trailing = canonical.clone();
+        trailing.push(0x00);
+        assert!(PolicyFragment::from_cose_payload(&trailing).is_none());
 
-        // Leading zeroes on the SVN: parses as 1, re-encodes as "1".
-        let padded_svn =
-            b"kata-policy-fragment/v3\nI\nF\n01\na\nb\n--includes--\n--requires--\n--module--\nM\n--prevhead--\n";
-        assert!(PolicyFragment::from_cose_payload(padded_svn).is_none());
+        // The outer array re-encoded with an indefinite length (0x9f … 0xff).
+        let mut indefinite = vec![0x9f];
+        indefinite.extend_from_slice(&canonical[1..]);
+        indefinite.push(0xff);
+        assert!(PolicyFragment::from_cose_payload(&indefinite).is_none());
+
+        // Wrong arity: a field appended, and a field omitted.
+        let mut long = match stmt(Value::Integer(1.into()), texts(&["a", "b"])) {
+            Value::Array(v) => v,
+            _ => unreachable!(),
+        };
+        long.push(Value::Text("extra".into()));
+        assert!(PolicyFragment::from_cose_payload(&encode(&Value::Array(long.clone()))).is_none());
+        long.truncate(STATEMENT_ARITY - 1);
+        assert!(PolicyFragment::from_cose_payload(&encode(&Value::Array(long))).is_none());
+
+        // Type confusion: an SVN encoded as text rather than an integer.
+        let typed = encode(&stmt(Value::Text("1".into()), texts(&["a", "b"])));
+        assert!(PolicyFragment::from_cose_payload(&typed).is_none());
+
+        // A different version tag is a different statement, and the tag is signed.
+        let mut wrong_version = match stmt(Value::Integer(1.into()), texts(&["a", "b"])) {
+            Value::Array(v) => v,
+            _ => unreachable!(),
+        };
+        wrong_version[0] = Value::Text("kata-policy-fragment/v3".into());
+        assert!(PolicyFragment::from_cose_payload(&encode(&Value::Array(wrong_version))).is_none());
+
+        // A non-minimally encoded integer: SVN 0 written as the two-byte 0x18 0x00 rather
+        // than the one-byte 0x00. Hand-built, because no encoder here will emit it.
+        let mut minimal = vec![0x89, 0x77];
+        minimal.extend_from_slice(STATEMENT_VERSION.as_bytes());
+        minimal.extend_from_slice(&[0x60, 0x60]); // issuer "", feed ""
+        let tail = [0x80, 0x80, 0x80, 0xf6, 0xf6]; // grants/includes/requires [], module+prev null
+        let mut non_minimal = minimal.clone();
+        minimal.push(0x00);
+        minimal.extend_from_slice(&tail);
+        non_minimal.extend_from_slice(&[0x18, 0x00]);
+        non_minimal.extend_from_slice(&tail);
+        assert!(
+            PolicyFragment::from_cose_payload(&minimal).is_some(),
+            "the minimal encoding is the canonical one and must be accepted"
+        );
+        assert!(
+            PolicyFragment::from_cose_payload(&non_minimal).is_none(),
+            "the same value encoded non-minimally must not be"
+        );
     }
 
     /// F-144: the gate is on the verification path, not merely available to callers — a
