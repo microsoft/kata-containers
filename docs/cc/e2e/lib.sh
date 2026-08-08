@@ -92,8 +92,10 @@ E2E_GUEST_IGVM="$E2E_KATA_PREFIX/share/kata-containers/${E2E_GUEST_IGVM_NAME:-}"
 # node-builder README is explicit that AzL's packaged kernel-uvm 6.6.137.mshv1
 # triple-faults during IGVM boot, so the UVM kernel is a specific older one that
 # has to be rebuilt with EROFS support.
-: "${E2E_CLH_REPO:=https://github.com/microsoft/cloud-hypervisor.git}"
-: "${E2E_CLH_TAG:=msft/v51.1.101}"
+: "${E2E_CLH_REPO:=https://github.com/cloud-hypervisor/cloud-hypervisor.git}"
+# Pinned to the upstream commit that carries flat VMDK support, which multi-layer
+# EROFS requires; the Microsoft fork (msft/v51.1.101) cannot parse VMDK at all.
+: "${E2E_CLH_TAG:=aa9678da67f6336c4a41add9095c9c917b800ea9}"
 : "${E2E_UVM_KERNEL_VERSION:=6.1.58.mshv8}"
 # whoami returns DOMAIN\user on a Windows workstation, and cygwin/git-bash render
 # that as DOMAIN+user. Azure rejects both separators and upper case in an admin

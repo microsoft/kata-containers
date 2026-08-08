@@ -262,24 +262,35 @@ EOF
 }
 
 # ---------------------------------------------------------------- build inputs
-# Cloud Hypervisor has to be the Microsoft fork built with the sev_snp feature;
-# upstream CLH has no SNP support and the resulting binary boots nothing.
+# Cloud Hypervisor is pinned to an upstream commit rather than the Microsoft
+# fork. Multi-layer EROFS attaches the layers as one multi-extent VMDK, and the
+# fork's ImageType knows only FixedVhd/Qcow2/Raw/Vhdx -- it silently treats the
+# VMDK descriptor (a ~1 KB text file) as a raw disk, so the guest sees a device
+# with no GPT signature and no partition node ever appears. Upstream gained flat
+# VMDK support at this commit; the compat patch restores MSHV/SNP behaviour that
+# regressed after the fork point. See docs/design/erofs-cloud-hypervisor-investigation.md.
 clh_build_cloud_hypervisor() {
-  local dir="${E2E_CLH_DIR:-$HOME/cloud-hypervisor}"
+  local dir="${E2E_CLH_DIR:-$HOME/cloud-hypervisor-vmdk}"
+  local patch="$E2E_REPO_DIR/cloud-hypervisor-mshv-vmdk-compat.patch"
   CLH_SNP_BIN="$dir/target/release/cloud-hypervisor"
   if [ -x "$CLH_SNP_BIN" ] && [ "${E2E_FORCE:-0}" != "1" ]; then
     ok "cloud-hypervisor already built: $CLH_SNP_BIN"
     export CLH_SNP_BIN; return 0
   fi
   if [ ! -d "$dir/.git" ]; then
-    log "cloning $E2E_CLH_REPO ($E2E_CLH_TAG)"
-    git clone --depth 1 --branch "$E2E_CLH_TAG" "$E2E_CLH_REPO" "$dir" \
-      || die "cloud-hypervisor clone failed"
+    log "cloning $E2E_CLH_REPO at $E2E_CLH_TAG"
+    git clone "$E2E_CLH_REPO" "$dir" || die "cloud-hypervisor clone failed"
   fi
-  log "building cloud-hypervisor with the sev_snp feature"
+  ( cd "$dir" && git fetch --all --quiet && git checkout --quiet "$E2E_CLH_TAG" ) \
+    || die "cloud-hypervisor checkout of $E2E_CLH_TAG failed"
+  # Re-appliable: reset first so E2E_FORCE=1 does not fail on an already-patched tree.
+  [ -f "$patch" ] || die "missing compat patch: $patch"
+  ( cd "$dir" && git checkout --quiet -- . && git apply "$patch" ) \
+    || die "cloud-hypervisor mshv/vmdk compat patch failed to apply"
+  log "building cloud-hypervisor with the mshv,sev_snp features"
   # OPENSSL_NO_VENDOR=1 makes the build use the distro OpenSSL. Without it the
   # vendored build needs a perl/ssl toolchain AzL3 does not ship by default.
-  ( cd "$dir" && OPENSSL_NO_VENDOR=1 cargo build --release --no-default-features --features sev_snp ) \
+  ( cd "$dir" && OPENSSL_NO_VENDOR=1 cargo build --release --no-default-features --features mshv,sev_snp ) \
     || die "cloud-hypervisor build failed"
   [ -x "$CLH_SNP_BIN" ] || die "cloud-hypervisor built but $CLH_SNP_BIN is missing"
   export CLH_SNP_BIN
