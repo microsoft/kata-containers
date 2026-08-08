@@ -2955,8 +2955,8 @@ fn caller_described_fragment_field(
         ("requires", !req.requires.is_empty()),
         ("prev_log_head", !req.prev_log_head.is_empty()),
     ]
-    .into_iter()
-    .find_map(|(name, present)| present.then_some(name))
+    .iter()
+    .find_map(|&(name, present)| present.then_some(name))
 }
 
 fn parse_extra_receipts(entries: &[String]) -> ttrpc::Result<Vec<(String, String)>> {
