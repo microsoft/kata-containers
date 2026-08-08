@@ -123,3 +123,12 @@ tsm-test-override = []
 # a guarantee (fragment SVN rollback protection, the fragment issuer trust root, the CDI spec
 # allow-list) that the host must not be able to relocate.
 test-path-override = []
+# F-166/R-2: restores the pre-F-166 behaviour where a guest with no TEE report provider is
+# treated as "not a confidential VM" and boots on with unbound initdata. Needed only for
+# non-confidential development VMs that deliver policy/trust roots through initdata. MUST NOT
+# be enabled in a shipped confidential image: F-6 showed the no-provider path is reachable on
+# a genuinely confidential VM (Azure paravisor SNP), where enabling this lets the host supply
+# the policy and the SRM trust roots unmeasured. Deliberately a build-time switch — the
+# agent's environment and kernel command line are host-chosen, so a runtime opt-out would
+# hand the same downgrade back to the host.
+allow-unattested-initdata = []
