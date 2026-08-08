@@ -423,6 +423,32 @@ ensure_genpolicy_defaults() {
           's|"image_layer_verification": "none"|"image_layer_verification": "host-erofs-dm-verity"|' \
           "$GP_SETTINGS"
       fi
+      # Every pod gets a sandbox container, and under host-erofs-dm-verity its
+      # image layer is verified like any other. genpolicy hashes whichever pause
+      # image the settings name, but the layer the node actually mounts comes
+      # from containerd's configured sandbox image. The shipped settings say
+      # mcr.microsoft.com/oss/kubernetes/pause:3.6 while a kubeadm-provisioned
+      # containerd runs registry.k8s.io/pause:3.10.x, so the policy declares a
+      # root hash for an image this node never pulls.
+      #
+      # The failure is deceptive: the workload's layers match perfectly and only
+      # the sandbox layer is refused, which reads as a dm-verity defect rather
+      # than an image-name skew. Ask containerd what it will actually run
+      # instead of hardcoding a value that silently rots when k8s bumps pause.
+      local sandbox_image declared_pause
+      sandbox_image="$(sudo containerd config dump 2>/dev/null \
+        | sed -n "s/^[[:space:]]*sandbox = '\(.*\)'[[:space:]]*$/\1/p" | head -1)"
+      if [ -n "$sandbox_image" ]; then
+        declared_pause="$(sed -n 's|.*"pause_container_image": "\([^"]*\)".*|\1|p' \
+          "$GP_SETTINGS" | head -1)"
+        if [ -n "$declared_pause" ] && [ "$declared_pause" != "$sandbox_image" ]; then
+          log "patching pause_container_image $declared_pause -> $sandbox_image"
+          sed -i "s|\"pause_container_image\": \"[^\"]*\"|\"pause_container_image\": \"$sandbox_image\"|" \
+            "$GP_SETTINGS"
+        fi
+      else
+        warn "could not read containerd's sandbox image; leaving pause_container_image alone"
+      fi
       ;;
   esac
   export GP_RULES GP_SETTINGS
