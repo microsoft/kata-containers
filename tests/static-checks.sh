@@ -489,6 +489,7 @@ static_check_license_headers()
 			--exclude="go.sum" \
 			--exclude="*.lock" \
 			--exclude="grpc-rs/*" \
+			--exclude="third_party/pathrs/*" \
 			--exclude="target/*" \
 			--exclude="*.patch" \
 			--exclude="*.diff" \

@@ -1,3 +1,6 @@
+\* Copyright (c) 2026 Microsoft Corporation
+\*
+\* SPDX-License-Identifier: Apache-2.0
 -------------------------------- MODULE SRM --------------------------------
 (***************************************************************************)
 (* FR-15 — formal model of the Security Reference Monitor (SRM) lifecycle. *)
