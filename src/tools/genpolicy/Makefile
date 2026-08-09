@@ -35,7 +35,7 @@ clean:
 	rm -f $(GENERATED_FILES)
 
 test: $(GENERATED_FILES)
-	@RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo test -p genpolicy --all-targets --all-features --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release)
+	@RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo test -p genpolicy --no-fail-fast --all-targets --all-features --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release)
 
 install: $(GENERATED_FILES)
 	@RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo install --locked --target $(TRIPLE) --path .
