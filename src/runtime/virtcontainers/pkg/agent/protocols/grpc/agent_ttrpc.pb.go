@@ -52,6 +52,7 @@ type AgentServiceService interface {
 	GetVolumeStats(context.Context, *VolumeStatsRequest) (*VolumeStatsResponse, error)
 	ResizeVolume(context.Context, *ResizeVolumeRequest) (*emptypb.Empty, error)
 	SetPolicy(context.Context, *SetPolicyRequest) (*emptypb.Empty, error)
+	LoadPolicyFragment(context.Context, *LoadPolicyFragmentRequest) (*emptypb.Empty, error)
 }
 
 func RegisterAgentServiceService(srv *ttrpc.Server, svc AgentServiceService) {
@@ -350,6 +351,13 @@ func RegisterAgentServiceService(srv *ttrpc.Server, svc AgentServiceService) {
 					return nil, err
 				}
 				return svc.SetPolicy(ctx, &req)
+			},
+			"LoadPolicyFragment": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
+				var req LoadPolicyFragmentRequest
+				if err := unmarshal(&req); err != nil {
+					return nil, err
+				}
+				return svc.LoadPolicyFragment(ctx, &req)
 			},
 		},
 	})
@@ -696,6 +704,14 @@ func (c *agentserviceClient) ResizeVolume(ctx context.Context, req *ResizeVolume
 func (c *agentserviceClient) SetPolicy(ctx context.Context, req *SetPolicyRequest) (*emptypb.Empty, error) {
 	var resp emptypb.Empty
 	if err := c.client.Call(ctx, "grpc.AgentService", "SetPolicy", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *agentserviceClient) LoadPolicyFragment(ctx context.Context, req *LoadPolicyFragmentRequest) (*emptypb.Empty, error) {
+	var resp emptypb.Empty
+	if err := c.client.Call(ctx, "grpc.AgentService", "LoadPolicyFragment", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
