@@ -680,6 +680,16 @@ external ledger are flagged and tracked in `docs/cc/backlog.md`.
   / `policy.rs`. Inert (no behavioural change) when no fragments are declared.
 - **Why:** fragments become operable/attested from the measured base policy, not only pushed
   at runtime.
+- **Duplicate declarations (RM-93):** the same `(issuer, feed)` may legitimately be declared
+  in both measured places — `policy_data.fragments` (BL-7, from settings) and
+  `policy_fragments` (BL-8, in the generated policy text) — and when the two disagree on
+  `minimum_svn`, the **strictest** floor applies. `svn_floor(issuer, feed)` takes the maximum
+  over every matching declaration, matching the SRM's `declare_feed`, which keeps the
+  stricter floor (RM-87). Previously both composition rules selected with an existential over
+  the specs, so the weakest floor won and an operator raising a floor in one place while a
+  stale declaration survived in the other silently got the old, lower bar at this layer. The
+  rules now iterate the delivered modules rather than the specs, so each feed is considered
+  exactly once and duplicate declarations cannot produce duplicate container entries.
 - **Commits:** `e3e203876`.
 
 ### Boot-time OCI pull → SRM-verify → inject (FR-1 delivery) — PR #7
