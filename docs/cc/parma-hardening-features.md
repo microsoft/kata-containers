@@ -742,12 +742,22 @@ external ledger are flagged and tracked in `docs/cc/backlog.md`.
   section first, else the measured-rootfs file (a shared `resolve_measured_config` helper logs
   the chosen source). Seeding runs after initdata is parsed and before the ttRPC server / the
   boot fragment pull; fail-closed semantics are unchanged (absent config ⇒ no authorized
-  issuer/layer/image).
+  issuer/layer/image). **The precedence is conditional on the binding having actually been
+  verified** (RM-88/F-166): the initdata section counts as measured state only when FR-2 bound
+  it to the launch measurement, and otherwise it is ignored in favour of the rootfs file.
 - **Guarantee:** the fragment/layer/image trust roots are bound to the **initdata digest**,
   which is part of the TEE-attested launch measurement — so a host cannot alter the trust root
   without changing the attestation. The runtime-advancing FR-1i SVN high-water / FR-1j ordering
   state stays on sealed encrypted-scratch (mutable + monotonic by construction); only the
   immutable initial trust config is bound into the measured section.
+- **Caveat (RM-88/F-166):** that guarantee holds only while the FR-2 binding actually runs. It
+  used to be assumed rather than checked at the point of use — the `Ok(false)` "no TEE report
+  provider" path merely warned, and the trust root was still taken from initdata, *in preference
+  to* a genuinely measured rootfs file. Since RM-88 a guest with no report provider aborts in a
+  strict build (matching hcsshim, whose gcs-sidecar keeps its deny policy when no report is
+  available), and an unbound initdata section is never treated as measured state. The
+  `allow-unattested-initdata` build feature restores the old behaviour for non-confidential
+  development VMs only.
 - **Delivered by:** PR #10 (branch `bl5-initdata-measured`).
 
 ### Complete OCI Process field coverage in genpolicy (FR-16) — this PR
