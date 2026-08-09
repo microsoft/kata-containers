@@ -64,6 +64,12 @@ pub struct PolicyFragment {
     /// (back-compat with a single-anchor configuration). This is *untrusted* metadata: it
     /// only selects a key set; a receipt is accepted only if that ledger's key actually
     /// signed the statement, so a forged ledger id cannot bypass verification.
+    ///
+    /// F-167: on the Stage-1 and native Stage-2 paths that holds unconditionally, because
+    /// the signed bytes are either the statement itself or `sth_signing_bytes(ledger, ..)`,
+    /// which names the ledger. A CCF Stage-2 receipt signs only the bare Merkle root and so
+    /// carries no ledger name of its own; that path additionally refuses a receipt that
+    /// validates under more than one configured ledger (`FragmentStore::ledger_ambiguity`).
     pub receipt_ledger: Option<String>,
     /// FR-1j: the append-only log head this fragment asserts it is applied on top of.
     /// Carried in the **protected** header (`kata-prev-log-head`), so the issuer signs it
@@ -638,6 +644,22 @@ pub enum FragmentError {
     /// FR-1f Stage 2: the transparency inclusion proof does not recompute to the signed
     /// tree-head root (the fragment is not provably recorded in the log).
     InvalidInclusionProof,
+    /// FR-1f Stage 2 (F-168): a CCF inclusion proof carries a longer path than any real
+    /// ledger produces. Bounded because the fold runs on host-supplied, unsigned input
+    /// before any signature is checked. Distinct from [`InvalidInclusionProof`] because it
+    /// is the one case an operator can act on rather than an attack signature.
+    ///
+    /// [`InvalidInclusionProof`]: FragmentError::InvalidInclusionProof
+    CcfProofPathTooLong { len: usize, max: usize },
+    /// FR-1f Stage 2 (F-167): a CCF receipt validated under the ledger it claims *and* under
+    /// at least one other configured ledger, so it does not attribute to a single ledger.
+    ///
+    /// Unlike the native `kata-ttl-proof/v1` path — where the ledger id is inside the bytes
+    /// the ledger signs — a CCF receipt is a signature over the bare Merkle root, so the
+    /// only thing binding it to a ledger is which trust-list entry the key sat in. When two
+    /// entries share key material that binding is not a binding at all, and a receipt from
+    /// one ledger would silently satisfy a scope naming the other.
+    AmbiguousCcfLedger { claimed: String, also: String },
     /// FR-1f Stage 2: the presented signed tree head is not an append-only extension of the
     /// last-seen one for this ledger (the log was rewound or forked).
     LogRolledBack {
@@ -708,6 +730,15 @@ impl fmt::Display for FragmentError {
             FragmentError::InvalidInclusionProof => {
                 write!(f, "transparency inclusion proof does not verify")
             }
+            FragmentError::CcfProofPathTooLong { len, max } => write!(
+                f,
+                "CCF inclusion proof presents a {len}-element path, more than the {max} permitted"
+            ),
+            FragmentError::AmbiguousCcfLedger { claimed, also } => write!(
+                f,
+                "CCF receipt claimed for ledger {claimed} also validates as ledger {also}: \
+                 shared ledger key material makes the claimed ledger unverifiable"
+            ),
             FragmentError::LogRolledBack { ledger, last_size, presented_size } => write!(
                 f,
                 "transparency log {ledger} rolled back: last size {last_size}, presented {presented_size}"
@@ -1043,6 +1074,26 @@ impl FragmentStore {
             }
         }
         Ok(())
+    }
+
+    /// FR-1f Stage 2 (F-167): does a CCF receipt attribute to more than one configured
+    /// ledger?
+    ///
+    /// Returns the id of some *other* ledger whose keys also validate `sig` over `root`, or
+    /// `None` when the claim is unambiguous. Needed only for the CCF path: every other
+    /// receipt form binds the ledger id into the bytes that were signed, so re-attribution
+    /// is already impossible there.
+    ///
+    /// This tests the property directly rather than checking for duplicate key material, so
+    /// it also covers the case where two entries hold *different* keys that both happen to
+    /// verify (a key present in two encodings, say). Cost is one verification per key in the
+    /// other ledgers, on a trust list that holds a handful of keys.
+    fn ledger_ambiguity(&self, claimed: &str, root: &[u8; 32], sig: &[u8]) -> Option<String> {
+        self.transparency_trust_list
+            .iter()
+            .filter(|(id, _)| id.as_str() != claimed)
+            .find(|(_, keys)| validating_subjects(keys, root, sig).is_some())
+            .map(|(id, _)| id.clone())
     }
 
     /// FR-1f (trust list): record which Trust List subject(s) vouched for a ledger key.
@@ -1440,15 +1491,44 @@ impl FragmentStore {
                 // BL-6: external SCITT CCF-profile receipt. Recompute the CCF Merkle root
                 // from the inclusion proof, require it binds SHA-256(statement), and verify
                 // the ledger's signature over that root. CCF proofs carry no signed tree
-                // head, so cross-fragment append-only ordering remains governed by FR-1j
-                // (`prev_log_head`), not by the external ledger.
+                // head, so cross-fragment append-only ordering is left to FR-1j
+                // (`prev_log_head`) rather than the external ledger — note that FR-1j is
+                // opt-in (it only engages once the store has a `log_genesis`), so a
+                // deployment that uses CCF receipts *without* ordered mode has neither the
+                // native `ttl_heads` consistency gate nor a log-head chain. That is
+                // acceptable only because `data_hash` binds the statement (hence the
+                // issuer/feed/SVN) and SVN monotonicity refuses a replayed receipt.
                 if proof.trim_start().starts_with("kata-ccf-proof/v1") {
                     let ccf = CcfReceipt::parse(proof).ok_or(FragmentError::InvalidReceipt)?;
                     let stmt_hash: [u8; 32] = Sha256::digest(statement).into();
                     let root = crate::ccf::verify_ccf_inclusion(&ccf.proof_cbor, &stmt_hash)
-                        .ok_or(FragmentError::InvalidInclusionProof)?;
+                        .map_err(|e| match e {
+                            // F-168: surfaced distinctly so an over-long path reads as a
+                            // bound being hit, not as an unverifiable proof.
+                            crate::ccf::CcfError::PathTooLong { len, max } => {
+                                FragmentError::CcfProofPathTooLong { len, max }
+                            }
+                            _ => FragmentError::InvalidInclusionProof,
+                        })?;
                     let subjects = validating_subjects(keys, &root, &ccf.sig)
                         .ok_or(FragmentError::InvalidReceipt)?;
+                    // F-167: the native path below has the ledger sign
+                    // `sth_signing_bytes(ledger, size, root)`, so the ledger id is *inside*
+                    // the signed bytes and a receipt cannot be re-attributed. A CCF receipt
+                    // is a signature over the bare root — nothing in it names a ledger — so
+                    // the claimed `receipt_ledger` is only as trustworthy as the assumption
+                    // that one ledger's keys are that ledger's alone. Nothing enforces that
+                    // assumption at load time (and it would be wrong to: sharing a key is
+                    // harmless for Stage 1 and for the native path, both of which bind the
+                    // ledger in the signed bytes). So test the property where it actually
+                    // matters: if any *other* configured ledger also validates this receipt,
+                    // the claim is unverifiable and the receipt is refused.
+                    if let Some(also) = self.ledger_ambiguity(ledger, &root, &ccf.sig) {
+                        return Err(FragmentError::AmbiguousCcfLedger {
+                            claimed: ledger.to_string(),
+                            also,
+                        });
+                    }
                     validated.push(ValidatedReceipt {
                         ledger: ledger.to_string(),
                         ttl_subjects: subjects,
@@ -3205,8 +3285,152 @@ mod tests {
         );
     }
 
-    /// TC-F1.34 (Stage 2): the tree head is monotonic — a growing log with a valid
-    /// consistency proof is accepted; a shrunk head (rollback) is rejected.
+    /// F-167: a CCF receipt signs only the bare Merkle root, so nothing in it names a
+    /// ledger. If two configured ledgers share key material, the receipt validates as both
+    /// and the `receipt_ledger` claim — which `allowed_ledgers` / `required_receipt_from`
+    /// scoping is enforced against — means nothing. It must be refused rather than silently
+    /// attributed to whichever ledger the host named.
+    #[test]
+    fn stage2_ccf_receipt_attributable_to_two_ledgers_is_refused() {
+        let (issuer_sk, issuer_pk) = keypair(1);
+        let (led_sk, led_pk) = keypair(30);
+        let mut store = FragmentStore::new(false);
+        store.authorize_issuer("issuerA", &issuer_pk).unwrap();
+        // The same key registered under two ledger ids: a rename/migration, or one ledger
+        // instance enrolled under both a generic and an environment-specific name.
+        store
+            .load_transparency_trust_list(&[
+                ("ttl".into(), vec![led_pk]),
+                ("other".into(), vec![led_pk]),
+            ])
+            .unwrap();
+
+        let f = ttl_frag(&issuer_sk, 1, "ttl");
+        let stmt = tbs_of(&f);
+
+        let mut ccf = f.clone();
+        ccf.receipt_proof = Some(ccf_receipt(&stmt, &led_sk, &stmt));
+        assert_eq!(
+            verify(&store, &issuer_sk, &ccf).unwrap_err(),
+            FragmentError::AmbiguousCcfLedger {
+                claimed: "ttl".into(),
+                also: "other".into(),
+            }
+        );
+
+        // Control: the native path carries the ledger id inside `sth_signing_bytes`, so the
+        // very same ambiguous trust list is harmless there and must keep working. This is
+        // why the check lives at the CCF branch and not in the trust-list loader.
+        let mut tree = MerkleTree::new();
+        tree.push(tbs_of(&f));
+        let mut native = f.clone();
+        native.receipt_proof = Some(ttl_proof(&tree, &led_sk, "ttl", 0, None));
+        assert!(verify(&store, &issuer_sk, &native).is_ok());
+    }
+
+    /// F-167 control: with only the claimed ledger configured there is no ambiguity, so the
+    /// receipt is accepted exactly as before. Guards against the check firing on the normal
+    /// single-ledger configuration.
+    #[test]
+    fn stage2_ccf_receipt_unambiguous_when_ledgers_hold_distinct_keys() {
+        let (issuer_sk, issuer_pk) = keypair(1);
+        let (led_sk, led_pk) = keypair(30);
+        let (_other_sk, other_pk) = keypair(32);
+        let mut store = FragmentStore::new(false);
+        store.authorize_issuer("issuerA", &issuer_pk).unwrap();
+        store
+            .load_transparency_trust_list(&[
+                ("ttl".into(), vec![led_pk]),
+                ("other".into(), vec![other_pk]),
+            ])
+            .unwrap();
+
+        let f = ttl_frag(&issuer_sk, 1, "ttl");
+        let stmt = tbs_of(&f);
+        let mut ok = f.clone();
+        ok.receipt_proof = Some(ccf_receipt(&stmt, &led_sk, &stmt));
+        assert!(verify(&store, &issuer_sk, &ok).is_ok());
+    }
+
+    /// F-168: the CCF path fold is host-supplied, unsigned input processed before any
+    /// signature check, so its length is bounded — and the bound reports distinctly.
+    #[test]
+    fn stage2_ccf_proof_path_length_is_bounded() {
+        let (issuer_sk, issuer_pk) = keypair(1);
+        let (led_sk, led_pk) = keypair(30);
+        let mut store = FragmentStore::new(false);
+        store.authorize_issuer("issuerA", &issuer_pk).unwrap();
+        store
+            .load_transparency_trust_list(&[("ttl".into(), vec![led_pk])])
+            .unwrap();
+
+        let f = ttl_frag(&issuer_sk, 1, "ttl");
+        let stmt = tbs_of(&f);
+        let over = crate::ccf::MAX_CCF_PATH_ELEMENTS + 1;
+
+        let mut long = f.clone();
+        long.receipt_proof = Some(ccf_receipt_with_path_len(&stmt, &led_sk, over));
+        assert_eq!(
+            verify(&store, &issuer_sk, &long).unwrap_err(),
+            FragmentError::CcfProofPathTooLong {
+                len: over,
+                max: crate::ccf::MAX_CCF_PATH_ELEMENTS,
+            }
+        );
+
+        // At the bound the proof is still processed normally: a correctly signed root at
+        // exactly MAX elements verifies, so the cap is not off by one.
+        let mut at_bound = f.clone();
+        at_bound.receipt_proof = Some(ccf_receipt_with_path_len(
+            &stmt,
+            &led_sk,
+            crate::ccf::MAX_CCF_PATH_ELEMENTS,
+        ));
+        assert!(verify(&store, &issuer_sk, &at_bound).is_ok());
+    }
+
+    /// F-168 helper: a CCF receipt binding `statement` with exactly `n` path elements, with
+    /// the resulting root correctly signed — so the only reason it can be refused is length.
+    fn ccf_receipt_with_path_len(statement: &[u8], led_sk: &SigningKey, n: usize) -> String {
+        let tx = [7u8; 32];
+        let data_hash: [u8; 32] = Sha256::digest(statement).into();
+        let mut h = crate::ccf::ccf_leaf_hash(&tx, b"ccf-evidence", &data_hash);
+        let mut path = Vec::with_capacity(n);
+        for i in 0..n {
+            let sib = [i as u8; 32];
+            let mut d = Sha256::new();
+            d.update(h);
+            d.update(sib);
+            h = d.finalize().into();
+            path.push(ciborium::value::Value::Array(vec![
+                ciborium::value::Value::Bool(false),
+                ciborium::value::Value::Bytes(sib.to_vec()),
+            ]));
+        }
+        let proof = ciborium::value::Value::Map(vec![
+            (
+                ciborium::value::Value::Integer(1.into()),
+                ciborium::value::Value::Array(vec![
+                    ciborium::value::Value::Bytes(tx.to_vec()),
+                    ciborium::value::Value::Text("ccf-evidence".into()),
+                    ciborium::value::Value::Bytes(data_hash.to_vec()),
+                ]),
+            ),
+            (
+                ciborium::value::Value::Integer(2.into()),
+                ciborium::value::Value::Array(path),
+            ),
+        ]);
+        let mut cbor = Vec::new();
+        ciborium::into_writer(&proof, &mut cbor).unwrap();
+        let sig = led_sk.sign(&h).to_bytes();
+        format!(
+            "kata-ccf-proof/v1\nproof={}\nsig={}\n",
+            bytes_to_hex(&cbor),
+            bytes_to_hex(&sig)
+        )
+    }
+
     #[test]
     fn stage2_consistency_and_rollback() {
         let (issuer_sk, issuer_pk) = keypair(1);
