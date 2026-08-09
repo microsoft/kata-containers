@@ -2586,19 +2586,13 @@ candidate_agrees_on_oci_version if {
     entry.container.OCI.Version == input.OCI.Version
 }
 
-errors[msg] if {
-    input.rule == "CreateContainerRequest"
-    count(all_policy_container_entries) > 0
-    i_namespace := input.OCI.Annotations[S_NAMESPACE_KEY]
-    not candidate_agrees_on_namespace
-    accepted := {c.container.OCI.Annotations[S_NAMESPACE_KEY] | some c in all_policy_container_entries}
-    msg := sprintf("sandbox namespace: request has %v, policy accepts %v", [i_namespace, accepted])
-}
-
-candidate_agrees_on_namespace if {
-    some entry in all_policy_container_entries
-    entry.container.OCI.Annotations[S_NAMESPACE_KEY] == input.OCI.Annotations[S_NAMESPACE_KEY]
-}
+# RM-97: there is deliberately no "sandbox namespace" error here. The enforcement path
+# never compares the request's namespace against the policy's: `allow_by_anno` reads
+# `S_NAMESPACE_KEY` from the *input* only and passes it down as a substitution variable
+# for `allow_var` and `allow_sandbox_log_directory`. The policy's own annotation is not a
+# constraint, and genpolicy commonly leaves it empty. Reporting a comparison the engine
+# never makes produced a permanent, unconditional "request has default, policy accepts
+# {\"\"}" on every guest-pull denial, which read like a root cause and was not one.
 
 # Command arguments are compared but never reported: unlike mounts and hashes they are
 # workload data rather than policy data, and the baseline redacts them for the same reason.
@@ -2626,6 +2620,33 @@ candidate_agrees_on_cwd if {
     entry.container.OCI.Process.Cwd == input.OCI.Process.Cwd
 }
 
+# RM-97: the process user. This check was missing entirely, and it was the actual cause of
+# every denial investigated under RM-95 and RM-96 -- in each case the operator was handed
+# three unrelated reasons and never told that `allow_user` had rejected the request. A
+# UID/GID/AdditionalGids mismatch is also one of the likeliest real mismatches in practice,
+# because supplementary groups are derived from the image's /etc/group rather than written
+# by hand, so a stale policy disagrees here first.
+#
+# These are policy data, not workload data -- the same values appear in the policy the
+# reader already holds -- so naming them leaks nothing, on the same rationale as mounts.
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(all_policy_container_entries) > 0
+    not candidate_agrees_on_user
+    accepted := {describe_user(c.container.OCI.Process.User) | some c in all_policy_container_entries}
+    msg := sprintf("process user: request has %v, policy accepts %v", [describe_user(input.OCI.Process.User), accepted])
+}
+
+# Delegates to the enforcement rule for the same reason `env_declared_by_some_candidate`
+# does: a hand-rolled comparison would drift, and `allow_user` compares AdditionalGids as
+# a set rather than a list.
+candidate_agrees_on_user if {
+    some entry in all_policy_container_entries
+    allow_user(entry.container.OCI.Process, input.OCI.Process)
+}
+
+describe_user(user) := sprintf("uid=%v gid=%v additionalGids=%v", [user.UID, user.GID, sort([g | some g in user.AdditionalGids])])
+
 # Environment variables: names only. A value can be a password or a sealed secret, and the
 # name alone is enough to say which variable was not expected.
 errors[msg] if {
@@ -2642,11 +2663,31 @@ unmatched_env_names := {name |
     name := split(i_env, "=")[0]
 }
 
+# RM-97: ask the *enforcement* rule, not a private copy of it. A plain `p_env == i_env`
+# ignores everything `allow_var` knows: the `$(host-name)`, `$(sandbox-name)` and
+# `$(sandbox-namespace)` substitutions, the `allow_env_regex` list, and the fieldRef and
+# IP-valued forms. It therefore reported `HOSTNAME` as undeclared against a policy that
+# plainly declares `HOSTNAME=$(host-name)`, and reported every regex-admitted
+# `KUBERNETES_*` variable as undeclared -- on requests whose real defect was elsewhere.
+# Delegating keeps the diagnostic honest by construction: it can only name a variable the
+# enforcement itself would have rejected.
 env_declared_by_some_candidate(i_env) if {
     some entry in all_policy_container_entries
-    some p_env in entry.container.OCI.Process.Env
-    p_env == i_env
+    allow_var(
+        entry.container.OCI.Process,
+        input.OCI.Process,
+        i_env,
+        request_sandbox_name,
+        request_sandbox_namespace,
+    )
 }
+
+# The substitution variables `allow_var` expects. Both are read from the request, which is
+# what `allow_by_anno` passes to the enforcement path; default to "" so a request missing
+# the annotation still produces a diagnostic instead of an undefined rule.
+request_sandbox_name := object.get(input.OCI.Annotations, S_NAME_KEY, "")
+
+request_sandbox_namespace := object.get(input.OCI.Annotations, S_NAMESPACE_KEY, "")
 
 # Mount destinations. These are declared in the policy, so reporting them leaks nothing,
 # and "which mount was not expected" is the single most common create-container question.
@@ -2679,13 +2720,25 @@ errors[msg] if {
     count(all_policy_container_entries) > 0
     not candidate_agrees_on_storage_count
     accepted := {count(c.container.storages) | some c in all_policy_container_entries}
-    msg := sprintf("storage count: request presents %v storages, policy declares %v", [count(input.storages), accepted])
+    msg := sprintf("storage count: request presents %v storages, policy declares %v", [presented_storage_count, accepted])
 }
 
 candidate_agrees_on_storage_count if {
     some entry in all_policy_container_entries
-    count(entry.container.storages) == count(input.storages)
+    count(entry.container.storages) == presented_storage_count
 }
+
+# RM-97: count the presented storages the way `allow_storages` does -- excluding
+# `image_guest_pull`. genpolicy never emits an `image_guest_pull` storage into a policy
+# (upstream does not either); the driver is matched against the container's image via
+# `allow_image_guest_pull_source`, so a policy declaring zero of them is correct, not a
+# mismatch. Counting them made every guest-pull denial carry a bogus
+# "request presents 1 storages, policy declares {0}" line, which is the single most
+# misleading thing an operator could be told about a correctly generated policy.
+presented_storage_count := count(input.storages) - count([s |
+	some s in input.storages
+	s.driver == "image_guest_pull"
+])
 
 # dm-verity root hashes (RM-42). Reported with the partition number each was presented on,
 # because a *correct* set of hashes on the *wrong* partitions is a real and previously

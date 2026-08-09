@@ -87,7 +87,9 @@ mod tests {
     /// should be exactly one entry with a PodSpec. The test case file must contain
     /// a JSON list of [TestCase] instances. Each instance will be of type enum TestRequest,
     /// with the tag `type` listing the exact type of request.
-    async fn runtests(test_case_dir: &str) {
+    async fn prepare_policy(
+        test_case_dir: &str,
+    ) -> (AgentPolicy, String, path::PathBuf, path::PathBuf) {
         // Check if config_map.yaml exists.
         // If it does, we need to copy it to the workdir.
         let is_config_map_file_present = path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -184,6 +186,13 @@ mod tests {
         )
         .await
         .unwrap();
+
+        (pol, policy, testdata_dir, workdir)
+    }
+
+    /// Run tests from the given directory. See [`prepare_policy`] for the setup.
+    async fn runtests(test_case_dir: &str) {
+        let (mut pol, policy, testdata_dir, workdir) = prepare_policy(test_case_dir).await;
 
         // Run through the test cases and evaluate the canned requests.
 
@@ -508,6 +517,122 @@ mod tests {
             kata_agent_policy::policy::POLICY_FRAMEWORK_VERSION,
             "genpolicy stamps a framework_version the agent does not implement; if the agent's \
              framework version was bumped deliberately, bump genpolicy's constant to match"
+        );
+    }
+
+    /// RM-97: a denial must name the check that actually failed, and must not name checks
+    /// that did not.
+    ///
+    /// This is a regression test for three diagnostics that were wrong at once. Debugging
+    /// two unrelated failures (RM-95, RM-96) produced the same three reasons both times --
+    /// undeclared `HOSTNAME`/`KUBERNETES_*`, a sandbox-namespace mismatch, and a storage
+    /// count mismatch -- and all three were false every time, while the real cause, an
+    /// `allow_user` mismatch, was never reported at all. The wrong reasons sent that
+    /// investigation down the wrong path for a full pass, so each one is pinned here.
+    ///
+    /// The vehicle is a Deployment, deliberately: its pod name is generated, so `HOSTNAME`
+    /// can only be admitted through the `$(host-name)` substitution and the
+    /// `KUBERNETES_*` service variables only through `allow_env_regex`. Those are exactly
+    /// the paths the old exact-match diagnostic could not see.
+    #[tokio::test]
+    async fn a_denial_names_the_check_that_failed_and_no_others() {
+        let (mut pol, _policy, testdata_dir, _workdir) =
+            prepare_policy("state/execprocessdeployment").await;
+
+        let raw_cases =
+            fs::read_to_string(testdata_dir.join("testcases.json")).expect("test cases readable");
+        let cases: Vec<TestCase> = serde_json::from_str(&raw_cases).expect("test cases parse");
+
+        // Start from a request the policy accepts, so the only thing under test is the
+        // single field we break below.
+        let case = cases
+            .iter()
+            .find(|c| c.allowed && matches!(c.request, TestRequest::CreateContainerRequest(_)))
+            .expect("fixture must contain an allowed CreateContainerRequest");
+
+        let mut req = serialize_request_only(&case.request).unwrap();
+        let user = req
+            .pointer_mut("/OCI/Process/User")
+            .expect("request has a process user");
+
+        // Add a supplementary group that no container in the policy declares. A value that
+        // merely differs is not enough: the sandbox pause container runs as uid 0 with
+        // gids [0], so dropping a group would still "agree" with *some* container and the
+        // per-check diagnostic would correctly stay silent. The mismatch has to hold
+        // against every candidate for the check to be the one that failed.
+        user["AdditionalGids"] = serde_json::json!([0, 10, 4242]);
+
+        let (allowed, message) = pol
+            .allow_request(
+                &case.request.to_string(),
+                &serde_json::to_string(&req).unwrap(),
+            )
+            .await
+            .expect("evaluation itself must succeed");
+
+        assert!(!allowed, "a mismatched AdditionalGids must be refused");
+
+        // The reason that must be present: it is the one that actually failed.
+        assert!(
+            message.contains("process user:"),
+            "denial must name the process-user mismatch, got: {message}"
+        );
+        assert!(
+            message.contains("additionalGids=[0, 10, 4242]"),
+            "denial must show the presented supplementary groups, got: {message}"
+        );
+
+        // The reasons that must be absent, one per defect fixed.
+        assert!(
+            !message.contains("sandbox namespace"),
+            "the engine never compares the policy's namespace annotation against the \
+             request's, so a namespace mismatch must never be reported: {message}"
+        );
+        assert!(
+            !message.contains("storage count"),
+            "genpolicy never declares an image_guest_pull storage, so a request presenting \
+             one must not be reported as a storage-count mismatch: {message}"
+        );
+        assert!(
+            !message.contains("HOSTNAME"),
+            "HOSTNAME is admitted via the $(host-name) substitution and must not be \
+             reported as undeclared: {message}"
+        );
+        assert!(
+            !message.contains("KUBERNETES_"),
+            "the KUBERNETES_* service variables are admitted by allow_env_regex and must \
+             not be reported as undeclared: {message}"
+        );
+    }
+
+    /// The other half of the test above: an unmodified request from the same fixture is
+    /// allowed. Without this, every assertion above would still hold if the policy denied
+    /// everything for some unrelated reason.
+    #[tokio::test]
+    async fn the_unmodified_request_is_still_allowed() {
+        let (mut pol, _policy, testdata_dir, _workdir) =
+            prepare_policy("state/execprocessdeployment").await;
+
+        let raw_cases =
+            fs::read_to_string(testdata_dir.join("testcases.json")).expect("test cases readable");
+        let cases: Vec<TestCase> = serde_json::from_str(&raw_cases).expect("test cases parse");
+        let case = cases
+            .iter()
+            .find(|c| c.allowed && matches!(c.request, TestRequest::CreateContainerRequest(_)))
+            .expect("fixture must contain an allowed CreateContainerRequest");
+
+        let req = serialize_request_only(&case.request).unwrap();
+        let (allowed, message) = pol
+            .allow_request(
+                &case.request.to_string(),
+                &serde_json::to_string(&req).unwrap(),
+            )
+            .await
+            .expect("evaluation itself must succeed");
+
+        assert!(
+            allowed,
+            "unmodified request must be allowed, got: {message}"
         );
     }
 
