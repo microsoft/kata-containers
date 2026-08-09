@@ -313,7 +313,8 @@ mod tests {
         for bits in [MIN_RSA_MODULUS_BITS, MAX_RSA_MODULUS_BITS] {
             assert!(
                 PublicKey::from_spki_der(&rsa_spki_der(bits)).is_some(),
-                "{bits}-bit modulus is on the boundary and must be accepted"
+                "{}-bit modulus is on the boundary and must be accepted",
+                bits
             );
         }
 
@@ -321,7 +322,8 @@ mod tests {
         for bits in [MIN_RSA_MODULUS_BITS - 8, MAX_RSA_MODULUS_BITS + 8] {
             assert!(
                 PublicKey::from_spki_der(&rsa_spki_der(bits)).is_none(),
-                "{bits}-bit modulus is outside the accepted range and must be refused"
+                "{}-bit modulus is outside the accepted range and must be refused",
+                bits
             );
         }
 

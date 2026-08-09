@@ -631,6 +631,14 @@ external ledger are flagged and tracked in `docs/cc/backlog.md`.
   COSE `alg` / certificate OID — no downgrade.
 - **Why:** parity with (and beyond) the reference confidential runtime, which verifies the
   RSA/ES256/ES384/EdDSA set; the baseline did Ed25519 + ES256 only.
+- **RSA modulus size (RM-92):** RSA is the only algorithm in the set whose key size is not
+  fixed by the algorithm, so it is the only one needing an explicit range:
+  `MIN_RSA_MODULUS_BITS` = 1024 and `MAX_RSA_MODULUS_BITS` = 4096, enforced in the single
+  constructor that builds an RSA key. The floor matches Go's `crypto/rsa`, which since Go
+  1.24 refuses sub-1024-bit keys for every operation including `Verify` — so the reference
+  Go stack rejects weak-key certificates that this verifier previously honoured. The ceiling
+  restates a bound the `rsa` crate already applied internally, so it is visible and tested
+  here rather than inherited from a dependency's default.
 - **Commits:** `0ac3af0c2`, `10a0ec277`.
 
 ### External SCITT / CCF transparency receipts (FR-1f Stage 2) — PR #5
