@@ -13,6 +13,11 @@ source "${lib_file}"
 
 CONF_PODS=${CONF_PODS:-no}
 USE_RUNTIME_RS=${USE_RUNTIME_RS:-no}
+# Defaulted here rather than only in uvm_build.sh: clean.sh, package_build.sh,
+# package_install.sh and package_tools_install.sh all branch on it too, and none of
+# them sources uvm_build.sh. They ran without nounset, so an unset BUILD_TARFS
+# silently expanded to the empty string and read as "no" by accident.
+BUILD_TARFS=${BUILD_TARFS:-no}
 
 OS_VERSION=$(sort -r /etc/*-release | gawk 'match($0, /^(VERSION_ID=(.*))$/, a) { print toupper(a[2] a[3]); exit }' | tr -d '"')
 

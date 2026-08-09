@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# shellcheck source-path=SCRIPTDIR
 # Shared helpers and configuration for the CoCo end-to-end reproduction scripts.
 # Source this from every step script:  . "$(dirname "$0")/lib.sh"
 
@@ -30,7 +36,7 @@ set -uo pipefail
 # are all different, and only the QEMU path ships a genpolicy binary. Anything
 # platform-dependent is derived here so the stages stay declarative.
 : "${E2E_PLATFORM:=qemu-coco-dev}"
-case "$E2E_PLATFORM" in
+case "${E2E_PLATFORM}" in
   qemu-coco-dev)
     # Standard_DC16as_cc_v5 is a SEV-SNP CC SKU. See README for the region/quota
     # trap: availability and quota are independent, and each alone is a false green.
@@ -76,7 +82,7 @@ case "$E2E_PLATFORM" in
     : "${E2E_GUEST_IGVM_NAME:=kata-containers-igvm.img}"
     ;;
   *)
-    echo "unsupported E2E_PLATFORM=$E2E_PLATFORM (expected qemu-coco-dev or clh-snp)" >&2
+    echo "unsupported E2E_PLATFORM=${E2E_PLATFORM} (expected qemu-coco-dev or clh-snp)" >&2
     exit 1
     ;;
 esac
@@ -84,9 +90,9 @@ esac
 # Where the *installed* kata payload lives. Only ever used for things the
 # platform actually installs — notably not genpolicy, which the confpods flow
 # does not ship at all (see genpolicy_defaults below).
-E2E_KATA_DEFAULTS="$E2E_KATA_PREFIX/share/defaults/kata-containers"
-E2E_GUEST_IMAGE="$E2E_KATA_PREFIX/share/kata-containers/$E2E_GUEST_IMAGE_NAME"
-E2E_GUEST_IGVM="$E2E_KATA_PREFIX/share/kata-containers/${E2E_GUEST_IGVM_NAME:-}"
+E2E_KATA_DEFAULTS="${E2E_KATA_PREFIX}/share/defaults/kata-containers"
+E2E_GUEST_IMAGE="${E2E_KATA_PREFIX}/share/kata-containers/${E2E_GUEST_IMAGE_NAME}"
+E2E_GUEST_IGVM="${E2E_KATA_PREFIX}/share/kata-containers/${E2E_GUEST_IGVM_NAME:-}"
 
 # Component versions for the clh-snp build. Pinned rather than floating: the
 # node-builder README is explicit that AzL's packaged kernel-uvm 6.6.137.mshv1
@@ -100,15 +106,15 @@ E2E_GUEST_IGVM="$E2E_KATA_PREFIX/share/kata-containers/${E2E_GUEST_IGVM_NAME:-}"
 # whoami returns DOMAIN\user on a Windows workstation, and cygwin/git-bash render
 # that as DOMAIN+user. Azure rejects both separators and upper case in an admin
 # name, so normalise here rather than failing deep inside az vm create.
-: "${E2E_ADMIN:=$(whoami | sed 's|.*[\\/+]||' | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9_-')}"
-: "${E2E_SSH_KEY:=$HOME/.ssh/id_rsa.pub}"
+: "${E2E_ADMIN:=$(whoami | sed 's|.*[\\/+]||' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')}"
+: "${E2E_SSH_KEY:=${HOME}/.ssh/id_rsa.pub}"
 
 # Repo under test. These default to where *this* branch lives, so a fresh clone
 # followed by `02-bootstrap-node.sh` reproduces the branch under test rather than
 # some other fork. Override both together to drive a different fork/branch.
 : "${E2E_REPO_URL:=https://github.com/microsoft/kata-containers.git}"
 : "${E2E_BRANCH:=manifold-cc}"
-: "${E2E_REPO_DIR:=$HOME/kata-containers}"
+: "${E2E_REPO_DIR:=${HOME}/kata-containers}"
 
 # Guest-stack build flags. STRICT_POLICY=yes is what pulls in the security reference
 # monitor; without it none of the hardening is in the binary.
@@ -132,29 +138,29 @@ E2E_GUEST_IGVM="$E2E_KATA_PREFIX/share/kata-containers/${E2E_GUEST_IGVM_NAME:-}"
 # both; set it to a registry name to reuse one, or to "" to stay on the loopback
 # registry and skip 07c/07d.
 : "${E2E_ACR:=}"
-: "${E2E_ACR_RG:=$E2E_RG}"
+: "${E2E_ACR_RG:=${E2E_RG}}"
 : "${E2E_ACR_SKU:=Standard}"
 
-E2E_STATE_DIR="${E2E_STATE_DIR:-$HOME/.coco-e2e}"
-mkdir -p "$E2E_STATE_DIR"
+E2E_STATE_DIR="${E2E_STATE_DIR:-${HOME}/.coco-e2e}"
+mkdir -p "${E2E_STATE_DIR}"
 
 # ---------------------------------------------------------------------- logging
 _c_red=$'\033[31m'; _c_grn=$'\033[32m'; _c_yel=$'\033[33m'
 _c_blu=$'\033[34m'; _c_off=$'\033[0m'
 
-log()   { printf '%s[e2e]%s %s\n'  "$_c_blu" "$_c_off" "$*"; }
-ok()    { printf '%s[ ok]%s %s\n'  "$_c_grn" "$_c_off" "$*"; }
-warn()  { printf '%s[warn]%s %s\n' "$_c_yel" "$_c_off" "$*"; }
-die()   { printf '%s[FAIL]%s %s\n' "$_c_red" "$_c_off" "$*" >&2; exit 1; }
+log()   { printf '%s[e2e]%s %s\n'  "${_c_blu}" "${_c_off}" "$*"; }
+ok()    { printf '%s[ ok]%s %s\n'  "${_c_grn}" "${_c_off}" "$*"; }
+warn()  { printf '%s[warn]%s %s\n' "${_c_yel}" "${_c_off}" "$*"; }
+die()   { printf '%s[FAIL]%s %s\n' "${_c_red}" "${_c_off}" "$*" >&2; exit 1; }
 
-step()  { printf '\n%s========== %s ==========%s\n' "$_c_blu" "$*" "$_c_off"; }
+step()  { printf '\n%s========== %s ==========%s\n' "${_c_blu}" "$*" "${_c_off}"; }
 
 # Mark a step complete so re-running the suite skips it.
-mark_done()   { touch "$E2E_STATE_DIR/$1.done"; }
-is_done()     { [ -f "$E2E_STATE_DIR/$1.done" ]; }
+mark_done()   { touch "${E2E_STATE_DIR}/$1.done"; }
+is_done()     { [[ -f "${E2E_STATE_DIR}/$1.done" ]]; }
 skip_if_done() {
-  if is_done "$1" && [ "${E2E_FORCE:-0}" != "1" ]; then
-    ok "$1 already complete (rm $E2E_STATE_DIR/$1.done or set E2E_FORCE=1 to redo)"
+  if is_done "$1" && [[ "${E2E_FORCE:-0}" != "1" ]]; then
+    ok "$1 already complete (rm ${E2E_STATE_DIR}/$1.done or set E2E_FORCE=1 to redo)"
     exit 0
   fi
 }
@@ -178,29 +184,29 @@ tarball_confined() {
   # `|| true` would let a tar failure (corrupt archive, missing zstd) produce an
   # empty stream that reads exactly like a clean archive — the guard would then
   # pass by failing, which is the bug class this function exists to avoid.
-  listing=$(tar --zstd -tf "$t" 2>/dev/null) || { echo "cannot list $t"; return 1; }
-  [ -n "$listing" ] || { echo "$t lists no members"; return 1; }
-  if grep -q '\.\.' <<<"$listing"; then
-    echo "$t contains .. in a member path"; return 1
+  listing=$(tar --zstd -tf "${t}" 2>/dev/null) || { echo "cannot list ${t}"; return 1; }
+  [[ -n "${listing}" ]] || { echo "${t} lists no members"; return 1; }
+  if grep -q '\.\.' <<<"${listing}"; then
+    echo "${t} contains .. in a member path"; return 1
   fi
   # Prefix matching alone would accept a symlink member under ./opt/kata/ that
   # points outside it, and any subsequent member written through that link. The
   # rootfs tarball legitimately carries one symlink (kata-containers.img ->
   # kata-ubuntu-noble.image), so reject by target, not by member type: a relative
   # target that stays inside the payload is fine, absolute or ..-escaping is not.
-  escaping=$(tar --zstd -tvf "$t" 2>/dev/null | grep ' -> ' | awk -F' -> ' '$2 ~ /^\/|\.\./' || true)
-  if [ -n "$escaping" ]; then
-    echo "$t contains symlinks pointing outside the payload:
-$escaping"; return 1
+  escaping=$(tar --zstd -tvf "${t}" 2>/dev/null | grep ' -> ' | awk -F' -> ' '$2 ~ /^\/|\.\./' || true)
+  if [[ -n "${escaping}" ]]; then
+    echo "${t} contains symlinks pointing outside the payload:
+${escaping}"; return 1
   fi
   # Some tarballs carry the ancestor directories as their own entries (./, ./opt,
   # ./opt/kata). Those are the path to the payload, not a widening of it, and
   # extracting them changes nothing, so allow exactly those three and no more.
-  stray=$(grep -v '^\./opt/kata/' <<<"$listing" \
+  stray=$(grep -v '^\./opt/kata/' <<<"${listing}" \
     | grep -vx '\./' | grep -vx '\./opt/' | grep -vx '\./opt/kata/' || true)
-  if [ -n "$stray" ]; then
-    echo "$t contains paths outside ./opt/kata/:
-$stray"; return 1
+  if [[ -n "${stray}" ]]; then
+    echo "${t} contains paths outside ./opt/kata/:
+${stray}"; return 1
   fi
   return 0
 }
@@ -218,12 +224,12 @@ $stray"; return 1
 # predicate drift apart silently, and the drift is invisible exactly when one of
 # them has been weakened.
 assert_local_guest_installed() {
-  local rec="$E2E_STATE_DIR/guest-image-sha256"
-  local img="$E2E_GUEST_IMAGE"
-  [ -f "$rec" ] || die "no record of a locally built guest image — run 04-build-guest-stack.sh first"
-  [ -f "$img" ] || die "missing $img"
-  [ "$(sha256sum "$img" | cut -d' ' -f1)" = "$(cat "$rec")" ] \
-    || die "$img is not the image stage 04 installed — re-run stage 04 (E2E_FORCE=1)"
+  local rec="${E2E_STATE_DIR}/guest-image-sha256"
+  local img="${E2E_GUEST_IMAGE}"
+  [[ -f "${rec}" ]] || die "no record of a locally built guest image — run 04-build-guest-stack.sh first"
+  [[ -f "${img}" ]] || die "missing ${img}"
+  [[ "$(sha256sum "${img}" | cut -d' ' -f1)" = "$(cat "${rec}")" ]] \
+    || die "${img} is not the image stage 04 installed — re-run stage 04 (E2E_FORCE=1)"
 
   # The runtime pins the guest to a dm-verity root hash. If the configured hash is
   # the one from our build, then a pod that reaches Running can only have booted
@@ -236,32 +242,32 @@ assert_local_guest_installed() {
   # therefore the artefact that carries the pin, and asserting it is the one we
   # built is the same claim by a different route — a tampered rootfs fails verity
   # against a hash the IGVM measurement covers.
-  if [ "$E2E_PLATFORM" = "clh-snp" ]; then
-    local igvm_rec="$E2E_STATE_DIR/guest-igvm-sha256"
-    [ -s "$igvm_rec" ] || die "no recorded IGVM digest — re-run stage 04"
-    [ -f "$E2E_GUEST_IGVM" ] || die "missing $E2E_GUEST_IGVM"
-    [ "$(sha256sum "$E2E_GUEST_IGVM" | cut -d' ' -f1)" = "$(cat "$igvm_rec")" ] \
-      || die "$E2E_GUEST_IGVM is not the IGVM stage 04 installed — re-run stage 04 (E2E_FORCE=1)"
+  if [[ "${E2E_PLATFORM}" = "clh-snp" ]]; then
+    local igvm_rec="${E2E_STATE_DIR}/guest-igvm-sha256"
+    [[ -s "${igvm_rec}" ]] || die "no recorded IGVM digest — re-run stage 04"
+    [[ -f "${E2E_GUEST_IGVM}" ]] || die "missing ${E2E_GUEST_IGVM}"
+    [[ "$(sha256sum "${E2E_GUEST_IGVM}" | cut -d' ' -f1)" = "$(cat "${igvm_rec}")" ]] \
+      || die "${E2E_GUEST_IGVM} is not the IGVM stage 04 installed — re-run stage 04 (E2E_FORCE=1)"
     ok "guest pinned by IGVM measurement to the locally built image"
-    ok "testing guest built from $(cat "$E2E_STATE_DIR/guest-image-commit" 2>/dev/null || echo unknown)"
+    ok "testing guest built from $(cat "${E2E_STATE_DIR}/guest-image-commit" 2>/dev/null || echo unknown)"
     return 0
   fi
 
-  local params_rec="$E2E_STATE_DIR/guest-verity-params"
-  local cfg_rec="$E2E_STATE_DIR/guest-config-paths"
-  [ -s "$params_rec" ] || die "no recorded dm-verity parameters — re-run stage 04"
-  [ -s "$cfg_rec" ]    || die "no recorded runtime config paths — re-run stage 04"
+  local params_rec="${E2E_STATE_DIR}/guest-verity-params"
+  local cfg_rec="${E2E_STATE_DIR}/guest-config-paths"
+  [[ -s "${params_rec}" ]] || die "no recorded dm-verity parameters — re-run stage 04"
+  [[ -s "${cfg_rec}" ]]    || die "no recorded runtime config paths — re-run stage 04"
   local cfgs=()
-  mapfile -t cfgs < "$cfg_rec"
-  [ "${#cfgs[@]}" -gt 0 ] || die "no runtime config paths recorded by stage 04"
+  mapfile -t cfgs < "${cfg_rec}"
+  [[ "${#cfgs[@]}" -gt 0 ]] || die "no runtime config paths recorded by stage 04"
   local cfg
   for cfg in "${cfgs[@]}"; do
-    [ -f "$cfg" ] || die "runtime config recorded by stage 04 is gone: $cfg"
-    grep -qF "$(cat "$params_rec")" "$cfg" \
-      || die "dm-verity hash in $cfg does not match the installed image — re-run stage 04"
+    [[ -f "${cfg}" ]] || die "runtime config recorded by stage 04 is gone: ${cfg}"
+    grep -qF "$(cat "${params_rec}")" "${cfg}" \
+      || die "dm-verity hash in ${cfg} does not match the installed image — re-run stage 04"
   done
   ok "guest pinned by dm-verity to the locally built image (${#cfgs[@]} config(s))"
-  ok "testing guest built from $(cat "$E2E_STATE_DIR/guest-image-commit" 2>/dev/null || echo unknown)"
+  ok "testing guest built from $(cat "${E2E_STATE_DIR}/guest-image-commit" 2>/dev/null || echo unknown)"
 }
 
 # Wait until a shell predicate succeeds.  wait_for <timeout-s> <desc> <cmd...>
@@ -274,9 +280,9 @@ wait_for() { wait_for_soft "$@" || die "timed out after ${1}s waiting for: $2"; 
 wait_for_soft() {
   local timeout="$1" desc="$2"; shift 2
   local deadline=$(( $(date +%s) + timeout ))
-  log "waiting up to ${timeout}s for: $desc"
-  while [ "$(date +%s)" -lt "$deadline" ]; do
-    if "$@" >/dev/null 2>&1; then ok "$desc"; return 0; fi
+  log "waiting up to ${timeout}s for: ${desc}"
+  while [[ "$(date +%s)" -lt "${deadline}" ]]; do
+    if "$@" >/dev/null 2>&1; then ok "${desc}"; return 0; fi
     sleep 5
   done
   return 1
@@ -288,24 +294,26 @@ wait_for_soft() {
 all_nodes_ready() {
   local out
   out=$(kubectl get nodes --no-headers 2>/dev/null) || return 1
-  [ -n "$out" ] || return 1
-  ! awk '{print $2}' <<<"$out" | grep -qvx Ready
+  [[ -n "${out}" ]] || return 1
+  ! awk '{print $2}' <<<"${out}" | grep -qvx Ready
 }
 
 # Load the cluster/runtime environment. Sourced before every gha-run.sh invocation.
+# shellcheck disable=SC2120  # the path argument is optional by design: 03 passes an
+# explicit ENV_FILE, every later stage takes the default.
 load_coco_env() {
-  local f="${1:-$HOME/coco-env.sh}"
-  [ -f "$f" ] || die "missing $f — run 03-deploy-cluster.sh first (it writes this file)"
+  local f="${1:-${HOME}/coco-env.sh}"
+  [[ -f "${f}" ]] || die "missing ${f} — run 03-deploy-cluster.sh first (it writes this file)"
   # shellcheck disable=SC1090
-  . "$f"
-  export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+  . "${f}"
+  export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
 }
 
 # Make cargo/go/kubectl reachable in non-interactive ssh sessions, which do not
 # source ~/.bashrc or ~/.cargo/env.
 load_toolchain() {
-  export PATH="$PATH:$HOME/.cargo/bin:/usr/local/go/bin:$HOME/gopath/bin"
-  export GOPATH="${GOPATH:-$HOME/gopath}"
+  export PATH="${PATH}:${HOME}/.cargo/bin:/usr/local/go/bin:${HOME}/gopath/bin"
+  export GOPATH="${GOPATH:-${HOME}/gopath}"
   # Derive GOROOT from whichever `go` PATH actually resolves -- never a fixed path.
   #
   # These nodes carry two Go installs: the distro package (/usr/lib/golang, on
@@ -320,7 +328,8 @@ load_toolchain() {
   # `env -u GOROOT` matters: ~/.bashrc exports GOROOT=/usr/local/go, and `go env
   # GOROOT` would otherwise just echo that back instead of the binary's own root.
   if command -v go >/dev/null 2>&1; then
-    export GOROOT="$(env -u GOROOT go env GOROOT)"
+    GOROOT="$(env -u GOROOT go env GOROOT)"
+    export GOROOT
   else
     export GOROOT="${GOROOT:-/usr/local/go}"
   fi
@@ -362,8 +371,8 @@ registry_up() {
   # --max-time, because a wedged registry is the interesting case: the one below
   # kept its listener open and accepted connections while every handler blocked,
   # so a probe without a deadline hangs here instead of rebuilding it.
-  curl -fsS --max-time 5 "http://$addr/v2/" >/dev/null 2>&1 && return 0
-  log "starting a local OCI registry at $addr"
+  curl -fsS --max-time 5 "http://${addr}/v2/" >/dev/null 2>&1 && return 0
+  log "starting a local OCI registry at ${addr}"
 
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     docker rm -f coco-e2e-registry >/dev/null 2>&1 || true
@@ -373,17 +382,20 @@ registry_up() {
     # diagnostics pointing at delivery rather than at a registry that went away.
     docker run -d --name coco-e2e-registry --restart unless-stopped \
       -v coco-e2e-registry-data:/var/lib/registry \
-      -p "$port:5000" \
+      -p "${port}:5000" \
       registry:2 >/dev/null || die "could not start the local registry"
   elif command -v ctr >/dev/null 2>&1; then
     # A namespace of our own, not k8s.io: anything the kubelet can see there it
     # also considers itself responsible for, and image GC would eventually
     # collect a container the cluster has no Pod for.
-    local ns="--namespace coco-e2e" img="docker.io/library/registry:2"
-    sudo ctr $ns task kill -s SIGKILL coco-e2e-registry >/dev/null 2>&1 || true
-    sudo ctr $ns container rm coco-e2e-registry >/dev/null 2>&1 || true
-    sudo ctr $ns image pull "$img" >/dev/null 2>&1 \
-      || die "could not pull $img"
+    local img="docker.io/library/registry:2"
+    # An array, not a string: this is two argv entries, and quoting it as one
+    # would hand ctr a single "--namespace coco-e2e" argument it cannot parse.
+    local ns=(--namespace coco-e2e)
+    sudo ctr "${ns[@]}" task kill -s SIGKILL coco-e2e-registry >/dev/null 2>&1 || true
+    sudo ctr "${ns[@]}" container rm coco-e2e-registry >/dev/null 2>&1 || true
+    sudo ctr "${ns[@]}" image pull "${img}" >/dev/null 2>&1 \
+      || die "could not pull ${img}"
     # Bind-mounted state rather than the container's own writable layer, which
     # `container rm` above would discard on the next run. ctr has no equivalent
     # of --restart, so a reboot does drop the registry; the curl probe at the top
@@ -397,17 +409,17 @@ registry_up() {
     # accepted, they simply never get answered. That reads as "the registry is up
     # but delivery hangs", and it strands stage 07 in FailedCreatePodSandBox
     # minutes later with diagnostics pointing at the fragment machinery.
-    sudo ctr $ns run -d --net-host \
+    sudo ctr "${ns[@]}" run -d --net-host \
       --log-uri "file:///var/log/coco-e2e-registry.log" \
-      --env "REGISTRY_HTTP_ADDR=0.0.0.0:$port" \
+      --env "REGISTRY_HTTP_ADDR=0.0.0.0:${port}" \
       --mount "type=bind,src=/var/lib/coco-e2e-registry,dst=/var/lib/registry,options=rbind:rw" \
-      "$img" coco-e2e-registry >/dev/null \
+      "${img}" coco-e2e-registry >/dev/null \
       || die "could not start the local registry under containerd"
   else
-    die "no container engine available to host the local registry at $addr"
+    die "no container engine available to host the local registry at ${addr}"
   fi
 
-  wait_for 60 "registry $addr responding" curl -fsS --max-time 5 "http://$addr/v2/"
+  wait_for 60 "registry ${addr} responding" curl -fsS --max-time 5 "http://${addr}/v2/"
 }
 
 # Only the binary is branch-built. The settings and rules under /opt/kata are
@@ -419,25 +431,25 @@ registry_up() {
 # Reproduce just that one substitution rather than invoking `make`, whose build
 # target also cross-compiles to $TRIPLE and runs `cargo test --no-run`.
 ensure_branch_genpolicy() {
-  local gp_src="$E2E_REPO_DIR/src/tools/genpolicy" gp_commit
+  local gp_src="${E2E_REPO_DIR}/src/tools/genpolicy" gp_commit
 
-  [ -f "$gp_src/src/version.rs.in" ] || die "missing $gp_src/src/version.rs.in"
-  gp_commit=$(git -C "$E2E_REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
-  [ -n "$(git -C "$E2E_REPO_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ] \
-    && gp_commit="$gp_commit-dirty"
-  sed -e "s|@COMMIT_INFO@|$gp_commit|g" "$gp_src/src/version.rs.in" > "$gp_src/src/version.rs" \
-    || die "could not generate $gp_src/src/version.rs"
+  [[ -f "${gp_src}/src/version.rs.in" ]] || die "missing ${gp_src}/src/version.rs.in"
+  gp_commit=$(git -C "${E2E_REPO_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)
+  [[ -n "$(git -C "${E2E_REPO_DIR}" status --porcelain --untracked-files=no 2>/dev/null)" ]] \
+    && gp_commit="${gp_commit}-dirty"
+  sed -e "s|@COMMIT_INFO@|${gp_commit}|g" "${gp_src}/src/version.rs.in" > "${gp_src}/src/version.rs" \
+    || die "could not generate ${gp_src}/src/version.rs"
 
   # genpolicy is a member of the root workspace (see the repo-root Cargo.toml),
   # so the artifact lands in the workspace target dir, not under src/tools.
-  log "building genpolicy from ${E2E_BRANCH:-the branch} ($gp_commit)"
-  ( cd "$E2E_REPO_DIR" && cargo build --release -p genpolicy ) \
+  log "building genpolicy from ${E2E_BRANCH:-the branch} (${gp_commit})"
+  ( cd "${E2E_REPO_DIR}" && cargo build --release -p genpolicy ) \
     || die "could not build genpolicy from the branch"
 
-  GENPOLICY="$E2E_REPO_DIR/target/release/genpolicy"
-  [ -x "$GENPOLICY" ] || die "genpolicy built but $GENPOLICY is missing"
+  GENPOLICY="${E2E_REPO_DIR}/target/release/genpolicy"
+  [[ -x "${GENPOLICY}" ]] || die "genpolicy built but ${GENPOLICY} is missing"
   export GENPOLICY
-  ok "using genpolicy from the branch: $GENPOLICY"
+  ok "using genpolicy from the branch: ${GENPOLICY}"
 }
 
 # Export GP_RULES / GP_SETTINGS — the rules.rego and genpolicy-settings.json that
@@ -458,27 +470,27 @@ ensure_branch_genpolicy() {
 #                  branch copies into a suite-owned directory and apply the same
 #                  oci_version patch stage 03 applies on the other platform.
 ensure_genpolicy_defaults() {
-  case "$E2E_PLATFORM" in
+  case "${E2E_PLATFORM}" in
     qemu-coco-dev)
-      GP_RULES="$E2E_KATA_DEFAULTS/rules.rego"
-      GP_SETTINGS="$E2E_KATA_DEFAULTS/genpolicy-settings.json"
-      [ -f "$GP_RULES" ]    || die "missing $GP_RULES — run stage 03 first"
-      [ -f "$GP_SETTINGS" ] || die "missing $GP_SETTINGS — run stage 03 first"
+      GP_RULES="${E2E_KATA_DEFAULTS}/rules.rego"
+      GP_SETTINGS="${E2E_KATA_DEFAULTS}/genpolicy-settings.json"
+      [[ -f "${GP_RULES}" ]]    || die "missing ${GP_RULES} — run stage 03 first"
+      [[ -f "${GP_SETTINGS}" ]] || die "missing ${GP_SETTINGS} — run stage 03 first"
       ;;
     clh-snp)
-      local src="$E2E_REPO_DIR/src/tools/genpolicy" dst="$E2E_STATE_DIR/genpolicy"
-      mkdir -p "$dst"
+      local src="${E2E_REPO_DIR}/src/tools/genpolicy" dst="${E2E_STATE_DIR}/genpolicy"
+      mkdir -p "${dst}"
       for f in rules.rego genpolicy-settings.json; do
-        [ -f "$src/$f" ] || die "missing $src/$f — genpolicy inputs are not where the suite expects them"
-        install -m 0644 "$src/$f" "$dst/$f" || die "could not stage $f into $dst"
+        [[ -f "${src}/${f}" ]] || die "missing ${src}/${f} — genpolicy inputs are not where the suite expects them"
+        install -m 0644 "${src}/${f}" "${dst}/${f}" || die "could not stage ${f} into ${dst}"
       done
-      GP_RULES="$dst/rules.rego"
-      GP_SETTINGS="$dst/genpolicy-settings.json"
+      GP_RULES="${dst}/rules.rego"
+      GP_SETTINGS="${dst}/genpolicy-settings.json"
       # containerd 2.3.x emits OCI spec 1.3.0 while the branch's settings still
       # say 1.1.0, which denies *every* pod at CreateContainerRequest.
-      if grep -q '"oci_version": "1.1.0"' "$GP_SETTINGS" 2>/dev/null; then
-        log "patching oci_version 1.1.0 -> 1.3.0 in $GP_SETTINGS"
-        sed -i 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' "$GP_SETTINGS"
+      if grep -q '"oci_version": "1.1.0"' "${GP_SETTINGS}" 2>/dev/null; then
+        log "patching oci_version 1.1.0 -> 1.3.0 in ${GP_SETTINGS}"
+        sed -i 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' "${GP_SETTINGS}"
       fi
       # This platform has no virtio-fs: the container rootfs arrives as an erofs
       # block storage that runtime-rs mounts under its passthrough share, so the
@@ -488,11 +500,14 @@ ensure_genpolicy_defaults() {
       # never matches and every pod is denied. "cpath" already tolerates the
       # passthrough segment; mirror that here. The added groups must stay
       # non-capturing — rules.rego reads capture group 1 as the bundle id.
-      if grep -q '"root_path": "/run/kata-containers/\$(bundle-id)/rootfs"' "$GP_SETTINGS" 2>/dev/null; then
+      # shellcheck disable=SC2016  # \$ is a regex escape for grep/sed, not a shell
+      # expansion: the literal text in the settings file is "$(bundle-id)".
+      if grep -q '"root_path": "/run/kata-containers/\$(bundle-id)/rootfs"' "${GP_SETTINGS}" 2>/dev/null; then
         log "patching root_path to accept the runtime-rs passthrough layout"
+        # shellcheck disable=SC2016
         sed -i \
           's|"root_path": "/run/kata-containers/\$(bundle-id)/rootfs"|"root_path": "/run/kata-containers/(?:shared/containers/(?:passthrough/)?)?$(bundle-id)/rootfs"|' \
-          "$GP_SETTINGS"
+          "${GP_SETTINGS}"
       fi
       # This platform runs containerd's erofs snapshotter in dm-verity mode, so
       # every image layer arrives as a GPT partition on a host-attached VMDK.
@@ -502,11 +517,11 @@ ensure_genpolicy_defaults() {
       # denial is "request presents N storages, policy declares {0}". Turn the
       # erofs layer model on so genpolicy derives a root hash per layer and
       # declares each one (RM-34/RM-42).
-      if grep -q '"image_layer_verification": "none"' "$GP_SETTINGS" 2>/dev/null; then
+      if grep -q '"image_layer_verification": "none"' "${GP_SETTINGS}" 2>/dev/null; then
         log "patching image_layer_verification -> host-erofs-dm-verity"
         sed -i \
           's|"image_layer_verification": "none"|"image_layer_verification": "host-erofs-dm-verity"|' \
-          "$GP_SETTINGS"
+          "${GP_SETTINGS}"
       fi
       # Every pod gets a sandbox container, and under host-erofs-dm-verity its
       # image layer is verified like any other. genpolicy hashes whichever pause
@@ -523,13 +538,13 @@ ensure_genpolicy_defaults() {
       local sandbox_image declared_pause
       sandbox_image="$(sudo containerd config dump 2>/dev/null \
         | sed -n "s/^[[:space:]]*sandbox = '\(.*\)'[[:space:]]*$/\1/p" | head -1)"
-      if [ -n "$sandbox_image" ]; then
+      if [[ -n "${sandbox_image}" ]]; then
         declared_pause="$(sed -n 's|.*"pause_container_image": "\([^"]*\)".*|\1|p' \
-          "$GP_SETTINGS" | head -1)"
-        if [ -n "$declared_pause" ] && [ "$declared_pause" != "$sandbox_image" ]; then
-          log "patching pause_container_image $declared_pause -> $sandbox_image"
-          sed -i "s|\"pause_container_image\": \"[^\"]*\"|\"pause_container_image\": \"$sandbox_image\"|" \
-            "$GP_SETTINGS"
+          "${GP_SETTINGS}" | head -1)"
+        if [[ -n "${declared_pause}" ]] && [[ "${declared_pause}" != "${sandbox_image}" ]]; then
+          log "patching pause_container_image ${declared_pause} -> ${sandbox_image}"
+          sed -i "s|\"pause_container_image\": \"[^\"]*\"|\"pause_container_image\": \"${sandbox_image}\"|" \
+            "${GP_SETTINGS}"
         fi
       else
         warn "could not read containerd's sandbox image; leaving pause_container_image alone"
@@ -537,7 +552,7 @@ ensure_genpolicy_defaults() {
       ;;
   esac
   export GP_RULES GP_SETTINGS
-  ok "genpolicy inputs: $GP_RULES"
+  ok "genpolicy inputs: ${GP_RULES}"
 }
 
 # Provision (or adopt) the guest-reachable registry the live boot-pull needs, and
@@ -554,16 +569,16 @@ ensure_genpolicy_defaults() {
 #      workstation and hand the values over.
 #   2. E2E_ACR set. Creates or adopts that registry with `az` wherever this runs.
 ensure_acr() {
-  if [ -n "${E2E_ACR_LOGIN_SERVER:-}" ]; then
-    ACR_LOGIN_SERVER="$E2E_ACR_LOGIN_SERVER"
+  if [[ -n "${E2E_ACR_LOGIN_SERVER:-}" ]]; then
+    ACR_LOGIN_SERVER="${E2E_ACR_LOGIN_SERVER}"
     ACR_USERNAME="${E2E_ACR_USERNAME:-}"
     ACR_PASSWORD="${E2E_ACR_PASSWORD:-}"
     export ACR_LOGIN_SERVER ACR_USERNAME ACR_PASSWORD
-    ok "using pre-provisioned registry $ACR_LOGIN_SERVER"
+    ok "using pre-provisioned registry ${ACR_LOGIN_SERVER}"
     return 0
   fi
 
-  [ -n "${E2E_ACR:-}" ] || return 1
+  [[ -n "${E2E_ACR:-}" ]] || return 1
 
   command -v az >/dev/null 2>&1 || {
     warn "az is not installed here — cannot provision a registry"
@@ -575,27 +590,27 @@ ensure_acr() {
     return 1
   }
 
-  local name="$E2E_ACR"
-  if [ "$name" = auto ]; then
+  local name="${E2E_ACR}"
+  if [[ "${name}" = auto ]]; then
     # Derive a stable, globally-unique-ish name from the subscription and
     # resource group so repeated runs adopt the same registry instead of
     # littering the subscription. ACR names are 5-50 lowercase alphanumerics.
     local sub seed
     sub=$(az account show --query id -o tsv) || return 1
-    seed=$(printf '%s/%s' "$sub" "$E2E_ACR_RG" | sha256sum | cut -c1-12)
-    name="cocoe2e$seed"
+    seed=$(printf '%s/%s' "${sub}" "${E2E_ACR_RG}" | sha256sum | cut -c1-12)
+    name="cocoe2e${seed}"
   fi
 
-  if az acr show -n "$name" -g "$E2E_ACR_RG" >/dev/null 2>&1; then
-    log "adopting existing registry $name"
+  if az acr show -n "${name}" -g "${E2E_ACR_RG}" >/dev/null 2>&1; then
+    log "adopting existing registry ${name}"
   else
-    log "creating registry $name in $E2E_ACR_RG ($E2E_ACR_SKU, $E2E_REGION)"
+    log "creating registry ${name} in ${E2E_ACR_RG} (${E2E_ACR_SKU}, ${E2E_REGION})"
     # Anonymous pull is deliberately not set here: older az does not accept
     # --anonymous-pull-enabled on `acr create`. The assertion below turns it on
     # either way, and has to run anyway for adopted registries.
-    az acr create -n "$name" -g "$E2E_ACR_RG" --sku "$E2E_ACR_SKU" \
-        --location "$E2E_REGION" -o none || {
-      warn "could not create registry $name"
+    az acr create -n "${name}" -g "${E2E_ACR_RG}" --sku "${E2E_ACR_SKU}" \
+        --location "${E2E_REGION}" -o none || {
+      warn "could not create registry ${name}"
       return 1
     }
   fi
@@ -604,32 +619,32 @@ ensure_acr() {
   # anonymous pull can be off on an adopted registry or turned off later. It also
   # requires Standard or better — Basic rejects it outright.
   local anon
-  anon=$(az acr show -n "$name" -g "$E2E_ACR_RG" \
+  anon=$(az acr show -n "${name}" -g "${E2E_ACR_RG}" \
            --query anonymousPullEnabled -o tsv 2>/dev/null) || anon=""
-  if [ "$anon" != true ]; then
-    log "enabling anonymous pull on $name (was: ${anon:-unset})"
-    az acr update -n "$name" -g "$E2E_ACR_RG" --anonymous-pull-enabled true -o none || {
-      warn "could not enable anonymous pull on $name — the guest could not fetch the fragment"
+  if [[ "${anon}" != true ]]; then
+    log "enabling anonymous pull on ${name} (was: ${anon:-unset})"
+    az acr update -n "${name}" -g "${E2E_ACR_RG}" --anonymous-pull-enabled true -o none || {
+      warn "could not enable anonymous pull on ${name} — the guest could not fetch the fragment"
       return 1
     }
   fi
 
-  ACR_LOGIN_SERVER=$(az acr show -n "$name" -g "$E2E_ACR_RG" --query loginServer -o tsv) || return 1
+  ACR_LOGIN_SERVER=$(az acr show -n "${name}" -g "${E2E_ACR_RG}" --query loginServer -o tsv) || return 1
   # A refresh token beats admin credentials: it is short-lived and does not
   # require the registry's admin user to be enabled at all.
-  ACR_PASSWORD=$(az acr login -n "$name" --expose-token --query accessToken -o tsv 2>/dev/null) || {
-    warn "could not mint a push token for $name"
+  ACR_PASSWORD=$(az acr login -n "${name}" --expose-token --query accessToken -o tsv 2>/dev/null) || {
+    warn "could not mint a push token for ${name}"
     return 1
   }
   ACR_USERNAME=00000000-0000-0000-0000-000000000000
   export ACR_LOGIN_SERVER ACR_USERNAME ACR_PASSWORD
-  ok "registry ready: $ACR_LOGIN_SERVER (anonymous pull on)"
+  ok "registry ready: ${ACR_LOGIN_SERVER} (anonymous pull on)"
 }
 
 # Platform-specific helpers, sourced last so they can use everything above. Only
 # the selected platform's module is loaded: the clh-snp one assumes Azure Linux
 # and would be nothing but a loaded footgun on the QEMU path.
-if [ "$E2E_PLATFORM" = "clh-snp" ]; then
+if [[ "${E2E_PLATFORM}" = "clh-snp" ]]; then
   # shellcheck source=platform-clh-snp.sh
   . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/platform-clh-snp.sh"
 
