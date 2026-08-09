@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+#
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 """Mutation-test the SRM TLA+ model (FR-15).
 
 A specification that passes on the first attempt may simply be asserting

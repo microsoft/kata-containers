@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 # FR-15: model-check the SRM lifecycle specification with TLC.
 #
 # Requires a Java runtime and tla2tools.jar. In CI this can run in any JRE image:
@@ -16,10 +21,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 JAR=${TLA2TOOLS_JAR:-tla2tools.jar}
-if [[ ! -f "$JAR" ]]; then
+if [[ ! -f "${JAR}" ]]; then
   echo "fetching tla2tools.jar..."
-  curl -fsSL -o "$JAR" \
+  curl -fsSL -o "${JAR}" \
     https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
 fi
 
-exec java -cp "$JAR" tlc2.TLC -deadlock -config SRM.cfg SRM.tla
+exec java -cp "${JAR}" tlc2.TLC -deadlock -config SRM.cfg SRM.tla
