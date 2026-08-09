@@ -19,8 +19,9 @@ reproducible proof for FR-1 Iteration 1 (apply-to-live-engine + attested issuer 
   `agent_policy.fragments` namespace. The base policy is authored to consult
   `data.agent_policy.fragments.*` (see `fragment-demo.rego`, where `ExecProcessRequest`
   defaults to `false` and becomes `data.agent_policy.fragments.exec_allowed`).
-- The guest authorizes issuers from **measured state**: a TOML file in the (measured)
-  rootfs at `/etc/kata/fragment-issuers.toml`:
+- The guest authorizes issuers from **measured state**: a TOML document delivered in the
+  attestation-bound initdata section under the well-known key `fragment-issuers.toml`
+  (RM-89 removed the former `/etc/kata/fragment-issuers.toml` rootfs fallback):
   ```toml
   require_receipt = true
   [[issuer]]
@@ -28,7 +29,8 @@ reproducible proof for FR-1 Iteration 1 (apply-to-live-engine + attested issuer 
   ed25519_pubkey_hex = "<64 hex chars>"
   min_svn = 0
   ```
-  With no such file / no issuers, every fragment is rejected (fail-closed).
+  With no such config / no issuers — or if the initdata was never bound to the launch
+  measurement — every fragment is rejected (fail-closed).
 - `LoadPolicyFragment` runs **verify → apply → commit** atomically: the fragment is
   verified (issuer signature, monotonic SVN, add-only, receipt), its module is merged into
   the live engine via `add_policy` (never `set_policy`, so the FR-12 one-shot lock holds),
@@ -44,7 +46,7 @@ SIGNER=target/aarch64-unknown-linux-musl/release/examples/sign-fragment
 ( cd $SRM && cargo build --release --example sign-fragment --target aarch64-unknown-linux-musl )
 ( cd src/tools/agent-ctl && cargo build --release --target aarch64-unknown-linux-musl )
 
-# 2. Issuer keypair; put the public key in the guest's /etc/kata/fragment-issuers.toml
+# 2. Issuer keypair; put the public key in the initdata `fragment-issuers.toml` section
 $SIGNER gen-key      # -> private_key_hex=... public_key_hex=...
 
 # 3. Author a fragment module and sign it.

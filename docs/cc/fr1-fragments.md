@@ -772,9 +772,11 @@ delivery annotation included. Stage 07 does this explicitly.
 
 ## 5. Measured configuration
 
-Seeded at boot by `main.rs::seed_fragment_trust_root` from a measured-rootfs file
-(`/etc/kata/fragment-issuers.toml`; redirectable via `KATA_FRAGMENT_ISSUERS` only under the test-only `test-path-override` feature — see F-86); absent config ⇒ no
-authorized issuer ⇒ fail-closed. Shape:
+Seeded at boot by `main.rs::seed_fragment_trust_root` from the **measured initdata section**
+(well-known key `fragment-issuers.toml`), and only once FR-2 has bound that initdata to the
+launch measurement. There is no other source: RM-89 removed the former
+`/etc/kata/fragment-issuers.toml` rootfs fallback (and with it `KATA_FRAGMENT_ISSUERS`), so
+absent, unbound or unusable config ⇒ no authorized issuer ⇒ fail-closed. Shape:
 
 ```toml
 require_receipt = true                 # global default

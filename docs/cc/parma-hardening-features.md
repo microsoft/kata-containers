@@ -735,21 +735,29 @@ external ledger are flagged and tracked in `docs/cc/backlog.md`.
 
 ### Measured-initdata trust roots (FR-1i / FR-4C / FR-4D provenance) — PR #10
 - **What:** the SRM trust roots — the policy-fragment issuer config (`fragment-issuers.toml`),
-  and (until RM-51 removed them) the verified-layer and verified-image allowlists — can now
-  be carried in the
-  **measured initdata section** as well-known keys, instead of relying only on files in the
-  measured rootfs. Each is resolved with provenance precedence: the attestation-bound initdata
-  section first, else the measured-rootfs file (a shared `resolve_measured_config` helper logs
-  the chosen source). Seeding runs after initdata is parsed and before the ttRPC server / the
-  boot fragment pull; fail-closed semantics are unchanged (absent config ⇒ no authorized
-  issuer/layer/image). **The precedence is conditional on the binding having actually been
-  verified** (RM-88/F-166): the initdata section counts as measured state only when FR-2 bound
-  it to the launch measurement, and otherwise it is ignored in favour of the rootfs file.
-- **Guarantee:** the fragment/layer/image trust roots are bound to the **initdata digest**,
-  which is part of the TEE-attested launch measurement — so a host cannot alter the trust root
-  without changing the attestation. The runtime-advancing FR-1i SVN high-water / FR-1j ordering
-  state stays on sealed encrypted-scratch (mutable + monotonic by construction); only the
-  immutable initial trust config is bound into the measured section.
+  and (until RM-51 removed them) the verified-layer and verified-image allowlists — are carried
+  in the **measured initdata section** as well-known keys. Seeding runs after initdata is parsed
+  and before the ttRPC server / the boot fragment pull; fail-closed semantics are unchanged
+  (absent config ⇒ no authorized issuer/layer/image). **The initdata section counts as measured
+  state only when FR-2 actually bound it to the launch measurement** (RM-88/F-166); unbound, it
+  is refused.
+- **Single-source (RM-89).** This originally specified a *precedence* — the attestation-bound
+  initdata section first, else a `/etc/kata/fragment-issuers.toml` in the measured rootfs, with
+  a shared `resolve_measured_config` helper logging the chosen source. Both carriers really were
+  measured (the guest rootfs is a dm-verity device mounted read-only whose root hash is an IGVM
+  kernel command line parameter, hence part of the launch measurement), so the pair was never a
+  difference in trust level — only in granularity, per-image versus per-deployment. What it did
+  add was a precedence decision, and F-166 was a bug in exactly that decision. The rootfs source
+  has therefore been removed: nothing in the tree ever installed that file and every e2e, demo
+  and deployment path delivers through initdata, so this also matches C-ACI, where hcsshim has
+  one configurable path (the policy whose digest the guest checks against HOSTDATA) plus a
+  compiled-in closed-door default. Compare FR-2 GAP-3, which removed the analogous rootfs
+  *policy* file. FR-4C's CDI allow-list keeps its rootfs file and is likewise single-source.
+- **Guarantee:** the fragment trust root is bound to the **initdata digest**, which is part of
+  the TEE-attested launch measurement — so a host cannot alter the trust root without changing
+  the attestation. The runtime-advancing FR-1i SVN high-water / FR-1j ordering state stays on
+  sealed encrypted-scratch (mutable + monotonic by construction); only the immutable initial
+  trust config is bound into the measured section.
 - **Caveat (RM-88/F-166):** that guarantee holds only while the FR-2 binding actually runs. It
   used to be assumed rather than checked at the point of use — the `Ok(false)` "no TEE report
   provider" path merely warned, and the trust root was still taken from initdata, *in preference
@@ -757,7 +765,8 @@ external ledger are flagged and tracked in `docs/cc/backlog.md`.
   strict build (matching hcsshim, whose gcs-sidecar keeps its deny policy when no report is
   available), and an unbound initdata section is never treated as measured state. The
   `allow-unattested-initdata` build feature restores the old behaviour for non-confidential
-  development VMs only.
+  development VMs only; there, since RM-89, it also permits the unbound section to seed the
+  trust root, because otherwise such a build would have none at all.
 - **Delivered by:** PR #10 (branch `bl5-initdata-measured`).
 
 ### Complete OCI Process field coverage in genpolicy (FR-16) — this PR

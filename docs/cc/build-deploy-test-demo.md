@@ -198,10 +198,9 @@ for c in agent rootfs-image genpolicy; do sudo tar --zstd -xf build/kata-static-
 
 Two knobs make a strict guest testable:
 
-1. **Measured trust roots** — the guest reads `/etc/kata/fragment-issuers.toml`,
-   measured state (or,
-   per BL-5, from the initdata measured section). Provide the authorized issuer/ledger keys and
-   allowlists there.
+1. **Measured trust roots** — the guest reads the `fragment-issuers.toml` section of the
+   attestation-bound initdata (BL-5; RM-89 made this the only source). Provide the authorized
+   issuer/ledger keys there.
 2. **Fragment delivery** — either **runtime push** (`kata-agent-ctl` `LoadPolicyFragment` over
    the guest's vsock) or **boot-time OCI pull** (BL-8; the base policy declares
    `policy_fragments[]`).
