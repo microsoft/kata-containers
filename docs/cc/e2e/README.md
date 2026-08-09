@@ -478,7 +478,11 @@ the `fragment-issuers.toml` trust root to deliver through measured initdata. Bot
 are needed for live delivery; stage 07 consumes them directly.
 
 The trust root is measured, so it must arrive through initdata (preferred) or the
-measured rootfs — never from the host. Fragment failures abort the VM by design.
+measured rootfs — never from the host. The initdata half of that only holds once
+FR-2 has bound the initdata to the launch measurement: since RM-88/F-166 an
+unbound initdata section is ignored in favour of the rootfs file, and in a strict
+build a guest with no TEE report provider aborts rather than booting on unverified
+initdata. Fragment failures abort the VM by design.
 
 ## Live fragment delivery (stage 07)
 
