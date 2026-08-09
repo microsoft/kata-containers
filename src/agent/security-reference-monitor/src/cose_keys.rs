@@ -19,6 +19,31 @@
 //! For X.509 chain links the certificate `signatureAlgorithm` OID selects the scheme:
 //! ecdsa-with-SHA256/384, sha256/384-WithRSAEncryption (PKCS#1 v1.5). RSA-PSS in certificates
 //! is uncommon and intentionally not accepted for chain links (fail-closed).
+//!
+//! ## RSA modulus size
+//!
+//! The elliptic-curve algorithms have exactly one key size each, fixed by the curve, so
+//! there is nothing to bound. RSA does not, so the accepted range is stated explicitly:
+//! [`MIN_RSA_MODULUS_BITS`]..=[`MAX_RSA_MODULUS_BITS`].
+//!
+//! The upper bound already existed but arrived by accident rather than by decision. The
+//! `rsa` crate applies its own `RsaPublicKey::MAX_SIZE` (4096) inside `RsaPublicKey::new`,
+//! which every DER decoding path funnels through, so an oversized modulus was never
+//! accepted. Restating it here is a no-op today and a tripwire if that internal default
+//! ever moves; the constant below is what this code depends on, not what the dependency
+//! happens to do.
+//!
+//! The lower bound did *not* exist, and its absence was a real divergence from the
+//! reference stack. The C-ACI/hcsshim implementation is Go, and since Go 1.24 `crypto/rsa`
+//! refuses keys below 1024 bits for *every* operation including `Verify`, so that stack has
+//! a 1024-bit floor it never had to write down. The `rsa` crate has no equivalent: its
+//! `check_public` rejects a degenerate exponent (`e < 2`, even `e`, `e >= n`) and an even
+//! modulus, but accepts a 512-bit — or 64-bit — modulus without complaint. A certificate
+//! carrying a weak key, whether through CA misissuance or a legacy anchor, would have had
+//! its signatures verified on their own terms; 512-bit RSA is factorable on commodity
+//! hardware, so verifying under such a key is not meaningfully verification at all.
+//! Matching Go's floor closes that gap and keeps the two stacks agreeing on which keys
+//! are strong enough to be worth checking.
 
 use const_oid::ObjectIdentifier;
 use ed25519_dalek::Verifier as _;
@@ -72,6 +97,19 @@ const SHA384_WITH_RSA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.
 // SubjectPublicKeyInfo algorithm OID for RSA.
 const RSA_ENCRYPTION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
 
+/// Smallest RSA modulus accepted for signature verification, in bits.
+///
+/// Matches the floor Go's `crypto/rsa` has enforced since Go 1.24, which is what the
+/// C-ACI/hcsshim stack verifies under. See the module documentation for why this is stated
+/// here rather than inherited from the `rsa` crate, which imposes no minimum.
+pub const MIN_RSA_MODULUS_BITS: usize = 1024;
+
+/// Largest RSA modulus accepted for signature verification, in bits.
+///
+/// Equal to `rsa::RsaPublicKey::MAX_SIZE`, restated so the bound this code relies on is
+/// visible and tested here rather than being a side effect of a dependency's default.
+pub const MAX_RSA_MODULUS_BITS: usize = 4096;
+
 /// A parsed public key of one of the supported algorithms.
 #[derive(Clone)]
 pub enum PublicKey {
@@ -105,12 +143,27 @@ impl PublicKey {
                 if let Some(pk_der) = spki.subject_public_key.as_bytes() {
                     use rsa::pkcs1::DecodeRsaPublicKey;
                     if let Ok(k) = rsa::RsaPublicKey::from_pkcs1_der(pk_der) {
-                        return Some(PublicKey::Rsa(k));
+                        return Self::rsa_within_bounds(k);
                     }
                 }
             }
         }
         None
+    }
+
+    /// Wrap an RSA key only if its modulus is within [`MIN_RSA_MODULUS_BITS`]..=
+    /// [`MAX_RSA_MODULUS_BITS`].
+    ///
+    /// This is the single construction site for [`PublicKey::Rsa`], so a key that is out of
+    /// range is never represented — there is no later point at which the check could be
+    /// forgotten, and no way to hold an `RsaPublicKey` this module would refuse to use.
+    fn rsa_within_bounds(k: rsa::RsaPublicKey) -> Option<Self> {
+        use rsa::traits::PublicKeyParts as _;
+        let bits = k.n().bits();
+        if !(MIN_RSA_MODULUS_BITS..=MAX_RSA_MODULUS_BITS).contains(&bits) {
+            return None;
+        }
+        Some(PublicKey::Rsa(k))
     }
 
     /// Verify a COSE detached signature (`sig`) over `tbs` under `alg`. `sig` is in the COSE
@@ -182,6 +235,106 @@ impl PublicKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Encode a DER length.
+    fn der_len(n: usize) -> Vec<u8> {
+        if n < 0x80 {
+            vec![n as u8]
+        } else {
+            let b = n.to_be_bytes();
+            let b = &b[b.iter().position(|&x| x != 0).unwrap()..];
+            let mut out = vec![0x80 | b.len() as u8];
+            out.extend_from_slice(b);
+            out
+        }
+    }
+
+    /// Encode a DER tag-length-value.
+    fn der_tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+        let mut out = vec![tag];
+        out.extend_from_slice(&der_len(content.len()));
+        out.extend_from_slice(content);
+        out
+    }
+
+    /// Encode a big-endian magnitude as a DER INTEGER (prefixing 0x00 when the high bit is
+    /// set, so it is not read as negative).
+    fn der_uint(mag: &[u8]) -> Vec<u8> {
+        let mut v = Vec::new();
+        if mag[0] & 0x80 != 0 {
+            v.push(0x00);
+        }
+        v.extend_from_slice(mag);
+        der_tlv(0x02, &v)
+    }
+
+    /// Build a DER SubjectPublicKeyInfo for an RSA key whose modulus is exactly `bits` bits
+    /// (`bits` must be a multiple of 8) with `e = 65537`.
+    ///
+    /// The modulus is synthetic — `2^(bits-1) + 1` — rather than a generated key, because
+    /// what is under test is the size gate, which runs before any use of the key. This keeps
+    /// the test exact about bit length (a generated key is only approximately the requested
+    /// size) and free of a keygen dependency. The value still satisfies every structural
+    /// check the `rsa` crate makes: the modulus is odd, and `2 <= e < n`.
+    fn rsa_spki_der(bits: usize) -> Vec<u8> {
+        assert!(bits % 8 == 0 && bits >= 16);
+        let mut n = vec![0u8; bits / 8];
+        n[0] = 0x80;
+        *n.last_mut().unwrap() = 0x01;
+
+        let pkcs1 = der_tlv(0x30, &[der_uint(&n), der_uint(&[0x01, 0x00, 0x01])].concat());
+        // BIT STRING with zero unused bits, wrapping the PKCS#1 RSAPublicKey.
+        let bitstr = der_tlv(0x03, &[&[0x00u8][..], &pkcs1].concat());
+        // AlgorithmIdentifier { rsaEncryption, NULL }.
+        let alg = hex_literal_rsa_alg_id();
+        der_tlv(0x30, &[alg.as_slice(), bitstr.as_slice()].concat())
+    }
+
+    /// `SEQUENCE { OID 1.2.840.113549.1.1.1, NULL }`.
+    fn hex_literal_rsa_alg_id() -> Vec<u8> {
+        let oid = der_tlv(0x06, &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01]);
+        let null = der_tlv(0x05, &[]);
+        der_tlv(0x30, &[oid, null].concat())
+    }
+
+    #[test]
+    fn rsa_modulus_size_is_bounded() {
+        // Sanity: the encoder produces what the size gate is meant to be reading, so a
+        // failure below is the gate's verdict and not a malformed test vector.
+        assert!(
+            matches!(
+                PublicKey::from_spki_der(&rsa_spki_der(2048)),
+                Some(PublicKey::Rsa(_))
+            ),
+            "a 2048-bit key must be accepted"
+        );
+
+        // Exactly at each bound: accepted.
+        for bits in [MIN_RSA_MODULUS_BITS, MAX_RSA_MODULUS_BITS] {
+            assert!(
+                PublicKey::from_spki_der(&rsa_spki_der(bits)).is_some(),
+                "{bits}-bit modulus is on the boundary and must be accepted"
+            );
+        }
+
+        // One step outside each bound: refused.
+        for bits in [MIN_RSA_MODULUS_BITS - 8, MAX_RSA_MODULUS_BITS + 8] {
+            assert!(
+                PublicKey::from_spki_der(&rsa_spki_der(bits)).is_none(),
+                "{bits}-bit modulus is outside the accepted range and must be refused"
+            );
+        }
+
+        // The size that motivated the floor. 512-bit RSA is factorable on commodity
+        // hardware, so verifying under it is not verification; Go's crypto/rsa — which the
+        // C-ACI/hcsshim stack verifies with — refuses it, and so must this.
+        assert!(
+            PublicKey::from_spki_der(&rsa_spki_der(512)).is_none(),
+            "512-bit RSA must be refused, matching Go's crypto/rsa floor"
+        );
+        // Degenerate sizes are refused by the same gate rather than reaching any modexp.
+        assert!(PublicKey::from_spki_der(&rsa_spki_der(64)).is_none());
+    }
 
     #[test]
     fn cose_alg_mapping() {
