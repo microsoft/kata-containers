@@ -600,7 +600,7 @@ async fn start_sandbox(
                     warn!(
                         logger,
                         "FR-2: no TEE report provider; initdata is NOT bound to a launch \
-                         measurement. Measured trust roots will be taken from the rootfs only."
+                         measurement. The SRM trust roots it carries are host-chosen."
                     );
                     false
                 }
@@ -619,9 +619,10 @@ async fn start_sandbox(
 
     // FR-1b / FR-4C / BL-3 (BL-5): seed the SRM trust roots — the policy-fragment issuers,
     // the verified read-only-layer (dm-verity) allowlist, and the verified guest-pull image
-    // allowlist — from measured guest state, *preferring* the attestation-bound initdata
-    // section over the measured-rootfs file. Seeded after initdata is parsed and before the
-    // ttRPC server (and the BL-8 boot fragment pull) run.
+    // allowlist — from measured guest state. FR-1's root comes from the attestation-bound
+    // initdata section and nowhere else (RM-89; see `resolve_measured_config` for why the
+    // rootfs alternative was removed). Seeded after initdata is parsed and before the ttRPC
+    // server (and the BL-8 boot fragment pull) run.
     //
     // RM-36 (F-94): a seeding failure is **fatal**. It used to be `warn!`-and-continue, which
     // meant an unparseable measured trust root produced a booting, apparently-healthy,
@@ -1096,74 +1097,62 @@ async fn initialize_policy() -> Result<()> {
         .await
 }
 
-// FR-1b: measured guest path listing the authorized policy-fragment issuers. It lives in
-// the measured rootfs; overridable via KATA_FRAGMENT_ISSUERS for tests. Format (TOML):
-//   require_receipt = true
-//   [[issuer]]
-//   id = "issuerA"
-//   ed25519_pubkey_hex = "<64 hex chars>"
-//   min_svn = 5
-#[cfg(feature = "strict-policy")]
-const FRAGMENT_ISSUERS_PATH: &str = "/etc/kata/fragment-issuers.toml";
-
-// BL-5: resolve an SRM trust-root config with provenance precedence:
-//   1. the measured **initdata** section (attestation-bound) — preferred;
-//   2. else the measured-rootfs file (env-overridable for tests).
-// Returns None when neither source provides the config (so the caller can fail-closed /
-// leave the feature off, unchanged from before). The chosen source is logged so the
-// provenance of the active trust root is auditable.
+// BL-5: resolve an SRM trust-root config from measured guest state — the **initdata**
+// section, and only once FR-2 has bound it to the launch measurement. Returns None when the
+// config is absent or unusable, so the caller fails closed (no authorized issuers).
+//
+// Single-source on purpose (RM-89). BL-5 originally specified a precedence: the initdata
+// section first, else a `/etc/kata/fragment-issuers.toml` in the measured rootfs. Both
+// carriers really are measured — the guest rootfs is a dm-verity device mounted read-only
+// whose root hash is a kernel command line parameter in the IGVM, hence part of the launch
+// measurement — so the two were never a difference in trust level, only in granularity
+// (per-image vs per-deployment). What the choice between them did add was a precedence
+// decision, and F-166 was precisely a bug in that decision: the higher-priority source was
+// consumed without checking the property that made it trustworthy, overriding the lower one.
+// Removing the second source removes that class of bug rather than fixing one instance, and
+// it costs nothing in practice: nothing in the tree ever installs that file, and every e2e,
+// demo and deployment path delivers the trust root through initdata. It is also the C-ACI
+// shape — hcsshim has exactly one configurable path (the policy whose digest the guest checks
+// against HOSTDATA via `ValidateHostData()`), and its only other source is a compiled-in
+// closed-door default. Compare FR-2 GAP-3, where the analogous rootfs *policy* file was
+// removed for the same reason. FR-4C's CDI allow-list keeps its rootfs file and stays
+// single-source too, which is the property that matters here.
 #[cfg(feature = "strict-policy")]
 fn resolve_measured_config(
     logger: &Logger,
     label: &str,
     initdata_cfg: Option<&str>,
     initdata_bound: bool,
-    env_var: &str,
-    default_path: &str,
 ) -> Option<String> {
-    // F-166: the initdata section is only a *measured* source once FR-2 has bound it to the
-    // launch measurement. The precedence prefers it over the rootfs file, so consuming it
-    // unconditionally meant that whenever the binding did not happen the host chose the trust
-    // root — and did so in preference to a genuinely measured file sitting on disk. The rule
-    // lives here, with the precedence it qualifies, so that any root resolved through this
-    // helper inherits it rather than each caller having to remember.
-    if let Some(text) = initdata_cfg {
-        if initdata_bound {
-            info!(
+    let text = initdata_cfg?;
+    if !initdata_bound {
+        // F-166: initdata is measured state only once it is bound to the launch measurement;
+        // unbound it is whatever the host handed us. A shipped strict build never reaches
+        // here — `main` aborts on an unbound initdata — so this is the dev-build path, kept
+        // as a defence in depth for the same reason the rule lives in the resolver at all.
+        if !cfg!(feature = "allow-unattested-initdata") {
+            warn!(
                 logger,
-                "{}: trust-root config sourced from measured initdata", label
+                "{}: refusing the initdata trust-root config — it was not bound to a launch \
+                 measurement, so it is not measured state; failing closed",
+                label
             );
-            return Some(text.to_string());
+            return None;
         }
         warn!(
             logger,
-            "{}: ignoring the initdata trust-root config — it was not bound to a launch \
-             measurement, so it is not measured state; falling back to the rootfs",
+            "{}: accepting an UNBOUND initdata trust-root config because the agent was built \
+             with `allow-unattested-initdata`; the host chose this trust root and it is NOT \
+             measured state. This build must never ship in a confidential image.",
             label
         );
+        return Some(text.to_string());
     }
-    let path = {
-        // FR-7 (F-86): test-only redirection, gated the same way as the SVN state path.
-        // Misdirecting this one costs availability rather than integrity — an unreadable
-        // trust root yields no authorized issuers and fragments fail closed — but it is the
-        // same class of host-influenced input and gets the same treatment.
-        #[cfg(feature = "test-path-override")]
-        {
-            std::env::var(env_var).unwrap_or_else(|_| default_path.to_string())
-        }
-        #[cfg(not(feature = "test-path-override"))]
-        {
-            let _ = env_var;
-            default_path.to_string()
-        }
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(t) => {
-            info!(logger, "{}: trust-root config sourced from measured rootfs", label; "path" => &path);
-            Some(t)
-        }
-        Err(_) => None,
-    }
+    info!(
+        logger,
+        "{}: trust-root config sourced from measured initdata", label
+    );
+    Some(text.to_string())
 }
 
 // FR-1i: runtime SVN high-water state, persisted so an agent restart cannot reopen a
@@ -1380,8 +1369,6 @@ async fn seed_fragment_trust_root(
         "FR-1",
         initdata_cfg,
         initdata_bound,
-        "KATA_FRAGMENT_ISSUERS",
-        FRAGMENT_ISSUERS_PATH,
     ) {
         Some(t) => t,
         None => {
@@ -1596,14 +1583,18 @@ mod tests {
     use test_utils::TestUserType;
     use test_utils::{assert_result, skip_if_not_root, skip_if_root};
 
-    // FR-7 (F-86): the paths backing fragment SVN rollback protection and the fragment
-    // issuer trust root must not be relocatable by the host. Both are read only in strict
-    // builds, so the environment override that used to serve tests was reachable exactly
-    // where it must not be: the kernel hands unrecognised `key=value` command line
-    // parameters to init as environment variables, and in a confidential guest the command
-    // line is the host's. Redirecting the SVN state path is silent and total -- the boot-time
-    // import is a no-op when the file cannot be read, so the floor restarts at zero every
-    // boot -- which is why this is asserted rather than left to review.
+    // FR-7 (F-86): the path backing fragment SVN rollback protection must not be relocatable
+    // by the host. It is read only in strict builds, so the environment override that used to
+    // serve tests was reachable exactly where it must not be: the kernel hands unrecognised
+    // `key=value` command line parameters to init as environment variables, and in a
+    // confidential guest the command line is the host's. Redirecting the SVN state path is
+    // silent and total -- the boot-time import is a no-op when the file cannot be read, so the
+    // floor restarts at zero every boot -- which is why this is asserted rather than left to
+    // review.
+    //
+    // The fragment issuer trust root used to be asserted here too, against
+    // `KATA_FRAGMENT_ISSUERS`. RM-89 removed its file source outright, so there is no longer a
+    // path for the host to redirect; the property is now structural rather than tested.
     //
     // Compiled out under `test-path-override`, which is what re-enables the redirection.
     #[cfg(all(feature = "strict-policy", not(feature = "test-path-override")))]
@@ -1617,88 +1608,42 @@ mod tests {
             super::FRAGMENT_SVN_STATE_PATH,
             "the host relocated the fragment SVN high-water file, resetting the rollback floor"
         );
-
-        let logger = slog::Logger::root(slog::Discard, slog::o!());
-        let dir = tempfile::tempdir().expect("tmpdir");
-        let planted = dir.path().join("attacker-issuers.toml");
-        std::fs::write(&planted, "require_receipt = false\n").expect("write planted config");
-        std::env::set_var("KATA_FRAGMENT_ISSUERS", &planted);
-        let resolved = super::resolve_measured_config(
-            &logger,
-            "FR-1",
-            None,
-            true,
-            "KATA_FRAGMENT_ISSUERS",
-            "/nonexistent/measured/issuers.toml",
-        );
-        std::env::remove_var("KATA_FRAGMENT_ISSUERS");
-        // The planted file is readable, so honouring the variable would yield Some(..).
-        assert!(
-            resolved.is_none(),
-            "the host redirected the fragment issuer trust root at a file it planted"
-        );
     }
 
-    // F-166: the initdata section outranks the measured-rootfs file, so it may only be used
-    // once FR-2 has bound it to the launch measurement. Unbound, it is host-chosen state --
-    // and the failure mode is silent, because an unbound initdata looks exactly like a bound
-    // one to this function. F-6 makes the unbound case reachable on a genuinely confidential
-    // VM (Azure paravisor SNP), so this is asserted rather than left to review.
-    #[cfg(feature = "strict-policy")]
+    // F-166: the initdata section is measured state only once FR-2 has bound it to the launch
+    // measurement. Unbound, it is host-chosen -- and the failure mode is silent, because an
+    // unbound initdata looks exactly like a bound one to this function. F-6 makes the unbound
+    // case reachable on a genuinely confidential VM (Azure paravisor SNP), so this is asserted
+    // rather than left to review.
+    //
+    // RM-89: with the rootfs source gone, "refused" now means fail-closed rather than "falls
+    // back to the file", so the assertion is that no trust root is produced at all.
+    #[cfg(all(feature = "strict-policy", not(feature = "allow-unattested-initdata")))]
     #[test]
     fn an_unbound_initdata_trust_root_is_refused_in_favour_of_measured_state() {
         let logger = slog::Logger::root(slog::Discard, slog::o!());
-        let dir = tempfile::tempdir().expect("tmpdir");
-
-        let measured = dir.path().join("measured-issuers.toml");
-        std::fs::write(&measured, "require_receipt = true\n").expect("write measured config");
-        let measured_path = measured.to_str().expect("utf8 path");
-
         let host_supplied = "require_receipt = false\n";
 
-        // Bound: the initdata section is measured state and wins, as BL-5 specifies.
-        let bound = super::resolve_measured_config(
-            &logger,
-            "FR-1",
-            Some(host_supplied),
-            true,
-            "KATA_FRAGMENT_ISSUERS_UNUSED_F166",
-            measured_path,
-        );
+        // Bound: the initdata section is measured state, so it is the trust root.
+        let bound = super::resolve_measured_config(&logger, "FR-1", Some(host_supplied), true);
         assert_eq!(
             bound.as_deref(),
             Some(host_supplied),
-            "a bound initdata trust root must still take precedence over the rootfs file"
+            "a bound initdata trust root must be used"
         );
 
-        // Unbound: it is not measured state, so the rootfs file must win instead.
-        let unbound = super::resolve_measured_config(
-            &logger,
-            "FR-1",
-            Some(host_supplied),
-            false,
-            "KATA_FRAGMENT_ISSUERS_UNUSED_F166",
-            measured_path,
-        );
-        assert_eq!(
-            unbound.as_deref(),
-            Some("require_receipt = true\n"),
-            "an unbound initdata trust root overrode genuinely measured state"
-        );
-
-        // Unbound with nothing measured to fall back to: fail closed, do not use the host's.
-        let nothing = super::resolve_measured_config(
-            &logger,
-            "FR-1",
-            Some(host_supplied),
-            false,
-            "KATA_FRAGMENT_ISSUERS_UNUSED_F166",
-            "/nonexistent/measured/issuers.toml",
-        );
+        // Unbound: it is not measured state, so it must not become the trust root. Fragments
+        // then fail closed, which is the correct answer -- there is nothing else to trust.
+        let unbound = super::resolve_measured_config(&logger, "FR-1", Some(host_supplied), false);
         assert!(
-            nothing.is_none(),
-            "an unbound initdata trust root was used when no measured state existed"
+            unbound.is_none(),
+            "an unbound, host-chosen initdata section was used as the FR-1 trust root"
         );
+
+        // No initdata at all is likewise closed: RM-89 removed the rootfs alternative, so
+        // absent config means no authorized issuers rather than a second source to consult.
+        let absent = super::resolve_measured_config(&logger, "FR-1", None, true);
+        assert!(absent.is_none(), "a trust root appeared from nowhere");
     }
 
     // FR-7 (F-79) leaves a strict build with no host-visible log stream, so the `error!`

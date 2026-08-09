@@ -115,20 +115,23 @@ devicemapper = ["kata-types/devicemapper"]
 # NOT be enabled in a shipped image: the agent's environment is host-influenced, so an
 # attacker who could set that variable could point the check at a tree they control.
 tsm-test-override = []
-# Test-only, same contract as tsm-test-override: lets KATA_FRAGMENT_SVN_STATE,
-# KATA_FRAGMENT_ISSUERS and KATA_TRUSTED_CDI_DIGESTS redirect measured/persisted security
-# state at paths a test controls. MUST NOT be enabled in a shipped image. The kernel passes
-# unrecognised `key=value` command line parameters to init as environment variables, so in a
-# confidential guest the agent's environment is chosen by the host; each of these paths backs
-# a guarantee (fragment SVN rollback protection, the fragment issuer trust root, the CDI spec
-# allow-list) that the host must not be able to relocate.
+# Test-only, same contract as tsm-test-override: lets KATA_FRAGMENT_SVN_STATE and
+# KATA_TRUSTED_CDI_DIGESTS redirect measured/persisted security state at paths a test
+# controls. MUST NOT be enabled in a shipped image. The kernel passes unrecognised
+# `key=value` command line parameters to init as environment variables, so in a confidential
+# guest the agent's environment is chosen by the host; each of these paths backs a guarantee
+# (fragment SVN rollback protection, the CDI spec allow-list) that the host must not be able
+# to relocate. KATA_FRAGMENT_ISSUERS was a third; RM-89 removed the fragment issuer trust
+# root's file source entirely, so there is no path left to redirect.
 test-path-override = []
 # F-166/R-2: restores the pre-F-166 behaviour where a guest with no TEE report provider is
-# treated as "not a confidential VM" and boots on with unbound initdata. Needed only for
-# non-confidential development VMs that deliver policy/trust roots through initdata. MUST NOT
-# be enabled in a shipped confidential image: F-6 showed the no-provider path is reachable on
-# a genuinely confidential VM (Azure paravisor SNP), where enabling this lets the host supply
-# the policy and the SRM trust roots unmeasured. Deliberately a build-time switch — the
-# agent's environment and kernel command line are host-chosen, so a runtime opt-out would
-# hand the same downgrade back to the host.
+# treated as "not a confidential VM" and boots on with unbound initdata — and, since RM-89
+# made the attestation-bound initdata section the only source of the FR-1 trust root, also
+# lets that unbound initdata seed it (otherwise such a build would have no trust root at all
+# and could not exercise fragments). Needed only for non-confidential development VMs that
+# deliver policy/trust roots through initdata. MUST NOT be enabled in a shipped confidential
+# image: F-6 showed the no-provider path is reachable on a genuinely confidential VM (Azure
+# paravisor SNP), where enabling this lets the host supply the policy and the SRM trust roots
+# unmeasured. Deliberately a build-time switch — the agent's environment and kernel command
+# line are host-chosen, so a runtime opt-out would hand the same downgrade back to the host.
 allow-unattested-initdata = []
