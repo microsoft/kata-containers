@@ -520,9 +520,8 @@ mod tests {
     /// returned `Ok` for every policy we generate, because it read a rule nothing wrote.
     #[tokio::test]
     async fn a_stamped_policy_is_accepted_and_a_newer_one_is_refused() {
-        let stamped = |version: &str| {
-            format!("package agent_policy\n\nframework_version := \"{version}\"\n")
-        };
+        let stamped =
+            |version: &str| format!("package agent_policy\n\nframework_version := \"{version}\"\n");
 
         let mut pol = AgentPolicy::new();
         pol.set_policy(&stamped(genpolicy::policy::POLICY_FRAMEWORK_VERSION))
@@ -536,10 +535,9 @@ mod tests {
         let ahead = format!("{}.0.0", major + 1);
 
         let mut pol = AgentPolicy::new();
-        let err = pol
-            .set_policy(&stamped(&ahead))
-            .await
-            .expect_err("the agent must refuse a policy naming a newer framework than it implements");
+        let err = pol.set_policy(&stamped(&ahead)).await.expect_err(
+            "the agent must refuse a policy naming a newer framework than it implements",
+        );
         let err = err.to_string();
         assert!(
             err.contains("framework_version"),

@@ -4119,16 +4119,40 @@ mod tests {
     fn every_signed_fragment_field_is_refused_from_the_caller() {
         use protocols::agent::LoadPolicyFragmentRequest as R;
 
-        let described: Vec<(&str, Box<dyn Fn(&mut R)>)> = vec![
-            ("issuer", Box::new(|r: &mut R| r.issuer = "did:x509:0:a::b".into())),
-            ("feed", Box::new(|r: &mut R| r.feed = "contoso.io/frag".into())),
+        /// Sets one signed field on the request, so each case can be driven uniformly.
+        type Describe = Box<dyn Fn(&mut R)>;
+
+        let described: Vec<(&str, Describe)> = vec![
+            (
+                "issuer",
+                Box::new(|r: &mut R| r.issuer = "did:x509:0:a::b".into()),
+            ),
+            (
+                "feed",
+                Box::new(|r: &mut R| r.feed = "contoso.io/frag".into()),
+            ),
             ("svn", Box::new(|r: &mut R| r.svn = 3)),
             ("grants", Box::new(|r: &mut R| r.grants = vec!["g".into()])),
-            ("signature", Box::new(|r: &mut R| r.signature = vec![1, 2, 3])),
-            ("policy_module", Box::new(|r: &mut R| r.policy_module = b"package p".to_vec())),
-            ("includes", Box::new(|r: &mut R| r.includes = vec!["exec".into()])),
-            ("requires", Box::new(|r: &mut R| r.requires = vec!["a/b/1".into()])),
-            ("prev_log_head", Box::new(|r: &mut R| r.prev_log_head = vec![9])),
+            (
+                "signature",
+                Box::new(|r: &mut R| r.signature = vec![1, 2, 3]),
+            ),
+            (
+                "policy_module",
+                Box::new(|r: &mut R| r.policy_module = b"package p".to_vec()),
+            ),
+            (
+                "includes",
+                Box::new(|r: &mut R| r.includes = vec!["exec".into()]),
+            ),
+            (
+                "requires",
+                Box::new(|r: &mut R| r.requires = vec!["a/b/1".into()]),
+            ),
+            (
+                "prev_log_head",
+                Box::new(|r: &mut R| r.prev_log_head = vec![9]),
+            ),
         ];
 
         for (name, set) in described {

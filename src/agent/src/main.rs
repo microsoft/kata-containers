@@ -1364,12 +1364,7 @@ async fn seed_fragment_trust_root(
     initdata_cfg: Option<&str>,
     initdata_bound: bool,
 ) -> Result<()> {
-    let text = match resolve_measured_config(
-        logger,
-        "FR-1",
-        initdata_cfg,
-        initdata_bound,
-    ) {
+    let text = match resolve_measured_config(logger, "FR-1", initdata_cfg, initdata_bound) {
         Some(t) => t,
         None => {
             info!(

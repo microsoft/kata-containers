@@ -2244,7 +2244,7 @@ fn agent_cmd_load_policy_fragment(
 
     let hex_decode = |s: &str| -> Result<Vec<u8>> {
         let s = s.trim();
-        if s.len() % 2 != 0 {
+        if !s.len().is_multiple_of(2) {
             return Err(anyhow!("hex string has odd length"));
         }
         (0..s.len())
@@ -2256,7 +2256,11 @@ fn agent_cmd_load_policy_fragment(
     let mut req = protocols::agent::LoadPolicyFragmentRequest::new();
     req.cose_sign1 = match kv.get("cose") {
         Some(c) if !c.is_empty() => hex_decode(c)?,
-        _ => return Err(anyhow!("cose=<hex> is required: the guest accepts only a COSE_Sign1 envelope")),
+        _ => {
+            return Err(anyhow!(
+                "cose=<hex> is required: the guest accepts only a COSE_Sign1 envelope"
+            ))
+        }
     };
     req.receipt = get("receipt");
     req.receipt_ledger = get("receipt_ledger");

@@ -782,6 +782,9 @@ impl AgentPolicy {
     /// not used to authorize anything here — that already happened — but the module is
     /// refused if it *describes itself* as anything else; see
     /// [`Self::assert_self_description`].
+    // Every parameter is a distinct, verified input; folding them into a struct would only
+    // move the arity somewhere else and churn ~35 call sites in the fragment tests.
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_fragment_module(
         &mut self,
         name: &str,
@@ -3071,9 +3074,11 @@ containers := [{"name": "wrong-issuer"}]
         ];
 
         for test_case in test_cases {
+            let name = test_case.name.clone();
             let output_res: Result<PolicyCopyFileRequest> = (&test_case.input).try_into();
             if let Some(expected) = test_case.output {
-                let output = output_res.expect(&format!("test case {}", &test_case.name));
+                let output = output_res
+                    .unwrap_or_else(|e| panic!("test case {}: {:?}", name, e));
                 assert_eq!(expected, output, "test case {}", &test_case.name)
             } else {
                 assert!(
