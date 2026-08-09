@@ -2383,15 +2383,31 @@ base_container_entries := [{"ref": {"base": true, "idx": i}, "container": c} |
 # Declaring the same fragment twice, in two different files, would have been the only way to
 # make it work, with divergence between the two failing silently.
 #
-# Duplicates across the two are harmless: they produce identical container entries with
-# identical references, and `container_by_ref` needs only one matching declaration.
+# Duplicates across the two are expected rather than exceptional: an operator raising a
+# floor in one place can easily leave a stale declaration behind in the other. When that
+# happens the *strictest* floor is the one that counts. `svn_floor` takes the maximum over
+# every declaration naming the same `(issuer, feed)`, which is what the SRM already does --
+# `declare_feed` keeps the stricter floor when a feed is declared twice (RM-87). Selecting
+# with `some spec in all_fragment_specs` instead would be an existential, admitting a
+# container if *any* declaration accepted it, so the weakest floor would win and this Rego
+# re-check would be laxer than the SRM gate it is meant to independently confirm.
+#
+# Iterating the delivered modules rather than the specs also makes each feed appear exactly
+# once, so duplicate declarations no longer produce duplicate container entries.
 all_fragment_specs := array.concat(policy_data.fragments, policy_fragments)
 
-fragment_container_entries := [{"ref": {"feed": spec.feed, "svn": to_number(mod.svn), "idx": j}, "container": c} |
-    some spec in all_fragment_specs
-    mod := data.agent_policy.fragments[spec.feed]
-    mod.issuer == spec.issuer
-    to_number(mod.svn) >= spec.minimum_svn
+svn_floor(issuer, feed) := max(floors) if {
+    floors := [spec.minimum_svn |
+        some spec in all_fragment_specs
+        spec.issuer == issuer
+        spec.feed == feed
+    ]
+    count(floors) > 0
+}
+
+fragment_container_entries := [{"ref": {"feed": feed, "svn": to_number(mod.svn), "idx": j}, "container": c} |
+    some feed, mod in data.agent_policy.fragments
+    to_number(mod.svn) >= svn_floor(mod.issuer, feed)
     some j, c in mod.containers
 ]
 
@@ -2412,11 +2428,8 @@ container_by_ref(ref) := c if {
 
 container_by_ref(ref) := c if {
     not ref.base
-    some spec in all_fragment_specs
-    spec.feed == ref.feed
     mod := data.agent_policy.fragments[ref.feed]
-    mod.issuer == spec.issuer
-    to_number(mod.svn) >= spec.minimum_svn
+    to_number(mod.svn) >= svn_floor(mod.issuer, ref.feed)
     to_number(mod.svn) == ref.svn
     c := mod.containers[ref.idx]
 }
