@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# shellcheck source-path=SCRIPTDIR
 # 05 — smoke test: boot a genpolicy-protected pod on the hardened stack, then
 #      assert the strict-policy negative behaviours.
 set -uo pipefail
@@ -28,18 +34,18 @@ assert_local_guest_installed
 ensure_branch_genpolicy
 ensure_genpolicy_defaults
 
-kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
+kubectl get ns "${NS}" >/dev/null 2>&1 || kubectl create ns "${NS}"
 
 # With PULL_TYPE=guest-pull genpolicy refuses images whose user/group would come
 # from the image layers, so the securityContext must be explicit at pod level.
-cat > "$WORK/pod.yaml" <<EOF
+cat > "${WORK}/pod.yaml" <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-  name: $POD
-  namespace: $NS
+  name: ${POD}
+  namespace: ${NS}
 spec:
-  runtimeClassName: $E2E_RUNTIMECLASS
+  runtimeClassName: ${E2E_RUNTIMECLASS}
   restartPolicy: Never
   securityContext:
     runAsUser: 0
@@ -52,22 +58,22 @@ spec:
 EOF
 
 log "generating policy (edits the YAML in place)"
-"$GENPOLICY" -y "$WORK/pod.yaml" \
-  -p "$GP_RULES" \
-  -j "$GP_SETTINGS" \
+"${GENPOLICY}" -y "${WORK}/pod.yaml" \
+  -p "${GP_RULES}" \
+  -j "${GP_SETTINGS}" \
   || die "genpolicy failed"
 
 # This build delivers the policy through initdata, not the legacy agent.policy
 # annotation — a "did genpolicy run?" check must look for cc_init_data.
-grep -q 'cc_init_data' "$WORK/pod.yaml" \
+grep -q 'cc_init_data' "${WORK}/pod.yaml" \
   || die "no cc_init_data annotation — genpolicy did not inject the policy"
 ok "policy injected via cc_init_data"
 
-kubectl delete pod "$POD" -n "$NS" --ignore-not-found >/dev/null 2>&1 || true
-kubectl apply -f "$WORK/pod.yaml" >/dev/null || die "kubectl apply failed"
+kubectl delete pod "${POD}" -n "${NS}" --ignore-not-found >/dev/null 2>&1 || true
+kubectl apply -f "${WORK}/pod.yaml" >/dev/null || die "kubectl apply failed"
 
-wait_for 300 "pod $POD Running" \
-  bash -c "kubectl get pod $POD -n $NS -o jsonpath='{.status.phase}' | grep -qx Running"
+wait_for 300 "pod ${POD} Running" \
+  bash -c "kubectl get pod ${POD} -n ${NS} -o jsonpath='{.status.phase}' | grep -qx Running"
 ok "pod is Running on the hardened stack"
 
 # ------------------------------------------------------- negative assertions
@@ -75,16 +81,16 @@ ok "pod is Running on the hardened stack"
 # is the proof that mediation is live; a success would mean the policy is not
 # being enforced.
 step "05a — exec must be denied by policy"
-if out=$(kubectl exec -n "$NS" "$POD" -- /bin/true 2>&1); then
+if out=$(kubectl exec -n "${NS}" "${POD}" -- /bin/true 2>&1); then
   die "kubectl exec SUCCEEDED — policy is not being enforced"
 fi
-if echo "$out" | grep -qi "blocked by policy\|ExecProcessRequest"; then
+if echo "${out}" | grep -qi "blocked by policy\|ExecProcessRequest"; then
   ok "exec denied by policy (expected)"
 else
-  echo "$out" | tail -5
+  echo "${out}" | tail -5
   die "exec failed, but not with a policy denial — cannot conclude mediation is live"
 fi
 
-kubectl delete pod "$POD" -n "$NS" --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete pod "${POD}" -n "${NS}" --ignore-not-found >/dev/null 2>&1 || true
 ok "smoke test passed"
 mark_done 05-smoke-test

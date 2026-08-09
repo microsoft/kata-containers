@@ -52,6 +52,9 @@ run_case() {
 		> "${WORKDIR}/allow-all.rego"
 	mkdir -p "${WORKDIR}/rootfs"
 
+	# shellcheck disable=SC2317,SC2329,SC2034  # everything below is consumed by the
+	# block eval'd at the end of this subshell, which shellcheck cannot see into: the
+	# `install` override is called from it, and the four variables are its inputs.
 	(
 		set -euo pipefail
 		info() { :; }

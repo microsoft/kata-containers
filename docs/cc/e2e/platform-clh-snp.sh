@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+#
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# shellcheck source-path=SCRIPTDIR
+# shellcheck disable=SC2154  # E2E_* are defined by lib.sh, which sources this file;
+# it cannot be sourced back from here without a cycle.
 # Platform module for E2E_PLATFORM=clh-snp — Cloud Hypervisor + MSHV + SEV-SNP on
 # Azure Linux 3.
 #
@@ -39,7 +47,7 @@ CLH_HOST_PKGS=(
 clh_need_azl3() {
   local v
   v=$(sed -n 's/^VERSION_ID="\?\([^"]*\)"\?/\1/p' /etc/os-release | head -1)
-  [ "$v" = "3.0" ] \
+  [[ "${v}" = "3.0" ]] \
     || die "E2E_PLATFORM=clh-snp requires Azure Linux 3 (found VERSION_ID=${v:-unknown})"
 }
 
@@ -57,7 +65,7 @@ clh_need_azl3() {
 # a reboot here would look like a stage failure. Configure, then say plainly what
 # is needed.
 clh_enable_dom0() {
-  if [ -e /dev/mshv ]; then
+  if [[ -e /dev/mshv ]]; then
     ok "already running as MSHV Dom0 ($(uname -r))"
     return 0
   fi
@@ -73,9 +81,13 @@ build artifact, then re-run this stage."
 
   log "selecting the Dom0 boot entry"
   sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=5/' /etc/default/grub
-  grep -q '^GRUB_DEFAULT=' /etc/default/grub \
-    && sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT="Dom0"/' /etc/default/grub \
-    || echo 'GRUB_DEFAULT="Dom0"' | sudo tee -a /etc/default/grub >/dev/null
+  if grep -q '^GRUB_DEFAULT=' /etc/default/grub; then
+    sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT="Dom0"/' /etc/default/grub \
+      || die "could not rewrite GRUB_DEFAULT"
+  else
+    echo 'GRUB_DEFAULT="Dom0"' | sudo tee -a /etc/default/grub >/dev/null \
+      || die "could not append GRUB_DEFAULT"
+  fi
   sudo grub2-mkconfig -o /boot/grub2/grub.cfg >/dev/null 2>&1 \
     || die "grub2-mkconfig failed"
 
@@ -90,7 +102,7 @@ the indicator to check."
 }
 
 clh_assert_snp_host() {
-  [ -e /dev/mshv ] \
+  [[ -e /dev/mshv ]] \
     || die "no /dev/mshv — this node is not running as an MSHV Dom0. Re-run stage 02, then reboot."
   sudo modprobe erofs 2>/dev/null || true
   grep -qw erofs /proc/filesystems \
@@ -134,10 +146,10 @@ clh_bootstrap_node() {
   # Belt and braces for the PATH-shadowing trap described above: if something
   # else on the node has pulled in a distro cargo, say so now rather than at
   # minute 40 of the guest build.
-  if command -v cargo >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
+  if command -v cargo >/dev/null 2>&1 && [[ -x "${HOME}/.cargo/bin/cargo" ]]; then
     local resolved; resolved=$(command -v cargo)
-    [ "$resolved" = "$HOME/.cargo/bin/cargo" ] \
-      || warn "cargo resolves to $resolved, not the rustup toolchain — prepend \$HOME/.cargo/bin to PATH if the build fails on a version requirement"
+    [[ "${resolved}" = "${HOME}/.cargo/bin/cargo" ]] \
+      || warn "cargo resolves to ${resolved}, not the rustup toolchain — prepend \$HOME/.cargo/bin to PATH if the build fails on a version requirement"
   fi
 
   clh_install_containerd
@@ -152,17 +164,17 @@ clh_bootstrap_node() {
 clh_install_containerd() {
   local want="${E2E_CONTAINERD_VERSION:-2.3.3}" have=""
   have=$(containerd --version 2>/dev/null | awk '{print $3}' | sed 's/^v//')
-  if [ "$have" = "$want" ]; then
-    ok "containerd $want already installed"
+  if [[ "${have}" = "${want}" ]]; then
+    ok "containerd ${want} already installed"
     return 0
   fi
-  log "installing containerd $want (found: ${have:-none})"
+  log "installing containerd ${want} (found: ${have:-none})"
   local url="https://github.com/containerd/containerd/releases/download/v${want}/containerd-${want}-linux-amd64.tar.gz"
-  curl -fsSLo /tmp/containerd.tgz "$url" || die "containerd download failed"
+  curl -fsSLo /tmp/containerd.tgz "${url}" || die "containerd download failed"
   sudo systemctl stop containerd 2>/dev/null || true
   sudo tar -C /usr/local -xzf /tmp/containerd.tgz || die "containerd unpack failed"
   # The unit file ships in the source tree, not in the binary tarball.
-  if [ ! -f /etc/systemd/system/containerd.service ]; then
+  if [[ ! -f /etc/systemd/system/containerd.service ]]; then
     curl -fsSLo /tmp/containerd.service \
       https://raw.githubusercontent.com/containerd/containerd/main/containerd.service \
       || die "containerd unit download failed"
@@ -179,10 +191,10 @@ clh_install_containerd() {
 # containerd fails to start on those.
 clh_configure_containerd() {
   local cfg=/etc/containerd/config.toml
-  log "writing $cfg"
+  log "writing ${cfg}"
   sudo mkdir -p /etc/containerd
-  [ -f "$cfg" ] && sudo cp -n "$cfg" "$cfg.pre-e2e"
-  sudo tee "$cfg" >/dev/null <<'EOF'
+  [[ -f "${cfg}" ]] && sudo cp -n "${cfg}" "${cfg}.pre-e2e"
+  sudo tee "${cfg}" >/dev/null <<'EOF'
 version = 3
 
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc]
@@ -270,41 +282,41 @@ EOF
 # VMDK support at this commit; the compat patch restores MSHV/SNP behaviour that
 # regressed after the fork point. See docs/design/erofs-cloud-hypervisor-investigation.md.
 clh_build_cloud_hypervisor() {
-  local dir="${E2E_CLH_DIR:-$HOME/cloud-hypervisor-vmdk}"
-  local patch="$E2E_REPO_DIR/cloud-hypervisor-mshv-vmdk-compat.patch"
-  CLH_SNP_BIN="$dir/target/release/cloud-hypervisor"
-  if [ -x "$CLH_SNP_BIN" ] && [ "${E2E_FORCE:-0}" != "1" ]; then
-    ok "cloud-hypervisor already built: $CLH_SNP_BIN"
+  local dir="${E2E_CLH_DIR:-${HOME}/cloud-hypervisor-vmdk}"
+  local patch="${E2E_REPO_DIR}/cloud-hypervisor-mshv-vmdk-compat.patch"
+  CLH_SNP_BIN="${dir}/target/release/cloud-hypervisor"
+  if [[ -x "${CLH_SNP_BIN}" ]] && [[ "${E2E_FORCE:-0}" != "1" ]]; then
+    ok "cloud-hypervisor already built: ${CLH_SNP_BIN}"
     export CLH_SNP_BIN; return 0
   fi
-  if [ ! -d "$dir/.git" ]; then
-    log "cloning $E2E_CLH_REPO at $E2E_CLH_TAG"
-    git clone "$E2E_CLH_REPO" "$dir" || die "cloud-hypervisor clone failed"
+  if [[ ! -d "${dir}/.git" ]]; then
+    log "cloning ${E2E_CLH_REPO} at ${E2E_CLH_TAG}"
+    git clone "${E2E_CLH_REPO}" "${dir}" || die "cloud-hypervisor clone failed"
   fi
-  ( cd "$dir" && git fetch --all --quiet && git checkout --quiet "$E2E_CLH_TAG" ) \
-    || die "cloud-hypervisor checkout of $E2E_CLH_TAG failed"
+  ( cd "${dir}" && git fetch --all --quiet && git checkout --quiet "${E2E_CLH_TAG}" ) \
+    || die "cloud-hypervisor checkout of ${E2E_CLH_TAG} failed"
   # Re-appliable: reset first so E2E_FORCE=1 does not fail on an already-patched tree.
-  [ -f "$patch" ] || die "missing compat patch: $patch"
-  ( cd "$dir" && git checkout --quiet -- . && git apply "$patch" ) \
+  [[ -f "${patch}" ]] || die "missing compat patch: ${patch}"
+  ( cd "${dir}" && git checkout --quiet -- . && git apply "${patch}" ) \
     || die "cloud-hypervisor mshv/vmdk compat patch failed to apply"
   log "building cloud-hypervisor with the mshv,sev_snp features"
   # OPENSSL_NO_VENDOR=1 makes the build use the distro OpenSSL. Without it the
   # vendored build needs a perl/ssl toolchain AzL3 does not ship by default.
-  ( cd "$dir" && OPENSSL_NO_VENDOR=1 cargo build --release --no-default-features --features mshv,sev_snp ) \
+  ( cd "${dir}" && OPENSSL_NO_VENDOR=1 cargo build --release --no-default-features --features mshv,sev_snp ) \
     || die "cloud-hypervisor build failed"
-  [ -x "$CLH_SNP_BIN" ] || die "cloud-hypervisor built but $CLH_SNP_BIN is missing"
+  [[ -x "${CLH_SNP_BIN}" ]] || die "cloud-hypervisor built but ${CLH_SNP_BIN} is missing"
   export CLH_SNP_BIN
-  ok "cloud-hypervisor: $CLH_SNP_BIN"
+  ok "cloud-hypervisor: ${CLH_SNP_BIN}"
 }
 
 # The UVM kernel is pinned and rebuilt rather than taken from the distro: AzL's
 # kernel-uvm 6.6.137.mshv1 triple-faults during IGVM boot, and the packaged
 # 6.1.58 has no EROFS support, which the single-layer image flow requires.
 clh_build_uvm_kernel() {
-  local dir="${E2E_UVM_KERNEL_DIR:-$HOME/kernel-uvm-6.1.58}"
-  IGVM_KERNEL="$dir/build/arch/x86/boot/bzImage"
-  if [ -f "$IGVM_KERNEL" ] && [ "${E2E_FORCE:-0}" != "1" ]; then
-    ok "UVM kernel already built: $IGVM_KERNEL"
+  local dir="${E2E_UVM_KERNEL_DIR:-${HOME}/kernel-uvm-6.1.58}"
+  IGVM_KERNEL="${dir}/build/arch/x86/boot/bzImage"
+  if [[ -f "${IGVM_KERNEL}" ]] && [[ "${E2E_FORCE:-0}" != "1" ]]; then
+    ok "UVM kernel already built: ${IGVM_KERNEL}"
     export IGVM_KERNEL; return 0
   fi
 
@@ -312,56 +324,57 @@ clh_build_uvm_kernel() {
   # triple-faults during IGVM boot, and the packaged 6.1.58 has EROFS off, which
   # the single-layer image flow requires. So the guest kernel is rebuilt from the
   # distro SRPM with exactly one config change.
-  local ver="$E2E_UVM_KERNEL_VERSION"           # e.g. 6.1.58.mshv8
+  local ver="${E2E_UVM_KERNEL_VERSION}"           # e.g. 6.1.58.mshv8
   local srpm="kernel-uvm-${ver}-1.azl3.src.rpm"
-  local url="https://packages.microsoft.com/azurelinux/3.0/prod/base/srpms/Packages/k/$srpm"
+  local url="https://packages.microsoft.com/azurelinux/3.0/prod/base/srpms/Packages/k/${srpm}"
 
   sudo dnf -y install bc bison flex dwarves ncurses-devel elfutils-libelf-devel \
     cpio rpm-build tar >/dev/null || die "UVM kernel build deps failed"
 
-  mkdir -p "$dir"/{srpm,source,build} || die "cannot create $dir"
+  mkdir -p "${dir}"/{srpm,source,build} || die "cannot create ${dir}"
   (
     set -e
-    cd "$dir"
-    [ -f "$srpm" ] || { log "downloading $srpm"; curl -fsSLO "$url"; }
-    rpm2cpio "$srpm" | ( cd srpm && cpio -idm ) 2>/dev/null
-    if [ ! -f source/Makefile ]; then
+    cd "${dir}"
+    [[ -f "${srpm}" ]] || { log "downloading ${srpm}"; curl -fsSLO "${url}"; }
+    rpm2cpio "${srpm}" | ( cd srpm && cpio -idm ) 2>/dev/null
+    if [[ ! -f source/Makefile ]]; then
       tar --extract --file "srpm/kernel-uvm-${ver}.tar.gz" --directory source --strip-components=1
     fi
     cp srpm/config build/.config
     source/scripts/config --file build/.config --enable EROFS_FS
-    make --directory source O="$PWD/build" olddefconfig >/dev/null
-    make --directory source O="$PWD/build" --jobs "$(nproc)" bzImage
+    make --directory source O="${PWD}/build" olddefconfig >/dev/null
+    make --directory source O="${PWD}/build" --jobs "$(nproc)" bzImage
   ) || die "UVM kernel build failed (see above)"
 
-  [ -f "$IGVM_KERNEL" ] || die "UVM kernel built but $IGVM_KERNEL is missing"
+  [[ -f "${IGVM_KERNEL}" ]] || die "UVM kernel built but ${IGVM_KERNEL} is missing"
 
   # EROFS has to actually be in the kernel that gets measured into the IGVM. A
   # kernel that merely built is not evidence of that: olddefconfig can silently
   # drop an option whose dependencies are unmet.
-  grep -qE '^CONFIG_EROFS_FS=[ym]' "$dir/build/.config" \
+  grep -qE '^CONFIG_EROFS_FS=[ym]' "${dir}/build/.config" \
     || die "the UVM kernel was built without CONFIG_EROFS_FS — the single-layer image flow will not work"
   ok "UVM kernel has CONFIG_EROFS_FS"
 
   export IGVM_KERNEL
-  ok "UVM kernel: $IGVM_KERNEL"
+  ok "UVM kernel: ${IGVM_KERNEL}"
 }
 
 clh_install_igvm_tooling() {
-  local sh="$E2E_REPO_DIR/tools/osbuilder/igvm-builder/igvm_builder.sh"
-  [ -x "$sh" ] || die "missing $sh"
+  local sh="${E2E_REPO_DIR}/tools/osbuilder/igvm-builder/igvm_builder.sh"
+  [[ -x "${sh}" ]] || die "missing ${sh}"
   log "installing IGVM build tooling"
-  ( cd "$(dirname "$sh")" && sudo ./igvm_builder.sh -i ) || die "igvm_builder.sh -i failed"
+  ( cd "$(dirname "${sh}")" && sudo ./igvm_builder.sh -i ) || die "igvm_builder.sh -i failed"
 
   # The installer skips the pip step whenever the extracted tooling folder is
   # already present, and on Azure Linux the plain `pip3 install` inside it is
   # refused because the site-packages tree is dnf-managed. Either way the igvm
   # module ends up missing, which only surfaces much later as a build failure.
   if ! python3 -c "import igvm" >/dev/null 2>&1; then
-    local src="$(dirname "$sh")/igvm-tooling/src"
-    [ -d "$src" ] || die "igvm tooling sources missing at $src"
+    local src
+    src="$(dirname "${sh}")/igvm-tooling/src"
+    [[ -d "${src}" ]] || die "igvm tooling sources missing at ${src}"
     log "installing the msigvm module explicitly"
-    ( cd "$src" && sudo pip3 install --no-deps --break-system-packages ./ ) \
+    ( cd "${src}" && sudo pip3 install --no-deps --break-system-packages ./ ) \
       || die "pip3 install msigvm failed"
     python3 -c "import igvm" >/dev/null 2>&1 \
       || die "msigvm installed but 'import igvm' still fails"
@@ -371,8 +384,8 @@ clh_install_igvm_tooling() {
 
 # ------------------------------------------------------- build + install kata
 clh_build_and_deploy() {
-  local nb="$E2E_REPO_DIR/tools/osbuilder/node-builder/azure-linux"
-  [ -d "$nb" ] || die "missing $nb — is this branch the right one?"
+  local nb="${E2E_REPO_DIR}/tools/osbuilder/node-builder/azure-linux"
+  [[ -d "${nb}" ]] || die "missing ${nb} — is this branch the right one?"
 
   : "${CLH_SNP_BIN:?clh_build_cloud_hypervisor must run first}"
   : "${IGVM_KERNEL:?clh_build_uvm_kernel must run first}"
@@ -381,7 +394,7 @@ clh_build_and_deploy() {
   # install a mix of the two. The README is explicit that they must not be
   # interleaved without a clean.
   log "cleaning any previous confpods build"
-  ( cd "$nb" && make clean-confpods ) || warn "make clean-confpods returned non-zero (first run?)"
+  ( cd "${nb}" && make clean-confpods ) || warn "make clean-confpods returned non-zero (first run?)"
 
   # Note what is NOT passed: AGENT_POLICY_FILE. The release default is
   # allow-set-policy.rego, which permits SetPolicy and then enforces whatever
@@ -391,45 +404,45 @@ clh_build_and_deploy() {
   # STRICT_POLICY/AGENT_POLICY match what the qemu stage 04 passes, so both
   # platforms exercise the same agent. STRICT_POLICY=yes also implies
   # USE_DEVMAPPER=yes, which the erofs dm-verity mount path requires.
-  local mk=(make CLH_SNP_PATH="$CLH_SNP_BIN" IGVM_KERNEL="$IGVM_KERNEL"
-            STRICT_POLICY="$E2E_STRICT_POLICY" AGENT_POLICY="$E2E_AGENT_POLICY")
-  [ "${E2E_BUILD_TARFS:-no}" = "yes" ] && mk+=(BUILD_TARFS=yes)
+  local mk=(make CLH_SNP_PATH="${CLH_SNP_BIN}" IGVM_KERNEL="${IGVM_KERNEL}"
+            STRICT_POLICY="${E2E_STRICT_POLICY}" AGENT_POLICY="${E2E_AGENT_POLICY}")
+  [[ "${E2E_BUILD_TARFS:-no}" = "yes" ]] && mk+=(BUILD_TARFS=yes)
 
   log "building kata-cc host and guest components (this takes a while)"
-  ( cd "$nb" && "${mk[@]}" all-confpods ) || die "make all-confpods failed"
+  ( cd "${nb}" && "${mk[@]}" all-confpods ) || die "make all-confpods failed"
 
   log "installing kata-cc components"
-  ( cd "$nb" && sudo "${mk[@]}" deploy-confpods ) || die "make deploy-confpods failed"
+  ( cd "${nb}" && sudo "${mk[@]}" deploy-confpods ) || die "make deploy-confpods failed"
 
   # Verify the produced agent rather than trusting the flags. A node-builder
   # agent without the devicemapper feature stubs out dm-verity device creation,
   # and every CreateContainer then fails inside the guest with
   # "dm-verity support not compiled in" — which surfaces only as an opaque
   # sandbox timeout on the host.
-  local abin="$nb/agent-install/usr/bin/kata-agent"
-  if [ -f "$abin" ]; then
+  local abin="${nb}/agent-install/usr/bin/kata-agent"
+  if [[ -f "${abin}" ]]; then
     local srm dmv
-    srm=$(strings -a "$abin" | grep -c security_reference_monitor || true)
-    dmv=$(strings -a "$abin" | grep -c 'dm-verity support not compiled in' || true)
-    log "agent binary check: strict=${E2E_STRICT_POLICY} srm=$srm devmapper_stub=$dmv"
-    [ "$dmv" -eq 0 ] || die "agent built without --features devicemapper (USE_DEVMAPPER did not take)"
+    srm=$(strings -a "${abin}" | grep -c security_reference_monitor || true)
+    dmv=$(strings -a "${abin}" | grep -c 'dm-verity support not compiled in' || true)
+    log "agent binary check: strict=${E2E_STRICT_POLICY} srm=${srm} devmapper_stub=${dmv}"
+    [[ "${dmv}" -eq 0 ]] || die "agent built without --features devicemapper (USE_DEVMAPPER did not take)"
     # Assert in whichever direction was asked for, so a non-strict leg is
     # verified too rather than silently accepted (see 04-build-guest-stack.sh).
-    if [ "${E2E_STRICT_POLICY}" = "yes" ]; then
-      [ "$srm" -gt 100 ] \
-        || die "STRICT_POLICY did not take: only $srm SRM symbols (expected >100)"
+    if [[ "${E2E_STRICT_POLICY}" = "yes" ]]; then
+      [[ "${srm}" -gt 100 ]] \
+        || die "STRICT_POLICY did not take: only ${srm} SRM symbols (expected >100)"
     else
-      [ "$srm" -le 100 ] \
-        || die "E2E_STRICT_POLICY=${E2E_STRICT_POLICY} but the agent carries $srm SRM symbols — the knob did not reach the build"
+      [[ "${srm}" -le 100 ]] \
+        || die "E2E_STRICT_POLICY=${E2E_STRICT_POLICY} but the agent carries ${srm} SRM symbols — the knob did not reach the build"
     fi
   else
-    warn "no agent binary at $abin — skipping build verification"
+    warn "no agent binary at ${abin} — skipping build verification"
   fi
 
-  local cfg="$E2E_KATA_DEFAULTS/runtime-rs/configuration.toml"
-  [ -f "$cfg" ] || die "expected shim config at $cfg after deploy-confpods"
-  [ -f "$E2E_GUEST_IMAGE" ] || die "expected guest IGVM at $E2E_GUEST_IMAGE after deploy-confpods"
-  ok "kata-cc installed (shim config: $cfg)"
+  local cfg="${E2E_KATA_DEFAULTS}/runtime-rs/configuration.toml"
+  [[ -f "${cfg}" ]] || die "expected shim config at ${cfg} after deploy-confpods"
+  [[ -f "${E2E_GUEST_IMAGE}" ]] || die "expected guest IGVM at ${E2E_GUEST_IMAGE} after deploy-confpods"
+  ok "kata-cc installed (shim config: ${cfg})"
 }
 
 # ------------------------------------------------------------------ kubernetes
@@ -442,13 +455,13 @@ clh_register_runtimeclass() {
   node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}') \
     || die "no Kubernetes node — bring the cluster up first"
 
-  log "registering RuntimeClass $E2E_RUNTIMECLASS"
-  kubectl apply -f - <<EOF || die "could not create RuntimeClass $E2E_RUNTIMECLASS"
+  log "registering RuntimeClass ${E2E_RUNTIMECLASS}"
+  kubectl apply -f - <<EOF || die "could not create RuntimeClass ${E2E_RUNTIMECLASS}"
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
-  name: $E2E_RUNTIMECLASS
-handler: $E2E_RUNTIMECLASS
+  name: ${E2E_RUNTIMECLASS}
+handler: ${E2E_RUNTIMECLASS}
 overhead:
   podFixed:
     memory: "600Mi"
@@ -457,9 +470,9 @@ scheduling:
     katacontainers.io/kata-runtime: "true"
 EOF
 
-  kubectl label node "$node" katacontainers.io/kata-runtime=true --overwrite \
-    || die "could not label node $node"
-  ok "RuntimeClass $E2E_RUNTIMECLASS registered; node $node labelled"
+  kubectl label node "${node}" katacontainers.io/kata-runtime=true --overwrite \
+    || die "could not label node ${node}"
+  ok "RuntimeClass ${E2E_RUNTIMECLASS} registered; node ${node} labelled"
 }
 
 # ------------------------------------------------------------------ kubernetes
@@ -484,7 +497,7 @@ clh_deploy_k8s() {
   # Stage 02 drops a kubectl into /usr/local/bin, which precedes /usr/bin on
   # PATH. Leaving it there lets kubectl and the cluster drift apart
   # independently, so make the distro package the single source of truth.
-  if [ -f /usr/local/bin/kubectl ] && [ ! -L /usr/local/bin/kubectl ]; then
+  if [[ -f /usr/local/bin/kubectl ]] && [[ ! -L /usr/local/bin/kubectl ]]; then
     sudo ln -sf /usr/bin/kubectl /usr/local/bin/kubectl
   fi
 
@@ -503,18 +516,18 @@ EOS
 
   log "kubeadm init (a couple of minutes)"
   sudo kubeadm init \
-    --pod-network-cidr="$CLH_POD_CIDR" \
+    --pod-network-cidr="${CLH_POD_CIDR}" \
     --cri-socket=unix:///run/containerd/containerd.sock \
     --ignore-preflight-errors=Mem,NumCPU \
     || die "kubeadm init failed — see 'sudo journalctl -u kubelet'"
 
-  mkdir -p "$HOME/.kube"
+  mkdir -p "${HOME}/.kube"
   sudo install -o "$(id -u)" -g "$(id -g)" -m 0600 \
-    /etc/kubernetes/admin.conf "$HOME/.kube/config" \
+    /etc/kubernetes/admin.conf "${HOME}/.kube/config" \
     || die "could not install the kubeconfig"
 
   log "installing the flannel CNI"
-  kubectl apply -f "$CLH_FLANNEL_URL" || die "flannel apply failed"
+  kubectl apply -f "${CLH_FLANNEL_URL}" || die "flannel apply failed"
 
   # Single node: nothing can ever schedule unless the control-plane taint goes.
   # A second run has nothing left to remove and kubectl exits non-zero on that.
