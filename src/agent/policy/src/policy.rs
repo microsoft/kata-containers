@@ -2461,6 +2461,171 @@ SignalProcessRequest if {
         p
     }
 
+    /// RM-93: when the same `(issuer, feed)` is declared twice with different SVN floors,
+    /// the *higher* floor must win.
+    ///
+    /// A policy can declare a fragment in two measured places — `policy_data.fragments`
+    /// (BL-7, from `genpolicy-settings.json`) and `policy_fragments` (BL-8, appended to the
+    /// generated policy text) — and `all_fragment_specs` concatenates them. Both are
+    /// measured, so neither is attacker-controlled; the risk is not injection but an
+    /// operator raising a floor in one place while a stale declaration survives in the
+    /// other.
+    ///
+    /// `fragment_container_entries` selects with `some spec in all_fragment_specs`, which
+    /// is an existential: a container is admitted if *any* spec accepts it. That makes the
+    /// weakest floor win. The SRM does the opposite — `declare_feed` keeps the stricter
+    /// floor when a feed is declared twice (RM-87) — so the two layers disagreed about what
+    /// a duplicate declaration means, and the Rego layer was the permissive one.
+    #[tokio::test]
+    async fn duplicate_fragment_declarations_keep_the_strictest_svn_floor() {
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy(
+                "rules.rego".to_string(),
+                include_str!("../../../tools/genpolicy/rules.rego").to_string(),
+            )
+            .unwrap();
+        // Two declarations for one feed: a floor of 5, and a stale floor of 1.
+        p.engine
+            .add_policy(
+                "policy_data.rego".to_string(),
+                r#"package agent_policy
+policy_data := {"containers": [], "fragments": [
+  {"issuer": "did:x509:iss", "feed": "feed-a", "minimum_svn": 5},
+  {"issuer": "did:x509:iss", "feed": "feed-a", "minimum_svn": 1}
+]}
+"#
+                .to_string(),
+            )
+            .unwrap();
+        // A delivered fragment at SVN 2: above the stale floor, below the real one.
+        p.engine
+            .add_policy(
+                "frag.rego".to_string(),
+                r#"package agent_policy.fragments["feed-a"]
+issuer := "did:x509:iss"
+svn := "2"
+containers := [{"name": "smuggled"}]
+"#
+                .to_string(),
+            )
+            .unwrap();
+
+        let entries = p
+            .engine
+            .eval_rule("data.agent_policy.fragment_container_entries".to_string())
+            .expect("fragment_container_entries must evaluate");
+
+        assert_eq!(
+            entries.as_array().map(|a| a.len()).unwrap_or(0),
+            0,
+            "a fragment at SVN 2 is below the declared floor of 5, so it must contribute no \
+             containers; admitting it means the weaker duplicate declaration won, which is \
+             the opposite of what the SRM's declare_feed does. Got: {:?}",
+            entries
+        );
+    }
+
+    /// RM-93 positive control: the strict-floor rule must still admit a fragment that
+    /// actually meets the highest declared floor, and must admit it exactly once even
+    /// though two declarations name it. Without this, the test above would also pass if
+    /// fragment composition were simply broken.
+    #[tokio::test]
+    async fn duplicate_declarations_admit_a_conforming_fragment_exactly_once() {
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy(
+                "rules.rego".to_string(),
+                include_str!("../../../tools/genpolicy/rules.rego").to_string(),
+            )
+            .unwrap();
+        p.engine
+            .add_policy(
+                "policy_data.rego".to_string(),
+                r#"package agent_policy
+policy_data := {"containers": [], "fragments": [
+  {"issuer": "did:x509:iss", "feed": "feed-a", "minimum_svn": 5},
+  {"issuer": "did:x509:iss", "feed": "feed-a", "minimum_svn": 1}
+]}
+"#
+                .to_string(),
+            )
+            .unwrap();
+        // At the strictest declared floor exactly.
+        p.engine
+            .add_policy(
+                "frag.rego".to_string(),
+                r#"package agent_policy.fragments["feed-a"]
+issuer := "did:x509:iss"
+svn := "5"
+containers := [{"name": "legit"}]
+"#
+                .to_string(),
+            )
+            .unwrap();
+
+        let entries = p
+            .engine
+            .eval_rule("data.agent_policy.fragment_container_entries".to_string())
+            .expect("fragment_container_entries must evaluate");
+
+        assert_eq!(
+            entries.as_array().map(|a| a.len()).unwrap_or(0),
+            1,
+            "a fragment at the declared floor must contribute its container, once -- two \
+             declarations of the same feed must not double it. Got: {:?}",
+            entries
+        );
+    }
+
+    /// RM-93: a fragment whose issuer no declaration names contributes nothing, so the
+    /// issuer check survived the move from iterating specs to iterating delivered modules.
+    #[tokio::test]
+    async fn a_fragment_from_an_undeclared_issuer_contributes_nothing() {
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy(
+                "rules.rego".to_string(),
+                include_str!("../../../tools/genpolicy/rules.rego").to_string(),
+            )
+            .unwrap();
+        p.engine
+            .add_policy(
+                "policy_data.rego".to_string(),
+                r#"package agent_policy
+policy_data := {"containers": [], "fragments": [
+  {"issuer": "did:x509:iss", "feed": "feed-a", "minimum_svn": 1}
+]}
+"#
+                .to_string(),
+            )
+            .unwrap();
+        p.engine
+            .add_policy(
+                "frag.rego".to_string(),
+                r#"package agent_policy.fragments["feed-a"]
+issuer := "did:x509:someone-else"
+svn := "9"
+containers := [{"name": "wrong-issuer"}]
+"#
+                .to_string(),
+            )
+            .unwrap();
+
+        let entries = p
+            .engine
+            .eval_rule("data.agent_policy.fragment_container_entries".to_string())
+            .expect("fragment_container_entries must evaluate");
+
+        assert_eq!(
+            entries.as_array().map(|a| a.len()).unwrap_or(0),
+            0,
+            "no declaration names this issuer, so svn_floor is undefined and the fragment \
+             must contribute nothing however high its SVN. Got: {:?}",
+            entries
+        );
+    }
+
     /// RM-64: a denial says which check failed, not merely that one did.
     ///
     /// This reproduces RM-63 -- a workload with `readOnlyRootFilesystem: false` makes
