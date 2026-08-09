@@ -644,8 +644,24 @@ external ledger are flagged and tracked in `docs/cc/backlog.md`.
   verifies the ledger's COSE signature over the recomputed root against a trust-list key
   (multi-alg, per PR #3).
 - **Guarantee:** a fragment can be required to be anchored in an external transparency ledger
-  (e.g. Azure Confidential Ledger / a CCF-based SCITT service); cross-fragment append-only
-  ordering remains governed by FR-1j `prev_log_head`.
+  (e.g. Azure Confidential Ledger / a CCF-based SCITT service). Cross-fragment append-only
+  ordering is left to FR-1j `prev_log_head` rather than the external ledger — and note that
+  FR-1j is opt-in (it engages only once the store has a `log_genesis`), so a deployment using
+  CCF receipts without ordered mode has neither the native `ttl_heads` consistency gate nor a
+  log-head chain. That is acceptable only because `data-hash` binds the statement — hence the
+  issuer, feed and SVN — so SVN monotonicity refuses a replayed receipt.
+- **Ledger attribution (RM-90):** unlike the native path, whose signature covers
+  `sth_signing_bytes(ledger, size, root)`, a CCF receipt signs the bare Merkle root and names
+  no ledger. The claimed `receipt_ledger` is therefore only as meaningful as the assumption
+  that one ledger's keys are that ledger's alone, which nothing enforces. The gate refuses a
+  CCF receipt that also validates under another configured ledger
+  (`AmbiguousCcfLedger`), so `allowed_ledgers` / `required_receipt_from` scoping cannot be
+  satisfied by a receipt from a different ledger that shares key material.
+- **Bounded proof path (RM-91):** the inclusion path is capped at `MAX_CCF_PATH_ELEMENTS`
+  = 64, checked before the fold. Receipts are attached alongside the envelope and so are not
+  covered by the issuer signature, which makes the path host-chosen input processed before
+  anything has been authenticated — the same reasoning that bounds the `did:x509` chain and
+  the native RFC 6962 proof.
 - **Commits:** `763a54cf5`. *(Live SCITT/CCF endpoint e2e is deployment-time — no guest egress
   in the test bed.)*
 
