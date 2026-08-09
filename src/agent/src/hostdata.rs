@@ -373,7 +373,9 @@ fn read_snp_report_ioctl(logger: &Logger, dev: &Path) -> Result<Vec<u8>> {
     let end = SNP_REPORT_RESP_HDR_LEN
         .checked_add(report_size)
         .filter(|end| *end <= resp.data.len())
-        .ok_or_else(|| anyhow!("SNP_GET_REPORT claimed an implausible report size {report_size}"))?;
+        .ok_or_else(|| {
+            anyhow!("SNP_GET_REPORT claimed an implausible report size {report_size}")
+        })?;
     if report_size < SNP_HOST_DATA_OFFSET + SNP_HOST_DATA_LEN {
         bail!(
             "SNP_GET_REPORT returned {report_size} bytes, too short to contain HOSTDATA \

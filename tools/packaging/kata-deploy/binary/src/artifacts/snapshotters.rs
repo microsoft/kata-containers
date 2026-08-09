@@ -555,9 +555,15 @@ mod tests {
 
         // Build timestamp.
         assert!(opts.contains("\"-T0\""), "missing -T0 in {opts}");
-        assert!(opts.contains("\"--mkfs-time\""), "missing --mkfs-time in {opts}");
+        assert!(
+            opts.contains("\"--mkfs-time\""),
+            "missing --mkfs-time in {opts}"
+        );
         // Tar entry ordering.
-        assert!(opts.contains("\"--sort=none\""), "missing --sort=none in {opts}");
+        assert!(
+            opts.contains("\"--sort=none\""),
+            "missing --sort=none in {opts}"
+        );
     }
 
     /// RM-40: dm-verity on the merged layout is the one combination that must be
@@ -577,7 +583,9 @@ mod tests {
     /// no reason to suspect the other is involved.
     #[test]
     fn dmverity_merge_mode_error_names_both_settings() {
-        let err = check_dmverity_requires_unmerged(true, false).unwrap_err().to_string();
+        let err = check_dmverity_requires_unmerged(true, false)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("EROFS_DMVERITY"), "{err}");
         assert!(err.contains("EROFS_MERGE_MODE=unmerged"), "{err}");
     }
