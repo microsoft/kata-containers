@@ -145,7 +145,9 @@ const GROUP_FILE_WHITEOUT_TAR_PATH: &str = "etc/.wh.group";
 pub const WHITEOUT_MARKER: &str = "WHITEOUT";
 
 impl Container {
-    pub async fn new(config: &Config, image: &str, is_pause_container: bool) -> Result<Self> {
+    /// `_is_pause_container` is retained so this mirrors `new_containerd_pull`'s
+    /// signature; the registry path no longer varies its behaviour on it.
+    pub async fn new(config: &Config, image: &str, _is_pause_container: bool) -> Result<Self> {
         info!("============================================");
         info!("Pulling manifest and config for {image}");
         let image_string = image.to_string();
@@ -199,28 +201,31 @@ impl Container {
         .await
         .unwrap();
 
-        // Nydus/guest_pull doesn't make available passwd/group files from layers properly.
-        // See issue https://github.com/kata-containers/kata-containers/issues/11162
-        let v1_policy = config.settings.cluster_config.pause_container_id_policy == "v1";
-        if config.settings.cluster_config.guest_pull && (v1_policy || !is_pause_container) {
-            info!("Guest pull is enabled, skipping passwd/group file parsing");
-        } else {
-            // Find the last layer with an /etc/* file, respecting whiteouts.
-            info!("Parsing users and groups in image layers");
-            for layer in &image_layers {
-                if layer.passwd == WHITEOUT_MARKER {
-                    passwd = String::new();
-                } else if !layer.passwd.is_empty() {
-                    passwd = layer.passwd.clone();
-                    debug!("Container:new: Found in image layer passwd = \n{passwd}");
-                }
+        // Nydus/guest_pull historically skipped this parsing, because guest-pulled layers
+        // did not reliably expose /etc/passwd and /etc/group.
+        // See issue https://github.com/kata-containers/kata-containers/issues/11162.
+        //
+        // That workaround is superseded by the guest_pull user/group check in
+        // policy.rs (`check_guest_pull_user_and_groups`), which needs these values to
+        // detect the mismatch and tell the user to pin securityContext explicitly.
+        // Skipping the parse left that check comparing against defaults, so it could
+        // never fire. Parse unconditionally, as upstream does.
+        //
+        // Find the last layer with an /etc/* file, respecting whiteouts.
+        info!("Parsing users and groups in image layers");
+        for layer in &image_layers {
+            if layer.passwd == WHITEOUT_MARKER {
+                passwd = String::new();
+            } else if !layer.passwd.is_empty() {
+                passwd = layer.passwd.clone();
+                debug!("Container:new: Found in image layer passwd = \n{passwd}");
+            }
 
-                if layer.group == WHITEOUT_MARKER {
-                    group = String::new();
-                } else if !layer.group.is_empty() {
-                    group = layer.group.clone();
-                    debug!("Container:new: Found in image layer group = \n{group}");
-                }
+            if layer.group == WHITEOUT_MARKER {
+                group = String::new();
+            } else if !layer.group.is_empty() {
+                group = layer.group.clone();
+                debug!("Container:new: Found in image layer group = \n{group}");
             }
         }
 
