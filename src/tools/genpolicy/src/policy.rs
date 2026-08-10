@@ -82,6 +82,14 @@ pub struct FragmentSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub includes: Vec<String>,
 
+    /// FR-1m: name patterns bounding which environment variables this fragment may
+    /// contribute `env_rules` for. Empty (the default) delegates nothing, so existing
+    /// settings produce byte-identical output and cannot acquire the capability by upgrade.
+    /// Passed through verbatim; `rules.rego` enforces the ceiling, anchoring every pattern
+    /// to the whole name so a missing `^`/`$` cannot widen the grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_env_rules: Vec<String>,
+
     /// FR-1c: whether the fragment's Rego module may be applied at all. Defaults to true;
     /// `false` accepts the fragment for its SVN/receipt/ordering record while contributing
     /// no rules. Emitted only when explicitly disabled, so existing settings produce

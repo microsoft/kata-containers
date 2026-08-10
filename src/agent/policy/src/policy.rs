@@ -195,6 +195,33 @@ pub struct FragmentSpec {
     /// matched candidate declaration rather than from the delivered fragment.
     #[serde(default)]
     pub includes: Vec<String>,
+    /// FR-1m: regexes bounding the environment-variable *names* this fragment may
+    /// contribute `env_rules` for. Empty (the default) delegates nothing.
+    ///
+    /// hcsshim lets a fragment carry `platform_rules`, which contribute environment rules
+    /// applied across *all* containers, so a deployment pipeline that injects a variable
+    /// (a feature flag, a fabric-injected setting) can be authorized by shipping a signed,
+    /// SVN-versioned fragment instead of regenerating and re-measuring the base policy.
+    /// There is no way for the base policy to say *which* variables a fragment may speak
+    /// for: including the fragment grants it the whole namespace.
+    ///
+    /// This is the same capability with the grant made explicit. The base policy names the
+    /// variables it is willing to let a feed decide — `["^FEATURE_FLAG_[A-Z0-9_]+$"]` — and
+    /// the fragment supplies the concrete rules within that ceiling. An operator who wants
+    /// hcsshim's all-or-nothing behaviour writes `["^.+$"]`; one who wants the list locked
+    /// down at measurement time omits the field and keeps every variable in the measured
+    /// base policy. Both ends of that range are expressible, and the default end is closed.
+    ///
+    /// Bounding by *name* rather than by rule is deliberate. Deciding whether one regex
+    /// admits a subset of another is undecidable in general, so a ceiling expressed over
+    /// whole rules could not be checked; a ceiling over names can, because the fragment's
+    /// rule names a literal variable (see `env_rules` handling in `rules.rego`).
+    ///
+    /// Patterns are matched fully anchored regardless of how they are written, so a
+    /// ceiling of `FEATURE_FLAG` cannot be widened into `EVIL_FEATURE_FLAG_X` by an author
+    /// who forgot the anchors.
+    #[serde(default)]
+    pub allow_env_rules: Vec<String>,
     /// FR-1c: whether this fragment's Rego module may be applied at all. Defaults to true.
     ///
     /// Setting it to false accepts the fragment for its SVN, receipt and ordering record
@@ -252,6 +279,7 @@ impl Default for FragmentSpec {
             required: false,
             allow_nested: AllowNested::default(),
             includes: Vec::new(),
+            allow_env_rules: Vec::new(),
             allow_module: true,
             parameters: None,
         }
@@ -295,6 +323,28 @@ impl FragmentSpec {
                 Ok(NestedScope::Issuers(list.clone()))
             }
         }
+    }
+
+    /// Validate [`Self::allow_env_rules`].
+    ///
+    /// An empty list is the closed default and is fine — it delegates nothing. What is not
+    /// fine is a *present* list containing an empty pattern: anchored, an empty pattern
+    /// matches only the empty variable name, so it grants nothing while looking like it
+    /// grants something. That is the failure mode worth catching at boot, because the
+    /// symptom (a fragment's env rules silently never applying) is otherwise identical to
+    /// the fragment not being delivered at all.
+    pub fn validate_env_rule_grant(&self) -> Result<()> {
+        for pattern in &self.allow_env_rules {
+            if pattern.trim().is_empty() {
+                bail!(
+                    "fragment declaration for feed {:?}: allow_env_rules contains an empty \
+                     pattern, which permits no variable name; remove it, or omit \
+                     allow_env_rules entirely to delegate nothing",
+                    self.feed
+                );
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1773,6 +1823,44 @@ mod tests {
         specs[0].nested_scope().unwrap_err().to_string()
     }
 
+    /// FR-1m: the env-rule grant parses, defaults to empty (delegating nothing), and an
+    /// empty *pattern* inside a present grant is rejected at boot rather than silently
+    /// granting nothing — the symptom of which is indistinguishable from the fragment never
+    /// having been delivered.
+    #[test]
+    fn test_fragment_specs_parse_env_rule_grant() {
+        let mut p = AgentPolicy::new();
+        let base = "package agent_policy\n\
+            policy_fragments := [\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:s\", \"feed\": \"reg/a:1\", \
+             \"allow_env_rules\": [\"^FEATURE_FLAG_.+$\"]},\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:s\", \"feed\": \"reg/b:1\"},\n\
+            {\"issuer\": \"did:x509:0:sha256:AAA::CN:s\", \"feed\": \"reg/c:1\", \
+             \"allow_env_rules\": [\"\"]}\n\
+            ]\n";
+        p.engine
+            .add_policy("agent_policy".to_string(), base.to_string())
+            .unwrap();
+        let specs = p.fragment_specs().unwrap();
+
+        assert_eq!(
+            specs[0].allow_env_rules,
+            vec!["^FEATURE_FLAG_.+$".to_string()]
+        );
+        specs[0].validate_env_rule_grant().unwrap();
+
+        assert!(
+            specs[1].allow_env_rules.is_empty(),
+            "an omitted grant must delegate nothing"
+        );
+        specs[1]
+            .validate_env_rule_grant()
+            .expect("an omitted grant is the closed default, not an error");
+
+        let err = specs[2].validate_env_rule_grant().unwrap_err().to_string();
+        assert!(err.contains("empty pattern"), "got: {}", err);
+    }
+
     /// F-62: the declaration carries the namespace grant and the module switch, and both
     /// default safely — no named namespaces, module allowed.
     #[test]
@@ -2658,6 +2746,262 @@ containers := [{"name": "legit"}]
             "a fragment at the declared floor must contribute its container, once -- two \
              declarations of the same feed must not double it. Got: {:?}",
             entries
+        );
+    }
+
+    /// FR-1m: evaluate the fragment-contributed env-rule arm of `allow_var` against the
+    /// real `rules.rego`.
+    ///
+    /// The probe rule calls `allow_var` with an empty policy process, so no other arm can
+    /// match and a `true` here can only have come from the fragment arm.
+    fn env_probe(policy_data: &str, fragment: &str, var: &str) -> bool {
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy(
+                "rules.rego".to_string(),
+                include_str!("../../../tools/genpolicy/rules.rego").to_string(),
+            )
+            .unwrap();
+        p.engine
+            .add_policy("policy_data.rego".to_string(), policy_data.to_string())
+            .unwrap();
+        p.engine
+            .add_policy("frag.rego".to_string(), fragment.to_string())
+            .unwrap();
+        p.engine
+            .add_policy(
+                "probe.rego".to_string(),
+                "package agent_policy\n\
+                 default env_probe := false\n\
+                 env_probe if {\n\
+                 \x20   allow_var({\"Env\": []}, {\"Env\": []}, input.var, \"sandbox\", \"ns\")\n\
+                 }\n"
+                .to_string(),
+            )
+            .unwrap();
+        p.engine
+            .set_input_json(&serde_json::json!({ "var": var }).to_string())
+            .unwrap();
+        p.engine
+            .eval_rule("data.agent_policy.env_probe".to_string())
+            .unwrap()
+            .to_string()
+            == "true"
+    }
+
+    /// A declaration granting a name pattern, at SVN 5.
+    fn env_policy_data(grant: &str) -> String {
+        format!(
+            r#"package agent_policy
+policy_data := {{"containers": [], "fragments": [
+  {{"issuer": "did:x509:iss", "feed": "prod/mut", "minimum_svn": 5{grant}}}
+]}}
+"#
+        )
+    }
+
+    /// A delivered fragment carrying `env_rules`.
+    fn env_fragment(svn: &str, rules: &str) -> String {
+        format!(
+            r#"package agent_policy.fragments["prod/mut"]
+issuer := "did:x509:iss"
+svn := "{svn}"
+env_rules := {rules}
+"#
+        )
+    }
+
+    /// FR-1m: the whole point — a variable the deployment pipeline injects, which no
+    /// measured container spec mentions, is admitted because a signed fragment says so and
+    /// the base policy delegated that variable's name to it.
+    #[tokio::test]
+    async fn a_fragment_may_admit_an_env_var_the_base_policy_delegated() {
+        assert!(
+            env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["^FEATURE_FLAG_[A-Z0-9_]+$"]"#),
+                &env_fragment("5", r#"[{"name": "FEATURE_FLAG_X", "value": "true"}]"#),
+                "FEATURE_FLAG_X=true",
+            ),
+            "a fragment rule inside the declared ceiling must admit the variable; this is \
+             the capability hcsshim provides through platform_rules"
+        );
+    }
+
+    /// The default is closed: a declaration that says nothing about env rules delegates
+    /// nothing, so a policy written before this attribute existed cannot acquire the
+    /// capability merely by running on a newer agent.
+    #[tokio::test]
+    async fn a_fragment_admits_nothing_when_the_base_policy_granted_nothing() {
+        assert!(
+            !env_probe(
+                &env_policy_data(""),
+                &env_fragment("5", r#"[{"name": "FEATURE_FLAG_X", "value": "true"}]"#),
+                "FEATURE_FLAG_X=true",
+            ),
+            "without allow_env_rules the fragment has no env-rule authority at all, however \
+             well-formed its rules are"
+        );
+    }
+
+    /// The ceiling binds: a fragment cannot speak for a name outside the grant.
+    #[tokio::test]
+    async fn a_fragment_cannot_admit_a_name_outside_the_ceiling() {
+        assert!(
+            !env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["^FEATURE_FLAG_[A-Z0-9_]+$"]"#),
+                &env_fragment("5", r#"[{"name": "AZURE_CLIENT_SECRET", "value": "s"}]"#),
+                "AZURE_CLIENT_SECRET=s",
+            ),
+            "a fragment that is trusted for feature flags must not thereby be trusted for \
+             credentials"
+        );
+    }
+
+    /// The ceiling is anchored by the enforcement, not by the author's discipline. An
+    /// unanchored grant is the mistake a reader is most likely to make and the one whose
+    /// consequence is worst: `regex.match` is a search, so "FEATURE_FLAG" would otherwise
+    /// match anywhere in the name and hand the fragment a far wider grant than it reads as.
+    #[tokio::test]
+    async fn an_unanchored_ceiling_is_still_matched_whole() {
+        assert!(
+            !env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["FEATURE_FLAG"]"#),
+                &env_fragment("5", r#"[{"name": "EVIL_FEATURE_FLAG_X", "value": "1"}]"#),
+                "EVIL_FEATURE_FLAG_X=1",
+            ),
+            "an unanchored ceiling must not admit a name that merely contains it"
+        );
+        assert!(
+            env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["FEATURE_FLAG"]"#),
+                &env_fragment("5", r#"[{"name": "FEATURE_FLAG", "value": "1"}]"#),
+                "FEATURE_FLAG=1",
+            ),
+            "positive control: anchoring must not break the exact name the author meant"
+        );
+    }
+
+    /// Duplicate declarations intersect rather than union, matching the strictest-wins rule
+    /// `svn_floor` applies to rollback floors. An operator who tightens one declaration must
+    /// not be silently overridden by a stale copy of the other.
+    #[tokio::test]
+    async fn duplicate_declarations_intersect_the_env_ceiling() {
+        let data = r#"package agent_policy
+policy_data := {"containers": [], "fragments": [
+  {"issuer": "did:x509:iss", "feed": "prod/mut", "minimum_svn": 5,
+   "allow_env_rules": ["^FEATURE_FLAG_[A-Z0-9_]+$"]},
+  {"issuer": "did:x509:iss", "feed": "prod/mut", "minimum_svn": 5}
+]}
+"#;
+        assert!(
+            !env_probe(
+                data,
+                &env_fragment("5", r#"[{"name": "FEATURE_FLAG_X", "value": "true"}]"#),
+                "FEATURE_FLAG_X=true",
+            ),
+            "a second declaration that grants nothing must close the door for the feed; \
+             taking the union would let the weakest declaration win, which is the opposite \
+             of what the SRM's declare_feed does with duplicate SVN floors"
+        );
+    }
+
+    /// The SVN floor governs env rules exactly as it governs containers: a rolled-back
+    /// fragment cannot reintroduce a grant a newer version withdrew.
+    #[tokio::test]
+    async fn a_fragment_below_the_svn_floor_contributes_no_env_rules() {
+        assert!(
+            !env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["^FEATURE_FLAG_[A-Z0-9_]+$"]"#),
+                &env_fragment("2", r#"[{"name": "FEATURE_FLAG_X", "value": "true"}]"#),
+                "FEATURE_FLAG_X=true",
+            ),
+            "SVN 2 is below the declared floor of 5, so the fragment contributes nothing"
+        );
+    }
+
+    /// A rule's value is a literal unless the author asks for a regex. This is the exact
+    /// mistake hcsshim's `strategy` field invites and that was raised against this design:
+    /// `strategy = "string"` with `^FEATURE_FLAG_X=true$` reads like a regex and is not one.
+    /// Here the quiet outcome is the safe one — the rule simply does not match.
+    #[tokio::test]
+    async fn a_value_is_literal_unless_re2_is_requested() {
+        // A regex written where a literal is expected matches nothing, rather than being
+        // silently reinterpreted.
+        assert!(
+            !env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["^FEATURE_FLAG_X$"]"#),
+                &env_fragment("5", r#"[{"name": "FEATURE_FLAG_X", "value": "^true$"}]"#),
+                "FEATURE_FLAG_X=true",
+            ),
+            "the default strategy is literal equality, so a regex-looking value must not be \
+             evaluated as a regex"
+        );
+        // Asking for re2 explicitly does work, and is anchored.
+        assert!(
+            env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["^FEATURE_FLAG_X$"]"#),
+                &env_fragment(
+                    "5",
+                    r#"[{"name": "FEATURE_FLAG_X", "value": "true|false", "value_strategy": "re2"}]"#
+                ),
+                "FEATURE_FLAG_X=false",
+            ),
+            "value_strategy re2 must evaluate the value as a regex"
+        );
+        assert!(
+            !env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["^FEATURE_FLAG_X$"]"#),
+                &env_fragment(
+                    "5",
+                    r#"[{"name": "FEATURE_FLAG_X", "value": "true", "value_strategy": "re2"}]"#
+                ),
+                "FEATURE_FLAG_X=untrue",
+            ),
+            "an re2 value must be anchored, or \"true\" admits \"untrue\""
+        );
+        // An unrecognised strategy is not a synonym for the default.
+        assert!(
+            !env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["^FEATURE_FLAG_X$"]"#),
+                &env_fragment(
+                    "5",
+                    r#"[{"name": "FEATURE_FLAG_X", "value": "true", "value_strategy": "regex"}]"#
+                ),
+                "FEATURE_FLAG_X=true",
+            ),
+            "a misspelled strategy must fail closed rather than fall back to literal"
+        );
+    }
+
+    /// The name ends at the *first* `=`. The `split`/`count == 2` idiom the older arms use
+    /// silently refuses every value containing an `=` — base64, connection strings, JWTs —
+    /// which is a common shape for exactly the pipeline-injected variables this feature
+    /// exists to admit.
+    #[tokio::test]
+    async fn a_value_may_contain_an_equals_sign() {
+        assert!(
+            env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["^PIPELINE_TOKEN$"]"#),
+                &env_fragment("5", r#"[{"name": "PIPELINE_TOKEN", "value": "YWJj=="}]"#),
+                "PIPELINE_TOKEN=YWJj==",
+            ),
+            "a base64 value must survive name/value splitting"
+        );
+    }
+
+    /// A leading `=` gives an empty name, which is not a variable. Rejecting it keeps a
+    /// ceiling of "^.*$" — the hcsshim-equivalent full delegation — from matching a
+    /// malformed entry.
+    #[tokio::test]
+    async fn a_var_with_an_empty_name_is_refused() {
+        assert!(
+            !env_probe(
+                &env_policy_data(r#", "allow_env_rules": ["^.*$"]"#),
+                &env_fragment("5", r#"[{"name": "", "value": "x"}]"#),
+                "=x",
+            ),
+            "an entry with no name is malformed and must not be admitted even under a \
+             wide-open ceiling"
         );
     }
 
