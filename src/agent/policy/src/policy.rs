@@ -2763,6 +2763,100 @@ containers := [{"name": "wrong-issuer"}]
         );
     }
 
+    /// RM-110: an error must not report a field the request never carried.
+    ///
+    /// `not is_null(x)` holds when `x` is *undefined* as well as when it is a value, so
+    /// reading `input.OCI.Linux.Seccomp` through an absent `Linux` section made the
+    /// seccomp error fire on requests that carried no seccomp profile at all. Because
+    /// the errors are joined in rule order that reason then led the denial, displacing
+    /// the field that actually failed -- the precise defect RM-64 exists to prevent,
+    /// reintroduced by a spurious reason rather than a missing one.
+    #[tokio::test]
+    async fn an_absent_linux_section_does_not_report_a_seccomp_profile() {
+        let containers = r#"[{
+            "sandbox_pidns": false,
+            "storages": [],
+            "OCI": {
+                "Version": "1.1.0",
+                "Root": {"Readonly": true},
+                "Process": {"Args": ["/bin/sh"], "Cwd": "/", "Env": ["PATH=/usr/bin"]},
+                "Mounts": [],
+                "Annotations": {}
+            }
+        }]"#;
+        // No `Linux` key at all, so `input.OCI.Linux.Seccomp` is undefined rather than null.
+        let request = r#"{
+            "container_id": "c1",
+            "sandbox_pidns": false,
+            "storages": [],
+            "OCI": {
+                "Version": "1.1.0",
+                "Root": {"Readonly": false},
+                "Process": {"Args": ["/bin/sh"], "Cwd": "/", "Env": ["PATH=/usr/bin"]},
+                "Mounts": [],
+                "Annotations": {}
+            }
+        }"#;
+
+        let mut p = policy_with_containers(containers);
+        let (allowed, explanation) = p
+            .allow_request("CreateContainerRequest", request)
+            .await
+            .unwrap();
+
+        assert!(!allowed, "the request must still be refused");
+        assert!(
+            !explanation.contains("Linux.Seccomp"),
+            "the request carries no seccomp profile, so nothing may claim it does: {}",
+            explanation
+        );
+    }
+
+    /// RM-110: the guard above must not silence the error it guards.
+    ///
+    /// The failure mode of over-tightening the check is an error that never fires, which
+    /// no negative test would catch, so pin the case the error exists for.
+    #[tokio::test]
+    async fn a_real_seccomp_profile_is_still_reported() {
+        let containers = r#"[{
+            "sandbox_pidns": false,
+            "storages": [],
+            "OCI": {
+                "Version": "1.1.0",
+                "Root": {"Readonly": true},
+                "Process": {"Args": ["/bin/sh"], "Cwd": "/", "Env": ["PATH=/usr/bin"]},
+                "Mounts": [],
+                "Annotations": {}
+            }
+        }]"#;
+        let request = r#"{
+            "container_id": "c1",
+            "sandbox_pidns": false,
+            "storages": [],
+            "OCI": {
+                "Version": "1.1.0",
+                "Root": {"Readonly": true},
+                "Process": {"Args": ["/bin/sh"], "Cwd": "/", "Env": ["PATH=/usr/bin"]},
+                "Mounts": [],
+                "Annotations": {},
+                "Linux": {"Seccomp": {"defaultAction": "SCMP_ACT_ERRNO"}}
+            }
+        }"#;
+
+        let mut p = policy_with_containers(containers);
+        let (allowed, explanation) = p
+            .allow_request("CreateContainerRequest", request)
+            .await
+            .unwrap();
+
+        assert!(!allowed, "a host seccomp profile must still be refused");
+        assert!(
+            explanation.contains("Linux.Seccomp"),
+            "the denial must still name the seccomp profile it refused: {}",
+            explanation
+        );
+    }
+
     /// RM-64 for the case that motivated it: RM-62, where the declared and presented
     /// dm-verity root hashes are identical and only the partition numbers are swapped.
     ///
