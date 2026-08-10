@@ -56,6 +56,14 @@ pub struct MeasuredCdiSpec {
     pub kind: String,
     /// Content digest of the spec file (e.g. `sha256:...`).
     pub digest: String,
+    /// Fully-qualified device names this spec declares (e.g. `nvidia.com/gpu=0`).
+    ///
+    /// Authorization is decided against *this*, not against [`Self::kind`]: a device must be
+    /// authorized against the spec that actually provides it. Matching on `kind` alone would
+    /// let one measured spec vouch for every other spec sharing its kind, which is a bypass
+    /// (a host adding a spec of an already-authorized kind could inject arbitrary
+    /// `containerEdits` under a device name the measured spec does not declare).
+    pub devices: Vec<String>,
 }
 
 /// A CDI device whose providing spec has been verified as measured/trusted.
@@ -111,6 +119,13 @@ impl std::error::Error for CdiError {}
 /// Authorize a set of requested CDI devices against the measured spec files available in
 /// the guest, using an authorized set of measured spec digests.
 ///
+/// A device is authorized only if **every** spec that declares it is measured. Binding on
+/// the providing specs rather than on the CDI `kind` is what makes the check sound: the
+/// edits a container receives come from whichever spec declares the device, so a spec that
+/// does not declare it must not be able to vouch for it. Requiring *all* of its providers
+/// to be measured — rather than any one of them — avoids having to predict which spec the
+/// CDI cache will pick when several declare the same device.
+///
 /// Returns the verified devices (device→providing-spec-digest) in request order, or the
 /// first authorization failure. Resolution is closed-door: with an empty authorized set,
 /// any requested CDI device is refused.
@@ -129,32 +144,34 @@ pub fn authorize_cdi(
             return Err(CdiError::HostArbitraryCdi { device });
         }
 
-        // Specs that declare the requested kind.
-        let of_kind: Vec<&MeasuredCdiSpec> = available_specs
+        // The specs that actually declare the requested device.
+        let providers: Vec<&MeasuredCdiSpec> = available_specs
             .iter()
-            .filter(|s| s.kind == req.kind)
+            .filter(|s| s.devices.iter().any(|d| d == &device))
             .collect();
-        if of_kind.is_empty() {
-            return Err(CdiError::UnsatisfiedRequest { device });
+        let providing = match providers.split_first() {
+            Some((first, _)) => *first,
+            None => return Err(CdiError::UnsatisfiedRequest { device }),
+        };
+
+        // Every provider must be measured: an unmeasured one could be the spec the CDI
+        // cache resolves the device from, and its edits would then never have been
+        // authorized.
+        if let Some(unmeasured) = providers
+            .iter()
+            .find(|s| !authorized_digests.contains(&s.digest))
+        {
+            return Err(CdiError::UnmeasuredSpec {
+                device,
+                kind: unmeasured.kind.clone(),
+                found_digest: unmeasured.digest.clone(),
+            });
         }
 
-        // At least one spec of the kind must be measured/authorized.
-        match of_kind
-            .iter()
-            .find(|s| authorized_digests.contains(&s.digest))
-        {
-            Some(spec) => verified.push(VerifiedCdiDevice {
-                device,
-                spec_digest: spec.digest.clone(),
-            }),
-            None => {
-                return Err(CdiError::UnmeasuredSpec {
-                    device,
-                    kind: req.kind.clone(),
-                    found_digest: of_kind[0].digest.clone(),
-                })
-            }
-        }
+        verified.push(VerifiedCdiDevice {
+            device,
+            spec_digest: providing.digest.clone(),
+        });
     }
 
     Ok(verified)
@@ -165,10 +182,14 @@ mod tests {
     use super::*;
 
     fn spec(kind: &str, digest: &str) -> MeasuredCdiSpec {
+        spec_with(kind, digest, &["0"])
+    }
+    fn spec_with(kind: &str, digest: &str, devices: &[&str]) -> MeasuredCdiSpec {
         MeasuredCdiSpec {
-            path: format!("/var/run/cdi/{kind}.json"),
+            path: format!("/var/run/cdi/{kind}-{digest}.json"),
             kind: kind.to_string(),
             digest: digest.to_string(),
+            devices: devices.iter().map(|d| format!("{kind}={d}")).collect(),
         }
     }
     fn auth(digests: &[&str]) -> HashSet<String> {
@@ -235,5 +256,85 @@ mod tests {
             authorize_cdi(&req, &specs, &authorized).unwrap_err(),
             CdiError::UnsatisfiedRequest { .. }
         ));
+    }
+
+    /// A spec of the requested kind exists and is measured, but does not declare the
+    /// requested device: nothing provides it, so the request is unsatisfied rather than
+    /// being waved through on the strength of a sibling spec.
+    #[test]
+    fn unsatisfied_request_when_measured_spec_lacks_the_device() {
+        let req = vec![CdiDeviceRequest::parse("nvidia.com/gpu=7").unwrap()];
+        let specs = vec![spec_with("nvidia.com/gpu", "sha256:TRUSTED", &["0", "1"])];
+        let authorized = auth(&["sha256:TRUSTED"]);
+        assert!(matches!(
+            authorize_cdi(&req, &specs, &authorized).unwrap_err(),
+            CdiError::UnsatisfiedRequest { .. }
+        ));
+    }
+
+    /// Regression, F-183: authorization must bind a device to the spec that *provides* it,
+    /// not to its CDI kind.
+    ///
+    /// A measured spec of kind `nvidia.com/gpu` legitimately provides device `0`. A host
+    /// that can write one file into the spec directory adds an unmeasured spec of the same
+    /// kind declaring device `1` with arbitrary `containerEdits`. The device names do not
+    /// collide, so the CDI cache's conflict handling never fires and the host's edits are
+    /// injected. Matching on `kind` accepted this, because a measured spec of that kind
+    /// existed -- and reported the innocent spec's digest as the binding.
+    #[test]
+    fn unmeasured_spec_cannot_hide_behind_a_measured_spec_of_the_same_kind() {
+        let req = vec![CdiDeviceRequest::parse("nvidia.com/gpu=1").unwrap()];
+        let specs = vec![
+            spec_with("nvidia.com/gpu", "sha256:TRUSTED", &["0"]),
+            spec_with("nvidia.com/gpu", "sha256:HOST_ARBITRARY", &["1"]),
+        ];
+        let authorized = auth(&["sha256:TRUSTED"]);
+        match authorize_cdi(&req, &specs, &authorized).unwrap_err() {
+            CdiError::UnmeasuredSpec {
+                device,
+                found_digest,
+                ..
+            } => {
+                assert_eq!(device, "nvidia.com/gpu=1");
+                assert_eq!(found_digest, "sha256:HOST_ARBITRARY");
+            }
+            other => panic!("expected UnmeasuredSpec, got {:?}", other),
+        }
+    }
+
+    /// Regression, F-183: when several specs declare the same device, *every* one of them
+    /// must be measured. Which one the CDI cache resolves the device from depends on spec
+    /// precedence, so authorizing on the strength of the measured one would authorize edits
+    /// that may never be the ones applied.
+    #[test]
+    fn every_spec_declaring_the_device_must_be_measured() {
+        let req = vec![CdiDeviceRequest::parse("nvidia.com/gpu=0").unwrap()];
+        let specs = vec![
+            spec_with("nvidia.com/gpu", "sha256:TRUSTED", &["0"]),
+            spec_with("nvidia.com/gpu", "sha256:HOST_ARBITRARY", &["0"]),
+        ];
+        let authorized = auth(&["sha256:TRUSTED"]);
+        assert!(matches!(
+            authorize_cdi(&req, &specs, &authorized).unwrap_err(),
+            CdiError::UnmeasuredSpec { .. }
+        ));
+
+        // ... and it is accepted once both providers are measured.
+        let authorized = auth(&["sha256:TRUSTED", "sha256:HOST_ARBITRARY"]);
+        assert_eq!(authorize_cdi(&req, &specs, &authorized).unwrap().len(), 1);
+    }
+
+    /// An unmeasured spec of an authorized kind is irrelevant so long as it declares none
+    /// of the requested devices: it cannot contribute edits to this container.
+    #[test]
+    fn unmeasured_spec_declaring_other_devices_is_ignored() {
+        let req = vec![CdiDeviceRequest::parse("nvidia.com/gpu=0").unwrap()];
+        let specs = vec![
+            spec_with("nvidia.com/gpu", "sha256:TRUSTED", &["0"]),
+            spec_with("nvidia.com/gpu", "sha256:HOST_ARBITRARY", &["3"]),
+        ];
+        let authorized = auth(&["sha256:TRUSTED"]);
+        let v = authorize_cdi(&req, &specs, &authorized).unwrap();
+        assert_eq!(v[0].spec_digest, "sha256:TRUSTED");
     }
 }
