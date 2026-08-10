@@ -79,6 +79,7 @@ jobs:
             path: src/tools/genpolicy
             needs:
               - rust
+              - erofs-utils
               - protobuf-compiler
         instance:
           - ${{ inputs.instance }}
@@ -136,6 +137,15 @@ jobs:
           echo "Set environment variables for the libseccomp crate to link the libseccomp library statically"
           echo "LIBSECCOMP_LINK_TYPE=static" >> "$GITHUB_ENV"
           echo "LIBSECCOMP_LIB_PATH=${libseccomp_install_dir}/lib" >> "$GITHUB_ENV"
+      - name: Install erofs-utils
+        if: contains(matrix.component.needs, 'erofs-utils') && matrix.command != 'make check'
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install --no-install-recommends \
+            autoconf automake libtool pkg-config liblz4-dev uuid-dev
+          erofs_utils_install_dir=$(mktemp -d -t erofs-utils.XXXXXXXXXX)
+          ./ci/install_erofs_utils.sh "${erofs_utils_install_dir}"
+          echo "${erofs_utils_install_dir}/bin" >> "$GITHUB_PATH"
       - name: Install protobuf-compiler
         if: contains(matrix.component.needs, 'protobuf-compiler')
         run: sudo apt-get update && sudo apt-get -y install protobuf-compiler
