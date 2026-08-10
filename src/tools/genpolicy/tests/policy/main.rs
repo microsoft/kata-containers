@@ -681,17 +681,28 @@ mod tests {
     #[tokio::test]
     async fn a_refused_security_control_names_itself_in_the_denial() {
         for (pointer, value, expected) in [
-            ("/OCI/Linux/Seccomp", serde_json::json!({"DefaultAction": "SCMP_ACT_ERRNO"}), "Linux.Seccomp"),
-            ("/OCI/Process/SelinuxLabel", serde_json::json!("system_u:system_r:container_t:s0"), "Process.SelinuxLabel"),
-            ("/OCI/Linux/MountLabel", serde_json::json!("system_u:object_r:container_file_t:s0"), "Linux.MountLabel"),
+            (
+                "/OCI/Linux/Seccomp",
+                serde_json::json!({"DefaultAction": "SCMP_ACT_ERRNO"}),
+                "Linux.Seccomp",
+            ),
+            (
+                "/OCI/Process/SelinuxLabel",
+                serde_json::json!("system_u:system_r:container_t:s0"),
+                "Process.SelinuxLabel",
+            ),
+            (
+                "/OCI/Linux/MountLabel",
+                serde_json::json!("system_u:object_r:container_file_t:s0"),
+                "Linux.MountLabel",
+            ),
         ] {
             let (mut pol, _policy, testdata_dir, _workdir) =
                 prepare_policy("state/execprocessdeployment").await;
 
             let raw_cases = fs::read_to_string(testdata_dir.join("testcases.json"))
                 .expect("test cases readable");
-            let cases: Vec<TestCase> =
-                serde_json::from_str(&raw_cases).expect("test cases parse");
+            let cases: Vec<TestCase> = serde_json::from_str(&raw_cases).expect("test cases parse");
 
             // Start from a request the policy accepts, so the refused field is the only
             // thing under test.
