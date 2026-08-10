@@ -1322,6 +1322,21 @@ impl AgentPolicy {
         // Resource-level settings from user's YAML - e.g., pod-level or deployment-level.
         let mut must_check_passwd = false;
         resource.get_process_fields(&mut process, &mut must_check_passwd, is_pause_container);
+
+        // RM-102: report a pod-level seccomp or apparmor request that the guest will not
+        // apply. Reported here rather than in `yaml::get_process_fields` because this is
+        // the only place that has both the security context and a name to attribute it to.
+        // `report_unenforced_security_controls` deduplicates, so a pod-level request is
+        // announced once rather than once per container in the pod.
+        if let Some(context) = resource.get_pod_security_context() {
+            pod::report_unenforced_security_controls(&pod::unenforced_security_controls(
+                "pod",
+                &resource.get_sandbox_name().unwrap_or_default(),
+                &context.seccompProfile,
+                &context.appArmorProfile,
+            ));
+        }
+
         debug!(
             "get_container_process: after resource.get_process_fields: must_check_passwd = {must_check_passwd}, User = {:?}",
             &process.User
