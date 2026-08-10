@@ -43,6 +43,7 @@ fragment store is mutated.
 | **FR-1h** | **COSE_Sign1 envelope** interop (pure-Rust `coset`, no Go) | `fragments.rs::verify_envelope` | `c0ea3cb25`, `f7ed23319`, `93e1ff6e5` |
 | **FR-1i** | **SVN rollback protection across restart** — raise-only persisted high-water marks | `fragments.rs::{export_svn_state,import_svn_state}`; `main.rs` persist | `c0ea3cb25`, `f7ed23319` |
 | **FR-1j** | **append-only application ordering** — signed rolling log head; reject reorder/omit/insert; exportable auditable log | `fragments.rs::{set_log_genesis,log_head,export_fragment_log}` (gate 8, `commit`) | `8efdaa65e` |
+| **FR-1m** | **fragment-contributed environment rules within a measured ceiling** — a declaration may delegate named env vars to a feed; the fragment supplies concrete rules inside that grant (§4.15) | `policy.rs::FragmentSpec::allow_env_rules`; `rules.rego` (`allow_var` arm 9, `fragment_env_name_permitted`) | this PR |
 | tools/demo | offline signer, agent-ctl command, mock ledger, self-contained capability demo | `examples/{sign-fragment,mock-ledger,fragment-demo}.rs`; `agent-ctl` | `392d890a8`, `69228f3b5`, `a63b9d5b3` |
 | docs | in-tree guide + this reference | `docs/cc/{parma-hardening-features,fr1-fragment-e2e,fr1-fragments}.md`, `kata-opa/fragment-demo.rego` | `adaa7558b`, `d8149983e`, `b65ba9113`, `26d013c95`, `5dc0744f9` |
 
@@ -474,7 +475,10 @@ Deltas that are **not** gates — surface hcsshim has and we do not, none of whi
 skip:
 
 - The richer `includes` vocabulary (`external_processes`, `platform_rules`,
-  `transparency_trust_lists`), which names hcsshim policy sections we do not have.
+  `transparency_trust_lists`), which names hcsshim policy sections we do not have. The
+  environment half of `platform_rules` — the part deployment pipelines actually need — is
+  covered as of FR-1m (§4.15), and bounded by the measured base policy rather than granted
+  wholesale. Mounts and `external_processes` remain hcsshim-only.
 - Trying **several** parameter sets per fragment. hcsshim concatenates every `parameters`
   object declared for an `(issuer, feed)` and compiles the fragment once per set, because
   its loading is lazy and it cannot know which instantiation the host will want. Ours is one
@@ -561,6 +565,77 @@ policy_fragments := [{
 parameters_api := {"allowed_registry": {"default": "mcr.microsoft.com"}}
 registry_ok { input.image_registry == parameter("allowed_registry") }
 ```
+
+### 4.15 Fragment-contributed environment rules (FR-1m)
+
+A deployment pipeline is not static. A given version of the API server, kubelet or containerd
+may inject an environment variable the policy author never wrote down, and a feature flag may
+be turned on by a pipeline stage rather than by the workload manifest. Without a delegation
+path the only way to admit such a variable is to regenerate and re-measure the base policy —
+re-establishing the security boundary for a change that was never about security.
+
+hcsshim answers this with `platform_rules`: an included fragment carries environment rules
+that are applied across every container. Effective, but unbounded — including the fragment
+hands it the whole environment namespace, and nothing in the base policy limits which
+variables it may speak for.
+
+Ours is the same capability with the grant made explicit. The **declaration** names the
+variables it is willing to let a feed decide; the **fragment** supplies the concrete rules
+inside that ceiling.
+
+```rego
+# in the measured base policy
+policy_fragments := [{
+  "issuer": "did:x509:...", "feed": "prod/mut:1", "minimum_svn": 5,
+  "allow_env_rules": ["^FEATURE_FLAG_[A-Z0-9_]+$"],
+}]
+
+# in the signed fragment module, at agent_policy.fragments["prod/mut:1"]
+env_rules := [
+  {"name": "FEATURE_FLAG_X", "value": "true"},
+  {"name": "FEATURE_FLAG_MODE", "value": "fast|slow", "value_strategy": "re2"},
+]
+```
+
+Omitting `allow_env_rules` delegates nothing, so a policy written before the attribute existed
+cannot acquire the capability by upgrade. Writing `["^.+$"]` reproduces hcsshim's behaviour
+exactly. Both ends of that range are expressible and the default end is closed.
+
+Four properties make the ceiling hold rather than merely look like it does:
+
+- **The grant is over variable *names*, and the fragment's rule names a literal.** Deciding
+  whether one regex admits a subset of another is undecidable in general, so a ceiling
+  expressed over whole rules could not be checked. Over names it can be, exactly.
+- **Every pattern is anchored by the enforcement, not by the author's discipline.** Rego's
+  `regex.match` is an unanchored search, so a ceiling of `FEATURE_FLAG` would otherwise admit
+  `EVIL_FEATURE_FLAG_X`, and an `re2` value of `true` would admit `untrue`.
+  `fragment_env_anchored` wraps both sides unconditionally.
+- **Duplicate declarations intersect.** The name must be permitted by *every* declaration
+  naming that `(issuer, feed)`, and at least one must exist — mirroring the strictest-wins
+  rule `svn_floor` applies to rollback floors (RM-93). An existential would let a stale, laxer
+  duplicate win. A declaration that omits the attribute contributes an empty list, so one
+  un-granted declaration closes the door for the whole feed.
+- **Delegation cannot manufacture env-rule authority.** The ceiling is built only from
+  declarations in the measured base policy, so a feed that exists solely because another
+  fragment delegated to it (§4.10) matches no ceiling and contributes nothing.
+
+The SVN floor governs env rules exactly as it governs containers, so a rolled-back fragment
+cannot reintroduce a grant a newer version withdrew.
+
+A rule's value is a **literal** unless `value_strategy: "re2"` is asked for. hcsshim's
+equivalent field takes a strategy with no safe default, and reading `"string"` as though it
+meant "regex" is an easy mistake and an invisible one — the rule simply never matches, or,
+unanchored, matches far more than intended. Defaulting to literal equality makes the quiet
+outcome the safe one; an unrecognised strategy fails closed rather than falling back.
+
+The `name=value` split takes the **first** `=`, unlike the older `allow_var` arms, whose
+`split`/`count == 2` idiom silently refuses every value containing an `=` — base64 payloads,
+connection strings, JWTs — a common shape for exactly the pipeline-injected variables this
+exists to admit.
+
+Scope note: this is deliberately narrower than `platform_rules`, which also carries **mounts**.
+Env was taken first because it is what the pipeline-drift case needs; a mount contributed by a
+fragment is a materially larger grant and wants its own ceiling design.
 
 ### 4.12 Receipt requirement grammar (FR-1f)
 

@@ -1156,6 +1156,107 @@ allow_var(p_process, i_process, i_var, s_name, s_namespace) if {
     print("allow_var 8: true")
 }
 
+# FR-1m: allow an input env variable admitted by an `env_rules` entry that a trusted
+# fragment contributes, within a ceiling the measured base policy declares.
+#
+# This is the Kata-CC form of hcsshim's `platform_rules`. The problem both solve is that a
+# deployment pipeline is not static: a given version of the API server, kubelet or
+# containerd may inject a variable the policy author never wrote down, and a feature flag
+# may be turned on by a pipeline stage rather than by the workload manifest. Without a
+# delegation path the only way to admit such a variable is to regenerate and re-measure the
+# base policy, which means the security boundary has to be re-established for a change that
+# was never about security.
+#
+# hcsshim answers this by letting an included fragment carry env rules that apply across
+# every container. That is effective but unbounded: including the fragment hands it the
+# whole environment namespace, and nothing in the base policy limits which variables it may
+# speak for. Here the base policy states the ceiling — a set of name patterns, per declared
+# (issuer, feed) — and the fragment supplies concrete rules inside it. Omitting the ceiling
+# delegates nothing, so this arm cannot be reached by any policy that has not deliberately
+# opted in; writing "^.+$" reproduces hcsshim's behaviour exactly. Both ends are available
+# and the default end is closed.
+#
+# Three properties make the ceiling actually hold rather than merely look like it does:
+#
+#   * The fragment's rule names a *literal* variable, and the ceiling is checked against
+#     that literal. A ceiling expressed over whole rules could not be enforced -- deciding
+#     whether one regex admits a subset of another is undecidable in general -- so the
+#     grant is over names, where an exact test exists.
+#   * Every pattern is matched fully anchored, on both sides. Rego's `regex.match` is an
+#     unanchored search, so a ceiling of "FEATURE_FLAG" would otherwise admit
+#     "EVIL_FEATURE_FLAG_X", and a value pattern of "true" would admit "untrue".
+#   * `fragment_env_name_permitted` requires the name to be permitted by *every* base
+#     declaration naming that (issuer, feed), and requires at least one to exist. Using
+#     `some spec` would be an existential, so a stale, laxer duplicate declaration would
+#     win; this mirrors the strictest-wins rule `svn_floor` applies to rollback floors.
+#     It also means a feed that exists only because another fragment delegated to it has no
+#     ceiling at all and therefore contributes no env rules -- delegation cannot manufacture
+#     env-rule authority the measured policy never granted.
+allow_var(p_process, i_process, i_var, s_name, s_namespace) if {
+    # Split on the *first* "=" only. The `split(i_var, "=")` / `count == 2` idiom the arms
+    # above use silently refuses any value that itself contains an "=" -- base64 payloads,
+    # connection strings, JWTs -- which is a common shape for a pipeline-injected variable.
+    # POSIX has the name end at the first "=" with the value being the whole remainder.
+    eq := indexof(i_var, "=")
+    eq > 0
+    name := substring(i_var, 0, eq)
+    value := substring(i_var, eq + 1, -1)
+
+    some feed, mod in data.agent_policy.fragments
+    to_number(mod.svn) >= svn_floor(mod.issuer, feed)
+
+    fragment_env_name_permitted(mod.issuer, feed, name)
+
+    some rule in mod.env_rules
+    rule.name == name
+    fragment_env_value_matches(rule, value)
+
+    print("allow_var 9: true")
+}
+
+# The ceiling: the name must be permitted by every measured base declaration naming this
+# (issuer, feed), and there must be at least one such declaration. A declaration that omits
+# `allow_env_rules` contributes an empty pattern list, which matches nothing, so a single
+# declaration without the grant closes the door for the whole feed.
+fragment_env_name_permitted(issuer, feed, name) if {
+    specs := [spec |
+        some spec in all_fragment_specs
+        spec.issuer == issuer
+        spec.feed == feed
+    ]
+    count(specs) > 0
+
+    every spec in specs {
+        some pattern in object.get(spec, "allow_env_rules", [])
+        regex.match(fragment_env_anchored(pattern), name)
+    }
+}
+
+# Anchor a pattern to the whole string. Nesting anchors an author already wrote -- turning
+# "^X$" into "^(?:^X$)$" -- is harmless in RE2 and means the wrapping is unconditional
+# rather than conditional on parsing the pattern, which is the part that could be got wrong.
+fragment_env_anchored(pattern) := concat("", ["^(?:", pattern, ")$"])
+
+# A rule's value is a literal by default. hcsshim's equivalent field takes a strategy with
+# no safe default, and reading "string" as though it meant "regex" is a mistake that is easy
+# to make and invisible when made: the rule simply never matches, or -- with an unanchored
+# pattern -- matches far more than intended. Defaulting to literal equality makes the quiet
+# outcome the safe one and reserves regex for authors who ask for it by name.
+fragment_env_value_matches(rule, value) if {
+    not rule.value_strategy
+    rule.value == value
+}
+
+fragment_env_value_matches(rule, value) if {
+    rule.value_strategy == "string"
+    rule.value == value
+}
+
+fragment_env_value_matches(rule, value) if {
+    rule.value_strategy == "re2"
+    regex.match(fragment_env_anchored(rule.value), value)
+}
+
 allow_pod_ip_var(var_name, p_var) if {
     print("allow_pod_ip_var: var_name =", var_name, "p_var =", p_var)
 
@@ -2502,6 +2603,14 @@ container_by_ref(ref) := c if {
 # never lower it. Nested declarations live in the delivering fragment's signed Rego module
 # (at `policy_fragments` inside its own package), so they are covered by the same COSE
 # signature as everything else it carries and the host cannot edit them.
+#
+# A declaration may also carry `allow_env_rules`: a list of name patterns bounding which
+# environment variables the fragment may contribute `env_rules` for. It is absent by
+# default, meaning the fragment decides nothing about the environment, so — as with
+# `allow_nested` — a policy written before the attribute existed cannot acquire the
+# capability by upgrade. See the `allow_var` arm that consumes it for why the grant is
+# expressed over variable *names* and why duplicate declarations are intersected rather
+# than combined.
 #
 # The rule is coarse by construction, because the request carries nothing finer to bind to.
 # The host sends only the COSE envelope: issuer, feed and SVN are derived from the bytes the

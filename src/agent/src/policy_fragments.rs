@@ -151,6 +151,7 @@ pub async fn record_declared_fragments() -> Result<usize> {
         let mut delegation = DELEGATION.lock().await;
         for spec in &specs {
             let scope = spec.nested_scope()?;
+            spec.validate_env_rule_grant()?;
             store.declare_feed(spec.issuer.clone(), spec.feed.clone(), spec.minimum_svn);
             // FR-1c: the declaration, not the fragment, decides which policy namespaces
             // this feed may contribute to and whether its module is applied at all.
@@ -418,7 +419,15 @@ pub async fn register_nested_fragments(
             continue;
         }
 
-        let child_scope = match spec.nested_scope() {
+        // A nested declaration cannot grant env-rule authority: the ceiling consulted by
+        // `rules.rego` is built only from declarations in the *measured* base policy, so a
+        // feed that exists solely because a fragment delegated to it matches no ceiling and
+        // contributes no env rules. Validating the form here still earns its keep — it
+        // turns a typo into a visible warning instead of a silently inert grant.
+        let child_scope = match spec
+            .nested_scope()
+            .and_then(|s| spec.validate_env_rule_grant().map(|()| s))
+        {
             Ok(s) => s,
             Err(e) => {
                 // Unlike the boot path this is not fatal: a malformed nested declaration
