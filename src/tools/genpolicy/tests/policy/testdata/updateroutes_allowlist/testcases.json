@@ -1,0 +1,123 @@
+[
+  {
+    "allowed": true,
+    "description": "default route via the allowlisted gateway",
+    "kind": "UpdateRoutesRequest",
+    "request": {
+      "routes": {
+        "Routes": [
+          {
+            "dest": "",
+            "device": "eth0",
+            "family": 0,
+            "gateway": "10.244.0.1",
+            "scope": 0,
+            "source": ""
+          }
+        ]
+      }
+    }
+  },
+  {
+    "allowed": true,
+    "description": "allowlisted destination prefix",
+    "kind": "UpdateRoutesRequest",
+    "request": {
+      "routes": {
+        "Routes": [
+          {
+            "dest": "10.244.0.0/24",
+            "device": "eth0",
+            "family": 0,
+            "gateway": "",
+            "scope": 0,
+            "source": ""
+          }
+        ]
+      }
+    }
+  },
+  {
+    "allowed": false,
+    "description": "destination outside the allowlist",
+    "kind": "UpdateRoutesRequest",
+    "request": {
+      "routes": {
+        "Routes": [
+          {
+            "dest": "10.9.9.0/24",
+            "device": "eth0",
+            "family": 0,
+            "gateway": "",
+            "scope": 0,
+            "source": ""
+          }
+        ]
+      }
+    }
+  },
+  {
+    "allowed": false,
+    "description": "default route redirected to an attacker gateway",
+    "kind": "UpdateRoutesRequest",
+    "request": {
+      "routes": {
+        "Routes": [
+          {
+            "dest": "",
+            "device": "eth0",
+            "family": 0,
+            "gateway": "10.9.9.9",
+            "scope": 0,
+            "source": ""
+          }
+        ]
+      }
+    }
+  },
+  {
+    "allowed": false,
+    "description": "one allowlisted route, one outside the allowlist",
+    "kind": "UpdateRoutesRequest",
+    "request": {
+      "routes": {
+        "Routes": [
+          {
+            "dest": "10.244.0.0/24",
+            "device": "eth0",
+            "family": 0,
+            "gateway": "",
+            "scope": 0,
+            "source": ""
+          },
+          {
+            "dest": "0.0.0.0/0",
+            "device": "eth0",
+            "family": 0,
+            "gateway": "10.9.9.9",
+            "scope": 0,
+            "source": ""
+          }
+        ]
+      }
+    }
+  },
+  {
+    "allowed": false,
+    "description": "missing dest field is checked as empty, gateway still outside the allowlist",
+    "kind": "UpdateRoutesRequest",
+    "request": {
+      "routes": {
+        "Routes": [
+          {
+            "device": "eth0",
+            "family": 0,
+            "gateway": "10.9.9.9",
+            "scope": 0,
+            "source": ""
+          }
+        ]
+      }
+    }
+  }
+]

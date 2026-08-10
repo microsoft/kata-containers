@@ -452,6 +452,23 @@ pub struct UpdateRoutesRequestDefaults {
 
     /// Forbid adding routes originating from these addresses.
     forbidden_source_regex: Vec<String>,
+
+    /// Allow routes whose destination matches any of these regexes. FR-14 asks for an
+    /// allowlist on route destinations; the guest cannot know a deployment's topology, so
+    /// the default is permissive and operators who do know it can narrow this.
+    #[serde(default = "allow_any_regex")]
+    allowed_dest_regex: Vec<String>,
+
+    /// Allow routes whose gateway matches any of these regexes. A default route ("" dest)
+    /// is redirected by its gateway, not its destination, so both are constrained.
+    #[serde(default = "allow_any_regex")]
+    allowed_gateway_regex: Vec<String>,
+}
+
+/// Default for the FR-14 route/address allowlists: match anything. Settings files written
+/// before these fields existed keep their previous behaviour.
+fn allow_any_regex() -> Vec<String> {
+    vec![".*".to_string()]
 }
 
 /// UpdateInterfaceRequest settings from genpolicy-settings.json.
@@ -465,6 +482,12 @@ pub struct UpdateInterfaceRequestDefaults {
 
     /// Explicitly blocked mac addresses. Intent is to block changes to loopback interface.
     forbidden_hw_addrs: Vec<String>,
+
+    /// Allow interface addresses matching any of these regexes. Assigning an address
+    /// creates a connected route for its prefix, so leaving this unconstrained would let a
+    /// host obtain a covering route without calling UpdateRoutes at all.
+    #[serde(default = "allow_any_regex")]
+    allowed_ip_regex: Vec<String>,
 }
 
 /// UpdateInterfaceRequest settings from genpolicy-settings.json.

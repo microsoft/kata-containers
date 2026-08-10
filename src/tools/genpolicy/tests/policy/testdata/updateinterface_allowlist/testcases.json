@@ -1,0 +1,98 @@
+[
+  {
+    "allowed": true,
+    "description": "allowlisted addresses",
+    "kind": "UpdateInterfaceRequest",
+    "request": {
+      "interface": {
+        "IPAddresses": [
+          {
+            "address": "10.244.0.14",
+            "family": 0,
+            "mask": "24"
+          },
+          {
+            "address": "fe80::6474:9fff:fe6a:9601",
+            "family": 1,
+            "mask": "64"
+          }
+        ],
+        "device": "eth0",
+        "hwAddr": "66:74:9f:6a:96:01",
+        "mtu": 1500,
+        "name": "eth0",
+        "pciPath": "",
+        "raw_flags": 0,
+        "type_": ""
+      }
+    }
+  },
+  {
+    "allowed": false,
+    "description": "address outside the allowlist",
+    "kind": "UpdateInterfaceRequest",
+    "request": {
+      "interface": {
+        "IPAddresses": [
+          {
+            "address": "10.9.9.9",
+            "family": 0,
+            "mask": "24"
+          }
+        ],
+        "device": "eth0",
+        "hwAddr": "66:74:9f:6a:96:01",
+        "mtu": 1500,
+        "name": "eth0",
+        "pciPath": "",
+        "raw_flags": 0,
+        "type_": ""
+      }
+    }
+  },
+  {
+    "allowed": false,
+    "description": "one allowlisted address, one outside the allowlist",
+    "kind": "UpdateInterfaceRequest",
+    "request": {
+      "interface": {
+        "IPAddresses": [
+          {
+            "address": "10.244.0.14",
+            "family": 0,
+            "mask": "24"
+          },
+          {
+            "address": "192.168.7.1",
+            "family": 0,
+            "mask": "0"
+          }
+        ],
+        "device": "eth0",
+        "hwAddr": "66:74:9f:6a:96:01",
+        "mtu": 1500,
+        "name": "eth0",
+        "pciPath": "",
+        "raw_flags": 0,
+        "type_": ""
+      }
+    }
+  },
+  {
+    "allowed": true,
+    "description": "no addresses at all",
+    "kind": "UpdateInterfaceRequest",
+    "request": {
+      "interface": {
+        "IPAddresses": [],
+        "device": "eth0",
+        "hwAddr": "66:74:9f:6a:96:01",
+        "mtu": 1500,
+        "name": "eth0",
+        "pciPath": "",
+        "raw_flags": 0,
+        "type_": ""
+      }
+    }
+  }
+]
