@@ -89,15 +89,6 @@ pub fn classify_scratch(effective_dm_targets: &[&str]) -> ScratchClass {
     }
 }
 
-/// Extract device-mapper target types from `dmsetup table` output. Each line has the form
-/// `<start> <length> <target-type> <params...>`; the target type is the third field.
-pub fn dm_target_types(dmsetup_table_output: &str) -> Vec<String> {
-    dmsetup_table_output
-        .lines()
-        .filter_map(|line| line.split_whitespace().nth(2).map(str::to_string))
-        .collect()
-}
-
 /// Enforce the scratch protection invariant against the effective classification.
 pub fn enforce_scratch(
     effective: ScratchClass,
@@ -130,22 +121,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_dmsetup_and_classify() {
-        let crypt = "0 204800 crypt aes-xts-plain64 0000 0 8:16 0";
-        assert_eq!(dm_target_types(crypt), vec!["crypt".to_string()]);
+    fn classify_by_target_stack() {
         assert_eq!(classify_scratch(&["crypt"]), ScratchClass::Encrypted);
-
-        let integrity =
-            "0 204800 crypt aes 0 0 8:16 0 1 integrity:28:aead\n0 200000 integrity 8:16 0";
-        let targets = dm_target_types(integrity);
-        let refs: Vec<&str> = targets.iter().map(String::as_str).collect();
         assert_eq!(
-            classify_scratch(&refs),
+            classify_scratch(&["crypt", "integrity"]),
             ScratchClass::EncryptedWithIntegrity
         );
-
-        let linear = "0 204800 linear 8:16 0";
-        assert_eq!(dm_target_types(linear), vec!["linear".to_string()]);
         assert_eq!(classify_scratch(&["linear"]), ScratchClass::Plaintext);
         assert_eq!(classify_scratch(&[]), ScratchClass::Plaintext);
     }
@@ -170,14 +151,9 @@ mod tests {
     /// denied — enforcement is on the effective dm stack, not host driver options.
     #[test]
     fn host_claimed_encryption_but_effective_plaintext_is_denied() {
-        // Host driver_options said "encryption_key=ephemeral", but the kernel shows no
-        // crypt target (e.g. a linear passthrough). classify_scratch ignores the claim.
-        let effective = classify_scratch(
-            &dm_target_types("0 100 linear 8:1 0")
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-        );
+        // Host driver_options said "encryption_key=ephemeral", but the kernel's live table
+        // shows no crypt target (e.g. a linear passthrough). classify_scratch ignores the claim.
+        let effective = classify_scratch(&["linear"]);
         assert_eq!(effective, ScratchClass::Plaintext);
         assert!(enforce_scratch(effective, ScratchRequirement::RequireEncrypted).is_err());
     }

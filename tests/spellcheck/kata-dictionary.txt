@@ -189,3 +189,5 @@ injectivity
 interleavings
 misissuance
 workstream
+LUKS
+mountinfo

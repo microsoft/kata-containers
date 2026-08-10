@@ -33,6 +33,9 @@ use crate::sandbox::Sandbox;
 
 mod bind_watcher_handler;
 mod block_handler;
+/// FR-5: reading a block device's live device-mapper table, for the encrypted-scratch check.
+#[cfg(feature = "strict-policy")]
+mod dm_table;
 mod ephemeral_handler;
 mod fs_handler;
 mod image_pull_handler;
