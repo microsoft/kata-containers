@@ -337,6 +337,12 @@ externals:
     url: "https://gitlab.com/cryptsetup/cryptsetup"
     version: "v2.8.1"
 
+  erofs-utils:
+    description: "Userspace tools for the EROFS filesystem, providing mkfs.erofs"
+    notes: "genpolicy rebuilds layer images with containerd's own mkfs.erofs invocation, which needs >= 1.8.2 for --tar=f, -T0, --mkfs-time and --sort. Keep in sync with the floor enforced in tools/packaging/kata-deploy/binary/src/main.rs."
+    url: "https://git.kernel.org/pub/scm/linux/kernel/git/xiang/erofs-utils.git"
+    version: "1.8.5"
+
   gperf:
     description: "GNU gperf is a perfect hash function generator"
     url: "https://ftp.gnu.org.uk/gnu/gperf/"
