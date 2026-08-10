@@ -191,3 +191,4 @@ misissuance
 workstream
 LUKS
 mountinfo
+bypassable

@@ -10,6 +10,7 @@ mod tests {
     use std::fs;
     use std::path;
     use std::str;
+    use std::sync;
 
     use protocols::agent::{
         AddARPNeighborsRequest, CreateContainerRequest, CreateSandboxRequest, ExecProcessRequest,
@@ -274,8 +275,20 @@ mod tests {
         test_case_dir: &str,
         files_to_copy: &[&str],
     ) -> (path::PathBuf, path::PathBuf) {
-        // Prepare temp dir for running genpolicy.
-        let workdir = path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(test_case_dir);
+        // Prepare temp dir for running genpolicy. The directory is keyed on a per-process
+        // counter rather than on `test_case_dir` alone, because several tests legitimately
+        // share a fixture directory -- `test_state_exec_process_deployment` and
+        // `a_denial_names_the_check_that_failed_and_no_others` both drive
+        // `state/execprocessdeployment` -- and `cargo test` runs them concurrently. Sharing
+        // the working directory made them race on the "make sure workdir is empty" sweep
+        // below, where one test removed a file the other had just copied in and the loser
+        // panicked with ENOENT. That surfaced as an intermittent failure naming a different
+        // test on each run, which is a slow thing to diagnose from CI.
+        static WORKDIR_SEQ: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
+        let unique = WORKDIR_SEQ.fetch_add(1, sync::atomic::Ordering::Relaxed);
+
+        let workdir = path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("{test_case_dir}-{unique}"));
         fs::create_dir_all(&workdir)
             .expect("should be able to create directories under CARGO_TARGET_TMPDIR");
 
@@ -337,6 +350,20 @@ mod tests {
     #[tokio::test]
     async fn test_update_interface() {
         runtests("updateinterface").await;
+    }
+
+    /// FR-14: the route destination/gateway allowlist actually constrains when a settings
+    /// file narrows it (the shipped default is permissive).
+    #[tokio::test]
+    async fn test_update_routes_allowlist() {
+        runtests("updateroutes_allowlist").await;
+    }
+
+    /// FR-14: interface addresses are constrained too — an address implies a connected
+    /// route, so an unconstrained address would bypass the route allowlist.
+    #[tokio::test]
+    async fn test_update_interface_allowlist() {
+        runtests("updateinterface_allowlist").await;
     }
 
     #[tokio::test]

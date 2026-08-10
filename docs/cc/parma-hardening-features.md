@@ -519,10 +519,18 @@ bypassed, plus a missing binding. All four are addressed on `fr2-strict-policy-h
   starts can exfiltrate or redirect traffic.
 - **Fix:** a phase machine (`Boot → SandboxSetup → WorkloadRunning → Locked`) permits
   network-mutating RPCs only during sandbox setup and freezes them once the workload runs;
-  a route allowlist further constrains programmed destinations.
-- **Guarantee:** post-start network mutation is refused.
-- **Commits:** `44d6f9d04` (phase machine), `8cf9c5785` (wiring).
-- **Validated:** unit tests + **live attack** — `UpdateRoutes` on a running pod is denied
+  the policy layer additionally constrains *what* may be programmed while setup is open —
+  `UpdateRoutesRequest.allowed_dest_regex` / `allowed_gateway_regex` and
+  `UpdateInterfaceRequest.allowed_ip_regex` allowlist route destinations, route gateways and
+  interface addresses (an address implies a connected route, so all three must be
+  constrained together or the allowlist is bypassable). The guest cannot know a deployment's
+  topology, so these default to permissive and are narrowed in `genpolicy-settings.json` by
+  operators who do.
+- **Guarantee:** post-start network mutation is refused; during setup, only routes and
+  addresses the policy declared may be programmed.
+- **Commits:** `44d6f9d04` (phase machine), `8cf9c5785` (wiring), RM-106 (policy allowlist).
+- **Validated:** unit tests + genpolicy policy tests (`updateroutes_allowlist`,
+  `updateinterface_allowlist`) + **live attack** — `UpdateRoutes` on a running pod is denied
   (`FrozenPhase`); matrix no-regression (network config during sandbox setup is unaffected).
 
 ### FR-7 (remainder) — Strict runtime surface

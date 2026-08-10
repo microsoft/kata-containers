@@ -11,16 +11,18 @@
 //! network-mutating operations to a phase state machine and refuses them once the workload
 //! is running or the network is explicitly locked.
 //!
-//! Routes are additionally constrained by an allowlist (prefer allowlist over blocklist):
-//! only destinations that the policy declared may be programmed.
+//! Routes and interface addresses are additionally constrained by the policy layer
+//! (`UpdateRoutesRequest.allowed_dest_regex` / `allowed_gateway_regex` and
+//! `UpdateInterfaceRequest.allowed_ip_regex` in the generated Rego), which is where the
+//! declared allowlist lives. This module owns the phase, not the payload.
 
-use std::collections::HashSet;
 use std::fmt;
 
 /// Lifecycle phase of the sandbox network.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NetworkPhase {
     /// Guest booting; no sandbox yet.
+    #[default]
     Boot,
     /// Sandbox being set up; network configuration is permitted here.
     SandboxSetup,
@@ -65,8 +67,6 @@ impl fmt::Display for NetOp {
 pub enum NetPhaseError {
     /// The operation is not allowed in the current phase (post-start network mutation).
     FrozenPhase { op: NetOp, phase: NetworkPhase },
-    /// A route destination is not in the allowlist.
-    RouteNotAllowed { destination: String },
 }
 
 impl fmt::Display for NetPhaseError {
@@ -76,31 +76,16 @@ impl fmt::Display for NetPhaseError {
                 f,
                 "network operation {op} is not permitted while network phase is {phase}"
             ),
-            NetPhaseError::RouteNotAllowed { destination } => {
-                write!(f, "route destination {destination} is not in the allowlist")
-            }
         }
     }
 }
 
 impl std::error::Error for NetPhaseError {}
 
-/// Network phase state machine + route allowlist.
-#[derive(Debug)]
+/// Network phase state machine.
+#[derive(Debug, Default)]
 pub struct NetworkPhaseMachine {
     phase: NetworkPhase,
-    /// Allowed route destinations (CIDRs/prefixes as declared by policy). `None` means no
-    /// allowlist is configured (routes are not additionally constrained).
-    route_allowlist: Option<HashSet<String>>,
-}
-
-impl Default for NetworkPhaseMachine {
-    fn default() -> Self {
-        Self {
-            phase: NetworkPhase::Boot,
-            route_allowlist: None,
-        }
-    }
 }
 
 impl NetworkPhaseMachine {
@@ -147,25 +132,6 @@ impl NetworkPhaseMachine {
             })
         }
     }
-
-    /// Configure the route allowlist (destinations the policy permits).
-    pub fn set_route_allowlist(&mut self, destinations: impl IntoIterator<Item = String>) {
-        self.route_allowlist = Some(destinations.into_iter().collect());
-    }
-
-    /// Authorize programming a route to `destination`: the phase must permit mutation and,
-    /// if an allowlist is configured, the destination must be listed.
-    pub fn authorize_route(&self, destination: &str) -> Result<(), NetPhaseError> {
-        self.authorize(NetOp::ConfigureRoutes)?;
-        if let Some(allow) = &self.route_allowlist {
-            if !allow.contains(destination) {
-                return Err(NetPhaseError::RouteNotAllowed {
-                    destination: destination.to_string(),
-                });
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -209,32 +175,22 @@ mod tests {
         assert_eq!(m.phase(), NetworkPhase::Locked);
     }
 
-    /// TC5.6: route allowlist enforced — an allowed destination is accepted, an
-    /// out-of-list destination is denied.
+    /// TC5.6: the route destination allowlist lives in the policy layer, not here — this
+    /// machine gates the phase for every network-mutating operation uniformly, including
+    /// route programming, whatever the payload says.
     #[test]
-    fn route_allowlist_is_enforced() {
+    fn route_programming_is_gated_by_phase_only() {
         let mut m = NetworkPhaseMachine::new();
+        assert_eq!(m.phase(), NetworkPhase::Boot);
         m.to_sandbox_setup();
-        m.set_route_allowlist(["10.0.0.0/24".to_string(), "192.168.1.0/24".to_string()]);
-        assert!(m.authorize_route("10.0.0.0/24").is_ok());
-        assert_eq!(
-            m.authorize_route("0.0.0.0/0").unwrap_err(),
-            NetPhaseError::RouteNotAllowed {
-                destination: "0.0.0.0/0".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn allowlisted_route_still_denied_after_freeze() {
-        let mut m = NetworkPhaseMachine::new();
-        m.to_sandbox_setup();
-        m.set_route_allowlist(["10.0.0.0/24".to_string()]);
+        assert!(m.authorize(NetOp::ConfigureRoutes).is_ok());
         m.to_workload_running();
-        // Even an allowlisted route is denied once the phase is frozen.
         assert!(matches!(
-            m.authorize_route("10.0.0.0/24").unwrap_err(),
-            NetPhaseError::FrozenPhase { .. }
+            m.authorize(NetOp::ConfigureRoutes).unwrap_err(),
+            NetPhaseError::FrozenPhase {
+                op: NetOp::ConfigureRoutes,
+                phase: NetworkPhase::WorkloadRunning
+            }
         ));
     }
 }

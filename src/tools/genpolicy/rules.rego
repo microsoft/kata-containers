@@ -2119,6 +2119,16 @@ UpdateRoutesRequest if {
     i_routes := input.routes.Routes
     p_source_regex = policy_data.request_defaults.UpdateRoutesRequest.forbidden_source_regex
     p_names = policy_data.request_defaults.UpdateRoutesRequest.forbidden_device_names
+    p_dest_regex = object.get(
+        policy_data.request_defaults.UpdateRoutesRequest,
+        "allowed_dest_regex",
+        [".*"],
+    )
+    p_gateway_regex = object.get(
+        policy_data.request_defaults.UpdateRoutesRequest,
+        "allowed_gateway_regex",
+        [".*"],
+    )
 
     every i_route in i_routes {
         print("i_route.source =", i_route.source)
@@ -2129,6 +2139,18 @@ UpdateRoutesRequest if {
 
         print("i_route.device =", i_route.device)
         not i_route.device in p_names
+
+        # FR-14: the destination and gateway must each match the allowlist. Absent fields
+        # are treated as "" so that a default route is checked against the same list.
+        i_dest := object.get(i_route, "dest", "")
+        print("i_route.dest =", i_dest)
+        some p_dest in p_dest_regex
+        regex.match(p_dest, i_dest)
+
+        i_gateway := object.get(i_route, "gateway", "")
+        print("i_route.gateway =", i_gateway)
+        some p_gateway in p_gateway_regex
+        regex.match(p_gateway, i_gateway)
     }
 
     print("UpdateRoutesRequest: true")
@@ -2151,6 +2173,21 @@ UpdateInterfaceRequest if {
     p_hwaddrs := policy_data.request_defaults.UpdateInterfaceRequest.forbidden_hw_addrs
 
     not i_interface.hwAddr in p_hwaddrs
+
+    # FR-14: constrain the addresses being assigned. An address implies a connected route
+    # for its prefix, so an unconstrained address is an unconstrained route.
+    p_ip_regex := object.get(
+        policy_data.request_defaults.UpdateInterfaceRequest,
+        "allowed_ip_regex",
+        [".*"],
+    )
+
+    every i_ip in object.get(i_interface, "IPAddresses", []) {
+        i_address := object.get(i_ip, "address", "")
+        print("i_ip.address =", i_address)
+        some p_ip in p_ip_regex
+        regex.match(p_ip, i_address)
+    }
 
     print("UpdateInterfaceRequest: true")
 }
