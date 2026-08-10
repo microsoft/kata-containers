@@ -533,7 +533,10 @@ impl AgentPolicy {
         let Some(obj) = input.as_object_mut() else {
             return Vec::new();
         };
-        obj.insert("rule".to_string(), serde_json::Value::String(ep.to_string()));
+        obj.insert(
+            "rule".to_string(),
+            serde_json::Value::String(ep.to_string()),
+        );
 
         if self.engine.set_input_json(&input.to_string()).is_err() {
             return Vec::new();
@@ -732,7 +735,10 @@ impl AgentPolicy {
     /// this fails closed. Mirrors hcsshim, whose `apply_defaults` has cases for equal and
     /// older framework versions and deliberately none for newer.
     fn check_framework_version(&mut self) -> Result<()> {
-        let declared = match self.engine.eval_rule("data.agent_policy.framework_version".into()) {
+        let declared = match self
+            .engine
+            .eval_rule("data.agent_policy.framework_version".into())
+        {
             Ok(v) => match v.as_string() {
                 Ok(s) => s.to_string(),
                 Err(_) => return Ok(()),
@@ -956,7 +962,10 @@ impl AgentPolicy {
     }
 
     /// Evaluate a single rego path, returning `None` when it is undefined.
-    fn eval_scalar(engine: &mut regorus::Engine, query: String) -> Result<Option<serde_json::Value>> {
+    fn eval_scalar(
+        engine: &mut regorus::Engine,
+        query: String,
+    ) -> Result<Option<serde_json::Value>> {
         let results = engine.eval_query(query, false)?;
         let value = match results
             .result
@@ -1643,7 +1652,10 @@ mod tests {
         assert_eq!(scope, NestedScope::None);
         assert!(!scope.is_enabled());
         assert!(
-            !scope.permits("did:x509:0:sha256:AAA::CN:signer", "did:x509:0:sha256:AAA::CN:signer"),
+            !scope.permits(
+                "did:x509:0:sha256:AAA::CN:signer",
+                "did:x509:0:sha256:AAA::CN:signer"
+            ),
             "no delegation means not even the fragment's own issuer"
         );
     }
@@ -1667,7 +1679,9 @@ mod tests {
             {{\"issuer\": \"{parent}\", \"feed\": \"reg/e:1\", \"allow_nested\": \"none\"}}\n\
             ]\n"
         );
-        p.engine.add_policy("agent_policy".to_string(), base).unwrap();
+        p.engine
+            .add_policy("agent_policy".to_string(), base)
+            .unwrap();
         let specs = p.fragment_specs().unwrap();
         assert_eq!(specs.len(), 5);
 
@@ -1712,7 +1726,8 @@ mod tests {
         let err = specs[0].nested_scope().unwrap_err().to_string();
         assert!(
             err.contains("does not say which issuers"),
-            "error must tell the author what is missing, got: {}", err
+            "error must tell the author what is missing, got: {}",
+            err
         );
         assert!(err.contains("same-issuer"), "error must name a valid form");
     }
@@ -1730,7 +1745,11 @@ mod tests {
             .add_policy("agent_policy".to_string(), base.to_string())
             .unwrap();
         let err = specs_err(&mut p);
-        assert!(err.contains("same_issuer"), "error must quote the bad value: {}", err);
+        assert!(
+            err.contains("same_issuer"),
+            "error must quote the bad value: {}",
+            err
+        );
     }
 
     /// BL-8: an empty issuer list permits nothing, which is almost certainly an authoring
@@ -1770,7 +1789,10 @@ mod tests {
             .unwrap();
         let specs = p.fragment_specs().unwrap();
 
-        assert_eq!(specs[0].includes, vec!["infra".to_string(), "net".to_string()]);
+        assert_eq!(
+            specs[0].includes,
+            vec!["infra".to_string(), "net".to_string()]
+        );
         assert!(
             specs[0].allow_module,
             "allow_module must default to true, or every existing declaration silently \
@@ -1819,7 +1841,15 @@ mod tests {
             {\"issuer\": \"did:x509:0:sha256:BBB::CN:child\", \"feed\": \"reg/child:1\", \"minimum_svn\": 5, \"required\": true}\n\
             ]\n";
         let pkg = p
-            .apply_fragment_module("fragment:test", module, "reg/parent", &["infra".to_string()], None, "", 0)
+            .apply_fragment_module(
+                "fragment:test",
+                module,
+                "reg/parent",
+                &["infra".to_string()],
+                None,
+                "",
+                0,
+            )
             .unwrap();
         assert_eq!(pkg, "agent_policy.fragments[\"infra\"]");
 
@@ -1870,7 +1900,9 @@ mod tests {
         let mut p = AgentPolicy::new();
         // A module trying to live in the base package is refused.
         let base_ns = "package agent_policy\ndefault ExecProcessRequest := true\n";
-        assert!(p.apply_fragment_module("evil", base_ns, "reg/a", &[], None, "", 0).is_err());
+        assert!(p
+            .apply_fragment_module("evil", base_ns, "reg/a", &[], None, "", 0)
+            .is_err());
 
         // A sub-namespace not in `includes` is refused; one that is, is accepted.
         let mount_ns = "package agent_policy.fragments.mount\nallowed := true\n";
@@ -1918,11 +1950,11 @@ mod tests {
         );
 
         // Whitespace inside the brackets is tolerated; the decoded feed is what is compared.
-        let spaced = format!(
-            "package agent_policy.fragments[ \"{feed}\" ]\ncontainers := []\n"
-        );
+        let spaced = format!("package agent_policy.fragments[ \"{feed}\" ]\ncontainers := []\n");
         let mut r = AgentPolicy::new();
-        assert!(r.apply_fragment_module("spaced", &spaced, feed, &[], None, "", 0).is_ok());
+        assert!(r
+            .apply_fragment_module("spaced", &spaced, feed, &[], None, "", 0)
+            .is_ok());
 
         // A trailing segment after the bracket is not the sanctioned form.
         let suffixed =
@@ -2175,7 +2207,15 @@ mod tests {
             let mut p = AgentPolicy::new();
             let module = format!("{header}{decoy}");
             let err = p
-                .apply_fragment_module("evil", &module, "reg/a", &["infra".to_string()], None, "", 0)
+                .apply_fragment_module(
+                    "evil",
+                    &module,
+                    "reg/a",
+                    &["infra".to_string()],
+                    None,
+                    "",
+                    0,
+                )
                 .expect_err(&format!("{label}: base package must be refused"));
             assert!(
                 format!("{err}").contains("outside the permitted fragment namespaces"),
@@ -2226,14 +2266,25 @@ mod tests {
         let evil = "package\tagent_policy\n\ndecoy := `\npackage agent_policy.fragments\n`\n\n\
                     CreateContainerRequest if { true }\n";
         assert!(p
-            .apply_fragment_module("evil", evil, "somefeed", &["infra".to_string()], None, "", 0)
+            .apply_fragment_module(
+                "evil",
+                evil,
+                "somefeed",
+                &["infra".to_string()],
+                None,
+                "",
+                0
+            )
             .is_err());
 
         let (after, _) = p
             .allow_request("CreateContainerRequest", request)
             .await
             .unwrap();
-        assert!(!after, "a refused fragment must not have changed the verdict");
+        assert!(
+            !after,
+            "a refused fragment must not have changed the verdict"
+        );
     }
 
     /// F-143: a module that does not parse is refused before it can touch the live engine,
@@ -2242,14 +2293,30 @@ mod tests {
     fn test_unparseable_fragment_never_reaches_the_engine() {
         let mut p = AgentPolicy::new();
         assert!(p
-            .apply_fragment_module("broken", "package agent_policy.fragments\nx := (", "reg/a", &[], None, "", 0)
+            .apply_fragment_module(
+                "broken",
+                "package agent_policy.fragments\nx := (",
+                "reg/a",
+                &[],
+                None,
+                "",
+                0
+            )
             .is_err());
         assert!(p
             .apply_fragment_module("no-package", "x := 1\n", "reg/a", &[], None, "", 0)
             .is_err());
         // The engine is still usable afterwards.
         assert!(p
-            .apply_fragment_module("good", "package agent_policy.fragments\nx := 1\n", "reg/a", &[], None, "", 0)
+            .apply_fragment_module(
+                "good",
+                "package agent_policy.fragments\nx := 1\n",
+                "reg/a",
+                &[],
+                None,
+                "",
+                0
+            )
             .is_ok());
     }
 
@@ -2263,8 +2330,16 @@ mod tests {
             bound := parameter(\"host\")\n\
             defaulted := parameter(\"missing_here\")\n\
             unknown := parameter(\"other\")\n";
-        p.apply_fragment_module("frag", module, "reg/a", &[], Some("{\"host\": \"supplied\"}"), "", 0)
-            .unwrap();
+        p.apply_fragment_module(
+            "frag",
+            module,
+            "reg/a",
+            &[],
+            Some("{\"host\": \"supplied\"}"),
+            "",
+            0,
+        )
+        .unwrap();
 
         let get = |p: &mut AgentPolicy, rule: &str| {
             p.engine
@@ -2303,7 +2378,9 @@ mod tests {
             .apply_fragment_module("c", module, "reg/a", &[], Some("{ not json"), "", 0)
             .is_err());
         // A fragment that is not parameterised is unaffected.
-        assert!(p.apply_fragment_module("d", module, "reg/a", &[], None, "", 0).is_ok());
+        assert!(p
+            .apply_fragment_module("d", module, "reg/a", &[], None, "", 0)
+            .is_ok());
     }
 
     /// FR-1l: a policy may state the enforcement framework it was written against. Equal or
@@ -2333,7 +2410,10 @@ mod tests {
         }
         // An explicit but malformed version is an error, not a silent legacy fallback.
         assert!(AgentPolicy::new().set_policy(&with("1.0")).await.is_err());
-        assert!(AgentPolicy::new().set_policy(&with("v1.0.0")).await.is_err());
+        assert!(AgentPolicy::new()
+            .set_policy(&with("v1.0.0"))
+            .await
+            .is_err());
     }
 
     /// A miniature policy that reproduces the `pstate` mechanics of the generated
@@ -2859,7 +2939,9 @@ containers := [{"name": "wrong-issuer"}]
         );
 
         assert!(
-            p.snapshot_state().unwrap().contains(&format!("retired:{cid}")),
+            p.snapshot_state()
+                .unwrap()
+                .contains(&format!("retired:{cid}")),
             "the no-op path must still burn the id (RM-20), so removal is single-shot \
              however it was admitted"
         );
@@ -3077,8 +3159,7 @@ containers := [{"name": "wrong-issuer"}]
             let name = test_case.name.clone();
             let output_res: Result<PolicyCopyFileRequest> = (&test_case.input).try_into();
             if let Some(expected) = test_case.output {
-                let output = output_res
-                    .unwrap_or_else(|e| panic!("test case {}: {:?}", name, e));
+                let output = output_res.unwrap_or_else(|e| panic!("test case {}: {:?}", name, e));
                 assert_eq!(expected, output, "test case {}", &test_case.name)
             } else {
                 assert!(
