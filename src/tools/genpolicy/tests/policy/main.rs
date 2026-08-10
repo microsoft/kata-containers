@@ -670,4 +670,53 @@ mod tests {
             err
         );
     }
+
+    /// RM-102: refusing a host-supplied security control must say so.
+    ///
+    /// `allow_create_container_input` refuses `Linux.Seccomp`, `Process.SelinuxLabel` and
+    /// `Linux.MountLabel` outright, but it is a flat conjunction with a single print at
+    /// each end -- so a request carrying any of them was denied with a trace that named
+    /// only the rule, and the operator had to diff the whole OCI spec to find out which
+    /// field was at fault. These are the three that a pod spec can actually populate.
+    #[tokio::test]
+    async fn a_refused_security_control_names_itself_in_the_denial() {
+        for (pointer, value, expected) in [
+            ("/OCI/Linux/Seccomp", serde_json::json!({"DefaultAction": "SCMP_ACT_ERRNO"}), "Linux.Seccomp"),
+            ("/OCI/Process/SelinuxLabel", serde_json::json!("system_u:system_r:container_t:s0"), "Process.SelinuxLabel"),
+            ("/OCI/Linux/MountLabel", serde_json::json!("system_u:object_r:container_file_t:s0"), "Linux.MountLabel"),
+        ] {
+            let (mut pol, _policy, testdata_dir, _workdir) =
+                prepare_policy("state/execprocessdeployment").await;
+
+            let raw_cases = fs::read_to_string(testdata_dir.join("testcases.json"))
+                .expect("test cases readable");
+            let cases: Vec<TestCase> =
+                serde_json::from_str(&raw_cases).expect("test cases parse");
+
+            // Start from a request the policy accepts, so the refused field is the only
+            // thing under test.
+            let case = cases
+                .iter()
+                .find(|c| c.allowed && matches!(c.request, TestRequest::CreateContainerRequest(_)))
+                .expect("fixture must contain an allowed CreateContainerRequest");
+
+            let mut req = serialize_request_only(&case.request).unwrap();
+            *req.pointer_mut(pointer)
+                .unwrap_or_else(|| panic!("request has {pointer}")) = value;
+
+            let (allowed, message) = pol
+                .allow_request(
+                    &case.request.to_string(),
+                    &serde_json::to_string(&req).unwrap(),
+                )
+                .await
+                .expect("evaluation itself must succeed");
+
+            assert!(!allowed, "a request carrying {expected} must be refused");
+            assert!(
+                message.contains(expected),
+                "denial must name the refused field {expected}, got: {message}"
+            );
+        }
+    }
 }

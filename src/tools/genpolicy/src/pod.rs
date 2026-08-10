@@ -21,6 +21,8 @@ use log::{debug, warn};
 use protocols::agent;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::sync::{Mutex, OnceLock};
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -433,12 +435,95 @@ pub fn apply_apparmor_profile(
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct SeccompProfile {
+pub struct SeccompProfile {
     #[serde(rename = "type")]
-    profile_type: String,
+    pub profile_type: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    localhostProfile: Option<String>,
+    pub localhostProfile: Option<String>,
+}
+
+/// A security control the workload asked for that the confidential guest will not apply.
+///
+/// The k8s API accepts `seccompProfile` and `appArmorProfile` on every pod and container,
+/// and a policy generated from such a spec looks entirely normal. Neither control is
+/// actually in force in the guest, for reasons that differ per control:
+///
+/// - **seccomp**: the guest kernel and the agent both support it (`CONFIG_SECCOMP_FILTER`,
+///   `rustjail::seccomp::init_seccomp`), but the profile would have to reach the guest as
+///   host-supplied data. `rules.rego` refuses it (`is_null(i_linux.Seccomp)`) and the
+///   runtime strips it anyway (`disable_guest_seccomp` defaults to true), so the container
+///   runs with an unfiltered syscall surface.
+/// - **apparmor**: the guest kernel is built without the AppArmor LSM and the rootfs has
+///   no `apparmor_parser`, so no profile can be applied regardless of what is requested.
+///   The policy still pins the field, which keeps the host from varying it, but pinning an
+///   inert field confines nothing.
+///
+/// Reporting this at policy-generation time is the point: a silently dropped security
+/// control is worse than a refused one, because the operator is left believing a boundary
+/// exists where none does. This is the same class of defect as RM-97 -- the system stating
+/// something untrue about its own enforcement.
+///
+/// `Unconfined` is never reported: asking for no confinement and receiving none is not a
+/// surprise.
+pub fn unenforced_security_controls(
+    resource_kind: &str,
+    resource_name: &str,
+    seccomp: &Option<SeccompProfile>,
+    apparmor: &Option<AppArmorProfile>,
+) -> Vec<String> {
+    let mut notices = Vec::new();
+
+    if let Some(p) = seccomp {
+        if p.profile_type != "Unconfined" {
+            notices.push(format!(
+                "{resource_kind} {resource_name} requests seccompProfile type {}, but the \
+                 confidential guest applies no seccomp profile: the container will run with \
+                 an unfiltered syscall surface.",
+                p.profile_type
+            ));
+        }
+    }
+
+    if let Some(p) = apparmor {
+        if p.profile_type != "Unconfined" {
+            notices.push(format!(
+                "{resource_kind} {resource_name} requests appArmorProfile type {}, but the \
+                 confidential guest kernel is built without AppArmor: no profile is applied \
+                 and the container is unconfined by AppArmor.",
+                p.profile_type
+            ));
+        }
+    }
+
+    notices
+}
+
+/// Print the notices from `unenforced_security_controls` to stderr, at most once each.
+///
+/// Deliberately not `warn!`: `main()` calls `env_logger::init()` with no default filter, so
+/// with `RUST_LOG` unset -- which is the normal case in CI and in the tooling that shells
+/// out to genpolicy -- the default `error` level would discard a `warn!` entirely. A
+/// security control that is silently not applied must not be announced through a channel
+/// that is itself silent by default.
+///
+/// The deduplication is what makes a pod-level request readable: the pod's security context
+/// is applied once per container, so without it a three-container pod would print the same
+/// line four times (once more for the pause container). Each notice names the resource it
+/// refers to, so identical strings really are the same fact.
+pub fn report_unenforced_security_controls(notices: &[String]) {
+    static REPORTED: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
+    let reported = REPORTED.get_or_init(|| Mutex::new(BTreeSet::new()));
+
+    for notice in notices {
+        let is_new = reported
+            .lock()
+            .expect("unenforced-control notice set is never held across a panic")
+            .insert(notice.clone());
+        if is_new {
+            eprintln!("genpolicy: warning: {notice}");
+        }
+    }
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
@@ -464,6 +549,14 @@ pub struct PodSecurityContext {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub appArmorProfile: Option<AppArmorProfile>,
+
+    /// Not consumed when building the policy -- the guest applies no seccomp filtering, so
+    /// there is nothing to constrain. It is parsed anyway so that
+    /// `unenforced_security_controls` can see a pod-level request and report it; before
+    /// this field existed the request was dropped by serde and could not be reported at
+    /// all (RM-102).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seccompProfile: Option<SeccompProfile>,
 }
 
 /// See Reference / Kubernetes API / Workload Resources / Pod.
@@ -1259,6 +1352,13 @@ impl Container {
         if let Some(context) = &self.securityContext {
             debug!("get_process_fields: securityContext = {:?}", context);
 
+            report_unenforced_security_controls(&unenforced_security_controls(
+                "container",
+                &self.name,
+                &context.seccompProfile,
+                &context.appArmorProfile,
+            ));
+
             // Container-level appArmorProfile overrides any pod-level default.
             apply_apparmor_profile(process, &context.appArmorProfile);
 
@@ -1479,5 +1579,82 @@ mod tests {
         };
 
         assert_eq!(c.get_nvidia_pgpu_count(&keys), Some(3));
+    }
+
+    /// RM-102: a requested-but-unapplied security control must be reported.
+    ///
+    /// Before this, `seccompProfile` was parsed into a field nothing ever read, so a pod
+    /// asking for `RuntimeDefault` produced a policy that looked correct while the
+    /// container ran with an unfiltered syscall surface and nothing said so anywhere.
+    #[test]
+    fn a_requested_seccomp_profile_is_reported_as_unenforced() {
+        let seccomp = Some(SeccompProfile {
+            profile_type: "RuntimeDefault".to_string(),
+            localhostProfile: None,
+        });
+        let notices = unenforced_security_controls("container", "web", &seccomp, &None);
+
+        assert_eq!(notices.len(), 1, "expected exactly one notice: {notices:?}");
+        assert!(
+            notices[0].contains("web") && notices[0].contains("RuntimeDefault"),
+            "the notice must name the container and the profile it asked for: {notices:?}"
+        );
+        assert!(
+            notices[0].contains("seccomp"),
+            "the notice must name the control that is not applied: {notices:?}"
+        );
+    }
+
+    /// AppArmor is reported for a different reason than seccomp -- the guest kernel is
+    /// built without the LSM -- but the operator-visible consequence is the same.
+    #[test]
+    fn a_requested_apparmor_profile_is_reported_as_unenforced() {
+        let apparmor = Some(AppArmorProfile {
+            profile_type: "Localhost".to_string(),
+            localhostProfile: Some("k8s-apparmor-example-deny-write".to_string()),
+        });
+        let notices = unenforced_security_controls("pod", "my-pod", &None, &apparmor);
+
+        assert_eq!(notices.len(), 1, "expected exactly one notice: {notices:?}");
+        assert!(
+            notices[0].contains("AppArmor"),
+            "the notice must name the control that is not applied: {notices:?}"
+        );
+    }
+
+    /// Asking for no confinement and receiving none is not a surprise, so it must not be
+    /// reported. Without this the notice would fire on every PSS-`baseline` pod that pins
+    /// `Unconfined`, and a warning that is always present is one nobody reads.
+    #[test]
+    fn unconfined_requests_are_not_reported() {
+        let seccomp = Some(SeccompProfile {
+            profile_type: "Unconfined".to_string(),
+            localhostProfile: None,
+        });
+        let apparmor = Some(AppArmorProfile {
+            profile_type: "Unconfined".to_string(),
+            localhostProfile: None,
+        });
+
+        assert!(unenforced_security_controls("pod", "p", &seccomp, &apparmor).is_empty());
+    }
+
+    /// A pod that requests neither control must stay silent.
+    #[test]
+    fn absent_requests_are_not_reported() {
+        assert!(unenforced_security_controls("pod", "p", &None, &None).is_empty());
+    }
+
+    /// A pod-level `seccompProfile` must survive deserialization. It has no effect on the
+    /// generated policy, but if serde drops it the request cannot be reported at all --
+    /// which is exactly the state this change fixes.
+    #[test]
+    fn pod_level_seccomp_profile_is_parsed() {
+        let ctx: PodSecurityContext =
+            serde_yaml::from_str("seccompProfile:\n  type: RuntimeDefault\nrunAsUser: 1000\n")
+                .expect("pod security context parses");
+
+        let seccomp = ctx.seccompProfile.expect("seccompProfile is retained");
+        assert_eq!(seccomp.profile_type, "RuntimeDefault");
     }
 }

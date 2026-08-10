@@ -2586,6 +2586,40 @@ candidate_agrees_on_oci_version if {
     entry.container.OCI.Version == input.OCI.Version
 }
 
+# RM-102: the fields `allow_create_container_input` refuses outright.
+#
+# Those checks are a flat conjunction with a single print at each end, so when one of them
+# rejects a request the trace says only "allow_create_container_input" and the operator is
+# left to diff the whole OCI spec by hand. Unlike the per-field checks above these are not
+# comparisons against candidate containers -- the policy refuses the field for *any*
+# container -- so the reason states the refusal rather than an accepted set.
+#
+# Only the three fields a workload can actually populate from a pod spec are reported.
+# `Hooks`, `Solaris`, `Windows`, `IntelRdt`, the ID mappings and the unsupported cgroup
+# resources are refused by the same conjunction, but nothing in the k8s -> containerd ->
+# kata path can set them, so an error for each would be noise that never fires. If that
+# ever changes, add them here.
+#
+# Each of these three names a security control the guest does not apply anyway, which is
+# why refusing them costs nothing: see docs/cc/guest-security-controls.md.
+
+errors["Linux.Seccomp: the request carries a seccomp profile, but the policy refuses any seccomp profile from the host. The kata guest applies no seccomp filtering, so set disable_guest_seccomp=true in the runtime configuration"] if {
+    input.rule == "CreateContainerRequest"
+    not is_null(input.OCI.Linux.Seccomp)
+}
+
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(input.OCI.Process.SelinuxLabel) > 0
+    msg := sprintf("Process.SelinuxLabel: the request carries the label %v, but the policy refuses any SELinux label from the host. The kata guest rootfs is not SELinux-labelled, so set disable_guest_selinux=true in the runtime configuration", [input.OCI.Process.SelinuxLabel])
+}
+
+errors[msg] if {
+    input.rule == "CreateContainerRequest"
+    count(input.OCI.Linux.MountLabel) > 0
+    msg := sprintf("Linux.MountLabel: the request carries the label %v, but the policy refuses any SELinux mount label from the host. The kata guest rootfs is not SELinux-labelled, so set disable_guest_selinux=true in the runtime configuration", [input.OCI.Linux.MountLabel])
+}
+
 # RM-97: there is deliberately no "sandbox namespace" error here. The enforcement path
 # never compares the request's namespace against the policy's: `allow_by_anno` reads
 # `S_NAMESPACE_KEY` from the *input* only and passes it down as a substitution variable
