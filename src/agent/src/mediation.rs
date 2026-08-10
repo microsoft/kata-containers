@@ -13,9 +13,11 @@
 //!
 //!  - [`MEDIATION_MANIFEST`] classifies every method of the agent ttRPC service by the
 //!    enforcement point it must pass through.
-//!  - The tests below fail the build if the proto service and this manifest drift apart
-//!    (a new RPC added without a mediation classification, or a wrong request type), and
-//!    — under `--features agent-policy` — they **call every handler under a deny-all
+//!  - A `const` block below **fails the build** if the proto service and this manifest
+//!    drift apart — a new RPC added without a mediation classification, a stale entry for
+//!    a method the service no longer exposes, or a wrong request type.
+//!  - The tests below re-check the same invariants with readable diagnostics, and —
+//!    under `--features agent-policy` — they **call every handler under a deny-all
 //!    policy** and require each one to refuse.
 //!
 //! In strict builds the default policy is closed-door (every request denied unless the
@@ -38,6 +40,24 @@
 //! Because the sweep runs the *compiled* build, the manifest is `cfg`-aware too: RPCs whose
 //! handler is not compiled in are declared [`EnforcementClass::CompiledOut`] rather than
 //! silently claimed as gated.
+//!
+//! ## What is checked when
+//!
+//! The two halves of the proof have different reach, and it is worth being precise about
+//! which is which:
+//!
+//! | Check | Fails at | Reach |
+//! | --- | --- | --- |
+//! | Manifest covers the service, exactly, with the right request types | **`cargo build`** | every build, every `cfg`, including consumers who never run tests |
+//! | Every handler refuses under a deny-all policy | `cargo test --features agent-policy` | only where the suite is run *with the policy engine enabled* |
+//!
+//! The coverage half is a `const` assertion against [`PROTO_RPCS`], generated from
+//! `agent.proto` by `build.rs`. It is evaluated per build configuration, so the
+//! `cfg`-conditional rows are checked in the configuration they describe.
+//!
+//! The behavioural half cannot be lifted to build time — it has to run code. Note that it
+//! is gated behind `--features agent-policy`, so a default-feature test run does **not**
+//! exercise it; CI must opt in explicitly for the FR-7 claim to be continuously verified.
 //!
 //! Run it with:
 //!
@@ -169,6 +189,106 @@ pub const MEDIATION_MANIFEST: &[(&str, &str, &str, EnforcementClass)] = &[
     ("LoadPolicyFragment", "load_policy_fragment", "LoadPolicyFragmentRequest", EnforcementClass::CompiledOut),
 ];
 
+// Every `rpc` the agent service declares, generated from `agent.proto` by `build.rs` as
+// `(method, request message)` in `PROTO_RPCS`.
+//
+// Generated rather than hand-written so that the service definition, not a copy of it, is
+// what `MEDIATION_MANIFEST` is checked against.
+include!(concat!(env!("OUT_DIR"), "/proto_rpcs.rs"));
+
+/// `str` equality usable in `const` evaluation.
+const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// Whether the manifest classifies `method`, and — if it does — whether it records the
+/// same request type the proto declares.
+const fn manifest_covers(method: &str, request: &str) -> bool {
+    let mut i = 0;
+    while i < MEDIATION_MANIFEST.len() {
+        let (m, _, req, _) = MEDIATION_MANIFEST[i];
+        if str_eq(m, method) {
+            return str_eq(req, request);
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Whether the service still declares `method`.
+const fn proto_declares(method: &str) -> bool {
+    let mut i = 0;
+    while i < PROTO_RPCS.len() {
+        let (m, _) = PROTO_RPCS[i];
+        if str_eq(m, method) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// FR-7 coverage gate — **a compile error, not a test failure**.
+///
+/// Total mediation is only a property of the shipped binary if it is impossible to build a
+/// binary without it. Expressing the check as a `const` assertion rather than a `#[test]`
+/// closes the gap where an RPC is added, the crate compiles, and nobody runs the suite
+/// before the artefact is consumed.
+///
+/// Three invariants, evaluated in whatever configuration is being built:
+///
+///  1. every RPC the service exposes is classified in the manifest — no unmediated surface;
+///  2. the manifest declares no method the service no longer exposes — no stale rows
+///     inflating the coverage count;
+///  3. the request types agree — the policy entry point is the request *message* name, so
+///     a manifest row naming the wrong one would silently exempt that endpoint from the
+///     deny-all sweep and let it pass vacuously.
+///
+/// `const` panics take a literal message, so the diagnostics here are deliberately terse.
+/// [`tests::every_service_rpc_is_classified`] and
+/// [`tests::manifest_request_types_match_the_proto`] re-check the same invariants and name
+/// the offending RPCs; run them to find out *which* method drifted.
+const _: () = {
+    assert!(
+        !PROTO_RPCS.is_empty(),
+        "no rpc parsed from agent.proto; the FR-7 mediation gate would pass vacuously"
+    );
+
+    let mut i = 0;
+    while i < PROTO_RPCS.len() {
+        let (method, request) = PROTO_RPCS[i];
+        assert!(
+            manifest_covers(method, request),
+            "FR-7: an agent RPC is unclassified, or is classified with the wrong request \
+             type, in MEDIATION_MANIFEST. Run `cargo test -p kata-agent mediation` to see \
+             which one."
+        );
+        i += 1;
+    }
+
+    let mut j = 0;
+    while j < MEDIATION_MANIFEST.len() {
+        let (method, _, _, _) = MEDIATION_MANIFEST[j];
+        assert!(
+            proto_declares(method),
+            "FR-7: MEDIATION_MANIFEST classifies a method the agent service no longer \
+             exposes. Run `cargo test -p kata-agent mediation` to see which one."
+        );
+        j += 1;
+    }
+};
+
 /// Return the enforcement class declared for a service method, if any.
 pub fn enforcement_class(rpc_method: &str) -> Option<EnforcementClass> {
     MEDIATION_MANIFEST
@@ -209,7 +329,12 @@ mod tests {
 
     /// TC3.9: complete-mediation coverage. Every RPC exposed by the service must be
     /// classified in the manifest, and the manifest must not classify a method the
-    /// service does not expose. Adding a new RPC without classifying it fails the build.
+    /// service does not expose.
+    ///
+    /// The same invariant is enforced at build time by the `const` gate above, which is
+    /// what actually makes it unbypassable. This test exists for its diagnostics: the
+    /// `const` assertion can only carry a literal message, whereas this one names the
+    /// offending RPCs.
     #[test]
     fn every_service_rpc_is_classified() {
         let rpcs = proto_rpcs();
@@ -239,6 +364,9 @@ mod tests {
     /// The policy entry point is the request *message* name, not the RPC name. If the
     /// manifest records the wrong one, the deny-all policy the conformance sweep builds
     /// would miss that endpoint and the sweep would pass vacuously.
+    ///
+    /// Also enforced at build time by the `const` gate above; kept here to name the
+    /// mismatched RPC and show both types.
     #[test]
     fn manifest_request_types_match_the_proto() {
         for (method, req) in proto_rpcs() {
