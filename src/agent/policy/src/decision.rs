@@ -427,10 +427,7 @@ mod tests {
         assert_eq!(v["decision"], "deny");
         assert_eq!(v["failed_rule"], "data.agent_policy.CreateContainerRequest");
         assert_eq!(v["bound_state_keys"][0], "OCI");
-        assert!(v["reasons"][0]
-            .as_str()
-            .unwrap()
-            .contains("Root.Readonly"));
+        assert!(v["reasons"][0].as_str().unwrap().contains("Root.Readonly"));
         // Nothing was shed, so the marker must be absent rather than empty.
         assert!(v.get("dropped").is_none(), "unexpected dropped: {}", v);
     }
