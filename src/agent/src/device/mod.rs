@@ -1094,27 +1094,15 @@ fn expose_guest_infiniband_devices(logger: &Logger, spec: &mut Spec) -> Result<(
 #[cfg(feature = "strict-policy")]
 pub const TRUSTED_CDI_DIGESTS_PATH: &str = "/etc/kata/trusted-cdi-digests";
 
-/// Best-effort extraction of a CDI spec's top-level `kind` (supports JSON and YAML).
-#[cfg(feature = "strict-policy")]
-fn parse_cdi_kind(bytes: &[u8]) -> Option<String> {
-    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
-        if let Some(k) = v.get("kind").and_then(|k| k.as_str()) {
-            return Some(k.to_string());
-        }
-    }
-    for line in String::from_utf8_lossy(bytes).lines() {
-        if let Some(rest) = line.trim_start().strip_prefix("kind:") {
-            let k = rest.trim().trim_matches('"').trim_matches('\'');
-            if !k.is_empty() {
-                return Some(k.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Measure every CDI spec file in `spec_dir`: compute each file's `sha256` content digest
-/// and its declared `kind`. Missing directory yields an empty list.
+/// Measure every CDI spec file in `spec_dir`: compute each file's `sha256` content digest,
+/// and record the CDI `kind` and the fully-qualified device names it declares. Missing
+/// directory yields an empty list.
+///
+/// Parsing goes through the CDI crate's own `read_spec`, so what is measured is what the
+/// injection path will actually load. A hand-rolled parser risks disagreeing with it about
+/// a spec's kind or devices, and a spec measured as one thing but loaded as another is an
+/// authorization confusion. A file the CDI crate cannot parse is recorded with no devices:
+/// it cannot authorize anything, and the cache cannot inject from it either.
 #[cfg(feature = "strict-policy")]
 pub fn measure_cdi_specs(
     spec_dir: &str,
@@ -1142,11 +1130,23 @@ pub fn measure_cdi_specs(
                 .map(|b| format!("{:02x}", b))
                 .collect::<String>()
         );
-        let kind = parse_cdi_kind(&bytes).unwrap_or_default();
+        let (kind, devices) = match cdi::spec::read_spec(&path, 0) {
+            Ok(spec) => {
+                let kind = format!("{}/{}", spec.get_vendor(), spec.get_class());
+                let devices = spec
+                    .get_devices()
+                    .values()
+                    .map(|d| d.get_qualified_name())
+                    .collect();
+                (kind, devices)
+            }
+            Err(_) => (String::new(), Vec::new()),
+        };
         out.push(kata_security_reference_monitor::MeasuredCdiSpec {
             path: path.display().to_string(),
             kind,
             digest,
+            devices,
         });
     }
     Ok(out)
@@ -1198,11 +1198,15 @@ fn requested_cdi_devices(
         .collect())
 }
 
-/// FR-11: authorize a container's CDI resolution before the edits are applied. Every CDI
-/// spec that provides a requested device must be measured (its digest present in the
-/// authorized set); otherwise the create is refused. Sandbox containers and containers
-/// that request no CDI devices are a no-op. Returns the verified devices so the caller can
-/// bind them to the container occurrence.
+/// FR-11: authorize a container's CDI resolution. Every CDI spec that *provides* a
+/// requested device must be measured (its digest present in the authorized set); otherwise
+/// the create is refused. Sandbox containers and containers that request no CDI devices are
+/// a no-op. Returns the verified devices so the caller can bind them to the container
+/// occurrence.
+///
+/// Called after the edits have been applied, because the spec files are written
+/// asynchronously and `handle_cdi_devices` waits for them; the caller is responsible for
+/// making the refusal fatal before anything acts on the mutated spec.
 #[cfg(feature = "strict-policy")]
 pub fn authorize_cdi_resolution(
     spec: &Spec,
@@ -1284,6 +1288,52 @@ mod tests {
         assert_eq!(verified.len(), 1);
         assert_eq!(verified[0].device, "kata.com/gpu=0");
         assert_eq!(verified[0].spec_digest, specs[0].digest);
+
+        // Device names are measured from the spec, not inferred from its kind.
+        assert_eq!(specs[0].devices, vec!["kata.com/gpu=0".to_string()]);
+    }
+
+    /// F-183 end-to-end: a host that drops a second spec of an already-authorized *kind*
+    /// into the CDI directory must not have its `containerEdits` accepted.
+    ///
+    /// The two specs share the kind `kata.com/gpu` but declare different device names, so
+    /// there is no fully-qualified collision and the CDI cache keeps both -- the host's
+    /// edits for `kata.com/gpu=1` would be injected. Authorization must therefore be
+    /// decided against the spec that declares the requested device, not against its kind.
+    #[cfg(feature = "strict-policy")]
+    #[test]
+    fn test_fr11_same_kind_unmeasured_spec_is_refused() {
+        use kata_security_reference_monitor::{authorize_cdi, CdiDeviceRequest};
+        let dir = tempdir().expect("tmpdir");
+        std::fs::write(
+            dir.path().join("trusted.json"),
+            r#"{"cdiVersion":"0.6.0","kind":"kata.com/gpu","devices":[{"name":"0","containerEdits":{}}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("host-arbitrary.json"),
+            r#"{"cdiVersion":"0.6.0","kind":"kata.com/gpu","devices":[{"name":"1","containerEdits":{"env":["SMUGGLED=1"]}}]}"#,
+        )
+        .unwrap();
+
+        let specs = measure_cdi_specs(dir.path().to_str().unwrap()).unwrap();
+        assert_eq!(specs.len(), 2);
+
+        // Only the legitimate spec is measured.
+        let trusted = specs
+            .iter()
+            .find(|s| s.devices.contains(&"kata.com/gpu=0".to_string()))
+            .expect("the trusted spec should declare device 0");
+        let authorized: HashSet<String> = std::iter::once(trusted.digest.clone()).collect();
+
+        // The device the host smuggled in is refused ...
+        let smuggled = vec![CdiDeviceRequest::parse("kata.com/gpu=1").unwrap()];
+        assert!(authorize_cdi(&smuggled, &specs, &authorized).is_err());
+
+        // ... while the legitimate device of the same kind still resolves.
+        let legitimate = vec![CdiDeviceRequest::parse("kata.com/gpu=0").unwrap()];
+        let verified = authorize_cdi(&legitimate, &specs, &authorized).unwrap();
+        assert_eq!(verified[0].spec_digest, trusted.digest);
     }
 
     const TEST_VM_PATH: &str = "/dev/null";

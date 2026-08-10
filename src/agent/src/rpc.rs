@@ -335,10 +335,18 @@ impl AgentService {
 
         // FR-11 (trusted CDI): the CDI edits applied above come from spec files in the
         // guest that may be host-influenced. In strict builds, require every CDI spec that
-        // provides a requested device to be measured (its content digest authorized);
+        // *provides* a requested device to be measured (its content digest authorized);
         // otherwise refuse the create rather than apply host-arbitrary device edits.
         // Resolution is closed-door by default. The verified devices are bound to the
         // occurrence once the container is created.
+        //
+        // This deliberately runs *after* `handle_cdi_devices`, which waits (up to
+        // `cdi_timeout`) for the spec files to appear: authorizing first would refuse a
+        // legitimate device whose spec has not been written yet. The edits are therefore
+        // already in `oci` by this point, which is safe only because the refusal is fatal
+        // -- the `?` below fails the create before `setup_bundle` writes anything and
+        // before the container is started, so nothing observes the unauthorized spec.
+        // `the_cdi_edits_are_authorized_before_anything_acts_on_them` pins that ordering.
         #[cfg(feature = "strict-policy")]
         let verified_cdi_devices =
             crate::device::authorize_cdi_resolution(&oci, "/var/run/cdi", &visible_cdi_devices)?;
@@ -5865,6 +5873,57 @@ COMMIT
                 rootfs_rebinding < binding_check,
                 "enforce_plan_binding runs before setup_bundle: it would compare \
                  the plan before the rootfs rebinding it exists to police"
+            );
+        }
+
+        /// F-185: the trusted-CDI authorization must run before anything acts on the
+        /// CDI-injected spec.
+        ///
+        /// `handle_cdi_devices` applies `containerEdits` from host-influenceable spec files
+        /// directly into `oci`, and the authorization that decides whether those edits were
+        /// ever permitted runs after it (deliberately -- the specs may not exist yet when
+        /// the request arrives). That is safe only while nothing observes the mutated spec
+        /// before the check: the moment `setup_bundle` writes it out or the container is
+        /// started, an unauthorized edit has had an effect. This pins the order so that
+        /// moving the check later, or moving `setup_bundle` earlier, fails loudly.
+        #[cfg(feature = "strict-policy")]
+        #[test]
+        fn the_cdi_edits_are_authorized_before_anything_acts_on_them() {
+            const SOURCE: &str = include_str!("rpc.rs");
+
+            let start = SOURCE
+                .find("    async fn do_create_container(")
+                .expect("do_create_container should be present");
+            let end = start
+                + SOURCE[start + 1..]
+                    .find("\n    async fn ")
+                    .expect("do_create_container should be followed by another method");
+            let body = &SOURCE[start..end];
+
+            let offset_of = |anchor: &str| -> usize {
+                assert_eq!(
+                    body.matches(anchor).count(),
+                    1,
+                    "anchor is no longer unique within do_create_container, so this \
+                     test can no longer tell where it sits: {}",
+                    anchor
+                );
+                body.find(anchor).unwrap()
+            };
+
+            let cdi_injection = offset_of("handle_cdi_devices(");
+            let cdi_authorization = offset_of("crate::device::authorize_cdi_resolution(");
+            let bundle_written = offset_of("let olddir = setup_bundle(&cid, &mut oci)?;");
+
+            assert!(
+                cdi_injection < cdi_authorization,
+                "authorize_cdi_resolution runs before handle_cdi_devices: the CDI specs \
+                 may not have been written yet, so legitimate devices would be refused"
+            );
+            assert!(
+                cdi_authorization < bundle_written,
+                "the CDI edits are written to the bundle before they are authorized: an \
+                 unauthorized containerEdit would have had an effect"
             );
         }
 
