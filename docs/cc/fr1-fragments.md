@@ -86,7 +86,7 @@ in the protected header:
 | 15 | CWT claims: `1` = issuer, `2` = feed, `"svn"` = uint |
 | `"iss"` / `"feed"` | string keys, accepted on read (this is what `sign1util create` writes) |
 | `kata-includes` / `kata-requires` | arrays, omitted when empty |
-| `kata-prev-log-head` | bstr, omitted when absent |
+| `kata-prev-log-head` | CBOR byte string, omitted when absent |
 
 An absent payload means no module, which is hcsshim's `add_module: false`. `x5chain` (label
 33) rides in the *unprotected* header, per RFC 9360 and `sign1util`; the chain is not the
@@ -223,7 +223,7 @@ hcsshim's number (`cosesign1/check.go`) and is far above any real chain.
 Routing is deliberately decided on **header presence, not chain validity**:
 `cose_has_x5chain` selects the did:x509 path (`fragments.rs::verify_envelope_with`) by asking
 only whether label 33 is there. Were it to ask whether the chain *parsed*, a host could steer
-an envelope away from X.509 verification by malforming the chain it presents — the envelope
+an envelope away from X.509 verification by presenting a malformed chain — the envelope
 would fall through to the raw-key path instead of being refused. Presence is the question
 being asked; anything wrong with the chain is then reported by `verify_x509_cose`.
 
@@ -301,7 +301,7 @@ tolerated is the policy's choice:
 
 | `required` | Behaviour | Equivalent in C-ACI/hcsshim |
 | --- | --- | --- |
-| `false` (default) | Delivery is lazy. An undelivered fragment contributes no rules. | Yes — hcsshim injection is lazy and unobligated |
+| `false` (default) | Delivery is lazy. An undelivered fragment contributes no rules. | Yes — hcsshim injection is lazy and carries no obligation |
 | `true` | `CreateContainer` is refused until the fragment is delivered and verified. | **No equivalent** — this is stricter than C-ACI |
 
 The default is `false` because absence is already fail-safe in the common case: a container
@@ -652,7 +652,7 @@ every existing configuration uses, means exactly what it always did.
 | `TTL:<subject>` | a receipt validated by a key that Trust List `<subject>` vouched for |
 | anything else | a receipt presented under, and validated by, that ledger id |
 
-`TTL:` indirects through *provenance* rather than the ledger id because the ledger id is
+`TTL:` resolves through *provenance* rather than the ledger id because the ledger id is
 self-asserted metadata carried on the receipt, whereas the subject is a property of the
 measured key material that actually validated it. Subjects are recorded per ledger key in the
 measured trust root (`[[ledger]] ttl_subjects`); a key loaded without them satisfies `*` and
