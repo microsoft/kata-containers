@@ -2932,14 +2932,6 @@ impl health_ttrpc::Health for HealthService {
     }
 }
 
-/// FR-1f (trust list): parse `extra_receipts` wire entries of the form `<ledger>=<hex sig>`.
-///
-/// Ledger and signature are carried in one string rather than as parallel lists so the two
-/// cannot be misaligned by a truncated or reordered request — a mismatch would silently
-/// check a signature against the wrong ledger's keys. A malformed entry is rejected rather
-/// than skipped: dropping it would quietly weaken a conjunctive requirement into one the
-/// remaining receipts happen to satisfy.
-#[cfg(feature = "strict-policy")]
 /// F-151: the name of the first signed field the caller tried to describe, if any.
 ///
 /// Every field here is covered by the issuer signature and is derived from the COSE_Sign1
@@ -2970,6 +2962,14 @@ fn caller_described_fragment_field(
     .find_map(|&(name, present)| present.then_some(name))
 }
 
+/// FR-1f (trust list): parse `extra_receipts` wire entries of the form `<ledger>=<hex sig>`.
+///
+/// Ledger and signature are carried in one string rather than as parallel lists so the two
+/// cannot be misaligned by a truncated or reordered request — a mismatch would silently
+/// check a signature against the wrong ledger's keys. A malformed entry is rejected rather
+/// than skipped: dropping it would quietly weaken a conjunctive requirement into one the
+/// remaining receipts happen to satisfy.
+#[cfg(feature = "strict-policy")]
 fn parse_extra_receipts(entries: &[String]) -> ttrpc::Result<Vec<(String, String)>> {
     entries
         .iter()
