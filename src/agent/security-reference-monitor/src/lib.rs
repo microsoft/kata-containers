@@ -64,8 +64,7 @@ pub use resource_graph::{
     ResourceKind, VerifiedResourceHandle,
 };
 pub use scratch::{
-    classify_scratch, dm_target_types, enforce_scratch, ScratchClass, ScratchError,
-    ScratchRequirement,
+    classify_scratch, enforce_scratch, ScratchClass, ScratchError, ScratchRequirement,
 };
 
 /// Host-independent identifier for a single mutating operation (idempotency key).
