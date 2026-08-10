@@ -2640,9 +2640,16 @@ candidate_agrees_on_oci_version if {
 # Each of these three names a security control the guest does not apply anyway, which is
 # why refusing them costs nothing: see docs/cc/guest-security-controls.md.
 
+# The reference has to be bound before it is negated. `not is_null(x)` is true when `x`
+# is *undefined* as well as when it is a profile, so reading through `input.OCI.Linux`
+# directly made this fire on any request whose OCI spec carries no `Linux` section at
+# all -- reporting a seccomp profile the request did not have, ahead of the field that
+# actually failed. Binding first makes the body undefined, and the error absent, unless
+# `Seccomp` is really present.
 errors["Linux.Seccomp: the request carries a seccomp profile, but the policy refuses any seccomp profile from the host. The kata guest applies no seccomp filtering, so set disable_guest_seccomp=true in the runtime configuration"] if {
     input.rule == "CreateContainerRequest"
-    not is_null(input.OCI.Linux.Seccomp)
+    i_seccomp := input.OCI.Linux.Seccomp
+    not is_null(i_seccomp)
 }
 
 errors[msg] if {
