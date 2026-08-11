@@ -2590,6 +2590,20 @@ impl agent_ttrpc::AgentService for AgentService {
             ));
         }
 
+        // `sandbox_id` is host-supplied and is joined into the destination path below.
+        // `do_copy_file` confines writes to the shared directory, but `pathrs` clamps a
+        // leading `..` at the root rather than rejecting it, so without this check a host
+        // could still redirect the write out of its own per-sandbox subdirectory and over
+        // another sandbox's single-file content. The sibling handlers validate every
+        // host-supplied path component the same way.
+        let sandbox_id = Path::new(&req.sandbox_id);
+        if !is_safe_relative_path(sandbox_id) {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                "invalid sandbox_id",
+            ));
+        }
+
         let agent_file_id = Path::new("single-files")
             .join(&req.sandbox_id)
             .join(target_file_name);
