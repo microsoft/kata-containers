@@ -602,6 +602,8 @@ impl ShareFsVolume {
 
                         oci_mount.set_source(Some(PathBuf::from(&guest_path)));
                     }
+
+                    info!(sl!(), "ShareFsVolume: is_file: new mount: {:?}", &oci_mount);
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
                     if is_watchable_volume(&src) {
@@ -611,6 +613,8 @@ impl ShareFsVolume {
                             })
                             .await
                             .context("init watchable volume")?;
+
+                        info!(sl!(), "ShareFsVolume: is_dir: agent_volume_id: {:?}", &init_resp.agent_volume_id);
 
                         sync_watchable_volume_revision(&src, &init_resp.agent_volume_id, &agent)
                             .await
