@@ -153,6 +153,16 @@ pub const MEDIATION_MANIFEST: &[(&str, &str, &str, EnforcementClass)] = &[
     ("AddSwap", "add_swap", "AddSwapRequest", EnforcementClass::PolicyGated),
     ("AddSwapPath", "add_swap_path", "AddSwapPathRequest", EnforcementClass::PolicyGated),
     ("ResizeVolume", "resize_volume", "ResizeVolumeRequest", EnforcementClass::PolicyGated),
+    // Typed host->guest content channel that replaces the destination-path-carrying CopyFile
+    // for the paths the runtime still needs. The guest, not the host, chooses the destination
+    // file name, and every host-supplied path component is validated before use. They are
+    // policy-gated like any other mutating RPC, but note that `rules.rego` currently declares
+    // all four `default := true` with no rule body, so a policy author can only toggle the
+    // whole request on or off — there is no field-level constraint yet (see RM-112).
+    ("CopySingleFile", "copy_single_file", "CopySingleFileRequest", EnforcementClass::PolicyGated),
+    ("InitWatchableVolume", "init_watchable_volume", "InitWatchableVolumeRequest", EnforcementClass::PolicyGated),
+    ("PutVolumeFile", "put_volume_file", "PutVolumeFileRequest", EnforcementClass::PolicyGated),
+    ("CommitVolumeRevision", "commit_volume_revision", "CommitVolumeRevisionRequest", EnforcementClass::PolicyGated),
     // FR-10: strict builds refuse CopyFile outright — the content is not policy-measured
     // and no content-addressed channel exists to replace it. Declared as it behaves, not as
     // it would behave if the deny were absent.
@@ -639,6 +649,22 @@ mod tests {
         sweep!(
             "ResizeVolume",
             svc.resize_volume(&ctx, ag::ResizeVolumeRequest::default())
+        );
+        sweep!(
+            "CopySingleFile",
+            svc.copy_single_file(&ctx, ag::CopySingleFileRequest::default())
+        );
+        sweep!(
+            "InitWatchableVolume",
+            svc.init_watchable_volume(&ctx, ag::InitWatchableVolumeRequest::default())
+        );
+        sweep!(
+            "PutVolumeFile",
+            svc.put_volume_file(&ctx, ag::PutVolumeFileRequest::default())
+        );
+        sweep!(
+            "CommitVolumeRevision",
+            svc.commit_volume_revision(&ctx, ag::CommitVolumeRevisionRequest::default())
         );
         sweep!(
             "StatsContainer",
