@@ -352,7 +352,7 @@ pflashes = []
 # to enable debug output where available.
 #
 # Default false
-enable_debug = false
+enable_debug = true
 
 # This option allows to add an extra HMP or QMP socket when `enable_debug = true`
 #
@@ -510,7 +510,7 @@ template_path = "/run/vc/vm/template"
 [agent.@PROJECT_TYPE@]
 # If enabled, make the agent display debug-level messages.
 # (default: disabled)
-enable_debug = false
+enable_debug = true
 
 # Enable agent tracing.
 #
@@ -544,7 +544,7 @@ kernel_modules = []
 # If enabled, user can connect guest OS running inside hypervisor
 # through "kata-runtime exec <sandbox-id>" command
 
-debug_console_enabled = false
+debug_console_enabled = true
 
 # Agent dial timeout in millisecond.
 # (default: 100)
@@ -585,7 +585,7 @@ cdh_api_timeout_ms = 50000
 # If enabled, the runtime will log additional debug messages to the
 # system log
 # (default: disabled)
-enable_debug = false
+enable_debug = true
 
 #
 # Internetworking model
