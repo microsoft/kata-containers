@@ -575,6 +575,11 @@ pub struct CopySingleFileRequest {
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
+pub struct CopySingleFileResponse {
+    pub agent_file_id: String,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
 pub struct InitWatchableVolumeRequest {
     pub host_volume_id: String,
 }

@@ -73,7 +73,7 @@ service AgentService {
 	rpc MemHotplugByProbe(MemHotplugByProbeRequest) returns (google.protobuf.Empty);
 	rpc SetGuestDateTime(SetGuestDateTimeRequest) returns (google.protobuf.Empty);
 	rpc CopyFile(CopyFileRequest) returns (google.protobuf.Empty);
-	rpc CopySingleFile(CopySingleFileRequest) returns (google.protobuf.Empty);
+	rpc CopySingleFile(CopySingleFileRequest) returns (CopySingleFileResponse);
 	rpc InitWatchableVolume(InitWatchableVolumeRequest) returns (InitWatchableVolumeResponse);
 	rpc PutVolumeFile(PutVolumeFileRequest) returns (google.protobuf.Empty);
 	rpc CommitVolumeRevision(CommitVolumeRevisionRequest) returns (google.protobuf.Empty);
@@ -616,6 +616,10 @@ message CopySingleFileRequest {
 	int64 data_size = 5;
 	bytes data = 6;
 	uint32 file_mode = 7;
+}
+
+message CopySingleFileResponse {
+	string agent_file_id = 1;
 }
 
 message InitWatchableVolumeRequest {

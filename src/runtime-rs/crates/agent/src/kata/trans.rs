@@ -16,7 +16,7 @@ use crate::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
         CommitVolumeRevisionRequest, ContainerID, CopyFileRequest, CopySingleFileRequest,
-        CpuStats, CpuUsage, CreateContainerRequest, CreateSandboxRequest, Device, Empty,
+        CopySingleFileResponse, CpuStats, CpuUsage, CreateContainerRequest, CreateSandboxRequest, Device, Empty,
         ExecProcessRequest, FSGroup, FSGroupChangePolicy, GetIPTablesRequest,
         GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse, HugetlbStats, IPAddress,
         IPFamily, InitWatchableVolumeRequest, InitWatchableVolumeResponse, Interface, Interfaces,
@@ -859,6 +859,14 @@ impl From<CopySingleFileRequest> for agent::CopySingleFileRequest {
             data: from.data,
             file_mode: from.file_mode,
             ..Default::default()
+        }
+    }
+}
+
+impl From<agent::CopySingleFileResponse> for CopySingleFileResponse {
+    fn from(from: agent::CopySingleFileResponse) -> Self {
+        Self {
+            agent_file_id: from.agent_file_id,
         }
     }
 }

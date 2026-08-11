@@ -11,6 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
+use std::collections::HashMap;
 use std::convert::TryFrom;
 #[cfg(feature = "agent-policy")]
 use std::convert::TryInto as _;
@@ -18,6 +19,7 @@ use std::ffi::{CString, OsStr};
 use std::fmt::Debug;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
+use std::path::Component;
 use std::path::Path;
 #[cfg(target_arch = "s390x")]
 use std::str::FromStr;
@@ -37,10 +39,12 @@ use pathrs::flags::OpenFlags;
 use protobuf::MessageDyn;
 use protobuf::MessageField;
 use protocols::agent::{
-    AddSwapPathRequest, AddSwapRequest, AgentDetails, CopyFileRequest, GetIPTablesRequest,
-    GetIPTablesResponse, GuestDetailsResponse, Interfaces, Metrics, OOMEvent, ReadStreamResponse,
-    ResizeVolumeRequest, Routes, SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse,
-    VolumeStatsRequest, WaitProcessResponse, WriteStreamResponse,
+    AddSwapPathRequest, AddSwapRequest, AgentDetails, CommitVolumeRevisionRequest, CopyFileRequest,
+    CopySingleFileRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
+    InitWatchableVolumeRequest, InitWatchableVolumeResponse, Interfaces, Metrics, OOMEvent,
+    PutVolumeFileRequest, ReadStreamResponse, ResizeVolumeRequest, Routes, SetIPTablesRequest,
+    SetIPTablesResponse, SingleFileType, StatsContainerResponse, VolumeStatsRequest,
+    WaitProcessResponse, WriteStreamResponse,
 };
 use protocols::csi::{
     volume_usage::Unit as VolumeUsage_Unit, VolumeCondition, VolumeStatsResponse, VolumeUsage,
@@ -113,12 +117,15 @@ use libc::{self, c_char, c_ushort, pid_t, winsize, TIOCSWINSZ};
 use std::fs;
 use std::os::unix::prelude::PermissionsExt;
 use std::process::{Command, Stdio};
+use std::time::SystemTime;
 
+use lazy_static::lazy_static;
 use nix::unistd::{Gid, Uid};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
+use std::sync::Mutex as StdMutex;
 
 #[cfg(feature = "devicemapper")]
 use kata_types::dmverity::cleanup_dmverity_devices;
@@ -138,6 +145,8 @@ const IP6TABLES_SAVE: &str = "/sbin/ip6tables-save";
 const USR_IP6TABLES_RESTORE: &str = "/usr/sbin/ip6tables-save";
 const IP6TABLES_RESTORE: &str = "/sbin/ip6tables-restore";
 const KATA_GUEST_SHARE_DIR: &str = "/run/kata-containers/shared/containers/";
+const KATA_GUEST_WATCHABLE_VOLUMES_DIR: &str =
+    "/run/kata-containers/shared/containers/watchable-volumes";
 
 /// This mask is applied to parent directories implicitly created for CopyFile requests.
 const IMPLICIT_DIRECTORY_PERMISSION_MASK: u32 = 0o777;
@@ -157,6 +166,23 @@ const ERR_NO_SANDBOX_PIDNS: &str = "Sandbox does not have sandbox_pidns";
 // filesystem lock. Based on this, 5 seconds seems a resonable timeout period in case the lock is
 // not available.
 const IPTABLES_RESTORE_WAIT_SEC: u64 = 5;
+
+#[derive(Clone, Debug, Default)]
+struct WatchableVolumeState {
+    current_revision: Option<String>,
+    pending_revision: Option<String>,
+}
+
+lazy_static! {
+    static ref WATCHABLE_VOLUMES: StdMutex<HashMap<String, WatchableVolumeState>> =
+        StdMutex::new(HashMap::new());
+}
+
+#[cfg(test)]
+lazy_static! {
+    static ref TEST_GUEST_SHARE_DIR: StdMutex<Option<PathBuf>> = StdMutex::new(None);
+    static ref TEST_WATCHABLE_VOLUMES_DIR: StdMutex<Option<PathBuf>> = StdMutex::new(None);
+}
 
 // Convenience function to obtain the scope logger.
 fn sl() -> slog::Logger {
@@ -375,6 +401,8 @@ impl AgentService {
         cdh_handler_sealed_secrets(&mut oci)
             .await
             .map_err(|e| anyhow!("failed to handle sealed secrets: {}", e))?;
+
+        translate_bind_safer_path_mounts(&mut oci)?;
 
         let mut s = self.sandbox.lock().await;
         s.container_mounts.insert(cid.clone(), m);
@@ -2534,6 +2562,234 @@ impl agent_ttrpc::AgentService for AgentService {
         ))
     }
 
+    async fn copy_single_file(
+        &self,
+        ctx: &TtrpcContext,
+        req: CopySingleFileRequest,
+    ) -> ttrpc::Result<protocols::agent::CopySingleFileResponse> {
+        trace_rpc_call!(ctx, "copy_single_file", req);
+        is_allowed(&req).await?;
+
+        let target_file_name = match req.file_type.enum_value_or_default() {
+            SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => "resolv.conf",
+            SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => "hosts",
+            SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => "hostname",
+            _ => {
+                return Err(ttrpc_error(
+                    ttrpc::Code::INVALID_ARGUMENT,
+                    "invalid single file type",
+                ));
+            }
+        };
+
+        if req.data_size != req.data.len() as i64 {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                "data_size mismatch",
+            ));
+        }
+
+        let agent_file_id = Path::new("single-files").join(&req.sandbox_id).join(target_file_name);
+        let target_path = guest_share_dir_path().join(&agent_file_id);
+        let copy_req = CopyFileRequest {
+            path: target_path.to_string_lossy().to_string(),
+            file_size: req.data_size,
+            file_mode: req.file_mode,
+            dir_mode: 0o755,
+            uid: req.uid,
+            gid: req.gid,
+            offset: 0,
+            data: req.data,
+            ..Default::default()
+        };
+
+        do_copy_file(&copy_req, &guest_share_dir_path())
+            .map_ttrpc_err(|e| format!("copy_single_file failed: {e:?}"))?;
+
+        let mut resp = protocols::agent::CopySingleFileResponse::new();
+        resp.agent_file_id = agent_file_id.to_string_lossy().to_string();
+        Ok(resp)
+    }
+
+    async fn init_watchable_volume(
+        &self,
+        ctx: &TtrpcContext,
+        req: InitWatchableVolumeRequest,
+    ) -> ttrpc::Result<InitWatchableVolumeResponse> {
+        trace_rpc_call!(ctx, "init_watchable_volume", req);
+        is_allowed(&req).await?;
+
+        let agent_volume_id = format!(
+            "watchable-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_ttrpc_err(same)?
+                .as_nanos()
+        );
+        let root = watchable_root_path(&agent_volume_id).map_ttrpc_err(same)?;
+        std::fs::create_dir_all(&root).map_ttrpc_err(same)?;
+
+        WATCHABLE_VOLUMES
+            .lock()
+            .map_ttrpc_err(|_| "failed to lock watchable volume map")?
+            .insert(agent_volume_id.clone(), WatchableVolumeState::default());
+
+        let mut resp = InitWatchableVolumeResponse::new();
+        resp.agent_volume_id = agent_volume_id;
+        Ok(resp)
+    }
+
+    async fn put_volume_file(
+        &self,
+        ctx: &TtrpcContext,
+        req: PutVolumeFileRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "put_volume_file", req);
+        is_allowed(&req).await?;
+
+        if req.revision.is_empty() {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                "revision cannot be empty",
+            ));
+        }
+
+        if req.file_size != req.data.len() as i64 {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                "file_size mismatch",
+            ));
+        }
+
+        let file_name = Path::new(&req.file_name);
+        if !is_safe_relative_path(file_name) {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                "invalid file_name",
+            ));
+        }
+
+        let revision = Path::new(&req.revision);
+        if !is_safe_relative_path(revision) {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                "invalid revision",
+            ));
+        }
+
+        {
+            let mut map = WATCHABLE_VOLUMES
+                .lock()
+                .map_ttrpc_err(|_| "failed to lock watchable volume map")?;
+            let state = map
+                .get_mut(&req.agent_volume_id)
+                .map_ttrpc_err(ttrpc::Code::NOT_FOUND, "unknown agent_volume_id")?;
+            if let Some(existing) = &state.pending_revision {
+                if existing != &req.revision {
+                    return Err(ttrpc_error(
+                        ttrpc::Code::INVALID_ARGUMENT,
+                        "mixed revisions for one pending watchable volume update",
+                    ));
+                }
+            } else {
+                state.pending_revision = Some(req.revision.clone());
+            }
+        }
+
+        let volume_root = watchable_root_path(&req.agent_volume_id).map_ttrpc_err(same)?;
+        std::fs::create_dir_all(&volume_root).map_ttrpc_err(same)?;
+
+        let revision_root = volume_root.join(revision);
+        create_watchable_directory(&revision_root, req.dir_mode, req.uid, req.gid)
+            .map_ttrpc_err(same)?;
+
+        let target_file = revision_root.join(file_name);
+        let copy_file_req = CopyFileRequest {
+            path: target_file.to_string_lossy().to_string(),
+            file_size: req.file_size,
+            file_mode: req.file_mode,
+            dir_mode: req.dir_mode,
+            uid: req.uid,
+            gid: req.gid,
+            offset: req.offset,
+            data: req.data,
+            ..Default::default()
+        };
+        do_copy_file(&copy_file_req, &guest_share_dir_path()).map_ttrpc_err(same)?;
+
+        let root_link = volume_root.join(file_name);
+        let link_target = Path::new("data")
+            .join(file_name)
+            .to_string_lossy()
+            .into_owned();
+        let link_req = CopyFileRequest {
+            path: root_link.to_string_lossy().to_string(),
+            file_size: link_target.len() as i64,
+            file_mode: stat::SFlag::S_IFLNK.bits(),
+            dir_mode: req.dir_mode,
+            uid: req.uid,
+            gid: req.gid,
+            offset: 0,
+            data: link_target.into_bytes(),
+            ..Default::default()
+        };
+        do_copy_file(&link_req, &guest_share_dir_path()).map_ttrpc_err(same)?;
+
+        Ok(Empty::new())
+    }
+
+    async fn commit_volume_revision(
+        &self,
+        ctx: &TtrpcContext,
+        req: CommitVolumeRevisionRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "commit_volume_revision", req);
+        is_allowed(&req).await?;
+
+        let volume_root = watchable_root_path(&req.agent_volume_id).map_ttrpc_err(same)?;
+
+        let (pending_revision, previous_revision) = {
+            let mut map = WATCHABLE_VOLUMES
+                .lock()
+                .map_ttrpc_err(|_| "failed to lock watchable volume map")?;
+            let state = map
+                .get_mut(&req.agent_volume_id)
+                .map_ttrpc_err(ttrpc::Code::NOT_FOUND, "unknown agent_volume_id")?;
+            let Some(pending) = state.pending_revision.clone() else {
+                return Ok(Empty::new());
+            };
+            let previous = state.current_revision.clone();
+            state.current_revision = Some(pending.clone());
+            state.pending_revision = None;
+            (pending, previous)
+        };
+
+        let data_link = volume_root.join("data");
+        let data_req = CopyFileRequest {
+            path: data_link.to_string_lossy().to_string(),
+            file_size: pending_revision.len() as i64,
+            file_mode: stat::SFlag::S_IFLNK.bits(),
+            dir_mode: 0o750,
+            uid: unistd::getuid().as_raw() as i32,
+            gid: unistd::getgid().as_raw() as i32,
+            offset: 0,
+            data: pending_revision.clone().into_bytes(),
+            ..Default::default()
+        };
+        do_copy_file(&data_req, &guest_share_dir_path()).map_ttrpc_err(same)?;
+
+        if req.garbage_collect_previous {
+            if let Some(prev) = previous_revision {
+                if prev != pending_revision {
+                    let old_revision_path = volume_root.join(prev);
+                    let _ = std::fs::remove_dir_all(old_revision_path);
+                }
+            }
+        }
+
+        Ok(Empty::new())
+    }
+
     async fn get_metrics(
         &self,
         ctx: &TtrpcContext,
@@ -3599,6 +3855,94 @@ fn do_set_guest_date_time(sec: i64, usec: i64) -> Result<()> {
     Ok(())
 }
 
+fn is_safe_relative_path(path: &Path) -> bool {
+    !path.is_absolute() && path.components().all(|c| matches!(c, Component::Normal(_)))
+}
+
+fn guest_share_dir_path() -> PathBuf {
+    #[cfg(test)]
+    {
+        if let Some(path) = TEST_GUEST_SHARE_DIR.lock().unwrap().clone() {
+            return path;
+        }
+    }
+
+    PathBuf::from(KATA_GUEST_SHARE_DIR)
+}
+
+fn watchable_volumes_dir_path() -> PathBuf {
+    #[cfg(test)]
+    {
+        if let Some(path) = TEST_WATCHABLE_VOLUMES_DIR.lock().unwrap().clone() {
+            return path;
+        }
+    }
+
+    PathBuf::from(KATA_GUEST_WATCHABLE_VOLUMES_DIR)
+}
+
+fn watchable_root_path(agent_volume_id: &str) -> Result<PathBuf> {
+    let id_path = Path::new(agent_volume_id);
+    if !is_safe_relative_path(id_path) {
+        return Err(anyhow!("invalid agent_volume_id: {agent_volume_id}"));
+    }
+
+    Ok(watchable_volumes_dir_path().join(id_path))
+}
+
+fn create_watchable_directory(path: &Path, mode: u32, uid: i32, gid: i32) -> Result<()> {
+    let req = CopyFileRequest {
+        path: path.to_string_lossy().to_string(),
+        file_size: 0,
+        file_mode: stat::SFlag::S_IFDIR.bits() | mode,
+        dir_mode: mode,
+        uid,
+        gid,
+        offset: 0,
+        data: vec![],
+        ..Default::default()
+    };
+    do_copy_file(&req, &guest_share_dir_path())
+}
+
+fn translate_bind_safer_path_mounts(oci: &mut Spec) -> Result<()> {
+    let Some(mounts) = oci.mounts_mut().as_mut() else {
+        return Ok(());
+    };
+
+    for mount in mounts.iter_mut() {
+        if mount.typ().as_deref() != Some("bind-safer-path") {
+            continue;
+        }
+
+        let source = mount
+            .source()
+            .as_ref()
+            .ok_or_else(|| anyhow!("bind-safer-path mount missing source"))?;
+        if source.is_absolute() {
+            return Err(anyhow!("bind-safer-path source must be relative: {source:?}"));
+        }
+
+        let translated = if source
+            .components()
+            .next()
+            .is_some_and(|c| c == Component::Normal(OsStr::new("single-files")))
+        {
+            guest_share_dir_path().join(source)
+        } else {
+            let source_id = source
+                .to_str()
+                .ok_or_else(|| anyhow!("bind-safer-path source is not valid UTF-8: {source:?}"))?;
+            watchable_root_path(source_id)?
+        };
+
+        mount.set_typ(Some("bind".to_string()));
+        mount.set_source(Some(translated));
+    }
+
+    Ok(())
+}
+
 /// do_copy_file creates a file, directory or symlink beneath the provided directory.
 ///
 /// The function guarantees that no content is written outside of the directory. However, a symlink
@@ -4221,6 +4565,250 @@ mod tests {
             metadata: std::collections::HashMap::new(),
             timeout_nano: 0,
         }
+    }
+
+    fn setup_watchable_rpc_test() -> TempDir {
+        let temp_dir = tempdir().unwrap();
+        let share_dir = temp_dir.path().join("share");
+        let watchable_dir = share_dir.join("watchable-volumes");
+        fs::create_dir_all(&watchable_dir).unwrap();
+
+        *TEST_GUEST_SHARE_DIR.lock().unwrap() = Some(share_dir);
+        *TEST_WATCHABLE_VOLUMES_DIR.lock().unwrap() = Some(watchable_dir);
+        WATCHABLE_VOLUMES.lock().unwrap().clear();
+
+        temp_dir
+    }
+
+    fn test_agent_service() -> Box<AgentService> {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Sandbox::new(&logger).unwrap();
+        Box::new(AgentService {
+            sandbox: Arc::new(Mutex::new(sandbox)),
+            init_mode: true,
+            oma: None,
+        })
+    }
+
+    async fn init_test_watchable_volume(agent_service: &AgentService) -> String {
+        agent_service
+            .init_watchable_volume(
+                &mk_ttrpc_context(),
+                InitWatchableVolumeRequest {
+                    host_volume_id: "host-volume".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .agent_volume_id
+    }
+
+    fn put_volume_file_request(
+        agent_volume_id: &str,
+        file_name: &str,
+        revision: &str,
+        data: &[u8],
+    ) -> PutVolumeFileRequest {
+        PutVolumeFileRequest {
+            agent_volume_id: agent_volume_id.to_string(),
+            file_name: file_name.to_string(),
+            file_size: data.len() as i64,
+            file_mode: 0o644 | libc::S_IFREG as u32,
+            uid: unistd::getuid().as_raw() as i32,
+            gid: unistd::getgid().as_raw() as i32,
+            offset: 0,
+            data: data.to_vec(),
+            revision: revision.to_string(),
+            dir_mode: 0o750,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_put_volume_file_rejects_invalid_paths() {
+        let _temp_dir = setup_watchable_rpc_test();
+        let agent_service = test_agent_service();
+        let agent_volume_id = init_test_watchable_volume(&agent_service).await;
+        let ctx = mk_ttrpc_context();
+
+        let invalid_file = put_volume_file_request(&agent_volume_id, "../token", "rev1", b"token");
+        assert!(agent_service
+            .put_volume_file(&ctx, invalid_file)
+            .await
+            .is_err());
+
+        let invalid_revision =
+            put_volume_file_request(&agent_volume_id, "token", "../rev1", b"token");
+        assert!(agent_service
+            .put_volume_file(&ctx, invalid_revision)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_copy_single_file_writes_to_shared_dir() {
+        let temp_dir = setup_watchable_rpc_test();
+        let agent_service = test_agent_service();
+        let ctx = mk_ttrpc_context();
+        let data = b"nameserver 1.1.1.1".to_vec();
+
+        let resp = agent_service
+            .copy_single_file(
+                &ctx,
+                CopySingleFileRequest {
+                    sandbox_id: "sandbox-id".to_string(),
+                    file_type: protobuf::EnumOrUnknown::new(
+                        SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF,
+                    ),
+                    uid: unistd::getuid().as_raw() as i32,
+                    gid: unistd::getgid().as_raw() as i32,
+                    data_size: data.len() as i64,
+                    data,
+                    file_mode: 0o644 | libc::S_IFREG as u32,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.agent_file_id, "single-files/sandbox-id/resolv.conf");
+        assert_eq!(
+            fs::read_to_string(temp_dir.path().join("share").join(resp.agent_file_id)).unwrap(),
+            "nameserver 1.1.1.1"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_translate_bind_safer_path_mounts() {
+        let temp_dir = setup_watchable_rpc_test();
+        let share_dir = temp_dir.path().join("share");
+
+        let mut single_file_mount = oci::Mount::default();
+        single_file_mount.set_destination(PathBuf::from("/etc/resolv.conf"));
+        single_file_mount.set_typ(Some("bind-safer-path".to_string()));
+        single_file_mount.set_source(Some(PathBuf::from("single-files/sandbox-id/resolv.conf")));
+
+        let mut watchable_mount = oci::Mount::default();
+        watchable_mount.set_destination(PathBuf::from("/var/run/secrets/kubernetes.io/serviceaccount"));
+        watchable_mount.set_typ(Some("bind-safer-path".to_string()));
+        watchable_mount.set_source(Some(PathBuf::from("watchable-volume-id")));
+
+        let mut spec = Spec::default();
+        spec.set_mounts(Some(vec![single_file_mount, watchable_mount]));
+
+        translate_bind_safer_path_mounts(&mut spec).unwrap();
+        let mounts = spec.mounts().as_ref().unwrap();
+
+        assert_eq!(mounts[0].typ().as_deref(), Some("bind"));
+        assert_eq!(
+            mounts[0].source().as_ref().unwrap(),
+            &share_dir.join("single-files/sandbox-id/resolv.conf")
+        );
+
+        assert_eq!(mounts[1].typ().as_deref(), Some("bind"));
+        assert_eq!(
+            mounts[1].source().as_ref().unwrap(),
+            &share_dir.join("watchable-volumes/watchable-volume-id")
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_put_volume_file_rejects_mixed_pending_revisions() {
+        let _temp_dir = setup_watchable_rpc_test();
+        let agent_service = test_agent_service();
+        let agent_volume_id = init_test_watchable_volume(&agent_service).await;
+        let ctx = mk_ttrpc_context();
+
+        let first = put_volume_file_request(&agent_volume_id, "token", "rev1", b"token");
+        agent_service.put_volume_file(&ctx, first).await.unwrap();
+
+        let second = put_volume_file_request(&agent_volume_id, "ca.crt", "rev2", b"crt");
+        assert!(agent_service.put_volume_file(&ctx, second).await.is_err());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_commit_volume_revision_without_pending_revision_is_noop() {
+        let _temp_dir = setup_watchable_rpc_test();
+        let agent_service = test_agent_service();
+        let agent_volume_id = init_test_watchable_volume(&agent_service).await;
+        let ctx = mk_ttrpc_context();
+
+        let req = CommitVolumeRevisionRequest {
+            agent_volume_id,
+            garbage_collect_previous: true,
+            ..Default::default()
+        };
+        agent_service
+            .commit_volume_revision(&ctx, req)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_commit_volume_revision_switches_data_symlink_and_gc() {
+        let _temp_dir = setup_watchable_rpc_test();
+        let agent_service = test_agent_service();
+        let agent_volume_id = init_test_watchable_volume(&agent_service).await;
+        let ctx = mk_ttrpc_context();
+        let volume_root = watchable_root_path(&agent_volume_id).unwrap();
+
+        let first = put_volume_file_request(&agent_volume_id, "token", "rev1", b"one");
+        agent_service.put_volume_file(&ctx, first).await.unwrap();
+        agent_service
+            .commit_volume_revision(
+                &ctx,
+                CommitVolumeRevisionRequest {
+                    agent_volume_id: agent_volume_id.clone(),
+                    garbage_collect_previous: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            fs::read_link(volume_root.join("token")).unwrap(),
+            PathBuf::from("data/token")
+        );
+        assert_eq!(
+            fs::read_link(volume_root.join("data")).unwrap(),
+            PathBuf::from("rev1")
+        );
+        assert_eq!(
+            fs::read_to_string(volume_root.join("rev1/token")).unwrap(),
+            "one"
+        );
+
+        let second = put_volume_file_request(&agent_volume_id, "token", "rev2", b"two");
+        agent_service.put_volume_file(&ctx, second).await.unwrap();
+        agent_service
+            .commit_volume_revision(
+                &ctx,
+                CommitVolumeRevisionRequest {
+                    agent_volume_id: agent_volume_id.clone(),
+                    garbage_collect_previous: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            fs::read_link(volume_root.join("data")).unwrap(),
+            PathBuf::from("rev2")
+        );
+        assert_eq!(
+            fs::read_to_string(volume_root.join("rev2/token")).unwrap(),
+            "two"
+        );
+        assert!(!volume_root.join("rev1").exists());
     }
 
     fn create_dummy_opts() -> CreateOpts {
