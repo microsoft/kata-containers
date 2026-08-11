@@ -10,7 +10,7 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
 use anyhow::{bail, Error, Result};
-use protocols::agent::CopyFileRequest;
+use protocols::agent::{CopyFileRequest, CopySingleFileRequest};
 use regorus::PolicyLengthConfig;
 use slog::{debug, error, info, warn};
 use tokio::io::AsyncWriteExt;
@@ -345,6 +345,31 @@ impl std::convert::TryFrom<&CopyFileRequest> for PolicyCopyFileRequest {
     }
 }
 
+/// PolicyCopySingleFileRequest omits the potentially large data field from CopySingleFileRequest.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct PolicyCopySingleFileRequest {
+    pub sandbox_id: String,
+    pub file_type: i32,
+    pub uid: i32,
+    pub gid: i32,
+    pub data_size: i64,
+    pub file_mode: u32,
+}
+
+impl From<&CopySingleFileRequest> for PolicyCopySingleFileRequest {
+    fn from(req: &CopySingleFileRequest) -> Self {
+        Self {
+            sandbox_id: req.sandbox_id.clone(),
+            file_type: req.file_type.value(),
+            uid: req.uid,
+            gid: req.gid,
+            data_size: req.data_size,
+            file_mode: req.file_mode,
+        }
+    }
+}
+
 #[cfg(test)]
 // libc::S_IF* constants are u16 on Darwin/BSD and u32 on Linux, and the test
 // cases below cast them to u32 to match the file_mode field type. The cast is
@@ -490,5 +515,35 @@ mod tests {
                 )
             }
         }
+    }
+
+    #[test]
+    fn test_copy_single_file_translation_omits_data() {
+        let input = CopySingleFileRequest {
+            sandbox_id: "sandbox-id".to_owned(),
+            file_type: protocols::agent::SingleFileType::SINGLE_FILE_TYPE_TERMINATION_LOG.into(),
+            uid: 1000,
+            gid: 1001,
+            data_size: 3,
+            data: vec![1, 2, 3],
+            file_mode: 0o640,
+            ..Default::default()
+        };
+
+        let output = PolicyCopySingleFileRequest::from(&input);
+        assert_eq!(
+            output,
+            PolicyCopySingleFileRequest {
+                sandbox_id: "sandbox-id".to_owned(),
+                file_type: 4,
+                uid: 1000,
+                gid: 1001,
+                data_size: 3,
+                file_mode: 0o640,
+            }
+        );
+
+        let serialized = serde_json::to_value(output).unwrap();
+        assert!(serialized.get("data").is_none());
     }
 }

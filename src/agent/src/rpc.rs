@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 #[cfg(feature = "agent-policy")]
-use kata_agent_policy::policy::PolicyCopyFileRequest;
+use kata_agent_policy::policy::{PolicyCopyFileRequest, PolicyCopySingleFileRequest};
 use pathrs::flags::OpenFlags;
 use rustjail::{pipestream::PipeStream, process::StreamType};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
@@ -1729,6 +1729,12 @@ impl agent_ttrpc::AgentService for AgentService {
         req: CopySingleFileRequest,
     ) -> ttrpc::Result<protocols::agent::CopySingleFileResponse> {
         trace_rpc_call!(ctx, "copy_single_file", req);
+        #[cfg(feature = "agent-policy")]
+        {
+            let req_for_policy = PolicyCopySingleFileRequest::from(&req);
+            is_allowed_with_entrypoint(req.descriptor_dyn().name(), &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
         is_allowed(&req).await?;
 
         if stat::SFlag::from_bits_truncate(req.file_mode) != stat::SFlag::S_IFREG {

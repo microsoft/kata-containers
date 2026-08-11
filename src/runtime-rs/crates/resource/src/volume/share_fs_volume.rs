@@ -504,6 +504,8 @@ impl ShareFsVolume {
         sid: &str,
         agent: &Arc<dyn Agent>,
     ) -> Result<String> {
+        info!(sl!(), "ShareFsVolume: single file: src = {:?}", src);
+
         let file_metadata = regular_file_metadata(src)?;
 
         let mut file = File::open(src).with_context(|| format!("Failed to open file: {src:?}"))?;
@@ -614,6 +616,8 @@ impl ShareFsVolume {
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
                     if is_watchable_volume(&src) {
+                        info!(sl!(), "ShareFsVolume: watchable_volume: src = {:?}", src);
+
                         let init_resp = agent
                             .init_watchable_volume(InitWatchableVolumeRequest {
                                 host_volume_id: src.to_string_lossy().to_string(),
