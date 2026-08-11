@@ -54,7 +54,38 @@ typeset url_check_timeout_secs="${url_check_timeout_secs:-60}"
 # number of attempts that will be made to check an individual URL.
 typeset url_check_max_tries="${url_check_max_tries:-3}"
 
+# number of attempts that will be made to download a tool from the network.
+typeset tool_download_max_tries="${tool_download_max_tries:-3}"
+
 typeset -A long_options
+
+# Run a command, retrying it if it fails.
+#
+# Tool downloads reach out to the network and occasionally fail for reasons
+# that have nothing to do with the change under test, so give them a few
+# attempts before failing the whole run.
+#
+# $1 : Human readable description of what is being attempted.
+# $@ : The command to run.
+retry_on_failure()
+{
+	local what="${1}"
+	shift
+
+	local attempt
+	for ((attempt = 1; attempt <= tool_download_max_tries; attempt++))
+	do
+		"${@}" && return 0
+
+		if [[ "${attempt}" -eq "${tool_download_max_tries}" ]]
+		then
+			die "${what} failed after ${tool_download_max_tries} attempts"
+		fi
+
+		warn "${what} failed (attempt ${attempt}/${tool_download_max_tries}), retrying"
+		sleep $((attempt * 5))
+	done
+}
 
 # Generated code
 ignore_clh_generated_code="virtcontainers/pkg/cloud-hypervisor/client"
@@ -245,6 +276,24 @@ need_chronic() {
 }
 
 
+# Install golangci-lint.
+#
+# The installer is fetched from the tag matching the requested version rather
+# than from the default branch, so that the script that runs is pinned to the
+# same version as the binary it installs.
+#
+# $1 : golangci-lint version, without a leading "v".
+# $2 : Directory to install the binary into.
+install_golangci_lint()
+{
+	local version="${1}"
+	local bindir="${2}"
+
+	curl -sSfL "https://raw.githubusercontent.com/golangci/golangci-lint/v${version}/install.sh" |
+		sh -s -- -b "${bindir}" "v${version}"
+}
+
+
 static_check_go_arch_specific()
 {
 	local go_packages
@@ -292,8 +341,8 @@ static_check_go_arch_specific()
 		linter_version=$(get_test_version "languages.golangci-lint.version")
 
 		info "Forcing ${linter} version ${linter_version}"
-		# shellcheck disable=SC2046
-		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(go env GOPATH)/bin" "v${linter_version}"
+		retry_on_failure "${linter} ${linter_version} install" \
+			install_golangci_lint "${linter_version}" "$(go env GOPATH)/bin"
 		command -v "${linter}" &>/dev/null || \
 			die "${linter} command not found. Ensure that \"\$GOPATH/bin\" is in your \$PATH."
 	fi
@@ -950,8 +999,8 @@ has_hadolint_or_install()
 		local download_url="${linter_url}/releases/download/v${linter_version}/hadolint-Linux-x86_64"
 		info "Installing ${linter_cmd} ${linter_version} at ${linter_dest}"
 
-		curl -sfL "${download_url}" -o "${linter_dest}" || \
-			die "Failed to download ${download_url}"
+		retry_on_failure "${linter_cmd} ${linter_version} download" \
+			curl -sfL "${download_url}" -o "${linter_dest}"
 		chmod +x "${linter_dest}"
 
 		# Overwrite in case it cannot be found in PATH.
