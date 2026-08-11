@@ -459,6 +459,7 @@ impl ShareFsVolume {
         m: &oci::Mount,
         cid: &str,
         readonly: bool,
+        copy_other_directories: bool,
         agent: Arc<dyn Agent>,
         volume_manager: Arc<VolumeManager>,
     ) -> Result<Self> {
@@ -525,7 +526,8 @@ impl ShareFsVolume {
                 } else if src.is_dir() {
                     // We allow directory copying wildly
                     // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
-                    let volume_type = if is_watchable_volume(&src) {
+                    let watchable_volume = is_watchable_volume(&src);
+                    let volume_type = if watchable_volume {
                         agent::VolumeSourceType::AtomicK8s
                     } else {
                         agent::VolumeSourceType::EmptyDir
@@ -546,7 +548,9 @@ impl ShareFsVolume {
                         .await
                         .context("get or create volume")?;
 
-                    if is_new {
+                    if is_new
+                        && should_copy_directory_to_guest(watchable_volume, copy_other_directories)
+                    {
                         info!(
                             sl!(),
                             "fsshare: new directory {:?} to managed volume {}",
@@ -558,10 +562,16 @@ impl ShareFsVolume {
                             &src,
                             &agent_volume_id,
                             &agent,
-                            is_watchable_volume(&src),
+                            watchable_volume,
                         )
                         .await
                         .context("copy directory to guest")?;
+                    } else if is_new {
+                        info!(
+                            sl!(),
+                            "skip copying contents for non-watchable directory {:?}: copy_volumes does not contain other-directories",
+                            &src
+                        );
                     }
 
                     oci_mount.set_source(Some(PathBuf::from(&agent_volume_id)));
@@ -569,7 +579,7 @@ impl ShareFsVolume {
 
                     // Start monitoring (only for watchable volumes)
                     let mut monitor_task = None;
-                    if is_new && is_watchable_volume(&src) {
+                    if is_new && watchable_volume {
                         let watcher = FsWatcher::new(&src).await?;
                         let handle = watcher
                             .start_monitor(agent.clone(), src.clone(), agent_volume_id.clone())
@@ -1106,6 +1116,10 @@ pub(crate) fn is_watchable_volume(source_path: &PathBuf) -> bool {
         || is_configmap(source_path)
 }
 
+fn should_copy_directory_to_guest(watchable_volume: bool, copy_other_directories: bool) -> bool {
+    watchable_volume || copy_other_directories
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1153,5 +1167,12 @@ mod test {
         assert!(is_watchable_volume(&secret_path));
         assert!(is_watchable_volume(&projected_path));
         assert!(is_watchable_volume(&downward_api_path));
+    }
+
+    #[test]
+    fn test_should_copy_directory_to_guest() {
+        assert!(should_copy_directory_to_guest(true, false));
+        assert!(should_copy_directory_to_guest(false, true));
+        assert!(!should_copy_directory_to_guest(false, false));
     }
 }
