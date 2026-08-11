@@ -155,6 +155,7 @@ impl VolumeResource {
                         share_fs,
                         m,
                         cid,
+                        ctx.sid,
                         read_only,
                         ctx.agent.clone(),
                         self.volume_manager.clone(),

@@ -56,6 +56,11 @@ default VolumeStatsRequest := false
 default WaitProcessRequest := false
 default WriteStreamRequest := false
 
+default CopySingleFileRequest := true
+default InitWatchableVolumeRequest := true
+default PutVolumeFileRequest := true
+default CommitVolumeRevisionRequest := true
+
 # Intentionally-allowed infrastructure / sandbox-lifecycle endpoints (reviewed, not an
 # unexamined gap). The endpoints below keep `:= true` above by design: they are part of
 # the trusted, host-driven sandbox lifecycle and carry no attacker-constrainable,
@@ -1378,7 +1383,6 @@ check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
 
     print("check_mount 3: true")
 }
-
 check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
     # Unified cgroup v2 mounts on newer kernels may add flags genpolicy does not
     # embed (e.g. nsdelegate, memory_recursiveprot). Allow extras listed in
@@ -1404,6 +1408,18 @@ check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
     mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id)
 
     print("check_mount 4: true")
+}
+check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
+    print("check_mount 5: i_mount.type_ = ", i_mount.type_)
+
+    p_mount.destination == i_mount.destination
+    i_mount.type_ == "bind-safer-path"
+    p_mount.type_ == "bind"
+    p_mount.options == i_mount.options
+
+    mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id)
+
+    print("check_mount 5: true")
 }
 
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
@@ -1437,6 +1453,12 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
     regex.match(regex4, i_mount.source)
 
     print("mount_source_allows 2: true")
+}
+mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
+    i_mount.type_ == "bind-safer-path"
+    p_mount.type_ == "bind"
+
+    print("mount_source_allows 3: true")
 }
 
 # FR-1o: a mount a signed fragment contributes, within a ceiling the measured base policy

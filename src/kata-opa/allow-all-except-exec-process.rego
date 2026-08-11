@@ -43,4 +43,9 @@ default UpdateRoutesRequest := true
 default WaitProcessRequest := true
 default WriteStreamRequest := true
 
+default CopySingleFileRequest := true
+default InitWatchableVolumeRequest := true
+default PutVolumeFileRequest := true
+default CommitVolumeRevisionRequest := true
+
 default ExecProcessRequest := false
