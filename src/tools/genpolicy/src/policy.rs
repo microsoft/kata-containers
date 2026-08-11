@@ -591,6 +591,52 @@ fn default_signal_process_request() -> SignalProcessRequestDefaults {
     }
 }
 
+/// Settings for CopySingleFileRequest.
+#[allow(non_snake_case)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CopySingleFileRequestDefaults {
+    /// Which of the guest's well-known files the Host may supply. Valid entries are
+    /// "ResolvConf", "EtcHosts", "Hostname" and "TerminationLog"; anything else never
+    /// matches, because the agent maps unrecognized wire values onto "Unknown".
+    ///
+    /// Each of these files is bind-mounted into the container, so this list is the
+    /// security-relevant setting: it is the only thing that decides which guest file the
+    /// Host is permitted to author.
+    pub allowed_file_types: Vec<String>,
+
+    /// Upper bound on the size of a single file supplied by the Host.
+    pub max_file_size: i64,
+}
+
+/// Settings for PutVolumeFileRequest.
+#[allow(non_snake_case)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PutVolumeFileRequestDefaults {
+    /// Upper bound on the size of a file written into a watchable volume. Kubernetes caps
+    /// ConfigMaps and Secrets at 1 MiB, so anything larger is not a legitimate projection.
+    pub max_file_size: i64,
+}
+
+fn default_copy_single_file_request() -> CopySingleFileRequestDefaults {
+    CopySingleFileRequestDefaults {
+        allowed_file_types: vec![
+            "ResolvConf".to_string(),
+            "EtcHosts".to_string(),
+            "Hostname".to_string(),
+            "TerminationLog".to_string(),
+        ],
+        max_file_size: 1024 * 1024,
+    }
+}
+
+fn default_put_volume_file_request() -> PutVolumeFileRequestDefaults {
+    PutVolumeFileRequestDefaults {
+        max_file_size: 1024 * 1024,
+    }
+}
+
 /// Settings specific to each kata agent endpoint, loaded from
 /// genpolicy-settings.json.
 ///
@@ -640,6 +686,28 @@ pub struct RequestDefaults {
 
     /// Allow Host to retrieve diagnostic data from the Guest.
     pub GetDiagnosticDataRequest: bool,
+
+    /// Which well-known guest files the Host may supply, and how large they may be.
+    ///
+    /// Defaulted rather than required so that a settings file predating the
+    /// host->guest content channel still generates a working policy. See the
+    /// `deny_unknown_fields` note above for why the reverse (an unknown key) is fatal.
+    #[serde(default = "default_copy_single_file_request")]
+    pub CopySingleFileRequest: CopySingleFileRequestDefaults,
+
+    /// Allow the Host to create a watchable volume. The request carries no field the
+    /// guest acts on -- it mints its own volume id -- so this is a plain on/off switch
+    /// for workloads that project no ConfigMaps, Secrets or downward-API volumes.
+    #[serde(default = "default_true")]
+    pub InitWatchableVolumeRequest: bool,
+
+    /// Bounds on the files the Host may write into a watchable volume.
+    #[serde(default = "default_put_volume_file_request")]
+    pub PutVolumeFileRequest: PutVolumeFileRequestDefaults,
+
+    /// Allow the Host to publish a staged watchable-volume revision.
+    #[serde(default = "default_true")]
+    pub CommitVolumeRevisionRequest: bool,
 }
 
 /// Struct used to read data from the settings file and copy that data into the policy.
