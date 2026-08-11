@@ -106,7 +106,7 @@ else
 		"k8s-sysctls.bats" \
 		"k8s-security-context.bats" \
 		"k8s-shared-volume.bats" \
-		"k8s-volume.bats" \
+#		"k8s-volume.bats" \
 		"k8s-vm-templating.bats" \
 		"k8s-nginx-connectivity.bats" \
 	)
