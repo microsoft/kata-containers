@@ -16,8 +16,8 @@ use crate::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
         CommitVolumeRevisionRequest, ContainerID, CopyFileRequest, CopySingleFileRequest,
-        CopySingleFileResponse, CpuStats, CpuUsage, CreateContainerRequest, CreateSandboxRequest, Device, Empty,
-        ExecProcessRequest, FSGroup, FSGroupChangePolicy, GetIPTablesRequest,
+        CopySingleFileResponse, CpuStats, CpuUsage, CreateContainerRequest, CreateSandboxRequest,
+        Device, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy, GetIPTablesRequest,
         GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse, HugetlbStats, IPAddress,
         IPFamily, InitWatchableVolumeRequest, InitWatchableVolumeResponse, Interface, Interfaces,
         KernelModule, MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse,
@@ -833,6 +833,9 @@ impl From<SingleFileType> for agent::SingleFileType {
             SingleFileType::ResolvConf => agent::SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF,
             SingleFileType::EtcHosts => agent::SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS,
             SingleFileType::Hostname => agent::SingleFileType::SINGLE_FILE_TYPE_HOSTNAME,
+            SingleFileType::TerminationLog => {
+                agent::SingleFileType::SINGLE_FILE_TYPE_TERMINATION_LOG
+            }
         }
     }
 }
@@ -844,6 +847,9 @@ impl From<agent::SingleFileType> for SingleFileType {
             agent::SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => SingleFileType::ResolvConf,
             agent::SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => SingleFileType::EtcHosts,
             agent::SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => SingleFileType::Hostname,
+            agent::SingleFileType::SINGLE_FILE_TYPE_TERMINATION_LOG => {
+                SingleFileType::TerminationLog
+            }
         }
     }
 }
