@@ -4599,6 +4599,27 @@ mod tests {
         temp_dir
     }
 
+    /// Installs a policy that admits the four content-channel RPCs.
+    ///
+    /// The policy builds deny any request whose rule the active policy does not define,
+    /// so a test that drives these handlers has to put a policy in place first. The
+    /// returned guard also serializes against every other policy-driven test, since
+    /// `AGENT_POLICY` is process-global (see `policy::test_support`).
+    #[cfg(feature = "agent-policy")]
+    async fn install_content_channel_policy() -> crate::policy::test_support::PolicyTestGuard {
+        crate::policy::test_support::install_policy(concat!(
+            "package agent_policy\n",
+            "default CopySingleFileRequest := true\n",
+            "default InitWatchableVolumeRequest := true\n",
+            "default PutVolumeFileRequest := true\n",
+            "default CommitVolumeRevisionRequest := true\n",
+            // Explicit, so a query for an unrelated endpoint still returns a result
+            // rather than an engine error.
+            "default AllowRequestsFailingPolicy := false\n",
+        ))
+        .await
+    }
+
     fn test_agent_service() -> Box<AgentService> {
         let logger = slog::Logger::root(slog::Discard, o!());
         let sandbox = Sandbox::new(&logger).unwrap();
@@ -4647,6 +4668,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_put_volume_file_rejects_invalid_paths() {
+        #[cfg(feature = "agent-policy")]
+        let _policy_guard = install_content_channel_policy().await;
         let _temp_dir = setup_watchable_rpc_test();
         let agent_service = test_agent_service();
         let agent_volume_id = init_test_watchable_volume(&agent_service).await;
@@ -4669,6 +4692,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_copy_single_file_writes_to_shared_dir() {
+        #[cfg(feature = "agent-policy")]
+        let _policy_guard = install_content_channel_policy().await;
         let temp_dir = setup_watchable_rpc_test();
         let agent_service = test_agent_service();
         let ctx = mk_ttrpc_context();
@@ -4740,6 +4765,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_put_volume_file_rejects_mixed_pending_revisions() {
+        #[cfg(feature = "agent-policy")]
+        let _policy_guard = install_content_channel_policy().await;
         let _temp_dir = setup_watchable_rpc_test();
         let agent_service = test_agent_service();
         let agent_volume_id = init_test_watchable_volume(&agent_service).await;
@@ -4755,6 +4782,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_commit_volume_revision_without_pending_revision_is_noop() {
+        #[cfg(feature = "agent-policy")]
+        let _policy_guard = install_content_channel_policy().await;
         let _temp_dir = setup_watchable_rpc_test();
         let agent_service = test_agent_service();
         let agent_volume_id = init_test_watchable_volume(&agent_service).await;
@@ -4774,6 +4803,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_commit_volume_revision_switches_data_symlink_and_gc() {
+        #[cfg(feature = "agent-policy")]
+        let _policy_guard = install_content_channel_policy().await;
         let _temp_dir = setup_watchable_rpc_test();
         let agent_service = test_agent_service();
         let agent_volume_id = init_test_watchable_volume(&agent_service).await;
