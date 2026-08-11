@@ -5,7 +5,9 @@
 
 use async_trait::async_trait;
 #[cfg(feature = "agent-policy")]
-use kata_agent_policy::policy::PolicyCopyFileRequest;
+use kata_agent_policy::policy::{
+    PolicyCopyFileRequest, PolicyCopySingleFileRequest, PolicyPutVolumeFileRequest,
+};
 use rustjail::{pipestream::PipeStream, process::StreamType};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 use tokio::sync::Mutex;
@@ -2568,6 +2570,19 @@ impl agent_ttrpc::AgentService for AgentService {
         req: CopySingleFileRequest,
     ) -> ttrpc::Result<protocols::agent::CopySingleFileResponse> {
         trace_rpc_call!(ctx, "copy_single_file", req);
+        // The raw request carries the file payload and a bare `file_mode`. Hand the policy
+        // the pre-processed view instead: it drops `data` and decodes the S_IFMT bits, so a
+        // rule can tell a regular-file write apart from a symlink creation and can see where
+        // that symlink would point. See PolicyCopySingleFileRequest.
+        #[cfg(feature = "agent-policy")]
+        {
+            let req_for_policy: PolicyCopySingleFileRequest = (&req)
+                .try_into()
+                .context("parsing CopySingleFileRequest for policy")
+                .map_ttrpc_err(same)?;
+            is_allowed_with_entrypoint(req.descriptor_dyn().name(), &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
         is_allowed(&req).await?;
 
         let target_file_name = match req.file_type.enum_value_or_default() {
@@ -2662,6 +2677,17 @@ impl agent_ttrpc::AgentService for AgentService {
         req: PutVolumeFileRequest,
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "put_volume_file", req);
+        // See copy_single_file: the policy gets the pre-processed view so it can constrain
+        // symlink creation and is not handed the file payload.
+        #[cfg(feature = "agent-policy")]
+        {
+            let req_for_policy: PolicyPutVolumeFileRequest = (&req)
+                .try_into()
+                .context("parsing PutVolumeFileRequest for policy")
+                .map_ttrpc_err(same)?;
+            is_allowed_with_entrypoint(req.descriptor_dyn().name(), &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
         is_allowed(&req).await?;
 
         if req.revision.is_empty() {
