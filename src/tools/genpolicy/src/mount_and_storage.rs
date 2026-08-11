@@ -140,6 +140,37 @@ pub fn get_mount_and_storage(
     }
 }
 
+/// Add `mount` to `p_mounts`, replacing any entry that already claims its destination.
+///
+/// Two entries for one destination are two independently satisfiable ways to mount the
+/// same path, and it is the host that chooses which to present. The mount check in
+/// `allow_by_bundle_or_sandbox_id` requires `count(p_matches) == count(i_base_mounts)`
+/// over a *set* of policy indices, which rejects two presented mounts collapsing onto a
+/// single policy mount but is an injection rather than a bijection: it neither requires
+/// every policy mount to be presented nor constrains their order. So where a volumeMount
+/// lands on a destination the settings also mount -- /etc/hosts, /etc/resolv.conf,
+/// /etc/hostname or /dev/termination-log -- leaving both entries in place lets the host
+/// keep the settings entry, which is "rw", and drop the volumeMount's, which is "ro".
+/// The pod's read-only request then means nothing.
+fn replace_or_push_mount(p_mounts: &mut Vec<policy::KataMount>, mount: policy::KataMount) {
+    if let Some(policy_mount) = p_mounts
+        .iter_mut()
+        .find(|m| m.destination.eq(&mount.destination))
+    {
+        debug!(
+            "replace_or_push_mount: updating dest = {}, source = {}",
+            mount.destination, mount.source
+        );
+        *policy_mount = mount;
+    } else {
+        debug!(
+            "replace_or_push_mount: adding dest = {}, source = {}",
+            mount.destination, mount.source
+        );
+        p_mounts.push(mount);
+    }
+}
+
 fn get_empty_dir_mount(
     settings: &settings::Settings,
     p_mounts: &mut Vec<policy::KataMount>,
@@ -271,16 +302,19 @@ fn get_guest_empty_dir_mount_and_storage(
         _ => "rw",
     };
 
-    p_mounts.push(policy::KataMount {
-        destination: yaml_mount.mountPath.to_string(),
-        type_: mount_type.to_string(),
-        source,
-        options: vec![
-            "rbind".to_string(),
-            "rprivate".to_string(),
-            access.to_string(),
-        ],
-    });
+    replace_or_push_mount(
+        p_mounts,
+        policy::KataMount {
+            destination: yaml_mount.mountPath.to_string(),
+            type_: mount_type.to_string(),
+            source,
+            options: vec![
+                "rbind".to_string(),
+                "rprivate".to_string(),
+                access.to_string(),
+            ],
+        },
+    );
 }
 
 fn get_host_path_mount(
@@ -375,35 +409,15 @@ fn get_config_map_mount_and_storage(
     let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
     let name = OsString::from(file_name).into_string().unwrap();
 
-    let dest = yaml_mount.mountPath.clone();
-    let type_ = settings_config_map.mount_type.clone();
-    let source = format!("{}{name}$", &settings_config_map.mount_point);
-    let options = settings_config_map.options.clone();
-
-    // A volumeMount whose destination is one the settings also mount by default -- most
-    // usefully /etc/hosts, /etc/resolv.conf, /etc/hostname or /dev/termination-log -- must
-    // *replace* that entry rather than add a second one. Two entries for one destination
-    // are two independently satisfiable ways to mount the same path, and the host chooses
-    // which to present and in what order: the mount check is an injection from presented
-    // mounts into policy mounts, so it neither requires every policy mount to appear nor
-    // constrains their order. The default entry is "rw" and a configMap or secret mount is
-    // "ro", so leaving both in place lets the host drop the "ro" one and hand the container
-    // a writable /etc/hosts that the pod spec asked to be read-only. Every sibling handler
-    // already updates in place for this reason; this one did not.
-    if let Some(policy_mount) = p_mounts.iter_mut().find(|m| m.destination.eq(&dest)) {
-        debug!("get_config_map_mount_and_storage: updating dest = {dest}, source = {source}");
-        policy_mount.type_ = type_;
-        policy_mount.source = source;
-        policy_mount.options = options;
-    } else {
-        debug!("get_config_map_mount_and_storage: adding dest = {dest}, source = {source}");
-        p_mounts.push(policy::KataMount {
-            destination: dest,
-            type_,
-            source,
-            options,
-        });
-    }
+    replace_or_push_mount(
+        p_mounts,
+        policy::KataMount {
+            destination: yaml_mount.mountPath.clone(),
+            type_: settings_config_map.mount_type.clone(),
+            source: format!("{}{name}$", &settings_config_map.mount_point),
+            options: settings_config_map.options.clone(),
+        },
+    );
 }
 
 fn get_shared_bind_mount(
@@ -656,5 +670,63 @@ mod tests {
         );
 
         assert_eq!(destinations(&mounts), ["/etc/hosts", "/mnt/config"]);
+    }
+
+    /// The default emptydir_type is block-encrypted, so this is the path an ordinary
+    /// emptyDir takes.
+    #[test]
+    fn a_block_backed_empty_dir_over_a_default_mount_replaces_it() {
+        let mut mounts = vec![default_etc_hosts()];
+        let mut storages = Vec::new();
+
+        get_mount_and_storage(
+            &settings(),
+            &mut mounts,
+            &mut storages,
+            &volume(r#"{"name": "ed", "emptyDir": {}}"#),
+            &volume_mount(r#"{"name": "ed", "mountPath": "/etc/hosts", "readOnly": true}"#),
+            &None,
+        );
+
+        assert_eq!(destinations(&mounts), ["/etc/hosts"]);
+        assert!(mounts[0].options.contains(&"ro".to_string()));
+        assert!(!mounts[0].options.contains(&"rw".to_string()));
+    }
+
+    #[test]
+    fn a_memory_backed_empty_dir_over_a_default_mount_replaces_it() {
+        let mut mounts = vec![default_etc_hosts()];
+        let mut storages = Vec::new();
+
+        get_mount_and_storage(
+            &settings(),
+            &mut mounts,
+            &mut storages,
+            &volume(r#"{"name": "ed", "emptyDir": {"medium": "Memory"}}"#),
+            &volume_mount(r#"{"name": "ed", "mountPath": "/etc/hosts", "readOnly": true}"#),
+            &None,
+        );
+
+        assert_eq!(destinations(&mounts), ["/etc/hosts"]);
+        assert!(mounts[0].options.contains(&"ro".to_string()));
+        assert!(!mounts[0].options.contains(&"rw".to_string()));
+    }
+
+    #[test]
+    fn an_empty_dir_elsewhere_is_still_added() {
+        let mut mounts = vec![default_etc_hosts()];
+        let mut storages = Vec::new();
+
+        get_mount_and_storage(
+            &settings(),
+            &mut mounts,
+            &mut storages,
+            &volume(r#"{"name": "ed", "emptyDir": {}}"#),
+            &volume_mount(r#"{"name": "ed", "mountPath": "/mnt/scratch"}"#),
+            &None,
+        );
+
+        assert_eq!(destinations(&mounts), ["/etc/hosts", "/mnt/scratch"]);
+        assert_eq!(storages.len(), 1);
     }
 }
