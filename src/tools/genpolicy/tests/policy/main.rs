@@ -13,13 +13,16 @@ mod tests {
     use std::sync;
 
     use protocols::agent::{
-        AddARPNeighborsRequest, CreateContainerRequest, CreateSandboxRequest, ExecProcessRequest,
+        AddARPNeighborsRequest, CommitVolumeRevisionRequest, CreateContainerRequest,
+        CreateSandboxRequest, ExecProcessRequest, InitWatchableVolumeRequest,
         RemoveContainerRequest, SignalProcessRequest, StartContainerRequest, StatsContainerRequest,
         TtyWinResizeRequest, UpdateInterfaceRequest, UpdateRoutesRequest, WaitProcessRequest,
     };
     use serde::{Deserialize, Serialize};
 
-    use kata_agent_policy::policy::{AgentPolicy, PolicyCopyFileRequest};
+    use kata_agent_policy::policy::{
+        AgentPolicy, PolicyCopyFileRequest, PolicyCopySingleFileRequest, PolicyPutVolumeFileRequest,
+    };
 
     // Translate each test case in testcases.json
     // to one request type.
@@ -40,6 +43,10 @@ mod tests {
         UpdateInterfaceRequest(UpdateInterfaceRequest),
         UpdateRoutesRequest(UpdateRoutesRequest),
         AddARPNeighborsRequest(AddARPNeighborsRequest),
+        CopySingleFileRequest(PolicyCopySingleFileRequest),
+        InitWatchableVolumeRequest(InitWatchableVolumeRequest),
+        PutVolumeFileRequest(PolicyPutVolumeFileRequest),
+        CommitVolumeRevisionRequest(CommitVolumeRevisionRequest),
     }
 
     impl Display for TestRequest {
@@ -58,6 +65,14 @@ mod tests {
                 TestRequest::UpdateInterfaceRequest(_) => write!(f, "UpdateInterfaceRequest"),
                 TestRequest::UpdateRoutesRequest(_) => write!(f, "UpdateRoutesRequest"),
                 TestRequest::AddARPNeighborsRequest(_) => write!(f, "AddARPNeighborsRequest"),
+                TestRequest::CopySingleFileRequest(_) => write!(f, "CopySingleFileRequest"),
+                TestRequest::InitWatchableVolumeRequest(_) => {
+                    write!(f, "InitWatchableVolumeRequest")
+                }
+                TestRequest::PutVolumeFileRequest(_) => write!(f, "PutVolumeFileRequest"),
+                TestRequest::CommitVolumeRevisionRequest(_) => {
+                    write!(f, "CommitVolumeRevisionRequest")
+                }
             }
         }
     }
@@ -332,6 +347,18 @@ mod tests {
         (workdir, testdata_dir)
     }
 
+    /// RM-114: the endpoints that replaced CopyFileRequest are mediated field by field,
+    /// not merely reachable. The deny cases cover the symlink primitive that the deleted
+    /// allow_copy_file rule used to guard.
+    #[tokio::test]
+    async fn test_content_channel() {
+        runtests("contentchannel").await;
+    }
+
+    /// The legacy free-form CopyFileRequest is hard-denied (`default := false`, no rule
+    /// body) now that the host->guest content channel goes through the four typed
+    /// endpoints exercised by `test_content_channel`. Every case here asserts the door
+    /// stayed shut, including the ones that used to be the endpoint's legitimate use.
     #[tokio::test]
     async fn test_copyfile() {
         runtests("copyfile").await;

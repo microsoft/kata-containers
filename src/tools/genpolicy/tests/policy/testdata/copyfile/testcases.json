@@ -1,20 +1,11 @@
 [
   {
-    "allowed": true,
-    "description": "copy initiated by k8s mount",
+    "allowed": false,
+    "description": "the copy a k8s mount used to perform is now refused: the host must use CopySingleFileRequest",
     "kind": "CopyFileRequest",
     "request": {
       "file_type": "Regular",
       "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-resolv.conf"
-    }
-  },
-  {
-    "allowed": true,
-    "description": "a dirname can have trailing dots",
-    "kind": "CopyFileRequest",
-    "request": {
-      "file_type": "Regular",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo../bar"
     }
   },
   {
@@ -55,117 +46,12 @@
   },
   {
     "allowed": false,
-    "description": "attempted directory traversal - parent directory",
+    "description": "symlink onto the top level of the shared directory",
     "kind": "CopyFileRequest",
     "request": {
-      "file_type": "Directory",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo/.."
-    }
-  },
-  {
-    "allowed": false,
-    "description": "relative path",
-    "kind": "CopyFileRequest",
-    "request": {
-      "file_type": "Regular",
-      "path": "etc/ssl/cert.pem"
-    }
-  },
-  {
-    "allowed": false,
-    "description": "relative path - parent directory",
-    "kind": "CopyFileRequest",
-    "request": {
-      "file_type": "Directory",
-      "path": ".."
-    }
-  },
-  {
-    "allowed": false,
-    "description": "unsupported file type",
-    "kind": "CopyFileRequest",
-    "request": {
-      "file_type": "Unknown",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo/bar"
-    }
-  },
-  {
-    "allowed": true,
-    "description": "directory in top-level shared directory",
-    "kind": "CopyFileRequest",
-    "request": {
-      "file_type": "Directory",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo"
-    }
-  },
-  {
-    "allowed": false,
-    "description": "symlink in top-level shared directory",
-    "kind": "CopyFileRequest",
-    "request": {
-      "symlink_target": "abc",
       "file_type": "Symlink",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo"
-    }
-  },
-  {
-    "allowed": true,
-    "description": "symlink beneath top-level shared directory",
-    "kind": "CopyFileRequest",
-    "request": {
-      "symlink_target": "abc",
-      "file_type": "Symlink",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo/lnk"
-    }
-  },
-  {
-    "allowed": false,
-    "description": "symlink pointing up - leading",
-    "kind": "CopyFileRequest",
-    "request": {
-      "symlink_target": "../abc",
-      "file_type": "Symlink",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo/lnk"
-    }
-  },
-  {
-    "allowed": false,
-    "description": "symlink pointing up - middle",
-    "kind": "CopyFileRequest",
-    "request": {
-      "symlink_target": "a/../../b",
-      "file_type": "Symlink",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo/lnk"
-    }
-  },
-  {
-    "allowed": false,
-    "description": "symlink pointing up - trailing",
-    "kind": "CopyFileRequest",
-    "request": {
-      "symlink_target": "foo/..",
-      "file_type": "Symlink",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo/lnk"
-    }
-  },
-  {
-    "allowed": false,
-    "description": "symlink pointing up - ..",
-    "kind": "CopyFileRequest",
-    "request": {
-      "symlink_target": "..",
-      "file_type": "Symlink",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo/lnk"
-    }
-  },
-  {
-    "allowed": false,
-    "description": "symlink with absolute target",
-    "kind": "CopyFileRequest",
-    "request": {
-      "symlink_target": "/abc",
-      "file_type": "Symlink",
-      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-foo/lnk"
+      "symlink_target": "../../../../etc/shadow",
+      "path": "/run/kata-containers/shared/containers/81e5f43bc8599c5661e66f959ac28df5bfb30da23c5d583f2dcc6f9e0c5186dc-ce23cfeb91e75aaa-resolv.conf"
     }
   }
 ]

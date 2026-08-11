@@ -1,0 +1,297 @@
+[
+  {
+    "allowed": true,
+    "description": "resolv.conf supplied as a regular file",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "b7b5f0e0",
+      "single_file_type": "ResolvConf",
+      "file_type": "Regular",
+      "data_size": 64,
+      "file_mode": 33188
+    }
+  },
+  {
+    "allowed": true,
+    "description": "/etc/hosts supplied as a regular file",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "b7b5f0e0",
+      "single_file_type": "EtcHosts",
+      "file_type": "Regular",
+      "data_size": 64,
+      "file_mode": 33188
+    }
+  },
+  {
+    "allowed": false,
+    "description": "file kind the settings file does not allow: this pod declares no terminationMessagePath",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "b7b5f0e0",
+      "single_file_type": "TerminationLog",
+      "file_type": "Regular",
+      "data_size": 64,
+      "file_mode": 33188
+    }
+  },
+  {
+    "allowed": false,
+    "description": "unrecognized SingleFileType wire value decodes to Unknown, which is in no allow-list",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "b7b5f0e0",
+      "single_file_type": "Unknown",
+      "file_type": "Regular",
+      "data_size": 64,
+      "file_mode": 33188
+    }
+  },
+  {
+    "allowed": false,
+    "description": "symlink instead of a file: would redirect the container's /etc/resolv.conf at a host-chosen path",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "b7b5f0e0",
+      "single_file_type": "ResolvConf",
+      "file_type": "Symlink",
+      "symlink_target": "/etc/shadow",
+      "data_size": 11,
+      "file_mode": 41471
+    }
+  },
+  {
+    "allowed": false,
+    "description": "directory instead of a file",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "b7b5f0e0",
+      "single_file_type": "ResolvConf",
+      "file_type": "Directory",
+      "data_size": 0,
+      "file_mode": 16877
+    }
+  },
+  {
+    "allowed": false,
+    "description": "setuid bit on host-supplied content",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "b7b5f0e0",
+      "single_file_type": "ResolvConf",
+      "file_type": "Regular",
+      "data_size": 64,
+      "file_mode": 35236
+    }
+  },
+  {
+    "allowed": false,
+    "description": "sandbox_id escaping its own per-sandbox subdirectory",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "../../other-sandbox",
+      "single_file_type": "ResolvConf",
+      "file_type": "Regular",
+      "data_size": 64,
+      "file_mode": 33188
+    }
+  },
+  {
+    "allowed": false,
+    "description": "absolute sandbox_id",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "/etc",
+      "single_file_type": "ResolvConf",
+      "file_type": "Regular",
+      "data_size": 64,
+      "file_mode": 33188
+    }
+  },
+  {
+    "allowed": false,
+    "description": "empty sandbox_id",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "",
+      "single_file_type": "ResolvConf",
+      "file_type": "Regular",
+      "data_size": 64,
+      "file_mode": 33188
+    }
+  },
+  {
+    "allowed": false,
+    "description": "file larger than the configured ceiling",
+    "kind": "CopySingleFileRequest",
+    "request": {
+      "sandbox_id": "b7b5f0e0",
+      "single_file_type": "ResolvConf",
+      "file_type": "Regular",
+      "data_size": 4097,
+      "file_mode": 33188
+    }
+  },
+  {
+    "allowed": true,
+    "description": "creating a watchable volume",
+    "kind": "InitWatchableVolumeRequest",
+    "request": {
+      "host_volume_id": "host-volume"
+    }
+  },
+  {
+    "allowed": true,
+    "description": "regular file written into a watchable volume revision",
+    "kind": "PutVolumeFileRequest",
+    "request": {
+      "agent_volume_id": "watchable-1",
+      "file_name": "config.json",
+      "revision": "..2026_02_11",
+      "file_type": "Regular",
+      "file_size": 64,
+      "file_mode": 33188,
+      "dir_mode": 493,
+      "offset": 0
+    }
+  },
+  {
+    "allowed": false,
+    "description": "symlink inside a projected volume, pointing wherever the host chose",
+    "kind": "PutVolumeFileRequest",
+    "request": {
+      "agent_volume_id": "watchable-1",
+      "file_name": "config.json",
+      "revision": "..2026_02_11",
+      "file_type": "Symlink",
+      "symlink_target": "/proc/self/environ",
+      "file_size": 18,
+      "file_mode": 41471,
+      "dir_mode": 493,
+      "offset": 0
+    }
+  },
+  {
+    "allowed": false,
+    "description": "file_name traversal out of the revision directory",
+    "kind": "PutVolumeFileRequest",
+    "request": {
+      "agent_volume_id": "watchable-1",
+      "file_name": "../../escape",
+      "revision": "..2026_02_11",
+      "file_type": "Regular",
+      "file_size": 64,
+      "file_mode": 33188,
+      "dir_mode": 493,
+      "offset": 0
+    }
+  },
+  {
+    "allowed": false,
+    "description": "revision traversal out of the volume root",
+    "kind": "PutVolumeFileRequest",
+    "request": {
+      "agent_volume_id": "watchable-1",
+      "file_name": "config.json",
+      "revision": "../..",
+      "file_type": "Regular",
+      "file_size": 64,
+      "file_mode": 33188,
+      "dir_mode": 493,
+      "offset": 0
+    }
+  },
+  {
+    "allowed": false,
+    "description": "agent_volume_id traversal out of the watchable-volumes root",
+    "kind": "PutVolumeFileRequest",
+    "request": {
+      "agent_volume_id": "../../..",
+      "file_name": "config.json",
+      "revision": "..2026_02_11",
+      "file_type": "Regular",
+      "file_size": 64,
+      "file_mode": 33188,
+      "dir_mode": 493,
+      "offset": 0
+    }
+  },
+  {
+    "allowed": false,
+    "description": "setgid bit on a projected file",
+    "kind": "PutVolumeFileRequest",
+    "request": {
+      "agent_volume_id": "watchable-1",
+      "file_name": "config.json",
+      "revision": "..2026_02_11",
+      "file_type": "Regular",
+      "file_size": 64,
+      "file_mode": 34212,
+      "dir_mode": 493,
+      "offset": 0
+    }
+  },
+  {
+    "allowed": false,
+    "description": "setuid bit on the directories created for the revision",
+    "kind": "PutVolumeFileRequest",
+    "request": {
+      "agent_volume_id": "watchable-1",
+      "file_name": "config.json",
+      "revision": "..2026_02_11",
+      "file_type": "Regular",
+      "file_size": 64,
+      "file_mode": 33188,
+      "dir_mode": 2541,
+      "offset": 0
+    }
+  },
+  {
+    "allowed": false,
+    "description": "projected file larger than the configured ceiling",
+    "kind": "PutVolumeFileRequest",
+    "request": {
+      "agent_volume_id": "watchable-1",
+      "file_name": "config.json",
+      "revision": "..2026_02_11",
+      "file_type": "Regular",
+      "file_size": 4097,
+      "file_mode": 33188,
+      "dir_mode": 493,
+      "offset": 0
+    }
+  },
+  {
+    "allowed": false,
+    "description": "negative offset",
+    "kind": "PutVolumeFileRequest",
+    "request": {
+      "agent_volume_id": "watchable-1",
+      "file_name": "config.json",
+      "revision": "..2026_02_11",
+      "file_type": "Regular",
+      "file_size": 64,
+      "file_mode": 33188,
+      "dir_mode": 493,
+      "offset": -1
+    }
+  },
+  {
+    "allowed": true,
+    "description": "publishing a staged revision",
+    "kind": "CommitVolumeRevisionRequest",
+    "request": {
+      "agent_volume_id": "watchable-1",
+      "garbage_collect_previous": true
+    }
+  },
+  {
+    "allowed": false,
+    "description": "commit naming a tree outside the watchable-volumes root",
+    "kind": "CommitVolumeRevisionRequest",
+    "request": {
+      "agent_volume_id": "../../run",
+      "garbage_collect_previous": true
+    }
+  }
+]
