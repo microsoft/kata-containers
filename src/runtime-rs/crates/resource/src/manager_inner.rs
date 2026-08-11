@@ -505,6 +505,12 @@ impl ResourceManagerInner {
                 .copy_volumes
                 .iter()
                 .any(|option| option == kata_types::config::COPY_VOLUMES_OTHER_DIRECTORIES),
+            copy_other_files: self
+                .toml_config
+                .runtime
+                .copy_volumes
+                .iter()
+                .any(|option| option == kata_types::config::COPY_VOLUMES_OTHER_FILES),
             fs_sharing_supported: capabilities.is_fs_sharing_supported(),
             block_device_discard_supported: capabilities.is_block_device_discard_supported(),
         };

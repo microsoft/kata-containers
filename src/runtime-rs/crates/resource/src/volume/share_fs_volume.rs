@@ -460,6 +460,7 @@ impl ShareFsVolume {
         cid: &str,
         readonly: bool,
         copy_other_directories: bool,
+        copy_other_files: bool,
         agent: Arc<dyn Agent>,
         volume_manager: Arc<VolumeManager>,
     ) -> Result<Self> {
@@ -503,26 +504,37 @@ impl ShareFsVolume {
 
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
-                    let source = Self::init_volume_source(
-                        &host_volume_id,
-                        agent::VolumeSourceType::SingleFile,
-                        readonly,
-                        &agent,
-                    )
-                    .await
-                    .context("init single-file volume source")?;
-
-                    info!(
-                        sl!(),
-                        "fsshare: file {:?} to managed volume {}", &src, &source.agent_volume_id
-                    );
-
-                    Self::copy_file_to_guest(&src, &source.agent_volume_id, &agent)
+                    if should_copy_file_to_guest(m.destination(), copy_other_files) {
+                        let source = Self::init_volume_source(
+                            &host_volume_id,
+                            agent::VolumeSourceType::SingleFile,
+                            readonly,
+                            &agent,
+                        )
                         .await
-                        .context("copy file to guest")?;
+                        .context("init single-file volume source")?;
 
-                    oci_mount.set_source(Some(PathBuf::from(&source.agent_volume_id)));
-                    volume.mounts.push(oci_mount);
+                        info!(
+                            sl!(),
+                            "fsshare: file {:?} to managed volume {}",
+                            &src,
+                            &source.agent_volume_id
+                        );
+
+                        Self::copy_file_to_guest(&src, &source.agent_volume_id, &agent)
+                            .await
+                            .context("copy file to guest")?;
+
+                        oci_mount.set_source(Some(PathBuf::from(&source.agent_volume_id)));
+                        volume.mounts.push(oci_mount);
+                    } else {
+                        info!(
+                            sl!(),
+                            "skip copying single-file mount {:?} to {:?}: copy_volumes does not contain other-files",
+                            &src,
+                            m.destination()
+                        );
+                    }
                 } else if src.is_dir() {
                     // We allow directory copying wildly
                     // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
@@ -1120,6 +1132,14 @@ fn should_copy_directory_to_guest(watchable_volume: bool, copy_other_directories
     watchable_volume || copy_other_directories
 }
 
+fn should_copy_file_to_guest(destination: &Path, copy_other_files: bool) -> bool {
+    copy_other_files
+        || matches!(
+            destination.to_str(),
+            Some("/etc/resolv.conf" | "/etc/hostname" | "/etc/hosts")
+        )
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1174,5 +1194,14 @@ mod test {
         assert!(should_copy_directory_to_guest(true, false));
         assert!(should_copy_directory_to_guest(false, true));
         assert!(!should_copy_directory_to_guest(false, false));
+    }
+
+    #[test]
+    fn test_should_copy_file_to_guest() {
+        assert!(should_copy_file_to_guest(Path::new("/etc/resolv.conf"), false));
+        assert!(should_copy_file_to_guest(Path::new("/etc/hostname"), false));
+        assert!(should_copy_file_to_guest(Path::new("/etc/hosts"), false));
+        assert!(should_copy_file_to_guest(Path::new("/tmp/other"), true));
+        assert!(!should_copy_file_to_guest(Path::new("/tmp/other"), false));
     }
 }

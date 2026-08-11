@@ -30,6 +30,9 @@ pub const EMPTYDIR_MODE_BLOCK_PLAIN: &str = "block-plain";
 /// Copy non-watchable directory volumes into the guest.
 pub const COPY_VOLUMES_OTHER_DIRECTORIES: &str = "other-directories";
 
+/// Copy single-file volumes other than standard container identity files into the guest.
+pub const COPY_VOLUMES_OTHER_FILES: &str = "other-files";
+
 /// Kata runtime configuration information.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Runtime {
@@ -159,11 +162,12 @@ pub struct Runtime {
     #[serde(default)]
     pub emptydir_mode: String,
 
-    /// Controls which host volume directories are copied into the guest when
-    /// shared-fs is unavailable.
+    /// Controls which host volumes are copied into the guest when shared-fs is
+    /// unavailable.
     ///
     /// Options:
     /// - other-directories: copy non-watchable directories and their contents.
+    /// - other-files: copy single files other than resolv.conf, hostname, and hosts.
     #[serde(default)]
     pub copy_volumes: Vec<String>,
 
@@ -300,7 +304,7 @@ impl ConfigOps for Runtime {
         }
 
         for option in &conf.runtime.copy_volumes {
-            if option != COPY_VOLUMES_OTHER_DIRECTORIES {
+            if option != COPY_VOLUMES_OTHER_DIRECTORIES && option != COPY_VOLUMES_OTHER_FILES {
                 return Err(std::io::Error::other(format!(
                     "Invalid copy_volumes option `{option}` in configuration file",
                 )));
@@ -456,13 +460,13 @@ emptydir_mode = "block-plain"
     fn test_copy_volumes() {
         let content = r#"
 [runtime]
-copy_volumes = ["other-directories"]
+copy_volumes = ["other-directories", "other-files"]
 "#;
         let config: TomlConfig = TomlConfig::load(content).unwrap();
         config.validate().unwrap();
         assert_eq!(
             config.runtime.copy_volumes,
-            vec![COPY_VOLUMES_OTHER_DIRECTORIES]
+            vec![COPY_VOLUMES_OTHER_DIRECTORIES, COPY_VOLUMES_OTHER_FILES]
         );
 
         let content = r#"
