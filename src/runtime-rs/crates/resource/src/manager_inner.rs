@@ -493,15 +493,24 @@ impl ResourceManagerInner {
         cid: &str,
         spec: &oci::Spec,
     ) -> Result<Vec<Arc<dyn Volume>>> {
-        let configured_copy_volume_types: HashSet<String> =
-            self.toml_config.runtime.copy_volumes.iter().cloned().collect();
+        let configured_copy_volume_types: HashSet<String> = self
+            .toml_config
+            .runtime
+            .copy_volumes
+            .iter()
+            .cloned()
+            .collect();
         let ctx = crate::volume::VolumeContext {
             share_fs: &self.share_fs,
             d: self.device_manager.as_ref(),
             sid: &self.sid,
             agent: self.agent.clone(),
             emptydir_mode: &self.toml_config.runtime.emptydir_mode,
-            fs_sharing_supported: self.hypervisor.capabilities().await?.is_fs_sharing_supported(),
+            fs_sharing_supported: self
+                .hypervisor
+                .capabilities()
+                .await?
+                .is_fs_sharing_supported(),
             copy_volume_types: Some(configured_copy_volume_types),
         };
         self.volume_resource.handler_volumes(&ctx, cid, spec).await
