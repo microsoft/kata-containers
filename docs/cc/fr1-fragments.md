@@ -43,7 +43,8 @@ fragment store is mutated.
 | **FR-1h** | **COSE_Sign1 envelope** interop (pure-Rust `coset`, no Go) | `fragments.rs::verify_envelope` | `c0ea3cb25`, `f7ed23319`, `93e1ff6e5` |
 | **FR-1i** | **SVN rollback protection across restart** — raise-only persisted high-water marks | `fragments.rs::{export_svn_state,import_svn_state}`; `main.rs` persist | `c0ea3cb25`, `f7ed23319` |
 | **FR-1j** | **append-only application ordering** — signed rolling log head; reject reorder/omit/insert; exportable auditable log | `fragments.rs::{set_log_genesis,log_head,export_fragment_log}` (gate 8, `commit`) | `8efdaa65e` |
-| **FR-1m** | **fragment-contributed environment rules within a measured ceiling** — a declaration may delegate named env vars to a feed; the fragment supplies concrete rules inside that grant (§4.15) | `policy.rs::FragmentSpec::allow_env_rules`; `rules.rego` (`allow_var` arm 9, `fragment_env_name_permitted`) | this PR |
+| **FR-1n** | **fragment-contributed environment rules within a measured ceiling** — a declaration may delegate named env vars to a feed; the fragment supplies concrete rules inside that grant (§4.19) | `policy.rs::FragmentSpec::allow_env_rules`; `rules.rego` (`allow_var` arm 9, `fragment_env_name_permitted`) | this PR |
+| **FR-1o** | **fragment-contributed mounts within a measured ceiling** — a declaration may delegate named mount destinations to a feed; the fragment supplies concrete mount rules inside that grant (§4.20) | `policy.rs::FragmentSpec::allow_mount_rules`; `rules.rego` (`fragment_mount_permitted`, `fragment_mount_is_new`) | this PR |
 | tools/demo | offline signer, agent-ctl command, mock ledger, self-contained capability demo | `examples/{sign-fragment,mock-ledger,fragment-demo}.rs`; `agent-ctl` | `392d890a8`, `69228f3b5`, `a63b9d5b3` |
 | docs | in-tree guide + this reference | `docs/cc/{parma-hardening-features,fr1-fragment-e2e,fr1-fragments}.md`, `kata-opa/fragment-demo.rego` | `adaa7558b`, `d8149983e`, `b65ba9113`, `26d013c95`, `5dc0744f9` |
 
@@ -475,10 +476,11 @@ Deltas that are **not** gates — surface hcsshim has and we do not, none of whi
 skip:
 
 - The richer `includes` vocabulary (`external_processes`, `platform_rules`,
-  `transparency_trust_lists`), which names hcsshim policy sections we do not have. The
-  environment half of `platform_rules` — the part deployment pipelines actually need — is
-  covered as of FR-1m (§4.15), and bounded by the measured base policy rather than granted
-  wholesale. Mounts and `external_processes` remain hcsshim-only.
+  `transparency_trust_lists`), which names hcsshim policy sections we do not have. The two
+  halves of `platform_rules` that deployment pipelines actually need are both covered — the
+  environment half as of FR-1n (§4.19) and the mount half as of FR-1o (§4.20) — and each is
+  bounded by the measured base policy rather than granted wholesale. `external_processes`
+  remains hcsshim-only.
 - Trying **several** parameter sets per fragment. hcsshim concatenates every `parameters`
   object declared for an `(issuer, feed)` and compiles the fragment once per set, because
   its loading is lazy and it cannot know which instantiation the host will want. Ours is one
@@ -566,7 +568,7 @@ parameters_api := {"allowed_registry": {"default": "mcr.microsoft.com"}}
 registry_ok { input.image_registry == parameter("allowed_registry") }
 ```
 
-### 4.15 Fragment-contributed environment rules (FR-1m)
+### 4.19 Fragment-contributed environment rules (FR-1n)
 
 A deployment pipeline is not static. A given version of the API server, kubelet or containerd
 may inject an environment variable the policy author never wrote down, and a feature flag may
@@ -609,7 +611,7 @@ Four properties make the ceiling hold rather than merely look like it does:
 - **Every pattern is anchored by the enforcement, not by the author's discipline.** Rego's
   `regex.match` is an unanchored search, so a ceiling of `FEATURE_FLAG` would otherwise admit
   `EVIL_FEATURE_FLAG_X`, and an `re2` value of `true` would admit `untrue`.
-  `fragment_env_anchored` wraps both sides unconditionally.
+  `fragment_anchored` wraps both sides unconditionally.
 - **Duplicate declarations intersect.** The name must be permitted by *every* declaration
   naming that `(issuer, feed)`, and at least one must exist — mirroring the strictest-wins
   rule `svn_floor` applies to rollback floors (RM-93). An existential would let a stale, laxer
@@ -633,9 +635,78 @@ The `name=value` split takes the **first** `=`, unlike the older `allow_var` arm
 connection strings, JWTs — a common shape for exactly the pipeline-injected variables this
 exists to admit.
 
-Scope note: this is deliberately narrower than `platform_rules`, which also carries **mounts**.
-Env was taken first because it is what the pipeline-drift case needs; a mount contributed by a
-fragment is a materially larger grant and wants its own ceiling design.
+Scope note: this covers the environment half of `platform_rules`. The mount half is FR-1o,
+immediately below, which reuses this section's ceiling machinery — including `fragment_anchored`
+and the intersect-duplicates rule — and adds the constraints a mount specifically needs.
+
+### 4.20 Fragment-contributed mounts (FR-1o)
+
+The drift argument of §4.19 applies to mounts as directly as it does to environment variables,
+and often for the same release. A newer kubelet moves a projected service-account token; a CSI
+driver attaches a directory under a name the workload manifest never mentions; a cluster-wide
+admission webhook injects an observability socket. Each is a mount the policy author could not
+have written down, and each otherwise forces a regeneration and re-measurement of the base
+policy for a change that was never about security.
+
+hcsshim's `platform_rules` carries mounts alongside environment rules, and concatenates them
+onto every container's mount list. As with env, the capability is right and the bound is
+missing: including the fragment hands it the entire mount namespace.
+
+The shape mirrors FR-1n. The **declaration** names the destinations it will let a feed speak
+for; the **fragment** supplies concrete mount rules inside that ceiling.
+
+```rego
+# in the measured base policy
+policy_fragments := [{
+  "issuer": "did:x509:...", "feed": "prod/mut:1", "minimum_svn": 5,
+  "allow_mount_rules": ["^/var/run/platform/[a-z0-9/._-]+$"],
+}]
+
+# in the signed fragment module, at agent_policy.fragments["prod/mut:1"]
+mount_rules := [{
+  "destination": "/var/run/platform/telemetry.sock",
+  "source": "/run/host/telemetry.sock",
+  "source_strategy": "string",
+  "type_": "bind",
+  "options": ["rbind", "rprivate", "ro", "nosuid", "nodev", "noexec"],
+}]
+```
+
+Omitting `allow_mount_rules` delegates nothing, so — as with env rules — a policy written
+before the attribute existed cannot acquire the capability by upgrading the agent.
+
+The ceiling reuses FR-1n's machinery wholesale: destinations are matched with the same
+unconditional anchoring (`fragment_anchored`), duplicate declarations **intersect** rather than
+union, at least one declaration must exist so a feed reachable only through delegation (§4.10)
+contributes nothing, and the SVN floor governs mounts exactly as it governs containers. The
+rule's `destination` is compared **literally**, which is what makes the ceiling an exact test
+rather than an undecidable regex-subset question.
+
+Three further constraints are specific to mounts, and each is tighter than hcsshim:
+
+- **A fragment may only add a destination, never restate one the base policy declares**
+  (`fragment_mount_is_new`). Without it a fragment could shadow a measured mount with a laxer
+  one — declaring `/data` read-only in the base policy would count for nothing if a fragment
+  could re-admit `/data` read-write — and the weakening would be invisible, because the base
+  declaration would still be sitting there reading `ro`. Fragments extend the mount set; they
+  cannot rewrite it.
+- **Options must match exactly, not by subset**, and a rule that omits `options` therefore
+  admits only a mount carrying none. Mount options *are* the security-relevant part of a mount
+  — `ro`, `nosuid`, `nodev`, `noexec` — so a subset test would let the enforcement ignore
+  precisely the fields worth enforcing.
+- **`source` is a literal unless `source_strategy: "re2"` is asked for**, and `type_` is always
+  literal. Same reasoning as the env rule's value strategy: the quiet outcome is the safe one,
+  and an unrecognised strategy fails closed.
+
+The enforcement point is worth noting because it is not where one would first reach for it.
+`allow_by_bundle_or_sandbox_id` requires a **bijection** between presented mounts and policy
+mounts, via `allow_mount`, which returns an *index into* `p_oci.Mounts`; the check is
+`count(p_matches) == count(i_oci.Mounts)`. A fragment mount cannot simply be added to the
+candidate set, because it has no such index — it would have to invent one that cannot collide
+with a real one, or two presented mounts would silently collapse onto a single match and defeat
+the bijection. Instead the permitted fragment mounts are **set aside first** and the bijection
+is required of what remains. The base check is left byte-for-byte as it was, and the whole of
+the new attack surface is confined to one predicate, `fragment_mount_permitted`.
 
 ### 4.12 Receipt requirement grammar (FR-1f)
 

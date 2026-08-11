@@ -195,7 +195,7 @@ pub struct FragmentSpec {
     /// matched candidate declaration rather than from the delivered fragment.
     #[serde(default)]
     pub includes: Vec<String>,
-    /// FR-1m: regexes bounding the environment-variable *names* this fragment may
+    /// FR-1n: regexes bounding the environment-variable *names* this fragment may
     /// contribute `env_rules` for. Empty (the default) delegates nothing.
     ///
     /// hcsshim lets a fragment carry `platform_rules`, which contribute environment rules
@@ -222,6 +222,31 @@ pub struct FragmentSpec {
     /// who forgot the anchors.
     #[serde(default)]
     pub allow_env_rules: Vec<String>,
+    /// FR-1o: destination patterns whose mounts a fragment delivered for this feed may
+    /// contribute. Empty — the default — delegates nothing.
+    ///
+    /// The mount half of the same delegation `allow_env_rules` provides for environment
+    /// variables, and the counterpart to the mount side of hcsshim's `platform_rules`. The
+    /// drift it answers is a deployment pipeline attaching a mount the policy author never
+    /// wrote down: a projected service-account token path a newer kubelet uses, a CSI
+    /// driver's directory, a socket injected by a cluster-wide admission webhook.
+    ///
+    /// Two bounds beyond the ceiling itself, both enforced in `rules.rego`:
+    ///
+    /// * A fragment may only *add* a destination. Restating one the base policy already
+    ///   declares is refused, so a fragment cannot shadow a measured mount with a laxer
+    ///   one — the weakening would otherwise be invisible, since the base declaration
+    ///   would still read `ro` while the container got `rw`.
+    /// * Mount options must match the fragment's rule exactly rather than by subset. The
+    ///   options are the security-relevant part of a mount (`ro`, `nosuid`, `nodev`,
+    ///   `noexec`), so an approximate match is the wrong default.
+    ///
+    /// As for `allow_env_rules`, patterns are matched fully anchored however they are
+    /// written, and the ceiling is checked against the fragment rule's *literal*
+    /// destination, which is what makes it an exact test rather than an undecidable
+    /// regex-subset question.
+    #[serde(default)]
+    pub allow_mount_rules: Vec<String>,
     /// FR-1c: whether this fragment's Rego module may be applied at all. Defaults to true.
     ///
     /// Setting it to false accepts the fragment for its SVN, receipt and ordering record
@@ -280,6 +305,7 @@ impl Default for FragmentSpec {
             allow_nested: AllowNested::default(),
             includes: Vec::new(),
             allow_env_rules: Vec::new(),
+            allow_mount_rules: Vec::new(),
             allow_module: true,
             parameters: None,
         }
@@ -325,23 +351,33 @@ impl FragmentSpec {
         }
     }
 
-    /// Validate [`Self::allow_env_rules`].
+    /// Validate [`Self::allow_env_rules`] and [`Self::allow_mount_rules`].
     ///
     /// An empty list is the closed default and is fine — it delegates nothing. What is not
     /// fine is a *present* list containing an empty pattern: anchored, an empty pattern
-    /// matches only the empty variable name, so it grants nothing while looking like it
-    /// grants something. That is the failure mode worth catching at boot, because the
-    /// symptom (a fragment's env rules silently never applying) is otherwise identical to
-    /// the fragment not being delivered at all.
-    pub fn validate_env_rule_grant(&self) -> Result<()> {
-        for pattern in &self.allow_env_rules {
-            if pattern.trim().is_empty() {
-                bail!(
-                    "fragment declaration for feed {:?}: allow_env_rules contains an empty \
-                     pattern, which permits no variable name; remove it, or omit \
-                     allow_env_rules entirely to delegate nothing",
-                    self.feed
-                );
+    /// matches only the empty name, so it grants nothing while looking like it grants
+    /// something. That is the failure mode worth catching at boot, because the symptom (a
+    /// fragment's rules silently never applying) is otherwise identical to the fragment not
+    /// being delivered at all.
+    ///
+    /// Both grants are checked here rather than in a method each, so that adding a third
+    /// delegation later cannot leave a caller validating two of three.
+    pub fn validate_rule_grants(&self) -> Result<()> {
+        for (field, patterns) in [
+            ("allow_env_rules", &self.allow_env_rules),
+            ("allow_mount_rules", &self.allow_mount_rules),
+        ] {
+            for pattern in patterns {
+                if pattern.trim().is_empty() {
+                    bail!(
+                        "fragment declaration for feed {:?}: {} contains an empty pattern, \
+                         which permits nothing; remove it, or omit {} entirely to delegate \
+                         nothing",
+                        self.feed,
+                        field,
+                        field
+                    );
+                }
             }
         }
         Ok(())
@@ -1823,7 +1859,7 @@ mod tests {
         specs[0].nested_scope().unwrap_err().to_string()
     }
 
-    /// FR-1m: the env-rule grant parses, defaults to empty (delegating nothing), and an
+    /// FR-1n: the env-rule grant parses, defaults to empty (delegating nothing), and an
     /// empty *pattern* inside a present grant is rejected at boot rather than silently
     /// granting nothing — the symptom of which is indistinguishable from the fragment never
     /// having been delivered.
@@ -1847,17 +1883,17 @@ mod tests {
             specs[0].allow_env_rules,
             vec!["^FEATURE_FLAG_.+$".to_string()]
         );
-        specs[0].validate_env_rule_grant().unwrap();
+        specs[0].validate_rule_grants().unwrap();
 
         assert!(
             specs[1].allow_env_rules.is_empty(),
             "an omitted grant must delegate nothing"
         );
         specs[1]
-            .validate_env_rule_grant()
+            .validate_rule_grants()
             .expect("an omitted grant is the closed default, not an error");
 
-        let err = specs[2].validate_env_rule_grant().unwrap_err().to_string();
+        let err = specs[2].validate_rule_grants().unwrap_err().to_string();
         assert!(err.contains("empty pattern"), "got: {}", err);
     }
 
@@ -2749,7 +2785,7 @@ containers := [{"name": "legit"}]
         );
     }
 
-    /// FR-1m: evaluate the fragment-contributed env-rule arm of `allow_var` against the
+    /// FR-1n: evaluate the fragment-contributed env-rule arm of `allow_var` against the
     /// real `rules.rego`.
     ///
     /// The probe rule calls `allow_var` with an empty policy process, so no other arm can
@@ -2811,7 +2847,7 @@ env_rules := {rules}
         )
     }
 
-    /// FR-1m: the whole point — a variable the deployment pipeline injects, which no
+    /// FR-1n: the whole point — a variable the deployment pipeline injects, which no
     /// measured container spec mentions, is admitted because a signed fragment says so and
     /// the base policy delegated that variable's name to it.
     #[tokio::test]
@@ -3002,6 +3038,501 @@ policy_data := {"containers": [], "fragments": [
             ),
             "an entry with no name is malformed and must not be admitted even under a \
              wide-open ceiling"
+        );
+    }
+
+    /// FR-1o: evaluate the fragment-contributed mount arm against the real `rules.rego`.
+    ///
+    /// `fragment_mount_permitted` is probed directly rather than through
+    /// `allow_by_bundle_or_sandbox_id`, because that rule needs a whole matching container,
+    /// annotations and a resolvable bundle id before it ever reaches the mount check. The
+    /// probe keeps each assertion about the thing it is named for.
+    fn mount_probe(policy_data: &str, fragment: &str, p_mounts: &str, i_mount: &str) -> bool {
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy(
+                "rules.rego".to_string(),
+                include_str!("../../../tools/genpolicy/rules.rego").to_string(),
+            )
+            .unwrap();
+        p.engine
+            .add_policy("policy_data.rego".to_string(), policy_data.to_string())
+            .unwrap();
+        p.engine
+            .add_policy("frag.rego".to_string(), fragment.to_string())
+            .unwrap();
+        p.engine
+            .add_policy(
+                "probe.rego".to_string(),
+                "package agent_policy\n\
+                 default mount_probe := false\n\
+                 mount_probe if {\n\
+                 \x20   fragment_mount_permitted({\"Mounts\": input.p_mounts}, input.i_mount)\n\
+                 }\n"
+                .to_string(),
+            )
+            .unwrap();
+        p.engine
+            .set_input_json(&format!(
+                r#"{{"p_mounts": {p_mounts}, "i_mount": {i_mount}}}"#
+            ))
+            .unwrap();
+        p.engine
+            .eval_rule("data.agent_policy.mount_probe".to_string())
+            .unwrap()
+            .to_string()
+            == "true"
+    }
+
+    /// A declaration granting a mount-destination pattern, at SVN 5.
+    ///
+    /// `common` is present because `allow_by_bundle_or_sandbox_id` dereferences
+    /// `policy_data.common.root_path` while substituting the bundle-id pattern; without it
+    /// the rule is undefined long before it reaches any mount.
+    fn mount_policy_data(grant: &str) -> String {
+        format!(
+            r#"package agent_policy
+policy_data := {{"containers": [], "common": {{
+  "root_path": "/run/kata/shared", "sfprefix": "^/run/kata/shared/", "cpath": "/run/kata/shared"
+}}, "fragments": [
+  {{"issuer": "did:x509:iss", "feed": "prod/mut", "minimum_svn": 5{grant}}}
+]}}
+"#
+        )
+    }
+
+    /// A delivered fragment carrying `mount_rules`.
+    fn mount_fragment(svn: &str, rules: &str) -> String {
+        format!(
+            r#"package agent_policy.fragments["prod/mut"]
+issuer := "did:x509:iss"
+svn := "{svn}"
+mount_rules := {rules}
+"#
+        )
+    }
+
+    /// The mount a pipeline attaches, in the shape `rules.rego` sees it.
+    const PIPELINE_MOUNT: &str = r#"{
+        "destination": "/var/run/pipeline",
+        "source": "/run/kata/pipeline",
+        "type_": "bind",
+        "options": ["rbind", "ro"]
+    }"#;
+
+    /// FR-1o: the point of the feature — a mount the deployment pipeline attaches, which
+    /// no measured container spec declares, is admitted because a signed fragment says so
+    /// and the base policy delegated that destination to it.
+    #[tokio::test]
+    async fn a_fragment_may_admit_a_mount_the_base_policy_delegated() {
+        assert!(
+            mount_probe(
+                &mount_policy_data(r#", "allow_mount_rules": ["^/var/run/pipeline$"]"#),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/pipeline",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                "[]",
+                PIPELINE_MOUNT,
+            ),
+            "a delegated destination, a fragment at the floor and an exactly matching rule \
+             must admit the mount"
+        );
+    }
+
+    /// The closed default: a base policy that never delegated a destination grants nothing,
+    /// however well-formed the fragment's rule is.
+    #[tokio::test]
+    async fn without_allow_mount_rules_a_fragment_contributes_no_mount() {
+        assert!(
+            !mount_probe(
+                &mount_policy_data(""),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/pipeline",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                "[]",
+                PIPELINE_MOUNT,
+            ),
+            "omitting allow_mount_rules must delegate nothing, so including a fragment \
+             cannot by itself hand it the mount namespace"
+        );
+    }
+
+    /// The ceiling is anchored however it is written, so an unanchored pattern cannot be
+    /// widened by prefixing or suffixing the destination.
+    #[tokio::test]
+    async fn a_mount_ceiling_is_anchored_even_when_written_unanchored() {
+        let grant = r#", "allow_mount_rules": ["/var/run/pipeline"]"#;
+        let rule = r#"[{"destination": "/evil/var/run/pipeline", "source": "/run/kata/pipeline",
+                        "type_": "bind", "options": ["rbind", "ro"]}]"#;
+        let evil = r#"{
+            "destination": "/evil/var/run/pipeline",
+            "source": "/run/kata/pipeline",
+            "type_": "bind",
+            "options": ["rbind", "ro"]
+        }"#;
+        assert!(
+            !mount_probe(
+                &mount_policy_data(grant),
+                &mount_fragment("5", rule),
+                "[]",
+                evil,
+            ),
+            "regex.match is an unanchored search, so without the anchoring a ceiling of \
+             /var/run/pipeline would admit /evil/var/run/pipeline"
+        );
+    }
+
+    /// A fragment may add a destination but never restate one the base policy declares.
+    /// Without this a measured `ro` mount could be silently re-admitted as `rw`, and the
+    /// base declaration would still read `ro` while the container got `rw`.
+    #[tokio::test]
+    async fn a_fragment_may_not_shadow_a_base_declared_destination() {
+        let base = r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/x",
+                        "type_": "bind", "options": ["rbind", "ro"]}]"#;
+        assert!(
+            !mount_probe(
+                &mount_policy_data(r#", "allow_mount_rules": ["^/var/run/pipeline$"]"#),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/pipeline",
+                         "type_": "bind", "options": ["rbind", "rw"]}]"#
+                ),
+                base,
+                r#"{
+                    "destination": "/var/run/pipeline",
+                    "source": "/run/kata/pipeline",
+                    "type_": "bind",
+                    "options": ["rbind", "rw"]
+                }"#,
+            ),
+            "the base policy already speaks for this destination, so a fragment must not be \
+             able to re-admit it on laxer terms"
+        );
+    }
+
+    /// Options are the security-relevant part of a mount, so they match exactly rather
+    /// than by subset: a presented mount carrying an option the rule does not name is
+    /// refused even though every option the rule *does* name is present.
+    #[tokio::test]
+    async fn mount_options_must_match_exactly_not_by_subset() {
+        assert!(
+            !mount_probe(
+                &mount_policy_data(r#", "allow_mount_rules": ["^/var/run/pipeline$"]"#),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/pipeline",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                "[]",
+                r#"{
+                    "destination": "/var/run/pipeline",
+                    "source": "/run/kata/pipeline",
+                    "type_": "bind",
+                    "options": ["rbind", "ro", "rw"]
+                }"#,
+            ),
+            "an option the rule never granted -- here rw alongside ro -- must not ride in \
+             on a superset match"
+        );
+    }
+
+    /// A rule that omits `options` admits only a mount that carries none, rather than any
+    /// mount whose options it happens not to constrain.
+    #[tokio::test]
+    async fn a_mount_rule_without_options_does_not_admit_arbitrary_options() {
+        assert!(
+            !mount_probe(
+                &mount_policy_data(r#", "allow_mount_rules": ["^/var/run/pipeline$"]"#),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/pipeline",
+                         "type_": "bind"}]"#
+                ),
+                "[]",
+                PIPELINE_MOUNT,
+            ),
+            "omitting options must mean 'no options', not 'any options'"
+        );
+    }
+
+    /// The source is a literal unless the rule asks for a regex by name, so a pattern
+    /// written without declaring `re2` is compared as text and does not match.
+    #[tokio::test]
+    async fn a_mount_source_is_literal_unless_re2_is_requested() {
+        let grant = r#", "allow_mount_rules": ["^/var/run/pipeline$"]"#;
+        assert!(
+            !mount_probe(
+                &mount_policy_data(grant),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "^/run/kata/.+$",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                "[]",
+                PIPELINE_MOUNT,
+            ),
+            "a pattern with no strategy is literal, so it must not quietly behave as a regex"
+        );
+        assert!(
+            mount_probe(
+                &mount_policy_data(grant),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/.+",
+                         "source_strategy": "re2",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                "[]",
+                PIPELINE_MOUNT,
+            ),
+            "asking for re2 by name must work"
+        );
+    }
+
+    /// A mount rule cannot outrun the rollback floor: a fragment below the declared
+    /// minimum SVN contributes nothing, mount rules included.
+    #[tokio::test]
+    async fn a_mount_rule_below_the_svn_floor_is_refused() {
+        assert!(
+            !mount_probe(
+                &mount_policy_data(r#", "allow_mount_rules": ["^/var/run/pipeline$"]"#),
+                &mount_fragment(
+                    "4",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/pipeline",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                "[]",
+                PIPELINE_MOUNT,
+            ),
+            "a fragment below the floor must contribute no mount, or the rollback \
+             protection would not cover this surface"
+        );
+    }
+
+    /// The ceiling is the intersection over declarations, not the union: a second,
+    /// narrower declaration of the same feed tightens the grant rather than being
+    /// outvoted by the wider one. `some spec` here would let a stale, laxer duplicate win.
+    #[tokio::test]
+    async fn two_declarations_intersect_rather_than_union_the_mount_ceiling() {
+        let policy_data = r#"package agent_policy
+policy_data := {"containers": [], "fragments": [
+  {"issuer": "did:x509:iss", "feed": "prod/mut", "minimum_svn": 5,
+   "allow_mount_rules": ["^/var/run/.+$"]},
+  {"issuer": "did:x509:iss", "feed": "prod/mut", "minimum_svn": 5,
+   "allow_mount_rules": ["^/var/run/telemetry$"]}
+]}
+"#;
+        assert!(
+            !mount_probe(
+                policy_data,
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/pipeline",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                "[]",
+                PIPELINE_MOUNT,
+            ),
+            "the narrower declaration must bind, so a destination only the wider one \
+             permits is refused"
+        );
+    }
+
+    /// A rule binds to the destination it names. Without the literal comparison a rule
+    /// written for one destination would admit a mount at any *other* destination the
+    /// ceiling happens to permit, which is the difference between delegating a named path
+    /// and delegating the whole pattern the ceiling describes.
+    #[tokio::test]
+    async fn a_mount_rule_admits_only_the_destination_it_names() {
+        assert!(
+            !mount_probe(
+                &mount_policy_data(r#", "allow_mount_rules": ["^/var/run/.+$"]"#),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/telemetry", "source": "/run/kata/pipeline",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                "[]",
+                PIPELINE_MOUNT,
+            ),
+            "the rule names /var/run/telemetry, so it must not admit a mount at \
+             /var/run/pipeline merely because the ceiling would allow that destination too"
+        );
+    }
+
+    /// FR-1o integration: the arithmetic in `allow_by_bundle_or_sandbox_id`.
+    ///
+    /// The probes above cover `fragment_mount_permitted` in isolation. This one covers the
+    /// part that actually changes the decision: a permitted mount is set aside, and the
+    /// bijection is then required of what remains. That is where an off-by-one would live,
+    /// and no amount of testing the predicate alone would find it.
+    fn mounts_probe(policy_data: &str, fragment: &str, p_mounts: &str, i_mounts: &str) -> bool {
+        let mut p = AgentPolicy::new();
+        p.engine
+            .add_policy(
+                "rules.rego".to_string(),
+                include_str!("../../../tools/genpolicy/rules.rego").to_string(),
+            )
+            .unwrap();
+        p.engine
+            .add_policy("policy_data.rego".to_string(), policy_data.to_string())
+            .unwrap();
+        p.engine
+            .add_policy("frag.rego".to_string(), fragment.to_string())
+            .unwrap();
+        p.engine
+            .add_policy(
+                "probe.rego".to_string(),
+                "package agent_policy\n\
+                 default mounts_probe := false\n\
+                 mounts_probe if {\n\
+                 \x20   allow_by_bundle_or_sandbox_id(input.p_oci, input.i_oci, [], [])\n\
+                 }\n"
+                .to_string(),
+            )
+            .unwrap();
+        let key = "io.kubernetes.cri.sandbox-id";
+        let sandbox = "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffff0000000011111111";
+        p.engine
+            .set_input_json(
+                &serde_json::json!({
+                    "p_oci": {
+                        "Annotations": { key: format!("^{sandbox}$") },
+                        "Root": { "Path": "/run/kata/shared/$(bundle-id)/rootfs" },
+                        "Mounts": serde_json::from_str::<serde_json::Value>(p_mounts).unwrap(),
+                    },
+                    "i_oci": {
+                        "Annotations": { key: sandbox },
+                        "Root": { "Path": format!("/run/kata/shared/{sandbox}/rootfs") },
+                        "Mounts": serde_json::from_str::<serde_json::Value>(i_mounts).unwrap(),
+                    },
+                })
+                .to_string(),
+            )
+            .unwrap();
+        p.engine
+            .eval_rule("data.agent_policy.mounts_probe".to_string())
+            .unwrap()
+            .to_string()
+            == "true"
+    }
+
+    /// The base mount set is unchanged by the feature: with no fragment in play, a mount
+    /// the policy does not declare is still refused. This is the guard that the excusing
+    /// logic did not quietly widen the ordinary path.
+    #[tokio::test]
+    async fn an_undeclared_mount_is_still_refused_without_a_fragment() {
+        let base = r#"[{"destination": "/etc/hosts", "source": "/run/kata/shared/x",
+                        "type_": "bind", "options": ["rbind"]}]"#;
+        let declared_only = r#"[{"destination": "/etc/hosts", "source": "/run/kata/shared/x",
+                                 "type_": "bind", "options": ["rbind"]}]"#;
+        assert!(
+            mounts_probe(
+                &mount_policy_data(""),
+                &mount_fragment("5", "[]"),
+                base,
+                declared_only
+            ),
+            "the declared mount alone must still be accepted"
+        );
+
+        let with_extra = format!(
+            r#"[{{"destination": "/etc/hosts", "source": "/run/kata/shared/x",
+                                       "type_": "bind", "options": ["rbind"]}}, {PIPELINE_MOUNT}]"#
+        );
+        assert!(
+            !mounts_probe(
+                &mount_policy_data(""),
+                &mount_fragment("5", "[]"),
+                base,
+                &with_extra
+            ),
+            "an extra mount no declaration covers must still be refused when nothing \
+             delegated it"
+        );
+    }
+
+    /// The feature end to end: the same extra mount is accepted once a signed fragment
+    /// speaks for it and the base policy delegated that destination.
+    #[tokio::test]
+    async fn a_delegated_mount_is_excused_from_the_base_bijection() {
+        let base = r#"[{"destination": "/etc/hosts", "source": "/run/kata/shared/x",
+                        "type_": "bind", "options": ["rbind"]}]"#;
+        let with_extra = format!(
+            r#"[{{"destination": "/etc/hosts", "source": "/run/kata/shared/x",
+                                       "type_": "bind", "options": ["rbind"]}}, {PIPELINE_MOUNT}]"#
+        );
+        assert!(
+            mounts_probe(
+                &mount_policy_data(r#", "allow_mount_rules": ["^/var/run/pipeline$"]"#),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/pipeline",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                base,
+                &with_extra,
+            ),
+            "the pipeline mount is delegated and signed for, so the request must be \
+             accepted with the declared mount still matched exactly once"
+        );
+    }
+
+    /// Excusing must not become a way to drop a mount from scrutiny: a second *undeclared*
+    /// mount that no fragment speaks for still fails the bijection even while the first is
+    /// excused. This is the case an off-by-one in the count would let through.
+    #[tokio::test]
+    async fn excusing_one_mount_does_not_excuse_another() {
+        let base = r#"[{"destination": "/etc/hosts", "source": "/run/kata/shared/x",
+                        "type_": "bind", "options": ["rbind"]}]"#;
+        let two_extra = format!(
+            r#"[{{"destination": "/etc/hosts", "source": "/run/kata/shared/x",
+                  "type_": "bind", "options": ["rbind"]}},
+                {PIPELINE_MOUNT},
+                {{"destination": "/var/run/smuggled", "source": "/run/kata/smuggled",
+                  "type_": "bind", "options": ["rbind", "rw"]}}]"#
+        );
+        assert!(
+            !mounts_probe(
+                &mount_policy_data(r#", "allow_mount_rules": ["^/var/run/pipeline$"]"#),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/pipeline",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                base,
+                &two_extra,
+            ),
+            "only the delegated mount may be set aside; a second undeclared mount must \
+             still be counted and refused"
+        );
+    }
+
+    /// The mount type is compared exactly, so a delegated destination cannot be reached
+    /// with a different kind of filesystem than the rule names.
+    #[tokio::test]
+    async fn a_mount_type_must_match_the_rule() {
+        assert!(
+            !mount_probe(
+                &mount_policy_data(r#", "allow_mount_rules": ["^/var/run/pipeline$"]"#),
+                &mount_fragment(
+                    "5",
+                    r#"[{"destination": "/var/run/pipeline", "source": "/run/kata/pipeline",
+                         "type_": "bind", "options": ["rbind", "ro"]}]"#
+                ),
+                "[]",
+                r#"{
+                    "destination": "/var/run/pipeline",
+                    "source": "/run/kata/pipeline",
+                    "type_": "tmpfs",
+                    "options": ["rbind", "ro"]
+                }"#,
+            ),
+            "a rule for a bind mount must not admit a tmpfs at the same destination"
         );
     }
 
