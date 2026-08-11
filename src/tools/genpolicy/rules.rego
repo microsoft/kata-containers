@@ -822,13 +822,37 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
     print("allow_by_bundle_or_sandbox_id: p_matches =", p_matches)
     count(p_matches) == count(i_oci.Mounts)
 
-    allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
+    # Every presented mount must claim a distinct destination.
+    #
+    # The check above is an injection from presented mounts into Policy mounts, not a
+    # bijection: it rejects two presented mounts collapsing onto one Policy mount, but it
+    # does not require every Policy mount to be presented and it says nothing about order.
+    # So wherever the Policy holds two entries for one destination -- which genpolicy emits
+    # deliberately for a shared-fs emptyDir, as two alternative sources for one path -- the
+    # host could satisfy both at once and stack them, and the later mount would be the one
+    # the container actually sees. Requiring the destinations to be distinct removes that
+    # choice: a container sees exactly one mount per path, whichever alternative was used.
+    #
+    # This is the constraint hcsshim enforces statefully -- `plan9_mount` refuses a target
+    # already recorded in `data.metadata.p9mounts` -- and it costs nothing here, because a
+    # runtime presenting two mounts for one destination is presenting a shadowed mount.
+    mount_destinations_are_distinct(i_oci)
+
+    allow_storages(p_storages, i_storages, bundle_id, sandbox_id, p_oci)
 
     print("allow_by_bundle_or_sandbox_id: true")
 }
 
-allow_process_common(p_process, i_process, s_name, s_namespace) if {
-    print("allow_process_common: p_process =", p_process)
+mount_destinations_are_distinct(i_oci) if {
+    i_destinations := {i_destination |
+        some i_mount in i_oci.Mounts
+        i_destination := i_mount.destination
+    }
+    print("mount_destinations_are_distinct: distinct =", count(i_destinations), "presented =", count(i_oci.Mounts))
+    count(i_destinations) == count(i_oci.Mounts)
+}
+
+allow_process_common(p_process, i_process, s_name, s_namespace) if {    print("allow_process_common: p_process =", p_process)
     print("allow_process_common: i_process = ", i_process)
     print("allow_process_common: s_name =", s_name)
 

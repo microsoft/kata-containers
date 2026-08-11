@@ -331,6 +331,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_container_volumes_empty_dir_shared_fs() {
+        // RM-115 (F-212): a shared-fs emptyDir is the one shape where the Policy
+        // deliberately holds two entries for a single destination -- the sandbox-scoped
+        // volume directory and the per-container shared-fs path, as alternative sources
+        // for the same path. The presented-vs-Policy mount check is an injection, so
+        // before the distinct-destinations rule a host could satisfy both entries at
+        // once and stack two mounts on one path, leaving the container looking at
+        // whichever landed last. Either source alone is still legitimate.
+        runtests("createcontainer/volumes/emptydir_shared_fs").await;
+    }
+
+    #[tokio::test]
+    async fn test_create_container_volumes_empty_dir_memory() {
+        // RM-35 (F-97): a memory-backed emptyDir is declared as an in-guest tmpfs --
+        // driver "ephemeral", source "tmpfs" -- and is not one of the two declarations
+        // that opt into host-chosen block backing. Before RM-35 the blk/scsi bodies of
+        // storage_pair_matches ignored the declaration's driver and source entirely, so
+        // a host-attached disk carrying arbitrary content satisfied this declaration.
+        runtests("createcontainer/volumes/emptydir_memory").await;
+    }
+
+    #[tokio::test]
     async fn test_create_container_volumes_config_map() {
         runtests("createcontainer/volumes/config_map").await;
     }
