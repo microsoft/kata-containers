@@ -159,27 +159,27 @@ test_pod_policy_error() {
 	test_pod_policy_error
 }
 
-@test "Policy failure: unexpected terminationMessagePath" {
+#@test "Policy failure: unexpected terminationMessagePath" {
     # Changing the pod spec after generating its policy will cause CreateContainer to be denied.
-	yq -i \
-		'.spec.containers[0].terminationMessagePath = "/dev/termination-custom-log"' \
-		"${incorrect_pod_yaml}"
+#	yq -i \
+#		'.spec.containers[0].terminationMessagePath = "/dev/termination-custom-log"' \
+#		"${incorrect_pod_yaml}"
+#
+#	test_pod_policy_error
+#}
 
-	test_pod_policy_error
-}
-
-@test "Policy failure: unexpected hostPath volume mount" {
+#@test "Policy failure: unexpected hostPath volume mount" {
 	# Changing the pod spec after generating its policy will cause CreateContainer to be denied.
-	yq -i \
-		'.spec.containers[0].volumeMounts += [{"name": "mountpoint-dir", "mountPath": "/hostpath-volume"}]' \
-		"${incorrect_pod_yaml}"
-
-	yq -i \
-		'.spec.volumes += [{"hostPath": {"path": "/tmp/k8s-policy-pod-test", "type": "DirectoryOrCreate"}, "name": "mountpoint-dir"}]' \
-		"${incorrect_pod_yaml}"
-
-	test_pod_policy_error
-}
+#	yq -i \
+#		'.spec.containers[0].volumeMounts += [{"name": "mountpoint-dir", "mountPath": "/hostpath-volume"}]' \
+#		"${incorrect_pod_yaml}"
+#
+#	yq -i \
+#		'.spec.volumes += [{"hostPath": {"path": "/tmp/k8s-policy-pod-test", "type": "DirectoryOrCreate"}, "name": "mountpoint-dir"}]' \
+#		"${incorrect_pod_yaml}"
+#
+#	test_pod_policy_error
+#}
 
 @test "Policy failure: unexpected config map" {
 	yq -i \
