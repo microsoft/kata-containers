@@ -530,6 +530,7 @@ impl ShareFsVolume {
         Ok(resp.agent_file_id)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new(
         share_fs: &Option<Arc<dyn ShareFs>>,
         m: &oci::Mount,
