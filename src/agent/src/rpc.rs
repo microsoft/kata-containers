@@ -4654,7 +4654,7 @@ mod tests {
             agent_volume_id: agent_volume_id.to_string(),
             file_name: file_name.to_string(),
             file_size: data.len() as i64,
-            file_mode: 0o644 | libc::S_IFREG as u32,
+            file_mode: 0o644 | libc::S_IFREG,
             uid: unistd::getuid().as_raw() as i32,
             gid: unistd::getgid().as_raw() as i32,
             offset: 0,
@@ -4711,7 +4711,7 @@ mod tests {
                     gid: unistd::getgid().as_raw() as i32,
                     data_size: data.len() as i64,
                     data,
-                    file_mode: 0o644 | libc::S_IFREG as u32,
+                    file_mode: 0o644 | libc::S_IFREG,
                     ..Default::default()
                 },
             )
