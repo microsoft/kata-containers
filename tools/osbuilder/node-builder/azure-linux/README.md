@@ -297,29 +297,11 @@ sudo make BUILD_TYPE=debug SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
 
 # Run Kata (Confidential) Containers
 
-## Run via CRI or via containerd API
+## Run via the containerd API
 
-Use e.g. `crictl` (or `ctr`) to schedule Kata (Confidential) containers, referencing either the Kata or Kata-CC handlers.
+Use `ctr` to run a confidential container with the Kata-CC runtime:
 
-Note: On Kubernetes nodes, pods created via `crictl` will be deleted by the control plane.
-
-The following instructions serve as a general reference:
-- Install `crictl`, `cni` binaries, and set runtime endpoint in `crictl` configuration:
-
-  ```
-  sudo dnf -y install cri-tools cni
-  sudo crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock
-  ```
-
-- Set a proper CNI configuration and create a sample pod manifest: This step is omitted as it depends on the individual needs.
-
-- Run pods with `crictl`, for example:
-
-  `sudo crictl runp -T 30s -r <handler-name> <sample-pod.yaml>`
-
-- Run containers with `ctr`, for example a confidential container:
-
-  ```
+```bash
 id="hello-$(date +%s)"
 sudo ctr -n k8s.io run \
   --runtime io.containerd.kata-cc.v2 \
@@ -327,11 +309,11 @@ sudo ctr -n k8s.io run \
   docker.io/library/busybox:latest "${id}" uname -a
 ```
 
-  With `shared_fs = "none"`, use containerd's EROFS snapshotter to pass a
-  single layer as a raw block device or multiple layers as one GPT-backed VMDK
-  block device:
+With `shared_fs = "none"`, use containerd's EROFS snapshotter to pass a single
+layer as a raw block device or multiple layers as one GPT-backed VMDK block
+device:
 
-  ```toml
+```toml
 [plugins."io.containerd.snapshotter.v1.erofs"]
   default_size = "0"
 
@@ -339,15 +321,17 @@ sudo ctr -n k8s.io run \
   default = ["erofs", "walking"]
 ```
 
-  Restart containerd and verify the plugins:
+Restart containerd and verify the plugins:
 
-  ```bash
+```bash
 sudo modprobe erofs
 sudo systemctl restart containerd
 sudo ctr plugins ls | grep erofs
 ```
 
-  ```bash
+Run a multi-layer image and verify both the workload and its overlay mount:
+
+```bash
 NS=erofs-repro
 IMAGE=docker.io/library/nginx:alpine
 ID="nginx-vmdk-$(date +%s)"
@@ -376,52 +360,58 @@ sudo ctr -n "${NS}" tasks rm "${ID}"
 sudo ctr -n "${NS}" containers rm "${ID}"
 ```
 
-  `nginx:alpine` currently has eight `linux/amd64` OCI layers. runtime-rs
-  combines them into a GPT-backed VMDK block device; the overlay mount should
-  show `lower-0` through `lower-7`. Container-layer verity is not yet enabled.
+`nginx:alpine` currently has eight `linux/amd64` OCI layers. runtime-rs combines
+them into a GPT-backed VMDK block device; the overlay mount should show
+`lower-0` through `lower-7`. Container-layer verity is not yet enabled.
 
-For further usage we refer to the upstream `crictl` (or `ctr`) and CNI documentation.
+For further usage, refer to the upstream `ctr` documentation.
 
 ## Run via Kubernetes
 
-If your environment was set up through `az aks create` the respective node is ready to run Kata (Confidential) Containers as AKS Kubernetes pods.
-Other types of Kubernetes clusters should work as well. While this document doesn't cover how to set-up those clusters, you can
-apply the kata and kata-cc runtime classes to your cluster from the machine that holds your kubeconfig file, for example:
-```
-cat << EOF > runtimeClass-kata-cc.yaml
-kind: RuntimeClass
+After configuring containerd's `kata-cc` handler to use the EROFS snapshotter,
+register a RuntimeClass from the machine that holds the cluster kubeconfig:
+
+```yaml
 apiVersion: node.k8s.io/v1
+kind: RuntimeClass
 metadata:
-    name: kata-cc
+  name: kata-cc-erofs
 handler: kata-cc
 overhead:
-    podFixed:
-        memory: "600Mi"
+  podFixed:
+    memory: 600Mi
 scheduling:
   nodeSelector:
-    katacontainers.io/kata-runtime: "true"
-EOF
+    kubernetes.azure.com/kata-vm-isolation: "true"
+```
 
-cat << EOF > runtimeClass-kata.yaml
-kind: RuntimeClass
-apiVersion: node.k8s.io/v1
+Run a multi-layer workload without explicit CPU or memory limits. This validated
+configuration uses the static workload defaults from the runtime configuration:
+
+```yaml
+apiVersion: v1
+kind: Pod
 metadata:
-    name: kata
-handler: kata
-overhead:
-    podFixed:
-        memory: "600Mi"
-scheduling:
-  nodeSelector:
-    katacontainers.io/kata-runtime: "true"
-EOF
-
-kubectl apply -f runtimeClass-kata-cc.yaml -f runtimeClass-kata.yaml
+  name: kata-cc-erofs-nginx
+spec:
+  runtimeClassName: kata-cc-erofs
+  containers:
+    - name: nginx
+      image: docker.io/library/nginx:alpine
 ```
 
-And label your node appropriately:
-```
-kubectl label node <nodename> katacontainers.io/kata-runtime=true
+Wait for the pod and verify the workload and eight-layer overlay:
+
+```bash
+kubectl wait \
+  --for=condition=Ready \
+  pod/kata-cc-erofs-nginx \
+  --timeout=180s
+
+kubectl exec kata-cc-erofs-nginx -- sh -c '
+  wget -qO- http://127.0.0.1/ | grep -o "Welcome.to.nginx"
+  cat /proc/mounts | grep "^overlay"
+'
 ```
 
 # Build attestation scenarios
