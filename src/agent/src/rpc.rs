@@ -1731,6 +1731,13 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "copy_single_file", req);
         is_allowed(&req).await?;
 
+        if stat::SFlag::from_bits_truncate(req.file_mode) != stat::SFlag::S_IFREG {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                "copy single file source is not a regular file",
+            ));
+        }
+
         let target_file_name = match req.file_type.enum_value_or_default() {
             SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => "resolv.conf",
             SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => "hosts",
@@ -3195,6 +3202,35 @@ mod tests {
             fs::read_to_string(temp_dir.path().join("share").join(resp.agent_file_id)).unwrap(),
             "nameserver 1.1.1.1"
         );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_copy_single_file_rejects_non_regular_file() {
+        let _temp_dir = setup_watchable_rpc_test();
+        let agent_service = test_agent_service();
+        let ctx = mk_ttrpc_context();
+        let data = b"resolv.conf".to_vec();
+
+        let result = agent_service
+            .copy_single_file(
+                &ctx,
+                CopySingleFileRequest {
+                    sandbox_id: "sandbox-id".to_string(),
+                    file_type: protobuf::EnumOrUnknown::new(
+                        SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF,
+                    ),
+                    uid: unistd::getuid().as_raw() as i32,
+                    gid: unistd::getgid().as_raw() as i32,
+                    data_size: data.len() as i64,
+                    data,
+                    file_mode: libc::S_IFLNK as u32,
+                    ..Default::default()
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
     }
 
     #[test]
