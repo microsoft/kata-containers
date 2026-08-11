@@ -73,6 +73,10 @@ service AgentService {
 	rpc MemHotplugByProbe(MemHotplugByProbeRequest) returns (google.protobuf.Empty);
 	rpc SetGuestDateTime(SetGuestDateTimeRequest) returns (google.protobuf.Empty);
 	rpc CopyFile(CopyFileRequest) returns (google.protobuf.Empty);
+	rpc CopySingleFile(CopySingleFileRequest) returns (google.protobuf.Empty);
+	rpc InitWatchableVolume(InitWatchableVolumeRequest) returns (InitWatchableVolumeResponse);
+	rpc PutVolumeFile(PutVolumeFileRequest) returns (google.protobuf.Empty);
+	rpc CommitVolumeRevision(CommitVolumeRevisionRequest) returns (google.protobuf.Empty);
 	rpc GetOOMEvent(GetOOMEventRequest) returns (OOMEvent);
 	rpc AddSwap(AddSwapRequest) returns (google.protobuf.Empty);
 	rpc AddSwapPath(AddSwapPathRequest) returns (google.protobuf.Empty);
@@ -595,6 +599,49 @@ message CopyFileRequest {
 	int64 offset = 7;
 	// Data to write in the destination file.
 	bytes data = 8;
+}
+
+enum SingleFileType {
+	SINGLE_FILE_TYPE_UNSPECIFIED = 0;
+	SINGLE_FILE_TYPE_RESOLV_CONF = 1;
+	SINGLE_FILE_TYPE_ETC_HOSTS = 2;
+	SINGLE_FILE_TYPE_HOSTNAME = 3;
+}
+
+message CopySingleFileRequest {
+	string sandbox_id = 1;
+	SingleFileType file_type = 2;
+	int32 uid = 3;
+	int32 gid = 4;
+	int64 data_size = 5;
+	bytes data = 6;
+	uint32 file_mode = 7;
+}
+
+message InitWatchableVolumeRequest {
+	string host_volume_id = 1;
+}
+
+message InitWatchableVolumeResponse {
+	string agent_volume_id = 1;
+}
+
+message PutVolumeFileRequest {
+	string agent_volume_id = 1;
+	string file_name = 2;
+	int64 file_size = 3;
+	uint32 file_mode = 4;
+	int32 uid = 5;
+	int32 gid = 6;
+	int64 offset = 7;
+	bytes data = 8;
+	string revision = 9;
+	uint32 dir_mode = 10;
+}
+
+message CommitVolumeRevisionRequest {
+	string agent_volume_id = 1;
+	bool garbage_collect_previous = 4;
 }
 
 message GetOOMEventRequest {}

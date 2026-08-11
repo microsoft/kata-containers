@@ -221,6 +221,22 @@ func (p *HybridVSockTTRPCMockImp) CopyFile(ctx context.Context, req *pb.CopyFile
 	return &gpb.Empty{}, nil
 }
 
+func (p *HybridVSockTTRPCMockImp) CopySingleFile(ctx context.Context, req *pb.CopySingleFileRequest) (*pb.CopySingleFileResponse, error) {
+	return &pb.CopySingleFileResponse{}, nil
+}
+
+func (p *HybridVSockTTRPCMockImp) InitWatchableVolume(ctx context.Context, req *pb.InitWatchableVolumeRequest) (*pb.InitWatchableVolumeResponse, error) {
+	return &pb.InitWatchableVolumeResponse{}, nil
+}
+
+func (p *HybridVSockTTRPCMockImp) PutVolumeFile(ctx context.Context, req *pb.PutVolumeFileRequest) (*gpb.Empty, error) {
+	return &gpb.Empty{}, nil
+}
+
+func (p *HybridVSockTTRPCMockImp) CommitVolumeRevision(ctx context.Context, req *pb.CommitVolumeRevisionRequest) (*gpb.Empty, error) {
+	return &gpb.Empty{}, nil
+}
+
 func (p *HybridVSockTTRPCMockImp) MemHotplugByProbe(ctx context.Context, req *pb.MemHotplugByProbeRequest) (*gpb.Empty, error) {
 	return &gpb.Empty{}, nil
 }
