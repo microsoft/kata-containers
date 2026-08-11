@@ -2638,11 +2638,19 @@ fn do_commit_volume_revision(req: &protocols::agent::CommitVolumeRevisionRequest
         bail!("only ATOMIC_K8S volume sources support revision commits")
     }
 
-    // Use the revision and visible names tracked while receiving files.
-    let revision = source
-        .pending_revision
-        .take()
-        .ok_or_else(|| anyhow!("no pending revision for AtomicK8s volume; no files were received before commit"))?;
+    // Empty commit is valid for optional/empty AtomicK8s sources.
+    // If no files were received, there is no revision to expose yet.
+    let Some(revision) = source.pending_revision.take() else {
+        if source.pending_visible_files.is_empty() {
+            return Ok(());
+        }
+
+        bail!(
+            "inconsistent AtomicK8s commit state: pending visible files exist without a pending revision"
+        );
+    };
+
+    // Use the visible names tracked while receiving files.
     let visible_files = std::mem::take(&mut source.pending_visible_files);
 
     let owner_uid = unistd::geteuid().as_raw() as i32;
@@ -3184,6 +3192,7 @@ mod tests {
         LinuxNamespaceBuilder, LinuxResourcesBuilder, SpecBuilder,
     };
     use oci_spec::runtime::{LinuxNamespaceType, Root};
+    use serial_test::serial;
     use tempfile::{tempdir, TempDir};
     use test_utils::{assert_result, skip_if_not_root};
     use ttrpc::{r#async::TtrpcContext, MessageHeader};
@@ -4307,6 +4316,7 @@ COMMIT
     }
 
     #[test]
+    #[serial]
     fn test_atomick8s_rejects_symlink_in_put_volume_file() {
         let temp = tempdir().expect("create tempdir");
         let guest_path = temp.path().join("managed");
@@ -4347,6 +4357,7 @@ COMMIT
     }
 
     #[test]
+    #[serial]
     fn test_managed_volume_atomic_flow() {
         let temp = tempdir().expect("create tempdir");
         let guest_path = temp.path().join("managed");
@@ -4413,6 +4424,58 @@ COMMIT
 
         let rm = protocols::agent::RemoveVolumeSourceRequest {
             agent_volume_id: "v1".to_string(),
+            ..Default::default()
+        };
+        do_remove_volume_source(&rm).expect("remove volume source");
+        assert!(!guest_path.exists());
+    }
+
+    #[test]
+    #[serial]
+    fn test_managed_volume_atomic_empty_commit_is_noop() {
+        let temp = tempdir().expect("create tempdir");
+        let guest_path = temp.path().join("managed-empty");
+        fs::create_dir_all(&guest_path).expect("create guest path");
+
+        {
+            let mut sources = MANAGED_VOLUME_SOURCES
+                .lock()
+                .expect("lock managed source map");
+            sources.clear();
+            sources.insert(
+                "v_empty".to_string(),
+                ManagedVolumeSource {
+                    host_volume_id: "h_empty".to_string(),
+                    guest_path: guest_path.clone(),
+                    volume_type: VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S,
+                    active_revision: None,
+                    pending_revision: None,
+                    pending_visible_files: vec![],
+                },
+            );
+        }
+
+        let commit = protocols::agent::CommitVolumeRevisionRequest {
+            agent_volume_id: "v_empty".to_string(),
+            garbage_collect_previous: true,
+            ..Default::default()
+        };
+        do_commit_volume_revision(&commit).expect("empty commit should be a no-op");
+
+        {
+            let sources = MANAGED_VOLUME_SOURCES
+                .lock()
+                .expect("lock managed source map");
+            let src = sources.get("v_empty").expect("source exists");
+            assert!(src.active_revision.is_none());
+            assert!(src.pending_revision.is_none());
+            assert!(src.pending_visible_files.is_empty());
+        }
+
+        assert!(!guest_path.join("..data").exists());
+
+        let rm = protocols::agent::RemoveVolumeSourceRequest {
+            agent_volume_id: "v_empty".to_string(),
             ..Default::default()
         };
         do_remove_volume_source(&rm).expect("remove volume source");
