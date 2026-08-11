@@ -33,6 +33,21 @@ pub const COPY_VOLUMES_OTHER_DIRECTORIES: &str = "other-directories";
 /// Copy single-file volumes other than standard container identity files into the guest.
 pub const COPY_VOLUMES_OTHER_FILES: &str = "other-files";
 
+/// Copy standard container network files into the guest.
+pub const COPY_VOLUMES_NETWORK_FILES: &str = "network-files";
+
+/// Copy Kubernetes projected volumes into the guest.
+pub const COPY_VOLUMES_PROJECTED: &str = "projected-volumes";
+
+/// Copy Kubernetes ConfigMap volumes into the guest.
+pub const COPY_VOLUMES_CONFIGMAP: &str = "configmap-volumes";
+
+/// Copy Kubernetes Secret volumes into the guest.
+pub const COPY_VOLUMES_SECRET: &str = "secret-volumes";
+
+/// Copy Kubernetes downward API volumes into the guest.
+pub const COPY_VOLUMES_DOWNWARD_API: &str = "downward-api-volumes";
+
 /// Kata runtime configuration information.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Runtime {
@@ -168,6 +183,11 @@ pub struct Runtime {
     /// Options:
     /// - other-directories: copy non-watchable directories and their contents.
     /// - other-files: copy single files other than resolv.conf, hostname, and hosts.
+    /// - network-files: copy resolv.conf, hostname, and hosts.
+    /// - projected-volumes: copy Kubernetes projected volumes.
+    /// - configmap-volumes: copy Kubernetes ConfigMap volumes.
+    /// - secret-volumes: copy Kubernetes Secret volumes.
+    /// - downward-api-volumes: copy Kubernetes downward API volumes.
     #[serde(default)]
     pub copy_volumes: Vec<String>,
 
@@ -304,7 +324,14 @@ impl ConfigOps for Runtime {
         }
 
         for option in &conf.runtime.copy_volumes {
-            if option != COPY_VOLUMES_OTHER_DIRECTORIES && option != COPY_VOLUMES_OTHER_FILES {
+            if option != COPY_VOLUMES_OTHER_DIRECTORIES
+                && option != COPY_VOLUMES_OTHER_FILES
+                && option != COPY_VOLUMES_NETWORK_FILES
+                && option != COPY_VOLUMES_PROJECTED
+                && option != COPY_VOLUMES_CONFIGMAP
+                && option != COPY_VOLUMES_SECRET
+                && option != COPY_VOLUMES_DOWNWARD_API
+            {
                 return Err(std::io::Error::other(format!(
                     "Invalid copy_volumes option `{option}` in configuration file",
                 )));
@@ -460,13 +487,21 @@ emptydir_mode = "block-plain"
     fn test_copy_volumes() {
         let content = r#"
 [runtime]
-copy_volumes = ["other-directories", "other-files"]
+copy_volumes = ["other-directories", "other-files", "network-files", "projected-volumes", "configmap-volumes", "secret-volumes", "downward-api-volumes"]
 "#;
         let config: TomlConfig = TomlConfig::load(content).unwrap();
         config.validate().unwrap();
         assert_eq!(
             config.runtime.copy_volumes,
-            vec![COPY_VOLUMES_OTHER_DIRECTORIES, COPY_VOLUMES_OTHER_FILES]
+            vec![
+                COPY_VOLUMES_OTHER_DIRECTORIES,
+                COPY_VOLUMES_OTHER_FILES,
+                COPY_VOLUMES_NETWORK_FILES,
+                COPY_VOLUMES_PROJECTED,
+                COPY_VOLUMES_CONFIGMAP,
+                COPY_VOLUMES_SECRET,
+                COPY_VOLUMES_DOWNWARD_API,
+            ]
         );
 
         let content = r#"

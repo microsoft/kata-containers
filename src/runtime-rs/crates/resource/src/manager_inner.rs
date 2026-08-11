@@ -499,18 +499,7 @@ impl ResourceManagerInner {
             sid: &self.sid,
             agent: self.agent.clone(),
             emptydir_mode: &self.toml_config.runtime.emptydir_mode,
-            copy_other_directories: self
-                .toml_config
-                .runtime
-                .copy_volumes
-                .iter()
-                .any(|option| option == kata_types::config::COPY_VOLUMES_OTHER_DIRECTORIES),
-            copy_other_files: self
-                .toml_config
-                .runtime
-                .copy_volumes
-                .iter()
-                .any(|option| option == kata_types::config::COPY_VOLUMES_OTHER_FILES),
+            copy_volumes: &self.toml_config.runtime.copy_volumes,
             fs_sharing_supported: capabilities.is_fs_sharing_supported(),
             block_device_discard_supported: capabilities.is_block_device_discard_supported(),
         };

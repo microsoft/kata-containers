@@ -33,6 +33,11 @@ use walkdir::WalkDir;
 use super::Volume;
 use crate::share_fs::{MountedInfo, ShareFs, ShareFsVolumeConfig};
 use kata_types::{
+    config::{
+        COPY_VOLUMES_CONFIGMAP, COPY_VOLUMES_DOWNWARD_API, COPY_VOLUMES_NETWORK_FILES,
+        COPY_VOLUMES_OTHER_DIRECTORIES, COPY_VOLUMES_OTHER_FILES, COPY_VOLUMES_PROJECTED,
+        COPY_VOLUMES_SECRET,
+    },
     k8s::{is_configmap, is_downward_api, is_projected, is_secret},
     mount,
 };
@@ -459,8 +464,7 @@ impl ShareFsVolume {
         m: &oci::Mount,
         cid: &str,
         readonly: bool,
-        copy_other_directories: bool,
-        copy_other_files: bool,
+        copy_volumes: &[String],
         agent: Arc<dyn Agent>,
         volume_manager: Arc<VolumeManager>,
     ) -> Result<Self> {
@@ -504,7 +508,7 @@ impl ShareFsVolume {
 
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
-                    if should_copy_file_to_guest(m.destination(), copy_other_files) {
+                    if should_copy_file_to_guest(m.destination(), copy_volumes) {
                         let source = Self::init_volume_source(
                             &host_volume_id,
                             agent::VolumeSourceType::SingleFile,
@@ -530,7 +534,7 @@ impl ShareFsVolume {
                     } else {
                         info!(
                             sl!(),
-                            "skip copying single-file mount {:?} to {:?}: copy_volumes does not contain other-files",
+                            "skip copying single-file mount {:?} to {:?}: its category is not enabled in copy_volumes",
                             &src,
                             m.destination()
                         );
@@ -539,6 +543,7 @@ impl ShareFsVolume {
                     // We allow directory copying wildly
                     // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
                     let watchable_volume = is_watchable_volume(&src);
+                    let copy_directory = should_copy_directory_to_guest(&src, copy_volumes);
                     let volume_type = if watchable_volume {
                         agent::VolumeSourceType::AtomicK8s
                     } else {
@@ -560,9 +565,7 @@ impl ShareFsVolume {
                         .await
                         .context("get or create volume")?;
 
-                    if is_new
-                        && should_copy_directory_to_guest(watchable_volume, copy_other_directories)
-                    {
+                    if is_new && copy_directory {
                         info!(
                             sl!(),
                             "fsshare: new directory {:?} to managed volume {}",
@@ -581,7 +584,7 @@ impl ShareFsVolume {
                     } else if is_new {
                         info!(
                             sl!(),
-                            "skip copying contents for non-watchable directory {:?}: copy_volumes does not contain other-directories",
+                            "skip copying directory contents {:?}: its category is not enabled in copy_volumes",
                             &src
                         );
                     }
@@ -591,7 +594,7 @@ impl ShareFsVolume {
 
                     // Start monitoring (only for watchable volumes)
                     let mut monitor_task = None;
-                    if is_new && watchable_volume {
+                    if is_new && watchable_volume && copy_directory {
                         let watcher = FsWatcher::new(&src).await?;
                         let handle = watcher
                             .start_monitor(agent.clone(), src.clone(), agent_volume_id.clone())
@@ -1115,29 +1118,50 @@ pub fn generate_mount_path(id: &str, file_name: &str) -> String {
 }
 
 /// This function is used to check whether a given volume is a watchable volume.
-/// More specifically, it determines whether the volume's path is located under
-/// a predefined list of allowed copy directories.
+/// More specifically, it determines whether the volume is one of the supported
+/// Kubernetes atomic volume types.
 pub(crate) fn is_watchable_volume(source_path: &PathBuf) -> bool {
+    watchable_volume_option(source_path).is_some()
+}
+
+fn copy_volume_enabled(copy_volumes: &[String], option: &str) -> bool {
+    copy_volumes.iter().any(|configured| configured == option)
+}
+
+fn watchable_volume_option(source_path: &PathBuf) -> Option<&'static str> {
     if !source_path.is_dir() {
-        return false;
+        return None;
     }
-    // watchable list: { kubernetes.io~projected, kubernetes.io~configmap, kubernetes.io~secret, kubernetes.io~downward-api }
-    is_projected(source_path)
-        || is_downward_api(source_path)
-        || is_secret(source_path)
-        || is_configmap(source_path)
+
+    if is_projected(source_path) {
+        Some(COPY_VOLUMES_PROJECTED)
+    } else if is_configmap(source_path) {
+        Some(COPY_VOLUMES_CONFIGMAP)
+    } else if is_secret(source_path) {
+        Some(COPY_VOLUMES_SECRET)
+    } else if is_downward_api(source_path) {
+        Some(COPY_VOLUMES_DOWNWARD_API)
+    } else {
+        None
+    }
 }
 
-fn should_copy_directory_to_guest(watchable_volume: bool, copy_other_directories: bool) -> bool {
-    watchable_volume || copy_other_directories
+fn should_copy_directory_to_guest(source_path: &PathBuf, copy_volumes: &[String]) -> bool {
+    let option = watchable_volume_option(source_path).unwrap_or(COPY_VOLUMES_OTHER_DIRECTORIES);
+    copy_volume_enabled(copy_volumes, option)
 }
 
-fn should_copy_file_to_guest(destination: &Path, copy_other_files: bool) -> bool {
-    copy_other_files
-        || matches!(
-            destination.to_str(),
-            Some("/etc/resolv.conf" | "/etc/hostname" | "/etc/hosts")
-        )
+fn should_copy_file_to_guest(destination: &Path, copy_volumes: &[String]) -> bool {
+    let option = if matches!(
+        destination.to_str(),
+        Some("/etc/resolv.conf" | "/etc/hostname" | "/etc/hosts")
+    ) {
+        COPY_VOLUMES_NETWORK_FILES
+    } else {
+        COPY_VOLUMES_OTHER_FILES
+    };
+
+    copy_volume_enabled(copy_volumes, option)
 }
 
 #[cfg(test)]
@@ -1191,17 +1215,64 @@ mod test {
 
     #[test]
     fn test_should_copy_directory_to_guest() {
-        assert!(should_copy_directory_to_guest(true, false));
-        assert!(should_copy_directory_to_guest(false, true));
-        assert!(!should_copy_directory_to_guest(false, false));
+        let temp_dir = tempfile::tempdir().unwrap();
+        let volume_types = [
+            ("kubernetes.io~projected/volume", COPY_VOLUMES_PROJECTED),
+            ("kubernetes.io~configmap/volume", COPY_VOLUMES_CONFIGMAP),
+            ("kubernetes.io~secret/volume", COPY_VOLUMES_SECRET),
+            (
+                "kubernetes.io~downward-api/volume",
+                COPY_VOLUMES_DOWNWARD_API,
+            ),
+        ];
+
+        for (relative_path, option) in volume_types {
+            let path = temp_dir.path().join(relative_path);
+            std::fs::create_dir_all(&path).unwrap();
+
+            assert!(!should_copy_directory_to_guest(&path, &[]));
+            assert!(should_copy_directory_to_guest(
+                &path,
+                &[option.to_string()]
+            ));
+            assert!(!should_copy_directory_to_guest(
+                &path,
+                &[COPY_VOLUMES_OTHER_DIRECTORIES.to_string()]
+            ));
+        }
+
+        let other_directory = temp_dir.path().join("other-directory");
+        std::fs::create_dir_all(&other_directory).unwrap();
+        assert!(!should_copy_directory_to_guest(&other_directory, &[]));
+        assert!(should_copy_directory_to_guest(
+            &other_directory,
+            &[COPY_VOLUMES_OTHER_DIRECTORIES.to_string()]
+        ));
     }
 
     #[test]
     fn test_should_copy_file_to_guest() {
-        assert!(should_copy_file_to_guest(Path::new("/etc/resolv.conf"), false));
-        assert!(should_copy_file_to_guest(Path::new("/etc/hostname"), false));
-        assert!(should_copy_file_to_guest(Path::new("/etc/hosts"), false));
-        assert!(should_copy_file_to_guest(Path::new("/tmp/other"), true));
-        assert!(!should_copy_file_to_guest(Path::new("/tmp/other"), false));
+        let network_files = ["/etc/resolv.conf", "/etc/hostname", "/etc/hosts"];
+        for destination in network_files {
+            assert!(!should_copy_file_to_guest(Path::new(destination), &[]));
+            assert!(should_copy_file_to_guest(
+                Path::new(destination),
+                &[COPY_VOLUMES_NETWORK_FILES.to_string()]
+            ));
+            assert!(!should_copy_file_to_guest(
+                Path::new(destination),
+                &[COPY_VOLUMES_OTHER_FILES.to_string()]
+            ));
+        }
+
+        assert!(!should_copy_file_to_guest(Path::new("/tmp/other"), &[]));
+        assert!(should_copy_file_to_guest(
+            Path::new("/tmp/other"),
+            &[COPY_VOLUMES_OTHER_FILES.to_string()]
+        ));
+        assert!(!should_copy_file_to_guest(
+            Path::new("/tmp/other"),
+            &[COPY_VOLUMES_NETWORK_FILES.to_string()]
+        ));
     }
 }
