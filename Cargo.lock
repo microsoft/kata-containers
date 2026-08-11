@@ -4011,6 +4011,7 @@ dependencies = [
  "base64 0.22.1",
  "json-patch 2.0.0",
  "libc",
+ "protobuf",
  "protocols",
  "regorus",
  "serde",

@@ -55,6 +55,9 @@ protocols = { workspace = true, features = ["with-serde"] }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
 tempfile.workspace = true
+# Constructing protobuf requests, including EnumOrUnknown values that are not any known
+# variant, so the tests can cover an unrecognized SingleFileType arriving from the host.
+protobuf.workspace = true
 
 [features]
 # Strict confidential-runtime policy behaviour:
