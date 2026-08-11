@@ -5220,21 +5220,33 @@ COMMIT
         }
     }
 
-    // Only runs without `agent-policy`, where `is_allowed` is the no-op stub.
+    // Drives two concurrent `GetOOMEvent` handlers to prove the lock discipline: the
+    // handler must release the sandbox lock before awaiting `recv()`, or a second caller
+    // deadlocks.
     //
-    // `get_oom_event` calls `is_allowed` as its first statement, and a freshly constructed
-    // `AgentPolicy` has an empty engine with `allow_failures = false`, so in any policy build
-    // the query returns no results and the handler fails before it reaches the `recv()` this
-    // test is exercising. That is a defect in the *test*, not the handler: the lock discipline
-    // under test lives after the policy gate and is configuration-independent.
-    //
-    // The correct fix is to install a permissive policy on `AGENT_POLICY` before spawning the
-    // handlers, which would let this run under `strict-policy` too. Deferred (F-22): note that
-    // `AgentPolicy::set_policy` is one-shot under `strict-policy`, so that fix wants a shared
-    // one-time helper rather than an inline call, or a second such test will fail closed.
-    #[cfg(not(feature = "agent-policy"))]
+    // This runs in every configuration. It used to be `cfg(not(agent-policy))`, because
+    // `get_oom_event` calls `is_allowed` as its first statement and an empty policy
+    // engine refuses everything, so the handler failed before reaching the `recv()` under
+    // test. That was a defect in the test, not the handler — the property lives *after*
+    // the policy gate and is configuration-independent — but the gate meant the only test
+    // in this crate that drives a ttrpc handler at all was excluded from precisely the
+    // builds that ship. Installing a permissive policy makes the policy builds exercise
+    // byte-identical code.
     #[tokio::test]
     async fn test_get_oom_event_no_deadlock() {
+        // Held for the duration: releasing it early would let another policy-driven test
+        // swap the active policy out from under the handlers below.
+        #[cfg(feature = "agent-policy")]
+        let _policy_guard = crate::policy::test_support::install_policy(concat!(
+            "package agent_policy\n",
+            "default GetOOMEventRequest := true\n",
+            // Explicit, so a query for an unrelated endpoint still returns a result
+            // rather than an engine error. Without it this policy would be permissive
+            // for `GetOOMEvent` and *indeterminate* for everything else.
+            "default AllowRequestsFailingPolicy := false\n",
+        ))
+        .await;
+
         let logger = slog::Logger::root(slog::Discard, o!());
         let sandbox = Sandbox::new(&logger).unwrap();
 
