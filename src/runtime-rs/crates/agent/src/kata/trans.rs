@@ -15,18 +15,19 @@ use crate::{
     types::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
-        ContainerID, CopyFileRequest, CpuStats, CpuUsage, CreateContainerRequest,
-        CreateSandboxRequest, Device, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy,
-        GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse,
-        HugetlbStats, IPAddress, IPFamily, Interface, Interfaces, KernelModule,
-        MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse, NetworkStats,
-        OnlineCPUMemRequest, PidsStats, ReadStreamRequest, ReadStreamResponse,
-        RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes,
-        SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse, SharedMount,
-        SignalProcessRequest, StatsContainerResponse, Storage, StringUser, ThrottlingData,
-        TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
-        VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
-        WriteStreamRequest,
+        CommitVolumeRevisionRequest, ContainerID, CopyFileRequest, CopySingleFileRequest,
+        CpuStats, CpuUsage, CreateContainerRequest, CreateSandboxRequest, Device, Empty,
+        ExecProcessRequest, FSGroup, FSGroupChangePolicy, GetIPTablesRequest,
+        GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse, HugetlbStats, IPAddress,
+        IPFamily, InitWatchableVolumeRequest, InitWatchableVolumeResponse, Interface, Interfaces,
+        KernelModule, MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse,
+        NetworkStats, OnlineCPUMemRequest, PidsStats, PutVolumeFileRequest, ReadStreamRequest,
+        ReadStreamResponse, RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest,
+        Route, Routes, SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse,
+        SharedMount, SignalProcessRequest, SingleFileType, StatsContainerResponse, Storage,
+        StringUser, ThrottlingData, TtyWinResizeRequest, UpdateContainerRequest,
+        UpdateInterfaceRequest, UpdateRoutesRequest, VersionCheckResponse, VolumeStatsRequest,
+        VolumeStatsResponse, WaitProcessRequest, WriteStreamRequest,
     },
     GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest,
     LoadPolicyFragmentRequest, OomEventResponse, SetPolicyRequest, WaitProcessResponse,
@@ -820,6 +821,88 @@ impl From<CopyFileRequest> for agent::CopyFileRequest {
             gid: from.gid,
             offset: from.offset,
             data: from.data,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<SingleFileType> for agent::SingleFileType {
+    fn from(from: SingleFileType) -> Self {
+        match from {
+            SingleFileType::Unspecified => agent::SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED,
+            SingleFileType::ResolvConf => agent::SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF,
+            SingleFileType::EtcHosts => agent::SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS,
+            SingleFileType::Hostname => agent::SingleFileType::SINGLE_FILE_TYPE_HOSTNAME,
+        }
+    }
+}
+
+impl From<agent::SingleFileType> for SingleFileType {
+    fn from(src: agent::SingleFileType) -> Self {
+        match src {
+            agent::SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED => SingleFileType::Unspecified,
+            agent::SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => SingleFileType::ResolvConf,
+            agent::SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => SingleFileType::EtcHosts,
+            agent::SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => SingleFileType::Hostname,
+        }
+    }
+}
+
+impl From<CopySingleFileRequest> for agent::CopySingleFileRequest {
+    fn from(from: CopySingleFileRequest) -> Self {
+        Self {
+            sandbox_id: from.sandbox_id,
+            file_type: protobuf::EnumOrUnknown::new(from.file_type.into()),
+            uid: from.uid,
+            gid: from.gid,
+            data_size: from.data_size,
+            data: from.data,
+            file_mode: from.file_mode,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<InitWatchableVolumeRequest> for agent::InitWatchableVolumeRequest {
+    fn from(from: InitWatchableVolumeRequest) -> Self {
+        Self {
+            host_volume_id: from.host_volume_id,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<agent::InitWatchableVolumeResponse> for InitWatchableVolumeResponse {
+    fn from(from: agent::InitWatchableVolumeResponse) -> Self {
+        Self {
+            agent_volume_id: from.agent_volume_id,
+        }
+    }
+}
+
+impl From<PutVolumeFileRequest> for agent::PutVolumeFileRequest {
+    fn from(from: PutVolumeFileRequest) -> Self {
+        Self {
+            agent_volume_id: from.agent_volume_id,
+            file_name: from.file_name,
+            file_size: from.file_size,
+            file_mode: from.file_mode,
+            uid: from.uid,
+            gid: from.gid,
+            offset: from.offset,
+            data: from.data,
+            revision: from.revision,
+            dir_mode: from.dir_mode,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CommitVolumeRevisionRequest> for agent::CommitVolumeRevisionRequest {
+    fn from(from: CommitVolumeRevisionRequest) -> Self {
+        Self {
+            agent_volume_id: from.agent_volume_id,
+            garbage_collect_previous: from.garbage_collect_previous,
             ..Default::default()
         }
     }
