@@ -642,17 +642,17 @@ pod_exec_blocked_command() {
 #	$2	- start time at the node for the sake of fetching logs
 #
 teardown_common() {
-	local node="$1"
-	local node_start_time="$2"
+	#local node="$1"
+	#local node_start_time="$2"
 
-	kubectl describe pods
+	#kubectl describe pods
 	k8s_delete_all_pods_if_any_exists || true
 
-	local node_end_time
-	node_end_time=$(measure_node_time "${node}")
+	#local node_end_time
+	#node_end_time=$(measure_node_time "${node}")
 
-	echo "Journal LOG starts at ${node_start_time:-}, ends at ${node_end_time:-}"
-	print_node_journal_since_test_start "${node}" "${node_start_time}" "${BATS_TEST_COMPLETED:-}"
+	#echo "Journal LOG starts at ${node_start_time:-}, ends at ${node_end_time:-}"
+	#print_node_journal_since_test_start "${node}" "${node_start_time}" "${BATS_TEST_COMPLETED:-}"
 }
 
 measure_node_time() {
