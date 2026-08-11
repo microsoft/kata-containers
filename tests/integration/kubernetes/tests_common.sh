@@ -245,11 +245,11 @@ install_genpolicy_drop_ins() {
 	fi
 
 	# 20-* OCI version overlay
-	if [[ "${KATA_HOST_OS:-}" == "cbl-mariner" ]]; then
-		cp "${examples_dir}/20-oci-1.2.1-drop-in.json" "${settings_d}/"
-	elif is_k3s_or_rke2 || is_nvidia_gpu_platform || is_snp_hypervisor "${KATA_HYPERVISOR}" || is_tdx_hypervisor "${KATA_HYPERVISOR}" || [[ -n "${CONTAINER_ENGINE_VERSION:-}" ]] || is_arm64_host; then
+	#if [[ "${KATA_HOST_OS:-}" == "cbl-mariner" ]]; then
+	#	cp "${examples_dir}/20-oci-1.2.1-drop-in.json" "${settings_d}/"
+	#elif is_k3s_or_rke2 || is_nvidia_gpu_platform || is_snp_hypervisor "${KATA_HYPERVISOR}" || is_tdx_hypervisor "${KATA_HYPERVISOR}" || [[ -n "${CONTAINER_ENGINE_VERSION:-}" ]] || is_arm64_host; then
 		cp "${examples_dir}/20-oci-1.3.0-drop-in.json" "${settings_d}/"
-	fi
+	#fi
 
 	# 20-* experimental force guest pull overlay
 	if [[ "${PULL_TYPE:-}" == "experimental-force-guest-pull" ]]; then
