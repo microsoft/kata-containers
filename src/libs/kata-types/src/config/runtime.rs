@@ -481,6 +481,27 @@ copy_volumes = ["network-files", "projected-volumes", "other-directories"]
     }
 
     #[test]
+    fn test_empty_copy_volumes() {
+        let content = r#"
+[runtime]
+copy_volumes = []
+"#;
+        let config: TomlConfig = TomlConfig::load(content).unwrap();
+        config.validate().unwrap();
+        assert!(config.runtime.copy_volumes.is_empty());
+    }
+
+    #[test]
+    fn test_missing_copy_volumes_defaults_to_empty() {
+        let content = r#"
+[runtime]
+"#;
+        let config: TomlConfig = TomlConfig::load(content).unwrap();
+        config.validate().unwrap();
+        assert!(config.runtime.copy_volumes.is_empty());
+    }
+
+    #[test]
     fn test_invalid_copy_volumes() {
         let content = r#"
 [runtime]

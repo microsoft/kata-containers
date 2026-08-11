@@ -493,18 +493,7 @@ impl ResourceManagerInner {
         spec: &oci::Spec,
     ) -> Result<Vec<Arc<dyn Volume>>> {
         let capabilities = self.hypervisor.capabilities().await?;
-        let configured_copy_volume_types = if self.toml_config.runtime.copy_volumes.is_empty() {
-            None
-        } else {
-            Some(
-                self.toml_config
-                    .runtime
-                    .copy_volumes
-                    .iter()
-                    .cloned()
-                    .collect(),
-            )
-        };
+        let configured_copy_volume_types = self.toml_config.runtime.copy_volumes.iter().cloned().collect();
         let ctx = crate::volume::VolumeContext {
             share_fs: &self.share_fs,
             d: self.device_manager.as_ref(),
@@ -513,7 +502,7 @@ impl ResourceManagerInner {
             emptydir_mode: &self.toml_config.runtime.emptydir_mode,
             fs_sharing_supported: capabilities.is_fs_sharing_supported(),
             block_device_discard_supported: capabilities.is_block_device_discard_supported(),
-            copy_volume_types: configured_copy_volume_types,
+            copy_volume_types: Some(configured_copy_volume_types),
         };
         self.volume_resource.handler_volumes(&ctx, cid, spec).await
     }
