@@ -16,6 +16,10 @@ use std::{
 };
 
 use agent::Agent;
+use agent::{
+    CommitVolumeRevisionRequest, CopySingleFileRequest, InitWatchableVolumeRequest,
+    PutVolumeFileRequest, SingleFileType,
+};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use hypervisor::device::device_manager::DeviceManager;
@@ -53,6 +57,8 @@ const COPY_VOLUME_SECRET_VOLUMES: &str = "secret-volumes";
 const COPY_VOLUME_DOWNWARD_API_VOLUMES: &str = "downward-api-volumes";
 const COPY_VOLUME_OTHER_DIRECTORIES: &str = "other-directories";
 const NETWORK_FILE_NAMES: [&str; 3] = ["resolv.conf", "hosts", "hostname"];
+const BIND_SAFER_PATH: &str = "bind-safer-path";
+const WATCHABLE_DATA_SYMLINK: &str = "..data";
 
 // Corresponds to os.FileMode(0750) | os.ModeDir in Go
 // So, it's (permission bits 0o750) ORed with (file type bit S_IFDIR).
@@ -170,6 +176,7 @@ impl FsWatcher {
     }
 
     /// start monitor
+    #[allow(dead_code)]
     pub async fn start_monitor(
         &self,
         agent: Arc<dyn Agent>,
@@ -276,6 +283,74 @@ impl FsWatcher {
                                 e
                             );
                             eprintln!("sync host/guest files failed: {e}");
+                        }
+                        *need_sync.lock().await = false;
+                        last_event_time = None;
+                    }
+                }
+
+                tokio::time::sleep(MONITOR_INTERVAL).await;
+            }
+        })
+    }
+
+    pub async fn start_watchable_monitor(
+        &self,
+        agent: Arc<dyn Agent>,
+        src: PathBuf,
+        agent_volume_id: String,
+    ) -> JoinHandle<()> {
+        let need_sync = self.need_sync.clone();
+        let pending_events = self.pending_events.clone();
+        let inotify = self.inotify.clone();
+        let monitor_config = self.config.clone();
+
+        tokio::spawn(async move {
+            let mut buffer = [0u8; 4096];
+            let mut last_event_time = None;
+
+            loop {
+                match inotify.lock().await.read_events(&mut buffer) {
+                    Ok(events) => {
+                        for event in events {
+                            if !event.mask.intersects(
+                                EventMask::CREATE
+                                    | EventMask::MODIFY
+                                    | EventMask::DELETE
+                                    | EventMask::MOVED_FROM
+                                    | EventMask::MOVED_TO
+                                    | EventMask::CLOSE_WRITE,
+                            ) {
+                                continue;
+                            }
+
+                            if let Some(file_name) = event.name {
+                                let full_path = &monitor_config.path.join(file_name);
+                                pending_events.lock().await.insert(full_path.clone());
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("inotify error: {e}"),
+                }
+
+                let events_paths = {
+                    let mut pending = pending_events.lock().await;
+                    pending.drain().collect::<Vec<_>>()
+                };
+                if !events_paths.is_empty() {
+                    *need_sync.lock().await = true;
+                    last_event_time = Some(Instant::now());
+                }
+
+                if let Some(t) = last_event_time {
+                    if Instant::now().duration_since(t) > DEBOUNCE_TIME && *need_sync.lock().await {
+                        if let Err(e) =
+                            sync_watchable_volume_revision(&src, &agent_volume_id, &agent).await
+                        {
+                            error!(
+                                sl!(),
+                                "watchable volume sync failed for {:?}: {:?}", &src, e
+                            );
                         }
                         *need_sync.lock().await = false;
                         last_event_time = None;
@@ -421,10 +496,42 @@ impl VolumeManager {
 }
 
 impl ShareFsVolume {
+    async fn copy_single_file_to_guest(
+        src: &Path,
+        sid: &str,
+        agent: &Arc<dyn Agent>,
+    ) -> Result<String> {
+        let file_metadata = std::fs::metadata(src)
+            .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
+
+        let mut file = File::open(src).with_context(|| format!("Failed to open file: {src:?}"))?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)
+            .with_context(|| format!("Failed to read file: {src:?}"))?;
+
+        let req = CopySingleFileRequest {
+            sandbox_id: sid.to_string(),
+            file_type: single_file_type_from_path(src)?,
+            uid: file_metadata.uid() as i32,
+            gid: file_metadata.gid() as i32,
+            data_size: file_metadata.len() as i64,
+            data: buffer,
+            file_mode: file_metadata.mode(),
+        };
+
+        let resp = agent
+            .copy_single_file(req)
+            .await
+            .with_context(|| format!("copy single file request failed for {src:?}"))?;
+
+        Ok(resp.agent_file_id)
+    }
+
     pub(crate) async fn new(
         share_fs: &Option<Arc<dyn ShareFs>>,
         m: &oci::Mount,
         cid: &str,
+        sid: &str,
         readonly: bool,
         agent: Arc<dyn Agent>,
         volume_manager: Arc<VolumeManager>,
@@ -477,49 +584,73 @@ impl ShareFsVolume {
 
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
-                    // Generate guest path
-                    let guest_path = generate_guest_path(cid, m.destination())
-                        .context("generate path failed")?;
-                    // Copy a single file
-                    Self::copy_file_to_guest(&src, &guest_path, &agent)
-                        .await
-                        .context("copy file to guest")?;
+                    if is_network_file_path(&src) {
+                        let agent_file_id = Self::copy_single_file_to_guest(&src, sid, &agent)
+                            .await
+                            .context("copy network file to guest")?;
 
-                    oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                        oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
+                        oci_mount.set_source(Some(PathBuf::from(agent_file_id)));
+                    } else {
+                        // Generate guest path
+                        let guest_path = generate_guest_path(cid, m.destination())
+                            .context("generate path failed")?;
+                        // Copy a single file
+                        Self::copy_file_to_guest(&src, &guest_path, &agent)
+                            .await
+                            .context("copy file to guest")?;
+
+                        oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                    }
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
-                    // We allow directory copying wildly
-                    // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
-                    info!(sl!(), "copying directory {:?} to guest", &src);
-
-                    // Get or create the guest path
-                    let guest_path = volume_manager
-                        .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
-                        .await
-                        .context("get or create volume")?;
-
-                    // Create directory
-                    Self::copy_directory_to_guest(&src, &guest_path, &agent)
-                        .await
-                        .context("copy directory to guest")?;
-
-                    oci_mount.set_source(Some(PathBuf::from(&guest_path)));
-                    volume.mounts.push(oci_mount);
-
-                    // Start monitoring (only for watchable volumes)
-                    let mut monitor_task = None;
                     if is_watchable_volume(&src) {
+                        let init_resp = agent
+                            .init_watchable_volume(InitWatchableVolumeRequest {
+                                host_volume_id: src.to_string_lossy().to_string(),
+                            })
+                            .await
+                            .context("init watchable volume")?;
+
+                        sync_watchable_volume_revision(&src, &init_resp.agent_volume_id, &agent)
+                            .await
+                            .context("sync watchable volume")?;
+
+                        oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
+                        oci_mount.set_source(Some(PathBuf::from(&init_resp.agent_volume_id)));
+                        volume.mounts.push(oci_mount);
+
                         let watcher = FsWatcher::new(&src).await?;
                         let handle = watcher
-                            .start_monitor(agent.clone(), src.clone(), PathBuf::from(&guest_path))
+                            .start_watchable_monitor(
+                                agent.clone(),
+                                src.clone(),
+                                init_resp.agent_volume_id.clone(),
+                            )
                             .await;
-                        monitor_task = Some(handle);
-                    }
 
-                    // Register monitor into Volume Manager
-                    volume_manager
-                        .register_monitor(&src.to_string_lossy(), monitor_task)
-                        .await?;
+                        volume_manager
+                            .register_monitor(&src.to_string_lossy(), Some(handle))
+                            .await?;
+                    } else {
+                        // We allow directory copying wildly
+                        // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
+                        info!(sl!(), "copying directory {:?} to guest", &src);
+
+                        // Get or create the guest path
+                        let guest_path = volume_manager
+                            .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
+                            .await
+                            .context("get or create volume")?;
+
+                        // Create directory
+                        Self::copy_directory_to_guest(&src, &guest_path, &agent)
+                            .await
+                            .context("copy directory to guest")?;
+
+                        oci_mount.set_source(Some(PathBuf::from(&guest_path)));
+                        volume.mounts.push(oci_mount);
+                    }
                 } else {
                     // If not, we can ignore it. Let's issue a warning so that the user knows.
                     warn!(
@@ -689,12 +820,105 @@ impl ShareFsVolume {
     }
 }
 
+fn single_file_type_from_path(src: &Path) -> Result<SingleFileType> {
+    let file_name = src
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("get file name failed for {src:?}"))?;
+
+    let file_type = match file_name {
+        "resolv.conf" => SingleFileType::ResolvConf,
+        "hosts" => SingleFileType::EtcHosts,
+        "hostname" => SingleFileType::Hostname,
+        _ => SingleFileType::Unspecified,
+    };
+
+    Ok(file_type)
+}
+
+async fn sync_watchable_volume_revision(
+    src: &Path,
+    agent_volume_id: &str,
+    agent: &Arc<dyn Agent>,
+) -> Result<()> {
+    let revision_link = src.join(WATCHABLE_DATA_SYMLINK);
+    let revision = std::fs::read_link(&revision_link)
+        .with_context(|| format!("read watchable data symlink: {revision_link:?}"))?;
+    let revision_str = revision
+        .to_str()
+        .ok_or_else(|| anyhow!("revision is not valid UTF-8: {revision:?}"))?
+        .to_string();
+
+    let revision_dir = src.join(&revision);
+    let walker = WalkDir::new(&revision_dir)
+        .follow_links(false)
+        .min_depth(1)
+        .into_iter();
+
+    for entry in walker.filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let entry_path = entry.path().to_path_buf();
+        let metadata = std::fs::metadata(&entry_path)
+            .with_context(|| format!("read metadata for watchable file {entry_path:?}"))?;
+
+        let rel_path = entry_path
+            .strip_prefix(&revision_dir)
+            .with_context(|| format!("strip prefix for watchable file {entry_path:?}"))?
+            .to_string_lossy()
+            .to_string();
+
+        let mut file = tokio::fs::File::open(&entry_path)
+            .await
+            .with_context(|| format!("open watchable file {entry_path:?}"))?;
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)
+            .await
+            .with_context(|| format!("read watchable file {entry_path:?}"))?;
+
+        agent
+            .put_volume_file(PutVolumeFileRequest {
+                agent_volume_id: agent_volume_id.to_string(),
+                file_name: rel_path,
+                file_size: metadata.len() as i64,
+                file_mode: metadata.mode(),
+                uid: metadata.uid() as i32,
+                gid: metadata.gid() as i32,
+                offset: 0,
+                data,
+                revision: revision_str.clone(),
+                dir_mode: DIR_MODE_PERMS,
+            })
+            .await
+            .with_context(|| format!("put watchable file {entry_path:?}"))?;
+    }
+
+    agent
+        .commit_volume_revision(CommitVolumeRevisionRequest {
+            agent_volume_id: agent_volume_id.to_string(),
+            garbage_collect_previous: true,
+        })
+        .await
+        .context("commit watchable revision")?;
+
+    Ok(())
+}
+
 fn should_copy_volume(src: &Path, copy_volume_types: Option<&HashSet<String>>) -> bool {
     let Some(enabled_types) = copy_volume_types else {
         return true;
     };
 
     enabled_types.contains(classify_copy_volume(src))
+}
+
+fn is_network_file_path(src: &Path) -> bool {
+    src.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| NETWORK_FILE_NAMES.contains(&name))
+        .unwrap_or(false)
 }
 
 fn classify_copy_volume(src: &Path) -> &'static str {
@@ -1160,7 +1384,10 @@ mod test {
         let other_directory = temp_dir.path().join(test_path(&["mnt", "nfs", "data"]));
         std::fs::create_dir_all(&other_directory).unwrap();
 
-        assert_eq!(classify_copy_volume(&network_file), COPY_VOLUME_NETWORK_FILES);
+        assert_eq!(
+            classify_copy_volume(&network_file),
+            COPY_VOLUME_NETWORK_FILES
+        );
         assert_eq!(classify_copy_volume(&other_file), COPY_VOLUME_OTHER_FILES);
         assert_eq!(
             classify_copy_volume(&projected),

@@ -16,8 +16,8 @@ pub mod types;
 pub use types::{
     ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
     BlkioStatsEntry, CheckRequest, CloseStdinRequest, CommitVolumeRevisionRequest, ContainerID,
-    ContainerProcessID, CopyFileRequest, CopySingleFileRequest, CreateContainerRequest,
-    CreateSandboxRequest, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy,
+    ContainerProcessID, CopyFileRequest, CopySingleFileRequest, CopySingleFileResponse,
+    CreateContainerRequest, CreateSandboxRequest, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy,
     GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest,
     GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse, IPAddress,
     IPFamily, InitWatchableVolumeRequest, InitWatchableVolumeResponse, Interface, Interfaces,
@@ -93,7 +93,7 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
 
     // utils
     async fn copy_file(&self, req: CopyFileRequest) -> Result<Empty>;
-    async fn copy_single_file(&self, req: CopySingleFileRequest) -> Result<Empty>;
+    async fn copy_single_file(&self, req: CopySingleFileRequest) -> Result<CopySingleFileResponse>;
     async fn init_watchable_volume(
         &self,
         req: InitWatchableVolumeRequest,

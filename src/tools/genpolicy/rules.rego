@@ -56,6 +56,11 @@ default VolumeStatsRequest := false
 default WaitProcessRequest := true
 default WriteStreamRequest := false
 
+default CopySingleFileRequest := true
+default InitWatchableVolumeRequest := true
+default PutVolumeFileRequest := true
+default CommitVolumeRevisionRequest := true
+
 # AllowRequestsFailingPolicy := true configures the Agent to *allow any
 # requests causing a policy failure*. This is an unsecure configuration
 # but is useful for allowing unsecure pods to start, then connect to
@@ -1163,7 +1168,6 @@ check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
 
     print("check_mount 3: true")
 }
-
 check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
     # Unified cgroup v2 mounts on newer kernels may add flags genpolicy does not
     # embed (e.g. nsdelegate, memory_recursiveprot). Allow extras listed in
@@ -1189,6 +1193,18 @@ check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
     mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id)
 
     print("check_mount 4: true")
+}
+check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
+    print("check_mount 5: i_mount.type_ = ", i_mount.type_)
+
+    p_mount.destination == i_mount.destination
+    i_mount.type_ == "bind-safer-path"
+    p_mount.type_ == "bind"
+    p_mount.options == i_mount.options
+
+    mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id)
+
+    print("check_mount 5: true")
 }
 
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
@@ -1222,6 +1238,12 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
     regex.match(regex4, i_mount.source)
 
     print("mount_source_allows 2: true")
+}
+mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
+    i_mount.type_ == "bind-safer-path"
+    p_mount.type_ == "bind"
+
+    print("mount_source_allows 3: true")
 }
 
 ######################################################################
