@@ -555,6 +555,56 @@ pub struct CopyFileRequest {
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
+pub enum SingleFileType {
+    #[default]
+    Unspecified = 0,
+    ResolvConf = 1,
+    EtcHosts = 2,
+    Hostname = 3,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct CopySingleFileRequest {
+    pub sandbox_id: String,
+    pub file_type: SingleFileType,
+    pub uid: i32,
+    pub gid: i32,
+    pub data_size: i64,
+    pub data: ::std::vec::Vec<u8>,
+    pub file_mode: u32,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct InitWatchableVolumeRequest {
+    pub host_volume_id: String,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct InitWatchableVolumeResponse {
+    pub agent_volume_id: String,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct PutVolumeFileRequest {
+    pub agent_volume_id: String,
+    pub file_name: String,
+    pub file_size: i64,
+    pub file_mode: u32,
+    pub uid: i32,
+    pub gid: i32,
+    pub offset: i64,
+    pub data: ::std::vec::Vec<u8>,
+    pub revision: String,
+    pub dir_mode: u32,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
+pub struct CommitVolumeRevisionRequest {
+    pub agent_volume_id: String,
+    pub garbage_collect_previous: bool,
+}
+
+#[derive(PartialEq, Clone, Default, Debug)]
 pub struct CheckRequest {
     pub service: String,
 }
