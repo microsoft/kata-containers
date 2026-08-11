@@ -1,0 +1,93 @@
+on:
+  workflow_call:
+    inputs:
+      instance:
+        required: true
+        type: string
+
+# No workflow-level `concurrency`: like `build-checks.yaml`, this file is only
+# `workflow_call`'d, and the caller already cancels the whole tree on a new push.
+# Job-level `concurrency` below supersedes in-flight matrix cells.
+
+permissions: {}
+name: Agent policy checks
+jobs:
+  check:
+    name: ${{ matrix.config.name }} / ${{ matrix.command }}
+    timeout-minutes: 60
+    runs-on: ${{ inputs.instance }}
+    strategy:
+      fail-fast: false
+      matrix:
+        command:
+          - "make check"
+          - "make test"
+        config:
+          # The policy engine compiled in, escape hatches still present. This is the
+          # configuration a non-confidential policy deployment ships.
+          - name: agent-policy
+            agent_policy: "yes"
+            strict_policy: "no"
+          # The hardened confidential configuration. `strict-policy` implies
+          # `agent-policy`, and the agent Makefile additionally forces
+          # `USE_DEVMAPPER=yes` (hence `LIBC=gnu`) because strict requires dm-verity
+          # for every erofs lower layer.
+          #
+          # This leg is the point of the whole workflow: without it nothing ever
+          # builds the artifact the hardening work produces, and the behavioural
+          # proof of complete mediation
+          # (`every_exposed_rpc_is_refused_under_a_deny_all_policy`) is compiled out
+          # of every other run.
+          - name: strict-policy
+            agent_policy: "yes"
+            strict_policy: "yes"
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.job }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.instance }}-${{ toJSON(matrix) }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # musl-tools is required by the `agent-policy` leg: without `devicemapper` the
+      # agent Makefile leaves `LIBC=musl`, so that leg links statically against musl
+      # while the strict leg is forced to `LIBC=gnu`.
+      - name: Setup rust
+        run: |
+          ./tests/install_rust.sh
+          echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
+          sudo apt-get update && sudo apt-get -y install musl-tools
+
+      - name: Install protobuf-compiler and clang
+        run: sudo apt-get update && sudo apt-get -y install protobuf-compiler clang
+
+      # Needed by both commands here, unlike `build-checks.yaml` where the agent only
+      # links libdevmapper for `make check`: `STRICT_POLICY=yes` forces the
+      # `devicemapper` feature on, so the test binary links it too.
+      - name: Install devicemapper
+        run: sudo apt-get update && sudo apt-get -y install libdevmapper-dev
+
+      - name: Install libseccomp
+        if: matrix.command != 'make check'
+        run: |
+          libseccomp_install_dir=$(mktemp -d -t libseccomp.XXXXXXXXXX)
+          gperf_install_dir=$(mktemp -d -t gperf.XXXXXXXXXX)
+          ./ci/install_libseccomp.sh "${libseccomp_install_dir}" "${gperf_install_dir}"
+          echo "Set environment variables for the libseccomp crate to link the libseccomp library statically"
+          echo "LIBSECCOMP_LINK_TYPE=static" >> "$GITHUB_ENV"
+          echo "LIBSECCOMP_LIB_PATH=${libseccomp_install_dir}/lib" >> "$GITHUB_ENV"
+
+      # The agent Makefile reads both of these from the environment (`?=`), so the
+      # configuration is selected without splicing anything into the command line.
+      - name: Running `${{ matrix.command }}` under ${{ matrix.config.name }}
+        run: |
+          cd src/agent
+          eval "${COMMAND}"
+        env:
+          COMMAND: ${{ matrix.command }}
+          AGENT_POLICY: ${{ matrix.config.agent_policy }}
+          STRICT_POLICY: ${{ matrix.config.strict_policy }}
+          RUST_BACKTRACE: "1"
+          RUST_LIB_BACKTRACE: "0"

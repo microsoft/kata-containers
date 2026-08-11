@@ -54,6 +54,18 @@ jobs:
     with:
       instance: ubuntu-22.04
 
+  # Fork-owned: exercises the agent's policy feature matrix, which upstream's
+  # `build-checks.yaml` never builds. Kept in a separate workflow rather than added
+  # as components there so it stays x86-only (the self-hosted callers of
+  # `build-checks.yaml` would otherwise pick it up) and so it does not widen the
+  # rebase surface on an upstream-maintained file.
+  agent-policy-checks:
+    needs: skipper
+    if: ${{ needs.skipper.outputs.skip_static != 'yes' }}
+    uses: ./.github/workflows/agent-policy-checks.yaml
+    with:
+      instance: ubuntu-22.04
+
   build-checks-depending-on-kvm:
     name: build-checks-depending-on-kvm
     runs-on: ubuntu-22.04
