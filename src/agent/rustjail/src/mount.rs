@@ -222,6 +222,7 @@ pub fn init_rootfs(
     )?;
 
     let mut bind_mount_dev = false;
+    let mut deferred_bind_readonly_remounts: Vec<String> = Vec::new();
     let default_mnts = vec![];
     for m in spec.mounts().as_ref().unwrap_or(&default_mnts) {
         let (mut flags, pgflags, data) = parse_mount(m);
@@ -258,6 +259,19 @@ pub fn init_rootfs(
                 check_proc_mount(m)?;
             }
 
+            // For nested mounts (for example /config and /config/secret), applying
+            // readonly on the parent too early can prevent creation of child
+            // mountpoints. Defer readonly bind remounts until all mounts exist.
+            let mut mount_flags = flags;
+            if mount_typ == "bind" && mount_flags.contains(MsFlags::MS_RDONLY) {
+                let dest = scoped_join(rootfs, mount_dest)?
+                    .to_str()
+                    .ok_or_else(|| anyhow::anyhow!("Failed to convert path to string"))?
+                    .to_string();
+                deferred_bind_readonly_remounts.push(dest);
+                mount_flags &= !MsFlags::MS_RDONLY;
+            }
+
             // If the destination already exists and is not a directory, we bail
             // out This is to avoid mounting through a symlink or similar -- which
             // has been a "fun" attack scenario in the past.
@@ -273,7 +287,7 @@ pub fn init_rootfs(
                 }
             }
 
-            mount_from(cfd_log, m, rootfs, flags, &data, label)?;
+            mount_from(cfd_log, m, rootfs, mount_flags, &data, label)?;
             // bind mount won't change mount options, we need remount to make mount options
             // effective.
             // first check that we have non-default options required before attempting a
@@ -294,6 +308,17 @@ pub fn init_rootfs(
         }
     }
 
+    sort_mount_paths_nested_first(&mut deferred_bind_readonly_remounts);
+    for dest in deferred_bind_readonly_remounts {
+        mount(
+            None::<&str>,
+            dest.as_str(),
+            None::<&str>,
+            MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY,
+            None::<&str>,
+        )?;
+    }
+
     let olddir = unistd::getcwd()?;
     unistd::chdir(rootfs)?;
 
@@ -311,6 +336,15 @@ pub fn init_rootfs(
     unistd::chdir(&olddir)?;
 
     Ok(())
+}
+
+fn sort_mount_paths_nested_first(paths: &mut [String]) {
+    paths.sort_by(|a, b| {
+        b.matches('/')
+            .count()
+            .cmp(&a.matches('/').count())
+            .then_with(|| b.len().cmp(&a.len()))
+    });
 }
 
 fn check_proc_mount(m: &Mount) -> Result<()> {
@@ -1220,6 +1254,22 @@ mod tests {
 
         let ret = init_rootfs(stdout_fd, &spec, &cpath, &mounts, true);
         assert!(ret.is_ok(), "Should pass. Got: {:?}", ret);
+    }
+
+    #[test]
+    fn test_sort_mount_paths_nested_first() {
+        let mut paths = vec![
+            "/rootfs/config".to_string(),
+            "/rootfs/config/secret".to_string(),
+            "/rootfs/config/secret/key".to_string(),
+            "/rootfs/etc".to_string(),
+        ];
+
+        sort_mount_paths_nested_first(&mut paths);
+
+        assert_eq!(paths[0], "/rootfs/config/secret/key");
+        assert_eq!(paths[1], "/rootfs/config/secret");
+        assert_eq!(paths[2], "/rootfs/config");
     }
 
     #[test]
