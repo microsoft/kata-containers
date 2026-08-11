@@ -155,10 +155,10 @@ pub const MEDIATION_MANIFEST: &[(&str, &str, &str, EnforcementClass)] = &[
     ("ResizeVolume", "resize_volume", "ResizeVolumeRequest", EnforcementClass::PolicyGated),
     // Typed host->guest content channel that replaces the destination-path-carrying CopyFile
     // for the paths the runtime still needs. The guest, not the host, chooses the destination
-    // file name, and every host-supplied path component is validated before use. They are
-    // policy-gated like any other mutating RPC, but note that `rules.rego` currently declares
-    // all four `default := true` with no rule body, so a policy author can only toggle the
-    // whole request on or off — there is no field-level constraint yet (see RM-112).
+    // file name, and every host-supplied path component is validated before use. The two that
+    // carry file content are evaluated against a pre-processed input that hides the payload
+    // and decodes the S_IFMT bits, so `rules.rego` can refuse a symlink where a regular file
+    // is expected (RM-114).
     ("CopySingleFile", "copy_single_file", "CopySingleFileRequest", EnforcementClass::PolicyGated),
     ("InitWatchableVolume", "init_watchable_volume", "InitWatchableVolumeRequest", EnforcementClass::PolicyGated),
     ("PutVolumeFile", "put_volume_file", "PutVolumeFileRequest", EnforcementClass::PolicyGated),

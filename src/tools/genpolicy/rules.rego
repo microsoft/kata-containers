@@ -17,7 +17,9 @@ default AddARPNeighborsRequest := false
 default AddSwapPathRequest := false
 default AddSwapRequest := false
 default CloseStdinRequest := false
+default CommitVolumeRevisionRequest := false
 default CopyFileRequest := false
+default CopySingleFileRequest := false
 default CreateContainerRequest := false
 default CreateSandboxRequest := false
 default DestroySandboxRequest := true
@@ -26,6 +28,7 @@ default GetIPTablesRequest := false
 default GetMetricsRequest := false
 default GetOOMEventRequest := true
 default GuestDetailsRequest := true
+default InitWatchableVolumeRequest := false
 default ListInterfacesRequest := false
 default ListRoutesRequest := false
 default MemAgentCompactConfig := false
@@ -33,6 +36,7 @@ default MemAgentMemcgConfig := false
 default MemHotplugByProbeRequest := false
 default OnlineCPUMemRequest := true
 default PauseContainerRequest := false
+default PutVolumeFileRequest := false
 default ReadStreamRequest := false
 default RemoveContainerRequest := false
 default RemoveStaleVirtiofsShareMountsRequest := true
@@ -55,11 +59,6 @@ default UpdateRoutesRequest := false
 default VolumeStatsRequest := false
 default WaitProcessRequest := false
 default WriteStreamRequest := false
-
-default CopySingleFileRequest := true
-default InitWatchableVolumeRequest := true
-default PutVolumeFileRequest := true
-default CommitVolumeRevisionRequest := true
 
 # Intentionally-allowed infrastructure / sandbox-lifecycle endpoints (reviewed, not an
 # unexamined gap). The endpoints below keep `:= true` above by design: they are part of
@@ -85,9 +84,11 @@ default CommitVolumeRevisionRequest := true
 #
 # This matches the reference, which likewise does not gate its GuestDetails/OOM/lifecycle
 # equivalents; the diagnostics surface the reference *does* gate (get-properties /
-# dump-stacks) is instead hard-disabled in the strict build (GetDiagnosticDataRequest and
-# CopyFileRequest are `:= false` above). Per-container operations (Create/Exec/Signal/
-# Start/Wait/Stats/TtyWinResize/RemoveContainer) ARE gated on authorized container state (see below).
+# dump-stacks) is instead hard-disabled (GetDiagnosticDataRequest is `:= false` above with
+# no rule that can make it true, as is CopyFileRequest -- the host->guest content channel
+# now runs through the four typed endpoints mediated further below). Per-container
+# operations (Create/Exec/Signal/Start/Wait/Stats/TtyWinResize/RemoveContainer) ARE gated
+# on authorized container state (see below).
 
 # AllowRequestsFailingPolicy := true configures the Agent to *allow any
 # requests causing a policy failure*. This is an unsecure configuration
@@ -2391,10 +2392,113 @@ AddARPNeighborsRequest if {
     print("AddARPNeighborsRequest: true")
 }
 
+# ---------------------------------------------------------------------------
+# Host -> guest content channel.
+#
+# These four endpoints replace the free-form CopyFileRequest, which is `:= false` above.
+# The host no longer names a destination path: it names one of a fixed set of file kinds
+# (CopySingleFileRequest) or a volume id the *guest* minted (the watchable-volume trio),
+# and the guest derives the path. That removes the arbitrary-write primitive, but it does
+# not by itself constrain what the host writes, so the rules below mediate the fields that
+# are still host-controlled.
+#
+# For the two endpoints that carry file content the agent evaluates a pre-processed input
+# (PolicyCopySingleFileRequest / PolicyPutVolumeFileRequest, in src/agent/policy): the
+# `data` blob is stripped so the host cannot load the rules engine with the payload, and
+# the S_IFMT bits of `file_mode` are decoded into `file_type` plus, for symlinks,
+# `symlink_target`. Rego therefore compares `input.file_type` against "Regular",
+# "Directory", "Symlink" or "Unknown" rather than doing bit arithmetic on the raw mode.
+# ---------------------------------------------------------------------------
+
+# Host-supplied content must not carry setuid, setgid or the sticky bit: do_copy_file
+# preserves file_mode & 0o7777, so those bits reach the file the container sees.
+allow_content_mode(i_mode) if {
+    # 3584 = 0o7000, i.e. S_ISUID | S_ISGID | S_ISVTX.
+    bits.and(i_mode, 3584) == 0
+}
+
+# A host-supplied path component must be a plain relative name: no "..", no leading "/",
+# and not empty. The agent enforces the same thing, but stating it here means the request
+# is refused before it reaches the filesystem code.
+allow_content_path_component(i_component) if {
+    i_component != ""
+    not startswith(i_component, "/")
+    check_directory_traversal(i_component)
+}
+
+CopySingleFileRequest if {
+    p_defaults := policy_data.request_defaults.CopySingleFileRequest
+    print("CopySingleFileRequest: input =", input, "policy =", p_defaults)
+
+    # Which of the guest's files the host is allowed to supply. Every one of these is
+    # bind-mounted into the container, so this is the security-relevant field: dropping
+    # "TerminationLog" here, for instance, denies a workload that never declares a
+    # terminationMessagePath. "Unknown" is never in the list, so an unrecognized wire
+    # value cannot match.
+    input.single_file_type in p_defaults.allowed_file_types
+
+    # The destination is a leaf that gets bind-mounted directly, so a symlink would
+    # redirect the container's /etc/resolv.conf (or /etc/hosts, /etc/hostname, the
+    # termination log) at a host-chosen path. The CopyFileRequest rule this replaced
+    # refused symlinks on the top level of the shared directory for exactly this reason,
+    # and these destinations are always on that top level.
+    input.file_type == "Regular"
+    allow_content_mode(input.file_mode)
+
+    # sandbox_id is a host-supplied path component.
+    allow_content_path_component(input.sandbox_id)
+
+    input.data_size >= 0
+    input.data_size <= p_defaults.max_file_size
+
+    print("CopySingleFileRequest: true")
+}
+
+# The request carries only host_volume_id, which the guest ignores -- it mints its own
+# "watchable-<nanos>" id and returns it. There is no host-controlled field to constrain,
+# so this is a plain on/off switch for workloads that use no projected volumes.
+InitWatchableVolumeRequest if {
+    policy_data.request_defaults.InitWatchableVolumeRequest == true
+}
+
+PutVolumeFileRequest if {
+    p_defaults := policy_data.request_defaults.PutVolumeFileRequest
+    print("PutVolumeFileRequest: input =", input, "policy =", p_defaults)
+
+    # agent_volume_id, revision and file_name are all joined into the destination path.
+    allow_content_path_component(input.agent_volume_id)
+    allow_content_path_component(input.revision)
+    allow_content_path_component(input.file_name)
+
+    # The watchable-volume tree backs projected ConfigMap, Secret and downward-API volumes
+    # and is bind-mounted into the container. put_volume_file creates the one symlink this
+    # layout needs itself (<root>/<file_name> -> data/<file_name>); a host-requested
+    # symlink would be an extra one, inside the revision directory, pointing wherever the
+    # host chose.
+    input.file_type == "Regular"
+    allow_content_mode(input.file_mode)
+    allow_content_mode(input.dir_mode)
+
+    input.offset >= 0
+    input.file_size >= 0
+    input.file_size <= p_defaults.max_file_size
+
+    print("PutVolumeFileRequest: true")
+}
+
+CommitVolumeRevisionRequest if {
+    policy_data.request_defaults.CommitVolumeRevisionRequest == true
+
+    # agent_volume_id is joined into the path of the tree that gets published and, with
+    # garbage_collect_previous, of the tree that gets deleted.
+    allow_content_path_component(input.agent_volume_id)
+
+    print("CommitVolumeRevisionRequest: true")
+}
+
 CloseStdinRequest if {
     policy_data.request_defaults.CloseStdinRequest == true
 }
-
 ReadStreamRequest if {
     policy_data.request_defaults.ReadStreamRequest == true
 }
