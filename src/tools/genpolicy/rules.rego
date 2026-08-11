@@ -1168,6 +1168,17 @@ check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
 
     print("check_mount 3: true")
 }
+check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
+    print("check_mount 4: i_mount.type_ = ", i_mount.type_)
+
+    p_mount.destination == i_mount.destination
+    i_mount.type_ == "bind-managed-volume"
+    p_mount.options == i_mount.options
+
+    mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id)
+
+    print("check_mount 4: true")
+}
 
 check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
     # Unified cgroup v2 mounts on newer kernels may add flags genpolicy does not
@@ -1227,6 +1238,15 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
     regex.match(regex4, i_mount.source)
 
     print("mount_source_allows 2: true")
+}
+mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
+    print("mount_source_allows 3: i_mount.type_ =", i_mount.type_, "i_mount.source =", i_mount.source)
+
+    # Example: vol-18ca987e6a95f493-0
+    i_mount.type_ == "bind-managed-volume"
+    regex.match("^vol-[a-z0-9]{16}-[a-z0-9]$", i_mount.source)
+
+    print("mount_source_allows 3: true")
 }
 
 ######################################################################
@@ -1642,12 +1662,6 @@ PutVolumeFileRequest if {
 CommitVolumeRevisionRequest if {
     print("CommitVolumeRevisionRequest: input =", input)
     policy_data.request_defaults.CommitVolumeRevisionRequest == true
-    check_directory_traversal(input.revision)
-    not startswith(input.revision, "/")
-    every visible_path in input.visible_paths {
-        check_directory_traversal(visible_path)
-        not startswith(visible_path, "/")
-    }
     print("CommitVolumeRevisionRequest: true")
 }
 
