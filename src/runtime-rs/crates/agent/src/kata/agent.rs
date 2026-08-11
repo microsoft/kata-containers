@@ -121,7 +121,10 @@ impl_agent!(
     destroy_sandbox | crate::Empty | crate::Empty | None,
     copy_file | crate::CopyFileRequest | crate::Empty | None,
     copy_single_file | crate::CopySingleFileRequest | crate::CopySingleFileResponse | None,
-    init_watchable_volume | crate::InitWatchableVolumeRequest | crate::InitWatchableVolumeResponse | None,
+    init_watchable_volume
+        | crate::InitWatchableVolumeRequest
+        | crate::InitWatchableVolumeResponse
+        | None,
     put_volume_file | crate::PutVolumeFileRequest | crate::Empty | None,
     commit_volume_revision | crate::CommitVolumeRevisionRequest | crate::Empty | None,
     get_oom_event | crate::Empty | crate::OomEventResponse | Some(0),

@@ -50,6 +50,7 @@ const MONITOR_INTERVAL: Duration = Duration::from_millis(100);
 const DEBOUNCE_TIME: Duration = Duration::from_millis(500);
 
 const COPY_VOLUME_NETWORK_FILES: &str = "network-files";
+const COPY_VOLUME_TERMINATION_LOG: &str = "termination-log";
 const COPY_VOLUME_OTHER_FILES: &str = "other-files";
 const COPY_VOLUME_PROJECTED_VOLUMES: &str = "projected-volumes";
 const COPY_VOLUME_CONFIGMAP_VOLUMES: &str = "configmap-volumes";
@@ -57,6 +58,7 @@ const COPY_VOLUME_SECRET_VOLUMES: &str = "secret-volumes";
 const COPY_VOLUME_DOWNWARD_API_VOLUMES: &str = "downward-api-volumes";
 const COPY_VOLUME_OTHER_DIRECTORIES: &str = "other-directories";
 const NETWORK_FILE_NAMES: [&str; 3] = ["resolv.conf", "hosts", "hostname"];
+const TERMINATION_LOG_DESTINATION: &str = "/dev/termination-log";
 const BIND_SAFER_PATH: &str = "bind-safer-path";
 const WATCHABLE_DATA_SYMLINK: &str = "..data";
 
@@ -498,6 +500,7 @@ impl VolumeManager {
 impl ShareFsVolume {
     async fn copy_single_file_to_guest(
         src: &Path,
+        destination: &Path,
         sid: &str,
         agent: &Arc<dyn Agent>,
     ) -> Result<String> {
@@ -511,7 +514,7 @@ impl ShareFsVolume {
 
         let req = CopySingleFileRequest {
             sandbox_id: sid.to_string(),
-            file_type: single_file_type_from_path(src)?,
+            file_type: single_file_type_from_mount(src, destination)?,
             uid: file_metadata.uid() as i32,
             gid: file_metadata.gid() as i32,
             data_size: file_metadata.len() as i64,
@@ -567,7 +570,7 @@ impl ShareFsVolume {
                     Ok(src) => src,
                 };
 
-                if !should_copy_volume(&src, copy_volume_types) {
+                if !should_copy_volume(&src, m.destination(), copy_volume_types) {
                     info!(
                         sl!(),
                         "skipping host->guest copy for {:?} because it is disabled by copy_volumes",
@@ -584,10 +587,11 @@ impl ShareFsVolume {
 
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
-                    if is_network_file_path(&src) {
-                        let agent_file_id = Self::copy_single_file_to_guest(&src, sid, &agent)
-                            .await
-                            .context("copy network file to guest")?;
+                    if is_single_file_mount(&src, m.destination()) {
+                        let agent_file_id =
+                            Self::copy_single_file_to_guest(&src, m.destination(), sid, &agent)
+                                .await
+                                .context("copy network file to guest")?;
 
                         oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
                         oci_mount.set_source(Some(PathBuf::from(agent_file_id)));
@@ -614,7 +618,11 @@ impl ShareFsVolume {
                             .await
                             .context("init watchable volume")?;
 
-                        info!(sl!(), "ShareFsVolume: is_dir: agent_volume_id: {:?}", &init_resp.agent_volume_id);
+                        info!(
+                            sl!(),
+                            "ShareFsVolume: is_dir: agent_volume_id: {:?}",
+                            &init_resp.agent_volume_id
+                        );
 
                         sync_watchable_volume_revision(&src, &init_resp.agent_volume_id, &agent)
                             .await
@@ -824,7 +832,11 @@ impl ShareFsVolume {
     }
 }
 
-fn single_file_type_from_path(src: &Path) -> Result<SingleFileType> {
+fn single_file_type_from_mount(src: &Path, destination: &Path) -> Result<SingleFileType> {
+    if destination == Path::new(TERMINATION_LOG_DESTINATION) {
+        return Ok(SingleFileType::TerminationLog);
+    }
+
     let file_name = src
         .file_name()
         .and_then(|name| name.to_str())
@@ -834,6 +846,7 @@ fn single_file_type_from_path(src: &Path) -> Result<SingleFileType> {
         "resolv.conf" => SingleFileType::ResolvConf,
         "hosts" => SingleFileType::EtcHosts,
         "hostname" => SingleFileType::Hostname,
+        "termination-log" => SingleFileType::TerminationLog,
         _ => SingleFileType::Unspecified,
     };
 
@@ -910,23 +923,33 @@ async fn sync_watchable_volume_revision(
     Ok(())
 }
 
-fn should_copy_volume(src: &Path, copy_volume_types: Option<&HashSet<String>>) -> bool {
+fn should_copy_volume(
+    src: &Path,
+    destination: &Path,
+    copy_volume_types: Option<&HashSet<String>>,
+) -> bool {
     let Some(enabled_types) = copy_volume_types else {
         return true;
     };
 
-    enabled_types.contains(classify_copy_volume(src))
+    enabled_types.contains(classify_copy_volume(src, destination))
 }
 
-fn is_network_file_path(src: &Path) -> bool {
-    src.file_name()
+fn is_single_file_mount(src: &Path, destination: &Path) -> bool {
+    let is_network_file = src
+        .file_name()
         .and_then(|name| name.to_str())
         .map(|name| NETWORK_FILE_NAMES.contains(&name))
-        .unwrap_or(false)
+        .unwrap_or(false);
+
+    is_network_file || destination == Path::new(TERMINATION_LOG_DESTINATION)
 }
 
-fn classify_copy_volume(src: &Path) -> &'static str {
+fn classify_copy_volume(src: &Path, destination: &Path) -> &'static str {
     if src.is_file() {
+        if destination == Path::new(TERMINATION_LOG_DESTINATION) {
+            return COPY_VOLUME_TERMINATION_LOG;
+        }
         let file_name = src
             .file_name()
             .and_then(|name| name.to_str())
@@ -1389,25 +1412,35 @@ mod test {
         std::fs::create_dir_all(&other_directory).unwrap();
 
         assert_eq!(
-            classify_copy_volume(&network_file),
+            classify_copy_volume(&network_file, Path::new("/etc/resolv.conf")),
             COPY_VOLUME_NETWORK_FILES
         );
-        assert_eq!(classify_copy_volume(&other_file), COPY_VOLUME_OTHER_FILES);
         assert_eq!(
-            classify_copy_volume(&projected),
+            classify_copy_volume(&other_file, Path::new("/tmp/termination-log")),
+            COPY_VOLUME_OTHER_FILES
+        );
+        assert_eq!(
+            classify_copy_volume(&other_file, Path::new(TERMINATION_LOG_DESTINATION)),
+            COPY_VOLUME_TERMINATION_LOG
+        );
+        assert_eq!(
+            classify_copy_volume(&projected, Path::new("/var/run/projected")),
             COPY_VOLUME_PROJECTED_VOLUMES
         );
         assert_eq!(
-            classify_copy_volume(&configmap),
+            classify_copy_volume(&configmap, Path::new("/config")),
             COPY_VOLUME_CONFIGMAP_VOLUMES
         );
-        assert_eq!(classify_copy_volume(&secret), COPY_VOLUME_SECRET_VOLUMES);
         assert_eq!(
-            classify_copy_volume(&downward_api),
+            classify_copy_volume(&secret, Path::new("/secret")),
+            COPY_VOLUME_SECRET_VOLUMES
+        );
+        assert_eq!(
+            classify_copy_volume(&downward_api, Path::new("/downward")),
             COPY_VOLUME_DOWNWARD_API_VOLUMES
         );
         assert_eq!(
-            classify_copy_volume(&other_directory),
+            classify_copy_volume(&other_directory, Path::new("/mnt")),
             COPY_VOLUME_OTHER_DIRECTORIES
         );
     }
@@ -1438,9 +1471,52 @@ mod test {
         ]));
         std::fs::create_dir_all(&projected).unwrap();
 
-        assert!(should_copy_volume(&resolv, Some(&enabled)));
-        assert!(should_copy_volume(&projected, Some(&enabled)));
-        assert!(!should_copy_volume(&other_file, Some(&enabled)));
-        assert!(should_copy_volume(&other_file, None));
+        assert!(should_copy_volume(
+            &resolv,
+            Path::new("/etc/resolv.conf"),
+            Some(&enabled)
+        ));
+        assert!(should_copy_volume(
+            &projected,
+            Path::new("/projected"),
+            Some(&enabled)
+        ));
+        assert!(!should_copy_volume(
+            &other_file,
+            Path::new("/tmp/termination-log"),
+            Some(&enabled)
+        ));
+        assert!(should_copy_volume(
+            &other_file,
+            Path::new("/tmp/termination-log"),
+            None
+        ));
+
+        enabled.insert(COPY_VOLUME_TERMINATION_LOG.to_string());
+        assert!(should_copy_volume(
+            &other_file,
+            Path::new(TERMINATION_LOG_DESTINATION),
+            Some(&enabled)
+        ));
+    }
+
+    #[test]
+    fn test_termination_log_uses_single_file_path() {
+        let source = PathBuf::from("/var/lib/kubelet/pods/1000/termination-log");
+        let destination = PathBuf::from(TERMINATION_LOG_DESTINATION);
+
+        assert!(is_single_file_mount(&source, &destination));
+        assert_eq!(
+            single_file_type_from_mount(&source, &destination).unwrap(),
+            SingleFileType::TerminationLog
+        );
+    }
+
+    #[test]
+    fn test_other_file_does_not_use_single_file_path_elsewhere() {
+        let source = PathBuf::from("/var/lib/kubelet/pods/1000/termination-log");
+        let destination = PathBuf::from("/tmp/termination-log");
+
+        assert!(!is_single_file_mount(&source, &destination));
     }
 }

@@ -10,11 +10,16 @@ use agent::{types::Device, ARPNeighbor, Agent, OnlineCPUMemRequest, Storage};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use hypervisor::{
-    BlockConfigModern, BlockDeviceAio, Hypervisor, VfioConfig, device::{
-        DeviceConfig, DeviceType, device_manager::{
-            DeviceManager, do_handle_device, find_cold_plugged_vfio_ap, get_block_device_info,
-        }, util::{DEVICE_TYPE_BLOCK, DEVICE_TYPE_CHAR, get_host_path},
-    }, utils::uses_native_ccw_bus, vfio_device::is_vfio_ap_device,
+    device::{
+        device_manager::{
+            do_handle_device, find_cold_plugged_vfio_ap, get_block_device_info, DeviceManager,
+        },
+        util::{get_host_path, DEVICE_TYPE_BLOCK, DEVICE_TYPE_CHAR},
+        DeviceConfig, DeviceType,
+    },
+    utils::uses_native_ccw_bus,
+    vfio_device::is_vfio_ap_device,
+    BlockConfigModern, BlockDeviceAio, Hypervisor, VfioConfig,
 };
 use kata_types::mount::{kata_guest_sandbox_dir, Mount, KATA_EPHEMERAL_VOLUME_TYPE, SHM_DIR};
 use kata_types::{
@@ -493,7 +498,13 @@ impl ResourceManagerInner {
         spec: &oci::Spec,
     ) -> Result<Vec<Arc<dyn Volume>>> {
         let capabilities = self.hypervisor.capabilities().await?;
-        let configured_copy_volume_types = self.toml_config.runtime.copy_volumes.iter().cloned().collect();
+        let configured_copy_volume_types = self
+            .toml_config
+            .runtime
+            .copy_volumes
+            .iter()
+            .cloned()
+            .collect();
         let ctx = crate::volume::VolumeContext {
             share_fs: &self.share_fs,
             d: self.device_manager.as_ref(),

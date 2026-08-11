@@ -1735,6 +1735,7 @@ impl agent_ttrpc::AgentService for AgentService {
             SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => "resolv.conf",
             SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => "hosts",
             SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => "hostname",
+            SingleFileType::SINGLE_FILE_TYPE_TERMINATION_LOG => "termination-log",
             _ => {
                 return Err(ttrpc_error(
                     ttrpc::Code::INVALID_ARGUMENT,
@@ -1750,7 +1751,9 @@ impl agent_ttrpc::AgentService for AgentService {
             ));
         }
 
-        let agent_file_id = Path::new("single-files").join(&req.sandbox_id).join(target_file_name);
+        let agent_file_id = Path::new("single-files")
+            .join(&req.sandbox_id)
+            .join(target_file_name);
         let target_path = guest_share_dir_path().join(&agent_file_id);
         let copy_req = CopyFileRequest {
             path: target_path.to_string_lossy().to_string(),
@@ -2571,7 +2574,9 @@ fn translate_bind_safer_path_mounts(oci: &mut Spec) -> Result<()> {
             .as_ref()
             .ok_or_else(|| anyhow!("bind-safer-path mount missing source"))?;
         if source.is_absolute() {
-            return Err(anyhow!("bind-safer-path source must be relative: {source:?}"));
+            return Err(anyhow!(
+                "bind-safer-path source must be relative: {source:?}"
+            ));
         }
 
         let translated = if source
@@ -3204,7 +3209,9 @@ mod tests {
         single_file_mount.set_source(Some(PathBuf::from("single-files/sandbox-id/resolv.conf")));
 
         let mut watchable_mount = oci::Mount::default();
-        watchable_mount.set_destination(PathBuf::from("/var/run/secrets/kubernetes.io/serviceaccount"));
+        watchable_mount.set_destination(PathBuf::from(
+            "/var/run/secrets/kubernetes.io/serviceaccount",
+        ));
         watchable_mount.set_typ(Some("bind-safer-path".to_string()));
         watchable_mount.set_source(Some(PathBuf::from("watchable-volume-id")));
 
