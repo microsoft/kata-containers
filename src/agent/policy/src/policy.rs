@@ -10,7 +10,7 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
 use anyhow::{bail, Error, Result};
-use protocols::agent::{CopyFileRequest, CopySingleFileRequest};
+use protocols::agent::{CopyFileRequest, CopySingleFileRequest, PutVolumeFileRequest};
 use regorus::PolicyLengthConfig;
 use slog::{debug, error, info, warn};
 use tokio::io::AsyncWriteExt;
@@ -370,6 +370,37 @@ impl From<&CopySingleFileRequest> for PolicyCopySingleFileRequest {
     }
 }
 
+/// PolicyPutVolumeFileRequest omits the potentially large data field from PutVolumeFileRequest.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct PolicyPutVolumeFileRequest {
+    pub agent_volume_id: String,
+    pub file_name: String,
+    pub file_size: i64,
+    pub file_mode: u32,
+    pub uid: i32,
+    pub gid: i32,
+    pub offset: i64,
+    pub revision: String,
+    pub dir_mode: u32,
+}
+
+impl From<&PutVolumeFileRequest> for PolicyPutVolumeFileRequest {
+    fn from(req: &PutVolumeFileRequest) -> Self {
+        Self {
+            agent_volume_id: req.agent_volume_id.clone(),
+            file_name: req.file_name.clone(),
+            file_size: req.file_size,
+            file_mode: req.file_mode,
+            uid: req.uid,
+            gid: req.gid,
+            offset: req.offset,
+            revision: req.revision.clone(),
+            dir_mode: req.dir_mode,
+        }
+    }
+}
+
 #[cfg(test)]
 // libc::S_IF* constants are u16 on Darwin/BSD and u32 on Linux, and the test
 // cases below cast them to u32 to match the file_mode field type. The cast is
@@ -540,6 +571,42 @@ mod tests {
                 gid: 1001,
                 data_size: 3,
                 file_mode: 0o640,
+            }
+        );
+
+        let serialized = serde_json::to_value(output).unwrap();
+        assert!(serialized.get("data").is_none());
+    }
+
+    #[test]
+    fn test_put_volume_file_translation_omits_data() {
+        let input = PutVolumeFileRequest {
+            agent_volume_id: "volume-id".to_owned(),
+            file_name: "token".to_owned(),
+            file_size: 3,
+            file_mode: 0o640,
+            uid: 1000,
+            gid: 1001,
+            offset: 2,
+            data: vec![1, 2, 3],
+            revision: "revision-1".to_owned(),
+            dir_mode: 0o750,
+            ..Default::default()
+        };
+
+        let output = PolicyPutVolumeFileRequest::from(&input);
+        assert_eq!(
+            output,
+            PolicyPutVolumeFileRequest {
+                agent_volume_id: "volume-id".to_owned(),
+                file_name: "token".to_owned(),
+                file_size: 3,
+                file_mode: 0o640,
+                uid: 1000,
+                gid: 1001,
+                offset: 2,
+                revision: "revision-1".to_owned(),
+                dir_mode: 0o750,
             }
         );
 

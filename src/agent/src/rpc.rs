@@ -5,7 +5,9 @@
 
 use async_trait::async_trait;
 #[cfg(feature = "agent-policy")]
-use kata_agent_policy::policy::{PolicyCopyFileRequest, PolicyCopySingleFileRequest};
+use kata_agent_policy::policy::{
+    PolicyCopyFileRequest, PolicyCopySingleFileRequest, PolicyPutVolumeFileRequest,
+};
 use pathrs::flags::OpenFlags;
 use rustjail::{pipestream::PipeStream, process::StreamType};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
@@ -1822,6 +1824,12 @@ impl agent_ttrpc::AgentService for AgentService {
         req: PutVolumeFileRequest,
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "put_volume_file", req);
+        #[cfg(feature = "agent-policy")]
+        {
+            let req_for_policy = PolicyPutVolumeFileRequest::from(&req);
+            is_allowed_with_entrypoint(req.descriptor_dyn().name(), &req_for_policy).await?;
+        }
+        #[cfg(not(feature = "agent-policy"))]
         is_allowed(&req).await?;
 
         if req.revision.is_empty() {
