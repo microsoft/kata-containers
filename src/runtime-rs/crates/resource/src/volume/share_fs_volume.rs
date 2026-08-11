@@ -31,7 +31,7 @@ use tokio::{
 use walkdir::WalkDir;
 
 use super::Volume;
-use crate::share_fs::{MountedInfo, ShareFs, ShareFsVolumeConfig};
+use crate::share_fs::{kata_guest_share_dir, MountedInfo, ShareFs, ShareFsVolumeConfig};
 use kata_types::{
     config::{
         COPY_VOLUMES_CONFIGMAP, COPY_VOLUMES_DOWNWARD_API, COPY_VOLUMES_NETWORK_FILES,
@@ -193,8 +193,7 @@ impl FsWatcher {
                     "Initial sync from {:?} to managed volume {:?}", &src_sync, &volume_id_sync
                 );
                 if let Err(e) =
-                    copy_dir_recursively(&src_sync, &src_sync, &volume_id_sync, &agent_sync, true)
-                        .await
+                    copy_dir_recursively(&src_sync, &src_sync, &volume_id_sync, &agent_sync).await
                 {
                     error!(sl!(), "Initial sync failed: {:?}", e);
                 } else {
@@ -279,7 +278,6 @@ impl FsWatcher {
                             &src,
                             &agent_volume_id,
                             &agent,
-                            true,
                         )
                         .await;
                         match sync_ok {
@@ -334,8 +332,10 @@ pub struct VolumeManager {
 struct VolumeState {
     // Source path (on the host)
     source_path: String,
-    // Agent-side managed volume identifier
-    agent_volume_id: String,
+    // OCI mount source: an agent volume ID or a legacy guest path.
+    mount_source: String,
+    // Agent-side managed volume identifier, if this is a managed volume.
+    agent_volume_id: Option<String>,
     // Reference count (how many containers are using it)
     ref_count: usize,
     // List of container IDs using this volume
@@ -357,7 +357,8 @@ impl VolumeManager {
         &self,
         canonical_source: &str,
         container_id: &str,
-        agent_volume_id: &str,
+        mount_source: &str,
+        agent_volume_id: Option<&str>,
     ) -> Result<(String, bool)> {
         let mut states = self.volume_states.write().await;
 
@@ -368,13 +369,13 @@ impl VolumeManager {
 
             info!(
                 sl!(),
-                "Existing volume: source={:?}, managed_volume={:?}, ref_count={}",
+                "Existing volume: source={:?}, mount_source={:?}, ref_count={}",
                 canonical_source,
-                state.agent_volume_id,
+                state.mount_source,
                 state.ref_count,
             );
 
-            return Ok((state.agent_volume_id.clone(), false));
+            return Ok((state.mount_source.clone(), false));
         }
 
         let mut containers = HashSet::new();
@@ -382,7 +383,8 @@ impl VolumeManager {
 
         let state = VolumeState {
             source_path: canonical_source.to_string(),
-            agent_volume_id: agent_volume_id.to_string(),
+            mount_source: mount_source.to_string(),
+            agent_volume_id: agent_volume_id.map(str::to_string),
             ref_count: 1,
             containers,
             monitor_task: None,
@@ -392,12 +394,12 @@ impl VolumeManager {
 
         info!(
             sl!(),
-            "Created new volume state: source={:?}, managed_volume={:?}",
+            "Created new volume state: source={:?}, mount_source={:?}",
             state.source_path,
-            state.agent_volume_id,
+            state.mount_source,
         );
 
-        Ok((state.agent_volume_id.clone(), true))
+        Ok((state.mount_source.clone(), true))
     }
 
     /// Register monitor task into the volume manager
@@ -441,16 +443,16 @@ impl VolumeManager {
 
                 info!(
                     sl!(),
-                    "Volume has no more references, source={:?}, managed_volume={:?}",
+                    "Volume has no more references, source={:?}, mount_source={:?}",
                     canonical_source,
-                    state.agent_volume_id
+                    state.mount_source
                 );
 
                 let state = states
                     .remove(&canonical_source)
                     .ok_or_else(|| anyhow!("missing volume state during cleanup"))?;
 
-                return Ok(Some(state.agent_volume_id));
+                return Ok(state.agent_volume_id);
             }
         }
 
@@ -544,43 +546,57 @@ impl ShareFsVolume {
                     // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
                     let watchable_volume = is_watchable_volume(&src);
                     let copy_directory = should_copy_directory_to_guest(&src, copy_volumes);
-                    let volume_type = if watchable_volume {
-                        agent::VolumeSourceType::AtomicK8s
-                    } else {
-                        agent::VolumeSourceType::EmptyDir
-                    };
-
-                    let source =
-                        Self::init_volume_source(&host_volume_id, volume_type, readonly, &agent)
-                            .await
-                            .context("init directory volume source")?;
-
-                    // Get or create the managed volume id
-                    let (agent_volume_id, is_new) = volume_manager
-                        .get_or_create_volume(
+                    let (mount_source, is_new) = if watchable_volume {
+                        let source = Self::init_volume_source(
                             &host_volume_id,
-                            cid,
-                            &source.agent_volume_id,
+                            agent::VolumeSourceType::AtomicK8s,
+                            readonly,
+                            &agent,
                         )
                         .await
-                        .context("get or create volume")?;
+                        .context("init directory volume source")?;
 
-                    if is_new && copy_directory {
+                        volume_manager
+                            .get_or_create_volume(
+                                &host_volume_id,
+                                cid,
+                                &source.agent_volume_id,
+                                Some(&source.agent_volume_id),
+                            )
+                            .await
+                            .context("get or create managed volume")?
+                    } else {
+                        let guest_path = generate_guest_path(cid, m.destination())?;
+                        volume_manager
+                            .get_or_create_volume(&host_volume_id, cid, &guest_path, None)
+                            .await
+                            .context("get or create legacy directory volume")?
+                    };
+
+                    if is_new && watchable_volume && copy_directory {
                         info!(
                             sl!(),
                             "fsshare: new directory {:?} to managed volume {}",
                             &src,
-                            &agent_volume_id
+                            &mount_source
                         );
 
                         Self::copy_directory_to_guest(
                             &src,
-                            &agent_volume_id,
+                            &mount_source,
                             &agent,
-                            watchable_volume,
                         )
                         .await
                         .context("copy directory to guest")?;
+                    } else if is_new && !watchable_volume {
+                        Self::copy_legacy_directory_to_guest(
+                            &src,
+                            &mount_source,
+                            &agent,
+                            copy_directory,
+                        )
+                        .await
+                        .context("create legacy directory in guest")?;
                     } else if is_new {
                         info!(
                             sl!(),
@@ -589,7 +605,10 @@ impl ShareFsVolume {
                         );
                     }
 
-                    oci_mount.set_source(Some(PathBuf::from(&agent_volume_id)));
+                    if !watchable_volume {
+                        oci_mount.set_typ(Some("bind".to_string()));
+                    }
+                    oci_mount.set_source(Some(PathBuf::from(&mount_source)));
                     volume.mounts.push(oci_mount);
 
                     // Start monitoring (only for watchable volumes)
@@ -597,7 +616,7 @@ impl ShareFsVolume {
                     if is_new && watchable_volume && copy_directory {
                         let watcher = FsWatcher::new(&src).await?;
                         let handle = watcher
-                            .start_monitor(agent.clone(), src.clone(), agent_volume_id.clone())
+                            .start_monitor(agent.clone(), src.clone(), mount_source.clone())
                             .await;
                         monitor_task = Some(handle);
                     }
@@ -737,31 +756,38 @@ impl ShareFsVolume {
         src: &Path,
         agent_volume_id: &str,
         agent: &Arc<dyn Agent>,
-        is_atomic_k8s: bool,
     ) -> Result<()> {
         // For AtomicK8s volumes, skip symlinks: agent reconstructs them from
         // the known path structure, preventing the host from sending arbitrary
         // symlink destinations into the guest.
-        copy_dir_recursively(src, src, agent_volume_id, agent, is_atomic_k8s)
+        copy_dir_recursively(src, src, agent_volume_id, agent)
             .await
             .context(format!("failed to copy directory contents: {src:?}"))?;
 
-        if is_atomic_k8s {
-            // Trigger atomic commit. The agent derives the revision directory
-            // name and visible-file list from the file paths it received, so
-            // runtime-rs does not supply them here.
-            let req = agent::CommitVolumeRevisionRequest {
-                agent_volume_id: agent_volume_id.to_string(),
-                garbage_collect_previous: true,
-            };
-            agent
-                .commit_volume_revision(req)
-                .await
-                .context(format!(
-                    "failed to commit atomic K8s volume revision for {agent_volume_id}"
-                ))?;
-        }
+        let req = agent::CommitVolumeRevisionRequest {
+            agent_volume_id: agent_volume_id.to_string(),
+            garbage_collect_previous: true,
+        };
+        agent
+            .commit_volume_revision(req)
+            .await
+            .context(format!(
+                "failed to commit atomic K8s volume revision for {agent_volume_id}"
+            ))?;
 
+        Ok(())
+    }
+
+    async fn copy_legacy_directory_to_guest(
+        src: &Path,
+        guest_path: &str,
+        agent: &Arc<dyn Agent>,
+        copy_contents: bool,
+    ) -> Result<()> {
+        copy_directory_entry(src, guest_path, agent).await?;
+        if copy_contents {
+            copy_dir_recursively_legacy(src, guest_path, agent).await?;
+        }
         Ok(())
     }
 
@@ -911,10 +937,6 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
     source_root: &Path,
     agent_volume_id: &str,
     agent: &Arc<dyn Agent>,
-    // When true, symlinks are skipped: agent will reconstruct them from the
-    // well-known AtomicK8s path structure rather than trusting host-supplied
-    // link destinations.
-    skip_symlinks: bool,
 ) -> Result<()> {
     let mut queue = VecDeque::new();
     queue.push_back(src_dir.as_ref().to_path_buf());
@@ -942,84 +964,14 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                 .context(format!("read metadata for {entry_path:?}"))?;
 
             if metadata.is_symlink() {
-                if skip_symlinks {
-                    // For AtomicK8s volumes, symlinks are never sent to the
-                    // agent. The agent derives them from the known K8s atomic
-                    // volume path structure, preventing the host from
-                    // specifying arbitrary symlink destinations inside the
-                    // guest.
-                    info!(
-                        sl!(),
-                        "fsshare: skipping symlink {:?} (agent will reconstruct)",
-                        &relative_path
-                    );
-                    continue;
-                }
-
-                // handle symlinks (EmptyDir volumes only)
-                let entry_path_err = entry_path.clone();
-                let entry_path_clone = entry_path.clone();
-                let link_target =
-                    tokio::task::spawn_blocking(move || std::fs::read_link(&entry_path_clone))
-                        .await
-                        .context(format!(
-                            "failed to spawn blocking task for symlink: {entry_path_err:?}"
-                        ))??;
-
-                let link_target_str = link_target.to_string_lossy().into_owned();
-
+                // AtomicK8s symlinks are reconstructed by the agent from the
+                // well-known path structure.
                 info!(
                     sl!(),
-                    "fsshare: symlink {:?} -> {link_target_str}", &relative_path
+                    "fsshare: skipping symlink {:?} (agent will reconstruct)",
+                    &relative_path
                 );
-
-                let symlink_request = agent::PutVolumeFileRequest {
-                    agent_volume_id: agent_volume_id.to_string(),
-                    relative_path: relative_path.clone(),
-                    file_size: link_target_str.len() as i64,
-                    uid: metadata.uid() as i32,
-                    gid: metadata.gid() as i32,
-                    file_mode: SFlag::S_IFLNK.bits(),
-                    dir_mode: DIR_MODE_PERMS,
-                    data: link_target_str.clone().into_bytes(),
-                    ..Default::default()
-                };
-                info!(
-                    sl!(),
-                    "syncing symlink {:?} to managed volume {} with file_mode: {:?}",
-                    relative_path,
-                    agent_volume_id,
-                    symlink_request.file_mode
-                );
-
-                agent
-                    .put_volume_file(symlink_request)
-                    .await
-                    .context(format!(
-                        "failed to sync symlink: {relative_path:?} -> {link_target_str:?}"
-                    ))?;
             } else if metadata.is_dir() {
-                // handle directory
-                let dir_request = agent::CreateVolumeSubdirRequest {
-                    agent_volume_id: agent_volume_id.to_string(),
-                    subdir: relative_path.clone(),
-                    uid: metadata.uid() as i32,
-                    gid: metadata.gid() as i32,
-                    dir_mode: metadata.mode() | SFlag::S_IFDIR.bits(),
-                    ..Default::default()
-                };
-                info!(
-                    sl!(),
-                    "syncing subdirectory {:?} to managed volume {}",
-                    dir_request.subdir,
-                    agent_volume_id
-                );
-                agent
-                    .create_volume_subdir(dir_request)
-                    .await
-                    .context(format!("failed to create subdirectory: {relative_path:?}"))?;
-
-                // push back the sub-dir into queue to handle it in time
                 queue.push_back(entry_path);
             } else if metadata.is_file() {
                 // async read file
@@ -1052,6 +1004,97 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                     .put_volume_file(file_request)
                     .await
                     .context(format!("sync file: {entry_path:?} -> {relative_path:?}"))?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn copy_directory_entry(
+    src: &Path,
+    guest_path: &str,
+    agent: &Arc<dyn Agent>,
+) -> Result<()> {
+    let metadata = tokio::fs::metadata(src)
+        .await
+        .context(format!("read directory metadata: {src:?}"))?;
+    let request = agent::CopyFileRequest {
+        path: guest_path.to_string(),
+        uid: metadata.uid() as i32,
+        gid: metadata.gid() as i32,
+        dir_mode: metadata.mode(),
+        file_mode: metadata.mode(),
+        ..Default::default()
+    };
+    agent
+        .copy_file(request)
+        .await
+        .context(format!("create directory in guest: {guest_path:?}"))?;
+    Ok(())
+}
+
+async fn copy_dir_recursively_legacy(
+    src_dir: &Path,
+    guest_dir: &str,
+    agent: &Arc<dyn Agent>,
+) -> Result<()> {
+    let mut queue = VecDeque::from([(src_dir.to_path_buf(), PathBuf::from(guest_dir))]);
+
+    while let Some((current_src, current_guest)) = queue.pop_front() {
+        let mut entries = tokio::fs::read_dir(&current_src)
+            .await
+            .context(format!("read directory: {current_src:?}"))?;
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .context(format!("read directory entry in {current_src:?}"))?
+        {
+            let entry_path = entry.path();
+            let guest_path = current_guest.join(entry.file_name());
+            let guest_path_string = guest_path.to_string_lossy().into_owned();
+            let metadata = entry
+                .metadata()
+                .await
+                .context(format!("read metadata for {entry_path:?}"))?;
+
+            if metadata.is_symlink() {
+                let link_target = tokio::fs::read_link(&entry_path)
+                    .await
+                    .context(format!("read symlink: {entry_path:?}"))?;
+                let data = link_target.to_string_lossy().into_owned().into_bytes();
+                agent
+                    .copy_file(agent::CopyFileRequest {
+                        path: guest_path_string,
+                        file_size: data.len() as i64,
+                        uid: metadata.uid() as i32,
+                        gid: metadata.gid() as i32,
+                        file_mode: SFlag::S_IFLNK.bits(),
+                        data,
+                        ..Default::default()
+                    })
+                    .await
+                    .context(format!("copy symlink to guest: {entry_path:?}"))?;
+            } else if metadata.is_dir() {
+                copy_directory_entry(&entry_path, &guest_path_string, agent).await?;
+                queue.push_back((entry_path, guest_path));
+            } else if metadata.is_file() {
+                let data = tokio::fs::read(&entry_path)
+                    .await
+                    .context(format!("read file: {entry_path:?}"))?;
+                agent
+                    .copy_file(agent::CopyFileRequest {
+                        path: guest_path_string,
+                        file_size: metadata.len() as i64,
+                        uid: metadata.uid() as i32,
+                        gid: metadata.gid() as i32,
+                        file_mode: metadata.mode(),
+                        data,
+                        ..Default::default()
+                    })
+                    .await
+                    .context(format!("copy file to guest: {entry_path:?}"))?;
             }
         }
     }
@@ -1115,6 +1158,18 @@ pub fn generate_mount_path(id: &str, file_name: &str) -> String {
     uid = String::from(uid_vec[0]);
 
     format!("{nid}-{uid}-{file_name}")
+}
+
+fn generate_guest_path(cid: &str, mount_destination: &Path) -> Result<String> {
+    let file_name = mount_destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("get mount destination name failed"))?;
+    Ok(format!(
+        "{}{}",
+        kata_guest_share_dir(),
+        generate_mount_path(cid, file_name)
+    ))
 }
 
 /// This function is used to check whether a given volume is a watchable volume.

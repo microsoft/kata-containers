@@ -1712,18 +1712,6 @@ impl agent_ttrpc::AgentService for AgentService {
         do_init_volume_source(&req).map_ttrpc_err(same)
     }
 
-    async fn create_volume_subdir(
-        &self,
-        ctx: &TtrpcContext,
-        req: protocols::agent::CreateVolumeSubdirRequest,
-    ) -> ttrpc::Result<Empty> {
-        trace_rpc_call!(ctx, "create_volume_subdir", req);
-        is_allowed(&req).await?;
-
-        do_create_volume_subdir(&req).map_ttrpc_err(same)?;
-        Ok(Empty::new())
-    }
-
     async fn put_volume_file(
         &self,
         ctx: &TtrpcContext,
@@ -2498,37 +2486,6 @@ fn do_init_volume_source(req: &protocols::agent::InitVolumeSourceRequest) -> Res
         agent_volume_id,
         ..Default::default()
     })
-}
-
-fn do_create_volume_subdir(req: &protocols::agent::CreateVolumeSubdirRequest) -> Result<()> {
-    let mut sources = MANAGED_VOLUME_SOURCES
-        .lock()
-        .map_err(|_| anyhow!("managed volume sources lock poisoned"))?;
-    let source = sources
-        .get_mut(&req.agent_volume_id)
-        .ok_or_else(|| anyhow!("unknown agent_volume_id"))?;
-
-    if source.volume_type != VolumeSourceType::VOLUME_SOURCE_TYPE_EMPTY_DIR
-        && source.volume_type != VolumeSourceType::VOLUME_SOURCE_TYPE_ATOMIC_K8S
-    {
-        bail!("volume type does not support subdirectory creation")
-    }
-
-    let target = resolve_managed_relative(&source.guest_path, &req.subdir)?;
-    let mode = if req.dir_mode == 0 {
-        libc::S_IFDIR | 0o750
-    } else {
-        req.dir_mode
-    };
-    let copy_req = CopyFileRequest {
-        path: target.to_string_lossy().into_owned(),
-        file_mode: mode,
-        dir_mode: mode,
-        uid: req.uid,
-        gid: req.gid,
-        ..Default::default()
-    };
-    do_copy_file(&copy_req, &source.guest_path)
 }
 
 fn do_put_volume_file(req: &protocols::agent::PutVolumeFileRequest) -> Result<()> {
@@ -4384,18 +4341,8 @@ COMMIT
             );
         }
 
-        let mkreq = protocols::agent::CreateVolumeSubdirRequest {
-            agent_volume_id: "v1".to_string(),
-            subdir: revision.to_string(),
-            dir_mode: libc::S_IFDIR | 0o750,
-            uid: unistd::getuid().as_raw() as i32,
-            gid: unistd::getgid().as_raw() as i32,
-            ..Default::default()
-        };
-        do_create_volume_subdir(&mkreq).expect("create subdir");
-
         // runtime-rs sends the file at "<revision>/token"; agent derives the
-        // revision and the visible name "token" from this path.
+        // revision and visible name, and CopyFile creates the parent directory.
         let putreq = protocols::agent::PutVolumeFileRequest {
             agent_volume_id: "v1".to_string(),
             relative_path: format!("{revision}/token"),

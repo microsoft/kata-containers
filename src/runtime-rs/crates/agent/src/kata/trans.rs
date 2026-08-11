@@ -16,7 +16,7 @@ use crate::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
         CommitVolumeRevisionRequest, ContainerID, CopyFileRequest, CpuStats, CpuUsage,
-        CreateContainerRequest, CreateSandboxRequest, CreateVolumeSubdirRequest, Device, Empty,
+        CreateContainerRequest, CreateSandboxRequest, Device, Empty,
         ExecProcessRequest, FSGroup, FSGroupChangePolicy, GetIPTablesRequest,
         GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse, HugetlbStats, IPAddress,
         IPFamily, InitVolumeSourceRequest, InitVolumeSourceResponse, Interface, Interfaces,
@@ -838,19 +838,6 @@ impl From<agent::InitVolumeSourceResponse> for InitVolumeSourceResponse {
     fn from(from: agent::InitVolumeSourceResponse) -> Self {
         Self {
             agent_volume_id: from.agent_volume_id,
-        }
-    }
-}
-
-impl From<CreateVolumeSubdirRequest> for agent::CreateVolumeSubdirRequest {
-    fn from(from: CreateVolumeSubdirRequest) -> Self {
-        Self {
-            agent_volume_id: from.agent_volume_id,
-            subdir: from.subdir,
-            dir_mode: from.dir_mode,
-            uid: from.uid,
-            gid: from.gid,
-            ..Default::default()
         }
     }
 }

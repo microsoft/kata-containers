@@ -73,7 +73,6 @@ service AgentService {
 	rpc MemHotplugByProbe(MemHotplugByProbeRequest) returns (google.protobuf.Empty);
 	rpc SetGuestDateTime(SetGuestDateTimeRequest) returns (google.protobuf.Empty);
 	rpc InitVolumeSource(InitVolumeSourceRequest) returns (InitVolumeSourceResponse);
-	rpc CreateVolumeSubdir(CreateVolumeSubdirRequest) returns (google.protobuf.Empty);
 	rpc PutVolumeFile(PutVolumeFileRequest) returns (google.protobuf.Empty);
 	rpc CommitVolumeRevision(CommitVolumeRevisionRequest) returns (google.protobuf.Empty);
 	rpc RemoveVolumeSource(RemoveVolumeSourceRequest) returns (google.protobuf.Empty);
@@ -616,15 +615,6 @@ message InitVolumeSourceResponse {
 	// Runtime must treat it as an identifier, not a path. For container mounts,
 	// use it as OCI Mount.source with type "bind-managed-volume".
 	string agent_volume_id = 1;
-}
-
-message CreateVolumeSubdirRequest {
-	string agent_volume_id = 1;
-	// Relative subdirectory path under the managed volume source root.
-	string subdir = 2;
-	uint32 dir_mode = 3;
-	int32 uid = 4;
-	int32 gid = 5;
 }
 
 message PutVolumeFileRequest {

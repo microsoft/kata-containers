@@ -121,7 +121,6 @@ impl_agent!(
     destroy_sandbox | crate::Empty | crate::Empty | None,
     copy_file | crate::CopyFileRequest | crate::Empty | None,
     init_volume_source | crate::InitVolumeSourceRequest | crate::InitVolumeSourceResponse | None,
-    create_volume_subdir | crate::CreateVolumeSubdirRequest | crate::Empty | None,
     put_volume_file | crate::PutVolumeFileRequest | crate::Empty | None,
     commit_volume_revision | crate::CommitVolumeRevisionRequest | crate::Empty | None,
     remove_volume_source | crate::RemoveVolumeSourceRequest | crate::Empty | None,

@@ -10,7 +10,6 @@ allowed = [
         "CloseStdinRequest",
         "CommitVolumeRevisionRequest",
         "CopyFileRequest",
-        "CreateVolumeSubdirRequest",
         "CreateContainerRequest",
         "CreateSandboxRequest",
         "DestroySandboxRequest",

@@ -10,7 +10,6 @@ default AddSwapRequest := true
 default CloseStdinRequest := true
 default CommitVolumeRevisionRequest := true
 default CopyFileRequest := true
-default CreateVolumeSubdirRequest := true
 default CreateContainerRequest := true
 default CreateSandboxRequest := true
 default DestroySandboxRequest := true

@@ -576,15 +576,6 @@ pub struct InitVolumeSourceResponse {
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
-pub struct CreateVolumeSubdirRequest {
-    pub agent_volume_id: String,
-    pub subdir: String,
-    pub dir_mode: u32,
-    pub uid: i32,
-    pub gid: i32,
-}
-
-#[derive(PartialEq, Clone, Default, Debug)]
 pub struct PutVolumeFileRequest {
     pub agent_volume_id: String,
     pub relative_path: String,
