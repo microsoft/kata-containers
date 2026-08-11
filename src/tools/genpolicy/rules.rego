@@ -862,10 +862,28 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
 
     # Match each input mount with a Policy mount.
     # Reject possible attempts to match multiple input mounts with a single Policy mount.
-    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, i_oci.Mounts[i_index], i_storages, bundle_id, sandbox_id) }
+    #
+    # FR-1o: mounts a signed fragment is authorized to contribute are set aside first, and
+    # the bijection below is then required of what remains. Adding them to the candidate
+    # set instead would not work: `allow_mount` returns an *index into p_oci.Mounts*, and
+    # the count check depends on those indices being distinct, so a fragment mount would
+    # either have to invent an index that cannot collide with a real one or silently
+    # collapse two matches into one. Excusing them keeps the base check exactly as it was
+    # and confines the new surface to `fragment_mount_permitted`.
+    i_fragment_mounts := {i_index |
+        some i_index, i_mount in i_oci.Mounts
+        fragment_mount_permitted(p_oci, i_mount)
+    }
+    i_base_mounts := [i_mount |
+        some i_index, i_mount in i_oci.Mounts
+        not i_index in i_fragment_mounts
+    ]
+    print("allow_by_bundle_or_sandbox_id: fragment mounts =", count(i_fragment_mounts))
+
+    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, i_base_mounts[i_index], i_storages, bundle_id, sandbox_id) }
 
     print("allow_by_bundle_or_sandbox_id: p_matches =", p_matches)
-    count(p_matches) == count(i_oci.Mounts)
+    count(p_matches) == count(i_base_mounts)
 
     allow_storages(p_storages, i_storages, bundle_id, sandbox_id, p_oci)
 
@@ -1156,7 +1174,7 @@ allow_var(p_process, i_process, i_var, s_name, s_namespace) if {
     print("allow_var 8: true")
 }
 
-# FR-1m: allow an input env variable admitted by an `env_rules` entry that a trusted
+# FR-1n: allow an input env variable admitted by an `env_rules` entry that a trusted
 # fragment contributes, within a ceiling the measured base policy declares.
 #
 # This is the Kata-CC form of hcsshim's `platform_rules`. The problem both solve is that a
@@ -1228,14 +1246,17 @@ fragment_env_name_permitted(issuer, feed, name) if {
 
     every spec in specs {
         some pattern in object.get(spec, "allow_env_rules", [])
-        regex.match(fragment_env_anchored(pattern), name)
+        regex.match(fragment_anchored(pattern), name)
     }
 }
 
 # Anchor a pattern to the whole string. Nesting anchors an author already wrote -- turning
 # "^X$" into "^(?:^X$)$" -- is harmless in RE2 and means the wrapping is unconditional
 # rather than conditional on parsing the pattern, which is the part that could be got wrong.
-fragment_env_anchored(pattern) := concat("", ["^(?:", pattern, ")$"])
+# Shared by the env-rule and mount-rule ceilings: both delegate by pattern, so both depend
+# on the same property, and having one definition means it cannot hold for one and not the
+# other.
+fragment_anchored(pattern) := concat("", ["^(?:", pattern, ")$"])
 
 # A rule's value is a literal by default. hcsshim's equivalent field takes a strategy with
 # no safe default, and reading "string" as though it meant "regex" is a mistake that is easy
@@ -1254,7 +1275,7 @@ fragment_env_value_matches(rule, value) if {
 
 fragment_env_value_matches(rule, value) if {
     rule.value_strategy == "re2"
-    regex.match(fragment_env_anchored(rule.value), value)
+    regex.match(fragment_anchored(rule.value), value)
 }
 
 allow_pod_ip_var(var_name, p_var) if {
@@ -1416,6 +1437,94 @@ mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
     regex.match(regex4, i_mount.source)
 
     print("mount_source_allows 2: true")
+}
+
+# FR-1o: a mount a signed fragment contributes, within a ceiling the measured base policy
+# declares. The mount half of hcsshim's `platform_rules`; the env half is `allow_var` arm 9.
+#
+# The motivation is the same drift problem: a deployment pipeline may attach a mount the
+# policy author never wrote down -- a projected token path a newer kubelet adds, a CSI
+# driver's directory, an observability socket a cluster-wide admission webhook injects.
+# Without a delegation path the only remedy is to regenerate and re-measure the base policy.
+#
+# Three differences from hcsshim's model, all in the direction of a tighter bound:
+#
+#   * hcsshim concatenates a fragment's platform mounts onto the container's mount list
+#     unconditionally, so including the fragment grants it the whole mount namespace. Here
+#     the base policy names the destinations it will let a feed speak for, and a declaration
+#     that omits `allow_mount_rules` delegates nothing -- the closed default again.
+#   * A fragment may only *add* a destination, never restate one the base policy already
+#     declares (`fragment_mount_is_new`). Otherwise a fragment could shadow a base mount
+#     with a laxer one -- declaring /data read-only in the measured policy would count for
+#     nothing if a fragment could re-admit /data read-write -- and the weakening would be
+#     invisible, because the base declaration would still be sitting there saying "ro".
+#     Fragments extend the mount set; they cannot rewrite it.
+#   * Options must match exactly rather than by subset, and a rule that omits `options`
+#     therefore admits only a mount with none. Mount options are the security-relevant part
+#     of a mount -- ro/rw, nosuid, nodev, noexec -- so "close enough" is the wrong default.
+fragment_mount_permitted(p_oci, i_mount) if {
+    some feed, mod in data.agent_policy.fragments
+    to_number(mod.svn) >= svn_floor(mod.issuer, feed)
+
+    fragment_mount_destination_permitted(mod.issuer, feed, i_mount.destination)
+    fragment_mount_is_new(p_oci, i_mount.destination)
+
+    some rule in mod.mount_rules
+    # The destination is compared literally, which is what makes the ceiling above an exact
+    # test rather than a regex-subset question. Same argument as the env rule's `name`.
+    rule.destination == i_mount.destination
+    rule.type_ == i_mount.type_
+    fragment_mount_source_matches(rule, i_mount.source)
+    fragment_mount_options_match(rule, i_mount.options)
+
+    print("fragment_mount_permitted: true for", i_mount.destination)
+}
+
+# The ceiling: the destination must be permitted by every measured base declaration naming
+# this (issuer, feed), and at least one must exist. `every` rather than `some` for the same
+# reason as the env ceiling -- an existential would let a stale, laxer duplicate declaration
+# win -- and the "at least one" requirement means a feed reachable only through delegation
+# has no ceiling and so contributes no mounts.
+fragment_mount_destination_permitted(issuer, feed, destination) if {
+    specs := [spec |
+        some spec in all_fragment_specs
+        spec.issuer == issuer
+        spec.feed == feed
+    ]
+    count(specs) > 0
+
+    every spec in specs {
+        some pattern in object.get(spec, "allow_mount_rules", [])
+        regex.match(fragment_anchored(pattern), destination)
+    }
+}
+
+# A fragment may not speak for a destination the base policy already declares.
+fragment_mount_is_new(p_oci, destination) if {
+    every p_mount in p_oci.Mounts {
+        p_mount.destination != destination
+    }
+}
+
+# Literal by default, regex only when asked for by name -- as for env rule values, so that
+# a misread strategy fails closed rather than matching more than intended.
+fragment_mount_source_matches(rule, source) if {
+    not rule.source_strategy
+    rule.source == source
+}
+
+fragment_mount_source_matches(rule, source) if {
+    rule.source_strategy == "string"
+    rule.source == source
+}
+
+fragment_mount_source_matches(rule, source) if {
+    rule.source_strategy == "re2"
+    regex.match(fragment_anchored(rule.source), source)
+}
+
+fragment_mount_options_match(rule, i_options) if {
+    {x | some x in object.get(rule, "options", [])} == {x | some x in i_options}
 }
 
 ######################################################################

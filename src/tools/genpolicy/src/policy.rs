@@ -82,13 +82,22 @@ pub struct FragmentSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub includes: Vec<String>,
 
-    /// FR-1m: name patterns bounding which environment variables this fragment may
+    /// FR-1n: name patterns bounding which environment variables this fragment may
     /// contribute `env_rules` for. Empty (the default) delegates nothing, so existing
     /// settings produce byte-identical output and cannot acquire the capability by upgrade.
     /// Passed through verbatim; `rules.rego` enforces the ceiling, anchoring every pattern
     /// to the whole name so a missing `^`/`$` cannot widen the grant.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow_env_rules: Vec<String>,
+
+    /// FR-1o: destination patterns whose mounts a fragment for this feed may contribute.
+    ///
+    /// The mount half of the delegation `allow_env_rules` provides for environment
+    /// variables. Same handling: `skip_serializing_if` so settings that do not use it
+    /// produce byte-identical output, passed through verbatim, and the ceiling enforced in
+    /// `rules.rego` with every pattern anchored to the whole destination.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_mount_rules: Vec<String>,
 
     /// FR-1c: whether the fragment's Rego module may be applied at all. Defaults to true;
     /// `false` accepts the fragment for its SVN/receipt/ordering record while contributing
