@@ -52,34 +52,86 @@ This section provides details about the [rules](#rules) used by the Policy docum
 
 ## `CopyFileRequest`
 
-`CopyFile` requests are rejected by the auto-generated Policy unless the destination path of the file being copied matches at least one regular expression from `policy_data.request_defaults.CopyFileRequest`. By default, there is a single regex in `policy_data.request_defaults.CopyFileRequest`, copied by `genpolicy` from [`genpolicy-settings.json`](genpolicy-settings.json):
+`CopyFile` requests are rejected unconditionally: `default CopyFileRequest := false` and
+[`rules.rego`](rules.rego) defines no rule that can make it true. The endpoint let the Host
+name an arbitrary destination path in the Guest, and no regular expression over that path is
+a satisfying way to describe what the Host is legitimately trying to do.
+
+The Host instead uses four typed endpoints, described below, that do not carry a destination
+path at all.
+
+
+## `CopySingleFileRequest`
+
+Replaces the use of `CopyFile` for the four well-known files the Host has to author for a
+sandbox: `/etc/resolv.conf`, `/etc/hosts`, `/etc/hostname` and the container termination log.
+The Host names *which* of those files it is supplying, as a `SingleFileType`, and the Guest
+derives the path. The Policy decides which kinds the Host may supply:
 
 ```
 policy_data := {
     ...
     "request_defaults": {
         ...
-        "CopyFileRequest": [
-            "^$(cpath)/"
-        ],
+        "CopySingleFileRequest": {
+            "allowed_file_types": [
+                "ResolvConf",
+                "EtcHosts",
+                "Hostname",
+                "TerminationLog"
+            ],
+            "max_file_size": 1048576
+        },
         ...
     },
     ...
 }
 ```
 
-The tool defines `$(cpath)` by copying its value from the same settings file into Policy's `policy_data.common.cpath`:
+A user can narrow `allowed_file_types` in a custom settings file -- for example, dropping
+`"TerminationLog"` for a workload that never declares a `terminationMessagePath`.
+
+The Agent evaluates a pre-processed form of the request rather than the request itself. The
+file payload is removed, so the Host cannot load the rules engine with it, and the `S_IFMT`
+bits of `file_mode` are decoded into `input.file_type` (`"Regular"`, `"Directory"`,
+`"Symlink"` or `"Unknown"`) plus, for symlinks, `input.symlink_target`. The rule requires
+`"Regular"`: these destinations are bind-mounted into the container, so a symlink would let
+the Host point the container's `/etc/resolv.conf` at a path of its choosing. The rule also
+rejects the `setuid`, `setgid` and sticky bits, and rejects a `sandbox_id` that is empty,
+absolute, or contains `..`.
+
+
+## `InitWatchableVolumeRequest`, `PutVolumeFileRequest` and `CommitVolumeRevisionRequest`
+
+Replace the use of `CopyFile` for projected `ConfigMap`, `Secret` and downward-API volumes.
+`InitWatchableVolume` asks the Guest to create a volume; the Guest mints the volume id and
+returns it, so the Host cannot choose it. `PutVolumeFile` stages files into a revision of
+that volume, and `CommitVolumeRevision` publishes the staged revision atomically.
+
+`InitWatchableVolumeRequest` and `CommitVolumeRevisionRequest` are plain booleans in the
+settings file, for workloads that project no volumes at all. `PutVolumeFileRequest` carries a
+size ceiling:
 
 ```
-common := {
+policy_data := {
     ...
-    "cpath": "/run/kata-containers/shared/containers",
+    "request_defaults": {
+        ...
+        "InitWatchableVolumeRequest": true,
+        "PutVolumeFileRequest": {
+            "max_file_size": 1048576
+        },
+        "CommitVolumeRevisionRequest": true,
+        ...
+    },
     ...
 }
 ```
 
-Therefore, by default the auto-generated Policy allows the Host to copy any files under `/run/kata-containers/shared/containers` and rejects any other `CopyFile` requests. A user can alter this behavior by using a custom settings file including a different `policy_data.request_defaults.CopyFileRequest` field value, instead of using the default from `genpolicy-settings.json`.
-
+`PutVolumeFileRequest` is pre-processed like `CopySingleFileRequest`, and its rule applies the
+same checks: regular files only, no `setuid`/`setgid`/sticky bits on either `file_mode` or
+`dir_mode`, and `agent_volume_id`, `revision` and `file_name` must each be a plain relative
+path component.
 
 ## `CreateContainerRequest`
 
