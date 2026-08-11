@@ -374,12 +374,36 @@ fn get_config_map_mount_and_storage(
 
     let file_name = Path::new(&yaml_mount.mountPath).file_name().unwrap();
     let name = OsString::from(file_name).into_string().unwrap();
-    p_mounts.push(policy::KataMount {
-        destination: yaml_mount.mountPath.clone(),
-        type_: settings_config_map.mount_type.clone(),
-        source: format!("{}{name}$", &settings_config_map.mount_point),
-        options: settings_config_map.options.clone(),
-    });
+
+    let dest = yaml_mount.mountPath.clone();
+    let type_ = settings_config_map.mount_type.clone();
+    let source = format!("{}{name}$", &settings_config_map.mount_point);
+    let options = settings_config_map.options.clone();
+
+    // A volumeMount whose destination is one the settings also mount by default -- most
+    // usefully /etc/hosts, /etc/resolv.conf, /etc/hostname or /dev/termination-log -- must
+    // *replace* that entry rather than add a second one. Two entries for one destination
+    // are two independently satisfiable ways to mount the same path, and the host chooses
+    // which to present and in what order: the mount check is an injection from presented
+    // mounts into policy mounts, so it neither requires every policy mount to appear nor
+    // constrains their order. The default entry is "rw" and a configMap or secret mount is
+    // "ro", so leaving both in place lets the host drop the "ro" one and hand the container
+    // a writable /etc/hosts that the pod spec asked to be read-only. Every sibling handler
+    // already updates in place for this reason; this one did not.
+    if let Some(policy_mount) = p_mounts.iter_mut().find(|m| m.destination.eq(&dest)) {
+        debug!("get_config_map_mount_and_storage: updating dest = {dest}, source = {source}");
+        policy_mount.type_ = type_;
+        policy_mount.source = source;
+        policy_mount.options = options;
+    } else {
+        debug!("get_config_map_mount_and_storage: adding dest = {dest}, source = {source}");
+        p_mounts.push(policy::KataMount {
+            destination: dest,
+            type_,
+            source,
+            options,
+        });
+    }
 }
 
 fn get_shared_bind_mount(
@@ -537,4 +561,100 @@ pub fn get_image_mount_and_storage(
         source,
         options: settings_image.options.clone(),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn volume(json: &str) -> volume::Volume {
+        serde_json::from_str(json).unwrap()
+    }
+
+    fn volume_mount(json: &str) -> pod::VolumeMount {
+        serde_json::from_str(json).unwrap()
+    }
+
+    fn settings() -> settings::Settings {
+        settings::Settings::new("genpolicy-settings.json")
+    }
+
+    /// The settings mount every container gets for /etc/hosts, as `get_settings_mounts`
+    /// would have added it before any volume is considered.
+    fn default_etc_hosts() -> policy::KataMount {
+        policy::KataMount {
+            destination: "/etc/hosts".to_string(),
+            type_: "bind".to_string(),
+            source: "$(sfprefix)hosts$".to_string(),
+            options: vec![
+                "rbind".to_string(),
+                "rprivate".to_string(),
+                "rw".to_string(),
+            ],
+        }
+    }
+
+    fn destinations(mounts: &[policy::KataMount]) -> Vec<&str> {
+        mounts.iter().map(|m| m.destination.as_str()).collect()
+    }
+
+    #[test]
+    fn a_config_map_over_a_default_mount_replaces_it() {
+        let mut mounts = vec![default_etc_hosts()];
+        let mut storages = Vec::new();
+
+        get_mount_and_storage(
+            &settings(),
+            &mut mounts,
+            &mut storages,
+            &volume(r#"{"name": "cm", "configMap": {"name": "my-cm"}}"#),
+            &volume_mount(r#"{"name": "cm", "mountPath": "/etc/hosts"}"#),
+            &None,
+        );
+
+        // Two entries for one destination would be two independently satisfiable ways to
+        // mount the same path. The host picks which to present -- the mount check is an
+        // injection from presented mounts into policy mounts, so it requires neither that
+        // every policy mount appear nor that they appear in order -- and the default entry
+        // is "rw" while this one is "ro", so keeping both makes the pod's read-only request
+        // unenforceable.
+        assert_eq!(destinations(&mounts), ["/etc/hosts"]);
+        assert!(mounts[0].options.contains(&"ro".to_string()));
+        assert!(!mounts[0].options.contains(&"rw".to_string()));
+    }
+
+    #[test]
+    fn a_secret_over_a_default_mount_replaces_it() {
+        let mut mounts = vec![default_etc_hosts()];
+        let mut storages = Vec::new();
+
+        get_mount_and_storage(
+            &settings(),
+            &mut mounts,
+            &mut storages,
+            &volume(r#"{"name": "s", "secret": {"secretName": "my-secret"}}"#),
+            &volume_mount(r#"{"name": "s", "mountPath": "/etc/hosts"}"#),
+            &None,
+        );
+
+        assert_eq!(destinations(&mounts), ["/etc/hosts"]);
+        assert!(mounts[0].options.contains(&"ro".to_string()));
+    }
+
+    #[test]
+    fn a_config_map_elsewhere_is_still_added() {
+        let mut mounts = vec![default_etc_hosts()];
+        let mut storages = Vec::new();
+
+        get_mount_and_storage(
+            &settings(),
+            &mut mounts,
+            &mut storages,
+            &volume(r#"{"name": "cm", "configMap": {"name": "my-cm"}}"#),
+            &volume_mount(r#"{"name": "cm", "mountPath": "/mnt/config"}"#),
+            &None,
+        );
+
+        assert_eq!(destinations(&mounts), ["/etc/hosts", "/mnt/config"]);
+    }
 }
