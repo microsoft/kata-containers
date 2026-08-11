@@ -53,3 +53,55 @@ pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::R
         .await
         .map_err(|e| ttrpc_error(ttrpc::Code::INVALID_ARGUMENT, e))
 }
+
+/// Test-only support for driving handlers through the real policy gate.
+///
+/// A handler's first statement is `is_allowed`, which reads the process-global
+/// `AGENT_POLICY`. A freshly constructed `AgentPolicy` has an empty engine, so every
+/// query returns no results and `allow_request` bails — meaning any test that wants to
+/// reach the body of a handler has to put a policy in place first.
+///
+/// Two properties make that harder than a bare `set_policy` call, and both are the
+/// reason this is a shared helper rather than something each test open-codes:
+///
+///  1. `AGENT_POLICY` is process-global and the test binary is a single process, so two
+///     tests that install different policies will race. The lock below serializes them.
+///  2. Under `strict-policy`, `AgentPolicy::set_policy` is one-shot: the second
+///     activation is refused so a host cannot weaken policy at runtime. Assigning a
+///     fresh `AgentPolicy` over the global clears that flag, which keeps the guarantee
+///     intact for production (the check is untouched) while letting each test start from
+///     a known state.
+///
+/// Hold the returned guard for as long as the installed policy must stay in effect.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::AgentPolicy;
+    use crate::AGENT_POLICY;
+    use lazy_static::lazy_static;
+    use tokio::sync::{Mutex, MutexGuard};
+
+    lazy_static! {
+        static ref POLICY_TEST_LOCK: Mutex<()> = Mutex::new(());
+    }
+
+    /// Serializes policy-driven tests. Dropping it releases the next waiter; the policy
+    /// itself is left in place, since the next holder replaces it wholesale.
+    pub(crate) struct PolicyTestGuard(#[allow(dead_code)] MutexGuard<'static, ()>);
+
+    /// Install `policy` as the active agent policy and block any other test that wants
+    /// to do the same until the returned guard is dropped.
+    pub(crate) async fn install_policy(policy: &str) -> PolicyTestGuard {
+        let guard = POLICY_TEST_LOCK.lock().await;
+
+        let mut active = AGENT_POLICY.lock().await;
+        // Replace rather than mutate: this resets `policy_activated`, so the one-shot
+        // activation lock does not make the *second* test to run fail closed.
+        *active = AgentPolicy::new();
+        active
+            .set_policy(policy)
+            .await
+            .expect("test policy must load");
+
+        PolicyTestGuard(guard)
+    }
+}

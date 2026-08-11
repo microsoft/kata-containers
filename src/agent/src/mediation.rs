@@ -436,12 +436,10 @@ mod tests {
         }
         deny_all.push_str("default AllowRequestsFailingPolicy := false\n");
 
-        crate::AGENT_POLICY
-            .lock()
-            .await
-            .set_policy(&deny_all)
-            .await
-            .expect("deny-all policy must load");
+        // Via the shared helper, not `set_policy` directly: `AGENT_POLICY` is
+        // process-global, so this sweep and any other policy-driven test must not
+        // install policies concurrently. Held until the sweep finishes.
+        let _policy_guard = crate::policy::test_support::install_policy(&deny_all).await;
 
         let logger = slog::Logger::root(slog::Discard, slog::o!());
         let sandbox = crate::sandbox::Sandbox::new(&logger).expect("sandbox");
