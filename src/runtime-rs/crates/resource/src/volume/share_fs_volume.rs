@@ -45,6 +45,15 @@ const SYS_MOUNT_PREFIX: [&str; 2] = ["/proc", "/sys"];
 const MONITOR_INTERVAL: Duration = Duration::from_millis(100);
 const DEBOUNCE_TIME: Duration = Duration::from_millis(500);
 
+const COPY_VOLUME_NETWORK_FILES: &str = "network-files";
+const COPY_VOLUME_OTHER_FILES: &str = "other-files";
+const COPY_VOLUME_PROJECTED_VOLUMES: &str = "projected-volumes";
+const COPY_VOLUME_CONFIGMAP_VOLUMES: &str = "configmap-volumes";
+const COPY_VOLUME_SECRET_VOLUMES: &str = "secret-volumes";
+const COPY_VOLUME_DOWNWARD_API_VOLUMES: &str = "downward-api-volumes";
+const COPY_VOLUME_OTHER_DIRECTORIES: &str = "other-directories";
+const NETWORK_FILE_NAMES: [&str; 3] = ["resolv.conf", "hosts", "hostname"];
+
 // Corresponds to os.FileMode(0750) | os.ModeDir in Go
 // So, it's (permission bits 0o750) ORed with (file type bit S_IFDIR).
 // We use u32 here because `file_mode` in CopyFileRequest is u32
@@ -419,6 +428,7 @@ impl ShareFsVolume {
         readonly: bool,
         agent: Arc<dyn Agent>,
         volume_manager: Arc<VolumeManager>,
+        copy_volume_types: Option<&HashSet<String>>,
     ) -> Result<Self> {
         // The file_name is in the format of "sandbox-{uuid}-{file_name}"
         let source_path = get_mount_path(m.source());
@@ -449,6 +459,15 @@ impl ShareFsVolume {
                     }
                     Ok(src) => src,
                 };
+
+                if !should_copy_volume(&src, copy_volume_types) {
+                    info!(
+                        sl!(),
+                        "skipping host->guest copy for {:?} because it is disabled by copy_volumes",
+                        &src
+                    );
+                    return Ok(volume);
+                }
 
                 // append oci::Mount structure to volume mounts
                 let mut oci_mount = oci::Mount::default();
@@ -668,6 +687,42 @@ impl ShareFsVolume {
 
         Ok(())
     }
+}
+
+fn should_copy_volume(src: &Path, copy_volume_types: Option<&HashSet<String>>) -> bool {
+    let Some(enabled_types) = copy_volume_types else {
+        return true;
+    };
+
+    enabled_types.contains(classify_copy_volume(src))
+}
+
+fn classify_copy_volume(src: &Path) -> &'static str {
+    if src.is_file() {
+        let file_name = src
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if NETWORK_FILE_NAMES.contains(&file_name) {
+            return COPY_VOLUME_NETWORK_FILES;
+        }
+        return COPY_VOLUME_OTHER_FILES;
+    }
+
+    if is_projected(src) {
+        return COPY_VOLUME_PROJECTED_VOLUMES;
+    }
+    if is_configmap(src) {
+        return COPY_VOLUME_CONFIGMAP_VOLUMES;
+    }
+    if is_secret(src) {
+        return COPY_VOLUME_SECRET_VOLUMES;
+    }
+    if is_downward_api(src) {
+        return COPY_VOLUME_DOWNWARD_API_VOLUMES;
+    }
+
+    COPY_VOLUME_OTHER_DIRECTORIES
 }
 
 #[async_trait]
@@ -991,6 +1046,14 @@ fn generate_guest_path(cid: &str, mount_destination: &Path) -> Result<String> {
 mod test {
     use super::*;
 
+    fn test_path(parts: &[&str]) -> PathBuf {
+        let mut path = PathBuf::new();
+        for p in parts {
+            path.push(p);
+        }
+        path
+    }
+
     #[test]
     fn test_is_system_mount() {
         let sys_dir = "/sys";
@@ -1034,5 +1097,119 @@ mod test {
         assert!(is_watchable_volume(&secret_path));
         assert!(is_watchable_volume(&projected_path));
         assert!(is_watchable_volume(&downward_api_path));
+    }
+
+    #[test]
+    fn test_classify_copy_volume() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let network_file = temp_dir.path().join("resolv.conf");
+        std::fs::write(&network_file, b"nameserver 1.1.1.1\n").unwrap();
+
+        let other_file = temp_dir.path().join("termination-log");
+        std::fs::write(&other_file, b"terminated\n").unwrap();
+
+        let projected = temp_dir.path().join(test_path(&[
+            "var",
+            "lib",
+            "kubelet",
+            "pods",
+            "1000",
+            "volumes",
+            "kubernetes.io~projected",
+            "kube-api-access-8s2nl",
+        ]));
+        std::fs::create_dir_all(&projected).unwrap();
+
+        let configmap = temp_dir.path().join(test_path(&[
+            "var",
+            "lib",
+            "kubelet",
+            "pods",
+            "1000",
+            "volumes",
+            "kubernetes.io~configmap",
+            "kube-configmap-0s2no",
+        ]));
+        std::fs::create_dir_all(&configmap).unwrap();
+
+        let secret = temp_dir.path().join(test_path(&[
+            "var",
+            "lib",
+            "kubelet",
+            "pods",
+            "1000",
+            "volumes",
+            "kubernetes.io~secret",
+            "kube-secret-2s2np",
+        ]));
+        std::fs::create_dir_all(&secret).unwrap();
+
+        let downward_api = temp_dir.path().join(test_path(&[
+            "var",
+            "lib",
+            "kubelet",
+            "pods",
+            "1000",
+            "volumes",
+            "kubernetes.io~downward-api",
+            "downward-api-xxxx",
+        ]));
+        std::fs::create_dir_all(&downward_api).unwrap();
+
+        let other_directory = temp_dir.path().join(test_path(&["mnt", "nfs", "data"]));
+        std::fs::create_dir_all(&other_directory).unwrap();
+
+        assert_eq!(classify_copy_volume(&network_file), COPY_VOLUME_NETWORK_FILES);
+        assert_eq!(classify_copy_volume(&other_file), COPY_VOLUME_OTHER_FILES);
+        assert_eq!(
+            classify_copy_volume(&projected),
+            COPY_VOLUME_PROJECTED_VOLUMES
+        );
+        assert_eq!(
+            classify_copy_volume(&configmap),
+            COPY_VOLUME_CONFIGMAP_VOLUMES
+        );
+        assert_eq!(classify_copy_volume(&secret), COPY_VOLUME_SECRET_VOLUMES);
+        assert_eq!(
+            classify_copy_volume(&downward_api),
+            COPY_VOLUME_DOWNWARD_API_VOLUMES
+        );
+        assert_eq!(
+            classify_copy_volume(&other_directory),
+            COPY_VOLUME_OTHER_DIRECTORIES
+        );
+    }
+
+    #[test]
+    fn test_should_copy_volume() {
+        let mut enabled = HashSet::new();
+        enabled.insert(COPY_VOLUME_NETWORK_FILES.to_string());
+        enabled.insert(COPY_VOLUME_PROJECTED_VOLUMES.to_string());
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let resolv = temp_dir.path().join("resolv.conf");
+        std::fs::write(&resolv, b"nameserver 1.1.1.1\n").unwrap();
+
+        let other_file = temp_dir.path().join("termination-log");
+        std::fs::write(&other_file, b"terminated\n").unwrap();
+
+        let projected = temp_dir.path().join(test_path(&[
+            "var",
+            "lib",
+            "kubelet",
+            "pods",
+            "1000",
+            "volumes",
+            "kubernetes.io~projected",
+            "kube-api-access-8s2nl",
+        ]));
+        std::fs::create_dir_all(&projected).unwrap();
+
+        assert!(should_copy_volume(&resolv, Some(&enabled)));
+        assert!(should_copy_volume(&projected, Some(&enabled)));
+        assert!(!should_copy_volume(&other_file, Some(&enabled)));
+        assert!(should_copy_volume(&other_file, None));
     }
 }

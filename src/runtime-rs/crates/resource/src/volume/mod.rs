@@ -18,7 +18,7 @@ pub mod direct_volume;
 use crate::volume::{direct_volume::is_direct_volume, share_fs_volume::VolumeManager};
 pub mod direct_volumes;
 
-use std::{sync::Arc, vec::Vec};
+use std::{collections::HashSet, sync::Arc, vec::Vec};
 
 use self::hugepage::{get_huge_page_limits_map, get_huge_page_option};
 use crate::{share_fs::ShareFs, volume::block_volume::is_block_volume};
@@ -40,6 +40,7 @@ pub struct VolumeContext<'a> {
     pub emptydir_mode: &'a str,
     pub fs_sharing_supported: bool,
     pub block_device_discard_supported: bool,
+    pub copy_volume_types: Option<HashSet<String>>,
 }
 
 #[async_trait]
@@ -164,6 +165,7 @@ impl VolumeResource {
                         read_only,
                         ctx.agent.clone(),
                         self.volume_manager.clone(),
+                        ctx.copy_volume_types.as_ref(),
                     )
                     .await
                     .with_context(|| format!("new share fs volume {m:?}"))?,

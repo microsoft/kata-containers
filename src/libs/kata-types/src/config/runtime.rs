@@ -27,6 +27,14 @@ pub const EMPTYDIR_MODE_BLOCK_ENCRYPTED: &str = "block-encrypted";
 /// EmptyDir mode: plug a block device to be mounted directly in the guest.
 pub const EMPTYDIR_MODE_BLOCK_PLAIN: &str = "block-plain";
 
+pub const COPY_VOLUME_NETWORK_FILES: &str = "network-files";
+pub const COPY_VOLUME_OTHER_FILES: &str = "other-files";
+pub const COPY_VOLUME_PROJECTED_VOLUMES: &str = "projected-volumes";
+pub const COPY_VOLUME_CONFIGMAP_VOLUMES: &str = "configmap-volumes";
+pub const COPY_VOLUME_SECRET_VOLUMES: &str = "secret-volumes";
+pub const COPY_VOLUME_DOWNWARD_API_VOLUMES: &str = "downward-api-volumes";
+pub const COPY_VOLUME_OTHER_DIRECTORIES: &str = "other-directories";
+
 /// Kata runtime configuration information.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Runtime {
@@ -192,6 +200,19 @@ pub struct Runtime {
     #[serde(default)]
     pub dan_conf: String,
 
+    /// Controls which mount source categories are copied from host to guest.
+    ///
+    /// Supported values:
+    /// - network-files
+    /// - other-files
+    /// - projected-volumes
+    /// - configmap-volumes
+    /// - secret-volumes
+    /// - downward-api-volumes
+    /// - other-directories
+    #[serde(default)]
+    pub copy_volumes: Vec<String>,
+
     /// shared_mount declarations
     #[serde(default)]
     pub shared_mounts: Vec<SharedMount>,
@@ -299,6 +320,21 @@ impl ConfigOps for Runtime {
                 real_path.to_owned(),
                 "sandbox bind mount `{}` is invalid: {}"
             )?;
+        }
+
+        for copy_volume in &conf.runtime.copy_volumes {
+            let valid = copy_volume == COPY_VOLUME_NETWORK_FILES
+                || copy_volume == COPY_VOLUME_OTHER_FILES
+                || copy_volume == COPY_VOLUME_PROJECTED_VOLUMES
+                || copy_volume == COPY_VOLUME_CONFIGMAP_VOLUMES
+                || copy_volume == COPY_VOLUME_SECRET_VOLUMES
+                || copy_volume == COPY_VOLUME_DOWNWARD_API_VOLUMES
+                || copy_volume == COPY_VOLUME_OTHER_DIRECTORIES;
+            if !valid {
+                return Err(std::io::Error::other(format!(
+                    "Invalid copy_volumes entry `{copy_volume}` in configuration file",
+                )));
+            }
         }
 
         Ok(())
@@ -431,6 +467,27 @@ emptydir_mode = "block-plain"
         let config: TomlConfig = TomlConfig::load(content).unwrap();
         config.validate().unwrap();
         assert_eq!(&config.runtime.emptydir_mode, "shared-fs");
+    }
+
+    #[test]
+    fn test_valid_copy_volumes() {
+        let content = r#"
+[runtime]
+copy_volumes = ["network-files", "projected-volumes", "other-directories"]
+"#;
+        let config: TomlConfig = TomlConfig::load(content).unwrap();
+        config.validate().unwrap();
+        assert_eq!(config.runtime.copy_volumes.len(), 3);
+    }
+
+    #[test]
+    fn test_invalid_copy_volumes() {
+        let content = r#"
+[runtime]
+copy_volumes = ["network-files", "invalid-kind"]
+"#;
+        let config: TomlConfig = TomlConfig::load(content).unwrap();
+        config.validate().unwrap_err();
     }
 
     #[test]

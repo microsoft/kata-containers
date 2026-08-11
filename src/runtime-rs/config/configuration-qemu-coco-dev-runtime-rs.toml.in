@@ -727,6 +727,8 @@ enable_pprof = false
 # (default: /run/kata-containers/dans)
 dan_conf = "@DEFDANCONF@"
 
+copy_volumes = ["network-files", "other-files", "projected-volumes", "configmap-volumes", "secret-volumes", "downward-api-volumes", "other-directories"]
+
 [[hypervisor.qemu.guest_extension_images]]
 name = "coco"
 path = "@COCOIMAGEPATH@"
