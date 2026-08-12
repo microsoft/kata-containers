@@ -178,6 +178,7 @@ build_component() {
   USE_CACHE="${cache}" \
   AGENT_POLICY="${E2E_AGENT_POLICY}" \
   STRICT_POLICY="${E2E_STRICT_POLICY}" \
+  ALLOW_UNATTESTED_INITDATA="${E2E_ALLOW_UNATTESTED_INITDATA}" \
   INIT_DATA="${E2E_INIT_DATA}" \
   DEBUG=1 \
     "${LB}/kata-deploy-binaries.sh" --build="${comp}" || die "build ${comp} failed"
@@ -225,6 +226,24 @@ if [[ "${E2E_STRICT_POLICY}" = "yes" ]]; then
 else
   [[ "${srm}" -le 100 ]] \
     || die "E2E_STRICT_POLICY=${E2E_STRICT_POLICY} but the agent carries ${srm} SRM symbols — the knob did not reach the build"
+fi
+
+# The escape hatch has no symbol of its own, but the two arms of the F-166 check carry
+# different literals, so the shape is provable either way. Getting this wrong is silent and
+# expensive: an abort-on-unbound agent on a non-TEE host kills every sandbox that carries
+# initdata about three seconds into boot, and the only visible symptom is a vsock connect
+# timeout that reads like a host fault (F-213).
+unattested_warn=$(strings -a "${BIN}" | grep -c 'The SRM trust roots it carries are host-chosen' || true)
+unattested_abort=$(strings -a "${BIN}" | grep -c 'cannot prove it is non-confidential' || true)
+log "binary check: allow_unattested=${E2E_ALLOW_UNATTESTED_INITDATA} warn=${unattested_warn} abort=${unattested_abort}"
+if [[ "${E2E_STRICT_POLICY}" = "yes" ]]; then
+  if [[ "${E2E_ALLOW_UNATTESTED_INITDATA}" = "yes" ]]; then
+    [[ "${unattested_warn}" -gt 0 && "${unattested_abort}" -eq 0 ]] \
+      || die "E2E_ALLOW_UNATTESTED_INITDATA=yes but the agent still aborts on unbound initdata — the knob did not reach the build"
+  else
+    [[ "${unattested_abort}" -gt 0 && "${unattested_warn}" -eq 0 ]] \
+      || die "E2E_ALLOW_UNATTESTED_INITDATA=no but the agent tolerates unbound initdata — this build must never ship"
+  fi
 fi
 
 # Fingerprint the verified binary so the image build can be held to it below.

@@ -120,6 +120,16 @@ E2E_GUEST_IGVM="${E2E_KATA_PREFIX}/share/kata-containers/${E2E_GUEST_IGVM_NAME:-
 # monitor; without it none of the hardening is in the binary.
 : "${E2E_AGENT_POLICY:=yes}"
 : "${E2E_STRICT_POLICY:=yes}"
+# F-166/R-2: a strict agent aborts the VM when initdata is present but cannot be bound to a
+# launch measurement. On a non-confidential hypervisor there is no report provider at all, so
+# every sandbox that carries initdata dies a few seconds into boot (F-213). Default the
+# build-time escape hatch on for exactly those platforms, and leave it off everywhere else --
+# on real TEE hardware the binding genuinely verifies, and enabling it there would let a host
+# supply unmeasured policy and SRM trust roots.
+case "${E2E_PLATFORM}" in
+  qemu-coco-dev) : "${E2E_ALLOW_UNATTESTED_INITDATA:=yes}" ;;
+  *)             : "${E2E_ALLOW_UNATTESTED_INITDATA:=no}"  ;;
+esac
 : "${E2E_INIT_DATA:=yes}"
 
 # Dev-loop controls. The defaults are the slow, paranoid path: a clean rebuild of

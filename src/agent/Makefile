@@ -49,6 +49,20 @@ ifeq ($(STRICT_POLICY),yes)
     override EXTRA_RUSTFEATURES += strict-policy
 endif
 
+##VAR ALLOW_UNATTESTED_INITDATA=yes|no let a guest with no TEE report provider boot on
+## with initdata that is not bound to a launch measurement, instead of aborting (F-166/R-2).
+## Development builds only: it is what makes a strict agent usable on a non-confidential
+## hypervisor such as qemu-coco-dev, where the upstream kubernetes suite delivers policy
+## through initdata and every sandbox would otherwise abort a few seconds into boot.
+## MUST NOT be enabled in a shipped confidential image -- see the feature comment in
+## Cargo.toml. Only meaningful together with STRICT_POLICY=yes, which is where the
+## abort lives.
+ALLOW_UNATTESTED_INITDATA ?= no
+
+ifeq ($(ALLOW_UNATTESTED_INITDATA),yes)
+    override EXTRA_RUSTFEATURES += allow-unattested-initdata
+endif
+
 ##VAR INIT_DATA=yes|no define if agent enables the init data feature
 INIT_DATA ?= yes
 
