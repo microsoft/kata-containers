@@ -32,6 +32,9 @@ process_yaml_file() {
 	bats_unbuffered_info "Removing policy annotation from ${yaml_file}"
 	yq -i 'del(.metadata.annotations."io.katacontainers.config.agent.policy")' "${yaml_file}" || true
 	yq -i 'del(.spec.template.metadata.annotations."io.katacontainers.config.agent.policy")' "${yaml_file}" || true
+
+	bats_unbuffered_info "Settings runtimeClassName in ${yaml_file}"
+	sed -i 's/runtimeClassName: kata-cc/runtimeClassName: kata/g' "${yaml_file}" || true
 	
 	auto_generate_policy "${pod_config_dir}" "${yaml_file}"
 }
