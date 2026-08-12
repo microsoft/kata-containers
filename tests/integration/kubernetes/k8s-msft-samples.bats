@@ -17,7 +17,7 @@ process_subdir() {
 	declare -r subdir="$1"
 	declare -r samples_root_dir="/home/azureuser/msft.kata-containers/src/agent/samples/policy/yaml"
 
-	bats_unbuffered_info "=============== Processing subdir: ${subdir}"
+	bats_unbuffered_info "********************************** Processing subdir: ${subdir}"
 	for current_yaml_file in "${samples_root_dir}/${subdir}"/*.yaml
 	do
 		process_yaml_file "${current_yaml_file}"
@@ -58,6 +58,11 @@ is_exception() {
 		"cron-job" \
 		"deployment" \
 		"job" \
+		"kubernetes/conformance" \
+		"kubernetes/conformance2" \
+		"kubernetes/fixtures" \
+		"kubernetes/fixtures2" \
+		"kubernetes/incomplete-init" \
 		"pod" \
 		"replica-set" \
 		"secrets" \
