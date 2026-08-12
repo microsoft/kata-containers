@@ -838,7 +838,7 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
     # runtime presenting two mounts for one destination is presenting a shadowed mount.
     mount_destinations_are_distinct(i_oci)
 
-    allow_storages(p_storages, i_storages, bundle_id, sandbox_id, p_oci)
+    allow_storages(p_storages, i_storages, bundle_id, sandbox_id)
 
     print("allow_by_bundle_or_sandbox_id: true")
 }
