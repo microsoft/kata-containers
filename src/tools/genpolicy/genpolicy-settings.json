@@ -429,12 +429,6 @@
         },
         "CloseStdinRequest": false,
         "CopySingleFileRequest": {
-            "allowed_file_types": [
-                "ResolvConf",
-                "EtcHosts",
-                "Hostname",
-                "TerminationLog"
-            ],
             "max_file_size": 1048576
         },
         "InitWatchableVolumeRequest": true,

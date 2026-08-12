@@ -10,9 +10,7 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
 use anyhow::{bail, Error, Result};
-use protocols::agent::{
-    CopyFileRequest, CopySingleFileRequest, PutVolumeFileRequest, SingleFileType,
-};
+use protocols::agent::{CopyFileRequest, CopySingleFileRequest, PutVolumeFileRequest};
 use regorus::PolicyLengthConfig;
 use slog::{debug, error, info, warn};
 use tokio::io::AsyncWriteExt;
@@ -1363,34 +1361,6 @@ impl std::convert::TryFrom<&CopyFileRequest> for PolicyCopyFileRequest {
     }
 }
 
-/// SingleFileKind is the Rego-facing spelling of the `SingleFileType` protobuf enum.
-///
-/// The generated protobuf type serializes as a bare integer, which would force policy
-/// authors to write magic numbers. Decoding it here keeps `rules.rego` and the genpolicy
-/// settings readable, and it collapses every unrecognized wire value onto `Unknown` so a
-/// future enum variant cannot silently match an allow-list entry.
-#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
-pub enum SingleFileKind {
-    #[default]
-    Unknown,
-    ResolvConf,
-    EtcHosts,
-    Hostname,
-    TerminationLog,
-}
-
-impl From<SingleFileType> for SingleFileKind {
-    fn from(raw: SingleFileType) -> Self {
-        match raw {
-            SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => Self::ResolvConf,
-            SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => Self::EtcHosts,
-            SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => Self::Hostname,
-            SingleFileType::SINGLE_FILE_TYPE_TERMINATION_LOG => Self::TerminationLog,
-            SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED => Self::Unknown,
-        }
-    }
-}
-
 /// Decode the symlink target carried in a request's `data` field.
 ///
 /// `do_copy_file` interprets `data` as the link target whenever `file_mode` has `S_IFLNK`
@@ -1407,25 +1377,19 @@ fn symlink_target_of(file_type: &FileType, data: &[u8]) -> Result<Option<String>
 
 /// PolicyCopySingleFileRequest is a pre-processed variant of the CopySingleFileRequest.
 ///
-/// It exists for the same two reasons as `PolicyCopyFileRequest`:
+/// `data` is the entire file payload. Serializing it into the policy input would cost a
+/// JSON array element per byte on every request and give the host a cheap way to load the
+/// rules engine, so it is deliberately omitted.
 ///
-///  1. The S_IFMT bits of `file_mode` decide whether `do_copy_file` writes a regular file
-///     or creates a *symlink* whose target is `data`. The destination of a
-///     `CopySingleFileRequest` is bind-mounted straight into the container as
-///     `/etc/resolv.conf`, `/etc/hosts`, `/etc/hostname` or the termination log, so an
-///     unconstrained `file_mode` lets the host point one of those at any path it likes.
-///     Rego cannot do bit arithmetic on the raw mode conveniently, so the type and the
-///     link target are decoded here.
-///  2. `data` is the entire file payload. Serializing it into the policy input costs a
-///     JSON array element per byte on every request and gives the host a cheap way to
-///     load the rules engine, so it is deliberately omitted.
+/// The S_IFMT bits of `file_mode` are not decoded here: `copy_single_file` refuses any
+/// request whose mode is not `S_IFREG` before policy ever sees it, so there is no
+/// non-regular file for a rule to distinguish. The permission bits *are* still forwarded,
+/// because that guard does not look at them and `do_copy_file` preserves `file_mode &
+/// 0o7777` -- setuid, setgid and the sticky bit included.
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct PolicyCopySingleFileRequest {
     pub sandbox_id: String,
-    pub single_file_type: SingleFileKind,
-    pub file_type: FileType,
-    pub symlink_target: Option<String>,
 
     pub uid: i32,
     pub gid: i32,
@@ -1433,42 +1397,26 @@ pub struct PolicyCopySingleFileRequest {
     pub file_mode: u32,
 }
 
-impl std::convert::TryFrom<&CopySingleFileRequest> for PolicyCopySingleFileRequest {
-    type Error = Error;
-
-    fn try_from(req: &CopySingleFileRequest) -> Result<Self> {
-        let file_type: FileType = req.file_mode.into();
-        let symlink_target = symlink_target_of(&file_type, &req.data)?;
-
-        Ok(PolicyCopySingleFileRequest {
+impl From<&CopySingleFileRequest> for PolicyCopySingleFileRequest {
+    fn from(req: &CopySingleFileRequest) -> Self {
+        PolicyCopySingleFileRequest {
             sandbox_id: req.sandbox_id.clone(),
-            // enum_value_or_default maps an unrecognized wire value onto UNSPECIFIED,
-            // which becomes SingleFileKind::Unknown -- a value no allow-list contains.
-            single_file_type: req.file_type.enum_value_or_default().into(),
-            file_type,
-            symlink_target,
             uid: req.uid,
             gid: req.gid,
             data_size: req.data_size,
             file_mode: req.file_mode,
-        })
+        }
     }
 }
 
 /// PolicyPutVolumeFileRequest is a pre-processed variant of the PutVolumeFileRequest,
 /// for the reasons documented on `PolicyCopySingleFileRequest`.
-///
-/// The watchable-volume tree backs projected ConfigMap, Secret and downward-API volumes,
-/// which are bind-mounted into the container, so the same symlink concern applies to
-/// `file_name` as it does to the single-file destinations.
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct PolicyPutVolumeFileRequest {
     pub agent_volume_id: String,
     pub file_name: String,
     pub revision: String,
-    pub file_type: FileType,
-    pub symlink_target: Option<String>,
 
     pub file_size: i64,
     pub file_mode: u32,
@@ -1478,26 +1426,19 @@ pub struct PolicyPutVolumeFileRequest {
     pub offset: i64,
 }
 
-impl std::convert::TryFrom<&PutVolumeFileRequest> for PolicyPutVolumeFileRequest {
-    type Error = Error;
-
-    fn try_from(req: &PutVolumeFileRequest) -> Result<Self> {
-        let file_type: FileType = req.file_mode.into();
-        let symlink_target = symlink_target_of(&file_type, &req.data)?;
-
-        Ok(PolicyPutVolumeFileRequest {
+impl From<&PutVolumeFileRequest> for PolicyPutVolumeFileRequest {
+    fn from(req: &PutVolumeFileRequest) -> Self {
+        PolicyPutVolumeFileRequest {
             agent_volume_id: req.agent_volume_id.clone(),
             file_name: req.file_name.clone(),
             revision: req.revision.clone(),
-            file_type,
-            symlink_target,
             file_size: req.file_size,
             file_mode: req.file_mode,
             dir_mode: req.dir_mode,
             uid: req.uid,
             gid: req.gid,
             offset: req.offset,
-        })
+        }
     }
 }
 
@@ -4272,81 +4213,56 @@ containers := [{"name": "wrong-issuer"}]
         }
     }
 
-    /// The policy sees a symlink request as a symlink, with its target, rather than as an
-    /// opaque mode word plus a byte array. Without this the rego rule cannot tell a
-    /// resolv.conf *write* apart from a resolv.conf *redirect*.
+    /// The payload is dropped on both content-channel translations: neither policy input
+    /// has a `data` field for the host to inflate. The permission bits survive, because
+    /// the S_IFREG guard in the agent does not look at them and `do_copy_file` preserves
+    /// `file_mode & 0o7777`.
     #[test]
-    fn copy_single_file_translation_exposes_the_symlink() {
-        let req = protocols::agent::CopySingleFileRequest {
+    fn content_channel_translations_drop_the_payload() {
+        let single = protocols::agent::CopySingleFileRequest {
             sandbox_id: "sbx".to_owned(),
-            file_type: protobuf::EnumOrUnknown::new(SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF),
-            file_mode: libc::S_IFLNK as u32 | 0o777,
-            data: b"/etc/shadow".to_vec(),
-            data_size: 11,
+            file_type: protobuf::EnumOrUnknown::new(
+                protocols::agent::SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF,
+            ),
+            file_mode: libc::S_IFREG as u32 | 0o4644,
+            data: b"nameserver 1.1.1.1\n".to_vec(),
+            data_size: 19,
             ..Default::default()
         };
 
-        let out: PolicyCopySingleFileRequest = (&req).try_into().unwrap();
+        let out = PolicyCopySingleFileRequest::from(&single);
 
-        assert_eq!(out.single_file_type, SingleFileKind::ResolvConf);
-        assert_eq!(out.file_type, FileType::Symlink);
-        assert_eq!(out.symlink_target.as_deref(), Some("/etc/shadow"));
-    }
-
-    /// An unrecognized SingleFileType from the wire must not land on a real variant: it
-    /// becomes Unknown, which no `allowed_file_types` list contains.
-    #[test]
-    fn copy_single_file_translation_folds_unknown_types() {
-        let req = protocols::agent::CopySingleFileRequest {
-            file_type: protobuf::EnumOrUnknown::from_i32(9999),
-            file_mode: libc::S_IFREG as u32 | 0o644,
-            ..Default::default()
-        };
-
-        let out: PolicyCopySingleFileRequest = (&req).try_into().unwrap();
-
-        assert_eq!(out.single_file_type, SingleFileKind::Unknown);
-        assert_eq!(out.file_type, FileType::Regular);
-        assert_eq!(out.symlink_target, None);
-    }
-
-    /// The same decoding for the watchable-volume channel, and the payload is dropped:
-    /// PolicyPutVolumeFileRequest has no `data` field for the host to inflate.
-    #[test]
-    fn put_volume_file_translation_exposes_the_symlink() {
-        let req = protocols::agent::PutVolumeFileRequest {
-            agent_volume_id: "watchable-1".to_owned(),
-            file_name: "config.json".to_owned(),
-            revision: "..2026_02_11".to_owned(),
-            file_mode: libc::S_IFLNK as u32 | 0o777,
-            data: b"/proc/self/environ".to_vec(),
-            file_size: 18,
-            ..Default::default()
-        };
-
-        let out: PolicyPutVolumeFileRequest = (&req).try_into().unwrap();
-
-        assert_eq!(out.file_type, FileType::Symlink);
-        assert_eq!(out.symlink_target.as_deref(), Some("/proc/self/environ"));
+        assert_eq!(out.sandbox_id, "sbx");
+        assert_eq!(out.file_mode, libc::S_IFREG as u32 | 0o4644);
+        assert_eq!(out.data_size, 19);
         assert_eq!(
             serde_json::to_value(&out).unwrap().get("data"),
             None,
             "the file payload must not reach the rules engine"
         );
-    }
 
-    /// A symlink target that is not valid UTF-8 cannot be shown to Rego, so the request is
-    /// refused rather than evaluated against a lossy rendering of the target.
-    #[test]
-    fn a_non_utf8_symlink_target_is_refused() {
-        let req = protocols::agent::CopySingleFileRequest {
-            file_type: protobuf::EnumOrUnknown::new(SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS),
-            file_mode: libc::S_IFLNK as u32,
-            data: vec![0x00, 0xFF, 0xFF, 0x00],
+        let volume = protocols::agent::PutVolumeFileRequest {
+            agent_volume_id: "watchable-1".to_owned(),
+            file_name: "config.json".to_owned(),
+            revision: "..2026_02_11".to_owned(),
+            file_mode: libc::S_IFREG as u32 | 0o2600,
+            dir_mode: 0o750,
+            data: b"{}".to_vec(),
+            file_size: 2,
             ..Default::default()
         };
 
-        let out: Result<PolicyCopySingleFileRequest> = (&req).try_into();
-        assert!(out.is_err(), "unexpected success: {:?}", out);
+        let out = PolicyPutVolumeFileRequest::from(&volume);
+
+        assert_eq!(out.agent_volume_id, "watchable-1");
+        assert_eq!(out.file_name, "config.json");
+        assert_eq!(out.revision, "..2026_02_11");
+        assert_eq!(out.file_mode, libc::S_IFREG as u32 | 0o2600);
+        assert_eq!(out.dir_mode, 0o750);
+        assert_eq!(
+            serde_json::to_value(&out).unwrap().get("data"),
+            None,
+            "the file payload must not reach the rules engine"
+        );
     }
 }

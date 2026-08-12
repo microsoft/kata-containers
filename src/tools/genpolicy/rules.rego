@@ -2403,11 +2403,13 @@ AddARPNeighborsRequest if {
 # are still host-controlled.
 #
 # For the two endpoints that carry file content the agent evaluates a pre-processed input
-# (PolicyCopySingleFileRequest / PolicyPutVolumeFileRequest, in src/agent/policy): the
-# `data` blob is stripped so the host cannot load the rules engine with the payload, and
-# the S_IFMT bits of `file_mode` are decoded into `file_type` plus, for symlinks,
-# `symlink_target`. Rego therefore compares `input.file_type` against "Regular",
-# "Directory", "Symlink" or "Unknown" rather than doing bit arithmetic on the raw mode.
+# (PolicyCopySingleFileRequest / PolicyPutVolumeFileRequest, in src/agent/policy) whose
+# `data` blob is stripped, so the host cannot load the rules engine with the payload.
+#
+# The S_IFMT bits are not mediated here. The agent refuses any request on these two
+# endpoints whose `file_mode` is not S_IFREG, before policy is consulted, so a rule could
+# only restate that. The *permission* bits are a different matter: that guard ignores
+# them, and do_copy_file preserves file_mode & 0o7777.
 # ---------------------------------------------------------------------------
 
 # Host-supplied content must not carry setuid, setgid or the sticky bit: do_copy_file
@@ -2430,19 +2432,12 @@ CopySingleFileRequest if {
     p_defaults := policy_data.request_defaults.CopySingleFileRequest
     print("CopySingleFileRequest: input =", input, "policy =", p_defaults)
 
-    # Which of the guest's files the host is allowed to supply. Every one of these is
-    # bind-mounted into the container, so this is the security-relevant field: dropping
-    # "TerminationLog" here, for instance, denies a workload that never declares a
-    # terminationMessagePath. "Unknown" is never in the list, so an unrecognized wire
-    # value cannot match.
-    input.single_file_type in p_defaults.allowed_file_types
+    # Which of the guest's files the host may supply is not mediated here. The host names
+    # a file *kind* from a closed enum rather than a path, and the guest derives the
+    # destination from it, so every reachable destination is one the guest chose. Should a
+    # policy ever need to narrow that set -- to deny TerminationLog for a workload with no
+    # terminationMessagePath, say -- the enum is the field to add.
 
-    # The destination is a leaf that gets bind-mounted directly, so a symlink would
-    # redirect the container's /etc/resolv.conf (or /etc/hosts, /etc/hostname, the
-    # termination log) at a host-chosen path. The CopyFileRequest rule this replaced
-    # refused symlinks on the top level of the shared directory for exactly this reason,
-    # and these destinations are always on that top level.
-    input.file_type == "Regular"
     allow_content_mode(input.file_mode)
 
     # sandbox_id is a host-supplied path component.
@@ -2470,12 +2465,6 @@ PutVolumeFileRequest if {
     allow_content_path_component(input.revision)
     allow_content_path_component(input.file_name)
 
-    # The watchable-volume tree backs projected ConfigMap, Secret and downward-API volumes
-    # and is bind-mounted into the container. put_volume_file creates the one symlink this
-    # layout needs itself (<root>/<file_name> -> data/<file_name>); a host-requested
-    # symlink would be an extra one, inside the revision directory, pointing wherever the
-    # host chose.
-    input.file_type == "Regular"
     allow_content_mode(input.file_mode)
     allow_content_mode(input.dir_mode)
 

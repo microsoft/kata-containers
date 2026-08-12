@@ -429,11 +429,6 @@
         },
         "CloseStdinRequest": false,
         "CopySingleFileRequest": {
-            "allowed_file_types": [
-                "ResolvConf",
-                "EtcHosts",
-                "Hostname"
-            ],
             "max_file_size": 4096
         },
         "InitWatchableVolumeRequest": true,
