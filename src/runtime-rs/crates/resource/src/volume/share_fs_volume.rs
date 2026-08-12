@@ -503,22 +503,29 @@ impl ShareFsVolume {
         destination: &Path,
         sid: &str,
         agent: &Arc<dyn Agent>,
+        copy_data: bool,
     ) -> Result<String> {
         info!(sl!(), "ShareFsVolume: single file: src = {:?}", src);
 
         let file_metadata = regular_file_metadata(src)?;
 
-        let mut file = File::open(src).with_context(|| format!("Failed to open file: {src:?}"))?;
         let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)
-            .with_context(|| format!("Failed to read file: {src:?}"))?;
+        if copy_data {
+            let mut file = File::open(src).with_context(|| format!("Failed to open file: {src:?}"))?;
+            file.read_to_end(&mut buffer)
+                .with_context(|| format!("Failed to read file: {src:?}"))?;
+        }
 
         let req = CopySingleFileRequest {
             sandbox_id: sid.to_string(),
             file_type: single_file_type_from_mount(src, destination)?,
             uid: file_metadata.uid() as i32,
             gid: file_metadata.gid() as i32,
-            data_size: file_metadata.len() as i64,
+            data_size: if copy_data {
+                file_metadata.len() as i64
+            } else {
+                0
+            },
             data: buffer,
             file_mode: file_metadata.mode(),
         };
@@ -571,7 +578,14 @@ impl ShareFsVolume {
                     Ok(src) => src,
                 };
 
-                if !should_copy_volume(&src, m.destination(), copy_volume_types) {
+                let copy_empty_other_file = should_copy_empty_other_file(
+                    &src,
+                    m.destination(),
+                    copy_volume_types,
+                );
+                if !should_copy_volume(&src, m.destination(), copy_volume_types)
+                    && !copy_empty_other_file
+                {
                     info!(
                         sl!(),
                         "skipping host->guest copy for {:?} because it is disabled by copy_volumes",
@@ -588,12 +602,13 @@ impl ShareFsVolume {
 
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
-                    if is_single_file_mount(&src, m.destination()) {
+                    if is_single_file_mount(&src, m.destination()) || copy_empty_other_file {
                         let agent_file_id = Self::copy_single_file_to_guest(
                             Path::new(&source_path),
                             m.destination(),
                             sid,
                             &agent,
+                            !copy_empty_other_file,
                         )
                         .await
                         .context("copy network file to guest")?;
@@ -962,6 +977,20 @@ fn is_single_file_mount(src: &Path, destination: &Path) -> bool {
         .unwrap_or(false);
 
     is_network_file || destination == Path::new(TERMINATION_LOG_DESTINATION)
+}
+
+fn should_copy_empty_other_file(
+    src: &Path,
+    destination: &Path,
+    copy_volume_types: Option<&HashSet<String>>,
+) -> bool {
+    if !src.is_file() || classify_copy_volume(src, destination) != COPY_VOLUME_OTHER_FILES {
+        return false;
+    }
+
+    copy_volume_types.is_some_and(|enabled_types| {
+        !enabled_types.contains(COPY_VOLUME_OTHER_FILES)
+    })
 }
 
 fn classify_copy_volume(src: &Path, destination: &Path) -> &'static str {
@@ -1537,6 +1566,29 @@ mod test {
         let destination = PathBuf::from("/tmp/termination-log");
 
         assert!(!is_single_file_mount(&source, &destination));
+    }
+
+    #[test]
+    fn test_disabled_other_file_uses_empty_single_file_path() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("other-file");
+        std::fs::write(&source, b"content").unwrap();
+        let destination = Path::new("/tmp/other-file");
+
+        assert!(should_copy_empty_other_file(
+            &source,
+            destination,
+            Some(&HashSet::new())
+        ));
+        assert!(!should_copy_empty_other_file(&source, destination, None));
+
+        let mut enabled = HashSet::new();
+        enabled.insert(COPY_VOLUME_OTHER_FILES.to_string());
+        assert!(!should_copy_empty_other_file(
+            &source,
+            destination,
+            Some(&enabled)
+        ));
     }
 
     #[test]
