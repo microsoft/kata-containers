@@ -397,9 +397,17 @@ if [[ -e "${SHIM_DST}" ]]; then
   # it costs one sed and one relink, and is what makes the assertion mean
   # anything at all.
   rm -f src/runtime-rs/crates/shim/src/config.rs
+  # Deleting config.rs restamps the source but does NOT force a relink: the
+  # Makefile builds from `$(TARGET_PATH): $(SOURCES)`, and $(GENERATED_FILES) is
+  # not among those prerequisites. So when no tracked source changed, cargo has
+  # nothing to do and the installed binary keeps whatever commit it was stamped
+  # with, potentially many branches ago. Removing the output too closes that
+  # gap: make must then remake $(TARGET_PATH) whatever the timestamps say, and
+  # the stamp always describes the tree it was actually built from.
+  SHIM_SRC="${E2E_REPO_DIR}/target/x86_64-unknown-linux-musl/release/containerd-shim-kata-v2"
+  rm -f "${SHIM_SRC}"
   ( cd src/runtime-rs && make ) || die "could not build the runtime-rs shim"
 
-  SHIM_SRC="${E2E_REPO_DIR}/target/x86_64-unknown-linux-musl/release/containerd-shim-kata-v2"
   [[ -x "${SHIM_SRC}" ]] || die "runtime-rs build produced no shim at ${SHIM_SRC}"
 
   sudo cp "${SHIM_DST}" "${SHIM_DST}.bak.$(date +%s)"
@@ -408,16 +416,35 @@ if [[ -e "${SHIM_DST}" ]]; then
   # HEAD: cargo rightly does not relink for a commit that touched only docs, so
   # the binary would be stale-but-correct and the stage would fail for no reason.
   # What matters is that nothing the shim is built *from* has changed since.
+  #
+  # Compare content, not ancestry. Requiring the reported commit to be an
+  # ancestor of HEAD looks equivalent but fails the moment a PR lands by
+  # rebase-merge: the merged commits get new SHAs, so a shim built from the
+  # pre-merge branch reports a commit that is no longer in any history even
+  # though its inputs are identical to HEAD's. That produced a stage-04 failure
+  # ("reports commit X, which is not in this branch's history") for a shim that
+  # was in fact correct. A tree comparison answers the question the check is
+  # actually asking, and stays strictly stronger: it fails for a genuinely stale
+  # shim whether or not the commit is reachable.
+  #
+  # Note the stamp can lag legitimately. src/runtime-rs/Makefile builds the
+  # binary from `$(TARGET_PATH): $(SOURCES)`, which does not list
+  # $(GENERATED_FILES) -- so regenerating config.rs (where @COMMIT@ is
+  # substituted) does not by itself make cargo relink. Deleting config.rs above
+  # therefore restamps the source but cannot force a rebuild when no source
+  # changed, which is exactly when the stamp is allowed to lag.
   SHIM_INPUTS=(src/runtime-rs src/libs src/dragonball Cargo.toml Cargo.lock)
   got=$("${SHIM_DST}" --version 2>&1 | sed -n 's/.*commit: *\([0-9a-f]\{7,\}\).*/\1/p')
   [[ -n "${got}" ]] || die "installed shim does not report a commit — is it the runtime-rs shim?"
-  git merge-base --is-ancestor "${got}" HEAD 2>/dev/null \
-    || die "installed shim reports commit ${got}, which is not in this branch's history"
-  stale=$(git log --oneline "${got}..HEAD" -- "${SHIM_INPUTS[@]}")
-  [[ -z "${stale}" ]] || {
-    printf '%s\n' "${stale}" | sed 's/^/    /'
-    die "shim was built at ${got:0:12} but the above commits changed ${SHIM_INPUTS[*]} since — the build did not pick them up"
-  }
+  # The stamp carries a "-dirty" suffix when the tree had uncommitted changes;
+  # strip it before asking git about the object.
+  got="${got%%-dirty}"
+  git cat-file -e "${got}^{commit}" 2>/dev/null \
+    || die "installed shim reports commit ${got}, which this repository does not have — fetch it, or rebuild the shim"
+  if ! git diff --quiet "${got}" HEAD -- "${SHIM_INPUTS[@]}"; then
+    git diff --stat "${got}" HEAD -- "${SHIM_INPUTS[@]}" | sed 's/^/    /'
+    die "shim was built at ${got:0:12} but the above ${SHIM_INPUTS[*]} inputs differ from HEAD — the build did not pick them up"
+  fi
   ok "runtime-rs shim installed and current (built at ${got:0:12})"
   # containerd caches nothing about the shim binary, but any shim already
   # running for a live sandbox is the old one; stage 07 creates fresh pods.
