@@ -351,13 +351,12 @@ auto_generate_policy_no_added_flags() {
 	#return 1
 
 	genpolicy_command+=' 2>&1'
-
 	bats_unbuffered_info "Executing: ${genpolicy_command}"
 	if ! cmd_out=$(eval "${genpolicy_command}"); then
-		bats_unbuffered_info "command failed: ${cmd_out}"
+		bats_unbuffered_info "command failed:\n${cmd_out}"
 		return 1
 	fi
-	bats_unbuffered_info "command output: ${cmd_out}"
+	bats_unbuffered_info "command output:\n${cmd_out}"
 	return 0
 }
 
