@@ -342,13 +342,23 @@ auto_generate_policy_no_added_flags() {
 
 	# Retry if genpolicy fails, because typical failures of this tool are caused by
 	# transient network errors.
-	for _ in {1..6}; do
-		info "Executing: ${genpolicy_command}"
-		eval "${genpolicy_command}" && return 0
-		info "Sleeping after command failed..."
-		sleep 10s
-	done
-	return 1
+	#for _ in {1..6}; do
+		#bats_unbuffered_info "Executing: ${genpolicy_command}"
+		#eval "${genpolicy_command}" && return 0
+		#info "Sleeping after command failed..."
+		#sleep 10s
+	#done
+	#return 1
+
+	genpolicy_command+=' 2>&1'
+
+	bats_unbuffered_info "Executing: ${genpolicy_command}"
+	if ! cmd_out=$(eval "${genpolicy_command}"); then
+		bats_unbuffered_info "command failed: ${cmd_out}"
+		return 1
+	fi
+	bats_unbuffered_info "command output: ${cmd_out}"
+	return 0
 }
 
 # 99-test-overrides.json is an RFC 6902 JSON Patch (array of ops). We append to it.
