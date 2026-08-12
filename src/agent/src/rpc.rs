@@ -2574,12 +2574,11 @@ impl agent_ttrpc::AgentService for AgentService {
         // the pre-processed view instead: it drops `data` and decodes the S_IFMT bits, so a
         // rule can tell a regular-file write apart from a symlink creation and can see where
         // that symlink would point. See PolicyCopySingleFileRequest.
+        // The payload is stripped before policy evaluation; the S_IFREG guard below is
+        // policy-independent.
         #[cfg(feature = "agent-policy")]
         {
-            let req_for_policy: PolicyCopySingleFileRequest = (&req)
-                .try_into()
-                .context("parsing CopySingleFileRequest for policy")
-                .map_ttrpc_err(same)?;
+            let req_for_policy = PolicyCopySingleFileRequest::from(&req);
             is_allowed_with_entrypoint(req.descriptor_dyn().name(), &req_for_policy).await?;
         }
         #[cfg(not(feature = "agent-policy"))]
@@ -2684,14 +2683,10 @@ impl agent_ttrpc::AgentService for AgentService {
         req: PutVolumeFileRequest,
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "put_volume_file", req);
-        // See copy_single_file: the policy gets the pre-processed view so it can constrain
-        // symlink creation and is not handed the file payload.
+        // See copy_single_file: the policy gets the request without the file payload.
         #[cfg(feature = "agent-policy")]
         {
-            let req_for_policy: PolicyPutVolumeFileRequest = (&req)
-                .try_into()
-                .context("parsing PutVolumeFileRequest for policy")
-                .map_ttrpc_err(same)?;
+            let req_for_policy = PolicyPutVolumeFileRequest::from(&req);
             is_allowed_with_entrypoint(req.descriptor_dyn().name(), &req_for_policy).await?;
         }
         #[cfg(not(feature = "agent-policy"))]
@@ -4738,7 +4733,7 @@ mod tests {
         let ctx = mk_ttrpc_context();
 
         let mut req = put_volume_file_request(&agent_volume_id, "token", "rev1", b"token");
-        req.file_mode = libc::S_IFLNK as u32;
+        req.file_mode = stat::SFlag::S_IFLNK.bits();
 
         assert!(agent_service.put_volume_file(&ctx, req).await.is_err());
     }
@@ -4799,7 +4794,7 @@ mod tests {
                     gid: unistd::getgid().as_raw() as i32,
                     data_size: data.len() as i64,
                     data,
-                    file_mode: libc::S_IFLNK as u32,
+                    file_mode: stat::SFlag::S_IFLNK.bits(),
                     ..Default::default()
                 },
             )

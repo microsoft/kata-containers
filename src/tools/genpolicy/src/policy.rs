@@ -596,15 +596,6 @@ fn default_signal_process_request() -> SignalProcessRequestDefaults {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CopySingleFileRequestDefaults {
-    /// Which of the guest's well-known files the Host may supply. Valid entries are
-    /// "ResolvConf", "EtcHosts", "Hostname" and "TerminationLog"; anything else never
-    /// matches, because the agent maps unrecognized wire values onto "Unknown".
-    ///
-    /// Each of these files is bind-mounted into the container, so this list is the
-    /// security-relevant setting: it is the only thing that decides which guest file the
-    /// Host is permitted to author.
-    pub allowed_file_types: Vec<String>,
-
     /// Upper bound on the size of a single file supplied by the Host.
     pub max_file_size: i64,
 }
@@ -621,12 +612,6 @@ pub struct PutVolumeFileRequestDefaults {
 
 fn default_copy_single_file_request() -> CopySingleFileRequestDefaults {
     CopySingleFileRequestDefaults {
-        allowed_file_types: vec![
-            "ResolvConf".to_string(),
-            "EtcHosts".to_string(),
-            "Hostname".to_string(),
-            "TerminationLog".to_string(),
-        ],
         max_file_size: 1024 * 1024,
     }
 }

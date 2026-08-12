@@ -66,7 +66,8 @@ path at all.
 Replaces the use of `CopyFile` for the four well-known files the Host has to author for a
 sandbox: `/etc/resolv.conf`, `/etc/hosts`, `/etc/hostname` and the container termination log.
 The Host names *which* of those files it is supplying, as a `SingleFileType`, and the Guest
-derives the path. The Policy decides which kinds the Host may supply:
+derives the path -- so every reachable destination is one the Guest chose. The Policy bounds
+the size:
 
 ```
 policy_data := {
@@ -74,12 +75,6 @@ policy_data := {
     "request_defaults": {
         ...
         "CopySingleFileRequest": {
-            "allowed_file_types": [
-                "ResolvConf",
-                "EtcHosts",
-                "Hostname",
-                "TerminationLog"
-            ],
             "max_file_size": 1048576
         },
         ...
@@ -88,16 +83,12 @@ policy_data := {
 }
 ```
 
-A user can narrow `allowed_file_types` in a custom settings file -- for example, dropping
-`"TerminationLog"` for a workload that never declares a `terminationMessagePath`.
-
-The Agent evaluates a pre-processed form of the request rather than the request itself. The
-file payload is removed, so the Host cannot load the rules engine with it, and the `S_IFMT`
-bits of `file_mode` are decoded into `input.file_type` (`"Regular"`, `"Directory"`,
-`"Symlink"` or `"Unknown"`) plus, for symlinks, `input.symlink_target`. The rule requires
-`"Regular"`: these destinations are bind-mounted into the container, so a symlink would let
-the Host point the container's `/etc/resolv.conf` at a path of its choosing. The rule also
-rejects the `setuid`, `setgid` and sticky bits, and rejects a `sandbox_id` that is empty,
+The Agent evaluates a pre-processed form of the request rather than the request itself: the
+file payload is removed, so the Host cannot load the rules engine with it. The `S_IFMT` bits
+are not mediated by the Policy, because the Agent refuses any request on this endpoint whose
+`file_mode` is not `S_IFREG` before the Policy is consulted. The rule does reject the
+`setuid`, `setgid` and sticky bits -- that guard ignores the permission bits, and
+`do_copy_file` preserves `file_mode & 0o7777` -- and rejects a `sandbox_id` that is empty,
 absolute, or contains `..`.
 
 
@@ -129,9 +120,9 @@ policy_data := {
 ```
 
 `PutVolumeFileRequest` is pre-processed like `CopySingleFileRequest`, and its rule applies the
-same checks: regular files only, no `setuid`/`setgid`/sticky bits on either `file_mode` or
-`dir_mode`, and `agent_volume_id`, `revision` and `file_name` must each be a plain relative
-path component.
+same checks: no `setuid`/`setgid`/sticky bits on either `file_mode` or `dir_mode`, and
+`agent_volume_id`, `revision` and `file_name` must each be a plain relative path component.
+As on the single-file endpoint, the Agent enforces `S_IFREG` itself, ahead of the Policy.
 
 ## `CreateContainerRequest`
 
