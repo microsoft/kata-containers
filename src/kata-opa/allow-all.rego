@@ -46,6 +46,6 @@ default WaitProcessRequest := true
 default WriteStreamRequest := true
 
 default CopySingleFileRequest := true
-default InitWatchableVolumeRequest := true
-default PutVolumeFileRequest := true
+default InitVolumeRequest := true
+default PutVolumeFileRevisionRequest := true
 default CommitVolumeRevisionRequest := true

@@ -74,8 +74,8 @@ service AgentService {
 	rpc SetGuestDateTime(SetGuestDateTimeRequest) returns (google.protobuf.Empty);
 	rpc CopyFile(CopyFileRequest) returns (google.protobuf.Empty);
 	rpc CopySingleFile(CopySingleFileRequest) returns (CopySingleFileResponse);
-	rpc InitWatchableVolume(InitWatchableVolumeRequest) returns (InitWatchableVolumeResponse);
-	rpc PutVolumeFile(PutVolumeFileRequest) returns (google.protobuf.Empty);
+	rpc InitVolume(InitVolumeRequest) returns (InitVolumeResponse);
+	rpc PutVolumeFileRevision(PutVolumeFileRevisionRequest) returns (google.protobuf.Empty);
 	rpc CommitVolumeRevision(CommitVolumeRevisionRequest) returns (google.protobuf.Empty);
 	rpc GetOOMEvent(GetOOMEventRequest) returns (OOMEvent);
 	rpc AddSwap(AddSwapRequest) returns (google.protobuf.Empty);
@@ -622,15 +622,15 @@ message CopySingleFileResponse {
 	string agent_file_id = 1;
 }
 
-message InitWatchableVolumeRequest {
+message InitVolumeRequest {
 	string host_volume_id = 1;
 }
 
-message InitWatchableVolumeResponse {
+message InitVolumeResponse {
 	string agent_volume_id = 1;
 }
 
-message PutVolumeFileRequest {
+message PutVolumeFileRevisionRequest {
 	string agent_volume_id = 1;
 	string file_name = 2;
 	int64 file_size = 3;

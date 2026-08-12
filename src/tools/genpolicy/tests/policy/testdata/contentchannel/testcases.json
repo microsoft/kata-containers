@@ -72,7 +72,7 @@
   {
     "allowed": true,
     "description": "creating a watchable volume",
-    "kind": "InitWatchableVolumeRequest",
+    "kind": "InitVolumeRequest",
     "request": {
       "host_volume_id": "host-volume"
     }
@@ -80,7 +80,7 @@
   {
     "allowed": true,
     "description": "regular file written into a watchable volume revision",
-    "kind": "PutVolumeFileRequest",
+    "kind": "PutVolumeFileRevisionRequest",
     "request": {
       "agent_volume_id": "watchable-1",
       "file_name": "config.json",
@@ -94,7 +94,7 @@
   {
     "allowed": false,
     "description": "file_name traversal out of the revision directory",
-    "kind": "PutVolumeFileRequest",
+    "kind": "PutVolumeFileRevisionRequest",
     "request": {
       "agent_volume_id": "watchable-1",
       "file_name": "../../escape",
@@ -108,7 +108,7 @@
   {
     "allowed": false,
     "description": "revision traversal out of the volume root",
-    "kind": "PutVolumeFileRequest",
+    "kind": "PutVolumeFileRevisionRequest",
     "request": {
       "agent_volume_id": "watchable-1",
       "file_name": "config.json",
@@ -122,7 +122,7 @@
   {
     "allowed": false,
     "description": "agent_volume_id traversal out of the watchable-volumes root",
-    "kind": "PutVolumeFileRequest",
+    "kind": "PutVolumeFileRevisionRequest",
     "request": {
       "agent_volume_id": "../../..",
       "file_name": "config.json",
@@ -136,7 +136,7 @@
   {
     "allowed": false,
     "description": "setgid bit on a projected file",
-    "kind": "PutVolumeFileRequest",
+    "kind": "PutVolumeFileRevisionRequest",
     "request": {
       "agent_volume_id": "watchable-1",
       "file_name": "config.json",
@@ -150,7 +150,7 @@
   {
     "allowed": false,
     "description": "setuid bit on the directories created for the revision",
-    "kind": "PutVolumeFileRequest",
+    "kind": "PutVolumeFileRevisionRequest",
     "request": {
       "agent_volume_id": "watchable-1",
       "file_name": "config.json",
@@ -164,7 +164,7 @@
   {
     "allowed": false,
     "description": "projected file larger than the configured ceiling",
-    "kind": "PutVolumeFileRequest",
+    "kind": "PutVolumeFileRevisionRequest",
     "request": {
       "agent_volume_id": "watchable-1",
       "file_name": "config.json",
@@ -178,7 +178,7 @@
   {
     "allowed": false,
     "description": "negative offset",
-    "kind": "PutVolumeFileRequest",
+    "kind": "PutVolumeFileRevisionRequest",
     "request": {
       "agent_volume_id": "watchable-1",
       "file_name": "config.json",
