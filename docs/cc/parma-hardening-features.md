@@ -11,9 +11,17 @@ deny, treat host-supplied identifiers as untrusted aliases, bind every operation
 mutates enforcer state to a transactional state machine, verify that the object actually
 executed matches the object that was authorized, and freeze or refuse surfaces that would
 otherwise let the host mutate a running workload. The features below implement those
-properties as a
-"strict" build of the guest agent (`STRICT_POLICY=yes`), deployed via the `kata-parma`
-runtime profile.
+properties as a "strict" build of the guest agent (`STRICT_POLICY=yes`).
+
+Strict mode is a **build-time** choice, not a deployment-time one: the flag selects
+`--features strict-policy` for the agent binary, which lives in the dm-verity rootfs whose
+root hash is on the guest kernel command line. Enabling it therefore yields a **different
+launch measurement** — by design, since a verifier must be able to tell a hardened guest
+from a permissive one. There is consequently no dedicated RuntimeClass that means "strict";
+a strict guest is deployed under whichever handler the platform already uses
+(`kata-qemu-coco-dev-runtime-rs` on the QEMU path, `kata-cc` on SEV-SNP/CLH), pointed at a
+config whose image and kernel are the strict ones. To confirm a deployment is hardened,
+check the installed artifact and its measurement — not the RuntimeClass name.
 
 This document maps each feature to the requirement it satisfies, the commits that
 implement it, the security guarantee it introduces, and how it was validated.
@@ -41,7 +49,7 @@ implement it, the security guarantee it introduces, and how it was validated.
 - **No new host↔guest protocol** except FR-1 (`LoadPolicyFragment`), which is additive and
   backward-compatible.
 - **Validation vocabulary:** *unit* = crate unit/integration tests; *matrix* = the live
-  `policy-matrix.sh` on strict `kata-parma` pods (expected 5/5); *live attack* = a
+  `policy-matrix.sh` on pods backed by a strict agent build (expected 5/5); *live attack* = a
   `kata-agent-ctl` ttRPC client impersonating the shim against a running guest.
 
 ---
@@ -877,7 +885,7 @@ external ledger are flagged and tracked in `docs/cc/backlog.md`.
   binding, verified-layer allowlist, network-phase machine, and lifecycle
   fault-injection/fuzz tests, all green (109 SRM unit tests + 4 fault-injection).
 - **Formal:** TLC model-checks the lifecycle safety properties with no error.
-- **Live matrix:** the strict `kata-parma` profile passes the policy-enforcement matrix
+- **Live matrix:** the strict agent build passes the policy-enforcement matrix
   with no regression, and the FR-9/FR-10/FR-14 live ttRPC attacks are denied.
 - **Mediation CI:** build-time tests keep the complete-mediation manifest in sync with the
   agent protocol.

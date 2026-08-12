@@ -996,7 +996,7 @@ COSE, ordering, Stage-2 inclusion/consistency), `did_x509::tests::*`
 non-CA-intermediate + **ES384 and RSA-RS256 end-to-end**), `cose_keys::tests::*` (alg mapping,
 cross-alg rejection), `merkle::tests::*` (inclusion + consistency across sizes).
 
-**Live E2E** (strict `kata-parma`, over vsock) — `fr1-fragment-attack.sh` (deny→load→allow),
+**Live E2E** (strict agent build, over vsock) — `fr1-fragment-attack.sh` (deny→load→allow),
 `fr1-cose-attack.sh` (COSE), `fr1-x509-attack.sh` (did:x509 valid/untrusted/revoked/rotated),
 `fr1-ordering-attack.sh` (out-of-order rejected), `fr1-ttl-attack.sh` (inclusion+consistency
 accepted, rewound-log + missing-proof rejected). Aggregated as `negative-matrix.sh` stages.

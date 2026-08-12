@@ -179,13 +179,15 @@ The last two matter as much as the first: `STRICT_POLICY=yes` now implies `USE_D
 so the combination without it refuses every confidential pod). If the stub string is present,
 the flag did not reach the agent build and the whole verification chain is dead code.
 
-Install onto the node and register a strict RuntimeClass (**environment-specific** — adapt
-paths/handler to your Kata install):
+Install onto the node and point a RuntimeClass at the strict config (**environment-specific**
+— adapt paths/handler to your Kata install). Note that strict mode is selected by the build
+above, not by the RuntimeClass: reuse your platform's existing handler
+(`kata-qemu-coco-dev-runtime-rs`, `kata-cc`, …) rather than inventing a "strict" class name.
 
 ```bash
 for c in agent rootfs-image genpolicy; do sudo tar --zstd -xf build/kata-static-$c.tar.zst -C /; done
-# Register a RuntimeClass (e.g. `kata-parma`) whose containerd handler points at your strict
-# Kata config, then deploy pods with runtimeClassName: <that class>.
+# Point a RuntimeClass at the containerd handler for your strict Kata config, then deploy
+# pods with runtimeClassName: <that class>.
 ```
 
 > Some environments need extra config (direct-kernel-boot firmware, enabling the `policy`

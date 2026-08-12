@@ -69,7 +69,7 @@ fragment signed by an unauthorized key is **rejected**.
 
 ## Automated proof
 
-An environment-specific runner drives the whole flow on a strict `kata-parma` pod
+An environment-specific runner drives the whole flow on a pod backed by a strict agent build
 (deploy → exec denied → sign+load → exec allowed → wrong-key rejected): see
 `fr1-fragment-attack.sh` in the confidential-runtime test harness. Deterministic
 coverage of the same guarantees (no VM required) is in the unit tests:
