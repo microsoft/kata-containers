@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "aarch64defs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "open_enum",
@@ -15,7 +15,7 @@ dependencies = [
 [[package]]
 name = "aarch64emu"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "inspect",
@@ -26,7 +26,7 @@ dependencies = [
 [[package]]
 name = "acpi"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "acpi_spec",
  "cxl_spec",
@@ -40,7 +40,7 @@ dependencies = [
 [[package]]
 name = "acpi_spec"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "open_enum",
@@ -82,7 +82,7 @@ dependencies = [
 [[package]]
 name = "address_filter"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "thiserror 2.0.19",
@@ -153,7 +153,7 @@ dependencies = [
 [[package]]
 name = "amd_iommu"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "chipset_device",
@@ -262,7 +262,7 @@ dependencies = [
 [[package]]
 name = "arc_cyclic_builder"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 
 [[package]]
 name = "arrayref"
@@ -965,7 +965,7 @@ dependencies = [
 [[package]]
 name = "build_rs_guest_arch"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 
 [[package]]
 name = "bumpalo"
@@ -1038,7 +1038,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 [[package]]
 name = "cache_topology"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "fs-err",
  "thiserror 2.0.19",
@@ -1164,7 +1164,7 @@ dependencies = [
 [[package]]
 name = "chipset"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "bitfield-struct 0.11.0",
@@ -1191,7 +1191,7 @@ dependencies = [
 [[package]]
 name = "chipset_device"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "mesh",
@@ -1202,7 +1202,7 @@ dependencies = [
 [[package]]
 name = "chipset_device_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "chipset_device",
@@ -1216,7 +1216,7 @@ dependencies = [
 [[package]]
 name = "chipset_device_worker"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1239,7 +1239,7 @@ dependencies = [
 [[package]]
 name = "chipset_device_worker_defs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "mesh_worker",
@@ -1249,7 +1249,7 @@ dependencies = [
 [[package]]
 name = "chipset_legacy"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "chipset",
@@ -1277,7 +1277,7 @@ dependencies = [
 [[package]]
 name = "chipset_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "local_clock",
@@ -1343,7 +1343,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 [[package]]
 name = "closeable_mutex"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "parking_lot",
 ]
@@ -1683,7 +1683,7 @@ checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 [[package]]
 name = "crypto"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "cms",
@@ -1755,7 +1755,7 @@ dependencies = [
 [[package]]
 name = "cvm_tracing"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "tracing",
  "tracing-subscriber",
@@ -1764,7 +1764,7 @@ dependencies = [
 [[package]]
 name = "cxl_spec"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "bitfield-struct 0.11.0",
@@ -2058,7 +2058,7 @@ dependencies = [
 [[package]]
 name = "debug_ptr"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 
 [[package]]
 name = "defmt"
@@ -2200,7 +2200,7 @@ dependencies = [
 [[package]]
 name = "device_emulators"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 
 [[package]]
 name = "device_tree"
@@ -2247,7 +2247,7 @@ dependencies = [
 [[package]]
 name = "disk_backend"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "futures",
@@ -2263,7 +2263,7 @@ dependencies = [
 [[package]]
 name = "disk_backend_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -2272,7 +2272,7 @@ dependencies = [
 [[package]]
 name = "disk_blockdevice"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2303,7 +2303,7 @@ dependencies = [
 [[package]]
 name = "disk_delay"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2320,7 +2320,7 @@ dependencies = [
 [[package]]
 name = "disk_file"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "blocking",
  "disk_backend",
@@ -2335,7 +2335,7 @@ dependencies = [
 [[package]]
 name = "disk_layered"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2354,7 +2354,7 @@ dependencies = [
 [[package]]
 name = "disk_prwrap"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "disk_backend",
@@ -2370,7 +2370,7 @@ dependencies = [
 [[package]]
 name = "disk_vhd1"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "disk_backend",
  "disk_backend_resources",
@@ -2387,7 +2387,7 @@ dependencies = [
 [[package]]
 name = "disk_vhdmp"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "disk_backend",
  "disk_file",
@@ -2404,7 +2404,7 @@ dependencies = [
 [[package]]
 name = "disklayer_ram"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "disk_backend",
@@ -2719,7 +2719,7 @@ dependencies = [
 [[package]]
 name = "fast_select"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "parking_lot",
 ]
@@ -2742,7 +2742,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 [[package]]
 name = "fdt"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "thiserror 2.0.19",
  "zerocopy 0.8.55",
@@ -2777,7 +2777,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "firmware_pcat"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "chipset_device",
  "generation_id",
@@ -2800,7 +2800,7 @@ dependencies = [
 [[package]]
 name = "firmware_uefi"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "bitfield-struct 0.11.0",
@@ -2839,7 +2839,7 @@ dependencies = [
 [[package]]
 name = "firmware_uefi_custom_vars"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guid",
  "mesh_protobuf",
@@ -2850,7 +2850,7 @@ dependencies = [
 [[package]]
 name = "firmware_uefi_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "chipset_resources",
  "firmware_uefi_custom_vars",
@@ -2901,7 +2901,7 @@ dependencies = [
 [[package]]
 name = "floppy"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "arrayvec",
  "bitfield-struct 0.11.0",
@@ -2921,7 +2921,7 @@ dependencies = [
 [[package]]
 name = "floppy_pcat_stub"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "arrayvec",
  "bitfield-struct 0.11.0",
@@ -2937,7 +2937,7 @@ dependencies = [
 [[package]]
 name = "floppy_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -3012,7 +3012,7 @@ dependencies = [
 [[package]]
 name = "framebuffer"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3078,7 +3078,7 @@ checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 [[package]]
 name = "fuse"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "libc",
@@ -3248,7 +3248,7 @@ dependencies = [
 [[package]]
 name = "gdma"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3277,7 +3277,7 @@ dependencies = [
 [[package]]
 name = "gdma_defs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "guestmem",
@@ -3289,7 +3289,7 @@ dependencies = [
 [[package]]
 name = "gdma_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "net_backend_resources",
@@ -3299,7 +3299,7 @@ dependencies = [
 [[package]]
 name = "generation_id"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "getrandom 0.4.3",
  "guestmem",
@@ -3360,7 +3360,7 @@ dependencies = [
 [[package]]
 name = "get_protocol"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "guid",
@@ -3374,7 +3374,7 @@ dependencies = [
 [[package]]
 name = "get_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "mesh",
@@ -3469,7 +3469,7 @@ dependencies = [
 [[package]]
 name = "guest_crash_device"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3491,7 +3491,7 @@ dependencies = [
 [[package]]
 name = "guest_emulation_device"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "disk_backend",
@@ -3524,7 +3524,7 @@ dependencies = [
 [[package]]
 name = "guest_emulation_log"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "get_protocol",
@@ -3547,7 +3547,7 @@ dependencies = [
 [[package]]
 name = "guest_watchdog"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "chipset_device",
@@ -3566,7 +3566,7 @@ dependencies = [
 [[package]]
 name = "guestmem"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "pal_event",
@@ -3579,7 +3579,7 @@ dependencies = [
 [[package]]
 name = "guid"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "getrandom 0.4.3",
  "inspect",
@@ -3671,7 +3671,7 @@ dependencies = [
 [[package]]
 name = "hcl_compat_uefi_nvram_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "mesh_protobuf",
@@ -3680,7 +3680,7 @@ dependencies = [
 [[package]]
 name = "hcl_compat_uefi_nvram_storage"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3725,7 +3725,7 @@ dependencies = [
 [[package]]
 name = "headervec"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 
 [[package]]
 name = "heck"
@@ -3879,7 +3879,7 @@ checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
 [[package]]
 name = "hv1_emulator"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "build_rs_guest_arch",
@@ -3901,7 +3901,7 @@ dependencies = [
 [[package]]
 name = "hv1_hypercall"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guestmem",
  "hv1_structs",
@@ -3915,7 +3915,7 @@ dependencies = [
 [[package]]
 name = "hv1_structs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitvec",
  "hvdef",
@@ -3925,7 +3925,7 @@ dependencies = [
 [[package]]
 name = "hvdef"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "open_enum",
@@ -3936,7 +3936,7 @@ dependencies = [
 [[package]]
 name = "hvs_file"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "crc32fast",
  "open_enum",
@@ -3957,7 +3957,7 @@ dependencies = [
 [[package]]
 name = "hybrid_vsock"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "fs-err",
  "guid",
@@ -4110,7 +4110,7 @@ dependencies = [
 [[package]]
 name = "hyperv_dump"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "hvdef",
  "hvs_file",
@@ -4123,7 +4123,7 @@ dependencies = [
 [[package]]
 name = "hyperv_ic"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4150,7 +4150,7 @@ dependencies = [
 [[package]]
 name = "hyperv_ic_protocol"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "guid",
@@ -4162,7 +4162,7 @@ dependencies = [
 [[package]]
 name = "hyperv_ic_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -4229,6 +4229,7 @@ dependencies = [
  "tests_utils",
  "thiserror 1.0.69",
  "tokio",
+ "tracelimit",
  "tracing",
  "tracing-subscriber",
  "ttrpc",
@@ -4247,7 +4248,7 @@ dependencies = [
 [[package]]
 name = "hypervisor_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "linkme",
@@ -4373,7 +4374,7 @@ dependencies = [
 [[package]]
 name = "ide"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "chipset_device",
@@ -4400,7 +4401,7 @@ dependencies = [
 [[package]]
 name = "ide_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "mesh",
@@ -4524,7 +4525,7 @@ dependencies = [
 [[package]]
 name = "input_core"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "futures",
  "mesh",
@@ -4534,7 +4535,7 @@ dependencies = [
 [[package]]
 name = "inspect"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "filepath",
@@ -4546,7 +4547,7 @@ dependencies = [
 [[package]]
 name = "inspect_counters"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
 ]
@@ -4554,7 +4555,7 @@ dependencies = [
 [[package]]
 name = "inspect_derive"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -4618,7 +4619,7 @@ checksum = "d8972d5be69940353d5347a1344cb375d9b457d6809b428b05bb1ca2fb9ce007"
 [[package]]
 name = "iommu_common"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guestmem",
  "pci_core",
@@ -5324,7 +5325,7 @@ dependencies = [
 [[package]]
 name = "kvm"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "kvm-bindings",
  "libc",
@@ -5506,7 +5507,7 @@ dependencies = [
 [[package]]
 name = "linux_net_bindings"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "nix 0.30.1",
 ]
@@ -5520,7 +5521,7 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 [[package]]
 name = "loader"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "anyhow",
@@ -5546,7 +5547,7 @@ dependencies = [
 [[package]]
 name = "loader_defs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "hvdef",
@@ -5561,12 +5562,12 @@ dependencies = [
 [[package]]
 name = "loan_cell"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 
 [[package]]
 name = "local_clock"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "jiff",
@@ -5616,7 +5617,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 [[package]]
 name = "lx"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "static_assertions",
@@ -5627,7 +5628,7 @@ dependencies = [
 [[package]]
 name = "lxutil"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "arrayvec",
  "bitfield-struct 0.11.0",
@@ -5711,7 +5712,7 @@ dependencies = [
 [[package]]
 name = "membacking"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "futures",
@@ -5767,7 +5768,7 @@ dependencies = [
 [[package]]
 name = "memory_range"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "mesh_protobuf",
@@ -5777,7 +5778,7 @@ dependencies = [
 [[package]]
 name = "mesh"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh_channel",
  "mesh_derive",
@@ -5788,7 +5789,7 @@ dependencies = [
 [[package]]
 name = "mesh_channel"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "futures",
  "mesh_channel_core",
@@ -5802,7 +5803,7 @@ dependencies = [
 [[package]]
 name = "mesh_channel_core"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "futures",
  "mesh_node",
@@ -5815,7 +5816,7 @@ dependencies = [
 [[package]]
 name = "mesh_derive"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -5826,7 +5827,7 @@ dependencies = [
 [[package]]
 name = "mesh_node"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "futures",
@@ -5844,7 +5845,7 @@ dependencies = [
 [[package]]
 name = "mesh_protobuf"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "fs-err",
  "heck 0.5.0",
@@ -5857,7 +5858,7 @@ dependencies = [
 [[package]]
 name = "mesh_worker"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "futures",
@@ -5927,7 +5928,7 @@ dependencies = [
 [[package]]
 name = "missing_dev"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "chipset_device",
  "chipset_device_resources",
@@ -5941,7 +5942,7 @@ dependencies = [
 [[package]]
 name = "missing_dev_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -6008,7 +6009,7 @@ dependencies = [
 [[package]]
 name = "net_backend"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6032,7 +6033,7 @@ dependencies = [
 [[package]]
 name = "net_backend_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guid",
  "inspect",
@@ -6044,7 +6045,7 @@ dependencies = [
 [[package]]
 name = "net_dio"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6062,7 +6063,7 @@ dependencies = [
 [[package]]
 name = "net_tap"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6206,7 +6207,7 @@ dependencies = [
 [[package]]
 name = "netvsp"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6241,7 +6242,7 @@ dependencies = [
 [[package]]
 name = "netvsp_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guid",
  "mesh",
@@ -6530,7 +6531,7 @@ dependencies = [
 [[package]]
 name = "nvme"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6565,7 +6566,7 @@ dependencies = [
 [[package]]
 name = "nvme_common"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "disk_backend",
  "nvme_spec",
@@ -6575,7 +6576,7 @@ dependencies = [
 [[package]]
 name = "nvme_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guid",
  "mesh",
@@ -6586,7 +6587,7 @@ dependencies = [
 [[package]]
 name = "nvme_spec"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "inspect",
@@ -6600,7 +6601,7 @@ dependencies = [
 [[package]]
 name = "nvme_test"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "chipset_device",
@@ -6870,12 +6871,12 @@ dependencies = [
 [[package]]
 name = "open_enum"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 
 [[package]]
 name = "openhcl_attestation_protocol"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "base64 0.22.1",
  "base64-serde",
@@ -6948,7 +6949,7 @@ dependencies = [
 [[package]]
 name = "openssl_kdf"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "libc",
  "openssl",
@@ -7139,7 +7140,7 @@ dependencies = [
 [[package]]
 name = "openvmm_core"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "acpi",
@@ -7235,7 +7236,7 @@ dependencies = [
 [[package]]
 name = "openvmm_defs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "firmware_uefi_custom_vars",
@@ -7265,7 +7266,7 @@ dependencies = [
 [[package]]
 name = "openvmm_helpers"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "disk_backend_resources",
@@ -7285,7 +7286,7 @@ dependencies = [
 [[package]]
 name = "openvmm_pcat_locator"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "fs-err",
@@ -7297,7 +7298,7 @@ dependencies = [
 [[package]]
 name = "openvmm_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "build_rs_guest_arch",
  "chipset",
@@ -7405,7 +7406,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 [[package]]
 name = "oversized_box"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 
 [[package]]
 name = "page_size"
@@ -7420,7 +7421,7 @@ dependencies = [
 [[package]]
 name = "page_table"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "static_assertions",
@@ -7432,7 +7433,7 @@ dependencies = [
 [[package]]
 name = "pal"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "caps",
  "fs-err",
@@ -7455,7 +7456,7 @@ dependencies = [
 [[package]]
 name = "pal_async"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-channel",
  "async-task",
@@ -7484,7 +7485,7 @@ dependencies = [
 [[package]]
 name = "pal_async_test"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7494,7 +7495,7 @@ dependencies = [
 [[package]]
 name = "pal_event"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "getrandom 0.4.3",
  "libc",
@@ -7578,7 +7579,7 @@ dependencies = [
 [[package]]
 name = "pci_bus"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "chipset_device",
@@ -7594,7 +7595,7 @@ dependencies = [
 [[package]]
 name = "pci_core"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "bitfield-struct 0.11.0",
@@ -7615,7 +7616,7 @@ dependencies = [
 [[package]]
 name = "pci_resource_assignment"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "memory_range",
  "pci_core",
@@ -7626,7 +7627,7 @@ dependencies = [
 [[package]]
 name = "pci_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "chipset_device",
  "chipset_device_resources",
@@ -7639,7 +7640,7 @@ dependencies = [
 [[package]]
 name = "pcie"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "chipset_device",
@@ -7859,7 +7860,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 [[package]]
 name = "plan9"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "lx",
  "lxutil",
@@ -7944,7 +7945,7 @@ dependencies = [
 [[package]]
 name = "power_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -8904,7 +8905,7 @@ dependencies = [
 [[package]]
 name = "resource_dll_parser"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "fs-err",
@@ -9399,7 +9400,7 @@ dependencies = [
 [[package]]
 name = "safe_intrinsics"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "cfg-if 1.0.4",
 ]
@@ -9407,7 +9408,7 @@ dependencies = [
 [[package]]
 name = "safeatomic"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "zerocopy 0.8.55",
 ]
@@ -9424,7 +9425,7 @@ dependencies = [
 [[package]]
 name = "save_restore_derive"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "quote",
  "syn 2.0.119",
@@ -9469,7 +9470,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 [[package]]
 name = "scsi_buffers"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "event-listener 5.4.1",
  "guestmem",
@@ -9481,7 +9482,7 @@ dependencies = [
 [[package]]
 name = "scsi_core"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "mesh",
@@ -9495,7 +9496,7 @@ dependencies = [
 [[package]]
 name = "scsi_defs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "open_enum",
@@ -9505,7 +9506,7 @@ dependencies = [
 [[package]]
 name = "scsidisk"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9534,7 +9535,7 @@ dependencies = [
 [[package]]
 name = "scsidisk_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "mesh",
@@ -9678,7 +9679,7 @@ dependencies = [
 [[package]]
 name = "serde_helpers"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "base64 0.22.1",
  "guid",
@@ -9788,7 +9789,7 @@ dependencies = [
 [[package]]
 name = "serial_16550"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "bitfield-struct 0.11.0",
@@ -9811,7 +9812,7 @@ dependencies = [
 [[package]]
 name = "serial_16550_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -9820,7 +9821,7 @@ dependencies = [
 [[package]]
 name = "serial_core"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "futures",
  "inspect",
@@ -9833,7 +9834,7 @@ dependencies = [
 [[package]]
 name = "serial_debugcon"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "chipset_device",
@@ -9852,7 +9853,7 @@ dependencies = [
 [[package]]
 name = "serial_debugcon_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -9861,7 +9862,7 @@ dependencies = [
 [[package]]
 name = "serial_pl011"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "bitfield-struct 0.11.0",
@@ -9884,7 +9885,7 @@ dependencies = [
 [[package]]
 name = "serial_pl011_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -9893,7 +9894,7 @@ dependencies = [
 [[package]]
 name = "serial_socket"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "futures",
  "inspect",
@@ -10272,7 +10273,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 [[package]]
 name = "smmu"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "bitfield-struct 0.11.0",
@@ -10324,7 +10325,7 @@ dependencies = [
 [[package]]
 name = "sparse_mmap"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "getrandom 0.4.3",
  "libc",
@@ -10370,7 +10371,7 @@ dependencies = [
 [[package]]
 name = "state_unit"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "event-listener 5.4.1",
@@ -10394,7 +10395,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "storage_string"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "mesh_protobuf",
@@ -10405,7 +10406,7 @@ dependencies = [
 [[package]]
 name = "storvsp"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10445,7 +10446,7 @@ dependencies = [
 [[package]]
 name = "storvsp_protocol"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guid",
  "open_enum",
@@ -10456,7 +10457,7 @@ dependencies = [
 [[package]]
 name = "storvsp_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guid",
  "mesh",
@@ -10704,7 +10705,7 @@ dependencies = [
 [[package]]
 name = "task_control"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "fast_select",
  "inspect",
@@ -10715,7 +10716,7 @@ dependencies = [
 [[package]]
 name = "tdisp"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "bitfield-struct 0.11.0",
@@ -10730,7 +10731,7 @@ dependencies = [
 [[package]]
 name = "tdisp_proto"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "prost 0.11.9",
@@ -10801,7 +10802,7 @@ dependencies = [
 [[package]]
 name = "test_igvm_agent_lib"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "base64 0.22.1",
  "crypto",
@@ -11341,7 +11342,7 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 [[package]]
 name = "tracelimit"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "parking_lot",
  "tracing",
@@ -11451,7 +11452,7 @@ dependencies = [
 [[package]]
 name = "tracing_helpers"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "tracing",
@@ -11467,7 +11468,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 [[package]]
 name = "trycopy"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "libc",
  "thiserror 2.0.19",
@@ -11545,7 +11546,7 @@ checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
 [[package]]
 name = "ucs2"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "thiserror 2.0.19",
 ]
@@ -11564,7 +11565,7 @@ dependencies = [
 [[package]]
 name = "uefi_nvram_specvars"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guid",
  "thiserror 2.0.19",
@@ -11576,7 +11577,7 @@ dependencies = [
 [[package]]
 name = "uefi_nvram_storage"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "guid",
@@ -11593,7 +11594,7 @@ dependencies = [
 [[package]]
 name = "uefi_specs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "guid",
@@ -11608,7 +11609,7 @@ dependencies = [
 [[package]]
 name = "uevent"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "fs-err",
@@ -11625,7 +11626,7 @@ dependencies = [
 [[package]]
 name = "uidevices"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11653,7 +11654,7 @@ dependencies = [
 [[package]]
 name = "uidevices_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "video_core",
@@ -11714,7 +11715,7 @@ checksum = "40789245bbff5f31eb773c9ac4ee5c4e15eab9640d975e124d6ce4c34a6410d7"
 [[package]]
 name = "unix_socket"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "getrandom 0.4.3",
  "mesh_protobuf",
@@ -11871,10 +11872,11 @@ dependencies = [
 [[package]]
 name = "vfio_assigned_device"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
+ "blocking",
  "chipset_device",
  "guestmem",
  "inspect",
@@ -11899,7 +11901,7 @@ dependencies = [
 [[package]]
 name = "vfio_assigned_device_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -11908,7 +11910,7 @@ dependencies = [
 [[package]]
 name = "vfio_sys"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "bitfield-struct 0.11.0",
@@ -11925,7 +11927,7 @@ dependencies = [
 [[package]]
 name = "vga"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "chipset_device",
  "framebuffer",
@@ -11947,7 +11949,7 @@ dependencies = [
 [[package]]
 name = "vhd1_defs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guid",
  "zerocopy 0.8.55",
@@ -11969,7 +11971,7 @@ dependencies = [
 [[package]]
 name = "vhost_user_frontend"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11991,7 +11993,7 @@ dependencies = [
 [[package]]
 name = "vhost_user_protocol"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "libc",
@@ -12006,7 +12008,7 @@ dependencies = [
 [[package]]
 name = "video_core"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "inspect",
@@ -12017,7 +12019,7 @@ dependencies = [
 [[package]]
 name = "virt"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "anyhow",
@@ -12078,7 +12080,7 @@ dependencies = [
 [[package]]
 name = "virt_kvm"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "anyhow",
@@ -12111,7 +12113,7 @@ dependencies = [
 [[package]]
 name = "virt_mshv"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "anyhow",
@@ -12146,7 +12148,7 @@ dependencies = [
 [[package]]
 name = "virt_support_aarch64emu"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "aarch64emu",
@@ -12164,7 +12166,7 @@ dependencies = [
 [[package]]
 name = "virt_support_apic"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "hvdef",
@@ -12183,7 +12185,7 @@ dependencies = [
 [[package]]
 name = "virt_support_x86emu"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "cvm_tracing",
  "guestmem",
@@ -12201,7 +12203,7 @@ dependencies = [
 [[package]]
 name = "virt_whp"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "anyhow",
@@ -12243,7 +12245,7 @@ dependencies = [
 [[package]]
 name = "virtio"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12289,7 +12291,7 @@ dependencies = [
 [[package]]
 name = "virtio_blk"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12313,7 +12315,7 @@ dependencies = [
 [[package]]
 name = "virtio_console"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12337,7 +12339,7 @@ dependencies = [
 [[package]]
 name = "virtio_net"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12363,7 +12365,7 @@ dependencies = [
 [[package]]
 name = "virtio_p9"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "futures",
@@ -12382,7 +12384,7 @@ dependencies = [
 [[package]]
 name = "virtio_pmem"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "fs-err",
@@ -12402,7 +12404,7 @@ dependencies = [
 [[package]]
 name = "virtio_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "net_backend_resources",
@@ -12413,7 +12415,7 @@ dependencies = [
 [[package]]
 name = "virtio_rng"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "futures",
@@ -12432,7 +12434,7 @@ dependencies = [
 [[package]]
 name = "virtio_spec"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "inspect",
@@ -12443,7 +12445,7 @@ dependencies = [
 [[package]]
 name = "virtio_vsock"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "bitfield-struct 0.11.0",
@@ -12471,7 +12473,7 @@ dependencies = [
 [[package]]
 name = "virtiofs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "fuse",
@@ -12521,7 +12523,7 @@ checksum = "69c376a9b84afdf97bddd2628096cf3554208b2a676cf06b4532e0f433a54e02"
 [[package]]
 name = "vm_loader"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "build_rs_guest_arch",
@@ -12538,7 +12540,7 @@ dependencies = [
 [[package]]
 name = "vm_manifest_builder"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "chipset_resources",
  "firmware_uefi_custom_vars",
@@ -12560,7 +12562,7 @@ dependencies = [
 [[package]]
 name = "vm_resource"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "inspect",
@@ -12572,7 +12574,7 @@ dependencies = [
 [[package]]
 name = "vm_topology"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "build_rs_guest_arch",
@@ -12589,7 +12591,7 @@ dependencies = [
 [[package]]
 name = "vmbfs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "bitfield-struct 0.11.0",
@@ -12611,7 +12613,7 @@ dependencies = [
 [[package]]
 name = "vmbfs_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -12620,7 +12622,7 @@ dependencies = [
 [[package]]
 name = "vmbus_async"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "futures",
  "guestmem",
@@ -12636,7 +12638,7 @@ dependencies = [
 [[package]]
 name = "vmbus_channel"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12661,7 +12663,7 @@ dependencies = [
 [[package]]
 name = "vmbus_core"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "futures",
@@ -12678,7 +12680,7 @@ dependencies = [
 [[package]]
 name = "vmbus_proxy"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "futures",
@@ -12698,7 +12700,7 @@ dependencies = [
 [[package]]
 name = "vmbus_ring"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guestmem",
  "inspect",
@@ -12710,7 +12712,7 @@ dependencies = [
 [[package]]
 name = "vmbus_serial_host"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12734,7 +12736,7 @@ dependencies = [
 [[package]]
 name = "vmbus_serial_protocol"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guid",
  "open_enum",
@@ -12745,7 +12747,7 @@ dependencies = [
 [[package]]
 name = "vmbus_serial_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -12754,7 +12756,7 @@ dependencies = [
 [[package]]
 name = "vmbus_server"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12789,7 +12791,7 @@ dependencies = [
 [[package]]
 name = "vmcore"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12816,7 +12818,7 @@ dependencies = [
 [[package]]
 name = "vmgs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "crc32fast",
@@ -12839,7 +12841,7 @@ dependencies = [
 [[package]]
 name = "vmgs_broker"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "inspect",
@@ -12857,7 +12859,7 @@ dependencies = [
 [[package]]
 name = "vmgs_format"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "inspect",
@@ -12870,7 +12872,7 @@ dependencies = [
 [[package]]
 name = "vmgs_resources"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "mesh",
  "vm_resource",
@@ -12900,7 +12902,7 @@ dependencies = [
 [[package]]
 name = "vmm_core"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "aarch64defs",
  "acpi",
@@ -12949,7 +12951,7 @@ dependencies = [
 [[package]]
 name = "vmm_core_defs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "inspect",
  "mesh",
@@ -12959,7 +12961,7 @@ dependencies = [
 [[package]]
 name = "vmotherboard"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "address_filter",
  "anyhow",
@@ -13001,7 +13003,7 @@ dependencies = [
 [[package]]
 name = "vmsocket"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "cfg-if 1.0.4",
  "guid",
@@ -13015,7 +13017,7 @@ dependencies = [
 [[package]]
 name = "vmswitch"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "futures",
  "getrandom 0.4.3",
@@ -13034,7 +13036,7 @@ dependencies = [
 [[package]]
 name = "vnc"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-channel",
  "bitvec",
@@ -13052,7 +13054,7 @@ dependencies = [
 [[package]]
 name = "vnc_worker"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -13077,7 +13079,7 @@ dependencies = [
 [[package]]
 name = "vnc_worker_defs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "framebuffer",
  "input_core",
@@ -13090,7 +13092,7 @@ dependencies = [
 [[package]]
 name = "vpci"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -13120,7 +13122,7 @@ dependencies = [
 [[package]]
 name = "vpci_protocol"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "guid",
@@ -13301,7 +13303,7 @@ dependencies = [
 [[package]]
 name = "watchdog_core"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "async-trait",
  "bitfield-struct 0.11.0",
@@ -13320,7 +13322,7 @@ dependencies = [
 [[package]]
 name = "watchdog_vmgs_format"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "thiserror 2.0.19",
  "vmcore",
@@ -13411,7 +13413,7 @@ dependencies = [
 [[package]]
 name = "whp"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "guid",
  "pal",
@@ -14015,7 +14017,7 @@ dependencies = [
 [[package]]
 name = "x86defs"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "bitfield-struct 0.11.0",
  "open_enum",
@@ -14026,7 +14028,7 @@ dependencies = [
 [[package]]
 name = "x86emu"
 version = "0.0.0"
-source = "git+https://github.com/JocelynBerrendonner/openvmm?rev=99a0f1643fe21ce4338c8b85cbed1b390828ee08#99a0f1643fe21ce4338c8b85cbed1b390828ee08"
+source = "git+https://github.com/chris-oo/openvmm?rev=df3eb80baf1ec4e6778d78b7f510cdbd57a76da8#df3eb80baf1ec4e6778d78b7f510cdbd57a76da8"
 dependencies = [
  "iced-x86",
  "thiserror 2.0.19",

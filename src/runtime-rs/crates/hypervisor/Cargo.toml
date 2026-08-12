@@ -107,6 +107,7 @@ ovmm_vmm_core_defs = { workspace = true, optional = true }
 ovmm_guid = { workspace = true, optional = true }
 ovmm_memory_range = { workspace = true, optional = true }
 ovmm_serial_socket = { workspace = true, optional = true }
+ovmm_tracelimit = { workspace = true, optional = true }
 
 [features]
 default = ["cloud-hypervisor"]
@@ -141,6 +142,7 @@ openvmm = [
     "dep:ovmm_guid",
     "dep:ovmm_memory_range",
     "dep:ovmm_serial_socket",
+    "dep:ovmm_tracelimit",
     "dep:tracing-subscriber",
 ]
 

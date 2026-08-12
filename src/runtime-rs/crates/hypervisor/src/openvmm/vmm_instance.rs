@@ -104,19 +104,50 @@ impl VmmInstance {
                 // process). Kata normally creates a fresh shim per sandbox,
                 // so the first launch wins and configures verbosity.
                 //
-                // Verbosity is controlled by the `RUST_LOG` environment
-                // variable; default is `info`. For VM-launch debugging use
-                // e.g. `RUST_LOG=info,openvmm=debug,virt_mshv=debug`.
+                // Verbosity is controlled by `OPENVMM_LOG`, matching standalone
+                // OpenVMM. `RUST_LOG` remains a compatibility fallback.
                 if let Some(ref dir) = log_dir {
                     let log_file_path = format!("{}/openvmm-worker.log", dir);
-                    if let Ok(file) = std::fs::File::create(&log_file_path) {
-                        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-                        let _ = tracing_subscriber::fmt()
+                    if let Ok(mut file) = std::fs::File::create(&log_file_path) {
+                        use std::io::Write as _;
+
+                        let requested_filter = std::env::var("OPENVMM_LOG")
+                            .or_else(|_| std::env::var("RUST_LOG"))
+                            .unwrap_or_else(|_| "info".to_string());
+                        let filter = tracing_subscriber::EnvFilter::try_new(&requested_filter)
+                            .unwrap_or_else(|err| {
+                                let _ = writeln!(
+                                    file,
+                                    "invalid OPENVMM_LOG/RUST_LOG filter {requested_filter:?}: {err}; using info"
+                                );
+                                tracing_subscriber::EnvFilter::new("info")
+                            });
+                        let spans_enabled = std::env::var("OPENVMM_LOG_SPANS")
+                            .is_ok_and(|value| !value.is_empty() && value != "0");
+                        let span_events = if spans_enabled {
+                            tracing_subscriber::fmt::format::FmtSpan::NEW
+                                | tracing_subscriber::fmt::format::FmtSpan::CLOSE
+                        } else {
+                            tracing_subscriber::fmt::format::FmtSpan::NONE
+                        };
+                        let rate_limits_disabled =
+                            std::env::var("OPENVMM_DISABLE_TRACING_RATELIMITS")
+                                .is_ok_and(|value| !value.is_empty() && value != "0");
+                        ovmm_tracelimit::disable_rate_limiting(rate_limits_disabled);
+
+                        let error_file = file.try_clone().ok();
+                        let init_result = tracing_subscriber::fmt()
                             .with_writer(std::sync::Mutex::new(file))
                             .with_ansi(false)
+                            .with_span_events(span_events)
                             .with_env_filter(filter)
                             .try_init();
+                        if let (Err(err), Some(mut error_file)) = (init_result, error_file) {
+                            let _ = writeln!(
+                                error_file,
+                                "failed to initialize OpenVMM text tracing: {err}"
+                            );
+                        }
                     }
                 }
 
