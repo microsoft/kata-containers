@@ -581,8 +581,14 @@ impl ShareFsVolume {
                     m.destination(),
                     copy_volume_types,
                 );
+                let copy_empty_other_directory = should_copy_empty_other_directory(
+                    &src,
+                    m.destination(),
+                    copy_volume_types,
+                );
                 if !should_copy_volume(&src, m.destination(), copy_volume_types)
                     && !copy_empty_other_file
+                    && !copy_empty_other_directory
                 {
                     info!(
                         sl!(),
@@ -627,7 +633,18 @@ impl ShareFsVolume {
                     info!(sl!(), "ShareFsVolume: is_file: new mount: {:?}", &oci_mount);
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
-                    if is_watchable_volume(&src) {
+                    if copy_empty_other_directory {
+                        let init_resp = agent
+                            .init_volume(InitVolumeRequest {
+                                host_volume_id: src.to_string_lossy().to_string(),
+                            })
+                            .await
+                            .context("init empty directory volume")?;
+
+                        oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
+                        oci_mount.set_source(Some(PathBuf::from(init_resp.agent_volume_id)));
+                        volume.mounts.push(oci_mount);
+                    } else if is_watchable_volume(&src) {
                         info!(sl!(), "ShareFsVolume: watchable_volume: src = {:?}", src);
 
                         let init_resp = agent
@@ -991,6 +1008,18 @@ fn should_copy_empty_other_file(
     copy_volume_types.is_some_and(|enabled_types| {
         !enabled_types.contains(COPY_VOLUME_OTHER_FILES)
     })
+}
+
+fn should_copy_empty_other_directory(
+    src: &Path,
+    destination: &Path,
+    copy_volume_types: Option<&HashSet<String>>,
+) -> bool {
+    src.is_dir()
+        && classify_copy_volume(src, destination) == COPY_VOLUME_OTHER_DIRECTORIES
+        && copy_volume_types.is_some_and(|enabled_types| {
+            !enabled_types.contains(COPY_VOLUME_OTHER_DIRECTORIES)
+        })
 }
 
 fn classify_copy_volume(src: &Path, _destination: &Path) -> &'static str {
@@ -1590,6 +1619,29 @@ mod test {
         let mut enabled = HashSet::new();
         enabled.insert(COPY_VOLUME_OTHER_FILES.to_string());
         assert!(!should_copy_empty_other_file(
+            &source,
+            destination,
+            Some(&enabled)
+        ));
+    }
+
+    #[test]
+    fn test_other_directory_empty_copy_follows_setting() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("other-directory");
+        std::fs::create_dir(&source).unwrap();
+        let destination = Path::new("/tmp/other-directory");
+
+        assert!(should_copy_empty_other_directory(
+            &source,
+            destination,
+            Some(&HashSet::new())
+        ));
+        assert!(!should_copy_empty_other_directory(&source, destination, None));
+
+        let mut enabled = HashSet::new();
+        enabled.insert(COPY_VOLUME_OTHER_DIRECTORIES.to_string());
+        assert!(!should_copy_empty_other_directory(
             &source,
             destination,
             Some(&enabled)
