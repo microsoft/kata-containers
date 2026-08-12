@@ -10,7 +10,7 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
 use anyhow::{bail, Error, Result};
-use protocols::agent::{CopyFileRequest, CopySingleFileRequest, PutVolumeFileRequest};
+use protocols::agent::{CopyFileRequest, CopySingleFileRequest, PutVolumeFileRevisionRequest};
 use regorus::PolicyLengthConfig;
 use slog::{debug, error, info, warn};
 use tokio::io::AsyncWriteExt;
@@ -370,10 +370,10 @@ impl From<&CopySingleFileRequest> for PolicyCopySingleFileRequest {
     }
 }
 
-/// PolicyPutVolumeFileRequest omits the potentially large data field from PutVolumeFileRequest.
+/// PolicyPutVolumeFileRevisionRequest omits the potentially large data field from PutVolumeFileRevisionRequest.
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
-pub struct PolicyPutVolumeFileRequest {
+pub struct PolicyPutVolumeFileRevisionRequest {
     pub agent_volume_id: String,
     pub file_name: String,
     pub file_size: i64,
@@ -385,8 +385,8 @@ pub struct PolicyPutVolumeFileRequest {
     pub dir_mode: u32,
 }
 
-impl From<&PutVolumeFileRequest> for PolicyPutVolumeFileRequest {
-    fn from(req: &PutVolumeFileRequest) -> Self {
+impl From<&PutVolumeFileRevisionRequest> for PolicyPutVolumeFileRevisionRequest {
+    fn from(req: &PutVolumeFileRevisionRequest) -> Self {
         Self {
             agent_volume_id: req.agent_volume_id.clone(),
             file_name: req.file_name.clone(),
@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn test_put_volume_file_translation_omits_data() {
-        let input = PutVolumeFileRequest {
+        let input = PutVolumeFileRevisionRequest {
             agent_volume_id: "volume-id".to_owned(),
             file_name: "token".to_owned(),
             file_size: 3,
@@ -594,10 +594,10 @@ mod tests {
             ..Default::default()
         };
 
-        let output = PolicyPutVolumeFileRequest::from(&input);
+        let output = PolicyPutVolumeFileRevisionRequest::from(&input);
         assert_eq!(
             output,
-            PolicyPutVolumeFileRequest {
+            PolicyPutVolumeFileRevisionRequest {
                 agent_volume_id: "volume-id".to_owned(),
                 file_name: "token".to_owned(),
                 file_size: 3,

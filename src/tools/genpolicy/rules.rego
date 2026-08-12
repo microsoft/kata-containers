@@ -57,8 +57,8 @@ default WaitProcessRequest := true
 default WriteStreamRequest := false
 
 default CopySingleFileRequest := true
-default InitWatchableVolumeRequest := true
-default PutVolumeFileRequest := true
+default InitVolumeRequest := true
+default PutVolumeFileRevisionRequest := true
 default CommitVolumeRevisionRequest := true
 
 # AllowRequestsFailingPolicy := true configures the Agent to *allow any
