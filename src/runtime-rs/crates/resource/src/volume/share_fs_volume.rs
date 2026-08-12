@@ -504,8 +504,7 @@ impl ShareFsVolume {
         sid: &str,
         agent: &Arc<dyn Agent>,
     ) -> Result<String> {
-        let file_metadata = std::fs::metadata(src)
-            .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
+        let file_metadata = regular_file_metadata(src)?;
 
         let mut file = File::open(src).with_context(|| format!("Failed to open file: {src:?}"))?;
         let mut buffer = Vec::new();
@@ -589,10 +588,14 @@ impl ShareFsVolume {
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
                     if is_single_file_mount(&src, m.destination()) {
-                        let agent_file_id =
-                            Self::copy_single_file_to_guest(&src, m.destination(), sid, &agent)
-                                .await
-                                .context("copy network file to guest")?;
+                        let agent_file_id = Self::copy_single_file_to_guest(
+                            Path::new(&source_path),
+                            m.destination(),
+                            sid,
+                            &agent,
+                        )
+                        .await
+                        .context("copy network file to guest")?;
 
                         oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
                         oci_mount.set_source(Some(PathBuf::from(agent_file_id)));
@@ -823,6 +826,18 @@ impl ShareFsVolume {
 
         Ok(())
     }
+}
+
+fn regular_file_metadata(src: &Path) -> Result<std::fs::Metadata> {
+    let metadata = std::fs::symlink_metadata(src)
+        .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
+    if !metadata.file_type().is_file() {
+        return Err(anyhow!(
+            "copy single file source is not a regular file: {src:?}"
+        ));
+    }
+
+    Ok(metadata)
 }
 
 fn single_file_type_from_mount(src: &Path, destination: &Path) -> Result<SingleFileType> {
@@ -1511,5 +1526,16 @@ mod test {
         let destination = PathBuf::from("/tmp/termination-log");
 
         assert!(!is_single_file_mount(&source, &destination));
+    }
+
+    #[test]
+    fn test_copy_single_file_rejects_symlink() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let target = temp_dir.path().join("target");
+        let source = temp_dir.path().join("resolv.conf");
+        std::fs::write(&target, b"nameserver 1.1.1.1\n").unwrap();
+        std::os::unix::fs::symlink(&target, &source).unwrap();
+
+        assert!(regular_file_metadata(&source).is_err());
     }
 }
