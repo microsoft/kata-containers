@@ -818,9 +818,6 @@ impl From<SingleFileType> for agent::SingleFileType {
             SingleFileType::ResolvConf => agent::SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF,
             SingleFileType::EtcHosts => agent::SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS,
             SingleFileType::Hostname => agent::SingleFileType::SINGLE_FILE_TYPE_HOSTNAME,
-            SingleFileType::TerminationLog => {
-                agent::SingleFileType::SINGLE_FILE_TYPE_TERMINATION_LOG
-            }
         }
     }
 }
@@ -832,9 +829,6 @@ impl From<agent::SingleFileType> for SingleFileType {
             agent::SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => SingleFileType::ResolvConf,
             agent::SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => SingleFileType::EtcHosts,
             agent::SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => SingleFileType::Hostname,
-            agent::SingleFileType::SINGLE_FILE_TYPE_TERMINATION_LOG => {
-                SingleFileType::TerminationLog
-            }
         }
     }
 }

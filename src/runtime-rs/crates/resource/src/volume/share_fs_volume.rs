@@ -50,7 +50,6 @@ const MONITOR_INTERVAL: Duration = Duration::from_millis(100);
 const DEBOUNCE_TIME: Duration = Duration::from_millis(500);
 
 const COPY_VOLUME_NETWORK_FILES: &str = "network-files";
-const COPY_VOLUME_TERMINATION_LOG: &str = "termination-log";
 const COPY_VOLUME_OTHER_FILES: &str = "other-files";
 const COPY_VOLUME_PROJECTED_VOLUMES: &str = "projected-volumes";
 const COPY_VOLUME_CONFIGMAP_VOLUMES: &str = "configmap-volumes";
@@ -500,7 +499,6 @@ impl VolumeManager {
 impl ShareFsVolume {
     async fn copy_single_file_to_guest(
         src: &Path,
-        destination: &Path,
         sid: &str,
         agent: &Arc<dyn Agent>,
         copy_data: bool,
@@ -518,7 +516,11 @@ impl ShareFsVolume {
 
         let req = CopySingleFileRequest {
             sandbox_id: sid.to_string(),
-            file_type: single_file_type_from_mount(src, destination)?,
+            file_type: if copy_data {
+                single_file_type_from_mount(src)?
+            } else {
+                SingleFileType::Unspecified
+            },
             uid: file_metadata.uid() as i32,
             gid: file_metadata.gid() as i32,
             data_size: if copy_data { file_metadata.len() as i64 } else { 0 },
@@ -598,10 +600,9 @@ impl ShareFsVolume {
 
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
-                    if is_single_file_mount(&src, m.destination()) || copy_empty_other_file {
+                    if is_single_file_mount(&src) || copy_empty_other_file {
                         let agent_file_id = Self::copy_single_file_to_guest(
                             Path::new(&source_path),
-                            m.destination(),
                             sid,
                             &agent,
                             !copy_empty_other_file,
@@ -862,11 +863,7 @@ fn regular_file_metadata(src: &Path) -> Result<std::fs::Metadata> {
     Ok(metadata)
 }
 
-fn single_file_type_from_mount(src: &Path, destination: &Path) -> Result<SingleFileType> {
-    if destination == Path::new(TERMINATION_LOG_DESTINATION) {
-        return Ok(SingleFileType::TerminationLog);
-    }
-
+fn single_file_type_from_mount(src: &Path) -> Result<SingleFileType> {
     let file_name = src
         .file_name()
         .and_then(|name| name.to_str())
@@ -876,7 +873,6 @@ fn single_file_type_from_mount(src: &Path, destination: &Path) -> Result<SingleF
         "resolv.conf" => SingleFileType::ResolvConf,
         "hosts" => SingleFileType::EtcHosts,
         "hostname" => SingleFileType::Hostname,
-        "termination-log" => SingleFileType::TerminationLog,
         _ => SingleFileType::Unspecified,
     };
 
@@ -965,14 +961,14 @@ fn should_copy_volume(
     enabled_types.contains(classify_copy_volume(src, destination))
 }
 
-fn is_single_file_mount(src: &Path, destination: &Path) -> bool {
+fn is_single_file_mount(src: &Path) -> bool {
     let is_network_file = src
         .file_name()
         .and_then(|name| name.to_str())
         .map(|name| NETWORK_FILE_NAMES.contains(&name))
         .unwrap_or(false);
 
-    is_network_file || destination == Path::new(TERMINATION_LOG_DESTINATION)
+    is_network_file
 }
 
 fn should_copy_empty_other_file(
@@ -980,7 +976,15 @@ fn should_copy_empty_other_file(
     destination: &Path,
     copy_volume_types: Option<&HashSet<String>>,
 ) -> bool {
-    if !src.is_file() || classify_copy_volume(src, destination) != COPY_VOLUME_OTHER_FILES {
+    if !src.is_file() {
+        return false;
+    }
+
+    if destination == Path::new(TERMINATION_LOG_DESTINATION) {
+        return true;
+    }
+
+    if classify_copy_volume(src, destination) != COPY_VOLUME_OTHER_FILES {
         return false;
     }
 
@@ -989,11 +993,8 @@ fn should_copy_empty_other_file(
     })
 }
 
-fn classify_copy_volume(src: &Path, destination: &Path) -> &'static str {
+fn classify_copy_volume(src: &Path, _destination: &Path) -> &'static str {
     if src.is_file() {
-        if destination == Path::new(TERMINATION_LOG_DESTINATION) {
-            return COPY_VOLUME_TERMINATION_LOG;
-        }
         let file_name = src
             .file_name()
             .and_then(|name| name.to_str())
@@ -1465,7 +1466,7 @@ mod test {
         );
         assert_eq!(
             classify_copy_volume(&other_file, Path::new(TERMINATION_LOG_DESTINATION)),
-            COPY_VOLUME_TERMINATION_LOG
+            COPY_VOLUME_OTHER_FILES
         );
         assert_eq!(
             classify_copy_volume(&projected, Path::new("/var/run/projected")),
@@ -1536,32 +1537,40 @@ mod test {
             None
         ));
 
-        enabled.insert(COPY_VOLUME_TERMINATION_LOG.to_string());
         assert!(should_copy_volume(
             &other_file,
             Path::new(TERMINATION_LOG_DESTINATION),
+            None
+        ));
+    }
+
+    #[test]
+    fn test_termination_log_uses_empty_single_file_path() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("termination-log");
+        std::fs::write(&source, b"host content").unwrap();
+        let destination = PathBuf::from(TERMINATION_LOG_DESTINATION);
+
+        assert!(!is_single_file_mount(&source));
+        assert_eq!(
+            single_file_type_from_mount(&source).unwrap(),
+            SingleFileType::Unspecified
+        );
+
+        let mut enabled = HashSet::new();
+        enabled.insert(COPY_VOLUME_OTHER_FILES.to_string());
+        assert!(should_copy_empty_other_file(
+            &source,
+            &destination,
             Some(&enabled)
         ));
     }
 
     #[test]
-    fn test_termination_log_uses_single_file_path() {
-        let source = PathBuf::from("/var/lib/kubelet/pods/1000/termination-log");
-        let destination = PathBuf::from(TERMINATION_LOG_DESTINATION);
-
-        assert!(is_single_file_mount(&source, &destination));
-        assert_eq!(
-            single_file_type_from_mount(&source, &destination).unwrap(),
-            SingleFileType::TerminationLog
-        );
-    }
-
-    #[test]
     fn test_other_file_does_not_use_single_file_path_elsewhere() {
         let source = PathBuf::from("/var/lib/kubelet/pods/1000/termination-log");
-        let destination = PathBuf::from("/tmp/termination-log");
 
-        assert!(!is_single_file_mount(&source, &destination));
+        assert!(!is_single_file_mount(&source));
     }
 
     #[test]

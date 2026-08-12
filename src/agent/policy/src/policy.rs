@@ -552,7 +552,7 @@ mod tests {
     fn test_copy_single_file_translation_omits_data() {
         let input = CopySingleFileRequest {
             sandbox_id: "sandbox-id".to_owned(),
-            file_type: protocols::agent::SingleFileType::SINGLE_FILE_TYPE_TERMINATION_LOG.into(),
+            file_type: protocols::agent::SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED.into(),
             uid: 1000,
             gid: 1001,
             data_size: 3,
@@ -566,7 +566,7 @@ mod tests {
             output,
             PolicyCopySingleFileRequest {
                 sandbox_id: "sandbox-id".to_owned(),
-                file_type: 4,
+                file_type: 0,
                 uid: 1000,
                 gid: 1001,
                 data_size: 3,
