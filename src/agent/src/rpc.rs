@@ -2697,6 +2697,13 @@ impl agent_ttrpc::AgentService for AgentService {
         #[cfg(not(feature = "agent-policy"))]
         is_allowed(&req).await?;
 
+        if stat::SFlag::from_bits_truncate(req.file_mode) != stat::SFlag::S_IFREG {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                "put volume file source is not a regular file",
+            ));
+        }
+
         if req.revision.is_empty() {
             return Err(ttrpc_error(
                 ttrpc::Code::INVALID_ARGUMENT,
@@ -4720,6 +4727,20 @@ mod tests {
             .put_volume_file(&ctx, invalid_revision)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_put_volume_file_rejects_non_regular_file() {
+        let _temp_dir = setup_watchable_rpc_test();
+        let agent_service = test_agent_service();
+        let agent_volume_id = init_test_watchable_volume(&agent_service).await;
+        let ctx = mk_ttrpc_context();
+
+        let mut req = put_volume_file_request(&agent_volume_id, "token", "rev1", b"token");
+        req.file_mode = libc::S_IFLNK as u32;
+
+        assert!(agent_service.put_volume_file(&ctx, req).await.is_err());
     }
 
     #[tokio::test]
