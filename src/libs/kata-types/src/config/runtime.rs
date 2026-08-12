@@ -25,7 +25,6 @@ pub const EMPTYDIR_MODE_SHARED_FS: &str = "shared-fs";
 pub const EMPTYDIR_MODE_BLOCK_ENCRYPTED: &str = "block-encrypted";
 
 pub const COPY_VOLUME_NETWORK_FILES: &str = "network-files";
-pub const COPY_VOLUME_TERMINATION_LOG: &str = "termination-log";
 pub const COPY_VOLUME_OTHER_FILES: &str = "other-files";
 pub const COPY_VOLUME_PROJECTED_VOLUMES: &str = "projected-volumes";
 pub const COPY_VOLUME_CONFIGMAP_VOLUMES: &str = "configmap-volumes";
@@ -210,7 +209,6 @@ pub struct Runtime {
     ///
     /// Supported values:
     /// - network-files
-    /// - termination-log
     /// - other-files
     /// - projected-volumes
     /// - configmap-volumes
@@ -330,7 +328,6 @@ impl ConfigOps for Runtime {
 
         for copy_volume in &conf.runtime.copy_volumes {
             let valid = copy_volume == COPY_VOLUME_NETWORK_FILES
-                || copy_volume == COPY_VOLUME_TERMINATION_LOG
                 || copy_volume == COPY_VOLUME_OTHER_FILES
                 || copy_volume == COPY_VOLUME_PROJECTED_VOLUMES
                 || copy_volume == COPY_VOLUME_CONFIGMAP_VOLUMES

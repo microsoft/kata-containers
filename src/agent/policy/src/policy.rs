@@ -4224,6 +4224,8 @@ containers := [{"name": "wrong-issuer"}]
             file_type: protobuf::EnumOrUnknown::new(
                 protocols::agent::SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF,
             ),
+            uid: 1000,
+            gid: 1001,
             file_mode: libc::S_IFREG as u32 | 0o4644,
             data: b"nameserver 1.1.1.1\n".to_vec(),
             data_size: 19,
@@ -4233,6 +4235,8 @@ containers := [{"name": "wrong-issuer"}]
         let out = PolicyCopySingleFileRequest::from(&single);
 
         assert_eq!(out.sandbox_id, "sbx");
+        assert_eq!(out.uid, 1000);
+        assert_eq!(out.gid, 1001);
         assert_eq!(out.file_mode, libc::S_IFREG as u32 | 0o4644);
         assert_eq!(out.data_size, 19);
         assert_eq!(
