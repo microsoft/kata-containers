@@ -5,9 +5,11 @@
 
 use async_trait::async_trait;
 #[cfg(feature = "agent-policy")]
-use kata_agent_policy::policy::{
-    PolicyCopyFileRequest, PolicyCopySingleFileRequest, PolicyPutVolumeFileRequest,
-};
+use kata_agent_policy::policy::{PolicyCopySingleFileRequest, PolicyPutVolumeFileRequest};
+// The generic CopyFile gate exists only in non-strict builds; strict builds refuse the RPC
+// before any policy round trip.
+#[cfg(all(feature = "agent-policy", not(feature = "strict-policy")))]
+use kata_agent_policy::policy::PolicyCopyFileRequest;
 use rustjail::{pipestream::PipeStream, process::StreamType};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 use tokio::sync::Mutex;
@@ -15,7 +17,7 @@ use tokio::time::{timeout, Duration};
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
-#[cfg(feature = "agent-policy")]
+#[cfg(all(feature = "agent-policy", not(feature = "strict-policy")))]
 use std::convert::TryInto as _;
 use std::ffi::{CString, OsStr};
 use std::fmt::Debug;
@@ -2525,11 +2527,23 @@ impl agent_ttrpc::AgentService for AgentService {
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "copy_file", req);
 
-        // F-42 step-1 experiment: strict builds no longer deny CopyFile outright. The
-        // request is routed through the policy gate that already existed on the non-strict
-        // path. PolicyCopyFileRequest exposes path, file_type, symlink_target, file_size,
-        // file_mode, dir_mode, uid, gid and offset to Rego -- strictly more than C-ACI's
-        // plan9_mount, which sees only the destination path.
+        // FR-10: the generic host->guest file write lets the host choose both the bytes and
+        // the destination path, and the content is not policy-measured. Strict builds refuse
+        // it outright, without a policy round trip, so no policy-authoring mistake can
+        // re-open it. The traffic the runtime still needs goes through the typed content
+        // channel (copy_single_file / init_watchable_volume / put_volume_file /
+        // commit_volume_revision), where the guest -- not the host -- chooses the
+        // destination.
+        #[cfg(feature = "strict-policy")]
+        {
+            let _ = &req;
+            return Err(ttrpc_error(
+                ttrpc::Code::PERMISSION_DENIED,
+                anyhow!("the generic CopyFile RPC is disabled in strict mode"),
+            ));
+        }
+
+        #[cfg(not(feature = "strict-policy"))]
         {
             #[cfg(feature = "agent-policy")]
             {

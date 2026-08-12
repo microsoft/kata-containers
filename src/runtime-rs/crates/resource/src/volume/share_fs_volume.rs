@@ -5,7 +5,7 @@
 //
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     fs::File,
     io::Read,
     os::unix::fs::MetadataExt,
@@ -175,125 +175,6 @@ impl FsWatcher {
         }
 
         Ok(())
-    }
-
-    /// start monitor
-    #[allow(dead_code)]
-    pub async fn start_monitor(
-        &self,
-        agent: Arc<dyn Agent>,
-        src: PathBuf,
-        dst: PathBuf,
-    ) -> JoinHandle<()> {
-        let need_sync = self.need_sync.clone();
-        let pending_events = self.pending_events.clone();
-        let inotify = self.inotify.clone();
-        let monitor_config = self.config.clone();
-
-        // Perform a full sync before starting monitoring to ensure that files which exist before monitoring starts are also synced.
-        let agent_sync = agent.clone();
-        let src_sync = src.clone();
-        let dst_sync = dst.clone();
-
-        tokio::spawn(async move {
-            let mut buffer = [0u8; 4096];
-            let mut last_event_time = None;
-
-            // Initial sync: ensure existing contents in the directory are synchronized
-            {
-                info!(
-                    sl!(),
-                    "Initial sync from {:?} to {:?}", &src_sync, &dst_sync
-                );
-                if let Err(e) =
-                    copy_dir_recursively(&src_sync, &dst_sync.to_string_lossy(), &agent_sync).await
-                {
-                    error!(sl!(), "Initial sync failed: {:?}", e);
-                }
-            }
-
-            loop {
-                // use cloned inotify instance
-                match inotify.lock().await.read_events(&mut buffer) {
-                    Ok(events) => {
-                        for event in events {
-                            if !event.mask.intersects(
-                                EventMask::CREATE
-                                    | EventMask::MODIFY
-                                    | EventMask::DELETE
-                                    | EventMask::MOVED_FROM
-                                    | EventMask::MOVED_TO
-                                    | EventMask::CLOSE_WRITE,
-                            ) {
-                                continue;
-                            }
-
-                            if let Some(file_name) = event.name {
-                                let full_path = &monitor_config.path.join(file_name);
-                                let event_types: Vec<&str> = event
-                                    .mask
-                                    .iter()
-                                    .map(|m| match m {
-                                        EventMask::CREATE => "CREATE",
-                                        EventMask::DELETE => "DELETE",
-                                        EventMask::MODIFY => "MODIFY",
-                                        EventMask::MOVED_FROM => "MOVED_FROM",
-                                        EventMask::MOVED_TO => "MOVED_TO",
-                                        EventMask::CLOSE_WRITE => "CLOSE_WRITE",
-                                        _ => "OTHER",
-                                    })
-                                    .collect();
-
-                                info!(
-                                    sl!(),
-                                    "handle events [{}] {:?} -> {:?}",
-                                    event_types.join("|"),
-                                    event.mask,
-                                    full_path
-                                );
-                                pending_events.lock().await.insert(full_path.clone());
-                            }
-                        }
-                    }
-                    Err(e) => eprintln!("inotify error: {e}"),
-                }
-
-                // handle events to be synchronized
-                let events_paths = {
-                    let mut pending = pending_events.lock().await;
-                    pending.drain().collect::<Vec<_>>()
-                };
-                if !events_paths.is_empty() {
-                    *need_sync.lock().await = true;
-                    last_event_time = Some(Instant::now());
-                }
-
-                // Debounce handling
-                // It is used to prevent unnecessary repeated copies when file changes are triggered
-                // multiple times in a short period; we only execute the last one.
-                if let Some(t) = last_event_time {
-                    if Instant::now().duration_since(t) > DEBOUNCE_TIME && *need_sync.lock().await {
-                        info!(sl!(), "debounce handle copyfile {:?} -> {:?}", &src, &dst);
-                        if let Err(e) =
-                            copy_dir_recursively(&src, &dst.to_string_lossy(), &agent).await
-                        {
-                            error!(
-                                sl!(),
-                                "debounce handle copyfile {:?} -> {:?} failed with error: {:?}",
-                                &src,
-                                &dst,
-                                e
-                            );
-                            eprintln!("sync host/guest files failed: {e}");
-                        }
-                        *need_sync.lock().await = false;
-                        last_event_time = None;
-                    }
-                }
-
-                tokio::time::sleep(MONITOR_INTERVAL).await;
-            }
-        })
     }
 
     pub async fn start_watchable_monitor(
@@ -587,78 +468,46 @@ impl ShareFsVolume {
 
                 // If the mount source is a file, we can copy it to the sandbox
                 if src.is_file() {
-                    if is_single_file_mount(&src, m.destination()) {
-                        let agent_file_id = Self::copy_single_file_to_guest(
-                            Path::new(&source_path),
-                            m.destination(),
-                            sid,
-                            &agent,
-                        )
-                        .await
-                        .context("copy network file to guest")?;
+                    let agent_file_id = Self::copy_single_file_to_guest(
+                        Path::new(&source_path),
+                        m.destination(),
+                        sid,
+                        &agent,
+                    )
+                    .await
+                    .context("copy single file to guest")?;
 
-                        oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
-                        oci_mount.set_source(Some(PathBuf::from(agent_file_id)));
-                    } else {
-                        // Generate guest path
-                        let guest_path = generate_guest_path(cid, m.destination())
-                            .context("generate path failed")?;
-                        // Copy a single file
-                        Self::copy_file_to_guest(&src, &guest_path, &agent)
-                            .await
-                            .context("copy file to guest")?;
-
-                        oci_mount.set_source(Some(PathBuf::from(&guest_path)));
-                    }
+                    oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
+                    oci_mount.set_source(Some(PathBuf::from(agent_file_id)));
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
-                    if is_watchable_volume(&src) {
-                        let init_resp = agent
-                            .init_watchable_volume(InitWatchableVolumeRequest {
-                                host_volume_id: src.to_string_lossy().to_string(),
-                            })
-                            .await
-                            .context("init watchable volume")?;
+                    let init_resp = agent
+                        .init_watchable_volume(InitWatchableVolumeRequest {
+                            host_volume_id: src.to_string_lossy().to_string(),
+                        })
+                        .await
+                        .context("init watchable volume")?;
 
-                        sync_watchable_volume_revision(&src, &init_resp.agent_volume_id, &agent)
-                            .await
-                            .context("sync watchable volume")?;
+                    sync_watchable_volume_revision(&src, &init_resp.agent_volume_id, &agent)
+                        .await
+                        .context("sync watchable volume")?;
 
-                        oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
-                        oci_mount.set_source(Some(PathBuf::from(&init_resp.agent_volume_id)));
-                        volume.mounts.push(oci_mount);
+                    oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
+                    oci_mount.set_source(Some(PathBuf::from(&init_resp.agent_volume_id)));
+                    volume.mounts.push(oci_mount);
 
-                        let watcher = FsWatcher::new(&src).await?;
-                        let handle = watcher
-                            .start_watchable_monitor(
-                                agent.clone(),
-                                src.clone(),
-                                init_resp.agent_volume_id.clone(),
-                            )
-                            .await;
+                    let watcher = FsWatcher::new(&src).await?;
+                    let handle = watcher
+                        .start_watchable_monitor(
+                            agent.clone(),
+                            src.clone(),
+                            init_resp.agent_volume_id.clone(),
+                        )
+                        .await;
 
-                        volume_manager
-                            .register_monitor(&src.to_string_lossy(), Some(handle))
-                            .await?;
-                    } else {
-                        // We allow directory copying wildly
-                        // source path: "/var/lib/kubelet/pods/6dad7281-57ff-49e4-b844-c588ceabec16/volumes/kubernetes.io~projected/kube-api-access-8s2nl"
-                        info!(sl!(), "copying directory {:?} to guest", &src);
-
-                        // Get or create the guest path
-                        let guest_path = volume_manager
-                            .get_or_create_volume(&src.to_string_lossy(), cid, m.destination())
-                            .await
-                            .context("get or create volume")?;
-
-                        // Create directory
-                        Self::copy_directory_to_guest(&src, &guest_path, &agent)
-                            .await
-                            .context("copy directory to guest")?;
-
-                        oci_mount.set_source(Some(PathBuf::from(&guest_path)));
-                        volume.mounts.push(oci_mount);
-                    }
+                    volume_manager
+                        .register_monitor(&src.to_string_lossy(), Some(handle))
+                        .await?;
                 } else {
                     // If not, we can ignore it. Let's issue a warning so that the user knows.
                     warn!(
@@ -745,86 +594,6 @@ impl ShareFsVolume {
             }
         }
         Ok(volume)
-    }
-
-    async fn copy_file_to_guest(
-        src: &Path,
-        guest_path: &str,
-        agent: &Arc<dyn Agent>,
-    ) -> Result<()> {
-        // Read file metadata
-        let file_metadata = std::fs::metadata(src)
-            .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
-
-        // Open file
-        let mut file = File::open(src).with_context(|| format!("Failed to open file: {src:?}"))?;
-
-        // Open read file contents to buffer
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)
-            .with_context(|| format!("Failed to read file: {src:?}"))?;
-
-        // Create gRPC request
-        let r = agent::CopyFileRequest {
-            path: guest_path.to_owned(),
-            file_size: file_metadata.len() as i64,
-            uid: file_metadata.uid() as i32,
-            gid: file_metadata.gid() as i32,
-            file_mode: file_metadata.mode(),
-            data: buffer,
-            ..Default::default()
-        };
-
-        debug!(sl!(), "copy_file: {:?} to sandbox {:?}", &src, guest_path);
-
-        // Issue gRPC request to agent
-        agent.copy_file(r).await.with_context(|| {
-            format!("copy file request failed: src: {src:?}, dest: {guest_path:?}")
-        })?;
-        Ok(())
-    }
-
-    async fn copy_directory_to_guest(
-        src: &Path,
-        guest_path: &str,
-        agent: &Arc<dyn Agent>,
-    ) -> Result<()> {
-        // create directory
-        let dir_metadata =
-            std::fs::metadata(src).context(format!("read metadata from directory: {src:?}"))?;
-
-        // ttRPC request for creating directory
-        let dir_request = agent::CopyFileRequest {
-            path: guest_path.to_owned(),
-            file_size: 0, // useless for dir
-            uid: dir_metadata.uid() as i32,
-            gid: dir_metadata.gid() as i32,
-            dir_mode: DIR_MODE_PERMS,
-            file_mode: dir_metadata.mode(),
-            data: vec![], // no files
-            ..Default::default()
-        };
-
-        info!(
-            sl!(),
-            "creating directory: {:?} in sandbox with file_mode: {:?}",
-            guest_path,
-            dir_request.file_mode
-        );
-
-        // send request for creating directory
-        agent
-            .copy_file(dir_request)
-            .await
-            .context(format!("create directory in sandbox: {guest_path:?}"))?;
-
-        // recursively copy files from this directory
-        // similar to `scp -r $source_dir $target_dir`
-        copy_dir_recursively(src, guest_path, agent)
-            .await
-            .context(format!("failed to copy directory contents: {src:?}"))?;
-
-        Ok(())
     }
 }
 
@@ -941,16 +710,6 @@ fn should_copy_volume(
     };
 
     enabled_types.contains(classify_copy_volume(src, destination))
-}
-
-fn is_single_file_mount(src: &Path, destination: &Path) -> bool {
-    let is_network_file = src
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| NETWORK_FILE_NAMES.contains(&name))
-        .unwrap_or(false);
-
-    is_network_file || destination == Path::new(TERMINATION_LOG_DESTINATION)
 }
 
 fn classify_copy_volume(src: &Path, destination: &Path) -> &'static str {
@@ -1088,128 +847,6 @@ impl Volume for ShareFsVolume {
     }
 }
 
-#[allow(dead_code)]
-async fn copy_dir_recursively<P: AsRef<Path>>(
-    src_dir: P,
-    dest_dir: &str,
-    agent: &Arc<dyn Agent>,
-) -> Result<()> {
-    let mut queue = VecDeque::new();
-    queue.push_back((src_dir.as_ref().to_path_buf(), dest_dir.to_string()));
-
-    while let Some((current_src, current_dest)) = queue.pop_front() {
-        let mut entries = tokio::fs::read_dir(&current_src)
-            .await
-            .context(format!("read directory: {current_src:?}"))?;
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .context(format!("read directory entry in {current_src:?}"))?
-        {
-            let entry_path = entry.path();
-            let file_name = entry_path
-                .file_name()
-                .ok_or_else(|| anyhow!("get file name for {:?}", entry_path))?
-                .to_string_lossy()
-                .to_string();
-
-            let dest_path = format!("{current_dest}/{file_name}");
-
-            let metadata = entry
-                .metadata()
-                .await
-                .context(format!("read metadata for {entry_path:?}"))?;
-
-            if metadata.is_symlink() {
-                // handle symlinks
-                let entry_path_err = entry_path.clone();
-                let entry_path_clone = entry_path.clone();
-                let link_target =
-                    tokio::task::spawn_blocking(move || std::fs::read_link(&entry_path_clone))
-                        .await
-                        .context(format!(
-                            "failed to spawn blocking task for symlink: {entry_path_err:?}"
-                        ))??;
-
-                let link_target_str = link_target.to_string_lossy().into_owned();
-                let symlink_request = agent::CopyFileRequest {
-                    path: dest_path.clone(),
-                    file_size: link_target_str.len() as i64,
-                    uid: metadata.uid() as i32,
-                    gid: metadata.gid() as i32,
-                    file_mode: SFlag::S_IFLNK.bits(),
-                    data: link_target_str.clone().into_bytes(),
-                    ..Default::default()
-                };
-                info!(
-                    sl!(),
-                    "copying symlink_request {:?} in sandbox with file_mode: {:?}",
-                    dest_path.clone(),
-                    symlink_request.file_mode
-                );
-
-                agent.copy_file(symlink_request).await.context(format!(
-                    "failed to create symlink: {dest_path:?} -> {link_target_str:?}"
-                ))?;
-            } else if metadata.is_dir() {
-                // handle directory
-                let dir_request = agent::CopyFileRequest {
-                    path: dest_path.clone(),
-                    file_size: 0,
-                    uid: metadata.uid() as i32,
-                    gid: metadata.gid() as i32,
-                    dir_mode: metadata.mode(),
-                    file_mode: SFlag::S_IFDIR.bits(),
-                    data: vec![],
-                    ..Default::default()
-                };
-                info!(
-                    sl!(),
-                    "copying subdirectory {:?} in sandbox with file_mode: {:?}",
-                    dir_request.path,
-                    dir_request.file_mode
-                );
-                agent
-                    .copy_file(dir_request)
-                    .await
-                    .context(format!("Failed to create subdirectory: {dest_path:?}"))?;
-
-                // push back the sub-dir into queue to handle it in time
-                queue.push_back((entry_path, dest_path));
-            } else if metadata.is_file() {
-                // async read file
-                let mut file = tokio::fs::File::open(&entry_path)
-                    .await
-                    .context(format!("open file: {entry_path:?}"))?;
-
-                let mut buffer = Vec::new();
-                file.read_to_end(&mut buffer)
-                    .await
-                    .context(format!("read file: {entry_path:?}"))?;
-
-                let file_request = agent::CopyFileRequest {
-                    path: dest_path.clone(),
-                    file_size: metadata.len() as i64,
-                    uid: metadata.uid() as i32,
-                    gid: metadata.gid() as i32,
-                    file_mode: SFlag::S_IFREG.bits(),
-                    data: buffer,
-                    ..Default::default()
-                };
-
-                info!(sl!(), "copy file {:?} to guest", dest_path.clone());
-                agent
-                    .copy_file(file_request)
-                    .await
-                    .context(format!("copy file: {entry_path:?} -> {dest_path:?}"))?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
 pub(crate) fn is_share_fs_volume(m: &oci::Mount) -> bool {
     let mount_type = get_mount_type(m);
     (mount_type == "bind" || mount_type == mount::KATA_EPHEMERAL_VOLUME_TYPE)
@@ -1266,20 +903,6 @@ pub fn generate_mount_path(id: &str, file_name: &str) -> String {
     format!("{nid}-{uid}-{file_name}")
 }
 
-/// This function is used to check whether a given volume is a watchable volume.
-/// More specifically, it determines whether the volume's path is located under
-/// a predefined list of allowed copy directories.
-pub(crate) fn is_watchable_volume(source_path: &PathBuf) -> bool {
-    if !source_path.is_dir() {
-        return false;
-    }
-    // watchable list: { kubernetes.io~projected, kubernetes.io~configmap, kubernetes.io~secret, kubernetes.io~downward-api }
-    is_projected(source_path)
-        || is_downward_api(source_path)
-        || is_secret(source_path)
-        || is_configmap(source_path)
-}
-
 /// Generates a guest path related to mount dest
 fn generate_guest_path(cid: &str, mount_destination: &Path) -> Result<String> {
     let mut data = vec![0u8; 8];
@@ -1326,36 +949,6 @@ mod test {
         assert!(is_system_mount(sys_sub_dir));
         assert!(is_system_mount(proc_sub_dir));
         assert!(!is_system_mount(not_sys_dir));
-    }
-
-    #[test]
-    fn test_is_watchable_volume() {
-        // The configmap is /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~configmap/kube-configmap-0s2no/{..data, key1, key2,...}
-        // The secret is /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~secret/kube-secret-2s2np/{..data, key1, key2,...}
-        // The projected is /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~projected/kube-api-access-8s2nl/{..data, key1, key2,...}
-        // The downward-api is /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~downward-api/downward-api-xxxx/{..data, key1, key2,...}
-        let configmap =
-            "var/lib/kubelet/pods/1000/volumes/kubernetes.io~configmap/kube-configmap-0s2no";
-        let secret = "var/lib/kubelet/pods/1000/volumes/kubernetes.io~secret/kube-secret-2s2np";
-        let projected =
-            "var/lib/kubelet/1000/<uid>/volumes/kubernetes.io~projected/kube-api-access-8s2nl";
-        let downward_api =
-            "var/lib/kubelet/1000/<uid>/volumes/kubernetes.io~downward-api/downward-api-xxxx";
-
-        let temp_dir = tempfile::tempdir().unwrap();
-        let cm_path = temp_dir.path().join(configmap);
-        std::fs::create_dir_all(&cm_path).unwrap();
-        let secret_path = temp_dir.path().join(secret);
-        std::fs::create_dir_all(&secret_path).unwrap();
-        let projected_path = temp_dir.path().join(projected);
-        std::fs::create_dir_all(&projected_path).unwrap();
-        let downward_api_path = temp_dir.path().join(downward_api);
-        std::fs::create_dir_all(&downward_api_path).unwrap();
-
-        assert!(is_watchable_volume(&cm_path));
-        assert!(is_watchable_volume(&secret_path));
-        assert!(is_watchable_volume(&projected_path));
-        assert!(is_watchable_volume(&downward_api_path));
     }
 
     #[test]
@@ -1513,7 +1106,6 @@ mod test {
         let source = PathBuf::from("/var/lib/kubelet/pods/1000/termination-log");
         let destination = PathBuf::from(TERMINATION_LOG_DESTINATION);
 
-        assert!(is_single_file_mount(&source, &destination));
         assert_eq!(
             single_file_type_from_mount(&source, &destination).unwrap(),
             SingleFileType::TerminationLog
@@ -1521,11 +1113,14 @@ mod test {
     }
 
     #[test]
-    fn test_other_file_does_not_use_single_file_path_elsewhere() {
-        let source = PathBuf::from("/var/lib/kubelet/pods/1000/termination-log");
-        let destination = PathBuf::from("/tmp/termination-log");
+    fn test_other_file_gets_an_unspecified_kind() {
+        let source = PathBuf::from("/var/lib/kubelet/pods/1000/payload.bin");
+        let destination = PathBuf::from("/tmp/payload.bin");
 
-        assert!(!is_single_file_mount(&source, &destination));
+        assert_eq!(
+            single_file_type_from_mount(&source, &destination).unwrap(),
+            SingleFileType::Unspecified
+        );
     }
 
     #[test]

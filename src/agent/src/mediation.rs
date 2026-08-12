@@ -163,9 +163,10 @@ pub const MEDIATION_MANIFEST: &[(&str, &str, &str, EnforcementClass)] = &[
     ("InitWatchableVolume", "init_watchable_volume", "InitWatchableVolumeRequest", EnforcementClass::PolicyGated),
     ("PutVolumeFile", "put_volume_file", "PutVolumeFileRequest", EnforcementClass::PolicyGated),
     ("CommitVolumeRevision", "commit_volume_revision", "CommitVolumeRevisionRequest", EnforcementClass::PolicyGated),
-    // FR-10: strict builds refuse CopyFile outright — the content is not policy-measured
-    // and no content-addressed channel exists to replace it. Declared as it behaves, not as
-    // it would behave if the deny were absent.
+    // FR-10: strict builds refuse the generic CopyFile outright — the content is not
+    // policy-measured and the host chooses the destination path. The typed content channel
+    // above carries the traffic the runtime still needs. Declared as it behaves, not as it
+    // would behave if the deny were absent.
     #[cfg(feature = "strict-policy")]
     ("CopyFile", "copy_file", "CopyFileRequest", EnforcementClass::DeniedUnconditionally),
     #[cfg(not(feature = "strict-policy"))]
