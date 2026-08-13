@@ -1907,10 +1907,14 @@ allow_image_guest_pull_source(p_oci, i_storage) if {
     p_digest == i_digest
     print("allow_image_guest_pull_source 1: true")
 }
-# An unpinned reference is admitted only where pinning is not required. Strict
-# deployments set `require_pinned_image_digests` and get no such body, so an unpinned
-# reference has no matching rule and is denied. Where pinning is not required this is
-# still no weaker than the tag the tenant wrote.
+# An unpinned reference is admitted only where pinning is not required.
+# `require_pinned_image_digests` now ships **true**, so by default this body does not
+# apply and an unpinned reference has no matching rule and is denied. A deployment that
+# clears the setting gets this body back, which is still no weaker than the tag the
+# tenant wrote -- but it is a materially weaker posture, because guest pull has no
+# dm-verity root hash to fall back on and the setting is the only thing pinning content.
+# The setting is emitted into `policy_data.common`, so a relying party can confirm from
+# the measured policy which posture was in force.
 allow_image_guest_pull_source(p_oci, i_storage) if {
     not policy_data.common.require_pinned_image_digests
     p_image := p_oci.Annotations["io.kubernetes.cri.image-name"]
