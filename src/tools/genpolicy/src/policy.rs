@@ -756,9 +756,12 @@ pub struct CommonData {
     /// `VerifiedImageStore::authorize`; that store has been removed in favour of the policy
     /// carrying the binding, so this is where the requirement lives now.
     ///
-    /// Defaults to `false` so that tag-based pod specs keep working on non-strict
-    /// deployments. Strict/PARMA deployments must set this to `true`.
-    #[serde(default)]
+    /// Defaults to `true`, including when the key is absent from a settings file.
+    /// `#[serde(default)]` would have yielded `false` there, which fails *open* on a
+    /// control whose whole purpose is to pin content: guest pull has no dm-verity root
+    /// hash to fall back on, so an unpinned reference is bound by nothing. A deployment
+    /// that wants tag-based pod specs has to say so explicitly.
+    #[serde(default = "default_true")]
     pub require_pinned_image_digests: bool,
 
     /// Expected apparmor profile for containers whose pod spec does not pin a

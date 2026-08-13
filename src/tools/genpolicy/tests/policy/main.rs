@@ -463,11 +463,20 @@ mod tests {
         runtests("state/waitprocess").await;
     }
 
+    /// This fixture ships its own settings clearing `require_pinned_image_digests`,
+    /// which now defaults to `true`. Its guest-pull image is the tag
+    /// `quay.io/prometheus/busybox:latest`, and the fixture is shared by several tests
+    /// that are about denial diagnostics and field mediation rather than image pinning;
+    /// pinning it would churn those cases for no gain.
     #[tokio::test]
     async fn test_state_exec_process_deployment() {
         runtests("state/execprocessdeployment").await;
     }
 
+    /// This fixture ships its own settings clearing `require_pinned_image_digests`,
+    /// which now defaults to `true`. Short-name normalization is what is under test here
+    /// (`busybox:latest` -> `docker.io/library/busybox:latest`), and a short name is by
+    /// definition unpinned, so the case cannot be expressed under the pinning default.
     #[tokio::test]
     async fn test_create_container_image_short_name() {
         runtests("createcontainer/image_short_name").await;
@@ -476,7 +485,13 @@ mod tests {
     /// RM-51: the same request as `image_short_name`, but generated with
     /// `require_pinned_image_digests` on. The tag-named guest-pull image must now be
     /// denied — this is the check that replaced the removed `VerifiedImageStore`
-    /// unpinned-reference refusal in the guest.
+    /// unpinned-reference refusal in the guest. The fixture keeps an explicit `true` in
+    /// its own settings even though that is now the default, so the case still states
+    /// what it depends on rather than inheriting it.
+    ///
+    /// The positive half of RM-51 is covered by the fixtures that already name
+    /// digest-pinned images and now run under the pinning default: `cgroup_mount_extras`,
+    /// `env_vars`, `gid` and `security_context/fsgroup`.
     #[tokio::test]
     async fn test_create_container_require_pinned_images() {
         runtests("createcontainer/require_pinned_images").await;
