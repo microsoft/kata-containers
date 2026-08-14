@@ -27,10 +27,11 @@ CONFIG_CRYPTO_ECDSA=y
 # Dependency of _CRYPTO_
 CONFIG_MODULE_SIG=y
 
-# HGX/DGX platform
-CONFIG_INFINIBAND=m
-CONFIG_INFINIBAND_USER_MAD=m
-
-CONFIG_NET_VENDOR_MELLANOX=y
-CONFIG_MLX5_CORE=m
-CONFIG_MLX5_INFINIBAND=m
+# Mellanox ConnectX (mlx5) + InfiniBand/RoCE are provided built-in (=y) by
+# fragments/common/mlx5.conf, which is merged into every kernel build. Do NOT
+# redefine those symbols here: build-kernel.sh's merge_config check dies on a
+# redundant/redefined CONFIG (the previous =m block here conflicted with
+# common's =y once common/mlx5.conf was added). Built-in means cold-plugged
+# CX5/CX6 VFs bind at guest PCI enumeration and expose /dev/infiniband without
+# NVRC having to modprobe them (an IB-only pod dispatches to NVRC's no-op cpu
+# mode).
