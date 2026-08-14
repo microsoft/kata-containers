@@ -44,9 +44,9 @@ use protocols::agent::{
     AddSwapPathRequest, AddSwapRequest, AgentDetails, CommitVolumeRevisionRequest, CopyFileRequest,
     CopySingleFileRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
     InitVolumeRequest, InitVolumeResponse, Interfaces, Metrics, OOMEvent,
-    PutVolumeFileRevisionRequest, ReadStreamResponse, ResizeVolumeRequest, Routes, SetIPTablesRequest,
-    SetIPTablesResponse, SingleFileType, StatsContainerResponse, VolumeStatsRequest,
-    WaitProcessResponse, WriteStreamResponse,
+    PutVolumeFileRevisionRequest, ReadStreamResponse, ResizeVolumeRequest, Routes,
+    SetIPTablesRequest, SetIPTablesResponse, SingleFileType, StatsContainerResponse,
+    VolumeStatsRequest, WaitProcessResponse, WriteStreamResponse,
 };
 use protocols::csi::{
     volume_usage::Unit as VolumeUsage_Unit, VolumeCondition, VolumeStatsResponse, VolumeUsage,
@@ -175,8 +175,7 @@ struct VolumeState {
 }
 
 lazy_static! {
-    static ref VOLUMES: StdMutex<HashMap<String, VolumeState>> =
-        StdMutex::new(HashMap::new());
+    static ref VOLUMES: StdMutex<HashMap<String, VolumeState>> = StdMutex::new(HashMap::new());
 }
 
 #[cfg(test)]
@@ -2592,7 +2591,10 @@ impl agent_ttrpc::AgentService for AgentService {
 
         let target_file_name = match req.file_type.enum_value_or_default() {
             SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED
-                if req.data_size == 0 && req.data.is_empty() => "empty-file",
+                if req.data_size == 0 && req.data.is_empty() =>
+            {
+                "empty-file"
+            }
             SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => "resolv.conf",
             SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => "hosts",
             SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => "hostname",
@@ -4735,7 +4737,10 @@ mod tests {
         let mut req = put_volume_file_request(&agent_volume_id, "token", "rev1", b"token");
         req.file_mode = stat::SFlag::S_IFLNK.bits();
 
-        assert!(agent_service.put_volume_file_revision(&ctx, req).await.is_err());
+        assert!(agent_service
+            .put_volume_file_revision(&ctx, req)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -4917,10 +4922,16 @@ mod tests {
         let ctx = mk_ttrpc_context();
 
         let first = put_volume_file_request(&agent_volume_id, "token", "rev1", b"token");
-        agent_service.put_volume_file_revision(&ctx, first).await.unwrap();
+        agent_service
+            .put_volume_file_revision(&ctx, first)
+            .await
+            .unwrap();
 
         let second = put_volume_file_request(&agent_volume_id, "ca.crt", "rev2", b"crt");
-        assert!(agent_service.put_volume_file_revision(&ctx, second).await.is_err());
+        assert!(agent_service
+            .put_volume_file_revision(&ctx, second)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -4956,7 +4967,10 @@ mod tests {
         let volume_root = volume_root_path(&agent_volume_id).unwrap();
 
         let first = put_volume_file_request(&agent_volume_id, "token", "rev1", b"one");
-        agent_service.put_volume_file_revision(&ctx, first).await.unwrap();
+        agent_service
+            .put_volume_file_revision(&ctx, first)
+            .await
+            .unwrap();
         agent_service
             .commit_volume_revision(
                 &ctx,
@@ -4983,7 +4997,10 @@ mod tests {
         );
 
         let second = put_volume_file_request(&agent_volume_id, "token", "rev2", b"two");
-        agent_service.put_volume_file_revision(&ctx, second).await.unwrap();
+        agent_service
+            .put_volume_file_revision(&ctx, second)
+            .await
+            .unwrap();
         agent_service
             .commit_volume_revision(
                 &ctx,

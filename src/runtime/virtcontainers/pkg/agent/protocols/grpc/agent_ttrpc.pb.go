@@ -47,8 +47,8 @@ type AgentServiceService interface {
 	SetGuestDateTime(context.Context, *SetGuestDateTimeRequest) (*emptypb.Empty, error)
 	CopyFile(context.Context, *CopyFileRequest) (*emptypb.Empty, error)
 	CopySingleFile(context.Context, *CopySingleFileRequest) (*CopySingleFileResponse, error)
-	InitWatchableVolume(context.Context, *InitWatchableVolumeRequest) (*InitWatchableVolumeResponse, error)
-	PutVolumeFile(context.Context, *PutVolumeFileRequest) (*emptypb.Empty, error)
+	InitVolume(context.Context, *InitVolumeRequest) (*InitVolumeResponse, error)
+	PutVolumeFileRevision(context.Context, *PutVolumeFileRevisionRequest) (*emptypb.Empty, error)
 	CommitVolumeRevision(context.Context, *CommitVolumeRevisionRequest) (*emptypb.Empty, error)
 	GetOOMEvent(context.Context, *GetOOMEventRequest) (*OOMEvent, error)
 	AddSwap(context.Context, *AddSwapRequest) (*emptypb.Empty, error)
@@ -321,19 +321,19 @@ func RegisterAgentServiceService(srv *ttrpc.Server, svc AgentServiceService) {
 				}
 				return svc.CopySingleFile(ctx, &req)
 			},
-			"InitWatchableVolume": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
-				var req InitWatchableVolumeRequest
+			"InitVolume": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
+				var req InitVolumeRequest
 				if err := unmarshal(&req); err != nil {
 					return nil, err
 				}
-				return svc.InitWatchableVolume(ctx, &req)
+				return svc.InitVolume(ctx, &req)
 			},
-			"PutVolumeFile": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
-				var req PutVolumeFileRequest
+			"PutVolumeFileRevision": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
+				var req PutVolumeFileRevisionRequest
 				if err := unmarshal(&req); err != nil {
 					return nil, err
 				}
-				return svc.PutVolumeFile(ctx, &req)
+				return svc.PutVolumeFileRevision(ctx, &req)
 			},
 			"CommitVolumeRevision": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
 				var req CommitVolumeRevisionRequest
@@ -701,17 +701,17 @@ func (c *agentserviceClient) CopySingleFile(ctx context.Context, req *CopySingle
 	return &resp, nil
 }
 
-func (c *agentserviceClient) InitWatchableVolume(ctx context.Context, req *InitWatchableVolumeRequest) (*InitWatchableVolumeResponse, error) {
-	var resp InitWatchableVolumeResponse
-	if err := c.client.Call(ctx, "grpc.AgentService", "InitWatchableVolume", req, &resp); err != nil {
+func (c *agentserviceClient) InitVolume(ctx context.Context, req *InitVolumeRequest) (*InitVolumeResponse, error) {
+	var resp InitVolumeResponse
+	if err := c.client.Call(ctx, "grpc.AgentService", "InitVolume", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-func (c *agentserviceClient) PutVolumeFile(ctx context.Context, req *PutVolumeFileRequest) (*emptypb.Empty, error) {
+func (c *agentserviceClient) PutVolumeFileRevision(ctx context.Context, req *PutVolumeFileRevisionRequest) (*emptypb.Empty, error) {
 	var resp emptypb.Empty
-	if err := c.client.Call(ctx, "grpc.AgentService", "PutVolumeFile", req, &resp); err != nil {
+	if err := c.client.Call(ctx, "grpc.AgentService", "PutVolumeFileRevision", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

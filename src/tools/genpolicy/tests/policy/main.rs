@@ -14,14 +14,15 @@ mod tests {
 
     use protocols::agent::{
         AddARPNeighborsRequest, CommitVolumeRevisionRequest, CreateContainerRequest,
-        CreateSandboxRequest, ExecProcessRequest, InitVolumeRequest,
-        RemoveContainerRequest, SignalProcessRequest, StartContainerRequest, StatsContainerRequest,
-        TtyWinResizeRequest, UpdateInterfaceRequest, UpdateRoutesRequest, WaitProcessRequest,
+        CreateSandboxRequest, ExecProcessRequest, InitVolumeRequest, RemoveContainerRequest,
+        SignalProcessRequest, StartContainerRequest, StatsContainerRequest, TtyWinResizeRequest,
+        UpdateInterfaceRequest, UpdateRoutesRequest, WaitProcessRequest,
     };
     use serde::{Deserialize, Serialize};
 
     use kata_agent_policy::policy::{
-        AgentPolicy, PolicyCopyFileRequest, PolicyCopySingleFileRequest, PolicyPutVolumeFileRevisionRequest,
+        AgentPolicy, PolicyCopyFileRequest, PolicyCopySingleFileRequest,
+        PolicyPutVolumeFileRevisionRequest,
     };
 
     // Translate each test case in testcases.json
@@ -69,7 +70,9 @@ mod tests {
                 TestRequest::InitVolumeRequest(_) => {
                     write!(f, "InitVolumeRequest")
                 }
-                TestRequest::PutVolumeFileRevisionRequest(_) => write!(f, "PutVolumeFileRevisionRequest"),
+                TestRequest::PutVolumeFileRevisionRequest(_) => {
+                    write!(f, "PutVolumeFileRevisionRequest")
+                }
                 TestRequest::CommitVolumeRevisionRequest(_) => {
                     write!(f, "CommitVolumeRevisionRequest")
                 }
