@@ -73,6 +73,7 @@ fn secret_in_separate_file() -> Result<(), Box<dyn std::error::Error>> {
 fn guest_pull_missing_supplemental_groups_exits() -> Result<(), Box<dyn std::error::Error>> {
     let test_case_dir = "guest_pull_missing_supplemental_groups";
     let workdir = prepare_workdir(test_case_dir, &[]);
+    enable_guest_pull(&workdir);
     let pod_yaml_path = workdir.join("missing_supplemental_groups.yaml");
     fs::write(
         &pod_yaml_path,
@@ -97,6 +98,7 @@ spec:
 
     let mut cmd = Command::cargo_bin("genpolicy")?;
     cmd.arg("--yaml-file").arg(&pod_yaml_path);
+    cmd.arg("-j").arg(workdir.join("genpolicy-settings.json"));
 
     let output = cmd.output()?;
     assert!(!output.status.success());
@@ -115,6 +117,7 @@ spec:
 fn guest_pull_run_as_user_requires_non_default_group() -> Result<(), Box<dyn std::error::Error>> {
     let test_case_dir = "guest_pull_run_as_user_requires_non_default_group";
     let workdir = prepare_workdir(test_case_dir, &[]);
+    enable_guest_pull(&workdir);
     let pod_yaml_path = workdir.join("run_as_user_requires_non_default_group.yaml");
     fs::write(
         &pod_yaml_path,
@@ -141,6 +144,7 @@ spec:
 
     let mut cmd = Command::cargo_bin("genpolicy")?;
     cmd.arg("--yaml-file").arg(&pod_yaml_path);
+    cmd.arg("-j").arg(workdir.join("genpolicy-settings.json"));
 
     let output = cmd.output()?;
     assert!(!output.status.success());
@@ -207,11 +211,13 @@ spec:
     for (name, yaml) in cases {
         let test_case_dir = format!("guest_pull_default_security_context_values_{name}");
         let workdir = prepare_workdir(&test_case_dir, &[]);
+        enable_guest_pull(&workdir);
         let pod_yaml_path = workdir.join(format!("{name}.yaml"));
         fs::write(&pod_yaml_path, yaml)?;
 
         let mut cmd = Command::cargo_bin("genpolicy")?;
         cmd.arg("--yaml-file").arg(&pod_yaml_path);
+        cmd.arg("-j").arg(workdir.join("genpolicy-settings.json"));
         cmd.assert().success();
     }
 
@@ -278,11 +284,13 @@ spec:
     for (name, yaml) in cases {
         let test_case_dir = format!("guest_pull_{name}");
         let workdir = prepare_workdir(&test_case_dir, &[]);
+        enable_guest_pull(&workdir);
         let pod_yaml_path = workdir.join(format!("{name}.yaml"));
         fs::write(&pod_yaml_path, yaml)?;
 
         let mut cmd = Command::cargo_bin("genpolicy")?;
         cmd.arg("--yaml-file").arg(&pod_yaml_path);
+        cmd.arg("-j").arg(workdir.join("genpolicy-settings.json"));
         cmd.assert().success();
     }
 
@@ -412,6 +420,39 @@ fn output_behavior() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Configure the workdir's settings copy as a guest-pull cluster.
+///
+/// `prepare_workdir` copies the *shipped* `genpolicy-settings.json`, which since RM-119
+/// ships `cluster_config.guest_pull = false` and `common.allow_guest_pull_images = false`.
+/// The `guest_pull_*` tests below are about the guest-pull path specifically, so they have
+/// to ask for it rather than inherit it. Without this they would either trip
+/// `exit_if_guest_pull_is_refused` and report the wrong error, or — worse for the two that
+/// assert success — pass while exercising nothing, because
+/// `exit_if_guest_pull_needs_security_context` returns early when `guest_pull` is unset.
+fn enable_guest_pull(workdir: &path::Path) {
+    let settings_path = workdir.join("genpolicy-settings.json");
+    let settings = fs::read_to_string(&settings_path)
+        .expect("the workdir should carry a copy of the shipped settings");
+
+    let guest_pull = "\"guest_pull\": false,";
+    let allow = "\"allow_guest_pull_images\": false,";
+    assert_eq!(
+        settings.matches(guest_pull).count(),
+        1,
+        "shipped settings should carry exactly one {guest_pull}"
+    );
+    assert_eq!(
+        settings.matches(allow).count(),
+        1,
+        "shipped settings should carry exactly one {allow}"
+    );
+
+    let settings = settings
+        .replace(guest_pull, "\"guest_pull\": true,")
+        .replace(allow, "\"allow_guest_pull_images\": true,");
+    fs::write(&settings_path, settings).expect("should be able to rewrite the settings copy");
 }
 
 fn prepare_workdir(test_case_dir: &str, files_to_copy: &[&str]) -> path::PathBuf {

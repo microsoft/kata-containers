@@ -342,6 +342,7 @@
             "CAP_CHECKPOINT_RESTORE"
         ],
         "image_layer_verification": "none",
+        "allow_guest_pull_images": false,
         "require_pinned_image_digests": true,
         "default_apparmor_profile": "",
         "default_rlimits": []
@@ -352,7 +353,7 @@
     },
     "cluster_config": {
         "pause_container_image": "mcr.microsoft.com/oss/kubernetes/pause:3.6",
-        "guest_pull": true,
+        "guest_pull": false,
         "pause_container_id_policy": "v1",
         "emptydir_type": "block-encrypted",
         "cgroup_mount_extras_allowed": [

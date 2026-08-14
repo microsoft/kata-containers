@@ -1899,7 +1899,20 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, p_oci) if {
 # every layer digest the manifest lists. A tag names whatever the host decides to serve.
 # The guest used to catch that separately, in VerifiedImageStore::authorize
 # (ImageError::UnpinnedImage); that store is gone, so the requirement lives here now.
+#
+# RM-119: both bodies below are gated on `allow_guest_pull_images`, which ships **false**.
+# Guest pull is the one storage path with no declaration behind it -- genpolicy emits no
+# `p_storage`, which is why `allow_storages` subtracts it from the cardinality check --
+# so a host may present an `image_guest_pull` storage *in addition to* a container's
+# declared dm-verity layers. Every declaration is still satisfied and the extra storage
+# is exempt from the count, so the request passes while a second, undeclared root
+# filesystem is admitted. With an unpinned reference that is host-chosen content at the
+# container root in a deployment whose layers are otherwise verity-bound: the guest-pull
+# path sidesteps the host-pull integrity guarantee without ever failing a verity check.
+# Refusing workload guest pull outright removes that, and removes a path whose content
+# verification happens in image-rs inside CDH and is never reported back to the policy.
 allow_image_guest_pull_source(p_oci, i_storage) if {
+    policy_data.common.allow_guest_pull_images
     p_image := p_oci.Annotations["io.kubernetes.cri.image-name"]
     p_digest := image_pinned_digest(p_image)
     i_digest := image_pinned_digest(i_storage.source)
@@ -1907,15 +1920,16 @@ allow_image_guest_pull_source(p_oci, i_storage) if {
     p_digest == i_digest
     print("allow_image_guest_pull_source 1: true")
 }
-# An unpinned reference is admitted only where pinning is not required.
-# `require_pinned_image_digests` now ships **true**, so by default this body does not
-# apply and an unpinned reference has no matching rule and is denied. A deployment that
-# clears the setting gets this body back, which is still no weaker than the tag the
-# tenant wrote -- but it is a materially weaker posture, because guest pull has no
-# dm-verity root hash to fall back on and the setting is the only thing pinning content.
-# The setting is emitted into `policy_data.common`, so a relying party can confirm from
-# the measured policy which posture was in force.
+# An unpinned reference is admitted only where guest pull is enabled *and* pinning is not
+# required. `allow_guest_pull_images` ships false and `require_pinned_image_digests` ships
+# true, so by default this body does not apply and an unpinned reference has no matching
+# rule and is denied. A deployment that clears both gets this body back, which is still no
+# weaker than the tag the tenant wrote -- but it is a materially weaker posture, because
+# guest pull has no dm-verity root hash to fall back on and the setting is the only thing
+# pinning content. Both settings are emitted into `policy_data.common`, so a relying party
+# can confirm from the measured policy which posture was in force.
 allow_image_guest_pull_source(p_oci, i_storage) if {
+    policy_data.common.allow_guest_pull_images
     not policy_data.common.require_pinned_image_digests
     p_image := p_oci.Annotations["io.kubernetes.cri.image-name"]
     not contains(p_image, "@")
@@ -1926,11 +1940,26 @@ allow_image_guest_pull_source(p_oci, i_storage) if {
 # The pause container is the one case with no declared image: genpolicy deliberately
 # omits the annotation for it (policy.rs, `if !is_pause_container`), and the runtime
 # names its rootfs with the literal "pause" -- get_image_reference returns that for
-# ContainerType::PodSandbox -- because the pause image ships inside the measured guest
-# rootfs and is never pulled. Admitting the sentinel only for a declaration that is
-# *both* image-less and typed "sandbox" keeps the pause path from becoming a wildcard
-# that any container could claim.
+# ContainerType::PodSandbox -- because in a guest-pull deployment the pause image ships
+# inside the measured guest rootfs and is never pulled. Admitting the sentinel only for a
+# declaration that is *both* image-less and typed "sandbox" keeps the pause path from
+# becoming a wildcard that any container could claim.
+#
+# RM-119: gated on `allow_guest_pull_images` like the two bodies above, so that setting
+# refuses *every* `image_guest_pull` storage rather than all but one. This is safe
+# because the sentinel is only ever produced by the guest-pull path itself:
+# `get_image_reference` is reached from exactly one place,
+# `handle_virtual_volume_storage` in runtime-rs, and only when the snapshotter's volume
+# type is `image_guest_pull`. A host-pull deployment's sandbox rootfs is an overlay or
+# EROFS volume, so no pause sentinel is ever presented and this body is unreachable
+# there. In `host-erofs-dm-verity` mode the pause container's layers are already declared
+# and verity-bound like any other image -- `get_erofs_layer_storages` is called without an
+# `is_pause_container` gate, and `add_pause_container` pulls `pause_container_image` from
+# the registry to obtain them -- so the sandbox rootfs comes from the host and needs no
+# exemption. Guest-pull deployments, which do rely on the inboxed pause bundle, set
+# `allow_guest_pull_images` and get this body back along with the other two.
 allow_image_guest_pull_source(p_oci, i_storage) if {
+    policy_data.common.allow_guest_pull_images
     not p_oci.Annotations["io.kubernetes.cri.image-name"]
     p_oci.Annotations["io.kubernetes.cri.container-type"] == "sandbox"
     print("allow_image_guest_pull_source 3: sandbox container, i_source =", i_storage.source)

@@ -343,7 +343,7 @@
         ],
         "image_layer_verification": "none",
         "allow_guest_pull_images": true,
-        "require_pinned_image_digests": false,
+        "require_pinned_image_digests": true,
         "default_apparmor_profile": "",
         "default_rlimits": []
     },
@@ -391,8 +391,7 @@
                 "00:00:00:00:00:00"
             ],
             "allowed_ip_regex": [
-                "^10\\.244\\.0\\.[0-9]{1,3}$",
-                "^fe80::.*$"
+                ".*"
             ]
         },
         "CopyFileRequest": [
@@ -430,6 +429,14 @@
             ]
         },
         "CloseStdinRequest": false,
+        "CopySingleFileRequest": {
+            "max_file_size": 1048576
+        },
+        "InitWatchableVolumeRequest": true,
+        "PutVolumeFileRequest": {
+            "max_file_size": 1048576
+        },
+        "CommitVolumeRevisionRequest": true,
         "GetDiagnosticDataRequest": false,
         "ReadStreamRequest": false,
         "UpdateEphemeralMountsRequest": false,

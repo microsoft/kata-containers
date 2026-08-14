@@ -342,6 +342,7 @@
             "CAP_CHECKPOINT_RESTORE"
         ],
         "image_layer_verification": "none",
+        "allow_guest_pull_images": true,
         "require_pinned_image_digests": true,
         "default_apparmor_profile": "",
         "default_rlimits": []

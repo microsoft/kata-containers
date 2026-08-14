@@ -463,23 +463,39 @@ mod tests {
         runtests("state/waitprocess").await;
     }
 
-    /// This fixture ships its own settings clearing `require_pinned_image_digests`,
-    /// which now defaults to `true`. Its guest-pull image is the tag
-    /// `quay.io/prometheus/busybox:latest`, and the fixture is shared by several tests
-    /// that are about denial diagnostics and field mediation rather than image pinning;
-    /// pinning it would churn those cases for no gain.
+    /// This fixture ships its own settings enabling `allow_guest_pull_images` (which now
+    /// defaults to `false`) and clearing `require_pinned_image_digests`. Its guest-pull
+    /// image is the tag `quay.io/prometheus/busybox:latest`, and the fixture is shared by
+    /// several tests that are about denial diagnostics and field mediation rather than
+    /// image pinning; pinning it would churn those cases for no gain.
     #[tokio::test]
     async fn test_state_exec_process_deployment() {
         runtests("state/execprocessdeployment").await;
     }
 
-    /// This fixture ships its own settings clearing `require_pinned_image_digests`,
-    /// which now defaults to `true`. Short-name normalization is what is under test here
+    /// This fixture ships its own settings enabling `allow_guest_pull_images` (which now
+    /// defaults to `false`) and clearing `require_pinned_image_digests`. Short-name
+    /// normalization is what is under test here
     /// (`busybox:latest` -> `docker.io/library/busybox:latest`), and a short name is by
     /// definition unpinned, so the case cannot be expressed under the pinning default.
     #[tokio::test]
     async fn test_create_container_image_short_name() {
         runtests("createcontainer/image_short_name").await;
+    }
+
+    /// RM-119: guest pull is refused for workload containers by default. The same request
+    /// as the allowed case in `createcontainer/gid` — a digest-pinned image that satisfies
+    /// `require_pinned_image_digests` — is denied here purely because this fixture ships no
+    /// settings of its own, so `allow_guest_pull_images` keeps its shipped `false`.
+    ///
+    /// The pair is the differential that shows pinning alone is not the control: `gid`
+    /// enables guest pull and allows the request, this one does not and denies it. What
+    /// pinning cannot fix is that the storage carries no declaration at all, so it is
+    /// exempt from the `allow_storages` cardinality check and would otherwise be admitted
+    /// *alongside* a container's declared dm-verity layers as a second root filesystem.
+    #[tokio::test]
+    async fn test_create_container_guest_pull_disabled() {
+        runtests("createcontainer/guest_pull_disabled").await;
     }
 
     /// RM-51: the same request as `image_short_name`, but generated with
@@ -489,9 +505,14 @@ mod tests {
     /// its own settings even though that is now the default, so the case still states
     /// what it depends on rather than inheriting it.
     ///
+    /// RM-119: it also has to set `allow_guest_pull_images` explicitly, because guest pull
+    /// is now refused for workload containers by default — with the path disabled there
+    /// is no pinning decision left to make, and the case would pass for the wrong reason.
+    ///
     /// The positive half of RM-51 is covered by the fixtures that already name
     /// digest-pinned images and now run under the pinning default: `cgroup_mount_extras`,
-    /// `env_vars`, `gid` and `security_context/fsgroup`.
+    /// `env_vars`, `gid` and `security_context/fsgroup`. Each of those ships settings
+    /// enabling guest pull for the same reason.
     #[tokio::test]
     async fn test_create_container_require_pinned_images() {
         runtests("createcontainer/require_pinned_images").await;
