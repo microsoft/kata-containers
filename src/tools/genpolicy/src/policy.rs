@@ -744,7 +744,45 @@ pub struct CommonData {
     #[serde(default = "default_image_layer_verification")]
     pub image_layer_verification: String,
 
+    /// RM-119: admit guest-pulled images at all.
+    ///
+    /// Guest pull is the one storage path with no policy declaration behind it: genpolicy
+    /// emits no `p_storage` for it, which is why `allow_storages` subtracts it from the
+    /// declared/presented cardinality check. A host can therefore present an
+    /// `image_guest_pull` storage *in addition to* a container's declared dm-verity layers
+    /// — the layer declarations are all satisfied, nothing is missing, and the extra
+    /// storage is exempt from the count. Where the image reference is unpinned that admits
+    /// host-chosen content at the container root in a deployment whose layers are
+    /// otherwise verity-bound, so the guest-pull path can be used to sidestep the
+    /// host-pull integrity guarantee without ever failing a verity check.
+    ///
+    /// Content verification for a guest pull happens in image-rs inside CDH, which returns
+    /// no proof to the agent (`ImagePullResponse` is empty), so the policy has no way to
+    /// confirm what was actually pulled. Defaults to `false`: guest pull is refused, and
+    /// `#[serde(default)]` is correct here because `false` *is* the safe value — an absent
+    /// key denies.
+    ///
+    /// This gates the sandbox pause sentinel too, so the setting refuses *every*
+    /// `image_guest_pull` storage rather than all but one. That is safe because the
+    /// sentinel is only ever produced by the guest-pull path itself: runtime-rs reaches
+    /// `get_image_reference` — the function that returns the literal `"pause"` for a
+    /// `PodSandbox` — from `handle_virtual_volume_storage` alone, and only for a volume the
+    /// snapshotter typed `image_guest_pull`. A host-pull deployment's sandbox rootfs is an
+    /// overlay or EROFS volume, so no sentinel is presented. Under
+    /// `host-erofs-dm-verity` the pause container's layers are declared and verity-bound
+    /// like any other image, because `get_erofs_layer_storages` is called without an
+    /// `is_pause_container` gate and `add_pause_container` pulls `pause_container_image`
+    /// from the registry to obtain them — the sandbox rootfs comes from the host and needs
+    /// no exemption. Deployments that do rely on the inboxed pause bundle are guest-pull
+    /// deployments, and set this.
+    #[serde(default)]
+    pub allow_guest_pull_images: bool,
+
     /// RM-51: require every guest-pull image reference to be pinned by a manifest digest.
+    ///
+    /// Only reachable where `allow_guest_pull_images` is set: with guest pull refused
+    /// outright this control has nothing to gate. It remains the second layer for a
+    /// deployment that re-enables the path.
     ///
     /// Guest pull (`image_guest_pull`) unpacks into the guest's own filesystem, so there
     /// is no read-only block device and no dm-verity root hash to bind — the manifest
@@ -1208,6 +1246,62 @@ impl AgentPolicy {
         }
     }
 
+    /// Refuse to generate a policy that no container could satisfy.
+    ///
+    /// Where the rootfs is not otherwise declared — `image_layer_verification` is `none`,
+    /// so `get_erofs_layer_storages` declares nothing — a container's rootfs arrives at
+    /// runtime as an `image_guest_pull` storage, and `allow_image_guest_pull_source` is
+    /// the only rule that can admit one. If `guest_pull` says that is how this cluster
+    /// works and guest pull is also refused, the generated policy denies every
+    /// `CreateContainerRequest` in the pod — the sandbox included, since RM-119 gates the
+    /// pause sentinel too — so those settings together describe a policy with no
+    /// satisfying request.
+    ///
+    /// Under `host-erofs-dm-verity` the rootfs *is* declared, for the pause container as
+    /// much as for a workload, so the policy remains satisfiable with guest pull refused
+    /// and there is nothing to report even if `guest_pull` is still set.
+    ///
+    /// Surface this at generation time rather than as a mystifying container-start denial
+    /// much later, following the precedent of
+    /// `exit_if_guest_pull_needs_security_context` above. The pause container returns
+    /// early only to keep the diagnostic from being printed twice; the first workload
+    /// container reports the same condition.
+    fn exit_if_guest_pull_is_refused(
+        &self,
+        yaml_container: &pod::Container,
+        is_pause_container: bool,
+    ) {
+        let common = &self.config.settings.common;
+        if is_pause_container
+            || !self.config.settings.cluster_config.guest_pull
+            || common.allow_guest_pull_images
+            || common.image_layer_verification != IMAGE_LAYER_VERIFICATION_NONE
+        {
+            return;
+        }
+
+        eprintln!(
+            "ERROR: guest_pull is enabled for container '{}' using image '{}', but \
+             allow_guest_pull_images is not set, so the generated policy would deny every \
+             container in this pod at startup, the pause sandbox included. Guest pull is \
+             refused by default because an image_guest_pull storage carries no policy \
+             declaration: it is exempt from the declared-vs-presented storage count, so a \
+             host can present one *in addition to* a container's declared dm-verity layers \
+             and mount undeclared content at the container root without failing a verity \
+             check. Either use host pull with image_layer_verification set to \
+             'host-erofs-dm-verity', which declares and verity-binds the pause image's \
+             layers along with every other image, or, if this cluster requires guest pull, \
+             opt in explicitly by setting:\n\
+             \x20   \"allow_guest_pull_images\": true\n\
+             in the \"common\" section of genpolicy-settings.json. Note that guest pull \
+             verifies image content in the Confidential Data Hub and reports no result back \
+             to the policy, so the policy can bind the image reference but cannot confirm \
+             the bytes it authorized were the bytes that were pulled.",
+            yaml_container.name, yaml_container.image,
+        );
+        exit(1);
+    }
+
     fn exit_if_guest_pull_needs_security_context(
         &self,
         resource: &dyn yaml::K8sResource,
@@ -1490,6 +1584,7 @@ impl AgentPolicy {
             "get_container_process: returning: User = {:?}",
             &process.User
         );
+        self.exit_if_guest_pull_is_refused(yaml_container, is_pause_container);
         self.exit_if_guest_pull_needs_security_context(
             resource,
             yaml_container,
