@@ -548,6 +548,33 @@ func TestClhCreateVM(t *testing.T) {
 	}
 }
 
+func TestClhCreateVMFileBackedMemoryVirtioMemDisabled(t *testing.T) {
+	assert := assert.New(t)
+
+	clhConfig, err := newClhConfig()
+	assert.NoError(err)
+	clhConfig.SharedFS = config.NoSharedFS
+	clhConfig.DefaultMaxMemorySize = uint64(clhConfig.MemorySize) + 1024
+	clhConfig.VirtioMem = false
+
+	memoryPath := filepath.Join(t.TempDir(), "memory")
+	assert.NoError(os.WriteFile(memoryPath, nil, 0o600))
+	clhConfig.FileBackedMemory = &FileBackedMemoryConfig{
+		Path:   memoryPath,
+		Shared: false,
+	}
+
+	network, err := NewNetwork()
+	assert.NoError(err)
+
+	clh := &cloudHypervisor{}
+	assert.NoError(clh.CreateVM(context.Background(), "testSandbox", network, &clhConfig))
+	assert.NotEqual("VirtioMem", clh.vmconfig.Memory.GetHotplugMethod())
+	if assert.NotNil(clh.vmconfig.Memory.Zones) && assert.Len(*clh.vmconfig.Memory.Zones, 1) {
+		assert.False((*clh.vmconfig.Memory.Zones)[0].HasHotplugSize())
+	}
+}
+
 func TestClhRestoreVM(t *testing.T) {
 	assert := assert.New(t)
 
@@ -581,13 +608,30 @@ func TestClhRestoreVM(t *testing.T) {
 	err = os.WriteFile(configFile, []byte("{}"), 0o600)
 	assert.NoError(err)
 
-	// Call restoreVM again, this time it should succeed.
-	err = clh.restoreVM(context.Background())
-	assert.NoError(err)
+	tests := []struct {
+		name     string
+		mode     ClhMemoryRestoreMode
+		expected chclient.MemoryRestoreMode
+	}{
+		{name: "copy", mode: ClhMemoryRestoreModeCopy, expected: chclient.COPY},
+		{name: "on demand", mode: ClhMemoryRestoreModeOnDemand, expected: chclient.ON_DEMAND},
+		{name: "copy on write", mode: ClhMemoryRestoreModeCopyOnWrite, expected: chclient.COPY_ON_WRITE},
+	}
 
-	if assert.NotNil(mockClient.restoreRequest) {
-		expectedSourceURL := "file://" + clhConfig.VMStorePath
-		assert.Equal(expectedSourceURL, mockClient.restoreRequest.GetSourceUrl())
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clh.config.ClhMemoryRestoreMode = test.mode
+			mockClient.restoreRequest = nil
+
+			err = clh.restoreVM(context.Background())
+			assert.NoError(err)
+
+			if assert.NotNil(mockClient.restoreRequest) {
+				expectedSourceURL := "file://" + clhConfig.VMStorePath
+				assert.Equal(expectedSourceURL, mockClient.restoreRequest.GetSourceUrl())
+				assert.Equal(test.expected, mockClient.restoreRequest.GetMemoryRestoreMode())
+			}
+		})
 	}
 
 	info, err := clh.vmInfo()

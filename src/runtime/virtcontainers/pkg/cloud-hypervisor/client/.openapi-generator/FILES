@@ -20,6 +20,7 @@ docs/DiskConfig.md
 docs/FsConfig.md
 docs/LandlockConfig.md
 docs/MemoryConfig.md
+docs/MemoryRestoreMode.md
 docs/MemoryZoneConfig.md
 docs/NetConfig.md
 docs/NumaConfig.md
@@ -66,6 +67,7 @@ model_disk_config.go
 model_fs_config.go
 model_landlock_config.go
 model_memory_config.go
+model_memory_restore_mode.go
 model_memory_zone_config.go
 model_net_config.go
 model_numa_config.go

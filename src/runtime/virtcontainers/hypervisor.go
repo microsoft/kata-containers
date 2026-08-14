@@ -537,6 +537,10 @@ type HypervisorConfig struct {
 	// target). When nil the guest uses standard anonymous memory.
 	FileBackedMemory *FileBackedMemoryConfig
 
+	// ClhMemoryRestoreMode controls how Cloud Hypervisor populates guest memory
+	// from a VM snapshot. The default is eager copy.
+	ClhMemoryRestoreMode ClhMemoryRestoreMode
+
 	// EntropySource is the path to a host source of
 	// entropy (/dev/random, /dev/urandom or real hardware RNG device)
 	EntropySource string

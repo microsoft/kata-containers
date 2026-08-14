@@ -95,6 +95,26 @@ const (
 	virtioMemBlockSizeMiB = 128
 )
 
+// ClhMemoryRestoreMode controls how Cloud Hypervisor populates guest memory
+// while restoring a VM snapshot.
+type ClhMemoryRestoreMode string
+
+const (
+	ClhMemoryRestoreModeCopy        ClhMemoryRestoreMode = "copy"
+	ClhMemoryRestoreModeOnDemand    ClhMemoryRestoreMode = "ondemand"
+	ClhMemoryRestoreModeCopyOnWrite ClhMemoryRestoreMode = "copyonwrite"
+)
+
+// IsValid reports whether the restore mode is supported by Cloud Hypervisor.
+func (mode ClhMemoryRestoreMode) IsValid() bool {
+	switch mode {
+	case ClhMemoryRestoreModeCopy, ClhMemoryRestoreModeOnDemand, ClhMemoryRestoreModeCopyOnWrite:
+		return true
+	default:
+		return false
+	}
+}
+
 // Interface that hides the implementation of openAPI client
 // If the client changes  its methods, this interface should do it as well,
 // The main purpose is to hide the client in an interface to allow mock testing.
@@ -622,15 +642,16 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 		memoryZoneConfig.SetShared(shared)
 		clh.vmconfig.Memory.Shared = func(b bool) *bool { return &b }(shared)
 
-		// Enable memory hotplug for template VMs so that a VM restored from the
-		// template can grow its memory to match the incoming pod's resource limits.
+		// Enable memory hotplug for template VMs when explicitly configured so
+		// that a VM restored from the template can grow its memory to match the
+		// incoming pod's resource limits.
 		// A file-backed memory zone can only be resized via the virtio-mem hotplug
 		// method - cloud-hypervisor rejects the default ACPI hotplug on a zone that
 		// carries a hotplug_size. Configuring this at template-creation time
 		// captures the hotplug_method/hotplug_size in the snapshot
 		// so every VM restored from the template inherits a resizable memory zone.
 		// This is intentionally not enabled for confidential guests.
-		if !clh.config.ConfidentialGuest {
+		if clh.config.VirtioMem && !clh.config.ConfidentialGuest {
 			// The hotplug region is the headroom between the boot memory size and
 			// the configured maximum memory. Note that DefaultMaxMemorySize resolves
 			// to the total host memory when default_maxmemory is set to 0, which is
@@ -2196,8 +2217,21 @@ func (clh *cloudHypervisor) restoreVM(ctx context.Context) error {
 
 	// Prepare restore configuration
 	restoreConfig := *chclient.NewRestoreConfig(sourceURL)
+	switch clh.config.ClhMemoryRestoreMode {
+	case "", ClhMemoryRestoreModeCopy:
+		restoreConfig.SetMemoryRestoreMode(chclient.COPY)
+	case ClhMemoryRestoreModeOnDemand:
+		restoreConfig.SetMemoryRestoreMode(chclient.ON_DEMAND)
+	case ClhMemoryRestoreModeCopyOnWrite:
+		restoreConfig.SetMemoryRestoreMode(chclient.COPY_ON_WRITE)
+	default:
+		return fmt.Errorf("unsupported memory restore mode %q", clh.config.ClhMemoryRestoreMode)
+	}
 
-	clh.Logger().WithField("sourceURL", sourceURL).Debug("Restore configuration")
+	clh.Logger().WithFields(log.Fields{
+		"sourceURL":         sourceURL,
+		"memoryRestoreMode": restoreConfig.GetMemoryRestoreMode(),
+	}).Debug("Restore configuration")
 
 	// Restore VM from template (uses the caller's ctx, which already has the boot timeout)
 	_, err := cl.VmRestorePut(ctx, restoreConfig)
