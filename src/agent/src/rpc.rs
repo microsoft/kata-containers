@@ -4806,6 +4806,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_copy_single_file_accepts_empty_unspecified_file() {
+        #[cfg(feature = "agent-policy")]
+        let _policy_guard = install_content_channel_policy().await;
         let temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
         let ctx = mk_ttrpc_context();
@@ -4840,6 +4842,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_copy_single_file_rejects_non_empty_unspecified_file() {
+        #[cfg(feature = "agent-policy")]
+        let _policy_guard = install_content_channel_policy().await;
         let _temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
         let ctx = mk_ttrpc_context();

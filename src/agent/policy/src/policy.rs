@@ -4270,6 +4270,7 @@ containers := [{"name": "wrong-issuer"}]
         assert_eq!(out.revision, "..2026_02_11");
         assert_eq!(out.file_mode, libc::S_IFREG as u32 | 0o2600);
         assert_eq!(out.dir_mode, 0o750);
+        assert_eq!(out.file_size, 2);
         assert_eq!(
             serde_json::to_value(&out).unwrap().get("data"),
             None,
