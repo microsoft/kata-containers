@@ -2,7 +2,7 @@ name: Documentation
 on:
   push:
     branches:
-      - msft-preview
+      - manifold-main
 permissions: {}
 
 concurrency:
