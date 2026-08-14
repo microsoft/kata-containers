@@ -895,6 +895,7 @@ func TestNewClhHypervisorConfig(t *testing.T) {
 		Path:                           hypervisorPath,
 		Kernel:                         kernelPath,
 		Image:                          imagePath,
+		ClhMemoryRestoreMode:           string(vc.ClhMemoryRestoreModeOnDemand),
 		VirtioFSDaemon:                 virtioFsDaemon,
 		VirtioFSCache:                  "always",
 		NetRateLimiterBwMaxRate:        netRateLimiterBwMaxRate,
@@ -935,6 +936,10 @@ func TestNewClhHypervisorConfig(t *testing.T) {
 		t.Errorf("Expected VirtioFSCache %v, got %v", true, config.VirtioFSCache)
 	}
 
+	if config.ClhMemoryRestoreMode != vc.ClhMemoryRestoreModeOnDemand {
+		t.Errorf("Expected memory restore mode %v, got %v", vc.ClhMemoryRestoreModeOnDemand, config.ClhMemoryRestoreMode)
+	}
+
 	if config.NetRateLimiterBwMaxRate != netRateLimiterBwMaxRate {
 		t.Errorf("Expected value for network bandwidth rate limiter %v, got %v", netRateLimiterBwMaxRate, config.NetRateLimiterBwMaxRate)
 	}
@@ -968,6 +973,25 @@ func TestNewClhHypervisorConfig(t *testing.T) {
 	if config.DiskRateLimiterOpsOneTimeBurst != 0 {
 		t.Errorf("Expected value for disk operations one time burst %v, got %v", diskRateLimiterOpsOneTimeBurst, config.DiskRateLimiterOpsOneTimeBurst)
 	}
+
+	hypervisor.ClhMemoryRestoreMode = ""
+	config, err = newClhHypervisorConfig(hypervisor)
+	assert.NoError(err)
+	assert.Equal(vc.ClhMemoryRestoreModeCopy, config.ClhMemoryRestoreMode)
+
+	hypervisor.ClhMemoryRestoreMode = string(vc.ClhMemoryRestoreModeCopyOnWrite)
+	config, err = newClhHypervisorConfig(hypervisor)
+	assert.NoError(err)
+	assert.Equal(vc.ClhMemoryRestoreModeCopyOnWrite, config.ClhMemoryRestoreMode)
+
+	hypervisor.VirtioMem = true
+	_, err = newClhHypervisorConfig(hypervisor)
+	assert.EqualError(err, "memory_restore_mode=copyonwrite requires enable_virtio_mem=false")
+
+	hypervisor.VirtioMem = false
+	hypervisor.ClhMemoryRestoreMode = "invalid"
+	_, err = newClhHypervisorConfig(hypervisor)
+	assert.EqualError(err, "invalid memory_restore_mode \"invalid\": must be copy, ondemand, or copyonwrite")
 }
 
 func TestHypervisorDefaults(t *testing.T) {

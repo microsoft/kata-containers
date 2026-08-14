@@ -125,6 +125,7 @@ Class | Method | HTTP request | Description
  - [FsConfig](docs/FsConfig.md)
  - [LandlockConfig](docs/LandlockConfig.md)
  - [MemoryConfig](docs/MemoryConfig.md)
+ - [MemoryRestoreMode](docs/MemoryRestoreMode.md)
  - [MemoryZoneConfig](docs/MemoryZoneConfig.md)
  - [NetConfig](docs/NetConfig.md)
  - [NumaConfig](docs/NumaConfig.md)

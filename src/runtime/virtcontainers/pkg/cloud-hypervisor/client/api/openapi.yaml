@@ -2230,6 +2230,13 @@ components:
         destination_url:
           type: string
       type: object
+    MemoryRestoreMode:
+      default: Copy
+      enum:
+      - Copy
+      - OnDemand
+      - CopyOnWrite
+      type: string
     RestoreConfig:
       example:
         prefault: true
@@ -2239,6 +2246,8 @@ components:
           type: string
         prefault:
           type: boolean
+        memory_restore_mode:
+          $ref: '#/components/schemas/MemoryRestoreMode'
       required:
       - source_url
       type: object

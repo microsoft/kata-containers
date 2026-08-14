@@ -95,6 +95,7 @@ type hypervisor struct {
 	KernelParams                   string                    `toml:"kernel_params"`
 	KernelVerityParams             string                    `toml:"kernel_verity_params"`
 	MachineType                    string                    `toml:"machine_type"`
+	ClhMemoryRestoreMode           string                    `toml:"memory_restore_mode"`
 	QgsPort                        uint32                    `toml:"tdx_quote_generation_service_socket_port"`
 	BlockDeviceDriver              string                    `toml:"block_device_driver"`
 	EntropySource                  string                    `toml:"entropy_source"`
@@ -1181,6 +1182,17 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 			fmt.Errorf("cannot enable %s without daemon path in configuration file", sharedFS)
 	}
 
+	memoryRestoreMode := vc.ClhMemoryRestoreMode(h.ClhMemoryRestoreMode)
+	if memoryRestoreMode == "" {
+		memoryRestoreMode = vc.ClhMemoryRestoreModeCopy
+	}
+	if !memoryRestoreMode.IsValid() {
+		return vc.HypervisorConfig{}, fmt.Errorf("invalid memory_restore_mode %q: must be copy, ondemand, or copyonwrite", h.ClhMemoryRestoreMode)
+	}
+	if memoryRestoreMode == vc.ClhMemoryRestoreModeCopyOnWrite && h.VirtioMem {
+		return vc.HypervisorConfig{}, errors.New("memory_restore_mode=copyonwrite requires enable_virtio_mem=false")
+	}
+
 	return vc.HypervisorConfig{
 		HypervisorPath:                 hypervisor,
 		HypervisorPathList:             h.HypervisorPathList,
@@ -1193,6 +1205,7 @@ func newClhHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 		KernelParams:                   vc.DeserializeParams(vc.KernelParamFields(kernelParams)),
 		KernelVerityParams:             h.kernelVerityParams(),
 		HypervisorMachineType:          machineType,
+		ClhMemoryRestoreMode:           memoryRestoreMode,
 		NumVCPUsF:                      h.defaultVCPUs(),
 		DefaultMaxVCPUs:                h.defaultMaxVCPUs(),
 		MemorySize:                     h.defaultMemSz(),
