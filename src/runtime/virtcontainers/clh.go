@@ -77,6 +77,7 @@ const (
 	clhTimeout                     = 10
 	clhAPITimeout                  = 1
 	clhAPITimeoutConfidentialGuest = 20
+	clhSnapshotTimeout             = 30
 	// Minimum timout for calling CreateVM followed by BootVM. Executing these two APIs
 	// might take longer than the value returned by getClhAPITimeout().
 	clhCreateAndBootVMMinimumTimeout = 10
@@ -88,6 +89,7 @@ const (
 	clhSocket                              = "clh.sock"
 	clhAPISocket                           = "clh-api.sock"
 	virtioFsSocket                         = "virtiofsd.sock"
+	clhSnapshotMemoryFile                  = "memory-ranges"
 	defaultClhPath                         = "/usr/local/bin/cloud-hypervisor"
 	// virtio-mem requires its hotplug region size to be a multiple of the
 	// virtio-mem block size (128 MiB). cloud-hypervisor rejects unaligned sizes
@@ -849,8 +851,8 @@ func (clh *cloudHypervisor) copyFile(src, dst string) error {
 	return dstFile.Sync()
 }
 
-// updateVsockSocketPath updates the vsock socket path in the config.json file
-func (clh *cloudHypervisor) updateVsockSocketPath(configPath, vmID string) error {
+// updateRestoreConfig updates runtime-specific fields in a copied snapshot config.
+func (clh *cloudHypervisor) updateRestoreConfig(configPath, vmID string) error {
 	// Read the config file
 	configData, err := os.ReadFile(configPath)
 	if err != nil {
@@ -877,6 +879,20 @@ func (clh *cloudHypervisor) updateVsockSocketPath(configPath, vmID string) error
 			"vmID":         vmID,
 			"newVsockPath": newVsockPath,
 		}).Debug("Updated vsock socket path in config.json")
+	}
+
+	// CLH's copy-on-write restore requires anonymous destination mappings so it
+	// can replace them with private mappings of the memory snapshot.
+	if clh.config.ClhMemoryRestoreMode == ClhMemoryRestoreModeCopyOnWrite {
+		if memory, ok := config["memory"].(map[string]interface{}); ok {
+			if zones, ok := memory["zones"].([]interface{}); ok {
+				for _, item := range zones {
+					if zone, ok := item.(map[string]interface{}); ok {
+						delete(zone, "file")
+					}
+				}
+			}
+		}
 	}
 
 	// Write the updated config back to file
@@ -1007,8 +1023,9 @@ func (clh *cloudHypervisor) bootTimeoutContext(ctx context.Context) (context.Con
 }
 
 // prepareRestoreFiles copies the snapshot's config.json and state.json from
-// snapshotDir into the VM's runtime directory and patches the vsock socket path
-// in the copied config so the restored VM uses a unique, per-VM socket.
+// snapshotDir into the VM's runtime directory, makes the immutable sparse
+// memory snapshot available there, and patches the vsock socket path in the
+// copied config so the restored VM uses a unique, per-VM socket.
 func (clh *cloudHypervisor) prepareRestoreFiles(snapshotDir string) error {
 	vmPath := filepath.Join(clh.config.VMStorePath, clh.id)
 
@@ -1026,10 +1043,19 @@ func (clh *cloudHypervisor) prepareRestoreFiles(snapshotDir string) error {
 		return fmt.Errorf("failed to copy state.json: %v", err)
 	}
 
-	// Update vsock socket path in the copied config.json so the restored VM
-	// uses a unique, per-VM socket instead of the snapshot's original one.
-	if err := clh.updateVsockSocketPath(dstConfig, clh.id); err != nil {
-		return fmt.Errorf("failed to update vsock socket path: %v", err)
+	// The restore source URL points at vmPath, so Cloud Hypervisor expects the
+	// memory snapshot there too. Keep this sparse 2+ GiB file in the template
+	// tmpfs and symlink it rather than materializing a dense per-VM copy.
+	srcMemory := filepath.Join(snapshotDir, clhSnapshotMemoryFile)
+	dstMemory := filepath.Join(vmPath, clhSnapshotMemoryFile)
+	if err := os.Symlink(srcMemory, dstMemory); err != nil {
+		return fmt.Errorf("failed to link %s: %v", clhSnapshotMemoryFile, err)
+	}
+
+	// Update runtime-specific fields in the copied config.json, including the
+	// unique per-VM vsock path and COW-compatible memory backing when requested.
+	if err := clh.updateRestoreConfig(dstConfig, clh.id); err != nil {
+		return fmt.Errorf("failed to update restore config: %v", err)
 	}
 
 	return nil
@@ -1636,7 +1662,7 @@ func (clh *cloudHypervisor) SaveVM(snapshotDir string) error {
 	clh.Logger().WithField("function", "SaveVM").Info("Save Sandbox")
 
 	cl := clh.client()
-	ctx, cancel := context.WithTimeout(context.Background(), clh.getClhAPITimeout()*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), clhSnapshotTimeout*time.Second)
 	defer cancel()
 
 	// Warn (but do not block) when snapshotting a VM whose file-backed virtio-mem
@@ -1661,9 +1687,7 @@ func (clh *cloudHypervisor) SaveVM(snapshotDir string) error {
 	}
 
 	// Snapshot the VM into the caller-provided directory. This is a pure
-	// hypervisor operation: the caller chooses the destination and is
-	// responsible for any feature-specific post-processing (e.g. a template
-	// factory adjusting the snapshot's memory sharing mode).
+	// hypervisor operation: the caller chooses the destination.
 	fileURL := "file://" + snapshotDir
 
 	vmSnapshotConfig := *chclient.NewVmSnapshotConfig()
@@ -1673,61 +1697,6 @@ func (clh *cloudHypervisor) SaveVM(snapshotDir string) error {
 	if err != nil {
 		clh.Logger().WithError(err).Error("Failed to save VM snapshot")
 		return openAPIClientError(err)
-	}
-
-	return nil
-}
-
-// PatchCLHSnapshotMemoryPrivate rewrites the memory configuration in a Cloud
-// Hypervisor snapshot's config.json so that the memory (and every memory zone)
-// is marked shared=false, i.e. mapped MAP_PRIVATE / Copy-On-Write when the
-// snapshot is later restored.
-//
-// It encapsulates knowledge of the CLH snapshot on-disk format and is a pure
-// snapshot-directory operation that does not depend on a running hypervisor.
-// Callers decide *when* to apply it: for example, the VM template factory marks
-// a template's snapshot private so that clones restored from it get their own
-// Copy-On-Write memory while still sharing the template's backing file.
-func PatchCLHSnapshotMemoryPrivate(snapshotDir string) error {
-	configPath := filepath.Join(snapshotDir, "config.json")
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to read snapshot config %s: %w", configPath, err)
-	}
-
-	var snapshotConfig map[string]interface{}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	if err := dec.Decode(&snapshotConfig); err != nil {
-		return fmt.Errorf("failed to unmarshal snapshot config: %w", err)
-	}
-
-	memorySection, ok := snapshotConfig["memory"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid snapshot config structure: memory section not found or invalid")
-	}
-	memorySection["shared"] = false
-
-	zones, ok := memorySection["zones"].([]interface{})
-	if !ok {
-		return fmt.Errorf("invalid snapshot config structure: zones array in memory section not found or invalid")
-	}
-	for _, zone := range zones {
-		zoneMap, ok := zone.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("invalid snapshot config structure: zone in memory section not found or invalid")
-		}
-		zoneMap["shared"] = false
-	}
-
-	modifiedConfig, err := json.Marshal(snapshotConfig)
-	if err != nil {
-		return fmt.Errorf("failed to marshal modified snapshot config: %w", err)
-	}
-
-	if err := os.WriteFile(configPath, modifiedConfig, 0644); err != nil {
-		return fmt.Errorf("failed to write modified snapshot config: %w", err)
 	}
 
 	return nil

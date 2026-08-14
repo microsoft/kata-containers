@@ -104,7 +104,10 @@ func (t *template) prepareTemplateFiles() error {
 		return err
 	}
 	flags := uintptr(syscall.MS_NOSUID | syscall.MS_NODEV)
-	opts := fmt.Sprintf("size=%dM", t.config.HypervisorConfig.MemorySize+templateDeviceStateSize)
+	// Private template RAM is written to a separate, full-size memory-ranges
+	// snapshot while the original memory backing file remains in the tmpfs.
+	tmpfsSizeMiB := uint64(t.config.HypervisorConfig.MemorySize)*2 + templateDeviceStateSize
+	opts := fmt.Sprintf("size=%dM", tmpfsSizeMiB)
 	if err = syscall.Mount("tmpfs", t.statePath, "tmpfs", flags, opts); err != nil {
 		t.close()
 		return err
@@ -131,12 +134,12 @@ func (t *template) prepareTemplateFiles() error {
 func (t *template) createTemplateVM(ctx context.Context) error {
 	// create the template vm
 	config := t.config
-	// The template source VM is backed by a shared memory file so that clones
-	// can map the same file. The factory expresses this through the generic
-	// file-backed memory config rather than template-specific flags.
+	// Use a private mapping so Cloud Hypervisor snapshots RAM into
+	// memory-ranges, allowing restore-mode experiments to exercise the copy,
+	// on-demand, and copy-on-write implementations.
 	config.HypervisorConfig.FileBackedMemory = &vc.FileBackedMemoryConfig{
 		Path:   t.statePath + "/memory",
-		Shared: true,
+		Shared: false,
 	}
 	config.HypervisorConfig.VMStorePath = t.statePath
 
@@ -167,19 +170,6 @@ func (t *template) createTemplateVM(ctx context.Context) error {
 		return err
 	}
 
-	// The template source VM runs with shared memory so that clones can map
-	// the same backing file, but the snapshot must record the memory as
-	// private so that clones restored from it get Copy-On-Write memory. The
-	// factory owns this policy decision (when to make a snapshot private),
-	// while the CLH snapshot-format details live in
-	// vc.PatchCLHSnapshotMemoryPrivate. Only Cloud Hypervisor records a
-	// config.json that needs patching; QEMU's device-state file does not.
-	if t.config.HypervisorType == vc.ClhHypervisor {
-		if err = vc.PatchCLHSnapshotMemoryPrivate(t.statePath); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -202,6 +192,11 @@ func (t *template) checkTemplateVM() error {
 	_, err := os.Stat(t.statePath + "/memory")
 	if err != nil {
 		return err
+	}
+	if t.config.HypervisorType == vc.ClhHypervisor {
+		if _, err = os.Stat(t.statePath + "/memory-ranges"); err != nil {
+			return err
+		}
 	}
 
 	_, err = os.Stat(t.deviceStatePath())
