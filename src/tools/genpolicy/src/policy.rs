@@ -600,11 +600,11 @@ pub struct CopySingleFileRequestDefaults {
     pub max_file_size: i64,
 }
 
-/// Settings for PutVolumeFileRequest.
+/// Settings for PutVolumeFileRevisionRequest.
 #[allow(non_snake_case)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PutVolumeFileRequestDefaults {
+pub struct PutVolumeFileRevisionRequestDefaults {
     /// Upper bound on the size of a file written into a watchable volume. Kubernetes caps
     /// ConfigMaps and Secrets at 1 MiB, so anything larger is not a legitimate projection.
     pub max_file_size: i64,
@@ -616,8 +616,8 @@ fn default_copy_single_file_request() -> CopySingleFileRequestDefaults {
     }
 }
 
-fn default_put_volume_file_request() -> PutVolumeFileRequestDefaults {
-    PutVolumeFileRequestDefaults {
+fn default_put_volume_file_request() -> PutVolumeFileRevisionRequestDefaults {
+    PutVolumeFileRevisionRequestDefaults {
         max_file_size: 1024 * 1024,
     }
 }
@@ -684,11 +684,11 @@ pub struct RequestDefaults {
     /// guest acts on -- it mints its own volume id -- so this is a plain on/off switch
     /// for workloads that project no ConfigMaps, Secrets or downward-API volumes.
     #[serde(default = "default_true")]
-    pub InitWatchableVolumeRequest: bool,
+    pub InitVolumeRequest: bool,
 
     /// Bounds on the files the Host may write into a watchable volume.
     #[serde(default = "default_put_volume_file_request")]
-    pub PutVolumeFileRequest: PutVolumeFileRequestDefaults,
+    pub PutVolumeFileRevisionRequest: PutVolumeFileRevisionRequestDefaults,
 
     /// Allow the Host to publish a staged watchable-volume revision.
     #[serde(default = "default_true")]

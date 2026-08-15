@@ -5,9 +5,7 @@
 
 use async_trait::async_trait;
 #[cfg(feature = "agent-policy")]
-use kata_agent_policy::policy::{
-    PolicyCopySingleFileRequest, PolicyPutVolumeFileRevisionRequest,
-};
+use kata_agent_policy::policy::{PolicyCopySingleFileRequest, PolicyPutVolumeFileRevisionRequest};
 // The generic CopyFile gate exists only in non-strict builds; strict builds refuse the RPC
 // before any policy round trip.
 #[cfg(all(feature = "agent-policy", not(feature = "strict-policy")))]
@@ -48,9 +46,9 @@ use protocols::agent::{
     AddSwapPathRequest, AddSwapRequest, AgentDetails, CommitVolumeRevisionRequest, CopyFileRequest,
     CopySingleFileRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
     InitVolumeRequest, InitVolumeResponse, Interfaces, Metrics, OOMEvent,
-    PutVolumeFileRevisionRequest, ReadStreamResponse, ResizeVolumeRequest, Routes, SetIPTablesRequest,
-    SetIPTablesResponse, SingleFileType, StatsContainerResponse, VolumeStatsRequest,
-    WaitProcessResponse, WriteStreamResponse,
+    PutVolumeFileRevisionRequest, ReadStreamResponse, ResizeVolumeRequest, Routes,
+    SetIPTablesRequest, SetIPTablesResponse, SingleFileType, StatsContainerResponse,
+    VolumeStatsRequest, WaitProcessResponse, WriteStreamResponse,
 };
 use protocols::csi::{
     volume_usage::Unit as VolumeUsage_Unit, VolumeCondition, VolumeStatsResponse, VolumeUsage,
@@ -179,8 +177,7 @@ struct VolumeState {
 }
 
 lazy_static! {
-    static ref VOLUMES: StdMutex<HashMap<String, VolumeState>> =
-        StdMutex::new(HashMap::new());
+    static ref VOLUMES: StdMutex<HashMap<String, VolumeState>> = StdMutex::new(HashMap::new());
 }
 
 #[cfg(test)]
@@ -2532,7 +2529,7 @@ impl agent_ttrpc::AgentService for AgentService {
         // the destination path, and the content is not policy-measured. Strict builds refuse
         // it outright, without a policy round trip, so no policy-authoring mistake can
         // re-open it. The traffic the runtime still needs goes through the typed content
-        // channel (copy_single_file / init_watchable_volume / put_volume_file /
+        // channel (copy_single_file / init_volume / put_volume_file_revision /
         // commit_volume_revision), where the guest -- not the host -- chooses the
         // destination.
         #[cfg(feature = "strict-policy")]
@@ -2608,7 +2605,10 @@ impl agent_ttrpc::AgentService for AgentService {
 
         let target_file_name = match req.file_type.enum_value_or_default() {
             SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED
-                if req.data_size == 0 && req.data.is_empty() => "empty-file",
+                if req.data_size == 0 && req.data.is_empty() =>
+            {
+                "empty-file"
+            }
             SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => "resolv.conf",
             SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => "hosts",
             SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => "hostname",
@@ -4700,8 +4700,8 @@ mod tests {
         crate::policy::test_support::install_policy(concat!(
             "package agent_policy\n",
             "default CopySingleFileRequest := true\n",
-            "default InitWatchableVolumeRequest := true\n",
-            "default PutVolumeFileRequest := true\n",
+            "default InitVolumeRequest := true\n",
+            "default PutVolumeFileRevisionRequest := true\n",
             "default CommitVolumeRevisionRequest := true\n",
             // Explicit, so a query for an unrelated endpoint still returns a result
             // rather than an engine error.
@@ -4790,7 +4790,10 @@ mod tests {
         let mut req = put_volume_file_request(&agent_volume_id, "token", "rev1", b"token");
         req.file_mode = stat::SFlag::S_IFLNK.bits();
 
-        assert!(agent_service.put_volume_file_revision(&ctx, req).await.is_err());
+        assert!(agent_service
+            .put_volume_file_revision(&ctx, req)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -4999,10 +5002,16 @@ mod tests {
         let ctx = mk_ttrpc_context();
 
         let first = put_volume_file_request(&agent_volume_id, "token", "rev1", b"token");
-        agent_service.put_volume_file_revision(&ctx, first).await.unwrap();
+        agent_service
+            .put_volume_file_revision(&ctx, first)
+            .await
+            .unwrap();
 
         let second = put_volume_file_request(&agent_volume_id, "ca.crt", "rev2", b"crt");
-        assert!(agent_service.put_volume_file_revision(&ctx, second).await.is_err());
+        assert!(agent_service
+            .put_volume_file_revision(&ctx, second)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -5038,7 +5047,10 @@ mod tests {
         let volume_root = volume_root_path(&agent_volume_id).unwrap();
 
         let first = put_volume_file_request(&agent_volume_id, "token", "rev1", b"one");
-        agent_service.put_volume_file_revision(&ctx, first).await.unwrap();
+        agent_service
+            .put_volume_file_revision(&ctx, first)
+            .await
+            .unwrap();
         agent_service
             .commit_volume_revision(
                 &ctx,
@@ -5065,7 +5077,10 @@ mod tests {
         );
 
         let second = put_volume_file_request(&agent_volume_id, "token", "rev2", b"two");
-        agent_service.put_volume_file_revision(&ctx, second).await.unwrap();
+        agent_service
+            .put_volume_file_revision(&ctx, second)
+            .await
+            .unwrap();
         agent_service
             .commit_volume_revision(
                 &ctx,

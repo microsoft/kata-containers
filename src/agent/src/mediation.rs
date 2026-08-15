@@ -160,8 +160,8 @@ pub const MEDIATION_MANIFEST: &[(&str, &str, &str, EnforcementClass)] = &[
     // and decodes the S_IFMT bits, so `rules.rego` can refuse a symlink where a regular file
     // is expected (RM-114).
     ("CopySingleFile", "copy_single_file", "CopySingleFileRequest", EnforcementClass::PolicyGated),
-    ("InitWatchableVolume", "init_watchable_volume", "InitWatchableVolumeRequest", EnforcementClass::PolicyGated),
-    ("PutVolumeFile", "put_volume_file", "PutVolumeFileRequest", EnforcementClass::PolicyGated),
+    ("InitVolume", "init_volume", "InitVolumeRequest", EnforcementClass::PolicyGated),
+    ("PutVolumeFileRevision", "put_volume_file_revision", "PutVolumeFileRevisionRequest", EnforcementClass::PolicyGated),
     ("CommitVolumeRevision", "commit_volume_revision", "CommitVolumeRevisionRequest", EnforcementClass::PolicyGated),
     // FR-10: strict builds refuse the generic CopyFile outright — the content is not
     // policy-measured and the host chooses the destination path. The typed content channel
@@ -656,12 +656,12 @@ mod tests {
             svc.copy_single_file(&ctx, ag::CopySingleFileRequest::default())
         );
         sweep!(
-            "InitWatchableVolume",
-            svc.init_watchable_volume(&ctx, ag::InitWatchableVolumeRequest::default())
+            "InitVolume",
+            svc.init_volume(&ctx, ag::InitVolumeRequest::default())
         );
         sweep!(
-            "PutVolumeFile",
-            svc.put_volume_file(&ctx, ag::PutVolumeFileRequest::default())
+            "PutVolumeFileRevision",
+            svc.put_volume_file_revision(&ctx, ag::PutVolumeFileRevisionRequest::default())
         );
         sweep!(
             "CommitVolumeRevision",

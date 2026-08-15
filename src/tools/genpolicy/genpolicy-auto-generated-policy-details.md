@@ -92,15 +92,15 @@ are not mediated by the Policy, because the Agent refuses any request on this en
 absolute, or contains `..`.
 
 
-## `InitWatchableVolumeRequest`, `PutVolumeFileRequest` and `CommitVolumeRevisionRequest`
+## `InitVolumeRequest`, `PutVolumeFileRevisionRequest` and `CommitVolumeRevisionRequest`
 
 Replace the use of `CopyFile` for projected `ConfigMap`, `Secret` and downward-API volumes.
-`InitWatchableVolume` asks the Guest to create a volume; the Guest mints the volume id and
-returns it, so the Host cannot choose it. `PutVolumeFile` stages files into a revision of
+`InitVolume` asks the Guest to create a volume; the Guest mints the volume id and
+returns it, so the Host cannot choose it. `PutVolumeFileRevision` stages files into a revision of
 that volume, and `CommitVolumeRevision` publishes the staged revision atomically.
 
-`InitWatchableVolumeRequest` and `CommitVolumeRevisionRequest` are plain booleans in the
-settings file, for workloads that project no volumes at all. `PutVolumeFileRequest` carries a
+`InitVolumeRequest` and `CommitVolumeRevisionRequest` are plain booleans in the
+settings file, for workloads that project no volumes at all. `PutVolumeFileRevisionRequest` carries a
 size ceiling:
 
 ```
@@ -108,8 +108,8 @@ policy_data := {
     ...
     "request_defaults": {
         ...
-        "InitWatchableVolumeRequest": true,
-        "PutVolumeFileRequest": {
+        "InitVolumeRequest": true,
+        "PutVolumeFileRevisionRequest": {
             "max_file_size": 1048576
         },
         "CommitVolumeRevisionRequest": true,
@@ -119,7 +119,7 @@ policy_data := {
 }
 ```
 
-`PutVolumeFileRequest` is pre-processed like `CopySingleFileRequest`, and its rule applies the
+`PutVolumeFileRevisionRequest` is pre-processed like `CopySingleFileRequest`, and its rule applies the
 same checks: no `setuid`/`setgid`/sticky bits on either `file_mode` or `dir_mode`, and
 `agent_volume_id`, `revision` and `file_name` must each be a plain relative path component.
 As on the single-file endpoint, the Agent enforces `S_IFREG` itself, ahead of the Policy.

@@ -432,8 +432,8 @@
         "CopySingleFileRequest": {
             "max_file_size": 1048576
         },
-        "InitWatchableVolumeRequest": true,
-        "PutVolumeFileRequest": {
+        "InitVolumeRequest": true,
+        "PutVolumeFileRevisionRequest": {
             "max_file_size": 1048576
         },
         "CommitVolumeRevisionRequest": true,

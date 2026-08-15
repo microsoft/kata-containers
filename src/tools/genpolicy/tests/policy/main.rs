@@ -14,14 +14,15 @@ mod tests {
 
     use protocols::agent::{
         AddARPNeighborsRequest, CommitVolumeRevisionRequest, CreateContainerRequest,
-        CreateSandboxRequest, ExecProcessRequest, InitWatchableVolumeRequest,
-        RemoveContainerRequest, SignalProcessRequest, StartContainerRequest, StatsContainerRequest,
-        TtyWinResizeRequest, UpdateInterfaceRequest, UpdateRoutesRequest, WaitProcessRequest,
+        CreateSandboxRequest, ExecProcessRequest, InitVolumeRequest, RemoveContainerRequest,
+        SignalProcessRequest, StartContainerRequest, StatsContainerRequest, TtyWinResizeRequest,
+        UpdateInterfaceRequest, UpdateRoutesRequest, WaitProcessRequest,
     };
     use serde::{Deserialize, Serialize};
 
     use kata_agent_policy::policy::{
-        AgentPolicy, PolicyCopyFileRequest, PolicyCopySingleFileRequest, PolicyPutVolumeFileRequest,
+        AgentPolicy, PolicyCopyFileRequest, PolicyCopySingleFileRequest,
+        PolicyPutVolumeFileRevisionRequest,
     };
 
     // Translate each test case in testcases.json
@@ -44,8 +45,8 @@ mod tests {
         UpdateRoutesRequest(UpdateRoutesRequest),
         AddARPNeighborsRequest(AddARPNeighborsRequest),
         CopySingleFileRequest(PolicyCopySingleFileRequest),
-        InitWatchableVolumeRequest(InitWatchableVolumeRequest),
-        PutVolumeFileRequest(PolicyPutVolumeFileRequest),
+        InitVolumeRequest(InitVolumeRequest),
+        PutVolumeFileRevisionRequest(PolicyPutVolumeFileRevisionRequest),
         CommitVolumeRevisionRequest(CommitVolumeRevisionRequest),
     }
 
@@ -66,10 +67,12 @@ mod tests {
                 TestRequest::UpdateRoutesRequest(_) => write!(f, "UpdateRoutesRequest"),
                 TestRequest::AddARPNeighborsRequest(_) => write!(f, "AddARPNeighborsRequest"),
                 TestRequest::CopySingleFileRequest(_) => write!(f, "CopySingleFileRequest"),
-                TestRequest::InitWatchableVolumeRequest(_) => {
-                    write!(f, "InitWatchableVolumeRequest")
+                TestRequest::InitVolumeRequest(_) => {
+                    write!(f, "InitVolumeRequest")
                 }
-                TestRequest::PutVolumeFileRequest(_) => write!(f, "PutVolumeFileRequest"),
+                TestRequest::PutVolumeFileRevisionRequest(_) => {
+                    write!(f, "PutVolumeFileRevisionRequest")
+                }
                 TestRequest::CommitVolumeRevisionRequest(_) => {
                     write!(f, "CommitVolumeRevisionRequest")
                 }
