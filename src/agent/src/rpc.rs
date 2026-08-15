@@ -4237,8 +4237,34 @@ fn enforce_plan_binding(
     executed_oci: &Spec,
     executed_oci_digest: &str,
 ) -> Result<()> {
+    // Content-channel mounts are the one authorized entry the guest is required to
+    // rewrite: the host names a guest-side identifier (`single-files/<sid>/<name>`
+    // or a volume id) and never a path, precisely so it cannot choose where the
+    // content lands. `translate_bind_safer_path_mounts` resolves that identifier
+    // under the guest's own share directory after the authorized spec was captured,
+    // so the authorized entry cannot survive verbatim and every container carrying
+    // one -- network files, watchable volumes, and the empty stand-ins substituted
+    // for suppressed other-files -- would otherwise be refused.
+    //
+    // The rewrite is *waived* nowhere: it is deterministic and derived by the guest
+    // alone, so the same translation is applied to a copy of the authorized spec and
+    // the executed side is held to that value. This is the treatment `/root/path`
+    // already gets, and for the same reason -- computing the expected value is
+    // strictly stronger than permitting the field to differ. An in-guest transform
+    // that pointed a content-channel mount anywhere else still fails the binding.
+    let mut authorized_resolved = authorized_oci.clone();
+    translate_bind_safer_path_mounts(&mut authorized_resolved).inspect_err(|e| {
+        error!(
+            sl(),
+            "FR-3: refusing to create container; an authorized content-channel \
+             mount cannot be resolved to the path the guest derives";
+            "container-id" => cid,
+            "violation" => e.to_string(),
+        );
+    })?;
+
     crate::plan_binding::assert_within_resolution_bounds(
-        authorized_oci,
+        &authorized_resolved,
         executed_oci,
         &container_rootfs_path(cid),
     )
@@ -6566,6 +6592,87 @@ COMMIT
 
             bind(authorized_spec(), executed)
                 .expect("trusted in-guest transforms must not fail the create");
+        }
+
+        /// A host-supplied `bind-safer-path` mount is rewritten in place by
+        /// `translate_bind_safer_path_mounts`, which runs *after* the authorized
+        /// spec is captured. The rewrite is one of the trusted in-guest
+        /// transforms and its result is derived by the guest alone, so it must
+        /// not fail the create.
+        ///
+        /// Every content-channel mount takes this path -- network files,
+        /// watchable volumes, and the empty stand-ins the guest substitutes for
+        /// suppressed other-files -- so a binding that refuses it refuses every
+        /// container that has one.
+        #[test]
+        #[serial_test::serial]
+        fn a_translated_bind_safer_path_mount_is_still_the_authorized_plan() {
+            let _temp_dir = setup_volume_rpc_test();
+
+            let mut safer = oci::Mount::default();
+            safer.set_destination(PathBuf::from("/dev/termination-log"));
+            safer.set_typ(Some("bind-safer-path".to_string()));
+            safer.set_source(Some(PathBuf::from("single-files/sandbox-id/empty-file")));
+
+            let mut authorized = spec_of(authorized_spec());
+            authorized.mounts_mut().as_mut().unwrap().push(safer);
+
+            let mut executed = authorized.clone();
+            let mut root = executed.root().clone().unwrap();
+            root.set_path(container_rootfs_path(BOUND_CID));
+            executed.set_root(Some(root));
+            translate_bind_safer_path_mounts(&mut executed)
+                .expect("the translation itself must succeed");
+
+            enforce_plan_binding(
+                BOUND_CID,
+                &authorized,
+                &plan_digest(&authorized),
+                &executed,
+                &plan_digest(&executed),
+            )
+            .expect("a guest-derived content-channel mount rewrite must not fail the create");
+        }
+
+        /// The rewrite is pinned, not waived: resolving the identifier is the
+        /// guest's job, but only to the path the guest itself derives. A
+        /// transform that redirected the mount elsewhere -- to a path outside
+        /// the share directory, say -- must still fail the create.
+        #[test]
+        #[serial_test::serial]
+        fn a_redirected_content_channel_mount_still_fails_the_create() {
+            let _temp_dir = setup_volume_rpc_test();
+
+            let mut safer = oci::Mount::default();
+            safer.set_destination(PathBuf::from("/dev/termination-log"));
+            safer.set_typ(Some("bind-safer-path".to_string()));
+            safer.set_source(Some(PathBuf::from("single-files/sandbox-id/empty-file")));
+
+            let mut authorized = spec_of(authorized_spec());
+            authorized.mounts_mut().as_mut().unwrap().push(safer);
+
+            let mut executed = authorized.clone();
+            let mut root = executed.root().clone().unwrap();
+            root.set_path(container_rootfs_path(BOUND_CID));
+            executed.set_root(Some(root));
+            translate_bind_safer_path_mounts(&mut executed)
+                .expect("the translation itself must succeed");
+            executed.mounts_mut().as_mut().unwrap()[1]
+                .set_source(Some(PathBuf::from("/etc/shadow")));
+
+            let err = enforce_plan_binding(
+                BOUND_CID,
+                &authorized,
+                &plan_digest(&authorized),
+                &executed,
+                &plan_digest(&executed),
+            )
+            .expect_err("a content-channel mount resolved elsewhere must fail the create");
+            assert!(
+                err.to_string().contains("plan binding violation"),
+                "unexpected error: {}",
+                err
+            );
         }
 
         #[test]
