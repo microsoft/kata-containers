@@ -461,8 +461,14 @@ impl ShareFsVolume {
                     m.destination(),
                     copy_volume_types,
                 );
+                let copy_empty_other_directory = should_copy_empty_other_directory(
+                    &src,
+                    m.destination(),
+                    copy_volume_types,
+                );
                 if !should_copy_volume(&src, m.destination(), copy_volume_types)
                     && !copy_empty_other_file
+                    && !copy_empty_other_directory
                 {
                     info!(
                         sl!(),
@@ -493,33 +499,48 @@ impl ShareFsVolume {
                     oci_mount.set_source(Some(PathBuf::from(agent_file_id)));
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
-                    let init_resp = agent
-                        .init_volume(InitVolumeRequest {
-                            host_volume_id: src.to_string_lossy().to_string(),
-                        })
-                        .await
-                        .context("init watchable volume")?;
+                    if copy_empty_other_directory {
+                        // The directory contents are suppressed by copy_volumes, so the
+                        // guest gets an empty directory rather than host-relayed content.
+                        let init_resp = agent
+                            .init_volume(InitVolumeRequest {
+                                host_volume_id: src.to_string_lossy().to_string(),
+                            })
+                            .await
+                            .context("init empty directory volume")?;
 
-                    sync_watchable_volume_revision(&src, &init_resp.agent_volume_id, &agent)
-                        .await
-                        .context("sync watchable volume")?;
+                        oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
+                        oci_mount.set_source(Some(PathBuf::from(init_resp.agent_volume_id)));
+                        volume.mounts.push(oci_mount);
+                    } else {
+                        let init_resp = agent
+                            .init_volume(InitVolumeRequest {
+                                host_volume_id: src.to_string_lossy().to_string(),
+                            })
+                            .await
+                            .context("init watchable volume")?;
 
-                    oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
-                    oci_mount.set_source(Some(PathBuf::from(&init_resp.agent_volume_id)));
-                    volume.mounts.push(oci_mount);
+                        sync_watchable_volume_revision(&src, &init_resp.agent_volume_id, &agent)
+                            .await
+                            .context("sync watchable volume")?;
 
-                    let watcher = FsWatcher::new(&src).await?;
-                    let handle = watcher
-                        .start_watchable_monitor(
-                            agent.clone(),
-                            src.clone(),
-                            init_resp.agent_volume_id.clone(),
-                        )
-                        .await;
+                        oci_mount.set_typ(Some(BIND_SAFER_PATH.to_string()));
+                        oci_mount.set_source(Some(PathBuf::from(&init_resp.agent_volume_id)));
+                        volume.mounts.push(oci_mount);
 
-                    volume_manager
-                        .register_monitor(&src.to_string_lossy(), Some(handle))
-                        .await?;
+                        let watcher = FsWatcher::new(&src).await?;
+                        let handle = watcher
+                            .start_watchable_monitor(
+                                agent.clone(),
+                                src.clone(),
+                                init_resp.agent_volume_id.clone(),
+                            )
+                            .await;
+
+                        volume_manager
+                            .register_monitor(&src.to_string_lossy(), Some(handle))
+                            .await?;
+                    }
                 } else {
                     // If not, we can ignore it. Let's issue a warning so that the user knows.
                     warn!(
@@ -739,6 +760,18 @@ fn should_copy_empty_other_file(
     copy_volume_types.is_some_and(|enabled_types| {
         !enabled_types.contains(COPY_VOLUME_OTHER_FILES)
     })
+}
+
+fn should_copy_empty_other_directory(
+    src: &Path,
+    destination: &Path,
+    copy_volume_types: Option<&HashSet<String>>,
+) -> bool {
+    src.is_dir()
+        && classify_copy_volume(src, destination) == COPY_VOLUME_OTHER_DIRECTORIES
+        && copy_volume_types.is_some_and(|enabled_types| {
+            !enabled_types.contains(COPY_VOLUME_OTHER_DIRECTORIES)
+        })
 }
 
 fn classify_copy_volume(src: &Path, _destination: &Path) -> &'static str {
@@ -1186,6 +1219,29 @@ mod test {
         let mut enabled = HashSet::new();
         enabled.insert(COPY_VOLUME_OTHER_FILES.to_string());
         assert!(!should_copy_empty_other_file(
+            &source,
+            destination,
+            Some(&enabled)
+        ));
+    }
+
+    #[test]
+    fn test_other_directory_empty_copy_follows_setting() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("other-directory");
+        std::fs::create_dir(&source).unwrap();
+        let destination = Path::new("/tmp/other-directory");
+
+        assert!(should_copy_empty_other_directory(
+            &source,
+            destination,
+            Some(&HashSet::new())
+        ));
+        assert!(!should_copy_empty_other_directory(&source, destination, None));
+
+        let mut enabled = HashSet::new();
+        enabled.insert(COPY_VOLUME_OTHER_DIRECTORIES.to_string());
+        assert!(!should_copy_empty_other_directory(
             &source,
             destination,
             Some(&enabled)
