@@ -55,6 +55,7 @@ RUN \
 WORKDIR /kata
 
 COPY Cargo.toml Cargo.lock ./
+COPY third_party ./third_party
 COPY src ./src
 COPY tools/packaging/kata-deploy/binary ./tools/packaging/kata-deploy/binary
 COPY tools/packaging/kata-deploy/job-dispatcher ./tools/packaging/kata-deploy/job-dispatcher
