@@ -3990,6 +3990,19 @@ fn translate_bind_safer_path_mounts(oci: &mut Spec) -> Result<()> {
                 "bind-safer-path source must be relative: {source:?}"
             ));
         }
+        // The host chooses this string, and the policy does not constrain it: the
+        // `bind-safer-path` case of `mount_source_allows` in rules.rego matches any source,
+        // because the guest mints watchable volume ids and genpolicy cannot predict them. The
+        // policy therefore pins the destination but not the source, which leaves the agent as
+        // the only check between a host-supplied path and a bind mount. Reject anything that
+        // is not a plain relative path, before the branch below so that both translations are
+        // covered: `join` does not normalise `..`, so the kernel would resolve it at mount
+        // time and the mount would escape the directory the branch selected.
+        if !is_safe_relative_path(source) {
+            return Err(anyhow!(
+                "bind-safer-path source must not contain '..' components: {source:?}"
+            ));
+        }
 
         let translated = if source
             .components()
@@ -4852,6 +4865,37 @@ mod tests {
             mounts[1].source().as_ref().unwrap(),
             &share_dir.join("watchable-volumes/watchable-volume-id")
         );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_translate_bind_safer_path_mounts_rejects_traversal() {
+        let _temp_dir = setup_watchable_rpc_test();
+
+        // The policy does not pin the source of a bind-safer-path mount, so these strings
+        // reach the agent under host control. Both translation branches must reject a
+        // source that walks out of the directory the branch selected -- `join` keeps `..`
+        // and the kernel would resolve it when the bind mount is performed.
+        for source in [
+            "single-files/../../../../etc/shadow",
+            "single-files/sandbox-id/../../../etc/shadow",
+            "../../etc/shadow",
+            "watchable-volumes/../../etc/shadow",
+        ] {
+            let mut mount = oci::Mount::default();
+            mount.set_destination(PathBuf::from("/etc/resolv.conf"));
+            mount.set_typ(Some("bind-safer-path".to_string()));
+            mount.set_source(Some(PathBuf::from(source)));
+
+            let mut spec = Spec::default();
+            spec.set_mounts(Some(vec![mount]));
+
+            assert!(
+                translate_bind_safer_path_mounts(&mut spec).is_err(),
+                "expected {} to be rejected",
+                source
+            );
+        }
     }
 
     #[tokio::test]
