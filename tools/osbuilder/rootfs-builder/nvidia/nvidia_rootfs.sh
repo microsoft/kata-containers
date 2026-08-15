@@ -382,18 +382,34 @@ copy_cdh_runtime_deps() {
 	cp -a "${stage_one}/${libdir}"/libpcre2-8.so.0*        "${libdir}/."
 	cp -a "${stage_one}/${libdir}"/libcap.so.2*            "${libdir}/."
 
+	copy_mkfs_ext4_runtime_deps
+
+	# cryptsetup and dd are used by CDH secure_mount.
+	mkdir -p sbin bin
+	cp -a "${stage_one}/sbin/cryptsetup" sbin/.
+	cp -a "${stage_one}/usr/bin/dd" bin/.
+}
+
+# The e2fsprogs tooling the agent and CDH shell out to when formatting scratch
+# (block emptyDir) volumes. Kept self-contained so it can also be called on its
+# own from the chiseled layouts, where cryptsetup and its libraries are absent.
+copy_mkfs_ext4_runtime_deps() {
+	local libdir="lib/${machine_arch}-linux-gnu"
+
+	mkdir -p "${libdir}"
+
 	# e2fsprogs (mke2fs/mkfs.ext4) runtime libs
+	cp -a "${stage_one}/${libdir}"/libuuid.so.1*           "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libblkid.so.1*          "${libdir}/."
 	cp -a "${stage_one}/${libdir}"/libext2fs.so.2*         "${libdir}/."
 	cp -a "${stage_one}/${libdir}"/libcom_err.so.2*        "${libdir}/."
 	cp -a "${stage_one}/${libdir}"/libe2p.so.2*            "${libdir}/."
 
-	# cryptsetup, mkfs.ext4, and dd are used by CDH secure_mount.
-	mkdir -p sbin etc bin
-	cp -a "${stage_one}/sbin/cryptsetup" sbin/.
+	# The agent uses mkfs.ext4 for block-plain emptyDir volumes.
+	mkdir -p sbin etc
 	cp -a "${stage_one}/sbin/mke2fs" sbin/.
 	cp -a "${stage_one}/sbin/mkfs.ext4" sbin/.
 	cp -a "${stage_one}/etc/mke2fs.conf" etc/.
-	cp -a "${stage_one}/usr/bin/dd" bin/.
 }
 
 coco_guest_components() {
