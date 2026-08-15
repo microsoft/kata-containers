@@ -2492,8 +2492,8 @@ CopySingleFileRequest if {
     # Which of the guest's files the host may supply is not mediated here. The host names
     # a file *kind* from a closed enum rather than a path, and the guest derives the
     # destination from it, so every reachable destination is one the guest chose. Should a
-    # policy ever need to narrow that set -- to deny TerminationLog for a workload with no
-    # terminationMessagePath, say -- the enum is the field to add.
+    # policy ever need to narrow that set -- to deny Hostname for a workload that should
+    # not learn the sandbox name, say -- the enum is the field to add.
 
     allow_content_mode(input.file_mode)
 
