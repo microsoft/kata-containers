@@ -28,7 +28,7 @@ default GetIPTablesRequest := false
 default GetMetricsRequest := false
 default GetOOMEventRequest := true
 default GuestDetailsRequest := true
-default InitWatchableVolumeRequest := false
+default InitVolumeRequest := false
 default ListInterfacesRequest := false
 default ListRoutesRequest := false
 default MemAgentCompactConfig := false
@@ -36,7 +36,7 @@ default MemAgentMemcgConfig := false
 default MemHotplugByProbeRequest := false
 default OnlineCPUMemRequest := true
 default PauseContainerRequest := false
-default PutVolumeFileRequest := false
+default PutVolumeFileRevisionRequest := false
 default ReadStreamRequest := false
 default RemoveContainerRequest := false
 default RemoveStaleVirtiofsShareMountsRequest := true
@@ -2460,7 +2460,7 @@ AddARPNeighborsRequest if {
 # are still host-controlled.
 #
 # For the two endpoints that carry file content the agent evaluates a pre-processed input
-# (PolicyCopySingleFileRequest / PolicyPutVolumeFileRequest, in src/agent/policy) whose
+# (PolicyCopySingleFileRequest / PolicyPutVolumeFileRevisionRequest, in src/agent/policy) whose
 # `data` blob is stripped, so the host cannot load the rules engine with the payload.
 #
 # The S_IFMT bits are not mediated here. The agent refuses any request on these two
@@ -2509,13 +2509,13 @@ CopySingleFileRequest if {
 # The request carries only host_volume_id, which the guest ignores -- it mints its own
 # "watchable-<nanos>" id and returns it. There is no host-controlled field to constrain,
 # so this is a plain on/off switch for workloads that use no projected volumes.
-InitWatchableVolumeRequest if {
-    policy_data.request_defaults.InitWatchableVolumeRequest == true
+InitVolumeRequest if {
+    policy_data.request_defaults.InitVolumeRequest == true
 }
 
-PutVolumeFileRequest if {
-    p_defaults := policy_data.request_defaults.PutVolumeFileRequest
-    print("PutVolumeFileRequest: input =", input, "policy =", p_defaults)
+PutVolumeFileRevisionRequest if {
+    p_defaults := policy_data.request_defaults.PutVolumeFileRevisionRequest
+    print("PutVolumeFileRevisionRequest: input =", input, "policy =", p_defaults)
 
     # agent_volume_id, revision and file_name are all joined into the destination path.
     allow_content_path_component(input.agent_volume_id)
@@ -2529,7 +2529,7 @@ PutVolumeFileRequest if {
     input.file_size >= 0
     input.file_size <= p_defaults.max_file_size
 
-    print("PutVolumeFileRequest: true")
+    print("PutVolumeFileRevisionRequest: true")
 }
 
 CommitVolumeRevisionRequest if {
