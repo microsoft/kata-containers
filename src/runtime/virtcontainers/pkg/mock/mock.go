@@ -225,11 +225,11 @@ func (p *HybridVSockTTRPCMockImp) CopySingleFile(ctx context.Context, req *pb.Co
 	return &pb.CopySingleFileResponse{}, nil
 }
 
-func (p *HybridVSockTTRPCMockImp) InitWatchableVolume(ctx context.Context, req *pb.InitWatchableVolumeRequest) (*pb.InitWatchableVolumeResponse, error) {
-	return &pb.InitWatchableVolumeResponse{}, nil
+func (p *HybridVSockTTRPCMockImp) InitVolume(ctx context.Context, req *pb.InitVolumeRequest) (*pb.InitVolumeResponse, error) {
+	return &pb.InitVolumeResponse{}, nil
 }
 
-func (p *HybridVSockTTRPCMockImp) PutVolumeFile(ctx context.Context, req *pb.PutVolumeFileRequest) (*gpb.Empty, error) {
+func (p *HybridVSockTTRPCMockImp) PutVolumeFileRevision(ctx context.Context, req *pb.PutVolumeFileRevisionRequest) (*gpb.Empty, error) {
 	return &gpb.Empty{}, nil
 }
 
