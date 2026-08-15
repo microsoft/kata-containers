@@ -562,3 +562,19 @@ sandbox_bind_mounts = @DEFBINDMOUNTS@
 # to the hypervisor.
 # (default: /run/kata-containers/dans)
 dan_conf = "@DEFDANCONF@"
+
+# Which kinds of host-supplied volume content the guest accepts over the
+# mediated content channel. A kind that is absent is not copied at all.
+#
+# Supported values: network-files, other-files, other-directories,
+# projected-volumes, configmap-volumes, secret-volumes, downward-api-volumes.
+#
+# The channel mediates the *shape* of a request -- the destination is derived by
+# the guest from a closed enum or a guest-minted volume id, path components must
+# be plain relative names, setuid/setgid/sticky bits are refused, and each file
+# is size-capped -- but the payload is stripped before the policy sees it, so
+# nothing constrains the bytes themselves. Every kind listed here is therefore
+# content the host supplies and the guest does not verify. Enumerate only the
+# kinds workloads actually need; other-files and other-directories are
+# deliberately absent, so those arrive as empty stand-ins.
+copy_volumes = ["network-files", "projected-volumes", "configmap-volumes", "secret-volumes", "downward-api-volumes"]
