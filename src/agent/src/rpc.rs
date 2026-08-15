@@ -2606,6 +2606,8 @@ impl agent_ttrpc::AgentService for AgentService {
         }
 
         let target_file_name = match req.file_type.enum_value_or_default() {
+            SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED
+                if req.data_size == 0 && req.data.is_empty() => "empty-file",
             SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => "resolv.conf",
             SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => "hosts",
             SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => "hostname",
@@ -4848,6 +4850,68 @@ mod tests {
                     data_size: data.len() as i64,
                     data,
                     file_mode: stat::SFlag::S_IFLNK.bits(),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_copy_single_file_accepts_empty_unspecified_file() {
+        let temp_dir = setup_watchable_rpc_test();
+        let agent_service = test_agent_service();
+        let ctx = mk_ttrpc_context();
+
+        let resp = agent_service
+            .copy_single_file(
+                &ctx,
+                CopySingleFileRequest {
+                    sandbox_id: "sandbox-id".to_string(),
+                    file_type: protobuf::EnumOrUnknown::new(
+                        SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED,
+                    ),
+                    uid: unistd::getuid().as_raw() as i32,
+                    gid: unistd::getgid().as_raw() as i32,
+                    data_size: 0,
+                    data: vec![],
+                    file_mode: 0o644 | libc::S_IFREG,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.agent_file_id, "single-files/sandbox-id/empty-file");
+        assert!(
+            fs::metadata(temp_dir.path().join("share").join(resp.agent_file_id))
+                .unwrap()
+                .is_file()
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_copy_single_file_rejects_non_empty_unspecified_file() {
+        let _temp_dir = setup_watchable_rpc_test();
+        let agent_service = test_agent_service();
+        let ctx = mk_ttrpc_context();
+
+        let result = agent_service
+            .copy_single_file(
+                &ctx,
+                CopySingleFileRequest {
+                    sandbox_id: "sandbox-id".to_string(),
+                    file_type: protobuf::EnumOrUnknown::new(
+                        SingleFileType::SINGLE_FILE_TYPE_UNSPECIFIED,
+                    ),
+                    uid: unistd::getuid().as_raw() as i32,
+                    gid: unistd::getgid().as_raw() as i32,
+                    data_size: 1,
+                    data: vec![1],
+                    file_mode: 0o644 | libc::S_IFREG,
                     ..Default::default()
                 },
             )
