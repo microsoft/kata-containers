@@ -2611,7 +2611,6 @@ impl agent_ttrpc::AgentService for AgentService {
             SingleFileType::SINGLE_FILE_TYPE_RESOLV_CONF => "resolv.conf",
             SingleFileType::SINGLE_FILE_TYPE_ETC_HOSTS => "hosts",
             SingleFileType::SINGLE_FILE_TYPE_HOSTNAME => "hostname",
-            SingleFileType::SINGLE_FILE_TYPE_TERMINATION_LOG => "termination-log",
             _ => {
                 return Err(ttrpc_error(
                     ttrpc::Code::INVALID_ARGUMENT,

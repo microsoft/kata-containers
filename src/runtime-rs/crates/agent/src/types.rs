@@ -561,7 +561,6 @@ pub enum SingleFileType {
     ResolvConf = 1,
     EtcHosts = 2,
     Hostname = 3,
-    TerminationLog = 4,
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
