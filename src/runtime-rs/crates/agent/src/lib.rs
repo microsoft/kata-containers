@@ -20,13 +20,13 @@ pub use types::{
     CreateContainerRequest, CreateSandboxRequest, Empty, ExecProcessRequest, FSGroup,
     FSGroupChangePolicy, GetDiagnosticDataRequest, GetDiagnosticDataResponse,
     GetGuestDetailsRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
-    HealthCheckResponse, IPAddress, IPFamily, InitWatchableVolumeRequest,
-    InitWatchableVolumeResponse, Interface, Interfaces, ListProcessesRequest,
-    LoadPolicyFragmentRequest, MemHotplugByProbeRequest, MetricsResponse, OnlineCPUMemRequest,
-    OomEventResponse, PutVolumeFileRequest, ReadStreamRequest, ReadStreamResponse,
-    RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes,
-    SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse, SignalProcessRequest,
-    SingleFileType, StatsContainerResponse, Storage, TtyWinResizeRequest, UpdateContainerRequest,
+    HealthCheckResponse, IPAddress, IPFamily, InitVolumeRequest, InitVolumeResponse, Interface,
+    Interfaces, ListProcessesRequest, LoadPolicyFragmentRequest, MemHotplugByProbeRequest,
+    MetricsResponse, OnlineCPUMemRequest, OomEventResponse, PutVolumeFileRevisionRequest,
+    ReadStreamRequest, ReadStreamResponse, RemoveContainerRequest, ReseedRandomDevRequest,
+    ResizeVolumeRequest, Route, Routes, SetGuestDateTimeRequest, SetIPTablesRequest,
+    SetIPTablesResponse, SignalProcessRequest, SingleFileType, StatsContainerResponse, Storage,
+    TtyWinResizeRequest, UpdateContainerRequest,
     UpdateInterfaceRequest, UpdateRoutesRequest, VersionCheckResponse, VolumeStatsRequest,
     VolumeStatsResponse, WaitProcessRequest, WaitProcessResponse, WriteStreamRequest,
     WriteStreamResponse,
@@ -95,11 +95,11 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
     // utils
     async fn copy_file(&self, req: CopyFileRequest) -> Result<Empty>;
     async fn copy_single_file(&self, req: CopySingleFileRequest) -> Result<CopySingleFileResponse>;
-    async fn init_watchable_volume(
+    async fn init_volume(
         &self,
-        req: InitWatchableVolumeRequest,
-    ) -> Result<InitWatchableVolumeResponse>;
-    async fn put_volume_file(&self, req: PutVolumeFileRequest) -> Result<Empty>;
+        req: InitVolumeRequest,
+    ) -> Result<InitVolumeResponse>;
+    async fn put_volume_file_revision(&self, req: PutVolumeFileRevisionRequest) -> Result<Empty>;
     async fn commit_volume_revision(&self, req: CommitVolumeRevisionRequest) -> Result<Empty>;
     async fn get_metrics(&self, req: Empty) -> Result<MetricsResponse>;
     async fn get_oom_event(&self, req: Empty) -> Result<OomEventResponse>;

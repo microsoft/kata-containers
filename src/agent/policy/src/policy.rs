@@ -10,7 +10,7 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
 use anyhow::{bail, Error, Result};
-use protocols::agent::{CopyFileRequest, CopySingleFileRequest, PutVolumeFileRequest};
+use protocols::agent::{CopyFileRequest, CopySingleFileRequest, PutVolumeFileRevisionRequest};
 use regorus::PolicyLengthConfig;
 use slog::{debug, error, info, warn};
 use tokio::io::AsyncWriteExt;
@@ -1409,11 +1409,11 @@ impl From<&CopySingleFileRequest> for PolicyCopySingleFileRequest {
     }
 }
 
-/// PolicyPutVolumeFileRequest is a pre-processed variant of the PutVolumeFileRequest,
-/// for the reasons documented on `PolicyCopySingleFileRequest`.
+/// PolicyPutVolumeFileRevisionRequest is a pre-processed variant of the
+/// PutVolumeFileRevisionRequest, for the reasons documented on `PolicyCopySingleFileRequest`.
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
-pub struct PolicyPutVolumeFileRequest {
+pub struct PolicyPutVolumeFileRevisionRequest {
     pub agent_volume_id: String,
     pub file_name: String,
     pub revision: String,
@@ -1426,9 +1426,9 @@ pub struct PolicyPutVolumeFileRequest {
     pub offset: i64,
 }
 
-impl From<&PutVolumeFileRequest> for PolicyPutVolumeFileRequest {
-    fn from(req: &PutVolumeFileRequest) -> Self {
-        PolicyPutVolumeFileRequest {
+impl From<&PutVolumeFileRevisionRequest> for PolicyPutVolumeFileRevisionRequest {
+    fn from(req: &PutVolumeFileRevisionRequest) -> Self {
+        Self {
             agent_volume_id: req.agent_volume_id.clone(),
             file_name: req.file_name.clone(),
             revision: req.revision.clone(),
@@ -4241,7 +4241,7 @@ containers := [{"name": "wrong-issuer"}]
             "the file payload must not reach the rules engine"
         );
 
-        let volume = protocols::agent::PutVolumeFileRequest {
+        let volume = protocols::agent::PutVolumeFileRevisionRequest {
             agent_volume_id: "watchable-1".to_owned(),
             file_name: "config.json".to_owned(),
             revision: "..2026_02_11".to_owned(),
@@ -4252,7 +4252,7 @@ containers := [{"name": "wrong-issuer"}]
             ..Default::default()
         };
 
-        let out = PolicyPutVolumeFileRequest::from(&volume);
+        let out = PolicyPutVolumeFileRevisionRequest::from(&volume);
 
         assert_eq!(out.agent_volume_id, "watchable-1");
         assert_eq!(out.file_name, "config.json");

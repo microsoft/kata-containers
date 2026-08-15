@@ -580,17 +580,17 @@ pub struct CopySingleFileResponse {
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
-pub struct InitWatchableVolumeRequest {
+pub struct InitVolumeRequest {
     pub host_volume_id: String,
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
-pub struct InitWatchableVolumeResponse {
+pub struct InitVolumeResponse {
     pub agent_volume_id: String,
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
-pub struct PutVolumeFileRequest {
+pub struct PutVolumeFileRevisionRequest {
     pub agent_volume_id: String,
     pub file_name: String,
     pub file_size: i64,

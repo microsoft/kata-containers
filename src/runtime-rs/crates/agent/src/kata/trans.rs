@@ -19,9 +19,9 @@ use crate::{
         CopySingleFileResponse, CpuStats, CpuUsage, CreateContainerRequest, CreateSandboxRequest,
         Device, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy, GetIPTablesRequest,
         GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse, HugetlbStats, IPAddress,
-        IPFamily, InitWatchableVolumeRequest, InitWatchableVolumeResponse, Interface, Interfaces,
+        IPFamily, InitVolumeRequest, InitVolumeResponse, Interface, Interfaces,
         KernelModule, MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse,
-        NetworkStats, OnlineCPUMemRequest, PidsStats, PutVolumeFileRequest, ReadStreamRequest,
+        NetworkStats, OnlineCPUMemRequest, PidsStats, PutVolumeFileRevisionRequest, ReadStreamRequest,
         ReadStreamResponse, RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest,
         Route, Routes, SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse,
         SharedMount, SignalProcessRequest, SingleFileType, StatsContainerResponse, Storage,
@@ -871,8 +871,8 @@ impl From<agent::CopySingleFileResponse> for CopySingleFileResponse {
     }
 }
 
-impl From<InitWatchableVolumeRequest> for agent::InitWatchableVolumeRequest {
-    fn from(from: InitWatchableVolumeRequest) -> Self {
+impl From<InitVolumeRequest> for agent::InitVolumeRequest {
+    fn from(from: InitVolumeRequest) -> Self {
         Self {
             host_volume_id: from.host_volume_id,
             ..Default::default()
@@ -880,16 +880,16 @@ impl From<InitWatchableVolumeRequest> for agent::InitWatchableVolumeRequest {
     }
 }
 
-impl From<agent::InitWatchableVolumeResponse> for InitWatchableVolumeResponse {
-    fn from(from: agent::InitWatchableVolumeResponse) -> Self {
+impl From<agent::InitVolumeResponse> for InitVolumeResponse {
+    fn from(from: agent::InitVolumeResponse) -> Self {
         Self {
             agent_volume_id: from.agent_volume_id,
         }
     }
 }
 
-impl From<PutVolumeFileRequest> for agent::PutVolumeFileRequest {
-    fn from(from: PutVolumeFileRequest) -> Self {
+impl From<PutVolumeFileRevisionRequest> for agent::PutVolumeFileRevisionRequest {
+    fn from(from: PutVolumeFileRevisionRequest) -> Self {
         Self {
             agent_volume_id: from.agent_volume_id,
             file_name: from.file_name,

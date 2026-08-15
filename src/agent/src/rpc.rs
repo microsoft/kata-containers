@@ -5,7 +5,9 @@
 
 use async_trait::async_trait;
 #[cfg(feature = "agent-policy")]
-use kata_agent_policy::policy::{PolicyCopySingleFileRequest, PolicyPutVolumeFileRequest};
+use kata_agent_policy::policy::{
+    PolicyCopySingleFileRequest, PolicyPutVolumeFileRevisionRequest,
+};
 // The generic CopyFile gate exists only in non-strict builds; strict builds refuse the RPC
 // before any policy round trip.
 #[cfg(all(feature = "agent-policy", not(feature = "strict-policy")))]
@@ -45,8 +47,8 @@ use protobuf::MessageField;
 use protocols::agent::{
     AddSwapPathRequest, AddSwapRequest, AgentDetails, CommitVolumeRevisionRequest, CopyFileRequest,
     CopySingleFileRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
-    InitWatchableVolumeRequest, InitWatchableVolumeResponse, Interfaces, Metrics, OOMEvent,
-    PutVolumeFileRequest, ReadStreamResponse, ResizeVolumeRequest, Routes, SetIPTablesRequest,
+    InitVolumeRequest, InitVolumeResponse, Interfaces, Metrics, OOMEvent,
+    PutVolumeFileRevisionRequest, ReadStreamResponse, ResizeVolumeRequest, Routes, SetIPTablesRequest,
     SetIPTablesResponse, SingleFileType, StatsContainerResponse, VolumeStatsRequest,
     WaitProcessResponse, WriteStreamResponse,
 };
@@ -149,8 +151,7 @@ const IP6TABLES_SAVE: &str = "/sbin/ip6tables-save";
 const USR_IP6TABLES_RESTORE: &str = "/usr/sbin/ip6tables-save";
 const IP6TABLES_RESTORE: &str = "/sbin/ip6tables-restore";
 const KATA_GUEST_SHARE_DIR: &str = "/run/kata-containers/shared/containers/";
-const KATA_GUEST_WATCHABLE_VOLUMES_DIR: &str =
-    "/run/kata-containers/shared/containers/watchable-volumes";
+const KATA_GUEST_VOLUMES_DIR: &str = "/run/kata-containers/shared/containers/volumes";
 
 /// This mask is applied to parent directories implicitly created for CopyFile requests.
 const IMPLICIT_DIRECTORY_PERMISSION_MASK: u32 = 0o777;
@@ -172,20 +173,20 @@ const ERR_NO_SANDBOX_PIDNS: &str = "Sandbox does not have sandbox_pidns";
 const IPTABLES_RESTORE_WAIT_SEC: u64 = 5;
 
 #[derive(Clone, Debug, Default)]
-struct WatchableVolumeState {
+struct VolumeState {
     current_revision: Option<String>,
     pending_revision: Option<String>,
 }
 
 lazy_static! {
-    static ref WATCHABLE_VOLUMES: StdMutex<HashMap<String, WatchableVolumeState>> =
+    static ref VOLUMES: StdMutex<HashMap<String, VolumeState>> =
         StdMutex::new(HashMap::new());
 }
 
 #[cfg(test)]
 lazy_static! {
     static ref TEST_GUEST_SHARE_DIR: StdMutex<Option<PathBuf>> = StdMutex::new(None);
-    static ref TEST_WATCHABLE_VOLUMES_DIR: StdMutex<Option<PathBuf>> = StdMutex::new(None);
+    static ref TEST_VOLUMES_DIR: StdMutex<Option<PathBuf>> = StdMutex::new(None);
 }
 
 // Convenience function to obtain the scope logger.
@@ -2664,44 +2665,44 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(resp)
     }
 
-    async fn init_watchable_volume(
+    async fn init_volume(
         &self,
         ctx: &TtrpcContext,
-        req: InitWatchableVolumeRequest,
-    ) -> ttrpc::Result<InitWatchableVolumeResponse> {
-        trace_rpc_call!(ctx, "init_watchable_volume", req);
+        req: InitVolumeRequest,
+    ) -> ttrpc::Result<InitVolumeResponse> {
+        trace_rpc_call!(ctx, "init_volume", req);
         is_allowed(&req).await?;
 
         let agent_volume_id = format!(
-            "watchable-{}",
+            "volume-{}",
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map_ttrpc_err(same)?
                 .as_nanos()
         );
-        let root = watchable_root_path(&agent_volume_id).map_ttrpc_err(same)?;
+        let root = volume_root_path(&agent_volume_id).map_ttrpc_err(same)?;
         std::fs::create_dir_all(&root).map_ttrpc_err(same)?;
 
-        WATCHABLE_VOLUMES
+        VOLUMES
             .lock()
             .map_ttrpc_err(|_| "failed to lock watchable volume map")?
-            .insert(agent_volume_id.clone(), WatchableVolumeState::default());
+            .insert(agent_volume_id.clone(), VolumeState::default());
 
-        let mut resp = InitWatchableVolumeResponse::new();
+        let mut resp = InitVolumeResponse::new();
         resp.agent_volume_id = agent_volume_id;
         Ok(resp)
     }
 
-    async fn put_volume_file(
+    async fn put_volume_file_revision(
         &self,
         ctx: &TtrpcContext,
-        req: PutVolumeFileRequest,
+        req: PutVolumeFileRevisionRequest,
     ) -> ttrpc::Result<Empty> {
-        trace_rpc_call!(ctx, "put_volume_file", req);
+        trace_rpc_call!(ctx, "put_volume_file_revision", req);
         // See copy_single_file: the policy gets the request without the file payload.
         #[cfg(feature = "agent-policy")]
         {
-            let req_for_policy = PolicyPutVolumeFileRequest::from(&req);
+            let req_for_policy = PolicyPutVolumeFileRevisionRequest::from(&req);
             is_allowed_with_entrypoint(req.descriptor_dyn().name(), &req_for_policy).await?;
         }
         #[cfg(not(feature = "agent-policy"))]
@@ -2745,7 +2746,7 @@ impl agent_ttrpc::AgentService for AgentService {
         }
 
         {
-            let mut map = WATCHABLE_VOLUMES
+            let mut map = VOLUMES
                 .lock()
                 .map_ttrpc_err(|_| "failed to lock watchable volume map")?;
             let state = map
@@ -2763,7 +2764,7 @@ impl agent_ttrpc::AgentService for AgentService {
             }
         }
 
-        let volume_root = watchable_root_path(&req.agent_volume_id).map_ttrpc_err(same)?;
+        let volume_root = volume_root_path(&req.agent_volume_id).map_ttrpc_err(same)?;
         std::fs::create_dir_all(&volume_root).map_ttrpc_err(same)?;
 
         let revision_root = volume_root.join(revision);
@@ -2813,10 +2814,10 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "commit_volume_revision", req);
         is_allowed(&req).await?;
 
-        let volume_root = watchable_root_path(&req.agent_volume_id).map_ttrpc_err(same)?;
+        let volume_root = volume_root_path(&req.agent_volume_id).map_ttrpc_err(same)?;
 
         let (pending_revision, previous_revision) = {
-            let mut map = WATCHABLE_VOLUMES
+            let mut map = VOLUMES
                 .lock()
                 .map_ttrpc_err(|_| "failed to lock watchable volume map")?;
             let state = map
@@ -3937,24 +3938,24 @@ fn guest_share_dir_path() -> PathBuf {
     PathBuf::from(KATA_GUEST_SHARE_DIR)
 }
 
-fn watchable_volumes_dir_path() -> PathBuf {
+fn volumes_dir_path() -> PathBuf {
     #[cfg(test)]
     {
-        if let Some(path) = TEST_WATCHABLE_VOLUMES_DIR.lock().unwrap().clone() {
+        if let Some(path) = TEST_VOLUMES_DIR.lock().unwrap().clone() {
             return path;
         }
     }
 
-    PathBuf::from(KATA_GUEST_WATCHABLE_VOLUMES_DIR)
+    PathBuf::from(KATA_GUEST_VOLUMES_DIR)
 }
 
-fn watchable_root_path(agent_volume_id: &str) -> Result<PathBuf> {
+fn volume_root_path(agent_volume_id: &str) -> Result<PathBuf> {
     let id_path = Path::new(agent_volume_id);
     if !is_safe_relative_path(id_path) {
         return Err(anyhow!("invalid agent_volume_id: {agent_volume_id}"));
     }
 
-    Ok(watchable_volumes_dir_path().join(id_path))
+    Ok(volumes_dir_path().join(id_path))
 }
 
 fn create_watchable_directory(path: &Path, mode: u32, uid: i32, gid: i32) -> Result<()> {
@@ -4015,7 +4016,7 @@ fn translate_bind_safer_path_mounts(oci: &mut Spec) -> Result<()> {
             let source_id = source
                 .to_str()
                 .ok_or_else(|| anyhow!("bind-safer-path source is not valid UTF-8: {source:?}"))?;
-            watchable_root_path(source_id)?
+            volume_root_path(source_id)?
         };
 
         mount.set_typ(Some("bind".to_string()));
@@ -4675,15 +4676,15 @@ mod tests {
         }
     }
 
-    fn setup_watchable_rpc_test() -> TempDir {
+    fn setup_volume_rpc_test() -> TempDir {
         let temp_dir = tempdir().unwrap();
         let share_dir = temp_dir.path().join("share");
-        let watchable_dir = share_dir.join("watchable-volumes");
-        fs::create_dir_all(&watchable_dir).unwrap();
+        let volumes_dir = share_dir.join("volumes");
+        fs::create_dir_all(&volumes_dir).unwrap();
 
         *TEST_GUEST_SHARE_DIR.lock().unwrap() = Some(share_dir);
-        *TEST_WATCHABLE_VOLUMES_DIR.lock().unwrap() = Some(watchable_dir);
-        WATCHABLE_VOLUMES.lock().unwrap().clear();
+        *TEST_VOLUMES_DIR.lock().unwrap() = Some(volumes_dir);
+        VOLUMES.lock().unwrap().clear();
 
         temp_dir
     }
@@ -4719,11 +4720,11 @@ mod tests {
         })
     }
 
-    async fn init_test_watchable_volume(agent_service: &AgentService) -> String {
+    async fn init_test_volume(agent_service: &AgentService) -> String {
         agent_service
-            .init_watchable_volume(
+            .init_volume(
                 &mk_ttrpc_context(),
-                InitWatchableVolumeRequest {
+                InitVolumeRequest {
                     host_volume_id: "host-volume".to_string(),
                     ..Default::default()
                 },
@@ -4738,8 +4739,8 @@ mod tests {
         file_name: &str,
         revision: &str,
         data: &[u8],
-    ) -> PutVolumeFileRequest {
-        PutVolumeFileRequest {
+    ) -> PutVolumeFileRevisionRequest {
+        PutVolumeFileRevisionRequest {
             agent_volume_id: agent_volume_id.to_string(),
             file_name: file_name.to_string(),
             file_size: data.len() as i64,
@@ -4759,21 +4760,21 @@ mod tests {
     async fn test_put_volume_file_rejects_invalid_paths() {
         #[cfg(feature = "agent-policy")]
         let _policy_guard = install_content_channel_policy().await;
-        let _temp_dir = setup_watchable_rpc_test();
+        let _temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
-        let agent_volume_id = init_test_watchable_volume(&agent_service).await;
+        let agent_volume_id = init_test_volume(&agent_service).await;
         let ctx = mk_ttrpc_context();
 
         let invalid_file = put_volume_file_request(&agent_volume_id, "../token", "rev1", b"token");
         assert!(agent_service
-            .put_volume_file(&ctx, invalid_file)
+            .put_volume_file_revision(&ctx, invalid_file)
             .await
             .is_err());
 
         let invalid_revision =
             put_volume_file_request(&agent_volume_id, "token", "../rev1", b"token");
         assert!(agent_service
-            .put_volume_file(&ctx, invalid_revision)
+            .put_volume_file_revision(&ctx, invalid_revision)
             .await
             .is_err());
     }
@@ -4781,15 +4782,15 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_put_volume_file_rejects_non_regular_file() {
-        let _temp_dir = setup_watchable_rpc_test();
+        let _temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
-        let agent_volume_id = init_test_watchable_volume(&agent_service).await;
+        let agent_volume_id = init_test_volume(&agent_service).await;
         let ctx = mk_ttrpc_context();
 
         let mut req = put_volume_file_request(&agent_volume_id, "token", "rev1", b"token");
         req.file_mode = stat::SFlag::S_IFLNK.bits();
 
-        assert!(agent_service.put_volume_file(&ctx, req).await.is_err());
+        assert!(agent_service.put_volume_file_revision(&ctx, req).await.is_err());
     }
 
     #[tokio::test]
@@ -4797,7 +4798,7 @@ mod tests {
     async fn test_copy_single_file_writes_to_shared_dir() {
         #[cfg(feature = "agent-policy")]
         let _policy_guard = install_content_channel_policy().await;
-        let temp_dir = setup_watchable_rpc_test();
+        let temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
         let ctx = mk_ttrpc_context();
         let data = b"nameserver 1.1.1.1".to_vec();
@@ -4831,7 +4832,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_copy_single_file_rejects_non_regular_file() {
-        let _temp_dir = setup_watchable_rpc_test();
+        let _temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
         let ctx = mk_ttrpc_context();
         let data = b"resolv.conf".to_vec();
@@ -4860,7 +4861,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_copy_single_file_accepts_empty_unspecified_file() {
-        let temp_dir = setup_watchable_rpc_test();
+        let temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
         let ctx = mk_ttrpc_context();
 
@@ -4894,7 +4895,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_copy_single_file_rejects_non_empty_unspecified_file() {
-        let _temp_dir = setup_watchable_rpc_test();
+        let _temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
         let ctx = mk_ttrpc_context();
 
@@ -4922,7 +4923,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_translate_bind_safer_path_mounts() {
-        let temp_dir = setup_watchable_rpc_test();
+        let temp_dir = setup_volume_rpc_test();
         let share_dir = temp_dir.path().join("share");
 
         let mut single_file_mount = oci::Mount::default();
@@ -4935,7 +4936,7 @@ mod tests {
             "/var/run/secrets/kubernetes.io/serviceaccount",
         ));
         watchable_mount.set_typ(Some("bind-safer-path".to_string()));
-        watchable_mount.set_source(Some(PathBuf::from("watchable-volume-id")));
+        watchable_mount.set_source(Some(PathBuf::from("volume-id")));
 
         let mut spec = Spec::default();
         spec.set_mounts(Some(vec![single_file_mount, watchable_mount]));
@@ -4952,14 +4953,14 @@ mod tests {
         assert_eq!(mounts[1].typ().as_deref(), Some("bind"));
         assert_eq!(
             mounts[1].source().as_ref().unwrap(),
-            &share_dir.join("watchable-volumes/watchable-volume-id")
+            &share_dir.join("volumes/volume-id")
         );
     }
 
     #[test]
     #[serial_test::serial]
     fn test_translate_bind_safer_path_mounts_rejects_traversal() {
-        let _temp_dir = setup_watchable_rpc_test();
+        let _temp_dir = setup_volume_rpc_test();
 
         // The policy does not pin the source of a bind-safer-path mount, so these strings
         // reach the agent under host control. Both translation branches must reject a
@@ -4992,16 +4993,16 @@ mod tests {
     async fn test_put_volume_file_rejects_mixed_pending_revisions() {
         #[cfg(feature = "agent-policy")]
         let _policy_guard = install_content_channel_policy().await;
-        let _temp_dir = setup_watchable_rpc_test();
+        let _temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
-        let agent_volume_id = init_test_watchable_volume(&agent_service).await;
+        let agent_volume_id = init_test_volume(&agent_service).await;
         let ctx = mk_ttrpc_context();
 
         let first = put_volume_file_request(&agent_volume_id, "token", "rev1", b"token");
-        agent_service.put_volume_file(&ctx, first).await.unwrap();
+        agent_service.put_volume_file_revision(&ctx, first).await.unwrap();
 
         let second = put_volume_file_request(&agent_volume_id, "ca.crt", "rev2", b"crt");
-        assert!(agent_service.put_volume_file(&ctx, second).await.is_err());
+        assert!(agent_service.put_volume_file_revision(&ctx, second).await.is_err());
     }
 
     #[tokio::test]
@@ -5009,9 +5010,9 @@ mod tests {
     async fn test_commit_volume_revision_without_pending_revision_is_noop() {
         #[cfg(feature = "agent-policy")]
         let _policy_guard = install_content_channel_policy().await;
-        let _temp_dir = setup_watchable_rpc_test();
+        let _temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
-        let agent_volume_id = init_test_watchable_volume(&agent_service).await;
+        let agent_volume_id = init_test_volume(&agent_service).await;
         let ctx = mk_ttrpc_context();
 
         let req = CommitVolumeRevisionRequest {
@@ -5030,14 +5031,14 @@ mod tests {
     async fn test_commit_volume_revision_switches_data_symlink_and_gc() {
         #[cfg(feature = "agent-policy")]
         let _policy_guard = install_content_channel_policy().await;
-        let _temp_dir = setup_watchable_rpc_test();
+        let _temp_dir = setup_volume_rpc_test();
         let agent_service = test_agent_service();
-        let agent_volume_id = init_test_watchable_volume(&agent_service).await;
+        let agent_volume_id = init_test_volume(&agent_service).await;
         let ctx = mk_ttrpc_context();
-        let volume_root = watchable_root_path(&agent_volume_id).unwrap();
+        let volume_root = volume_root_path(&agent_volume_id).unwrap();
 
         let first = put_volume_file_request(&agent_volume_id, "token", "rev1", b"one");
-        agent_service.put_volume_file(&ctx, first).await.unwrap();
+        agent_service.put_volume_file_revision(&ctx, first).await.unwrap();
         agent_service
             .commit_volume_revision(
                 &ctx,
@@ -5064,7 +5065,7 @@ mod tests {
         );
 
         let second = put_volume_file_request(&agent_volume_id, "token", "rev2", b"two");
-        agent_service.put_volume_file(&ctx, second).await.unwrap();
+        agent_service.put_volume_file_revision(&ctx, second).await.unwrap();
         agent_service
             .commit_volume_revision(
                 &ctx,
@@ -6644,7 +6645,7 @@ COMMIT
         #[test]
         #[serial_test::serial]
         fn a_translated_bind_safer_path_mount_is_still_the_authorized_plan() {
-            let _temp_dir = setup_watchable_rpc_test();
+            let _temp_dir = setup_volume_rpc_test();
 
             let mut safer = oci::Mount::default();
             safer.set_destination(PathBuf::from("/dev/termination-log"));
@@ -6678,7 +6679,7 @@ COMMIT
         #[test]
         #[serial_test::serial]
         fn a_redirected_content_channel_mount_still_fails_the_create() {
-            let _temp_dir = setup_watchable_rpc_test();
+            let _temp_dir = setup_volume_rpc_test();
 
             let mut safer = oci::Mount::default();
             safer.set_destination(PathBuf::from("/dev/termination-log"));

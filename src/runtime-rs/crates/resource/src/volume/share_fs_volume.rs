@@ -17,8 +17,8 @@ use std::{
 
 use agent::Agent;
 use agent::{
-    CommitVolumeRevisionRequest, CopySingleFileRequest, InitWatchableVolumeRequest,
-    PutVolumeFileRequest, SingleFileType,
+    CommitVolumeRevisionRequest, CopySingleFileRequest, InitVolumeRequest, PutVolumeFileRevisionRequest,
+    SingleFileType,
 };
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -494,7 +494,7 @@ impl ShareFsVolume {
                     volume.mounts.push(oci_mount);
                 } else if src.is_dir() {
                     let init_resp = agent
-                        .init_watchable_volume(InitWatchableVolumeRequest {
+                        .init_volume(InitVolumeRequest {
                             host_volume_id: src.to_string_lossy().to_string(),
                         })
                         .await
@@ -680,7 +680,7 @@ async fn sync_watchable_volume_revision(
             .with_context(|| format!("read watchable file {entry_path:?}"))?;
 
         agent
-            .put_volume_file(PutVolumeFileRequest {
+            .put_volume_file_revision(PutVolumeFileRevisionRequest {
                 agent_volume_id: agent_volume_id.to_string(),
                 file_name: rel_path,
                 file_size: metadata.len() as i64,
