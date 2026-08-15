@@ -2557,6 +2557,7 @@ impl agent_ttrpc::AgentService for AgentService {
             is_allowed(&req).await?;
 
             // Potentially untrustworthy data from the host needs to go into the shared dir.
+            // (baseline CI control - do not merge)
             let root_path = PathBuf::from(KATA_GUEST_SHARE_DIR);
             do_copy_file(&req, &root_path).map_ttrpc_err(same)?;
 
