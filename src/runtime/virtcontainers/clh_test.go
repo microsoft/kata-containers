@@ -8,6 +8,7 @@
 package virtcontainers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -621,6 +623,13 @@ func TestClhCreateVMFileBackedMemoryVirtioMemDisabled(t *testing.T) {
 
 func TestClhRestoreVM(t *testing.T) {
 	assert := assert.New(t)
+	originalHvLogger := hvLogger
+	var warningOutput bytes.Buffer
+	testLogger := logrus.New()
+	testLogger.SetLevel(logrus.WarnLevel)
+	testLogger.SetOutput(&warningOutput)
+	hvLogger = logrus.NewEntry(testLogger)
+	t.Cleanup(func() { hvLogger = originalHvLogger })
 
 	store, err := persist.GetDriver()
 	assert.NoError(err)
@@ -653,10 +662,12 @@ func TestClhRestoreVM(t *testing.T) {
 	assert.NoError(err)
 
 	tests := []struct {
-		name     string
-		mode     ClhMemoryRestoreMode
-		expected chclient.MemoryRestoreMode
+		name           string
+		mode           ClhMemoryRestoreMode
+		expected       chclient.MemoryRestoreMode
+		expectsWarning bool
 	}{
+		{name: "unset defaults to copy", expected: chclient.COPY, expectsWarning: true},
 		{name: "copy", mode: ClhMemoryRestoreModeCopy, expected: chclient.COPY},
 		{name: "on demand", mode: ClhMemoryRestoreModeOnDemand, expected: chclient.ON_DEMAND},
 		{name: "copy on write", mode: ClhMemoryRestoreModeCopyOnWrite, expected: chclient.COPY_ON_WRITE},
@@ -666,9 +677,15 @@ func TestClhRestoreVM(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			clh.config.ClhMemoryRestoreMode = test.mode
 			mockClient.restoreRequest = nil
+			warningOutput.Reset()
 
 			err = clh.restoreVM(context.Background())
 			assert.NoError(err)
+			if test.expectsWarning {
+				assert.Contains(warningOutput.String(), "memory restore mode is unset; defaulting to copy")
+			} else {
+				assert.Empty(warningOutput.String())
+			}
 
 			if assert.NotNil(mockClient.restoreRequest) {
 				expectedSourceURL := "file://" + clhConfig.VMStorePath

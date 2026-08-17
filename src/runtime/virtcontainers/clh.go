@@ -2375,7 +2375,10 @@ func (clh *cloudHypervisor) restoreVM(ctx context.Context) error {
 	// Prepare restore configuration
 	restoreConfig := *chclient.NewRestoreConfig(sourceURL)
 	switch clh.config.ClhMemoryRestoreMode {
-	case "", ClhMemoryRestoreModeCopy:
+	case "":
+		clh.Logger().Warn("memory restore mode is unset; defaulting to copy")
+		restoreConfig.SetMemoryRestoreMode(chclient.COPY)
+	case ClhMemoryRestoreModeCopy:
 		restoreConfig.SetMemoryRestoreMode(chclient.COPY)
 	case ClhMemoryRestoreModeOnDemand:
 		restoreConfig.SetMemoryRestoreMode(chclient.ON_DEMAND)

@@ -220,12 +220,13 @@ func create(ctx context.Context, s *service, r *taskAPI.CreateTaskRequest) (*con
 				}
 			}
 			sandbox, err = virtcontainers.RestoreSandbox(s.ctx, snapDir, virtcontainers.RestoreOpts{
-				SandboxID:      r.ID,
-				HypervisorPath: s.config.HypervisorConfig.HypervisorPath,
-				KernelPath:     s.config.HypervisorConfig.KernelPath,
-				ImagePath:      s.config.HypervisorConfig.ImagePath,
-				NetNSPath:      netNSPath,
-				DisableSeccomp: s.config.HypervisorConfig.DisableSeccomp,
+				SandboxID:            r.ID,
+				HypervisorPath:       s.config.HypervisorConfig.HypervisorPath,
+				KernelPath:           s.config.HypervisorConfig.KernelPath,
+				ImagePath:            s.config.HypervisorConfig.ImagePath,
+				NetNSPath:            netNSPath,
+				DisableSeccomp:       s.config.HypervisorConfig.DisableSeccomp,
+				ClhMemoryRestoreMode: s.config.HypervisorConfig.ClhMemoryRestoreMode,
 			})
 		} else {
 			sandbox, _, err = katautils.CreateSandbox(s.ctx, vci, *ociSpec, *s.config, rootFs, r.ID, bundlePath, disableOutput, false)

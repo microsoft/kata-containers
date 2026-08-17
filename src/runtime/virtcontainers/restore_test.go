@@ -15,15 +15,17 @@ import (
 
 func TestRestoreOptsApplyHypervisorOverrides(t *testing.T) {
 	config := HypervisorConfig{
-		HypervisorPath: "/snapshot/cloud-hypervisor",
-		KernelPath:     "/snapshot/vmlinuz",
-		ImagePath:      "/snapshot/image",
+		HypervisorPath:       "/snapshot/cloud-hypervisor",
+		KernelPath:           "/snapshot/vmlinuz",
+		ImagePath:            "/snapshot/image",
+		ClhMemoryRestoreMode: ClhMemoryRestoreModeCopy,
 	}
 	opts := RestoreOpts{
-		HypervisorPath: "/current/cloud-hypervisor",
-		KernelPath:     "/current/vmlinuz",
-		ImagePath:      "/current/image",
-		DisableSeccomp: true,
+		HypervisorPath:       "/current/cloud-hypervisor",
+		KernelPath:           "/current/vmlinuz",
+		ImagePath:            "/current/image",
+		DisableSeccomp:       true,
+		ClhMemoryRestoreMode: ClhMemoryRestoreModeCopyOnWrite,
 	}
 
 	opts.applyHypervisorOverrides(&config)
@@ -32,6 +34,7 @@ func TestRestoreOptsApplyHypervisorOverrides(t *testing.T) {
 	assert.Equal(t, opts.KernelPath, config.KernelPath)
 	assert.Equal(t, opts.ImagePath, config.ImagePath)
 	assert.True(t, config.DisableSeccomp)
+	assert.Equal(t, opts.ClhMemoryRestoreMode, config.ClhMemoryRestoreMode)
 }
 
 func TestRekeySandboxAgentContainerIDMap(t *testing.T) {

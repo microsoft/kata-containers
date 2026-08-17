@@ -22,12 +22,13 @@ import (
 
 // RestoreOpts configures an annotation-driven restore.
 type RestoreOpts struct {
-	SandboxID      string
-	HypervisorPath string
-	KernelPath     string
-	ImagePath      string
-	NetNSPath      string
-	DisableSeccomp bool
+	SandboxID            string
+	HypervisorPath       string
+	KernelPath           string
+	ImagePath            string
+	NetNSPath            string
+	DisableSeccomp       bool
+	ClhMemoryRestoreMode ClhMemoryRestoreMode
 }
 
 func (opts RestoreOpts) applyHypervisorOverrides(config *HypervisorConfig) {
@@ -42,8 +43,9 @@ func (opts RestoreOpts) applyHypervisorOverrides(config *HypervisorConfig) {
 	}
 
 	// The restored VMM is a new host process, so use the current runtime's
-	// seccomp policy rather than the snapshot's persisted configuration.
+	// host policies rather than the snapshot's persisted configuration.
 	config.DisableSeccomp = opts.DisableSeccomp
+	config.ClhMemoryRestoreMode = opts.ClhMemoryRestoreMode
 }
 
 // RestoreSandbox restores a snapshot as a managed, paused sandbox.
