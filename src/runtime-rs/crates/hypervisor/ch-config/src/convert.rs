@@ -364,7 +364,11 @@ impl TryFrom<(CpuInfo, GuestProtection)> for CpusConfig {
             packages: 1,
         };
 
-        let max_phys_bits = DEFAULT_CH_MAX_PHYS_BITS;
+        let max_phys_bits = if cpu.max_phys_bits == 0 {
+            DEFAULT_CH_MAX_PHYS_BITS
+        } else {
+            cpu.max_phys_bits
+        };
 
         let features = CpuFeatures::from(cpu.cpu_features);
 
@@ -1334,6 +1338,31 @@ mod tests {
                         ..topology
                     }),
                     max_phys_bits: DEFAULT_CH_MAX_PHYS_BITS,
+
+                    ..Default::default()
+                }),
+            },
+            TestData {
+                cpu_info: CpuInfo {
+                    default_vcpus: 1.0,
+                    default_maxvcpus: 13,
+                    max_phys_bits: 43,
+                    ..Default::default()
+                },
+                guest_protection: GuestProtection::Snp(SevSnpDetails {
+                    cbitpos: 51,
+                    phys_addr_reduction: 5,
+                }),
+                result: Ok(CpusConfig {
+                    boot_vcpus: 1,
+                    max_vcpus: 1,
+                    nested: cpu_nested_config(),
+                    topology: Some(CpuTopology {
+                        cores_per_die: 1,
+
+                        ..topology
+                    }),
+                    max_phys_bits: 43,
 
                     ..Default::default()
                 }),
