@@ -7,8 +7,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	containerdshim "github.com/kata-containers/kata-containers/src/runtime/pkg/containerd-shim-v2"
@@ -30,7 +28,6 @@ var snapshotCLICommand = cli.Command{
 	Usage: "snapshot a running Kata Containers sandbox VM",
 	Subcommands: []cli.Command{
 		createSnapshotCommand,
-		deleteSnapshotCommand,
 	},
 }
 
@@ -66,38 +63,6 @@ var createSnapshotCommand = cli.Command{
 		if err := shimclient.DoPut(sandboxID, snapshotTimeout, containerdshim.SnapshotURL,
 			"application/octet-stream", []byte(path)); err != nil {
 			return fmt.Errorf("Error observed when making snapshot request: %s", err)
-		}
-
-		fmt.Fprintln(defaultOutputFile, path)
-
-		return nil
-	},
-}
-
-var deleteSnapshotCommand = cli.Command{
-	Name:      "delete",
-	Usage:     "delete a snapshot directory",
-	ArgsUsage: "--path <dir>",
-	Flags: []cli.Flag{
-		cli.StringFlag{
-			Name:  "path",
-			Usage: "snapshot directory to delete (required)",
-		},
-	},
-	Action: func(c *cli.Context) error {
-		path := c.String("path")
-		if path == "" {
-			return fmt.Errorf("--path is required")
-		}
-		// node-local removal; a snapshot can outlive its sandbox, so no shim round-trip.
-		if !filepath.IsAbs(path) {
-			return fmt.Errorf("--path must be absolute: %q", path)
-		}
-		if _, err := os.Stat(path); err != nil {
-			return fmt.Errorf("snapshot path %q: %w", path, err)
-		}
-		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("failed to delete snapshot %s: %s", path, err)
 		}
 
 		fmt.Fprintln(defaultOutputFile, path)
