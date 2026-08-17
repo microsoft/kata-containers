@@ -562,3 +562,5 @@ sandbox_bind_mounts = @DEFBINDMOUNTS@
 # to the hypervisor.
 # (default: /run/kata-containers/dans)
 dan_conf = "@DEFDANCONF@"
+
+copy_volumes = ["network-files", "projected-volumes", "configmap-volumes", "secret-volumes", "downward-api-volumes"]
