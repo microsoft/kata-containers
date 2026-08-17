@@ -66,7 +66,7 @@ go_threads 23
 	assert.Equal(true, len(strings.Split(body, "\n")) > 0)
 }
 
-func TestMakeConfigSelfContainedPackagesErofsDisks(t *testing.T) {
+func TestMakeConfigSelfContainedRemovesMemoryBackingAndPackagesErofsDisks(t *testing.T) {
 	snapshotDir := t.TempDir()
 	erofsDir := t.TempDir()
 	stableDir := t.TempDir()
@@ -105,9 +105,7 @@ func TestMakeConfigSelfContainedPackagesErofsDisks(t *testing.T) {
 
 	var restoredConfig struct {
 		Memory struct {
-			Zones []struct {
-				File string `json:"file"`
-			} `json:"zones"`
+			Zones []map[string]interface{} `json:"zones"`
 		} `json:"memory"`
 		Disks []struct {
 			ID   string `json:"id"`
@@ -118,7 +116,7 @@ func TestMakeConfigSelfContainedPackagesErofsDisks(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(updatedConfig, &restoredConfig))
 	require.Len(t, restoredConfig.Memory.Zones, 1)
-	assert.Equal(t, memoryRanges, restoredConfig.Memory.Zones[0].File)
+	assert.NotContains(t, restoredConfig.Memory.Zones[0], "file")
 	require.Len(t, restoredConfig.Disks, 5)
 	assert.Equal(t, stableDisk, restoredConfig.Disks[0].Path)
 

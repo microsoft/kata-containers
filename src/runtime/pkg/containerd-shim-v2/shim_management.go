@@ -432,7 +432,7 @@ func (s *service) doSnapshot(ctx context.Context, destDir string) error {
 	if err := s.sandbox.SaveVM(destDir); err != nil {
 		return err
 	}
-	// Finalize config.json with snapshot-owned memory and EROFS disk paths. A
+	// Finalize config.json for snapshot-owned memory and EROFS disk paths. A
 	// restore copies this finalized config before applying per-VM changes.
 	if err := makeConfigSelfContained(destDir); err != nil {
 		return err
@@ -444,9 +444,9 @@ func (s *service) doSnapshot(ctx context.Context, destDir string) error {
 	return s.writeSnapshotManifest(destDir)
 }
 
-// makeConfigSelfContained rewrites config.json to use snapshot-owned memory and
-// EROFS disk files. cloud-hypervisor otherwise records the live backing paths,
-// which disappear when containerd removes the source snapshots.
+// makeConfigSelfContained removes live memory backing references and packages
+// EROFS disk files. The snapshot's memory-ranges file is consumed through the
+// restore source URL according to the destination node's memory restore mode.
 func makeConfigSelfContained(destDir string) error {
 	configPath := filepath.Join(destDir, "config.json")
 	memoryRanges := filepath.Join(destDir, "memory-ranges")
@@ -465,8 +465,10 @@ func makeConfigSelfContained(destDir string) error {
 			if zones, ok := mem["zones"].([]interface{}); ok {
 				for _, zone := range zones {
 					if zoneMap, ok := zone.(map[string]interface{}); ok {
-						zoneMap["file"] = memoryRanges
-						changed = true
+						if _, present := zoneMap["file"]; present {
+							delete(zoneMap, "file")
+							changed = true
+						}
 					}
 				}
 			}
