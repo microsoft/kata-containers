@@ -109,6 +109,17 @@ memory_slots = @DEFMEMSLOTS@
 # > amount of physical RAM      --> will be set to the actual amount of physical RAM
 default_maxmemory = @DEFMAXMEMSZ@
 
+# Guest memory restore mode:
+#   - copy: eagerly copy snapshot memory before resume (default)
+#   - ondemand: populate memory lazily with userfaultfd
+#   - copyonwrite: privately map snapshot memory and share its page cache
+memory_restore_mode = "copy"
+
+# Enable virtio-mem for resizable memory zones. Keep this disabled when using
+# memory_restore_mode = "copyonwrite"; resizable zones force Cloud Hypervisor
+# to fall back to eager copy.
+enable_virtio_mem = false
+
 # Disable hotplugging host block devices to guest VMs for container rootfs.
 # In case of a storage driver like devicemapper where a container's
 # root file system is backed by a block device, the block device is passed

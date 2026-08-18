@@ -42,6 +42,9 @@ type Sandbox struct {
 	ResumeFunc               func() error
 	DeleteFunc               func() error
 	CreateContainerFunc      func(conf vc.ContainerConfig) (vc.VCContainer, error)
+	RestoreContainerFunc     func(conf vc.ContainerConfig) (vc.VCContainer, error)
+	FinalizeRestoreNetworkFunc func() error
+	AbortRestoreFunc         func() error
 	DeleteContainerFunc      func(contID string) (vc.VCContainer, error)
 	StartContainerFunc       func(contID string) (vc.VCContainer, error)
 	StopContainerFunc        func(contID string, force bool) (vc.VCContainer, error)

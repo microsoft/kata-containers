@@ -8,13 +8,17 @@
 package virtcontainers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/config"
@@ -23,7 +27,9 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -77,6 +83,7 @@ type clhClientMock struct {
 	vmInfo          chclient.VmInfo
 	restoreRequest  *chclient.RestoreConfig
 	snapshotRequest *chclient.VmSnapshotConfig
+	shutdownVMM     func() error
 }
 
 func (c *clhClientMock) VmmPingGet(ctx context.Context) (chclient.VmmPingResponse, *http.Response, error) {
@@ -84,7 +91,46 @@ func (c *clhClientMock) VmmPingGet(ctx context.Context) (chclient.VmmPingRespons
 }
 
 func (c *clhClientMock) ShutdownVMM(ctx context.Context) (*http.Response, error) {
+	if c.shutdownVMM != nil {
+		return nil, c.shutdownVMM()
+	}
 	return nil, nil
+}
+
+func TestClhTerminateReapsProcessWhenShutdownRequestFails(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	require.NoError(t, cmd.Start())
+	reaped := false
+	t.Cleanup(func() {
+		if !reaped {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	})
+
+	shutdownErr := errors.New("VMM disconnected during shutdown")
+	mockClient := &clhClientMock{
+		shutdownVMM: func() error {
+			require.NoError(t, cmd.Process.Kill())
+			return shutdownErr
+		},
+	}
+	clh := &cloudHypervisor{
+		id:        "reap-after-shutdown-error",
+		APIClient: mockClient,
+		state: CloudHypervisorState{
+			PID: cmd.Process.Pid,
+		},
+		config: HypervisorConfig{
+			VMStorePath: t.TempDir(),
+			SharedFS:    config.NoSharedFS,
+		},
+	}
+
+	require.NoError(t, clh.StopVM(context.Background(), false))
+	_, waitErr := syscall.Wait4(cmd.Process.Pid, nil, syscall.WNOHANG, nil)
+	assert.ErrorIs(t, waitErr, syscall.ECHILD)
+	reaped = true
 }
 
 func (c *clhClientMock) CreateVM(ctx context.Context, vmConfig chclient.VmConfig) (*http.Response, error) {
@@ -548,8 +594,42 @@ func TestClhCreateVM(t *testing.T) {
 	}
 }
 
+func TestClhCreateVMFileBackedMemoryVirtioMemDisabled(t *testing.T) {
+	assert := assert.New(t)
+
+	clhConfig, err := newClhConfig()
+	assert.NoError(err)
+	clhConfig.SharedFS = config.NoSharedFS
+	clhConfig.DefaultMaxMemorySize = uint64(clhConfig.MemorySize) + 1024
+	clhConfig.VirtioMem = false
+
+	memoryPath := filepath.Join(t.TempDir(), "memory")
+	assert.NoError(os.WriteFile(memoryPath, nil, 0o600))
+	clhConfig.FileBackedMemory = &FileBackedMemoryConfig{
+		Path:   memoryPath,
+		Shared: false,
+	}
+
+	network, err := NewNetwork()
+	assert.NoError(err)
+
+	clh := &cloudHypervisor{}
+	assert.NoError(clh.CreateVM(context.Background(), "testSandbox", network, &clhConfig))
+	assert.NotEqual("VirtioMem", clh.vmconfig.Memory.GetHotplugMethod())
+	if assert.NotNil(clh.vmconfig.Memory.Zones) && assert.Len(*clh.vmconfig.Memory.Zones, 1) {
+		assert.False((*clh.vmconfig.Memory.Zones)[0].HasHotplugSize())
+	}
+}
+
 func TestClhRestoreVM(t *testing.T) {
 	assert := assert.New(t)
+	originalHvLogger := hvLogger
+	var warningOutput bytes.Buffer
+	testLogger := logrus.New()
+	testLogger.SetLevel(logrus.WarnLevel)
+	testLogger.SetOutput(&warningOutput)
+	hvLogger = logrus.NewEntry(testLogger)
+	t.Cleanup(func() { hvLogger = originalHvLogger })
 
 	store, err := persist.GetDriver()
 	assert.NoError(err)
@@ -581,18 +661,158 @@ func TestClhRestoreVM(t *testing.T) {
 	err = os.WriteFile(configFile, []byte("{}"), 0o600)
 	assert.NoError(err)
 
-	// Call restoreVM again, this time it should succeed.
-	err = clh.restoreVM(context.Background())
-	assert.NoError(err)
+	tests := []struct {
+		name           string
+		mode           ClhMemoryRestoreMode
+		expected       chclient.MemoryRestoreMode
+		expectsWarning bool
+	}{
+		{name: "unset defaults to copy", expected: chclient.COPY, expectsWarning: true},
+		{name: "copy", mode: ClhMemoryRestoreModeCopy, expected: chclient.COPY},
+		{name: "on demand", mode: ClhMemoryRestoreModeOnDemand, expected: chclient.ON_DEMAND},
+		{name: "copy on write", mode: ClhMemoryRestoreModeCopyOnWrite, expected: chclient.COPY_ON_WRITE},
+	}
 
-	if assert.NotNil(mockClient.restoreRequest) {
-		expectedSourceURL := "file://" + clhConfig.VMStorePath
-		assert.Equal(expectedSourceURL, mockClient.restoreRequest.GetSourceUrl())
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clh.config.ClhMemoryRestoreMode = test.mode
+			mockClient.restoreRequest = nil
+			warningOutput.Reset()
+
+			err = clh.restoreVM(context.Background())
+			assert.NoError(err)
+			if test.expectsWarning {
+				assert.Contains(warningOutput.String(), "memory restore mode is unset; defaulting to copy")
+			} else {
+				assert.Empty(warningOutput.String())
+			}
+
+			if assert.NotNil(mockClient.restoreRequest) {
+				expectedSourceURL := "file://" + clhConfig.VMStorePath
+				assert.Equal(expectedSourceURL, mockClient.restoreRequest.GetSourceUrl())
+				assert.Equal(test.expected, mockClient.restoreRequest.GetMemoryRestoreMode())
+			}
+		})
 	}
 
 	info, err := clh.vmInfo()
 	assert.NoError(err)
 	assert.Equal(clhStatePaused, info.State)
+}
+
+func TestClhPrepareRestoreFilesKeepsSnapshotPrivate(t *testing.T) {
+	snapshotDir := t.TempDir()
+	vmStoreDir := t.TempDir()
+	vmID := "restored-vm"
+	snapshotDiskDir := filepath.Join(snapshotDir, "disks")
+	require.NoError(t, os.MkdirAll(snapshotDiskDir, 0o700))
+
+	readonlyDisk := filepath.Join(snapshotDiskDir, "1-layer.erofs")
+	writableDisk := filepath.Join(snapshotDiskDir, "2-rwlayer.img")
+	require.NoError(t, os.WriteFile(readonlyDisk, []byte("read-only layer"), 0o600))
+	require.NoError(t, os.WriteFile(writableDisk, []byte("writable layer"), 0o600))
+
+	snapshotConfig := map[string]interface{}{
+		"vsock": map[string]interface{}{"socket": "/source/clh.sock"},
+		"memory": map[string]interface{}{
+			"shared": true,
+			"zones":  []interface{}{map[string]interface{}{"shared": true}},
+		},
+		"disks": []interface{}{
+			map[string]interface{}{"id": "_disk3", "path": readonlyDisk, "readonly": true},
+			map[string]interface{}{"id": "_disk4", "path": writableDisk, "readonly": false},
+		},
+	}
+	snapshotConfigJSON, err := json.Marshal(snapshotConfig)
+	require.NoError(t, err)
+	snapshotConfigPath := filepath.Join(snapshotDir, "config.json")
+	require.NoError(t, os.WriteFile(snapshotConfigPath, snapshotConfigJSON, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(snapshotDir, "state.json"), []byte("{}"), 0o600))
+
+	clh := &cloudHypervisor{
+		id: vmID,
+		config: HypervisorConfig{
+			VMStorePath: vmStoreDir,
+		},
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(vmStoreDir, vmID), 0o700))
+	require.NoError(t, clh.prepareRestoreFiles(snapshotDir))
+
+	canonicalConfig, err := os.ReadFile(snapshotConfigPath)
+	require.NoError(t, err)
+	assert.Equal(t, snapshotConfigJSON, canonicalConfig)
+
+	privateConfigPath := filepath.Join(vmStoreDir, vmID, "config.json")
+	canonicalConfigInfo, err := os.Stat(snapshotConfigPath)
+	require.NoError(t, err)
+	privateConfigInfo, err := os.Stat(privateConfigPath)
+	require.NoError(t, err)
+	assert.False(t, os.SameFile(canonicalConfigInfo, privateConfigInfo))
+
+	privateConfigJSON, err := os.ReadFile(privateConfigPath)
+	require.NoError(t, err)
+	var privateConfig struct {
+		Vsock struct {
+			Socket string `json:"socket"`
+		} `json:"vsock"`
+		Disks []struct {
+			Path     string `json:"path"`
+			Readonly bool   `json:"readonly"`
+		} `json:"disks"`
+	}
+	require.NoError(t, json.Unmarshal(privateConfigJSON, &privateConfig))
+	require.Len(t, privateConfig.Disks, 2)
+	assert.Equal(t, filepath.Join(vmStoreDir, vmID, clhSocket), privateConfig.Vsock.Socket)
+	assert.Equal(t, readonlyDisk, privateConfig.Disks[0].Path)
+	privateWritableDisk := filepath.Join(vmStoreDir, vmID, "disks", "1-2-rwlayer.img")
+	assert.Equal(t, privateWritableDisk, privateConfig.Disks[1].Path)
+
+	privateConfig.Disks = append(privateConfig.Disks, struct {
+		Path     string `json:"path"`
+		Readonly bool   `json:"readonly"`
+	}{Path: "/first-restore/extra-disk"})
+	mutatedPrivateConfig, err := json.Marshal(privateConfig)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(privateConfigPath, mutatedPrivateConfig, 0o600))
+	require.NoError(t, os.WriteFile(privateWritableDisk, []byte("first restore changed this"), 0o600))
+
+	secondVMID := "second-restored-vm"
+	secondVMDir := filepath.Join(vmStoreDir, secondVMID)
+	require.NoError(t, os.MkdirAll(secondVMDir, 0o700))
+	secondClh := &cloudHypervisor{
+		id: secondVMID,
+		config: HypervisorConfig{
+			VMStorePath: vmStoreDir,
+		},
+	}
+	require.NoError(t, secondClh.prepareRestoreFiles(snapshotDir))
+
+	canonicalConfig, err = os.ReadFile(snapshotConfigPath)
+	require.NoError(t, err)
+	assert.Equal(t, snapshotConfigJSON, canonicalConfig)
+	secondPrivateConfigJSON, err := os.ReadFile(filepath.Join(secondVMDir, "config.json"))
+	require.NoError(t, err)
+	var secondPrivateConfig struct {
+		Disks []struct {
+			Path     string `json:"path"`
+			Readonly bool   `json:"readonly"`
+		} `json:"disks"`
+	}
+	require.NoError(t, json.Unmarshal(secondPrivateConfigJSON, &secondPrivateConfig))
+	require.Len(t, secondPrivateConfig.Disks, 2)
+	secondPrivateWritableDisk := filepath.Join(secondVMDir, "disks", "1-2-rwlayer.img")
+	assert.Equal(t, secondPrivateWritableDisk, secondPrivateConfig.Disks[1].Path)
+	secondPrivateDiskContent, err := os.ReadFile(secondPrivateWritableDisk)
+	require.NoError(t, err)
+	assert.Equal(t, "writable layer", string(secondPrivateDiskContent))
+
+	require.NoError(t, os.Remove(writableDisk))
+	firstPrivateDiskContent, err := os.ReadFile(privateWritableDisk)
+	require.NoError(t, err)
+	assert.Equal(t, "first restore changed this", string(firstPrivateDiskContent))
+	secondPrivateDiskContent, err = os.ReadFile(secondPrivateWritableDisk)
+	require.NoError(t, err)
+	assert.Equal(t, "writable layer", string(secondPrivateDiskContent))
 }
 
 func TestClhSaveVM(t *testing.T) {
@@ -603,8 +823,6 @@ func TestClhSaveVM(t *testing.T) {
 
 	clhConfig, err := newClhConfig()
 	assert.NoError(err)
-	// For testing, assume the memory path is located within the VM store path.
-	clhConfig.MemoryPath = filepath.Join(store.RunVMStoragePath(), "memory")
 	clhConfig.VMStorePath = store.RunVMStoragePath()
 	clhConfig.RunStorePath = store.RunStoragePath()
 
@@ -614,11 +832,12 @@ func TestClhSaveVM(t *testing.T) {
 		APIClient: mockClient,
 	}
 
-	err = clh.SaveVM()
+	snapshotDir := store.RunVMStoragePath()
+	err = clh.SaveVM(snapshotDir)
 	assert.NoError(err)
 
 	if assert.NotNil(mockClient.snapshotRequest) {
-		expectedDestinationURL := "file://" + filepath.Dir(clhConfig.MemoryPath)
+		expectedDestinationURL := "file://" + snapshotDir
 		assert.Equal(expectedDestinationURL, mockClient.snapshotRequest.GetDestinationUrl())
 	}
 }
@@ -631,15 +850,16 @@ func TestClhSaveVMWarnsHotpluggedFileBackedZone(t *testing.T) {
 
 	clhConfig, err := newClhConfig()
 	assert.NoError(err)
-	clhConfig.MemoryPath = filepath.Join(store.RunVMStoragePath(), "memory")
 	clhConfig.VMStorePath = store.RunVMStoragePath()
 	clhConfig.RunStorePath = store.RunStoragePath()
+
+	memoryFilePath := filepath.Join(store.RunVMStoragePath(), "memory")
 
 	mockClient := &clhClientMock{}
 	// Simulate a restored template VM that has grown its file-backed virtio-mem
 	// zone (hotplugged_size > 0). SaveVM should warn but still proceed.
 	zone := chclient.NewMemoryZoneConfig("mem0", int64(512*utils.MiB.ToBytes()))
-	zone.SetFile(clhConfig.MemoryPath)
+	zone.SetFile(memoryFilePath)
 	zone.HotpluggedSize = func(i int64) *int64 { return &i }(int64(1024 * utils.MiB.ToBytes()))
 	mockClient.vmInfo.Config = *chclient.NewVmConfig(*chclient.NewPayloadConfig())
 	mockClient.vmInfo.Config.Memory = chclient.NewMemoryConfig(0)
@@ -650,7 +870,8 @@ func TestClhSaveVMWarnsHotpluggedFileBackedZone(t *testing.T) {
 		APIClient: mockClient,
 	}
 
-	err = clh.SaveVM()
+	snapshotDir := store.RunVMStoragePath()
+	err = clh.SaveVM(snapshotDir)
 	assert.NoError(err)
 	// The snapshot must still have been attempted despite the warning.
 	assert.NotNil(mockClient.snapshotRequest)
@@ -710,7 +931,7 @@ func TestCloudHypervisorStartSandbox(t *testing.T) {
 	err = clh.PauseVM(context.Background())
 	assert.NoError(err)
 
-	err = clh.SaveVM()
+	err = clh.SaveVM(clhConfig.VMStorePath)
 	assert.NoError(err)
 
 	err = clh.ResumeVM(context.Background())

@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 
@@ -41,6 +42,7 @@ const (
 	PolicyURL             = "/policy"
 	IP6TablesURL          = "/ip6tables"
 	MetricsURL            = "/metrics"
+	SnapshotURL           = "/snapshot"
 )
 
 var (
@@ -295,6 +297,7 @@ func (s *service) startManagementServer(ctx context.Context, ociSpec *specs.Spec
 	m.Handle(IPTablesURL, http.HandlerFunc(s.ipTablesHandler))
 	m.Handle(PolicyURL, http.HandlerFunc(s.policyHandler))
 	m.Handle(IP6TablesURL, http.HandlerFunc(s.ip6TablesHandler))
+	m.Handle(SnapshotURL, http.HandlerFunc(s.snapshotHandler))
 	s.mountPprofHandle(m, ociSpec)
 
 	// register shim metrics
@@ -360,6 +363,216 @@ func SocketPathRust(id string) string {
 // NOTE: this code is only called by the go shim management implementation.
 func ServerSocketAddress(id string) string {
 	return fmt.Sprintf("unix://%s", SocketPathGo(id))
+}
+
+// SnapshotBaseDir is where kata-runtime snapshot dirs live by default. It is
+// the canonical default shared by the shim handler and the kata-runtime CLI.
+const SnapshotBaseDir = "/run/vc/vm/snapshots"
+
+// snapshotManifest is the small self-describing record we drop alongside the
+// cloud-hypervisor snapshot files so a future restore can identify the source.
+type snapshotManifest struct {
+	SourceSandboxID string `json:"source_sandbox_id"`
+	Timestamp       string `json:"timestamp"`
+}
+
+// snapshotHandler triggers a VM snapshot of the sandbox over the management socket.
+// the request body, when non-empty, is the destination directory; otherwise we
+// default to SnapshotBaseDir/<sandbox-id>.
+func (s *service) snapshotHandler(w http.ResponseWriter, r *http.Request) {
+	logger := shimMgtLog.WithFields(logrus.Fields{"handler": "snapshot"})
+
+	switch r.Method {
+	case http.MethodPut:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			logger.WithError(err).Error("failed to read request body")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+		destDir := strings.TrimSpace(string(body))
+		if destDir == "" {
+			destDir = filepath.Join(SnapshotBaseDir, s.id)
+		}
+
+		if err := s.doSnapshot(context.Background(), destDir); err != nil {
+			logger.WithError(err).Error("snapshot failed")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+		fmt.Fprint(w, destDir)
+
+	default:
+		w.WriteHeader(http.StatusNotImplemented)
+	}
+}
+
+// doSnapshot pauses the VM, persists kata sandbox state, snapshots the VM memory
+// to destDir, copies the persist.json into destDir, writes a manifest, then
+// resumes the VM. the VM is always resumed (best-effort) even on failure so the
+// running pod is not left frozen.
+func (s *service) doSnapshot(ctx context.Context, destDir string) error {
+	if err := os.MkdirAll(destDir, 0700); err != nil {
+		return err
+	}
+
+	if err := s.sandbox.PauseVM(ctx); err != nil {
+		return err
+	}
+	// always try to resume so a partial failure never leaves the pod paused.
+	defer s.sandbox.ResumeVM(ctx)
+
+	// persist kata-level sandbox state to /run/vc/sbs/<id>/persist.json.
+	if err := s.sandbox.Save(); err != nil {
+		return err
+	}
+	// snapshot the VM memory + device state into destDir via cloud-hypervisor.
+	if err := s.sandbox.SaveVM(destDir); err != nil {
+		return err
+	}
+	// Finalize config.json for snapshot-owned memory and EROFS disk paths. A
+	// restore copies this finalized config before applying per-VM changes.
+	if err := makeConfigSelfContained(destDir); err != nil {
+		return err
+	}
+	// bundle the persist.json into the snapshot dir alongside the memory/state files.
+	if err := s.copyPersistInto(destDir); err != nil {
+		return err
+	}
+	return s.writeSnapshotManifest(destDir)
+}
+
+// makeConfigSelfContained removes live memory backing references and packages
+// EROFS disk files. The snapshot's memory-ranges file is consumed through the
+// restore source URL according to the destination node's memory restore mode.
+func makeConfigSelfContained(destDir string) error {
+	configPath := filepath.Join(destDir, "config.json")
+	memoryRanges := filepath.Join(destDir, "memory-ranges")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return err
+	}
+
+	changed := false
+	if _, err := os.Stat(memoryRanges); err == nil {
+		if mem, ok := cfg["memory"].(map[string]interface{}); ok {
+			if zones, ok := mem["zones"].([]interface{}); ok {
+				for _, zone := range zones {
+					if zoneMap, ok := zone.(map[string]interface{}); ok {
+						if _, present := zoneMap["file"]; present {
+							delete(zoneMap, "file")
+							changed = true
+						}
+					}
+				}
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat snapshot memory file %s: %w", memoryRanges, err)
+	}
+
+	disksChanged, err := packageErofsSnapshotDisks(destDir, cfg)
+	if err != nil {
+		return err
+	}
+	changed = changed || disksChanged
+	if !changed {
+		return nil
+	}
+
+	out, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, out, 0600)
+}
+
+func packageErofsSnapshotDisks(destDir string, cfg map[string]interface{}) (bool, error) {
+	disks, ok := cfg["disks"].([]interface{})
+	if !ok {
+		return false, nil
+	}
+
+	diskDir := filepath.Join(destDir, "disks")
+	changed := false
+	for index, entry := range disks {
+		disk, ok := entry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		sourcePath, ok := disk["path"].(string)
+		if !ok || sourcePath == "" {
+			continue
+		}
+		baseName, ok := erofsSnapshotDiskBaseName(sourcePath)
+		if !ok {
+			continue
+		}
+
+		if err := os.MkdirAll(diskDir, 0700); err != nil {
+			return false, fmt.Errorf("create snapshot disk directory: %w", err)
+		}
+		destinationPath := filepath.Join(diskDir, fmt.Sprintf("%d-%s", index, baseName))
+		if filepath.Clean(sourcePath) != filepath.Clean(destinationPath) {
+			if err := copySnapshotFile(sourcePath, destinationPath); err != nil {
+				return false, fmt.Errorf("package snapshot disk %q from %s: %w", disk["id"], sourcePath, err)
+			}
+		}
+		disk["path"] = destinationPath
+		changed = true
+	}
+
+	return changed, nil
+}
+
+func erofsSnapshotDiskBaseName(path string) (string, bool) {
+	baseName := filepath.Base(path)
+	for {
+		if baseName == "layer.erofs" || baseName == "rwlayer.img" {
+			return baseName, true
+		}
+
+		prefix, remainder, found := strings.Cut(baseName, "-")
+		if !found || prefix == "" || strings.Trim(prefix, "0123456789") != "" {
+			return "", false
+		}
+		baseName = remainder
+	}
+}
+
+func copySnapshotFile(sourcePath, destinationPath string) error {
+	return mutils.CopyFileSparse(sourcePath, destinationPath)
+}
+
+// copyPersistInto copies /run/vc/sbs/<id>/persist.json into destDir.
+func (s *service) copyPersistInto(destDir string) error {
+	src := filepath.Join("/run/vc/sbs", s.id, "persist.json")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		// persist.json may legitimately be absent on some configs; not fatal.
+		shimMgtLog.WithError(err).WithField("src", src).Warn("no persist.json to bundle")
+		return nil
+	}
+	return os.WriteFile(filepath.Join(destDir, "persist.json"), data, 0600)
+}
+
+// writeSnapshotManifest drops a small kata-snapshot.json describing the source.
+func (s *service) writeSnapshotManifest(destDir string) error {
+	m := snapshotManifest{
+		SourceSandboxID: s.id,
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+	}
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(destDir, "kata-snapshot.json"), b, 0600)
 }
 
 // ClientSocketAddress returns the address of the unix domain socket for communicating with the

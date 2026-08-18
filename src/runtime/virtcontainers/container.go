@@ -366,6 +366,25 @@ func (c *Container) ID() string {
 	return c.id
 }
 
+// agentID returns the canonical guest ID when host bookkeeping was rekeyed during restore.
+func (c *Container) agentID() string {
+	if c.sandbox != nil && c.sandbox.agentContainerIDMap != nil {
+		if agentID, ok := c.sandbox.agentContainerIDMap[c.id]; ok && agentID != "" {
+			return agentID
+		}
+		c.Logger().Warn("container has no canonical agent ID in the agent container ID map")
+	}
+	return c.id
+}
+
+// guestExecID maps the restored init process to its persisted guest ID.
+func (c *Container) guestExecID(execID string) string {
+	if execID == c.id {
+		return c.agentID()
+	}
+	return execID
+}
+
 // Logger returns a logrus logger appropriate for logging Container messages
 func (c *Container) Logger() *logrus.Entry {
 	return virtLog.WithFields(logrus.Fields{

@@ -32,6 +32,7 @@ func (s *Sandbox) dumpVersion(ss *persistapi.SandboxState) {
 
 func (s *Sandbox) dumpState(ss *persistapi.SandboxState, cs map[string]persistapi.ContainerState) {
 	ss.SandboxContainer = s.id
+	ss.AgentContainerIDMap = cloneAgentContainerIDMap(s.agentContainerIDMap)
 	ss.GuestMemoryBlockSizeMB = s.state.GuestMemoryBlockSizeMB
 	ss.GuestMemoryHotplugProbe = s.state.GuestMemoryHotplugProbe
 	ss.State = string(s.state.State)
@@ -58,6 +59,18 @@ func (s *Sandbox) dumpState(ss *persistapi.SandboxState, cs map[string]persistap
 			delete(cs, id)
 		}
 	}
+}
+
+func cloneAgentContainerIDMap(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(source))
+	for hostID, agentID := range source {
+		cloned[hostID] = agentID
+	}
+	return cloned
 }
 
 func (s *Sandbox) dumpHypervisor(ss *persistapi.SandboxState) {
@@ -222,8 +235,6 @@ func (s *Sandbox) dumpConfig(ss *persistapi.SandboxState) {
 		JailerPathList:                sconfig.HypervisorConfig.JailerPathList,
 		BlockDeviceDriver:             sconfig.HypervisorConfig.BlockDeviceDriver,
 		HypervisorMachineType:         sconfig.HypervisorConfig.HypervisorMachineType,
-		MemoryPath:                    sconfig.HypervisorConfig.MemoryPath,
-		DevicesStatePath:              sconfig.HypervisorConfig.DevicesStatePath,
 		EntropySource:                 sconfig.HypervisorConfig.EntropySource,
 		EntropySourceList:             sconfig.HypervisorConfig.EntropySourceList,
 		SharedFS:                      sconfig.HypervisorConfig.SharedFS,
@@ -244,8 +255,6 @@ func (s *Sandbox) dumpConfig(ss *persistapi.SandboxState) {
 		HugePages:                     sconfig.HypervisorConfig.HugePages,
 		DisableNestingChecks:          sconfig.HypervisorConfig.DisableNestingChecks,
 		DisableImageNvdimm:            sconfig.HypervisorConfig.DisableImageNvdimm,
-		BootToBeTemplate:              sconfig.HypervisorConfig.BootToBeTemplate,
-		BootFromTemplate:              sconfig.HypervisorConfig.BootFromTemplate,
 		DisableVhostNet:               sconfig.HypervisorConfig.DisableVhostNet,
 		EnableVhostUserStore:          sconfig.HypervisorConfig.EnableVhostUserStore,
 		SeccompSandbox:                sconfig.HypervisorConfig.SeccompSandbox,
@@ -298,6 +307,7 @@ func (s *Sandbox) Save() error {
 
 func (s *Sandbox) loadState(ss persistapi.SandboxState) {
 	s.state.PersistVersion = ss.PersistVersion
+	s.agentContainerIDMap = cloneAgentContainerIDMap(ss.AgentContainerIDMap)
 	s.state.GuestMemoryBlockSizeMB = ss.GuestMemoryBlockSizeMB
 	s.state.BlockIndexMap = ss.HypervisorState.BlockIndexMap
 	s.state.State = types.StateString(ss.State)
@@ -462,8 +472,6 @@ func loadSandboxConfig(id string) (*SandboxConfig, error) {
 		JailerPathList:                hconf.JailerPathList,
 		BlockDeviceDriver:             hconf.BlockDeviceDriver,
 		HypervisorMachineType:         hconf.HypervisorMachineType,
-		MemoryPath:                    hconf.MemoryPath,
-		DevicesStatePath:              hconf.DevicesStatePath,
 		EntropySource:                 hconf.EntropySource,
 		EntropySourceList:             hconf.EntropySourceList,
 		SharedFS:                      hconf.SharedFS,
@@ -488,8 +496,6 @@ func loadSandboxConfig(id string) (*SandboxConfig, error) {
 		ColdPlugVFIO:                  hconf.ColdPlugVFIO,
 		PCIeRootPort:                  hconf.PCIeRootPort,
 		PCIeSwitchPort:                hconf.PCIeSwitchPort,
-		BootToBeTemplate:              hconf.BootToBeTemplate,
-		BootFromTemplate:              hconf.BootFromTemplate,
 		DisableVhostNet:               hconf.DisableVhostNet,
 		EnableVhostUserStore:          hconf.EnableVhostUserStore,
 		VhostUserStorePath:            hconf.VhostUserStorePath,

@@ -224,6 +224,18 @@ func (n *LinuxNetwork) addSingleEndpoint(ctx context.Context, s *Sandbox, netInf
 	if err != nil {
 		return nil, err
 	}
+	if s.restoreNetFence {
+		netPair := endpoint.NetworkPair()
+		if endpoint.Type() != VethEndpointType || netPair == nil {
+			return nil, fmt.Errorf("kata restore failed: expected a veth endpoint")
+		}
+		if netPair.NetInterworkingModel == NetXConnectDefaultModel {
+			netPair.NetInterworkingModel = DefaultNetInterworkingModel
+		}
+		if netPair.NetInterworkingModel != NetXConnectTCFilterModel {
+			return nil, fmt.Errorf("kata restore failed: restore requires the TC filter network model")
+		}
+	}
 
 	endpoint.SetProperties(netInfo)
 
@@ -1079,6 +1091,136 @@ func tapNetworkPair(ctx context.Context, endpoint Endpoint, queues int, disableV
 	}
 
 	return nil
+}
+
+// prepareRestoreTCFence creates the restore TAP without redirects so traffic stays blocked.
+func prepareRestoreTCFence(ctx context.Context, endpoint Endpoint, h Hypervisor) (err error) {
+	span, _ := networkTrace(ctx, "prepareRestoreTCFence", endpoint)
+	defer span.End()
+
+	netHandle, err := netlink.NewHandle()
+	if err != nil {
+		return err
+	}
+	defer netHandle.Close()
+
+	queues := 0
+	caps := h.Capabilities(ctx)
+	if caps.IsMultiQueueSupported() {
+		queues = int(h.HypervisorConfig().NumVCPUs())
+	}
+	netPair := endpoint.NetworkPair()
+
+	tapLink, fds, err := createLink(netHandle, netPair.TAPIface.Name, &netlink.Tuntap{}, queues)
+	if err != nil {
+		return fmt.Errorf("restore fence: could not create TAP interface: %s", err)
+	}
+	netPair.VMFds = fds
+	defer func() {
+		if err != nil {
+			for _, fd := range netPair.VMFds {
+				if fd != nil {
+					_ = fd.Close()
+				}
+			}
+			netPair.VMFds = nil
+			_ = netHandle.LinkDel(tapLink)
+		}
+	}()
+
+	link, err := getLinkForEndpoint(endpoint, netHandle)
+	if err != nil {
+		return err
+	}
+	attrs := link.Attrs()
+	netPair.TAPIface.HardAddr = attrs.HardwareAddr.String()
+
+	if err := netHandle.LinkSetMTU(tapLink, attrs.MTU); err != nil {
+		return fmt.Errorf("restore fence: could not set TAP MTU %d: %s", attrs.MTU, err)
+	}
+
+	// CLH requires a live TAP; absent redirects keep traffic fenced.
+	if err := netHandle.LinkSetUp(tapLink); err != nil {
+		return fmt.Errorf("restore fence: could not bring TAP up: %s", err)
+	}
+	networkLogger().WithField("tap", netPair.TAPIface.Name).Debug("restore network fence prepared")
+	return nil
+}
+
+// activateRestoreTCFence installs redirects only after guest network identity is replaced.
+func activateRestoreTCFence(ctx context.Context, endpoint Endpoint) (err error) {
+	span, _ := networkTrace(ctx, "activateRestoreTCFence", endpoint)
+	defer span.End()
+
+	netHandle, nerr := netlink.NewHandle()
+	if nerr != nil {
+		return nerr
+	}
+	defer netHandle.Close()
+
+	netPair := endpoint.NetworkPair()
+	tapLink, err := netHandle.LinkByName(netPair.TAPIface.Name)
+	if err != nil {
+		return fmt.Errorf("restore fence: tap %s missing at activate: %w", netPair.TAPIface.Name, err)
+	}
+	veth, err := getLinkForEndpoint(endpoint, netHandle)
+	if err != nil {
+		return err
+	}
+	tapIdx := tapLink.Attrs().Index
+	vethIdx := veth.Attrs().Index
+
+	defer func() {
+		if err != nil {
+			_ = removeQdiscIngress(tapLink)
+			_ = removeQdiscIngress(veth)
+		}
+	}()
+
+	if err = addQdiscIngress(tapIdx); err != nil {
+		return err
+	}
+	if err = addQdiscIngress(vethIdx); err != nil {
+		return err
+	}
+	if err = addRedirectTCFilter(vethIdx, tapIdx); err != nil {
+		return err
+	}
+	if err = addRedirectTCFilter(tapIdx, vethIdx); err != nil {
+		return err
+	}
+	networkLogger().WithField("tap", netPair.TAPIface.Name).Debug("restore network fence activated")
+	return nil
+}
+
+// cleanupRestoreTCFence releases restore TAP FDs and removes its redirects and link.
+func cleanupRestoreTCFence(endpoint Endpoint) {
+	netPair := endpoint.NetworkPair()
+	if netPair == nil {
+		return
+	}
+	for _, fd := range netPair.VMFds {
+		if fd != nil {
+			_ = fd.Close()
+		}
+	}
+	netPair.VMFds = nil
+
+	netHandle, err := netlink.NewHandle()
+	if err != nil {
+		return
+	}
+	defer netHandle.Close()
+
+	if veth, verr := getLinkForEndpoint(endpoint, netHandle); verr == nil {
+		_ = removeQdiscIngress(veth)
+	}
+	if tapLink, tapErr := netHandle.LinkByName(netPair.TAPIface.Name); tapErr == nil {
+		_ = removeQdiscIngress(tapLink)
+		_ = netHandle.LinkSetDown(tapLink)
+		_ = netHandle.LinkDel(tapLink)
+	}
+	networkLogger().WithField("tap", netPair.TAPIface.Name).Debug("restore network fence cleaned")
 }
 
 func setupTCFiltering(ctx context.Context, endpoint Endpoint, queues int, disableVhostNet bool) error {

@@ -21,6 +21,8 @@ pub enum CapabilityBits {
     HybridVsockSupport,
     /// hypervisor supports memory hotplug probe interface
     GuestMemoryProbe,
+    /// hypervisor supports network device hotplug
+    NetworkDeviceHotplugSupport,
 }
 
 /// Capabilities describe a virtcontainers hypervisor capabilities through a bit mask.
@@ -83,6 +85,11 @@ impl Capabilities {
     pub fn is_mem_hotplug_probe_supported(&self) -> bool {
         self.flags.and(CapabilityBits::GuestMemoryProbe) != 0
     }
+
+    /// is_network_device_hotplug_supported tells if the hypervisor supports network hotplug.
+    pub fn is_network_device_hotplug_supported(&self) -> bool {
+        self.flags.and(CapabilityBits::NetworkDeviceHotplugSupport) != 0
+    }
 }
 
 #[cfg(test)]
@@ -95,6 +102,7 @@ mod tests {
     fn test_set_hypervisor_capabilities() {
         let mut cap = Capabilities::new();
         assert!(!cap.is_block_device_supported());
+        assert!(!cap.is_network_device_hotplug_supported());
 
         // test legacy vsock support
         assert!(!cap.is_hybrid_vsock_supported());
@@ -133,5 +141,8 @@ mod tests {
         cap.add(CapabilityBits::GuestMemoryProbe);
         assert!(cap.is_mem_hotplug_probe_supported());
         assert!(cap.is_fs_sharing_supported());
+        // test network device hotplug capability
+        cap.add(CapabilityBits::NetworkDeviceHotplugSupport);
+        assert!(cap.is_network_device_hotplug_supported());
     }
 }

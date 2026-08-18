@@ -690,11 +690,14 @@ impl QemuInner {
         let flags = if self.hypervisor_config().security_info.confidential_guest
             || self.hypervisor_config().shared_fs.shared_fs.is_none()
         {
-            CapabilityBits::BlockDeviceSupport | CapabilityBits::BlockDeviceHotplugSupport
+            CapabilityBits::BlockDeviceSupport
+                | CapabilityBits::BlockDeviceHotplugSupport
+                | CapabilityBits::NetworkDeviceHotplugSupport
         } else {
             CapabilityBits::BlockDeviceSupport
                 | CapabilityBits::BlockDeviceHotplugSupport
                 | CapabilityBits::FsSharingSupport
+                | CapabilityBits::NetworkDeviceHotplugSupport
         };
         caps.set(flags);
 
@@ -1184,6 +1187,23 @@ impl QemuInner {
             )
         })?;
         qmp.get_device_by_qdev_id(hostdev_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_network_device_hotplug_capability() {
+        let (exit_notify, _exit_waiter) = mpsc::channel(1);
+        let qemu = QemuInner::new(exit_notify);
+
+        assert!(qemu
+            .capabilities()
+            .await
+            .unwrap()
+            .is_network_device_hotplug_supported());
     }
 }
 

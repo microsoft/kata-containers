@@ -92,6 +92,9 @@ func (s *Sandbox) Resume() error {
 
 // Delete implements the VCSandbox function of the same name.
 func (s *Sandbox) Delete(ctx context.Context) error {
+	if s.DeleteFunc != nil {
+		return s.DeleteFunc()
+	}
 	return nil
 }
 
@@ -101,6 +104,30 @@ func (s *Sandbox) CreateContainer(ctx context.Context, conf vc.ContainerConfig) 
 		return s.CreateContainerFunc(conf)
 	}
 	return nil, fmt.Errorf("%s: %s (%+v): sandboxID: %v, containerConfig: %v", mockErrorPrefix, getSelf(), s, s.MockID, conf)
+}
+
+// RestoreContainer implements the VCSandbox function of the same name.
+func (s *Sandbox) RestoreContainer(ctx context.Context, conf vc.ContainerConfig) (vc.VCContainer, error) {
+	if s.RestoreContainerFunc != nil {
+		return s.RestoreContainerFunc(conf)
+	}
+	return nil, fmt.Errorf("%s: %s (%+v): sandboxID: %v, containerConfig: %v", mockErrorPrefix, getSelf(), s, s.MockID, conf)
+}
+
+// FinalizeRestoreNetwork implements the VCSandbox function of the same name.
+func (s *Sandbox) FinalizeRestoreNetwork(ctx context.Context) error {
+	if s.FinalizeRestoreNetworkFunc != nil {
+		return s.FinalizeRestoreNetworkFunc()
+	}
+	return fmt.Errorf("%s: %s (%+v): sandboxID: %v", mockErrorPrefix, getSelf(), s, s.MockID)
+}
+
+// AbortRestore implements the VCSandbox function of the same name.
+func (s *Sandbox) AbortRestore(ctx context.Context) error {
+	if s.AbortRestoreFunc != nil {
+		return s.AbortRestoreFunc()
+	}
+	return fmt.Errorf("%s: %s (%+v): sandboxID: %v", mockErrorPrefix, getSelf(), s, s.MockID)
 }
 
 // DeleteContainer implements the VCSandbox function of the same name.
@@ -275,5 +302,25 @@ func (s *Sandbox) SetIPTables(ctx context.Context, isIPv6 bool, data []byte) err
 }
 
 func (s *Sandbox) SetPolicy(ctx context.Context, policy string) error {
+	return nil
+}
+
+// PauseVM implements the VCSandbox function of the same name.
+func (s *Sandbox) PauseVM(ctx context.Context) error {
+	return nil
+}
+
+// SaveVM implements the VCSandbox function of the same name.
+func (s *Sandbox) SaveVM(destDir string) error {
+	return nil
+}
+
+// ResumeVM implements the VCSandbox function of the same name.
+func (s *Sandbox) ResumeVM(ctx context.Context) error {
+	return nil
+}
+
+// Save implements the VCSandbox function of the same name.
+func (s *Sandbox) Save() error {
 	return nil
 }

@@ -123,6 +123,10 @@ type exit struct {
 type service struct {
 	sandbox vc.VCSandbox
 
+	restoredSandbox  bool
+	restoreFinalized bool
+	restoreFailed    bool
+
 	ctx      context.Context
 	rootCtx  context.Context // root context for tracing
 	rootSpan otelTrace.Span
@@ -418,47 +422,68 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	if err := katautils.VerifyContainerID(r.ID); err != nil {
 		return nil, err
 	}
+	if s.restoreFailed {
+		return nil, fmt.Errorf("kata restore failed: pod sandbox restore is terminal; recreate the pod sandbox")
+	}
 
 	type Result struct {
 		container *container
 		err       error
 	}
-	ch := make(chan Result, 1)
-	go func() {
-		container, err := create(ctx, s, r)
-		ch <- Result{container, err}
-	}()
+	restoreCreate := isRestoreCreateRequest(s, r)
+	var res Result
+	if restoreCreate {
+		// Restore mutates persistent sandbox ownership. Do not let the RPC
+		// timeout abandon that mutation in a goroutine with no result consumer.
+		res.container, res.err = create(ctx, s, r)
+	} else {
+		ch := make(chan Result, 1)
+		go func() {
+			container, err := create(ctx, s, r)
+			ch <- Result{container, err}
+		}()
 
-	select {
-	case <-ctx.Done():
-		return nil, errors.Errorf("create container timeout: %v", r.ID)
-	case res := <-ch:
-		if res.err != nil {
-			return nil, res.err
+		select {
+		case <-ctx.Done():
+			return nil, errors.Errorf("create container timeout: %v", r.ID)
+		case res = <-ch:
 		}
-		container := res.container
-		container.status = task.Status_CREATED
-
-		s.containers[r.ID] = container
-
-		s.send(&eventstypes.TaskCreate{
-			ContainerID: r.ID,
-			Bundle:      r.Bundle,
-			Rootfs:      r.Rootfs,
-			IO: &eventstypes.TaskIO{
-				Stdin:    r.Stdin,
-				Stdout:   r.Stdout,
-				Stderr:   r.Stderr,
-				Terminal: r.Terminal,
-			},
-			Checkpoint: r.Checkpoint,
-			Pid:        s.hpid,
-		})
-
-		return &taskAPI.CreateTaskResponse{
-			Pid: s.hpid,
-		}, nil
 	}
+	if res.err != nil {
+		if s.restoredSandbox {
+			s.failRestoredSandbox(res.err)
+		}
+		return nil, res.err
+	}
+	if restoreCreate && ctx.Err() != nil {
+		err := errors.Wrapf(ctx.Err(), "kata restore failed: create result for %s could not be committed", r.ID)
+		if s.restoredSandbox {
+			s.failRestoredSandbox(err)
+		}
+		return nil, err
+	}
+	container := res.container
+	container.status = task.Status_CREATED
+
+	s.containers[r.ID] = container
+
+	s.send(&eventstypes.TaskCreate{
+		ContainerID: r.ID,
+		Bundle:      r.Bundle,
+		Rootfs:      r.Rootfs,
+		IO: &eventstypes.TaskIO{
+			Stdin:    r.Stdin,
+			Stdout:   r.Stdout,
+			Stderr:   r.Stderr,
+			Terminal: r.Terminal,
+		},
+		Checkpoint: r.Checkpoint,
+		Pid:        s.hpid,
+	})
+
+	return &taskAPI.CreateTaskResponse{
+		Pid: s.hpid,
+	}, nil
 }
 
 // Start a process
