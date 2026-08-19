@@ -5,14 +5,15 @@
 
 use super::HypervisorState;
 use crate::device::DeviceType;
-use crate::{Hypervisor, MemoryConfig, VcpuThreadIds};
-use anyhow::{Context, Result};
+use crate::{Hypervisor, MemoryConfig, RestoreVmRequest, VcpuThreadIds};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use kata_types::capabilities::{Capabilities, CapabilityBits};
 use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
 use persist::sandbox_persist::Persist;
-use std::collections::HashMap;
+use serde_json::Value;
 use std::sync::Arc;
+use std::{collections::HashMap, fs, os::unix::fs::PermissionsExt, path::Path};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 // Convenience macro to obtain the scope logger
@@ -29,6 +30,35 @@ mod inner_hypervisor;
 mod utils;
 
 use inner::CloudHypervisorInner;
+
+pub fn patch_snapshot_memory_shared(snapshot_dir: &Path, shared: bool) -> Result<()> {
+    let config_path = snapshot_dir.join("config.json");
+    let data = fs::read(&config_path).with_context(|| format!("read {}", config_path.display()))?;
+    let mut config: Value = serde_json::from_slice(&data)
+        .with_context(|| format!("parse {}", config_path.display()))?;
+
+    let memory = config
+        .get_mut("memory")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| anyhow!("snapshot config missing memory section"))?;
+    memory.insert("shared".to_string(), Value::Bool(shared));
+
+    let zones = memory
+        .get_mut("zones")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| anyhow!("snapshot config missing memory zones"))?;
+    for zone in zones {
+        let zone = zone
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("snapshot config has invalid memory zone"))?;
+        zone.insert("shared".to_string(), Value::Bool(shared));
+    }
+
+    fs::write(&config_path, serde_json::to_vec(&config)?)
+        .with_context(|| format!("write {}", config_path.display()))?;
+    fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("set permissions on {}", config_path.display()))
+}
 
 #[derive(Debug)]
 pub struct CloudHypervisor {
@@ -55,6 +85,35 @@ impl CloudHypervisor {
 impl Default for CloudHypervisor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_patch_snapshot_memory_shared() {
+        let snapshot = tempfile::tempdir().unwrap();
+        let config_path = snapshot.path().join("config.json");
+        fs::write(
+            &config_path,
+            serde_json::to_vec(&serde_json::json!({
+                "memory": {
+                    "shared": true,
+                    "zones": [{"id": "mem0", "shared": true, "file": "/template/memory"}]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        patch_snapshot_memory_shared(snapshot.path(), false).unwrap();
+
+        let config: Value = serde_json::from_slice(&fs::read(config_path).unwrap()).unwrap();
+        assert_eq!(config["memory"]["shared"], false);
+        assert_eq!(config["memory"]["zones"][0]["shared"], false);
+        assert_eq!(config["memory"]["zones"][0]["file"], "/template/memory");
     }
 }
 
@@ -92,18 +151,23 @@ impl Hypervisor for CloudHypervisor {
     }
 
     async fn pause_vm(&self) -> Result<()> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         inner.pause_vm().await
     }
 
     async fn resume_vm(&self) -> Result<()> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         inner.resume_vm().await
     }
 
-    async fn save_vm(&self) -> Result<()> {
+    async fn save_vm(&self, snapshot_dir: &Path) -> Result<()> {
         let inner = self.inner.write().await;
-        inner.save_vm().await
+        inner.save_vm(snapshot_dir).await
+    }
+
+    async fn restore_vm(&self, request: RestoreVmRequest) -> Result<()> {
+        let mut inner = self.inner.write().await;
+        inner.restore_vm(request).await
     }
 
     async fn add_device(&self, device: DeviceType) -> Result<DeviceType> {

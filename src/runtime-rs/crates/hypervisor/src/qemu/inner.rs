@@ -36,7 +36,7 @@ use persist::sandbox_persist::Persist;
 use qapi_qmp::MigrationStatus;
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -66,6 +66,7 @@ pub struct QemuInner {
     netns: Option<String>,
 
     exit_notify: Option<mpsc::Sender<()>>,
+    restore_state_path: Option<PathBuf>,
 }
 
 impl QemuInner {
@@ -79,6 +80,7 @@ impl QemuInner {
             netns: None,
 
             exit_notify: Some(exit_notify),
+            restore_state_path: None,
         }
     }
 
@@ -105,7 +107,11 @@ impl QemuInner {
         Ok(())
     }
 
-    pub(crate) async fn start_vm(&mut self, _timeout: i32) -> Result<()> {
+    pub(crate) async fn start_vm(&mut self, timeout: i32) -> Result<()> {
+        self.start_vm_inner(timeout, true).await
+    }
+
+    async fn start_vm_inner(&mut self, _timeout: i32, resume_template: bool) -> Result<()> {
         info!(sl!(), "Starting QEMU VM");
         let netns = self.netns.clone().unwrap_or_default();
 
@@ -113,6 +119,9 @@ impl QemuInner {
         // open until spawn() is called to launch qemu later in this function,
         // 'cmdline' has to live at least until spawn() is called
         let mut cmdline = QemuCmdLine::new(&self.id, &self.config)?;
+        if self.restore_state_path.is_some() {
+            cmdline.add_template();
+        }
 
         for device in &mut self.devices {
             match device {
@@ -397,11 +406,11 @@ impl QemuInner {
         }
 
         // Start the virtual machine by restoring it from a VM template if enabled.
-        if self.config.vm_template.boot_from_template {
-            self.boot_from_template()
-                .await
-                .context("boot from template")?;
-            self.resume_vm().context("resume vm")?;
+        if self.restore_state_path.is_some() {
+            self.restore_snapshot().await.context("restore snapshot")?;
+            if resume_template {
+                self.resume_vm().context("resume vm")?;
+            }
         }
 
         // When hypervisor debug is enabled, output the kernel boot messages for debugging.
@@ -413,7 +422,7 @@ impl QemuInner {
         Ok(())
     }
 
-    async fn boot_from_template(&mut self) -> Result<()> {
+    async fn restore_snapshot(&mut self) -> Result<()> {
         let qmp = self
             .qmp
             .as_mut()
@@ -422,7 +431,11 @@ impl QemuInner {
         qmp.set_ignore_shared_memory_capability()
             .context("failed to set ignore shared memory capability")?;
 
-        let uri = format!("exec:cat {}", self.config.vm_template.device_state_path);
+        let state_path = self
+            .restore_state_path
+            .as_ref()
+            .context("snapshot state path is missing")?;
+        let uri = format!("exec:cat {}", state_path.display());
 
         qmp.execute_migration_incoming(&uri)
             .context("failed to execute migration incoming")?;
@@ -545,15 +558,21 @@ impl QemuInner {
         qmp.qmp_cont().context("resume vm")
     }
 
-    pub(crate) async fn save_vm(&mut self) -> Result<()> {
+    pub(crate) async fn save_vm(&mut self, snapshot_dir: &Path) -> Result<()> {
         let qmp = self.qmp.as_mut().ok_or(anyhow!("QMP not initialized"))?;
 
-        if self.config.vm_template.boot_to_be_template {
+        if self
+            .config
+            .file_backed_memory
+            .as_ref()
+            .is_some_and(|memory| memory.shared)
+        {
             qmp.set_ignore_shared_memory_capability()
                 .context("failed to set ignore shared memory capability")?;
         }
 
-        let uri = format!("exec:cat >{}", self.config.vm_template.device_state_path);
+        let state_path = snapshot_dir.join("state");
+        let uri = format!("exec:cat >{}", state_path.display());
 
         qmp.execute_migration(&uri)
             .context("failed to execute migration")?;
@@ -565,6 +584,20 @@ impl QemuInner {
         info!(sl!(), "migration finished successfully");
 
         Ok(())
+    }
+
+    pub(crate) async fn restore_vm(&mut self, request: crate::RestoreVmRequest) -> Result<()> {
+        if request.timeout_secs <= 0 {
+            return Err(anyhow!("restore timeout must be positive"));
+        }
+        if !request.network.is_empty() {
+            return Err(anyhow!(
+                "QEMU snapshot restore does not support replacement network FDs"
+            ));
+        }
+
+        self.restore_state_path = Some(request.snapshot_dir.join("state"));
+        self.start_vm_inner(request.timeout_secs, false).await
     }
 
     pub(crate) async fn get_agent_socket(&self) -> Result<String> {
@@ -1233,6 +1266,7 @@ impl Persist for QemuInner {
             netns: None,
 
             exit_notify: Some(exit_notify),
+            restore_state_path: None,
         })
     }
 }

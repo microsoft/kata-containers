@@ -13,8 +13,8 @@ use persist::sandbox_persist::Persist;
 mod seccomp;
 pub mod vmm_instance;
 
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, path::Path};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -28,7 +28,7 @@ use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::instrument;
 
-use crate::{DeviceType, Hypervisor, MemoryConfig, NetworkConfig, VcpuThreadIds};
+use crate::{DeviceType, Hypervisor, MemoryConfig, NetworkConfig, RestoreVmRequest, VcpuThreadIds};
 
 pub struct Dragonball {
     inner: Arc<RwLock<DragonballInner>>,
@@ -131,9 +131,16 @@ impl Hypervisor for Dragonball {
         inner.resume_vm()
     }
 
-    async fn save_vm(&self) -> Result<()> {
-        let inner = self.inner.read().await;
-        inner.save_vm().await
+    async fn save_vm(&self, _snapshot_dir: &Path) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "Dragonball snapshot save is not supported by runtime-rs"
+        ))
+    }
+
+    async fn restore_vm(&self, _request: RestoreVmRequest) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "Dragonball snapshot restore is not supported by runtime-rs"
+        ))
     }
 
     // returns Result<(old_vcpus, new_vcpus)>

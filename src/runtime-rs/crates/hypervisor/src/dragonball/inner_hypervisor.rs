@@ -82,10 +82,6 @@ impl DragonballInner {
         Ok(())
     }
 
-    pub(crate) async fn save_vm(&self) -> Result<()> {
-        todo!()
-    }
-
     pub(crate) async fn get_agent_socket(&self) -> Result<String> {
         const HYBRID_VSOCK_SCHEME: &str = "hvsock";
         Ok(format!(

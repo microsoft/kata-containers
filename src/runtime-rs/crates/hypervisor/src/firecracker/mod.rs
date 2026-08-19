@@ -10,7 +10,7 @@ mod inner_hypervisor;
 
 use super::HypervisorState;
 use crate::MemoryConfig;
-use crate::{device::DeviceType, Hypervisor, HypervisorConfig, VcpuThreadIds};
+use crate::{device::DeviceType, Hypervisor, HypervisorConfig, RestoreVmRequest, VcpuThreadIds};
 use anyhow::Context;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -18,8 +18,8 @@ use inner::FcInner;
 use kata_types::capabilities::Capabilities;
 use kata_types::capabilities::CapabilityBits;
 use persist::sandbox_persist::Persist;
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, path::Path};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
@@ -105,9 +105,16 @@ impl Hypervisor for Firecracker {
         inner.resume_vm()
     }
 
-    async fn save_vm(&self) -> Result<()> {
-        let inner = self.inner.read().await;
-        inner.save_vm().await
+    async fn save_vm(&self, _snapshot_dir: &Path) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "Firecracker snapshot save is not supported by runtime-rs"
+        ))
+    }
+
+    async fn restore_vm(&self, _request: RestoreVmRequest) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "Firecracker snapshot restore is not supported by runtime-rs"
+        ))
     }
 
     async fn add_device(&self, device: DeviceType) -> Result<DeviceType> {

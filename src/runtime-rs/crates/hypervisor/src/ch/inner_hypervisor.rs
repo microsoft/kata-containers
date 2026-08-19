@@ -14,17 +14,19 @@ use crate::utils::remove_dir_all_if_exists;
 use crate::utils::set_groups;
 use crate::utils::vm_cleanup;
 use crate::utils::{bytes_to_megs, get_jailer_root, get_sandbox_path, megs_to_bytes};
-use crate::MemoryConfig;
 use crate::VM_ROOTFS_DRIVER_BLK;
+use crate::{MemoryConfig, RestoreNetworkConfig, RestoreVmRequest};
 use crate::{VcpuThreadIds, VmmState};
 use anyhow::{anyhow, Context, Result};
 use ch_config::ch_api::cloud_hypervisor_vm_netdev_add_with_fds;
 use ch_config::{
     ch_api::{
         cloud_hypervisor_vm_create, cloud_hypervisor_vm_info, cloud_hypervisor_vm_pause,
-        cloud_hypervisor_vm_resize, cloud_hypervisor_vm_restore, cloud_hypervisor_vm_resume,
+        cloud_hypervisor_vm_resize, cloud_hypervisor_vm_restore,
+        cloud_hypervisor_vm_restore_with_fds, cloud_hypervisor_vm_resume,
         cloud_hypervisor_vm_snapshot, cloud_hypervisor_vm_start, cloud_hypervisor_vmm_ping,
-        cloud_hypervisor_vmm_shutdown, RestoreConfig, VmSnapshotConfig,
+        cloud_hypervisor_vmm_shutdown, MemoryRestoreMode, RestoreConfig, RestoredNetConfig,
+        VmSnapshotConfig,
     },
     VmResize,
 };
@@ -46,8 +48,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
+use std::os::{fd::AsRawFd, unix::fs::PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, RwLock};
@@ -70,8 +72,18 @@ const CH_FEATURES_KEY: &str = "features";
 // The name of the CH build-time feature for Intel TDX.
 const CH_FEATURE_TDX: &str = "tdx";
 
-const CLH_TEMPLATE_STATE_FILE: &str = "state.json";
-const CLH_TEMPLATE_CONFIG_FILE: &str = "config.json";
+const CLH_SNAPSHOT_STATE_FILE: &str = "state.json";
+const CLH_SNAPSHOT_CONFIG_FILE: &str = "config.json";
+const CLH_SNAPSHOT_MINIMUM_TIMEOUT_SECS: u64 = 30;
+const CLH_SNAPSHOT_TIMEOUT_SECS_PER_GIB: u64 = 10;
+
+#[derive(Debug, PartialEq, Eq)]
+enum RestoreMemoryLayout {
+    /// Factory template memory remains backed by zones[].file (the `memory` file).
+    FileBacked,
+    /// Workload snapshot memory is read from `memory-ranges` under source_url.
+    SnapshotRanges,
+}
 
 #[derive(Debug, PartialEq)]
 enum CloudHypervisorLogLevel {
@@ -265,36 +277,6 @@ impl CloudHypervisorInner {
         Ok(())
     }
 
-    fn template_dir(&self) -> Option<PathBuf> {
-        let memory_path = Path::new(&self.config.vm_template.memory_path);
-
-        memory_path.parent().map(Path::to_path_buf)
-    }
-
-    fn should_restore_from_template(&self) -> bool {
-        let Some(template_dir) = self.template_dir() else {
-            debug!(sl!(), "template memory path has no parent directory"; "memory-path" => self.config.vm_template.memory_path.clone());
-            return false;
-        };
-
-        let required_files = [
-            PathBuf::from(&self.config.vm_template.memory_path),
-            template_dir.join(CLH_TEMPLATE_STATE_FILE),
-            template_dir.join(CLH_TEMPLATE_CONFIG_FILE),
-        ];
-
-        for path in required_files {
-            if let Err(err) = fs::metadata(&path) {
-                debug!(sl!(), "template artifact not accessible"; "path" => path.display().to_string(), "error" => err.to_string());
-                return false;
-            }
-        }
-
-        info!(sl!(), "Template files found, can restore VM from template");
-
-        true
-    }
-
     /// Copy a CLH template artifact while preserving the source file permissions.
     fn copy_template_artifact(src: &Path, dst: &Path) -> Result<()> {
         let metadata = fs::metadata(src).with_context(|| format!("stat {}", src.display()))?;
@@ -302,14 +284,6 @@ impl CloudHypervisorInner {
             .with_context(|| format!("copy {} to {}", src.display(), dst.display()))?;
         fs::set_permissions(dst, metadata.permissions())
             .with_context(|| format!("set permissions on {}", dst.display()))?;
-        Ok(())
-    }
-
-    fn write_json_file(path: &Path, value: &Value) -> Result<()> {
-        let data = serde_json::to_vec(value)?;
-        fs::write(path, data).with_context(|| format!("write {}", path.display()))?;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("set permissions on {}", path.display()))?;
         Ok(())
     }
 
@@ -324,61 +298,107 @@ impl CloudHypervisorInner {
             vsock.insert("socket".to_string(), Value::String(vsock_socket_path));
         }
 
-        Self::write_json_file(config_path, &config)
+        let data = serde_json::to_vec(&config)?;
+        fs::write(config_path, data).with_context(|| format!("write {}", config_path.display()))?;
+        fs::set_permissions(config_path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("set permissions on {}", config_path.display()))
     }
 
-    fn patch_snapshot_memory_shared(config_path: &Path, shared: bool) -> Result<()> {
+    fn restore_memory_layout(config_path: &Path) -> Result<RestoreMemoryLayout> {
         let data =
             fs::read(config_path).with_context(|| format!("read {}", config_path.display()))?;
-        let mut config: Value = serde_json::from_slice(&data)
+        let config: Value = serde_json::from_slice(&data)
             .with_context(|| format!("parse {}", config_path.display()))?;
-
         let memory = config
-            .get_mut("memory")
-            .and_then(Value::as_object_mut)
+            .get("memory")
+            .and_then(Value::as_object)
             .ok_or_else(|| anyhow!("snapshot config missing memory section"))?;
-        memory.insert("shared".to_string(), Value::Bool(shared));
+        let zones = match memory.get("zones") {
+            None | Some(Value::Null) => &[][..],
+            Some(Value::Array(zones)) => zones.as_slice(),
+            Some(_) => return Err(anyhow!("snapshot config memory zones are not an array")),
+        };
 
-        let zones = memory
-            .get_mut("zones")
-            .and_then(Value::as_array_mut)
-            .ok_or_else(|| anyhow!("snapshot config missing memory zones"))?;
-        for zone in zones {
-            let zone = zone
-                .as_object_mut()
-                .ok_or_else(|| anyhow!("snapshot config has invalid memory zone"))?;
-            zone.insert("shared".to_string(), Value::Bool(shared));
+        let file_backed_zones = zones
+            .iter()
+            .filter(|zone| {
+                zone.get("file")
+                    .and_then(Value::as_str)
+                    .is_some_and(|path| !path.is_empty())
+            })
+            .count();
+
+        match file_backed_zones {
+            0 => Ok(RestoreMemoryLayout::SnapshotRanges),
+            count if count == zones.len() => Ok(RestoreMemoryLayout::FileBacked),
+            _ => Err(anyhow!(
+                "snapshot config mixes file-backed and snapshot-owned memory zones"
+            )),
         }
-
-        Self::write_json_file(config_path, &config)
     }
 
-    fn prepare_restore_files(&self) -> Result<()> {
-        let template_dir = self
-            .template_dir()
-            .ok_or_else(|| anyhow!("template memory path has no parent directory"))?;
+    fn prepare_restore_files(&self, snapshot_dir: &Path) -> Result<()> {
         let vm_path = PathBuf::from(&self.vm_path);
 
         create_dir_all_with_inherit_owner(&vm_path, 0o750)
             .with_context(|| format!("failed to create VM path {}", vm_path.display()))?;
 
-        let src_config = template_dir.join(CLH_TEMPLATE_CONFIG_FILE);
-        let src_state = template_dir.join(CLH_TEMPLATE_STATE_FILE);
-        let dst_config = vm_path.join(CLH_TEMPLATE_CONFIG_FILE);
-        let dst_state = vm_path.join(CLH_TEMPLATE_STATE_FILE);
+        let src_config = snapshot_dir.join(CLH_SNAPSHOT_CONFIG_FILE);
+        let src_state = snapshot_dir.join(CLH_SNAPSHOT_STATE_FILE);
+        fs::metadata(&src_config)
+            .with_context(|| format!("snapshot config is unavailable: {}", src_config.display()))?;
+        fs::metadata(&src_state)
+            .with_context(|| format!("snapshot state is unavailable: {}", src_state.display()))?;
+        let dst_config = vm_path.join(CLH_SNAPSHOT_CONFIG_FILE);
+        let dst_state = vm_path.join(CLH_SNAPSHOT_STATE_FILE);
 
         Self::copy_template_artifact(&src_config, &dst_config).context("copy template config")?;
         Self::copy_template_artifact(&src_state, &dst_state).context("copy template state")?;
         Self::update_vsock_socket_path(&dst_config, &self.id)
             .context("update restore vsock socket path")?;
 
+        let dst_memory = vm_path.join("memory-ranges");
+        if fs::symlink_metadata(&dst_memory).is_ok() {
+            fs::remove_file(&dst_memory)
+                .with_context(|| format!("remove {}", dst_memory.display()))?;
+        }
+
+        match Self::restore_memory_layout(&dst_config)? {
+            RestoreMemoryLayout::FileBacked => {
+                // Factory templates retain zones[].file pointing at the
+                // template's `memory` backing file. Do not introduce a
+                // memory-ranges source even if an unrelated file is present.
+            }
+            RestoreMemoryLayout::SnapshotRanges => {
+                let src_memory = snapshot_dir.join("memory-ranges");
+                fs::metadata(&src_memory).with_context(|| {
+                    format!(
+                        "snapshot memory ranges are unavailable: {}",
+                        src_memory.display()
+                    )
+                })?;
+                std::os::unix::fs::symlink(&src_memory, &dst_memory).with_context(|| {
+                    format!(
+                        "symlink snapshot memory {} to {}",
+                        src_memory.display(),
+                        dst_memory.display()
+                    )
+                })?;
+            }
+        }
+
         Ok(())
     }
 
-    async fn restore_vm(&self) -> Result<()> {
+    async fn restore_snapshot(
+        &self,
+        memory_restore_mode: kata_types::config::hypervisor::MemoryRestoreMode,
+        networks: &[RestoreNetworkConfig],
+        timeout: Duration,
+    ) -> Result<()> {
         let vm_path = PathBuf::from(&self.vm_path);
-        let state_file = vm_path.join(CLH_TEMPLATE_STATE_FILE);
-        let config_file = vm_path.join(CLH_TEMPLATE_CONFIG_FILE);
+        let state_file = vm_path.join(CLH_SNAPSHOT_STATE_FILE);
+        let config_file = vm_path.join(CLH_SNAPSHOT_CONFIG_FILE);
 
         fs::metadata(&state_file)
             .with_context(|| format!("access state file {}", state_file.display()))?;
@@ -386,24 +406,89 @@ impl CloudHypervisorInner {
             .with_context(|| format!("access config file {}", config_file.display()))?;
 
         let source_url = format!("file://{}", vm_path.display());
-        let response = cloud_hypervisor_vm_restore(
-            &self.api_socket,
-            RestoreConfig {
-                source_url: source_url.clone(),
-            },
-        )
-        .await?;
+        let mut restored_networks = Vec::with_capacity(networks.len());
+        let mut request_fds = Vec::new();
+        let mut network_ids = std::collections::HashSet::new();
+        for network in networks {
+            if network.id.is_empty() {
+                return Err(anyhow!("restore network ID must not be empty"));
+            }
+            if network.fds.is_empty() {
+                return Err(anyhow!(
+                    "restore network {} has no replacement FDs",
+                    network.id
+                ));
+            }
+            if !network_ids.insert(&network.id) {
+                return Err(anyhow!("duplicate restore network ID {}", network.id));
+            }
+            request_fds.extend(network.fds.iter().map(AsRawFd::as_raw_fd));
+            restored_networks.push(RestoredNetConfig {
+                id: network.id.clone(),
+                num_fds: network.fds.len(),
+                fds: None,
+            });
+        }
+
+        let restore_config = RestoreConfig {
+            source_url: source_url.clone(),
+            memory_restore_mode: MemoryRestoreMode::from(memory_restore_mode),
+            net_fds: (!restored_networks.is_empty()).then_some(restored_networks),
+        };
+        let restore = async {
+            if request_fds.is_empty() {
+                // Factory templates contain no NIC. Networking is hotplugged
+                // after restore, so this path sends ordinary HTTP without
+                // ancillary data.
+                cloud_hypervisor_vm_restore(&self.api_socket, restore_config).await
+            } else {
+                // Workload restore adopts the saved NIC by replacing its TAP
+                // descriptors through SCM_RIGHTS.
+                cloud_hypervisor_vm_restore_with_fds(&self.api_socket, restore_config, request_fds)
+                    .await
+            }
+        };
+        let response = tokio::time::timeout(timeout, restore)
+            .await
+            .context("cloud-hypervisor restore timed out")??;
         if let Some(detail) = response {
             debug!(sl!(), "vm restore response: {:?}", detail);
         }
 
         let info = cloud_hypervisor_vm_info(&self.api_socket).await?;
         if !matches!(info.state, State::Paused) {
-            warn!(sl!(), "restored VM is not paused"; "state" => format!("{:?}", info.state));
+            return Err(anyhow!(
+                "restored VM is in state {:?}, expected Paused",
+                info.state
+            ));
         }
 
         info!(sl!(), "Successfully restored VM from template");
 
+        Ok(())
+    }
+
+    pub(crate) async fn restore_vm(&mut self, request: RestoreVmRequest) -> Result<()> {
+        if request.timeout_secs <= 0 {
+            return Err(anyhow!("restore timeout must be positive"));
+        }
+        if self.state != VmmState::NotReady {
+            return Err(anyhow!(
+                "cannot restore VM in state {:?}; expected NotReady",
+                self.state
+            ));
+        }
+        self.timeout_secs = request.timeout_secs;
+        self.start_hypervisor(self.timeout_secs).await?;
+        self.state = VmmState::VmmServerReady;
+        self.prepare_restore_files(&request.snapshot_dir)?;
+        self.restore_snapshot(
+            request.memory_restore_mode,
+            &request.network,
+            Duration::from_secs(request.timeout_secs as u64),
+        )
+        .await?;
+        self.state = VmmState::VmPaused;
         Ok(())
     }
 
@@ -803,16 +888,7 @@ impl CloudHypervisorInner {
 
         self.state = VmmState::VmmServerReady;
 
-        if self.config.vm_template.boot_from_template && self.should_restore_from_template() {
-            self.prepare_restore_files()?;
-            self.restore_vm().await?;
-            self.resume_vm().await?;
-        } else {
-            if self.config.vm_template.boot_from_template {
-                self.config.vm_template.boot_from_template = false;
-            }
-            self.boot_vm().await?;
-        }
+        self.boot_vm().await?;
 
         self.state = VmmState::VmRunning;
 
@@ -825,13 +901,12 @@ impl CloudHypervisorInner {
         // which results in this method being called potentially a second
         // time. Without this check, we'll return an error representing EPIPE
         // since the CH API socket is at that point invalid.
-        if self.state != VmmState::VmRunning {
+        if self.state == VmmState::NotReady {
             return Ok(());
         }
 
-        self.state = VmmState::NotReady;
-
         self.cloud_hypervisor_shutdown().await?;
+        self.state = VmmState::NotReady;
 
         Ok(())
     }
@@ -841,37 +916,54 @@ impl CloudHypervisorInner {
         Ok(0)
     }
 
-    pub(crate) async fn pause_vm(&self) -> Result<()> {
+    pub(crate) async fn pause_vm(&mut self) -> Result<()> {
+        if self.state != VmmState::VmRunning {
+            return Err(anyhow!("cannot pause VM in state {:?}", self.state));
+        }
         let response = cloud_hypervisor_vm_pause(&self.api_socket).await?;
         if let Some(detail) = response {
             debug!(sl!(), "vm pause response: {:?}", detail);
         }
+        self.state = VmmState::VmPaused;
         Ok(())
     }
 
-    pub(crate) async fn resume_vm(&self) -> Result<()> {
+    pub(crate) async fn resume_vm(&mut self) -> Result<()> {
+        if self.state != VmmState::VmPaused {
+            return Err(anyhow!("cannot resume VM in state {:?}", self.state));
+        }
         let response = cloud_hypervisor_vm_resume(&self.api_socket).await?;
         if let Some(detail) = response {
             debug!(sl!(), "vm resume response: {:?}", detail);
         }
+        self.state = VmmState::VmRunning;
         Ok(())
     }
 
-    pub(crate) async fn save_vm(&self) -> Result<()> {
-        let snapshot_dir = self
-            .template_dir()
-            .ok_or_else(|| anyhow!("template memory path has no parent directory"))?;
+    fn snapshot_timeout_for_memory_bytes(memory_bytes: u64) -> Duration {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        let memory_gib = memory_bytes.div_ceil(GIB);
+        Duration::from_secs(
+            CLH_SNAPSHOT_MINIMUM_TIMEOUT_SECS.max(memory_gib * CLH_SNAPSHOT_TIMEOUT_SECS_PER_GIB),
+        )
+    }
+
+    pub(crate) async fn save_vm(&self, snapshot_dir: &Path) -> Result<()> {
         let destination_url = format!("file://{}", snapshot_dir.display());
-        let response =
-            cloud_hypervisor_vm_snapshot(&self.api_socket, VmSnapshotConfig { destination_url })
-                .await?;
+        let vm_info = cloud_hypervisor_vm_info(&self.api_socket)
+            .await
+            .context("query VM memory before snapshot")?;
+        let memory_bytes = vm_info
+            .memory_actual_size
+            .unwrap_or_else(|| u64::from(self.config.memory_info.default_memory) * 1024 * 1024);
+        let response = tokio::time::timeout(
+            Self::snapshot_timeout_for_memory_bytes(memory_bytes),
+            cloud_hypervisor_vm_snapshot(&self.api_socket, VmSnapshotConfig { destination_url }),
+        )
+        .await
+        .context("cloud-hypervisor snapshot timed out")??;
         if let Some(detail) = response {
             debug!(sl!(), "vm snapshot response: {:?}", detail);
-        }
-
-        if self.config.vm_template.boot_to_be_template {
-            Self::patch_snapshot_memory_shared(&snapshot_dir.join(CLH_TEMPLATE_CONFIG_FILE), false)
-                .context("patch snapshot memory sharing")?;
         }
 
         Ok(())
@@ -1306,6 +1398,16 @@ mod tests {
     use std::fs::File;
     use tempfile::Builder;
 
+    fn write_restore_artifacts(snapshot_dir: &Path, config: Value) {
+        fs::create_dir_all(snapshot_dir).unwrap();
+        fs::write(
+            snapshot_dir.join(CLH_SNAPSHOT_CONFIG_FILE),
+            serde_json::to_vec(&config).unwrap(),
+        )
+        .unwrap();
+        fs::write(snapshot_dir.join(CLH_SNAPSHOT_STATE_FILE), b"{}").unwrap();
+    }
+
     fn set_fake_guest_protection(protection: Option<GuestProtection>) {
         let existing_ref = FAKE_GUEST_PROTECTION.clone();
 
@@ -1313,6 +1415,87 @@ mod tests {
 
         // Modify the lazy static global config structure
         *existing = protection;
+    }
+
+    #[test]
+    fn test_snapshot_timeout_scales_with_memory() {
+        assert_eq!(
+            CloudHypervisorInner::snapshot_timeout_for_memory_bytes(512 * 1024 * 1024),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            CloudHypervisorInner::snapshot_timeout_for_memory_bytes(4 * 1024 * 1024 * 1024),
+            Duration::from_secs(40)
+        );
+    }
+
+    #[test]
+    fn test_prepare_factory_restore_preserves_file_backed_memory() {
+        let root = Builder::new()
+            .prefix("clh-factory-restore")
+            .tempdir()
+            .unwrap();
+        let snapshot_dir = root.path().join("template");
+        let vm_path = root.path().join("vm");
+        let memory_path = snapshot_dir.join("memory");
+        fs::create_dir_all(&snapshot_dir).unwrap();
+        File::create(&memory_path).unwrap();
+        fs::write(snapshot_dir.join("memory-ranges"), b"stale").unwrap();
+        write_restore_artifacts(
+            &snapshot_dir,
+            serde_json::json!({
+                "memory": {
+                    "zones": [{
+                        "id": "mem0",
+                        "file": memory_path,
+                    }],
+                },
+                "vsock": { "socket": "template.sock" },
+            }),
+        );
+
+        let mut clh = CloudHypervisorInner::default();
+        clh.id = "factory-clone".to_string();
+        clh.vm_path = vm_path.to_string_lossy().into_owned();
+        clh.prepare_restore_files(&snapshot_dir).unwrap();
+
+        let config: Value =
+            serde_json::from_slice(&fs::read(vm_path.join(CLH_SNAPSHOT_CONFIG_FILE)).unwrap())
+                .unwrap();
+        assert_eq!(
+            config["memory"]["zones"][0]["file"],
+            Value::String(memory_path.to_string_lossy().into_owned())
+        );
+        assert!(fs::symlink_metadata(vm_path.join("memory-ranges")).is_err());
+    }
+
+    #[test]
+    fn test_prepare_workload_restore_links_memory_ranges() {
+        let root = Builder::new()
+            .prefix("clh-workload-restore")
+            .tempdir()
+            .unwrap();
+        let snapshot_dir = root.path().join("snapshot");
+        let vm_path = root.path().join("vm");
+        let memory_ranges = snapshot_dir.join("memory-ranges");
+        write_restore_artifacts(
+            &snapshot_dir,
+            serde_json::json!({
+                "memory": { "size": 134217728 },
+                "vsock": { "socket": "snapshot.sock" },
+            }),
+        );
+        fs::write(&memory_ranges, b"snapshot memory").unwrap();
+
+        let mut clh = CloudHypervisorInner::default();
+        clh.id = "restored-workload".to_string();
+        clh.vm_path = vm_path.to_string_lossy().into_owned();
+        clh.prepare_restore_files(&snapshot_dir).unwrap();
+
+        assert_eq!(
+            fs::read_link(vm_path.join("memory-ranges")).unwrap(),
+            memory_ranges
+        );
     }
 
     #[actix_rt::test]
