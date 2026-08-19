@@ -27,3 +27,6 @@ api_client = { git = "https://github.com/cloud-hypervisor/cloud-hypervisor", tag
 # Local dependencies
 kata-types = { workspace = true }
 kata-sys-util = { workspace = true }
+
+[dev-dependencies]
+vmm-sys-util = { workspace = true }
