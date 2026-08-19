@@ -680,6 +680,11 @@ pub struct CpuInfo {
     /// - On ARM with GICv2, max is 8
     #[serde(default)]
     pub default_maxvcpus: u32,
+
+    /// Maximum guest physical address width. Unspecified or `0` uses the
+    /// hypervisor-specific default.
+    #[serde(default)]
+    pub max_phys_bits: u8,
 }
 
 impl CpuInfo {
@@ -2032,11 +2037,13 @@ mod tests {
                     cpu_features: "".to_string(),
                     default_vcpus: 0.0,
                     default_maxvcpus: 0,
+                    max_phys_bits: 0,
                 },
                 output: CpuInfo {
                     cpu_features: "".to_string(),
                     default_vcpus,
                     default_maxvcpus: node_cpus as u32,
+                    max_phys_bits: 0,
                 },
             },
             TestData {
@@ -2045,11 +2052,13 @@ mod tests {
                     cpu_features: "a,b,c".to_string(),
                     default_vcpus: 9999999.0,
                     default_maxvcpus: 9999999,
+                    max_phys_bits: 0,
                 },
                 output: CpuInfo {
                     cpu_features: "a,b,c".to_string(),
                     default_vcpus: node_cpus,
                     default_maxvcpus: node_cpus as u32,
+                    max_phys_bits: 0,
                 },
             },
             TestData {
@@ -2058,11 +2067,13 @@ mod tests {
                     cpu_features: "a, b ,c".to_string(),
                     default_vcpus: -1.0,
                     default_maxvcpus: 1,
+                    max_phys_bits: 0,
                 },
                 output: CpuInfo {
                     cpu_features: "a,b,c".to_string(),
                     default_vcpus: 1.0,
                     default_maxvcpus: 1,
+                    max_phys_bits: 0,
                 },
             },
         ];

@@ -1,0 +1,13 @@
+diff --git a/src/igvm/igvmfile.py b/src/igvm/igvmfile.py
+--- a/src/igvm/igvmfile.py
++++ b/src/igvm/igvmfile.py
+@@ -489,9 +489,6 @@ class IGVMFile:
+                         (CpuIdFunctionExtendedStateEnumeration, 2),
+                         (CpuIdFunctionExtendedStateEnumeration, 3),
+                         (CpuIdFunctionExtendedStateEnumeration, 4),
+-                        (CpuIdFunctionExtendedStateEnumeration, 5),
+-                        (CpuIdFunctionExtendedStateEnumeration, 6),
+-                        (CpuIdFunctionExtendedStateEnumeration, 7),
+                         (CpuIdFunctionExtendedStateEnumeration, 8),
+                         (CpuIdFunctionExtendedBrandingString1, 0),
+                         (CpuIdFunctionExtendedBrandingString2, 0),
