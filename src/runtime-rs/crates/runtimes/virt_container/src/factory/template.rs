@@ -87,7 +87,10 @@ impl Template {
     }
 
     fn memory_path(&self) -> PathBuf {
-        self.state_path.join("memory")
+        match self.config.hypervisor_name.as_str() {
+            HYPERVISOR_NAME_CH => self.state_path.join("memory-ranges"),
+            _ => self.state_path.join("memory"),
+        }
     }
 
     fn device_state_path(&self) -> PathBuf {
@@ -117,7 +120,7 @@ impl Template {
         // Mount tmpfs to store template VM memory data in memory for:
         // - Accelerating VM cloning by avoiding disk I/O
         // - Enhancing security by keeping sensitive data in memory
-        // - Supporting QEMU's shared memory clone model
+        // - Supporting VMM's shared memory clone model
         let opts = format!(
             "size={}M",
             self.config.hypervisor_config.memory_info.default_memory
@@ -140,42 +143,35 @@ impl Template {
             ));
         }
 
-        // Create memory file
-        let memory_file = self.memory_path();
-        let file = File::create(&memory_file)
-            .context(format!("failed to create memory file: {memory_file:?}"))?;
-        let memory_size_bytes = u64::from(self.config.hypervisor_config.memory_info.default_memory)
-            .checked_mul(MIB)
-            .ok_or_else(|| anyhow!("template memory size overflows u64"))?;
-        file.set_len(memory_size_bytes)
-            .context(format!("failed to size memory file: {memory_file:?}"))?;
-
-        // Verify memory file was created successfully
-        if !memory_file.exists() {
-            return Err(anyhow!(
-                "memory file {:?} does not exist after creation",
-                memory_file
-            ));
+        if self.config.hypervisor_name != HYPERVISOR_NAME_CH {
+            let memory_file = self.memory_path();
+            let file = File::create(&memory_file)
+                .context(format!("failed to create memory file: {memory_file:?}"))?;
+            let memory_size_bytes =
+                u64::from(self.config.hypervisor_config.memory_info.default_memory)
+                    .checked_mul(MIB)
+                    .ok_or_else(|| anyhow!("template memory size overflows u64"))?;
+            file.set_len(memory_size_bytes)
+                .context(format!("failed to size memory file: {memory_file:?}"))?;
         }
 
         Ok(())
     }
 
-    /// Configures the VM configuration for template operations.
-    fn prepare_vm_config(&self, boot_to_be_template: bool) -> VmConfig {
+    fn prepare_vm_config(&self) -> VmConfig {
         let mut config = self.config.clone();
-        config.hypervisor_config.vm_template.boot_to_be_template = boot_to_be_template;
-        config.hypervisor_config.vm_template.boot_from_template = !boot_to_be_template;
-        config.hypervisor_config.vm_template.memory_path =
-            self.memory_path().to_string_lossy().to_string();
-        config.hypervisor_config.vm_template.device_state_path =
-            self.device_state_path().to_string_lossy().to_string();
+        if config.hypervisor_name != HYPERVISOR_NAME_CH {
+            config.hypervisor_config.file_backed_memory =
+                Some(kata_types::config::hypervisor::FileBackedMemory {
+                    path: self.memory_path().to_string_lossy().to_string(),
+                    shared: true,
+                });
+        }
         config
     }
 
     pub async fn save_to_template(&self, toml_config: TomlConfig) -> Result<()> {
-        let config = self.prepare_vm_config(true);
-        let vm = TemplateVm::new_vm(config, toml_config)
+        let vm = TemplateVm::new_vm(self.prepare_vm_config(), toml_config)
             .await
             .context("new template vm")?;
 
@@ -194,7 +190,10 @@ impl Template {
             sleep(TEMPLATE_WAIT_FOR_AGENT);
 
             vm.pause().await.context("pause template vm")?;
-            vm.save().await.context("save template vm")
+            vm.save(&self.state_path)
+                .await
+                .context("save template vm")?;
+            Ok(())
         }
         .await;
 
@@ -212,5 +211,69 @@ impl Template {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prepare_vm_config_uses_snapshot_memory_for_clh() {
+        let template = Template::new(
+            VmConfig {
+                hypervisor_name: HYPERVISOR_NAME_CH.to_string(),
+                ..Default::default()
+            },
+            PathBuf::from("/template"),
+        );
+
+        assert!(template
+            .prepare_vm_config()
+            .hypervisor_config
+            .file_backed_memory
+            .is_none());
+        assert_eq!(
+            template.memory_path(),
+            PathBuf::from("/template/memory-ranges")
+        );
+    }
+
+    #[test]
+    fn test_prepare_vm_config_preserves_other_hypervisors_memory_backing() {
+        let template = Template::new(VmConfig::default(), PathBuf::from("/template"));
+        let config = template.prepare_vm_config();
+        let file_backed_memory = config.hypervisor_config.file_backed_memory.unwrap();
+
+        assert_eq!(file_backed_memory.path, "/template/memory");
+        assert!(file_backed_memory.shared);
+    }
+
+    #[test]
+    fn test_template_vm_exists_requires_snapshot_artifacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let template = Template::new(
+            VmConfig {
+                hypervisor_name: HYPERVISOR_NAME_CH.to_string(),
+                ..Default::default()
+            },
+            dir.path().to_path_buf(),
+        );
+
+        std::fs::write(dir.path().join("config.json"), b"{}").unwrap();
+        std::fs::write(dir.path().join("state.json"), b"{}").unwrap();
+        std::fs::write(dir.path().join("memory"), b"legacy backing").unwrap();
+        assert!(!template.template_vm_exists());
+
+        std::fs::remove_file(dir.path().join("memory")).unwrap();
+        std::fs::write(dir.path().join("memory-ranges"), b"snapshot memory").unwrap();
+        assert!(template.template_vm_exists());
+
+        for artifact in ["config.json", "state.json", "memory-ranges"] {
+            let path = dir.path().join(artifact);
+            std::fs::remove_file(&path).unwrap();
+            assert!(!template.template_vm_exists());
+            std::fs::write(path, b"snapshot artifact").unwrap();
+        }
     }
 }

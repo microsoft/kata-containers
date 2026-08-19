@@ -139,6 +139,16 @@ impl DragonballInner {
     pub(crate) async fn cold_start_vm(&mut self, timeout: i32) -> Result<()> {
         info!(sl!(), "start sandbox cold");
 
+        self.prepare_vm_start().await?;
+
+        // start vmm and wait ready
+        self.start_vmm_instance().context("start vmm instance")?;
+        self.wait_vmm_ready(timeout).context("wait vmm")?;
+
+        Ok(())
+    }
+
+    async fn prepare_vm_start(&mut self) -> Result<()> {
         self.set_vm_base_config().context("set vm base config")?;
 
         // get kernel params
@@ -178,9 +188,28 @@ impl DragonballInner {
             self.add_device(dev).await.context("add_device")?;
         }
 
-        // start vmm and wait ready
-        self.start_vmm_instance().context("start vmm instance")?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub(crate) async fn restore_vm_from_snapshot(
+        &mut self,
+        state_path: String,
+        memory_path: String,
+        timeout: i32,
+    ) -> Result<()> {
+        self.prepare_vm_start().await?;
+        self.vmm_instance
+            .instance_start_from_snapshot(state_path, memory_path)
+            .context("start vmm from snapshot")?;
+        self.state = VmmState::VmRunning;
         self.wait_vmm_ready(timeout).context("wait vmm")?;
+        // The VM factory path expects restored VMs to be
+        // returned in Paused state.
+        self.vmm_instance
+            .pause()
+            .context("pause restored vm before returning")?;
+        self.state = VmmState::VmPaused;
 
         Ok(())
     }
@@ -319,37 +348,6 @@ impl DragonballInner {
 
     fn start_vmm_instance(&mut self) -> Result<()> {
         info!(sl!(), "Starting VM");
-        // Boot from a VM template snapshot instead of cold booting when
-        // configured (mirrors the QEMU boot_from_template flow).
-        #[cfg(target_arch = "x86_64")]
-        if self.config.vm_template.boot_from_template {
-            let template = &self.config.vm_template;
-            if template.device_state_path.is_empty() || template.memory_path.is_empty() {
-                return Err(anyhow!(
-                    "vm_template memory_path/device_state_path are not configured"
-                ));
-            }
-            info!(
-                sl!(),
-                "Starting VM from template snapshot";
-                "device_state_path" => &template.device_state_path,
-                "memory_path" => &template.memory_path,
-            );
-            self.vmm_instance
-                .instance_start_from_snapshot(
-                    template.device_state_path.clone(),
-                    template.memory_path.clone(),
-                )
-                .context("Failed to start vmm from template snapshot")?;
-            self.state = VmmState::VmRunning;
-            return Ok(());
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        if self.config.vm_template.boot_from_template {
-            return Err(anyhow!(
-                "boot_from_template is not supported on this architecture"
-            ));
-        }
         self.vmm_instance
             .instance_start()
             .context("Failed to start vmm")?;
