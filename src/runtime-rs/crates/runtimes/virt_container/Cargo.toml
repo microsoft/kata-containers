@@ -50,5 +50,8 @@ dragonball = ["hypervisor/dragonball"]
 # Enable the OpenVMM driver
 openvmm = ["hypervisor/openvmm"]
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [package.metadata.cargo-machete]
 ignored = ["slog-scope"]
