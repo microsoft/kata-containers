@@ -30,6 +30,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use qapi_spec::Dictionary;
+use std::fs::File;
 use std::thread;
 use std::time::Instant;
 
@@ -38,6 +39,7 @@ const DEFAULT_QMP_READ_TIMEOUT: u64 = 250;
 const DEFAULT_QMP_INIT_READ_TIMEOUT: u64 = 5000;
 const DEFAULT_QMP_CONNECT_DEADLINE_MS: u64 = 50000;
 const DEFAULT_QMP_RETRY_SLEEP_MS: u64 = 50;
+const MIGRATION_FD_NAME: &str = "snapshot-state";
 
 const DEVICE_DELETED_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -154,6 +156,12 @@ impl Qmp {
             .context("execute migration")
     }
 
+    pub fn execute_migration_from_file(&mut self, file: &File) -> Result<()> {
+        self.pass_fd(file.as_raw_fd(), MIGRATION_FD_NAME)
+            .context("pass migration file descriptor")?;
+        self.execute_migration(&format!("fd:{MIGRATION_FD_NAME}"))
+    }
+
     pub async fn execute_query_migrate(&mut self) -> Result<MigrationInfo> {
         let migrate_info = self.qmp.execute(&qmp::query_migrate {})?;
 
@@ -169,6 +177,12 @@ impl Qmp {
             })
             .map(|_| ())
             .context("execute migration incoming")
+    }
+
+    pub fn execute_migration_incoming_from_file(&mut self, file: &File) -> Result<()> {
+        self.pass_fd(file.as_raw_fd(), MIGRATION_FD_NAME)
+            .context("pass incoming migration file descriptor")?;
+        self.execute_migration_incoming(&format!("fd:{MIGRATION_FD_NAME}"))
     }
 
     pub fn hotplug_vcpus(&mut self, vcpu_cnt: u32) -> Result<u32> {
