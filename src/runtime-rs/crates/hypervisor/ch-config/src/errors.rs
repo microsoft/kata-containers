@@ -112,14 +112,14 @@ pub enum MemoryConfigError {
     #[error("Failed to query system memory information: {0}")]
     SysInfoFail(#[source] nix::errno::Errno),
 
-    #[error("Template memory path is empty")]
-    NoTemplateMemoryPath,
+    #[error("File-backed memory path is empty")]
+    NoFileBackedMemoryPath,
 
-    #[error("Template memory path is not accessible: {0}")]
-    TemplateMemoryPathNotAccessible(String),
+    #[error("File-backed memory path is not accessible: {0}")]
+    FileBackedMemoryPathNotAccessible(String),
 
-    #[error("Template mode requires no shared filesystem")]
-    TemplateRequiresNoSharedFs,
+    #[error("File-backed memory requires no shared filesystem")]
+    FileBackedMemoryRequiresNoSharedFs,
 }
 
 #[derive(Error, Debug, PartialEq)]

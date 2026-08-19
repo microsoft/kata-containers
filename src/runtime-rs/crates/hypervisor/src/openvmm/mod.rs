@@ -28,6 +28,7 @@ use inner::OpenVmmInner;
 use persist::sandbox_persist::Persist;
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -38,7 +39,7 @@ use tokio::sync::{watch, RwLock};
 use tracing::instrument;
 
 use super::HypervisorState;
-use crate::{DeviceType, Hypervisor, MemoryConfig, VcpuThreadIds};
+use crate::{DeviceType, Hypervisor, MemoryConfig, RestoreVmRequest, VcpuThreadIds};
 
 // PCIe topology layout on the single root complex (bus 0). Every Kata device is
 // a virtio (or vhost-user) function behind its own root port at function 0 of a
@@ -137,9 +138,15 @@ impl Hypervisor for OpenVmm {
         inner.resume_vm().await
     }
 
-    async fn save_vm(&self) -> Result<()> {
+    async fn save_vm(&self, _snapshot_dir: &Path) -> Result<()> {
         let inner = self.inner.read().await;
         inner.save_vm().await
+    }
+
+    async fn restore_vm(&self, _request: RestoreVmRequest) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "OpenVMM snapshot restore is not supported by runtime-rs"
+        ))
     }
 
     async fn resize_vcpu(&self, old_vcpus: u32, new_vcpus: u32) -> Result<(u32, u32)> {
