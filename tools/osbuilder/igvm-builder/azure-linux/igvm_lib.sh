@@ -20,6 +20,7 @@ install_igvm_tool()
 	IGVM_VER=$(curl -sL "https://api.github.com/repos/microsoft/igvm-tooling/releases/latest" | jq -r .tag_name | sed 's/^v//')
 	curl -sL "https://github.com/microsoft/igvm-tooling/archive/refs/tags/${IGVM_VER}.tar.gz" | tar --no-same-owner -xz
 	mv "igvm-tooling-${IGVM_VER}" "${IGVM_EXTRACT_FOLDER}"
+	patch -d "${IGVM_EXTRACT_FOLDER}" -p1 < "${distro_config_dir}/igvm-tooling-cpuid.patch"
 
 	echo "Installing IGVM module msigvm (${IGVM_VER}) via pip3"
 	pushd "${IGVM_EXTRACT_FOLDER}/src" || exit

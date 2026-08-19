@@ -90,6 +90,11 @@ default_vcpus = @DEFVCPUS@
 # unless you know what are you doing.
 default_maxvcpus = 1
 
+# Keep the guest address layout consistent with the static ACPI addresses in
+# the IGVM across Milan and Genoa confidential-child hosts.
+# TODO: 46 also passes on both when the IGVM ACPI layout matches.
+max_phys_bits = 43
+
 # Default memory size in MiB for SB/VM.
 # If unspecified then it will be set @DEFMEMSZ@ MiB.
 default_memory = @DEFMEMSZ@
