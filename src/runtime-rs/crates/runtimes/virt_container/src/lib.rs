@@ -64,7 +64,7 @@ use hypervisor::{openvmm::OpenVmm, HYPERVISOR_NAME_OPENVMM};
 ))]
 use kata_types::config::OpenVmmConfig;
 
-use crate::factory::{template_device_state_path, vm::VmConfig};
+use crate::factory::vm::VmConfig;
 use resource::cpu_mem::initial_size::InitialSizeManager;
 use resource::ResourceManager;
 use sandbox::VIRTCONTAINER;
@@ -201,13 +201,11 @@ async fn build_vm_from_template() -> Result<(Arc<dyn Hypervisor>, Arc<dyn Agent>
         TomlConfig::load_from_default().context("failed to load toml config")?;
     let hypervisor_name = toml_config.runtime.hypervisor_name.clone();
     if let Some(h) = toml_config.hypervisor.get_mut(&hypervisor_name) {
-        h.vm_template.boot_to_be_template = false;
-        h.vm_template.boot_from_template = true;
         let path = Path::new(&h.factory.template_path);
-        h.vm_template.memory_path = path.join("memory").to_string_lossy().to_string();
-        h.vm_template.device_state_path = template_device_state_path(&hypervisor_name, path)
-            .to_string_lossy()
-            .to_string();
+        h.file_backed_memory = Some(kata_types::config::hypervisor::FileBackedMemory {
+            path: path.join("memory").to_string_lossy().to_string(),
+            shared: false,
+        });
         let _ = VmConfig::validate_hypervisor_config(h);
     } else {
         return Err(anyhow!("hypervisor '{}' not found", hypervisor_name));

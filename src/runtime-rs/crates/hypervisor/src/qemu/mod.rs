@@ -10,7 +10,7 @@ mod qmp;
 use crate::device::pci_path::PciPath;
 use crate::device::DeviceType;
 use crate::hypervisor_persist::HypervisorState;
-use crate::{Hypervisor, MemoryConfig};
+use crate::{Hypervisor, MemoryConfig, RestoreVmRequest};
 use crate::{HypervisorConfig, VcpuThreadIds};
 use inner::QemuInner;
 use kata_types::capabilities::{Capabilities, CapabilityBits};
@@ -19,8 +19,8 @@ use persist::sandbox_persist::Persist;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, path::Path};
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, Mutex};
 
@@ -101,9 +101,14 @@ impl Hypervisor for Qemu {
         inner.resume_vm()
     }
 
-    async fn save_vm(&self) -> Result<()> {
+    async fn save_vm(&self, snapshot_dir: &Path) -> Result<()> {
         let mut inner = self.inner.write().await;
-        inner.save_vm().await
+        inner.save_vm(snapshot_dir).await
+    }
+
+    async fn restore_vm(&self, request: RestoreVmRequest) -> Result<()> {
+        let mut inner = self.inner.write().await;
+        inner.restore_vm(request).await
     }
 
     async fn add_device(&self, device: DeviceType) -> Result<DeviceType> {

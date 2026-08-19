@@ -80,7 +80,8 @@ pub trait Hypervisor: Send + Sync {
     async fn start_vm(&self, timeout: i32) -> Result<()>;
     async fn stop_vm(&self) -> Result<()>;
     async fn pause_vm(&self) -> Result<()>;
-    async fn save_vm(&self) -> Result<()>;
+    async fn save_vm(&self, snapshot_dir: &Path) -> Result<()>;
+    async fn restore_vm(&self, request: RestoreVmRequest) -> Result<()>;
     async fn resume_vm(&self) -> Result<()>;
 
     // device manager
