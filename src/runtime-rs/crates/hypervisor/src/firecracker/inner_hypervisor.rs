@@ -134,6 +134,7 @@ impl FcInner {
         warn!(sl(), "Save VM: Not implemented");
         Ok(())
     }
+
     pub(crate) fn resume_vm(&self) -> Result<()> {
         warn!(sl(), "Resume VM: Not implemented");
         Ok(())

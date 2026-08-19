@@ -402,8 +402,11 @@ impl TemplateVm {
     }
 
     /// Save a VM to persistent disk.
-    pub async fn save(&self) -> Result<()> {
-        self.hypervisor.save_vm().await.context("save vm")
+    pub async fn save(&self, snapshot_dir: &std::path::Path) -> Result<()> {
+        self.hypervisor
+            .save_vm(snapshot_dir)
+            .await
+            .context("save vm")
     }
 
     /// Resume resumes a paused VM.
