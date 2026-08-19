@@ -47,10 +47,27 @@ pub struct FactoryConfig {
 
 impl FactoryConfig {
     pub fn new(toml_config: &TomlConfig) -> Self {
+        let mut vm_config = VmConfig::new(toml_config);
+        if toml_config.runtime.static_sandbox_resource_mgmt {
+            if vm_config.hypervisor_config.memory_info.default_memory == 0
+                && toml_config.runtime.static_sandbox_default_workload_mem > 0
+            {
+                vm_config.hypervisor_config.memory_info.default_memory =
+                    toml_config.runtime.static_sandbox_default_workload_mem;
+            }
+
+            if vm_config.hypervisor_config.cpu_info.default_vcpus == 0.0
+                && toml_config.runtime.static_sandbox_default_workload_vcpus > 0.0
+            {
+                vm_config.hypervisor_config.cpu_info.default_vcpus =
+                    toml_config.runtime.static_sandbox_default_workload_vcpus;
+            }
+        }
+
         Self {
             template: toml_config.get_factory().enable_template,
             template_path: toml_config.get_factory().template_path,
-            vm_config: VmConfig::new(toml_config),
+            vm_config,
         }
     }
 }
@@ -177,6 +194,7 @@ pub fn close_factory(config: &mut FactoryConfig) -> Result<()> {
 mod tests {
     use std::fs;
 
+    use kata_types::config::Hypervisor;
     use tempfile::tempdir;
 
     use super::*;
@@ -190,6 +208,9 @@ mod tests {
             r#"
 [runtime]
 hypervisor_name = "clh"
+static_sandbox_resource_mgmt = true
+static_sandbox_default_workload_mem = 512
+static_sandbox_default_workload_vcpus = 1.5
 
 [hypervisor.clh]
 path = "/bin/true"
@@ -209,6 +230,22 @@ template_path = "/run/vc/vm/preview-template"
 
         assert!(factory_config.template);
         assert_eq!(factory_config.template_path, "/run/vc/vm/preview-template");
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .memory_info
+                .default_memory,
+            512
+        );
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .cpu_info
+                .default_vcpus,
+            1.5
+        );
         assert!(toml_config
             .hypervisor
             .get("clh")
@@ -216,5 +253,69 @@ template_path = "/run/vc/vm/preview-template"
             .shared_fs
             .shared_fs
             .is_none());
+    }
+
+    #[test]
+    fn static_factory_defaults_only_replace_zero_base_sizes() {
+        let mut config = TomlConfig::default();
+        config.runtime.hypervisor_name = "clh".to_string();
+        config.runtime.static_sandbox_resource_mgmt = true;
+        config.runtime.static_sandbox_default_workload_mem = 512;
+        config.runtime.static_sandbox_default_workload_vcpus = 1.5;
+        config.hypervisor.insert(
+            "clh".to_string(),
+            Hypervisor {
+                memory_info: kata_types::config::hypervisor::MemoryInfo {
+                    default_memory: 256,
+                    ..Default::default()
+                },
+                cpu_info: kata_types::config::hypervisor::CpuInfo {
+                    default_vcpus: 2.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+
+        let factory_config = FactoryConfig::new(&config);
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .memory_info
+                .default_memory,
+            256
+        );
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .cpu_info
+                .default_vcpus,
+            2.0
+        );
+
+        config.runtime.static_sandbox_resource_mgmt = false;
+        let hypervisor = config.hypervisor.get_mut("clh").unwrap();
+        hypervisor.memory_info.default_memory = 0;
+        hypervisor.cpu_info.default_vcpus = 0.0;
+
+        let factory_config = FactoryConfig::new(&config);
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .memory_info
+                .default_memory,
+            0
+        );
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .cpu_info
+                .default_vcpus,
+            0.0
+        );
     }
 }

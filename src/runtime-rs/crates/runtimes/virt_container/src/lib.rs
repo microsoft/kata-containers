@@ -40,7 +40,7 @@ use kata_types::config::DragonballConfig;
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use kata_types::config::FirecrackerConfig;
 use kata_types::config::RemoteConfig;
-use kata_types::config::{hypervisor::register_hypervisor_plugin, QemuConfig, TomlConfig};
+use kata_types::config::{hypervisor::register_hypervisor_plugin, Factory, QemuConfig, TomlConfig};
 
 #[cfg(all(
     feature = "cloud-hypervisor",
@@ -53,7 +53,7 @@ use hypervisor::ch::CloudHypervisor;
 ))]
 use kata_types::config::{hypervisor::HYPERVISOR_NAME_CH, CloudHypervisorConfig};
 
-use crate::factory::vm::VmConfig;
+use crate::factory::{template::Template, vm::VmConfig};
 use resource::cpu_mem::initial_size::InitialSizeManager;
 use resource::ResourceManager;
 use sandbox::VIRTCONTAINER;
@@ -122,17 +122,7 @@ impl RuntimeHandler for VirtContainer {
         init_size_manager: InitialSizeManager,
         sandbox_config: SandboxConfig,
     ) -> Result<RuntimeInstance> {
-        let factory = config.get_factory();
-        let (hypervisor, agent) = if factory.enable_template {
-            build_vm_from_template()
-                .await
-                .context("build vm from template")?
-        } else {
-            (
-                new_hypervisor(&config).await.context("new hypervisor")?,
-                new_agent(&config).context("new agent")? as Arc<dyn agent::Agent>,
-            )
-        };
+        let (hypervisor, agent, factory) = new_vm_components(&config).await?;
 
         let resource_manager = Arc::new(
             ResourceManager::new(
@@ -176,24 +166,61 @@ impl RuntimeHandler for VirtContainer {
     }
 }
 
-async fn build_vm_from_template() -> Result<(Arc<dyn Hypervisor>, Arc<dyn Agent>)> {
-    let (mut toml_config, _) =
-        TomlConfig::load_from_default().context("failed to load toml config")?;
-    let hypervisor_name = toml_config.runtime.hypervisor_name.clone();
-    if let Some(h) = toml_config.hypervisor.get_mut(&hypervisor_name) {
-        let path = Path::new(&h.factory.template_path);
-        h.file_backed_memory = Some(kata_types::config::hypervisor::FileBackedMemory {
-            path: path.join("memory").to_string_lossy().to_string(),
-            shared: false,
-        });
-        let _ = VmConfig::validate_hypervisor_config(h);
-    } else {
-        return Err(anyhow!("hypervisor '{}' not found", hypervisor_name));
+async fn new_vm_components(
+    toml_config: &TomlConfig,
+) -> Result<(Arc<dyn Hypervisor>, Arc<dyn Agent>, Factory)> {
+    let mut factory = toml_config.get_factory();
+    if factory.enable_template {
+        let template = Template::fetch(
+            VmConfig::new(toml_config),
+            Path::new(&factory.template_path).to_path_buf(),
+        );
+
+        match template {
+            Ok(_) => match build_vm_from_template(toml_config).await {
+                Ok((hypervisor, agent)) => return Ok((hypervisor, agent, factory)),
+                Err(error) => warn!(
+                    sl!(),
+                    "failed to configure VM from factory, falling back to normal boot: {:#}", error
+                ),
+            },
+            Err(error) => warn!(
+                sl!(),
+                "failed to get VM from factory, falling back to normal boot: {:#}", error
+            ),
+        }
+
+        factory.enable_template = false;
     }
-    let hypervisor = new_hypervisor(&toml_config)
+
+    let hypervisor = new_hypervisor(toml_config)
         .await
         .context("new hypervisor")?;
-    let agent = new_agent(&toml_config).context("new agent")? as Arc<dyn agent::Agent>;
+    let agent = new_agent(toml_config).context("new agent")? as Arc<dyn Agent>;
+    Ok((hypervisor, agent, factory))
+}
+
+async fn build_vm_from_template(
+    toml_config: &TomlConfig,
+) -> Result<(Arc<dyn Hypervisor>, Arc<dyn Agent>)> {
+    let hypervisor_name = toml_config.runtime.hypervisor_name.clone();
+    let mut hypervisor_config = toml_config
+        .hypervisor
+        .get(&hypervisor_name)
+        .cloned()
+        .ok_or_else(|| anyhow!("hypervisor '{}' not found", hypervisor_name))?;
+    let path = Path::new(&hypervisor_config.factory.template_path);
+    hypervisor_config.file_backed_memory = Some(kata_types::config::hypervisor::FileBackedMemory {
+        path: path.join("memory").to_string_lossy().to_string(),
+        shared: false,
+    });
+    VmConfig::validate_hypervisor_config(&mut hypervisor_config)
+        .context("validate template hypervisor config")?;
+
+    let hypervisor = new_hypervisor_with_config(toml_config, &hypervisor_config)
+        .await
+        .context("new hypervisor")?;
+    let agent = new_agent(toml_config).context("new agent")? as Arc<dyn agent::Agent>;
 
     Ok((hypervisor, agent))
 }
@@ -205,6 +232,15 @@ async fn new_hypervisor(toml_config: &TomlConfig) -> Result<Arc<dyn Hypervisor>>
         .get(hypervisor_name)
         .ok_or_else(|| anyhow!("failed to get hypervisor for {}", &hypervisor_name))
         .context("get hypervisor")?;
+
+    new_hypervisor_with_config(toml_config, hypervisor_config).await
+}
+
+async fn new_hypervisor_with_config(
+    toml_config: &TomlConfig,
+    hypervisor_config: &kata_types::config::Hypervisor,
+) -> Result<Arc<dyn Hypervisor>> {
+    let hypervisor_name = &toml_config.runtime.hypervisor_name;
 
     // TODO: support other hypervisor
     // issue: https://github.com/kata-containers/kata-containers/issues/4634
@@ -323,5 +359,77 @@ hypervisor_name="qemu"
 
         let res = new_hypervisor(&toml_config).await;
         assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_build_vm_from_template_uses_active_config() {
+        VirtContainer::init().unwrap();
+
+        let toml_config = TomlConfig::load(
+            r#"
+[hypervisor.qemu]
+path = "/bin/echo"
+kernel = "/bin/echo"
+image = "/bin/echo"
+default_memory = 768
+
+[hypervisor.qemu.factory]
+enable_template = true
+template_path = "/run/vc/vm/active-template"
+
+[agent.kata]
+container_pipe_size = 1
+
+[runtime]
+hypervisor_name = "qemu"
+agent_name = "kata"
+"#,
+        )
+        .unwrap();
+
+        let (hypervisor, _) = build_vm_from_template(&toml_config).await.unwrap();
+        let hypervisor_config = hypervisor.hypervisor_config().await;
+
+        assert_eq!(hypervisor_config.memory_info.default_memory, 768);
+        assert_eq!(
+            hypervisor_config.file_backed_memory.unwrap().path,
+            "/run/vc/vm/active-template/memory"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_missing_factory_template_falls_back_to_normal_boot() {
+        VirtContainer::init().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let template_path = dir.path().join("missing-template");
+        let toml_config = TomlConfig::load(&format!(
+            r#"
+[hypervisor.qemu]
+path = "/bin/echo"
+kernel = "/bin/echo"
+image = "/bin/echo"
+default_memory = 512
+
+[hypervisor.qemu.factory]
+enable_template = true
+template_path = "{}"
+
+[agent.kata]
+container_pipe_size = 1
+
+[runtime]
+hypervisor_name = "qemu"
+agent_name = "kata"
+"#,
+            template_path.display()
+        ))
+        .unwrap();
+
+        let (hypervisor, _, factory) = new_vm_components(&toml_config).await.unwrap();
+        let hypervisor_config = hypervisor.hypervisor_config().await;
+
+        assert!(!factory.enable_template);
+        assert!(hypervisor_config.file_backed_memory.is_none());
+        assert_eq!(hypervisor_config.memory_info.default_memory, 512);
     }
 }
