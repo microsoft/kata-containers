@@ -47,7 +47,7 @@ use hypervisor::{
     utils::{get_hvsock_path, uses_native_ccw_bus},
     HybridVsockConfig, DEFAULT_GUEST_VSOCK_CID,
 };
-use hypervisor::{BlockConfig, Hypervisor};
+use hypervisor::{BlockConfig, Hypervisor, RestoreVmRequest};
 use hypervisor::{BlockDeviceAio, PortDeviceConfig};
 use hypervisor::{ProtectionDeviceConfig, SevSnpConfig, TdxConfig};
 use kata_sys_util::hooks::HookStates;
@@ -83,6 +83,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
+const VMM_START_TIMEOUT_SECS: i32 = 10_000;
 
 pub struct SandboxRestoreArgs {
     pub sid: String,
@@ -814,8 +815,29 @@ impl Sandbox for VirtSandbox {
             .await
             .context("set up device before start vm")?;
 
-        // start vm
-        self.hypervisor.start_vm(10_000).await.context("start vm")?;
+        // Factory clones restore through the generic hypervisor primitive;
+        // ordinary sandboxes cold boot.
+        if self.is_factory_enabled() {
+            let hypervisor_config = self.hypervisor.hypervisor_config().await;
+            self.hypervisor
+                .restore_vm(RestoreVmRequest {
+                    snapshot_dir: PathBuf::from(&hypervisor_config.factory.template_path),
+                    memory_restore_mode: hypervisor_config.memory_info.memory_restore_mode,
+                    network: Vec::new(),
+                    timeout_secs: VMM_START_TIMEOUT_SECS,
+                })
+                .await
+                .context("restore factory vm")?;
+            self.hypervisor
+                .resume_vm()
+                .await
+                .context("resume factory vm")?;
+        } else {
+            self.hypervisor
+                .start_vm(VMM_START_TIMEOUT_SECS)
+                .await
+                .context("start vm")?;
+        }
         info!(sl!(), "start vm");
 
         let sandbox = self.clone();
@@ -1039,7 +1061,7 @@ impl Sandbox for VirtSandbox {
             .context("set up device before start vm")?;
 
         self.hypervisor
-            .start_vm(10_000)
+            .start_vm(VMM_START_TIMEOUT_SECS)
             .await
             .context("start template vm")?;
         info!(sl!(), "vm started from template");

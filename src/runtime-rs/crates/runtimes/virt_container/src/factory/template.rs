@@ -161,20 +161,19 @@ impl Template {
         Ok(())
     }
 
-    /// Configures the VM configuration for template operations.
-    fn prepare_vm_config(&self, boot_to_be_template: bool) -> VmConfig {
+    /// Configures shared file-backed memory for the source template VM.
+    fn prepare_vm_config(&self) -> VmConfig {
         let mut config = self.config.clone();
-        config.hypervisor_config.vm_template.boot_to_be_template = boot_to_be_template;
-        config.hypervisor_config.vm_template.boot_from_template = !boot_to_be_template;
-        config.hypervisor_config.vm_template.memory_path =
-            self.memory_path().to_string_lossy().to_string();
-        config.hypervisor_config.vm_template.device_state_path =
-            self.device_state_path().to_string_lossy().to_string();
+        config.hypervisor_config.file_backed_memory =
+            Some(kata_types::config::hypervisor::FileBackedMemory {
+                path: self.memory_path().to_string_lossy().to_string(),
+                shared: true,
+            });
         config
     }
 
     pub async fn save_to_template(&self, toml_config: TomlConfig) -> Result<()> {
-        let config = self.prepare_vm_config(true);
+        let config = self.prepare_vm_config();
         let vm = TemplateVm::new_vm(config, toml_config)
             .await
             .context("new template vm")?;
@@ -194,7 +193,14 @@ impl Template {
             sleep(TEMPLATE_WAIT_FOR_AGENT);
 
             vm.pause().await.context("pause template vm")?;
-            vm.save().await.context("save template vm")
+            vm.save(&self.state_path)
+                .await
+                .context("save template vm")?;
+            if self.config.hypervisor_name == HYPERVISOR_NAME_CH {
+                hypervisor::ch::patch_snapshot_memory_shared(&self.state_path, false)
+                    .context("patch template snapshot memory sharing")?;
+            }
+            Ok(())
         }
         .await;
 
@@ -217,5 +223,20 @@ impl Template {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prepare_vm_config_uses_shared_file_backed_memory() {
+        let template = Template::new(VmConfig::default(), PathBuf::from("/template"));
+        let config = template.prepare_vm_config();
+        let file_backed_memory = config.hypervisor_config.file_backed_memory.unwrap();
+
+        assert_eq!(file_backed_memory.path, "/template/memory");
+        assert!(file_backed_memory.shared);
     }
 }

@@ -31,7 +31,11 @@ pub mod remote;
 pub mod selinux;
 pub use kernel_param::Param;
 pub mod utils;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    os::fd::OwnedFd,
+    path::{Path, PathBuf},
+};
 
 #[cfg(all(
     feature = "cloud-hypervisor",
@@ -43,7 +47,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use hypervisor_persist::HypervisorState;
 use kata_types::capabilities::{Capabilities, CapabilityBits};
-use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
+use kata_types::config::hypervisor::{Hypervisor as HypervisorConfig, MemoryRestoreMode};
 
 pub use kata_types::config::hypervisor::HYPERVISOR_NAME_CH;
 
@@ -103,6 +107,7 @@ const DEFAULT_HOTPLUG_TIMEOUT: u64 = 250;
 pub(crate) enum VmmState {
     NotReady,
     VmmServerReady,
+    VmPaused,
     VmRunning,
 }
 
@@ -120,6 +125,20 @@ pub struct MemoryConfig {
     pub probe: bool,
 }
 
+#[derive(Debug)]
+pub struct RestoreNetworkConfig {
+    pub id: String,
+    pub fds: Vec<OwnedFd>,
+}
+
+#[derive(Debug)]
+pub struct RestoreVmRequest {
+    pub snapshot_dir: PathBuf,
+    pub memory_restore_mode: MemoryRestoreMode,
+    pub network: Vec<RestoreNetworkConfig>,
+    pub timeout_secs: i32,
+}
+
 #[async_trait]
 pub trait Hypervisor: std::fmt::Debug + Send + Sync {
     // vm manager
@@ -134,7 +153,8 @@ pub trait Hypervisor: std::fmt::Debug + Send + Sync {
     async fn stop_vm(&self) -> Result<()>;
     async fn wait_vm(&self) -> Result<i32>;
     async fn pause_vm(&self) -> Result<()>;
-    async fn save_vm(&self) -> Result<()>;
+    async fn save_vm(&self, snapshot_dir: &Path) -> Result<()>;
+    async fn restore_vm(&self, request: RestoreVmRequest) -> Result<()>;
     async fn resume_vm(&self) -> Result<()>;
     async fn resize_vcpu(&self, old_vcpus: u32, new_vcpus: u32) -> Result<(u32, u32)>; // returns (old_vcpus, new_vcpus)
     async fn resize_memory(&self, new_mem_mb: u32) -> Result<(u32, MemoryConfig)>;

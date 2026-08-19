@@ -1009,6 +1009,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]

@@ -241,11 +241,6 @@ impl RemoteInner {
         todo!()
     }
 
-    pub(crate) async fn save_vm(&self) -> Result<()> {
-        warn!(sl!(), "RemoteInner::save_vm(): NOT YET IMPLEMENTED");
-        todo!()
-    }
-
     pub(crate) async fn add_device(&self, device: DeviceType) -> Result<DeviceType> {
         warn!(sl!(), "RemoteInner::add_device(): NOT YET IMPLEMENTED");
         Ok(device)
