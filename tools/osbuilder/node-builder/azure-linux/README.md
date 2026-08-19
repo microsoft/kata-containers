@@ -10,7 +10,7 @@ The guide provides the steps for two different environments:
 - Azure Linux 3 based systems, such as Azure VMs
   - Variant I: Utilize released components
   - Variant II: Build components from source
-- AKS nodes (based on Azure Linux 2 as of today)
+- AKS nodes based on Azure Linux 3
 
 # Steps for Azure Linux 3 based environments
 
@@ -123,7 +123,10 @@ sudo ./igvm_builder.sh -i
 popd
 ```
 
-This command installs the latest release of the [IGVM tooling](https://github.com/microsoft/igvm-tooling/) using `pip3 install`. The tool can be uninstalled at any time by calling the script using the -u parameter instead.
+This command installs the latest release of the [IGVM tooling](https://github.com/microsoft/igvm-tooling/) using `pip3 install`. The repository applies
+`igvm-tooling-cpuid.patch` during installation to omit CPUID entries that are
+not portable across MSHV-backed SNP hosts. The tool can be uninstalled at any
+time by calling the script using the `-u` parameter instead.
 
 ## Prepare SEV-SNP build inputs
 
@@ -145,8 +148,9 @@ popd
 ```
 
 The compatibility patch fully reverts Cloud Hypervisor commit `4091e965`
-(`vmm: return all-ones for unregistered MMIO reads`) and applies AMD SME
-physical-address reduction only to the MSHV backend.
+(`vmm: return all-ones for unregistered MMIO reads`). The Kata-CC SNP
+configuration explicitly caps the guest physical address width at 43 bits so
+the runtime and the static IGVM ACPI platform addresses use the same layout.
 
 For the single-layer EROFS flow, install containerd 2.3.3:
 
@@ -368,8 +372,21 @@ For further usage, refer to the upstream `ctr` documentation.
 
 ## Run via Kubernetes
 
-After configuring containerd's `kata-cc` handler to use the EROFS snapshotter,
-register a RuntimeClass from the machine that holds the cluster kubeconfig:
+On each target node, configure the existing `kata-cc` handler to use EROFS and
+the deployed runtime-rs configuration:
+
+```bash
+sudo sed -i \
+  '/runtimes.kata-cc/,/runtimes.kata-cc.options/ s/snapshotter = "tardev"/snapshotter = "erofs"/' \
+  /etc/containerd/config.toml
+sudo sed -i \
+  's|ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/configuration-clh-snp.toml"|ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/runtime-rs/configuration.toml"|' \
+  /etc/containerd/config.toml
+sudo containerd config dump >/dev/null
+sudo systemctl restart containerd
+```
+
+Then register a RuntimeClass from the machine that holds the cluster kubeconfig:
 
 ```yaml
 apiVersion: node.k8s.io/v1

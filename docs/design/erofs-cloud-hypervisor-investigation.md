@@ -53,8 +53,8 @@ Before `4091e965`, the zero-initialized emulator buffer remained unchanged.
 The working prototype:
 
 - reverts `4091e965`, restoring the previous missing-MMIO behavior;
-- applies AMD SME physical-address reduction only for the MSHV backend, leaving
-  KVM behavior unchanged.
+- caps the Kata-CC SNP guest physical address width at 43 bits, matching the
+  static platform-device addresses in the IGVM ACPI tables.
 
 With these changes, single-layer BusyBox and eight-layer `nginx:alpine`
 GPT+VMDK EROFS workloads both complete in approximately 11 seconds. The
