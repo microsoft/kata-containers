@@ -9,20 +9,26 @@
 install_igvm_tool()
 {
 	echo "Installing IGVM tool"
-	if [[ -d "${IGVM_EXTRACT_FOLDER}" ]]; then
-		echo "${IGVM_EXTRACT_FOLDER} folder already exists, assuming tool is already installed"
-		return
+	if [[ ! -d "${IGVM_EXTRACT_FOLDER}" ]]; then
+		# the igvm tool on Azure Linux will soon be properly installed through dnf via kata-packages-uvm-build
+		# as of now, even when installing with pip3, we cannot delete the source folder as the ACPI tables are not being installed anywhere, hence relying on this folder
+		echo "Determining and downloading latest IGVM tooling release, and extracting including ACPI tables"
+		IGVM_VER=$(curl -sL "https://api.github.com/repos/microsoft/igvm-tooling/releases/latest" | jq -r .tag_name | sed 's/^v//')
+		curl -sL "https://github.com/microsoft/igvm-tooling/archive/refs/tags/${IGVM_VER}.tar.gz" | tar --no-same-owner -xz
+		mv "igvm-tooling-${IGVM_VER}" "${IGVM_EXTRACT_FOLDER}"
+	else
+		echo "Using existing IGVM tooling source from ${IGVM_EXTRACT_FOLDER}"
 	fi
 
-	# the igvm tool on Azure Linux will soon be properly installed through dnf via kata-packages-uvm-build
-	# as of now, even when installing with pip3, we cannot delete the source folder as the ACPI tables are not being installed anywhere, hence relying on this folder
-	echo "Determining and downloading latest IGVM tooling release, and extracting including ACPI tables"
-	IGVM_VER=$(curl -sL "https://api.github.com/repos/microsoft/igvm-tooling/releases/latest" | jq -r .tag_name | sed 's/^v//')
-	curl -sL "https://github.com/microsoft/igvm-tooling/archive/refs/tags/${IGVM_VER}.tar.gz" | tar --no-same-owner -xz
-	mv "igvm-tooling-${IGVM_VER}" "${IGVM_EXTRACT_FOLDER}"
-	patch -d "${IGVM_EXTRACT_FOLDER}" -p1 < "${distro_config_dir}/igvm-tooling-cpuid.patch"
+	local patch_file="${distro_config_dir}/igvm-tooling-cpuid.patch"
+	if patch --batch --forward --dry-run -d "${IGVM_EXTRACT_FOLDER}" -p1 < "${patch_file}"; then
+		patch --batch --forward -d "${IGVM_EXTRACT_FOLDER}" -p1 < "${patch_file}"
+	elif ! patch --batch --reverse --dry-run -d "${IGVM_EXTRACT_FOLDER}" -p1 < "${patch_file}"; then
+		echo "IGVM tooling CPUID patch is incompatible"
+		return 1
+	fi
 
-	echo "Installing IGVM module msigvm (${IGVM_VER}) via pip3"
+	echo "Installing IGVM module msigvm via pip3"
 	pushd "${IGVM_EXTRACT_FOLDER}/src" || exit
 	pip3 install --no-deps ./
 	popd || exit
