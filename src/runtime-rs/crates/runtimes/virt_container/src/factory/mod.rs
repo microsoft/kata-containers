@@ -70,7 +70,7 @@ pub(crate) fn check_template_vm_config(config: &TomlConfig) -> Result<()> {
 /// The config used to match templates, ignoring the template paths and flags.
 pub(crate) fn vm_config_value(config: &VmConfig) -> Result<serde_json::Value> {
     let mut config = config.clone();
-    config.hypervisor_config.vm_template = Default::default();
+    config.hypervisor_config.file_backed_memory = None;
 
     Ok(serde_json::to_value(config)?)
 }

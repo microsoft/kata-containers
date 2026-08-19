@@ -71,7 +71,7 @@ use hypervisor::{openvmm::OpenVmm, HYPERVISOR_NAME_OPENVMM};
 ))]
 use kata_types::config::OpenVmmConfig;
 
-use crate::factory::{check_template_vm_config, template_device_state_path};
+use crate::factory::check_template_vm_config;
 use persist::sandbox_persist::Persist;
 use resource::cpu_mem::initial_size::InitialSizeManager;
 use resource::ResourceManager;
@@ -224,13 +224,11 @@ async fn build_vm_from_template(
     let mut toml_config = config.clone();
     let hypervisor_name = toml_config.runtime.hypervisor_name.clone();
     if let Some(h) = toml_config.hypervisor.get_mut(&hypervisor_name) {
-        h.vm_template.boot_to_be_template = false;
-        h.vm_template.boot_from_template = true;
         let path = Path::new(&h.factory.template_path);
-        h.vm_template.memory_path = path.join("memory").to_string_lossy().to_string();
-        h.vm_template.device_state_path = template_device_state_path(&hypervisor_name, path)
-            .to_string_lossy()
-            .to_string();
+        h.file_backed_memory = Some(kata_types::config::hypervisor::FileBackedMemory {
+            path: path.join("memory").to_string_lossy().to_string(),
+            shared: false,
+        });
     } else {
         return Err(anyhow!("hypervisor '{}' not found", hypervisor_name));
     }

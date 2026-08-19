@@ -146,8 +146,18 @@ impl DragonballInner {
     pub(crate) async fn cold_start_vm(&mut self, timeout: i32) -> Result<()> {
         info!(sl!(), "start sandbox cold");
 
+        self.prepare_vm_start(false).await?;
+
+        // start vmm and wait ready
+        self.start_vmm_instance().context("start vmm instance")?;
+        self.wait_vmm_ready(timeout).context("wait vmm")?;
+
+        Ok(())
+    }
+
+    async fn prepare_vm_start(&mut self, restore: bool) -> Result<()> {
         self.set_vm_base_config().context("set vm base config")?;
-        self.configure_boot_source()?;
+        self.configure_boot_source(restore)?;
 
         // insert the virtio-rng device before boot: it is cold-plug only
         let entropy_source = &self.config.machine_info.entropy_source;
@@ -183,15 +193,35 @@ impl DragonballInner {
             self.add_device(dev).await.context("add_device")?;
         }
 
-        // start vmm and wait ready
-        self.start_vmm_instance().context("start vmm instance")?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub(crate) async fn restore_vm_from_snapshot(
+        &mut self,
+        state_path: String,
+        memory_path: String,
+        timeout: i32,
+    ) -> Result<()> {
+        self.prepare_vm_start(true).await?;
+        self.vmm_instance
+            .instance_start_from_snapshot(state_path, memory_path)
+            .context("start vmm from snapshot")?;
+        self.state = VmmState::VmRunning;
         self.wait_vmm_ready(timeout).context("wait vmm")?;
+        // The VM factory path expects restored VMs to be
+        // returned in Paused state.
+        self.vmm_instance
+            .pause()
+            .context("pause restored vm before returning")?;
+        self.state = VmmState::VmPaused;
 
         Ok(())
     }
 
-    fn configure_boot_source(&mut self) -> Result<()> {
-        if self.config.vm_template.boot_from_template {
+    /// A restored VM resumes the snapshot's kernel, so it needs no boot source.
+    fn configure_boot_source(&mut self, restore: bool) -> Result<()> {
+        if restore {
             return Ok(());
         }
 
@@ -376,38 +406,14 @@ impl DragonballInner {
 
     fn start_vmm_instance(&mut self) -> Result<()> {
         info!(sl!(), "Starting VM");
-        // Boot from a VM template snapshot instead of cold booting when
-        // configured (mirrors the QEMU boot_from_template flow).
-        #[cfg(target_arch = "x86_64")]
-        if self.config.vm_template.boot_from_template {
-            let template = &self.config.vm_template;
-            if template.device_state_path.is_empty() || template.memory_path.is_empty() {
-                return Err(anyhow!(
-                    "vm_template memory_path/device_state_path are not configured"
-                ));
-            }
-            info!(
-                sl!(),
-                "Starting VM from template snapshot";
-                "device_state_path" => &template.device_state_path,
-                "memory_path" => &template.memory_path,
-            );
-            self.vmm_instance
-                .instance_start_from_snapshot(
-                    template.device_state_path.clone(),
-                    template.memory_path.clone(),
-                )
-                .context("Failed to start vmm from template snapshot")?;
-            self.state = VmmState::VmRunning;
-            return Ok(());
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        if self.config.vm_template.boot_from_template {
-            return Err(anyhow!(
-                "boot_from_template is not supported on this architecture"
-            ));
-        }
-        if self.config.vm_template.boot_to_be_template {
+        // A VM booted with shared file-backed memory is a template source;
+        // it must not capture an established host upcall connection.
+        if self
+            .config
+            .file_backed_memory
+            .as_ref()
+            .is_some_and(|memory| memory.shared)
+        {
             self.vmm_instance
                 .instance_start_for_template()
                 .context("Failed to start template vmm")?;
@@ -747,10 +753,9 @@ mod tests {
     fn test_template_restore_skips_boot_source_configuration() {
         let (tx, _) = mpsc::channel(1);
         let mut inner = DragonballInner::new(tx);
-        inner.config.vm_template.boot_from_template = true;
         inner.config.boot_info.kernel = "/kernel-must-not-be-opened".to_string();
 
-        inner.configure_boot_source().unwrap();
+        inner.configure_boot_source(true).unwrap();
     }
 
     #[test]

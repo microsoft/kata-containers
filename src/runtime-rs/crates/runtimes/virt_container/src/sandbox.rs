@@ -43,7 +43,9 @@ use hypervisor::HYPERVISOR_REMOTE;
 use hypervisor::{dragonball::Dragonball, HYPERVISOR_DRAGONBALL};
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use hypervisor::{firecracker::Firecracker, HYPERVISOR_FIRECRACKER};
-use hypervisor::{is_vfio_ap_device, BlockConfigModern, Hypervisor, VfioDeviceBase};
+use hypervisor::{
+    is_vfio_ap_device, BlockConfigModern, Hypervisor, RestoreVmRequest, VfioDeviceBase,
+};
 #[cfg(all(
     feature = "openvmm",
     any(target_arch = "x86_64", target_arch = "aarch64")
@@ -106,6 +108,7 @@ use crate::vmm_process::VmmProcessIdentity;
 use crate::UNKNOWN_EXIT_STATUS;
 
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
+const VMM_START_TIMEOUT_SECS: i32 = 10_000;
 
 const STOP_VM_TIMEOUT: Duration = Duration::from_secs(15);
 const LATE_VM_EXIT_TIMEOUT: Duration = Duration::from_secs(90);
@@ -1101,8 +1104,12 @@ impl VirtSandbox {
     }
 
     /// Reseeds a template-restored guest's RNG, which clones share with the snapshot.
-    async fn reseed_rng(agent: &dyn Agent, config: &HypervisorConfig) -> Result<()> {
-        if !config.vm_template.boot_from_template {
+    async fn reseed_rng(
+        agent: &dyn Agent,
+        config: &HypervisorConfig,
+        boot_from_template: bool,
+    ) -> Result<()> {
+        if !boot_from_template {
             return Ok(());
         }
         if config.security_info.confidential_guest {
@@ -1123,8 +1130,8 @@ impl VirtSandbox {
     }
 
     /// Sets a template-restored guest's clock, which stops while the template is paused.
-    async fn sync_time(agent: &dyn Agent, config: &HypervisorConfig) -> Result<()> {
-        if !config.vm_template.boot_from_template {
+    async fn sync_time(agent: &dyn Agent, boot_from_template: bool) -> Result<()> {
+        if !boot_from_template {
             return Ok(());
         }
         let now = SystemTime::now()
@@ -1548,7 +1555,32 @@ impl Sandbox for VirtSandbox {
 
         // start vm
         inner.vmm_start_attempted = true;
-        let started = self.hypervisor.start_vm(10_000).await.context("start vm");
+        // Factory clones restore through the generic hypervisor primitive;
+        // ordinary sandboxes cold boot.
+        let started = if self.is_factory_enabled() {
+            async {
+                let hypervisor_config = self.hypervisor.hypervisor_config().await;
+                self.hypervisor
+                    .restore_vm(RestoreVmRequest {
+                        snapshot_dir: PathBuf::from(&hypervisor_config.factory.template_path),
+                        memory_restore_mode: hypervisor_config.memory_info.memory_restore_mode,
+                        network: Vec::new(),
+                        timeout_secs: VMM_START_TIMEOUT_SECS,
+                    })
+                    .await
+                    .context("restore factory vm")?;
+                self.hypervisor
+                    .resume_vm()
+                    .await
+                    .context("resume factory vm")
+            }
+            .await
+        } else {
+            self.hypervisor
+                .start_vm(VMM_START_TIMEOUT_SECS)
+                .await
+                .context("start vm")
+        };
         // A start that fails after spawning the VMM gets no exit watcher.
         // stop() then needs the identity to confirm the exit, or cleanup
         // never runs.
@@ -1647,8 +1679,9 @@ impl Sandbox for VirtSandbox {
             .await
             .context(format!("connect to address {:?}", address))?;
         let hypervisor_config = self.hypervisor.hypervisor_config().await;
-        Self::reseed_rng(self.agent.as_ref(), &hypervisor_config).await?;
-        Self::sync_time(self.agent.as_ref(), &hypervisor_config).await?;
+        let boot_from_template = self.is_factory_enabled();
+        Self::reseed_rng(self.agent.as_ref(), &hypervisor_config, boot_from_template).await?;
+        Self::sync_time(self.agent.as_ref(), boot_from_template).await?;
         self.set_agent_policy().await.context("set agent policy")?;
 
         self.resource_manager
@@ -1807,7 +1840,7 @@ impl Sandbox for VirtSandbox {
         inner.vmm_start_attempted = true;
         let started = self
             .hypervisor
-            .start_vm(10_000)
+            .start_vm(VMM_START_TIMEOUT_SECS)
             .await
             .context("start template vm");
         self.remember_vmm_process().await;

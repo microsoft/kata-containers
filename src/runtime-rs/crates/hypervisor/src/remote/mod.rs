@@ -4,13 +4,15 @@
 //
 
 use super::HypervisorState;
-use crate::{device::DeviceType, Hypervisor, HypervisorConfig, MemoryConfig, VcpuThreadIds};
+use crate::{
+    device::DeviceType, Hypervisor, HypervisorConfig, MemoryConfig, RestoreVmRequest, VcpuThreadIds,
+};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use inner::RemoteInner;
 use kata_types::capabilities::{Capabilities, CapabilityBits};
 use persist::sandbox_persist::Persist;
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -89,9 +91,16 @@ impl Hypervisor for Remote {
         inner.resume_vm().await
     }
 
-    async fn save_vm(&self) -> Result<()> {
-        let inner = self.inner.read().await;
-        inner.save_vm().await
+    async fn save_vm(&self, _snapshot_dir: &Path) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "remote hypervisor snapshot save is not supported"
+        ))
+    }
+
+    async fn restore_vm(&self, _request: RestoreVmRequest) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "remote hypervisor snapshot restore is not supported"
+        ))
     }
 
     async fn add_device(&self, device: DeviceType) -> Result<DeviceType> {
