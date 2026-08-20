@@ -113,6 +113,7 @@ pub struct DeviceConfig {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ImageType {
+    FlatVmdk,
     FixedVhd,
     Qcow2,
     Raw,
@@ -148,6 +149,8 @@ pub struct DiskConfig {
     pub pci_segment: u16,
     #[serde(default)]
     pub image_type: ImageType,
+    #[serde(default)]
+    pub extent_anchor_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
