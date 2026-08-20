@@ -47,28 +47,36 @@ pub struct FactoryConfig {
 
 impl FactoryConfig {
     pub fn new(toml_config: &TomlConfig) -> Self {
-        let mut vm_config = VmConfig::new(toml_config);
-        if toml_config.runtime.static_sandbox_resource_mgmt {
-            if vm_config.hypervisor_config.memory_info.default_memory == 0
-                && toml_config.runtime.static_sandbox_default_workload_mem > 0
-            {
-                vm_config.hypervisor_config.memory_info.default_memory =
-                    toml_config.runtime.static_sandbox_default_workload_mem;
-            }
-
-            if vm_config.hypervisor_config.cpu_info.default_vcpus == 0.0
-                && toml_config.runtime.static_sandbox_default_workload_vcpus > 0.0
-            {
-                vm_config.hypervisor_config.cpu_info.default_vcpus =
-                    toml_config.runtime.static_sandbox_default_workload_vcpus;
-            }
-        }
-
         Self {
             template: toml_config.get_factory().enable_template,
             template_path: toml_config.get_factory().template_path,
-            vm_config,
+            vm_config: VmConfig::new(toml_config),
         }
+    }
+}
+
+fn apply_static_factory_defaults(toml_config: &mut TomlConfig) {
+    if !toml_config.runtime.static_sandbox_resource_mgmt {
+        return;
+    }
+
+    let hypervisor_name = toml_config.runtime.hypervisor_name.clone();
+    let Some(hypervisor) = toml_config.hypervisor.get_mut(&hypervisor_name) else {
+        return;
+    };
+
+    if hypervisor.memory_info.default_memory == 0
+        && toml_config.runtime.static_sandbox_default_workload_mem > 0
+    {
+        hypervisor.memory_info.default_memory =
+            toml_config.runtime.static_sandbox_default_workload_mem;
+    }
+
+    if hypervisor.cpu_info.default_vcpus == 0.0
+        && toml_config.runtime.static_sandbox_default_workload_vcpus > 0.0
+    {
+        hypervisor.cpu_info.default_vcpus =
+            toml_config.runtime.static_sandbox_default_workload_vcpus;
     }
 }
 
@@ -78,11 +86,13 @@ fn load_and_validate_factory_config(
 ) -> Result<(TomlConfig, FactoryConfig)> {
     VirtContainer::init().context("initialize runtime handler")?;
 
-    let (toml_config, _) = match config_path {
-        Some(path) => TomlConfig::load_from_file(path),
-        None => TomlConfig::load_from_file(""),
+    let (mut toml_config, _) = match config_path {
+        Some(path) => TomlConfig::load_raw_from_file(path),
+        None => TomlConfig::load_raw_from_file(""),
     }
     .context("load toml config")?;
+    apply_static_factory_defaults(&mut toml_config);
+    toml_config.adjust_config().context("adjust toml config")?;
 
     let factory_config = FactoryConfig::new(&toml_config);
 
@@ -277,6 +287,7 @@ template_path = "/run/vc/vm/preview-template"
             },
         );
 
+        apply_static_factory_defaults(&mut config);
         let factory_config = FactoryConfig::new(&config);
         assert_eq!(
             factory_config
@@ -300,6 +311,7 @@ template_path = "/run/vc/vm/preview-template"
         hypervisor.memory_info.default_memory = 0;
         hypervisor.cpu_info.default_vcpus = 0.0;
 
+        apply_static_factory_defaults(&mut config);
         let factory_config = FactoryConfig::new(&config);
         assert_eq!(
             factory_config

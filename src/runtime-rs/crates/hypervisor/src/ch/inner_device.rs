@@ -18,7 +18,7 @@ use crate::ShareFsConfig;
 use crate::ShareFsDevice;
 use crate::VfioDevice;
 use crate::VmmState;
-use crate::{BlockConfigModern, BlockDeviceModern};
+use crate::{BlockConfigModern, BlockDeviceFormat, BlockDeviceModern};
 use anyhow::{anyhow, Context, Result};
 use ch_config::ch_api::cloud_hypervisor_vm_device_add;
 use ch_config::ch_api::{
@@ -520,13 +520,18 @@ impl TryFrom<BlockConfigModern> for DiskConfig {
     type Error = anyhow::Error;
 
     fn try_from(blkcfg: BlockConfigModern) -> Result<Self, Self::Error> {
+        let image_type = match blkcfg.format {
+            BlockDeviceFormat::Raw => ImageType::Raw,
+            BlockDeviceFormat::Vmdk => ImageType::FlatVmdk,
+        };
         let disk_config: DiskConfig = DiskConfig {
             path: Some(blkcfg.path_on_host.as_str().into()),
             readonly: blkcfg.is_readonly,
             num_queues: blkcfg.num_queues,
             queue_size: blkcfg.queue_size as u16,
             sparse: blkcfg.discard_unmap,
-            image_type: ImageType::Raw,
+            image_type,
+            extent_anchor_path: blkcfg.extent_anchor_path,
             ..Default::default()
         };
 
@@ -577,6 +582,7 @@ impl TryFrom<ShareFsSettings> for FsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::driver::BlockDeviceFormat;
     use crate::Address;
 
     #[test]
@@ -616,5 +622,25 @@ mod tests {
         let net = NetConfig::try_from(cfg);
         assert!(net.is_ok());
         assert_eq!(net.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_vmdk_extent_anchor_to_diskconfig() {
+        let disk = DiskConfig::try_from(BlockConfigModern {
+            path_on_host: "/run/kata/merged_fs.vmdk".to_string(),
+            format: BlockDeviceFormat::Vmdk,
+            extent_anchor_path: Some("/".into()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(disk.image_type, ImageType::FlatVmdk);
+        assert_eq!(disk.extent_anchor_path, Some("/".into()));
+        let disk_json = serde_json::to_value(disk).unwrap();
+        assert_eq!(disk_json["image_type"], "FlatVmdk");
+        assert_eq!(disk_json["extent_anchor_path"], "/");
+
+        let raw = DiskConfig::try_from(BlockConfigModern::default()).unwrap();
+        assert!(raw.extent_anchor_path.is_none());
     }
 }
