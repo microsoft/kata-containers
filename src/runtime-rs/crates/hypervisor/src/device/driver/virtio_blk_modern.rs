@@ -91,6 +91,9 @@ pub struct BlockConfigModern {
     /// raw, vmdk, etc. And default to raw if not set.
     pub format: BlockDeviceFormat,
 
+    /// Trusted containment root for absolute VMDK extent paths.
+    pub extent_anchor_path: Option<std::path::PathBuf>,
+
     /// Specifies cache-related options for block devices.
     /// Denotes whether use of O_DIRECT (bypass the host page cache) is enabled.
     /// If not set, use configurarion block_device_cache_direct.
