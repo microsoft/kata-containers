@@ -335,11 +335,9 @@ impl RuntimeHandlerManagerInner {
         // the sandbox creation can reach here only once and the sandbox is created
         // so we can safely create the shim management socket right now
         // the unwrap here is safe because the runtime handler is correctly created
-        let shim_mgmt_svr = MgmtServer::new(
-            &self.id,
-            self.runtime_instance.as_ref().unwrap().sandbox.clone(),
-        )
-        .context(ERR_NO_SHIM_SERVER)?;
+        let shim_mgmt_svr =
+            MgmtServer::new(&self.id, self.runtime_instance.as_ref().unwrap().clone())
+                .context(ERR_NO_SHIM_SERVER)?;
 
         tokio::task::spawn(Arc::new(shim_mgmt_svr).run());
         info!(sl!(), "shim management http server starts");
@@ -632,6 +630,21 @@ impl RuntimeHandlerManager {
 
             Ok(SandboxResponse::CreateSandbox)
         } else {
+            let instance = self
+                .get_runtime_instance()
+                .await
+                .context("get runtime instance")?;
+            let mutates = matches!(
+                &req,
+                SandboxRequest::StartSandbox(_)
+                    | SandboxRequest::StopSandbox(_)
+                    | SandboxRequest::ShutdownSandbox(_)
+            );
+            let _operation = if mutates {
+                Some(instance.operation_lock.read().await)
+            } else {
+                None
+            };
             self.handler_sandbox_request(req)
                 .await
                 .context("handler request")
@@ -664,6 +677,7 @@ impl RuntimeHandlerManager {
                 .get_runtime_instance()
                 .await
                 .context("get runtime instance")?;
+            let _operation = instance.operation_lock.read().await;
 
             instance
                 .sandbox
@@ -696,12 +710,13 @@ impl RuntimeHandlerManager {
             saved.context("save the sandbox state")?;
 
             let container_manager = instance.container_manager.clone();
+            let sandbox = instance.sandbox.clone();
             let process_id =
                 ContainerProcess::new(&container_id, "").context("create container process")?;
             let pid = shim_pid.pid;
+            drop(_operation);
             tokio::spawn(async move {
-                let result = instance
-                    .sandbox
+                let result = sandbox
                     .wait_process(container_manager, process_id, pid)
                     .await;
                 if let Err(e) = result {
@@ -747,6 +762,28 @@ impl RuntimeHandlerManager {
                 }
             }
 
+            let instance = self
+                .get_runtime_instance()
+                .await
+                .context("get runtime instance")?;
+            let mutates = matches!(
+                &req,
+                TaskRequest::CloseProcessIO(_)
+                    | TaskRequest::DeleteProcess(_)
+                    | TaskRequest::ExecProcess(_)
+                    | TaskRequest::KillProcess(_)
+                    | TaskRequest::ShutdownContainer(_)
+                    | TaskRequest::StartProcess(_)
+                    | TaskRequest::PauseContainer(_)
+                    | TaskRequest::ResumeContainer(_)
+                    | TaskRequest::ResizeProcessPTY(_)
+                    | TaskRequest::UpdateContainer(_)
+            );
+            let _operation = if mutates {
+                Some(instance.operation_lock.read().await)
+            } else {
+                None
+            };
             self.handler_task_request(req)
                 .await
                 .context("handler TaskRequest")
@@ -1560,6 +1597,13 @@ mod tests {
         async fn set_policy(&self, _policy: &str) -> Result<()> {
             unimplemented!()
         }
+        async fn snapshot(
+            &self,
+            _container_manager: Arc<dyn common::ContainerManager>,
+            _destination: &std::path::Path,
+        ) -> Result<()> {
+            unimplemented!()
+        }
     }
 
     struct StartingContainerManager;
@@ -1639,6 +1683,9 @@ mod tests {
         async fn is_sandbox_container(&self, _process_id: &ContainerProcess) -> bool {
             false
         }
+        async fn container_ids(&self) -> Vec<common::types::ContainerID> {
+            Vec::new()
+        }
     }
 
     // CreateContainer already spawns the waiter for a container, so a second
@@ -1661,6 +1708,7 @@ mod tests {
                 waiters: waiters_tx,
             }),
             container_manager: Arc::new(StartingContainerManager),
+            operation_lock: Arc::new(tokio::sync::RwLock::new(())),
         }));
 
         let process_id = ContainerProcess::new("test-cid", exec_id).unwrap();

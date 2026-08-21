@@ -182,3 +182,38 @@ pub(crate) fn is_block_rootfs(m: &Mount) -> Option<(u64, Mount)> {
     };
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rootfs::RootFsResource;
+    use std::{collections::HashSet, path::Path, sync::Arc};
+
+    #[tokio::test]
+    async fn snapshot_artifacts_rejects_unsupported_block_rootfs() {
+        let rootfs = Arc::new(BlockRootfs {
+            guest_path: "/run/kata-containers/test/rootfs".to_string(),
+            device_id: "test-device".to_string(),
+            mount: oci::Mount::default(),
+            storage: None,
+        });
+        let staging = Path::new("/tmp/staging");
+        let destination = Path::new("/tmp/snapshot");
+        let error = rootfs
+            .snapshot_artifacts(staging, destination)
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("snapshot artifacts are not supported"));
+        assert!(error.to_string().contains("BlockRootfs"));
+
+        let resource = RootFsResource::new();
+        resource.inner.write().await.rootfs.push(rootfs);
+        let error = resource
+            .snapshot_artifacts(staging, destination, &HashSet::from(["test".to_string()]))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("BlockRootfs"));
+    }
+}
