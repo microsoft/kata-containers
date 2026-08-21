@@ -390,16 +390,16 @@ az vm list-usage --location westus --query "[?contains(localName,'DCACCV5')]" -o
 is derived in one `case` block at the top of `lib.sh`, so the stages themselves
 stay declarative.
 
-| | `qemu-coco-dev` (default) | `clh-snp` |
-| --- | --- | --- |
-| Hypervisor | QEMU + KVM | Cloud Hypervisor + MSHV |
-| Guest | ordinary VM, **not attested** | real SEV-SNP CVM |
-| Node OS | Ubuntu 24.04 | Azure Linux 3 |
-| Installed by | kata-deploy (Helm) | `make all-confpods` from `tools/osbuilder/node-builder/azure-linux` |
-| Prefix | `/opt/kata` | `/opt/confidential-containers` |
-| RuntimeClass | `kata-qemu-coco-dev-runtime-rs` | `kata-cc` |
-| genpolicy | ships in the kata-deploy image | **none** — built from the branch |
-| Verity pin | patched into `configuration-*.toml` | baked into the IGVM kernel cmdline |
+| | `qemu-coco-dev` (default) | `clh-snp` | `aks` |
+| --- | --- | --- | --- |
+| Hypervisor | QEMU + KVM | Cloud Hypervisor + MSHV | Cloud Hypervisor + MSHV |
+| Guest | ordinary VM, **not attested** | real SEV-SNP CVM | real SEV-SNP CVM |
+| Node OS | Ubuntu 24.04 | Azure Linux 3 | Azure Linux 3 (AKS node image) |
+| Installed by | kata-deploy (Helm) | `make all-confpods` from `tools/osbuilder/node-builder/azure-linux` | **already baked into the node image** |
+| Prefix | `/opt/kata` | `/opt/confidential-containers` | `/opt/confidential-containers` |
+| RuntimeClass | `kata-qemu-coco-dev-runtime-rs` | `kata-cc` | discovered on the cluster |
+| genpolicy | ships in the kata-deploy image | **none** — built from the branch | **none** — built from the branch |
+| Verity pin | patched into `configuration-*.toml` | baked into the IGVM kernel cmdline | baked into the IGVM kernel cmdline |
 
 The two answer different questions. `qemu-coco-dev` is fast and exercises the
 policy logic, the agent and the guest-pull path, which is most of what changes
@@ -419,6 +419,55 @@ Note that `AGENT_POLICY_FILE=allow-all.rego`, which the node-builder README
 passes, is deliberately **not** used here — it would make stages 05–08 vacuous.
 The default for a release build is `allow-set-policy.rego`, which is what these
 tests need.
+
+### `aks` — validating a prebuilt node image
+
+`E2E_PLATFORM=aks` does not build anything. It points the suite at a cluster
+whose nodes already run an image someone else produced, and asks whether that
+image was assembled correctly. Stage `00-adopt-node.sh` replaces stages 01–04:
+it discovers the node, finds the payload, checks the RuntimeClass wiring,
+inspects the shipped guest agent, and records a baseline — then marks 01–04 done
+so stage 05 onwards run unchanged.
+
+```bash
+export KUBECONFIG=~/.kube/aks.config
+export E2E_PLATFORM=aks
+export E2E_STATE_DIR=$HOME/.coco-e2e-aks   # keep it away from a build run's state
+export E2E_REPO_DIR=$HOME/kata-containers  # genpolicy is built from here
+./00-adopt-node.sh && ./05-smoke-test.sh
+```
+
+Stage 00 exists because a wrong image still looks healthy. Two failures it is
+built to catch, both of which produce a *running pod* and no error anywhere:
+
+- **The agent is not the strict one.** An agent built without the security
+  reference monitor, or without `--features devicemapper`, boots fine. 00d
+  loop-mounts `kata-containers.img` on the node and greps the agent binary
+  rather than trusting the image label. Note that a shipped agent is stripped,
+  so the SRM shows up only as the panic-location paths
+  (`src/agent/security-reference-monitor/...`), not as symbol names.
+- **The RuntimeClass runs the wrong stack.** A node can carry two complete kata
+  installs — a legacy one under `/usr/share` and the confidential one under
+  `/opt/confidential-containers` — each with its own containerd handler,
+  `ConfigPath`, guest image and `enable_annotations` list. If the RuntimeClass
+  resolves to the legacy handler, `cc_init_data` is not in its allowlist, so the
+  generated policy is dropped **silently**: the pod comes up and `exec` is
+  allowed. 00c ties the handler's `ConfigPath` back to the payload prefix and
+  checks the allowlist, and prints the handler table so you can see which
+  handler you should have used.
+
+Two AKS-specific traps worth knowing. A RuntimeClass carries
+`scheduling.nodeSelector`, which the API server copies onto every pod using it;
+if the node lacks those labels the pod is rejected by kubelet with an opaque
+`Predicate NodeAffinity failed`, so 00a skips any kata RuntimeClass the node
+cannot satisfy. And on AKS those labels are system-managed —
+`aks-node-validating-webhook` refuses to let you add them by hand, so if the
+provisioned RuntimeClass is unusable the way forward is a new RuntimeClass with no
+nodeSelector over the correct handler.
+
+Building genpolicy needs `mkfs.erofs` >= 1.8 for `--mkfs-time`. Ubuntu 24.04
+ships 1.7.1, which fails with `unrecognized option '--mkfs-time'` partway
+through layer derivation; build erofs-utils from source into `/usr/local`.
 
 ### The node is not a confidential VM
 
