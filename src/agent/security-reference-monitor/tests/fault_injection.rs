@@ -230,7 +230,12 @@ fn randomized_sequences_preserve_invariants() {
             }
             assert!(
                 m.transaction_count() <= ids.len(),
-                "seed {seed}: transaction map grew beyond the id space"
+                // Explicit argument: the agent workspace is edition 2018, where
+                // `assert!` with a single string does not treat it as a format
+                // string -- an implicit `{seed}` capture would print the
+                // placeholder and lose the seed that reproduces the failure.
+                "seed {}: transaction map grew beyond the id space",
+                seed
             );
         }
     }
