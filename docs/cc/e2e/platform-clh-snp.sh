@@ -101,9 +101,15 @@ Note /dev/sev does NOT appear on the host — MSHV owns the PSP, so /dev/mshv is
 the indicator to check."
 }
 
-clh_assert_snp_host() {
-  [[ -e /dev/mshv ]] \
-    || die "no /dev/mshv — this node is not running as an MSHV Dom0. Re-run stage 02, then reboot."
+# Both modules have to be present *before* containerd starts, so this runs during
+# bootstrap rather than at first use. containerd's erofs differ probes for
+# dm-verity at plugin-load time, and if the probe fails it does not merely
+# disable verity — it fails the differ, which cascades into the diff service,
+# the CRI image service and finally the whole CRI plugin. The node then looks
+# like containerd is up while kubelet cannot talk to it at all, and stage 03's
+# 'kubeadm init' dies in preflight with an opaque "unknown service
+# runtime.v1.RuntimeService".
+clh_load_storage_modules() {
   sudo modprobe erofs 2>/dev/null || true
   grep -qw erofs /proc/filesystems \
     || die "the running host kernel has no EROFS support — the erofs snapshotter cannot mount layers.
@@ -116,22 +122,30 @@ Install the EROFS-enabled kernel-mshv build and reboot."
     echo erofs | sudo tee /etc/modules-load.d/erofs.conf >/dev/null
   fi
 
-  # dm-verity is the other module this stack needs early. containerd's erofs
-  # differ probes for it at plugin-load time, and if it is missing the probe
-  # does not merely disable verity — it fails the differ, which cascades into
-  # the diff service, the CRI image service and finally the whole CRI plugin.
-  # The node then looks like containerd is up while kubelet cannot talk to it
-  # at all. Load it before containerd is configured, and persist it.
   sudo modprobe dm-verity 2>/dev/null || true
-  grep -qw dm_verity /proc/modules \
-    || die "the running host kernel has no dm-verity support — containerd's erofs
+  # Probe the device-mapper target, not just the module list: with
+  # CONFIG_DM_VERITY=y the target is available but nothing appears in
+  # /proc/modules. (The EROFS check above is already builtin-safe because
+  # /proc/filesystems lists built-in filesystems too.)
+  if ! sudo dmsetup targets 2>/dev/null | grep -qw verity \
+     && ! grep -qw dm_verity /proc/modules; then
+    die "the running host kernel has no dm-verity support — containerd's erofs
 differ cannot compute per-layer hash trees, so no layer will carry the
 X-containerd.dmverity annotation and any policy asking for
 image_layer_verification = host-erofs-dm-verity will refuse every container."
-  if ! grep -qx dm-verity /etc/modules-load.d/dm-verity.conf 2>/dev/null; then
+  fi
+  # Only worth persisting when it is a loadable module; a built-in target needs
+  # no modules-load.d entry.
+  if grep -qw dm_verity /proc/modules \
+     && ! grep -qx dm-verity /etc/modules-load.d/dm-verity.conf 2>/dev/null; then
     echo dm-verity | sudo tee /etc/modules-load.d/dm-verity.conf >/dev/null
   fi
+}
 
+clh_assert_snp_host() {
+  [[ -e /dev/mshv ]] \
+    || die "no /dev/mshv — this node is not running as an MSHV Dom0. Re-run stage 02, then reboot."
+  clh_load_storage_modules
   ok "MSHV Dom0 with EROFS ($(uname -r))"
 }
 
@@ -152,9 +166,14 @@ clh_bootstrap_node() {
       || warn "cargo resolves to ${resolved}, not the rustup toolchain — prepend \$HOME/.cargo/bin to PATH if the build fails on a version requirement"
   fi
 
+  # Bring the node to Dom0 first. On the pre-reboot pass this deliberately dies
+  # asking for a reboot, so the module checks and containerd land on the MSHV
+  # kernel that will actually run the stack — not on the stock kernel, whose
+  # EROFS support is not this suite's to guarantee.
+  clh_enable_dom0
+  clh_load_storage_modules
   clh_install_containerd
   clh_configure_containerd
-  clh_enable_dom0
   ok "node bootstrapped for clh-snp"
 }
 
@@ -245,7 +264,7 @@ version = 3
   # If it is missing, the probe does not merely disable verity -- it fails the
   # differ, the diff service, the CRI image service and finally the whole CRI
   # plugin, leaving a node where containerd is "active" but kubelet cannot talk
-  # to it. clh_assert_snp_host() loads and persists the module first.
+  # to it. clh_load_storage_modules() loads and persists the module first.
   enable_dmverity = true
   # These three must match erofs_mkfs_options() in
   # tools/packaging/kata-deploy/binary/src/artifacts/snapshotters.rs, because
