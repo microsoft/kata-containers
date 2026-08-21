@@ -377,7 +377,8 @@ the deployed runtime-rs configuration:
 
 ```bash
 sudo sed -i \
-  '/runtimes.kata-cc/,/runtimes.kata-cc.options/ s/snapshotter = "tardev"/snapshotter = "erofs"/' \
+  -e '/runtimes.kata-cc/,/runtimes.kata-cc.options/ {/^[[:space:]]*snapshotter = /d;}' \
+  -e '/runtimes.kata-cc]$/a\  snapshotter = "erofs"' \
   /etc/containerd/config.toml
 sudo sed -i \
   's|ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/configuration-clh-snp.toml"|ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/runtime-rs/configuration.toml"|' \
