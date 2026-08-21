@@ -91,10 +91,11 @@ States == {"none", "prepared", "executed", "committed"}
 (*   occurrence-diverged      do_create_container   (rpc.rs, strict-policy)*)
 (*                                                                         *)
 (* This list is checked against the implementation by                      *)
-(* `quarantine_causes_match_the_formal_model` in lib.rs: every production  *)
-(* `quarantine()` call site must map to a member of `Causes` and vice      *)
-(* versa. The sixth cause was added by the agent without being added here, *)
-(* which is the drift that test now prevents.                              *)
+(* `quarantine_causes_match_the_formal_model` in                           *)
+(* `tests/model_drift.rs`: every production `quarantine()` call site must  *)
+(* map to a member of `Causes` and vice versa. The sixth cause was added   *)
+(* by the agent without being added here, which is the drift that test now *)
+(* prevents.                                                               *)
 (***************************************************************************)
 Causes == {"none", "commit-failed", "abandoned-after-execute",
            "rollback-failed", "no-snapshot", "abort-failed",
