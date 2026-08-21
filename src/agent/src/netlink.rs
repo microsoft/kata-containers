@@ -110,12 +110,18 @@ impl Handle {
 
     pub(crate) fn new_in_netns(netns_path: &str) -> Result<Handle> {
         let netns_path = netns_path.to_string();
+        let runtime = tokio::runtime::Handle::current();
         let (connection, handle, _) = std::thread::spawn(move || {
-            let current = fs::File::open("/proc/self/ns/net")?;
-            let target = fs::File::open(&netns_path)?;
-            setns(&target, CloneFlags::CLONE_NEWNET)?;
+            let _runtime_guard = runtime.enter();
+            let current =
+                fs::File::open("/proc/self/ns/net").context("open current network namespace")?;
+            let target = fs::File::open(&netns_path)
+                .with_context(|| format!("open target network namespace {netns_path}"))?;
+            setns(&target, CloneFlags::CLONE_NEWNET)
+                .with_context(|| format!("enter target network namespace {netns_path}"))?;
             let result = new_connection();
-            setns(&current, CloneFlags::CLONE_NEWNET)?;
+            setns(&current, CloneFlags::CLONE_NEWNET)
+                .context("restore current network namespace")?;
             result.map_err(anyhow::Error::from)
         })
         .join()
@@ -1004,6 +1010,18 @@ mod tests {
 
         assert_ne!(message.header, LinkHeader::default());
         assert_eq!(message.name(), "lo");
+    }
+
+    #[tokio::test]
+    async fn create_handle_in_network_namespace() {
+        skip_if_not_root!();
+
+        let handle = Handle::new_in_netns("/proc/self/ns/net")
+            .expect("Failed to create netlink handle in network namespace");
+        handle
+            .find_link(LinkFilter::Name("lo"))
+            .await
+            .expect("Loopback not found");
     }
 
     #[tokio::test]
