@@ -435,32 +435,28 @@ pub fn set_toml_array(file_path: &Path, path: &str, values: &[String]) -> Result
 fn parse_toml_value(value: &str) -> Item {
     use toml_edit::Formatted;
 
-    // Try to parse as different types
-    if matches!(value, "true" | "false") {
-        return Item::Value(Value::Boolean(Formatted::new(value == "true")));
-    }
-
-    if let Ok(i) = value.parse::<i64>() {
-        return Item::Value(Value::Integer(Formatted::new(i)));
-    }
-
-    if let Ok(f) = value.parse::<f64>() {
-        return Item::Value(Value::Float(Formatted::new(f)));
-    }
-
-    // Check if it's an array
-    if value.starts_with('[') && value.ends_with(']') {
-        let array_str = &value[1..value.len() - 1];
-        let mut array = toml_edit::Array::new();
-        for item in array_str.split(',') {
-            let item = item.trim().trim_matches('"');
-            array.push(Value::String(Formatted::new(item.to_string())));
+    // Let toml_edit do the parsing. Hand-rolling it cannot represent composite
+    // values: an array of inline tables such as
+    //
+    //     [{platform = "linux/amd64", snapshotter = "erofs", differ = "erofs"}]
+    //
+    // split on commas degrades into a list of broken strings, and containerd
+    // then refuses to start with
+    //
+    //     toml: cannot decode TOML string into struct field
+    //     transfer.transferConfig.UnpackConfiguration
+    //
+    // taking the node's CRI down with it.
+    if let Ok(doc) = format!("v = {value}").parse::<DocumentMut>() {
+        if let Some(parsed) = doc.get("v").and_then(|item| item.as_value()) {
+            let mut parsed = parsed.clone();
+            parsed.decor_mut().clear();
+            return Item::Value(parsed);
         }
-        return Item::Value(Value::Array(array));
     }
 
-    // Default to string
-    // If the value is quoted, extract the content; otherwise use as-is
+    // Not valid TOML on its own: treat it as a bare string, stripping the
+    // quotes when the caller already supplied them.
     let string_value = if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
         value[1..value.len() - 1].to_string()
     } else {
@@ -660,6 +656,61 @@ mod tests {
         .unwrap();
         let content = std::fs::read_to_string(path).unwrap();
         assert!(content.contains("runtime_type"));
+    }
+
+    /// Composite values must survive the round-trip through the file, not just
+    /// parse in isolation. An array of inline tables written as a flat list of
+    /// strings is still valid TOML, so nothing here fails - but containerd
+    /// rejects it at startup and the node loses its CRI. The erofs
+    /// `unpack_config` is exactly that shape.
+    #[test]
+    fn test_set_toml_value_preserves_array_of_inline_tables() {
+        let file = NamedTempFile::new().unwrap();
+        let path = file.path();
+        std::fs::write(path, "").unwrap();
+
+        set_toml_value(
+            path,
+            ".plugins.\"io.containerd.transfer.v1.local\".unpack_config",
+            "[{platform = \"linux/amd64\", snapshotter = \"erofs\", differ = \"erofs\"}, \
+             {platform = \"linux/arm64\", snapshotter = \"erofs\", differ = \"erofs\"}]",
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(path).unwrap();
+        let doc: DocumentMut = content.parse().unwrap();
+        let entries = doc["plugins"]["io.containerd.transfer.v1.local"]["unpack_config"]
+            .as_array()
+            .expect("unpack_config must stay an array");
+        assert_eq!(entries.len(), 2, "got {content}");
+        for entry in entries.iter() {
+            let table = entry
+                .as_inline_table()
+                .unwrap_or_else(|| panic!("entry must stay an inline table, got {content}"));
+            assert_eq!(table["snapshotter"].as_str(), Some("erofs"));
+            assert_eq!(table["differ"].as_str(), Some("erofs"));
+        }
+    }
+
+    /// The scalar and string-array forms every other caller uses must keep
+    /// working now that toml_edit does the parsing.
+    #[rstest]
+    #[case("true", "enable = true")]
+    #[case("false", "enable = false")]
+    #[case("42", "enable = 42")]
+    #[case("[\"erofs\",\"walking\"]", "enable = [\"erofs\",\"walking\"]")]
+    #[case("\"/opt/kata/bin/qemu\"", "enable = \"/opt/kata/bin/qemu\"")]
+    #[case("/opt/kata/bin/qemu", "enable = \"/opt/kata/bin/qemu\"")]
+    #[case("10G", "enable = \"10G\"")]
+    fn test_set_toml_value_scalar_forms(#[case] value: &str, #[case] expected: &str) {
+        let file = NamedTempFile::new().unwrap();
+        let path = file.path();
+        std::fs::write(path, "").unwrap();
+
+        set_toml_value(path, ".enable", value).unwrap();
+
+        let content = std::fs::read_to_string(path).unwrap();
+        assert_eq!(content.trim(), expected);
     }
 
     #[rstest]
