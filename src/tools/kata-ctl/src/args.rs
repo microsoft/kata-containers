@@ -19,7 +19,7 @@ use thiserror::Error;
 pub struct KataCtlCli {
     #[clap(subcommand)]
     pub command: Option<Commands>,
-    /// Path to the Kata runtime configuration file for VM factory operations.
+    /// Path to the Kata runtime configuration file.
     #[clap(long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
     #[clap(short, long, value_enum, value_parser = parse_log_level)]
@@ -76,6 +76,9 @@ pub enum Commands {
     /// Start a monitor to get metrics of Kata Containers
     Monitor(MonitorArgument),
 
+    /// Manage VM snapshots
+    Snapshot(SnapshotArgs),
+
     /// Display version details
     Version,
 
@@ -129,6 +132,29 @@ pub enum FactorySubCommand {
     Status,
 }
 
+#[derive(Parser, Debug)]
+pub struct SnapshotArgs {
+    #[command(subcommand)]
+    pub command: SnapshotSubCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SnapshotSubCommand {
+    /// Snapshot a running sandbox VM into a caller-chosen directory
+    Create(SnapshotCreateArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct SnapshotCreateArgs {
+    /// Target sandbox ID or unique ID prefix
+    #[arg(long)]
+    pub sandbox_id: String,
+
+    /// Absolute destination directory, which must not already exist
+    #[arg(long, value_name = "DIR")]
+    pub path: PathBuf,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +177,31 @@ mod tests {
             Some(Commands::Factory(FactoryArgs {
                 command: FactorySubCommand::Init
             }))
+        ));
+    }
+
+    #[test]
+    fn parse_snapshot_create() {
+        let args = KataCtlCli::try_parse_from([
+            "kata-ctl",
+            "snapshot",
+            "create",
+            "--sandbox-id",
+            "0123456789ab",
+            "--path",
+            "/run/vc/vm/snapshots/example",
+        ])
+        .unwrap();
+
+        assert!(matches!(
+            args.command,
+            Some(Commands::Snapshot(SnapshotArgs {
+                command: SnapshotSubCommand::Create(SnapshotCreateArgs {
+                    sandbox_id,
+                    path,
+                })
+            })) if sandbox_id == "0123456789ab"
+                && path == PathBuf::from("/run/vc/vm/snapshots/example")
         ));
     }
 }
