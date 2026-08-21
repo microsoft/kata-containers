@@ -44,3 +44,7 @@ default UpdateInterfaceRequest := true
 default UpdateRoutesRequest := true
 default WaitProcessRequest := true
 default WriteStreamRequest := true
+
+# DMFIX
+default CreatePodSandboxRequest := true
+default DestroyPodSandboxRequest := true

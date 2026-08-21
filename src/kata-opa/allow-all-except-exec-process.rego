@@ -43,4 +43,7 @@ default UpdateRoutesRequest := true
 default WaitProcessRequest := true
 default WriteStreamRequest := true
 
+default CreatePodSandboxRequest := true
+default DestroyPodSandboxRequest := true
+
 default ExecProcessRequest := false
