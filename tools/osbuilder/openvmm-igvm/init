@@ -1,0 +1,25 @@
+#!/bin/sh
+#
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+
+echo
+echo "OpenVMM SNP diagnostic initramfs"
+uname -a
+echo "cmdline: $(cat /proc/cmdline)"
+echo "cpu count: $(grep -c '^processor' /proc/cpuinfo)"
+echo "memory:"
+grep -E '^(MemTotal|MemFree):' /proc/meminfo
+echo "block devices:"
+ls -l /dev/vd* /dev/sd* /dev/nvme* 2>/dev/null || true
+echo
+echo "Dropping to a BusyBox shell."
+
+exec sh
