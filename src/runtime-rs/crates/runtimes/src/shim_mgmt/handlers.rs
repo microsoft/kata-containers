@@ -10,20 +10,20 @@
 use crate::shim_metrics::get_shim_metrics;
 use agent::ResizeVolumeRequest;
 use anyhow::{anyhow, Context, Result};
-use common::Sandbox;
+use common::{RuntimeInstance, Sandbox};
 use hyper::{Body, Method, Request, Response, StatusCode};
-use std::{str, sync::Arc};
+use std::{path::PathBuf, str, sync::Arc};
 use url::Url;
 
 use shim_interface::shim_mgmt::{
     AGENT_POLICY_URL, AGENT_URL, DIRECT_VOLUME_PATH_KEY, DIRECT_VOLUME_RESIZE_URL,
-    DIRECT_VOLUME_STATS_URL, IP6_TABLE_URL, IP_TABLE_URL, METRICS_URL,
+    DIRECT_VOLUME_STATS_URL, IP6_TABLE_URL, IP_TABLE_URL, METRICS_URL, SNAPSHOT_URL,
 };
 
 // main router for response, this works as a multiplexer on
 // http arrival which invokes the corresponding handler function
 pub(crate) async fn handler_mux(
-    sandbox: Arc<dyn Sandbox>,
+    instance: Arc<RuntimeInstance>,
     req: Request<Body>,
 ) -> Result<Response<Body>> {
     info!(
@@ -32,6 +32,7 @@ pub(crate) async fn handler_mux(
         req.method(),
         req.uri().path()
     );
+    let sandbox = instance.sandbox.clone();
     match (req.method(), req.uri().path()) {
         (&Method::GET, AGENT_URL) => agent_url_handler(sandbox, req).await,
         (&Method::PUT, IP_TABLE_URL) | (&Method::GET, IP_TABLE_URL) => {
@@ -46,8 +47,54 @@ pub(crate) async fn handler_mux(
         }
         (&Method::GET, METRICS_URL) => metrics_url_handler(sandbox, req).await,
         (&Method::PUT, AGENT_POLICY_URL) => set_agent_policy_handler(sandbox, req).await,
+        (&Method::PUT, SNAPSHOT_URL) => snapshot_handler(instance, req).await,
+        (_, SNAPSHOT_URL) => Response::builder()
+            .status(StatusCode::METHOD_NOT_ALLOWED)
+            .body(Body::empty())
+            .map_err(Into::into),
         _ => Ok(not_found(req).await),
     }
+}
+
+async fn snapshot_handler(
+    instance: Arc<RuntimeInstance>,
+    req: Request<Body>,
+) -> Result<Response<Body>> {
+    const MAX_SNAPSHOT_PATH_BYTES: usize = 4096;
+
+    let body = hyper::body::to_bytes(req.into_body()).await?;
+    if body.is_empty() || body.len() > MAX_SNAPSHOT_PATH_BYTES {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from("snapshot path is empty or too long"))
+            .map_err(Into::into);
+    }
+    let destination = str::from_utf8(&body)
+        .context("snapshot path is not valid UTF-8")?
+        .trim();
+    if destination.contains('\0') {
+        return Err(anyhow!("snapshot path contains NUL"));
+    }
+    let destination = PathBuf::from(destination);
+    let snapshot_destination = destination.clone();
+    let snapshot = tokio::spawn(async move {
+        let _operation = instance.operation_lock.write().await;
+        instance
+            .sandbox
+            .snapshot(instance.container_manager.clone(), &snapshot_destination)
+            .await
+            .context("create portable snapshot")
+    });
+    if let Err(error) = snapshot.await.context("join portable snapshot task")? {
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from(format!("{error:#}")))
+            .map_err(Into::into);
+    }
+
+    Ok(Response::new(Body::from(
+        destination.to_string_lossy().to_string(),
+    )))
 }
 
 // url not found

@@ -157,6 +157,7 @@ impl RuntimeHandler for VirtContainer {
         Ok(RuntimeInstance {
             sandbox: Arc::new(sandbox),
             container_manager: Arc::new(container_manager),
+            operation_lock: Arc::new(tokio::sync::RwLock::new(())),
         })
     }
 
