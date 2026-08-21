@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use agent::{Agent, Storage};
@@ -179,6 +179,7 @@ impl ResourceManager {
     pub async fn handler_rootfs(
         &self,
         cid: &str,
+        cri_name: &str,
         root: &oci::Root,
         bundle_path: &str,
         rootfs_mounts: &[Mount],
@@ -186,7 +187,7 @@ impl ResourceManager {
     ) -> Result<Arc<dyn Rootfs>> {
         let inner = self.inner.read().await;
         inner
-            .handler_rootfs(cid, root, bundle_path, rootfs_mounts, annotations)
+            .handler_rootfs(cid, cri_name, root, bundle_path, rootfs_mounts, annotations)
             .await
     }
 
@@ -207,6 +208,19 @@ impl ResourceManager {
     pub async fn dump(&self) {
         let inner = self.inner.read().await;
         inner.dump().await
+    }
+
+    pub async fn snapshot_rootfs_artifacts(
+        &self,
+        staging: &std::path::Path,
+        final_destination: &std::path::Path,
+        active_host_ids: &HashSet<String>,
+    ) -> Result<Vec<crate::rootfs::RootfsSnapshotArtifacts>> {
+        let inner = self.inner.read().await;
+        inner
+            .rootfs_resource
+            .snapshot_artifacts(staging, final_destination, active_host_ids)
+            .await
     }
 
     pub async fn update_linux_resource(

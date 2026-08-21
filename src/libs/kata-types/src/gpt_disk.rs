@@ -104,7 +104,7 @@ pub struct GptDiskLayout {
 }
 
 /// Result of GPT metadata file generation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GptMetadataFiles {
     /// Path to generated gpt_meta_head.img
     pub head_path: PathBuf,
