@@ -59,6 +59,7 @@ use hypervisor::{
 };
 use hypervisor::{BlockDeviceAio, PortDeviceConfig};
 use hypervisor::{ProtectionDeviceConfig, SevSnpConfig, TdxConfig};
+use kata_sys_util::fs::reflink_copy;
 use kata_sys_util::hooks::HookStates;
 use kata_sys_util::protection::{available_guest_protection, GuestProtection};
 use kata_sys_util::spec::load_oci_spec;
@@ -84,8 +85,13 @@ use resource::manager::ManagerArgs;
 use resource::network::{dan_config_path, DanNetworkConfig, NetworkConfig, NetworkWithNetNsConfig};
 use resource::{ResourceConfig, ResourceManager};
 use runtime_spec as spec;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::io::Read;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 use strum::Display;
@@ -95,6 +101,77 @@ use tracing::instrument;
 
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
 const VMM_START_TIMEOUT_SECS: i32 = 10_000;
+
+#[derive(Serialize)]
+struct SnapshotFileManifest {
+    path: String,
+    size: u64,
+    sha256: String,
+}
+
+#[derive(Serialize)]
+struct SnapshotContainerManifest {
+    cri_name: String,
+    source_host_id: String,
+    snapshot_guest_id: String,
+    readonly_disk: String,
+    writable_disk: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SnapshotManifest {
+    format_version: u32,
+    producer: &'static str,
+    hypervisor: &'static str,
+    source_sandbox_id: String,
+    containers: Vec<SnapshotContainerManifest>,
+    files: Vec<SnapshotFileManifest>,
+}
+
+fn relative_snapshot_path(root: &Path, path: &Path) -> Result<String> {
+    let relative = path.strip_prefix(root).with_context(|| {
+        format!(
+            "snapshot path {} escapes {}",
+            path.display(),
+            root.display()
+        )
+    })?;
+    if relative
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(anyhow!(
+            "snapshot manifest path is not a clean relative path: {}",
+            relative.display()
+        ));
+    }
+    Ok(relative.to_string_lossy().to_string())
+}
+
+fn snapshot_file_manifest(root: &Path, path: &Path) -> Result<SnapshotFileManifest> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() {
+        return Err(anyhow!(
+            "snapshot artifact is not a regular file: {}",
+            path.display()
+        ));
+    }
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(SnapshotFileManifest {
+        path: relative_snapshot_path(root, path)?,
+        size: metadata.len(),
+        sha256: hex::encode(hasher.finalize()),
+    })
+}
 
 pub struct SandboxRestoreArgs {
     pub sid: String,
@@ -965,6 +1042,202 @@ impl VirtSandbox {
             network_created: false,
         })
     }
+
+    async fn create_portable_snapshot(
+        &self,
+        container_manager: Arc<dyn ContainerManager>,
+        destination: &Path,
+    ) -> Result<()> {
+        if !destination.is_absolute() || destination == Path::new("/") {
+            return Err(anyhow!(
+                "snapshot destination must be absolute and non-root"
+            ));
+        }
+        if destination
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+        {
+            return Err(anyhow!("snapshot destination must be lexically clean"));
+        }
+        if destination.exists() {
+            return Err(anyhow!(
+                "snapshot destination already exists: {}",
+                destination.display()
+            ));
+        }
+        let parent = destination
+            .parent()
+            .ok_or_else(|| anyhow!("snapshot destination has no parent"))?;
+        let canonical_parent = parent
+            .canonicalize()
+            .with_context(|| format!("snapshot parent must already exist: {}", parent.display()))?;
+        if canonical_parent != parent {
+            return Err(anyhow!(
+                "snapshot parent contains a symlink or non-canonical component: {}",
+                parent.display()
+            ));
+        }
+        let file_name = destination
+            .file_name()
+            .ok_or_else(|| anyhow!("snapshot destination has no filename"))?
+            .to_string_lossy();
+        let staging = parent.join(format!(".{file_name}.partial-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&staging)?;
+        fs::set_permissions(&staging, fs::Permissions::from_mode(0o700))?;
+
+        let container_ids = container_manager.container_ids().await;
+        let active_host_ids = container_ids
+            .iter()
+            .map(|container_id| container_id.container_id.clone())
+            .collect::<HashSet<_>>();
+        let mut paused_containers = Vec::new();
+        let mut vm_paused = false;
+        let operation: Result<Vec<resource::rootfs::RootfsSnapshotArtifacts>> = async {
+            for container_id in &container_ids {
+                container_manager
+                    .pause_container(container_id)
+                    .await
+                    .with_context(|| format!("pause container {}", container_id.container_id))?;
+                paused_containers.push(container_id.clone());
+            }
+            self.hypervisor.pause_vm().await.context("pause VM")?;
+            vm_paused = true;
+
+            self.save().await.context("persist sandbox state")?;
+            let clh_staging = staging.join("clh");
+            fs::create_dir(&clh_staging)?;
+            fs::set_permissions(&clh_staging, fs::Permissions::from_mode(0o700))?;
+            self.hypervisor
+                .save_vm(&clh_staging)
+                .await
+                .context("save VM snapshot")?;
+            let artifacts = self
+                .resource_manager
+                .snapshot_rootfs_artifacts(&staging, destination, &active_host_ids)
+                .await
+                .context("package rootfs snapshot artifacts")?;
+            resource::rootfs::snapshot::finalize_snapshot_config(&clh_staging, &artifacts)
+                .context("finalize snapshot config")?;
+
+            let persist_source = PathBuf::from(kata_types::prefix_with_rootless_dir(
+                kata_types::config::KATA_PATH,
+            ))
+            .join(&self.sid)
+            .join(persist::PERSIST_FILE);
+            if !persist_source.is_file() {
+                return Err(anyhow!(
+                    "runtime state is unavailable: {}",
+                    persist_source.display()
+                ));
+            }
+            let persist_destination = staging.join("runtime-state.json");
+            reflink_copy(&persist_source, &persist_destination)?;
+            fs::set_permissions(&persist_destination, fs::Permissions::from_mode(0o600))?;
+            Ok(artifacts)
+        }
+        .await;
+
+        let mut recovery_error: Option<anyhow::Error> = None;
+        if vm_paused {
+            if let Err(error) = self.hypervisor.resume_vm().await.context("resume VM") {
+                recovery_error = Some(error);
+            }
+        }
+        for container_id in paused_containers.iter().rev() {
+            if let Err(error) = container_manager
+                .resume_container(container_id)
+                .await
+                .with_context(|| format!("resume container {}", container_id.container_id))
+            {
+                recovery_error = Some(match recovery_error {
+                    Some(previous) => previous.context(error.to_string()),
+                    None => error,
+                });
+            }
+        }
+
+        let artifacts = match (operation, recovery_error) {
+            (Ok(artifacts), None) => artifacts,
+            (Err(primary), None) => {
+                let _ = fs::remove_dir_all(&staging);
+                return Err(primary);
+            }
+            (Ok(_), Some(recovery)) => {
+                let _ = fs::remove_dir_all(&staging);
+                return Err(recovery);
+            }
+            (Err(primary), Some(recovery)) => {
+                let _ = fs::remove_dir_all(&staging);
+                return Err(primary.context(format!("snapshot recovery failed: {recovery:#}")));
+            }
+        };
+
+        let publication: Result<()> = (|| {
+            let clh_staging = staging.join("clh");
+            let mut file_paths = vec![
+                clh_staging.join("config.json"),
+                clh_staging.join("state.json"),
+                staging.join("runtime-state.json"),
+            ];
+            for optional in ["memory-ranges"] {
+                let path = clh_staging.join(optional);
+                if path.is_file() {
+                    file_paths.push(path);
+                }
+            }
+            for artifact in &artifacts {
+                file_paths.extend(artifact.files.iter().cloned());
+            }
+            file_paths.sort();
+            file_paths.dedup();
+            let files = file_paths
+                .iter()
+                .map(|path| snapshot_file_manifest(&staging, path))
+                .collect::<Result<Vec<_>>>()?;
+            let containers = artifacts
+                .iter()
+                .map(|artifact| {
+                    Ok(SnapshotContainerManifest {
+                        cri_name: artifact.cri_name.clone(),
+                        source_host_id: artifact.source_host_id.clone(),
+                        snapshot_guest_id: artifact.snapshot_guest_id.clone(),
+                        readonly_disk: relative_snapshot_path(
+                            destination,
+                            &artifact.readonly_disk.snapshot_path,
+                        )?,
+                        writable_disk: artifact
+                            .writable_disk
+                            .as_ref()
+                            .map(|disk| relative_snapshot_path(destination, &disk.snapshot_path))
+                            .transpose()?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let manifest = SnapshotManifest {
+                format_version: 1,
+                producer: "runtime-rs",
+                hypervisor: "cloud-hypervisor",
+                source_sandbox_id: self.sid.clone(),
+                containers,
+                files,
+            };
+            let manifest_path = staging.join("kata-snapshot.json");
+            fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
+            fs::set_permissions(&manifest_path, fs::Permissions::from_mode(0o600))?;
+            fs::rename(&staging, destination).with_context(|| {
+                format!(
+                    "publish snapshot {} to {}",
+                    staging.display(),
+                    destination.display()
+                )
+            })?;
+            Ok(())
+        })();
+        if publication.is_err() {
+            let _ = fs::remove_dir_all(&staging);
+        }
+        publication
+    }
 }
 
 /// Collect VFIO character device nodes (e.g. /dev/vfio/devices/vfio0) that a CDI
@@ -1235,6 +1508,15 @@ impl Sandbox for VirtSandbox {
         self.save().await.context("save state")?;
 
         Ok(())
+    }
+
+    async fn snapshot(
+        &self,
+        container_manager: Arc<dyn ContainerManager>,
+        destination: &Path,
+    ) -> Result<()> {
+        self.create_portable_snapshot(container_manager, destination)
+            .await
     }
 
     /// Core function for starting a VM from a template
