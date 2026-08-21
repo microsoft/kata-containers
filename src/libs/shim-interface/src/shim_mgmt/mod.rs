@@ -22,5 +22,7 @@ pub const IP6_TABLE_URL: &str = "/ip6tables";
 pub const METRICS_URL: &str = "/metrics";
 /// URL for setting agent policy
 pub const AGENT_POLICY_URL: &str = "/policy";
+/// URL for creating a portable sandbox snapshot.
+pub const SNAPSHOT_URL: &str = "/snapshot";
 
 pub const ERR_NO_SHIM_SERVER: &str = "Failed to create shim management server";
