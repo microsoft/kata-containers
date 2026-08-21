@@ -68,7 +68,10 @@ setup_repositories() {
 	echo "chroot: Setup NVIDIA azl3 CUDA repository"
 
 	# Drop the NVIDIA azl3 CUDA repo definition. cuda_repo_url already ends
-	# in a slash and cuda_repo_pkg is the per-arch .repo file name.
+	# in a slash and cuda_repo_pkg is the per-arch .repo file name. The repo
+	# dir is created by the azurelinux-repos package, but mkdir defensively in
+	# case the base set did not pull it.
+	mkdir -p /etc/yum.repos.d
 	curl -fsSL -o /etc/yum.repos.d/cuda-azl3.repo "${cuda_repo_url}${cuda_repo_pkg}"
 
 	# The NVIDIA driver packages depend on packages in the Azure Linux
