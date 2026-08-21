@@ -38,8 +38,7 @@ fn repo_path(rel: &str) -> PathBuf {
 
 fn read(rel: &str) -> String {
     let path = repo_path(rel);
-    fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("cannot read {}: {}", path.display(), e))
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {}", path.display(), e))
 }
 
 /// Drop everything from the unit-test module onwards.
@@ -75,43 +74,145 @@ fn production_only(src: &str) -> &str {
     src
 }
 
+/// A production `quarantine()` call, together with the reason expression it passes.
+struct CallSite {
+    line: usize,
+    text: String,
+    /// The reason as written at the call: the argument list itself, or -- when the
+    /// argument is merely a binding -- that binding's initializer.
+    reason: String,
+}
+
+/// The source between `open` (which must index a `(`) and its matching `)`.
+///
+/// String literals are tracked so that parentheses *inside* a reason string cannot
+/// unbalance the scan.
+fn balanced(src: &str, open: usize) -> Option<&str> {
+    let bytes = src.as_bytes();
+    let (mut depth, mut in_str, mut escaped) = (0usize, false, false);
+    for i in open..bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            b'"' => in_str = true,
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&src[open + 1..i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `s` truncated at the first `;` outside any bracket or string.
+fn until_semicolon(s: &str) -> &str {
+    let (mut depth, mut in_str, mut escaped) = (0i32, false, false);
+    for (i, c) in s.bytes().enumerate() {
+        if in_str {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            b'"' => in_str = true,
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b';' if depth <= 0 => return &s[..i],
+            _ => {}
+        }
+    }
+    s
+}
+
+/// The reason expression belonging to a `quarantine()` call at `call_at`.
+///
+/// Most call sites build the reason in place (`quarantine(format!("..."))`), so the
+/// argument list already contains it. One does not: the FR-9 occurrence-divergence
+/// site binds `let reason = format!(...)` so it can both log and return the same
+/// text, and calls `quarantine(reason.clone())`. Following that one hop is what
+/// lets the lint insist the reason belongs to *this* call rather than merely
+/// occurring somewhere in the file.
+fn resolve_reason(src: &str, call_at: usize, args: &str) -> String {
+    if args.contains('"') {
+        return args.to_string();
+    }
+    let ident: String = args
+        .trim()
+        .trim_start_matches('&')
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    if ident.is_empty() {
+        return args.to_string();
+    }
+    let head = &src[..call_at];
+    match head.rfind(&format!("let {} =", ident)) {
+        Some(at) => until_semicolon(&head[at..]).to_string(),
+        None => args.to_string(),
+    }
+}
+
 /// Locate call sites of the *method* `quarantine(`, excluding `abort_or_quarantine(`
 /// and `commit_or_quarantine(` (which contain it as a substring), the `fn
 /// quarantine(` definition itself, and mentions inside comments.
 ///
-/// Returns `(line number, trimmed line)` so a failure can name what it found: a
-/// bare count tells a developer that the lint fired but not which call site is new.
-fn quarantine_call_sites(src: &str) -> Vec<(usize, String)> {
+/// Each site carries its line number and text so a failure can name what it found:
+/// a bare count tells a developer that the lint fired but not which call site is new.
+fn quarantine_call_sites(src: &str) -> Vec<CallSite> {
+    let bytes = src.as_bytes();
     let mut sites = Vec::new();
-    for (idx, line) in src.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("//") || trimmed.starts_with("*") {
+    let mut from = 0;
+    while let Some(rel) = src[from..].find("quarantine(") {
+        let at = from + rel;
+        from = at + "quarantine(".len();
+        let open = from - 1;
+
+        // Part of a longer identifier (`abort_or_quarantine`).
+        if at > 0 {
+            let p = bytes[at - 1];
+            if p == b'_' || p.is_ascii_alphanumeric() {
+                continue;
+            }
+        }
+        let line_start = src[..at].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = src[at..].find('\n').map_or(src.len(), |i| at + i);
+        let trimmed = src[line_start..line_end].trim();
+        if trimmed.starts_with("//") || trimmed.starts_with('*') {
             continue;
         }
-        let bytes = line.as_bytes();
-        let mut from = 0;
-        while let Some(rel) = line[from..].find("quarantine(") {
-            let at = from + rel;
-            from = at + "quarantine(".len();
-
-            // Part of a longer identifier (`abort_or_quarantine`).
-            if at > 0 && {
-                let p = bytes[at - 1];
-                p == b'_' || p.is_ascii_alphanumeric()
-            } {
-                continue;
-            }
-            // The definition, not a call.
-            if line[..at].contains("fn ") {
-                continue;
-            }
-            // A mention in prose, e.g. `quarantine()` in a doc comment.
-            if line[from..].starts_with(')') {
-                continue;
-            }
-            sites.push((idx + 1, trimmed.to_string()));
-            break;
+        // The definition, not a call.
+        if src[line_start..at].contains("fn ") {
+            continue;
         }
+        // A mention in prose, e.g. `quarantine()` in a doc comment.
+        if src[from..].starts_with(')') {
+            continue;
+        }
+
+        let args = balanced(src, open).unwrap_or("");
+        sites.push(CallSite {
+            line: src[..at].matches('\n').count() + 1,
+            text: trimmed.to_string(),
+            reason: resolve_reason(src, at, args),
+        });
     }
     sites
 }
@@ -184,14 +285,28 @@ fn quarantine_causes_match_the_formal_model() {
             )
         });
         let src = read(file);
-        assert!(
-            production_only(&src).contains(marker),
-            "SRM.tla declares the quarantine cause {:?}, which should come from {} \
-             containing {:?} — but it does not. Either the reason string changed, or \
-             the cause no longer exists and must be removed from the model.",
+        let sites = quarantine_call_sites(production_only(&src));
+        let matched: Vec<&CallSite> = sites.iter().filter(|s| s.reason.contains(marker)).collect();
+
+        assert_eq!(
+            matched.len(),
+            1,
+            "SRM.tla declares the quarantine cause {:?}, which should be raised by \
+             exactly one quarantine() call in {} whose reason contains {:?} — but {} \
+             such calls were found. Searching the reason *at the call* rather than \
+             the whole file is deliberate: leaving the text in a nearby log line \
+             while the call itself says something else is drift, not a match.\n\
+             call sites in {}:\n{}",
             cause,
             file,
-            marker
+            marker,
+            matched.len(),
+            file,
+            sites
+                .iter()
+                .map(|s| format!("  {}:{}  {}", file, s.line, s.text))
+                .collect::<Vec<_>>()
+                .join("\n")
         );
     }
 
@@ -208,21 +323,42 @@ fn quarantine_causes_match_the_formal_model() {
 #[test]
 fn every_quarantine_call_site_is_modelled() {
     let mut found: Vec<String> = Vec::new();
+    let mut unclaimed: Vec<String> = Vec::new();
+
     for file in ["src/lib.rs", "../src/rpc.rs"] {
         let src = read(file);
-        for (line, text) in quarantine_call_sites(production_only(&src)) {
-            found.push(format!("  {}:{}  {}", file, line, text));
+        for site in quarantine_call_sites(production_only(&src)) {
+            let where_ = format!("  {}:{}  {}", file, site.line, site.text);
+            let claims = CAUSE_CALL_SITES
+                .iter()
+                .filter(|(_, f, marker)| *f == file && site.reason.contains(marker))
+                .count();
+            if claims != 1 {
+                unclaimed.push(format!("{}   [{} rows claim it]", where_, claims));
+            }
+            found.push(where_);
         }
     }
+
+    // Counting alone would let a new call site hide behind a deleted one. Each
+    // site must be claimed by exactly one row, and (via the companion test) each
+    // row must claim exactly one site -- together a bijection between the code's
+    // ways of failing closed and the model's `Causes`.
+    assert!(
+        unclaimed.is_empty(),
+        "these production quarantine() call sites are not matched by exactly one row \
+         of CAUSE_CALL_SITES:\n{}\n\nA new call site is a new way for the monitor to \
+         fail closed; it needs a cause in SRM.tla's `Causes`, an action that raises \
+         it, and a row here. (This is exactly the drift that left the model claiming \
+         five causes while the agent had six.)",
+        unclaimed.join("\n")
+    );
 
     assert_eq!(
         found.len(),
         CAUSE_CALL_SITES.len(),
         "the agent has {} production quarantine() call sites but the model accounts for \
-         {}. A new call site is a new way for the monitor to fail closed; it needs a \
-         cause in SRM.tla's `Causes`, an action that raises it, and a row in \
-         CAUSE_CALL_SITES. (This is exactly the drift that left the model claiming five \
-         causes while the agent had six.)\nfound:\n{}",
+         {}.\nfound:\n{}",
         found.len(),
         CAUSE_CALL_SITES.len(),
         found.join("\n")

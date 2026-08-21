@@ -1,10 +1,21 @@
 name: Formal model check (SRM)
 
 # FR-15: the security reference monitor's TLA+ model is part of the assurance
-# argument, so it is gated like code rather than run by hand. Path-filtered
-# because it only ever needs to run when the model, its harness, or the Rust it
-# describes changes -- the drift lint reads lib.rs and rpc.rs, so a change to
-# either can invalidate the model without touching `formal/`.
+# argument, so it is gated like code rather than run by hand.
+#
+# Deliberately *not* path-filtered. The obvious filter is the monitor's own
+# directory, but the drift lint reads `src/agent/src/rpc.rs`, which holds five of
+# the six modelled quarantine call sites -- so a filter scoped to the monitor
+# would let exactly the change this gate exists to catch slip past it. Widening
+# the filter to cover both is possible but fragile: the set of files the lint
+# reads is a property of the test, and a filter here silently stops matching it
+# the moment that set grows.
+#
+# The job is also a required check (tools/testing/gatekeeper/required-tests.yaml),
+# and gatekeeper waits for required jobs to report. A path-filtered workflow that
+# does not run produces no report at all, so "required" and "path-filtered" cannot
+# both hold. Running unconditionally is what makes the check enforceable; it costs
+# ~75s on a cached jar, which is cheap for a merge gate.
 
 on:
   workflow_dispatch:
@@ -13,9 +24,6 @@ on:
       - opened
       - reopened
       - synchronize
-    paths:
-      - "src/agent/security-reference-monitor/**"
-      - ".github/workflows/formal-check.yaml"
 
 permissions: {}
 

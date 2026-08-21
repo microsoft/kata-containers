@@ -43,15 +43,27 @@ if [[ ! -f "${JAR}" ]]; then
     "https://github.com/tlaplus/tlaplus/releases/download/${TLA2TOOLS_VERSION}/tla2tools.jar"
 fi
 
+# The jar is executable supply-chain input, so a missing checksum tool is a
+# reason to stop, not a reason to continue: "could not verify" and "verified"
+# must never take the same branch. macOS ships `shasum` rather than
+# `sha256sum`, so try both before giving up.
 if command -v sha256sum >/dev/null 2>&1; then
-  if ! echo "${TLA2TOOLS_SHA256}  ${JAR}" | sha256sum -c - >/dev/null 2>&1; then
-    echo "ERROR: ${JAR} does not match the pinned sha256." >&2
-    echo "       Delete it to re-fetch, or update TLA2TOOLS_SHA256 if the" >&2
-    echo "       pinned version was changed deliberately." >&2
-    exit 1
-  fi
+  actual=$(sha256sum "${JAR}" | cut -d' ' -f1)
+elif command -v shasum >/dev/null 2>&1; then
+  actual=$(shasum -a 256 "${JAR}" | cut -d' ' -f1)
 else
-  echo "WARNING: sha256sum not found; ${JAR} integrity NOT verified" >&2
+  echo "ERROR: neither sha256sum nor shasum is available, so ${JAR} cannot be" >&2
+  echo "       verified against its pin. Refusing to run an unverified jar." >&2
+  exit 1
+fi
+
+if [[ "${actual}" != "${TLA2TOOLS_SHA256}" ]]; then
+  echo "ERROR: ${JAR} does not match the pinned sha256." >&2
+  echo "       expected ${TLA2TOOLS_SHA256}" >&2
+  echo "       actual   ${actual}" >&2
+  echo "       Delete it to re-fetch, or update TLA2TOOLS_SHA256 if the" >&2
+  echo "       pinned version was changed deliberately." >&2
+  exit 1
 fi
 
 # Keep the raw output: the coverage check parses it, and a failing run must
@@ -69,8 +81,10 @@ fi
 
 # Action coverage lines look like:
 #   <Prepare line 181, col 1 to line 181, col 17 of module SRM>: 431:6336
-# where the pair is DISTINCT:GENERATED — the states this action generated, and
-# how many of those were new. The two mean different things:
+# where the pair is DISTINCT:GENERATED — how many of the states this action
+# generated were new, and how many it generated in all. (The order is easy to
+# invert; the labels above are TLC's own, and the checks below depend on them.)
+# The two mean different things:
 #
 #   generated == 0  the action never fired at all. That is a guard which
 #                   contradicts itself, and it is a hard failure: every
@@ -83,6 +97,41 @@ fi
 #                   effect coincides (AbandonPrepared vs Abort), which is worth
 #                   keeping for traceability even though it adds no obligation.
 parse='/^<[A-Za-z_][A-Za-z0-9_]* line [0-9]+, col [0-9]+ .* of module SRM>: [0-9]+:[0-9]+$/'
+
+# A coverage check that only inspects the rows it finds cannot tell "every
+# action fired" from "no rows were parsed": if TLC's output format changes, or
+# -coverage stops being passed, every filter below matches nothing and the gate
+# reports success while checking precisely nothing. So derive the actions the
+# module *claims* from `Next`, and require a row for each. This also catches an
+# action that is defined and never disjoined into `Next`, which TLC itself will
+# not report -- the coverage output simply would not mention it.
+expected=$(sed -n '/^Next ==/,/^$/p' SRM.tla |
+  sed -n 's/.*[:/][[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*(\{0,1\}.*/\1/p' | sort -u)
+
+if [[ -z "${expected}" ]]; then
+  echo "ERROR: could not parse any action names out of SRM.tla's \`Next\`." >&2
+  echo "       The coverage gate cannot verify anything without them, so this" >&2
+  echo "       is a failure rather than a skip. Has \`Next\` been reformatted?" >&2
+  exit 1
+fi
+
+missing=()
+while IFS= read -r action; do
+  if ! grep -qE "^<${action} line [0-9]+, col [0-9]+ .* of module SRM>:" "${out}"; then
+    missing+=("${action}")
+  fi
+done <<<"${expected}"
+
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo >&2
+  echo "ERROR: TLC reported no coverage at all for these actions of \`Next\`:" >&2
+  for action in "${missing[@]}"; do echo "  - ${action}" >&2; done
+  echo >&2
+  echo "Either TLC's coverage output changed shape (in which case this gate was" >&2
+  echo "silently passing and must be repaired), or these actions are named in" >&2
+  echo "\`Next\` but not defined as actions of this module." >&2
+  exit 1
+fi
 
 dead=$(awk "${parse}"'{ name = substr($1, 2); split($NF, c, ":"); if (c[2] == 0) print name }' \
   "${out}" | sort -u)
@@ -108,4 +157,4 @@ if [[ -n "${dead}" ]]; then
 fi
 
 echo
-echo "coverage: every action fired at least once"
+echo "coverage: all $(wc -l <<<"${expected}") actions of \`Next\` fired at least once"
