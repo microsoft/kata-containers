@@ -11,6 +11,7 @@ use crate::{
 
 use anyhow::Result;
 use async_trait::async_trait;
+use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Clone, Default)]
@@ -58,6 +59,12 @@ pub trait Sandbox: Send + Sync {
     // metrics function
     async fn agent_metrics(&self) -> Result<String>;
     async fn hypervisor_metrics(&self) -> Result<String>;
+
+    async fn snapshot(
+        &self,
+        container_manager: Arc<dyn ContainerManager>,
+        destination: &Path,
+    ) -> Result<()>;
 
     // set agent policy
     async fn set_policy(&self, policy: &str) -> Result<()>;

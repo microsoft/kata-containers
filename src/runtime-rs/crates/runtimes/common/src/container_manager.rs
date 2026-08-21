@@ -37,4 +37,5 @@ pub trait ContainerManager: Send + Sync {
     async fn pid(&self) -> Result<PID>;
     async fn need_shutdown_sandbox(&self, req: &ShutdownRequest) -> bool;
     async fn is_sandbox_container(&self, process_id: &ContainerProcess) -> bool;
+    async fn container_ids(&self) -> Vec<ContainerID>;
 }
