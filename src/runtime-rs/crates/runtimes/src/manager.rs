@@ -455,10 +455,13 @@ impl RuntimeHandlerManager {
     //init the sandbox for the sandbox api
     #[instrument]
     async fn sandbox_init_runtime_instance(&self, sandbox_config: SandboxConfig) -> Result<()> {
+        if let Some(instance) = self.inner.read().await.get_runtime_instance() {
+            return instance.sandbox.add_sandbox(sandbox_config).await;
+        }
         let mut inner = self.inner.write().await;
-        // return if runtime instance has init
-        if inner.runtime_instance.is_some() {
-            return Ok(());
+        if let Some(instance) = inner.get_runtime_instance() {
+            drop(inner);
+            return instance.sandbox.add_sandbox(sandbox_config).await;
         }
         inner.try_init(sandbox_config, None, &None).await
     }
@@ -507,9 +510,16 @@ impl RuntimeHandlerManager {
                 .await
                 .context("get runtime instance")?;
 
+            let manager_id = self.inner.read().await.id.clone();
+            let sandbox_id = spec
+                .annotations()
+                .as_ref()
+                .and_then(|annotations| annotations.get("io.kubernetes.cri.sandbox-id"))
+                .cloned()
+                .unwrap_or(manager_id);
             instance
                 .sandbox
-                .start()
+                .start(&sandbox_id)
                 .await
                 .context("start sandbox in task handler")?;
 
@@ -588,9 +598,9 @@ impl RuntimeHandlerManager {
 
         match req {
             SandboxRequest::CreateSandbox(req) => Err(anyhow!("Unreachable request {:?}", req)),
-            SandboxRequest::StartSandbox(_) => {
+            SandboxRequest::StartSandbox(request) => {
                 sandbox
-                    .start()
+                    .start(&request.sandbox_id)
                     .await
                     .context("start sandbox in sandbox handler")?;
                 Ok(SandboxResponse::StartSandbox(StartSandboxInfo {
@@ -602,18 +612,24 @@ impl RuntimeHandlerManager {
                 os: std::env::consts::OS.to_string(),
                 architecture: std::env::consts::ARCH.to_string(),
             })),
-            SandboxRequest::StopSandbox(_) => {
-                sandbox.stop().await.context("stop sandbox")?;
+            SandboxRequest::StopSandbox(request) => {
+                sandbox
+                    .stop(&request.sandbox_id)
+                    .await
+                    .context("stop sandbox")?;
 
                 Ok(SandboxResponse::StopSandbox)
             }
-            SandboxRequest::WaitSandbox(_) => {
-                let exit_info = sandbox.wait().await.context("wait sandbox")?;
+            SandboxRequest::WaitSandbox(request) => {
+                let exit_info = sandbox
+                    .wait(&request.sandbox_id)
+                    .await
+                    .context("wait sandbox")?;
 
                 Ok(SandboxResponse::WaitSandbox(exit_info))
             }
-            SandboxRequest::SandboxStatus(_) => {
-                let status = sandbox.status().await?;
+            SandboxRequest::SandboxStatus(request) => {
+                let status = sandbox.status(&request.sandbox_id).await?;
 
                 Ok(SandboxResponse::SandboxStatus(SandboxStatusInfo {
                     sandbox_id: status.sandbox_id,
@@ -624,8 +640,11 @@ impl RuntimeHandlerManager {
                 }))
             }
             SandboxRequest::Ping(_) => Ok(SandboxResponse::Ping),
-            SandboxRequest::ShutdownSandbox(_) => {
-                sandbox.shutdown().await.context("shutdown sandbox")?;
+            SandboxRequest::ShutdownSandbox(request) => {
+                sandbox
+                    .shutdown(&request.sandbox_id, false)
+                    .await
+                    .context("shutdown sandbox")?;
 
                 Ok(SandboxResponse::ShutdownSandbox)
             }
@@ -676,7 +695,10 @@ impl RuntimeHandlerManager {
             }
             TaskRequest::ShutdownContainer(req) => {
                 if cm.need_shutdown_sandbox(&req).await {
-                    sandbox.shutdown().await.context("do shutdown")?;
+                    sandbox
+                        .shutdown(&req.container_id, req.is_now)
+                        .await
+                        .context("do shutdown")?;
 
                     // stop the tracer collector
                     let kata_tracer = self.get_kata_tracer().await.context("get kata tracer")?;
@@ -688,7 +710,10 @@ impl RuntimeHandlerManager {
             TaskRequest::WaitProcess(process_id) => {
                 let exit_status = cm.wait_process(&process_id).await.context("wait process")?;
                 if cm.is_sandbox_container(&process_id).await {
-                    sandbox.stop().await.context("stop sandbox")?;
+                    sandbox
+                        .stop(process_id.container_id())
+                        .await
+                        .context("stop sandbox")?;
                 }
                 Ok(TaskResponse::WaitProcess(exit_status))
             }

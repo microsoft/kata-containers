@@ -157,12 +157,14 @@ impl RuntimeHandler for VirtContainer {
         )
         .await
         .context("new virt sandbox")?;
+        let members = sandbox.members();
         let container_manager = container_manager::VirtContainerManager::new(
             sid,
             pid,
             agent,
             hypervisor,
             resource_manager,
+            members,
         );
         Ok(RuntimeInstance {
             sandbox: Arc::new(sandbox),

@@ -259,7 +259,7 @@ impl ResourceManagerInner {
         Ok(())
     }
 
-    async fn handle_interfaces(&self, network: &dyn Network) -> Result<()> {
+    async fn handle_interfaces(&self, network: &dyn Network, sandbox_id: &str) -> Result<()> {
         for i in network.interfaces().await.context("get interfaces")? {
             info!(sl!(), "update interface {:?}", i);
 
@@ -273,6 +273,7 @@ impl ResourceManagerInner {
                     .agent
                     .update_interface(agent::UpdateInterfaceRequest {
                         interface: Some(i.clone()),
+                        sandbox_id: sandbox_id.to_string(),
                     })
                     .await
                 {
@@ -302,7 +303,7 @@ impl ResourceManagerInner {
         Ok(())
     }
 
-    async fn handle_neighbours(&self, network: &dyn Network) -> Result<()> {
+    async fn handle_neighbours(&self, network: &dyn Network, sandbox_id: &str) -> Result<()> {
         let all_neighbors = network.neighs().await.context("neighs")?;
 
         // We add only static ARP entries
@@ -316,6 +317,7 @@ impl ResourceManagerInner {
             self.agent
                 .add_arp_neighbors(agent::AddArpNeighborRequest {
                     neighbors: Some(agent::ARPNeighbors { neighbors }),
+                    sandbox_id: sandbox_id.to_string(),
                 })
                 .await
                 .context("update neighbors")?;
@@ -323,13 +325,14 @@ impl ResourceManagerInner {
         Ok(())
     }
 
-    async fn handle_routes(&self, network: &dyn Network) -> Result<()> {
+    async fn handle_routes(&self, network: &dyn Network, sandbox_id: &str) -> Result<()> {
         let routes = network.routes().await.context("routes")?;
         if !routes.is_empty() {
             info!(sl!(), "update routes {:?}", routes);
             self.agent
                 .update_routes(agent::UpdateRoutesRequest {
                     route: Some(agent::Routes { routes }),
+                    sandbox_id: sandbox_id.to_string(),
                 })
                 .await
                 .context("update routes")?;
@@ -337,7 +340,7 @@ impl ResourceManagerInner {
         Ok(())
     }
 
-    pub async fn setup_after_start_vm(&mut self) -> Result<()> {
+    pub async fn setup_after_start_vm(&mut self, sandbox_id: &str) -> Result<()> {
         self.cgroups_resource
             .setup_after_start_vm(self.hypervisor.as_ref())
             .await
@@ -358,7 +361,8 @@ impl ResourceManagerInner {
             // update_interface to the agent.
             resolve_physical_endpoint_pci_paths(network.as_ref(), self.hypervisor.as_ref()).await;
 
-            self.apply_network_to_agent(network.as_ref()).await?;
+            self.apply_network_to_agent(network.as_ref(), sandbox_id)
+                .await?;
         }
 
         if let Some(swap) = self.swap_resource.as_ref() {
@@ -368,14 +372,20 @@ impl ResourceManagerInner {
         Ok(())
     }
 
-    pub async fn apply_network_to_agent(&self, network: &dyn Network) -> Result<()> {
-        self.handle_interfaces(network)
+    pub async fn apply_network_to_agent(
+        &self,
+        network: &dyn Network,
+        sandbox_id: &str,
+    ) -> Result<()> {
+        self.handle_interfaces(network, sandbox_id)
             .await
             .context("handle interfaces")?;
-        self.handle_neighbours(network)
+        self.handle_neighbours(network, sandbox_id)
             .await
             .context("handle neighbors")?;
-        self.handle_routes(network).await.context("handle routes")?;
+        self.handle_routes(network, sandbox_id)
+            .await
+            .context("handle routes")?;
         Ok(())
     }
 
@@ -498,7 +508,11 @@ impl ResourceManagerInner {
             sid: &self.sid,
             agent: self.agent.clone(),
             emptydir_mode: &self.toml_config.runtime.emptydir_mode,
-            fs_sharing_supported: self.hypervisor.capabilities().await?.is_fs_sharing_supported(),
+            fs_sharing_supported: self
+                .hypervisor
+                .capabilities()
+                .await?
+                .is_fs_sharing_supported(),
         };
         self.volume_resource.handler_volumes(&ctx, cid, spec).await
     }

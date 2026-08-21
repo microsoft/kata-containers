@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use agent::{Agent, Storage};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use hypervisor::device::device_manager::DeviceManager;
 use hypervisor::Hypervisor;
@@ -85,9 +85,33 @@ impl ResourceManager {
     }
 
     #[instrument]
-    pub async fn setup_after_start_vm(&self) -> Result<()> {
+    pub async fn setup_after_start_vm(&self, sandbox_id: &str) -> Result<()> {
         let mut inner = self.inner.write().await;
-        inner.setup_after_start_vm().await
+        inner.setup_after_start_vm(sandbox_id).await
+    }
+
+    pub async fn setup_pod_network(
+        &self,
+        network_config: NetworkConfig,
+        sandbox_id: &str,
+    ) -> Result<()> {
+        let device_manager = self.get_device_manager().await;
+        let network =
+            tokio::task::spawn_blocking(move || -> Result<Arc<dyn crate::network::Network>> {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .build()?;
+                let network =
+                    runtime.block_on(crate::network::new(&network_config, device_manager))?;
+                runtime.block_on(network.setup())?;
+                Ok(network)
+            })
+            .await
+            .context("join PodSet network setup")??;
+        let inner = self.inner.read().await;
+        inner
+            .apply_network_to_agent(network.as_ref(), sandbox_id)
+            .await
     }
 
     /// Poll the netns until interfaces exist, then configure the guest (Docker 26+).
@@ -164,7 +188,7 @@ impl ResourceManager {
         if let Some(network) = network {
             let inner = self.inner.read().await;
             inner
-                .apply_network_to_agent(network.as_ref())
+                .apply_network_to_agent(network.as_ref(), "")
                 .await
                 .context("apply network to agent")?;
         }

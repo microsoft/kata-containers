@@ -126,6 +126,7 @@ pub struct Sandbox {
     pub uevent_watchers: Vec<Option<UeventWatcher>>,
     pub shared_utsns: Namespace,
     pub shared_ipcns: Namespace,
+    pub shared_netns: Namespace,
     pub sandbox_pidns: Option<Namespace>,
     pub storages: HashMap<String, StorageState>,
     pub running: bool,
@@ -161,6 +162,7 @@ impl Sandbox {
             uevent_watchers: Vec::new(),
             shared_utsns: Namespace::new(&logger),
             shared_ipcns: Namespace::new(&logger),
+            shared_netns: Namespace::new(&logger),
             sandbox_pidns: None,
             storages: HashMap::new(),
             running: false,
@@ -248,21 +250,41 @@ impl Sandbox {
 
     #[instrument]
     pub async fn setup_shared_namespaces(&mut self) -> Result<bool> {
+        self.setup_shared_namespaces_at("").await
+    }
+
+    #[instrument]
+    pub async fn setup_shared_namespaces_at(&mut self, sandbox_id: &str) -> Result<bool> {
         // Set up shared IPC namespace
         self.shared_ipcns = Namespace::new(&self.logger)
             .get_ipc()
-            .setup()
+            .setup_at(sandbox_id)
             .await
             .context("setup persistent IPC namespace")?;
 
         // // Set up shared UTS namespace
         self.shared_utsns = Namespace::new(&self.logger)
             .get_uts(self.hostname.as_str())
-            .setup()
+            .setup_at(sandbox_id)
             .await
             .context("setup persistent UTS namespace")?;
 
+        if !sandbox_id.is_empty() {
+            self.shared_netns = Namespace::new(&self.logger)
+                .get_net()
+                .setup_at(sandbox_id)
+                .await
+                .context("setup persistent network namespace")?;
+        }
+
         Ok(true)
+    }
+
+    pub fn cleanup_shared_namespaces(&self) -> Result<()> {
+        self.shared_ipcns.cleanup()?;
+        self.shared_utsns.cleanup()?;
+        self.shared_netns.cleanup()?;
+        Ok(())
     }
 
     #[instrument]
@@ -272,7 +294,7 @@ impl Sandbox {
         // This means a separate pause process has not been created. We treat the
         // first container created as the infra container in that case
         // and use its pid namespace in case pid namespace needs to be shared.
-        if self.sandbox_pidns.is_none() && self.containers.is_empty() {
+        if self.sandbox_pidns.is_none() {
             let init_pid = c.init_process_pid;
             if init_pid == -1 {
                 return Err(anyhow!(

@@ -19,6 +19,7 @@ backtrace = { version = ">=0.3.76", features = [
     "std",
 ], default-features = false }
 containerd-shim-protos = { workspace = true }
+fs2 = "0.4.3"
 go-flag = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }

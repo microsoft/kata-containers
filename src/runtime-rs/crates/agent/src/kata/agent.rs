@@ -118,6 +118,8 @@ impl_agent!(
     list_interfaces | crate::Empty | crate::Interfaces | None,
     list_routes | crate::Empty | crate::Routes | None,
     create_sandbox | crate::CreateSandboxRequest | crate::Empty | None,
+    create_pod_sandbox | crate::CreatePodSandboxRequest | crate::Empty | None,
+    destroy_pod_sandbox | crate::DestroyPodSandboxRequest | crate::Empty | None,
     destroy_sandbox | crate::Empty | crate::Empty | None,
     copy_file | crate::CopyFileRequest | crate::Empty | None,
     get_oom_event | crate::Empty | crate::OomEventResponse | Some(0),

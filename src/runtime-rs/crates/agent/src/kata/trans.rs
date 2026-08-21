@@ -16,17 +16,17 @@ use crate::{
         ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
         AgentDetails, BlkioStats, BlkioStatsEntry, CgroupStats, CheckRequest, CloseStdinRequest,
         ContainerID, CopyFileRequest, CpuStats, CpuUsage, CreateContainerRequest,
-        CreateSandboxRequest, Device, Empty, ExecProcessRequest, FSGroup, FSGroupChangePolicy,
-        GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse,
-        HugetlbStats, IPAddress, IPFamily, Interface, Interfaces, KernelModule,
-        MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse, NetworkStats,
-        OnlineCPUMemRequest, PidsStats, ReadStreamRequest, ReadStreamResponse,
-        RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes,
-        SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse, SharedMount,
-        SignalProcessRequest, StatsContainerResponse, Storage, StringUser, ThrottlingData,
-        TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
-        VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
-        WriteStreamRequest,
+        CreatePodSandboxRequest, CreateSandboxRequest, DestroyPodSandboxRequest, Device, Empty,
+        ExecProcessRequest, FSGroup, FSGroupChangePolicy, GetIPTablesRequest, GetIPTablesResponse,
+        GuestDetailsResponse, HealthCheckResponse, HugetlbStats, IPAddress, IPFamily, Interface,
+        Interfaces, KernelModule, MemHotplugByProbeRequest, MemoryData, MemoryStats,
+        MetricsResponse, NetworkStats, OnlineCPUMemRequest, PidsStats, ReadStreamRequest,
+        ReadStreamResponse, RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest,
+        Route, Routes, SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse,
+        SharedMount, SignalProcessRequest, StatsContainerResponse, Storage, StringUser,
+        ThrottlingData, TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest,
+        UpdateRoutesRequest, VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse,
+        WaitProcessRequest, WriteStreamRequest,
     },
     GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest, OomEventResponse,
     SetPolicyRequest, WaitProcessResponse, WriteStreamResponse,
@@ -613,6 +613,7 @@ impl From<UpdateInterfaceRequest> for agent::UpdateInterfaceRequest {
     fn from(from: UpdateInterfaceRequest) -> Self {
         Self {
             interface: from_option(from.interface),
+            sandbox_id: from.sandbox_id,
             ..Default::default()
         }
     }
@@ -630,6 +631,7 @@ impl From<UpdateRoutesRequest> for agent::UpdateRoutesRequest {
     fn from(from: UpdateRoutesRequest) -> Self {
         Self {
             routes: from_option(from.route),
+            sandbox_id: from.sandbox_id,
             ..Default::default()
         }
     }
@@ -669,6 +671,7 @@ impl From<AddArpNeighborRequest> for agent::AddARPNeighborsRequest {
     fn from(from: AddArpNeighborRequest) -> Self {
         Self {
             neighbors: from_option(from.neighbors),
+            sandbox_id: from.sandbox_id,
             ..Default::default()
         }
     }
@@ -684,6 +687,27 @@ impl From<CreateSandboxRequest> for agent::CreateSandboxRequest {
             sandbox_id: from.sandbox_id,
             guest_hook_path: from.guest_hook_path,
             kernel_modules: trans_vec(from.kernel_modules),
+            pod_set_uid: from.pod_set_uid,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CreatePodSandboxRequest> for agent::CreatePodSandboxRequest {
+    fn from(from: CreatePodSandboxRequest) -> Self {
+        Self {
+            hostname: from.hostname,
+            dns: trans_vec(from.dns),
+            sandbox_id: from.sandbox_id,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<DestroyPodSandboxRequest> for agent::DestroyPodSandboxRequest {
+    fn from(from: DestroyPodSandboxRequest) -> Self {
+        Self {
+            sandbox_id: from.sandbox_id,
             ..Default::default()
         }
     }

@@ -11,6 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
+use std::collections::HashMap;
 use std::convert::TryFrom;
 #[cfg(feature = "agent-policy")]
 use std::convert::TryInto as _;
@@ -204,6 +205,7 @@ impl<T> OptionToTtrpcResult<T> for Option<T> {
 #[derive(Clone, Debug)]
 pub struct AgentService {
     sandbox: Arc<Mutex<Sandbox>>,
+    pod_sandboxes: Arc<Mutex<HashMap<String, Sandbox>>>,
     init_mode: bool,
     oma: Option<mem_agent::agent::MemAgent>,
 }
@@ -301,13 +303,26 @@ impl AgentService {
             .await
             .map_err(|e| anyhow!("failed to handle sealed secrets: {}", e))?;
 
+        let sandbox_id = oci
+            .annotations()
+            .as_ref()
+            .and_then(|annotations| annotations.get("io.kubernetes.cri.sandbox-id"))
+            .cloned();
         let mut s = self.sandbox.lock().await;
         s.container_mounts.insert(cid.clone(), m);
 
-        update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
-
-        // Append guest hooks
-        append_guest_hooks(&s, &mut oci)?;
+        let pod_sandboxes = self.pod_sandboxes.lock().await;
+        if let Some(pod_sandbox) = sandbox_id
+            .as_ref()
+            .and_then(|sandbox_id| pod_sandboxes.get(sandbox_id))
+        {
+            update_container_namespaces(pod_sandbox, &mut oci, use_sandbox_pidns)?;
+            append_guest_hooks(&s, &mut oci)?;
+        } else {
+            update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
+            append_guest_hooks(&s, &mut oci)?;
+        }
+        drop(pod_sandboxes);
 
         // write spec to bundle path, hooks might
         // read ocispec
@@ -374,7 +389,15 @@ impl AgentService {
             return Err(err);
         }
 
-        s.update_shared_pidns(&ctr)?;
+        if let Some(sandbox_id) = sandbox_id {
+            if let Some(pod_sandbox) = self.pod_sandboxes.lock().await.get_mut(&sandbox_id) {
+                pod_sandbox.update_shared_pidns(&ctr)?;
+            } else {
+                s.update_shared_pidns(&ctr)?;
+            }
+        } else {
+            s.update_shared_pidns(&ctr)?;
+        }
         s.setup_shared_mounts(&ctr, &req.shared_mounts)?;
         s.add_container(ctr);
         info!(sl(), "created container!");
@@ -1148,6 +1171,7 @@ impl agent_ttrpc::AgentService for AgentService {
             ttrpc::Code::INVALID_ARGUMENT,
             "empty update interface request",
         )?;
+        let target_sandbox_id = req.sandbox_id;
 
         // For network devices passed, check for the network interface
         // to be available first.
@@ -1171,6 +1195,40 @@ impl agent_ttrpc::AgentService for AgentService {
                     .await
                     .map_ttrpc_err(|e| format!("interface not available: {e:?}"))?;
             }
+        }
+
+        if !target_sandbox_id.is_empty() {
+            let mut pod_sandboxes = self.pod_sandboxes.lock().await;
+            let target = pod_sandboxes
+                .get_mut(&target_sandbox_id)
+                .map_ttrpc_err(ttrpc::Code::NOT_FOUND, "target pod sandbox not found")?;
+            let target_error = match target.rtnl.update_interface(&interface).await {
+                Ok(()) => return Ok(interface),
+                Err(error) => error,
+            };
+            let target_netns = target.shared_netns.path.clone();
+            drop(pod_sandboxes);
+
+            self.sandbox
+                .lock()
+                .await
+                .rtnl
+                .move_link_to_netns_by_address(&interface.hwAddr, &target_netns)
+                .await
+                .map_ttrpc_err(|move_error| {
+                    format!(
+                        "locate pod interface: {target_error:?}; move interface: {move_error:?}"
+                    )
+                })?;
+            let mut pod_sandboxes = self.pod_sandboxes.lock().await;
+            pod_sandboxes
+                .get_mut(&target_sandbox_id)
+                .map_ttrpc_err(ttrpc::Code::NOT_FOUND, "target pod sandbox disappeared")?
+                .rtnl
+                .update_interface(&interface)
+                .await
+                .map_ttrpc_err(|e| format!("update pod interface: {e:?}"))?;
+            return Ok(interface);
         }
 
         let mut sandbox = self.sandbox.lock().await;
@@ -1239,6 +1297,22 @@ impl agent_ttrpc::AgentService for AgentService {
             .into_option()
             .map(|r| r.Routes)
             .map_ttrpc_err(ttrpc::Code::INVALID_ARGUMENT, "empty update routes request")?;
+
+        if !req.sandbox_id.is_empty() {
+            let mut pod_sandboxes = self.pod_sandboxes.lock().await;
+            let target = pod_sandboxes
+                .get_mut(&req.sandbox_id)
+                .map_ttrpc_err(ttrpc::Code::NOT_FOUND, "target pod sandbox not found")?;
+            target
+                .rtnl
+                .update_routes(new_routes)
+                .await
+                .map_ttrpc_err(|e| format!("update pod routes: {e:?}"))?;
+            return Ok(protocols::agent::Routes {
+                Routes: target.rtnl.list_routes().await.map_ttrpc_err(same)?,
+                ..Default::default()
+            });
+        }
 
         let mut sandbox = self.sandbox.lock().await;
 
@@ -1477,7 +1551,9 @@ impl agent_ttrpc::AgentService for AgentService {
                 load_kernel_module(m).map_ttrpc_err(same)?;
             }
 
-            s.setup_shared_namespaces().await.map_ttrpc_err(same)?;
+            if req.pod_set_uid.is_empty() {
+                s.setup_shared_namespaces().await.map_ttrpc_err(same)?;
+            }
         }
 
         let m = add_storages(sl(), req.storages.clone(), &self.sandbox, None)
@@ -1507,6 +1583,46 @@ impl agent_ttrpc::AgentService for AgentService {
             }
         }
 
+        Ok(Empty::new())
+    }
+
+    async fn create_pod_sandbox(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::CreatePodSandboxRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "create_pod_sandbox", req);
+        is_allowed(&req).await?;
+        kata_sys_util::validate::verify_id(&req.sandbox_id).map_ttrpc_err(same)?;
+
+        let mut pod_sandboxes = self.pod_sandboxes.lock().await;
+        if pod_sandboxes.contains_key(&req.sandbox_id) {
+            return Ok(Empty::new());
+        }
+        let mut sandbox = Sandbox::new(&sl()).map_ttrpc_err(same)?;
+        sandbox.id = req.sandbox_id.clone();
+        sandbox.hostname = req.hostname;
+        sandbox.running = true;
+        sandbox
+            .setup_shared_namespaces_at(&req.sandbox_id)
+            .await
+            .map_ttrpc_err(same)?;
+        sandbox.rtnl =
+            crate::netlink::Handle::new_in_netns(&sandbox.shared_netns.path).map_ttrpc_err(same)?;
+        pod_sandboxes.insert(req.sandbox_id, sandbox);
+        Ok(Empty::new())
+    }
+
+    async fn destroy_pod_sandbox(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::DestroyPodSandboxRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "destroy_pod_sandbox", req);
+        is_allowed(&req).await?;
+        if let Some(sandbox) = self.pod_sandboxes.lock().await.remove(&req.sandbox_id) {
+            sandbox.cleanup_shared_namespaces().map_ttrpc_err(same)?;
+        }
         Ok(Empty::new())
     }
 
@@ -1554,6 +1670,19 @@ impl agent_ttrpc::AgentService for AgentService {
                 ttrpc::Code::INVALID_ARGUMENT,
                 "empty add arp neighbours request",
             )?;
+
+        if !req.sandbox_id.is_empty() {
+            let mut pod_sandboxes = self.pod_sandboxes.lock().await;
+            let target = pod_sandboxes
+                .get_mut(&req.sandbox_id)
+                .map_ttrpc_err(ttrpc::Code::NOT_FOUND, "target pod sandbox not found")?;
+            target
+                .rtnl
+                .add_arp_neighbors(neighs)
+                .await
+                .map_ttrpc_err(|e| format!("add pod ARP neighbours: {e:?}"))?;
+            return Ok(Empty::new());
+        }
 
         self.sandbox
             .lock()
@@ -2008,6 +2137,7 @@ pub async fn start(
 ) -> Result<TtrpcServer> {
     let agent_service = Box::new(AgentService {
         sandbox: s,
+        pod_sandboxes: Arc::new(Mutex::new(HashMap::new())),
         init_mode,
         oma,
     });
@@ -2048,6 +2178,7 @@ fn update_container_namespaces(
         .ok_or_else(|| anyhow!(ERR_NO_LINUX_FIELD))?;
 
     if let Some(namespaces) = linux.namespaces_mut() {
+        let mut has_network_namespace = false;
         for namespace in namespaces.iter_mut() {
             if namespace.typ().to_string() == NSTYPEIPC {
                 namespace.set_path(if !sandbox.shared_ipcns.path.is_empty() {
@@ -2065,6 +2196,20 @@ fn update_container_namespaces(
                 });
                 continue;
             }
+            if namespace.typ() == oci::LinuxNamespaceType::Network
+                && !sandbox.shared_netns.path.is_empty()
+            {
+                has_network_namespace = true;
+                namespace.set_path(Some(PathBuf::from(&sandbox.shared_netns.path)));
+                continue;
+            }
+        }
+
+        if !has_network_namespace && !sandbox.shared_netns.path.is_empty() {
+            let mut network_namespace = LinuxNamespace::default();
+            network_namespace.set_typ(oci::LinuxNamespaceType::Network);
+            network_namespace.set_path(Some(PathBuf::from(&sandbox.shared_netns.path)));
+            namespaces.push(network_namespace);
         }
 
         // update pid namespace
@@ -2796,6 +2941,7 @@ mod tests {
 
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            pod_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -2814,6 +2960,7 @@ mod tests {
         let sandbox = Sandbox::new(&logger).unwrap();
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            pod_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -2832,6 +2979,7 @@ mod tests {
         let sandbox = Sandbox::new(&logger).unwrap();
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            pod_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -2970,6 +3118,7 @@ mod tests {
 
             let agent_service = Box::new(AgentService {
                 sandbox: Arc::new(Mutex::new(sandbox)),
+                pod_sandboxes: Arc::new(Mutex::new(HashMap::new())),
                 init_mode: true,
                 oma: None,
             });
@@ -3458,6 +3607,7 @@ OtherField:other
         let sandbox = Sandbox::new(&logger).unwrap();
         let agent_service = Box::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            pod_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });
@@ -3661,12 +3811,46 @@ COMMIT
     }
 
     #[tokio::test]
+    async fn test_update_container_namespaces_adds_pod_network_namespace() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let mut sandbox = Sandbox::new(&logger).unwrap();
+        sandbox.shared_netns.path = "/var/run/sandbox-ns/pod-1/net".to_string();
+        let linux = LinuxBuilder::default()
+            .namespaces(vec![LinuxNamespaceBuilder::default()
+                .typ(LinuxNamespaceType::Ipc)
+                .build()
+                .unwrap()])
+            .build()
+            .unwrap();
+        let mut spec = Spec::default();
+        spec.set_linux(Some(linux));
+
+        update_container_namespaces(&sandbox, &mut spec, false).unwrap();
+
+        let network_namespace = spec
+            .linux()
+            .as_ref()
+            .unwrap()
+            .namespaces()
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|namespace| namespace.typ() == LinuxNamespaceType::Network)
+            .unwrap();
+        assert_eq!(
+            network_namespace.path().as_ref().unwrap(),
+            &PathBuf::from("/var/run/sandbox-ns/pod-1/net")
+        );
+    }
+
+    #[tokio::test]
     async fn test_get_oom_event_no_deadlock() {
         let logger = slog::Logger::root(slog::Discard, o!());
         let sandbox = Sandbox::new(&logger).unwrap();
 
         let agent_service = Arc::new(AgentService {
             sandbox: Arc::new(Mutex::new(sandbox)),
+            pod_sandboxes: Arc::new(Mutex::new(HashMap::new())),
             init_mode: true,
             oma: None,
         });

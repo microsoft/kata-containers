@@ -403,11 +403,13 @@ pub struct TtyWinResizeRequest {
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct UpdateInterfaceRequest {
     pub interface: Option<Interface>,
+    pub sandbox_id: String,
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
 pub struct UpdateRoutesRequest {
     pub route: Option<Routes>,
+    pub sandbox_id: String,
 }
 
 #[derive(Deserialize, PartialEq, Clone, Default, Debug)]
@@ -427,6 +429,7 @@ pub struct ARPNeighbors {
 #[derive(PartialEq, Clone, Default, Debug)]
 pub struct AddArpNeighborRequest {
     pub neighbors: Option<ARPNeighbors>,
+    pub sandbox_id: String,
 }
 
 #[derive(PartialEq, Clone, Default)]
@@ -494,6 +497,19 @@ pub struct CreateSandboxRequest {
     pub sandbox_id: String,
     pub guest_hook_path: String,
     pub kernel_modules: Vec<KernelModule>,
+    pub pod_set_uid: String,
+}
+
+#[derive(PartialEq, Clone, Default)]
+pub struct CreatePodSandboxRequest {
+    pub hostname: String,
+    pub dns: Vec<String>,
+    pub sandbox_id: String,
+}
+
+#[derive(PartialEq, Clone, Default)]
+pub struct DestroyPodSandboxRequest {
+    pub sandbox_id: String,
 }
 
 #[derive(PartialEq, Clone, Default)]

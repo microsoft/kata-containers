@@ -10,7 +10,7 @@ use agent::types::{KernelModule, SetPolicyRequest};
 use agent::{
     self, Agent, GetGuestDetailsRequest, GetIPTablesRequest, SetIPTablesRequest, VolumeStatsRequest,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use async_trait::async_trait;
 use common::error::is_normal_oom_shutdown_error;
 use common::types::utils::option_system_time_into;
@@ -33,7 +33,6 @@ use hypervisor::ch::CloudHypervisor;
 use hypervisor::device::topology::PCIePort;
 use hypervisor::device::util::{get_host_path, DEVICE_TYPE_CHAR};
 use hypervisor::remote::Remote;
-use hypervisor::{is_vfio_ap_device, VfioDeviceBase};
 use hypervisor::VsockConfig;
 use hypervisor::HYPERVISOR_REMOTE;
 #[cfg(all(
@@ -43,6 +42,7 @@ use hypervisor::HYPERVISOR_REMOTE;
 use hypervisor::{dragonball::Dragonball, HYPERVISOR_DRAGONBALL};
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use hypervisor::{firecracker::Firecracker, HYPERVISOR_FIRECRACKER};
+use hypervisor::{is_vfio_ap_device, VfioDeviceBase};
 use hypervisor::{qemu::Qemu, HYPERVISOR_QEMU};
 use hypervisor::{
     utils::{get_hvsock_path, uses_native_ccw_bus},
@@ -75,6 +75,7 @@ use resource::manager::ManagerArgs;
 use resource::network::{dan_config_path, DanNetworkConfig, NetworkConfig, NetworkWithNetNsConfig};
 use resource::{ResourceConfig, ResourceManager};
 use runtime_spec as spec;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -84,6 +85,110 @@ use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
+const POD_SET_UID_ANNOTATION: &str = "io.podset/pod_set_uid";
+
+pub(crate) struct SandboxMembers {
+    pod_set_uid: Option<String>,
+    configs: HashMap<String, SandboxConfig>,
+    active: HashSet<String>,
+    started: HashSet<String>,
+}
+
+#[derive(Debug, PartialEq)]
+enum MemberDeactivation {
+    Legacy,
+    AlreadyInactive,
+    Removed { last: bool },
+}
+
+impl SandboxMembers {
+    pub(crate) fn new(config: SandboxConfig) -> Self {
+        let pod_set_uid = config
+            .annotations
+            .get(POD_SET_UID_ANNOTATION)
+            .filter(|uid| !uid.is_empty())
+            .cloned();
+        let sid = config.sandbox_id.clone();
+        Self {
+            pod_set_uid,
+            configs: HashMap::from([(sid.clone(), config)]),
+            active: HashSet::from([sid]),
+            started: HashSet::new(),
+        }
+    }
+
+    fn legacy(sid: String) -> Self {
+        Self {
+            pod_set_uid: None,
+            configs: HashMap::new(),
+            active: HashSet::from([sid]),
+            started: HashSet::new(),
+        }
+    }
+
+    fn add(&mut self, config: SandboxConfig) -> Result<()> {
+        let pod_set_uid = config
+            .annotations
+            .get(POD_SET_UID_ANNOTATION)
+            .filter(|uid| !uid.is_empty());
+        ensure!(
+            self.pod_set_uid.as_ref() == pod_set_uid,
+            "sandbox {} does not belong to this PodSet",
+            config.sandbox_id
+        );
+        ensure!(
+            self.pod_set_uid.is_some(),
+            "cannot add a sandbox to a non-PodSet VM"
+        );
+        self.active.insert(config.sandbox_id.clone());
+        self.configs.insert(config.sandbox_id.clone(), config);
+        Ok(())
+    }
+
+    pub(crate) fn is_pod_set(&self) -> bool {
+        self.pod_set_uid.is_some()
+    }
+
+    fn deactivate(&mut self, sandbox_id: &str) -> MemberDeactivation {
+        if !self.is_pod_set() || !self.configs.contains_key(sandbox_id) {
+            return MemberDeactivation::Legacy;
+        }
+        if !self.active.remove(sandbox_id) {
+            return MemberDeactivation::AlreadyInactive;
+        }
+        MemberDeactivation::Removed {
+            last: self.active.is_empty(),
+        }
+    }
+
+    fn begin_start(&mut self, sandbox_id: &str) -> Result<Option<SandboxConfig>> {
+        let config = self
+            .configs
+            .get(sandbox_id)
+            .cloned()
+            .with_context(|| format!("sandbox {sandbox_id} is not registered"))?;
+        if !self.is_pod_set() || !self.started.insert(sandbox_id.to_string()) {
+            return Ok(None);
+        }
+        Ok(Some(config))
+    }
+
+    fn start_failed(&mut self, sandbox_id: &str) {
+        self.started.remove(sandbox_id);
+    }
+
+    fn is_active(&self, sandbox_id: &str) -> bool {
+        self.active.contains(sandbox_id)
+    }
+
+    fn has_active_members(&self) -> bool {
+        !self.active.is_empty()
+    }
+
+    pub(crate) fn contains(&self, sandbox_id: &str) -> bool {
+        self.configs.contains_key(sandbox_id)
+    }
+}
 
 pub struct SandboxRestoreArgs {
     pub sid: String,
@@ -137,6 +242,7 @@ pub struct VirtSandbox {
     shm_size: u64,
     factory: Option<Factory>,
     cancel_token: CancellationToken,
+    members: Arc<RwLock<SandboxMembers>>,
 }
 
 impl std::fmt::Debug for VirtSandbox {
@@ -157,7 +263,7 @@ impl std::fmt::Debug for VirtSandbox {
 }
 
 impl VirtSandbox {
-    pub async fn new(
+    pub(crate) async fn new(
         sid: &str,
         msg_sender: Sender<Message>,
         agent: Arc<dyn Agent>,
@@ -180,10 +286,128 @@ impl VirtSandbox {
             monitor: Arc::new(HealthCheck::new(true, keep_abnormal)),
             exit_notify_tx,
             shm_size: sandbox_config.shm_size,
+            members: Arc::new(RwLock::new(SandboxMembers::new(sandbox_config.clone()))),
             sandbox_config: Some(sandbox_config),
             factory: Some(factory),
             cancel_token,
         })
+    }
+
+    pub(crate) fn members(&self) -> Arc<RwLock<SandboxMembers>> {
+        self.members.clone()
+    }
+
+    async fn start_pod_sandbox(&self, sandbox_id: &str, setup_network: bool) -> Result<()> {
+        let config = {
+            let mut members = self.members.write().await;
+            members.begin_start(sandbox_id)?
+        };
+        let Some(config) = config else {
+            return Ok(());
+        };
+        let request = agent::CreatePodSandboxRequest {
+            hostname: config.hostname.clone(),
+            dns: config.dns.clone(),
+            sandbox_id: sandbox_id.to_string(),
+        };
+        if let Err(error) = self.agent.create_pod_sandbox(request).await {
+            self.members.write().await.start_failed(sandbox_id);
+            return Err(error).context("create pod sandbox");
+        }
+        let setup_result = async {
+            if setup_network {
+                if let Some(netns_path) = config.network_env.netns {
+                    let runtime_config = self.resource_manager.config().await;
+                    if !runtime_config.runtime.disable_new_netns
+                        && !dan_config_path(&runtime_config, &self.sid).exists()
+                    {
+                        self.resource_manager
+                            .setup_pod_network(
+                                NetworkConfig::NetNs(NetworkWithNetNsConfig {
+                                    network_model: runtime_config
+                                        .runtime
+                                        .internetworking_model
+                                        .clone(),
+                                    netns_path,
+                                    queues: self
+                                        .hypervisor
+                                        .hypervisor_config()
+                                        .await
+                                        .network_info
+                                        .network_queues
+                                        as usize,
+                                    network_created: config.network_env.network_created,
+                                }),
+                                sandbox_id,
+                            )
+                            .await
+                            .context("setup pod network")?;
+                    }
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        }
+        .await;
+        if let Err(error) = setup_result {
+            self.members.write().await.start_failed(sandbox_id);
+            let _ = self
+                .agent
+                .destroy_pod_sandbox(agent::DestroyPodSandboxRequest {
+                    sandbox_id: sandbox_id.to_string(),
+                })
+                .await;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    async fn stop_vm(&self) -> Result<()> {
+        let state = self.inner.read().await.state;
+        if state == SandboxState::Stopped {
+            return Ok(());
+        }
+
+        self.cancel_token.cancel();
+        info!(sl!(), "begin stop sandbox");
+        if state == SandboxState::Init {
+            let _ = self.hypervisor.stop_vm().await;
+            self.record_stop(0, SystemTime::now()).await;
+            info!(sl!(), "sandbox stopped during Init");
+            return Ok(());
+        }
+
+        self.hypervisor.stop_vm().await.context("stop vm")?;
+        self.wait_for_vm_exit()
+            .await
+            .context("wait for vm exit after stop")?;
+        info!(sl!(), "sandbox stopped");
+        Ok(())
+    }
+
+    async fn wait_for_vm_exit(&self) -> Result<SandboxExitInfo> {
+        if self.inner.read().await.state == SandboxState::Stopped {
+            return Ok(self
+                .inner
+                .read()
+                .await
+                .exit_info
+                .clone()
+                .unwrap_or_default());
+        }
+        let mut exit_notify_rx = self.exit_notify_tx.subscribe();
+        while !*exit_notify_rx.borrow() {
+            exit_notify_rx
+                .changed()
+                .await
+                .context("wait for sandbox stop notification")?;
+        }
+        Ok(self
+            .inner
+            .read()
+            .await
+            .exit_info
+            .clone()
+            .unwrap_or_default())
     }
 
     pub fn get_agent(&self) -> Arc<dyn Agent> {
@@ -277,7 +501,9 @@ impl VirtSandbox {
         // avoiding unnecessary file I/O and OCI spec parsing in the common K8s case.
         let mut vfio_devices = self.prepare_coldplug_cdi_devices(sandbox_config).await?;
         if vfio_devices.is_empty() {
-            let raw_vfio = self.prepare_coldplug_raw_vfio_devices(sandbox_config).await?;
+            let raw_vfio = self
+                .prepare_coldplug_raw_vfio_devices(sandbox_config)
+                .await?;
             vfio_devices.extend(raw_vfio);
         }
         if !vfio_devices.is_empty() {
@@ -463,7 +689,9 @@ impl VirtSandbox {
                 Err(e) => {
                     warn!(
                         sl!(),
-                        "failed to resolve host path for {:?}: {:?}", d.path(), e
+                        "failed to resolve host path for {:?}: {:?}",
+                        d.path(),
+                        e
                     );
                     continue;
                 }
@@ -841,8 +1069,12 @@ impl VirtSandbox {
 
 #[async_trait]
 impl Sandbox for VirtSandbox {
+    async fn add_sandbox(&self, config: SandboxConfig) -> Result<()> {
+        self.members.write().await.add(config)
+    }
+
     #[instrument(name = "sb: start")]
-    async fn start(&self) -> Result<()> {
+    async fn start(&self, sandbox_id: &str) -> Result<()> {
         let id = &self.sid;
 
         if self.sandbox_config.is_none() {
@@ -855,8 +1087,8 @@ impl Sandbox for VirtSandbox {
 
         let mut inner = self.inner.write().await;
         if inner.state != SandboxState::Init {
-            warn!(sl!(), "sandbox is started");
-            return Ok(());
+            drop(inner);
+            return self.start_pod_sandbox(sandbox_id, true).await;
         }
         let selinux_label = load_oci_spec().ok().and_then(|spec| {
             spec.process()
@@ -962,8 +1194,13 @@ impl Sandbox for VirtSandbox {
             .context(format!("connect to address {:?}", &address))?;
         self.set_agent_policy().await.context("set agent policy")?;
 
+        let pod_set = self.members.read().await.is_pod_set();
+        if pod_set {
+            self.start_pod_sandbox(sandbox_id, false).await?;
+        }
+
         self.resource_manager
-            .setup_after_start_vm()
+            .setup_after_start_vm(if pod_set { sandbox_id } else { "" })
             .await
             .context("setup device after start vm")?;
 
@@ -987,6 +1224,11 @@ impl Sandbox for VirtSandbox {
                 .security_info
                 .guest_hook_path,
             kernel_modules,
+            pod_set_uid: sandbox_config
+                .annotations
+                .get(POD_SET_UID_ANNOTATION)
+                .cloned()
+                .unwrap_or_default(),
         };
 
         self.agent
@@ -1123,12 +1365,18 @@ impl Sandbox for VirtSandbox {
         Ok(())
     }
 
-    async fn status(&self) -> Result<SandboxStatus> {
+    async fn status(&self, sandbox_id: &str) -> Result<SandboxStatus> {
         let inner = self.inner.read().await;
-        let state = inner.state.to_cri_state().to_string();
+        let active = self.members.read().await.is_active(sandbox_id);
+        let state = if active {
+            inner.state.to_cri_state()
+        } else {
+            SandboxState::Stopped.to_cri_state()
+        }
+        .to_string();
 
         Ok(SandboxStatus {
-            sandbox_id: self.sid.clone(),
+            sandbox_id: sandbox_id.to_string(),
             pid: std::process::id(),
             state,
             info: std::collections::HashMap::new(),
@@ -1136,60 +1384,47 @@ impl Sandbox for VirtSandbox {
         })
     }
 
-    async fn wait(&self) -> Result<SandboxExitInfo> {
+    async fn wait(&self, sandbox_id: &str) -> Result<SandboxExitInfo> {
         info!(sl!(), "wait sandbox");
-        {
-            let inner = self.inner.read().await;
-            if inner.state == SandboxState::Stopped {
-                return Ok(inner.exit_info.clone().unwrap_or_default());
+        if !self.members.read().await.is_active(sandbox_id) {
+            return Ok(SandboxExitInfo {
+                exit_status: 0,
+                exited_at: Some(SystemTime::now()),
+            });
+        }
+        self.wait_for_vm_exit().await
+    }
+
+    async fn stop(&self, sandbox_id: &str) -> Result<()> {
+        match self.members.write().await.deactivate(sandbox_id) {
+            MemberDeactivation::Legacy => {}
+            MemberDeactivation::AlreadyInactive => return Ok(()),
+            MemberDeactivation::Removed { last } => {
+                self.agent
+                    .destroy_pod_sandbox(agent::DestroyPodSandboxRequest {
+                        sandbox_id: sandbox_id.to_string(),
+                    })
+                    .await
+                    .context("destroy pod sandbox")?;
+                if !last {
+                    return Ok(());
+                }
             }
         }
-
-        let mut exit_notify_rx = self.exit_notify_tx.subscribe();
-        while !*exit_notify_rx.borrow() {
-            exit_notify_rx
-                .changed()
-                .await
-                .context("wait for sandbox stop notification")?;
-        }
-
-        let inner = self.inner.read().await;
-        Ok(inner.exit_info.clone().unwrap_or_default())
+        self.stop_vm().await
     }
 
-    async fn stop(&self) -> Result<()> {
-        let state = {
-            let sandbox_inner = self.inner.read().await;
-            sandbox_inner.state
-        };
-
-        if state == SandboxState::Stopped {
-            return Ok(());
-        }
-
-        // Cancel the OOM watcher before tearing down the VM so it exits
-        // cleanly instead of hitting ECONNRESET/EOF on a closed channel.
-        self.cancel_token.cancel();
-
-        info!(sl!(), "begin stop sandbox");
-        if state == SandboxState::Init {
-            let _ = self.hypervisor.stop_vm().await;
-            self.record_stop(0, SystemTime::now()).await;
-            info!(sl!(), "sandbox stopped during Init");
-            return Ok(());
-        }
-
-        self.hypervisor.stop_vm().await.context("stop vm")?;
-        self.wait().await.context("wait for vm exit after stop")?;
-        info!(sl!(), "sandbox stopped");
-
-        Ok(())
-    }
-
-    async fn shutdown(&self) -> Result<()> {
+    async fn shutdown(&self, sandbox_id: &str, force: bool) -> Result<()> {
         info!(sl!(), "shutdown");
 
-        self.stop().await.context("stop")?;
+        if force && !self.members.read().await.is_pod_set() {
+            self.stop_vm().await.context("force stop")?;
+        } else {
+            self.stop(sandbox_id).await.context("stop")?;
+            if self.members.read().await.has_active_members() {
+                return Ok(());
+            }
+        }
 
         self.cleanup().await.context("do the clean up")?;
 
@@ -1249,7 +1484,9 @@ impl Sandbox for VirtSandbox {
         info!(sl!(), "container process exited with {:?}", exit_status);
 
         if cm.is_sandbox_container(&process_id).await {
-            self.stop().await.context("stop sandbox")?;
+            self.stop(process_id.container_id())
+                .await
+                .context("stop sandbox")?;
         }
 
         let cid = process_id.container_id();
@@ -1467,6 +1704,109 @@ impl Persist for VirtSandbox {
             shm_size: DEFAULT_SHM_SIZE,
             factory: None,
             cancel_token: CancellationToken::default(),
+            members: Arc::new(RwLock::new(SandboxMembers::legacy(sid))),
         })
+    }
+}
+
+#[cfg(test)]
+mod pod_set_tests {
+    use super::*;
+
+    fn sandbox_config(sandbox_id: &str, pod_set_uid: Option<&str>) -> SandboxConfig {
+        let mut annotations = HashMap::new();
+        if let Some(uid) = pod_set_uid {
+            annotations.insert(POD_SET_UID_ANNOTATION.to_string(), uid.to_string());
+        }
+        SandboxConfig {
+            sandbox_id: sandbox_id.to_string(),
+            hostname: sandbox_id.to_string(),
+            dns: Vec::new(),
+            network_env: SandboxNetworkEnv::default(),
+            annotations,
+            hooks: None,
+            state: spec::State {
+                version: Default::default(),
+                id: sandbox_id.to_string(),
+                status: spec::ContainerState::Creating,
+                pid: 0,
+                bundle: String::new(),
+                annotations: HashMap::new(),
+            },
+            shm_size: 0,
+        }
+    }
+
+    #[test]
+    fn pod_set_members_are_symmetric() {
+        let mut members = SandboxMembers::new(sandbox_config("sandbox-1", Some("set-1")));
+        members
+            .add(sandbox_config("sandbox-2", Some("set-1")))
+            .unwrap();
+
+        assert_eq!(
+            members.deactivate("sandbox-1"),
+            MemberDeactivation::Removed { last: false }
+        );
+        assert!(members.is_active("sandbox-2"));
+        assert_eq!(
+            members.deactivate("sandbox-2"),
+            MemberDeactivation::Removed { last: true }
+        );
+    }
+
+    #[test]
+    fn pod_set_members_can_stop_in_reverse_order() {
+        let mut members = SandboxMembers::new(sandbox_config("sandbox-1", Some("set-1")));
+        members
+            .add(sandbox_config("sandbox-2", Some("set-1")))
+            .unwrap();
+
+        assert_eq!(
+            members.deactivate("sandbox-2"),
+            MemberDeactivation::Removed { last: false }
+        );
+        assert!(members.is_active("sandbox-1"));
+        assert_eq!(
+            members.deactivate("sandbox-1"),
+            MemberDeactivation::Removed { last: true }
+        );
+    }
+
+    #[test]
+    fn repeated_pod_set_stop_is_idempotent() {
+        let mut members = SandboxMembers::new(sandbox_config("sandbox-1", Some("set-1")));
+        members
+            .add(sandbox_config("sandbox-2", Some("set-1")))
+            .unwrap();
+
+        assert_eq!(
+            members.deactivate("sandbox-1"),
+            MemberDeactivation::Removed { last: false }
+        );
+        assert_eq!(
+            members.deactivate("sandbox-1"),
+            MemberDeactivation::AlreadyInactive
+        );
+        assert!(members.is_active("sandbox-2"));
+    }
+
+    #[test]
+    fn pod_set_rejects_member_from_another_set() {
+        let mut members = SandboxMembers::new(sandbox_config("sandbox-1", Some("set-1")));
+
+        let error = members
+            .add(sandbox_config("sandbox-2", Some("set-2")))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("does not belong"));
+    }
+
+    #[test]
+    fn non_pod_set_keeps_legacy_lifecycle() {
+        let mut members = SandboxMembers::new(sandbox_config("sandbox-1", None));
+
+        assert_eq!(members.deactivate("sandbox-1"), MemberDeactivation::Legacy);
     }
 }

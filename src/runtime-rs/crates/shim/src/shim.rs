@@ -15,7 +15,10 @@ use oci_spec::runtime as oci;
 use runtime_spec as spec;
 use sha2::Digest;
 const SOCKET_ROOT: &str = "/run/containerd";
+const POD_SET_ROOT: &str = "/run/kata-containers/podsets";
 const SHIM_PID_FILE: &str = "shim.pid";
+
+pub(crate) const POD_SET_UID_ANNOTATION: &str = "io.podset/pod_set_uid";
 
 pub(crate) const ENV_KATA_RUNTIME_BIND_FD: &str = "KATA_RUNTIME_BIND_FD";
 
@@ -77,6 +80,26 @@ impl ShimExecutor {
             hasher.finalize()
         )))
     }
+
+    pub(crate) fn pod_set_state_dir(&self, pod_set_uid: &str) -> PathBuf {
+        let data = [&self.args.address, &self.args.namespace, pod_set_uid].join("/");
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(data);
+        PathBuf::from(format!("{POD_SET_ROOT}/{:X}", hasher.finalize()))
+    }
+
+    pub(crate) fn pod_set_member_file(&self, pod_set_uid: &str, sid: &str) -> PathBuf {
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(sid);
+        self.pod_set_state_dir(pod_set_uid)
+            .join("members")
+            .join(format!("{:X}", hasher.finalize()))
+    }
+
+    pub(crate) fn socket_file(address: &Path) -> Result<PathBuf> {
+        let trim_path = address.strip_prefix("unix:").context("trim socket path")?;
+        Ok(Path::new("/").join(trim_path))
+    }
 }
 
 #[cfg(test)]
@@ -115,5 +138,14 @@ mod tests {
         executor.write_pid_file(&dir, 1267).unwrap();
         let read_pid = executor.read_pid_file(&dir).unwrap();
         assert_eq!(read_pid, 1267);
+
+        let first = executor.pod_set_state_dir("set-1");
+        let second = executor.pod_set_state_dir("set-1");
+        let other = executor.pod_set_state_dir("set-2");
+        assert_eq!(first, second);
+        assert_ne!(first, other);
+        assert!(executor
+            .pod_set_member_file("set-1", "sandbox-1")
+            .starts_with(first.join("members")));
     }
 }

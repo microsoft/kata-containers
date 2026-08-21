@@ -5,7 +5,7 @@
 //
 
 use crate::{
-    types::{ContainerProcess, SandboxExitInfo, SandboxStatus},
+    types::{ContainerProcess, SandboxConfig, SandboxExitInfo, SandboxStatus},
     ContainerManager,
 };
 
@@ -30,13 +30,14 @@ impl std::fmt::Debug for SandboxNetworkEnv {
 
 #[async_trait]
 pub trait Sandbox: Send + Sync {
-    async fn start(&self) -> Result<()>;
+    async fn add_sandbox(&self, config: SandboxConfig) -> Result<()>;
+    async fn start(&self, sandbox_id: &str) -> Result<()>;
     async fn start_template(&self) -> Result<()>;
-    async fn stop(&self) -> Result<()>;
+    async fn stop(&self, sandbox_id: &str) -> Result<()>;
     async fn cleanup(&self) -> Result<()>;
-    async fn shutdown(&self) -> Result<()>;
-    async fn status(&self) -> Result<SandboxStatus>;
-    async fn wait(&self) -> Result<SandboxExitInfo>;
+    async fn shutdown(&self, sandbox_id: &str, force: bool) -> Result<()>;
+    async fn status(&self, sandbox_id: &str) -> Result<SandboxStatus>;
+    async fn wait(&self, sandbox_id: &str) -> Result<SandboxExitInfo>;
 
     // utils
     async fn set_iptables(&self, is_ipv6: bool, data: Vec<u8>) -> Result<Vec<u8>>;

@@ -7,6 +7,7 @@
 use std::{collections::HashMap, convert::TryFrom};
 
 use anyhow::{ensure, Context, Result};
+use byte_unit::Byte;
 use kata_types::{
     annotations::Annotation, config::TomlConfig, container::ContainerType,
     cpu::LinuxContainerCpuResources, k8s::container_type,
@@ -23,6 +24,9 @@ struct InitialSize {
 }
 
 const MIB: i64 = 1024 * 1024;
+const POD_SET_UID_ANNOTATION: &str = "io.podset/pod_set_uid";
+const POD_SET_CPU_LIMIT_ANNOTATION: &str = "io.podset/group_limits_cpu";
+const POD_SET_MEMORY_LIMIT_ANNOTATION: &str = "io.podset/group_limits_memory";
 
 // generate initial resource(vcpu and memory in MiB) from annotations
 impl TryFrom<&HashMap<String, String>> for InitialSize {
@@ -42,7 +46,29 @@ impl TryFrom<&HashMap<String, String>> for InitialSize {
         if let Ok(cpu_resource) = LinuxContainerCpuResources::try_from(&cpu) {
             vcpu = get_nr_vcpu(&cpu_resource);
         }
-        let mem_mb = convert_memory_to_mb(memory);
+        let mut mem_mb = convert_memory_to_mb(memory);
+
+        if an
+            .get(POD_SET_UID_ANNOTATION)
+            .is_some_and(|uid| !uid.is_empty())
+        {
+            if let Some(cpu_limit) = an.get(POD_SET_CPU_LIMIT_ANNOTATION) {
+                vcpu = parse_cpu_quantity(cpu_limit).with_context(|| {
+                    format!("invalid {POD_SET_CPU_LIMIT_ANNOTATION} annotation")
+                })?;
+            }
+            if let Some(memory_limit) = an.get(POD_SET_MEMORY_LIMIT_ANNOTATION) {
+                let memory_bytes = Byte::parse_str(memory_limit, true)
+                    .with_context(|| {
+                        format!("invalid {POD_SET_MEMORY_LIMIT_ANNOTATION} annotation")
+                    })?
+                    .as_u128();
+                let memory_bytes = i64::try_from(memory_bytes).with_context(|| {
+                    format!("{POD_SET_MEMORY_LIMIT_ANNOTATION} annotation is too large")
+                })?;
+                mem_mb = convert_memory_to_mb(memory_bytes);
+            }
+        }
 
         Ok(Self {
             vcpu,
@@ -50,6 +76,27 @@ impl TryFrom<&HashMap<String, String>> for InitialSize {
             orig_toml_default_mem: 0,
         })
     }
+}
+
+fn parse_cpu_quantity(value: &str) -> Result<f32> {
+    let (number, multiplier) = if let Some(number) = value.strip_suffix('m') {
+        (number, 0.001)
+    } else if let Some(number) = value.strip_suffix('u') {
+        (number, 0.000_001)
+    } else if let Some(number) = value.strip_suffix('n') {
+        (number, 0.000_000_001)
+    } else {
+        (value, 1.0)
+    };
+    let quantity = number
+        .parse::<f64>()
+        .with_context(|| format!("failed to parse CPU quantity {value:?}"))?
+        * multiplier;
+    ensure!(
+        quantity.is_finite() && quantity > 0.0 && quantity <= f32::MAX as f64,
+        "CPU quantity must be finite and greater than zero"
+    );
+    Ok(quantity as f32)
 }
 
 // generate initial resource(vcpu and memory in MiB) from spec's information
@@ -116,12 +163,15 @@ impl TryFrom<&oci::Spec> for InitialSize {
 #[derive(Clone, Copy, Debug)]
 pub struct InitialSizeManager {
     resource: InitialSize,
+    force_static: bool,
 }
 
 impl InitialSizeManager {
     pub fn new(spec: &oci::Spec) -> Result<Self> {
+        let annotations = spec.annotations().clone().unwrap_or_default();
         Ok(Self {
             resource: InitialSize::try_from(spec).context("failed to construct static resource")?,
+            force_static: has_pod_set_group_limits(&annotations),
         })
     }
 
@@ -129,6 +179,7 @@ impl InitialSizeManager {
         Ok(Self {
             resource: InitialSize::try_from(annotation)
                 .context("failed to construct static resource")?,
+            force_static: has_pod_set_group_limits(annotation),
         })
     }
 
@@ -140,6 +191,7 @@ impl InitialSizeManager {
     ) -> Result<()> {
         let from_annotation =
             InitialSize::try_from(annotation).context("failed to construct static resource")?;
+        self.force_static |= has_pod_set_group_limits(annotation);
 
         if self.resource.vcpu == 0.0 {
             self.resource.vcpu = from_annotation.vcpu;
@@ -162,7 +214,7 @@ impl InitialSizeManager {
         self.resource.orig_toml_default_mem = hv.memory_info.default_memory;
 
         // Non-static mode keeps configured defaults unchanged.
-        if !config.runtime.static_sandbox_resource_mgmt {
+        if !config.runtime.static_sandbox_resource_mgmt && !self.force_static {
             validate_non_zero_sandbox_memory(hypervisor_name, hv.memory_info.default_memory)?;
             return Ok(());
         }
@@ -175,11 +227,9 @@ impl InitialSizeManager {
                 info!(sl!(), "resource with memory {}", self.resource.mem_mb);
             }
 
-            hv.cpu_info.default_vcpus =
-                (hv.cpu_info.overhead_vcpus + self.resource.vcpu).max(1.0);
+            hv.cpu_info.default_vcpus = (hv.cpu_info.overhead_vcpus + self.resource.vcpu).max(1.0);
 
-            hv.memory_info.default_memory =
-                hv.memory_info.overhead_memory + self.resource.mem_mb;
+            hv.memory_info.default_memory = hv.memory_info.overhead_memory + self.resource.mem_mb;
             hv.memory_info.default_maxmemory = hv
                 .memory_info
                 .default_maxmemory
@@ -195,6 +245,14 @@ impl InitialSizeManager {
     pub fn get_orig_toml_default_mem(&self) -> u32 {
         self.resource.orig_toml_default_mem
     }
+}
+
+fn has_pod_set_group_limits(annotations: &HashMap<String, String>) -> bool {
+    annotations
+        .get(POD_SET_UID_ANNOTATION)
+        .is_some_and(|uid| !uid.is_empty())
+        && (annotations.contains_key(POD_SET_CPU_LIMIT_ANNOTATION)
+            || annotations.contains_key(POD_SET_MEMORY_LIMIT_ANNOTATION))
 }
 
 fn validate_non_zero_sandbox_memory(hypervisor_name: &str, memory_mib: u32) -> Result<()> {
@@ -241,6 +299,8 @@ fn get_sizing_info(annotation: Annotation) -> Result<(u64, i64, i64)> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::too_many_arguments)]
+
     use super::*;
     use kata_types::annotations::cri_containerd;
     use oci_spec::runtime::{LinuxBuilder, LinuxMemory, LinuxMemoryBuilder, LinuxResourcesBuilder};
@@ -357,6 +417,114 @@ mod tests {
         }
     }
 
+    #[rstest]
+    #[case("500m", 0.5)]
+    #[case("1500m", 1.5)]
+    #[case("2", 2.0)]
+    #[case("250000u", 0.25)]
+    fn test_pod_set_cpu_quantity(#[case] quantity: &str, #[case] expected: f32) {
+        let annotations = HashMap::from([
+            (POD_SET_UID_ANNOTATION.to_string(), "set-1".to_string()),
+            (
+                POD_SET_CPU_LIMIT_ANNOTATION.to_string(),
+                quantity.to_string(),
+            ),
+        ]);
+
+        let size = InitialSize::try_from(&annotations).unwrap();
+
+        assert!((size.vcpu - expected).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_pod_set_memory_quantity() {
+        let annotations = HashMap::from([
+            (POD_SET_UID_ANNOTATION.to_string(), "set-1".to_string()),
+            (
+                POD_SET_MEMORY_LIMIT_ANNOTATION.to_string(),
+                "1Gi".to_string(),
+            ),
+        ]);
+
+        let size = InitialSize::try_from(&annotations).unwrap();
+
+        assert_eq!(size.mem_mb, 1024);
+    }
+
+    #[test]
+    fn test_pod_set_limit_without_uid_does_not_change_existing_sizing() {
+        let annotations = HashMap::from([
+            (
+                cri_containerd::SANDBOX_CPU_PERIOD_KEY.to_string(),
+                "100000".to_string(),
+            ),
+            (
+                cri_containerd::SANDBOX_CPU_QUOTA_KEY.to_string(),
+                "200000".to_string(),
+            ),
+            (POD_SET_CPU_LIMIT_ANNOTATION.to_string(), "500m".to_string()),
+        ]);
+
+        let size = InitialSize::try_from(&annotations).unwrap();
+
+        assert_eq!(size.vcpu, 2.0);
+    }
+
+    #[test]
+    fn test_pod_set_partial_limit_preserves_other_existing_sizing() {
+        let annotations = HashMap::from([
+            (POD_SET_UID_ANNOTATION.to_string(), "set-1".to_string()),
+            (
+                cri_containerd::SANDBOX_MEM_KEY.to_string(),
+                (512 * MIB).to_string(),
+            ),
+            (POD_SET_CPU_LIMIT_ANNOTATION.to_string(), "500m".to_string()),
+        ]);
+
+        let size = InitialSize::try_from(&annotations).unwrap();
+
+        assert_eq!(size.vcpu, 0.5);
+        assert_eq!(size.mem_mb, 512);
+    }
+
+    #[test]
+    fn test_pod_set_limits_force_sizing_when_static_management_is_disabled() {
+        let annotations = HashMap::from([
+            (POD_SET_UID_ANNOTATION.to_string(), "set-1".to_string()),
+            (POD_SET_CPU_LIMIT_ANNOTATION.to_string(), "500m".to_string()),
+            (
+                POD_SET_MEMORY_LIMIT_ANNOTATION.to_string(),
+                "1Gi".to_string(),
+            ),
+        ]);
+        let mut config = make_config(2.0, 0.5, 8, 512, 128, 4096, false);
+        let mut manager = InitialSizeManager::new_from(&annotations).unwrap();
+
+        manager.setup_config(&mut config).unwrap();
+
+        let hypervisor = config.hypervisor.get("qemu").unwrap();
+        assert_eq!(hypervisor.cpu_info.default_vcpus, 1.0);
+        assert_eq!(hypervisor.memory_info.default_memory, 1152);
+    }
+
+    #[rstest]
+    #[case(POD_SET_CPU_LIMIT_ANNOTATION, "invalid")]
+    #[case(POD_SET_CPU_LIMIT_ANNOTATION, "0")]
+    #[case(POD_SET_MEMORY_LIMIT_ANNOTATION, "not-memory")]
+    fn test_invalid_pod_set_quantity_reports_annotation(
+        #[case] annotation: &str,
+        #[case] value: &str,
+    ) {
+        let annotations = HashMap::from([
+            (POD_SET_UID_ANNOTATION.to_string(), "set-1".to_string()),
+            (annotation.to_string(), value.to_string()),
+        ]);
+
+        let error = InitialSize::try_from(&annotations).unwrap_err().to_string();
+
+        assert!(error.contains(annotation), "{}", error);
+    }
+
     #[test]
     fn test_initial_size_container() {
         let tests = get_test_data();
@@ -451,6 +619,7 @@ mod tests {
                 mem_mb: 512,
                 orig_toml_default_mem: 0,
             },
+            force_static: false,
         };
 
         mgr.setup_config(&mut config).unwrap();
@@ -468,6 +637,7 @@ mod tests {
                 mem_mb: 512,
                 orig_toml_default_mem: 0,
             },
+            force_static: false,
         };
 
         mgr.setup_config(&mut config).unwrap();
@@ -485,6 +655,7 @@ mod tests {
                 mem_mb: 0,
                 orig_toml_default_mem: 0,
             },
+            force_static: false,
         };
 
         mgr.setup_config(&mut config).unwrap();
@@ -502,6 +673,7 @@ mod tests {
                 mem_mb: 0,
                 orig_toml_default_mem: 0,
             },
+            force_static: false,
         };
 
         mgr.setup_config(&mut config).unwrap();
@@ -519,6 +691,7 @@ mod tests {
                 mem_mb: 512,
                 orig_toml_default_mem: 0,
             },
+            force_static: false,
         };
 
         mgr.setup_config(&mut config).unwrap();
@@ -536,6 +709,7 @@ mod tests {
                 mem_mb: 128,
                 orig_toml_default_mem: 0,
             },
+            force_static: false,
         };
 
         mgr.setup_config(&mut config).unwrap();
@@ -550,6 +724,7 @@ mod tests {
                 mem_mb: 0,
                 orig_toml_default_mem: 0,
             },
+            force_static: false,
         };
 
         let ann = HashMap::from([
@@ -583,6 +758,7 @@ mod tests {
                 mem_mb: 0,
                 orig_toml_default_mem: 0,
             },
+            force_static: false,
         };
 
         mgr.setup_config(&mut config).unwrap();
@@ -600,6 +776,7 @@ mod tests {
                 mem_mb: 0,
                 orig_toml_default_mem: 0,
             },
+            force_static: false,
         };
 
         let err = mgr.setup_config(&mut config).unwrap_err().to_string();
@@ -638,6 +815,7 @@ mod tests {
                 mem_mb: requested_mem_mb,
                 orig_toml_default_mem: 0,
             },
+            force_static: false,
         };
 
         mgr.setup_config(&mut config).unwrap();

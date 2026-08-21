@@ -32,6 +32,7 @@ use kata_sys_util::{hooks::HookStates, netns::NetnsGuard};
 use crate::container_manager::is_termination_signal;
 
 use super::{logger_with_process, Container};
+use crate::sandbox::SandboxMembers;
 
 pub struct VirtContainerManager {
     sid: String,
@@ -41,6 +42,7 @@ pub struct VirtContainerManager {
     agent: Arc<dyn Agent>,
     hypervisor: Arc<dyn Hypervisor>,
     vmm_master_tid: OnceCell<u32>,
+    members: Arc<RwLock<SandboxMembers>>,
 }
 
 impl std::fmt::Debug for VirtContainerManager {
@@ -66,6 +68,7 @@ impl VirtContainerManager {
         agent: Arc<dyn Agent>,
         hypervisor: Arc<dyn Hypervisor>,
         resource_manager: Arc<ResourceManager>,
+        members: Arc<RwLock<SandboxMembers>>,
     ) -> Self {
         Self {
             sid: sid.to_string(),
@@ -75,6 +78,7 @@ impl VirtContainerManager {
             agent,
             hypervisor,
             vmm_master_tid: OnceCell::new(),
+            members,
         }
     }
 
@@ -460,7 +464,9 @@ impl ContainerManager for VirtContainerManager {
 
     #[instrument]
     async fn need_shutdown_sandbox(&self, req: &ShutdownRequest) -> bool {
-        req.is_now || self.sid == req.container_id
+        req.is_now
+            || self.members.read().await.contains(&req.container_id)
+            || self.sid == req.container_id
     }
 
     #[instrument]

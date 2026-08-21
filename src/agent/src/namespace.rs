@@ -4,7 +4,7 @@
 //
 
 use anyhow::{anyhow, Result};
-use nix::mount::MsFlags;
+use nix::mount::{umount2, MntFlags, MsFlags};
 use nix::sched::{unshare, CloneFlags};
 use nix::unistd::{getpid, gettid};
 use slog::Logger;
@@ -55,6 +55,12 @@ impl Namespace {
     }
 
     #[instrument]
+    pub fn get_net(mut self) -> Self {
+        self.ns_type = NamespaceType::Net;
+        self
+    }
+
+    #[instrument]
     pub fn get_uts(mut self, hostname: &str) -> Self {
         self.ns_type = NamespaceType::Uts;
         if !hostname.is_empty() {
@@ -78,11 +84,18 @@ impl Namespace {
     // setup creates persistent namespace without switching to it.
     // Note, pid namespaces cannot be persisted.
     #[instrument]
+    #[allow(dead_code)]
     #[allow(clippy::question_mark)]
-    pub async fn setup(mut self) -> Result<Self> {
-        fs::create_dir_all(&self.persistent_ns_dir)?;
+    pub async fn setup(self) -> Result<Self> {
+        self.setup_at("").await
+    }
 
-        let ns_path = PathBuf::from(&self.persistent_ns_dir);
+    #[instrument]
+    #[allow(clippy::question_mark)]
+    pub async fn setup_at(mut self, sandbox_id: &str) -> Result<Self> {
+        let ns_path = PathBuf::from(&self.persistent_ns_dir).join(sandbox_id);
+        fs::create_dir_all(&ns_path)?;
+
         let ns_type = self.ns_type;
         if ns_type == NamespaceType::Pid {
             return Err(anyhow!("Cannot persist namespace of PID type"));
@@ -143,12 +156,29 @@ impl Namespace {
 
         Ok(self)
     }
+
+    pub fn cleanup(&self) -> Result<()> {
+        if self.path.is_empty() {
+            return Ok(());
+        }
+        if let Err(error) = umount2(self.path.as_str(), MntFlags::MNT_DETACH) {
+            if error != nix::errno::Errno::EINVAL && error != nix::errno::Errno::ENOENT {
+                return Err(error.into());
+            }
+        }
+        fs::remove_file(&self.path).ok();
+        if let Some(parent) = Path::new(&self.path).parent() {
+            fs::remove_dir(parent).ok();
+        }
+        Ok(())
+    }
 }
 
 /// Represents the Namespace type.
 #[derive(Clone, Copy, PartialEq)]
 enum NamespaceType {
     Ipc,
+    Net,
     Uts,
     Pid,
 }
@@ -158,6 +188,7 @@ impl NamespaceType {
     pub fn get(&self) -> &str {
         match *self {
             Self::Ipc => "ipc",
+            Self::Net => "net",
             Self::Uts => "uts",
             Self::Pid => "pid",
         }
@@ -167,6 +198,7 @@ impl NamespaceType {
     pub fn get_flags(&self) -> CloneFlags {
         match *self {
             Self::Ipc => CloneFlags::CLONE_NEWIPC,
+            Self::Net => CloneFlags::CLONE_NEWNET,
             Self::Uts => CloneFlags::CLONE_NEWUTS,
             Self::Pid => CloneFlags::CLONE_NEWPID,
         }

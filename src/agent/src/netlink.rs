@@ -22,6 +22,7 @@ use netlink_packet_route::{
     route::{RouteAddress, RouteAttribute, RouteMessage},
 };
 use nix::errno::Errno;
+use nix::sched::{setns, CloneFlags};
 use protocols::types::{ARPNeighbor, IPAddress, IPFamily, Interface, Route};
 use rtnetlink::{new_connection, IpVersion};
 use std::convert::{TryFrom, TryInto};
@@ -29,6 +30,7 @@ use std::fmt;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Deref;
+use std::os::fd::AsRawFd;
 use std::str::{self, FromStr};
 
 /// Search criteria to use when looking for a link in `find_link`.
@@ -104,6 +106,39 @@ impl Handle {
         tokio::spawn(conn);
 
         Ok(Handle { handle })
+    }
+
+    pub(crate) fn new_in_netns(netns_path: &str) -> Result<Handle> {
+        let netns_path = netns_path.to_string();
+        let (connection, handle, _) = std::thread::spawn(move || {
+            let current = fs::File::open("/proc/self/ns/net")?;
+            let target = fs::File::open(&netns_path)?;
+            setns(&target, CloneFlags::CLONE_NEWNET)?;
+            let result = new_connection();
+            setns(&current, CloneFlags::CLONE_NEWNET)?;
+            result.map_err(anyhow::Error::from)
+        })
+        .join()
+        .map_err(|_| anyhow!("network namespace helper thread panicked"))??;
+        tokio::spawn(connection);
+        Ok(Handle { handle })
+    }
+
+    pub async fn move_link_to_netns_by_address(
+        &self,
+        address: &str,
+        netns_path: &str,
+    ) -> Result<()> {
+        let link = self.find_link(LinkFilter::Address(address)).await?;
+        let netns = fs::File::open(netns_path)
+            .with_context(|| format!("open target netns {netns_path}"))?;
+        self.handle
+            .link()
+            .set(link.index())
+            .setns_by_fd(netns.as_raw_fd())
+            .execute()
+            .await
+            .with_context(|| format!("move interface with MAC {address} to {netns_path}"))
     }
 
     pub async fn update_interface(&mut self, iface: &Interface) -> Result<()> {

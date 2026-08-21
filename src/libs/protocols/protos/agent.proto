@@ -79,6 +79,8 @@ service AgentService {
 	rpc GetVolumeStats(VolumeStatsRequest) returns (VolumeStatsResponse);
 	rpc ResizeVolume(ResizeVolumeRequest) returns (google.protobuf.Empty);
 	rpc SetPolicy(SetPolicyRequest) returns (google.protobuf.Empty);
+	rpc CreatePodSandbox(CreatePodSandboxRequest) returns (google.protobuf.Empty);
+	rpc DestroyPodSandbox(DestroyPodSandboxRequest) returns (google.protobuf.Empty);
 }
 
 message CreateContainerRequest {
@@ -324,6 +326,17 @@ message CreateSandboxRequest {
 	string guest_hook_path = 6;
 	// This field is the list of kernel modules to be loaded in the guest kernel.
 	repeated KernelModule kernel_modules = 7;
+	string pod_set_uid = 8;
+}
+
+message CreatePodSandboxRequest {
+	string hostname = 1;
+	repeated string dns = 2;
+	string sandbox_id = 3;
+}
+
+message DestroyPodSandboxRequest {
+	string sandbox_id = 1;
 }
 
 message DestroySandboxRequest {
@@ -341,10 +354,12 @@ message Routes {
 
 message UpdateInterfaceRequest {
 	types.Interface interface = 1;
+	string sandbox_id = 2;
 }
 
 message UpdateRoutesRequest {
 	Routes routes = 1;
+	string sandbox_id = 2;
 }
 
 message UpdateEphemeralMountsRequest {
@@ -363,6 +378,7 @@ message ARPNeighbors {
 
 message AddARPNeighborsRequest {
        ARPNeighbors neighbors = 1;
+	string sandbox_id = 2;
 }
 
 message GetIPTablesRequest {

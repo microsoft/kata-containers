@@ -5,19 +5,20 @@
 //
 
 use std::{
-    fs,
+    fs::{self, OpenOptions},
     io::Write,
     os::unix::{io::IntoRawFd, prelude::OsStrExt},
     path::{Path, PathBuf},
 };
 
 use anyhow::{anyhow, Context, Result};
+use fs2::FileExt;
 use kata_sys_util::spec::get_bundle_path;
 use kata_types::{container::ContainerType, k8s};
 use unix_socket::UnixListener;
 
 use crate::{
-    shim::{ShimExecutor, ENV_KATA_RUNTIME_BIND_FD},
+    shim::{ShimExecutor, ENV_KATA_RUNTIME_BIND_FD, POD_SET_UID_ANNOTATION},
     Error,
 };
 
@@ -38,12 +39,22 @@ impl ShimExecutor {
         let mut container_type = ContainerType::PodSandbox;
         let mut id = None;
 
+        let mut pod_set_uid = None;
         if let Ok(spec) = self.load_oci_spec(&bundle_path) {
             (container_type, id) = k8s::container_type_with_id(&spec);
+            pod_set_uid = spec
+                .annotations()
+                .as_ref()
+                .and_then(|annotations| annotations.get(POD_SET_UID_ANNOTATION))
+                .filter(|uid| !uid.is_empty())
+                .cloned();
         }
 
         match container_type {
             ContainerType::PodSandbox | ContainerType::SingleContainer => {
+                if let Some(pod_set_uid) = pod_set_uid {
+                    return self.start_pod_set_sandbox(&bundle_path, &pod_set_uid);
+                }
                 let address = self.socket_address(&self.args.id)?;
                 let socket = new_listener(&address)?;
                 let child_pid = self.create_shim_process(socket)?;
@@ -60,6 +71,57 @@ impl ShimExecutor {
                 Ok(address)
             }
         }
+    }
+
+    fn start_pod_set_sandbox(&self, bundle_path: &Path, pod_set_uid: &str) -> Result<PathBuf> {
+        let state_dir = self.pod_set_state_dir(pod_set_uid);
+        let members_dir = state_dir.join("members");
+        fs::create_dir_all(&members_dir).context("create PodSet state directory")?;
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(state_dir.join("lock"))
+            .context("open PodSet state lock")?;
+        lock.lock_exclusive().context("lock PodSet state")?;
+
+        let canonical_address = self.socket_address(pod_set_uid)?;
+        let canonical_socket = ShimExecutor::socket_file(&canonical_address)?;
+        let member_address = self.socket_address(&self.args.id)?;
+        let member_socket = ShimExecutor::socket_file(&member_address)?;
+
+        let child_pid = if canonical_socket.exists() {
+            fs::read_to_string(state_dir.join("pid"))
+                .context("read PodSet shim pid")?
+                .parse::<u32>()
+                .context("parse PodSet shim pid")?
+        } else {
+            let socket = new_listener(&canonical_address)?;
+            let child_pid = self.create_shim_process(socket)?;
+            fs::write(state_dir.join("pid"), child_pid.to_string())
+                .context("write PodSet shim pid")?;
+            fs::write(state_dir.join("owner"), &self.args.id)
+                .context("write PodSet runtime owner")?;
+            child_pid
+        };
+
+        if member_socket != canonical_socket {
+            if member_socket.exists() {
+                fs::remove_file(&member_socket).context("remove stale sandbox socket alias")?;
+            }
+            fs::hard_link(&canonical_socket, &member_socket)
+                .context("create sandbox socket alias")?;
+        }
+        fs::write(
+            self.pod_set_member_file(pod_set_uid, &self.args.id),
+            &self.args.id,
+        )
+        .context("register PodSet sandbox")?;
+        self.write_pid_file(bundle_path, child_pid)?;
+        self.write_address(bundle_path, &member_address)?;
+
+        Ok(member_address)
     }
 
     fn new_command(&self) -> Result<std::process::Command> {
