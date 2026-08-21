@@ -140,6 +140,9 @@ impl SandboxMembers {
             self.pod_set_uid.is_some(),
             "cannot add a sandbox to a non-PodSet VM"
         );
+        if self.configs.contains_key(&config.sandbox_id) {
+            return Ok(());
+        }
         self.active.insert(config.sandbox_id.clone());
         self.configs.insert(config.sandbox_id.clone(), config);
         Ok(())
@@ -1801,6 +1804,19 @@ mod pod_set_tests {
             .to_string();
 
         assert!(error.contains("does not belong"));
+    }
+
+    #[test]
+    fn repeated_pod_set_registration_keeps_original_config() {
+        let mut members = SandboxMembers::new(sandbox_config("sandbox-1", Some("set-1")));
+        let original = sandbox_config("sandbox-2", Some("set-1"));
+        members.add(original).unwrap();
+
+        let mut duplicate = sandbox_config("sandbox-2", Some("set-1"));
+        duplicate.hostname = "replacement".to_string();
+        members.add(duplicate).unwrap();
+
+        assert_eq!(members.configs["sandbox-2"].hostname, "sandbox-2");
     }
 
     #[test]

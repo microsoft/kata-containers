@@ -381,19 +381,6 @@ impl DeviceManager {
                     .context("failed to create vhost blk device")?
             }
             DeviceConfig::NetworkCfg(config) => {
-                // try to find the device, found and just return id.
-                let host_path = config.host_dev_name.as_str();
-                if let Some(dev_id_matched) = self.find_device(host_path.to_owned()).await {
-                    info!(
-                        sl!(),
-                        "network device with path:{:?} found. return network device id: {:?}",
-                        host_path,
-                        dev_id_matched
-                    );
-
-                    return Ok(dev_id_matched);
-                }
-
                 Arc::new(Mutex::new(NetworkDevice::new(device_id.clone(), config)))
             }
             DeviceConfig::VhostUserNetworkCfg(config) => {
@@ -761,7 +748,7 @@ mod tests {
     use crate::{
         device::{device_manager::get_block_device_info, DeviceConfig, DeviceType},
         qemu::Qemu,
-        BlockConfig, KATA_BLK_DEV_TYPE,
+        Address, BlockConfig, NetworkConfig, KATA_BLK_DEV_TYPE,
     };
     use anyhow::{anyhow, Context, Result};
     use kata_types::config::hypervisor::TopologyConfigInfo;
@@ -816,6 +803,37 @@ mod tests {
             assert_eq!(device.config.driver_option, KATA_BLK_DEV_TYPE);
         } else {
             assert_eq!(1, 0)
+        }
+    }
+
+    #[actix_rt::test]
+    async fn test_network_devices_with_same_name_are_distinct() {
+        let dm = new_device_manager().await.unwrap();
+        let first = DeviceConfig::NetworkCfg(NetworkConfig {
+            host_dev_name: "tap0_kata".to_string(),
+            guest_mac: Some(Address([0x02, 0, 0, 0, 0, 1])),
+            ..Default::default()
+        });
+        let second = DeviceConfig::NetworkCfg(NetworkConfig {
+            host_dev_name: "tap0_kata".to_string(),
+            guest_mac: Some(Address([0x02, 0, 0, 0, 0, 2])),
+            ..Default::default()
+        });
+
+        let first_id = dm.write().await.new_device(&first).await.unwrap();
+        let second_id = dm.write().await.new_device(&second).await.unwrap();
+
+        assert_ne!(first_id, second_id);
+        let first_info = dm.read().await.get_device_info(&first_id).await.unwrap();
+        let second_info = dm.read().await.get_device_info(&second_id).await.unwrap();
+        match (first_info, second_info) {
+            (DeviceType::Network(first), DeviceType::Network(second)) => {
+                assert_ne!(
+                    first.config.guest_mac.unwrap().0,
+                    second.config.guest_mac.unwrap().0
+                );
+            }
+            _ => panic!("expected network devices"),
         }
     }
 }

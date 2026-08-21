@@ -25,6 +25,8 @@ use kata_types::{
     annotations::Annotation,
     build_path,
     config::{default::DEFAULT_GUEST_DNS_FILE, hypervisor::RootlessUser, Hypervisor, TomlConfig},
+    container::ContainerType,
+    k8s,
     mount::SHM_DEVICE,
     rootless::{is_rootless, rootless_dir, set_rootless},
 };
@@ -86,6 +88,23 @@ fn effective_log_level(enable_debug: bool, log_level: &str) -> &str {
         "debug"
     } else {
         log_level
+    }
+}
+
+fn task_sandbox_target(
+    container_type: ContainerType,
+    container_id: &str,
+    annotated_sandbox_id: Option<String>,
+    manager_id: &str,
+) -> (String, bool) {
+    match container_type {
+        ContainerType::PodContainer => (
+            annotated_sandbox_id.unwrap_or_else(|| manager_id.to_string()),
+            false,
+        ),
+        ContainerType::PodSandbox | ContainerType::SingleContainer => {
+            (container_id.to_string(), true)
+        }
     }
 }
 
@@ -361,12 +380,13 @@ impl RuntimeHandlerManager {
         spec: &mut oci::Spec,
         state: &spec::State,
         options: &Option<Vec<u8>>,
+        sandbox_id: &str,
+        register_sandbox: bool,
     ) -> Result<()> {
         let mut inner: tokio::sync::RwLockWriteGuard<'_, RuntimeHandlerManagerInner> =
             self.inner.write().await;
 
-        // return if runtime instance has init
-        if inner.runtime_instance.is_some() {
+        if inner.runtime_instance.is_some() && !register_sandbox {
             return Ok(());
         }
 
@@ -439,7 +459,7 @@ impl RuntimeHandlerManager {
         let shm_size = get_shm_size(spec)?;
 
         let sandbox_config = SandboxConfig {
-            sandbox_id: inner.id.clone(),
+            sandbox_id: sandbox_id.to_string(),
             dns,
             hostname: spec.hostname().clone().unwrap_or_default(),
             network_env,
@@ -448,6 +468,11 @@ impl RuntimeHandlerManager {
             state: state.clone(),
             shm_size,
         };
+
+        if let Some(instance) = inner.get_runtime_instance() {
+            drop(inner);
+            return instance.sandbox.add_sandbox(sandbox_config).await;
+        }
 
         inner.try_init(sandbox_config, Some(spec), options).await
     }
@@ -502,21 +527,29 @@ impl RuntimeHandlerManager {
                 annotations: spec.annotations().clone().unwrap_or_default(),
             };
 
-            self.task_init_runtime_instance(&mut spec, &state, &container_config.options)
-                .await
-                .context("try init runtime instance")?;
+            let manager_id = self.inner.read().await.id.clone();
+            let (container_type, annotated_sandbox_id) = k8s::container_type_with_id(&spec);
+            let (sandbox_id, register_sandbox) = task_sandbox_target(
+                container_type,
+                &container_config.container_id,
+                annotated_sandbox_id,
+                &manager_id,
+            );
+
+            self.task_init_runtime_instance(
+                &mut spec,
+                &state,
+                &container_config.options,
+                &sandbox_id,
+                register_sandbox,
+            )
+            .await
+            .context("try init runtime instance")?;
             let instance = self
                 .get_runtime_instance()
                 .await
                 .context("get runtime instance")?;
 
-            let manager_id = self.inner.read().await.id.clone();
-            let sandbox_id = spec
-                .annotations()
-                .as_ref()
-                .and_then(|annotations| annotations.get("io.kubernetes.cri.sandbox-id"))
-                .cloned()
-                .unwrap_or(manager_id);
             instance
                 .sandbox
                 .start(&sandbox_id)
@@ -1022,6 +1055,32 @@ mod tests {
     use super::*;
     use common::types::ShutdownRequest;
     use tokio::sync::mpsc::channel;
+
+    #[test]
+    fn test_task_sandbox_target() {
+        assert_eq!(
+            task_sandbox_target(ContainerType::PodSandbox, "sandbox-2", None, "sandbox-1"),
+            ("sandbox-2".to_string(), true)
+        );
+        assert_eq!(
+            task_sandbox_target(
+                ContainerType::PodContainer,
+                "container-2",
+                Some("sandbox-2".to_string()),
+                "sandbox-1",
+            ),
+            ("sandbox-2".to_string(), false)
+        );
+        assert_eq!(
+            task_sandbox_target(
+                ContainerType::PodContainer,
+                "container-1",
+                None,
+                "sandbox-1"
+            ),
+            ("sandbox-1".to_string(), false)
+        );
+    }
 
     // A ShutdownContainer RPC that arrives before any runtime instance was
     // created (e.g. after a failed CreateContainer) must still drive the shim
