@@ -702,7 +702,17 @@ install_image_nvidia_gpu() {
 	export ROOT_FREE_SPACE="${ROOT_FREE_SPACE:-512}"
 	local version
 	version=$(get_latest_nvidia_driver_version)
-	EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
+	local os_name
+	os_name=$(get_from_kata_deps ".assets.image.architecture.${ARCH}.nvidia-gpu.name")
+	if [[ "${os_name}" == "cbl-mariner" ]]; then
+		# Azure Linux: the in-rootfs nvidia_chroot.sh installs the NVIDIA
+		# userspace with tdnf (not apt) and uses curl to fetch the CUDA repo
+		# file; the chroot is entered via /bin/bash. None are guaranteed by the
+		# minimal kata-packages-uvm set, and 'apt' does not exist on azl.
+		EXTRA_PKGS="tdnf curl bash ${EXTRA_PKGS}"
+	else
+		EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
+	fi
 	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
 	install_image "nvidia-gpu"
 }
@@ -716,7 +726,13 @@ install_image_nvidia_gpu_confidential() {
 	export SKIP_DAX_HEADER="yes"
 	local version
 	version=$(get_latest_nvidia_driver_version)
-	EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
+	local os_name
+	os_name=$(get_from_kata_deps ".assets.image.architecture.${ARCH}.nvidia-gpu-confidential.name")
+	if [[ "${os_name}" == "cbl-mariner" ]]; then
+		EXTRA_PKGS="tdnf curl bash ${EXTRA_PKGS}"
+	else
+		EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
+	fi
 	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
 	install_image "nvidia-gpu-confidential"
 }
