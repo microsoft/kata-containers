@@ -986,9 +986,7 @@ impl ErofsMultiLayerRootfs {
 
     fn snapshot_directory(&self, destination: &Path) -> Result<PathBuf> {
         let mut components = Path::new(&self.container_id).components();
-        if !matches!(components.next(), Some(Component::Normal(_)))
-            || components.next().is_some()
-        {
+        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
             return Err(anyhow!(
                 "source container ID is not a clean path component: {}",
                 self.container_id
