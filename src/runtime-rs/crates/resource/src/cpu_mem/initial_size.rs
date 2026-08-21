@@ -25,8 +25,8 @@ struct InitialSize {
 
 const MIB: i64 = 1024 * 1024;
 const POD_SET_UID_ANNOTATION: &str = "io.podset/pod_set_uid";
-const POD_SET_CPU_LIMIT_ANNOTATION: &str = "io.podset/group_limits_cpu";
-const POD_SET_MEMORY_LIMIT_ANNOTATION: &str = "io.podset/group_limits_memory";
+const POD_SET_CPU_LIMIT_ANNOTATION: &str = "io.podset/set_limits_cpu";
+const POD_SET_MEMORY_LIMIT_ANNOTATION: &str = "io.podset/set_limits_memory";
 
 // generate initial resource(vcpu and memory in MiB) from annotations
 impl TryFrom<&HashMap<String, String>> for InitialSize {
