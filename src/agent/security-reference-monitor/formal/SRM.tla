@@ -88,9 +88,17 @@ States == {"none", "prepared", "executed", "committed"}
 (*   rollback-failed          rollback_policy_state (rpc.rs)               *)
 (*   no-snapshot              rollback_policy_state (rpc.rs)               *)
 (*   abort-failed             abort_or_quarantine   (rpc.rs)               *)
+(*   occurrence-diverged      do_create_container   (rpc.rs, strict-policy)*)
+(*                                                                         *)
+(* This list is checked against the implementation by                      *)
+(* `quarantine_causes_match_the_formal_model` in lib.rs: every production  *)
+(* `quarantine()` call site must map to a member of `Causes` and vice      *)
+(* versa. The sixth cause was added by the agent without being added here, *)
+(* which is the drift that test now prevents.                              *)
 (***************************************************************************)
 Causes == {"none", "commit-failed", "abandoned-after-execute",
-           "rollback-failed", "no-snapshot", "abort-failed"}
+           "rollback-failed", "no-snapshot", "abort-failed",
+           "occurrence-diverged"}
 
 VARIABLES
     state,        \* state[o]     : the lifecycle state of operation o
@@ -326,6 +334,17 @@ SnapshotMissing ==
     /\ Poison("no-snapshot")
     /\ UNCHANGED <<state, authorized, presented, teardown, version, commits>>
 
+(* FR-9: under `strict-policy`, `do_create_container` records the container's
+   occurrence after the transaction has committed. If the occurrence registry
+   refuses the record, the monitor's transaction log and the registry disagree
+   about which containers exist, and neither can be believed. Like the two
+   rollback faults this is not scoped to an operation id -- the divergence is
+   between two whole-sandbox registries, not within one transaction -- so it
+   takes no argument. *)
+OccurrenceDiverged ==
+    /\ Poison("occurrence-diverged")
+    /\ UNCHANGED <<state, authorized, presented, teardown, version, commits>>
+
 Next ==
     \/ \E o \in Ops, d \in Digests, td \in BOOLEAN : Prepare(o, d, td)
     \/ \E o \in Ops, d \in Digests : Execute(o, d)
@@ -338,6 +357,7 @@ Next ==
     \/ \E o \in Ops : AbandonExecuted(o)
     \/ RollbackFailed
     \/ SnapshotMissing
+    \/ OccurrenceDiverged
 
 Spec == Init /\ [][Next]_vars
 
@@ -370,7 +390,7 @@ CommittedIsPlanBound ==
 
 (* Every quarantine has a cause, and a cause implies a quarantine. There is
    no unconditional fail-closed action: the model can only quarantine
-   through one of the five call sites enumerated in `Causes`. *)
+   through one of the six call sites enumerated in `Causes`. *)
 QuarantineHasCause == quarantined <=> (qcause # "none")
 
 (* A monitor whose recorded version no longer matches reality is always
