@@ -410,6 +410,15 @@ impl ContainerManager for VirtContainerManager {
         Ok(())
     }
 
+    async fn container_ids(&self) -> Vec<ContainerID> {
+        self.containers
+            .read()
+            .await
+            .keys()
+            .filter_map(|id| ContainerID::new(id).ok())
+            .collect()
+    }
+
     #[instrument]
     async fn resize_process_pty(&self, req: &ResizePTYRequest) -> Result<()> {
         let containers = self.containers.read().await;
