@@ -1,0 +1,82 @@
+name: Formal model check (SRM)
+
+# FR-15: the security reference monitor's TLA+ model is part of the assurance
+# argument, so it is gated like code rather than run by hand. Path-filtered
+# because it only ever needs to run when the model, its harness, or the Rust it
+# describes changes -- the drift lint reads lib.rs and rpc.rs, so a change to
+# either can invalidate the model without touching `formal/`.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+    paths:
+      - "src/agent/security-reference-monitor/**"
+      - ".github/workflows/formal-check.yaml"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  formal-check:
+    name: TLC + mutation + drift
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Java
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # tla2tools.jar is pinned by content in run-tlc.sh, so the cache key can
+      # be the digest itself: a cache entry that does not match the pin can
+      # never be served, and changing the pin changes the key.
+      - name: Resolve the pinned tla2tools digest
+        id: tla
+        run: |
+          sha=$(sed -n 's/^TLA2TOOLS_SHA256=//p' \
+            src/agent/security-reference-monitor/formal/run-tlc.sh)
+          test -n "${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache tla2tools.jar
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: src/agent/security-reference-monitor/formal/tla2tools.jar
+          key: tla2tools-${{ steps.tla.outputs.sha }}
+
+      # Steps 1 and 2 of the aggregate check: model + mutation. Split from the
+      # drift lint so that a failure names which obligation broke without
+      # waiting for the agent's dependencies to install.
+      - name: Model check and mutation test
+        run: ./check-all.sh --model
+        working-directory: src/agent/security-reference-monitor/formal
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install protobuf-compiler clang libdevmapper-dev
+
+      - name: Setup rust
+        run: |
+          ./tests/install_rust.sh
+          echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
+
+      # Step 3: the model still describes the code.
+      - name: Model-drift lint
+        run: ./check-all.sh --drift
+        working-directory: src/agent/security-reference-monitor/formal
+        env:
+          RUST_BACKTRACE: "1"
