@@ -791,7 +791,8 @@ function kata_deploy_failure_verdict() {
 		matched=1
 	fi
 
-	if sudo grep -qiE 'dmverity|dm-verity' "${journal}" "${configdump}" "${podlog}" 2>/dev/null; then
+	if sudo grep -qiE 'invalid dmverity_mode|dmverity_mode is .on. but|dm-verity support check failed|dm-verity is not supported|EROFS_DMVERITY requires' \
+		"${journal}" "${configdump}" "${podlog}" 2>/dev/null; then
 		echo "SUSPECT 5474f95e04 / 94f673a615 (dm-verity keys written on every path)"
 		echo "  -> dmverity_mode/enable_dmverity are written even with erofsDmverity=false."
 		matched=1
