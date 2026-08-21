@@ -665,6 +665,146 @@ function delete_test_runners(){
 	done
 }
 
+# Dump the node-level CRI state. kata-deploy rewrites the CRI configuration and
+# restarts the container runtime as part of its install, so whenever the install
+# never reaches Ready the failure is frequently on the node (runtime refused to
+# start with the freshly written config) rather than inside the pod - and in
+# that case `kubectl logs` cannot return the pod logs either.
+#
+# Directory used to stash the pre-deploy node state so the post-failure dump can
+# diff against it.
+KATA_DEPLOY_DIAG_DIR="${KATA_DEPLOY_DIAG_DIR:-/tmp/kata-deploy-diag}"
+
+# Mirrors what kata-deploy's erofs host check inspects, so a host-check failure
+# can be told apart from a containerd failure. Called before the deploy and
+# again on failure, because the erofs module is normally only auto-loaded at the
+# first erofs mount - i.e. after the check has already run.
+function dump_erofs_host_state() {
+	echo "::group::EROFS host prerequisites (${1:-state})"
+	echo "--- loaded modules ---"
+	lsmod | grep -E '^(erofs|dm_mod|dm_verity)' || echo "erofs/dm modules not loaded"
+	echo "--- kernel config ---"
+	grep -E '^CONFIG_(EROFS_FS|BLK_DEV_DM|DM_VERITY|FS_VERITY)=' "/boot/config-$(uname -r)" 2>/dev/null \
+		|| echo "no /boot/config-$(uname -r)"
+	echo "--- /proc/config.gz readable? ---"
+	sudo test -r /proc/config.gz && echo yes || echo no
+	echo "--- erofs-utils ---"
+	mkfs.erofs --version 2>&1 | head -3 || echo "mkfs.erofs missing"
+	echo "::endgroup::"
+}
+
+# Record the node state right before kata-deploy is installed, so the failure
+# dump can show exactly what kata-deploy changed (and when).
+function snapshot_node_cri_state() {
+	sudo mkdir -p "${KATA_DEPLOY_DIAG_DIR}" || true
+	date -u '+%Y-%m-%d %H:%M:%S' | sudo tee "${KATA_DEPLOY_DIAG_DIR}/deploy-start" >/dev/null || true
+	sudo cp /etc/containerd/config.toml "${KATA_DEPLOY_DIAG_DIR}/config.toml.pre" 2>/dev/null || true
+	dump_erofs_host_state "before kata-deploy"
+}
+
+function dump_node_cri_diagnostics() {
+	local diag="${KATA_DEPLOY_DIAG_DIR}"
+	local since
+	sudo mkdir -p "${diag}" || true
+	since="$(sudo cat "${diag}/deploy-start" 2>/dev/null)"
+	[[ -n "${since}" ]] || since="1 hour ago"
+
+	# kubelet writes container logs straight to the host filesystem, so these
+	# survive a dead/unresponsive containerd - unlike `kubectl logs`. This is
+	# the authoritative record of how far `kata-deploy install` got.
+	echo "::group::kata-deploy logs from the host (survives a dead CRI)"
+	sudo find /var/log/pods -maxdepth 3 -path '*kata-deploy*' -name '*.log' -print 2>/dev/null || true
+	sudo find /var/log/pods -maxdepth 3 -path '*kata-deploy*' -name '*.log' -exec cat {} + 2>/dev/null \
+		| sudo tee "${diag}/kata-deploy.podlog" || true
+	echo "::endgroup::"
+
+	echo "::group::containerd state and journal"
+	sudo systemctl is-active containerd || true
+	sudo systemctl status containerd --no-pager --full || true
+	sudo journalctl -u containerd --no-pager --since "${since}" \
+		2>/dev/null | sudo tee "${diag}/containerd.journal" || true
+	echo "::endgroup::"
+
+	echo "::group::containerd config validation"
+	# `containerd config dump` loads and validates the on-disk configuration.
+	# It is the fastest way to see a plugin the freshly written erofs config
+	# refers to but that cannot be initialised on this host.
+	sudo containerd config dump 2>&1 | sudo tee "${diag}/containerd-config-dump.txt" || true
+	echo "::endgroup::"
+
+	echo "::group::containerd config: what kata-deploy changed"
+	if [[ -f "${diag}/config.toml.pre" ]]; then
+		sudo diff -u "${diag}/config.toml.pre" /etc/containerd/config.toml || true
+	else
+		echo "no pre-deploy snapshot available"
+	fi
+	echo "--- /etc/containerd (current) ---"
+	sudo find /etc/containerd -maxdepth 2 -type f -print -exec cat {} \; || true
+	echo "::endgroup::"
+
+	echo "::group::kubelet and CRI"
+	sudo journalctl -u kubelet --no-pager --since "${since}" -n 200 || true
+	sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock version || true
+	sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock info || true
+	echo "::endgroup::"
+
+	dump_erofs_host_state "after failure"
+
+	kata_deploy_failure_verdict
+}
+
+# Map the collected evidence onto the commits that introduced each failure mode,
+# so a CI run says which change to revert instead of leaving it to inspection.
+function kata_deploy_failure_verdict() {
+	local diag="${KATA_DEPLOY_DIAG_DIR}"
+	local podlog="${diag}/kata-deploy.podlog"
+	local journal="${diag}/containerd.journal"
+	local configdump="${diag}/containerd-config-dump.txt"
+	local matched=0
+
+	echo "::group::kata-deploy failure verdict (suspect commits)"
+
+	if ! sudo systemctl is-active --quiet containerd; then
+		echo "MATCH: containerd is not active after kata-deploy restarted it."
+		matched=1
+	fi
+
+	if sudo grep -qE 'snapshotter "erofs" not found|failed to get instance for diff plugin|io\.containerd\.transfer\.v1\.local|unpack_config|no matching diff plugins' \
+		"${journal}" "${configdump}" 2>/dev/null; then
+		echo "SUSPECT d607cced71 'EROFS verity: declare the block size, pin the differ, fail closed (RM-47/48/50)'"
+		echo "  -> it writes unpack_config/use_local_image_pull; a non-optional unpack entry"
+		echo "     naming an unavailable erofs snapshotter/differ makes containerd fail to start."
+		matched=1
+	fi
+
+	if sudo grep -qE 'Required host kernel feature|erofs-utils version .* is too old|mkfs.erofs. is not available|Could not parse erofs-utils version' \
+		"${podlog}" 2>/dev/null; then
+		echo "SUSPECT 980b5a2288 'kata-deploy: validate erofs prerequisites'"
+		echo "  -> the new host check rejects this node before anything is installed."
+		matched=1
+	fi
+
+	if sudo grep -qE 'Timed out after 300s waiting for node' "${podlog}" 2>/dev/null; then
+		echo "SUSPECT 5474f95e04 'kata-deploy: Configure containerd erofs for dm-verity integrity mode'"
+		echo "  -> it capped wait_till_node_is_ready at 300s, turning a node that never"
+		echo "     recovers after the CRI restart into a hard install failure."
+		matched=1
+	fi
+
+	if sudo grep -qiE 'dmverity|dm-verity' "${journal}" "${configdump}" "${podlog}" 2>/dev/null; then
+		echo "SUSPECT 5474f95e04 / 94f673a615 (dm-verity keys written on every path)"
+		echo "  -> dmverity_mode/enable_dmverity are written even with erofsDmverity=false."
+		matched=1
+	fi
+
+	if [[ ${matched} -eq 0 ]]; then
+		echo "No known signature matched - inspect the groups above."
+		echo "Reference: the erofs deploy delta vs msft-main is d607cced71, 980b5a2288,"
+		echo "5474f95e04 and 94f673a615 (all in tools/packaging/kata-deploy)."
+	fi
+	echo "::endgroup::"
+}
+
 function helm_helper() {
 	local max_tries
 	local interval
@@ -1076,6 +1216,9 @@ VERIFICATION_POD_EOF
 	# Ensure any potential leftover is cleaned up ... and this secret usually is not in case of previous failures
 	kubectl delete secret sh.helm.release.v1.kata-deploy.v1 -n kube-system || true
 
+	# Baseline the node before kata-deploy touches the CRI configuration.
+	snapshot_node_cri_state
+
 	max_tries=3
 	interval=10
 	i=0
@@ -1102,6 +1245,7 @@ VERIFICATION_POD_EOF
 	set -e # Re-enable immediate exit on failure
 	if [[ ${i} -ge ${max_tries} ]]; then
 		echo "ERROR: Failed to deploy kata-deploy after ${max_tries} tries"
+		dump_node_cri_diagnostics
 		return 1
 	fi
 
@@ -1128,6 +1272,7 @@ VERIFICATION_POD_EOF
 			kubectl -n kube-system get ds -l "name=${pod_label_name}" -o wide || true
 			kubectl -n kube-system describe ds -l "name=${pod_label_name}" || true
 			echo "::endgroup::"
+			dump_node_cri_diagnostics
 			return 1
 		fi
 		sleep 1
@@ -1140,6 +1285,11 @@ VERIFICATION_POD_EOF
 		kubectl -n kube-system logs -l "name=${pod_label_name}" --all-containers --previous --tail=-1 --timestamps 2>/dev/null || true
 		kubectl -n kube-system logs -l "name=${pod_label_name}" --all-containers --tail=-1 --timestamps 2>/dev/null || true
 		echo "::endgroup::"
+		# kubectl logs above returns "unable to retrieve container logs" whenever
+		# the node's CRI is unhealthy, which is exactly what a failed
+		# kata-deploy CRI reconfiguration + restart looks like. Dump the node
+		# side directly so the real error is not lost.
+		dump_node_cri_diagnostics
 		return 1
 	fi
 
