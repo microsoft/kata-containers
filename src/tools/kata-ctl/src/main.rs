@@ -32,6 +32,7 @@ use ops::check_ops::{
 use ops::env_ops::handle_env;
 use ops::exec_ops::handle_exec;
 use ops::factory_ops::handle_factory;
+use ops::snapshot_ops::handle_snapshot;
 use ops::volume_ops::handle_direct_volume;
 use slog::{error, o};
 
@@ -73,6 +74,7 @@ fn real_main() -> Result<()> {
             Commands::Iptables(args) => handle_iptables(args),
             Commands::Metrics(args) => handle_metrics(args),
             Commands::Monitor(args) => handle_monitor(args),
+            Commands::Snapshot(args) => handle_snapshot(args),
             Commands::Version => handle_version(),
             Commands::LogParser(args) => log_parser(args),
         }
