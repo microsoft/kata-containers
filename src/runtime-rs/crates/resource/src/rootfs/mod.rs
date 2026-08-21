@@ -6,6 +6,7 @@
 
 mod nydus_rootfs;
 mod share_fs_rootfs;
+pub mod snapshot;
 use agent::Storage;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -15,9 +16,15 @@ mod erofs_rootfs;
 pub mod virtual_volume;
 
 use hypervisor::{device::device_manager::DeviceManager, Hypervisor};
+use serde::{Deserialize, Serialize};
 use virtual_volume::{is_kata_virtual_volume, VirtualVolume};
 
-use std::{collections::HashMap, sync::Arc, vec::Vec};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+    vec::Vec,
+};
 use tokio::sync::RwLock;
 
 use self::{
@@ -32,6 +39,22 @@ const ROOTFS: &str = "rootfs";
 pub const HYBRID_ROOTFS_LOWER_DIR: &str = "rootfs_lower";
 const TYPE_OVERLAY_FS: &str = "overlay";
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SnapshotDiskPath {
+    pub live_path: PathBuf,
+    pub snapshot_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RootfsSnapshotArtifacts {
+    pub cri_name: String,
+    pub source_host_id: String,
+    pub snapshot_guest_id: String,
+    pub readonly_disk: SnapshotDiskPath,
+    pub writable_disk: Option<SnapshotDiskPath>,
+    pub files: Vec<PathBuf>,
+}
+
 #[async_trait]
 pub trait Rootfs: Send + Sync {
     async fn get_guest_rootfs_path(&self) -> Result<String>;
@@ -39,6 +62,16 @@ pub trait Rootfs: Send + Sync {
     async fn get_storage(&self) -> Option<Vec<Storage>>;
     async fn cleanup(&self, device_manager: &RwLock<DeviceManager>) -> Result<()>;
     async fn get_device_id(&self) -> Result<Option<String>>;
+    async fn snapshot_host_id(&self) -> Option<String> {
+        None
+    }
+    async fn snapshot_artifacts(
+        &self,
+        _staging: &std::path::Path,
+        _final_destination: &std::path::Path,
+    ) -> Result<Option<RootfsSnapshotArtifacts>> {
+        Ok(None)
+    }
 }
 
 #[derive(Default)]
@@ -76,6 +109,7 @@ impl RootFsResource {
         bundle_path: &str,
         rootfs_mounts: &[Mount],
         annotations: &HashMap<String, String>,
+        cri_name: &str,
     ) -> Result<Arc<dyn Rootfs>> {
         match rootfs_mounts {
             // if rootfs_mounts is empty
@@ -103,10 +137,16 @@ impl RootFsResource {
                     rootfs_mounts.len()
                 );
 
-                let multi_layer =
-                    ErofsMultiLayerRootfs::new(device_manager, sid, cid, rootfs_mounts, share_fs)
-                        .await
-                        .context("new multi-layer erofs rootfs")?;
+                let multi_layer = ErofsMultiLayerRootfs::new(
+                    device_manager,
+                    sid,
+                    cid,
+                    cri_name,
+                    rootfs_mounts,
+                    share_fs,
+                )
+                .await
+                .context("new multi-layer erofs rootfs")?;
 
                 let ret = Arc::new(multi_layer);
                 let mut inner = self.inner.write().await;
@@ -192,6 +232,37 @@ impl RootFsResource {
             );
         }
     }
+
+    pub async fn snapshot_artifacts(
+        &self,
+        staging: &std::path::Path,
+        final_destination: &std::path::Path,
+        active_host_ids: &HashSet<String>,
+    ) -> Result<Vec<RootfsSnapshotArtifacts>> {
+        let inner = self.inner.read().await;
+        let mut artifacts = Vec::new();
+        let mut names = std::collections::HashSet::new();
+        for rootfs in &inner.rootfs {
+            if let Some(host_id) = rootfs.snapshot_host_id().await {
+                if !active_host_ids.contains(&host_id) {
+                    continue;
+                }
+            }
+            if let Some(snapshot) = rootfs
+                .snapshot_artifacts(staging, final_destination)
+                .await?
+            {
+                if !names.insert(snapshot.cri_name.clone()) {
+                    return Err(anyhow!(
+                        "duplicate CRI container name in snapshot: {}",
+                        snapshot.cri_name
+                    ));
+                }
+                artifacts.push(snapshot);
+            }
+        }
+        Ok(artifacts)
+    }
 }
 
 fn is_single_layer_rootfs(rootfs_mounts: &[Mount]) -> bool {
@@ -203,4 +274,105 @@ pub fn is_guest_pull_volume(
     m: &kata_types::mount::Mount,
 ) -> bool {
     share_fs.is_none() && is_kata_virtual_volume(m)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    struct TestRootfs {
+        host_id: Option<String>,
+        snapshot: Option<RootfsSnapshotArtifacts>,
+    }
+
+    #[async_trait]
+    impl Rootfs for TestRootfs {
+        async fn get_guest_rootfs_path(&self) -> Result<String> {
+            Ok("/rootfs".to_string())
+        }
+
+        async fn get_rootfs_mount(&self) -> Result<Vec<oci::Mount>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_storage(&self) -> Option<Vec<Storage>> {
+            None
+        }
+
+        async fn cleanup(&self, _device_manager: &RwLock<DeviceManager>) -> Result<()> {
+            Ok(())
+        }
+
+        async fn get_device_id(&self) -> Result<Option<String>> {
+            Ok(None)
+        }
+
+        async fn snapshot_host_id(&self) -> Option<String> {
+            self.host_id.clone()
+        }
+
+        async fn snapshot_artifacts(
+            &self,
+            _staging: &Path,
+            _final_destination: &Path,
+        ) -> Result<Option<RootfsSnapshotArtifacts>> {
+            Ok(self.snapshot.clone())
+        }
+    }
+
+    fn snapshot_artifact(name: &str, host_id: &str) -> RootfsSnapshotArtifacts {
+        RootfsSnapshotArtifacts {
+            cri_name: name.to_string(),
+            source_host_id: host_id.to_string(),
+            snapshot_guest_id: format!("guest-{host_id}"),
+            readonly_disk: SnapshotDiskPath {
+                live_path: PathBuf::from(format!("/live/{host_id}.img")),
+                snapshot_path: PathBuf::from(format!("/snapshot/{host_id}.img")),
+            },
+            writable_disk: None,
+            files: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn snapshot_artifacts_skips_inactive_host_ids() {
+        let resource = RootFsResource {
+            inner: Arc::new(RwLock::new(RootFsResourceInner {
+                rootfs: vec![
+                    Arc::new(TestRootfs {
+                        host_id: Some("active".to_string()),
+                        snapshot: Some(snapshot_artifact("active-cri", "active")),
+                    }),
+                    Arc::new(TestRootfs {
+                        host_id: Some("inactive".to_string()),
+                        snapshot: Some(snapshot_artifact("inactive-cri", "inactive")),
+                    }),
+                    Arc::new(TestRootfs {
+                        host_id: None,
+                        snapshot: Some(snapshot_artifact("anonymous-cri", "anonymous")),
+                    }),
+                ],
+            })),
+        };
+        let active_host_ids = HashSet::from(["active".to_string()]);
+
+        let artifacts = resource
+            .snapshot_artifacts(
+                Path::new("/tmp/staging"),
+                Path::new("/tmp/final"),
+                &active_host_ids,
+            )
+            .await
+            .unwrap();
+
+        let names = artifacts
+            .into_iter()
+            .map(|artifact| artifact.cri_name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec!["active-cri".to_string(), "anonymous-cri".to_string()]
+        );
+    }
 }

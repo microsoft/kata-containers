@@ -11,12 +11,13 @@ use anyhow::Result;
 use async_trait::async_trait;
 use kata_types::config::TomlConfig;
 use resource::cpu_mem::initial_size::InitialSizeManager;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, RwLock};
 
 #[derive(Clone)]
 pub struct RuntimeInstance {
     pub sandbox: Arc<dyn Sandbox>,
     pub container_manager: Arc<dyn ContainerManager>,
+    pub operation_lock: Arc<RwLock<()>>,
 }
 
 #[async_trait]

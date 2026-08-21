@@ -14,7 +14,7 @@
 use std::{fs, path::Path, sync::Arc};
 
 use anyhow::{Context, Result};
-use common::Sandbox;
+use common::RuntimeInstance;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
@@ -29,12 +29,12 @@ pub struct MgmtServer {
     pub s_addr: String,
 
     /// The sandbox instance
-    pub sandbox: Arc<dyn Sandbox>,
+    pub instance: Arc<RuntimeInstance>,
 }
 
 impl MgmtServer {
     /// construct a new management server
-    pub fn new(sid: &str, sandbox: Arc<dyn Sandbox>) -> Result<Self> {
+    pub fn new(sid: &str, instance: Arc<RuntimeInstance>) -> Result<Self> {
         // make sure the storage path exists, and the socket file will be created in that path
         let kata_path = sb_storage_path();
         fs::create_dir_all(kata_path)
@@ -42,7 +42,7 @@ impl MgmtServer {
 
         let s_addr = format!("unix://{kata_path}/{sid}/{SHIM_MGMT_SOCK_NAME}");
 
-        Ok(Self { s_addr, sandbox })
+        Ok(Self { s_addr, instance })
     }
 
     // TODO(when metrics is supported): write metric addresses to fs
@@ -61,7 +61,7 @@ impl MgmtServer {
                 if let Err(err) = http1::Builder::new()
                     .serve_connection(
                         io,
-                        service_fn(|request| handler_mux(me.sandbox.clone(), request)),
+                        service_fn(|request| handler_mux(me.instance.clone(), request)),
                     )
                     .await
                 {
