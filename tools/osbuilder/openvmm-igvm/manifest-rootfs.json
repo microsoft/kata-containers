@@ -1,0 +1,74 @@
+{
+  "guest_arch": "x64",
+  "guest_configs": [
+    {
+      "guest_svn": 1,
+      "max_vtl": 0,
+      "isolation_type": {
+        "snp": {
+          "shared_gpa_boundary_bits": null,
+          "policy": 196608,
+          "enable_debug": true,
+          "injection_type": "restricted",
+          "secure_avic": "disabled"
+        }
+      },
+      "image": {
+        "snp_linux_direct": {
+          "linux": {
+            "use_initrd": false,
+            "command_line": "root=/dev/vda1 ro rootfstype=ext4 panic=1 no_timer_check noreplace-smp systemd.unit=kata-containers.target systemd.mask=systemd-networkd.service systemd.mask=systemd-networkd.socket agent.enable_signature_verification=false console=ttyS0 systemd.log_target=console systemd.log_level=debug agent.log=debug agent.debug_console agent.debug_console_vport=1026"
+          },
+          "processor_topology": {
+            "proc_count": 1,
+            "vps_per_socket": 1,
+            "enable_smt": false,
+            "apic_id_offset": 0,
+            "x2apic": "supported"
+          },
+          "vm_layout": {
+            "node_mem_sizes": [
+              167772160
+            ],
+            "layout": {
+              "chipset_low_mmio_size": 134217728,
+              "chipset_high_mmio_size": 0,
+              "vtl2_chipset_mmio_size": 0
+            },
+            "pcie_root_complexes": [
+              {
+                "index": 0,
+                "name": "s0rc0",
+                "segment": 0,
+                "start_bus": 0,
+                "end_bus": 255,
+                "low_mmio": {
+                  "dynamic": {
+                    "size": 67108864
+                  }
+                },
+                "high_mmio": {
+                  "dynamic": {
+                    "size": 1073741824
+                  }
+                },
+                "cxl": null,
+                "iommu": null,
+                "vnode": null,
+                "preserve_bars": false
+              }
+            ],
+            "virtio_mmio_count": 0,
+            "pcie_ecam_below_4gb": true,
+            "vtl2_layout": null,
+            "ram_start_address": 0,
+            "vtl2_framebuffer_size": 0,
+            "physical_address_size": 48
+          },
+          "boot_layout": "aci_hyperv",
+          "c_bit_position": 51
+        }
+      }
+    }
+  ]
+}
