@@ -85,7 +85,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
-const POD_SET_UID_ANNOTATION: &str = "io.podset/pod_set_uid";
+const POD_SET_UID_ANNOTATION: &str = "io.podset/set_uid";
 
 pub(crate) struct SandboxMembers {
     pod_set_uid: Option<String>,

@@ -18,7 +18,7 @@ const SOCKET_ROOT: &str = "/run/containerd";
 const POD_SET_ROOT: &str = "/run/kata-containers/podsets";
 const SHIM_PID_FILE: &str = "shim.pid";
 
-pub(crate) const POD_SET_UID_ANNOTATION: &str = "io.podset/pod_set_uid";
+pub(crate) const POD_SET_UID_ANNOTATION: &str = "io.podset/set_uid";
 
 pub(crate) const ENV_KATA_RUNTIME_BIND_FD: &str = "KATA_RUNTIME_BIND_FD";
 
