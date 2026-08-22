@@ -715,6 +715,8 @@ impl RuntimeHandlerManager {
                 ContainerProcess::new(&container_id, "").context("create container process")?;
             let pid = shim_pid.pid;
             drop(_operation);
+            // The init process gets exactly one TaskExit publisher, registered
+            // here. StartProcess must not register a second init waiter.
             tokio::spawn(async move {
                 let result = sandbox
                     .wait_process(container_manager, process_id, pid)
@@ -766,6 +768,10 @@ impl RuntimeHandlerManager {
                 .get_runtime_instance()
                 .await
                 .context("get runtime instance")?;
+            // Ordinary mutations share the read side; snapshot creation owns
+            // the write side. Calls that skip this gate join the agent
+            // generation barrier only when correctness requires them to remain
+            // logically pending across a snapshot.
             let mutates = matches!(
                 &req,
                 TaskRequest::CloseProcessIO(_)

@@ -469,6 +469,12 @@ mod tests {
         async fn disconnect(&self) -> Result<()> {
             unimplemented!()
         }
+        async fn prepare_disconnect(&self) -> Result<agent::AgentDisconnectToken> {
+            unimplemented!()
+        }
+        async fn reconnect(&self, _address: &str, _token: agent::AgentDisconnectToken) -> Result<()> {
+            unimplemented!()
+        }
         async fn agent_sock(&self) -> Result<String> {
             unimplemented!()
         }
