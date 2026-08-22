@@ -77,13 +77,25 @@ ok "handler '${HANDLER}' is registered in containerd"
 # stage 00d makes is true of an image that never boots, the cc_init_data
 # annotation is silently dropped, and stage 05 reports "exec succeeded" with no
 # hint that it exercised the wrong stack. Tie the handler back to the payload.
-HANDLER_CFG=$(aks_handler_config_path "${HANDLER}" "${CTRD_DUMP}")
-[[ -n "${HANDLER_CFG}" ]] \
-  || warn "handler '${HANDLER}' declares no ConfigPath — cannot confirm which stack it runs"
-if [[ -n "${HANDLER_CFG}" ]]; then
-  log "handler '${HANDLER}' ConfigPath: ${HANDLER_CFG}"
-  [[ "${HANDLER_CFG}" = "${E2E_KATA_PREFIX}"/* ]] \
-    || die "RuntimeClass ${E2E_RUNTIMECLASS} runs the WRONG kata stack
+HANDLER_CFG="${E2E_HANDLER_CONFIG:-$(aks_handler_config_path "${HANDLER}" "${CTRD_DUMP}")}"
+# No ConfigPath means the shim falls back to a built-in default we would have to
+# guess at, and guessing is exactly what this stage exists not to do: the whole
+# point of 00c is to prove which of the node's kata stacks the RuntimeClass
+# reaches. Refuse rather than continue — a skipped binding check would let 00d
+# certify /opt/confidential-containers while pods boot something else entirely.
+[[ -n "${HANDLER_CFG}" ]] || die "handler '${HANDLER}' declares no ConfigPath
+
+Without it there is no way to tell which kata stack ${E2E_RUNTIMECLASS} actually
+runs, so no assertion this stage makes about ${E2E_KATA_PREFIX} would be about the
+image your pods boot. Set E2E_HANDLER_CONFIG to the configuration.toml this
+handler resolves to if you know it.
+
+  handlers on this node:
+$(aks_handler_table "${CTRD_DUMP}")"
+
+log "handler '${HANDLER}' ConfigPath: ${HANDLER_CFG}"
+[[ "${HANDLER_CFG}" = "${E2E_KATA_PREFIX}"/* ]] \
+  || die "RuntimeClass ${E2E_RUNTIMECLASS} runs the WRONG kata stack
 
   handler          ${HANDLER}
   its ConfigPath   ${HANDLER_CFG}
@@ -98,18 +110,29 @@ is under ${E2E_KATA_PREFIX} and re-run.
 
   handlers on this node:
 $(aks_handler_table "${CTRD_DUMP}")"
-  ok "handler '${HANDLER}' runs the payload under ${E2E_KATA_PREFIX}"
+ok "handler '${HANDLER}' runs the payload under ${E2E_KATA_PREFIX}"
 
-  ANN=$(aks_node_exec "grep -h '^enable_annotations' /host${HANDLER_CFG} 2>/dev/null" || true)
-  if [[ -n "${ANN}" ]]; then
-    grep -q 'cc_init_data' <<<"${ANN}" \
-      || die "the config behind handler '${HANDLER}' does not allow the cc_init_data annotation
+# kata's default for enable_annotations is the empty list — every annotation
+# denied. So a config with no such line is not "unknown", it is "cc_init_data
+# will be dropped", and an unreadable one is not evidence of anything. Both have
+# to fail here; treating either as a pass reintroduces the silent-drop failure
+# this check exists to catch.
+aks_node_exec "test -r /host${HANDLER_CFG}" >/dev/null 2>&1 \
+  || die "cannot read ${HANDLER_CFG} on ${E2E_NODE}
+It is the config behind handler '${HANDLER}', and without it there is no way to
+confirm the cc_init_data annotation is allowed through."
+ANN=$(aks_node_exec "grep -h '^[[:space:]]*enable_annotations' /host${HANDLER_CFG} 2>/dev/null" || true)
+[[ -n "${ANN}" ]] || die "${HANDLER_CFG} sets no enable_annotations
+
+kata denies every annotation by default, so genpolicy's policy — which is
+delivered through the cc_init_data annotation — would be dropped without an
+error and every pod would run unmediated."
+grep -q 'cc_init_data' <<<"${ANN}" \
+  || die "the config behind handler '${HANDLER}' does not allow the cc_init_data annotation
   ${ANN}
 genpolicy delivers the policy through that annotation, so the runtime would drop
 it silently and every pod would run unmediated."
-    ok "cc_init_data is in the handler's enable_annotations allowlist"
-  fi
-fi
+ok "cc_init_data is in the handler's enable_annotations allowlist"
 
 step "00d — are the strict bits actually in the shipped image?"
 aks_assert_strict_image

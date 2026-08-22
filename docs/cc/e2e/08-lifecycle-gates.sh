@@ -146,6 +146,7 @@ metadata:
   namespace: ${NS}
 spec:
   runtimeClassName: ${E2E_RUNTIMECLASS}
+$(pod_pin)
   restartPolicy: Never
   securityContext:
     runAsUser: 0

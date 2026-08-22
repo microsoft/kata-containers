@@ -305,6 +305,20 @@ assert_local_guest_installed() {
   ok "testing guest built from $(cat "${E2E_STATE_DIR}/guest-image-commit" 2>/dev/null || echo unknown)"
 }
 
+# The `nodeName:` line that pins a workload to the node under test, or nothing
+# on the platforms where the cluster is single-node by construction.
+#
+# Every AKS manifest has to carry it, not just stage 05: the assertions there are
+# about one specific node's *image*, and a pod the scheduler placed elsewhere in
+# a multi-node pool would be measuring something this run has made no claim
+# about. Emitted through one helper so a new stage cannot quietly forget it.
+# Intended to sit on its own line inside a heredoc; expands to an empty line,
+# which YAML ignores, on other platforms.
+pod_pin() {
+  [[ "${E2E_PLATFORM}" = "aks" ]] || return 0
+  printf '  nodeName: %s' "${E2E_NODE}"
+}
+
 # Wait until a shell predicate succeeds.  wait_for <timeout-s> <desc> <cmd...>
 # Fatal on timeout. Use wait_for_soft when the caller needs to print diagnostics
 # before giving up — `if ! wait_for ...` never runs its else branch, because the
@@ -573,9 +587,10 @@ ensure_genpolicy_defaults() {
       #
       # Where containerd is asked from differs by platform: clh-snp runs the
       # suite on the node itself, aks reaches the node through the inspector
-      # pod. Two spellings of "sandbox image" have to be accepted either way —
-      # containerd 2.x puts it under the CRI runtime plugin as `sandbox = '...'`
-      # while 1.x (and crictl info) still say `sandbox_image = "..."`.
+      # pod. Three spellings of "sandbox image" have to be accepted either way —
+      # containerd 2.x puts it under the CRI runtime plugin as `sandbox = '...'`,
+      # 1.x writes `sandbox_image = "..."`, and the `crictl info` fallback emits
+      # JSON with the field camelCased as "sandboxImage".
       local sandbox_image declared_pause dump
       if [[ "${E2E_PLATFORM}" = "aks" ]]; then
         dump="$(aks_containerd_config_dump)"
@@ -586,6 +601,7 @@ ensure_genpolicy_defaults() {
         -e "s/^[[:space:]]*sandbox = '\(.*\)'[[:space:]]*$/\1/p" \
         -e 's/^[[:space:]]*sandbox_image[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' \
         -e 's/^[[:space:]]*"sandbox_image":[[:space:]]*"\([^"]*\)".*$/\1/p' \
+        -e 's/^[[:space:]]*"sandboxImage":[[:space:]]*"\([^"]*\)".*$/\1/p' \
         <<<"${dump}" | head -1)"
       if [[ -n "${sandbox_image}" ]]; then
         declared_pause="$(sed -n 's|.*"pause_container_image": "\([^"]*\)".*|\1|p' \

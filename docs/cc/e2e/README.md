@@ -224,6 +224,7 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | `E2E_REPO_DIR` | `~/kata-containers` | Checkout on the node. |
 | `E2E_STRICT_POLICY` | `yes` | Pulls in the security reference monitor. Set to `no` for a non-strict A/B leg — stage 04 asserts in whichever direction you ask for, so a non-strict build is verified too rather than silently accepted. Note that an operator `env.sh` must not `export` this unconditionally, or it will clobber a per-run override. |
 | `E2E_NIGHTLY_SHA` | *(required for stage 03)* | CI-nightly commit sha. |
+| `E2E_HANDLER_CONFIG` | *(auto)* | `aks` only. The `configuration.toml` the RuntimeClass's containerd handler resolves to. Stage 00c normally reads this from `ConfigPath`; set it when a handler declares none, because a handler whose config cannot be located cannot be tied to a payload and the stage refuses to guess. |
 | `E2E_REGISTRY` | `localhost:5000` | Registry for the policy fragment. Loopback starts a throwaway `registry:2`. Overridden when `E2E_ACR` resolves. |
 | `E2E_ACR` | *(empty)* | `auto` provisions/adopts an ACR so stage 07 exercises a real TLS pull; a name adopts that registry; empty stays on loopback, which now also works. |
 | `E2E_ACR_RG` / `_SKU` | `$E2E_RG` / `Standard` | Where and how `ensure_acr` creates the registry. Anonymous pull needs Standard or better; Basic rejects it. |
@@ -459,11 +460,20 @@ built to catch, both of which produce a *running pod* and no error anywhere:
 Two AKS-specific traps worth knowing. A RuntimeClass carries
 `scheduling.nodeSelector`, which the API server copies onto every pod using it;
 if the node lacks those labels the pod is rejected by kubelet with an opaque
-`Predicate NodeAffinity failed`, so 00a skips any kata RuntimeClass the node
-cannot satisfy. And on AKS those labels are system-managed —
+`Predicate NodeAffinity failed`, so 00a checks this for the class it is about to
+use — whether that class was discovered or supplied through `E2E_RUNTIMECLASS`.
+And on AKS those labels are system-managed —
 `aks-node-validating-webhook` refuses to let you add them by hand, so if the
 provisioned RuntimeClass is unusable the way forward is a new RuntimeClass with no
 nodeSelector over the correct handler.
+
+Every AKS pod is pinned to the adopted node with `nodeName`, through the shared
+`pod_pin` helper in `lib.sh` rather than per-stage, because the assertions are
+about one node's image and a multi-node pool would otherwise let the scheduler
+measure something this run made no claim about. For the same reason `run-all.sh`
+narrows its stage list by platform *before* matching arguments: `./run-all.sh 04`
+on AKS is refused rather than silently installing a second guest stack over the
+one under test.
 
 Building genpolicy needs `mkfs.erofs` >= 1.8 for `--mkfs-time`. Ubuntu 24.04
 ships 1.7.1, which fails with `unrecognized option '--mkfs-time'` partway

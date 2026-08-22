@@ -36,12 +36,6 @@ ensure_genpolicy_defaults
 
 kubectl get ns "${NS}" >/dev/null 2>&1 || kubectl create ns "${NS}"
 
-# On a prebuilt-image run the assertions are about one specific node's image, so
-# the pod must land on the node stage 00 inspected. On the other platforms the
-# cluster is single-node by construction and there is nothing to pin.
-POD_PIN=""
-[[ "${E2E_PLATFORM}" = "aks" ]] && POD_PIN="  nodeName: ${E2E_NODE}"
-
 # With PULL_TYPE=guest-pull genpolicy refuses images whose user/group would come
 # from the image layers, so the securityContext must be explicit at pod level.
 cat > "${WORK}/pod.yaml" <<EOF
@@ -52,7 +46,7 @@ metadata:
   namespace: ${NS}
 spec:
   runtimeClassName: ${E2E_RUNTIMECLASS}
-${POD_PIN}
+$(pod_pin)
   restartPolicy: Never
   securityContext:
     runAsUser: 0
