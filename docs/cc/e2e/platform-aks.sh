@@ -65,17 +65,17 @@ aks_discover() {
   AKS_NODE_IMAGE_VERSION="${nodeimg:-unknown}"
   export AKS_NODE_IMAGE_VERSION
 
+  # A RuntimeClass carries scheduling.nodeSelector, which the API server copies
+  # onto every pod that uses it. If the node under test does not satisfy that
+  # selector the pod is rejected by kubelet with an opaque "Predicate
+  # NodeAffinity failed" long before anything kata-related runs.
   if [[ -z "${E2E_RUNTIMECLASS_EXPLICIT:-}" ]]; then
     local rcs rc pick=""
     rcs=$(kubectl get runtimeclass -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
       2>/dev/null | grep -i kata || true)
     [[ -n "${rcs}" ]] || die "no kata RuntimeClass in this cluster — the node image is not wired up
 (kubectl get runtimeclass showed none matching /kata/)"
-    # A RuntimeClass carries scheduling.nodeSelector, which the API server copies
-    # onto every pod that uses it. If the node under test does not satisfy that
-    # selector the pod is rejected by kubelet with an opaque "Predicate
-    # NodeAffinity failed" long before anything kata-related runs — so pick a
-    # class the node can actually honour rather than the first one by name.
+    # Pick a class the node can actually honour rather than the first one by name.
     for rc in ${rcs}; do
       if aks_node_satisfies_runtimeclass "${rc}"; then pick="${rc}"; break; fi
       warn "RuntimeClass ${rc} requires labels ${E2E_NODE} does not have — skipping"
@@ -84,16 +84,33 @@ aks_discover() {
 (every kata RuntimeClass carries a scheduling.nodeSelector the node does not satisfy;
 on AKS those are system-managed labels that cannot be added by hand, so either the
 nodepool was not provisioned as a kata pool or the BYOI override suppressed the
-labelling. Create an unselectored RuntimeClass over the same handler to test anyway.)"
+labelling. Create a RuntimeClass with no nodeSelector over the same handler to
+test anyway.)"
     E2E_RUNTIMECLASS="${pick}"
     export E2E_RUNTIMECLASS
   fi
+
+  # Check the class whether it was discovered or supplied. An explicit choice is
+  # not a safer one: because AKS workloads are additionally pinned with nodeName,
+  # a selector the node cannot meet fails the pod outright, which is precisely
+  # the opaque failure this discovery code exists to prevent.
+  aks_node_satisfies_runtimeclass "${E2E_RUNTIMECLASS}" \
+    || die "RuntimeClass ${E2E_RUNTIMECLASS} cannot schedule onto ${E2E_NODE}
+
+  its nodeSelector  $(kubectl get runtimeclass "${E2E_RUNTIMECLASS}" -o jsonpath='{.scheduling.nodeSelector}' 2>/dev/null)
+
+The API server copies that selector onto every pod using the class, and because
+the node under test is pinned by name the pod cannot land anywhere else — kubelet
+rejects it with 'Predicate NodeAffinity failed' before any kata code runs. On AKS
+these labels are system-managed and cannot be added by hand; use a RuntimeClass
+with no nodeSelector over the same handler instead."
   ok "RuntimeClass under test: ${E2E_RUNTIMECLASS}"
 }
 
 # True when every scheduling.nodeSelector entry on the RuntimeClass is present
 # on the node under test with the same value.
-aks_node_satisfies_runtimeclass() {  local rc="$1" sel need k v
+aks_node_satisfies_runtimeclass() {
+  local rc="$1" sel need k v
   sel=$(kubectl get runtimeclass "${rc}" -o jsonpath='{.scheduling.nodeSelector}' 2>/dev/null)
   [[ -n "${sel}" && "${sel}" != "null" ]] || return 0
   need=$(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"${sel}" 2>/dev/null) || return 0

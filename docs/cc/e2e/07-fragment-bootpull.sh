@@ -255,6 +255,7 @@ metadata:
   namespace: ${NS}${frag_anno}
 spec:
   runtimeClassName: ${E2E_RUNTIMECLASS}
+$(pod_pin)
   restartPolicy: Never
   securityContext:
     runAsUser: 0
@@ -673,6 +674,7 @@ metadata:
   namespace: ${NS}${frag_anno}
 spec:
   runtimeClassName: ${E2E_RUNTIMECLASS}
+$(pod_pin)
   restartPolicy: Never
   securityContext:
     runAsUser: 0
