@@ -80,6 +80,9 @@ async fn snapshot_handler(
     let destination = PathBuf::from(destination);
     let snapshot_destination = destination.clone();
     let snapshot = tokio::spawn(async move {
+        // Snapshot is the exclusive writer; ordinary mutating task/sandbox
+        // requests hold the shared side. The spawned task also owns the
+        // transaction independently of HTTP client cancellation.
         let _operation = instance.operation_lock.write().await;
         instance
             .sandbox
