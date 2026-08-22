@@ -38,11 +38,32 @@ use crate::types::SetPolicyRequest;
 
 pub const AGENT_KATA: &str = "kata";
 
+/// Proof that a reconnect belongs to one planned disconnect generation.
+///
+/// The token is returned only after new agent work has been blocked and writes
+/// have drained. Keeping its generation private prevents an unrelated or stale
+/// reconnect from attaching to the wrong VM state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AgentDisconnectToken {
+    generation: u64,
+}
+
+impl AgentDisconnectToken {
+    pub fn generation(self) -> u64 {
+        self.generation
+    }
+}
+
 #[async_trait]
 pub trait AgentManager: Send + Sync {
     async fn start(&self, address: &str) -> Result<()>;
     async fn stop(&self);
+    /// Close the transport permanently unless `prepare_disconnect` was called.
     async fn disconnect(&self) -> Result<()>;
+    /// Enter a planned-disconnect generation and wait for non-replayable writes.
+    async fn prepare_disconnect(&self) -> Result<AgentDisconnectToken>;
+    /// Connect the next generation using the token from `prepare_disconnect`.
+    async fn reconnect(&self, address: &str, token: AgentDisconnectToken) -> Result<()>;
 
     async fn agent_sock(&self) -> Result<String>;
     async fn agent_config(&self) -> AgentConfig;
