@@ -5,6 +5,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # shellcheck source-path=SCRIPTDIR
+# shellcheck disable=SC2154  # E2E_* are defined by lib.sh, which sources this file;
+# it cannot be sourced back from here without a cycle.
 # platform-aks.sh — helpers for validating a *prebuilt* node image on AKS.
 #
 # The clh-snp platform builds the guest stack on the node (stage 04) and then
