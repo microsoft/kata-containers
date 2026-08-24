@@ -25,6 +25,7 @@ use kata_types::{
     annotations::Annotation,
     build_path,
     config::{default::DEFAULT_GUEST_DNS_FILE, hypervisor::RootlessUser, Hypervisor, TomlConfig},
+    k8s::container_type,
     mount::SHM_DEVICE,
     rootless::{is_rootless, rootless_dir, set_rootless},
 };
@@ -366,6 +367,19 @@ impl RuntimeHandlerManager {
         // return if runtime instance has init
         if inner.runtime_instance.is_some() {
             return Ok(());
+        }
+
+        if let Some(restore_from) = spec.annotations().as_ref().and_then(|annotations| {
+            annotations.get(kata_types::annotations::KATA_ANNO_RESTORE_FROM)
+        }) {
+            if restore_from.is_empty() {
+                return Err(anyhow!("restore-from annotation is empty"));
+            }
+            if !container_type(spec).is_pod_sandbox() {
+                return Err(anyhow!(
+                    "restore-from is supported only on pod sandbox tasks"
+                ));
+            }
         }
 
         let mut dns: Vec<String> = vec![];

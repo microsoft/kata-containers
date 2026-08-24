@@ -177,8 +177,8 @@ impl From<types::IPAddress> for IPAddress {
     fn from(src: types::IPAddress) -> Self {
         Self {
             family: src.family.unwrap().into(),
-            address: "".to_string(),
-            mask: "".to_string(),
+            address: src.address,
+            mask: src.mask,
         }
     }
 }
@@ -921,5 +921,26 @@ impl From<AddSwapPathRequest> for agent::AddSwapPathRequest {
             path: from.path,
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ip_address_round_trip_preserves_address_and_mask() {
+        let source = types::IPAddress {
+            family: protobuf::EnumOrUnknown::new(types::IPFamily::v4),
+            address: "10.0.0.2".to_string(),
+            mask: "24".to_string(),
+            ..Default::default()
+        };
+
+        let converted: IPAddress = source.into();
+
+        assert_eq!(converted.family, IPFamily::V4);
+        assert_eq!(converted.address, "10.0.0.2");
+        assert_eq!(converted.mask, "24");
     }
 }

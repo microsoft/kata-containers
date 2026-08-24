@@ -23,7 +23,7 @@ pub use vhost_user_endpoint::VhostUserEndpoint;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use hypervisor::Hypervisor;
+use hypervisor::{Hypervisor, NetworkConfig};
 
 use super::EndpointState;
 
@@ -34,6 +34,15 @@ pub trait Endpoint: std::fmt::Debug + Send + Sync {
     async fn attach(&self) -> Result<()>;
     async fn detach(&self, hypervisor: &dyn Hypervisor) -> Result<()>;
     async fn save(&self) -> Option<EndpointState>;
+    /// Return the target TAP configuration without attaching a second guest NIC
+    /// or enabling host traffic redirects.
+    async fn restore_network_config(&self) -> Result<Option<NetworkConfig>> {
+        Ok(None)
+    }
+    /// Enable host traffic only after restored guest identity is verified.
+    async fn activate_restore(&self) -> Result<()> {
+        anyhow::bail!("endpoint does not support fenced snapshot restore")
+    }
     /// Returns the guest PCI path for this endpoint if it is a cold-plugged
     /// physical (VFIO) device, e.g. `"05/00"`. Used to populate
     /// `Interface.device_path` in `update_interface` so the agent can do

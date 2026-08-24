@@ -28,8 +28,10 @@ use tokio::sync::{OnceCell, RwLock};
 use tracing::instrument;
 
 use kata_sys_util::{hooks::HookStates, netns::NetnsGuard};
+use kata_types::k8s::container_type;
 
 use crate::container_manager::is_termination_signal;
+use crate::restore::RestoreCoordinator;
 
 use super::{logger_with_process, Container};
 
@@ -41,6 +43,7 @@ pub struct VirtContainerManager {
     agent: Arc<dyn Agent>,
     hypervisor: Arc<dyn Hypervisor>,
     vmm_master_tid: OnceCell<u32>,
+    restore_coordinator: Arc<RestoreCoordinator>,
 }
 
 impl std::fmt::Debug for VirtContainerManager {
@@ -66,6 +69,7 @@ impl VirtContainerManager {
         agent: Arc<dyn Agent>,
         hypervisor: Arc<dyn Hypervisor>,
         resource_manager: Arc<ResourceManager>,
+        restore_coordinator: Arc<RestoreCoordinator>,
     ) -> Self {
         Self {
             sid: sid.to_string(),
@@ -75,6 +79,7 @@ impl VirtContainerManager {
             agent,
             hypervisor,
             vmm_master_tid: OnceCell::new(),
+            restore_coordinator,
         }
     }
 
@@ -91,6 +96,35 @@ impl ContainerManager for VirtContainerManager {
     #[instrument]
     async fn create_container(&self, config: ContainerConfig, spec: oci::Spec) -> Result<PID> {
         let vmm_master_tid = self.get_vmm_master_tid().await?;
+
+        if self
+            .restore_coordinator
+            .adopt_pause(&config.container_id, container_type(&spec).is_pod_sandbox())
+            .await?
+        {
+            if spec.hooks().is_some() {
+                return Err(anyhow!(
+                    "OCI hooks are not supported for restored pause tasks"
+                ));
+            }
+            let container = Container::new(
+                vmm_master_tid,
+                config.clone(),
+                spec,
+                self.agent.clone(),
+                self.resource_manager.clone(),
+                self.hypervisor.get_passfd_listener_addr().await.ok(),
+            )
+            .await
+            .context("adopt restored pause container")?;
+            self.containers
+                .write()
+                .await
+                .insert(config.container_id, container);
+            return Ok(PID {
+                pid: vmm_master_tid,
+            });
+        }
 
         let mut container = Container::new(
             vmm_master_tid,
@@ -232,6 +266,17 @@ impl ContainerManager for VirtContainerManager {
 
     #[instrument]
     async fn kill_process(&self, req: &KillRequest) -> Result<()> {
+        if is_termination_signal(req.signal)
+            && self
+                .restore_coordinator
+                .is_adopted_pause(req.process.container_id())
+                .await
+        {
+            if let Some(container) = self.containers.read().await.get(req.process.container_id()) {
+                container.complete_locally(0).await;
+            }
+            return Ok(());
+        }
         let containers = self.containers.read().await;
         let container_id = &req.process.container_id.container_id;
 
@@ -328,6 +373,21 @@ impl ContainerManager for VirtContainerManager {
 
     #[instrument]
     async fn start_process(&self, process: &ContainerProcess) -> Result<PID> {
+        if process.process_type == ProcessType::Container
+            && self
+                .restore_coordinator
+                .stage_pause_start(process.container_id())
+                .await?
+        {
+            let containers = self.containers.read().await;
+            let container = containers
+                .get(process.container_id())
+                .ok_or_else(|| Error::ContainerNotFound(process.container_id().to_string()))?;
+            container.set_state(ProcessStatus::Running).await;
+            return Ok(PID {
+                pid: self.get_vmm_master_tid().await?,
+            });
+        }
         let containers = self.containers.read().await;
         let container_id = &process.container_id.container_id;
         let c = containers
