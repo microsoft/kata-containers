@@ -287,6 +287,7 @@ impl TemplateVm {
             resource_manager.clone(),
             sandbox_config,
             factory,
+            Arc::new(crate::restore::RestoreCoordinator::new()),
         )
         .await
         .context("build sandbox")?;

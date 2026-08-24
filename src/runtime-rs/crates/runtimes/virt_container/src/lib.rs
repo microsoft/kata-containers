@@ -12,6 +12,7 @@ logging::logger_with_subsystem!(sl, "virt-container");
 mod container_manager;
 pub mod factory;
 pub mod health_check;
+mod restore;
 pub mod sandbox;
 pub mod sandbox_persist;
 
@@ -135,6 +136,7 @@ impl RuntimeHandler for VirtContainer {
             .await?,
         );
         let pid = std::process::id();
+        let restore_coordinator = Arc::new(restore::RestoreCoordinator::new());
 
         let sandbox = sandbox::VirtSandbox::new(
             sid,
@@ -144,6 +146,7 @@ impl RuntimeHandler for VirtContainer {
             resource_manager.clone(),
             sandbox_config,
             factory,
+            restore_coordinator.clone(),
         )
         .await
         .context("new virt sandbox")?;
@@ -153,6 +156,7 @@ impl RuntimeHandler for VirtContainer {
             agent,
             hypervisor,
             resource_manager,
+            restore_coordinator,
         );
         Ok(RuntimeInstance {
             sandbox: Arc::new(sandbox),

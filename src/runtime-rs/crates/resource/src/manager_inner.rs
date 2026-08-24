@@ -15,8 +15,8 @@ use hypervisor::{
         util::{get_host_path, DEVICE_TYPE_BLOCK, DEVICE_TYPE_CHAR},
         DeviceConfig, DeviceType,
     },
-    utils::uses_native_ccw_bus,
-    BlockConfig, BlockDeviceAio, Hypervisor, VfioConfig,
+    utils::{open_named_tuntap, uses_native_ccw_bus},
+    BlockConfig, BlockDeviceAio, Hypervisor, RestoreNetworkConfig, VfioConfig,
 };
 use kata_types::mount::{kata_guest_sandbox_dir, Mount, KATA_EPHEMERAL_VOLUME_TYPE, SHM_DIR};
 use kata_types::{
@@ -253,6 +253,64 @@ impl ResourceManagerInner {
         .context("failed to set up network")?;
         self.network = Some(network);
         Ok(())
+    }
+
+    pub async fn prepare_restore_network(
+        &mut self,
+        network_config: NetworkConfig,
+        saved_device_id: String,
+        saved_tap_queue_count: usize,
+    ) -> Result<RestoreNetworkConfig> {
+        if saved_device_id.is_empty() || saved_tap_queue_count == 0 {
+            return Err(anyhow!("invalid saved restore network contract"));
+        }
+        let netns_path = match &network_config {
+            NetworkConfig::NetNs(config) if !config.netns_path.is_empty() => {
+                config.netns_path.clone()
+            }
+            NetworkConfig::NetNs(_) => {
+                return Err(anyhow!("target network namespace is required for restore"))
+            }
+            NetworkConfig::Dan(_) => return Err(anyhow!("DAN snapshot restore is not supported")),
+        };
+        let device_manager = self.device_manager.clone();
+        let (network, fds) = thread::spawn(move || -> Result<_> {
+            let runtime = runtime::Builder::new_current_thread().enable_io().build()?;
+            let _netns_guard = kata_sys_util::netns::NetnsGuard::new(&netns_path)
+                .context("enter target restore netns")?;
+            let network = runtime
+                .block_on(network::new(&network_config, device_manager))
+                .context("prepare target restore network")?;
+            let mut configs = runtime
+                .block_on(network.restore_network_configs())
+                .context("get target restore network config")?;
+            if configs.len() != 1 {
+                return Err(anyhow!(
+                    "snapshot restore requires exactly one target network endpoint, found {}",
+                    configs.len()
+                ));
+            }
+            let config = configs.remove(0);
+            let files = open_named_tuntap(&config.host_dev_name, saved_tap_queue_count as u32)
+                .context("open target restore TAP queues")?;
+            let fds = files.into_iter().map(std::os::fd::OwnedFd::from).collect();
+            Ok((network, fds))
+        })
+        .join()
+        .map_err(|error| anyhow!("restore network thread failed: {error:?}"))??;
+        self.network = Some(network);
+        Ok(RestoreNetworkConfig {
+            id: saved_device_id,
+            fds,
+        })
+    }
+
+    pub async fn activate_restore_network(&self) -> Result<()> {
+        self.network
+            .as_ref()
+            .ok_or_else(|| anyhow!("restore network was not prepared"))?
+            .activate_restore()
+            .await
     }
 
     async fn handle_interfaces(&self, network: &dyn Network) -> Result<()> {
@@ -496,7 +554,11 @@ impl ResourceManagerInner {
             sid: &self.sid,
             agent: self.agent.clone(),
             emptydir_mode: &self.toml_config.runtime.emptydir_mode,
-            fs_sharing_supported: self.hypervisor.capabilities().await?.is_fs_sharing_supported(),
+            fs_sharing_supported: self
+                .hypervisor
+                .capabilities()
+                .await?
+                .is_fs_sharing_supported(),
         };
         self.volume_resource.handler_volumes(&ctx, cid, spec).await
     }

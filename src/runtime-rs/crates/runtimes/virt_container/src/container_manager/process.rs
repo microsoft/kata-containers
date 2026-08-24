@@ -437,6 +437,12 @@ impl Process {
         *status = ProcessStatus::Stopped;
     }
 
+    pub async fn complete_locally(&mut self, exit_code: i32) {
+        self.exit_status.write().await.update_exit_code(exit_code);
+        self.set_status(ProcessStatus::Stopped).await;
+        self.exit_watcher_tx.take();
+    }
+
     /// Close the stdin of the process in container.
     pub async fn close_io(&mut self, _agent: Arc<dyn Agent>) {
         // Close the stdin writer keeper so that
@@ -455,5 +461,26 @@ impl Process {
     pub async fn set_status(&self, new_status: ProcessStatus) {
         let mut status = self.status.write().await;
         *status = new_status;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn local_completion_records_exit_and_releases_waiter() {
+        let process_id = ContainerProcess::new("restored-pause", "").unwrap();
+        let mut process = Process::new(&process_id, 1234, "/bundle", None, None, None, false);
+        let (watcher, exit_status) = process.fetch_exit_watcher().unwrap();
+        let mut watcher = watcher.unwrap();
+
+        process.complete_locally(42).await;
+
+        assert!(watcher.changed().await.is_err());
+        assert_eq!(process.get_status().await, ProcessStatus::Stopped);
+        let exit_status = exit_status.read().await;
+        assert_eq!(exit_status.exit_code, 42);
+        assert!(exit_status.exit_time.is_some());
     }
 }

@@ -55,6 +55,19 @@ pub struct Container {
 }
 
 impl Container {
+    pub(crate) async fn set_state(&self, state: ProcessStatus) {
+        self.inner.write().await.set_state(state).await;
+    }
+
+    pub(crate) async fn complete_locally(&self, exit_code: i32) {
+        self.inner
+            .write()
+            .await
+            .init_process
+            .complete_locally(exit_code)
+            .await;
+    }
+
     pub async fn new(
         pid: u32,
         config: ContainerConfig,

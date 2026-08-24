@@ -149,6 +149,29 @@ impl Network for NetworkWithNetns {
         Some(endpoint)
     }
 
+    async fn restore_network_configs(&self) -> Result<Vec<hypervisor::NetworkConfig>> {
+        let inner = self.inner.read().await;
+        let mut configs = Vec::with_capacity(inner.entity_list.len());
+        for entity in &inner.entity_list {
+            let config = entity
+                .endpoint
+                .restore_network_config()
+                .await?
+                .ok_or_else(|| anyhow!("network endpoint does not support snapshot restore"))?;
+            configs.push(config);
+        }
+        Ok(configs)
+    }
+
+    async fn activate_restore(&self) -> Result<()> {
+        let inner = self.inner.read().await;
+        let _netns_guard = netns::NetnsGuard::new(&inner.netns_path).context("net netns guard")?;
+        for entity in &inner.entity_list {
+            entity.endpoint.activate_restore().await?;
+        }
+        Ok(())
+    }
+
     async fn remove(&self, h: &dyn Hypervisor) -> Result<()> {
         let inner = self.inner.read().await;
 

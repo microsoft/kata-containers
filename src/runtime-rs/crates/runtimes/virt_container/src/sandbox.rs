@@ -5,6 +5,7 @@
 //
 
 use crate::health_check::HealthCheck;
+use crate::restore::RestoreCoordinator;
 use agent::kata::KataAgent;
 use agent::types::{KernelModule, SetPolicyRequest};
 use agent::{
@@ -61,7 +62,7 @@ use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 use kata_types::config::hypervisor::HYPERVISOR_NAME_CH;
-use kata_types::config::{hypervisor::Factory, TomlConfig};
+use kata_types::config::{hypervisor::Factory, hypervisor::MemoryRestoreMode, TomlConfig};
 use kata_types::initdata::{calculate_initdata_digest, ProtectedPlatform};
 use oci_spec::runtime as oci;
 use persist::{self, sandbox_persist::Persist};
@@ -75,8 +76,10 @@ use resource::manager::ManagerArgs;
 use resource::network::{dan_config_path, DanNetworkConfig, NetworkConfig, NetworkWithNetNsConfig};
 use resource::{ResourceConfig, ResourceManager};
 use runtime_spec as spec;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
 use std::fs;
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
@@ -91,40 +94,369 @@ use tracing::instrument;
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
 const VMM_START_TIMEOUT_SECS: i32 = 10_000;
 const SOURCE_AGENT_LISTEN_GRACE: Duration = Duration::from_secs(2);
+const SNAPSHOT_BASE_DIR: &str = "/run/vc/vm/snapshots";
+const SNAPSHOT_MANIFEST_FILE: &str = "kata-snapshot.json";
 
-#[derive(Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct SnapshotFileManifest {
     path: String,
     size: u64,
     sha256: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct SnapshotContainerManifest {
     cri_name: String,
     source_host_id: String,
     snapshot_guest_id: String,
+    readonly_disk_id: String,
     readonly_disk: String,
+    writable_disk_id: Option<String>,
     writable_disk: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct SnapshotAgentTransportManifest {
     contract_version: u32,
-    state: &'static str,
+    state: String,
     server_port: u32,
     log_port: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct SnapshotManifest {
     format_version: u32,
-    producer: &'static str,
-    hypervisor: &'static str,
+    producer: String,
+    hypervisor: String,
     source_sandbox_id: String,
     agent_transport: SnapshotAgentTransportManifest,
     containers: Vec<SnapshotContainerManifest>,
     files: Vec<SnapshotFileManifest>,
+}
+
+struct SavedRestoreNetwork {
+    id: String,
+    tap_queue_count: usize,
+}
+
+fn clean_relative_snapshot_path(path: &Path) -> Result<()> {
+    if path.as_os_str().is_empty()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(anyhow!(
+            "snapshot manifest path is not a clean relative path: {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn restore_source_from_annotations(
+    annotations: &std::collections::HashMap<String, String>,
+) -> Result<Option<PathBuf>> {
+    let Some(value) = annotations.get(kata_types::annotations::KATA_ANNO_RESTORE_FROM) else {
+        return Ok(None);
+    };
+    if value.is_empty() {
+        return Err(anyhow!("restore-from annotation is empty"));
+    }
+
+    let annotation_path = Path::new(value);
+    let restore_source = if annotation_path.is_absolute() {
+        if annotation_path == Path::new("/")
+            || annotation_path
+                .components()
+                .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+        {
+            return Err(anyhow!("restore-from path is not lexically clean"));
+        }
+        annotation_path.to_path_buf()
+    } else {
+        clean_relative_snapshot_path(annotation_path)?;
+        Path::new(SNAPSHOT_BASE_DIR).join(annotation_path)
+    };
+
+    let metadata = fs::symlink_metadata(&restore_source).with_context(|| {
+        format!(
+            "restore-from snapshot is unavailable: {}",
+            restore_source.display()
+        )
+    })?;
+    if !metadata.file_type().is_dir() {
+        return Err(anyhow!(
+            "restore-from snapshot is not a directory: {}",
+            restore_source.display()
+        ));
+    }
+    let canonical = restore_source.canonicalize()?;
+    if canonical != restore_source {
+        return Err(anyhow!(
+            "restore-from path contains a symlink or non-canonical component: {}",
+            restore_source.display()
+        ));
+    }
+    Ok(Some(restore_source))
+}
+
+fn load_restore_manifest(snapshot_dir: &Path) -> Result<SnapshotManifest> {
+    let manifest_path = snapshot_dir.join(SNAPSHOT_MANIFEST_FILE);
+    let manifest_metadata = fs::symlink_metadata(&manifest_path).with_context(|| {
+        format!(
+            "snapshot manifest is unavailable: {}",
+            manifest_path.display()
+        )
+    })?;
+    if !manifest_metadata.file_type().is_file() {
+        return Err(anyhow!(
+            "snapshot manifest is not a regular file: {}",
+            manifest_path.display()
+        ));
+    }
+    let manifest: SnapshotManifest = serde_json::from_reader(fs::File::open(&manifest_path)?)
+        .with_context(|| format!("parse snapshot manifest {}", manifest_path.display()))?;
+
+    if manifest.format_version != 1
+        || manifest.producer != "runtime-rs"
+        || manifest.hypervisor != "cloud-hypervisor"
+    {
+        return Err(anyhow!("unsupported snapshot manifest contract"));
+    }
+    if manifest.source_sandbox_id.is_empty() {
+        return Err(anyhow!("snapshot source sandbox ID is empty"));
+    }
+    if manifest.agent_transport.contract_version != 1
+        || manifest.agent_transport.state != "disconnected-listening"
+        || manifest.agent_transport.server_port == 0
+        || manifest.agent_transport.log_port == 0
+    {
+        return Err(anyhow!("unsupported snapshot agent transport contract"));
+    }
+
+    let mut declared_files = HashSet::new();
+    for file in &manifest.files {
+        let relative = Path::new(&file.path);
+        clean_relative_snapshot_path(relative)?;
+        if !declared_files.insert(file.path.as_str()) {
+            return Err(anyhow!("duplicate snapshot file {}", file.path));
+        }
+        let path = snapshot_dir.join(relative);
+        let metadata = fs::symlink_metadata(&path)
+            .with_context(|| format!("snapshot file is unavailable: {}", path.display()))?;
+        if !metadata.file_type().is_file() {
+            return Err(anyhow!(
+                "snapshot artifact is not a regular file: {}",
+                path.display()
+            ));
+        }
+        if metadata.len() != file.size {
+            return Err(anyhow!(
+                "snapshot artifact size mismatch for {}: manifest {}, actual {}",
+                file.path,
+                file.size,
+                metadata.len()
+            ));
+        }
+    }
+
+    for required in ["clh/config.json", "clh/state.json", "runtime-state.json"] {
+        if !declared_files.contains(required) {
+            return Err(anyhow!("snapshot manifest does not declare {required}"));
+        }
+    }
+    for container in &manifest.containers {
+        if container.cri_name.is_empty()
+            || container.source_host_id.is_empty()
+            || container.snapshot_guest_id.is_empty()
+            || container.readonly_disk_id.is_empty()
+            || container.writable_disk_id.is_some() != container.writable_disk.is_some()
+            || container
+                .writable_disk_id
+                .as_ref()
+                .is_some_and(String::is_empty)
+        {
+            return Err(anyhow!("snapshot container identity is incomplete"));
+        }
+        for disk in std::iter::once(container.readonly_disk.as_str())
+            .chain(container.writable_disk.as_deref())
+        {
+            clean_relative_snapshot_path(Path::new(disk))?;
+            if !declared_files.contains(disk) {
+                return Err(anyhow!("snapshot manifest does not declare disk {disk}"));
+            }
+        }
+    }
+
+    Ok(manifest)
+}
+
+fn snapshot_disk_id(config: &serde_json::Value, path: &Path) -> Result<String> {
+    let matches = config
+        .get("disks")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| anyhow!("snapshot config missing disks"))?
+        .iter()
+        .filter(|disk| disk.get("path").and_then(serde_json::Value::as_str) == path.to_str())
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return Err(anyhow!(
+            "snapshot config has {} entries for disk {}",
+            matches.len(),
+            path.display()
+        ));
+    }
+    matches[0]
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("snapshot disk {} has no ID", path.display()))
+}
+
+fn prepare_restore_source(
+    snapshot_dir: &Path,
+    private_dir: &Path,
+    manifest: &SnapshotManifest,
+) -> Result<PathBuf> {
+    fs::create_dir(private_dir)
+        .with_context(|| format!("create private restore directory {}", private_dir.display()))?;
+    fs::set_permissions(private_dir, fs::Permissions::from_mode(0o700))?;
+
+    let restore_source = private_dir.join("clh");
+    fs::create_dir(&restore_source)?;
+    fs::set_permissions(&restore_source, fs::Permissions::from_mode(0o700))?;
+    let snapshot_clh = snapshot_dir.join("clh");
+    let private_config_path = restore_source.join("config.json");
+    reflink_copy(&snapshot_clh.join("config.json"), &private_config_path)
+        .context("copy private restore config")?;
+    fs::set_permissions(&private_config_path, fs::Permissions::from_mode(0o600))?;
+    std::os::unix::fs::symlink(
+        snapshot_clh.join("state.json"),
+        restore_source.join("state.json"),
+    )
+    .context("link immutable restore state")?;
+    let memory_ranges = snapshot_clh.join("memory-ranges");
+    if memory_ranges.is_file() {
+        std::os::unix::fs::symlink(&memory_ranges, restore_source.join("memory-ranges"))
+            .context("link immutable restore memory")?;
+    }
+
+    let mut replacements = HashMap::<String, PathBuf>::new();
+    for container in &manifest.containers {
+        let readonly = snapshot_dir.join(&container.readonly_disk);
+        if replacements
+            .insert(container.readonly_disk_id.clone(), readonly)
+            .is_some()
+        {
+            return Err(anyhow!(
+                "duplicate snapshot disk ID {}",
+                container.readonly_disk_id
+            ));
+        }
+        if let (Some(writable_id), Some(writable)) = (
+            container.writable_disk_id.as_ref(),
+            container.writable_disk.as_ref(),
+        ) {
+            clean_relative_snapshot_path(Path::new(&container.source_host_id))?;
+            let private_container = private_dir
+                .join("containers")
+                .join(&container.source_host_id);
+            fs::create_dir_all(&private_container)?;
+            fs::set_permissions(&private_container, fs::Permissions::from_mode(0o700))?;
+            let private_writable = private_container.join("rwlayer.img");
+            reflink_copy(&snapshot_dir.join(writable), &private_writable)
+                .with_context(|| format!("clone private writable disk {writable}"))?;
+            fs::set_permissions(&private_writable, fs::Permissions::from_mode(0o600))?;
+            if replacements
+                .insert(writable_id.clone(), private_writable)
+                .is_some()
+            {
+                return Err(anyhow!("duplicate snapshot disk ID {writable_id}"));
+            }
+        }
+    }
+
+    let mut config: serde_json::Value = serde_json::from_slice(&fs::read(&private_config_path)?)
+        .context("parse private restore config")?;
+    let disks = config
+        .get_mut("disks")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| anyhow!("snapshot config missing disks"))?;
+    let mut rewritten = HashSet::new();
+    for disk in disks {
+        let Some(id) = disk
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let Some(path) = replacements.get(&id) else {
+            continue;
+        };
+        if !rewritten.insert(id.clone()) {
+            return Err(anyhow!("snapshot config contains duplicate disk ID {id}"));
+        }
+        disk.as_object_mut()
+            .ok_or_else(|| anyhow!("snapshot config has invalid disk"))?
+            .insert(
+                "path".to_string(),
+                serde_json::Value::String(path.display().to_string()),
+            );
+    }
+    let expected = replacements.keys().cloned().collect::<HashSet<_>>();
+    if rewritten != expected {
+        return Err(anyhow!(
+            "snapshot config did not reference manifest disk IDs: {:?}",
+            expected.difference(&rewritten).collect::<Vec<_>>()
+        ));
+    }
+    fs::write(&private_config_path, serde_json::to_vec(&config)?)?;
+    Ok(restore_source)
+}
+
+fn saved_restore_network(snapshot_dir: &Path) -> Result<SavedRestoreNetwork> {
+    let config: serde_json::Value =
+        serde_json::from_slice(&fs::read(snapshot_dir.join("clh/config.json"))?)
+            .context("parse saved CLH network config")?;
+    let networks = config
+        .get("net")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| anyhow!("snapshot config missing network devices"))?;
+    if networks.len() != 1 {
+        return Err(anyhow!(
+            "snapshot restore requires exactly one saved network device, found {}",
+            networks.len()
+        ));
+    }
+    let network = &networks[0];
+    if network
+        .get("vhost_user")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(anyhow!("vhost-user snapshot restore is not supported"));
+    }
+    let id = network
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| anyhow!("saved restore network has no device ID"))?;
+    let virtio_queue_count = network
+        .get("num_queues")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|queues| usize::try_from(queues).ok())
+        .filter(|queues| *queues > 0 && *queues % 2 == 0)
+        .ok_or_else(|| anyhow!("saved restore network has invalid virtio queue count"))?;
+    Ok(SavedRestoreNetwork {
+        id: id.to_string(),
+        tap_queue_count: virtio_queue_count / 2,
+    })
 }
 
 fn relative_snapshot_path(root: &Path, path: &Path) -> Result<String> {
@@ -175,17 +507,72 @@ fn snapshot_file_manifest(root: &Path, path: &Path) -> Result<SnapshotFileManife
 #[cfg(test)]
 mod snapshot_manifest_tests {
     use super::*;
+    use tempfile::TempDir;
+
+    fn write_artifact(root: &Path, relative: &str, data: &[u8]) -> SnapshotFileManifest {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, data).unwrap();
+        SnapshotFileManifest {
+            path: relative.to_string(),
+            size: data.len() as u64,
+            sha256: format!("sha256:{}", "0".repeat(64)),
+        }
+    }
+
+    fn valid_manifest(root: &Path) -> SnapshotManifest {
+        let readonly = root.join("containers/source/rootfs.vmdk");
+        let writable = root.join("containers/source/rwlayer.img");
+        let config = serde_json::to_vec(&serde_json::json!({
+            "disks": [
+                {"id": "readonly-source", "path": readonly},
+                {"id": "writable-source", "path": writable},
+            ],
+            "memory": {"zones": []},
+            "net": [{"id": "net0", "num_queues": 2}],
+        }))
+        .unwrap();
+        let files = vec![
+            write_artifact(root, "clh/config.json", &config),
+            write_artifact(root, "clh/state.json", b"{}"),
+            write_artifact(root, "runtime-state.json", b"{}"),
+            write_artifact(root, "containers/source/rootfs.vmdk", b"descriptor"),
+            write_artifact(root, "containers/source/rwlayer.img", b"writable"),
+        ];
+        SnapshotManifest {
+            format_version: 1,
+            producer: "runtime-rs".to_string(),
+            hypervisor: "cloud-hypervisor".to_string(),
+            source_sandbox_id: "source-sandbox".to_string(),
+            agent_transport: SnapshotAgentTransportManifest {
+                contract_version: 1,
+                state: "disconnected-listening".to_string(),
+                server_port: 1024,
+                log_port: 1025,
+            },
+            containers: vec![SnapshotContainerManifest {
+                cri_name: "workload".to_string(),
+                source_host_id: "source".to_string(),
+                snapshot_guest_id: "source".to_string(),
+                readonly_disk_id: "readonly-source".to_string(),
+                readonly_disk: "containers/source/rootfs.vmdk".to_string(),
+                writable_disk_id: Some("writable-source".to_string()),
+                writable_disk: Some("containers/source/rwlayer.img".to_string()),
+            }],
+            files,
+        }
+    }
 
     #[test]
     fn agent_transport_contract_is_required_in_manifest() {
         let manifest = SnapshotManifest {
             format_version: 1,
-            producer: "runtime-rs",
-            hypervisor: "cloud-hypervisor",
+            producer: "runtime-rs".to_string(),
+            hypervisor: "cloud-hypervisor".to_string(),
             source_sandbox_id: "sandbox".to_string(),
             agent_transport: SnapshotAgentTransportManifest {
                 contract_version: 1,
-                state: "disconnected-listening",
+                state: "disconnected-listening".to_string(),
                 server_port: 1024,
                 log_port: 1025,
             },
@@ -198,6 +585,87 @@ mod snapshot_manifest_tests {
         assert_eq!(value["agent_transport"]["state"], "disconnected-listening");
         assert_eq!(value["agent_transport"]["server_port"], 1024);
         assert_eq!(value["agent_transport"]["log_port"], 1025);
+    }
+
+    #[test]
+    fn restore_manifest_validation_does_not_hash_payloads() {
+        let snapshot = TempDir::new().unwrap();
+        let manifest = valid_manifest(snapshot.path());
+        fs::write(
+            snapshot.path().join(SNAPSHOT_MANIFEST_FILE),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_restore_manifest(snapshot.path()).unwrap();
+        assert_eq!(loaded.source_sandbox_id, "source-sandbox");
+    }
+
+    #[test]
+    fn restore_manifest_rejects_symlinks_and_size_mismatches() {
+        let snapshot = TempDir::new().unwrap();
+        let mut manifest = valid_manifest(snapshot.path());
+        manifest.files[0].size += 1;
+        fs::write(
+            snapshot.path().join(SNAPSHOT_MANIFEST_FILE),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        assert!(load_restore_manifest(snapshot.path())
+            .unwrap_err()
+            .to_string()
+            .contains("size mismatch"));
+    }
+
+    #[test]
+    fn restore_annotation_resolves_absolute_snapshot_directory() {
+        let snapshot = TempDir::new().unwrap();
+        let annotations = std::collections::HashMap::from([(
+            kata_types::annotations::KATA_ANNO_RESTORE_FROM.to_string(),
+            snapshot.path().to_string_lossy().to_string(),
+        )]);
+        assert_eq!(
+            restore_source_from_annotations(&annotations).unwrap(),
+            Some(snapshot.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn restore_source_clones_writable_and_rewrites_disks_by_id() {
+        let snapshot = TempDir::new().unwrap();
+        let manifest = valid_manifest(snapshot.path());
+        let private_parent = TempDir::new().unwrap();
+        let private = private_parent.path().join("restore");
+
+        let restore_source = prepare_restore_source(snapshot.path(), &private, &manifest).unwrap();
+        let config: serde_json::Value =
+            serde_json::from_slice(&fs::read(restore_source.join("config.json")).unwrap()).unwrap();
+        let disks = config["disks"].as_array().unwrap();
+        assert_eq!(
+            disks[0]["path"],
+            snapshot
+                .path()
+                .join("containers/source/rootfs.vmdk")
+                .display()
+                .to_string()
+        );
+        let private_writable = private.join("containers/source/rwlayer.img");
+        assert_eq!(disks[1]["path"], private_writable.display().to_string());
+        assert_eq!(fs::read(private_writable).unwrap(), b"writable");
+        assert_eq!(
+            fs::read(snapshot.path().join("containers/source/rwlayer.img")).unwrap(),
+            b"writable"
+        );
+    }
+
+    #[test]
+    fn saved_restore_network_requires_one_id_and_queue_count() {
+        let snapshot = TempDir::new().unwrap();
+        let _manifest = valid_manifest(snapshot.path());
+
+        let network = saved_restore_network(snapshot.path()).unwrap();
+        assert_eq!(network.id, "net0");
+        assert_eq!(network.tap_queue_count, 1);
     }
 }
 
@@ -253,6 +721,7 @@ pub struct VirtSandbox {
     shm_size: u64,
     factory: Option<Factory>,
     cancel_token: CancellationToken,
+    restore_coordinator: Arc<RestoreCoordinator>,
 }
 
 impl std::fmt::Debug for VirtSandbox {
@@ -273,7 +742,7 @@ impl std::fmt::Debug for VirtSandbox {
 }
 
 impl VirtSandbox {
-    pub async fn new(
+    pub(crate) async fn new(
         sid: &str,
         msg_sender: Sender<Message>,
         agent: Arc<dyn Agent>,
@@ -281,6 +750,7 @@ impl VirtSandbox {
         resource_manager: Arc<ResourceManager>,
         sandbox_config: SandboxConfig,
         factory: Factory,
+        restore_coordinator: Arc<RestoreCoordinator>,
     ) -> Result<Self> {
         let config = resource_manager.config().await;
         let keep_abnormal = config.runtime.keep_abnormal;
@@ -299,6 +769,7 @@ impl VirtSandbox {
             sandbox_config: Some(sandbox_config),
             factory: Some(factory),
             cancel_token,
+            restore_coordinator,
         })
     }
 
@@ -312,6 +783,134 @@ impl VirtSandbox {
 
     pub fn get_hypervisor(&self) -> Arc<dyn Hypervisor> {
         self.hypervisor.clone()
+    }
+
+    fn restore_private_dir(&self) -> PathBuf {
+        PathBuf::from(kata_types::build_path(kata_types::config::KATA_PATH))
+            .join(&self.sid)
+            .join("restore")
+    }
+
+    async fn start_restore_if_requested(
+        &self,
+        sandbox_config: &SandboxConfig,
+        inner: &mut SandboxInner,
+    ) -> Result<bool> {
+        let Some(snapshot_dir) = restore_source_from_annotations(&sandbox_config.annotations)?
+        else {
+            return Ok(false);
+        };
+        if sandbox_config.hooks.is_some() {
+            return Err(anyhow!(
+                "sandbox OCI hooks are not supported for snapshot restore"
+            ));
+        }
+        let runtime_config = self.resource_manager.config().await;
+        if runtime_config.runtime.hypervisor_name != HYPERVISOR_NAME_CH {
+            return Err(anyhow!(
+                "snapshot restore requires cloud-hypervisor, configured {}",
+                runtime_config.runtime.hypervisor_name
+            ));
+        }
+
+        let manifest = load_restore_manifest(&snapshot_dir)?;
+        let saved_network = saved_restore_network(&snapshot_dir)?;
+        self.restore_coordinator
+            .begin(&manifest.source_sandbox_id)
+            .await?;
+        let private_dir = self.restore_private_dir();
+        let result: Result<()> = async {
+            fs::create_dir_all(private_dir.parent().unwrap())?;
+            let restore_source = prepare_restore_source(&snapshot_dir, &private_dir, &manifest)?;
+            let selinux_label = load_oci_spec().ok().and_then(|spec| {
+                spec.process()
+                    .as_ref()
+                    .and_then(|process| process.selinux_label().clone())
+            });
+            self.hypervisor
+                .prepare_vm(
+                    &self.sid,
+                    sandbox_config.network_env.netns.clone(),
+                    &sandbox_config.annotations,
+                    selinux_label,
+                )
+                .await
+                .context("prepare restored VM")?;
+            let target_network = self
+                .prepare_network_resource(&sandbox_config.network_env)
+                .await
+                .ok_or_else(|| anyhow!("target network is required for snapshot restore"))?;
+            let target_network = match target_network {
+                ResourceConfig::Network(network) => network,
+                _ => unreachable!(),
+            };
+            let restore_network = self
+                .resource_manager
+                .prepare_restore_network(
+                    target_network,
+                    saved_network.id,
+                    saved_network.tap_queue_count,
+                )
+                .await
+                .context("prepare fenced restore network")?;
+            let hypervisor_config = self.hypervisor.hypervisor_config().await;
+            if hypervisor_config.memory_info.enable_virtio_mem
+                && hypervisor_config.memory_info.memory_restore_mode
+                    == MemoryRestoreMode::CopyOnWrite
+            {
+                return Err(anyhow!(
+                    "copy-on-write snapshot restore is incompatible with virtio-mem"
+                ));
+            }
+            self.hypervisor
+                .restore_vm(RestoreVmRequest {
+                    snapshot_dir: restore_source,
+                    memory_restore_mode: hypervisor_config.memory_info.memory_restore_mode,
+                    network: vec![restore_network],
+                    timeout_secs: VMM_START_TIMEOUT_SECS,
+                })
+                .await
+                .context("restore workload VM paused")?;
+            self.restore_coordinator.restored_paused().await?;
+            inner.state = SandboxState::Running;
+            inner.created_at = Some(SystemTime::now());
+            self.save()
+                .await
+                .context("persist paused restored sandbox")?;
+            Ok(())
+        }
+        .await;
+        if let Err(error) = result {
+            self.restore_coordinator.fail().await;
+            if let Err(stop_error) = self.hypervisor.stop_vm().await {
+                return Err(error.context(format!(
+                    "failed to stop restored VMM; preserving private restore storage: {stop_error:#}"
+                )));
+            }
+            let _ = self.resource_manager.cleanup().await;
+            let _ = fs::remove_dir_all(&private_dir);
+            return Err(error);
+        }
+
+        let sandbox = self.clone();
+        tokio::spawn(async move {
+            match sandbox.hypervisor.wait_vm().await {
+                Ok(exit_code) => {
+                    sandbox
+                        .record_stop(exit_code as u32, SystemTime::now())
+                        .await
+                }
+                Err(error) => {
+                    warn!(sl!(), "failed waiting for restored VM exit: {:?}", error);
+                    sandbox.record_stop(255, SystemTime::now()).await;
+                }
+            }
+        });
+        info!(
+            sl!(),
+            "restored workload VM is paused and awaiting task adoption"
+        );
+        Ok(true)
     }
 
     async fn record_stop(&self, exit_status: u32, exited_at: std::time::SystemTime) {
@@ -1102,6 +1701,8 @@ impl VirtSandbox {
                 .iter()
                 .map(|path| snapshot_file_manifest(&staging, path))
                 .collect::<Result<Vec<_>>>()?;
+            let clh_config: serde_json::Value =
+                serde_json::from_slice(&fs::read(clh_staging.join("config.json"))?)?;
             let containers = artifacts
                 .iter()
                 .map(|artifact| {
@@ -1109,10 +1710,19 @@ impl VirtSandbox {
                         cri_name: artifact.cri_name.clone(),
                         source_host_id: artifact.source_host_id.clone(),
                         snapshot_guest_id: artifact.snapshot_guest_id.clone(),
+                        readonly_disk_id: snapshot_disk_id(
+                            &clh_config,
+                            &artifact.readonly_disk.snapshot_path,
+                        )?,
                         readonly_disk: relative_snapshot_path(
                             destination,
                             &artifact.readonly_disk.snapshot_path,
                         )?,
+                        writable_disk_id: artifact
+                            .writable_disk
+                            .as_ref()
+                            .map(|disk| snapshot_disk_id(&clh_config, &disk.snapshot_path))
+                            .transpose()?,
                         writable_disk: artifact
                             .writable_disk
                             .as_ref()
@@ -1123,12 +1733,12 @@ impl VirtSandbox {
                 .collect::<Result<Vec<_>>>()?;
             let manifest = SnapshotManifest {
                 format_version: 1,
-                producer: "runtime-rs",
-                hypervisor: "cloud-hypervisor",
+                producer: "runtime-rs".to_string(),
+                hypervisor: "cloud-hypervisor".to_string(),
                 source_sandbox_id: self.sid.clone(),
                 agent_transport: SnapshotAgentTransportManifest {
                     contract_version: 1,
-                    state: "disconnected-listening",
+                    state: "disconnected-listening".to_string(),
                     server_port: agent_config.server_port,
                     log_port: agent_config.log_port,
                 },
@@ -1171,6 +1781,12 @@ impl Sandbox for VirtSandbox {
         let mut inner = self.inner.write().await;
         if inner.state != SandboxState::Init {
             warn!(sl!(), "sandbox is started");
+            return Ok(());
+        }
+        if self
+            .start_restore_if_requested(sandbox_config, &mut inner)
+            .await?
+        {
             return Ok(());
         }
         let selinux_label = load_oci_spec().ok().and_then(|spec| {
@@ -1576,6 +2192,16 @@ impl Sandbox for VirtSandbox {
             .await
             .context("resource clean up")?;
 
+        let private_restore = self.restore_private_dir();
+        if private_restore.exists() {
+            fs::remove_dir_all(&private_restore).with_context(|| {
+                format!(
+                    "remove private restore directory {}",
+                    private_restore.display()
+                )
+            })?;
+        }
+
         // TODO: cleanup other sandbox resource
         Ok(())
     }
@@ -1822,6 +2448,7 @@ impl Persist for VirtSandbox {
             shm_size: DEFAULT_SHM_SIZE,
             factory: None,
             cancel_token: CancellationToken::default(),
+            restore_coordinator: Arc::new(RestoreCoordinator::new()),
         })
     }
 }
