@@ -315,6 +315,11 @@ mod tests {
 
     const AGENT_PROTO: &str = include_str!("../../libs/protocols/protos/agent.proto");
 
+    /// The RPC handlers as the compiler sees them. Only the handler *bodies* are read as
+    /// text; the manifest itself is used as data, so a mis-parse cannot silently exempt an
+    /// entry.
+    const RPC_SOURCE: &str = include_str!("rpc.rs");
+
     /// Extract `(method, request type)` for every `rpc <Name>(<Request>)` declared by the
     /// agent proto service.
     fn proto_rpcs() -> Vec<(String, String)> {
@@ -413,6 +418,111 @@ mod tests {
             }
             assert!(enforcement_class(rpc).is_some());
         }
+    }
+
+    /// The body of the handler `async fn <name>(` as written in `rpc.rs`.
+    ///
+    /// Delimited by the *next* method of the same `impl` block rather than by matching
+    /// braces: handler bodies are full of `format!` strings containing `{}`, so a brace
+    /// counter would have to understand Rust string, char and comment syntax before it
+    /// could be trusted. Every handler sits at one indentation level inside its `impl`,
+    /// which makes the next `fn` at that level -- or the end of the block -- an exact and
+    /// far cheaper boundary.
+    ///
+    /// Searching for `fn <name>(` also excludes the inner `do_<name>` helpers for free,
+    /// since `fn do_create_container(` does not contain `fn create_container(`.
+    /// Everything in `rpc.rs` before its unit-test module.
+    ///
+    /// Without this, a test helper could stand in for a production handler that had been
+    /// deleted, and the lint would go on reporting the RPC as mediated. The marker is
+    /// matched at column zero because `#[cfg(test)]` also guards items further up the
+    /// file, so the attribute is not a reliable boundary on its own.
+    const TEST_MODULE: &str = "\nmod tests {";
+
+    fn production_only(src: &str) -> &str {
+        match src.find(TEST_MODULE) {
+            Some(at) => &src[..at],
+            None => src,
+        }
+    }
+
+    fn handler_body<'a>(src: &'a str, name: &str) -> Option<&'a str> {
+        let at = src.find(&format!("fn {}(", name))?;
+        let rest = &src[at..];
+        let end = ["\n    async fn ", "\n    fn ", "\n}"]
+            .iter()
+            .filter_map(|marker| rest.find(marker))
+            .min()
+            .unwrap_or(rest.len());
+        Some(&rest[..end])
+    }
+
+    /// FR-7/FR-9: classifying an RPC `LifecycleGated` is a claim that its handler runs
+    /// under an SRM transaction. Nothing checked that claim, and it has been false in
+    /// production -- `StartContainer` was classified correctly and still mutated sandbox
+    /// state without opening a transaction at all. Classification and mediation are
+    /// separate facts, and only the first one was being enforced.
+    ///
+    /// This is deliberately a shallow check: it proves the call is *written in* the
+    /// handler, not that it is reached on every path. What makes it worth having anyway is
+    /// that it is static over the whole handler set, so it holds for every RPC rather than
+    /// for the configurations a model or a test happens to explore.
+    #[test]
+    fn every_lifecycle_gated_handler_opens_a_transaction() {
+        let mut missing = Vec::new();
+        let mut unknown = Vec::new();
+        let mut checked = 0;
+
+        // If this marker ever stops matching, the scan silently widens back over the test
+        // module instead of failing, so it is checked rather than assumed.
+        assert!(
+            RPC_SOURCE.contains(TEST_MODULE),
+            "rpc.rs no longer contains a `{}` module declaration at column zero, so this \
+             lint would scan test code as if it were production code. Update TEST_MODULE.",
+            TEST_MODULE.trim()
+        );
+        let production = production_only(RPC_SOURCE);
+
+        for (rpc, handler, _, class) in MEDIATION_MANIFEST {
+            if !matches!(class, EnforcementClass::LifecycleGated) {
+                continue;
+            }
+            checked += 1;
+            match handler_body(production, handler) {
+                None => unknown.push(format!("{} ({})", rpc, handler)),
+                Some(body) => {
+                    if !body.contains(".prepare(") && !body.contains(".prepare_teardown(") {
+                        missing.push(format!("{} ({})", rpc, handler));
+                    }
+                }
+            }
+        }
+
+        // A lint that silently checks nothing is worse than no lint: renaming or retiring
+        // the variant would leave this test green while enforcing nothing at all.
+        assert!(
+            checked > 0,
+            "no LifecycleGated entries found in MEDIATION_MANIFEST, so this lint verified \
+             nothing. If the class was renamed, update this test to match rather than \
+             leaving it vacuously green."
+        );
+        assert!(
+            unknown.is_empty(),
+            "the mediation manifest names handler(s) that do not exist in rpc.rs: {:?}. \
+             Either a handler was renamed without updating the manifest, or this lint's \
+             notion of a handler signature has gone stale -- both make the check below \
+             weaker than it looks.",
+            unknown
+        );
+        assert!(
+            missing.is_empty(),
+            "RPC(s) classified LifecycleGated whose handler never opens an SRM \
+             transaction: {:?}. That classification claims the operation is gated by the \
+             FR-9 occurrence state machine; with no prepare()/prepare_teardown() the \
+             classification is decoration and the operation mutates lifecycle state \
+             unmediated.",
+            missing
+        );
     }
 
     /// The behavioural proof of complete mediation: with a policy that denies everything,
