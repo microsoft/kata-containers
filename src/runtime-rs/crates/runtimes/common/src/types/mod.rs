@@ -145,6 +145,21 @@ pub struct ContainerConfig {
     pub stderr: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ContainerSnapshotMount {
+    pub destination: String,
+    pub guest_source: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContainerSnapshotIdentity {
+    pub host_id: String,
+    pub cri_name: String,
+    pub oci_identity_version: u32,
+    pub oci_identity_sha256: String,
+    pub guest_mounts: Vec<ContainerSnapshotMount>,
+}
+
 #[derive(Debug, Clone, Display)]
 pub enum SandboxRequest {
     CreateSandbox(Box<SandboxConfig>),

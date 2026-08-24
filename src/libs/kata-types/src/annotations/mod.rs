@@ -36,6 +36,12 @@ pub mod thirdparty;
 pub const KATA_ANNO_PREFIX: &str = "io.katacontainers.";
 /// Selects a packaged VM snapshot for annotation-driven sandbox restore.
 pub const KATA_ANNO_RESTORE_FROM: &str = "io.katacontainers.restore-from";
+/// JSON object mapping CRI container names to trusted resolved image manifest digests.
+pub const KATA_ANNO_RESTORE_IMAGE_DIGESTS: &str =
+    "io.katacontainers.restore.image-manifest-digests";
+/// JSON array listing completed non-restartable init container names in order.
+pub const KATA_ANNO_RESTORE_COMPLETED_INITS: &str =
+    "io.katacontainers.restore.completed-init-containers";
 /// Prefix for Kata configuration annotations
 pub const KATA_ANNO_CFG_PREFIX: &str = "io.katacontainers.config.";
 /// Prefix for Kata container annotations

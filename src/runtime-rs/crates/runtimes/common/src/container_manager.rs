@@ -5,8 +5,8 @@
 //
 
 use crate::types::{
-    ContainerConfig, ContainerID, ContainerProcess, ExecProcessRequest, KillRequest,
-    ProcessExitStatus, ProcessStateInfo, ResizePTYRequest, ShutdownRequest, StatsInfo,
+    ContainerConfig, ContainerID, ContainerProcess, ContainerSnapshotIdentity, ExecProcessRequest,
+    KillRequest, ProcessExitStatus, ProcessStateInfo, ResizePTYRequest, ShutdownRequest, StatsInfo,
     UpdateRequest, PID,
 };
 use anyhow::Result;
@@ -30,6 +30,7 @@ pub trait ContainerManager: Send + Sync {
     async fn kill_process(&self, req: &KillRequest) -> Result<()>;
     async fn resize_process_pty(&self, req: &ResizePTYRequest) -> Result<()>;
     async fn start_process(&self, process_id: &ContainerProcess) -> Result<PID>;
+    async fn complete_synthetic_init(&self, process_id: &ContainerProcess) -> Result<()>;
     async fn state_process(&self, process_id: &ContainerProcess) -> Result<ProcessStateInfo>;
     async fn wait_process(&self, process_id: &ContainerProcess) -> Result<ProcessExitStatus>;
 
@@ -38,4 +39,10 @@ pub trait ContainerManager: Send + Sync {
     async fn need_shutdown_sandbox(&self, req: &ShutdownRequest) -> bool;
     async fn is_sandbox_container(&self, process_id: &ContainerProcess) -> bool;
     async fn container_ids(&self) -> Vec<ContainerID>;
+    async fn snapshot_identities(&self) -> Result<Vec<ContainerSnapshotIdentity>>;
+    async fn restore_container_specs(
+        &self,
+        target_ids: &[String],
+    ) -> Result<Vec<(String, oci::Spec)>>;
+    async fn activate_restored_containers(&self, target_ids: &[String]) -> Result<()>;
 }

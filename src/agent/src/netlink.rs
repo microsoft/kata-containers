@@ -225,6 +225,48 @@ impl Handle {
         Ok(())
     }
 
+    pub async fn prepare_restore_interface(&mut self, target_mac: &str) -> Result<()> {
+        let mut links = self
+            .list_links()
+            .await?
+            .into_iter()
+            .filter(|link| link.name() != "lo")
+            .collect::<Vec<_>>();
+        if links.len() != 1 {
+            return Err(anyhow!(
+                "restore requires exactly one non-loopback guest interface, found {}",
+                links.len()
+            ));
+        }
+        let link = links.remove(0);
+        if link.is_up() {
+            self.enable_link(link.index(), false).await?;
+        }
+
+        let mut addresses = self
+            .handle
+            .address()
+            .get()
+            .set_link_index_filter(link.index())
+            .execute();
+        while let Some(address) = addresses.try_next().await? {
+            self.handle.address().del(address).execute().await?;
+        }
+        for version in [IpVersion::V4, IpVersion::V6] {
+            let mut routes = self.handle.route().get(version).execute();
+            while let Some(route) = routes.try_next().await? {
+                let belongs_to_link = route.attributes.iter().any(
+                    |attribute| matches!(attribute, RouteAttribute::Oif(index) if *index == link.index()),
+                );
+                if belongs_to_link {
+                    self.handle.route().del(route).execute().await?;
+                }
+            }
+        }
+        self.set_link_mac_by_name(&link.name(), target_mac).await?;
+        Ok(())
+    }
+
     pub async fn handle_localhost(&self) -> Result<()> {
         let link = self.find_link(LinkFilter::Name("lo")).await?;
         self.enable_link(link.index(), true).await?;

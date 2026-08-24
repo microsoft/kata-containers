@@ -414,6 +414,32 @@ impl Container {
         Ok(())
     }
 
+    pub async fn activate_restored(
+        &self,
+        containers: Arc<RwLock<HashMap<String, Container>>>,
+        process: &ContainerProcess,
+    ) -> Result<()> {
+        let mut inner = self.inner.write().await;
+        if let Some((hvsock_uds_path, passfd_port)) = &self.passfd_listener_addr {
+            inner
+                .init_process
+                .passfd_io_init(hvsock_uds_path, *passfd_port)
+                .await?;
+            inner
+                .init_process
+                .passfd_io_wait(containers, self.agent.clone())
+                .await?;
+        } else {
+            let container_io = inner.new_container_io(process).await?;
+            inner
+                .init_process
+                .start_io_and_wait(containers, self.agent.clone(), container_io)
+                .await?;
+        }
+        inner.set_state(ProcessStatus::Running).await;
+        Ok(())
+    }
+
     pub async fn delete_exec_process(&self, container_process: &ContainerProcess) -> Result<()> {
         let mut inner = self.inner.write().await;
         inner
@@ -750,6 +776,23 @@ impl Container {
 
     pub async fn spec(&self) -> oci::Spec {
         self.spec.clone()
+    }
+
+    pub(crate) async fn snapshot_guest_mounts(
+        &self,
+    ) -> Result<Vec<common::types::ContainerSnapshotMount>> {
+        let inner = self.inner.read().await;
+        let mut mounts = Vec::new();
+        for volume in &inner.volumes {
+            for (destination, guest_source) in volume.snapshot_guest_mounts()? {
+                mounts.push(common::types::ContainerSnapshotMount {
+                    destination,
+                    guest_source,
+                });
+            }
+        }
+        mounts.sort_by(|left, right| left.destination.cmp(&right.destination));
+        Ok(mounts)
     }
 
     pub async fn cleanup(&mut self) -> Result<()> {

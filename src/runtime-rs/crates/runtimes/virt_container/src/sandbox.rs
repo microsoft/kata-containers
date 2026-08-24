@@ -5,7 +5,10 @@
 //
 
 use crate::health_check::HealthCheck;
-use crate::restore::RestoreCoordinator;
+use crate::restore::{
+    RestoreCompletedInit, RestoreContainerKind, RestoreContainerSlot, RestoreCoordinator,
+    RestoreGuestMount, RestoreIdentity,
+};
 use agent::kata::KataAgent;
 use agent::types::{KernelModule, SetPolicyRequest};
 use agent::{
@@ -107,14 +110,48 @@ struct SnapshotFileManifest {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+struct SnapshotIdentityManifest {
+    resolved_image_manifest_digest: String,
+    oci_identity_version: u32,
+    oci_identity_sha256: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SnapshotMountManifest {
+    destination: String,
+    guest_source: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum SnapshotContainerKind {
+    Sandbox,
+    Workload,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct SnapshotContainerManifest {
+    kind: SnapshotContainerKind,
     cri_name: String,
     source_host_id: String,
     snapshot_guest_id: String,
+    identity: SnapshotIdentityManifest,
+    node_local_mounts: Vec<SnapshotMountManifest>,
     readonly_disk_id: String,
     readonly_disk: String,
     writable_disk_id: Option<String>,
     writable_disk: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SnapshotCompletedInitManifest {
+    name: String,
+    order: u32,
+    exit_code: i32,
+    identity: SnapshotIdentityManifest,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -135,7 +172,57 @@ struct SnapshotManifest {
     source_sandbox_id: String,
     agent_transport: SnapshotAgentTransportManifest,
     containers: Vec<SnapshotContainerManifest>,
+    completed_init_containers: Vec<SnapshotCompletedInitManifest>,
     files: Vec<SnapshotFileManifest>,
+}
+
+fn valid_sha256_digest(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn restore_image_digests(
+    annotations: &std::collections::HashMap<String, String>,
+) -> Result<HashMap<String, String>> {
+    let value = annotations
+        .get(kata_types::annotations::KATA_ANNO_RESTORE_IMAGE_DIGESTS)
+        .ok_or_else(|| anyhow!("trusted resolved image digest metadata is missing"))?;
+    let digests: HashMap<String, String> =
+        serde_json::from_str(value).context("parse resolved image digest metadata")?;
+    if digests.is_empty()
+        || digests
+            .iter()
+            .any(|(name, digest)| name.is_empty() || !valid_sha256_digest(digest))
+    {
+        return Err(anyhow!("resolved image digest metadata is invalid"));
+    }
+    Ok(digests)
+}
+
+fn completed_init_metadata(
+    annotations: &std::collections::HashMap<String, String>,
+) -> Result<Vec<SnapshotCompletedInitManifest>> {
+    let Some(value) = annotations.get(kata_types::annotations::KATA_ANNO_RESTORE_COMPLETED_INITS)
+    else {
+        return Ok(Vec::new());
+    };
+    let completed: Vec<SnapshotCompletedInitManifest> =
+        serde_json::from_str(value).context("parse completed init metadata")?;
+    let mut names = HashSet::new();
+    for (index, init) in completed.iter().enumerate() {
+        if init.name.is_empty()
+            || !names.insert(init.name.as_str())
+            || init.order != index as u32
+            || init.exit_code != 0
+            || init.identity.oci_identity_version != crate::restore::OCI_IDENTITY_VERSION
+            || !valid_sha256_digest(&init.identity.resolved_image_manifest_digest)
+            || !valid_sha256_digest(&init.identity.oci_identity_sha256)
+        {
+            return Err(anyhow!("completed init metadata is invalid"));
+        }
+    }
+    Ok(completed)
 }
 
 struct SavedRestoreNetwork {
@@ -269,10 +356,23 @@ fn load_restore_manifest(snapshot_dir: &Path) -> Result<SnapshotManifest> {
             return Err(anyhow!("snapshot manifest does not declare {required}"));
         }
     }
+    if manifest.containers.is_empty() {
+        return Err(anyhow!("snapshot contains no active containers"));
+    }
+    let mut cri_names = HashSet::new();
+    let mut host_ids = HashSet::new();
+    let mut guest_ids = HashSet::new();
+    let mut sandbox_count = 0;
     for container in &manifest.containers {
         if container.cri_name.is_empty()
             || container.source_host_id.is_empty()
             || container.snapshot_guest_id.is_empty()
+            || !cri_names.insert(container.cri_name.as_str())
+            || !host_ids.insert(container.source_host_id.as_str())
+            || !guest_ids.insert(container.snapshot_guest_id.as_str())
+            || container.identity.oci_identity_version != crate::restore::OCI_IDENTITY_VERSION
+            || !valid_sha256_digest(&container.identity.resolved_image_manifest_digest)
+            || !valid_sha256_digest(&container.identity.oci_identity_sha256)
             || container.readonly_disk_id.is_empty()
             || container.writable_disk_id.is_some() != container.writable_disk.is_some()
             || container
@@ -282,6 +382,33 @@ fn load_restore_manifest(snapshot_dir: &Path) -> Result<SnapshotManifest> {
         {
             return Err(anyhow!("snapshot container identity is incomplete"));
         }
+        if container.kind == SnapshotContainerKind::Sandbox {
+            sandbox_count += 1;
+            if container.source_host_id != manifest.source_sandbox_id {
+                return Err(anyhow!(
+                    "snapshot sandbox slot does not match source sandbox ID"
+                ));
+            }
+        }
+        let mut mount_destinations = HashSet::new();
+        for mount in &container.node_local_mounts {
+            let destination = Path::new(&mount.destination);
+            let guest_source = Path::new(&mount.guest_source);
+            let trusted_guest_root = Path::new("/run/kata-containers");
+            if !destination.is_absolute()
+                || destination
+                    .components()
+                    .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+                || guest_source == trusted_guest_root
+                || !guest_source.starts_with(trusted_guest_root)
+                || guest_source
+                    .components()
+                    .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+                || !mount_destinations.insert(mount.destination.as_str())
+            {
+                return Err(anyhow!("snapshot node-local mount mapping is invalid"));
+            }
+        }
         for disk in std::iter::once(container.readonly_disk.as_str())
             .chain(container.writable_disk.as_deref())
         {
@@ -289,6 +416,25 @@ fn load_restore_manifest(snapshot_dir: &Path) -> Result<SnapshotManifest> {
             if !declared_files.contains(disk) {
                 return Err(anyhow!("snapshot manifest does not declare disk {disk}"));
             }
+        }
+    }
+    if sandbox_count != 1 {
+        return Err(anyhow!(
+            "snapshot requires exactly one sandbox slot, found {sandbox_count}"
+        ));
+    }
+    let mut init_names = HashSet::new();
+    for (index, init) in manifest.completed_init_containers.iter().enumerate() {
+        if init.name.is_empty()
+            || cri_names.contains(init.name.as_str())
+            || !init_names.insert(init.name.as_str())
+            || init.order != index as u32
+            || init.exit_code != 0
+            || init.identity.oci_identity_version != crate::restore::OCI_IDENTITY_VERSION
+            || !valid_sha256_digest(&init.identity.resolved_image_manifest_digest)
+            || !valid_sha256_digest(&init.identity.oci_identity_sha256)
+        {
+            return Err(anyhow!("snapshot completed init identity is invalid"));
         }
     }
 
@@ -418,6 +564,67 @@ fn prepare_restore_source(
     }
     fs::write(&private_config_path, serde_json::to_vec(&config)?)?;
     Ok(restore_source)
+}
+
+fn restored_rootfs_configs(
+    snapshot_dir: &Path,
+    private_dir: &Path,
+    manifest: &SnapshotManifest,
+) -> Result<Vec<resource::rootfs::RestoredRootfsConfig>> {
+    manifest
+        .containers
+        .iter()
+        .map(|container| {
+            let prefix = PathBuf::from("containers").join(&container.source_host_id);
+            let readonly = PathBuf::from(&container.readonly_disk);
+            let writable = container.writable_disk.as_ref().map(PathBuf::from);
+            let private_writable = writable.as_ref().map(|_| {
+                private_dir
+                    .join("containers")
+                    .join(&container.source_host_id)
+                    .join("rwlayer.img")
+            });
+            let files = manifest
+                .files
+                .iter()
+                .map(|file| PathBuf::from(&file.path))
+                .filter(|path| path.starts_with(&prefix))
+                .map(|path| {
+                    if writable.as_ref() == Some(&path) {
+                        private_writable
+                            .clone()
+                            .ok_or_else(|| anyhow!("restored writable disk is unavailable"))
+                    } else {
+                        Ok(snapshot_dir.join(path))
+                    }
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if !manifest
+                .files
+                .iter()
+                .any(|file| Path::new(&file.path) == readonly)
+                || writable.as_ref().is_some_and(|path| {
+                    !manifest
+                        .files
+                        .iter()
+                        .any(|file| Path::new(&file.path) == path)
+                })
+            {
+                return Err(anyhow!(
+                    "snapshot container {} has an incomplete file inventory",
+                    container.cri_name
+                ));
+            }
+            Ok(resource::rootfs::RestoredRootfsConfig {
+                cri_name: container.cri_name.clone(),
+                host_id: container.source_host_id.clone(),
+                guest_id: container.snapshot_guest_id.clone(),
+                readonly_disk: snapshot_dir.join(readonly),
+                writable_disk: private_writable,
+                files,
+            })
+        })
+        .collect()
 }
 
 fn saved_restore_network(snapshot_dir: &Path) -> Result<SavedRestoreNetwork> {
@@ -551,14 +758,22 @@ mod snapshot_manifest_tests {
                 log_port: 1025,
             },
             containers: vec![SnapshotContainerManifest {
+                kind: SnapshotContainerKind::Sandbox,
                 cri_name: "workload".to_string(),
-                source_host_id: "source".to_string(),
-                snapshot_guest_id: "source".to_string(),
+                source_host_id: "source-sandbox".to_string(),
+                snapshot_guest_id: "source-sandbox".to_string(),
+                identity: SnapshotIdentityManifest {
+                    resolved_image_manifest_digest: format!("sha256:{}", "1".repeat(64)),
+                    oci_identity_version: crate::restore::OCI_IDENTITY_VERSION,
+                    oci_identity_sha256: format!("sha256:{}", "2".repeat(64)),
+                },
+                node_local_mounts: Vec::new(),
                 readonly_disk_id: "readonly-source".to_string(),
                 readonly_disk: "containers/source/rootfs.vmdk".to_string(),
                 writable_disk_id: Some("writable-source".to_string()),
                 writable_disk: Some("containers/source/rwlayer.img".to_string()),
             }],
+            completed_init_containers: Vec::new(),
             files,
         }
     }
@@ -577,6 +792,7 @@ mod snapshot_manifest_tests {
                 log_port: 1025,
             },
             containers: Vec::new(),
+            completed_init_containers: Vec::new(),
             files: Vec::new(),
         };
 
@@ -618,6 +834,25 @@ mod snapshot_manifest_tests {
     }
 
     #[test]
+    fn restore_manifest_rejects_unsafe_guest_mount_paths() {
+        let snapshot = TempDir::new().unwrap();
+        let mut manifest = valid_manifest(snapshot.path());
+        manifest.containers[0].node_local_mounts = vec![SnapshotMountManifest {
+            destination: "/etc/config".to_string(),
+            guest_source: "/run/kata-containers".to_string(),
+        }];
+        fs::write(
+            snapshot.path().join(SNAPSHOT_MANIFEST_FILE),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        assert!(load_restore_manifest(snapshot.path())
+            .unwrap_err()
+            .to_string()
+            .contains("node-local mount mapping is invalid"));
+    }
+
+    #[test]
     fn restore_annotation_resolves_absolute_snapshot_directory() {
         let snapshot = TempDir::new().unwrap();
         let annotations = std::collections::HashMap::from([(
@@ -649,7 +884,7 @@ mod snapshot_manifest_tests {
                 .display()
                 .to_string()
         );
-        let private_writable = private.join("containers/source/rwlayer.img");
+        let private_writable = private.join("containers/source-sandbox/rwlayer.img");
         assert_eq!(disks[1]["path"], private_writable.display().to_string());
         assert_eq!(fs::read(private_writable).unwrap(), b"writable");
         assert_eq!(
@@ -815,13 +1050,72 @@ impl VirtSandbox {
 
         let manifest = load_restore_manifest(&snapshot_dir)?;
         let saved_network = saved_restore_network(&snapshot_dir)?;
+        let restore_slots = manifest
+            .containers
+            .iter()
+            .map(|container| RestoreContainerSlot {
+                kind: match container.kind {
+                    SnapshotContainerKind::Sandbox => RestoreContainerKind::Sandbox,
+                    SnapshotContainerKind::Workload => RestoreContainerKind::Workload,
+                },
+                cri_name: container.cri_name.clone(),
+                snapshot_guest_id: container.snapshot_guest_id.clone(),
+                identity: RestoreIdentity {
+                    resolved_image_manifest_digest: container
+                        .identity
+                        .resolved_image_manifest_digest
+                        .clone(),
+                    oci_identity_version: container.identity.oci_identity_version,
+                    oci_identity_sha256: container.identity.oci_identity_sha256.clone(),
+                },
+                guest_mounts: container
+                    .node_local_mounts
+                    .iter()
+                    .map(|mount| RestoreGuestMount {
+                        destination: mount.destination.clone(),
+                        guest_source: mount.guest_source.clone(),
+                    })
+                    .collect(),
+            })
+            .collect();
+        let completed_inits = manifest
+            .completed_init_containers
+            .iter()
+            .map(|init| RestoreCompletedInit {
+                name: init.name.clone(),
+                order: init.order,
+                exit_code: init.exit_code,
+                identity: RestoreIdentity {
+                    resolved_image_manifest_digest: init
+                        .identity
+                        .resolved_image_manifest_digest
+                        .clone(),
+                    oci_identity_version: init.identity.oci_identity_version,
+                    oci_identity_sha256: init.identity.oci_identity_sha256.clone(),
+                },
+            })
+            .collect();
+        let target_digests = restore_image_digests(&sandbox_config.annotations)?;
         self.restore_coordinator
-            .begin(&manifest.source_sandbox_id)
+            .begin(
+                &manifest.source_sandbox_id,
+                restore_slots,
+                completed_inits,
+                target_digests,
+            )
             .await?;
         let private_dir = self.restore_private_dir();
         let result: Result<()> = async {
             fs::create_dir_all(private_dir.parent().unwrap())?;
             let restore_source = prepare_restore_source(&snapshot_dir, &private_dir, &manifest)?;
+            self.resource_manager
+                .register_restored_rootfs(restored_rootfs_configs(
+                    &snapshot_dir,
+                    &private_dir,
+                    &manifest,
+                )?)
+                .await
+                .context("register restored rootfs graph")?;
             let selinux_label = load_oci_spec().ok().and_then(|spec| {
                 spec.process()
                     .as_ref()
@@ -1517,6 +1811,45 @@ impl VirtSandbox {
                 parent.display()
             ));
         }
+        let sandbox_config = self
+            .sandbox_config
+            .as_ref()
+            .ok_or_else(|| anyhow!("sandbox config is unavailable"))?;
+        let snapshot_identities = container_manager.snapshot_identities().await?;
+        let mut identities_by_host = HashMap::new();
+        let mut expected_names = HashSet::new();
+        for identity in &snapshot_identities {
+            if identities_by_host
+                .insert(identity.host_id.as_str(), identity)
+                .is_some()
+                || !expected_names.insert(identity.cri_name.as_str())
+            {
+                return Err(anyhow!("duplicate active snapshot identity"));
+            }
+        }
+        let active_host_ids = snapshot_identities
+            .iter()
+            .map(|identity| identity.host_id.clone())
+            .collect::<HashSet<_>>();
+        let image_digests = restore_image_digests(&sandbox_config.annotations)?;
+        let completed_init_containers = completed_init_metadata(&sandbox_config.annotations)?;
+        for init in &completed_init_containers {
+            if !expected_names.insert(init.name.as_str())
+                || image_digests.get(&init.name)
+                    != Some(&init.identity.resolved_image_manifest_digest)
+            {
+                return Err(anyhow!("completed init identity metadata does not match"));
+            }
+        }
+        if expected_names.len() != image_digests.len()
+            || expected_names
+                .iter()
+                .any(|name| !image_digests.contains_key(*name))
+        {
+            return Err(anyhow!(
+                "resolved image digest inventory does not match snapshot containers"
+            ));
+        }
         let file_name = destination
             .file_name()
             .ok_or_else(|| anyhow!("snapshot destination has no filename"))?
@@ -1526,10 +1859,6 @@ impl VirtSandbox {
         fs::set_permissions(&staging, fs::Permissions::from_mode(0o700))?;
 
         let container_ids = container_manager.container_ids().await;
-        let active_host_ids = container_ids
-            .iter()
-            .map(|container_id| container_id.container_id.clone())
-            .collect::<HashSet<_>>();
         // These flags record completed stages so recovery reverses only work
         // that actually happened.
         let mut paused_containers = Vec::new();
@@ -1710,10 +2039,51 @@ impl VirtSandbox {
             let containers = artifacts
                 .iter()
                 .map(|artifact| {
+                    let identity = identities_by_host
+                        .get(artifact.source_host_id.as_str())
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "snapshot storage has no identity for host container {}",
+                                artifact.source_host_id
+                            )
+                        })?;
+                    if identity.cri_name != artifact.cri_name {
+                        return Err(anyhow!(
+                            "snapshot identity name {} does not match storage name {}",
+                            identity.cri_name,
+                            artifact.cri_name
+                        ));
+                    }
                     Ok(SnapshotContainerManifest {
+                        kind: if artifact.source_host_id == self.sid {
+                            SnapshotContainerKind::Sandbox
+                        } else {
+                            SnapshotContainerKind::Workload
+                        },
                         cri_name: artifact.cri_name.clone(),
                         source_host_id: artifact.source_host_id.clone(),
                         snapshot_guest_id: artifact.snapshot_guest_id.clone(),
+                        identity: SnapshotIdentityManifest {
+                            resolved_image_manifest_digest: image_digests
+                                .get(&artifact.cri_name)
+                                .cloned()
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "snapshot container {} has no trusted image digest",
+                                        artifact.cri_name
+                                    )
+                                })?,
+                            oci_identity_version: identity.oci_identity_version,
+                            oci_identity_sha256: identity.oci_identity_sha256.clone(),
+                        },
+                        node_local_mounts: identity
+                            .guest_mounts
+                            .iter()
+                            .map(|mount| SnapshotMountManifest {
+                                destination: mount.destination.clone(),
+                                guest_source: mount.guest_source.clone(),
+                            })
+                            .collect(),
                         readonly_disk_id: snapshot_disk_id(
                             &clh_config,
                             &artifact.readonly_disk.snapshot_path,
@@ -1747,6 +2117,7 @@ impl VirtSandbox {
                     log_port: agent_config.log_port,
                 },
                 containers,
+                completed_init_containers,
                 files,
             };
             let manifest_path = staging.join("kata-snapshot.json");
@@ -1765,6 +2136,229 @@ impl VirtSandbox {
             let _ = fs::remove_dir_all(&staging);
         }
         publication
+    }
+
+    async fn finalize_restore_transaction(
+        &self,
+        container_manager: Arc<dyn ContainerManager>,
+    ) -> Result<()> {
+        if !self.restore_coordinator.needs_finalization().await {
+            return Ok(());
+        }
+        let result: Result<()> = async {
+            self.hypervisor
+                .resume_vm()
+                .await
+                .context("resume restored VM")?;
+            let address = self
+                .hypervisor
+                .get_agent_socket()
+                .await
+                .context("get restored agent socket")?;
+            self.agent
+                .start(&address)
+                .await
+                .context("dial restored agent")?;
+            self.agent
+                .check(agent::CheckRequest::new(""))
+                .await
+                .context("health-check restored agent")?;
+
+            let target_to_guest = self.restore_coordinator.target_to_guest().await;
+            let mut target_ids = target_to_guest.keys().cloned().collect::<Vec<_>>();
+            target_ids.sort();
+            let specs = container_manager
+                .restore_container_specs(&target_ids)
+                .await?;
+            let mut specs = specs.into_iter().collect::<HashMap<_, _>>();
+            let guest_mounts = self.restore_coordinator.guest_mounts_by_target().await;
+            let mut mount_refreshes = Vec::new();
+            for (target_id, mappings) in guest_mounts {
+                let spec = specs
+                    .get_mut(&target_id)
+                    .ok_or_else(|| anyhow!("target OCI spec is unavailable"))?;
+                let mounts = spec
+                    .mounts_mut()
+                    .as_mut()
+                    .ok_or_else(|| anyhow!("target OCI mounts are unavailable"))?;
+                for mapping in mappings {
+                    let mount = mounts
+                        .iter_mut()
+                        .find(|mount| mount.destination() == Path::new(&mapping.destination))
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "target container {target_id} has no mount at {}",
+                                mapping.destination
+                            )
+                        })?;
+                    let source = mount.source().clone().ok_or_else(|| {
+                        anyhow!("target mount {} has no host source", mapping.destination)
+                    })?;
+                    mount_refreshes.push((source, mapping.guest_source.clone()));
+                    mount.set_source(Some(PathBuf::from(mapping.guest_source)));
+                }
+            }
+            self.resource_manager
+                .refresh_restore_mounts(&mount_refreshes)
+                .await
+                .context("refresh target-generation guest mounts")?;
+            let mut bindings = Vec::with_capacity(target_ids.len());
+            for target_id in &target_ids {
+                bindings.push(agent::RebindContainer {
+                    old_container_id: target_to_guest[target_id].clone(),
+                    new_container_id: target_id.clone(),
+                    oci: Some(
+                        specs
+                            .get(target_id)
+                            .cloned()
+                            .ok_or_else(|| anyhow!("target OCI spec is unavailable"))?,
+                    ),
+                });
+            }
+            let sandbox_config = self
+                .sandbox_config
+                .as_ref()
+                .ok_or_else(|| anyhow!("target sandbox config is unavailable"))?;
+            self.agent
+                .rebind_sandbox(agent::RebindSandboxRequest {
+                    old_sandbox_id: self.restore_coordinator.source_sandbox_id().await?,
+                    new_sandbox_id: self.sid.clone(),
+                    hostname: sandbox_config.hostname.clone(),
+                    dns: sandbox_config.dns.clone(),
+                    containers: bindings,
+                })
+                .await
+                .context("atomically rebind restored guest identity")?;
+            self.resource_manager
+                .rebind_restored_rootfs(&self.restore_coordinator.target_names().await?)
+                .await
+                .context("rebind restored rootfs identity")?;
+            self.restore_coordinator.begin_finalizing().await?;
+
+            self.agent
+                .reseed_random_dev(agent::ReseedRandomDevRequest {
+                    data: kata_sys_util::rand::RandomBytes::new(512).bytes,
+                })
+                .await
+                .context("reseed restored guest RNG")?;
+            let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
+            self.agent
+                .set_guest_date_time(agent::SetGuestDateTimeRequest {
+                    sec: now.as_secs() as i64,
+                    usec: now.subsec_micros() as i64,
+                })
+                .await
+                .context("synchronize restored guest time")?;
+
+            let before = self.agent.list_interfaces(agent::Empty::new()).await?;
+            let source_interfaces = before
+                .interfaces
+                .into_iter()
+                .filter(|interface| interface.name != "lo")
+                .collect::<Vec<_>>();
+            if source_interfaces.len() != 1 {
+                return Err(anyhow!(
+                    "restored guest has {} non-loopback interfaces",
+                    source_interfaces.len()
+                ));
+            }
+            let source = &source_interfaces[0];
+            let source_addresses = source
+                .ip_addresses
+                .iter()
+                .map(|address| format!("{}/{}", address.address, address.mask))
+                .collect::<HashSet<_>>();
+            let (mut target, mut routes) = self.resource_manager.restore_network_identity().await?;
+            let target_interface_name = target.name.clone();
+            target.name = source.name.clone();
+            target.device = source.name.clone();
+            let target_addresses = target
+                .ip_addresses
+                .iter()
+                .map(|address| format!("{}/{}", address.address, address.mask))
+                .collect::<HashSet<_>>();
+            self.agent
+                .update_interface(agent::UpdateInterfaceRequest {
+                    interface: Some(target.clone()),
+                })
+                .await
+                .context("replace restored guest interface")?;
+            for route in &mut routes {
+                if route.device == target_interface_name {
+                    route.device = source.name.clone();
+                }
+            }
+            if !routes.is_empty() {
+                self.agent
+                    .update_routes(agent::UpdateRoutesRequest {
+                        route: Some(agent::Routes { routes }),
+                    })
+                    .await
+                    .context("install restored guest routes")?;
+            }
+            let after = self.agent.list_interfaces(agent::Empty::new()).await?;
+            let restored = after
+                .interfaces
+                .iter()
+                .find(|interface| interface.name == source.name)
+                .ok_or_else(|| anyhow!("restored guest interface disappeared"))?;
+            if !restored.hw_addr.eq_ignore_ascii_case(&target.hw_addr) {
+                return Err(anyhow!("restored guest interface MAC verification failed"));
+            }
+            let restored_addresses = restored
+                .ip_addresses
+                .iter()
+                .map(|address| format!("{}/{}", address.address, address.mask))
+                .collect::<HashSet<_>>();
+            if !target_addresses.is_subset(&restored_addresses)
+                || source_addresses
+                    .difference(&target_addresses)
+                    .any(|address| restored_addresses.contains(address))
+            {
+                return Err(anyhow!(
+                    "restored guest address verification failed: source {source_addresses:?}, target {target_addresses:?}, restored {restored_addresses:?}"
+                ));
+            }
+            self.resource_manager.activate_restore_network().await?;
+
+            for target_id in &target_ids {
+                self.agent
+                    .resume_container(agent::ContainerID {
+                        container_id: target_id.clone(),
+                    })
+                    .await
+                    .with_context(|| format!("resume restored container {target_id}"))?;
+            }
+            container_manager
+                .activate_restored_containers(&target_ids)
+                .await?;
+            self.monitor.start(&self.sid, self.agent.clone());
+            self.restore_coordinator.activate().await?;
+            Ok(())
+        }
+        .await;
+
+        if let Err(error) = result {
+            self.restore_coordinator.fail().await;
+            let _ = self.agent.disconnect().await;
+            if let Err(stop_error) = self.hypervisor.stop_vm().await {
+                return Err(error.context(format!(
+                    "failed to stop restored VMM after finalization error: {stop_error:#}"
+                )));
+            }
+            let _ = self.resource_manager.cleanup().await;
+            let private_restore = self.restore_private_dir();
+            if private_restore.exists() {
+                fs::remove_dir_all(&private_restore).with_context(|| {
+                    format!(
+                        "remove private restore directory {} after finalization error",
+                        private_restore.display()
+                    )
+                })?;
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 }
 
@@ -2028,6 +2622,10 @@ impl Sandbox for VirtSandbox {
     ) -> Result<()> {
         self.create_portable_snapshot(container_manager, destination)
             .await
+    }
+
+    async fn finalize_restore(&self, container_manager: Arc<dyn ContainerManager>) -> Result<()> {
+        self.finalize_restore_transaction(container_manager).await
     }
 
     /// Core function for starting a VM from a template

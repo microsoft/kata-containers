@@ -79,6 +79,27 @@ service AgentService {
 	rpc GetVolumeStats(VolumeStatsRequest) returns (VolumeStatsResponse);
 	rpc ResizeVolume(ResizeVolumeRequest) returns (google.protobuf.Empty);
 	rpc SetPolicy(SetPolicyRequest) returns (google.protobuf.Empty);
+	rpc RebindSandbox(RebindSandboxRequest) returns (google.protobuf.Empty);
+	rpc PrepareGuestMount(PrepareGuestMountRequest) returns (google.protobuf.Empty);
+}
+
+message PrepareGuestMountRequest {
+	string path = 1;
+	bool directory = 2;
+}
+
+message RebindContainer {
+	string old_container_id = 1;
+	string new_container_id = 2;
+	Spec OCI = 3;
+}
+
+message RebindSandboxRequest {
+	string old_sandbox_id = 1;
+	string new_sandbox_id = 2;
+	string hostname = 3;
+	repeated string dns = 4;
+	repeated RebindContainer containers = 5;
 }
 
 message CreateContainerRequest {

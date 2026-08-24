@@ -21,12 +21,13 @@ pub use types::{
     GetGuestDetailsRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
     HealthCheckResponse, IPAddress, IPFamily, Interface, Interfaces, ListProcessesRequest,
     MemHotplugByProbeRequest, MetricsResponse, OnlineCPUMemRequest, OomEventResponse,
-    ReadStreamRequest, ReadStreamResponse, RemoveContainerRequest, ReseedRandomDevRequest,
-    ResizeVolumeRequest, Route, Routes, SetGuestDateTimeRequest, SetIPTablesRequest,
-    SetIPTablesResponse, SignalProcessRequest, StatsContainerResponse, Storage,
-    TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
-    VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
-    WaitProcessResponse, WriteStreamRequest, WriteStreamResponse,
+    PrepareGuestMountRequest, ReadStreamRequest, ReadStreamResponse, RebindContainer,
+    RebindSandboxRequest, RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest,
+    Route, Routes, SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse,
+    SignalProcessRequest, StatsContainerResponse, Storage, TtyWinResizeRequest,
+    UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest, VersionCheckResponse,
+    VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest, WaitProcessResponse,
+    WriteStreamRequest, WriteStreamResponse,
 };
 
 use anyhow::Result;
@@ -81,6 +82,8 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
     async fn create_sandbox(&self, req: CreateSandboxRequest) -> Result<Empty>;
     async fn destroy_sandbox(&self, req: Empty) -> Result<Empty>;
     async fn online_cpu_mem(&self, req: OnlineCPUMemRequest) -> Result<Empty>;
+    async fn reseed_random_dev(&self, req: ReseedRandomDevRequest) -> Result<Empty>;
+    async fn set_guest_date_time(&self, req: SetGuestDateTimeRequest) -> Result<Empty>;
 
     // network
     async fn add_arp_neighbors(&self, req: AddArpNeighborRequest) -> Result<Empty>;
@@ -97,6 +100,8 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
     async fn start_container(&self, req: ContainerID) -> Result<Empty>;
     async fn stats_container(&self, req: ContainerID) -> Result<StatsContainerResponse>;
     async fn update_container(&self, req: UpdateContainerRequest) -> Result<Empty>;
+    async fn rebind_sandbox(&self, req: RebindSandboxRequest) -> Result<Empty>;
+    async fn prepare_guest_mount(&self, req: PrepareGuestMountRequest) -> Result<Empty>;
 
     // process
     async fn exec_process(&self, req: ExecProcessRequest) -> Result<Empty>;

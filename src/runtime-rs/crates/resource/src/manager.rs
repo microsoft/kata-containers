@@ -101,6 +101,17 @@ impl ResourceManager {
         self.inner.read().await.activate_restore_network().await
     }
 
+    pub async fn restore_network_identity(&self) -> Result<(agent::Interface, Vec<agent::Route>)> {
+        self.inner.read().await.restore_network_identity().await
+    }
+
+    pub async fn refresh_restore_mounts(
+        &self,
+        mounts: &[(std::path::PathBuf, String)],
+    ) -> Result<()> {
+        self.inner.read().await.refresh_restore_mounts(mounts).await
+    }
+
     #[instrument]
     pub async fn setup_after_start_vm(&self) -> Result<()> {
         let mut inner = self.inner.write().await;
@@ -237,6 +248,27 @@ impl ResourceManager {
         inner
             .rootfs_resource
             .snapshot_artifacts(staging, final_destination, active_host_ids)
+            .await
+    }
+
+    pub async fn register_restored_rootfs(
+        &self,
+        configs: Vec<crate::rootfs::RestoredRootfsConfig>,
+    ) -> Result<()> {
+        self.inner
+            .read()
+            .await
+            .rootfs_resource
+            .register_restored(configs)
+            .await
+    }
+
+    pub async fn rebind_restored_rootfs(&self, targets: &HashMap<String, String>) -> Result<()> {
+        self.inner
+            .read()
+            .await
+            .rootfs_resource
+            .rebind_restored(targets)
             .await
     }
 

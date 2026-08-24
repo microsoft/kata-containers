@@ -139,6 +139,28 @@ pub struct CreateContainerRequest {
 }
 
 #[derive(PartialEq, Clone, Default)]
+pub struct RebindContainer {
+    pub old_container_id: String,
+    pub new_container_id: String,
+    pub oci: Option<oci::Spec>,
+}
+
+#[derive(PartialEq, Clone, Default)]
+pub struct RebindSandboxRequest {
+    pub old_sandbox_id: String,
+    pub new_sandbox_id: String,
+    pub hostname: String,
+    pub dns: Vec<String>,
+    pub containers: Vec<RebindContainer>,
+}
+
+#[derive(PartialEq, Clone, Default)]
+pub struct PrepareGuestMountRequest {
+    pub path: String,
+    pub directory: bool,
+}
+
+#[derive(PartialEq, Clone, Default)]
 pub struct ContainerID {
     pub container_id: String,
 }

@@ -313,6 +313,31 @@ impl ResourceManagerInner {
             .await
     }
 
+    pub async fn restore_network_identity(&self) -> Result<(agent::Interface, Vec<agent::Route>)> {
+        let network = self
+            .network
+            .as_ref()
+            .ok_or_else(|| anyhow!("restore network was not prepared"))?;
+        let mut interfaces = network.interfaces().await?;
+        if interfaces.len() != 1 {
+            return Err(anyhow!(
+                "snapshot restore requires exactly one target interface, found {}",
+                interfaces.len()
+            ));
+        }
+        let mut interface = interfaces.remove(0);
+        interface.raw_flags |= 0x4000_0000;
+        Ok((interface, network.routes().await?))
+    }
+
+    pub async fn refresh_restore_mounts(&self, mounts: &[(PathBuf, String)]) -> Result<()> {
+        for (source, guest_path) in mounts {
+            crate::volume::share_fs_volume::refresh_guest_path(source, guest_path, &self.agent)
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn handle_interfaces(&self, network: &dyn Network) -> Result<()> {
         for i in network.interfaces().await.context("get interfaces")? {
             info!(sl!(), "update interface {:?}", i);

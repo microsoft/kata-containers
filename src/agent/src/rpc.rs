@@ -143,6 +143,7 @@ const ERR_NO_SANDBOX_PIDNS: &str = "Sandbox does not have sandbox_pidns";
 // filesystem lock. Based on this, 5 seconds seems a resonable timeout period in case the lock is
 // not available.
 const IPTABLES_RESTORE_WAIT_SEC: u64 = 5;
+const KATA_IFACE_RESTORE_REPLACE: u32 = 0x4000_0000;
 
 // Convenience function to obtain the scope logger.
 fn sl() -> slog::Logger {
@@ -207,6 +208,206 @@ pub struct AgentService {
 }
 
 impl AgentService {
+    async fn do_rebind_sandbox(&self, req: protocols::agent::RebindSandboxRequest) -> Result<()> {
+        kata_sys_util::validate::verify_id(&req.old_sandbox_id)?;
+        kata_sys_util::validate::verify_id(&req.new_sandbox_id)?;
+        if req.containers.is_empty() {
+            return Err(anyhow!("rebind request has no containers"));
+        }
+
+        let mut old_ids = std::collections::HashSet::new();
+        let mut new_ids = std::collections::HashSet::new();
+        let mut bindings = Vec::with_capacity(req.containers.len());
+        for mut binding in req.containers {
+            kata_sys_util::validate::verify_id(&binding.old_container_id)?;
+            kata_sys_util::validate::verify_id(&binding.new_container_id)?;
+            if !old_ids.insert(binding.old_container_id.clone())
+                || !new_ids.insert(binding.new_container_id.clone())
+            {
+                return Err(anyhow!("rebind request has duplicate IDs"));
+            }
+            let spec: oci::Spec = binding
+                .OCI
+                .take()
+                .ok_or_else(|| anyhow!("rebind request is missing OCI"))?
+                .into();
+            if spec.hooks().is_some() {
+                return Err(anyhow!("rebind OCI hooks are not supported"));
+            }
+            let init_process = spec
+                .process()
+                .clone()
+                .ok_or_else(|| anyhow!("rebind OCI has no init process"))?;
+            bindings.push((
+                binding.old_container_id,
+                binding.new_container_id,
+                spec,
+                init_process,
+            ));
+        }
+
+        let mut sandbox = self.sandbox.lock().await;
+        if sandbox.id != req.old_sandbox_id {
+            return Err(anyhow!(
+                "sandbox ID mismatch: expected {}, got {}",
+                sandbox.id,
+                req.old_sandbox_id
+            ));
+        }
+        if sandbox
+            .containers
+            .keys()
+            .any(|id| new_ids.contains(id) && !old_ids.contains(id))
+        {
+            return Err(anyhow!("rebind target container ID already exists"));
+        }
+        for (old_id, new_id, _, _) in &bindings {
+            let container = sandbox
+                .containers
+                .get(old_id)
+                .ok_or_else(|| anyhow!("rebind source container is missing"))?;
+            if container.status() != runtime_spec::ContainerState::Paused {
+                return Err(anyhow!("rebind source container {} is not paused", old_id));
+            }
+            let init_process = container
+                .processes
+                .get(old_id)
+                .ok_or_else(|| anyhow!("rebind source container {old_id} has no init process"))?;
+            if !init_process.init {
+                return Err(anyhow!(
+                    "rebind source container {old_id} process is not init"
+                ));
+            }
+            if old_id != new_id && container.processes.contains_key(new_id) {
+                return Err(anyhow!("rebind target init process ID already exists"));
+            }
+            if container.config.spec.is_none() {
+                return Err(anyhow!("rebind source container {old_id} has no OCI spec"));
+            }
+        }
+        let completed_container_ids = sandbox
+            .containers
+            .iter()
+            .filter(|(container_id, _)| !old_ids.contains(*container_id))
+            .map(|(container_id, container)| {
+                if container.status() != runtime_spec::ContainerState::Stopped {
+                    return Err(anyhow!(
+                        "rebind request does not cover active guest container {container_id}"
+                    ));
+                }
+                Ok(container_id.clone())
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if bindings.is_empty() {
+            return Err(anyhow!("rebind request covers no active guest containers"));
+        }
+        setup_guest_dns(sl(), &req.dns)?;
+
+        let mut rebound = Vec::with_capacity(bindings.len());
+        for (old_id, new_id, mut spec, init_process) in bindings {
+            let mut container = sandbox
+                .containers
+                .remove(&old_id)
+                .expect("rebind source was validated under the sandbox lock");
+            let restored_spec = container
+                .config
+                .spec
+                .as_ref()
+                .expect("rebind source spec was validated under the sandbox lock");
+            spec.set_root(restored_spec.root().clone());
+            if let (Some(target_linux), Some(restored_namespaces)) = (
+                spec.linux_mut().as_mut(),
+                restored_spec
+                    .linux()
+                    .as_ref()
+                    .and_then(|linux| linux.namespaces().clone()),
+            ) {
+                target_linux.set_namespaces(Some(restored_namespaces));
+            }
+            container.id = new_id.clone();
+            container.config.spec = Some(spec.clone());
+            let mut process = container
+                .processes
+                .remove(&old_id)
+                .expect("rebind init process was validated under the sandbox lock");
+            process.exec_id = new_id.clone();
+            process.oci = init_process;
+            assert!(container
+                .processes
+                .insert(new_id.clone(), process)
+                .is_none());
+            rebound.push((old_id, new_id, container));
+        }
+        for (old_id, new_id, container) in rebound {
+            if let Some(mounts) = sandbox.container_mounts.remove(&old_id) {
+                sandbox.container_mounts.insert(new_id.clone(), mounts);
+            }
+            if let Some(mapping) = sandbox.pcimap.remove(&old_id) {
+                sandbox.pcimap.insert(new_id.clone(), mapping);
+            }
+            sandbox.containers.insert(new_id, container);
+        }
+        for container_id in completed_container_ids {
+            sandbox.containers.remove(&container_id);
+            sandbox.container_mounts.remove(&container_id);
+            sandbox.pcimap.remove(&container_id);
+        }
+        sandbox.id = req.new_sandbox_id;
+        sandbox.hostname = req.hostname;
+        let dns = req.dns;
+        for entry in &dns {
+            sandbox.network.set_dns(entry.clone());
+        }
+        Ok(())
+    }
+
+    async fn do_prepare_guest_mount(
+        &self,
+        req: protocols::agent::PrepareGuestMountRequest,
+    ) -> Result<()> {
+        let path = Path::new(&req.path);
+        let trusted_root = Path::new("/run/kata-containers");
+        if !path.is_absolute()
+            || path == trusted_root
+            || !path.starts_with(trusted_root)
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir | std::path::Component::CurDir
+                )
+            })
+        {
+            return Err(anyhow!("guest mount path is outside the trusted root"));
+        }
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(anyhow!("guest mount path is a symlink"));
+        }
+        if req.directory {
+            if !metadata.is_dir() {
+                return Err(anyhow!("guest mount path is not a directory"));
+            }
+            for entry in fs::read_dir(path)? {
+                let entry = entry?;
+                let file_type = entry.file_type()?;
+                if file_type.is_dir() && !file_type.is_symlink() {
+                    fs::remove_dir_all(entry.path())?;
+                } else {
+                    fs::remove_file(entry.path())?;
+                }
+            }
+        } else {
+            if !metadata.is_file() {
+                return Err(anyhow!("guest mount path is not a regular file"));
+            }
+            fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(path)?;
+        }
+        Ok(())
+    }
+
     #[instrument]
     async fn do_create_container(
         &self,
@@ -901,6 +1102,28 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn rebind_sandbox(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::RebindSandboxRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "rebind_sandbox", req);
+        is_allowed(&req).await?;
+        self.do_rebind_sandbox(req).await.map_ttrpc_err(same)?;
+        Ok(Empty::new())
+    }
+
+    async fn prepare_guest_mount(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::PrepareGuestMountRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "prepare_guest_mount", req);
+        is_allowed(&req).await?;
+        self.do_prepare_guest_mount(req).await.map_ttrpc_err(same)?;
+        Ok(Empty::new())
+    }
+
     async fn start_container(
         &self,
         ctx: &TtrpcContext,
@@ -1172,6 +1395,14 @@ impl agent_ttrpc::AgentService for AgentService {
         }
 
         let mut sandbox = self.sandbox.lock().await;
+
+        if interface.raw_flags & KATA_IFACE_RESTORE_REPLACE != 0 {
+            sandbox
+                .rtnl
+                .prepare_restore_interface(&interface.hwAddr)
+                .await
+                .map_ttrpc_err(|e| format!("prepare restore interface: {e:?}"))?;
+        }
 
         #[cfg(not(target_arch = "s390x"))]
         if !interface.devicePath.is_empty() && !interface.hwAddr.is_empty() {
@@ -2698,6 +2929,38 @@ mod tests {
             .unwrap(),
             dir,
         )
+    }
+
+    #[tokio::test]
+    async fn rebind_rejects_invalid_oci_before_mutating_identity() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let mut sandbox = Sandbox::new(&logger).unwrap();
+        sandbox.id = "source-sandbox".to_string();
+        let sandbox = Arc::new(Mutex::new(sandbox));
+        let service = AgentService {
+            sandbox: sandbox.clone(),
+            init_mode: true,
+            oma: None,
+        };
+        let mut replacement = Spec::default();
+        replacement.set_hooks(Some(Hooks::default()));
+        let request = protocols::agent::RebindSandboxRequest {
+            old_sandbox_id: "source-sandbox".to_string(),
+            new_sandbox_id: "target-sandbox".to_string(),
+            containers: vec![protocols::agent::RebindContainer {
+                old_container_id: "some_id".to_string(),
+                new_container_id: "target-container".to_string(),
+                OCI: protobuf::MessageField::some(replacement.into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        assert!(service.do_rebind_sandbox(request).await.is_err());
+        let sandbox = sandbox.lock().await;
+        assert_eq!(sandbox.id, "source-sandbox");
+        assert!(sandbox.containers.is_empty());
+        assert!(!sandbox.containers.contains_key("target-container"));
     }
 
     #[test]

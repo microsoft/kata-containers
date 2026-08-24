@@ -769,6 +769,11 @@ impl RuntimeHandlerManager {
                     .await
                     .context("start process")?;
 
+                sandbox
+                    .finalize_restore(cm.clone())
+                    .await
+                    .context("finalize restored sandbox")?;
+
                 let pid = shim_pid.pid;
                 let process_type = process_id.process_type;
                 let container_id = process_id.container_id().to_string();
@@ -776,8 +781,12 @@ impl RuntimeHandlerManager {
                     // Init already registered during CreateContainer. Exec
                     // processes first become waitable here, so only they add a
                     // StartProcess waiter. One waiter means one TaskExit.
+                    let waiter_cm = cm.clone();
+                    let waiter_process_id = process_id.clone();
                     tokio::spawn(async move {
-                        let result = sandbox.wait_process(cm, process_id, pid).await;
+                        let result = sandbox
+                            .wait_process(waiter_cm, waiter_process_id, pid)
+                            .await;
                         if let Err(e) = result {
                             error!(sl!(), "sandbox wait process error: {:?}", e);
                         }
@@ -795,6 +804,9 @@ impl RuntimeHandlerManager {
                         .send(msg)
                         .await
                         .context("send task start event")?;
+                    cm.complete_synthetic_init(&process_id)
+                        .await
+                        .context("complete restored init container")?;
                 }
 
                 Ok(TaskResponse::StartProcess(shim_pid))

@@ -5,6 +5,7 @@
 //
 
 mod nydus_rootfs;
+mod restored_rootfs;
 mod share_fs_rootfs;
 pub mod snapshot;
 use agent::Storage;
@@ -34,6 +35,7 @@ use self::{
 use crate::rootfs::erofs_rootfs::is_erofs_multi_layer;
 use crate::share_fs::{NydusShareFs, ShareFs};
 use oci_spec::runtime as oci;
+pub use restored_rootfs::RestoredRootfsConfig;
 
 const ROOTFS: &str = "rootfs";
 pub const HYBRID_ROOTFS_LOWER_DIR: &str = "rootfs_lower";
@@ -71,6 +73,12 @@ pub trait Rootfs: Send + Sync {
         _final_destination: &std::path::Path,
     ) -> Result<Option<RootfsSnapshotArtifacts>> {
         Ok(None)
+    }
+    fn restored_cri_name(&self) -> Option<&str> {
+        None
+    }
+    async fn rebind_restored(&self, _target_id: &str) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -262,6 +270,44 @@ impl RootFsResource {
             }
         }
         Ok(artifacts)
+    }
+
+    pub async fn register_restored(&self, configs: Vec<RestoredRootfsConfig>) -> Result<()> {
+        let restored = configs
+            .into_iter()
+            .map(restored_rootfs::RestoredRootfs::new)
+            .collect::<Result<Vec<_>>>()?;
+        self.inner.write().await.rootfs.extend(
+            restored
+                .into_iter()
+                .map(|rootfs| Arc::new(rootfs) as Arc<dyn Rootfs>),
+        );
+        Ok(())
+    }
+
+    pub async fn rebind_restored(&self, targets: &HashMap<String, String>) -> Result<()> {
+        let inner = self.inner.read().await;
+        let mut matched = HashMap::<String, &Arc<dyn Rootfs>>::new();
+        for rootfs in &inner.rootfs {
+            if let Some(cri_name) = rootfs.restored_cri_name() {
+                if matched.insert(cri_name.to_string(), rootfs).is_some() {
+                    return Err(anyhow!("duplicate restored rootfs for {cri_name}"));
+                }
+            }
+        }
+        if matched.len() != targets.len()
+            || targets
+                .keys()
+                .any(|cri_name| !matched.contains_key(cri_name))
+        {
+            return Err(anyhow!(
+                "restored rootfs inventory does not match target containers"
+            ));
+        }
+        for (cri_name, target_id) in targets {
+            matched[cri_name].rebind_restored(target_id).await?;
+        }
+        Ok(())
     }
 }
 

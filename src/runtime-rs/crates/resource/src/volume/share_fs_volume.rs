@@ -589,7 +589,7 @@ impl ShareFsVolume {
         Ok(volume)
     }
 
-    async fn copy_file_to_guest(
+    pub(crate) async fn copy_file_to_guest(
         src: &Path,
         guest_path: &str,
         agent: &Arc<dyn Agent>,
@@ -626,7 +626,7 @@ impl ShareFsVolume {
         Ok(())
     }
 
-    async fn copy_directory_to_guest(
+    pub(crate) async fn copy_directory_to_guest(
         src: &Path,
         guest_path: &str,
         agent: &Arc<dyn Agent>,
@@ -670,6 +670,34 @@ impl ShareFsVolume {
     }
 }
 
+pub(crate) async fn refresh_guest_path(
+    source: &Path,
+    guest_path: &str,
+    agent: &Arc<dyn Agent>,
+) -> Result<()> {
+    let source = source
+        .canonicalize()
+        .with_context(|| format!("canonicalize target mount source {}", source.display()))?;
+    let metadata = std::fs::symlink_metadata(&source)?;
+    if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
+        return Err(anyhow!(
+            "unsupported target mount source {}",
+            source.display()
+        ));
+    }
+    agent
+        .prepare_guest_mount(agent::PrepareGuestMountRequest {
+            path: guest_path.to_string(),
+            directory: metadata.is_dir(),
+        })
+        .await?;
+    if metadata.is_dir() {
+        ShareFsVolume::copy_directory_to_guest(&source, guest_path, agent).await
+    } else {
+        ShareFsVolume::copy_file_to_guest(&source, guest_path, agent).await
+    }
+}
+
 #[async_trait]
 impl Volume for ShareFsVolume {
     fn get_volume_mount(&self) -> anyhow::Result<Vec<oci::Mount>> {
@@ -678,6 +706,24 @@ impl Volume for ShareFsVolume {
 
     fn get_storage(&self) -> Result<Vec<agent::Storage>> {
         Ok(self.storages.clone())
+    }
+
+    fn snapshot_guest_mounts(&self) -> Result<Vec<(String, String)>> {
+        if self.share_fs.is_some() {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .mounts
+            .iter()
+            .filter_map(|mount| {
+                mount.source().as_ref().map(|source| {
+                    (
+                        mount.destination().display().to_string(),
+                        source.display().to_string(),
+                    )
+                })
+            })
+            .collect())
     }
 
     async fn cleanup(&self, _device_manager: &RwLock<DeviceManager>) -> Result<()> {

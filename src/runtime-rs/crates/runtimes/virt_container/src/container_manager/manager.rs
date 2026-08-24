@@ -13,9 +13,9 @@ use agent::Agent;
 use common::{
     error::Error,
     types::{
-        ContainerConfig, ContainerID, ContainerProcess, ExecProcessRequest, KillRequest,
-        ProcessExitStatus, ProcessStateInfo, ProcessStatus, ProcessType, ResizePTYRequest,
-        ShutdownRequest, StatsInfo, UpdateRequest, PID,
+        ContainerConfig, ContainerID, ContainerProcess, ContainerSnapshotIdentity,
+        ExecProcessRequest, KillRequest, ProcessExitStatus, ProcessStateInfo, ProcessStatus,
+        ProcessType, ResizePTYRequest, ShutdownRequest, StatsInfo, UpdateRequest, PID,
     },
     ContainerManager,
 };
@@ -31,7 +31,9 @@ use kata_sys_util::{hooks::HookStates, netns::NetnsGuard};
 use kata_types::k8s::container_type;
 
 use crate::container_manager::is_termination_signal;
-use crate::restore::RestoreCoordinator;
+use crate::restore::{
+    canonical_oci_identity, CreateAction, RestoreCoordinator, StartAction, OCI_IDENTITY_VERSION,
+};
 
 use super::{logger_with_process, Container};
 
@@ -96,36 +98,11 @@ impl ContainerManager for VirtContainerManager {
     #[instrument]
     async fn create_container(&self, config: ContainerConfig, spec: oci::Spec) -> Result<PID> {
         let vmm_master_tid = self.get_vmm_master_tid().await?;
-
-        if self
-            .restore_coordinator
-            .adopt_pause(&config.container_id, container_type(&spec).is_pod_sandbox())
-            .await?
-        {
-            if spec.hooks().is_some() {
-                return Err(anyhow!(
-                    "OCI hooks are not supported for restored pause tasks"
-                ));
-            }
-            let container = Container::new(
-                vmm_master_tid,
-                config.clone(),
-                spec,
-                self.agent.clone(),
-                self.resource_manager.clone(),
-                self.hypervisor.get_passfd_listener_addr().await.ok(),
-            )
-            .await
-            .context("adopt restored pause container")?;
-            self.containers
-                .write()
-                .await
-                .insert(config.container_id, container);
-            return Ok(PID {
-                pid: vmm_master_tid,
-            });
+        let is_pause = container_type(&spec).is_pod_sandbox();
+        let mut cri_name = kata_types::k8s::container_name(&spec);
+        if cri_name.is_empty() && is_pause {
+            cri_name = "POD".to_string();
         }
-
         let mut container = Container::new(
             vmm_master_tid,
             config.clone(),
@@ -135,7 +112,34 @@ impl ContainerManager for VirtContainerManager {
             self.hypervisor.get_passfd_listener_addr().await.ok(),
         )
         .await
-        .context("new container")?;
+        .context("prepare container host state")?;
+        let create_action = self
+            .restore_coordinator
+            .classify_create(
+                &config.container_id,
+                &cri_name,
+                is_pause,
+                &canonical_oci_identity(&spec)?,
+            )
+            .await?;
+        if !matches!(create_action, CreateAction::ColdCreate) {
+            if spec.hooks().is_some() {
+                return Err(anyhow!("OCI hooks are not supported for restored tasks"));
+            }
+            if self
+                .containers
+                .write()
+                .await
+                .insert(config.container_id, container)
+                .is_some()
+            {
+                self.restore_coordinator.fail().await;
+                return Err(anyhow!("restored target container already exists"));
+            }
+            return Ok(PID {
+                pid: vmm_master_tid,
+            });
+        }
 
         // CreateContainer Hooks:
         // * should be run in vmm namespace (hook path in runtime namespace)
@@ -220,7 +224,11 @@ impl ContainerManager for VirtContainerManager {
                         .execute_hooks(from_hooks(hooks.poststop()), Some(state))?;
                 }
 
-                c.state_process(process).await.context("state process")
+                let state = c.state_process(process).await.context("state process")?;
+                self.restore_coordinator
+                    .forget_synthetic_init(container_id)
+                    .await;
+                Ok(state)
             }
             ProcessType::Exec => {
                 let containers = self.containers.read().await;
@@ -373,20 +381,46 @@ impl ContainerManager for VirtContainerManager {
 
     #[instrument]
     async fn start_process(&self, process: &ContainerProcess) -> Result<PID> {
-        if process.process_type == ProcessType::Container
-            && self
+        if process.process_type == ProcessType::Container {
+            match self
                 .restore_coordinator
-                .stage_pause_start(process.container_id())
+                .classify_start(process.container_id())
                 .await?
-        {
-            let containers = self.containers.read().await;
-            let container = containers
-                .get(process.container_id())
-                .ok_or_else(|| Error::ContainerNotFound(process.container_id().to_string()))?;
-            container.set_state(ProcessStatus::Running).await;
-            return Ok(PID {
-                pid: self.get_vmm_master_tid().await?,
-            });
+            {
+                StartAction::ColdStart => {}
+                StartAction::Stage => {
+                    if self
+                        .restore_coordinator
+                        .is_adopted_pause(process.container_id())
+                        .await
+                    {
+                        let containers = self.containers.read().await;
+                        let container =
+                            containers.get(process.container_id()).ok_or_else(|| {
+                                Error::ContainerNotFound(process.container_id().to_string())
+                            })?;
+                        container.set_state(ProcessStatus::Running).await;
+                    }
+                    return Ok(PID {
+                        pid: self.get_vmm_master_tid().await?,
+                    });
+                }
+                StartAction::CompleteSyntheticInit => {
+                    let containers = self.containers.read().await;
+                    let container = containers.get(process.container_id()).ok_or_else(|| {
+                        Error::ContainerNotFound(process.container_id().to_string())
+                    })?;
+                    container.set_state(ProcessStatus::Running).await;
+                    return Ok(PID {
+                        pid: self.get_vmm_master_tid().await?,
+                    });
+                }
+                StartAction::Finalize => {
+                    return Ok(PID {
+                        pid: self.get_vmm_master_tid().await?,
+                    });
+                }
+            }
         }
         let containers = self.containers.read().await;
         let container_id = &process.container_id.container_id;
@@ -419,6 +453,22 @@ impl ContainerManager for VirtContainerManager {
         Ok(PID {
             pid: vmm_master_tid,
         })
+    }
+
+    async fn complete_synthetic_init(&self, process: &ContainerProcess) -> Result<()> {
+        let Some(exit_code) = self
+            .restore_coordinator
+            .take_synthetic_init_exit_code(process.container_id())
+            .await
+        else {
+            return Ok(());
+        };
+        let containers = self.containers.read().await;
+        let container = containers
+            .get(process.container_id())
+            .ok_or_else(|| Error::ContainerNotFound(process.container_id().to_string()))?;
+        container.complete_locally(exit_code).await;
+        Ok(())
     }
 
     #[instrument]
@@ -471,12 +521,22 @@ impl ContainerManager for VirtContainerManager {
     }
 
     async fn container_ids(&self) -> Vec<ContainerID> {
-        self.containers
+        let ids = self
+            .containers
             .read()
             .await
             .keys()
-            .filter_map(|id| ContainerID::new(id).ok())
-            .collect()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut result = Vec::with_capacity(ids.len());
+        for id in ids {
+            if !self.restore_coordinator.is_synthetic_init(&id).await {
+                if let Ok(id) = ContainerID::new(&id) {
+                    result.push(id);
+                }
+            }
+        }
+        result
     }
 
     #[instrument]
@@ -536,5 +596,64 @@ impl ContainerManager for VirtContainerManager {
     async fn is_sandbox_container(&self, process: &ContainerProcess) -> bool {
         process.process_type == ProcessType::Container
             && process.container_id.container_id == self.sid
+    }
+
+    async fn snapshot_identities(&self) -> Result<Vec<ContainerSnapshotIdentity>> {
+        let containers = self.containers.read().await;
+        let mut identities = Vec::with_capacity(containers.len());
+        for (host_id, container) in containers.iter() {
+            if self.restore_coordinator.is_synthetic_init(host_id).await {
+                continue;
+            }
+            let spec = container.spec().await;
+            let mut cri_name = kata_types::k8s::container_name(&spec);
+            if cri_name.is_empty() && container_type(&spec).is_pod_sandbox() {
+                cri_name = "POD".to_string();
+            }
+            if cri_name.is_empty() {
+                return Err(anyhow!("container {host_id} has no CRI name"));
+            }
+            identities.push(ContainerSnapshotIdentity {
+                host_id: host_id.clone(),
+                cri_name,
+                oci_identity_version: OCI_IDENTITY_VERSION,
+                oci_identity_sha256: canonical_oci_identity(&spec)?,
+                guest_mounts: container.snapshot_guest_mounts().await?,
+            });
+        }
+        identities.sort_by(|left, right| left.host_id.cmp(&right.host_id));
+        Ok(identities)
+    }
+
+    async fn restore_container_specs(
+        &self,
+        target_ids: &[String],
+    ) -> Result<Vec<(String, oci::Spec)>> {
+        let containers = self.containers.read().await;
+        let mut specs = Vec::with_capacity(target_ids.len());
+        for target_id in target_ids {
+            let container = containers
+                .get(target_id)
+                .ok_or_else(|| Error::ContainerNotFound(target_id.clone()))?;
+            specs.push((target_id.clone(), container.spec().await));
+        }
+        Ok(specs)
+    }
+
+    async fn activate_restored_containers(&self, target_ids: &[String]) -> Result<()> {
+        let containers = self.containers.read().await;
+        for target_id in target_ids {
+            if target_id == &self.sid {
+                continue;
+            }
+            let container = containers
+                .get(target_id)
+                .ok_or_else(|| Error::ContainerNotFound(target_id.clone()))?;
+            let process = ContainerProcess::new(target_id, "")?;
+            container
+                .activate_restored(self.containers.clone(), &process)
+                .await?;
+        }
+        Ok(())
     }
 }
