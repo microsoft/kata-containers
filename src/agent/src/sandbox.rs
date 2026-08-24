@@ -124,6 +124,7 @@ pub struct Sandbox {
     pub uevent_watchers: Vec<Option<UeventWatcher>>,
     pub shared_utsns: Namespace,
     pub shared_ipcns: Namespace,
+    pub shared_netns: Namespace,
     pub sandbox_pidns: Option<Namespace>,
     pub storages: HashMap<String, StorageState>,
     pub running: bool,
@@ -158,6 +159,7 @@ impl Sandbox {
             uevent_watchers: Vec::new(),
             shared_utsns: Namespace::new(&logger),
             shared_ipcns: Namespace::new(&logger),
+            shared_netns: Namespace::new(&logger),
             sandbox_pidns: None,
             storages: HashMap::new(),
             running: false,
@@ -244,20 +246,33 @@ impl Sandbox {
     }
 
     #[instrument]
-    pub async fn setup_shared_namespaces(&mut self) -> Result<bool> {
+    // pub async fn setup_shared_namespaces(&mut self) -> Result<bool> {
+    pub async fn setup_shared_namespaces(&mut self, secondary_sandbox_id: &str) -> Result<bool> {
         // Set up shared IPC namespace
         self.shared_ipcns = Namespace::new(&self.logger)
             .get_ipc()
-            .setup()
+            // .setup()
+            .setup(secondary_sandbox_id)
             .await
             .context("setup persistent IPC namespace")?;
 
         // // Set up shared UTS namespace
         self.shared_utsns = Namespace::new(&self.logger)
             .get_uts(self.hostname.as_str())
-            .setup()
+            // .setup()
+            .setup(secondary_sandbox_id)
             .await
             .context("setup persistent UTS namespace")?;
+
+        // Keep primary sandbox behavior unchanged. Only secondary sandboxes
+        // get a dedicated guest NET namespace for network isolation.
+        if !secondary_sandbox_id.is_empty() {
+            self.shared_netns = Namespace::new(&self.logger)
+                .get_net()
+                .setup(secondary_sandbox_id)
+                .await
+                .context("setup persistent NET namespace")?;
+        }
 
         Ok(true)
     }
