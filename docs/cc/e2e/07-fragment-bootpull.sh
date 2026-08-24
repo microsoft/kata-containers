@@ -232,9 +232,9 @@ render_rules() {
 }
 
 render_pod() {
-  # Mirrors 05-smoke-test.sh: with PULL_TYPE=guest-pull genpolicy refuses images
-  # whose user/group would come from the layers, so the securityContext must be
-  # explicit at pod level.
+  # Mirrors 05-smoke-test.sh: where the image is pulled in the guest, genpolicy
+  # refuses images whose user/group would come from the layers, so the
+  # securityContext must be explicit at pod level.
   #
   # $2, when set, is the fragment delivery hint. BL-8 delivery is host-side: the
   # shim fetches each reference and pushes the COSE envelope over the
@@ -361,7 +361,7 @@ diagnose() {
 
 cleanup_pod() { kubectl delete pod "$1" -n "${NS}" --ignore-not-found >/dev/null 2>&1 || true; }
 
-kubectl get ns "${NS}" >/dev/null 2>&1 || kubectl create ns "${NS}" >/dev/null
+ensure_ns "${NS}"
 
 # ============================================================ 07a — the control
 step "07a — control: an empty declaration must still boot"

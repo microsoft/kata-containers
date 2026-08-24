@@ -63,6 +63,7 @@ HANDLER=$(kubectl get runtimeclass "${E2E_RUNTIMECLASS}" -o jsonpath='{.handler}
 [[ -n "${HANDLER}" ]] || die "RuntimeClass ${E2E_RUNTIMECLASS} has no handler"
 CTRD_DUMP=$(aks_containerd_config_dump)
 [[ -n "${CTRD_DUMP}" ]] || die "could not read containerd's config from ${E2E_NODE}"
+aks_require_toml_dump "${CTRD_DUMP}"
 grep -q "runtimes\.${HANDLER}\b\|\"${HANDLER}\"" <<<"${CTRD_DUMP}" \
   || die "containerd on ${E2E_NODE} has no runtime handler '${HANDLER}'
 RuntimeClass ${E2E_RUNTIMECLASS} points at a handler this node does not implement,
@@ -134,10 +135,13 @@ genpolicy delivers the policy through that annotation, so the runtime would drop
 it silently and every pod would run unmediated."
 ok "cc_init_data is in the handler's enable_annotations allowlist"
 
-step "00d — are the strict bits actually in the shipped image?"
+step "00d — image layers must arrive as host EROFS, not guest-pull"
+aks_assert_erofs_layers "${HANDLER}" "${CTRD_DUMP}"
+
+step "00e — are the strict bits actually in the shipped image?"
 aks_assert_strict_image
 
-step "00e — record the baseline"
+step "00f — record the baseline"
 aks_record_baseline
 
 # coco-env.sh is what load_coco_env() reads in every later stage. On the other
@@ -151,7 +155,12 @@ export E2E_NODE=${E2E_NODE}
 export E2E_RUNTIMECLASS=${E2E_RUNTIMECLASS}
 export E2E_KATA_PREFIX=${E2E_KATA_PREFIX}
 export KUBECONFIG=${KUBECONFIG:-${HOME}/.kube/config}
-export PULL_TYPE=guest-pull
+# Layers are built and hashed on the node and attached to the guest as verified
+# EROFS block devices — 00d proves it rather than assuming it. This is not the
+# guest-pull path the confpods platforms deploy, and recording it as such would
+# misdescribe every later stage's policy: under guest-pull genpolicy declares no
+# layer storages at all.
+export PULL_TYPE=host-erofs
 EOF
 ok "wrote ${ENV_FILE}"
 

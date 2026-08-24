@@ -34,10 +34,12 @@ assert_local_guest_installed
 ensure_branch_genpolicy
 ensure_genpolicy_defaults
 
-kubectl get ns "${NS}" >/dev/null 2>&1 || kubectl create ns "${NS}"
+ensure_ns "${NS}"
 
-# With PULL_TYPE=guest-pull genpolicy refuses images whose user/group would come
-# from the image layers, so the securityContext must be explicit at pod level.
+# Where the image is pulled in the guest, genpolicy refuses images whose
+# user/group would come from the layers, so the securityContext must be explicit
+# at pod level. Harmless on the host-EROFS platforms, so it is set unconditionally
+# rather than branched on.
 cat > "${WORK}/pod.yaml" <<EOF
 apiVersion: v1
 kind: Pod
