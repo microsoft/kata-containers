@@ -496,16 +496,9 @@ mod tests {
     #[derive(Default)]
     struct CallScan {
         opens_transaction: bool,
-        self_calls: Vec<String>,
     }
 
     impl CallScan {
-        fn of_fn(f: &syn::ImplItemFn) -> Self {
-            let mut scan = CallScan::default();
-            syn::visit::visit_impl_item_fn(&mut scan, f);
-            scan
-        }
-
         fn of_block(b: &syn::ExprBlock) -> Self {
             let mut scan = CallScan::default();
             syn::visit::visit_expr_block(&mut scan, b);
@@ -515,16 +508,8 @@ mod tests {
 
     impl<'ast> syn::visit::Visit<'ast> for CallScan {
         fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-            let method = node.method.to_string();
-            if TRANSACTION_OPENERS.contains(&method.as_str()) {
+            if TRANSACTION_OPENERS.contains(&node.method.to_string().as_str()) {
                 self.opens_transaction = true;
-            }
-            // `self.do_create_container(..).await` parses as an await of a method call
-            // whose receiver is `self`, so the receiver test still holds here.
-            if let syn::Expr::Path(path) = &*node.receiver {
-                if path.path.is_ident("self") {
-                    self.self_calls.push(method);
-                }
             }
             syn::visit::visit_expr_method_call(self, node);
         }
@@ -534,8 +519,7 @@ mod tests {
     ///
     /// Deliberately the tail statement rather than "contains a `return` somewhere". Each
     /// of these blocks returns early on its error paths, so the weaker test is satisfied
-    /// by those alone -- it stays green in exactly the situation it is supposed to catch,
-    /// where the block completes normally and falls into the unmediated call below.
+    /// by those alone -- it stays green in exactly the situation it is supposed to catch.
     fn tail_returns(block: &syn::ExprBlock) -> bool {
         matches!(
             block.block.stmts.last(),
@@ -565,19 +549,20 @@ mod tests {
     /// separate facts, and only the first one was being enforced.
     ///
     /// The check works on the parsed syntax tree rather than on the source text. That
-    /// buys three things: handler bodies and the unit-test module are exact properties of
-    /// the tree instead of guesses about indentation and column-zero markers; a match can
-    /// no longer come from a comment or a string literal; and delegation through a
-    /// `self.do_*` helper is followed rather than reported as a violation.
+    /// buys two things: handler bodies and the unit-test module are exact properties of
+    /// the tree instead of guesses about indentation and column-zero markers, and a match
+    /// can no longer come from a comment or a string literal.
     ///
-    /// Reading the source also makes the check `cfg`-agnostic: it sees the
-    /// `strict-policy` block whichever way the crate is compiled. A type-level rule --
-    /// making the transaction a capability the mutation demands -- would be stronger where
-    /// it applied, but it would only ever constrain the configuration actually being
-    /// built, and mediation here is feature-conditional.
+    /// It reads source rather than relying on types because mediation is
+    /// feature-conditional: a compile-time rule can only constrain the configuration
+    /// actually being built. Where a type *can* apply it is used instead — `execute`
+    /// takes the `Reserved` value `prepare` returns, so ordering within a transaction is
+    /// the compiler's business and not asserted about here. What is left for this lint is
+    /// the part no type reaches: whether the handler enters the state machine at all.
     ///
     /// What it still does not prove is reachability: the call must be *written* in the
-    /// handler, not reached on every path. That limit is inherent to a syntactic check.
+    /// handler's guarded block, not reached on every path. That limit is inherent to a
+    /// syntactic check.
     #[test]
     fn every_lifecycle_gated_handler_opens_a_transaction() {
         let file = syn::parse_file(RPC_SOURCE).expect("rpc.rs parses as Rust");
@@ -593,10 +578,9 @@ mod tests {
                 .collect()
         };
 
-        let mut missing = Vec::new();
+        let mut unmediated = Vec::new();
         let mut unknown = Vec::new();
         let mut ambiguous = Vec::new();
-        let mut falls_through = Vec::new();
         let mut gated = Vec::new();
 
         for (rpc, handler, _, class) in MEDIATION_MANIFEST {
@@ -619,32 +603,33 @@ mod tests {
                 }
             };
 
-            let scan = CallScan::of_fn(body);
-            // One hop only. It covers the `do_*` delegation this file actually uses, and
-            // stopping there keeps the check from wandering the whole call graph, where a
-            // `prepare` on some unrelated path would start counting as mediation.
-            let delegated = || {
-                scan.self_calls.iter().any(|callee| {
-                    find(callee)
-                        .into_iter()
-                        .any(|f| CallScan::of_fn(f).opens_transaction)
-                })
-            };
-            if !scan.opens_transaction && !delegated() {
-                missing.push(where_.clone());
-            }
-
-            // Mediation is compiled in only under `strict-policy`; the same handler calls
-            // the same mutation unguarded below the block. That is by design, and it is
-            // safe only while the guarded block diverges -- otherwise both run.
+            // Both halves are load-bearing, and neither is sufficient alone.
+            //
+            // The transaction must be opened inside a block guarded by `strict-policy`,
+            // since that is the only configuration where mediation is compiled at all; an
+            // opener elsewhere in the handler would not describe the build the row claims.
+            //
+            // The guarded block must also leave the handler rather than falling into what
+            // follows it. Today the unmediated call below is `cfg(not(strict-policy))` and
+            // so cannot coexist with the guarded one -- but that exclusivity is a
+            // convention of how these handlers are written, not something the compiler
+            // enforces. Drop the `cfg` from the fallback and a strict build runs the
+            // mutation twice, the second time outside the transaction it just committed.
+            // Nothing else would notice; this does.
+            //
+            // The cost is that a guarded block which is itself the handler's tail may
+            // legitimately yield its value instead of returning, and is asked to return
+            // anyway. That is a real false positive, accepted because the alternative --
+            // proving no unguarded path reaches the mutation -- is a reachability
+            // question a syntactic check cannot answer.
             let mut blocks = StrictPolicyBlocks::default();
             syn::visit::Visit::visit_impl_item_fn(&mut blocks, body);
-            let guarded_and_diverging = blocks
+            let mediates = blocks
                 .blocks
                 .iter()
                 .any(|b| CallScan::of_block(b).opens_transaction && tail_returns(b));
-            if !guarded_and_diverging {
-                falls_through.push(where_);
+            if !mediates {
+                unmediated.push(where_);
             }
         }
 
@@ -687,22 +672,18 @@ mod tests {
             ambiguous
         );
         assert!(
-            missing.is_empty(),
-            "RPC(s) classified LifecycleGated whose handler never opens an SRM \
+            unmediated.is_empty(),
+            "RPC(s) classified LifecycleGated whose handler is not mediated by an SRM \
              transaction: {:?}. That classification claims the operation is gated by the \
-             FR-9 occurrence state machine; with no prepare()/prepare_teardown() the \
-             classification is decoration and the operation mutates lifecycle state \
-             unmediated.",
-            missing
-        );
-        assert!(
-            falls_through.is_empty(),
-            "RPC(s) whose `strict-policy` transaction block does not return: {:?}. Each \
-             of these handlers calls its mutation again, unmediated, below that block -- \
-             the arrangement is only sound because the mediated path returns first. If it \
-             falls through, the confidential build performs the operation twice, the \
-             second time outside the transaction it just committed.",
-            falls_through
+             FR-9 occurrence state machine. It fails either way it can: no \
+             prepare()/prepare_teardown() inside the handler's `strict-policy` block, in \
+             which case the classification is decoration and the operation mutates \
+             lifecycle state unmediated; or a block that opens one and does not return, \
+             which is safe only while the unmediated call below it stays behind \
+             `cfg(not(strict-policy))` -- if that guard is ever dropped, a strict build \
+             performs the operation twice, the second time outside the transaction it \
+             just committed.",
+            unmediated
         );
     }
 

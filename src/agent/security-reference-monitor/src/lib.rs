@@ -219,13 +219,6 @@ pub struct Reserved {
     op_id: OperationId,
 }
 
-impl Reserved {
-    /// The operation id this reservation belongs to.
-    pub fn op_id(&self) -> &str {
-        &self.op_id
-    }
-}
-
 /// Result of a `prepare` call.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Prepared {
