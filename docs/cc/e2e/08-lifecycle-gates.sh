@@ -56,7 +56,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-kubectl get ns "${NS}" >/dev/null 2>&1 || kubectl create ns "${NS}"
+ensure_ns "${NS}"
 
 fail_case() { printf '%s[FAIL]%s %s\n' "${_c_red}" "${_c_off}" "$*" >&2; FAILURES=$((FAILURES + 1)); }
 

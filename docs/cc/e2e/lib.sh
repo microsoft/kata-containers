@@ -99,9 +99,13 @@ case "${E2E_PLATFORM}" in
     : "${E2E_KATA_PREFIX:=/opt/confidential-containers}"
     : "${E2E_GUEST_IMAGE_NAME:=kata-containers.img}"
     : "${E2E_GUEST_IGVM_NAME:=kata-containers-igvm.img}"
-    # Unused on this platform, but referenced by the shared configuration block
-    # below and by anything that prints the environment.
-    : "${E2E_VM_SIZE:=Standard_DC16as_cc_v5}"
+    # Not used to provision anything — AKS owns the node pool — but recorded and
+    # printed so a run says which SKU it was validated against. The v6 CC sizes
+    # are the current generation; only the 8- and 32-vCPU shapes exist (there is
+    # no DC16as_cc_v6), and unlike v5 they are offered in belgiumcentral. Check
+    # with `az vm list-skus -l <region>` before creating a pool: the CC SKUs are
+    # sparsely distributed and a missing one reports as a quota error.
+    : "${E2E_VM_SIZE:=Standard_DC8as_cc_v6}"
     : "${E2E_VM_IMAGE:=n/a-aks-managed}"
     : "${E2E_VM_SECURITY_TYPE:=n/a}"
     : "${E2E_OS_DISK_GB:=0}"
@@ -317,6 +321,20 @@ assert_local_guest_installed() {
 pod_pin() {
   [[ "${E2E_PLATFORM}" = "aks" ]] || return 0
   printf '  nodeName: %s' "${E2E_NODE}"
+}
+
+# Create a namespace and wait until it can actually hold pods. `kubectl create
+# ns` returns before the service-account controller has populated the namespace,
+# and a pod applied into that window is rejected outright with `error looking up
+# service account <ns>/default`. The gap is small enough to be invisible on a
+# warm cluster and reliable on a freshly built one, which makes it a flake that
+# shows up exactly when a run is least expected to fail.
+ensure_ns() {
+  local ns="$1"
+  kubectl get ns "${ns}" >/dev/null 2>&1 || kubectl create ns "${ns}" >/dev/null \
+    || die "could not create namespace ${ns}"
+  wait_for 180 "namespace ${ns} to have its default ServiceAccount" \
+    kubectl -n "${ns}" get serviceaccount default
 }
 
 # Wait until a shell predicate succeeds.  wait_for <timeout-s> <desc> <cmd...>

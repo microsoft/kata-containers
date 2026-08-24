@@ -76,7 +76,7 @@ SIGN()    { ( cd "${E2E_REPO_DIR}" && cargo run -q --example sign-fragment \
 FRAGGEN() { ( cd "${E2E_REPO_DIR}" && cargo run -q -p genpolicy-fragmentgen -- "$@" ); }
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-kubectl get ns "${NS}" >/dev/null 2>&1 || kubectl create ns "${NS}" >/dev/null
+ensure_ns "${NS}"
 
 # The issuer allow-list is measured configuration: it travels in initdata, not in
 # the policy, so the guest knows which issuers exist before any policy runs.

@@ -136,8 +136,7 @@ aks_node_pod_up() {
     return 0
   fi
 
-  kubectl get ns "${E2E_NODE_NS}" >/dev/null 2>&1 || \
-    kubectl create ns "${E2E_NODE_NS}" >/dev/null || die "could not create ${E2E_NODE_NS}"
+  ensure_ns "${E2E_NODE_NS}"
 
   # The pod deliberately does NOT set a runtimeClassName: it must run on the
   # host runtime. Scheduling the inspector into a kata sandbox would show it the
@@ -437,27 +436,55 @@ aks_containerd_config_dump() {
   printf '%s' "${out}"
 }
 
-# The ConfigPath declared for a containerd runtime handler. Handler blocks are
-# TOML tables, so scope the search to the block that names the handler and stop
-# at the next table header — a bare grep for ConfigPath would return whichever
-# handler happens to appear first in the file.
-aks_handler_config_path() {
-  local handler="$1" dump="$2"
-  awk -v h="${handler}" '
+# The per-handler assertions below read TOML tables. `crictl info` is a fine
+# fallback for a flat lookup like the sandbox image, but it carries no table
+# headers, so every scoped lookup against it returns empty — which the callers
+# would then report as "this handler declares no ConfigPath/snapshotter". Say
+# what actually happened instead of inventing a finding about the node.
+aks_require_toml_dump() {
+  local dump="$1"
+  grep -q 'runtimes\.[A-Za-z0-9_-]*\]' <<<"${dump}" \
+    || die "could not read containerd's TOML configuration from ${E2E_NODE}
+
+'containerd config dump' produced nothing and only 'crictl info' was available.
+Its JSON does not expose the per-handler tables this stage has to inspect, so
+neither the RuntimeClass's kata stack nor its layer transport can be established
+— and an unverified answer here is the one this stage exists to prevent."
+}
+
+# One key out of a containerd runtime handler's block. Handler blocks are TOML
+# tables, so scope the search to the block that names the handler and stop at
+# the next table header — a bare grep would return whichever handler happens to
+# appear first in the file. The handler's own sub-tables (.options) stay in
+# scope, because ConfigPath lives there while snapshotter sits directly in the
+# handler table.
+#
+# TOML only. aks_containerd_config_dump falls back to `crictl info`, whose JSON
+# has no table headers to scope by; aks_require_toml_dump refuses that input
+# rather than letting every lookup come back empty and be read as "unset".
+aks_handler_key() {
+  local handler="$1" dump="$2" key="$3"
+  awk -v h="${handler}" -v k="${key}" '
     $0 ~ ("runtimes\\." h "\\]")            { inblk = 1; next }
     $0 ~ ("runtimes\\." h "\\.options\\]")  { inblk = 1; next }
     /^[[:space:]]*\[/ {
       # Any other table header ends the block, except the handler own sub-tables.
       if (inblk && $0 !~ ("runtimes\\." h "\\.")) inblk = 0
     }
-    inblk && /ConfigPath/ {
+    inblk && $0 ~ ("^[[:space:]]*\"?" k "\"?[[:space:]]*[=:]") {
       # containerd 1.x dumps TOML with double quotes, 2.x with single quotes.
-      # Strip the key and whichever quoting style this containerd chose.
-      sub(/^[^=]*=[[:space:]]*/, "")
+      # Strip the key, then whichever quoting style this containerd chose.
+      sub(/^[^=:]*[=:][[:space:]]*/, "")
+      sub(/,[[:space:]]*$/, "")
       gsub(/^["\047]|["\047][[:space:]]*$/, "")
       print; exit
     }
   ' <<<"${dump}"
+}
+
+# The ConfigPath declared for a containerd runtime handler.
+aks_handler_config_path() {
+  aks_handler_key "$1" "$2" ConfigPath
 }
 
 # Every handler with its ConfigPath, for error messages that tell the reader
@@ -469,4 +496,89 @@ aks_handler_table() {
     printf '    %-12s -> %s\n' "${h}" "$(aks_handler_config_path "${h}" "${dump}")"
   done < <(grep -o 'runtimes\.[A-Za-z0-9_-]*\]' <<<"${dump}" \
              | sed 's/^runtimes\.//; s/\]$//' | sort -u)
+}
+
+# ------------------------------------------------------- image layer transport
+# One key out of a top-level containerd plugin table, e.g. the EROFS differ's
+# enable_dmverity. Same scoping problem as aks_handler_key: the key names are
+# generic enough that an unscoped grep would read a neighbouring plugin's value.
+aks_plugin_key() {
+  local plugin="$1" dump="$2" key="$3"
+  awk -v p="${plugin}" -v k="${key}" '
+    $0 ~ ("^[[:space:]]*\\[plugins\\.[\"\047]?" p "[\"\047]?\\]") { inblk = 1; next }
+    /^[[:space:]]*\[/ { inblk = 0 }
+    inblk && $0 ~ ("^[[:space:]]*\"?" k "\"?[[:space:]]*[=:]") {
+      sub(/^[^=:]*[=:][[:space:]]*/, "")
+      sub(/,[[:space:]]*$/, "")
+      gsub(/^["\047]|["\047][[:space:]]*$/, "")
+      print; exit
+    }
+  ' <<<"${dump}"
+}
+
+# genpolicy is told to model image layers as host EROFS with dm-verity (see
+# ensure_genpolicy_defaults in lib.sh), which is only true if the node actually
+# transports layers that way. If it does not — if the handler pulls inside the
+# guest instead — the policy declares a roothash per layer, the guest presents
+# storages that carry none, allow_storages fails the match and every container
+# is refused. That reads as a verity or policy defect and is neither: the two
+# halves of the contract are simply describing different worlds.
+#
+# The reverse skew is quieter still and is why this is an assertion rather than
+# a note. The mkfs options below are reproduced byte-for-byte by genpolicy to
+# predict each layer's root hash (src/tools/genpolicy/src/erofs.rs). Let the
+# node build layers with different options and the content is identical while
+# the hash is not, so the policy declares a digest the host will never present.
+aks_assert_erofs_layers() {
+  local handler="$1" dump="$2"
+  local snap verity opts want="--mkfs-time -T0 --sort=none" missing=""
+
+  snap=$(aks_handler_key "${handler}" "${dump}" snapshotter)
+  [[ -n "${snap}" ]] || die "handler '${handler}' declares no snapshotter
+
+Without one containerd uses its default (overlayfs), so image layers never
+become EROFS block devices and the host-erofs-dm-verity policy this suite
+generates cannot match anything the guest presents."
+
+  [[ "${snap}" = "erofs" ]] || die "handler '${handler}' does not use the EROFS snapshotter
+
+  snapshotter   ${snap}
+  expected      erofs
+
+This suite validates the host-EROFS + dm-verity layer path: layers are built on
+the node, hashed there, and attached to the guest as verified block devices. A
+'nydus' snapshotter means the image is pulled inside the guest instead, where
+there is no host-side root hash for genpolicy to declare — a different design
+with a different policy, not a variant of this one. Point the RuntimeClass at a
+handler configured with snapshotter = \"erofs\"."
+  ok "handler '${handler}' transports layers through the EROFS snapshotter"
+
+  verity=$(aks_plugin_key 'io.containerd.differ.v1.erofs' "${dump}" enable_dmverity)
+  [[ "${verity}" = "true" ]] || die "the EROFS differ on ${E2E_NODE} has dm-verity disabled
+
+  enable_dmverity   ${verity:-<unset>}
+
+The differ is what computes each layer's hash tree and writes the .dmverity
+metadata beside layer.erofs. Without it the snapshotter still produces perfectly
+good layers, but no mount carries the verity annotation, so runtime-rs attaches
+them bare. The policy asks for a roothash, the storage has none, and every
+container is refused with no mention of verity anywhere in the error."
+  ok "the EROFS differ writes dm-verity metadata"
+
+  opts=$(aks_plugin_key 'io.containerd.differ.v1.erofs' "${dump}" mkfs_options)
+  for o in ${want}; do
+    grep -q -- "${o}" <<<"${opts}" || missing="${missing} ${o}"
+  done
+  [[ -z "${missing}" ]] || die "the EROFS differ's mkfs_options cannot produce reproducible layers
+
+  mkfs_options   ${opts:-<unset>}
+  missing       ${missing}
+
+genpolicy reproduces this exact mkfs.erofs invocation to predict each layer's
+root hash. -T0 and --mkfs-time pin the build timestamp, --sort=none removes tar
+ordering variance; without them the same layer content yields a different image,
+and therefore a different digest, on every unpack. The policy would declare a
+hash this node will never present and stage 05 would fail as though the image
+were wrong."
+  ok "mkfs_options pin the layer build (${opts})"
 }

@@ -217,7 +217,7 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | `E2E_FAST` | `0` | Dev-loop mode. Reduces assurance — see below. |
 | `E2E_SKIP_BUILD` | `0` | Install the tarballs already in `build/` without rebuilding. |
 | `E2E_REGION` | `eastus` | See the region trap below. |
-| `E2E_VM_SIZE` | `Standard_DC16as_cc_v5` | Confidential-capable **host** SKU (nested virt). The node itself is a normal VM. |
+| `E2E_VM_SIZE` | `Standard_DC16as_cc_v5` (`aks`: `Standard_DC8as_cc_v6`) | Confidential-capable **host** SKU (nested virt). The node itself is a normal VM. |
 | `E2E_VM_SECURITY_TYPE` | `Standard` | See "The node is not a confidential VM" below. |
 | `E2E_BRANCH` | `manifold-cc` | Branch under test. Defaults with `E2E_REPO_URL` to where this branch lives. |
 | `E2E_REPO_URL` | `https://github.com/microsoft/kata-containers.git` | Fork the node clones. Override together with `E2E_BRANCH`. |
@@ -438,11 +438,35 @@ export E2E_REPO_DIR=$HOME/kata-containers  # genpolicy is built from here
 ./00-adopt-node.sh && ./05-smoke-test.sh
 ```
 
-Stage 00 exists because a wrong image still looks healthy. Two failures it is
-built to catch, both of which produce a *running pod* and no error anywhere:
+A node pool carrying an image built elsewhere is created with the BYOI custom
+headers. The SKU must be a confidential-container one (`_cc_`); the v6
+generation comes in 8- and 32-vCPU shapes only — there is no `DC16as_cc_v6` —
+and is offered in regions where no v5 CC SKU is, `belgiumcentral` among them.
+`az vm list-skus -l "$LOCATION"` before you create the pool: an absent SKU
+surfaces as a quota error rather than as "not offered here".
+
+```bash
+az aks create -g "$RG" -n "$CLUSTER" -l "$LOCATION" \
+  --node-count 1 --node-vm-size Standard_DC8as_cc_v6 \
+  --os-sku AzureLinux --workload-runtime KataVmIsolation \
+  --node-os-upgrade-channel None --generate-ssh-keys \
+  --aks-custom-headers \
+"AKSHTTPCustomFeatures=Microsoft.ContainerService/UseCustomizedOSImage,\
+OSImageSubscriptionID=<sub>,OSImageResourceGroup=<rg>,OSImageGallery=<gallery>,\
+OSImageName=AzureLinuxV3gen2,OSImageVersion=<version>,OSSKU=AzureLinux,\
+OSDistro=CustomizedImageKata"
+```
+
+Note that `--workload-runtime KataVmIsolation` provisions its own RuntimeClass,
+and on the images seen so far that class points at the node's *legacy* kata
+handler rather than the confidential one — which is the second failure below.
+Expect to create your own RuntimeClass over the right handler.
+
+Stage 00 exists because a wrong image still looks healthy. Three failures it is
+built to catch, all of which produce a *running pod* and no error anywhere:
 
 - **The agent is not the strict one.** An agent built without the security
-  reference monitor, or without `--features devicemapper`, boots fine. 00d
+  reference monitor, or without `--features devicemapper`, boots fine. 00e
   loop-mounts `kata-containers.img` on the node and greps the agent binary
   rather than trusting the image label. Note that a shipped agent is stripped,
   so the SRM shows up only as the panic-location paths
@@ -456,6 +480,15 @@ built to catch, both of which produce a *running pod* and no error anywhere:
   allowed. 00c ties the handler's `ConfigPath` back to the payload prefix and
   checks the allowlist, and prints the handler table so you can see which
   handler you should have used.
+- **The layers do not arrive the way the policy describes them.** This suite
+  generates policy for the host-EROFS + dm-verity path, where layers are built
+  and hashed on the node and attached to the guest as verified block devices.
+  A handler on the `nydus` snapshotter pulls inside the guest instead, where no
+  host-side root hash exists; and an EROFS differ with `enable_dmverity = false`
+  or unpinned `mkfs_options` produces layers whose digests genpolicy cannot
+  predict. All three end the same way — every container refused, with the error
+  pointing at storages rather than at the configuration — so 00d reads the
+  node's containerd config and asserts the transport before anything is built.
 
 Two AKS-specific traps worth knowing. A RuntimeClass carries
 `scheduling.nodeSelector`, which the API server copies onto every pod using it;
