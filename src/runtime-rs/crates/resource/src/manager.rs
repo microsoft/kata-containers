@@ -84,6 +84,11 @@ impl ResourceManager {
         inner.handle_network(network_config).await
     }
 
+    pub async fn apply_network_config_to_agent(&self, network_config: NetworkConfig) -> Result<()> {
+        let inner = self.inner.read().await;
+        inner.apply_network_config_to_agent(network_config).await
+    }
+
     #[instrument]
     pub async fn setup_after_start_vm(&self) -> Result<()> {
         let mut inner = self.inner.write().await;
@@ -195,7 +200,8 @@ impl ResourceManager {
         cid: &str,
         spec: &oci::Spec,
     ) -> Result<Vec<Arc<dyn Volume>>> {
-        let inner = self.inner.read().await;
+        // let inner = self.inner.read().await;
+        let mut inner = self.inner.write().await;
         inner.handler_volumes(cid, spec).await
     }
 

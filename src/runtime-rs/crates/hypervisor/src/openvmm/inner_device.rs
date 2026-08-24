@@ -12,12 +12,13 @@ use vm_resource::IntoResource;
 
 use super::inner::OpenVmmInner;
 use crate::device::DeviceType;
+use crate::utils::open_named_tuntap;
 use crate::{VmmState, KATA_BLK_DEV_TYPE};
 
 impl OpenVmmInner {
     pub(crate) async fn add_device(&mut self, device: DeviceType) -> Result<DeviceType> {
-        if self.state == VmmState::NotReady {
-            info!(sl!(), "openvmm: VMM not ready, queueing device {}", device);
+        if self.state != VmmState::VmRunning {
+            info!(sl!(), "openvmm: VMM not running, queueing device {}", device);
             self.pending_devices.push(device.clone());
             return Ok(device);
         }
@@ -116,6 +117,83 @@ impl OpenVmmInner {
                 block.config.pci_path = Some(port.pci_path);
                 Ok(DeviceType::Block(block))
             }
+            DeviceType::Network(net_dev) => {
+                let device_key = net_dev.config.host_dev_name.clone();
+                let port = self.reserve_block_hotplug_port(&device_key)?;
+
+                let tap_file = open_named_tuntap(&net_dev.config.host_dev_name, 1)
+                    .with_context(|| {
+                        format!(
+                            "failed to open TAP device {} for openvmm hotplug",
+                            net_dev.config.host_dev_name
+                        )
+                    })?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "no TAP file descriptors returned for {}",
+                            net_dev.config.host_dev_name
+                        )
+                    })?;
+
+                let endpoint = net_backend_resources::tap::TapHandle {
+                    fd: tap_file.into(),
+                }
+                .into_resource();
+
+                let mac_address = net_dev
+                    .config
+                    .guest_mac
+                    .as_ref()
+                    .map(|mac| net_backend_resources::mac_address::MacAddress::from(mac.0))
+                    .unwrap_or_else(|| {
+                        net_backend_resources::mac_address::MacAddress::from([
+                            0x02,
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x00,
+                            (net_dev.config.index as u8).saturating_add(1),
+                        ])
+                    });
+
+                let resource = virtio_resources::VirtioPciDeviceHandle(
+                    virtio_resources::net::VirtioNetHandle {
+                        max_queues: None,
+                        mac_address,
+                        endpoint,
+                    }
+                    .into_resource(),
+                )
+                .into_resource();
+
+                let hotplug_result = self
+                    .vmm_instance
+                    .add_pcie_device(port.name.clone(), resource)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to hotplug network device {} on {}",
+                            net_dev.config.host_dev_name, port.name
+                        )
+                    });
+
+                if let Err(err) = hotplug_result {
+                    let _ = self.release_block_hotplug_port(&device_key);
+                    return Err(err);
+                }
+
+                info!(
+                    sl!(),
+                    "openvmm: hotplugged network device {} on port {} ({})",
+                    net_dev.config.host_dev_name,
+                    port.name,
+                    port.pci_path
+                );
+
+                Ok(DeviceType::Network(net_dev))
+            }
             other => {
                 if matches!(other, DeviceType::Vfio(_)) {
                     return Err(anyhow!(
@@ -154,6 +232,34 @@ impl OpenVmmInner {
                 info!(
                     sl!(),
                     "openvmm: hot-removed block device {} from port {}", block.device_id, port.name
+                );
+                Ok(())
+            }
+            DeviceType::Network(net_dev) => {
+                let Some(port) = self.release_block_hotplug_port(&net_dev.config.host_dev_name) else {
+                    warn!(
+                        sl!(),
+                        "openvmm: no hotplug mapping found for network device {}",
+                        net_dev.config.host_dev_name
+                    );
+                    return Ok(());
+                };
+
+                self.vmm_instance
+                    .remove_pcie_device(port.name.clone())
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to hot-remove network device {} from {}",
+                            net_dev.config.host_dev_name, port.name
+                        )
+                    })?;
+
+                info!(
+                    sl!(),
+                    "openvmm: hot-removed network device {} from port {}",
+                    net_dev.config.host_dev_name,
+                    port.name
                 );
                 Ok(())
             }

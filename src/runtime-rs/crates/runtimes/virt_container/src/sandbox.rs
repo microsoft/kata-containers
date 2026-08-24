@@ -113,6 +113,7 @@ struct SandboxInner {
     state: SandboxState,
     exit_info: Option<SandboxExitInfo>,
     created_at: Option<SystemTime>,
+    additional_sids: Vec<String>,
 }
 
 impl SandboxInner {
@@ -121,6 +122,7 @@ impl SandboxInner {
             state: SandboxState::Init,
             exit_info: None,
             created_at: None,
+            additional_sids: Vec::new(),
         }
     }
 }
@@ -222,7 +224,7 @@ impl VirtSandbox {
     ) -> Result<Vec<ResourceConfig>> {
         let mut resource_configs = vec![];
 
-        info!(sl!(), "prepare vm socket config for sandbox.");
+        info!(sl!(), "prepare_for_start_sandbox: prepare vm socket config for sandbox.");
         let vm_socket_config = self
             .prepare_vm_socket_config()
             .await
@@ -230,11 +232,16 @@ impl VirtSandbox {
         resource_configs.push(vm_socket_config);
 
         let network_env: SandboxNetworkEnv = sandbox_config.network_env.clone();
+        info!(sl!(), "prepare_for_start_sandbox: network_env = {:?}", &network_env);
+
         // prepare network config
         if !network_env.network_created {
+            info!(sl!(), "prepare_for_start_sandbox: calling prepare_network_resource");
             if let Some(network_resource) = self.prepare_network_resource(&network_env).await {
                 resource_configs.push(network_resource);
             }
+        } else {
+            warn!(sl!(), "prepare_for_start_sandbox: skipping prepare_network_resource");
         }
 
         // prepare sharefs device config
@@ -848,12 +855,89 @@ impl VirtSandbox {
             network_created: false,
         })
     }
+
+    async fn setup_secondary_sandbox(
+        &self,
+        bundle_sandbox_id: &str,
+        bundle_hostname: &str,
+    ) -> Result<()> {
+
+        info!(sl!(), "setup_secondary_sandbox: start");
+
+        // create additional sandbox in vm
+        if self.sandbox_config.is_none() {
+            return Err(anyhow!("sandbox config is missing"));
+        }
+        let sandbox_config = self.sandbox_config.as_ref().unwrap();
+        let dns = sandbox_config.dns.clone();
+
+        info!(
+            sl!(),
+            "setup_secondary_sandbox: sending CreateSecondarySandboxRequest: sandbox_id = {bundle_sandbox_id}, hostname = {bundle_hostname}, dns = {:?}",
+            dns,
+        );
+
+        let req = agent::CreateSecondarySandboxRequest {
+            hostname: bundle_hostname.to_string(),
+            dns,
+            sandbox_id: bundle_sandbox_id.to_string(),
+        };
+
+        self.agent
+            .create_secondary_sandbox(req)
+            .await
+            .context("create secondary sandbox")?;
+
+        Ok(())
+    }
+
+    async fn setup_secondary_network(&self, bundle_netns_path: Option<String>) -> Result<()> {
+        let Some(netns_path) = bundle_netns_path else {
+            info!(sl!(), "setup_secondary_network: no netns path, skip");
+            return Ok(());
+        };
+
+        info!(sl!(), "setup_secondary_network: netns_path = {}", netns_path);
+
+        let config = self.resource_manager.config().await;
+        if config.runtime.disable_new_netns || dan_config_path(&config, &self.sid).exists() {
+            info!(sl!(), "setup_secondary_network: netns disabled or DAN present, skip");
+            return Ok(());
+        }
+
+        let network_resource = NetworkConfig::NetNs(NetworkWithNetNsConfig {
+            network_model: config.runtime.internetworking_model.clone(),
+            netns_path,
+            queues: self
+                .hypervisor
+                .hypervisor_config()
+                .await
+                .network_info
+                .network_queues as usize,
+            network_created: false,
+        });
+
+        self.resource_manager
+            .apply_network_config_to_agent(network_resource)
+            .await
+            .context("apply secondary network to agent")?;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl Sandbox for VirtSandbox {
     #[instrument(name = "sb: start")]
-    async fn start(&self) -> Result<()> {
+    // async fn start(&self) -> Result<()> {
+    async fn start(
+        &self,
+        bundle_sandbox_id: Option<String>,
+        bundle_hostname: &str,
+        bundle_netns_path: Option<String>,
+    ) -> Result<()> {
+
+        info!(sl!(), "VirtSandbox: start, container sandbox-id annotation = {:?}", bundle_sandbox_id);
         let id = &self.sid;
 
         if self.sandbox_config.is_none() {
@@ -861,11 +945,25 @@ impl Sandbox for VirtSandbox {
         }
         let sandbox_config = self.sandbox_config.as_ref().unwrap();
 
+        let mut inner = self.inner.write().await;
+
+        let mut added_secondary = false;
+        if let Some(sid) = bundle_sandbox_id {
+            if sid != *id && !inner.additional_sids.contains(&sid) {
+                info!(sl!(), "VirtSandbox: adding secondary sandbox_id = {sid}");
+                inner.additional_sids.push(sid.clone());
+                self.setup_secondary_sandbox(&sid, bundle_hostname).await?;
+                added_secondary = true;
+            }
+        }
         // if sandbox is not in SandboxState::Init then return,
         // otherwise try to create sandbox
-
-        let mut inner = self.inner.write().await;
         if inner.state != SandboxState::Init {
+            if added_secondary {
+                self.setup_secondary_network(bundle_netns_path)
+                    .await
+                    .context("setup secondary network")?;
+            }
             warn!(sl!(), "sandbox is started");
             return Ok(());
         }
@@ -981,22 +1079,60 @@ impl Sandbox for VirtSandbox {
         // create sandbox in vm
         let agent_config = self.agent.agent_config().await;
         let kernel_modules = KernelModule::set_kernel_modules(agent_config.kernel_modules)?;
+
+        let hostname = sandbox_config.hostname.clone();
+        let dns = sandbox_config.dns.clone();
+        let storages = self
+                .resource_manager
+                .get_storage_for_sandbox(self.shm_size)
+                .await
+                .context("get storages for sandbox")?;
+        let sandbox_id = id.to_string();
+        let guest_hook_path = self
+                .hypervisor
+                .hypervisor_config()
+                .await
+                .security_info
+                .guest_hook_path;
+
+        info!(
+            sl!(),
+            "Sandbox: sending CreateSandboxRequest: sandbox_id = {sandbox_id}, hostname = {hostname}, dns = {:?}, storages = {:?}",
+            dns,
+            storages
+        );
+
         let req = agent::CreateSandboxRequest {
-            hostname: sandbox_config.hostname.clone(),
-            dns: sandbox_config.dns.clone(),
+            // hostname: sandbox_config.hostname.clone(),
+            hostname,
+
+            // dns: sandbox_config.dns.clone(),
+            dns,
+
+            /*
             storages: self
                 .resource_manager
                 .get_storage_for_sandbox(self.shm_size)
                 .await
                 .context("get storages for sandbox")?,
+            */
+            storages,
+
             sandbox_pidns: false,
-            sandbox_id: id.to_string(),
+
+            // sandbox_id: id.to_string(),
+            sandbox_id,
+
+            /*
             guest_hook_path: self
                 .hypervisor
                 .hypervisor_config()
                 .await
                 .security_info
                 .guest_hook_path,
+            */
+            guest_hook_path,
+
             kernel_modules,
         };
 
