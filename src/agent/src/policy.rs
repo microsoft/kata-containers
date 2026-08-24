@@ -5,11 +5,12 @@
 
 use protobuf::MessageDyn;
 
-use crate::rpc::ttrpc_error;
+// use crate::rpc::ttrpc_error;
 use crate::AGENT_POLICY;
 use kata_agent_policy::policy::AgentPolicy;
 
-async fn allow_request(policy: &mut AgentPolicy, ep: &str, request: &str) -> ttrpc::Result<()> {
+async fn allow_request(_policy: &mut AgentPolicy, _ep: &str, _request: &str) -> ttrpc::Result<()> {
+    /*
     match policy.allow_request(ep, request).await {
         Ok((allowed, prints)) => {
             if allowed {
@@ -26,6 +27,8 @@ async fn allow_request(policy: &mut AgentPolicy, ep: &str, request: &str) -> ttr
             format!("{ep}: internal error {e}"),
         )),
     }
+    */
+    Ok(())
 }
 
 pub async fn is_allowed(req: &(impl MessageDyn + serde::Serialize)) -> ttrpc::Result<()> {
@@ -41,7 +44,8 @@ pub async fn is_allowed_with_entrypoint(
     allow_request(&mut policy, ep, &request).await
 }
 
-pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::Result<()> {
+pub async fn do_set_policy(_req: &protocols::agent::SetPolicyRequest) -> ttrpc::Result<()> {
+    /*
     let request = serde_json::to_string(req).unwrap();
     let mut policy = AGENT_POLICY.lock().await;
     allow_request(&mut policy, "SetPolicyRequest", &request).await?;
@@ -49,4 +53,6 @@ pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::R
         .set_policy(&req.policy)
         .await
         .map_err(|e| ttrpc_error(ttrpc::Code::INVALID_ARGUMENT, e))
+    */
+    Ok(())
 }

@@ -89,6 +89,34 @@ fn effective_log_level(enable_debug: bool, log_level: &str) -> &str {
     }
 }
 
+fn get_container_netns_path(spec: &oci::Spec) -> Option<String> {
+    let mut netns = None;
+
+    if let Some(linux) = &spec.linux() {
+        let linux_namespaces = linux.namespaces().clone().unwrap_or_default();
+        for ns in &linux_namespaces {
+            if ns.typ() != oci::LinuxNamespaceType::Network {
+                continue;
+            }
+            if ns.path().is_some() {
+                netns = ns.path().clone().map(|p| p.display().to_string());
+            }
+            break;
+        }
+    }
+
+    if netns.as_deref() == Some("/proc/0/ns/net") {
+        netns = None;
+    }
+
+    if netns.is_none() {
+        if let Some(p) = kata_sys_util::oci_docker::docker_netns_path(spec) {
+            netns = Some(p);
+        }
+    }
+
+    netns
+}
 struct RuntimeHandlerManagerInner {
     id: String,
     msg_sender: Sender<Message>,
@@ -502,6 +530,13 @@ impl RuntimeHandlerManager {
             self.task_init_runtime_instance(&mut spec, &state, &container_config.options)
                 .await
                 .context("try init runtime instance")?;
+
+            let bundle_sandbox_id = spec
+                .annotations()
+                .as_ref()
+                .and_then(|a| a.get("io.kubernetes.cri.sandbox-id").cloned());
+            let bundle_netns_path = get_container_netns_path(&spec);
+
             let instance = self
                 .get_runtime_instance()
                 .await
@@ -509,7 +544,12 @@ impl RuntimeHandlerManager {
 
             instance
                 .sandbox
-                .start()
+                // .start()
+                .start(
+                    bundle_sandbox_id,
+                    &spec.hostname().clone().unwrap_or_default(),
+                    bundle_netns_path,
+                )
                 .await
                 .context("start sandbox in task handler")?;
 
@@ -590,7 +630,8 @@ impl RuntimeHandlerManager {
             SandboxRequest::CreateSandbox(req) => Err(anyhow!("Unreachable request {:?}", req)),
             SandboxRequest::StartSandbox(_) => {
                 sandbox
-                    .start()
+                    // .start()
+                    .start(None, "", None)
                     .await
                     .context("start sandbox in sandbox handler")?;
                 Ok(SandboxResponse::StartSandbox(StartSandboxInfo {

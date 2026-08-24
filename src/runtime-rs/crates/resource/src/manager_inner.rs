@@ -56,7 +56,10 @@ pub(crate) struct ResourceManagerInner {
     nydus_share_fs: Option<Arc<dyn NydusShareFs>>,
 
     pub rootfs_resource: RootFsResource,
-    pub volume_resource: VolumeResource,
+
+    // pub volume_resource: VolumeResource,
+    pub volume_resource: HashMap<String, VolumeResource>,
+
     pub cgroups_resource: CgroupsResource,
     pub cpu_resource: CpuResource,
     pub mem_resource: MemResource,
@@ -127,7 +130,10 @@ impl ResourceManagerInner {
             share_fs: None,
             nydus_share_fs: None,
             rootfs_resource: RootFsResource::new(),
-            volume_resource: VolumeResource::new(),
+
+            // volume_resource: VolumeResource::new(),
+            volume_resource: HashMap::new(),
+
             cgroups_resource,
             cpu_resource,
             mem_resource,
@@ -364,6 +370,63 @@ impl ResourceManagerInner {
         Ok(())
     }
 
+    pub async fn apply_network_config_to_agent(&self, network_config: NetworkConfig) -> Result<()> {
+        if let NetworkConfig::NetNs(cfg) = &network_config {
+            use std::time::{Duration, Instant};
+
+            const POLL: Duration = Duration::from_millis(50);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let netns_path = cfg.netns_path.clone();
+
+            let found = tokio::task::spawn_blocking(move || -> Result<bool> {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .build()?;
+                loop {
+                    if rt.block_on(crate::network::netns_has_interfaces(&netns_path))? {
+                        return Ok(true);
+                    }
+                    if Instant::now() >= deadline {
+                        return Ok(false);
+                    }
+                    std::thread::sleep(POLL);
+                }
+            })
+            .await
+            .map_err(|e| anyhow!("{:?}", e))
+            .context("secondary netns poll task join")?
+            .context("secondary netns poll")?;
+
+            if !found {
+                warn!(
+                    sl!(),
+                    "secondary network: no interfaces in target netns before timeout"
+                );
+            }
+        }
+
+        // Build and set up a temporary network object from the provided netns,
+        // then push interfaces/routes/neighbors to the agent.
+        let device_manager = self.device_manager.clone();
+        let network = thread::spawn(move || -> Result<Arc<dyn Network>> {
+            let rt = runtime::Builder::new_current_thread().enable_io().build()?;
+            let d = rt
+                .block_on(network::new(&network_config, device_manager))
+                .context("new network")?;
+            rt.block_on(d.setup()).context("setup network")?;
+            Ok(d)
+        })
+        .join()
+        .map_err(|e| anyhow!("{:?}", e))
+        .context("Couldn't join on the associated thread")?
+        .context("failed to set up network")?;
+
+        resolve_physical_endpoint_pci_paths(network.as_ref(), self.hypervisor.as_ref()).await;
+        self.apply_network_to_agent(network.as_ref())
+            .await
+            .context("apply network to agent")
+    }
+
     pub async fn apply_network_to_agent(&self, network: &dyn Network) -> Result<()> {
         self.handle_interfaces(network)
             .await
@@ -484,7 +547,8 @@ impl ResourceManagerInner {
     }
 
     pub async fn handler_volumes(
-        &self,
+        // &self,
+        &mut self,
         cid: &str,
         spec: &oci::Spec,
     ) -> Result<Vec<Arc<dyn Volume>>> {
@@ -496,7 +560,19 @@ impl ResourceManagerInner {
             emptydir_mode: &self.toml_config.runtime.emptydir_mode,
             fs_sharing_supported: self.hypervisor.capabilities().await?.is_fs_sharing_supported(),
         };
-        self.volume_resource.handler_volumes(&ctx, cid, spec).await
+
+        // self.volume_resource.handler_volumes(&ctx, cid, spec).await
+        let sandbox_id = spec
+            .annotations()
+            .as_ref()
+            .and_then(|a| a.get("io.kubernetes.cri.sandbox-id"))
+            .cloned()
+            .unwrap_or_default();
+        let volume_resource = self
+            .volume_resource
+            .entry(sandbox_id)
+            .or_insert_with(VolumeResource::new);
+        volume_resource.handler_volumes(&ctx, cid, spec).await
     }
 
     pub async fn handler_devices(&self, _cid: &str, linux: &Linux) -> Result<Vec<ContainerDevice>> {
@@ -952,17 +1028,31 @@ impl ResourceManagerInner {
             swap.clean().await;
         }
 
+        /*
         self.volume_resource
             .cleanup_ephemeral_disks()
             .await
             .context("failed to cleanup ephemeral disks")?;
+        */
+        for v in &self.volume_resource {
+            info!(sl!(), "ResourceManagerInner: cleanup calling cleanup_ephemeral_disks");
+
+            v.1.cleanup_ephemeral_disks()
+                .await
+                .context("failed to cleanup ephemeral disks")?;
+        }
 
         Ok(())
     }
 
     pub async fn dump(&self) {
         self.rootfs_resource.dump().await;
-        self.volume_resource.dump().await;
+
+        // self.volume_resource.dump().await;
+        for (key, volume_resource) in &self.volume_resource {
+            info!(sl!(), "ResourceManagerInner: dump volume_resource for sandbox-id: {}", key);
+            volume_resource.dump().await;
+        }
     }
 
     pub async fn update_linux_resource(
@@ -1095,7 +1185,10 @@ impl Persist for ResourceManagerInner {
             share_fs: None,
             nydus_share_fs: None,
             rootfs_resource: RootFsResource::new(),
-            volume_resource: VolumeResource::new(),
+
+            // volume_resource: VolumeResource::new(),
+            volume_resource: HashMap::new(),
+
             cgroups_resource: CgroupsResource::restore(
                 args,
                 resource_state.cgroup_state.unwrap_or_default(),

@@ -27,6 +27,7 @@ use crate::{
         TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
         VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
         WriteStreamRequest,
+        CreateSecondarySandboxRequest,
     },
     GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest, OomEventResponse,
     SetPolicyRequest, WaitProcessResponse, WriteStreamResponse,
@@ -684,6 +685,17 @@ impl From<CreateSandboxRequest> for agent::CreateSandboxRequest {
             sandbox_id: from.sandbox_id,
             guest_hook_path: from.guest_hook_path,
             kernel_modules: trans_vec(from.kernel_modules),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<CreateSecondarySandboxRequest> for agent::CreateSecondarySandboxRequest {
+    fn from(from: CreateSecondarySandboxRequest) -> Self {
+        Self {
+            hostname: from.hostname,
+            dns: trans_vec(from.dns),
+            sandbox_id: from.sandbox_id,
             ..Default::default()
         }
     }

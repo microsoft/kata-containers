@@ -10,10 +10,11 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 
 use crate::device::topology::PCIeTopology;
+use crate::device::util::{do_decrease_count, do_increase_count};
 use crate::device::{Device, DeviceType};
 use crate::Hypervisor as hypervisor;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct Address(pub [u8; 6]);
 
 impl fmt::Debug for Address {
@@ -55,6 +56,9 @@ pub struct NetworkDevice {
     /// Unique identifier of the device
     pub device_id: String,
 
+    /// Reference count for attach/detach lifecycle management.
+    pub attach_count: u64,
+
     /// Network Device config info
     pub config: NetworkConfig,
 }
@@ -64,6 +68,7 @@ impl NetworkDevice {
     pub fn new(device_id: String, config: &NetworkConfig) -> Self {
         Self {
             device_id,
+            attach_count: 0,
             config: config.clone(),
         }
     }
@@ -76,9 +81,19 @@ impl Device for NetworkDevice {
         _pcie_topo: &mut Option<&mut PCIeTopology>,
         h: &dyn hypervisor,
     ) -> Result<()> {
-        h.add_device(DeviceType::Network(self.clone()))
+        // Skip re-attach when this network device is already attached.
+        if self
+            .increase_attach_count()
             .await
-            .context("add network device.")?;
+            .context("failed to increase attach count")?
+        {
+            return Ok(());
+        }
+
+        if let Err(e) = h.add_device(DeviceType::Network(self.clone())).await {
+            self.decrease_attach_count().await?;
+            return Err(e).context("add network device.");
+        }
 
         return Ok(());
     }
@@ -88,6 +103,15 @@ impl Device for NetworkDevice {
         _pcie_topo: &mut Option<&mut PCIeTopology>,
         h: &dyn hypervisor,
     ) -> Result<Option<u64>> {
+        // Keep attached while there are active references.
+        if self
+            .decrease_attach_count()
+            .await
+            .context("failed to decrease attach count")?
+        {
+            return Ok(None);
+        }
+
         h.remove_device(DeviceType::Network(self.clone()))
             .await
             .context("remove network device.")?;
@@ -105,14 +129,10 @@ impl Device for NetworkDevice {
     }
 
     async fn increase_attach_count(&mut self) -> Result<bool> {
-        // network devices will not be attached multiple times, Just return Ok(false)
-
-        Ok(false)
+        do_increase_count(&mut self.attach_count)
     }
 
     async fn decrease_attach_count(&mut self) -> Result<bool> {
-        // network devices will not be detached multiple times, Just return Ok(false)
-
-        Ok(false)
+        do_decrease_count(&mut self.attach_count)
     }
 }

@@ -11,8 +11,8 @@
 
 [hypervisor.openvmm]
 path = ""
-kernel = "@KERNELPATH_OPENVMM@"
-image = "@IMAGEPATH@"
+kernel = "/opt/kata/share/kata-containers/vmlinux.container"
+image = "/opt/kata/share/kata-containers/kata-containers.img"
 
 # rootfs filesystem type:
 #   - ext4 (default)
@@ -117,7 +117,7 @@ enable_guest_swap = false
 container_pipe_size = @PIPESIZE@
 enable_debug = true
 enable_tracing = false
-debug_console_enabled = false
+debug_console_enabled = true
 
 # Agent dial timeout in millisecond.
 # Use longer timeout to give the hvsock relay time to complete VMBus handshake.
