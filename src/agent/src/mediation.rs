@@ -122,12 +122,31 @@ impl EnforcementClass {
 /// often than it is edited, and rustfmt would expand each row to a five-line tuple.
 #[rustfmt::skip]
 pub const MEDIATION_MANIFEST: &[(&str, &str, &str, EnforcementClass)] = &[
-    // Container lifecycle (policy + occurrence state machine).
+    // Container lifecycle. The occurrence state machine that gates these is compiled in
+    // only under `strict-policy`; every other build runs the same mutation with no
+    // transaction around it and is left with the policy check alone. Declared per
+    // configuration for the same reason `CopyFile` is below: the row describes the binary
+    // that is running, not the one we would like to be running.
+    #[cfg(feature = "strict-policy")]
     ("CreateContainer", "create_container", "CreateContainerRequest", EnforcementClass::LifecycleGated),
+    #[cfg(not(feature = "strict-policy"))]
+    ("CreateContainer", "create_container", "CreateContainerRequest", EnforcementClass::PolicyGated),
+    #[cfg(feature = "strict-policy")]
     ("StartContainer", "start_container", "StartContainerRequest", EnforcementClass::LifecycleGated),
+    #[cfg(not(feature = "strict-policy"))]
+    ("StartContainer", "start_container", "StartContainerRequest", EnforcementClass::PolicyGated),
+    #[cfg(feature = "strict-policy")]
     ("RemoveContainer", "remove_container", "RemoveContainerRequest", EnforcementClass::LifecycleGated),
+    #[cfg(not(feature = "strict-policy"))]
+    ("RemoveContainer", "remove_container", "RemoveContainerRequest", EnforcementClass::PolicyGated),
+    #[cfg(feature = "strict-policy")]
     ("ExecProcess", "exec_process", "ExecProcessRequest", EnforcementClass::LifecycleGated),
+    #[cfg(not(feature = "strict-policy"))]
+    ("ExecProcess", "exec_process", "ExecProcessRequest", EnforcementClass::PolicyGated),
+    #[cfg(feature = "strict-policy")]
     ("SignalProcess", "signal_process", "SignalProcessRequest", EnforcementClass::LifecycleGated),
+    #[cfg(not(feature = "strict-policy"))]
+    ("SignalProcess", "signal_process", "SignalProcessRequest", EnforcementClass::PolicyGated),
     // State-mutating operations (policy gated).
     ("WaitProcess", "wait_process", "WaitProcessRequest", EnforcementClass::PolicyGated),
     ("UpdateContainer", "update_container", "UpdateContainerRequest", EnforcementClass::PolicyGated),
@@ -327,6 +346,9 @@ mod tests {
     /// this lint reads the source rather than relying on the type system: a compile-time
     /// rule can only constrain the configuration actually being built.
     const STRICT_POLICY: &str = "strict-policy";
+
+    /// Whether this build compiles the occurrence state machine in at all.
+    const LIFECYCLE_GATING_COMPILED_IN: bool = cfg!(feature = "strict-policy");
 
     /// Extract `(method, request type)` for every `rpc <Name>(<Request>)` declared by the
     /// agent proto service.
@@ -575,14 +597,14 @@ mod tests {
         let mut unknown = Vec::new();
         let mut ambiguous = Vec::new();
         let mut falls_through = Vec::new();
-        let mut checked = 0;
+        let mut gated = Vec::new();
 
         for (rpc, handler, _, class) in MEDIATION_MANIFEST {
             if !matches!(class, EnforcementClass::LifecycleGated) {
                 continue;
             }
-            checked += 1;
             let where_ = format!("{} ({})", rpc, handler);
+            gated.push(where_.clone());
 
             let candidates = find(handler);
             let body = match candidates.len() {
@@ -626,14 +648,29 @@ mod tests {
             }
         }
 
-        // A lint that silently checks nothing is worse than no lint: renaming or retiring
-        // the variant would leave this test green while enforcing nothing at all.
-        assert!(
-            checked > 0,
-            "no LifecycleGated entries found in MEDIATION_MANIFEST, so this lint verified \
-             nothing. If the class was renamed, update this test to match rather than \
-             leaving it vacuously green."
-        );
+        // The expected count is a property of the configuration, not a constant. Requiring
+        // only "more than zero" would have accepted the very inaccuracy this pairing fixes:
+        // an unconditional LifecycleGated row claims a transaction that a default build
+        // never opens, and the lint would have confirmed the claim by reading strict-only
+        // source. Each configuration is now asked the question that is true of it.
+        if LIFECYCLE_GATING_COMPILED_IN {
+            assert!(
+                !gated.is_empty(),
+                "no LifecycleGated entries found in MEDIATION_MANIFEST, so this lint \
+                 verified nothing. If the class was renamed, update this test to match \
+                 rather than leaving it vacuously green."
+            );
+        } else {
+            assert!(
+                gated.is_empty(),
+                "this build does not compile the occurrence state machine in, yet the \
+                 manifest still classifies {:?} as LifecycleGated. Such a row claims a \
+                 transaction the handler never opens here: the mediation is behind \
+                 `strict-policy`, and below it the same mutation runs unguarded. Declare \
+                 the row per configuration, as CopyFile and SetPolicy are.",
+                gated
+            );
+        }
         assert!(
             unknown.is_empty(),
             "the mediation manifest names handler(s) that do not exist in rpc.rs: {:?}. \
