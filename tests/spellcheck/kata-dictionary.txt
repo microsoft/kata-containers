@@ -142,6 +142,7 @@ UNBINDABLE
 RAII
 Virt
 sysfs
+BYOI
 pullable
 SRPM
 
