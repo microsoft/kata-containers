@@ -320,6 +320,14 @@ mod tests {
     /// entry.
     const RPC_SOURCE: &str = include_str!("rpc.rs");
 
+    /// Calls that open an SRM transaction.
+    const TRANSACTION_OPENERS: &[&str] = &["prepare", "prepare_teardown"];
+
+    /// The feature that compiles the mediation in. Mediation is conditional, which is why
+    /// this lint reads the source rather than relying on the type system: a compile-time
+    /// rule can only constrain the configuration actually being built.
+    const STRICT_POLICY: &str = "strict-policy";
+
     /// Extract `(method, request type)` for every `rpc <Name>(<Request>)` declared by the
     /// agent proto service.
     fn proto_rpcs() -> Vec<(String, String)> {
@@ -420,41 +428,112 @@ mod tests {
         }
     }
 
-    /// The body of the handler `async fn <name>(` as written in `rpc.rs`.
-    ///
-    /// Delimited by the *next* method of the same `impl` block rather than by matching
-    /// braces: handler bodies are full of `format!` strings containing `{}`, so a brace
-    /// counter would have to understand Rust string, char and comment syntax before it
-    /// could be trusted. Every handler sits at one indentation level inside its `impl`,
-    /// which makes the next `fn` at that level -- or the end of the block -- an exact and
-    /// far cheaper boundary.
-    ///
-    /// Searching for `fn <name>(` also excludes the inner `do_<name>` helpers for free,
-    /// since `fn do_create_container(` does not contain `fn create_container(`.
-    /// Everything in `rpc.rs` before its unit-test module.
-    ///
-    /// Without this, a test helper could stand in for a production handler that had been
-    /// deleted, and the lint would go on reporting the RPC as mediated. The marker is
-    /// matched at column zero because `#[cfg(test)]` also guards items further up the
-    /// file, so the attribute is not a reliable boundary on its own.
-    const TEST_MODULE: &str = "\nmod tests {";
-
-    fn production_only(src: &str) -> &str {
-        match src.find(TEST_MODULE) {
-            Some(at) => &src[..at],
-            None => src,
+    /// The `#[cfg(...)]` predicate of an attribute, as written.
+    fn cfg_tokens(attr: &syn::Attribute) -> Option<String> {
+        match &attr.meta {
+            syn::Meta::List(list) if list.path.is_ident("cfg") => Some(list.tokens.to_string()),
+            _ => None,
         }
     }
 
-    fn handler_body<'a>(src: &'a str, name: &str) -> Option<&'a str> {
-        let at = src.find(&format!("fn {}(", name))?;
-        let rest = &src[at..];
-        let end = ["\n    async fn ", "\n    fn ", "\n}"]
+    fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().filter_map(cfg_tokens).any(|t| t == "test")
+    }
+
+    fn is_strict_policy(attrs: &[syn::Attribute]) -> bool {
+        attrs
             .iter()
-            .filter_map(|marker| rest.find(marker))
-            .min()
-            .unwrap_or(rest.len());
-        Some(&rest[..end])
+            .filter_map(cfg_tokens)
+            .any(|t| t.contains(STRICT_POLICY))
+    }
+
+    /// Every method the production build compiles, collected from the syntax tree.
+    ///
+    /// `#[cfg(test)]` modules are skipped structurally, so a test helper can never stand
+    /// in for a production handler that was deleted.
+    #[derive(Default)]
+    struct ProductionMethods<'ast> {
+        methods: Vec<&'ast syn::ImplItemFn>,
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for ProductionMethods<'ast> {
+        fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+            if is_cfg_test(&node.attrs) {
+                return;
+            }
+            syn::visit::visit_item_mod(self, node);
+        }
+
+        fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+            self.methods.push(node);
+            syn::visit::visit_impl_item_fn(self, node);
+        }
+    }
+
+    /// What a piece of syntax does that this lint cares about.
+    #[derive(Default)]
+    struct CallScan {
+        opens_transaction: bool,
+        self_calls: Vec<String>,
+    }
+
+    impl CallScan {
+        fn of_fn(f: &syn::ImplItemFn) -> Self {
+            let mut scan = CallScan::default();
+            syn::visit::visit_impl_item_fn(&mut scan, f);
+            scan
+        }
+
+        fn of_block(b: &syn::ExprBlock) -> Self {
+            let mut scan = CallScan::default();
+            syn::visit::visit_expr_block(&mut scan, b);
+            scan
+        }
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for CallScan {
+        fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+            let method = node.method.to_string();
+            if TRANSACTION_OPENERS.contains(&method.as_str()) {
+                self.opens_transaction = true;
+            }
+            // `self.do_create_container(..).await` parses as an await of a method call
+            // whose receiver is `self`, so the receiver test still holds here.
+            if let syn::Expr::Path(path) = &*node.receiver {
+                if path.path.is_ident("self") {
+                    self.self_calls.push(method);
+                }
+            }
+            syn::visit::visit_expr_method_call(self, node);
+        }
+    }
+
+    /// Does this block's *success* path leave the handler?
+    ///
+    /// Deliberately the tail statement rather than "contains a `return` somewhere". Each
+    /// of these blocks returns early on its error paths, so the weaker test is satisfied
+    /// by those alone -- it stays green in exactly the situation it is supposed to catch,
+    /// where the block completes normally and falls into the unmediated call below.
+    fn tail_returns(block: &syn::ExprBlock) -> bool {
+        matches!(
+            block.block.stmts.last(),
+            Some(syn::Stmt::Expr(syn::Expr::Return(_), _))
+        )
+    }
+
+    /// Blocks written as `#[cfg(feature = "strict-policy")] { .. }`.
+    #[derive(Default)]
+    struct StrictPolicyBlocks<'ast> {
+        blocks: Vec<&'ast syn::ExprBlock>,
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for StrictPolicyBlocks<'ast> {
+        fn visit_expr_block(&mut self, node: &'ast syn::ExprBlock) {
+            if is_strict_policy(&node.attrs) {
+                self.blocks.push(node);
+            }
+            syn::visit::visit_expr_block(self, node);
+        }
     }
 
     /// FR-7/FR-9: classifying an RPC `LifecycleGated` is a claim that its handler runs
@@ -463,38 +542,87 @@ mod tests {
     /// state without opening a transaction at all. Classification and mediation are
     /// separate facts, and only the first one was being enforced.
     ///
-    /// This is deliberately a shallow check: it proves the call is *written in* the
-    /// handler, not that it is reached on every path. What makes it worth having anyway is
-    /// that it is static over the whole handler set, so it holds for every RPC rather than
-    /// for the configurations a model or a test happens to explore.
+    /// The check works on the parsed syntax tree rather than on the source text. That
+    /// buys three things: handler bodies and the unit-test module are exact properties of
+    /// the tree instead of guesses about indentation and column-zero markers; a match can
+    /// no longer come from a comment or a string literal; and delegation through a
+    /// `self.do_*` helper is followed rather than reported as a violation.
+    ///
+    /// Reading the source also makes the check `cfg`-agnostic: it sees the
+    /// `strict-policy` block whichever way the crate is compiled. A type-level rule --
+    /// making the transaction a capability the mutation demands -- would be stronger where
+    /// it applied, but it would only ever constrain the configuration actually being
+    /// built, and mediation here is feature-conditional.
+    ///
+    /// What it still does not prove is reachability: the call must be *written* in the
+    /// handler, not reached on every path. That limit is inherent to a syntactic check.
     #[test]
     fn every_lifecycle_gated_handler_opens_a_transaction() {
+        let file = syn::parse_file(RPC_SOURCE).expect("rpc.rs parses as Rust");
+        let mut production = ProductionMethods::default();
+        syn::visit::Visit::visit_file(&mut production, &file);
+
+        let find = |name: &str| -> Vec<&syn::ImplItemFn> {
+            production
+                .methods
+                .iter()
+                .copied()
+                .filter(|m| m.sig.ident == name)
+                .collect()
+        };
+
         let mut missing = Vec::new();
         let mut unknown = Vec::new();
+        let mut ambiguous = Vec::new();
+        let mut falls_through = Vec::new();
         let mut checked = 0;
-
-        // If this marker ever stops matching, the scan silently widens back over the test
-        // module instead of failing, so it is checked rather than assumed.
-        assert!(
-            RPC_SOURCE.contains(TEST_MODULE),
-            "rpc.rs no longer contains a `{}` module declaration at column zero, so this \
-             lint would scan test code as if it were production code. Update TEST_MODULE.",
-            TEST_MODULE.trim()
-        );
-        let production = production_only(RPC_SOURCE);
 
         for (rpc, handler, _, class) in MEDIATION_MANIFEST {
             if !matches!(class, EnforcementClass::LifecycleGated) {
                 continue;
             }
             checked += 1;
-            match handler_body(production, handler) {
-                None => unknown.push(format!("{} ({})", rpc, handler)),
-                Some(body) => {
-                    if !body.contains(".prepare(") && !body.contains(".prepare_teardown(") {
-                        missing.push(format!("{} ({})", rpc, handler));
-                    }
+            let where_ = format!("{} ({})", rpc, handler);
+
+            let candidates = find(handler);
+            let body = match candidates.len() {
+                0 => {
+                    unknown.push(where_);
+                    continue;
                 }
+                1 => candidates[0],
+                n => {
+                    ambiguous.push(format!("{} x{}", where_, n));
+                    continue;
+                }
+            };
+
+            let scan = CallScan::of_fn(body);
+            // One hop only. It covers the `do_*` delegation this file actually uses, and
+            // stopping there keeps the check from wandering the whole call graph, where a
+            // `prepare` on some unrelated path would start counting as mediation.
+            let delegated = || {
+                scan.self_calls.iter().any(|callee| {
+                    find(callee)
+                        .into_iter()
+                        .any(|f| CallScan::of_fn(f).opens_transaction)
+                })
+            };
+            if !scan.opens_transaction && !delegated() {
+                missing.push(where_.clone());
+            }
+
+            // Mediation is compiled in only under `strict-policy`; the same handler calls
+            // the same mutation unguarded below the block. That is by design, and it is
+            // safe only while the guarded block diverges -- otherwise both run.
+            let mut blocks = StrictPolicyBlocks::default();
+            syn::visit::Visit::visit_impl_item_fn(&mut blocks, body);
+            let guarded_and_diverging = blocks
+                .blocks
+                .iter()
+                .any(|b| CallScan::of_block(b).opens_transaction && tail_returns(b));
+            if !guarded_and_diverging {
+                falls_through.push(where_);
             }
         }
 
@@ -515,6 +643,13 @@ mod tests {
             unknown
         );
         assert!(
+            ambiguous.is_empty(),
+            "more than one method in rpc.rs answers to these handler name(s): {:?}. The \
+             lint cannot tell which one mediates the RPC, so it would be checking an \
+             arbitrary one of them.",
+            ambiguous
+        );
+        assert!(
             missing.is_empty(),
             "RPC(s) classified LifecycleGated whose handler never opens an SRM \
              transaction: {:?}. That classification claims the operation is gated by the \
@@ -522,6 +657,15 @@ mod tests {
              classification is decoration and the operation mutates lifecycle state \
              unmediated.",
             missing
+        );
+        assert!(
+            falls_through.is_empty(),
+            "RPC(s) whose `strict-policy` transaction block does not return: {:?}. Each \
+             of these handlers calls its mutation again, unmediated, below that block -- \
+             the arrangement is only sound because the mediated path returns first. If it \
+             falls through, the confidential build performs the operation twice, the \
+             second time outside the transaction it just committed.",
+            falls_through
         );
     }
 
