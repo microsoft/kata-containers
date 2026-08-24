@@ -334,6 +334,10 @@ MONITOR = kata-monitor
 MONITOR_OUTPUT = $(CURDIR)/$(MONITOR)
 MONITOR_DIR = $(CLI_DIR)/kata-monitor
 
+WARMPOOL = kata-warm-pool-manager
+WARMPOOL_OUTPUT = $(CURDIR)/$(WARMPOOL)
+WARMPOOL_DIR = $(CLI_DIR)/kata-warm-pool-manager
+
 
 SOURCES := $(shell find . 2>&1 | grep -E '.*\.(c|h|go)$$')
 VERSION := ${shell cat ./VERSION}
@@ -884,7 +888,7 @@ define SHOW_ARCH
   $(shell printf "\\t%s%s\\\n" "$(1)" $(if $(filter $(ARCH),$(1))," (default)",""))
 endef
 
-all: runtime containerd-shim-v2 monitor
+all: runtime containerd-shim-v2 monitor warm-pool-manager
 
 # Targets that depend on .git-commit can use $(shell git rev-parse HEAD) to get a
 # git revision string.  They will only be rebuilt if the revision string
@@ -899,6 +903,8 @@ all: runtime containerd-shim-v2 monitor
 containerd-shim-v2: $(SHIMV2_OUTPUT)
 
 monitor: $(MONITOR_OUTPUT)
+
+warm-pool-manager: $(WARMPOOL_OUTPUT)
 
 runtime: $(RUNTIME_OUTPUT) $(CONFIGS)
 .DEFAULT: default
@@ -950,6 +956,9 @@ $(SHIMV2_OUTPUT): $(SOURCES) $(GENERATED_FILES) $(MAKEFILE_LIST)
 $(MONITOR_OUTPUT): $(SOURCES) $(GENERATED_FILES) $(MAKEFILE_LIST) .git-commit
 	$(QUIET_BUILD)(cd $(MONITOR_DIR)/ && go build \
 		--ldflags "-X main.GitCommit=$(shell git rev-parse HEAD)" $(BUILDFLAGS) -o $@ .)
+
+$(WARMPOOL_OUTPUT): $(SOURCES) $(GENERATED_FILES) $(MAKEFILE_LIST)
+	$(QUIET_BUILD)(cd $(WARMPOOL_DIR)/ && go build -ldflags "$(KATA_LDFLAGS)" $(BUILDFLAGS) -o $@ .)
 
 .PHONY: \
 	check \
@@ -1011,7 +1020,7 @@ coverage:
 	go test -v -covermode=atomic -coverprofile=coverage.txt ./...
 	go tool cover -html=coverage.txt -o coverage.html
 
-install: all install-runtime install-containerd-shim-v2 install-monitor
+install: all install-runtime install-containerd-shim-v2 install-monitor install-warm-pool-manager
 
 install-bin: $(BINLIST)
 	$(QUIET_INST)$(foreach f,$(BINLIST),$(call INSTALL_EXEC,$f,$(BINDIR)))
@@ -1022,6 +1031,9 @@ install-containerd-shim-v2: $(SHIMV2_OUTPUT)
 	$(QUIET_INST)$(call INSTALL_EXEC,$<,$(BINDIR))
 
 install-monitor: $(MONITOR)
+	$(QUIET_INST)$(call INSTALL_EXEC,$<,$(BINDIR))
+
+install-warm-pool-manager: $(WARMPOOL)
 	$(QUIET_INST)$(call INSTALL_EXEC,$<,$(BINDIR))
 
 install-bin-libexec: $(BINLIBEXECLIST)
