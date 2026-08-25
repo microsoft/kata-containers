@@ -122,6 +122,12 @@ pub async fn get_virtio_blk_pci_device_name(
     let sysfs_rel_path = pcipath_to_sysfs(&root_bus_sysfs, pcipath)?;
     let matcher = VirtioBlkPciMatcher::new(&sysfs_rel_path, root_complex);
 
+    // OpenVMM attaches the endpoint successfully, but its PCIe root-port
+    // hotplug notification is not observed by restricted-injection SNP
+    // guests, so Linux does not scan the port or emit a uevent. Force a scan
+    // until OpenVMM provides an SNP-compatible notification path.
+    std::fs::write("/sys/bus/pci/rescan", "1").context("failed to rescan PCI bus")?;
+
     let uev = wait_for_uevent(sandbox, matcher).await?;
     Ok(format!("{}/{}", SYSTEM_DEV_PATH, &uev.devname))
 }

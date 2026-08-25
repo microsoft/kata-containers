@@ -20,6 +20,50 @@ impl OpenVmmInner {
         }
 
         match device {
+            DeviceType::Block(mut block_device) => {
+                if block_device.config.driver_option != KATA_BLK_DEV_TYPE {
+                    return Err(anyhow!(
+                        "openvmm only supports '{}' block hotplug, got '{}'",
+                        KATA_BLK_DEV_TYPE,
+                        block_device.config.driver_option
+                    ));
+                }
+
+                if block_device.config.path_on_host.is_empty() {
+                    return Err(anyhow!("openvmm block hotplug requires a host path"));
+                }
+
+                let port = self.reserve_block_hotplug_port(&block_device.device_id)?;
+                let hotplug_result = self
+                    .vmm_instance
+                    .add_pcie_device(
+                        &port.name,
+                        block_device.config.path_on_host.clone(),
+                        block_device.config.is_readonly,
+                    )
+                    .await
+                    .context(format!(
+                        "failed to hotplug block device {} into PCIe port {}",
+                        block_device.config.path_on_host, port.name
+                    ));
+
+                if let Err(err) = hotplug_result {
+                    let _ = self.release_block_hotplug_port(&block_device.device_id);
+                    return Err(err);
+                }
+
+                info!(
+                    sl!(),
+                    "openvmm: hotplugged block device {} as virtio-blk-pci at port {} (pci_path {})",
+                    block_device.config.path_on_host,
+                    port.name,
+                    port.pci_path
+                );
+
+                block_device.config.pci_path = Some(port.pci_path.clone());
+                block_device.config.scsi_addr = None;
+                Ok(DeviceType::Block(block_device))
+            }
             DeviceType::BlockModern(block_device) => {
                 let (device_id, path_on_host, is_readonly, driver_option) = {
                     let block = block_device.lock().await;
@@ -90,6 +134,32 @@ impl OpenVmmInner {
 
     pub(crate) async fn remove_device(&mut self, device: DeviceType) -> Result<()> {
         match device {
+            DeviceType::Block(block_device) => {
+                let device_id = block_device.device_id;
+                let Some(port) = self.block_hotplug_port(&device_id) else {
+                    warn!(
+                        sl!(),
+                        "openvmm: no hotplug mapping found for block device {}", device_id
+                    );
+                    return Ok(());
+                };
+
+                self.vmm_instance
+                    .remove_pcie_device(&port.name)
+                    .await
+                    .context(format!(
+                        "failed to hot-remove block device {} from PCIe port {}",
+                        device_id, port.name
+                    ))?;
+
+                let _ = self.release_block_hotplug_port(&device_id);
+
+                info!(
+                    sl!(),
+                    "openvmm: hot-removed block device {} from PCIe port {}", device_id, port.name
+                );
+                Ok(())
+            }
             DeviceType::BlockModern(block_device) => {
                 let device_id = block_device.lock().await.device_id.clone();
                 let Some(port) = self.block_hotplug_port(&device_id) else {
