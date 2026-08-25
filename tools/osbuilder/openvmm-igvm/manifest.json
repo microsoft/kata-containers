@@ -41,15 +41,15 @@
                 "name": "s0rc0",
                 "segment": 0,
                 "start_bus": 0,
-                "end_bus": 255,
+                "end_bus": 127,
                 "low_mmio": {
                   "dynamic": {
-                    "size": 67108864
+                    "size": 268435456
                   }
                 },
                 "high_mmio": {
                   "dynamic": {
-                    "size": 1073741824
+                    "size": 17179869184
                   }
                 },
                 "cxl": null,

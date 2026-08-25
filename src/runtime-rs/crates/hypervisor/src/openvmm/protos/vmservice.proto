@@ -66,6 +66,19 @@ message DirectBoot {
     string kernel_cmdline = 3;
 }
 
+message IgvmBoot {
+    string igvm_path = 1;
+}
+
+message IsolationConfig {
+    enum Type {
+        NONE = 0;
+        SNP = 1;
+    }
+
+    Type isolation_type = 1;
+}
+
 message UEFI {
     // Variables used to initialize an empty UEFI variable store. These are
     // ignored when the store already contains any variables.
@@ -517,6 +530,7 @@ message VMConfig {
     oneof BootConfig {
         DirectBoot direct_boot = 5;
         UEFI uefi = 6;
+        IgvmBoot igvm = 13;
     }
     WindowsOptions windows_options = 7;
     // Field 8 was previously map<string, string> extra_data.
@@ -532,6 +546,8 @@ message VMConfig {
     // Actions to take on guest power events. Each unset action uses its
     // default.
     GuestPowerActions guest_power_actions = 12;
+    // Confidential-computing isolation mode.
+    IsolationConfig isolation_config = 14;
 }
 
 // WindowsOptions contains virtual machine configurations that are only present on a Windows host.

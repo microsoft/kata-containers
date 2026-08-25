@@ -21,13 +21,14 @@ impl OpenVmmInner {
 
         match device {
             DeviceType::BlockModern(block_device) => {
-                let (device_id, path_on_host, is_readonly, driver_option) = {
+                let (device_id, path_on_host, is_readonly, driver_option, format) = {
                     let block = block_device.lock().await;
                     (
                         block.device_id.clone(),
                         block.config.path_on_host.clone(),
                         block.config.is_readonly,
                         block.config.driver_option.clone(),
+                        block.config.format.clone(),
                     )
                 };
 
@@ -46,7 +47,13 @@ impl OpenVmmInner {
                 let port = self.reserve_block_hotplug_port(&device_id)?;
                 let hotplug_result = self
                     .vmm_instance
-                    .add_pcie_device(&port.name, path_on_host.clone(), is_readonly)
+                    .add_pcie_device(
+                        &port.name,
+                        path_on_host.clone(),
+                        is_readonly,
+                        &format,
+                        &self.run_dir,
+                    )
                     .await
                     .context(format!(
                         "failed to hotplug block device {} into PCIe port {}",

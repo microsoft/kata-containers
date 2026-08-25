@@ -31,6 +31,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::instrument;
 
+fn sl() -> slog::Logger {
+    slog_scope::logger().new(o!("subsystem" => "block-device"))
+}
+
 #[derive(Debug)]
 pub struct VirtioBlkPciDeviceHandler {}
 
@@ -121,6 +125,18 @@ pub async fn get_virtio_blk_pci_device_name(
     let root_bus_sysfs = format!("{}{}", SYSFS_DIR, create_pci_root_bus_path(root_complex));
     let sysfs_rel_path = pcipath_to_sysfs(&root_bus_sysfs, pcipath)?;
     let matcher = VirtioBlkPciMatcher::new(&sysfs_rel_path, root_complex);
+
+    // OpenVMM attaches the endpoint successfully, but its PCIe root-port
+    // hotplug notification is not observed by restricted-injection SNP
+    // guests, so Linux does not scan the port or emit a uevent. Force a scan
+    // until OpenVMM provides an SNP-compatible notification path.
+    if let Err(err) = std::fs::write("/sys/bus/pci/rescan", "1") {
+        warn!(
+            sl(),
+            "failed to force PCI rescan, relying on hotplug uevent";
+            "error" => err.to_string()
+        );
+    }
 
     let uev = wait_for_uevent(sandbox, matcher).await?;
     Ok(format!("{}/{}", SYSTEM_DEV_PATH, &uev.devname))

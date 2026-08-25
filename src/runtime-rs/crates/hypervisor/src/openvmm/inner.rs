@@ -78,8 +78,7 @@ impl OpenVmmInner {
         let mut capabilities = Capabilities::new();
         capabilities.set(
             CapabilityBits::BlockDeviceSupport
-                | CapabilityBits::BlockDeviceDiscardSupport
-                | CapabilityBits::FsSharingSupport,
+                | CapabilityBits::BlockDeviceDiscardSupport,
         );
 
         OpenVmmInner {
@@ -109,7 +108,13 @@ impl OpenVmmInner {
     }
 
     pub(crate) async fn capabilities(&self) -> Result<Capabilities> {
-        Ok(self.capabilities.clone())
+        let mut capabilities = self.capabilities.clone();
+        if !self.config.security_info.confidential_guest
+            && self.config.shared_fs.shared_fs.is_some()
+        {
+            capabilities.set(CapabilityBits::FsSharingSupport);
+        }
+        Ok(capabilities)
     }
 
     pub(crate) fn set_capabilities(&mut self, flag: CapabilityBits) {
