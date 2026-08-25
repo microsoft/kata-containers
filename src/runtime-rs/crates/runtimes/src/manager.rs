@@ -1689,8 +1689,8 @@ mod tests {
         async fn is_sandbox_container(&self, _process_id: &ContainerProcess) -> bool {
             false
         }
-        async fn container_ids(&self) -> Vec<common::types::ContainerID> {
-            Vec::new()
+        async fn snapshot_inventory(&self) -> Result<common::types::ContainerSnapshotInventory> {
+            unimplemented!()
         }
     }
 
