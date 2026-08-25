@@ -115,4 +115,15 @@ impl Endpoint for VethEndpoint {
         // nothing else of this endpoint lives on the host for recovery.
         None
     }
+
+    async fn restore_network_config(&self) -> Result<Option<NetworkConfig>> {
+        Ok(Some(self.get_network_config()?))
+    }
+
+    async fn activate_restore(&self) -> Result<()> {
+        self.net_pair
+            .add_network_model()
+            .await
+            .context("activate restore network model")
+    }
 }

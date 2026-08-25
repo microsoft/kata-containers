@@ -18,6 +18,7 @@ mod container_manager;
 pub mod factory;
 pub mod health_check;
 pub mod oom;
+mod restore;
 pub mod sandbox;
 pub mod sandbox_persist;
 pub mod vmm_process;
@@ -150,7 +151,10 @@ impl RuntimeHandler for VirtContainer {
         init_size_manager: InitialSizeManager,
         sandbox_config: SandboxConfig,
     ) -> Result<RuntimeInstance> {
-        let (hypervisor, agent, factory) = new_vm_components(&config).await?;
+        let restore_requested = sandbox_config
+            .annotations
+            .contains_key(kata_types::annotations::KATA_ANNO_RESTORE_FROM);
+        let (hypervisor, agent, factory) = new_vm_components(&config, restore_requested).await?;
 
         let resource_manager = Arc::new(
             ResourceManager::new(
@@ -163,6 +167,7 @@ impl RuntimeHandler for VirtContainer {
             .await?,
         );
         let pid = std::process::id();
+        let restore_context = Arc::new(restore::RestoreContext::new(sid));
 
         let sandbox = sandbox::VirtSandbox::new(
             sid,
@@ -172,6 +177,7 @@ impl RuntimeHandler for VirtContainer {
             resource_manager.clone(),
             sandbox_config,
             factory,
+            restore_context.clone(),
         )
         .await
         .context("new virt sandbox")?;
@@ -188,6 +194,7 @@ impl RuntimeHandler for VirtContainer {
             hypervisor,
             resource_manager,
             sandbox.oom_notifier(),
+            restore_context,
         );
         Ok(RuntimeInstance {
             sandbox: Arc::new(sandbox),
@@ -204,9 +211,12 @@ impl RuntimeHandler for VirtContainer {
 
 async fn new_vm_components(
     toml_config: &TomlConfig,
+    restore_requested: bool,
 ) -> Result<(Arc<dyn Hypervisor>, Arc<dyn Agent>, Factory)> {
     let mut factory = toml_config.get_factory();
-    if factory.enable_template {
+    if restore_requested {
+        factory.enable_template = false;
+    } else if factory.enable_template {
         // Like runtime-go's checkVMConfig(), only restore a template whose saved
         // VM config matches this sandbox's (e.g. same static sizing).
         let template = check_template_vm_config(toml_config).and_then(|()| {
@@ -473,7 +483,7 @@ agent_name = "kata"
         ))
         .unwrap();
 
-        let (hypervisor, _, factory) = new_vm_components(&toml_config).await.unwrap();
+        let (hypervisor, _, factory) = new_vm_components(&toml_config, false).await.unwrap();
         let hypervisor_config = hypervisor.hypervisor_config().await;
 
         assert!(!factory.enable_template);

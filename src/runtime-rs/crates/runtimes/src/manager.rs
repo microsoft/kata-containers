@@ -31,6 +31,7 @@ use kata_types::{
         hypervisor::{RootlessUser, SecurityInfo},
         Hypervisor, TomlConfig, KATA_PATH,
     },
+    k8s::container_type,
     mount::SHM_DEVICE,
     prefix_with_rootless_dir,
     rootless::{is_rootless, rootless_dir, set_rootless},
@@ -511,6 +512,19 @@ impl RuntimeHandlerManager {
             return Ok(());
         }
 
+        if let Some(restore_from) = spec.annotations().as_ref().and_then(|annotations| {
+            annotations.get(kata_types::annotations::KATA_ANNO_RESTORE_FROM)
+        }) {
+            if restore_from.is_empty() {
+                return Err(anyhow!("restore-from annotation is empty"));
+            }
+            if !container_type(spec).is_pod_sandbox() {
+                return Err(anyhow!(
+                    "restore-from is supported only on pod sandbox tasks"
+                ));
+            }
+        }
+
         let mut dns: Vec<String> = vec![];
 
         let spec_mounts = spec.mounts().clone().unwrap_or_default();
@@ -802,14 +816,19 @@ impl RuntimeHandlerManager {
             .await
             .context("get runtime instance")?;
         let sandbox = instance.sandbox.clone();
+        let cm = instance.container_manager.clone();
 
         match req {
             SandboxRequest::CreateSandbox(req) => Err(anyhow!("Unreachable request {:?}", req)),
-            SandboxRequest::StartSandbox(_) => {
+            SandboxRequest::StartSandbox(req) => {
                 sandbox
                     .start()
                     .await
                     .context("start sandbox in sandbox handler")?;
+                sandbox
+                    .activate_restore(cm, &req.sandbox_id)
+                    .await
+                    .context("activate restored sandbox")?;
                 Ok(SandboxResponse::StartSandbox(StartSandboxInfo {
                     pid: std::process::id(),
                     create_time: Some(SystemTime::now()),
@@ -931,10 +950,17 @@ impl RuntimeHandlerManager {
                         .context("record the network rescan")?;
                 }
 
-                let shim_pid = cm
-                    .start_process(&process_id)
+                let restored = sandbox
+                    .activate_restore(cm.clone(), process_id.container_id())
                     .await
-                    .context("start process")?;
+                    .context("activate restored sandbox")?;
+                let shim_pid = if restored {
+                    cm.pid().await.context("get restored sandbox pid")?
+                } else {
+                    cm.start_process(&process_id)
+                        .await
+                        .context("start process")?
+                };
 
                 let pid = shim_pid.pid;
                 let process_type = process_id.process_type;
@@ -1610,6 +1636,13 @@ mod tests {
         ) -> Result<()> {
             unimplemented!()
         }
+        async fn activate_restore(
+            &self,
+            _container_manager: Arc<dyn common::ContainerManager>,
+            _container_id: &str,
+        ) -> Result<bool> {
+            Ok(false)
+        }
     }
 
     struct StartingContainerManager;
@@ -1690,6 +1723,19 @@ mod tests {
             false
         }
         async fn snapshot_inventory(&self) -> Result<common::types::ContainerSnapshotInventory> {
+            unimplemented!()
+        }
+        async fn prepare_restored_container(
+            &self,
+            _target: &common::types::HostContainerId,
+            _source: &common::types::GuestContainerId,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn mark_restored_container_running(
+            &self,
+            _target: &common::types::HostContainerId,
+        ) -> Result<common::types::PID> {
             unimplemented!()
         }
     }

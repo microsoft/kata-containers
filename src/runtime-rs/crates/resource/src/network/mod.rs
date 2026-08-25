@@ -32,6 +32,7 @@ use tokio::sync::RwLock;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use hypervisor::NetworkConfig as HypervisorNetworkConfig;
 use hypervisor::{device::device_manager::DeviceManager, Hypervisor};
 
 /// How far a network got attaching its endpoints.
@@ -108,6 +109,12 @@ pub trait Network: Send + Sync {
     /// knows which one it was.
     async fn netns_path(&self) -> Option<String> {
         None
+    }
+    async fn restore_network_configs(&self) -> Result<Vec<HypervisorNetworkConfig>> {
+        Ok(Vec::new())
+    }
+    async fn activate_restore(&self) -> Result<()> {
+        anyhow::bail!("network does not support fenced snapshot restore")
     }
     /// Returns the list of network endpoints. Used to resolve PCI paths
     /// via QMP before sending update_interface to the agent.

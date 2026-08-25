@@ -11,7 +11,7 @@ use agent::{Agent, Storage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use hypervisor::device::device_manager::DeviceManager;
-use hypervisor::Hypervisor;
+use hypervisor::{Hypervisor, RestoreNetworkConfig};
 use kata_types::config::TomlConfig;
 use kata_types::mount::Mount;
 use oci::{Linux, LinuxResources};
@@ -113,6 +113,27 @@ impl ResourceManager {
     pub async fn network_pending_attach(&self) -> bool {
         let inner = self.inner.read().await;
         inner.network_pending_attach()
+    }
+
+    pub async fn prepare_restore_network(
+        &self,
+        network_config: NetworkConfig,
+        saved_device_id: String,
+        saved_tap_queue_count: usize,
+    ) -> Result<RestoreNetworkConfig> {
+        self.inner
+            .write()
+            .await
+            .prepare_restore_network(network_config, saved_device_id, saved_tap_queue_count)
+            .await
+    }
+
+    pub async fn restore_network_identity(&self) -> Result<(agent::Interface, Vec<agent::Route>)> {
+        self.inner.read().await.restore_network_identity().await
+    }
+
+    pub async fn activate_restore_network(&self) -> Result<()> {
+        self.inner.read().await.activate_restore_network().await
     }
 
     #[instrument]
