@@ -34,7 +34,7 @@ args=(
 	--processors 1
 	--memory 1G
 	--pcie-root-complex
-	"s0rc0,segment=0,start_bus=0,end_bus=255,low_mmio=64M,high_mmio=1G"
+	"s0rc0,segment=0,start_bus=0,end_bus=127,low_mmio=256M,high_mmio=16G"
 	--pcie-ecam-below-4gb
 	--pcie-root-port
 	"s0rc0:rootfs,addr=1"

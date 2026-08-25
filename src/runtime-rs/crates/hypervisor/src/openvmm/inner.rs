@@ -76,7 +76,7 @@ impl std::fmt::Debug for OpenVmmInner {
 impl OpenVmmInner {
     pub(crate) fn new(exit_notify: watch::Sender<Option<i32>>) -> Self {
         let mut capabilities = Capabilities::new();
-        capabilities.set(CapabilityBits::BlockDeviceSupport | CapabilityBits::FsSharingSupport);
+        capabilities.set(CapabilityBits::BlockDeviceSupport);
 
         OpenVmmInner {
             id: String::new(),
@@ -105,7 +105,13 @@ impl OpenVmmInner {
     }
 
     pub(crate) async fn capabilities(&self) -> Result<Capabilities> {
-        Ok(self.capabilities.clone())
+        let mut capabilities = self.capabilities.clone();
+        if !self.config.security_info.confidential_guest
+            && self.config.shared_fs.shared_fs.is_some()
+        {
+            capabilities.set(CapabilityBits::FsSharingSupport);
+        }
+        Ok(capabilities)
     }
 
     pub(crate) fn set_capabilities(&mut self, flag: CapabilityBits) {

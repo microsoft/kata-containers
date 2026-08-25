@@ -124,9 +124,12 @@ impl VmConfig {
             return Ok(());
         }
 
-        // kernel_path
-        if conf.boot_info.kernel.is_empty() {
-            return Err(anyhow!("missing kernel path"));
+        // Kernel and IGVM are alternative guest boot payloads.
+        if conf.boot_info.kernel.is_empty() && conf.boot_info.igvm.is_empty() {
+            return Err(anyhow!("missing kernel and IGVM path"));
+        }
+        if !conf.boot_info.kernel.is_empty() && !conf.boot_info.igvm.is_empty() {
+            return Err(anyhow!("kernel and IGVM path cannot both be set"));
         }
 
         // Validate boot configuration based on security mode
