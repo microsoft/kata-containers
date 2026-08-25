@@ -86,10 +86,8 @@ use resource::network::{dan_config_path, DanNetworkConfig, NetworkConfig, Networ
 use resource::{ResourceConfig, ResourceManager};
 use runtime_spec as spec;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
-use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -107,16 +105,21 @@ const SOURCE_AGENT_LISTEN_GRACE: Duration = Duration::from_secs(2);
 struct SnapshotFileManifest {
     path: String,
     size: u64,
-    sha256: String,
 }
 
 #[derive(Serialize)]
-struct SnapshotContainerManifest {
+struct SnapshotLiveContainerManifest {
     cri_name: String,
     source_host_id: String,
     snapshot_guest_id: String,
     readonly_disk: String,
     writable_disk: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SnapshotCompletedContainerManifest {
+    cri_name: String,
+    exit_code: i32,
 }
 
 #[derive(Serialize)]
@@ -134,7 +137,8 @@ struct SnapshotManifest {
     hypervisor: &'static str,
     source_sandbox_id: String,
     agent_transport: SnapshotAgentTransportManifest,
-    containers: Vec<SnapshotContainerManifest>,
+    live_containers: Vec<SnapshotLiveContainerManifest>,
+    completed_containers: Vec<SnapshotCompletedContainerManifest>,
     files: Vec<SnapshotFileManifest>,
 }
 
@@ -166,20 +170,9 @@ fn snapshot_file_manifest(root: &Path, path: &Path) -> Result<SnapshotFileManife
             path.display()
         ));
     }
-    let mut file = fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
     Ok(SnapshotFileManifest {
         path: relative_snapshot_path(root, path)?,
         size: metadata.len(),
-        sha256: hex::encode(hasher.finalize()),
     })
 }
 
@@ -200,7 +193,8 @@ mod snapshot_manifest_tests {
                 server_port: 1024,
                 log_port: 1025,
             },
-            containers: Vec::new(),
+            live_containers: Vec::new(),
+            completed_containers: Vec::new(),
             files: Vec::new(),
         };
 
@@ -209,6 +203,44 @@ mod snapshot_manifest_tests {
         assert_eq!(value["agent_transport"]["state"], "disconnected-listening");
         assert_eq!(value["agent_transport"]["server_port"], 1024);
         assert_eq!(value["agent_transport"]["log_port"], 1025);
+    }
+
+    #[test]
+    fn manifest_separates_live_and_completed_containers_without_payload_hashes() {
+        let manifest = SnapshotManifest {
+            format_version: 1,
+            producer: "runtime-rs",
+            hypervisor: "cloud-hypervisor",
+            source_sandbox_id: "sandbox".to_string(),
+            agent_transport: SnapshotAgentTransportManifest {
+                contract_version: 1,
+                state: "disconnected-listening",
+                server_port: 1024,
+                log_port: 1025,
+            },
+            live_containers: vec![SnapshotLiveContainerManifest {
+                cri_name: "app".to_string(),
+                source_host_id: "host-app".to_string(),
+                snapshot_guest_id: "guest-app".to_string(),
+                readonly_disk: "containers/host-app/rootfs.vmdk".to_string(),
+                writable_disk: None,
+            }],
+            completed_containers: vec![SnapshotCompletedContainerManifest {
+                cri_name: "setup".to_string(),
+                exit_code: 0,
+            }],
+            files: vec![SnapshotFileManifest {
+                path: "clh/state.json".to_string(),
+                size: 42,
+            }],
+        };
+
+        let value = serde_json::to_value(manifest).unwrap();
+        assert!(value.get("containers").is_none());
+        assert_eq!(value["live_containers"][0]["cri_name"], "app");
+        assert_eq!(value["completed_containers"][0]["cri_name"], "setup");
+        assert_eq!(value["completed_containers"][0]["exit_code"], 0);
+        assert!(value["files"][0].get("sha256").is_none());
     }
 }
 
@@ -1124,8 +1156,9 @@ impl VirtSandbox {
         fs::create_dir(&staging)?;
         fs::set_permissions(&staging, fs::Permissions::from_mode(0o700))?;
 
-        let container_ids = container_manager.container_ids().await;
-        let active_host_ids = container_ids
+        let inventory = container_manager.snapshot_inventory().await?;
+        let active_host_ids = inventory
+            .live_container_ids
             .iter()
             .map(|container_id| container_id.container_id.clone())
             .collect::<HashSet<_>>();
@@ -1143,7 +1176,7 @@ impl VirtSandbox {
         let operation: Result<Vec<resource::rootfs::RootfsSnapshotArtifacts>> = async {
             self.monitor.suspend().await;
             monitor_suspended = true;
-            for container_id in &container_ids {
+            for container_id in &inventory.live_container_ids {
                 container_manager
                     .pause_container(container_id)
                     .await
@@ -1305,10 +1338,10 @@ impl VirtSandbox {
                 .iter()
                 .map(|path| snapshot_file_manifest(&staging, path))
                 .collect::<Result<Vec<_>>>()?;
-            let containers = artifacts
+            let live_containers = artifacts
                 .iter()
                 .map(|artifact| {
-                    Ok(SnapshotContainerManifest {
+                    Ok(SnapshotLiveContainerManifest {
                         cri_name: artifact.cri_name.clone(),
                         source_host_id: artifact.source_host_id.clone(),
                         snapshot_guest_id: artifact.snapshot_guest_id.clone(),
@@ -1324,6 +1357,31 @@ impl VirtSandbox {
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let mut container_names = HashSet::new();
+            for container in &live_containers {
+                if !container_names.insert(container.cri_name.as_str()) {
+                    return Err(anyhow!(
+                        "snapshot has duplicate live container name {}",
+                        container.cri_name
+                    ));
+                }
+            }
+            let completed_containers = inventory
+                .completed_containers
+                .iter()
+                .map(|container| {
+                    if !container_names.insert(container.cri_name.as_str()) {
+                        return Err(anyhow!(
+                            "snapshot container name {} is both live and completed",
+                            container.cri_name
+                        ));
+                    }
+                    Ok(SnapshotCompletedContainerManifest {
+                        cri_name: container.cri_name.clone(),
+                        exit_code: container.exit_code,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
             let manifest = SnapshotManifest {
                 format_version: 1,
                 producer: "runtime-rs",
@@ -1335,7 +1393,8 @@ impl VirtSandbox {
                     server_port: agent_config.server_port,
                     log_port: agent_config.log_port,
                 },
-                containers,
+                live_containers,
+                completed_containers,
                 files,
             };
             let manifest_path = staging.join("kata-snapshot.json");
