@@ -47,7 +47,7 @@ mod remote;
 pub use self::remote::{RemoteConfig, HYPERVISOR_NAME_REMOTE};
 
 mod openvmm;
-pub use self::openvmm::{OpenVmmConfig, HYPERVISOR_NAME_OPENVMM};
+pub use self::openvmm::{snp_igvm_enabled, OpenVmmConfig, HYPERVISOR_NAME_OPENVMM};
 
 mod rate_limiter;
 pub use self::rate_limiter::{RateLimiterConfig, DEFAULT_RATE_LIMITER_REFILL_TIME};

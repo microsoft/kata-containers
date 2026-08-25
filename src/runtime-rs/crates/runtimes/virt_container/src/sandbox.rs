@@ -56,6 +56,8 @@ use kata_sys_util::hooks::HookStates;
 use kata_sys_util::protection::{available_guest_protection, GuestProtection};
 use kata_sys_util::spec::load_oci_spec;
 use kata_types::capabilities::CapabilityBits;
+#[cfg(feature = "openvmm")]
+use kata_types::config::hypervisor::snp_igvm_enabled;
 use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
 use kata_types::config::hypervisor::{VIRTIO_BLK_CCW, VIRTIO_BLK_PCI};
 #[cfg(all(
@@ -616,6 +618,15 @@ impl VirtSandbox {
         // a protection device (also avoids failing on hosts that advertise a
         // protection they cannot use, e.g. SEV without SEV-SNP).
         if !hypervisor_config.security_info.confidential_guest {
+            return Ok(None);
+        }
+
+        #[cfg(feature = "openvmm")]
+        if self.resource_manager.config().await.runtime.hypervisor_name == HYPERVISOR_NAME_OPENVMM
+            && snp_igvm_enabled(hypervisor_config)?
+        {
+            // OpenVMM loads the SNP firmware and isolation state from the IGVM
+            // through its VM-service request, rather than a separate device.
             return Ok(None);
         }
 
