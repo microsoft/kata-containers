@@ -27,6 +27,7 @@ use kata_sys_util::{mount::get_mount_path, spec::load_oci_spec};
 use kata_types::{
     annotations::Annotation,
     config::{default::DEFAULT_GUEST_DNS_FILE, hypervisor::RootlessUser, Hypervisor, TomlConfig},
+    k8s::container_type,
     mount::SHM_DEVICE,
     prefix_with_rootless_dir,
     rootless::{is_rootless, rootless_dir, set_rootless},
@@ -383,6 +384,19 @@ impl RuntimeHandlerManager {
             return Ok(());
         }
 
+        if let Some(restore_from) = spec.annotations().as_ref().and_then(|annotations| {
+            annotations.get(kata_types::annotations::KATA_ANNO_RESTORE_FROM)
+        }) {
+            if restore_from.is_empty() {
+                return Err(anyhow!("restore-from annotation is empty"));
+            }
+            if !container_type(spec).is_pod_sandbox() {
+                return Err(anyhow!(
+                    "restore-from is supported only on pod sandbox tasks"
+                ));
+            }
+        }
+
         let mut dns: Vec<String> = vec![];
 
         let spec_mounts = spec.mounts().clone().unwrap_or_default();
@@ -643,14 +657,19 @@ impl RuntimeHandlerManager {
             .await
             .context("get runtime instance")?;
         let sandbox = instance.sandbox.clone();
+        let cm = instance.container_manager.clone();
 
         match req {
             SandboxRequest::CreateSandbox(req) => Err(anyhow!("Unreachable request {:?}", req)),
-            SandboxRequest::StartSandbox(_) => {
+            SandboxRequest::StartSandbox(req) => {
                 sandbox
                     .start()
                     .await
                     .context("start sandbox in sandbox handler")?;
+                sandbox
+                    .activate_restore(cm, &req.sandbox_id)
+                    .await
+                    .context("activate restored sandbox")?;
                 Ok(SandboxResponse::StartSandbox(StartSandboxInfo {
                     pid: std::process::id(),
                     create_time: Some(SystemTime::now()),
@@ -773,10 +792,17 @@ impl RuntimeHandlerManager {
                     }
                 }
 
-                let shim_pid = cm
-                    .start_process(&process_id)
+                let restored = sandbox
+                    .activate_restore(cm.clone(), process_id.container_id())
                     .await
-                    .context("start process")?;
+                    .context("activate restored sandbox")?;
+                let shim_pid = if restored {
+                    cm.pid().await.context("get restored sandbox pid")?
+                } else {
+                    cm.start_process(&process_id)
+                        .await
+                        .context("start process")?
+                };
 
                 let pid = shim_pid.pid;
                 let process_type = process_id.process_type;

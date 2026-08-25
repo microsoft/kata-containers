@@ -32,6 +32,8 @@ pub trait ContainerManager: Send + Sync {
     async fn start_process(&self, process_id: &ContainerProcess) -> Result<PID>;
     async fn state_process(&self, process_id: &ContainerProcess) -> Result<ProcessStateInfo>;
     async fn wait_process(&self, process_id: &ContainerProcess) -> Result<ProcessExitStatus>;
+    async fn prepare_restored_container(&self, host_id: &str, guest_id: &str) -> Result<()>;
+    async fn mark_restored_container_running(&self, host_id: &str) -> Result<PID>;
 
     // utility
     async fn pid(&self) -> Result<PID>;

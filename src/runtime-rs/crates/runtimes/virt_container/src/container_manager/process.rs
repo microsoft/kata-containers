@@ -38,6 +38,7 @@ enum StdIoType {
 #[derive(Debug)]
 pub struct Process {
     pub process: ContainerProcess,
+    agent_process: ContainerProcess,
     pub pid: u32,
     logger: slog::Logger,
     pub bundle: String,
@@ -117,6 +118,7 @@ impl Process {
 
         Process {
             process: process.clone(),
+            agent_process: process.clone(),
             pid,
             logger: logger_with_process(process),
             bundle: bundle.to_string(),
@@ -135,6 +137,15 @@ impl Process {
             exit_watcher_tx: Some(sender),
             passfd_io: None,
         }
+    }
+
+    pub fn set_agent_container_id(&mut self, container_id: &str) -> Result<()> {
+        self.agent_process = ContainerProcess::new(container_id, self.process.exec_id())?;
+        Ok(())
+    }
+
+    pub fn agent_process(&self) -> &ContainerProcess {
+        &self.agent_process
     }
 
     pub fn pre_fifos_open(&mut self) -> Result<()> {
@@ -201,13 +212,14 @@ impl Process {
         let logger = self.logger.clone();
         info!(logger, "start passfd io wait");
         let process = self.process.clone();
+        let agent_process = self.agent_process.clone();
         let exit_status = self.exit_status.clone();
         let exit_notifier = self.exit_watcher_tx.take();
         let status = self.status.clone();
 
         tokio::spawn(async move {
             let req = agent::WaitProcessRequest {
-                process_id: process.clone().into(),
+                process_id: agent_process.into(),
             };
 
             info!(logger, "begin passfd io wait process");
@@ -380,6 +392,7 @@ impl Process {
         let logger = self.logger.clone();
         info!(logger, "start run io wait");
         let process = self.process.clone();
+        let agent_process = self.agent_process.clone();
         let exit_status = self.exit_status.clone();
         let exit_notifier = self.exit_watcher_tx.take();
         let status = self.status.clone();
@@ -395,7 +408,7 @@ impl Process {
             }
 
             let req = agent::WaitProcessRequest {
-                process_id: process.clone().into(),
+                process_id: agent_process.into(),
             };
 
             info!(logger, "begin wait process");
@@ -493,7 +506,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use super::is_binary_stdio;
+    use super::*;
 
     #[test]
     fn identifies_binary_logger_uri() {
@@ -502,5 +515,16 @@ mod tests {
         ));
         assert!(!is_binary_stdio("/run/containerd/io/stdout"));
         assert!(!is_binary_stdio("file:///run/container.log"));
+    }
+
+    #[test]
+    fn restored_process_keeps_host_and_agent_identities_separate() {
+        let host = ContainerProcess::new("target-pause", "").unwrap();
+        let mut process = Process::new(&host, 1, "/bundle", None, None, None, false);
+
+        process.set_agent_container_id("source-pause").unwrap();
+
+        assert_eq!(process.process.container_id(), "target-pause");
+        assert_eq!(process.agent_process().container_id(), "source-pause");
     }
 }

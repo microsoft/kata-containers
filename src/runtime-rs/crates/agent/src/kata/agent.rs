@@ -280,6 +280,8 @@ impl_agent!(
     get_volume_stats | crate::VolumeStatsRequest | crate::VolumeStatsResponse | None,
     resize_volume | crate::ResizeVolumeRequest | crate::Empty | None,
     online_cpu_mem | crate::OnlineCPUMemRequest | crate::Empty | None,
+    reseed_random_dev | crate::ReseedRandomDevRequest | crate::Empty | None,
+    set_guest_date_time | crate::SetGuestDateTimeRequest | crate::Empty | None,
     get_metrics | crate::Empty | crate::MetricsResponse | None,
     get_guest_details | crate::GetGuestDetailsRequest | crate::GuestDetailsResponse | None,
     add_swap | crate::AddSwapRequest | crate::Empty | None,

@@ -50,6 +50,12 @@ pub trait Endpoint: std::fmt::Debug + Send + Sync {
     async fn attach(&self) -> Result<Option<String>>;
     async fn detach(&self, hypervisor: &dyn Hypervisor) -> Result<()>;
     async fn save(&self) -> Option<EndpointState>;
+    async fn restore_network_config(&self) -> Result<Option<NetworkConfig>> {
+        Ok(None)
+    }
+    async fn activate_restore(&self) -> Result<()> {
+        anyhow::bail!("endpoint does not support fenced snapshot restore")
+    }
     /// Returns the guest PCI path for this endpoint if it is a cold-plugged
     /// physical (VFIO) device, e.g. `"05/00"`. Used to populate
     /// `Interface.device_path` in `update_interface` so the agent can do

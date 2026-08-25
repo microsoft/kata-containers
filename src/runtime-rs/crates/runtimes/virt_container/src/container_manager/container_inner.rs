@@ -312,6 +312,10 @@ impl ContainerInner {
         Ok(ContainerIo::new(self.agent.clone(), process.clone()))
     }
 
+    pub(crate) fn set_init_agent_container_id(&mut self, container_id: &str) -> Result<()> {
+        self.init_process.set_agent_container_id(container_id)
+    }
+
     pub async fn close_io(&mut self, process: &ContainerProcess) -> Result<()> {
         match process.process_type {
             ProcessType::Container => self.init_process.close_io(self.agent.clone()).await,
