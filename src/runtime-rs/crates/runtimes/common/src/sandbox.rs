@@ -66,6 +66,12 @@ pub trait Sandbox: Send + Sync {
         destination: &Path,
     ) -> Result<()>;
 
+    async fn activate_restore(
+        &self,
+        container_manager: Arc<dyn ContainerManager>,
+        target_id: &str,
+    ) -> Result<bool>;
+
     // set agent policy
     async fn set_policy(&self, policy: &str) -> Result<()>;
 }

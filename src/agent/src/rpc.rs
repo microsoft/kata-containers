@@ -145,6 +145,9 @@ const ERR_NO_SANDBOX_PIDNS: &str = "Sandbox does not have sandbox_pidns";
 // filesystem lock. Based on this, 5 seconds seems a resonable timeout period in case the lock is
 // not available.
 const IPTABLES_RESTORE_WAIT_SEC: u64 = 5;
+// Private Kata restore-replace bit carried in Interface.raw_flags. It is not a
+// Linux IFF value. Keep in sync with ResourceManagerInner on the host.
+const KATA_IFACE_RESTORE_REPLACE: u32 = 0x4000_0000;
 
 /// This mask is applied to parent directories implicitly created for CopyFile requests.
 const IMPLICIT_DIRECTORY_PERMISSION_MASK: u32 = 0o777;
@@ -1247,6 +1250,14 @@ impl agent_ttrpc::AgentService for AgentService {
         }
 
         let mut sandbox = self.sandbox.lock().await;
+
+        if interface.raw_flags & KATA_IFACE_RESTORE_REPLACE != 0 {
+            sandbox
+                .rtnl
+                .prepare_restore_interface(&interface.hwAddr)
+                .await
+                .map_ttrpc_err(|e| format!("prepare restore interface: {e:?}"))?;
+        }
 
         #[cfg(not(target_arch = "s390x"))]
         if !interface.devicePath.is_empty() && !interface.hwAddr.is_empty() {
