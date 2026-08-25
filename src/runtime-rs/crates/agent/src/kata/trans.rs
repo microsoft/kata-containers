@@ -177,9 +177,28 @@ impl From<types::IPAddress> for IPAddress {
     fn from(src: types::IPAddress) -> Self {
         Self {
             family: src.family.unwrap().into(),
-            address: "".to_string(),
-            mask: "".to_string(),
+            address: src.address,
+            mask: src.mask,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ip_address_round_trip_preserves_address_and_mask() {
+        let address = IPAddress {
+            family: IPFamily::V4,
+            address: "10.244.0.34".to_string(),
+            mask: "16".to_string(),
+        };
+
+        assert_eq!(
+            IPAddress::from(types::IPAddress::from(address.clone())),
+            address
+        );
     }
 }
 
