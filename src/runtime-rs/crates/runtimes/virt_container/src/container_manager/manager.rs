@@ -13,9 +13,10 @@ use agent::Agent;
 use common::{
     error::Error,
     types::{
-        ContainerConfig, ContainerID, ContainerProcess, ExecProcessRequest, KillRequest,
-        ProcessExitStatus, ProcessStateInfo, ProcessStatus, ProcessType, ResizePTYRequest,
-        ShutdownRequest, StatsInfo, UpdateRequest, PID,
+        CompletedContainerSnapshot, ContainerConfig, ContainerID, ContainerProcess,
+        ContainerSnapshotInventory, ExecProcessRequest, KillRequest, ProcessExitStatus,
+        ProcessStateInfo, ProcessStatus, ProcessType, ResizePTYRequest, ShutdownRequest, StatsInfo,
+        UpdateRequest, PID,
     },
     ContainerManager,
 };
@@ -28,6 +29,7 @@ use tokio::sync::{OnceCell, RwLock};
 use tracing::instrument;
 
 use kata_sys_util::{hooks::HookStates, netns::NetnsGuard};
+use kata_types::k8s::{container_name, container_type};
 
 use crate::container_manager::is_termination_signal;
 
@@ -37,6 +39,7 @@ pub struct VirtContainerManager {
     sid: String,
     pid: u32,
     containers: Arc<RwLock<HashMap<String, Container>>>,
+    completed_containers: Arc<RwLock<HashMap<String, CompletedContainerSnapshot>>>,
     resource_manager: Arc<ResourceManager>,
     agent: Arc<dyn Agent>,
     hypervisor: Arc<dyn Hypervisor>,
@@ -59,6 +62,40 @@ fn from_hooks(hooks: &Option<Vec<oci::Hook>>) -> &[oci::Hook] {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum SnapshotContainerLifecycle {
+    Live { cri_name: String },
+    Completed(CompletedContainerSnapshot),
+}
+
+fn snapshot_container_lifecycle(
+    host_id: &str,
+    spec: &oci::Spec,
+    state: &ProcessStateInfo,
+) -> Result<SnapshotContainerLifecycle> {
+    let mut cri_name = container_name(spec);
+    if cri_name.is_empty() && container_type(spec).is_pod_sandbox() {
+        cri_name = "POD".to_string();
+    }
+    if cri_name.is_empty() {
+        return Err(anyhow!("container {host_id} has no CRI name"));
+    }
+    match state.status {
+        ProcessStatus::Running | ProcessStatus::Paused => {
+            Ok(SnapshotContainerLifecycle::Live { cri_name })
+        }
+        ProcessStatus::Stopped if container_type(spec).is_pod_container() => Ok(
+            SnapshotContainerLifecycle::Completed(CompletedContainerSnapshot {
+                cri_name,
+                exit_code: state.exit_status,
+            }),
+        ),
+        status => Err(anyhow!(
+            "container {host_id} is in transitional snapshot state {status:?}"
+        )),
+    }
+}
+
 impl VirtContainerManager {
     pub fn new(
         sid: &str,
@@ -71,6 +108,7 @@ impl VirtContainerManager {
             sid: sid.to_string(),
             pid,
             containers: Default::default(),
+            completed_containers: Default::default(),
             resource_manager,
             agent,
             hypervisor,
@@ -128,6 +166,8 @@ impl ContainerManager for VirtContainerManager {
             }
         }
 
+        let cri_name = container_name(&spec);
+        let is_pod_container = container_type(&spec).is_pod_container();
         let mut containers = self.containers.write().await;
         if let Err(e) = container.create(spec).await {
             if let Err(inner_e) = container.cleanup().await {
@@ -138,6 +178,9 @@ impl ContainerManager for VirtContainerManager {
         }
 
         containers.insert(container.container_id.to_string(), container);
+        if !cri_name.is_empty() && is_pod_container {
+            self.completed_containers.write().await.remove(&cri_name);
+        }
         Ok(PID {
             pid: vmm_master_tid,
         })
@@ -186,7 +229,21 @@ impl ContainerManager for VirtContainerManager {
                         .execute_hooks(from_hooks(hooks.poststop()), Some(state))?;
                 }
 
-                c.state_process(process).await.context("state process")
+                let process_state = c.state_process(process).await.context("state process")?;
+                let cri_name = container_name(&c_spec);
+                if process_state.status == ProcessStatus::Stopped
+                    && container_type(&c_spec).is_pod_container()
+                    && !cri_name.is_empty()
+                {
+                    self.completed_containers.write().await.insert(
+                        cri_name.clone(),
+                        CompletedContainerSnapshot {
+                            cri_name,
+                            exit_code: process_state.exit_status,
+                        },
+                    );
+                }
+                Ok(process_state)
             }
             ProcessType::Exec => {
                 let containers = self.containers.read().await;
@@ -410,13 +467,31 @@ impl ContainerManager for VirtContainerManager {
         Ok(())
     }
 
-    async fn container_ids(&self) -> Vec<ContainerID> {
-        self.containers
-            .read()
-            .await
-            .keys()
-            .filter_map(|id| ContainerID::new(id).ok())
-            .collect()
+    async fn snapshot_inventory(&self) -> Result<ContainerSnapshotInventory> {
+        let containers = self.containers.read().await;
+        let mut completed = self.completed_containers.read().await.clone();
+        let mut live_container_ids = Vec::new();
+        for (host_id, container) in containers.iter() {
+            let process = ContainerProcess::new(host_id, "")?;
+            let state = container.state_process(&process).await?;
+            let spec = container.spec().await;
+            match snapshot_container_lifecycle(host_id, &spec, &state)? {
+                SnapshotContainerLifecycle::Live { cri_name } => {
+                    completed.remove(&cri_name);
+                    live_container_ids.push(ContainerID::new(host_id)?);
+                }
+                SnapshotContainerLifecycle::Completed(record) => {
+                    completed.insert(record.cri_name.clone(), record);
+                }
+            }
+        }
+        live_container_ids.sort_by(|left, right| left.container_id.cmp(&right.container_id));
+        let mut completed_containers = completed.into_values().collect::<Vec<_>>();
+        completed_containers.sort_by(|left, right| left.cri_name.cmp(&right.cri_name));
+        Ok(ContainerSnapshotInventory {
+            live_container_ids,
+            completed_containers,
+        })
     }
 
     #[instrument]
@@ -476,5 +551,98 @@ impl ContainerManager for VirtContainerManager {
     async fn is_sandbox_container(&self, process: &ContainerProcess) -> bool {
         process.process_type == ProcessType::Container
             && process.container_id.container_id == self.sid
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pod_spec(name: &str, container_type_value: &str) -> oci::Spec {
+        let mut spec = oci::Spec::default();
+        spec.set_annotations(Some(HashMap::from([
+            (
+                kata_types::annotations::cri_containerd::CONTAINER_NAME_LABEL_KEY.to_string(),
+                name.to_string(),
+            ),
+            (
+                kata_types::annotations::cri_containerd::CONTAINER_TYPE_LABEL_KEY.to_string(),
+                container_type_value.to_string(),
+            ),
+        ])));
+        spec
+    }
+
+    fn process_state(status: ProcessStatus, exit_status: i32) -> ProcessStateInfo {
+        ProcessStateInfo {
+            container_id: "host-id".to_string(),
+            exec_id: String::new(),
+            pid: PID { pid: 1 },
+            bundle: String::new(),
+            stdin: None,
+            stdout: None,
+            stderr: None,
+            terminal: false,
+            status,
+            exit_status,
+            exited_at: None,
+        }
+    }
+
+    #[test]
+    fn stopped_pod_container_is_completed() {
+        let spec = pod_spec("setup", kata_types::annotations::cri_containerd::CONTAINER);
+        let lifecycle = snapshot_container_lifecycle(
+            "host-id",
+            &spec,
+            &process_state(ProcessStatus::Stopped, 17),
+        )
+        .unwrap();
+        assert_eq!(
+            lifecycle,
+            SnapshotContainerLifecycle::Completed(CompletedContainerSnapshot {
+                cri_name: "setup".to_string(),
+                exit_code: 17,
+            })
+        );
+    }
+
+    #[test]
+    fn running_pod_container_is_live() {
+        let spec = pod_spec("app", kata_types::annotations::cri_containerd::CONTAINER);
+        let lifecycle = snapshot_container_lifecycle(
+            "host-id",
+            &spec,
+            &process_state(ProcessStatus::Running, 0),
+        )
+        .unwrap();
+        assert_eq!(
+            lifecycle,
+            SnapshotContainerLifecycle::Live {
+                cri_name: "app".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn created_container_is_rejected_as_transitional() {
+        let spec = pod_spec("app", kata_types::annotations::cri_containerd::CONTAINER);
+        assert!(snapshot_container_lifecycle(
+            "host-id",
+            &spec,
+            &process_state(ProcessStatus::Created, 0),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn stopped_sandbox_is_not_a_completed_container() {
+        let spec = pod_spec("POD", kata_types::annotations::cri_containerd::SANDBOX);
+        assert!(snapshot_container_lifecycle(
+            "host-id",
+            &spec,
+            &process_state(ProcessStatus::Stopped, 0),
+        )
+        .is_err());
     }
 }
