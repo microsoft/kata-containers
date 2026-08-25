@@ -6,8 +6,8 @@
 
 use crate::types::{
     ContainerConfig, ContainerID, ContainerProcess, ContainerSnapshotInventory, ExecProcessRequest,
-    KillRequest, ProcessExitStatus, ProcessStateInfo, ResizePTYRequest, ShutdownRequest, StatsInfo,
-    UpdateRequest, PID,
+    GuestContainerId, HostContainerId, KillRequest, ProcessExitStatus, ProcessStateInfo,
+    ResizePTYRequest, ShutdownRequest, StatsInfo, UpdateRequest, PID,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -32,6 +32,12 @@ pub trait ContainerManager: Send + Sync {
     async fn start_process(&self, process_id: &ContainerProcess) -> Result<PID>;
     async fn state_process(&self, process_id: &ContainerProcess) -> Result<ProcessStateInfo>;
     async fn wait_process(&self, process_id: &ContainerProcess) -> Result<ProcessExitStatus>;
+    async fn prepare_restored_container(
+        &self,
+        host_id: &HostContainerId,
+        guest_id: &GuestContainerId,
+    ) -> Result<()>;
+    async fn mark_restored_container_running(&self, host_id: &HostContainerId) -> Result<PID>;
 
     // utility
     async fn pid(&self) -> Result<PID>;

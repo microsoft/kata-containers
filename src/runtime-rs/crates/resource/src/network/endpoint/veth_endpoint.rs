@@ -112,4 +112,15 @@ impl Endpoint for VethEndpoint {
             ..Default::default()
         })
     }
+
+    async fn restore_network_config(&self) -> Result<Option<NetworkConfig>> {
+        Ok(Some(self.get_network_config()?))
+    }
+
+    async fn activate_restore(&self) -> Result<()> {
+        self.net_pair
+            .add_network_model()
+            .await
+            .context("activate restore network model")
+    }
 }
