@@ -462,11 +462,54 @@ mod tests {
         attrs.iter().filter_map(cfg_tokens).any(|t| t == "test")
     }
 
+    /// The comma-separated predicates inside `all(..)` / `any(..)`.
+    fn cfg_operands(list: &syn::MetaList) -> Vec<syn::Meta> {
+        list.parse_args_with(
+            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+        )
+        .map(|operands| operands.into_iter().collect())
+        .unwrap_or_default()
+    }
+
+    /// Does this predicate hold *only* in a build with `strict-policy` enabled?
+    ///
+    /// Not "does the attribute mention the feature". Both guards of a handler name it,
+    /// and the fallback names it under `not(..)`; a containment test would accept the
+    /// fallback as evidence of mediation, so swapping a handler's two guards -- moving
+    /// the transaction out of the confidential build entirely -- would leave this lint
+    /// green. `not(..)` therefore never certifies mediation, whatever it wraps.
+    fn requires_strict_policy(meta: &syn::Meta) -> bool {
+        match meta {
+            syn::Meta::NameValue(nv) => {
+                nv.path.is_ident("feature")
+                    && matches!(
+                        &nv.value,
+                        syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Str(name),
+                            ..
+                        }) if name.value() == STRICT_POLICY
+                    )
+            }
+            // `all(..)` holds only if every operand does, so one is enough.
+            syn::Meta::List(list) if list.path.is_ident("all") => {
+                cfg_operands(list).iter().any(requires_strict_policy)
+            }
+            // `any(..)` can be satisfied by whichever operand is weakest, so all of them
+            // must require the feature. An empty `any(..)` is never satisfied.
+            syn::Meta::List(list) if list.path.is_ident("any") => {
+                let operands = cfg_operands(list);
+                !operands.is_empty() && operands.iter().all(requires_strict_policy)
+            }
+            _ => false,
+        }
+    }
+
     fn is_strict_policy(attrs: &[syn::Attribute]) -> bool {
         attrs
             .iter()
-            .filter_map(cfg_tokens)
-            .any(|t| t.contains(STRICT_POLICY))
+            .filter(|attr| attr.path().is_ident("cfg"))
+            .filter_map(|attr| attr.parse_args::<syn::Meta>().ok())
+            .any(|meta| requires_strict_policy(&meta))
     }
 
     /// Every method the production build compiles, collected from the syntax tree.

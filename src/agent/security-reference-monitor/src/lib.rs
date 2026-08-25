@@ -194,10 +194,10 @@ impl std::error::Error for SrmError {}
 /// A reservation can only come from `prepare`:
 ///
 /// ```
-/// use kata_security_reference_monitor::ReferenceMonitor;
+/// use kata_security_reference_monitor::{ReferenceMonitor, Reserved};
 ///
 /// let mut m = ReferenceMonitor::new();
-/// let reserved = m.prepare("op1", 0, "d").unwrap().expect_new();
+/// let reserved: Reserved = m.prepare("op1", 0, "d").unwrap().expect_new();
 /// m.execute(&reserved, "d").unwrap();
 /// ```
 ///
@@ -207,13 +207,22 @@ impl std::error::Error for SrmError {}
 /// use kata_security_reference_monitor::{ReferenceMonitor, Reserved};
 ///
 /// let mut m = ReferenceMonitor::new();
-/// m.execute(&Reserved { op_id: "op1".into() }, "d").unwrap();
+/// let reserved: Reserved = m.prepare("op1", 0, "d").unwrap().expect_new();
+/// m.execute(&reserved, "d").unwrap();
+///
+/// // The reservation is spent. Copying its contents into a fresh one to execute
+/// // again is rejected: the field that would have to be copied is private.
+/// let replay = Reserved { ..reserved };
+/// m.execute(&replay, "d").unwrap();
 /// ```
 ///
 /// A `compile_fail` test passes for *any* compilation error, including one caused by
-/// renaming what it references — so it is paired with the example above deliberately.
-/// Both name `ReferenceMonitor` and `execute`; a change that made the negative case fail
-/// for an uninteresting reason would break the positive one and be noticed.
+/// renaming what it references, so it is written to be hard to satisfy accidentally.
+/// It names no private detail — the update syntax asks for the fields without spelling
+/// them, so renaming one cannot turn this into a pass — and everything it does name is
+/// named by the honest example above, which stops compiling if any of it moves. The
+/// error code cannot be pinned instead: rustdoc accepts `compile_fail,E0616` but does
+/// not check the code on stable, so the annotation would assert nothing.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Reserved {
     op_id: OperationId,
