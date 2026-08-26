@@ -261,6 +261,10 @@ func (p *HybridVSockTTRPCMockImp) SetPolicy(ctx context.Context, req *pb.SetPoli
 	return &gpb.Empty{}, nil
 }
 
+func (p *HybridVSockTTRPCMockImp) PrepareGuestMount(ctx context.Context, req *pb.PrepareGuestMountRequest) (*gpb.Empty, error) {
+	return &gpb.Empty{}, nil
+}
+
 func (p *HybridVSockTTRPCMockImp) GetDiagnosticData(ctx context.Context, req *pb.GetDiagnosticDataRequest) (*pb.GetDiagnosticDataResponse, error) {
 	return &pb.GetDiagnosticDataResponse{}, nil
 }
