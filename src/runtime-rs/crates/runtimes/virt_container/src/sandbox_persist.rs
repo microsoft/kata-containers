@@ -40,6 +40,9 @@ pub struct SandboxState {
     /// the file.
     #[serde(default)]
     pub keep_abnormal: Option<bool>,
+    // Claims, completion tombstones, and both ID maps survive shim recovery.
+    #[serde(default)]
+    pub(crate) restore: Option<crate::restore::RestorePersistState>,
 }
 
 impl SandboxState {
@@ -77,6 +80,7 @@ impl SandboxState {
             created_netns: network_env.created_netns(),
             bootstrap: true,
             keep_abnormal: None,
+            restore: None,
         }
     }
 
@@ -140,6 +144,10 @@ mod tests {
         (
             "keep_abnormal",
             "cleanup() leaves an abnormal sandbox alone",
+        ),
+        (
+            "restore",
+            "VirtSandbox::restore() rebuilds the snapshot-restore context",
         ),
     ];
     const RESOURCE_FIELDS: &[(&str, &str)] = &[

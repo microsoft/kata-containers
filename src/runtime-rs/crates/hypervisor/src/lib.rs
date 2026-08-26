@@ -140,6 +140,7 @@ pub struct MemoryConfig {
 
 #[derive(Debug)]
 pub struct RestoreNetworkConfig {
+    // ID comes from the saved CLH NIC; FDs belong to the target netns.
     pub id: String,
     pub fds: Vec<OwnedFd>,
 }

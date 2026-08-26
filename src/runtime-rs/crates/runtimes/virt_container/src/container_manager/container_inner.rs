@@ -95,7 +95,7 @@ impl ContainerInner {
 
         self.agent
             .exec_process(agent::ExecProcessRequest {
-                process_id: process.clone().into(),
+                process_id: exec.process.agent_process().clone().into(),
                 string_user: None,
                 process: Some(exec.oci_process.clone()),
                 stdin_port: exec.process.passfd_io.as_ref().and_then(|io| io.stdin_port),
@@ -126,9 +126,19 @@ impl ContainerInner {
             .await
             .context("check state")?;
 
+        let agent_process = match process.process_type {
+            ProcessType::Container => self.init_process.agent_process().clone(),
+            ProcessType::Exec => self
+                .exec_processes
+                .get(&process.exec_id)
+                .ok_or_else(|| Error::ProcessNotFound(process.clone()))?
+                .process
+                .agent_process()
+                .clone(),
+        };
         self.agent
             .tty_win_resize(agent::TtyWinResizeRequest {
-                process_id: process.clone().into(),
+                process_id: agent_process.into(),
                 row: height,
                 column: width,
             })
@@ -190,7 +200,8 @@ impl ContainerInner {
 
     pub(crate) async fn cleanup_container(
         &mut self,
-        cid: &str,
+        host_id: &str,
+        guest_id: &str,
         force: bool,
         device_manager: &RwLock<DeviceManager>,
     ) -> Result<()> {
@@ -202,7 +213,7 @@ impl ContainerInner {
         info!(self.logger, "container terminated");
         if !self.removed_from_agent {
             let remove_request = agent::RemoveContainerRequest {
-                container_id: cid.to_string(),
+                container_id: guest_id.to_string(),
             };
             match self.agent.remove_container(remove_request).await {
                 Ok(_) => self.removed_from_agent = true,
@@ -230,7 +241,7 @@ impl ContainerInner {
         let rootfs = self
             .clean_rootfs(device_manager)
             .await
-            .context("clean rootfs");
+            .with_context(|| format!("clean rootfs for {host_id}"));
 
         let errors: Vec<String> = vec![devices, volumes, rootfs]
             .into_iter()
@@ -255,8 +266,14 @@ impl ContainerInner {
         let state = self.init_process.get_status().await;
         if state == ProcessStatus::Stopped {
             if process.process_type == ProcessType::Container && self.has_pending_cleanup() {
+                let guest_id = self.init_process.agent_container_id().to_string();
                 return self
-                    .cleanup_container(&process.container_id.container_id, force, device_manager)
+                    .cleanup_container(
+                        &process.container_id.container_id,
+                        &guest_id,
+                        force,
+                        device_manager,
+                    )
                     .await
                     .context("stop container");
             }
@@ -293,9 +310,15 @@ impl ContainerInner {
             }
         }
 
+        let guest_id = self.init_process.agent_container_id().to_string();
         match process.process_type {
             ProcessType::Container => self
-                .cleanup_container(&process.container_id.container_id, force, device_manager)
+                .cleanup_container(
+                    &process.container_id.container_id,
+                    &guest_id,
+                    force,
+                    device_manager,
+                )
                 .await
                 .context("stop container")?,
             ProcessType::Exec => {
@@ -320,7 +343,16 @@ impl ContainerInner {
             return Ok(());
         }
 
-        let mut process_id: agent::ContainerProcessID = process.clone().into();
+        let agent_process = match process.process_type {
+            ProcessType::Container => self.init_process.agent_process(),
+            ProcessType::Exec => self
+                .exec_processes
+                .get(&process.exec_id)
+                .ok_or_else(|| Error::ProcessNotFound(process.clone()))?
+                .process
+                .agent_process(),
+        };
+        let mut process_id: agent::ContainerProcessID = agent_process.clone().into();
         if all {
             // force signal init process
             process_id.exec_id.clear();
@@ -335,7 +367,17 @@ impl ContainerInner {
     }
 
     pub async fn new_container_io(&self, process: &ContainerProcess) -> Result<ContainerIo> {
-        Ok(ContainerIo::new(self.agent.clone(), process.clone()))
+        let agent_process = match process.process_type {
+            ProcessType::Container => self.init_process.agent_process().clone(),
+            ProcessType::Exec => self
+                .exec_processes
+                .get(&process.exec_id)
+                .ok_or_else(|| Error::ProcessNotFound(process.clone()))?
+                .process
+                .agent_process()
+                .clone(),
+        };
+        Ok(ContainerIo::new(self.agent.clone(), agent_process))
     }
 
     pub(crate) fn set_init_agent_container_id(
@@ -343,6 +385,10 @@ impl ContainerInner {
         container_id: &GuestContainerId,
     ) -> Result<()> {
         self.init_process.set_agent_container_id(container_id)
+    }
+
+    pub(crate) fn init_agent_container_id(&self) -> &str {
+        self.init_process.agent_container_id()
     }
 
     pub async fn close_io(&mut self, process: &ContainerProcess) -> Result<()> {
@@ -505,6 +551,12 @@ mod tests {
 
     #[async_trait]
     impl Agent for FakeAgent {
+        async fn prepare_guest_mount(
+            &self,
+            _: agent::PrepareGuestMountRequest,
+        ) -> Result<agent::Empty> {
+            unimplemented!()
+        }
         async fn remove_container(&self, _: agent::RemoveContainerRequest) -> Result<agent::Empty> {
             if self.removed.fetch_add(1, Ordering::SeqCst) < self.remove_failures {
                 return Err(anyhow!("injected remove container failure"));
@@ -814,7 +866,7 @@ mod tests {
         inner.rootfs = vec![rootfs.clone()];
 
         assert!(inner
-            .cleanup_container(CID, true, &device_manager)
+            .cleanup_container(CID, CID, true, &device_manager)
             .await
             .is_err());
         assert_eq!(rootfs.cleanups(), 1);
@@ -831,7 +883,7 @@ mod tests {
         inner.rootfs = vec![rootfs.clone()];
 
         let err = inner
-            .cleanup_container(CID, true, &device_manager)
+            .cleanup_container(CID, CID, true, &device_manager)
             .await
             .expect_err("missing device cleanup failure was hidden");
 
@@ -854,7 +906,7 @@ mod tests {
 
         for _ in 0..2 {
             inner
-                .cleanup_container(CID, true, &device_manager)
+                .cleanup_container(CID, CID, true, &device_manager)
                 .await
                 .unwrap();
         }
@@ -875,20 +927,20 @@ mod tests {
         inner.volumes = vec![volume.clone()];
 
         assert!(inner
-            .cleanup_container(CID, true, &device_manager)
+            .cleanup_container(CID, CID, true, &device_manager)
             .await
             .is_err());
         assert_eq!(agent.removed.load(Ordering::SeqCst), 1);
 
         inner
-            .cleanup_container(CID, true, &device_manager)
+            .cleanup_container(CID, CID, true, &device_manager)
             .await
             .unwrap();
         assert_eq!(agent.removed.load(Ordering::SeqCst), 2);
         assert_eq!(volume.cleanups(), 2);
 
         inner
-            .cleanup_container(CID, true, &device_manager)
+            .cleanup_container(CID, CID, true, &device_manager)
             .await
             .unwrap();
         assert_eq!(agent.removed.load(Ordering::SeqCst), 2);
@@ -920,7 +972,7 @@ mod tests {
         assert_eq!(inner.rootfs.len(), 2, "cancellation dropped rootfs");
 
         inner
-            .cleanup_container(CID, true, &device_manager)
+            .cleanup_container(CID, CID, true, &device_manager)
             .await
             .unwrap();
         assert!(inner.volumes.is_empty());

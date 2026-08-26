@@ -17,6 +17,7 @@ protobuf = { workspace = true }
 sendfd = { features = ["tokio"], version = "0.4.3" }
 serde = { features = ["derive"], workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 hex = "0.4"
 slog = { workspace = true }
 slog-scope = { workspace = true }

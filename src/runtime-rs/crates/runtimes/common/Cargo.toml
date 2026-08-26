@@ -18,6 +18,7 @@ containerd-shim-protos = { features = ["sandbox"], workspace = true }
 nix = { workspace = true }
 oci-spec = { workspace = true }
 protobuf = { workspace = true }
+serde = { workspace = true }
 slog = { workspace = true }
 slog-scope = { workspace = true }
 strum = { workspace = true }
