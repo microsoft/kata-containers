@@ -15,6 +15,14 @@ use agent::types::Device;
 
 const CDI_PREFIX: &str = "cdi.k8s.io";
 
+// Network/IB VFs resolve to this CDI kind. Unlike the GPU kinds, no in-guest
+// component generates a /var/run/cdi spec for it: the kata-agent injects the
+// InfiniBand char devices directly (expose_guest_infiniband_devices exposes
+// /dev/infiniband/*). Emitting a cdi.k8s.io annotation for it would make the
+// agent block in handle_cdi_devices for the full cdi_timeout waiting on a spec
+// that never appears, so we skip annotating this kind (see annotate_container_devices).
+const NIC_CDI_KIND: &str = "nvidia.com/nic";
+
 // Sort the devices based on the first element's PCI_Guest_Path in the PCI bus according to options.
 fn sort_devices_by_guest_pcipath(devices: &mut [ContainerDevice]) {
     // Extract first guest_pcipath from device_options
@@ -63,6 +71,13 @@ pub fn annotate_container_devices(
             .as_ref()
             .and_then(|info| resolve_cdi_device_kind(&info.vendor_id, &info.class_id))
         {
+            // The kata-agent injects IB char devices for NIC VFs directly, and no
+            // in-guest CDI spec is produced for them; skip the guest annotation so
+            // the agent does not stall in handle_cdi_devices. The device is still in
+            // devices_agent, and the host cold-plug CDI path is unaffected.
+            if key == NIC_CDI_KIND {
+                continue;
+            }
             grouped_devices
                 .entry(key.to_owned())
                 .or_default()
