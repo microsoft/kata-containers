@@ -248,6 +248,8 @@ impl Handle {
     }
 
     pub async fn prepare_restore_interface(&mut self, target_mac: &str) -> Result<()> {
+        // UpdateInterface will install target-generation state next. Clear the
+        // captured addresses/routes first so source-only identity cannot survive.
         let mut links = self
             .list_links()
             .await?

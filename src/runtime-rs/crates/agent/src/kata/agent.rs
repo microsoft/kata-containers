@@ -262,6 +262,7 @@ impl_agent!(
     remove_container | crate::RemoveContainerRequest | crate::Empty | None,
     signal_process | crate::SignalProcessRequest | crate::Empty | None,
     update_container | crate::UpdateContainerRequest | crate::Empty | None,
+    prepare_guest_mount | crate::PrepareGuestMountRequest | crate::Empty | None,
     stats_container | crate::ContainerID | crate::StatsContainerResponse | None,
     pause_container | crate::ContainerID | crate::Empty | None,
     resume_container | crate::ContainerID | crate::Empty | None,

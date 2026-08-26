@@ -10,7 +10,7 @@ mod default_volume;
 mod ephemeral_volume;
 pub mod hugepage;
 mod local_volume;
-mod share_fs_volume;
+pub(crate) mod share_fs_volume;
 mod shm_volume;
 pub mod utils;
 
@@ -47,6 +47,9 @@ pub trait Volume: Send + Sync {
     fn get_volume_mount(&self) -> Result<Vec<oci::Mount>>;
     fn get_storage(&self) -> Result<Vec<agent::Storage>>;
     fn get_device_id(&self) -> Result<Option<String>>;
+    fn snapshot_guest_mounts(&self) -> Result<Vec<(String, String)>> {
+        Ok(Vec::new())
+    }
     async fn cleanup(&self, device_manager: &RwLock<DeviceManager>) -> Result<()>;
 }
 
