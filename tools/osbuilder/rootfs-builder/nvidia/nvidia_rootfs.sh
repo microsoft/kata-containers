@@ -144,10 +144,19 @@ setup_nvidia_gpu_rootfs_stage_one() {
 # the image root (like every chisseled_* helper).
 chisseled_from_deb() {
 	local pkg="$1"
-	local list
-	list=$(ls "${stage_one}/var/lib/dpkg/info/${pkg}.list" \
-	          "${stage_one}/var/lib/dpkg/info/${pkg}":*.list 2>/dev/null | head -1 || true)
-	if [[ -z "${list}" || ! -f "${list}" ]]; then
+	local list=""
+	local candidate
+	# The file list is either <pkg>.list or, for multi-arch packages,
+	# <pkg>:<arch>.list. Take the first one that exists; an unmatched glob
+	# stays literal and is filtered out by the -f test.
+	for candidate in "${stage_one}/var/lib/dpkg/info/${pkg}.list" \
+			 "${stage_one}/var/lib/dpkg/info/${pkg}":*.list; do
+		if [[ -f "${candidate}" ]]; then
+			list="${candidate}"
+			break
+		fi
+	done
+	if [[ -z "${list}" ]]; then
 		echo "nvidia: warning: dpkg package '${pkg}' not found in stage-one; skipping"
 		return 0
 	fi

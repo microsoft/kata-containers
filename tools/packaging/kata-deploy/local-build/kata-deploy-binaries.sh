@@ -1453,7 +1453,7 @@ handle_build() {
 	# Export BUILD_DIR for use inside Docker containers (nvidia rootfs builds).
 	# The repo is bind-mounted at /kata-containers, so translate the host workdir
 	# to the corresponding Docker-internal path.
-	export BUILD_DIR="/kata-containers/${workdir#${repo_root_dir}/}"
+	export BUILD_DIR="/kata-containers/${workdir#"${repo_root_dir}"/}"
 
 	case "${build_target}" in
 	all)

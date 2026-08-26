@@ -82,6 +82,7 @@ if [[ "${CROSS_BUILD}" == "true" ]]; then
 	# shellcheck disable=SC2034
 	PLATFORM="--platform=${TARGET_OS}/${TARGET_ARCH}"
 	if command -v "${TARGET_ARCH}-linux-gnu-strip" >/dev/null; then
+		# shellcheck disable=SC2034
 		stripping_tool="${TARGET_ARCH}-linux-gnu-strip"
 	else
 		die "Could not find ${TARGET_ARCH}-linux-gnu-strip for cross build"

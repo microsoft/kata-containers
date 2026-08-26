@@ -24,6 +24,9 @@ die() {
 	exit 1
 }
 
+# arch_target is accepted for call compatibility with the Ubuntu variant and to
+# validate that the caller passes it; the azl3 flow does not branch on it.
+# shellcheck disable=SC2034
 arch_target="${1:?arch_target not specified}"
 nvidia_gpu_stack="${2:?nvidia_gpu_stack not specified}"
 # cuda_repo_osv is the base-OS version string (e.g. "3.0"); kept for call
@@ -37,10 +40,13 @@ cuda_repo_pkg="${5:?cuda_repo_pkg not specified}"
 # tools_repo_url / tools_repo_pkg are unused on Azure Linux: the single azl3
 # CUDA repo also ships the container toolkit, DCGM, fabricmanager and imex.
 # They are still accepted for call compatibility with the Ubuntu variant.
+# shellcheck disable=SC2034
 tools_repo_url="${6:-}"
+# shellcheck disable=SC2034
 tools_repo_pkg="${7:-}"
 # ctk_version comes from versions.yaml in Ubuntu (deb-revisioned) form and does
 # not map to the azl3 revisions, so it is not used to pin the toolkit here.
+# shellcheck disable=SC2034
 ctk_version="${8:-}"
 
 # --releasever bypasses tdnf's distroverpkg lookup: the Azure Linux release
