@@ -20,13 +20,13 @@ use crate::{
         GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse, HealthCheckResponse,
         HugetlbStats, IPAddress, IPFamily, Interface, Interfaces, KernelModule,
         MemHotplugByProbeRequest, MemoryData, MemoryStats, MetricsResponse, NetworkStats,
-        OnlineCPUMemRequest, PidsStats, ReadStreamRequest, ReadStreamResponse,
-        RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes,
-        SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse, SharedMount,
-        SignalProcessRequest, StatsContainerResponse, Storage, StringUser, ThrottlingData,
-        TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
-        VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
-        WriteStreamRequest,
+        OnlineCPUMemRequest, PidsStats, PrepareGuestMountRequest, ReadStreamRequest,
+        ReadStreamResponse, RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest,
+        Route, Routes, SetGuestDateTimeRequest, SetIPTablesRequest, SetIPTablesResponse,
+        SharedMount, SignalProcessRequest, StatsContainerResponse, Storage, StringUser,
+        ThrottlingData, TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest,
+        UpdateRoutesRequest, VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse,
+        WaitProcessRequest, WriteStreamRequest,
     },
     GetDiagnosticDataRequest, GetDiagnosticDataResponse, GetGuestDetailsRequest, OomEventResponse,
     SetPolicyRequest, WaitProcessResponse, WriteStreamResponse,
@@ -303,6 +303,16 @@ impl From<CreateContainerRequest> for agent::CreateContainerRequest {
             stdin_port: from.stdin_port.unwrap_or_default(),
             stdout_port: from.stdout_port.unwrap_or_default(),
             stderr_port: from.stderr_port.unwrap_or_default(),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<PrepareGuestMountRequest> for agent::PrepareGuestMountRequest {
+    fn from(from: PrepareGuestMountRequest) -> Self {
+        Self {
+            path: from.path,
+            directory: from.directory,
             ..Default::default()
         }
     }

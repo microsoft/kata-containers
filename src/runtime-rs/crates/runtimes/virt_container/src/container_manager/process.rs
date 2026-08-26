@@ -37,7 +37,10 @@ enum StdIoType {
 
 #[derive(Debug)]
 pub struct Process {
+    // Host-facing identity is assigned by the current containerd generation.
     pub process: ContainerProcess,
+    // Guest-facing identity names the process captured in the VM and remains
+    // stable across restore generations.
     agent_process: ContainerProcess,
     pub pid: u32,
     logger: slog::Logger,
@@ -146,6 +149,10 @@ impl Process {
 
     pub fn agent_process(&self) -> &ContainerProcess {
         &self.agent_process
+    }
+
+    pub fn agent_container_id(&self) -> &str {
+        self.agent_process.container_id()
     }
 
     pub fn pre_fifos_open(&mut self) -> Result<()> {
@@ -481,6 +488,12 @@ impl Process {
     pub async fn stop(&mut self) {
         let mut status = self.status.write().await;
         *status = ProcessStatus::Stopped;
+    }
+
+    pub async fn complete_locally(&mut self, exit_code: i32) {
+        self.exit_status.write().await.update_exit_code(exit_code);
+        self.set_status(ProcessStatus::Stopped).await;
+        self.exit_watcher_tx.take();
     }
 
     /// Close the stdin of the process in container.

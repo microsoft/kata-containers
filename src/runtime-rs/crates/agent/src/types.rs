@@ -139,6 +139,12 @@ pub struct CreateContainerRequest {
 }
 
 #[derive(PartialEq, Clone, Default)]
+pub struct PrepareGuestMountRequest {
+    pub path: String,
+    pub directory: bool,
+}
+
+#[derive(PartialEq, Clone, Default)]
 pub struct ContainerID {
     pub container_id: String,
 }

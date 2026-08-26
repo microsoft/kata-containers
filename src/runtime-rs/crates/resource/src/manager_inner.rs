@@ -247,6 +247,8 @@ impl ResourceManagerInner {
         //    but it is not in netns. So, the previous thread would still remain in the pod netns.
         // The solution is to block the future on the current thread, it is enabled by spawn an os thread, create a
         // tokio runtime, and block the task on it.
+        // Open target TAP queues inside the target netns, but retain the saved
+        // CLH device ID so restore replaces that NIC's descriptors in place.
         let device_manager = self.device_manager.clone();
         let network = thread::spawn(move || -> Result<Arc<dyn Network>> {
             let rt = runtime::Builder::new_current_thread().enable_io().build()?;
@@ -327,8 +329,8 @@ impl ResourceManagerInner {
             ));
         }
         let mut interface = interfaces.remove(0);
-        // Private Kata restore-replace bit. The guest clears stale addresses,
-        // routes, and MAC state before applying this target interface.
+        // Private Kata restore-replace bit. The guest clears stale addresses
+        // and routes before applying this target interface.
         // Keep in sync with KATA_IFACE_RESTORE_REPLACE in kata-agent.
         interface.raw_flags |= 0x4000_0000;
         Ok((interface, network.routes().await?))
@@ -340,6 +342,14 @@ impl ResourceManagerInner {
             .ok_or_else(|| anyhow!("restore network was not prepared"))?
             .activate_restore()
             .await
+    }
+
+    pub async fn refresh_restore_mounts(&self, mounts: &[(PathBuf, String)]) -> Result<()> {
+        for (source, guest_path) in mounts {
+            crate::volume::share_fs_volume::refresh_guest_path(source, guest_path, &self.agent)
+                .await?;
+        }
+        Ok(())
     }
 
     async fn handle_interfaces(&self, network: &dyn Network) -> Result<()> {

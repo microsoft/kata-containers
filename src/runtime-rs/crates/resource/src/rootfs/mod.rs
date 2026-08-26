@@ -5,6 +5,7 @@
 //
 
 mod nydus_rootfs;
+mod restored_rootfs;
 mod share_fs_rootfs;
 pub mod snapshot;
 use agent::Storage;
@@ -34,6 +35,7 @@ use self::{
 use crate::rootfs::erofs_rootfs::is_erofs_multi_layer;
 use crate::share_fs::{NydusShareFs, ShareFs};
 use oci_spec::runtime as oci;
+pub use restored_rootfs::RestoredRootfsConfig;
 
 const ROOTFS: &str = "rootfs";
 pub const HYBRID_ROOTFS_LOWER_DIR: &str = "rootfs_lower";
@@ -41,14 +43,18 @@ const TYPE_OVERLAY_FS: &str = "overlay";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SnapshotDiskPath {
+    // Path currently referenced by the live CLH configuration.
     pub live_path: PathBuf,
+    // Path the finalized CLH configuration will use after publication.
     pub snapshot_path: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RootfsSnapshotArtifacts {
     pub cri_name: String,
+    // Current host ID selects the per-container artifact directory.
     pub source_host_id: String,
+    // Stable guest ID survives host rekeying in recursive snapshots.
     pub snapshot_guest_id: String,
     pub readonly_disk: SnapshotDiskPath,
     pub writable_disk: Option<SnapshotDiskPath>,
@@ -62,6 +68,12 @@ pub trait Rootfs: Send + Sync {
     async fn get_storage(&self) -> Option<Vec<Storage>>;
     async fn cleanup(&self, device_manager: &RwLock<DeviceManager>) -> Result<()>;
     async fn get_device_id(&self) -> Result<Option<String>>;
+    fn restored_cri_name(&self) -> Option<&str> {
+        None
+    }
+    async fn rebind_restored(&self, _target_id: &str) -> Result<()> {
+        Ok(())
+    }
     async fn snapshot_host_id(&self) -> Option<String> {
         None
     }
@@ -262,6 +274,35 @@ impl RootFsResource {
             }
         }
         Ok(artifacts)
+    }
+
+    pub async fn register_restored(&self, configs: Vec<RestoredRootfsConfig>) -> Result<()> {
+        let restored = configs
+            .into_iter()
+            .map(restored_rootfs::RestoredRootfs::new)
+            .collect::<Result<Vec<_>>>()?;
+        self.inner.write().await.rootfs.extend(
+            restored
+                .into_iter()
+                .map(|rootfs| Arc::new(rootfs) as Arc<dyn Rootfs>),
+        );
+        Ok(())
+    }
+
+    pub async fn rebind_restored(&self, cri_name: &str, target_id: &str) -> Result<()> {
+        let inner = self.inner.read().await;
+        let matches = inner
+            .rootfs
+            .iter()
+            .filter(|rootfs| rootfs.restored_cri_name() == Some(cri_name))
+            .collect::<Vec<_>>();
+        if matches.len() != 1 {
+            return Err(anyhow!(
+                "expected one restored rootfs for {cri_name}, found {}",
+                matches.len()
+            ));
+        }
+        matches[0].rebind_restored(target_id).await
     }
 }
 

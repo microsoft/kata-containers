@@ -147,13 +147,36 @@ pub struct ContainerConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletedContainerSnapshot {
+    // CRI name is the stable key after the source task object is deleted.
     pub cri_name: String,
     pub exit_code: i32,
+    pub oci_identity_version: u32,
+    pub oci_identity_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContainerSnapshotMount {
+    // Host source is target-local and intentionally omitted. Destination joins
+    // a target OCI mount to the captured guest path during restore.
+    pub destination: String,
+    pub guest_source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveContainerSnapshot {
+    // Host ID belongs to this runtime generation; guest ID names the captured
+    // process and remains stable through recursive restore.
+    pub host_id: String,
+    pub guest_id: String,
+    pub cri_name: String,
+    pub oci_identity_version: u32,
+    pub oci_identity_sha256: String,
+    pub node_local_mounts: Vec<ContainerSnapshotMount>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ContainerSnapshotInventory {
-    pub live_container_ids: Vec<ContainerID>,
+    pub live_containers: Vec<LiveContainerSnapshot>,
     pub completed_containers: Vec<CompletedContainerSnapshot>,
 }
 
