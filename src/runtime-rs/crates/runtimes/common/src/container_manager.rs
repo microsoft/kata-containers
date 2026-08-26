@@ -38,6 +38,7 @@ pub trait ContainerManager: Send + Sync {
         guest_id: &GuestContainerId,
     ) -> Result<()>;
     async fn mark_restored_container_running(&self, host_id: &HostContainerId) -> Result<PID>;
+    async fn complete_synthetic_init(&self, process_id: &ContainerProcess) -> Result<()>;
 
     // utility
     async fn pid(&self) -> Result<PID>;

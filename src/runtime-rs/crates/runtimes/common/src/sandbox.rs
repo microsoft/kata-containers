@@ -72,6 +72,8 @@ pub trait Sandbox: Send + Sync {
         target_id: &str,
     ) -> Result<bool>;
 
+    async fn persist_runtime_state(&self) -> Result<()>;
+
     // set agent policy
     async fn set_policy(&self, policy: &str) -> Result<()>;
 }
