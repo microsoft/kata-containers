@@ -39,6 +39,10 @@ pub fn finalize_snapshot_config(
         .with_context(|| format!("parse snapshot config {}", config_path.display()))?;
 
     if memory_ranges.is_file() {
+        // A VM cloned from the template factory can retain memory.file and
+        // zones[].file paths to the source template backing. This snapshot has
+        // its own memory-ranges file, so remove those host-local references to
+        // make CLH restore from the portable snapshot memory instead.
         let memory = config
             .get_mut("memory")
             .and_then(Value::as_object_mut)
@@ -66,6 +70,9 @@ pub fn finalize_snapshot_config(
         .and_then(Value::as_array_mut)
         .ok_or_else(|| anyhow!("snapshot config missing disks"))?;
     let mut rewritten = HashSet::<PathBuf>::new();
+    // Replace every live rootfs path captured by CLH with its packaged path in
+    // the final snapshot. Packaged VMDK extents are relative, so the live
+    // extent anchor must not follow the artifact to another host or directory.
     for disk in disks {
         let disk = disk
             .as_object_mut()

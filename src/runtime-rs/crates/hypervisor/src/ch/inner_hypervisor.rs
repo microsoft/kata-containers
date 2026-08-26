@@ -436,6 +436,8 @@ impl CloudHypervisorInner {
         let mut restored_networks = Vec::with_capacity(networks.len());
         let mut request_fds = Vec::new();
         let mut network_ids = std::collections::HashSet::new();
+        // CLH matches each saved NIC by ID; its replacement TAP descriptors
+        // travel out of band through SCM_RIGHTS in the same declared order.
         for network in networks {
             if network.id.is_empty() {
                 return Err(anyhow!("restore network ID must not be empty"));
@@ -482,6 +484,8 @@ impl CloudHypervisorInner {
             debug!(sl!(), "vm restore response: {:?}", detail);
         }
 
+        // Sandbox activation owns resume. Returning a running VM here would let
+        // captured workloads execute before target network identity is verified.
         let info = cloud_hypervisor_vm_info(&self.api_socket).await?;
         if !matches!(info.state, State::Paused) {
             return Err(anyhow!(
