@@ -20,6 +20,7 @@ pub struct RestoredRootfsConfig {
     pub cri_name: String,
     pub host_id: String,
     pub guest_id: String,
+    pub device_ids: Vec<String>,
     pub readonly_disk: PathBuf,
     pub writable_disk: Option<PathBuf>,
     pub files: Vec<PathBuf>,
@@ -35,6 +36,7 @@ struct RestoredRootfsIdentity {
 pub struct RestoredRootfs {
     cri_name: String,
     identity: Arc<RwLock<RestoredRootfsIdentity>>,
+    device_ids: Vec<String>,
     readonly_disk: PathBuf,
     writable_disk: Option<PathBuf>,
     files: Vec<PathBuf>,
@@ -42,7 +44,12 @@ pub struct RestoredRootfs {
 
 impl RestoredRootfs {
     pub fn new(config: RestoredRootfsConfig) -> Result<Self> {
-        if config.cri_name.is_empty() || config.host_id.is_empty() || config.guest_id.is_empty() {
+        if config.cri_name.is_empty()
+            || config.host_id.is_empty()
+            || config.guest_id.is_empty()
+            || config.device_ids.is_empty()
+            || config.device_ids.iter().any(String::is_empty)
+        {
             return Err(anyhow!("restored rootfs identity is incomplete"));
         }
         if config.files.is_empty() || !config.readonly_disk.is_file() {
@@ -61,6 +68,7 @@ impl RestoredRootfs {
                 host_id: config.host_id,
                 guest_id: config.guest_id,
             })),
+            device_ids: config.device_ids,
             readonly_disk: config.readonly_disk,
             writable_disk: config.writable_disk,
             files: config.files,
@@ -93,7 +101,14 @@ impl Rootfs for RestoredRootfs {
         None
     }
 
-    async fn cleanup(&self, _device_manager: &RwLock<DeviceManager>) -> Result<()> {
+    async fn cleanup(&self, device_manager: &RwLock<DeviceManager>) -> Result<()> {
+        let device_manager = device_manager.read().await;
+        for device_id in self.device_ids.iter().rev() {
+            device_manager
+                .remove_restored_device(device_id)
+                .await
+                .with_context(|| format!("remove restored rootfs device {device_id}"))?;
+        }
         Ok(())
     }
 
@@ -204,6 +219,7 @@ mod tests {
             cri_name: "app".to_string(),
             host_id: "source-host".to_string(),
             guest_id: "stable-guest".to_string(),
+            device_ids: vec!["readonly".to_string(), "writable".to_string()],
             readonly_disk: descriptor.clone(),
             writable_disk: Some(writable.clone()),
             files: vec![lower, descriptor.clone(), writable.clone()],
