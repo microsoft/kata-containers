@@ -362,6 +362,16 @@ impl RestoreContext {
         self.state.lock().await.guest_to_host.get(guest_id).cloned()
     }
 
+    pub(crate) async fn retire_live(&self, host_id: &HostContainerId) {
+        let mut state = self.state.lock().await;
+        if let Some(guest_id) = state.host_to_guest.remove(host_id) {
+            state.guest_to_host.remove(&guest_id);
+        }
+        state
+            .live_slots
+            .retain(|_, slot| slot.claimed_host_id.as_ref() != Some(host_id));
+    }
+
     pub(crate) async fn guest_mounts_for_target(
         &self,
         host_id: &HostContainerId,
@@ -903,6 +913,14 @@ mod tests {
             .classify_create(&host("other-app"), "app", false, &identity("app"))
             .await
             .is_err());
+
+        context.retire_live(&host("target-app")).await;
+        assert_eq!(context.resolve_guest_id(&host("target-app")).await, None);
+        assert_eq!(context.resolve_host_id(&guest("source-app")).await, None);
+        assert_eq!(
+            context.guest_mounts_for_target(&host("target-app")).await,
+            None
+        );
     }
 
     #[tokio::test]
@@ -925,15 +943,15 @@ mod tests {
             .unwrap();
         context.prepared_paused().await.unwrap();
         context
-            .classify_create("target", "POD", true, &identity("pause"))
+            .classify_create(&host("target"), "POD", true, &identity("pause"))
             .await
             .unwrap();
-        context.begin_activation("target").await.unwrap();
+        context.begin_activation(&host("target")).await.unwrap();
         context.activate().await.unwrap();
 
         assert!(context
             .classify_create(
-                "debugger",
+                &host("debugger"),
                 "snapshot-debugger",
                 false,
                 &identity("debugger")
@@ -941,12 +959,12 @@ mod tests {
             .await
             .is_err());
         context
-            .classify_create("target-app", "app", false, &identity("app"))
+            .classify_create(&host("target-app"), "app", false, &identity("app"))
             .await
             .unwrap();
         assert!(context
             .classify_create(
-                "debugger",
+                &host("debugger"),
                 "snapshot-debugger",
                 false,
                 &identity("debugger")
@@ -954,18 +972,22 @@ mod tests {
             .await
             .is_err());
         context
-            .classify_create("target-setup", "setup", false, &identity("setup"))
+            .classify_create(&host("target-setup"), "setup", false, &identity("setup"))
             .await
             .unwrap();
         assert_eq!(
-            context.take_synthetic_exit_code("target-setup").await,
+            context
+                .take_synthetic_exit_code(&host("target-setup"))
+                .await,
             Some(0)
         );
-        context.retire_synthetic_completed("target-setup").await;
+        context
+            .retire_synthetic_completed(&host("target-setup"))
+            .await;
         assert_eq!(
             context
                 .classify_create(
-                    "debugger",
+                    &host("debugger"),
                     "snapshot-debugger",
                     false,
                     &identity("debugger")
