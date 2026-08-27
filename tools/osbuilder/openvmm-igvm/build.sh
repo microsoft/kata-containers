@@ -18,6 +18,7 @@ boot_mode="${BOOT_MODE:-diagnostic}"
 extra_kernel_args="${EXTRA_KERNEL_ARGS:-}"
 output_name="${OUTPUT_NAME:-}"
 root_hash_file="${ROOT_HASH_FILE:-}"
+vp_count="${VP_COUNT:-1}"
 
 die()
 {
@@ -29,6 +30,8 @@ die()
 [[ -x "${igvmfilegen}" ]] ||
 	die "igvmfilegen is not executable: ${igvmfilegen}"
 command -v jq >/dev/null || die "required tool not found: jq"
+[[ "${vp_count}" =~ ^[1-9][0-9]*$ ]] ||
+	die "VP_COUNT must be a positive integer: ${vp_count}"
 
 mkdir -p "${out_dir}"
 
@@ -67,16 +70,17 @@ if [[ "${boot_mode}" == "rootfs" ]]; then
 		kernel_cmdline+=" ${extra_kernel_args}"
 	fi
 
-	if [[ -n "${root_hash_file}" || -n "${extra_kernel_args}" ]]; then
-		manifest="${out_dir}/manifest-rootfs-generated.json"
-		jq \
-			--arg kernel_cmdline "${kernel_cmdline}" \
-			'(.guest_configs[0].image.snp_linux_direct.linux.command_line) =
-				$kernel_cmdline' \
-			"${script_dir}/manifest-rootfs.json" >"${manifest}"
-	fi
+	manifest="${out_dir}/manifest-rootfs-generated.json"
+	jq \
+		--arg kernel_cmdline "${kernel_cmdline}" \
+		--argjson vp_count "${vp_count}" \
+		'(.guest_configs[0].image.snp_linux_direct.linux.command_line) =
+			$kernel_cmdline |
+		(.guest_configs[0].image.snp_linux_direct.processor_topology.proc_count) =
+			$vp_count' \
+		"${script_dir}/manifest-rootfs.json" >"${manifest}"
 
-	output_name="${output_name:-kata-aci-rootfs-direct-no-initrd-1vp.bin}"
+	output_name="${output_name:-kata-aci-rootfs-direct-no-initrd-${vp_count}vp.bin}"
 	jq -n \
 		--arg kernel "$(readlink -f "${kernel}")" \
 		'{resources: {linux_kernel: $kernel}}' \
