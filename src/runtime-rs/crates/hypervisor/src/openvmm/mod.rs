@@ -39,16 +39,17 @@ use crate::{DeviceType, Hypervisor, MemoryConfig, VcpuThreadIds};
 // a virtio (or vhost-user) function behind its own root port at function 0 of a
 // distinct device number, so the guest-visible path is "DD/00". Device 0 (00.0)
 // is intentionally left unused so the layout does not depend on whether the root
-// complex reserves it. Cold-plug devices use fixed device numbers 1..=7; block
-// hotplug ports use device numbers 8..=31 (hp0..hp23).
+// complex reserves it. Cold-plug devices use fixed device numbers 1..=8; block
+// hotplug ports use device numbers 9..=31 (hp0..hp22).
 pub(crate) const OPENVMM_ROOTFS_PCI_DEVICE: u8 = 1;
 pub(crate) const OPENVMM_SHAREFS_PCI_DEVICE: u8 = 2;
 pub(crate) const OPENVMM_VSOCK_PCI_DEVICE: u8 = 3;
 pub(crate) const OPENVMM_NET_PCI_FIRST_DEVICE: u8 = 4;
 pub(crate) const OPENVMM_NET_PCI_MAX_COUNT: u8 = 4;
-pub(crate) const OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE: u8 = 8;
+pub(crate) const OPENVMM_CONSOLE_PCI_DEVICE: u8 = 8;
+pub(crate) const OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE: u8 = 9;
 pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX: &str = "hp";
-pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_COUNT: u8 = 24;
+pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_COUNT: u8 = 23;
 
 /// The OpenVMM hypervisor struct, wrapping inner state behind a lock.
 pub struct OpenVmm {
