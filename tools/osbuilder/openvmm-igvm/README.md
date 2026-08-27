@@ -1,174 +1,277 @@
-# OpenVMM SNP IGVM bring-up
+# OpenVMM SNP Kata container validation
 
-This directory reproduces the currently working OpenVMM SEV-SNP bring-up:
+This directory builds and validates the working Kata Confidential Containers
+flow on OpenVMM:
 
-- build a one-vCPU ACI Linux-direct IGVM;
-- boot it with OpenVMM over MSHV;
-- reach a diagnostic BusyBox shell over COM1;
-- optionally attach a Kata rootfs image as virtio-blk and discover
-  `/dev/vda`, `/dev/vda1`, and `/dev/vda2`;
-- boot the Kata rootfs through dm-verity and start the Kata agent.
+1. build the modified OpenVMM VM-service server and `igvmfilegen`;
+2. generate an ACI Linux-direct SEV-SNP IGVM with a selected VP count;
+3. build and install the runtime-rs OpenVMM shim and configuration;
+4. configure containerd to use the EROFS snapshotter;
+5. boot a Kata pod through CRI or Kubernetes and run an EROFS-backed BusyBox
+   container.
 
-This is experimental bring-up tooling, not a Kata runtime configuration.
+The flow has been validated from clean Azure Linux 3 installations on:
 
-## Current status
+- `Standard_DC16as_cc_v5`;
+- `Standard_DC32as_cc_v6`.
 
-The following path works:
+## Required inputs
 
-1. MSHV creates an SNP guest with restricted injection.
-2. The ACI kernel boots from the IGVM.
-3. The embedded diagnostic initramfs starts.
-4. A PCIe virtio-blk Kata image is discovered when `KATA_IMAGE` is supplied.
-5. The Kata rootfs boots through dm-verity and starts the agent.
+The setup builds the host components and IGVM, but it does not yet build the
+guest kernel or Kata disk image. Provide:
 
-Known limitations:
+- `OPENVMM_DIR`: OpenVMM source containing SNP IGVM VM-service support;
+- `KERNEL`: prebuilt Kata-capable ACI `bzImage`;
+- `KATA_IMAGE`: matching dm-verity Kata image;
+- `ROOT_HASH_FILE`: dm-verity metadata for `KATA_IMAGE`.
 
-- The two-vCPU manifest tested during bring-up triple-faults while starting the
-  second vCPU. This reproducer intentionally uses one vCPU.
-- A layout-dependent decompressor page triggers `HvMessageTypeUnacceptedGpa`.
-  The current kernel build reserves GPA `0x416b000` as a bring-up workaround;
-  this is not a production fix.
-- The reserved GPA moved when the kernel layout changed, so the workaround
-  must not be treated as a stable ABI.
-- The manifest enables confidential debugging and is not suitable for
-  production.
+The validated development image contains the guest PCI-rescan workaround and
+an `allow-all.rego` policy. It is suitable for functional validation only.
 
-## Prerequisites
+## Prepare an Azure Linux host
 
-- An SNP-capable Azure confidential-child VM with `/dev/mshv`.
-- The OpenVMM branch containing MSHV SNP ACI IGVM support.
-- The OpenVMM-tested ACI `bzImage`.
-- A statically linked x86-64 BusyBox binary.
-- `cargo`, `jq`, `cpio`, `gzip`, and `file`.
-- Optionally, a Kata `kata-containers.img`.
-
-The commands below assume:
+Use an SNP-capable confidential-child VM. Install the MSHV boot environment:
 
 ```sh
-cd /path/to/kata-containers/tools/osbuilder/openvmm-igvm
-
-export OPENVMM_DIR="$HOME/openvmm-snp-mshv-aci-igvm"
-export KERNEL="$HOME/openvmm-snp-artifacts/bzImage-aci-6.6-ioapic-virtio.bin"
-export BUSYBOX="$HOME/openvmm-snp-artifacts/busybox"
-export KATA_IMAGE="$HOME/kata-containers/tools/osbuilder/kata-containers.img"
+sudo dnf install -y \
+    kernel-mshv mshv mshv-bootloader-lx edk2-hvloader
+sudo reboot
 ```
 
-## Build OpenVMM
+After reconnecting, verify the host:
+
+```sh
+uname -r
+test -e /dev/mshv
+```
+
+The kernel version must contain `mshv`, and `/dev/mshv` must exist.
+
+Install the build and runtime dependencies:
+
+```sh
+sudo dnf install -y \
+    binutils clang cmake containerd cpio cri-tools curl device-mapper-devel \
+    erofs-utils file gcc gcc-c++ git glibc-devel gzip jq kernel-headers \
+    libseccomp-devel llvm-devel make openssl-devel perl pkg-config protobuf \
+    protobuf-devel python3-pip tar
+```
+
+Install Rust:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+    sh -s -- -y --profile minimal
+. "$HOME/.cargo/env"
+```
+
+## Prepare OpenVMM
 
 OpenVMM currently requires Rust 1.95:
 
 ```sh
-rustup toolchain install 1.95.0 --profile minimal
 cd "$OPENVMM_DIR"
+rustup toolchain install 1.95.0 --profile minimal
 rustup override set 1.95.0
 ```
 
-Restore its packaged build dependencies:
+Restore the packaged build dependencies without downloading compatibility-test
+IGVMs:
 
 ```sh
-PROTOC="$(command -v protoc)" cargo xflowey restore-packages
+PROTOC="$(command -v protoc)" \
+    cargo xflowey restore-packages --no-compat-igvm
 ```
 
-The explicit `PROTOC` is useful for bootstrapping a fresh checkout before
-OpenVMM's packaged `protoc` has been restored. The restore flow may prompt for
-GitHub authentication after the public build artifacts have been installed.
+`--no-compat-igvm` avoids an interactive GitHub authentication prompt for
+artifacts that are not needed by this flow.
 
-Build the required binaries:
+## Run the end-to-end flow
+
+Set the input paths:
 
 ```sh
-make openvmm OPENVMM_DIR="$OPENVMM_DIR"
+cd /path/to/kata-containers/tools/osbuilder/openvmm-igvm
+
+export OPENVMM_DIR="$HOME/openvmm"
+export KERNEL="$HOME/kata-inputs/bzImage"
+export KATA_IMAGE="$HOME/kata-inputs/kata-containers.img"
+export ROOT_HASH_FILE="$HOME/kata-inputs/root_hash_.txt"
+export VP_COUNT=2
 ```
 
-## Build the Kata-capable ACI kernel
-
-Start from the exact config embedded in the OpenVMM-tested ACI kernel:
+Build and install the complete host-side stack:
 
 ```sh
-make kernel \
-    KERNEL_SRC="$HOME/src/LSG-linux-rolling-aci-openvmm" \
-    BASE_KERNEL="$HOME/openvmm-snp-mshv-aci-igvm/bzImage-aci-6.6-ioapic-virtio.bin"
-```
-
-The script enables and verifies dm-init, dm-verity, EROFS, virtio-vsock,
-SEV guest reporting, PCIe port support, TUN, nftables, and cgroup BPF.
-
-The output is:
-
-```text
-$KERNEL_SRC/build-kata-openvmm/arch/x86/boot/bzImage
-```
-
-Linux 6.6 requires a compiler that does not default EFI stub compilation to
-C23. GCC 13 on the Azure Linux build node is known to work.
-
-## Build and run the diagnostic shell
-
-```sh
-make shell-igvm \
+make e2e-setup \
     OPENVMM_DIR="$OPENVMM_DIR" \
     KERNEL="$KERNEL" \
-    BUSYBOX="$BUSYBOX"
+    KATA_IMAGE="$KATA_IMAGE" \
+    ROOT_HASH_FILE="$ROOT_HASH_FILE" \
+    VP_COUNT="$VP_COUNT"
 ```
 
-The output is:
+This target:
+
+- builds OpenVMM and `igvmfilegen`;
+- regenerates the dm-verity SNP IGVM;
+- sets both the IGVM topology and runtime VM request to `VP_COUNT`;
+- builds runtime-rs with OpenVMM support;
+- installs `containerd-shim-kata-openvmm-v2`;
+- generates the OpenVMM SNP runtime configuration;
+- starts containerd with a dedicated EROFS configuration.
+
+The normal `/etc/containerd/config.toml` is not modified.
+
+Boot and validate the pod:
+
+```sh
+make e2e-test VP_COUNT="$VP_COUNT"
+```
+
+Successful output includes:
 
 ```text
-out/kata-aci-shell-reserve-416b-1vp.bin
+OPENVMM_KATACC_E2E_OK
+guest kernel: 6.6.31-aci-kata-openvmm+
 ```
 
-Boot the BusyBox shell without a disk:
+The test verifies:
+
+- CRI selected the `kata-openvmm` runtime;
+- the container executes inside the Kata guest;
+- the container has an active EROFS snapshot;
+- the sandbox is backed by an OpenVMM process.
+- the guest processor count matches `VP_COUNT`.
+
+The pod and container are removed after the test. Use `KEEP_SANDBOX=yes` to
+leave them running.
+
+## Select the VP count
+
+`VP_COUNT` is propagated to both places that must agree:
+
+- `processor_topology.proc_count` in the generated IGVM manifest;
+- `default_vcpus` in the generated runtime-rs configuration.
+
+For example, build and validate a four-VP guest:
 
 ```sh
-make shell-run OPENVMM_DIR="$OPENVMM_DIR"
-```
-
-Boot the same shell with the Kata disk attached for manual inspection:
-
-```sh
-make shell-disk-run \
-    OPENVMM_DIR="$OPENVMM_DIR" \
-    KATA_IMAGE="$KATA_IMAGE"
-```
-
-The disk-backed shell exposes:
-
-```text
-/dev/vda
-/dev/vda1
-/dev/vda2
-```
-
-## Boot the dm-verity Kata agent
-
-The image builder writes dm-verity metadata to `root_hash_*.txt`. Build and
-run the working agent variant:
-
-```sh
-make agent-dmverity-igvm \
+make e2e-setup \
     OPENVMM_DIR="$OPENVMM_DIR" \
     KERNEL="$KERNEL" \
-    ROOT_HASH_FILE=../root_hash_.txt
+    KATA_IMAGE="$KATA_IMAGE" \
+    ROOT_HASH_FILE="$ROOT_HASH_FILE" \
+    VP_COUNT=4
 
-make agent-dmverity-run \
-    OPENVMM_DIR="$OPENVMM_DIR" \
-    KATA_IMAGE="$KATA_IMAGE"
+make e2e-test VP_COUNT=4
 ```
 
-The generated command line creates `/dev/dm-0` from `/dev/vda1` and
-`/dev/vda2`, then mounts `/dev/dm-0` as the read-only ext4 root filesystem.
-The boot reaches `kata-containers.target` and starts the agent ttRPC server on
-`vsock://-1:1024`.
+The generated IGVM is named:
 
-Exit OpenVMM with `Ctrl-C`.
+```text
+out/kata-aci-agent-dmverity-reserve-416b-4vp.bin
+```
 
-## Validate the tooling
+OpenVMM and MSHV require the runtime processor count to exactly match the
+topology embedded in the IGVM. Always use the same `VP_COUNT` for setup and
+test. The build target also injects the current
+`memmap=4K$0x416b000` bring-up workaround; calling `build.sh` directly requires
+passing that argument explicitly.
+
+Kubernetes CPU requests are not used to select the IGVM topology. Do not add
+CPU sizing annotations or resource limits that change the Kata VM CPU count;
+generate and install an IGVM with the desired fixed `VP_COUNT` instead.
+
+## Validate through Kubernetes
+
+The Kubernetes flow assumes `make e2e-setup` has already installed the Kata
+runtime and configured containerd.
+
+Create an experimental single-node Kubernetes cluster:
 
 ```sh
-make check
+make e2e-k8s-setup
 ```
 
-Generated files are confined to `out/`:
+The setup target installs Kubernetes `v1.32.0` and CNI plugins `v1.6.2`,
+initializes kubeadm against the existing containerd socket, installs a local
+bridge CNI, and removes the control-plane scheduling taint. Override versions
+or the pod CIDR with:
 
 ```sh
-make clean
+KUBERNETES_VERSION=v1.32.0 CNI_VERSION=v1.6.2 \
+    POD_CIDR=10.244.0.0/16 make e2e-k8s-setup
 ```
+
+Run the Kubernetes test:
+
+```sh
+make e2e-k8s-test VP_COUNT="$VP_COUNT"
+```
+
+This applies:
+
+- a `kata-openvmm` `RuntimeClass` mapped to the containerd handler;
+- an EROFS-backed BusyBox pod using that runtime class.
+
+The test waits for the pod, executes a marker inside the guest, verifies the
+guest VP count and kernel, checks the active EROFS snapshot and OpenVMM process,
+and confirms SEV-SNP in guest `dmesg`. Set `KEEP_SANDBOX=yes` to retain the pod:
+
+```sh
+KEEP_SANDBOX=yes make e2e-k8s-test VP_COUNT="$VP_COUNT"
+kubectl exec -it openvmm-kata-e2e -- sh
+```
+
+## Verify SEV-SNP explicitly
+
+With a retained sandbox:
+
+```sh
+POD="$(sudo crictl pods -q | head -1)"
+CTR="$(sudo crictl ps -q | head -1)"
+
+sudo crictl pods --id "$POD"
+pgrep -af "openvmm.*$POD"
+sudo crictl exec "$CTR" dmesg |
+    grep -E "Memory Encryption Features active|SNP CPUID|SNP guest platform"
+```
+
+Expected guest evidence includes:
+
+```text
+Memory Encryption Features active: AMD SEV SEV-ES SEV-SNP
+SEV: Using SNP CPUID table
+SEV: SNP guest platform device initialized
+```
+
+## Current limitations
+
+- The kernel command line reserves GPA `0x416b000` to avoid the
+  layout-dependent `HvMessageTypeUnacceptedGpa` failure. This is not a
+  production fix or stable ABI.
+- The IGVM enables confidential debugging.
+- The development guest policy is permissive.
+- Initdata is not currently bound into the OpenVMM SNP launch measurement.
+- A guest PCI rescan compensates for the missing OpenVMM PCIe hotplug
+  notification under restricted interrupt injection.
+
+## Lower-level troubleshooting targets
+
+The original bring-up targets remain available for debugging:
+
+| Target | Purpose |
+|---|---|
+| `make kernel` | Build the Kata-capable ACI kernel from a tested base kernel |
+| `make shell-igvm` | Build a diagnostic BusyBox IGVM |
+| `make shell-run` | Boot the diagnostic IGVM without a disk |
+| `make shell-disk-run` | Boot the diagnostic IGVM with the Kata disk |
+| `make agent-dmverity-igvm` | Generate the dm-verity Kata-agent IGVM |
+| `make agent-dmverity-run` | Boot the dm-verity guest directly |
+| `make e2e-setup` | Build and install a fixed-VP OpenVMM Kata runtime |
+| `make e2e-test` | Validate the runtime directly through CRI |
+| `make e2e-k8s-setup` | Install an experimental single-node Kubernetes cluster |
+| `make e2e-k8s-test` | Validate the runtime through a Kubernetes RuntimeClass |
+| `make check` | Validate scripts and manifests |
+| `make clean` | Remove generated files under `out/` |

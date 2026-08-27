@@ -1,0 +1,17 @@
+{
+  "metadata": {
+    "name": "openvmm-e2e",
+    "namespace": "default",
+    "uid": "openvmm-e2e",
+    "attempt": 1
+  },
+  "linux": {
+    "security_context": {
+      "namespace_options": {
+        "network": 2,
+        "pid": 1,
+        "ipc": 1
+      }
+    }
+  }
+}
