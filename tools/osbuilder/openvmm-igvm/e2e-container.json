@@ -1,0 +1,23 @@
+{
+  "metadata": {
+    "name": "busybox"
+  },
+  "image": {
+    "image": "docker.io/library/busybox:latest"
+  },
+  "command": [
+    "sh",
+    "-c",
+    "echo OPENVMM_EROFS_CONTAINER_OK; sleep 300"
+  ],
+  "log_path": "busybox.log",
+  "linux": {
+    "security_context": {
+      "namespace_options": {
+        "network": 2,
+        "pid": 1,
+        "ipc": 1
+      }
+    }
+  }
+}
