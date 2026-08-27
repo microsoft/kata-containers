@@ -61,7 +61,7 @@ kernel_params = ""
 # < 0                             --> will be set to the actual number of physical cores
 # > 0 <= number of physical cores --> will be set to the specified number
 # > number of physical cores      --> will be set to the actual number of physical cores
-default_vcpus = @DEFVCPUS@
+default_vcpus = 2
 
 # Guest-side vCPU overhead budget (fractional) used with static_sandbox_resource_mgmt.
 # When workload limits are present, vm_vcpus = requested_vcpus + overhead_vcpus

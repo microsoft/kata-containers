@@ -16,8 +16,9 @@ use super::vmm_instance::OPENVMM_READY_TIMEOUT;
 use super::vmservice;
 use super::{
     OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
-    OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT,
-    OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VSOCK_PCI_DEVICE,
+    OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_CONSOLE_PCI_DEVICE,
+    OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT, OPENVMM_ROOTFS_PCI_DEVICE,
+    OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VSOCK_PCI_DEVICE,
 };
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
@@ -112,6 +113,24 @@ fn agent_vsock_pcie_port(socket_path: &str) -> vmservice::PciePort {
         false,
         Some(vsock_device_kind(socket_path.to_string())),
     )
+}
+
+fn console_device_kind(socket_path: String) -> vmservice::PcieDeviceKind {
+    virtio_pcie_device(vmservice::virtio_device::Kind::Console(
+        vmservice::VirtioConsole {
+            backend: MessageField::some(vmservice::SerialBackend {
+                kind: Some(vmservice::serial_backend::Kind::Relay(
+                    vmservice::SerialRelay {
+                        socket_path,
+                        connect: false,
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    ))
 }
 
 /// Build a vhost-user-fs endpoint (virtiofsd backend reached over a Unix socket).
@@ -244,6 +263,7 @@ impl OpenVmmInner {
         };
 
         let vsock_socket_path = format!("{}/vsock.sock", self.run_dir);
+        let console_socket_path = format!("{}/console.sock", self.run_dir);
         let pending = self.pending_devices.clone();
         let mut deferred_block_devices = Vec::new();
         let mut network_index = 0u8;
@@ -361,6 +381,7 @@ impl OpenVmmInner {
         let ttrpc_socket_path = format!("{}/openvmm.sock", self.run_dir);
         let serial_socket_path = format!("{}/serial.sock", self.run_dir);
         let _ = std::fs::remove_file(&vsock_socket_path);
+        let _ = std::fs::remove_file(&console_socket_path);
         let _ = std::fs::remove_file(&ttrpc_socket_path);
         let _ = std::fs::remove_file(&serial_socket_path);
 
@@ -370,6 +391,14 @@ impl OpenVmmInner {
         // the hybrid-vsock "hvsock://" scheme (see get_agent_socket).
         root_ports
             .push(agent_vsock_port.unwrap_or_else(|| agent_vsock_pcie_port(&vsock_socket_path)));
+        if use_snp_igvm {
+            root_ports.push(make_pcie_port(
+                "console",
+                OPENVMM_CONSOLE_PCI_DEVICE,
+                false,
+                Some(console_device_kind(console_socket_path)),
+            ));
+        }
 
         // Pre-declare empty, hotplug-capable ports (hp0..) for block volumes
         // that are hot-added after resume. Their device numbers match the
@@ -425,6 +454,19 @@ impl OpenVmmInner {
                 MessageField::none(),
             )
         };
+        let serial_config = if use_snp_igvm {
+            MessageField::none()
+        } else {
+            MessageField::some(vmservice::SerialConfig {
+                ports: vec![vmservice::serial_config::Config {
+                    port: 0,
+                    socket_path: serial_socket_path,
+                    connect: false,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        };
 
         let request = vmservice::CreateVMRequest {
             config: MessageField::some(vmservice::VMConfig {
@@ -437,15 +479,7 @@ impl OpenVmmInner {
                     ..Default::default()
                 }),
                 pcie: MessageField::some(pcie),
-                serial_config: MessageField::some(vmservice::SerialConfig {
-                    ports: vec![vmservice::serial_config::Config {
-                        port: 0,
-                        socket_path: serial_socket_path,
-                        connect: false,
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }),
+                serial_config,
                 BootConfig: Some(boot_config),
                 isolation_config,
                 ..Default::default()
