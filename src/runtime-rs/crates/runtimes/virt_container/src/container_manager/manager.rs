@@ -277,9 +277,14 @@ impl ContainerManager for VirtContainerManager {
         match process.process_type {
             ProcessType::Container => {
                 let mut containers = self.containers.write().await;
-                let c = containers
+                let mut c = containers
                     .remove(container_id)
                     .ok_or_else(|| Error::ContainerNotFound(container_id.to_string()))?;
+                let adopted_live = self
+                    .restore_context
+                    .resolve_guest_id(container_id)
+                    .await
+                    .is_some();
 
                 // Poststop Hooks:
                 // * should be run in runtime namespace
@@ -326,6 +331,16 @@ impl ContainerManager for VirtContainerManager {
                             "completed container is not eligible for snapshot: {error:#}"
                         ),
                     }
+                }
+                if adopted_live {
+                    c.cleanup()
+                        .await
+                        .context("clean up deleted restored container")?;
+                    self.resource_manager
+                        .cleanup_restored_rootfs(container_id)
+                        .await
+                        .context("detach deleted restored rootfs")?;
+                    self.restore_context.retire_live(container_id).await;
                 }
                 self.restore_context
                     .retire_synthetic_completed(container_id)

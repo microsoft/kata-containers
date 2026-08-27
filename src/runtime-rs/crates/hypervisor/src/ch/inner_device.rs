@@ -130,6 +130,14 @@ impl CloudHypervisorInner {
         }
     }
 
+    pub(crate) async fn remove_restored_device(&mut self, device_id: &str) -> Result<()> {
+        let rm_data = VmRemoveDeviceData {
+            id: device_id.to_string(),
+        };
+        cloud_hypervisor_vm_device_remove(&self.api_socket, rm_data).await?;
+        Ok(())
+    }
+
     pub(crate) async fn update_device(&mut self, _device: DeviceType) -> Result<()> {
         Ok(())
     }

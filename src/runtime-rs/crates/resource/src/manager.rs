@@ -272,6 +272,15 @@ impl ResourceManager {
             .await
     }
 
+    pub async fn cleanup_restored_rootfs(&self, host_id: &str) -> Result<()> {
+        let device_manager = self.get_device_manager().await;
+        let inner = self.inner.read().await;
+        inner
+            .rootfs_resource
+            .cleanup_restored(host_id, &device_manager)
+            .await
+    }
+
     pub async fn update_linux_resource(
         &self,
         cid: &str,

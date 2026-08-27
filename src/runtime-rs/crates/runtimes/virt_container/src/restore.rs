@@ -348,6 +348,16 @@ impl RestoreContext {
         self.state.lock().await.guest_to_host.get(guest_id).cloned()
     }
 
+    pub(crate) async fn retire_live(&self, host_id: &str) {
+        let mut state = self.state.lock().await;
+        if let Some(guest_id) = state.host_to_guest.remove(host_id) {
+            state.guest_to_host.remove(&guest_id);
+        }
+        state
+            .live_slots
+            .retain(|_, slot| slot.claimed_host_id.as_deref() != Some(host_id));
+    }
+
     pub(crate) async fn guest_mounts_for_target(
         &self,
         host_id: &str,
@@ -878,6 +888,11 @@ mod tests {
             .classify_create("other-app", "app", false, &identity("app"))
             .await
             .is_err());
+
+        context.retire_live("target-app").await;
+        assert_eq!(context.resolve_guest_id("target-app").await, None);
+        assert_eq!(context.resolve_host_id("source-app").await, None);
+        assert_eq!(context.guest_mounts_for_target("target-app").await, None);
     }
 
     #[tokio::test]

@@ -220,6 +220,10 @@ impl DeviceManager {
         ))
     }
 
+    pub async fn remove_restored_device(&self, device_id: &str) -> Result<()> {
+        self.hypervisor.remove_restored_device(device_id).await
+    }
+
     async fn get_device_info(&self, device_id: &str) -> Result<DeviceType> {
         if let Some(dev) = self.devices.get(device_id) {
             return Ok(dev.lock().await.get_device_info().await);

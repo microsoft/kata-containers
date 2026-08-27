@@ -593,6 +593,9 @@ fn restored_rootfs_configs(
                 cri_name: container.cri_name.clone(),
                 host_id: container.source_host_id.clone(),
                 guest_id: container.snapshot_guest_id.clone(),
+                device_ids: std::iter::once(container.readonly_disk_id.clone())
+                    .chain(container.writable_disk_id.clone())
+                    .collect(),
                 readonly_disk: snapshot_dir.join(readonly),
                 writable_disk: private_writable,
                 files,
@@ -2368,6 +2371,22 @@ impl VirtSandbox {
                 .iter()
                 .map(|container| (container.host_id.as_str(), container))
                 .collect::<HashMap<_, _>>();
+            let artifact_host_ids = artifacts
+                .iter()
+                .map(|artifact| artifact.source_host_id.as_str())
+                .collect::<HashSet<_>>();
+            let identity_host_ids = identities_by_host.keys().copied().collect::<HashSet<_>>();
+            if artifact_host_ids != identity_host_ids {
+                return Err(anyhow!(
+                    "snapshot live identity and rootfs ownership differ: missing storage {:?}, missing identity {:?}",
+                    identity_host_ids
+                        .difference(&artifact_host_ids)
+                        .collect::<Vec<_>>(),
+                    artifact_host_ids
+                        .difference(&identity_host_ids)
+                        .collect::<Vec<_>>()
+                ));
+            }
             let live_containers = artifacts
                 .iter()
                 .map(|artifact| {
