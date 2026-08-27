@@ -14,11 +14,18 @@ runtime_dir="${repo_dir}/src/runtime-rs"
 openvmm_dir="${OPENVMM_DIR:-${HOME}/openvmm-snp-mshv-aci-igvm}"
 openvmm="${OPENVMM:-${openvmm_dir}/target/release/openvmm}"
 vp_count="${VP_COUNT:-2}"
-igvm="${IGVM:-${script_dir}/out/kata-aci-agent-dmverity-reserve-416b-${vp_count}vp.bin}"
-kernel="${KERNEL:-}"
-kata_image="${KATA_IMAGE:-${script_dir}/../kata-containers.img}"
-root_hash_file="${ROOT_HASH_FILE:-${script_dir}/../root_hash_.txt}"
 out_dir="${OUT_DIR:-${script_dir}/out}"
+kernel_override="${KERNEL:-}"
+kata_image_override="${KATA_IMAGE:-}"
+root_hash_override="${ROOT_HASH_FILE:-}"
+igvm_override="${IGVM:-}"
+igvm="${IGVM:-${out_dir}/kata-aci-agent-dmverity-reserve-416b-${vp_count}vp.bin}"
+kernel_src="${KERNEL_SRC:-}"
+kernel_config="${KERNEL_CONFIG:-${script_dir}/kernel.config}"
+kernel_build_dir="${KERNEL_BUILD_DIR:-${out_dir}/kernel}"
+kernel="${KERNEL:-${kernel_build_dir}/arch/x86/boot/bzImage}"
+kata_image="${KATA_IMAGE:-${out_dir}/kata-containers.img}"
+root_hash_file="${ROOT_HASH_FILE:-${out_dir}/root_hash_.txt}"
 runtime_config="${RUNTIME_CONFIG:-${out_dir}/configuration-openvmm-snp-runtime-rs.toml}"
 shim_path="${SHIM_PATH:-/usr/local/bin/containerd-shim-kata-openvmm-v2}"
 containerd_config="${CONTAINERD_CONFIG:-/etc/containerd/config-openvmm.toml}"
@@ -39,7 +46,6 @@ done
 
 [[ -e /dev/mshv ]] || die "/dev/mshv is not available"
 [[ -d "${openvmm_dir}/.git" ]] || die "OpenVMM checkout does not exist: ${openvmm_dir}"
-[[ -f "${kata_image}" ]] || die "Kata image does not exist: ${kata_image}"
 [[ -f "${runtime_dir}/Makefile" ]] || die "runtime-rs source does not exist: ${runtime_dir}"
 grep -q '^message IgvmBoot' \
 	"${openvmm_dir}/openvmm/openvmm_ttrpc_vmservice/src/vmservice.proto" ||
@@ -47,9 +53,41 @@ grep -q '^message IgvmBoot' \
 
 mkdir -p "${out_dir}" "$(dirname "${runtime_config}")"
 
+if [[ -n "${kernel_override}" ]]; then
+	[[ -f "${kernel}" ]] || die "prebuilt kernel does not exist: ${kernel}"
+elif [[ ! -f "${kernel}" ]]; then
+	[[ -n "${kernel_src}" ]] ||
+		die "set KERNEL_SRC or provide a prebuilt KERNEL"
+	make -C "${script_dir}" kernel \
+		KERNEL_SRC="${kernel_src}" \
+		KERNEL_CONFIG="${kernel_config}" \
+		KERNEL_BUILD_DIR="${kernel_build_dir}" \
+		OUT_DIR="${out_dir}"
+fi
+
+if [[ -n "${kata_image_override}" || -n "${root_hash_override}" ]]; then
+	[[ -n "${kata_image_override}" && -n "${root_hash_override}" ]] ||
+		die "KATA_IMAGE and ROOT_HASH_FILE must be provided together"
+	[[ -f "${kata_image}" ]] || die "prebuilt Kata image does not exist: ${kata_image}"
+	[[ -f "${root_hash_file}" ]] ||
+		die "prebuilt dm-verity metadata does not exist: ${root_hash_file}"
+elif [[ ! -f "${kata_image}" || ! -f "${root_hash_file}" ]]; then
+	make -C "${script_dir}" guest-image \
+		OUT_DIR="${out_dir}" \
+		KATA_IMAGE="${kata_image}" \
+		ROOT_HASH_FILE="${root_hash_file}"
+fi
+[[ -f "${kata_image}" ]] || die "Kata image was not built: ${kata_image}"
+[[ -f "${root_hash_file}" ]] ||
+	die "dm-verity metadata was not built: ${root_hash_file}"
+
 make -C "${script_dir}" openvmm OPENVMM_DIR="${openvmm_dir}"
 
-if [[ -n "${kernel}" ]]; then
+if [[ -n "${igvm_override}" && ! -f "${igvm}" ]]; then
+	die "prebuilt IGVM does not exist: ${igvm}"
+fi
+if [[ -z "${igvm_override}" &&
+	(! -f "${igvm}" || "${REBUILD_IGVM:-no}" == "yes") ]]; then
 	make -C "${script_dir}" agent-dmverity-igvm \
 		OPENVMM_DIR="${openvmm_dir}" \
 		KERNEL="${kernel}" \
@@ -57,7 +95,7 @@ if [[ -n "${kernel}" ]]; then
 		VP_COUNT="${vp_count}" \
 		OUT_DIR="${out_dir}"
 fi
-[[ -f "${igvm}" ]] || die "IGVM does not exist: ${igvm}; set KERNEL to build it"
+[[ -f "${igvm}" ]] || die "IGVM was not built: ${igvm}"
 
 make -B -C "${runtime_dir}" \
 	HYPERVISOR=openvmm-runtime-rs \
