@@ -1,12 +1,17 @@
 OPENVMM_DIR ?= $(HOME)/openvmm-snp-mshv-aci-igvm
 OUT_DIR ?= $(CURDIR)/out
 KERNEL ?=
+KERNEL_SRC ?=
+KERNEL_CONFIG ?= $(CURDIR)/kernel.config
+KERNEL_BUILD_DIR ?= $(OUT_DIR)/kernel
 BUSYBOX ?=
 KATA_IMAGE ?=
-ROOT_HASH_FILE ?= $(CURDIR)/../root_hash_.txt
+ROOT_HASH_FILE ?= $(OUT_DIR)/root_hash_.txt
 RUNTIME_CONFIG ?= $(CURDIR)/out/configuration-openvmm-snp-runtime-rs.toml
 VP_COUNT ?= 2
 AGENT_IGVM = $(OUT_DIR)/kata-aci-agent-dmverity-reserve-416b-$(VP_COUNT)vp.bin
+AGENT_BINARY = $(abspath ../../../target/$(shell uname -m)-unknown-linux-gnu/release/kata-agent)
+AGENT_SOURCE_DIR = $(abspath ../../../src/agent)
 
 OPENVMM ?= $(OPENVMM_DIR)/target/release/openvmm
 IGVMFILEGEN ?= $(OPENVMM_DIR)/target/release/igvmfilegen
@@ -14,7 +19,8 @@ IGVMFILEGEN ?= $(OPENVMM_DIR)/target/release/igvmfilegen
 .PHONY: help
 help:
 	@echo "OpenVMM SNP IGVM bring-up targets:"
-	@echo "  make kernel BASE_KERNEL=<tested-aci-bzImage>"
+	@echo "  make kernel KERNEL_SRC=<linux-source>"
+	@echo "  make guest-image"
 	@echo "  make openvmm OPENVMM_DIR=<path>"
 	@echo "  make shell-igvm KERNEL=<bzImage> BUSYBOX=<static-busybox>"
 	@echo "  make shell-run"
@@ -31,9 +37,53 @@ help:
 .PHONY: kernel
 kernel:
 	KERNEL_SRC="$(KERNEL_SRC)" \
-	BASE_KERNEL="$(BASE_KERNEL)" \
-	BUILD_DIR="$(BUILD_DIR)" \
+	KERNEL_CONFIG="$(KERNEL_CONFIG)" \
+	BUILD_DIR="$(KERNEL_BUILD_DIR)" \
 	./build-kernel.sh
+
+.PHONY: guest-image
+guest-image:
+	$(MAKE) -C "$(AGENT_SOURCE_DIR)" \
+		AGENT_POLICY=yes \
+		BUILD_TYPE=release \
+		LIBC=gnu \
+		SECCOMP=yes \
+		kata-agent kata-agent.service kata-containers.target
+	sudo rm -f \
+		"$(OUT_DIR)/.cbl-mariner_rootfs.done" \
+		"$(OUT_DIR)/kata-containers.img" \
+		"$(OUT_DIR)/root_hash_.txt"
+	sudo -E env \
+		PATH="$(PATH)" \
+		$(MAKE) -C .. \
+		ROOTFS_BUILD_DEST="$(OUT_DIR)" \
+		DISTRO=cbl-mariner \
+		AGENT_SOURCE_BIN="$(AGENT_BINARY)" \
+		AGENT_POLICY=yes \
+		AGENT_POLICY_FILE="$(abspath ../../../src/kata-opa/allow-all.rego)" \
+		CONFIDENTIAL_GUEST=yes \
+		rootfs
+	sudo install -D -m 0644 \
+		"$(AGENT_SOURCE_DIR)/kata-agent.service" \
+		"$(OUT_DIR)/cbl-mariner_rootfs/usr/lib/systemd/system/kata-agent.service"
+	sudo install -D -m 0644 \
+		"$(AGENT_SOURCE_DIR)/kata-containers.target" \
+		"$(OUT_DIR)/cbl-mariner_rootfs/usr/lib/systemd/system/kata-containers.target"
+	sudo mkdir -p \
+		"$(OUT_DIR)/cbl-mariner_rootfs/etc/systemd/system/kata-containers.target.wants"
+	sudo ln -sf /usr/lib/systemd/system/kata-agent.service \
+		"$(OUT_DIR)/cbl-mariner_rootfs/etc/systemd/system/kata-containers.target.wants/kata-agent.service"
+	sudo -E env \
+		PATH="$(PATH)" \
+		$(MAKE) -C .. \
+		ROOTFS_BUILD_DEST="$(OUT_DIR)" \
+		IMAGES_BUILD_DEST="$(OUT_DIR)" \
+		DISTRO=cbl-mariner \
+		MEASURED_ROOTFS=yes \
+		DM_VERITY_FORMAT=kernelinit \
+		IMAGE_SIZE_ALIGNMENT_MB=2 \
+		image
+	sudo chown "$(shell id -u):$(shell id -g)" "$(OUT_DIR)"
 
 .PHONY: openvmm
 openvmm:
@@ -92,6 +142,9 @@ agent-dmverity-run:
 .PHONY: e2e-setup
 e2e-setup:
 	OPENVMM_DIR="$(OPENVMM_DIR)" \
+	KERNEL_SRC="$(KERNEL_SRC)" \
+	KERNEL_CONFIG="$(KERNEL_CONFIG)" \
+	KERNEL_BUILD_DIR="$(KERNEL_BUILD_DIR)" \
 	KERNEL="$(KERNEL)" \
 	KATA_IMAGE="$(KATA_IMAGE)" \
 	ROOT_HASH_FILE="$(ROOT_HASH_FILE)" \

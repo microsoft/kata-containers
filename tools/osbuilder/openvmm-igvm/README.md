@@ -15,18 +15,21 @@ The flow has been validated from clean Azure Linux 3 installations on:
 - `Standard_DC16as_cc_v5`;
 - `Standard_DC32as_cc_v6`.
 
-## Required inputs
+## Required source trees
 
-The setup builds the host components and IGVM, but it does not yet build the
-guest kernel or Kata disk image. Provide:
+The complete setup builds from three source trees:
 
+- this Kata Containers checkout;
 - `OPENVMM_DIR`: OpenVMM source containing SNP IGVM VM-service support;
-- `KERNEL`: prebuilt Kata-capable ACI `bzImage`;
-- `KATA_IMAGE`: matching dm-verity Kata image;
-- `ROOT_HASH_FILE`: dm-verity metadata for `KATA_IMAGE`.
+- `KERNEL_SRC`: the ACI Linux kernel source.
 
-The validated development image contains the guest PCI-rescan workaround and
-an `allow-all.rego` policy. It is suitable for functional validation only.
+The checked-in `kernel.config` is the configuration extracted from the
+validated ACI guest kernel. The setup builds the kernel from `KERNEL_SRC`,
+builds kata-agent and a measured dm-verity image from this Kata checkout, and
+uses the generated root hash when producing the IGVM.
+
+Prebuilt `KERNEL`, `KATA_IMAGE`, and `ROOT_HASH_FILE` values remain supported
+for faster iteration.
 
 ## Prepare an Azure Linux host
 
@@ -51,10 +54,11 @@ Install the build and runtime dependencies:
 
 ```sh
 sudo dnf install -y \
-    binutils clang cmake containerd cpio cri-tools curl device-mapper-devel \
-    erofs-utils file gcc gcc-c++ git glibc-devel gzip jq kernel-headers \
-    libseccomp-devel llvm-devel make openssl-devel perl pkg-config protobuf \
-    protobuf-devel python3-pip tar
+    bc binutils bison clang cmake containerd cpio cri-tools curl \
+    device-mapper-devel elfutils-libelf-devel erofs-utils file flex gcc \
+    gcc-c++ git glibc-devel gzip jq kernel-headers libseccomp-devel \
+    llvm-devel make openssl-devel perl parted pkg-config protobuf \
+    protobuf-devel python3-pip qemu-img tar veritysetup
 ```
 
 Install Rust:
@@ -94,9 +98,7 @@ Set the input paths:
 cd /path/to/kata-containers/tools/osbuilder/openvmm-igvm
 
 export OPENVMM_DIR="$HOME/openvmm"
-export KERNEL="$HOME/kata-inputs/bzImage"
-export KATA_IMAGE="$HOME/kata-inputs/kata-containers.img"
-export ROOT_HASH_FILE="$HOME/kata-inputs/root_hash_.txt"
+export KERNEL_SRC="$HOME/src/LSG-linux-rolling-aci-openvmm"
 export VP_COUNT=2
 ```
 
@@ -105,15 +107,16 @@ Build and install the complete host-side stack:
 ```sh
 make e2e-setup \
     OPENVMM_DIR="$OPENVMM_DIR" \
-    KERNEL="$KERNEL" \
-    KATA_IMAGE="$KATA_IMAGE" \
-    ROOT_HASH_FILE="$ROOT_HASH_FILE" \
+    KERNEL_SRC="$KERNEL_SRC" \
     VP_COUNT="$VP_COUNT"
 ```
 
 This target:
 
 - builds OpenVMM and `igvmfilegen`;
+- builds the guest kernel using the checked-in configuration;
+- builds kata-agent and the measured dm-verity Kata image;
+- writes the matching `root_hash_.txt`;
 - regenerates the dm-verity SNP IGVM;
 - sets both the IGVM topology and runtime VM request to `VP_COUNT`;
 - builds runtime-rs with OpenVMM support;
@@ -159,9 +162,7 @@ For example, build and validate a four-VP guest:
 ```sh
 make e2e-setup \
     OPENVMM_DIR="$OPENVMM_DIR" \
-    KERNEL="$KERNEL" \
-    KATA_IMAGE="$KATA_IMAGE" \
-    ROOT_HASH_FILE="$ROOT_HASH_FILE" \
+    KERNEL_SRC="$KERNEL_SRC" \
     VP_COUNT=4
 
 make e2e-test VP_COUNT=4
@@ -178,6 +179,16 @@ topology embedded in the IGVM. Always use the same `VP_COUNT` for setup and
 test. The build target also injects the current
 `memmap=4K$0x416b000` bring-up workaround; calling `build.sh` directly requires
 passing that argument explicitly.
+
+To force IGVM regeneration when an artifact for the selected VP count already
+exists:
+
+```sh
+REBUILD_IGVM=yes make e2e-setup \
+    OPENVMM_DIR="$OPENVMM_DIR" \
+    KERNEL_SRC="$KERNEL_SRC" \
+    VP_COUNT="$VP_COUNT"
+```
 
 Kubernetes CPU requests are not used to select the IGVM topology. Do not add
 CPU sizing annotations or resource limits that change the Kata VM CPU count;
@@ -263,7 +274,8 @@ The original bring-up targets remain available for debugging:
 
 | Target | Purpose |
 |---|---|
-| `make kernel` | Build the Kata-capable ACI kernel from a tested base kernel |
+| `make kernel` | Build the Kata-capable ACI kernel from `KERNEL_SRC` |
+| `make guest-image` | Build kata-agent, dm-verity image, and root hash |
 | `make shell-igvm` | Build a diagnostic BusyBox IGVM |
 | `make shell-run` | Boot the diagnostic IGVM without a disk |
 | `make shell-disk-run` | Boot the diagnostic IGVM with the Kata disk |
