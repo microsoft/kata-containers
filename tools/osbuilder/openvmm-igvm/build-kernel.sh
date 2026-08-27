@@ -9,7 +9,8 @@ set -o nounset
 set -o pipefail
 
 kernel_src="${KERNEL_SRC:-${HOME}/src/LSG-linux-rolling-aci-openvmm}"
-base_kernel="${BASE_KERNEL:-}"
+script_dir="$(dirname "$(readlink -f "$0")")"
+kernel_config="${KERNEL_CONFIG:-${script_dir}/kernel.config}"
 build_dir="${BUILD_DIR:-${kernel_src}/build-kata-openvmm}"
 
 die()
@@ -20,15 +21,15 @@ die()
 
 [[ -f "${kernel_src}/Makefile" ]] ||
 	die "kernel source does not exist: ${kernel_src}"
-[[ -f "${base_kernel}" ]] ||
-	die "set BASE_KERNEL to the tested ACI bzImage"
+[[ -f "${kernel_config}" ]] ||
+	die "kernel config does not exist: ${kernel_config}"
 
 for tool in gcc make; do
 	command -v "${tool}" >/dev/null || die "required tool not found: ${tool}"
 done
 
 mkdir -p "${build_dir}"
-"${kernel_src}/scripts/extract-ikconfig" "${base_kernel}" >"${build_dir}/.config"
+cp "${kernel_config}" "${build_dir}/.config"
 
 "${kernel_src}/scripts/config" --file "${build_dir}/.config" \
 	--set-str LOCALVERSION "-aci-kata-openvmm" \
