@@ -17,10 +17,10 @@
         "snp_linux_direct": {
           "linux": {
             "use_initrd": false,
-            "command_line": "root=/dev/vda1 ro rootfstype=ext4 panic=1 no_timer_check noreplace-smp systemd.unit=kata-containers.target systemd.mask=systemd-networkd.service systemd.mask=systemd-networkd.socket agent.enable_signature_verification=false console=ttyS0 systemd.log_target=console systemd.log_level=debug agent.log=debug agent.debug_console agent.debug_console_vport=1026"
+            "command_line": "root=/dev/vda1 ro rootfstype=ext4 panic=1 no_timer_check noreplace-smp systemd.unit=kata-containers.target systemd.mask=systemd-networkd.service systemd.mask=systemd-networkd.socket agent.enable_signature_verification=false console=hvc0 systemd.log_target=console systemd.log_level=debug agent.log=debug agent.debug_console agent.debug_console_vport=1026"
           },
           "processor_topology": {
-            "proc_count": 1,
+            "proc_count": 2,
             "vps_per_socket": 1,
             "enable_smt": false,
             "apic_id_offset": 0,
