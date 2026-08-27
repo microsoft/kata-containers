@@ -61,16 +61,10 @@ kernel_params = ""
 # < 0                             --> will be set to the actual number of physical cores
 # > 0 <= number of physical cores --> will be set to the specified number
 # > number of physical cores      --> will be set to the actual number of physical cores
-default_vcpus = @DEFVCPUS@
+default_vcpus = 2
 
-# Guest-side vCPU overhead budget (fractional) used with static_sandbox_resource_mgmt.
-# When workload limits are present, vm_vcpus = requested_vcpus + overhead_vcpus
-# (rounded up at boot). If a workload limit is set on another dimension (for example
-# memory) but CPU is missing, requested_vcpus is treated as 0 and vm_vcpus equals
-# overhead_vcpus (minimum 1 at boot). When no workload limits are present,
-# default_vcpus is used instead.
-# See docs/how-to/how-to-size-sandbox-overhead-runtime-rs.md
-overhead_vcpus = @DEFOVERHEADVCPUS_OPENVMM@
+# Do not add vCPUs beyond workload limits or the static workload default.
+overhead_vcpus = 0
 
 # Default maximum number of vCPUs per SB/VM:
 # unspecified or == 0             --> will be set to the actual number of physical cores or to the maximum number
@@ -92,13 +86,8 @@ default_maxvcpus = @DEFMAXVCPUS@
 # If unspecified then it will be set @DEFMEMSZ@ MiB.
 default_memory = @DEFMEMSZ@
 
-# Guest-side memory overhead budget (MiB) used with static_sandbox_resource_mgmt.
-# When workload limits are present, vm_memory = requested_memory + overhead_memory.
-# If a workload limit is set on another dimension (for example CPU) but memory is
-# missing, requested_memory is treated as 0, so vm_memory equals overhead_memory.
-# When no workload limits are present, default_memory is used instead.
-# See docs/how-to/how-to-size-sandbox-overhead-runtime-rs.md
-overhead_memory = @DEFOVERHEADMEMSZ_OPENVMM@
+# Do not add memory beyond workload limits or the static workload default.
+overhead_memory = 0
 
 # Shared file system type:
 #   - virtio-fs
@@ -515,6 +504,11 @@ enable_pprof = false
 #   does not yet support sandbox sizing annotations.
 # - When running single containers using a tool like ctr, container sizing information will be available.
 static_sandbox_resource_mgmt = @DEFSTATICRESOURCEMGMT_OPENVMM_AZURE@
+
+# Workload defaults used when the corresponding limit is absent.
+static_sandbox_default_workload_mem = @DEFSTATICSANDBOXWORKLOADMEM@
+# Match the two VPs embedded in the default SNP IGVM manifest.
+static_sandbox_default_workload_vcpus = 2
 
 # If specified, sandbox_bind_mounts identifieds host paths to be mounted(ro, rw) into the sandboxes shared path.
 # This is only valid if filesystem sharing is utilized. The provided path(s) will be bindmounted into the shared fs directory.
