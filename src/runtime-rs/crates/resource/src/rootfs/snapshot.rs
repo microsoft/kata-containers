@@ -27,6 +27,12 @@ fn matching_disk<'a>(
     })
 }
 
+fn is_external_restored_container_disk(path: &Path) -> bool {
+    let path = path.to_string_lossy();
+    path.contains("/restore/containers/")
+        || (path.starts_with("/run/vc/vm/snapshots/") && path.contains("/containers/"))
+}
+
 pub fn finalize_snapshot_config(
     snapshot_dir: &Path,
     artifacts: &[RootfsSnapshotArtifacts],
@@ -73,14 +79,26 @@ pub fn finalize_snapshot_config(
     // Replace every live rootfs path captured by CLH with its packaged path in
     // the final snapshot. Packaged VMDK extents are relative, so the live
     // extent anchor must not follow the artifact to another host or directory.
-    for disk in disks {
-        let disk = disk
+    let mut retained_disks = Vec::with_capacity(disks.len());
+    for mut disk in std::mem::take(disks) {
+        let disk_config = disk
             .as_object_mut()
             .ok_or_else(|| anyhow!("snapshot config has invalid disk"))?;
-        let Some(live_path) = disk.get("path").and_then(Value::as_str).map(PathBuf::from) else {
+        let Some(live_path) = disk_config
+            .get("path")
+            .and_then(Value::as_str)
+            .map(PathBuf::from)
+        else {
+            retained_disks.push(disk);
             continue;
         };
         let Some(mapping) = matching_disk(artifacts, &live_path) else {
+            // CLH keeps boot-disk entries in its saved static config after a
+            // successful vm.remove-device. Omit those detached, inactive
+            // restored disks from the next generation's restore config.
+            if !is_external_restored_container_disk(&live_path) {
+                retained_disks.push(disk);
+            }
             continue;
         };
         if !rewritten.insert(live_path.clone()) {
@@ -89,12 +107,14 @@ pub fn finalize_snapshot_config(
                 live_path.display()
             ));
         }
-        disk.insert(
+        disk_config.insert(
             "path".to_string(),
             Value::String(mapping.snapshot_path.display().to_string()),
         );
-        disk.remove("extent_anchor_path");
+        disk_config.remove("extent_anchor_path");
+        retained_disks.push(disk);
     }
+    *disks = retained_disks;
 
     let expected = artifacts
         .iter()
@@ -217,5 +237,29 @@ mod tests {
         assert!(config["memory"]["zones"].is_null());
         assert_eq!(config["disks"][0]["path"], vmdk.display().to_string());
         assert!(config["disks"][0].get("extent_anchor_path").is_none());
+    }
+
+    #[test]
+    fn removes_inactive_restored_container_disks() {
+        let snapshot = tempfile::tempdir().unwrap();
+        fs::write(
+            snapshot.path().join("config.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "memory": {},
+                "disks": [{
+                    "id": "stale-rw",
+                    "path": "/run/kata/sandbox/restore/containers/deleted/rwlayer.img"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        finalize_snapshot_config(snapshot.path(), &[]).unwrap();
+
+        let config: Value =
+            serde_json::from_slice(&fs::read(snapshot.path().join("config.json")).unwrap())
+                .unwrap();
+        assert_eq!(config["disks"].as_array().unwrap().len(), 0);
     }
 }
