@@ -12,6 +12,8 @@ script_dir="$(dirname "$(readlink -f "$0")")"
 openvmm="${OPENVMM:-${HOME}/openvmm-snp-mshv-aci-igvm/target/release/openvmm}"
 igvm="${IGVM:-${script_dir}/out/kata-aci-diagnostic-1vp.bin}"
 kata_image="${KATA_IMAGE:-}"
+processors="${VP_COUNT:-1}"
+memory="${MEMORY:-1G}"
 
 die()
 {
@@ -22,6 +24,8 @@ die()
 [[ -x "${openvmm}" ]] || die "OpenVMM is not executable: ${openvmm}"
 [[ -f "${igvm}" ]] || die "IGVM does not exist: ${igvm}"
 [[ -e /dev/mshv ]] || die "/dev/mshv is not available"
+[[ "${processors}" =~ ^[1-9][0-9]*$ ]] ||
+	die "VP_COUNT must be a positive integer: ${processors}"
 
 args=(
 	--hypervisor mshv
@@ -31,8 +35,8 @@ args=(
 	--hv
 	--no-vmbus
 	--com1 console
-	--processors 1
-	--memory 1G
+	--processors "${processors}"
+	--memory "${memory}"
 	--pcie-root-complex
 	"s0rc0,segment=0,start_bus=0,end_bus=127,low_mmio=256M,high_mmio=16G"
 	--pcie-ecam-below-4gb
