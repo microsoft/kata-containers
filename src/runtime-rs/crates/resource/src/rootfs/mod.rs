@@ -304,6 +304,29 @@ impl RootFsResource {
         }
         matches[0].rebind_restored(target_id).await
     }
+
+    pub async fn cleanup_restored(
+        &self,
+        host_id: &str,
+        device_manager: &RwLock<DeviceManager>,
+    ) -> Result<()> {
+        let mut inner = self.inner.write().await;
+        let mut match_index = None;
+        for (index, rootfs) in inner.rootfs.iter().enumerate() {
+            if rootfs.restored_cri_name().is_some()
+                && rootfs.snapshot_host_id().await.as_deref() == Some(host_id)
+            {
+                if match_index.replace(index).is_some() {
+                    return Err(anyhow!("multiple restored rootfs entries for {host_id}"));
+                }
+            }
+        }
+        let index =
+            match_index.ok_or_else(|| anyhow!("restored rootfs is unavailable for {host_id}"))?;
+        inner.rootfs[index].cleanup(device_manager).await?;
+        inner.rootfs.remove(index);
+        Ok(())
+    }
 }
 
 fn is_single_layer_rootfs(rootfs_mounts: &[Mount]) -> bool {
