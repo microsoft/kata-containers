@@ -275,12 +275,18 @@ impl ContainerManager for VirtContainerManager {
     #[instrument]
     async fn delete_process(&self, process: &ContainerProcess) -> Result<ProcessStateInfo> {
         let container_id = &process.container_id.container_id;
+        let host_id = HostContainerId::new(container_id);
         match process.process_type {
             ProcessType::Container => {
                 let mut containers = self.containers.write().await;
-                let c = containers
+                let mut c = containers
                     .remove(container_id)
                     .ok_or_else(|| Error::ContainerNotFound(container_id.to_string()))?;
+                let adopted_live = self
+                    .restore_context
+                    .resolve_guest_id(&host_id)
+                    .await
+                    .is_some();
 
                 // Poststop Hooks:
                 // * should be run in runtime namespace
@@ -328,8 +334,18 @@ impl ContainerManager for VirtContainerManager {
                         ),
                     }
                 }
+                if adopted_live {
+                    c.cleanup()
+                        .await
+                        .context("clean up deleted restored container")?;
+                    self.resource_manager
+                        .cleanup_restored_rootfs(container_id)
+                        .await
+                        .context("detach deleted restored rootfs")?;
+                    self.restore_context.retire_live(&host_id).await;
+                }
                 self.restore_context
-                    .retire_synthetic_completed(&HostContainerId::new(container_id))
+                    .retire_synthetic_completed(&host_id)
                     .await;
                 Ok(process_state)
             }
