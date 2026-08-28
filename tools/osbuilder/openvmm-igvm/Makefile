@@ -12,6 +12,9 @@ VP_COUNT ?= 2
 AGENT_IGVM = $(OUT_DIR)/kata-aci-agent-dmverity-reserve-416b-$(VP_COUNT)vp.bin
 AGENT_BINARY = $(abspath ../../../target/$(shell uname -m)-unknown-linux-gnu/release/kata-agent)
 AGENT_SOURCE_DIR = $(abspath ../../../src/agent)
+AGENT_POLICY ?= yes
+AGENT_POLICY_FILE ?= $(abspath ../../../src/kata-opa/allow-all.rego)
+STRICT_POLICY ?= no
 
 OPENVMM ?= $(OPENVMM_DIR)/target/release/openvmm
 IGVMFILEGEN ?= $(OPENVMM_DIR)/target/release/igvmfilegen
@@ -44,10 +47,11 @@ kernel:
 .PHONY: guest-image
 guest-image:
 	$(MAKE) -C "$(AGENT_SOURCE_DIR)" \
-		AGENT_POLICY=yes \
+		AGENT_POLICY="$(AGENT_POLICY)" \
 		BUILD_TYPE=release \
 		LIBC=gnu \
 		SECCOMP=yes \
+		STRICT_POLICY="$(STRICT_POLICY)" \
 		kata-agent kata-agent.service kata-containers.target
 	sudo rm -f \
 		"$(OUT_DIR)/.cbl-mariner_rootfs.done" \
@@ -59,8 +63,8 @@ guest-image:
 		ROOTFS_BUILD_DEST="$(OUT_DIR)" \
 		DISTRO=cbl-mariner \
 		AGENT_SOURCE_BIN="$(AGENT_BINARY)" \
-		AGENT_POLICY=yes \
-		AGENT_POLICY_FILE="$(abspath ../../../src/kata-opa/allow-all.rego)" \
+		AGENT_POLICY="$(AGENT_POLICY)" \
+		AGENT_POLICY_FILE="$(AGENT_POLICY_FILE)" \
 		CONFIDENTIAL_GUEST=yes \
 		rootfs
 	sudo install -D -m 0644 \
