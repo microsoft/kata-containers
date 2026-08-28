@@ -34,11 +34,29 @@ for f in "${HERE}"/*.sh; do
   [[ "$(basename "${f}")" == env*.sh ]] && continue
   sync_files+=("${f}")
 done
-scp -q "${sync_files[@]}" "${HERE}"/README.md "${E2E_SSH_HOST}:~/coco-e2e/" || die "scp failed"
+scp "${sync_files[@]}" "${HERE}"/README.md "${E2E_SSH_HOST}:~/coco-e2e/" || die "scp failed"
 # Windows checkouts carry no executable bit, and scp preserves that, so the
 # scripts arrive non-executable and every invocation fails with Permission denied.
 ssh "${E2E_SSH_HOST}" 'chmod +x ~/coco-e2e/*.sh' || die "chmod failed"
 ok "suite synced to ${E2E_SSH_HOST}:~/coco-e2e"
+
+if [[ "${E2E_PLATFORM}" = "openvmm-snp" &&
+      -n "${E2E_OPENVMM_KERNEL_SRC_LOCAL}" ]]; then
+  [[ -d "${E2E_OPENVMM_KERNEL_SRC_LOCAL}/.git" ]] \
+    || die "E2E_OPENVMM_KERNEL_SRC_LOCAL is not a git checkout: ${E2E_OPENVMM_KERNEL_SRC_LOCAL}"
+  kernel_archive=$(mktemp)
+  trap 'rm -f -- "${kernel_archive}"' EXIT
+  log "archiving ACI kernel source from ${E2E_OPENVMM_KERNEL_SRC_LOCAL}"
+  git -C "${E2E_OPENVMM_KERNEL_SRC_LOCAL}" archive --format=tar.gz \
+    --output="${kernel_archive}" HEAD || die "kernel source archive failed"
+  scp "${kernel_archive}" "${E2E_SSH_HOST}:~/aci-openvmm-kernel.tar.gz" \
+    || die "kernel source transfer failed"
+  ssh "${E2E_SSH_HOST}" \
+    'mkdir -p ~/src/openvmm-aci-kernel &&
+     tar -xzf ~/aci-openvmm-kernel.tar.gz -C ~/src/openvmm-aci-kernel' \
+    || die "kernel source extraction failed"
+  ok "ACI kernel source synced"
+fi
 
 [[ "$#" -gt 0 ]] || exit 0
 
@@ -48,7 +66,9 @@ env_prefix=""
 for v in E2E_FAST E2E_SKIP_BUILD E2E_FORCE E2E_NIGHTLY_SHA E2E_BRANCH \
          E2E_STRICT_POLICY E2E_AGENT_POLICY E2E_REGISTRY E2E_NS \
          E2E_PLATFORM E2E_REPO_URL E2E_INIT_DATA \
-         E2E_CLH_TAG E2E_UVM_KERNEL_VERSION; do
+         E2E_CLH_TAG E2E_UVM_KERNEL_VERSION E2E_OPENVMM_REPO \
+         E2E_OPENVMM_BRANCH E2E_OPENVMM_DIR E2E_OPENVMM_KERNEL_SRC \
+         E2E_OPENVMM_VP_COUNT; do
   if [[ -n "${!v:-}" ]]; then
     env_prefix+="${v}=$(printf '%q' "${!v}") "
   fi

@@ -19,6 +19,8 @@ if [[ "${E2E_PLATFORM}" = "clh-snp" ]]; then
   # stack is built natively by the node-builder in stage 04 rather than in a
   # container, so nothing here needs a container engine.
   clh_bootstrap_node
+elif [[ "${E2E_PLATFORM}" = "openvmm-snp" ]]; then
+  openvmm_bootstrap_node
 else
   log "installing base packages"
   sudo apt-get update -qq

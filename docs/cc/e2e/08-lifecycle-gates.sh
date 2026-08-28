@@ -235,6 +235,14 @@ agent_addr() {
     done
     return 1
   fi
+  if [[ "${E2E_PLATFORM}" = "openvmm-snp" ]]; then
+    sock="/run/kata/${sb}/vsock.sock"
+    for _ in $(seq 1 20); do
+      sudo test -S "${sock}" && { echo "unix://${sock}"; return 0; }
+      sleep 1
+    done
+    return 1
+  fi
   local cid
   # shellcheck disable=SC2009  # pgrep cannot be substituted here: we need the full
   # argv to sed guest-cid out of, and the [s] bracket idiom already prevents the

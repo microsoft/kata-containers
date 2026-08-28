@@ -98,7 +98,7 @@ Set the input paths:
 cd /path/to/kata-containers/tools/osbuilder/openvmm-igvm
 
 export OPENVMM_DIR="$HOME/openvmm"
-export KERNEL_SRC="$HOME/src/LSG-linux-rolling-aci-openvmm"
+export KERNEL_SRC="$HOME/src/openvmm-aci-kernel"
 export VP_COUNT=2
 ```
 
