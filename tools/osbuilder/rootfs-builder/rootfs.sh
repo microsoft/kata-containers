@@ -66,6 +66,8 @@ BUILD_VARIANT=${BUILD_VARIANT:-""}
 
 # shellcheck source=/dev/null
 [[ "${BUILD_VARIANT}" == "nvidia-gpu"* ]] && source "${script_dir}/nvidia/nvidia_rootfs.sh"
+# shellcheck source=/dev/null
+[[ "${BUILD_VARIANT}" == "azure-gpus"* ]] && source "${script_dir}/azure-gpus/azure_gpus_rootfs.sh"
 
 #For cross build
 CROSS_BUILD=${CROSS_BUILD:-false}
@@ -598,6 +600,7 @@ build_rootfs_distro()
 			--env CONFIDENTIAL_GUEST="${CONFIDENTIAL_GUEST}" \
 			--env NVIDIA_GPU_STACK="${NVIDIA_GPU_STACK}" \
 			--env KBUILD_SIGN_PIN="${KBUILD_SIGN_PIN}" \
+			--env BUILD_DIR="${BUILD_DIR:-}" \
 			-v "${repo_dir}":"/kata-containers" \
 			-v "${ROOTFS_DIR}":"/rootfs" \
 			-v "${script_dir}/../scripts":"/scripts" \
@@ -941,6 +944,12 @@ main()
 	if [[ "${BUILD_VARIANT}" = "nvidia-gpu-confidential" ]]; then
 		setup_nvidia_gpu_rootfs_stage_one "confidential"
 		setup_nvidia_gpu_rootfs_stage_two "confidential"
+		return $?
+	fi
+
+	if [[ "${BUILD_VARIANT}" = "azure-gpus" ]]; then
+		setup_azure_gpus_rootfs_stage_one
+		setup_azure_gpus_rootfs_stage_two
 		return $?
 	fi
 }

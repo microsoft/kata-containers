@@ -23,17 +23,20 @@ const ALL_SHIMS: &[&str] = &[
     "clh",
     "clh-azure",
     "clh-azure-runtime-rs",
+    "clh-azure-gpus",
     "clh-runtime-rs",
     "dragonball",
     "fc",
     "firecracker",
     "openvmm",
+    "openvmm-azure-gpus",
     "remote",
     // QEMU shims
     "qemu",
     "qemu-cca",
     "qemu-coco-dev",
     "qemu-coco-dev-runtime-rs",
+    "qemu-azure-gpus",
     "qemu-nvidia-gpu",
     "qemu-nvidia-gpu-runtime-rs",
     "qemu-nvidia-gpu-snp",
@@ -66,10 +69,12 @@ fn get_hypervisor_name(shim: &str) -> Result<&str> {
     }
 
     match shim {
-        "clh" | "clh-azure" | "clh-runtime-rs" | "clh-azure-runtime-rs" => Ok("clh"),
+        "clh" | "clh-azure" | "clh-runtime-rs" | "clh-azure-runtime-rs" | "clh-azure-gpus" => {
+            Ok("clh")
+        }
         "dragonball" => Ok("dragonball"),
         "fc" | "firecracker" => Ok("firecracker"),
-        "openvmm" => Ok("openvmm"),
+        "openvmm" | "openvmm-azure-gpus" => Ok("openvmm"),
         "remote" => Ok("remote"),
         _ => anyhow::bail!(
             "Unknown shim '{}'. Valid shims are: {}",
@@ -1365,6 +1370,15 @@ mod tests {
     #[case("openvmm", "openvmm")]
     #[case("remote", "remote")]
     fn test_get_hypervisor_name_other_hypervisors(#[case] shim: &str, #[case] expected: &str) {
+        assert_eq!(get_hypervisor_name(shim).unwrap(), expected);
+    }
+
+    #[rstest]
+    // "<vmm>-azure-gpus" shims resolve to the same hypervisor as their base shim.
+    #[case("openvmm-azure-gpus", "openvmm")]
+    #[case("clh-azure-gpus", "clh")]
+    #[case("qemu-azure-gpus", "qemu")]
+    fn test_get_hypervisor_name_azure_gpus_variants(#[case] shim: &str, #[case] expected: &str) {
         assert_eq!(get_hypervisor_name(shim).unwrap(), expected);
     }
 
