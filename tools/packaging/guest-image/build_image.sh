@@ -91,6 +91,9 @@ build_image() {
 	if [[ "${image_initrd_suffix}" == "nvidia-gpu"* ]]; then
 		nvidia_driver_version=$(get_from_kata_deps .externals.nvidia.driver.version)
 		artifact_name=${artifact_name/.image/"-${nvidia_driver_version}".image}
+	elif [[ "${image_initrd_suffix}" == "azure-gpus"* ]]; then
+		nvidia_driver_version=$(get_from_kata_deps '.externals["azure-gpus"].driver.version')
+		artifact_name=${artifact_name/.image/"-${nvidia_driver_version}".image}
 	fi
 
 	mv -f "kata-containers.img" "${install_dir}/${artifact_name}"

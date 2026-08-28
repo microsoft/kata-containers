@@ -11,6 +11,7 @@ pub const RUST_SHIMS: &[&str] = &[
     "clh-runtime-rs",
     "dragonball",
     "openvmm",
+    "openvmm-azure-gpus",
     "qemu-runtime-rs",
     "qemu-nvidia-gpu-runtime-rs",
     "qemu-nvidia-gpu-snp-runtime-rs",
@@ -203,6 +204,19 @@ mod tests {
             &["clh-runtime-rs"],
             "/custom/path",
             "/custom/path/runtime-rs/bin/containerd-shim-kata-v2",
+        );
+    }
+
+    #[test]
+    fn test_is_rust_shim_azure_gpus_variants() {
+        // "<vmm>-azure-gpus" shims inherit the Go/Rust classification of their
+        // base "<vmm>" shim, and resolve to that runtime's shim binary path.
+        assert!(is_rust_shim("openvmm-azure-gpus")); // base openvmm is Rust
+        assert!(!is_rust_shim("qemu-azure-gpus")); // base qemu is Go
+        assert!(!is_rust_shim("clh-azure-gpus")); // base clh is Go
+        assert_eq!(
+            get_kata_containers_runtime_path("openvmm-azure-gpus", "/opt/kata"),
+            "/opt/kata/runtime-rs/bin/containerd-shim-kata-v2"
         );
     }
 

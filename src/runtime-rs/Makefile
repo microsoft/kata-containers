@@ -491,6 +491,14 @@ endif
     IMAGEPATH_NV = $(PKGDATADIR)/$(IMAGENAME_NV)
     KERNELPARAMS_NV := cgroup_no_v1=all pci=realloc pci=nocrs pci=assign-busses
 
+    # Azure GPUs GPU UVM variant (parallel to the _NV stack). openvmm boots the
+    # uncompressed kernel.
+    KERNELTYPE_AZURE_GPUS = uncompressed
+    KERNELNAME_AZURE_GPUS = $(call MAKE_KERNEL_NAME_AZURE_GPUS,$(KERNELTYPE_AZURE_GPUS))
+    KERNELPATH_AZURE_GPUS = $(KERNELDIR)/$(KERNELNAME_AZURE_GPUS)
+    IMAGENAME_AZURE_GPUS = $(PROJECT_TAG)-azure-gpus.img
+    IMAGEPATH_AZURE_GPUS = $(PKGDATADIR)/$(IMAGENAME_AZURE_GPUS)
+
     KERNELPARAMS_CONFIDENTIAL_NV = $(KERNELPARAMS_NV)
     KERNELPARAMS_CONFIDENTIAL_NV += "nvrc.smi.srs=1"
 
@@ -509,6 +517,8 @@ endif
     DEFPODRESOURCEAPISOCK_NV := "$(DEFKUBELETROOTDIR)/pod-resources/kubelet.sock"
     # NVIDIA profile: rootfs filesystem type (erofs for read-only, compressed images)
     DEFROOTFSTYPE_NV := $(ROOTFSTYPE_EROFS)
+    # Azure GPUs profile: same erofs read-only rootfs.
+    DEFROOTFSTYPE_AZURE_GPUS := $(ROOTFSTYPE_EROFS)
     # NVIDIA profile: rootfs block driver (avoid virtio-pmem/DAX for this stack)
     VMROOTFSDRIVER_NV := virtio-blk-pci
     # Agent client: hybrid vsock retry delay (ms); vsock path uses this as initial backoff (clamped in agent)
@@ -619,6 +629,18 @@ ifeq ($(USE_OPENVMM),true)
     SYSCONFIG_OPENVMM = $(abspath $(SYSCONFDIR)/$(CONFIG_FILE_OPENVMM))
     SYSCONFIG_PATHS += $(SYSCONFIG_OPENVMM)
     CONFIGS += $(CONFIG_OPENVMM)
+    # GB200 "Azure GPUs" GPU UVM variant of the openvmm config: a copy of
+    # configuration-openvmm.toml.in that points at the NVIDIA guest kernel and
+    # rootfs (kernel-azure-gpus / rootfs-image-azure-gpus). Keep in sync with
+    # configuration-openvmm.toml.in.
+    CONFIG_FILE_OPENVMM_AZURE_GPUS = configuration-openvmm-azure-gpus.toml
+    CONFIG_OPENVMM_AZURE_GPUS = config/$(CONFIG_FILE_OPENVMM_AZURE_GPUS)
+    CONFIG_OPENVMM_AZURE_GPUS_IN = $(CONFIG_OPENVMM_AZURE_GPUS).in
+    CONFIG_PATH_OPENVMM_AZURE_GPUS = $(abspath $(CONFDIR)/$(CONFIG_FILE_OPENVMM_AZURE_GPUS))
+    CONFIG_PATHS += $(CONFIG_PATH_OPENVMM_AZURE_GPUS)
+    SYSCONFIG_OPENVMM_AZURE_GPUS = $(abspath $(SYSCONFDIR)/$(CONFIG_FILE_OPENVMM_AZURE_GPUS))
+    SYSCONFIG_PATHS += $(SYSCONFIG_OPENVMM_AZURE_GPUS)
+    CONFIGS += $(CONFIG_OPENVMM_AZURE_GPUS)
     # openvmm-specific options (all should be suffixed by "_OPENVMM")
     VMROOTFSDRIVER_OPENVMM := virtio-blk-pci
     DEFBLOCKSTORAGEDRIVER_OPENVMM := virtio-blk-pci
@@ -664,6 +686,7 @@ USER_VARS += BINDIR
 USER_VARS += CONFIG_DB_IN
 USER_VARS += CONFIG_FC_IN
 USER_VARS += CONFIG_OPENVMM_IN
+USER_VARS += CONFIG_OPENVMM_AZURE_GPUS_IN
 USER_VARS += CONFIG_PATH
 USER_VARS += CONFIG_QEMU_IN
 USER_VARS += CONFIG_QEMU_SE_IN
@@ -704,15 +727,18 @@ USER_VARS += DEFMAXMEMSZ_FC
 USER_VARS += SYSCONFIG
 USER_VARS += IMAGENAME
 USER_VARS += IMAGENAME_NV
+USER_VARS += IMAGENAME_AZURE_GPUS
 USER_VARS += IMAGECONFIDENTIALNAME
 USER_VARS += IMAGEPATH
 USER_VARS += IMAGEPATH_CLH_AZURE
 USER_VARS += IMAGEPATH_NV
+USER_VARS += IMAGEPATH_AZURE_GPUS
 USER_VARS += IMAGECONFIDENTIALPATH
 USER_VARS += INITRDNAME
 USER_VARS += INITRDCONFIDENTIALNAME
 USER_VARS += INITRDPATH
 USER_VARS += INITRDCONFIDENTIALPATH
+USER_VARS += DEFROOTFSTYPE_AZURE_GPUS
 USER_VARS += DEFROOTFSTYPE
 USER_VARS += VMROOTFSDRIVER_DB
 USER_VARS += VMROOTFSDRIVER_CLH
@@ -723,6 +749,8 @@ USER_VARS += KERNELTYPE
 USER_VARS += KERNELPATH_DB
 USER_VARS += KERNELPATH_QEMU
 USER_VARS += KERNELPATH_NV
+USER_VARS += KERNELNAME_AZURE_GPUS
+USER_VARS += KERNELPATH_AZURE_GPUS
 USER_VARS += KERNELPATH_QEMU_SE
 USER_VARS += KERNELPATH_FC
 USER_VARS += KERNELPATH_COCO
@@ -983,6 +1011,10 @@ endef
 
 define MAKE_KERNEL_NAME_NV
 $(if $(findstring uncompressed,$1),vmlinux-nvidia-gpu.container,vmlinuz-nvidia-gpu.container)
+endef
+
+define MAKE_KERNEL_NAME_AZURE_GPUS
+$(if $(findstring uncompressed,$1),vmlinux-azure-gpus.container,vmlinuz-azure-gpus.container)
 endef
 
 .DEFAULT_GOAL := default

@@ -65,6 +65,7 @@ INITRDCONFIDENTIALNAME = $(PROJECT_TAG)-initrd-confidential.img
 
 IMAGENAME_NV = $(PROJECT_TAG)-nvidia-gpu.img
 IMAGENAME_CONFIDENTIAL_NV = $(PROJECT_TAG)-nvidia-gpu-confidential.img
+IMAGENAME_AZURE_GPUS = $(PROJECT_TAG)-azure-gpus.img
 
 TARGET = $(BIN_PREFIX)-runtime
 RUNTIME_OUTPUT = $(CURDIR)/$(TARGET)
@@ -134,6 +135,7 @@ INITRDCONFIDENTIALPATH := $(PKGDATADIR)/$(INITRDCONFIDENTIALNAME)
 
 IMAGEPATH_NV := $(PKGDATADIR)/$(IMAGENAME_NV)
 IMAGEPATH_CONFIDENTIAL_NV := $(PKGDATADIR)/$(IMAGENAME_CONFIDENTIAL_NV)
+IMAGEPATH_AZURE_GPUS := $(PKGDATADIR)/$(IMAGENAME_AZURE_GPUS)
 
 ROOTFSTYPE_EXT4 := \"ext4\"
 ROOTFSTYPE_XFS := \"xfs\"
@@ -361,6 +363,19 @@ ifneq (,$(QEMUCMD))
 
     CONFIGS += $(CONFIG_QEMU)
 
+    # GB200 "Azure GPUs" GPU UVM variant of the qemu config: a copy of
+    # configuration-qemu.toml.in that points at the NVIDIA guest kernel and
+    # rootfs (kernel-azure-gpus / rootfs-image-azure-gpus). Keep in sync with
+    # configuration-qemu.toml.in.
+    CONFIG_FILE_QEMU_AZURE_GPUS = configuration-qemu-azure-gpus.toml
+    CONFIG_QEMU_AZURE_GPUS = config/$(CONFIG_FILE_QEMU_AZURE_GPUS)
+    CONFIG_QEMU_AZURE_GPUS_IN = $(CONFIG_QEMU_AZURE_GPUS).in
+    CONFIG_PATH_QEMU_AZURE_GPUS = $(abspath $(CONFDIR)/$(CONFIG_FILE_QEMU_AZURE_GPUS))
+    CONFIG_PATHS += $(CONFIG_PATH_QEMU_AZURE_GPUS)
+    SYSCONFIG_QEMU_AZURE_GPUS = $(abspath $(SYSCONFDIR)/$(CONFIG_FILE_QEMU_AZURE_GPUS))
+    SYSCONFIG_PATHS += $(SYSCONFIG_QEMU_AZURE_GPUS)
+    CONFIGS += $(CONFIG_QEMU_AZURE_GPUS)
+
     # Begin configuration-qemu-coco-dev
     CONFIG_FILE_QEMU_COCO_DEV = configuration-qemu-coco-dev.toml
     CONFIG_QEMU_COCO_DEV = config/$(CONFIG_FILE_QEMU_COCO_DEV)
@@ -492,6 +507,12 @@ ifneq (,$(QEMUCMD))
     KERNELNAME_CONFIDENTIAL_NV = $(call MAKE_KERNEL_NAME_NV,$(KERNELCONFIDENTIALTYPE))
     KERNELPATH_CONFIDENTIAL_NV = $(KERNELDIR)/$(KERNELNAME_CONFIDENTIAL_NV)
 
+    # Azure GPUs GPU UVM variant (parallel to the _NV stack). qemu boots the
+    # compressed kernel; clh/openvmm boot the uncompressed one.
+    KERNELTYPE_AZURE_GPUS = compressed
+    KERNELNAME_AZURE_GPUS = $(call MAKE_KERNEL_NAME_AZURE_GPUS,$(KERNELTYPE_AZURE_GPUS))
+    KERNELPATH_AZURE_GPUS = $(KERNELDIR)/$(KERNELNAME_AZURE_GPUS)
+
     DEFAULTVCPUS_NV = 1
     DEFAULTMEMORY_NV = 8192
     DEFAULTTIMEOUT_NV = 1200
@@ -517,6 +538,8 @@ ifneq (,$(QEMUCMD))
 
     # NVIDIA profile: rootfs filesystem type (erofs for read-only, compressed images)
     DEFROOTFSTYPE_NV := $(ROOTFSTYPE_EROFS)
+    # Azure GPUs profile: same erofs read-only rootfs.
+    DEFROOTFSTYPE_AZURE_GPUS := $(ROOTFSTYPE_EROFS)
 
     ifneq (,$(QEMUFW))
         FIRMWAREPATH := $(PREFIXDEPS)/share/$(EDK2_NAME)/$(QEMUFW)
@@ -541,6 +564,19 @@ ifneq (,$(CLHCMD))
 
     CONFIGS += $(CONFIG_CLH)
 
+    # GB200 "Azure GPUs" GPU UVM variant of the clh config: a copy of
+    # configuration-clh.toml.in that points at the NVIDIA guest kernel and
+    # rootfs (kernel-azure-gpus / rootfs-image-azure-gpus). Keep in sync with
+    # configuration-clh.toml.in.
+    CONFIG_FILE_CLH_AZURE_GPUS = configuration-clh-azure-gpus.toml
+    CONFIG_CLH_AZURE_GPUS = config/$(CONFIG_FILE_CLH_AZURE_GPUS)
+    CONFIG_CLH_AZURE_GPUS_IN = $(CONFIG_CLH_AZURE_GPUS).in
+    CONFIG_PATH_CLH_AZURE_GPUS = $(abspath $(CONFDIR)/$(CONFIG_FILE_CLH_AZURE_GPUS))
+    CONFIG_PATHS += $(CONFIG_PATH_CLH_AZURE_GPUS)
+    SYSCONFIG_CLH_AZURE_GPUS = $(abspath $(SYSCONFDIR)/$(CONFIG_FILE_CLH_AZURE_GPUS))
+    SYSCONFIG_PATHS += $(SYSCONFIG_CLH_AZURE_GPUS)
+    CONFIGS += $(CONFIG_CLH_AZURE_GPUS)
+
     CONFIG_FILE_CLH_AZURE = configuration-clh-azure.toml
     CONFIG_CLH_AZURE = config/$(CONFIG_FILE_CLH_AZURE)
     CONFIG_CLH_AZURE_IN = $(CONFIG_CLH_AZURE).in
@@ -562,6 +598,8 @@ ifneq (,$(CLHCMD))
     KERNELTYPE_CLH = uncompressed
     KERNEL_NAME_CLH = $(call MAKE_KERNEL_NAME,$(KERNELTYPE_CLH))
     KERNELPATH_CLH = $(KERNELDIR)/$(KERNEL_NAME_CLH)
+    # Azure GPUs clh boots the uncompressed kernel (vmlinux-azure-gpus.container).
+    KERNELPATH_CLH_AZURE_GPUS = $(KERNELDIR)/$(call MAKE_KERNEL_NAME_AZURE_GPUS,uncompressed)
 endif
 
 ifneq (,$(STRATOVIRTCMD))
@@ -662,10 +700,12 @@ SHAREDIR := $(SHAREDIR)
 USER_VARS += ARCH
 USER_VARS += BINDIR
 USER_VARS += CONFIG_CLH_IN
+USER_VARS += CONFIG_CLH_AZURE_GPUS_IN
 USER_VARS += CONFIG_FC_IN
 USER_VARS += CONFIG_STRATOVIRT_IN
 USER_VARS += CONFIG_PATH
 USER_VARS += CONFIG_QEMU_IN
+USER_VARS += CONFIG_QEMU_AZURE_GPUS_IN
 USER_VARS += CONFIG_REMOTE_IN
 USER_VARS += DESTDIR
 USER_VARS += DEFAULT_HYPERVISOR
@@ -693,10 +733,15 @@ USER_VARS += IMAGENAME_NV
 USER_VARS += IMAGENAME_CONFIDENTIAL_NV
 USER_VARS += IMAGEPATH_NV
 USER_VARS += IMAGEPATH_CONFIDENTIAL_NV
+USER_VARS += IMAGENAME_AZURE_GPUS
+USER_VARS += IMAGEPATH_AZURE_GPUS
 USER_VARS += KERNELNAME_NV
 USER_VARS += KERNELPATH_NV
 USER_VARS += KERNELNAME_CONFIDENTIAL_NV
 USER_VARS += KERNELPATH_CONFIDENTIAL_NV
+USER_VARS += KERNELNAME_AZURE_GPUS
+USER_VARS += KERNELPATH_AZURE_GPUS
+USER_VARS += KERNELPATH_CLH_AZURE_GPUS
 USER_VARS += DEFAULTVCPUS_NV
 USER_VARS += DEFAULTMEMORY_NV
 USER_VARS += DEFAULTVFIOPORT_NV
@@ -711,6 +756,7 @@ USER_VARS += DEFSANDBOXCGROUPONLY_NV
 USER_VARS += DEFENABLEVCPUPINNING_NV
 USER_VARS += DEFENABLENUMA_NV
 USER_VARS += DEFROOTFSTYPE_NV
+USER_VARS += DEFROOTFSTYPE_AZURE_GPUS
 USER_VARS += DEFROOTFSTYPE
 USER_VARS += MACHINETYPE
 USER_VARS += KERNELDIR
@@ -937,6 +983,10 @@ endef
 
 define MAKE_KERNEL_NAME_NV
 $(if $(findstring uncompressed,$1),vmlinux-nvidia-gpu.container,vmlinuz-nvidia-gpu.container)
+endef
+
+define MAKE_KERNEL_NAME_AZURE_GPUS
+$(if $(findstring uncompressed,$1),vmlinux-azure-gpus.container,vmlinuz-azure-gpus.container)
 endef
 
 GENERATED_FILES += pkg/katautils/config-settings.go

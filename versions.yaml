@@ -137,6 +137,9 @@ assets:
         nvidia-gpu-confidential:
           name: "ubuntu"
           version: "noble"  # 24.04 LTS
+        azure-gpus:
+          name: "cbl-mariner"
+          version: "3.0"
       ppc64le:
         name: "ubuntu"
         version: "noble"  # 24.04 LTS
@@ -161,6 +164,9 @@ assets:
         nvidia-gpu-confidential:
           name: "ubuntu"
           version: "noble"  # 24.04 LTS
+        azure-gpus:
+          name: "cbl-mariner"
+          version: "3.0"
 
   initrd:
     description: |
@@ -277,6 +283,43 @@ externals:
           # yamllint disable-line rule:line-length
           url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/"
           pkg: "cuda-keyring_1.1-1_all.deb"
+    ctk:
+      version: "1.18.1-1"
+      url: "https://github.com/NVIDIA/nvidia-container-toolkit"
+    nvat:
+      desc: "NVIDIA Attestation SDK"
+      version: "2026.03.02"
+      url: "https://github.com/NVIDIA/attestation-sdk"
+
+  azure-gpus:
+    desc: "NVIDIA compute stack for the Azure GPUs UVM (Azure Linux 3.0 / azl3)"
+    driver:
+      desc: "NVIDIA kernel driver"
+      version: "610.43.02"
+      # yamllint disable-line rule:line-length
+      url: "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/"
+    cuda:
+      desc: "NVIDIA CUDA repository (Azure Linux 3.0 / azl3)"
+      repo:
+        x86_64:
+          # yamllint disable-line rule:line-length
+          url: "https://developer.download.nvidia.com/compute/cuda/repos/azl3/x86_64/"
+          pkg: "cuda-azl3.repo"
+        aarch64:
+          # yamllint disable-line rule:line-length
+          url: "https://developer.download.nvidia.com/compute/cuda/repos/azl3/sbsa/"
+          pkg: "cuda-azl3.repo"
+    tools:
+      desc: "NVIDIA container toolkit and tools repository (Azure Linux 3.0 / azl3)"
+      repo:
+        x86_64:
+          # yamllint disable-line rule:line-length
+          url: "https://developer.download.nvidia.com/compute/cuda/repos/azl3/x86_64/"
+          pkg: "cuda-azl3.repo"
+        aarch64:
+          # yamllint disable-line rule:line-length
+          url: "https://developer.download.nvidia.com/compute/cuda/repos/azl3/sbsa/"
+          pkg: "cuda-azl3.repo"
     ctk:
       version: "1.18.1-1"
       url: "https://github.com/NVIDIA/nvidia-container-toolkit"

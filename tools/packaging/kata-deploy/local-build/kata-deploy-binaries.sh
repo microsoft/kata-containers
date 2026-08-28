@@ -201,7 +201,7 @@ cleanup_and_fail_shim_v2_specifics() {
 	local extra_tarballs="${3:-}"
 	local tarball_dir="${repo_root_dir}/tools/packaging/kata-deploy/local-build/build"
 
-	for variant in confidential nvidia-gpu nvidia-gpu-confidential; do
+	for variant in confidential nvidia-gpu nvidia-gpu-confidential azure-gpus; do
 		local root_hash_file="${tarball_dir}/${component}-root_hash_${variant}.txt"
 		[[ -f "${root_hash_file}" ]] && rm -f "${root_hash_file}"
 	done
@@ -231,7 +231,7 @@ install_cached_shim_v2_tarball_get_root_hash() {
 	local tarball_dir="${repo_root_dir}/tools/packaging/kata-deploy/local-build/build"
 	local root_hash_basedir="./opt/kata/share/kata-containers/"
 
-	for variant in confidential nvidia-gpu nvidia-gpu-confidential; do
+	for variant in confidential nvidia-gpu nvidia-gpu-confidential azure-gpus; do
 		local image_conf_tarball="kata-static-rootfs-image-${variant}.tar.zst"
 		local tarball_path="${tarball_dir}/${image_conf_tarball}"
 		local root_hash_path="${root_hash_basedir}root_hash_${variant}.txt"
@@ -252,7 +252,7 @@ install_cached_shim_v2_tarball_compare_root_hashes() {
 	local found_any=""
 	local tarball_dir="${repo_root_dir}/tools/packaging/kata-deploy/local-build/build"
 
-	for variant in confidential nvidia-gpu nvidia-gpu-confidential; do
+	for variant in confidential nvidia-gpu nvidia-gpu-confidential azure-gpus; do
 		local image_root_hash="${tarball_dir}/root_hash_${variant}.txt"
 		local cached_root_hash="${component}-root_hash_${variant}.txt"
 
@@ -424,6 +424,28 @@ get_latest_nvidia_nvat_version() {
 	get_from_kata_deps ".externals.nvidia.nvat.version"
 }
 
+get_latest_kernel_azure_gpus_artefact_and_builder_image_version() {
+	local kernel_version
+	local kernel_kata_config_version
+	local latest_kernel_artefact
+	local latest_kernel_builder_image
+
+	kernel_version=$(get_from_kata_deps ".assets.kernel.azure-gpus.version")
+	kernel_kata_config_version="$(cat "${repo_root_dir}"/tools/packaging/kernel/kata_config_version)"
+	latest_kernel_artefact="${kernel_version}-${kernel_kata_config_version}-$(get_last_modification "$(dirname "${kernel_builder}")")"
+	latest_kernel_builder_image="$(get_kernel_image_name)"
+
+	echo "${latest_kernel_artefact}-${latest_kernel_builder_image}"
+}
+
+get_latest_azure_gpus_driver_version() {
+	get_from_kata_deps ".externals.azure-gpus.driver.version"
+}
+
+get_latest_azure_gpus_ctk_version() {
+	get_from_kata_deps ".externals.azure-gpus.ctk.version"
+}
+
 #Install guest image
 install_image() {
 	local variant="${1:-}"
@@ -480,6 +502,14 @@ install_image() {
 		latest_artefact+="-$(get_latest_kernel_nvidia_artefact_and_builder_image_version)"
 		latest_artefact+="-$(get_latest_nvidia_driver_version)"
 		latest_artefact+="-$(get_latest_nvidia_ctk_version)"
+		latest_artefact+="-$(get_latest_nvidia_nvrc_version)"
+	fi
+
+	if [[ "${variant}" == "azure-gpus" ]]; then
+		# If we bump the kernel we need to rebuild the image
+		latest_artefact+="-$(get_latest_kernel_azure_gpus_artefact_and_builder_image_version)"
+		latest_artefact+="-$(get_latest_azure_gpus_driver_version)"
+		latest_artefact+="-$(get_latest_azure_gpus_ctk_version)"
 		latest_artefact+="-$(get_latest_nvidia_nvrc_version)"
 	fi
 
@@ -715,6 +745,32 @@ install_image_nvidia_gpu_confidential() {
 	EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
 	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
 	install_image "nvidia-gpu-confidential"
+}
+
+#Install Azure GPUs image
+install_image_azure_gpus() {
+	export AGENT_POLICY
+	export MEASURED_ROOTFS="yes"
+	export FS_TYPE="erofs"
+	export SKIP_DAX_HEADER="yes"
+	export ROOT_FREE_SPACE="${ROOT_FREE_SPACE:-512}"
+	local version
+	version=$(get_latest_azure_gpus_driver_version)
+	local os_name
+	os_name=$(get_from_kata_deps ".assets.image.architecture.${ARCH}.azure-gpus.name")
+	if [[ "${os_name}" == "cbl-mariner" ]]; then
+		# Azure Linux: the in-rootfs azure_gpus_chroot.sh installs the NVIDIA
+		# userspace with tdnf (not apt) and uses curl to fetch the CUDA repo
+		# file. azurelinux-repos provides /etc/yum.repos.d + the base repo
+		# definitions the in-chroot tdnf needs to resolve NVIDIA package
+		# dependencies; none are guaranteed by the minimal kata-packages-uvm
+		# set, and 'apt' does not exist on Azure Linux.
+		EXTRA_PKGS="tdnf curl bash azurelinux-repos ${EXTRA_PKGS}"
+	else
+		EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
+	fi
+	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
+	install_image "azure-gpus"
 }
 
 install_se_image() {
@@ -1078,7 +1134,7 @@ install_nydus() {
 # Shared helper: extract measured-rootfs root hashes from confidential image tarballs.
 # These are needed by the Rust runtime (runtime-rs) at build time for dm-verity.
 _collect_root_hashes() {
-	for variant in confidential nvidia-gpu nvidia-gpu-confidential; do
+	for variant in confidential nvidia-gpu nvidia-gpu-confidential azure-gpus; do
 		local image_conf_tarball
 		image_conf_tarball="$(find "${workdir}" -maxdepth 1 -name "kata-static-rootfs-image-${variant}.tar.zst" 2>/dev/null | head -n 1)"
 		# Only one variant may be built at a time so we need to
@@ -1438,6 +1494,11 @@ handle_build() {
 	export final_tarball_name
 	rm -f "${final_tarball_name}"
 
+	# Export BUILD_DIR for use inside Docker containers (GPU rootfs builds).
+	# The repo is bind-mounted at /kata-containers, so translate the host workdir
+	# to the corresponding Docker-internal path.
+	export BUILD_DIR="/kata-containers/${workdir#${repo_root_dir}/}"
+
 	case "${build_target}" in
 	all)
 		install_agent_ctl
@@ -1538,6 +1599,8 @@ handle_build() {
 
 	rootfs-image-nvidia-gpu-confidential) install_image_nvidia_gpu_confidential ;;
 
+	rootfs-image-azure-gpus) install_image_azure_gpus ;;
+
 	rootfs-cca-confidential-image) install_image_confidential ;;
 
 	rootfs-cca-confidential-initrd) install_initrd_confidential ;;
@@ -1597,7 +1660,7 @@ handle_build() {
 			;;
 		shim-v2-go|shim-v2-rust)
 			if [[ "${MEASURED_ROOTFS}" == "yes" ]]; then
-				for variant in confidential nvidia-gpu nvidia-gpu-confidential; do
+				for variant in confidential nvidia-gpu nvidia-gpu-confidential azure-gpus; do
 					[[ -f "${workdir}/root_hash_${variant}.txt" ]] && mv "${workdir}/root_hash_${variant}.txt" "${workdir}/${build_target}-root_hash_${variant}.txt"
 				done
 			fi
@@ -1666,7 +1729,7 @@ handle_build() {
 		shim-v2-go|shim-v2-rust)
 			if [[ "${MEASURED_ROOTFS}" == "yes" ]]; then
 				local found_any=""
-				for variant in confidential nvidia-gpu nvidia-gpu-confidential; do
+				for variant in confidential nvidia-gpu nvidia-gpu-confidential azure-gpus; do
 					# The variants could be built independently we need to check if
 					# they exist and then push them to the registry
 					[[ -f "${workdir}/${build_target}-root_hash_${variant}.txt" ]] && files_to_push+=("${build_target}-root_hash_${variant}.txt") && found_any="yes"
