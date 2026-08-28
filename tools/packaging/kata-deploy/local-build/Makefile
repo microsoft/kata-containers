@@ -280,6 +280,9 @@ kernel-dragonball-experimental-tarball:
 kernel-nvidia-gpu-tarball:
 	${MAKE} $@-build
 
+kernel-azure-gpus-tarball:
+	${MAKE} $@-build
+
 kernel-tarball:
 	${MAKE} $@-build
 
@@ -362,6 +365,10 @@ rootfs-initrd-tarball: $(DEPS)
 
 DEPS := agent-tarball busybox-tarball kernel-nvidia-gpu-tarball
 rootfs-image-nvidia-gpu-tarball: $(DEPS)
+	${MAKE} $@-build
+
+DEPS := agent-tarball busybox-tarball kernel-azure-gpus-tarball
+rootfs-image-azure-gpus-tarball: $(DEPS)
 	${MAKE} $@-build
 
 DEPS := agent-tarball busybox-tarball pause-image-tarball coco-guest-components-tarball kernel-nvidia-gpu-tarball

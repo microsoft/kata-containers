@@ -22,16 +22,19 @@ const ALL_SHIMS: &[&str] = &[
     "clh",
     "clh-azure",
     "clh-azure-runtime-rs",
+    "clh-azure-gpus",
     "clh-runtime-rs",
     "dragonball",
     "fc",
     "firecracker",
+    "openvmm-azure-gpus-runtime-rs",
     "openvmm-azure-runtime-rs",
     "remote",
     // QEMU shims
     "qemu",
     "qemu-coco-dev",
     "qemu-coco-dev-runtime-rs",
+    "qemu-azure-gpus",
     "qemu-nvidia-cpu",
     "qemu-nvidia-cpu-runtime-rs",
     "qemu-nvidia-gpu",
@@ -66,10 +69,12 @@ fn get_hypervisor_name(shim: &str) -> Result<&str> {
     }
 
     match shim {
-        "clh" | "clh-azure" | "clh-runtime-rs" | "clh-azure-runtime-rs" => Ok("clh"),
+        "clh" | "clh-azure" | "clh-runtime-rs" | "clh-azure-runtime-rs" | "clh-azure-gpus" => {
+            Ok("clh")
+        }
         "dragonball" => Ok("dragonball"),
         "fc" | "firecracker" => Ok("firecracker"),
-        "openvmm-azure-runtime-rs" => Ok("openvmm"),
+        "openvmm-azure-runtime-rs" | "openvmm-azure-gpus-runtime-rs" => Ok("openvmm"),
         "remote" => Ok("remote"),
         _ => anyhow::bail!(
             "Unknown shim '{}'. Valid shims are: {}",
@@ -1489,8 +1494,10 @@ fn get_hypervisor_path(config: &Config, shim: &str) -> Result<String> {
     } else {
         // For non-QEMU shims, use the appropriate hypervisor binary
         let binary = match shim {
-            "clh" | "clh-azure" | "clh-runtime-rs" | "clh-azure-runtime-rs" => "cloud-hypervisor",
-            "openvmm-azure-runtime-rs" => "openvmm",
+            "clh" | "clh-azure" | "clh-runtime-rs" | "clh-azure-runtime-rs" | "clh-azure-gpus" => {
+                "cloud-hypervisor"
+            }
+            "openvmm-azure-runtime-rs" | "openvmm-azure-gpus-runtime-rs" => "openvmm",
             "fc" | "firecracker" => "firecracker",
             "dragonball" => "dragonball",
             "stratovirt" => "stratovirt",
@@ -1974,6 +1981,58 @@ mod tests {
     #[case("ppc64le", "qemu-system-ppc64")]
     fn test_qemu_system_binary_for(#[case] arch: &str, #[case] expected: &str) {
         assert_eq!(qemu_system_binary_for(arch), expected);
+    }
+
+    #[rstest]
+    // "<vmm>-azure-gpus" shims resolve to the same hypervisor as their base shim.
+    #[case("openvmm-azure-gpus-runtime-rs", "openvmm")]
+    #[case("clh-azure-gpus", "clh")]
+    #[case("qemu-azure-gpus", "qemu")]
+    fn test_get_hypervisor_name_azure_gpus_variants(#[case] shim: &str, #[case] expected: &str) {
+        assert_eq!(get_hypervisor_name(shim).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case("clh-azure-gpus", "/custom/bin/cloud-hypervisor")]
+    #[case("openvmm-azure-runtime-rs", "/custom/bin/openvmm")]
+    #[case("openvmm-azure-gpus-runtime-rs", "/custom/bin/openvmm")]
+    fn test_get_hypervisor_path_azure_variants(#[case] shim: &str, #[case] expected: &str) {
+        let config = crate::config::Config {
+            node_name: "test".to_string(),
+            debug: false,
+            shims_for_arch: vec![shim.to_string()],
+            default_shim_for_arch: shim.to_string(),
+            allowed_hypervisor_annotations_for_arch: vec![],
+            snapshotter_handler_mapping_for_arch: None,
+            agent_https_proxy: None,
+            agent_no_proxy: None,
+            pull_type_mapping_for_arch: None,
+            installation_prefix: Some("/custom".to_string()),
+            multi_install_suffix: None,
+            devkit_enabled: false,
+            helm_post_delete_hook: false,
+            experimental_setup_snapshotter: None,
+            erofs_merge_mode: None,
+            experimental_force_guest_pull_for_arch: vec![],
+            dest_dir: "/custom".to_string(),
+            host_install_dir: "/custom".to_string(),
+            crio_drop_in_conf_dir: String::new(),
+            crio_drop_in_conf_file: String::new(),
+            crio_drop_in_conf_file_debug: String::new(),
+            containerd_conf_file: String::new(),
+            containerd_conf_file_backup: String::new(),
+            containerd_drop_in_conf_file: String::new(),
+            containerd_user_drop_in_source_file: None,
+            daemonset_name: "kata-deploy".to_string(),
+            custom_runtimes_enabled: false,
+            custom_runtimes: vec![],
+            erofs_snapshotter_mode: None,
+            erofs_dmverity: false,
+            startup_taints: vec![],
+            container_runtime_version: None,
+            k8s_distribution: None,
+        };
+        assert_eq!(get_hypervisor_path(&config, shim).unwrap(), expected);
     }
 
     #[rstest]
