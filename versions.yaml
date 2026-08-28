@@ -212,6 +212,19 @@ assets:
       description: "Linux kernel optimised for virtual machines"
       url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/"
       version: "v6.18.35"
+    azure-gpus:
+      # Azure GPUs UVM kernel: built from the Microsoft Azure Linux
+      # (CBL-Mariner) 6.18 HWE tree (rolling-lts/azl3-hwe) so the guest kernel
+      # lines up with the kernel-hwe / cuda-open-hwe ABI (6.18.43.1), with the
+      # gpu/azure-gpus.<arch>.conf.in fragment (HMM, PCIe ATS, CONFIG_HYPERV)
+      # merged on top.
+      description: "Microsoft Azure Linux (CBL-Mariner) 6.18 HWE kernel for the Azure GPUs UVM"
+      url: "https://github.com/microsoft/CBL-Mariner-Linux-Kernel.git"
+      version: "v6.18.43.1"
+      # git fetch --depth 1 lands the tag in FETCH_HEAD without a local ref, so
+      # checkout must be by a fetchable commit SHA (tip of the
+      # rolling-lts/azl3-hwe/6.18.43.1 tag).
+      ref: "9800aff36fc7eb263b8c5b3b8d807b5c1ec2f841"
 
   kernel-arm-experimental:
     description: "Linux kernel with cpu/mem hotplug support on arm64"

@@ -177,7 +177,21 @@ get_kernel_modules_dir() {
 		numeric_final_version="${numeric_final_version%-*}+"
 	fi
 
-	local kernel_modules_dir="${repo_root_dir}/tools/packaging/kata-deploy/local-build/build/${kernel_name}/builddir/kata-linux-${version}-${kernel_kata_config_version}/lib/modules/${numeric_final_version}"
+	local kernel_modules_dir="${workdir}/${kernel_name}/builddir/kata-linux-${version}-${kernel_kata_config_version}/lib/modules/${numeric_final_version}"
+	case ${kernel_name} in
+		kernel-nvidia-gpu)
+			kernel_modules_dir+="-nvidia-gpu"
+			;;
+		kernel-nvidia-gpu-confidential)
+			kernel_modules_dir+="-nvidia-gpu-confidential"
+			;;
+		kernel-azure-gpus)
+			kernel_modules_dir+="-azure-gpus"
+			;;
+		*)
+			;;
+	esac
+
 	echo "${kernel_modules_dir}"
 }
 
@@ -727,7 +741,7 @@ install_cached_kernel_tarball_component() {
 		|| return 1
 
 	case ${kernel_name} in
-		"kernel-nvidia-gpu"*"")
+		"kernel-nvidia-gpu"*""|"kernel-azure-gpus")
 			local modules_dir
 			modules_dir=$(get_kernel_modules_dir "${kernel_version}" "${kernel_kata_config_version}" "${build_target}")
 
@@ -767,7 +781,7 @@ install_kernel_helper() {
 	fi
 
 	case ${kernel_name} in
-		kernel-nvidia-gpu|kernel-nvidia-gpu-dragonball-experimental|kernel*-confidential)
+		kernel-nvidia-gpu|kernel-nvidia-gpu-dragonball-experimental|kernel-azure-gpus|kernel*-confidential)
 			local kernel_modules_tarball_name="kata-static-${kernel_name}-modules.tar.zst"
 			local kernel_modules_tarball_path="${workdir}/${kernel_modules_tarball_name}"
 			extra_tarballs="${kernel_modules_tarball_name}:${kernel_modules_tarball_path}"
@@ -854,6 +868,16 @@ install_kernel_nvidia_gpu() {
 		"assets.kernel.nvidia" \
 		"kernel-nvidia-gpu" \
 		"-x -g nvidia"
+}
+
+#Install Azure GPUs kernel asset
+install_kernel_azure_gpus() {
+	export CONFIDENTIAL_GUEST="yes"
+	export MEASURED_ROOTFS="yes"
+	install_kernel_helper \
+		"assets.kernel.azure-gpus" \
+		"kernel-azure-gpus" \
+		"-x -g nvidia-azure-repackaged"
 }
 
 install_qemu_helper() {
@@ -1476,6 +1500,8 @@ handle_build() {
 
 	kernel-nvidia-gpu) install_kernel_nvidia_gpu ;;
 
+	kernel-azure-gpus) install_kernel_azure_gpus ;;
+
 	nydus) install_nydus ;;
 
 	ovmf) install_ovmf ;;
@@ -1540,7 +1566,10 @@ handle_build() {
 	tar --zstd -tvf "${final_tarball_path}"
 
 	case ${build_target} in
-		kernel-nvidia-gpu|kernel-nvidia-gpu-dragonball-experimental)
+		kernel-nvidia-gpu|kernel-nvidia-gpu-dragonball-experimental|kernel-azure-gpus)
+			# kernel-azure-gpus shares this layout: install_cached_kernel_tarball_component
+			# extracts its modules tarball with --strip-components=1, matching the
+			# parent-dir tar produced here.
 			local modules_final_tarball_path="${workdir}/kata-static-${build_target}-modules.tar.zst"
 			if [[ ! -f "${modules_final_tarball_path}" ]]; then
 				local modules_dir
@@ -1632,7 +1661,7 @@ handle_build() {
 		)
 		oci_image="${ARTEFACT_REGISTRY}/${ARTEFACT_REPOSITORY}/cached-artefacts/${build_target}:${normalized_tags}"
 		case ${build_target} in
-			kernel-nvidia-gpu|kernel-nvidia-gpu-dragonball-experimental|kernel*-confidential)
+			kernel-nvidia-gpu|kernel-nvidia-gpu-dragonball-experimental|kernel-azure-gpus|kernel*-confidential)
 				files_to_push+=(
 					"kata-static-${build_target}-modules.tar.zst"
 				)
