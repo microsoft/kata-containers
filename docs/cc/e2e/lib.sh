@@ -30,6 +30,8 @@ set -uo pipefail
 #                  on Azure Linux 3 by tools/osbuilder/node-builder/azure-linux
 #                  and installed under /opt/confidential-containers. kata-deploy
 #                  is not involved at all on this path.
+#   openvmm-snp    OpenVMM + MSHV with real SEV-SNP, built from source on Azure
+#                  Linux 3 by tools/osbuilder/openvmm-igvm.
 #
 # The split matters because the two differ in more than a hypervisor name: the
 # install prefix, the shim binary, the containerd handler and the RuntimeClass
@@ -81,8 +83,20 @@ case "${E2E_PLATFORM}" in
     : "${E2E_GUEST_IMAGE_NAME:=kata-containers.img}"
     : "${E2E_GUEST_IGVM_NAME:=kata-containers-igvm.img}"
     ;;
+  openvmm-snp)
+    : "${E2E_VM_SIZE:=Standard_DC32as_cc_v6}"
+    : "${E2E_VM_IMAGE:=MicrosoftCBLMariner:azure-linux-3:azure-linux-3-gen2:latest}"
+    : "${E2E_VM_SECURITY_TYPE:=Standard}"
+    : "${E2E_OS_DISK_GB:=256}"
+    : "${E2E_PKG:=dnf}"
+    : "${E2E_RUNTIMECLASS:=kata-openvmm}"
+    : "${E2E_KATA_PREFIX:=${HOME}/kata-openvmm}"
+    : "${E2E_GUEST_IMAGE_NAME:=kata-containers.img}"
+    : "${E2E_OPENVMM_VP_COUNT:=2}"
+    : "${E2E_GUEST_IGVM_NAME:=kata-aci-agent-dmverity-reserve-416b-${E2E_OPENVMM_VP_COUNT}vp.bin}"
+    ;;
   *)
-    echo "unsupported E2E_PLATFORM=${E2E_PLATFORM} (expected qemu-coco-dev or clh-snp)" >&2
+    echo "unsupported E2E_PLATFORM=${E2E_PLATFORM} (expected qemu-coco-dev, clh-snp, or openvmm-snp)" >&2
     exit 1
     ;;
 esac
@@ -103,6 +117,11 @@ E2E_GUEST_IGVM="${E2E_KATA_PREFIX}/share/kata-containers/${E2E_GUEST_IGVM_NAME:-
 # EROFS requires; the Microsoft fork (msft/v51.1.101) cannot parse VMDK at all.
 : "${E2E_CLH_TAG:=aa9678da67f6336c4a41add9095c9c917b800ea9}"
 : "${E2E_UVM_KERNEL_VERSION:=6.1.58.mshv8}"
+: "${E2E_OPENVMM_REPO:=https://github.com/nbojanic/openvmm.git}"
+: "${E2E_OPENVMM_BRANCH:=kata-snp-working}"
+: "${E2E_OPENVMM_DIR:=${HOME}/openvmm}"
+: "${E2E_OPENVMM_KERNEL_SRC:=${HOME}/src/openvmm-aci-kernel}"
+: "${E2E_OPENVMM_KERNEL_SRC_LOCAL:=}"
 # whoami returns DOMAIN\user on a Windows workstation, and cygwin/git-bash render
 # that as DOMAIN+user. Azure rejects both separators and upper case in an admin
 # name, so normalise here rather than failing deep inside az vm create.
@@ -242,7 +261,7 @@ assert_local_guest_installed() {
   # therefore the artefact that carries the pin, and asserting it is the one we
   # built is the same claim by a different route — a tampered rootfs fails verity
   # against a hash the IGVM measurement covers.
-  if [[ "${E2E_PLATFORM}" = "clh-snp" ]]; then
+  if [[ "${E2E_PLATFORM}" = "clh-snp" || "${E2E_PLATFORM}" = "openvmm-snp" ]]; then
     local igvm_rec="${E2E_STATE_DIR}/guest-igvm-sha256"
     [[ -s "${igvm_rec}" ]] || die "no recorded IGVM digest — re-run stage 04"
     [[ -f "${E2E_GUEST_IGVM}" ]] || die "missing ${E2E_GUEST_IGVM}"
@@ -477,7 +496,7 @@ ensure_genpolicy_defaults() {
       [[ -f "${GP_RULES}" ]]    || die "missing ${GP_RULES} — run stage 03 first"
       [[ -f "${GP_SETTINGS}" ]] || die "missing ${GP_SETTINGS} — run stage 03 first"
       ;;
-    clh-snp)
+    clh-snp|openvmm-snp)
       local src="${E2E_REPO_DIR}/src/tools/genpolicy" dst="${E2E_STATE_DIR}/genpolicy"
       mkdir -p "${dst}"
       for f in rules.rego genpolicy-settings.json; do
@@ -654,4 +673,11 @@ if [[ "${E2E_PLATFORM}" = "clh-snp" ]]; then
   command -v clh_bootstrap_node >/dev/null \
     || die "platform-clh-snp.sh did not load cleanly — clh_* helpers are missing.
 A common cause is CRLF line endings after editing the file on Windows."
+fi
+if [[ "${E2E_PLATFORM}" = "openvmm-snp" ]]; then
+  # shellcheck source=platform-openvmm-snp.sh
+  . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/platform-openvmm-snp.sh"
+
+  command -v openvmm_bootstrap_node >/dev/null \
+    || die "platform-openvmm-snp.sh did not load cleanly — openvmm_* helpers are missing"
 fi

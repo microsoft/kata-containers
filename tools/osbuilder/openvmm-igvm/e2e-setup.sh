@@ -31,6 +31,12 @@ shim_path="${SHIM_PATH:-/usr/local/bin/containerd-shim-kata-openvmm-v2}"
 containerd_config="${CONTAINERD_CONFIG:-/etc/containerd/config-openvmm.toml}"
 containerd_dropin="${CONTAINERD_DROPIN:-/etc/systemd/system/containerd.service.d/20-kata-openvmm.conf}"
 crictl_config="${CRICTL_CONFIG:-/etc/crictl.yaml}"
+configure_containerd="${CONFIGURE_CONTAINERD:-yes}"
+network_model="${NETWORK_MODEL:-none}"
+disable_new_netns="${DISABLE_NEW_NETNS:-yes}"
+agent_policy="${AGENT_POLICY:-yes}"
+agent_policy_file="${AGENT_POLICY_FILE:-${repo_dir}/src/kata-opa/allow-all.rego}"
+strict_policy="${STRICT_POLICY:-no}"
 
 die()
 {
@@ -43,6 +49,8 @@ for tool in awk cargo containerd crictl install jq make modprobe systemctl; do
 done
 [[ "${vp_count}" =~ ^[1-9][0-9]*$ ]] ||
 	die "VP_COUNT must be a positive integer: ${vp_count}"
+[[ "${disable_new_netns}" == "yes" || "${disable_new_netns}" == "no" ]] ||
+	die "DISABLE_NEW_NETNS must be yes or no: ${disable_new_netns}"
 
 [[ -e /dev/mshv ]] || die "/dev/mshv is not available"
 [[ -d "${openvmm_dir}/.git" ]] || die "OpenVMM checkout does not exist: ${openvmm_dir}"
@@ -74,6 +82,9 @@ if [[ -n "${kata_image_override}" || -n "${root_hash_override}" ]]; then
 elif [[ ! -f "${kata_image}" || ! -f "${root_hash_file}" ]]; then
 	make -C "${script_dir}" guest-image \
 		OUT_DIR="${out_dir}" \
+		AGENT_POLICY="${agent_policy}" \
+		AGENT_POLICY_FILE="${agent_policy_file}" \
+		STRICT_POLICY="${strict_policy}" \
 		KATA_IMAGE="${kata_image}" \
 		ROOT_HASH_FILE="${root_hash_file}"
 fi
@@ -102,7 +113,7 @@ make -B -C "${runtime_dir}" \
 	OPENVMMPATH="${openvmm}" \
 	IGVMPATH_OPENVMM_SNP="${igvm}" \
 	IMAGEPATH_OPENVMM_AZURE="${kata_image}" \
-	DEFNETWORKMODEL_OPENVMM=none \
+	DEFNETWORKMODEL_OPENVMM="${network_model}" \
 	crates/shim/src/config.rs \
 	config/configuration-openvmm-snp-runtime-rs.toml
 
@@ -115,15 +126,29 @@ make -B -C "${runtime_dir}" \
 )
 
 generated_config="${runtime_dir}/config/configuration-openvmm-snp-runtime-rs.toml"
-sed \
-	-e 's/^disable_new_netns = false$/disable_new_netns = true/' \
-	-e "s/^default_vcpus = .*/default_vcpus = ${vp_count}/" \
-	"${generated_config}" >"${runtime_config}"
+sed_args=(-e "s/^default_vcpus = .*/default_vcpus = ${vp_count}/")
+if [[ "${disable_new_netns}" == "yes" ]]; then
+	sed_args+=(-e 's/^disable_new_netns = false$/disable_new_netns = true/')
+fi
+sed "${sed_args[@]}" "${generated_config}" >"${runtime_config}"
 
 shim="${repo_dir}/target/release/containerd-shim-kata-v2"
 [[ -x "${shim}" ]] || die "runtime-rs shim was not built: ${shim}"
 
 sudo install -D -m 0755 "${shim}" "${shim_path}"
+
+if [[ "${configure_containerd}" == "no" ]]; then
+	echo "Installed OpenVMM Kata runtime:"
+	echo "  OpenVMM: ${openvmm}"
+	echo "  IGVM: ${igvm}"
+	echo "  VPs: ${vp_count}"
+	echo "  Kata image: ${kata_image}"
+	echo "  Shim: ${shim_path}"
+	echo "  Runtime config: ${runtime_config}"
+	exit 0
+fi
+[[ "${configure_containerd}" == "yes" ]] ||
+	die "CONFIGURE_CONTAINERD must be yes or no: ${configure_containerd}"
 
 containerd_tmp="$(mktemp)"
 dropin_tmp="$(mktemp)"

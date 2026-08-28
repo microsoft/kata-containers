@@ -65,6 +65,25 @@ if [[ "${E2E_PLATFORM}" = "clh-snp" ]]; then
   exit 0
 fi
 
+if [[ "${E2E_PLATFORM}" = "openvmm-snp" ]]; then
+  openvmm_assert_snp_host
+  openvmm_build_and_deploy
+
+  [[ -f "${E2E_GUEST_IMAGE}" ]] || die "no ${E2E_GUEST_IMAGE} after OpenVMM build"
+  [[ -f "${E2E_GUEST_IGVM}" ]] || die "no ${E2E_GUEST_IGVM} after OpenVMM build"
+  sha256sum "${E2E_GUEST_IMAGE}" | cut -d' ' -f1 > "${E2E_STATE_DIR}/guest-image-sha256"
+  sha256sum "${E2E_GUEST_IGVM}" | cut -d' ' -f1 > "${E2E_STATE_DIR}/guest-igvm-sha256"
+  { git rev-parse HEAD; git diff --quiet HEAD -- src/ tools/ || printf -- '-dirty'; } \
+    | tr -d '\n' > "${E2E_STATE_DIR}/guest-image-commit"
+  printf '%s\n' "${E2E_OPENVMM_RUNTIME_CONFIG}" > "${E2E_STATE_DIR}/guest-config-paths"
+  tr -d '\n' < "${E2E_OPENVMM_OUT}/root_hash_.txt" \
+    > "${E2E_STATE_DIR}/guest-verity-params"
+
+  ok "guest stack built and installed (openvmm-snp)"
+  mark_done 04-build-guest-stack
+  exit 0
+fi
+
 LB=tools/packaging/kata-deploy/local-build
 
 # TRAP 1: the agent builds inside a container from a *git checkout*, so

@@ -8,7 +8,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-kernel_src="${KERNEL_SRC:-${HOME}/src/LSG-linux-rolling-aci-openvmm}"
+kernel_src="${KERNEL_SRC:-${HOME}/src/openvmm-aci-kernel}"
 script_dir="$(dirname "$(readlink -f "$0")")"
 kernel_config="${KERNEL_CONFIG:-${script_dir}/kernel.config}"
 build_dir="${BUILD_DIR:-${kernel_src}/build-kata-openvmm}"

@@ -211,7 +211,7 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `E2E_PLATFORM` | `qemu-coco-dev` | Which hypervisor stack to validate. `clh-snp` selects Cloud Hypervisor + MSHV with real SEV-SNP — see "Platforms" below. |
+| `E2E_PLATFORM` | `qemu-coco-dev` | Which hypervisor stack to validate. `clh-snp` and `openvmm-snp` select real SEV-SNP guests over MSHV — see "Platforms" below. |
 | `E2E_RG` / `E2E_VM` | `coco-e2e-rg` / `coco-e2e-1` | Azure resource group and VM name. The suite creates the RG if it is absent, so leaving these at their defaults provisions a fresh, self-owned environment rather than reusing anyone else's. |
 | `E2E_SSH_HOST` | `coco-e2e` | ssh alias the workstation-side helpers use. Override with `E2E_VM` for a parallel environment. |
 | `E2E_FAST` | `0` | Dev-loop mode. Reduces assurance — see below. |
@@ -231,6 +231,10 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | `E2E_SKIP_PROVISION` | `auto` | `auto` skips stage 01 when `az` is missing; `1` always skips, `0` always runs. |
 | `E2E_NS` | `coco-e2e` | Namespace for the stage-05 pod. |
 | `E2E_GO_VERSION` | `1.25.0` | Go toolchain installed by stage 02. |
+| `E2E_OPENVMM_VP_COUNT` | `2` | Fixed VP count embedded in the OpenVMM IGVM and requested by runtime-rs. |
+| `E2E_OPENVMM_KERNEL_SRC` | `~/src/openvmm-aci-kernel` | Validated ACI kernel source on the E2E node. |
+| `E2E_OPENVMM_KERNEL_SRC_LOCAL` | *(empty)* | Workstation checkout archived and copied by `sync.sh` for `openvmm-snp`. |
+| `E2E_OPENVMM_REPO` / `_BRANCH` | `nbojanic/openvmm` / `kata-snp-working` | OpenVMM source carrying VM-service SNP IGVM support. |
 | `E2E_STATE_DIR` | `~/.coco-e2e` | Stage markers and stage-06 artifacts. |
 | `E2E_FRAGMENT_ISSUER` / `_FEED` / `_SVN` / `_MIN_SVN` / `_TAG` | `did:example:e2e-issuer` / `$E2E_REGISTRY/coco-e2e/fragment` / `2` / `1` / `e2e` | Stage-06 fragment identity and rollback floor. |
 | `E2E_FRAGMENT_WORK` | `$E2E_STATE_DIR/fragments` | Holds the issuer private key; created mode 700. |
@@ -390,23 +394,25 @@ az vm list-usage --location westus --query "[?contains(localName,'DCACCV5')]" -o
 is derived in one `case` block at the top of `lib.sh`, so the stages themselves
 stay declarative.
 
-| | `qemu-coco-dev` (default) | `clh-snp` |
-| --- | --- | --- |
-| Hypervisor | QEMU + KVM | Cloud Hypervisor + MSHV |
-| Guest | ordinary VM, **not attested** | real SEV-SNP CVM |
-| Node OS | Ubuntu 24.04 | Azure Linux 3 |
-| Installed by | kata-deploy (Helm) | `make all-confpods` from `tools/osbuilder/node-builder/azure-linux` |
-| Prefix | `/opt/kata` | `/opt/confidential-containers` |
-| RuntimeClass | `kata-qemu-coco-dev-runtime-rs` | `kata-cc` |
-| genpolicy | ships in the kata-deploy image | **none** — built from the branch |
-| Verity pin | patched into `configuration-*.toml` | baked into the IGVM kernel cmdline |
+| | `qemu-coco-dev` (default) | `clh-snp` | `openvmm-snp` |
+| --- | --- | --- | --- |
+| Hypervisor | QEMU + KVM | Cloud Hypervisor + MSHV | OpenVMM + MSHV |
+| Guest | ordinary VM, **not attested** | real SEV-SNP CVM | real SEV-SNP CVM |
+| Node OS | Ubuntu 24.04 | Azure Linux 3 | Azure Linux 3 |
+| Default SKU | `Standard_DC16as_cc_v5` | `Standard_DC16as_cc_v5` | `Standard_DC32as_cc_v6` |
+| Installed by | kata-deploy (Helm) | Azure Linux node-builder | `tools/osbuilder/openvmm-igvm` |
+| Prefix | `/opt/kata` | `/opt/confidential-containers` | `~/kata-openvmm` |
+| RuntimeClass | `kata-qemu-coco-dev-runtime-rs` | `kata-cc` | `kata-openvmm` |
+| genpolicy | ships in the kata-deploy image | built from the branch | built from the branch |
+| Verity pin | patched into `configuration-*.toml` | baked into the IGVM cmdline | baked into the IGVM cmdline |
 
 The two answer different questions. `qemu-coco-dev` is fast and exercises the
 policy logic, the agent and the guest-pull path, which is most of what changes
 day to day. It cannot say anything about attestation, the SNP boot path, or
 anything MSHV-specific — for example the pathrs kernel-version panic is invisible
 under QEMU because it needs a version string containing an MSHV suffix.
-`clh-snp` covers those at the cost of a multi-hour native build.
+The two SNP platforms cover those gaps. `openvmm-snp` uses the VM-service
+OpenVMM backend and supports a fixed, selectable multi-VP IGVM topology.
 
 **`clh-snp` prerequisites the suite handles for you:** the MSHV host kernel and
 the `Dom0` grub entry (stage 02 — this needs one reboot, and the stage says so),
@@ -419,6 +425,46 @@ Note that `AGENT_POLICY_FILE=allow-all.rego`, which the node-builder README
 passes, is deliberately **not** used here — it would make stages 05–08 vacuous.
 The default for a release build is `allow-set-policy.rego`, which is what these
 tests need.
+
+**`openvmm-snp` kernel source:** the validated ACI kernel source is not
+automatically cloned by the suite. Point `E2E_OPENVMM_KERNEL_SRC_LOCAL` at a
+workstation checkout when syncing:
+
+```bash
+E2E_PLATFORM=openvmm-snp \
+E2E_OPENVMM_KERNEL_SRC_LOCAL="$HOME/src/openvmm-aci-kernel" \
+  ./sync.sh
+```
+
+`sync.sh` sends a `git archive`, not the checkout metadata or credentials, and
+extracts it at the node’s default `E2E_OPENVMM_KERNEL_SRC`.
+
+#### Current `openvmm-snp` limitations
+
+- **Initdata is not functional yet.** Runtime-rs creates the compressed
+  `initdata.image`, but the OpenVMM backend currently receives it as
+  `DeviceType::Block` and does not add it to the initial PCIe topology. The
+  guest agent must see this disk during startup; hot-plugging it later is too
+  late. Consequently, stage 04 passes, but stage 05 cannot yet boot a
+  genpolicy-protected pod.
+- **Initdata is not measured.** The runtime calculates the SNP initdata digest,
+  but the OpenVMM IGVM path currently skips `ProtectionDeviceConfig`, so the
+  digest is not carried into SNP `HOST_DATA` or otherwise bound into the launch
+  measurement. Functional block delivery and measurement binding are separate
+  remaining tasks.
+- **The VP topology is fixed per IGVM.** `E2E_OPENVMM_VP_COUNT` is used for both
+  IGVM generation and runtime configuration, and those values must match
+  exactly. Kubernetes CPU requests must not dynamically resize the VM.
+- **The guest command line carries a layout-specific workaround.**
+  `memmap=4K$0x416b000` avoids the currently observed
+  `HvMessageTypeUnacceptedGpa` failure. It is not a stable ABI or production
+  solution.
+- **The ACI kernel source is private.** Fresh nodes need an authenticated clone
+  or `E2E_OPENVMM_KERNEL_SRC_LOCAL` during `sync.sh`.
+- **The current validation boundary is stages 01–04.** Provisioning,
+  MSHV/Azure Linux bootstrap, Flannel Kubernetes/KBS deployment, and the full
+  source build/install pass on `Standard_DC32as_cc_v6`. Stages 05–08 remain
+  blocked on OpenVMM initdata support.
 
 ### The node is not a confidential VM
 
@@ -433,7 +479,7 @@ Asking for `ConfidentialVM` also fails outright against the plain Ubuntu
 supported for the provided image") — a `:cvm:` image sku is required for that.
 `E2E_VM_SECURITY_TYPE=ConfidentialVM` is available if you pair it with one.
 
-`clh-snp` also uses `Standard`, for a different reason: there the node is the
+Both SNP platforms also use `Standard`, for a different reason: the node is the
 *hypervisor root partition* (MSHV Dom0) that launches SNP guests, so it must not
 itself be a CVM. Confidentiality on that path comes from the guest's IGVM
 measurement, not from the node.
