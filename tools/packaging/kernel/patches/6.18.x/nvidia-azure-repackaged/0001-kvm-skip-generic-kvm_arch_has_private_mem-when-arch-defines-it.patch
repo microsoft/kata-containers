@@ -1,0 +1,39 @@
+From: Jocelyn Berrendonner <jocelynb@microsoft.com>
+Date: Thu, 6 Aug 2026 19:10:00 -0700
+Subject: [PATCH] kvm: skip generic kvm_arch_has_private_mem when arch defines it
+
+The arm64 Microsoft Azure Linux (CBL-Mariner) kernel tree defines
+kvm_arch_has_private_mem() as a macro in arch/arm64/include/asm/kvm_host.h.
+The generic definition in include/linux/kvm_host.h is a static inline guarded
+only by !CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES. On a Kata GPU UVM the guest
+kernel is built without KVM, so CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES is unset
+and the generic inline is emitted even though the arch macro already exists.
+The macro then expands into the inline's signature and
+arch/arm64/kernel/asm-offsets.c fails to compile:
+
+  include/linux/kvm_host.h: error: expected identifier or '(' before 'struct'
+  arch/arm64/include/asm/kvm_host.h: in definition of macro
+  'kvm_arch_has_private_mem'
+
+Also skip the generic inline when the arch already provides the macro,
+mirroring the upstream '#ifndef kvm_arch_has_private_mem' idiom.
+
+Signed-off-by: Jocelyn Berrendonner <jocelynb@microsoft.com>
+Generated-By: GitHub Copilot
+---
+ include/linux/kvm_host.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/linux/kvm_host.h b/include/linux/kvm_host.h
+--- a/include/linux/kvm_host.h
++++ b/include/linux/kvm_host.h
+@@ -721,8 +721,8 @@ static inline int kvm_arch_vcpu_memslots_id(struct kvm_vcpu *vcpu)
+ 	return 0;
+ }
+ #endif
+ 
+-#ifndef CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES
++#if !defined(CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES) && !defined(kvm_arch_has_private_mem)
+ static inline bool kvm_arch_has_private_mem(struct kvm *kvm)
+ {
+ 	return false;

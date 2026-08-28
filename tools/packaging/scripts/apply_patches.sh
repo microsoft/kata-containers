@@ -40,6 +40,15 @@ if [[ -d "${patches_dir}" ]]; then
 	mapfile -t patches < <(find "${patches_dir}" -maxdepth 1 -name '*.patch'|sort -t- -k1,1n)
 	echo "INFO: Found ${#patches[@]} patches"
 	for patch in "${patches[@]}"; do
+		# Opt-in for distribution-serviced source trees, which can already
+		# carry a stable backport of a patch: skip a patch that no longer
+		# applies but reverse-applies cleanly, i.e. is already present.
+		if [[ "${KATA_SKIP_APPLIED_PATCHES:-no}" == "yes" ]] && \
+			! patch -p1 -f -s --dry-run < "${patch}" >/dev/null 2>&1 && \
+			patch -p1 -R -f -s --dry-run < "${patch}" >/dev/null 2>&1; then
+			echo "INFO: Skip ${patch}: already present in the source tree"
+			continue
+		fi
 		echo "INFO: Apply ${patch}"
 		patch -p1 < "${patch}" || \
 			{ echo >&2 "ERROR: Not applied. Exiting..."; exit 1; }
