@@ -33,6 +33,7 @@ readonly default_config_whitelist="${script_dir}/configs/fragments/whitelist.con
 # xPU vendor
 readonly VENDOR_INTEL="intel"
 readonly VENDOR_NVIDIA="nvidia"
+readonly VENDOR_NVIDIA_AZURE_REPACKAGED="nvidia-azure-repackaged"
 readonly KBUILD_SIGN_PIN=${KBUILD_SIGN_PIN:-""}
 readonly KERNEL_DEBUG_ENABLED=${KERNEL_DEBUG_ENABLED:-"no"}
 
@@ -474,6 +475,7 @@ setup_kernel() {
 	major_kernel=$(get_major_kernel_version "${kernel_version}")
 	local patches_dir_for_version="${patches_path}/${major_kernel}.x"
 	local build_type_patches_dir="${patches_path}/${major_kernel}.x/${build_type}"
+	local gpu_patches_dir="${patches_path}/${major_kernel}.x/${gpu_vendor}"
 
 	[[ -n "${arch_target}" ]] || arch_target="$(uname -m)"
 	arch_target=$(arch_to_kernel "${arch_target}")
@@ -489,6 +491,12 @@ setup_kernel() {
 		"${packaging_scripts_dir}/apply_patches.sh" "${build_type_patches_dir}"
 	fi
 
+	# Apply GPU-vendor-specific patches, if any (e.g. the nvidia-azure-repackaged vendor)
+	if [[ "${gpu_vendor}" != "" ]] && [[ -d "${gpu_patches_dir}" ]] ;then
+		info "Apply GPU patches from ${gpu_patches_dir}"
+		"${packaging_scripts_dir}/apply_patches.sh" "${gpu_patches_dir}"
+	fi
+
 	# shellcheck disable=SC2030
 	[[ -n "${hypervisor_target}" ]] || hypervisor_target="kvm"
 	[[ -n "${kernel_config_path}" ]] || kernel_config_path=$(get_default_kernel_config "${kernel_version}" "${hypervisor_target}" "${arch_target}" "${kernel_path}")
@@ -500,9 +508,11 @@ setup_kernel() {
 	)
 
 	info "Fetching NVIDIA driver source code"
-	if [[ "${gpu_vendor}" == "${VENDOR_NVIDIA}" ]]; then
-		driver_version=$(get_from_kata_deps .externals.nvidia.driver.version)
-		driver_url=$(get_from_kata_deps .externals.nvidia.driver.url)
+	if [[ "${gpu_vendor}" == "${VENDOR_NVIDIA}" || "${gpu_vendor}" == "${VENDOR_NVIDIA_AZURE_REPACKAGED}" ]]; then
+		local gpu_deps=".externals.nvidia"
+		[[ "${gpu_vendor}" == "${VENDOR_NVIDIA_AZURE_REPACKAGED}" ]] && gpu_deps='.externals["azure-gpus"]'
+		driver_version=$(get_from_kata_deps "${gpu_deps}.driver.version")
+		driver_url=$(get_from_kata_deps "${gpu_deps}.driver.url")
 		driver_src="open-gpu-kernel-modules-${driver_version}"
 
 		info "Downloading NVIDIA driver source code from: ${driver_url}${driver_version}.tar.gz"
@@ -530,7 +540,7 @@ build_kernel() {
 	{ [[ "${hypervisor_target}" == "firecracker" ]] || [[ "${hypervisor_target}" == "cloud-hypervisor" ]]; } && [[ "${arch_target}" == "arm64" ]] && [[ -e "arch/${arch_target}/boot/Image" ]]
 	popd >>/dev/null
 
-	if [[ "${gpu_vendor}" == "${VENDOR_NVIDIA}" ]]; then
+	if [[ "${gpu_vendor}" == "${VENDOR_NVIDIA}" || "${gpu_vendor}" == "${VENDOR_NVIDIA_AZURE_REPACKAGED}" ]]; then
 		# We need in-tree modules as well as out-of-tree ones for NVIDIA GPU
 		make -C "${kernel_path}" -j "$(nproc)" INSTALL_MOD_STRIP=1 INSTALL_MOD_PATH="${kernel_path}" modules_install
 
@@ -585,7 +595,11 @@ install_kata() {
 		suffix="-${build_type}"
 	fi
 
-	if [[ ${gpu_vendor} != "" ]]; then
+	if [[ "${gpu_vendor}" == "${VENDOR_NVIDIA_AZURE_REPACKAGED}" ]]; then
+		# The vendor only governs how the NVIDIA driver/tools are packaged; the
+		# UVM kernel identity stays "azure-gpus" (matches CONFIG_LOCALVERSION).
+		suffix="-azure-gpus${suffix}"
+	elif [[ ${gpu_vendor} != "" ]]; then
 		suffix="-${gpu_vendor}-gpu${suffix}"
 	elif [[ ${conf_guest} != "" ]]; then
 		# CCA kernel on arm64 needs a -confidential suffix to coexist
@@ -665,7 +679,7 @@ main() {
 				;;
 			g)
 				gpu_vendor="${OPTARG}"
-				[[ "${gpu_vendor}" == "${VENDOR_INTEL}" || "${gpu_vendor}" == "${VENDOR_NVIDIA}" ]] || die "GPU vendor only support intel and nvidia"
+				[[ "${gpu_vendor}" == "${VENDOR_INTEL}" || "${gpu_vendor}" == "${VENDOR_NVIDIA}" || "${gpu_vendor}" == "${VENDOR_NVIDIA_AZURE_REPACKAGED}" ]] || die "GPU vendor only support intel, nvidia and nvidia-azure-repackaged"
 				;;
 			h)
 				usage 0

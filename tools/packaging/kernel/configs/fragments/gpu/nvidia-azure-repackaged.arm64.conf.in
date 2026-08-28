@@ -1,0 +1,69 @@
+# Support for loading modules and firmware.
+# It is used to support loading GPU drivers.
+CONFIG_MODULES=y
+CONFIG_MODULE_UNLOAD=y
+CONFIG_FW_LOADER=y
+
+# CRYPTO_FIPS requires this config when loading modules is enabled.
+CONFIG_MODULE_SIG=y
+
+# Linux kernel version suffix
+CONFIG_LOCALVERSION="-azure-gpus${CONF_GUEST_SUFFIX}"
+
+# Newer NVIDIA drivers need additional symbols
+CONFIG_ARCH_SUPPORTS_MEMORY_FAILURE=y
+CONFIG_MEMORY_FAILURE=y
+
+# NVIDIA UVM enables UVM_IS_CONFIG_HMM only when both CONFIG_HMM_MIRROR and
+# CONFIG_DEVICE_PRIVATE are set. HMM_MIRROR is a promptless, select-only symbol
+# (mm/Kconfig), so a bare CONFIG_HMM_MIRROR=y is silently dropped; enable an
+# in-tree selector that does `select HMM_MIRROR`. TEST_HMM is the lightest one
+# (needs TRANSPARENT_HUGEPAGE + DEVICE_PRIVATE, pulls in no GPU/DRM stack); its
+# module is built but never loaded. kata builds the config with
+# `merge_config.sh -r -n` (allnoconfig base), which forces every prompted symbol
+# and menuconfig gate off unless a fragment sets it. TEST_HMM lives under
+# `if RUNTIME_TESTING_MENU`, so that gate must be enabled here or TEST_HMM is
+# dropped and nothing selects HMM_MIRROR.
+CONFIG_TRANSPARENT_HUGEPAGE=y
+CONFIG_DEVICE_PRIVATE=y
+CONFIG_RUNTIME_TESTING_MENU=y
+CONFIG_TEST_HMM=m
+
+
+# VFIO/IOMMU setttings
+CONFIG_MMU_NOTIFIER=y
+CONFIG_IOMMU_IO_PGTABLE=y
+CONFIG_IOMMU_IO_PGTABLE_LPAE=y
+CONFIG_IOMMU_SVA=y
+CONFIG_ARM_SMMU_V3=y
+CONFIG_ARM_SMMU_V3_SVA=y
+
+# GB200 coherent addressing (ATS) enablement. On Grace+Blackwell the NVIDIA
+# driver reports "Addressing Mode: ATS" and CUDA cuInit succeeds only when the
+# PCIe ATS coherent path is available; otherwise it falls back to HMM and
+# cuInit fails with error 802 ("system not yet initialized"). PCIe ATS is built
+# on PASID + PRI (both promptable bools that `select PCI_ATS`), so enabling them
+# pulls in PCI_ATS. TEGRA241_CMDQV drives the GB200 host SMMU (a Tegra241) and
+# ARM_SMMU_V3_IOMMUFD + IOMMUFD + IOMMU_DEFAULT_PASSTHROUGH provide the
+# passthrough domain the coherent path needs. Without these the allnoconfig
+# base leaves them off even though ARM_SMMU_V3(_SVA) are set.
+CONFIG_PCI_PASID=y
+CONFIG_PCI_PRI=y
+CONFIG_PCI_P2PDMA=y
+CONFIG_IOMMUFD=y
+CONFIG_ARM_SMMU_V3_IOMMUFD=y
+CONFIG_IOMMU_DEFAULT_PASSTHROUGH=y
+CONFIG_TEGRA241_CMDQV=y
+CONFIG_VIRTIO_IOMMU=y
+
+# GB200 exposes many NUMA nodes (one CPU node + a GI/GPU-memory node per GPU,
+# up to 4 GPUs). NODES_SHIFT=4 (16 nodes) previously capped the guest at ~3
+# generic-initiator nodes ("Built 16 zonelists"); bump to 6 (64 nodes) to match
+# the Canonical linux-nvidia arm64 build and give the coherent GPU memory nodes
+# room.
+CONFIG_NODES_SHIFT=6
+
+# CC related configs
+CONFIG_CRYPTO_ECC=y
+CONFIG_CRYPTO_ECDH=y
+CONFIG_CRYPTO_ECDSA=y
