@@ -76,6 +76,8 @@ is_nvidia_confidential_variant() { [[ "${BUILD_VARIANT}" == "nvidia-gpu-confiden
 
 # shellcheck source=/dev/null
 is_nvidia_variant && source "${script_dir}/nvidia/nvidia_rootfs.sh"
+# shellcheck source=/dev/null
+[[ "${BUILD_VARIANT}" == "azure-gpus"* ]] && source "${script_dir}/azure-gpus/azure_gpus_rootfs.sh"
 
 ARCH=${ARCH:-$(uname -m)}
 stripping_tool="strip"
@@ -653,6 +655,7 @@ build_rootfs_distro()
 			--env CONFIDENTIAL_GUEST="${CONFIDENTIAL_GUEST}" \
 			--env NVIDIA_GPU_STACK="${NVIDIA_GPU_STACK}" \
 			--env KBUILD_SIGN_PIN="${KBUILD_SIGN_PIN}" \
+			--env BUILD_DIR="${BUILD_DIR:-}" \
 			-v "${repo_dir}":"/kata-containers" \
 			-v "${ROOTFS_DIR}":"/rootfs" \
 			-v "${script_dir}/../scripts":"/scripts" \
@@ -1017,6 +1020,12 @@ main()
 		# The monolith and nvidia base continue to share stage-one.
 		setup_nvidia_gpu_rootfs_stage_one
 		setup_nvidia_gpu_rootfs_stage_two
+		return $?
+	fi
+
+	if [[ "${BUILD_VARIANT}" = "azure-gpus" ]]; then
+		setup_azure_gpus_rootfs_stage_one
+		setup_azure_gpus_rootfs_stage_two
 		return $?
 	fi
 }

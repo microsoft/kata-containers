@@ -86,6 +86,7 @@ readonly MEASURED_ROOTFS_VARIANTS=(
 	nvidia-gpu-confidential
 	nvidia
 	nvidia-gpu-extension
+	azure-gpus
 )
 
 die() {
@@ -610,6 +611,28 @@ get_latest_nvidia_repo_version() {
 		| sha256sum | cut -c1-9
 }
 
+get_latest_kernel_azure_gpus_artefact_and_builder_image_version() {
+	local kernel_version
+	local kernel_kata_config_version
+	local latest_kernel_artefact
+	local latest_kernel_builder_image
+
+	kernel_version=$(get_from_kata_deps ".assets.kernel.azure-gpus.version")
+	kernel_kata_config_version="$(cat "${repo_root_dir}"/tools/packaging/kernel/kata_config_version)"
+	latest_kernel_artefact="${kernel_version}-${kernel_kata_config_version}-$(get_last_modification "$(dirname "${kernel_builder}")")"
+	latest_kernel_builder_image="$(get_kernel_image_name)"
+
+	echo "${latest_kernel_artefact}-${latest_kernel_builder_image}"
+}
+
+get_latest_azure_gpus_driver_version() {
+	get_from_kata_deps ".externals.azure-gpus.driver.version"
+}
+
+get_latest_azure_gpus_ctk_version() {
+	get_from_kata_deps ".externals.azure-gpus.ctk.version"
+}
+
 #Install guest image
 install_image() {
 	local variant="${1:-}"
@@ -688,6 +711,14 @@ install_image() {
 		# or container-toolkit versions.  That lets a single base image back
 		# multiple driver-specific gpu extensions.
 		latest_artefact+="-$(get_latest_kernel_nvidia_artefact_and_builder_image_version)"
+		latest_artefact+="-$(get_latest_nvidia_nvrc_version)"
+	fi
+
+	if [[ "${variant}" == "azure-gpus" ]]; then
+		# If we bump the kernel we need to rebuild the image
+		latest_artefact+="-$(get_latest_kernel_azure_gpus_artefact_and_builder_image_version)"
+		latest_artefact+="-$(get_latest_azure_gpus_driver_version)"
+		latest_artefact+="-$(get_latest_azure_gpus_ctk_version)"
 		latest_artefact+="-$(get_latest_nvidia_nvrc_version)"
 	fi
 
@@ -1165,6 +1196,36 @@ install_image_nvidia_gpu_extension() {
 	EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
 	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
 	install_image "nvidia-gpu-extension"
+}
+
+#Install Azure GPUs image
+install_image_azure_gpus() {
+	export AGENT_POLICY
+	export MEASURED_ROOTFS="yes"
+	export FS_TYPE="erofs"
+	export SKIP_DAX_HEADER="yes"
+	export ROOT_FREE_SPACE="${ROOT_FREE_SPACE:-512}"
+	local version
+	version=$(get_latest_azure_gpus_driver_version)
+	local os_name
+	os_name=$(get_from_kata_deps ".assets.image.architecture.${ARCH}.azure-gpus.name")
+	if [[ "${os_name}" == "cbl-mariner" ]]; then
+		# Azure Linux: the in-rootfs azure_gpus_chroot.sh installs the NVIDIA
+		# userspace with tdnf (not apt) and uses curl to fetch the CUDA repo
+		# file. azurelinux-repos provides /etc/yum.repos.d + the base repo
+		# definitions the in-chroot tdnf needs to resolve NVIDIA package
+		# dependencies; none are guaranteed by the minimal kata-packages-uvm
+		# set, and 'apt' does not exist on Azure Linux.
+		EXTRA_PKGS="tdnf curl bash azurelinux-repos ${EXTRA_PKGS}"
+	else
+		EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
+	fi
+	# DCGM (datacenter-gpu-manager) + dcgm-exporter are intentionally omitted
+	# from the azure-gpus default stack: they are telemetry-only and cannot yet
+	# be rebuilt internally for licensing reasons, so their RPMs are not in the
+	# internal Azure Linux repo. Leaving 'dcgm' here would fail the tdnf install.
+	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,nvswitch"}
+	install_image "azure-gpus"
 }
 
 install_se_image() {
@@ -1909,6 +1970,11 @@ handle_build() {
 	export final_tarball_name
 	rm -f "${final_tarball_name}"
 
+	# Export BUILD_DIR for use inside Docker containers (GPU rootfs builds).
+	# The repo is bind-mounted at /kata-containers, so translate the host workdir
+	# to the corresponding Docker-internal path.
+	export BUILD_DIR="/kata-containers/${workdir#${repo_root_dir}/}"
+
 	case "${build_target}" in
 	all)
 		install_agent_ctl
@@ -2014,6 +2080,8 @@ handle_build() {
 	rootfs-image-nvidia-gpu-confidential) install_image_nvidia_gpu_confidential ;;
 
 	rootfs-image-nvidia) install_image_nvidia ;;
+
+	rootfs-image-azure-gpus) install_image_azure_gpus ;;
 
 	rootfs-image-nvidia-gpu-extension) install_image_nvidia_gpu_extension ;;
 

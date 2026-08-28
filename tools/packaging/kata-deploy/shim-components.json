@@ -86,6 +86,17 @@
     "openvmm-azure-runtime-rs": {
       "x86_64": ["shim-v2-rust", "openvmm", "virtiofsd", "kernel", "kernel-debug", "rootfs-image-mariner"]
     },
+    "clh-azure-gpus": {
+      "x86_64": ["shim-v2-go", "cloud-hypervisor", "virtiofsd", "kernel-azure-gpus", "rootfs-image-azure-gpus"]
+    },
+    "qemu-azure-gpus": {
+      "x86_64":  ["shim-v2-go", "qemu", "virtiofsd", "kernel-azure-gpus", "rootfs-image-azure-gpus", "ovmf"],
+      "aarch64": ["shim-v2-go", "qemu", "virtiofsd", "kernel-azure-gpus", "rootfs-image-azure-gpus", "ovmf"]
+    },
+    "openvmm-azure-gpus-runtime-rs": {
+      "x86_64":  ["shim-v2-rust", "openvmm", "virtiofsd", "kernel-azure-gpus", "rootfs-image-azure-gpus"],
+      "aarch64": ["shim-v2-rust", "openvmm", "virtiofsd", "kernel-azure-gpus", "rootfs-image-azure-gpus"]
+    },
     "dragonball": {
       "x86_64":  ["shim-v2-rust", "virtiofsd", "nydus", "kernel-dragonball-experimental", "rootfs-image", "rootfs-initrd"],
       "aarch64": ["shim-v2-rust", "virtiofsd", "nydus", "kernel-dragonball-experimental", "rootfs-image", "rootfs-initrd"]

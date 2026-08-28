@@ -1,0 +1,687 @@
+#!/usr/bin/env bash
+#
+# Copyright (c) 2024 NVIDIA Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
+set -euo pipefail
+[[ -n "${DEBUG}" ]] && set -x
+
+# Error helpers
+trap 'echo "rootfs: ERROR at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
+die() {
+  local msg="${*:-fatal error}"
+  echo "rootfs: ${msg}" >&2
+  exit 1
+}
+
+readonly BUILD_DIR="${BUILD_DIR:-/kata-containers/build/}"
+# catch errors and then assign
+script_dir="$(dirname "$(readlink -f "$0")")"
+readonly SCRIPT_DIR="${script_dir}/azure-gpus"
+
+KBUILD_SIGN_PIN=${KBUILD_SIGN_PIN:-}
+AGENT_POLICY="${AGENT_POLICY:-no}"
+
+NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:?NVIDIA_GPU_STACK must be set}
+BUILD_VARIANT=${BUILD_VARIANT:?BUILD_VARIANT must be set}
+ARCH=${ARCH:?ARCH must be set}
+INSTALL_NVLSM=${INSTALL_NVLSM:-yes}
+
+machine_arch="${ARCH}"
+
+if [[ "${machine_arch}" == "aarch64" ]]; then
+    distro_arch="arm64"
+elif [[ "${machine_arch}" == "x86_64" ]]; then
+    distro_arch="amd64"
+else
+    die "Unsupported architecture: ${machine_arch}"
+fi
+
+readonly stage_one="${BUILD_DIR:?}/rootfs-${BUILD_VARIANT:?}-stage-one"
+
+# Azure Linux ships no cosign package; fetch the released binary (checksum-
+# verified) so setup_nvidia-nvrc can cosign-verify the NVRC blob. Idempotent.
+install_cosign() {
+	command -v cosign >/dev/null 2>&1 && return 0
+	local cosign_arch
+	case "${machine_arch}" in
+		aarch64) cosign_arch="arm64" ;;
+		x86_64)  cosign_arch="amd64" ;;
+		*) die "Unsupported architecture for cosign: ${machine_arch}" ;;
+	esac
+	local ver="v3.0.2"
+	local base="https://github.com/sigstore/cosign/releases/download/${ver}"
+	pushd "${BUILD_DIR}" >> /dev/null
+	curl -fsSL -O "${base}/cosign-linux-${cosign_arch}"
+	curl -fsSL -O "${base}/cosign_checksums.txt"
+	grep -E "cosign-linux-${cosign_arch}$" cosign_checksums.txt | sha256sum --check -
+	install -m 0755 "cosign-linux-${cosign_arch}" /usr/local/bin/cosign
+	rm -f "cosign-linux-${cosign_arch}" cosign_checksums.txt
+	popd >> /dev/null
+}
+
+setup_nvidia-nvrc() {
+	local url ver
+	local nvrc=NVRC-${machine_arch}-unknown-linux-musl
+
+	install_cosign
+	url=$(get_package_version_from_kata_yaml "externals.nvrc.url")
+	ver=$(get_package_version_from_kata_yaml "externals.nvrc.version")
+
+	local dl="${url}/${ver}"
+	curl -fsSL -o "${BUILD_DIR}/${nvrc}.tar.xz" "${dl}/${nvrc}.tar.xz"
+	curl -fsSL -o "${BUILD_DIR}/${nvrc}.tar.xz.sig" "${dl}/${nvrc}.tar.xz.sig"
+	curl -fsSL -o "${BUILD_DIR}/${nvrc}.tar.xz.cert" "${dl}/${nvrc}.tar.xz.cert"
+
+	local id="^https://github.com/NVIDIA/nvrc/.github/workflows/.+@refs/heads/main$"
+	local oidc="https://token.actions.githubusercontent.com"
+
+	# Only allow releases from the NVIDIA/nvrc main branch and build by github actions
+	cosign verify-blob                                 \
+	  --rekor-url https://rekor.sigstore.dev           \
+	  --certificate "${BUILD_DIR}/${nvrc}.tar.xz.cert" \
+	  --signature   "${BUILD_DIR}/${nvrc}.tar.xz.sig"  \
+	  --certificate-identity-regexp "${id}"            \
+	  --certificate-oidc-issuer "${oidc}"              \
+	  "${BUILD_DIR}/${nvrc}.tar.xz"
+}
+
+setup_azure_gpus_rootfs_stage_one() {
+	local rootfs_type=${1:-""}
+
+	if [[ -e "${stage_one}.tar.zst" ]]; then
+		info "nvidia: GPU rootfs stage one already exists"
+		return
+	fi
+
+	pushd "${ROOTFS_DIR:?}" >> /dev/null
+
+	info "nvidia: Setup GPU rootfs type=${rootfs_type}"
+	cp "${SCRIPT_DIR}/azure_gpus_chroot.sh" ./azure_gpus_chroot.sh
+
+	chmod +x ./azure_gpus_chroot.sh
+
+	local nvrc=NVRC-${machine_arch}-unknown-linux-musl
+	if [[ ! -e  "${BUILD_DIR}/${nvrc}.tar.xz" ]]; then
+		setup_nvidia-nvrc
+	fi
+	tar -xvf "${BUILD_DIR}/${nvrc}.tar.xz" -C ./bin/
+
+	local appendix=""
+	if echo "${NVIDIA_GPU_STACK}" | grep -q '\<dragonball\>'; then
+    		appendix="-dragonball-experimental"
+	fi
+
+	# Install the precompiled kernel modules shipped with the kernel
+	mkdir -p ./lib/modules/
+	tar --zstd -xvf "${BUILD_DIR}"/kata-static-kernel-azure-gpus"${appendix}"-modules.tar.zst -C ./lib/modules/
+
+	mount --rbind /dev ./dev
+	mount --make-rslave ./dev
+	mount -t proc /proc ./proc
+	# Give the in-chroot azure_gpus_chroot.sh working DNS to fetch the CUDA repo /
+	# packages. The cbl-mariner rootfs ships an empty /etc/resolv.conf (tdnf
+	# --installroot does not copy the host's, unlike debootstrap), so without
+	# this the chroot cannot resolve developer.download.nvidia.com. Unmounted
+	# before the tar below so the shipped image keeps its clean resolv.conf.
+	mount --bind /etc/resolv.conf ./etc/resolv.conf
+	local cuda_repo_url cuda_repo_pkg gpu_base_os_version ctk_version
+	cuda_repo_url=$(get_package_version_from_kata_yaml "externals.azure-gpus.cuda.repo.${machine_arch}.url")
+	cuda_repo_pkg=$(get_package_version_from_kata_yaml "externals.azure-gpus.cuda.repo.${machine_arch}.pkg")
+	gpu_base_os_version=$(get_package_version_from_kata_yaml "assets.image.architecture.x86_64.azure-gpus.version")
+
+	tools_repo_url=$(get_package_version_from_kata_yaml "externals.azure-gpus.tools.repo.${machine_arch}.url")
+	tools_repo_pkg=$(get_package_version_from_kata_yaml "externals.azure-gpus.tools.repo.${machine_arch}.pkg")
+
+	ctk_version=$(get_package_version_from_kata_yaml "externals.azure-gpus.ctk.version")
+
+	chroot . /bin/bash -c "/azure_gpus_chroot.sh ${machine_arch} ${NVIDIA_GPU_STACK} \
+		 ${gpu_base_os_version} ${cuda_repo_url} ${cuda_repo_pkg} ${tools_repo_url} ${tools_repo_pkg} ${ctk_version}"
+
+	umount ./etc/resolv.conf || true
+	umount -R ./dev
+	umount ./proc
+
+	rm ./azure_gpus_chroot.sh
+
+	tar cfa "${stage_one}.tar.zst" --remove-files -- *
+
+	popd  >> /dev/null
+
+	pushd "${BUILD_DIR}" >> /dev/null
+	curl -LO "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-${distro_arch}_linux.tar.xz"
+	tar xvf "upx-4.2.4-${distro_arch}_linux.tar.xz"
+	popd  >> /dev/null
+}
+
+# Copy every regular file / symlink that a stage-one dpkg package owns into the
+# chiseled image, recreating its directory tree, by reading the package's dpkg
+# file list (/var/lib/dpkg/info/<pkg>.list). This is more robust than
+# hand-picking individual paths: a file the daemon needs -- e.g. nvidia-imex's
+# /etc/nvidia-imex/config.cfg + nodes_config.cfg -- is shipped automatically
+# instead of being silently dropped, and it keeps working if a package update
+# adds files. Shared-library dependencies that live in OTHER packages (libc,
+# libnvidia-*) are still provided by the explicit copies in the chisseled_*
+# helpers, so this only needs to ship the package's own files. Runs with CWD =
+# the image root (like every chisseled_* helper).
+chisseled_from_deb() {
+	local pkg="$1"
+	local list
+	list=$(ls "${stage_one}/var/lib/dpkg/info/${pkg}.list" \
+	          "${stage_one}/var/lib/dpkg/info/${pkg}":*.list 2>/dev/null | head -1 || true)
+	if [[ -z "${list}" || ! -f "${list}" ]]; then
+		echo "nvidia: warning: dpkg package '${pkg}' not found in stage-one; skipping"
+		return 0
+	fi
+	echo "nvidia: chisseling package ${pkg} ($(basename "${list}"))"
+	local path src
+	while IFS= read -r path; do
+		[[ -z "${path}" ]] && continue
+		src="${stage_one}${path}"
+		if [[ -L "${src}" ]]; then
+			install -d "$(dirname "./${path}")"
+			cp -a "${src}" "./${path}"
+		elif [[ -d "${src}" ]]; then
+			install -d "./${path}"
+		elif [[ -e "${src}" ]]; then
+			install -d "$(dirname "./${path}")"
+			cp -a "${src}" "./${path}"
+		fi
+	done < "${list}"
+}
+
+chisseled_iptables() {
+	echo "nvidia: chisseling iptables"
+	cp -a "${stage_one}"/usr/sbin/xtables-nft-multi sbin/.
+
+	ln -s ../sbin/xtables-nft-multi sbin/iptables-restore
+	ln -s ../sbin/xtables-nft-multi sbin/iptables-save
+
+	libdir=lib/"${machine_arch}"-linux-gnu
+	cp -a "${stage_one}/${libdir}"/libmnl.so.0*      lib/.
+
+	libdir=usr/lib/"${machine_arch}"-linux-gnu
+	cp -a "${stage_one}/${libdir}"/libnftnl.so.11*   lib/.
+	cp -a "${stage_one}/${libdir}"/libxtables.so.12* lib/.
+}
+
+# <= NVLINK4 nv-fabrimanager
+# >= NVLINK5 nv-fabricmanager + nvlsm (TODO)
+chisseled_nvswitch() {
+	echo "nvidia: chisseling NVSwitch"
+
+	mkdir -p usr/share/nvidia/nvswitch
+
+	cp -a "${stage_one}"/usr/bin/nv-fabricmanager	bin/.
+	cp -a "${stage_one}"/usr/share/nvidia/nvswitch	usr/share/nvidia/.
+
+	libdir=usr/lib/"${machine_arch}"-linux-gnu
+	cp -a "${stage_one}/${libdir}"/libnvidia-nscq.so.* lib/"${machine_arch}"-linux-gnu/.
+
+	# NVLINK SubnetManager dependencies are only needed on multi-node racks.
+	# Force-disable NVLSM when it is not explicitly present in the requested stack
+	# so stage-two does not depend on external env propagation.
+	local install_nvlsm="${INSTALL_NVLSM}"
+	if [[ ",${NVIDIA_GPU_STACK}," != *",nvlsm,"* ]]; then
+		install_nvlsm="no"
+	fi
+
+	if [[ "${install_nvlsm}" == "yes" ]]; then
+		local nvlsm=usr/share/nvidia/nvlsm
+		mkdir -p "${nvlsm}"
+
+		if [[ -f "${stage_one}/opt/nvidia/nvlsm/lib/libgrpc_mgr.so" && -f "${stage_one}/opt/nvidia/nvlsm/sbin/nvlsm" ]]; then
+			cp -a "${stage_one}"/opt/nvidia/nvlsm/lib/libgrpc_mgr.so	lib/.
+			cp -a "${stage_one}"/opt/nvidia/nvlsm/sbin/nvlsm		sbin/.
+			cp -a "${stage_one}/${nvlsm}"/*.conf					"${nvlsm}"/.
+		else
+			echo "nvidia: warning: nvlsm requested but nvlsm artifacts are missing in stage-one; skipping nvlsm userspace copy"
+		fi
+	fi
+	# Redirect all the logs to syslog instead of logging to file
+	sed -i 's|^LOG_USE_SYSLOG=.*|LOG_USE_SYSLOG=1|' usr/share/nvidia/nvswitch/fabricmanager.cfg
+}
+
+chisseled_dcgm() {
+	echo "nvidia: chisseling DCGM"
+
+	mkdir -p etc/dcgm-exporter
+	libdir=lib/"${machine_arch}"-linux-gnu
+
+	cp -a "${stage_one}"/usr/"${libdir}"/libdcgm.*     "${libdir}"/.
+	cp -a "${stage_one}"/"${libdir}"/libgcc_s.so.1*    "${libdir}"/.
+	cp -a "${stage_one}"/usr/bin/nv-hostengine   bin/.
+}
+
+# copute always includes utility per default
+chisseled_compute() {
+	echo "nvidia: chisseling GPU"
+
+	cp -a "${stage_one}"/lib/modules/* lib/modules/.
+
+	libdir="lib/${machine_arch}-linux-gnu"
+	cp -a "${stage_one}/${libdir}"/libdl.so.2*        	"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libz.so.1*         	"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libpthread.so.0*   	"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libresolv.so.2*    	"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libc.so.6*         	"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libm.so.6*         	"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/librt.so.1*        	"${libdir}"/.
+ 	# nvidia-persistenced dependencies for CUDA repo and >= 590
+	cp -a "${stage_one}/${libdir}"/libtirpc.so.3*    	"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libgssapi_krb5.so.2*	"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libkrb5.so.3*		"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libkrb5support.so.0*	"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libk5crypto.so.3*	"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libcom_err.so.2*		"${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libkeyutils.so.1*	"${libdir}"/.
+	cp -a "${stage_one}/etc/netconfig"	etc/.
+
+	[[ "${type}" == "confidential" ]] && cp -a "${stage_one}/${libdir}"/libnvidia-pkcs11* 	"${libdir}"/.
+
+	[[ ${machine_arch} == "aarch64" ]] && libdir="lib"
+	[[ ${machine_arch} == "x86_64" ]]  && libdir="lib64"
+
+	cp -aL "${stage_one}/${libdir}"/ld-linux-* "${libdir}"/.
+
+	libdir=usr/lib/"${machine_arch}"-linux-gnu
+	cp -a "${stage_one}/${libdir}"/libnv*        lib/"${machine_arch}"-linux-gnu/.
+	cp -a "${stage_one}/${libdir}"/libcuda.so.*       lib/"${machine_arch}"-linux-gnu/.
+
+	# basic GPU admin tools
+	cp -a "${stage_one}"/usr/bin/nvidia-persistenced  bin/.
+	cp -a "${stage_one}"/usr/bin/nvidia-smi           bin/.
+	cp -a "${stage_one}"/usr/bin/nvidia-ctk           bin/.
+	cp -a "${stage_one}"/usr/bin/nvidia-cdi-hook      bin/.
+	# nv-fabricmanager and nvidia-imex both execve /usr/bin/nvidia-modprobe
+	# (the path is hard-coded in their .data section via
+	# libnvidia-modprobe-utils) to create the /dev/nvidia* device nodes and
+	# load the nvidia kernel module on demand. Without it both daemons exit
+	# at startup before fabric init can run.
+	#
+	# Ship the binary into BOTH /bin and /usr/bin so the hard-coded
+	# /usr/bin/nvidia-modprobe path always resolves, regardless of whether
+	# the surrounding chisseled_* helpers materialised usr/bin/ as a real
+	# directory (e.g. chisseled_init dropping kata-agent into usr/bin/, which
+	# turns a subsequent `ln -s ../bin usr/bin` into a no-op that creates
+	# usr/bin/bin -> ../bin instead of replacing the directory).
+	cp -a "${stage_one}"/usr/bin/nvidia-modprobe      bin/.
+	install -d -m 0755 usr/bin
+	cp -a "${stage_one}"/usr/bin/nvidia-modprobe      usr/bin/.
+
+	# nvidia-imex: on Blackwell coherent-NVLink parts (GB200) the GPU
+	# fabric/clique readiness that gates cuInit is brought up by nvidia-imex,
+	# NOT nv-fabricmanager. The 'compute' feature apt-installs nvidia-imex into
+	# stage-one at the pinned driver version, but no chisel step shipped it, so
+	# it was silently absent -> the fabric never reached a ready state (cuInit
+	# 802 / CliqueId 32766). Ship the WHOLE package (binaries + /etc/nvidia-imex/
+	# config.cfg + nodes_config.cfg + ...) from its dpkg file list so we cannot
+	# miss a file the daemon needs (config.cfg is mandatory -- without it the
+	# daemon exits at startup). Starting it at boot is a separate NVRC concern
+	# (the .deb's systemd nvidia-imex.service never runs under the NVRC-PID1 UVM).
+	chisseled_from_deb "nvidia-imex"
+
+	# The nvidia-imex .deb ships config.cfg but NOT nodes_config.cfg (the node
+	# list is deployment-specific). config.cfg's IMEX_NODE_CONFIG_FILE points at
+	# /etc/nvidia-imex/nodes_config.cfg, and imex needs that file to form its
+	# IMEX domain. For the single-node UVM (one GPU clique per VM) the domain has
+	# exactly one member -- this node via loopback -- so write a one-line node
+	# list. Without it imex cannot reach "Domain State: UP" and the GPU fabric
+	# never becomes ready. Only written when imex was actually shipped (config.cfg
+	# present) so non-compute images are unaffected.
+	if [[ -f etc/nvidia-imex/config.cfg && ! -f etc/nvidia-imex/nodes_config.cfg ]]; then
+		echo "127.0.0.1" > etc/nvidia-imex/nodes_config.cfg
+	fi
+
+	# Tune the shipped config.cfg for the NVRC-PID1 UVM so NVRC can run imex as
+	# a tracked, observable daemon: DAEMONIZE=0 keeps it in the foreground (the
+	# .deb default is 1, which would fork and detach -- NVRC's background()
+	# would then track a dead parent PID and lose the log pipe), and
+	# LOG_FILE_NAME=/dev/stderr routes its log to background()'s stderr->/dev/kmsg
+	# wiring so it shows up on the openvmm-guest console (the UVM has no syslog
+	# and the default /var/log path is invisible during triage). Mirrors how
+	# chisseled_nvswitch rewrites fabricmanager.cfg's LOG_USE_SYSLOG.
+	if [[ -f etc/nvidia-imex/config.cfg ]]; then
+		sed -i \
+			-e 's|^DAEMONIZE=.*|DAEMONIZE=0|' \
+			-e 's|^LOG_FILE_NAME=.*|LOG_FILE_NAME=/dev/stderr|' \
+			etc/nvidia-imex/config.cfg
+	fi
+}
+
+chisseled_gpudirect() {
+	echo "nvidia: chisseling GPUDirect"
+	echo "nvidia: not implemented yet"
+	exit 1
+}
+
+chisseled_nvat() {
+	if [[ "${type}" != "confidential" ]]; then
+                return
+	fi
+
+	echo "nvidia: chisseling NVAT"
+
+	local libdir="lib/${machine_arch}-linux-gnu"
+
+	# NVAT shared library (bundled via coco-guest-components tarball)
+	cp -a "${stage_one}"/usr/local/lib/libnvat.so* "${libdir}"/.
+
+	# NVAT runtime dependencies (per ldd on attestation-agent)
+	cp -a "${stage_one}/${libdir}"/libxml2.so.2*     "${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libstdc++.so.6*   "${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/liblzma.so.5*     "${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libicuuc.so.*     "${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libicudata.so.*   "${libdir}"/.
+}
+
+setup_nvrc_init_symlinks() {
+	local nvrc="NVRC-${machine_arch}-unknown-linux-musl"
+	# make sure NVRC is the init process for the initrd and image case
+	ln -sf /bin/"${nvrc}" init
+	ln -sf /bin/"${nvrc}" sbin/init
+}
+
+chisseled_init() {
+	echo "nvidia: chisseling init"
+	tar --zstd -xvf "${BUILD_DIR}"/kata-static-busybox.tar.zst -C .
+
+	mkdir -p dev etc proc run/cdi sys tmp usr var lib/modules lib/firmware \
+		 usr/share/nvidia lib/"${machine_arch}"-linux-gnu lib64        \
+		 usr/bin etc/modprobe.d etc/ssl/certs
+
+	ln -sf ../run var/run
+	ln -sf ../run var/log
+	ln -sf ../run var/cache
+
+	# Needed for various RUST static builds with LIBC=gnu
+	libdir=lib/"${machine_arch}"-linux-gnu
+	cp -a "${stage_one}"/"${libdir}"/libgcc_s.so.1*    "${libdir}"/.
+
+	local nvrc="NVRC-${machine_arch}-unknown-linux-musl"
+
+	cp -a "${stage_one}/bin/${nvrc}"      bin/.
+	cp -a "${stage_one}/bin/${nvrc}".cert bin/.
+	cp -a "${stage_one}/bin/${nvrc}".sig  bin/.
+
+	setup_nvrc_init_symlinks
+
+	cp -a "${stage_one}"/usr/bin/kata-agent   usr/bin/.
+	if [[ "${AGENT_POLICY}" == "yes" ]]; then
+		cp -a "${stage_one}"/etc/kata-opa etc/.
+	fi
+	cp -a "${stage_one}"/etc/resolv.conf      etc/.
+
+	cp -a "${stage_one}"/lib/firmware/nvidia  lib/firmware/.
+	cp -a "${stage_one}"/sbin/ldconfig.real   sbin/ldconfig
+
+	cp -a "${stage_one}"/etc/ssl/certs/ca-certificates.crt etc/ssl/certs/.
+
+	local conf_file="etc/modprobe.d/0000-nvidia.conf"
+	echo 'options nvidia NVreg_DeviceFileMode=0660' > "${conf_file}"
+}
+
+# Ship debug tools (bash + strace) and their .so deps into the chiseled
+# rootfs. apt-installed by install_debug_tools() in azure_gpus_chroot.sh so the
+# stage_one tree already has them.
+#
+# Why these two:
+#   * bash    -- the kata-static-busybox shipped to the chiseled rootfs
+#                is a minimized build (no `sh` applet). Without bash any
+#                shebang-based scripting is broken, including the
+#                dev-time /init wrappers used by debug tooling.
+#   * strace  -- the canonical "what syscall failed?" tool. Several
+#                silent fabricmanager / NVRC failures (exit 255 with no
+#                useful stderr, hung IOCTLs on /dev/nvidia*) are only
+#                diagnosable by tracing the actual syscall sequence
+#                inside the UVM.
+#
+# Lib copies match the runtime deps that the Ubuntu noble packages of
+# bash + strace actually pull in (verified by apt install output 2026-06-25):
+#   bash    -> libtinfo + libreadline + libncursesw  (terminal + line editing)
+#   strace  -> libunwind                              (stack trace symbols)
+# libc + ld-linux are already shipped by chisseled_init / chisseled_compute.
+# Other libs sometimes seen in `ldd strace` on richer distros (libdw,
+# libelf, libz, libzstd, liblzma, libbz2) are NOT linked by Ubuntu's strace,
+# so we don't try to copy them.
+chisseled_debug_tools() {
+	echo "nvidia: chisseling debug tools (bash + strace)"
+
+	local libdir="lib/${machine_arch}-linux-gnu"
+
+	# bash + its terminal-handling deps. Bash imports libreadline +
+	# libncursesw at startup (DT_NEEDED) even for non-interactive script
+	# execution; missing either makes /bin/bash fail to exec.
+	cp -a "${stage_one}"/usr/bin/bash             bin/.
+	cp -a "${stage_one}/${libdir}"/libtinfo.so.6*       "${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libreadline.so.8*    "${libdir}"/.
+	cp -a "${stage_one}/${libdir}"/libncursesw.so.6*    "${libdir}"/.
+
+	# strace + (on some arches) libunwind.
+	#
+	# On Ubuntu noble x86_64 the strace 6.8 package links libunwind for
+	# symbolic backtraces and apt pulls libunwind8 in as a hard dep.
+	# On Ubuntu noble arm64 the same strace 6.8 package does NOT link
+	# libunwind (aarch64 uses a different unwind path), so apt doesn't
+	# install libunwind8 and the stage_one tree has no libunwind.so.8.
+	# Guard the copy with compgen so the build doesn't abort there.
+	cp -a "${stage_one}"/usr/bin/strace           bin/.
+	if compgen -G "${stage_one}/${libdir}/libunwind.so.8*" >/dev/null; then
+		cp -a "${stage_one}/${libdir}"/libunwind.so.8*  "${libdir}"/.
+	else
+		echo "nvidia: strace has no libunwind dep on this arch, skipping libunwind.so.8 copy"
+	fi
+}
+
+compress_rootfs() {
+	echo "nvidia: compressing rootfs"
+
+	# For some unobvious reason libc has executable bit set
+	# clean this up otherwise the find -executable will not work correctly
+	find . -type f -name "*.so.*" | while IFS= read -r file; do
+		if ! file "${file}" | grep -q ELF; then
+			echo "nvidia: skip stripping file: ${file} ($(file -b "${file}"))"
+			continue
+		fi
+		chmod -x "${file}"
+		strip "${file}"
+	done
+
+	find . -type f -executable | while IFS= read -r file; do
+		# Skip files with setuid/setgid bits (UPX refuses to pack them)
+		if [[ -u "${file}" ]] || [[ -g "${file}" ]]; then
+			echo "nvidia: skip compressing executable (special permissions): ${file} ($(file -b "${file}"))"
+			continue
+		fi
+		if ! file "${file}" | grep -q ELF; then
+			echo "nvidia: skip compressing executable (not ELF): ${file} ($(file -b "${file}"))"
+			continue
+		fi
+		strip "${file}"
+		# UPX refuses to compress some ELF binaries with a non-zero exit
+		# (NotCompressibleException, typically on Go binaries with large
+		# embedded sections). Treat that as a benign skip instead of aborting
+		# the whole rootfs build -- the file is already stripped and remains
+		# fully usable, just not compressed.
+		if ! "${BUILD_DIR}"/upx-4.2.4-"${distro_arch}"_linux/upx --best --lzma "${file}"; then
+			echo "nvidia: skip compressing (UPX refused): ${file}"
+		fi
+	done
+
+ 	# While I was playing with compression the executable flag on
+	# /lib64/ld-linux-x86-64.so.2 was lost...
+	# Since this is the program interpreter, it needs to be executable
+	# as well.. sigh
+	[[ ${machine_arch} == "aarch64" ]] && libdir="lib"
+	[[ ${machine_arch} == "x86_64" ]]  && libdir="lib64"
+
+	chmod +x "${libdir}"/ld-linux-*
+}
+
+copy_cdh_runtime_deps() {
+	local libdir="lib/${machine_arch}-linux-gnu"
+
+	# Shared libraries required by /usr/local/bin/confidential-data-hub.
+	cp -a "${stage_one}/${libdir}"/libgcc_s.so.1*          "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libm.so.6*              "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libc.so.6*              "${libdir}/."
+
+	# Shared libraries required by the cryptsetup, mkfs.ext4, and dd binaries
+	# used by CDH secure_mount.
+	#
+	# cryptsetup direct dependencies
+	cp -a "${stage_one}/${libdir}"/libcryptsetup.so.12*    "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libpopt.so.0*           "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libuuid.so.1*           "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libblkid.so.1*          "${libdir}/."
+
+	# libcryptsetup transitive dependencies
+	cp -a "${stage_one}/${libdir}"/libdevmapper.so.1.02.1* "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libcrypto.so.3*         "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libargon2.so.1*         "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libjson-c.so.5*         "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libselinux.so.1*        "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libudev.so.1*           "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libpcre2-8.so.0*        "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libcap.so.2*            "${libdir}/."
+
+	# e2fsprogs (mke2fs/mkfs.ext4) runtime libs
+	cp -a "${stage_one}/${libdir}"/libext2fs.so.2*         "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libcom_err.so.2*        "${libdir}/."
+	cp -a "${stage_one}/${libdir}"/libe2p.so.2*            "${libdir}/."
+
+	# cryptsetup, mkfs.ext4, and dd are used by CDH secure_mount.
+	mkdir -p sbin etc bin
+	cp -a "${stage_one}/sbin/cryptsetup" sbin/.
+	cp -a "${stage_one}/sbin/mke2fs" sbin/.
+	cp -a "${stage_one}/sbin/mkfs.ext4" sbin/.
+	cp -a "${stage_one}/etc/mke2fs.conf" etc/.
+	cp -a "${stage_one}/usr/bin/dd" bin/.
+}
+
+coco_guest_components() {
+	if [[ "${type}" != "confidential" ]]; then
+		return
+	fi
+
+	info "nvidia: installing the confidential containers guest components tarball"
+
+	local -r coco_bin_dir="usr/local/bin"
+	local -r etc_dir="etc"
+	local -r pause_dir="pause_bundle"
+
+	mkdir -p "${coco_bin_dir}"
+	cp -a "${stage_one}/${coco_bin_dir}"/attestation-agent-nv  "${coco_bin_dir}/attestation-agent"
+	cp -a "${stage_one}/${coco_bin_dir}"/api-server-rest       "${coco_bin_dir}/."
+	cp -a "${stage_one}/${coco_bin_dir}"/confidential-data-hub "${coco_bin_dir}/."
+
+	cp -a "${stage_one}/${etc_dir}"/ocicrypt_config.json "${etc_dir}/."
+
+	mkdir -p "${pause_dir}/rootfs"
+	cp -a "${stage_one}/${pause_dir}"/config.json  "${pause_dir}/."
+	cp -a "${stage_one}/${pause_dir}"/rootfs/pause "${pause_dir}/rootfs/."
+
+	copy_cdh_runtime_deps
+}
+
+setup_azure_gpus_rootfs_stage_two() {
+	readonly stage_two="${ROOTFS_DIR:?}"
+	readonly stack="${NVIDIA_GPU_STACK:?}"
+	readonly type=${1:-""}
+
+	# Base distro of the GPU UVM image (from versions.yaml, keyed on the
+	# actual build variant). Azure Linux (cbl-mariner) uses an rpm/tdnf
+	# stage-one with no dpkg file lists and Azure Linux library paths, so the
+	# Debian-oriented chisseled_* helpers do not apply; take a full-rootfs
+	# assembly path instead.
+	local base_os
+	base_os=$(get_package_version_from_kata_yaml "assets.image.architecture.${machine_arch}.${BUILD_VARIANT}.name")
+
+	# If devkit flag is set, skip chisseling, use stage_one
+	if echo "${stack}" | grep -q '\<devkit\>'; then
+		echo "nvidia: devkit mode enabled - skip chisseling"
+
+		tar -C "${stage_two}" -xf "${stage_one}".tar.zst
+
+		pushd "${stage_two}" >> /dev/null
+
+		# Only step needed from stage_two (see chisseled_init)
+		setup_nvrc_init_symlinks
+	elif [[ "${base_os}" == "cbl-mariner" ]]; then
+		# Azure Linux full-rootfs assembly (no chisel). The tdnf stage-one
+		# already installed the NVIDIA userspace at standard Azure Linux
+		# paths, so ship the whole tree and only re-point init at NVRC and
+		# replicate the NVRC-specific config tuning. Deliberately "full-ish"
+		# for first bring-up; size trimming can come later.
+		echo "nvidia: Azure Linux full rootfs assembly (no chisel)"
+
+		tar -C "${stage_two}" -xf "${stage_one}".tar.zst
+
+		pushd "${stage_two}" >> /dev/null
+
+		# NVRC is PID1 for the UVM (initrd + image cases).
+		setup_nvrc_init_symlinks
+
+		# Relax the nvidia device-node mode so nvidia-modprobe can create
+		# /dev/nvidia* accessible to the workload (mirrors chisseled_init).
+		mkdir -p etc/modprobe.d
+		echo 'options nvidia NVreg_DeviceFileMode=0660' > etc/modprobe.d/0000-nvidia.conf
+
+		# NVRC-PID1 tuning for nvidia-imex (GB200 fabric bring-up). These
+		# paths are NVIDIA-package-internal (not distro-specific) and are
+		# guarded, so a differing Azure Linux layout is a harmless no-op we
+		# can correct once a built image can be inspected.
+		if [[ -f etc/nvidia-imex/config.cfg ]]; then
+			[[ ! -f etc/nvidia-imex/nodes_config.cfg ]] && echo "127.0.0.1" > etc/nvidia-imex/nodes_config.cfg
+			sed -i \
+				-e 's|^DAEMONIZE=.*|DAEMONIZE=0|' \
+				-e 's|^LOG_FILE_NAME=.*|LOG_FILE_NAME=/dev/stderr|' \
+				etc/nvidia-imex/config.cfg
+		fi
+
+		# Route fabricmanager logs to syslog (mirrors chisseled_nvswitch).
+		if [[ -f usr/share/nvidia/nvswitch/fabricmanager.cfg ]]; then
+			sed -i 's|^LOG_USE_SYSLOG=.*|LOG_USE_SYSLOG=1|' usr/share/nvidia/nvswitch/fabricmanager.cfg
+		fi
+	else
+		echo "nvidia: chisseling the following stack components: ${stack}"
+
+		[[ -e "${stage_one}" ]] && rm -rf "${stage_one}"
+		[[ ! -e "${stage_one}" ]] && mkdir -p "${stage_one}"
+
+		tar -C "${stage_one}" -xf "${stage_one}".tar.zst
+
+		pushd "${stage_two}" >> /dev/null
+
+		chisseled_init
+		chisseled_iptables
+		chisseled_debug_tools
+
+		IFS=',' read -r -a stack_components <<< "${NVIDIA_GPU_STACK}"
+
+		for component in "${stack_components[@]}"; do
+			if [[ "${component}" = "compute" ]]; then
+				echo "nvidia: processing \"compute\" component"
+				chisseled_compute
+			elif [[ "${component}" = "dcgm" ]]; then
+				echo "nvidia: processing DCGM component"
+				chisseled_dcgm
+			elif [[ "${component}" = "nvswitch" ]]; then
+				echo "nvidia: processing NVSwitch component"
+				chisseled_nvswitch
+			elif [[ "${component}" = "gpudirect" ]]; then
+				echo "nvidia: processing GPUDirect component"
+				chisseled_gpudirect
+			fi
+		done
+
+		coco_guest_components
+		chisseled_nvat
+	fi
+
+	compress_rootfs
+	chroot . ldconfig
+
+	popd >> /dev/null
+}

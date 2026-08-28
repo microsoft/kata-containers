@@ -22,16 +22,19 @@ const ALL_SHIMS: &[&str] = &[
     "clh",
     "clh-azure",
     "clh-azure-runtime-rs",
+    "clh-azure-gpus",
     "clh-runtime-rs",
     "dragonball",
     "fc",
     "firecracker",
+    "openvmm-azure-gpus-runtime-rs",
     "openvmm-azure-runtime-rs",
     "remote",
     // QEMU shims
     "qemu",
     "qemu-coco-dev",
     "qemu-coco-dev-runtime-rs",
+    "qemu-azure-gpus",
     "qemu-nvidia-cpu",
     "qemu-nvidia-cpu-runtime-rs",
     "qemu-nvidia-gpu",
@@ -66,10 +69,12 @@ fn get_hypervisor_name(shim: &str) -> Result<&str> {
     }
 
     match shim {
-        "clh" | "clh-azure" | "clh-runtime-rs" | "clh-azure-runtime-rs" => Ok("clh"),
+        "clh" | "clh-azure" | "clh-runtime-rs" | "clh-azure-runtime-rs" | "clh-azure-gpus" => {
+            Ok("clh")
+        }
         "dragonball" => Ok("dragonball"),
         "fc" | "firecracker" => Ok("firecracker"),
-        "openvmm-azure-runtime-rs" => Ok("openvmm"),
+        "openvmm-azure-runtime-rs" | "openvmm-azure-gpus-runtime-rs" => Ok("openvmm"),
         "remote" => Ok("remote"),
         _ => anyhow::bail!(
             "Unknown shim '{}'. Valid shims are: {}",
@@ -1974,6 +1979,15 @@ mod tests {
     #[case("ppc64le", "qemu-system-ppc64")]
     fn test_qemu_system_binary_for(#[case] arch: &str, #[case] expected: &str) {
         assert_eq!(qemu_system_binary_for(arch), expected);
+    }
+
+    #[rstest]
+    // "<vmm>-azure-gpus" shims resolve to the same hypervisor as their base shim.
+    #[case("openvmm-azure-gpus-runtime-rs", "openvmm")]
+    #[case("clh-azure-gpus", "clh")]
+    #[case("qemu-azure-gpus", "qemu")]
+    fn test_get_hypervisor_name_azure_gpus_variants(#[case] shim: &str, #[case] expected: &str) {
+        assert_eq!(get_hypervisor_name(shim).unwrap(), expected);
     }
 
     #[rstest]
