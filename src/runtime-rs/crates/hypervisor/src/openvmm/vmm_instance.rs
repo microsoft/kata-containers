@@ -18,12 +18,44 @@ use super::empty::Empty;
 use super::inner_hypervisor::blk_device_kind;
 use super::vmservice;
 use super::vmservice_ttrpc::VmClient;
+use crate::BlockDeviceFormat;
 use protobuf::MessageField;
 
 // These timeouts were picked somewhat arbitrarily - to be revisited later.
 pub(super) const OPENVMM_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const OPENVMM_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const OPENVMM_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub(super) async fn prepare_disk_path(
+    host_path: String,
+    format: &BlockDeviceFormat,
+) -> Result<String> {
+    if *format != BlockDeviceFormat::Vmdk {
+        return Ok(host_path);
+    }
+
+    let raw_path = format!("{host_path}.raw");
+    let temp_path = format!("{raw_path}.tmp");
+    let _ = tokio::fs::remove_file(&temp_path).await;
+    let status = Command::new("qemu-img")
+        .args(["convert", "-f", "vmdk", "-O", "raw", &host_path, &temp_path])
+        .status()
+        .await
+        .context("failed to execute qemu-img for OpenVMM VMDK flattening")?;
+    if !status.success() {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err(anyhow!(
+            "qemu-img failed to flatten OpenVMM VMDK {}: {}",
+            host_path,
+            status
+        ));
+    }
+
+    tokio::fs::rename(&temp_path, &raw_path)
+        .await
+        .context("failed to publish flattened OpenVMM raw disk")?;
+    Ok(raw_path)
+}
 
 /// Wrapper around an external OpenVMM process, providing VM lifecycle control.
 pub(crate) struct VmmInstance {
@@ -232,7 +264,9 @@ impl VmmInstance {
         port_name: &str,
         host_path: String,
         read_only: bool,
+        format: &BlockDeviceFormat,
     ) -> Result<()> {
+        let host_path = prepare_disk_path(host_path, format).await?;
         let request = vmservice::AddPcieDeviceRequest {
             port_name: port_name.to_string(),
             device: MessageField::some(blk_device_kind(host_path, read_only)),

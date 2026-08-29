@@ -7,7 +7,7 @@ policy-fragment flow.
 Everything here is idempotent and resumable. Each stage records a marker under
 `~/.coco-e2e`; a re-run skips completed stages. `E2E_FORCE=1` re-runs anyway.
 
-Stages 01–06 have been run start to finish from an empty resource group. That
+Stages 01–08 have been run start to finish from an empty resource group. That
 exercise is worth repeating after any substantial change: standing a second node
 up beside a working one turned up seven defects in this suite, every one of them
 hidden by state the original node had accumulated by hand.
@@ -441,17 +441,17 @@ extracts it at the node’s default `E2E_OPENVMM_KERNEL_SRC`.
 
 #### Current `openvmm-snp` limitations
 
-- **Initdata is not functional yet.** Runtime-rs creates the compressed
-  `initdata.image`, but the OpenVMM backend currently receives it as
-  `DeviceType::Block` and does not add it to the initial PCIe topology. The
-  guest agent must see this disk during startup; hot-plugging it later is too
-  late. Consequently, stage 04 passes, but stage 05 cannot yet boot a
-  genpolicy-protected pod.
-- **Initdata is not measured.** The runtime calculates the SNP initdata digest,
-  but the OpenVMM IGVM path currently skips `ProtectionDeviceConfig`, so the
-  digest is not carried into SNP `HOST_DATA` or otherwise bound into the launch
-  measurement. Functional block delivery and measurement binding are separate
-  remaining tasks.
+- **EROFS VMDK is flattened before attachment.** Kata represents GPT-partitioned,
+  dm-verity-protected EROFS layers as a flat VMDK descriptor. OpenVMM has no
+  native flat-VMDK/composite-disk backend, so the OpenVMM runtime path uses
+  `qemu-img` to create an equivalent raw GPT disk beside the descriptor before
+  attaching it. The raw artifact is regenerated atomically if VM startup is
+  retried. The guest still mounts the EROFS partitions through dm-verity, but
+  this temporary compatibility path copies layer data and costs additional
+  startup time and host disk space.
+- **The IGVM topology remains fixed.** `E2E_OPENVMM_VP_COUNT` is embedded in the
+  generated IGVM and must match runtime-rs `default_vcpus`; Kubernetes CPU
+  requests cannot resize an already measured OpenVMM SNP topology.
 - **The VP topology is fixed per IGVM.** `E2E_OPENVMM_VP_COUNT` is used for both
   IGVM generation and runtime configuration, and those values must match
   exactly. Kubernetes CPU requests must not dynamically resize the VM.
