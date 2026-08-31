@@ -31,13 +31,29 @@ fn erofs_mkfs_options() -> String {
     "[\"-T0\",\"--mkfs-time\",\"--sort=none\"]".to_string()
 }
 
+/// containerd's own default unpack snapshotter, restated because `unpack_config`
+/// replaces the built-in default wholesale rather than extending it.
+const DEFAULT_UNPACK_SNAPSHOTTER: &str = "overlayfs";
+
 /// Bind the transfer service's unpacker for the `erofs` snapshotter to the `erofs`
 /// differ, so layer construction cannot silently fall back to a path that produces
 /// no dm-verity metadata. See RM-50 and the call site for why this matters.
+///
+/// The default-snapshotter entries are not optional padding. Setting this key
+/// discards containerd's built-in default, and the transfer service only unpacks a
+/// pull whose requested snapshotter equals one of the entries here
+/// (`getSupportedPlatform` in core/transfer/local/pull.go). With erofs-only
+/// entries, every pull that does not ask for erofs -- i.e. every non-kata pod on
+/// the node -- matches nothing and fails the whole pull with "unable to initialize
+/// unpacker: no unpack platforms defined".
 fn erofs_unpack_config() -> String {
-    "[{platform = \"linux/amd64\", snapshotter = \"erofs\", differ = \"erofs\"}, \
-     {platform = \"linux/arm64\", snapshotter = \"erofs\", differ = \"erofs\"}]"
-        .to_string()
+    format!(
+        "[{{platform = \"linux/amd64\", snapshotter = \"{d}\"}}, \
+          {{platform = \"linux/arm64\", snapshotter = \"{d}\"}}, \
+          {{platform = \"linux/amd64\", snapshotter = \"erofs\", differ = \"erofs\"}}, \
+          {{platform = \"linux/arm64\", snapshotter = \"erofs\", differ = \"erofs\"}}]",
+        d = DEFAULT_UNPACK_SNAPSHOTTER
+    )
 }
 use std::path::Path;
 
@@ -603,11 +619,12 @@ mod tests {
         let entries = doc["unpack_config"]
             .as_array()
             .expect("array of inline tables");
-        assert_eq!(entries.len(), 2, "one entry per supported platform");
         let mut platforms = Vec::new();
         for entry in entries.iter() {
             let table = entry.as_inline_table().expect("inline table");
-            assert_eq!(table["snapshotter"].as_str(), Some("erofs"));
+            if table["snapshotter"].as_str() != Some("erofs") {
+                continue;
+            }
             assert_eq!(
                 table["differ"].as_str(),
                 Some("erofs"),
@@ -617,6 +634,34 @@ mod tests {
         }
         assert!(platforms.contains(&"linux/amd64".to_string()));
         assert!(platforms.contains(&"linux/arm64".to_string()));
+    }
+
+    /// Writing this key replaces containerd's built-in default, so dropping the
+    /// default-snapshotter entries leaves every non-erofs pull on the node with no
+    /// matching unpack platform, failing with "no unpack platforms defined".
+    #[test]
+    fn erofs_unpack_config_keeps_the_default_snapshotter() {
+        let doc: toml_edit::DocumentMut = format!("unpack_config = {}", erofs_unpack_config())
+            .parse()
+            .expect("unpack_config must be TOML");
+        let platforms: Vec<String> = doc["unpack_config"]
+            .as_array()
+            .expect("array of inline tables")
+            .iter()
+            .filter_map(|entry| {
+                let table = entry.as_inline_table()?;
+                (table["snapshotter"].as_str() == Some(DEFAULT_UNPACK_SNAPSHOTTER))
+                    .then(|| table["platform"].as_str().unwrap().to_string())
+            })
+            .collect();
+        assert!(
+            platforms.contains(&"linux/amd64".to_string()),
+            "{platforms:?}"
+        );
+        assert!(
+            platforms.contains(&"linux/arm64".to_string()),
+            "{platforms:?}"
+        );
     }
 
     /// containerd's differ appends its own `-U <uuid-of-layer-digest>` after these
