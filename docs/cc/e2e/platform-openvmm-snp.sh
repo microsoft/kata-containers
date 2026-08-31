@@ -101,8 +101,9 @@ openvmm_prepare_sources() {
     PROTOC="$(command -v protoc)" cargo xflowey restore-packages --no-compat-igvm
   ) || die "OpenVMM source preparation failed"
 
-  [[ -f "${E2E_OPENVMM_KERNEL_SRC}/Makefile" ]] || die \
-    "ACI kernel source is missing at ${E2E_OPENVMM_KERNEL_SRC}.
+  [[ -f "${E2E_OPENVMM_KERNEL_SRC}/Makefile" &&
+     -x "${E2E_OPENVMM_KERNEL_SRC}/scripts/config" ]] || die \
+    "ACI kernel source is incomplete at ${E2E_OPENVMM_KERNEL_SRC}.
 Provide the validated ACI kernel source or set E2E_OPENVMM_KERNEL_SRC."
 }
 

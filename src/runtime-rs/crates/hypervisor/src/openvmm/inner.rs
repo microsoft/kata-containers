@@ -24,6 +24,8 @@ use crate::device::pci_path::{PciPath, PciSlot};
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpenVmmHotplugPort {
+    /// Root-port device number on bus 0.
+    pub(crate) device: u8,
     /// Topology port name (e.g. "hp0"); matches the name declared in the PCIe
     /// topology at CreateVm and targeted by AddPcieDevice/RemovePcieDevice.
     pub(crate) name: String,
@@ -39,6 +41,7 @@ impl OpenVmmHotplugPort {
         let pci_path = PciPath::new(vec![PciSlot::new(device), PciSlot::new(0)])
             .expect("openvmm hotplug port PCI path is non-empty");
         Self {
+            device,
             name: format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
             pci_path,
         }
@@ -195,5 +198,23 @@ impl OpenVmmInner {
         (0..OPENVMM_BLOCK_HOTPLUG_PORT_COUNT)
             .map(OpenVmmHotplugPort::new)
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reserved_cold_plug_port_is_not_reused() {
+        let (exit_notify, _exit_waiter) = watch::channel(None);
+        let mut inner = OpenVmmInner::new(exit_notify);
+
+        let cold = inner.reserve_block_hotplug_port("initdata").unwrap();
+        let dynamic = inner.reserve_block_hotplug_port("volume").unwrap();
+
+        assert_eq!(cold.device, OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE);
+        assert_eq!(dynamic.device, OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE + 1);
+        assert_ne!(cold.name, dynamic.name);
     }
 }
