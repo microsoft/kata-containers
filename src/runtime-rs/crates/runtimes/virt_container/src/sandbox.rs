@@ -621,15 +621,6 @@ impl VirtSandbox {
             return Ok(None);
         }
 
-        #[cfg(feature = "openvmm")]
-        if self.resource_manager.config().await.runtime.hypervisor_name == HYPERVISOR_NAME_OPENVMM
-            && snp_igvm_enabled(hypervisor_config)?
-        {
-            // OpenVMM loads the SNP firmware and isolation state from the IGVM
-            // through its VM-service request, rather than a separate device.
-            return Ok(None);
-        }
-
         let available_protection = available_guest_protection()?;
         info!(
             sl!(),
@@ -651,6 +642,12 @@ impl VirtSandbox {
                 })))
             }
             GuestProtection::Snp(details) => {
+                #[cfg(feature = "openvmm")]
+                let is_openvmm_igvm = self.resource_manager.config().await.runtime.hypervisor_name
+                    == HYPERVISOR_NAME_OPENVMM
+                    && snp_igvm_enabled(hypervisor_config)?;
+                #[cfg(not(feature = "openvmm"))]
+                let is_openvmm_igvm = false;
                 let is_cloud_hypervisor = Arc::clone(&self.resource_manager.config().await)
                     .runtime
                     .hypervisor_name
@@ -658,7 +655,10 @@ impl VirtSandbox {
 
                 // Cloud Hypervisor can boot SNP guests from IGVM and does not
                 // require the external firmware used by QEMU.
-                if hypervisor_config.boot_info.firmware.is_empty() && !is_cloud_hypervisor {
+                if hypervisor_config.boot_info.firmware.is_empty()
+                    && !is_cloud_hypervisor
+                    && !is_openvmm_igvm
+                {
                     return Err(anyhow!("SEV-SNP protection requires a path to firmware"));
                 }
 

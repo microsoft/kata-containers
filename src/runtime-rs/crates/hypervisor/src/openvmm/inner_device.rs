@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context, Result};
 
 use super::inner::OpenVmmInner;
 use crate::device::DeviceType;
-use crate::{VmmState, KATA_BLK_DEV_TYPE};
+use crate::{BlockDeviceFormat, VmmState, KATA_BLK_DEV_TYPE};
 
 impl OpenVmmInner {
     pub(crate) async fn add_device(&mut self, device: DeviceType) -> Result<DeviceType> {
@@ -40,6 +40,7 @@ impl OpenVmmInner {
                         &port.name,
                         block_device.config.path_on_host.clone(),
                         block_device.config.is_readonly,
+                        &block_device.config.format,
                     )
                     .await
                     .context(format!(
@@ -90,7 +91,12 @@ impl OpenVmmInner {
                 let port = self.reserve_block_hotplug_port(&device_id)?;
                 let hotplug_result = self
                     .vmm_instance
-                    .add_pcie_device(&port.name, path_on_host.clone(), is_readonly)
+                    .add_pcie_device(
+                        &port.name,
+                        path_on_host.clone(),
+                        is_readonly,
+                        &BlockDeviceFormat::Raw,
+                    )
                     .await
                     .context(format!(
                         "failed to hotplug block device {} into PCIe port {}",
