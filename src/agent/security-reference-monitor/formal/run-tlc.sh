@@ -33,8 +33,16 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# v1.8.0 is upstream's only *prerelease*, and it targets master rather than a
+# fixed commit: the release object is deleted and recreated as master advances,
+# republishing tla2tools.jar under this same URL. The pin below was correct when
+# it landed on 2026-08-21 and stopped matching on 2026-09-01, when the release
+# was recreated (its created_at moved forward, which a stable release's cannot).
+# Expect to refresh this hash again. The durable fix is to pin the latest stable
+# release instead -- v1.7.4, untouched since 2024-08-08 -- once the model has
+# been confirmed to check cleanly, with the coverage gates below intact, there.
 TLA2TOOLS_VERSION=v1.8.0
-TLA2TOOLS_SHA256=eabd140a70f49eb9305a3bd3f3df944eddf87e5a90d329789085f8953a80533a
+TLA2TOOLS_SHA256=dbcc75552f21978a4846688b8e23be1a6b6c0b3fcee35d78fec2df167958ec94
 
 JAR=${TLA2TOOLS_JAR:-tla2tools.jar}
 if [[ ! -f "${JAR}" ]]; then
