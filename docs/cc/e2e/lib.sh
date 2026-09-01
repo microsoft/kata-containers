@@ -567,7 +567,12 @@ ensure_branch_genpolicy() {
 #   qemu-coco-dev  kata-deploy lays down upstream's copies and stage 03 then
 #                  overwrites them with the branch's. Use those — re-deriving
 #                  them here would reintroduce upstream's settings and deny every
-#                  pod at CreateContainerRequest.
+#                  pod at CreateContainerRequest. They are staged into a
+#                  suite-owned directory rather than consumed in place, so a
+#                  drop-in can be carried beside them: this cluster pulls images
+#                  inside the guest, which the branch's defaults refuse. See the
+#                  drop-in written below for why that refusal is the right
+#                  default and what enabling it gives up.
 #   clh-snp        the confpods flow installs no genpolicy, no rules.rego and no
 #                  settings whatsoever (grep the node-builder scripts: genpolicy
 #                  is never mentioned). There is nothing to consume, so stage the
@@ -576,10 +581,51 @@ ensure_branch_genpolicy() {
 ensure_genpolicy_defaults() {
   case "${E2E_PLATFORM}" in
     qemu-coco-dev)
-      GP_RULES="${E2E_KATA_DEFAULTS}/rules.rego"
-      GP_SETTINGS="${E2E_KATA_DEFAULTS}/genpolicy-settings.json"
-      [[ -f "${GP_RULES}" ]]    || die "missing ${GP_RULES} — run stage 03 first"
-      [[ -f "${GP_SETTINGS}" ]] || die "missing ${GP_SETTINGS} — run stage 03 first"
+      local kd_rules="${E2E_KATA_DEFAULTS}/rules.rego"
+      local kd_settings="${E2E_KATA_DEFAULTS}/genpolicy-settings.json"
+      [[ -f "${kd_rules}" ]]    || die "missing ${kd_rules} — run stage 03 first"
+      [[ -f "${kd_settings}" ]] || die "missing ${kd_settings} — run stage 03 first"
+
+      # Stage into a suite-owned directory. $E2E_KATA_DEFAULTS is the runtime's
+      # install tree, and genpolicy reads every *.json in a genpolicy-settings.d/
+      # beside the settings file, so carrying our drop-in in place would mean
+      # writing suite state into what kata-deploy installed. Copy instead, from
+      # the branch's post-stage-03 files so the settings stay the branch's.
+      local dst="${E2E_STATE_DIR}/genpolicy"
+      mkdir -p "${dst}"
+      cmp -s "${kd_rules}" "${dst}/rules.rego" \
+        || install -m 0644 "${kd_rules}" "${dst}/rules.rego" \
+        || die "could not stage rules.rego into ${dst}"
+      cmp -s "${kd_settings}" "${dst}/genpolicy-settings.json" \
+        || install -m 0644 "${kd_settings}" "${dst}/genpolicy-settings.json" \
+        || die "could not stage genpolicy-settings.json into ${dst}"
+
+      GP_RULES="${dst}/rules.rego"
+      GP_SETTINGS="${dst}"
+
+      # Stage 03 deploys this cluster with PULL_TYPE=guest-pull and the nydus
+      # snapshotter, so a container's rootfs arrives as an `image_guest_pull`
+      # storage. All three bodies of `allow_image_guest_pull_source` are gated on
+      # `allow_guest_pull_images`, which ships false — the pause sentinel body
+      # included — so with the branch's defaults every CreateContainerRequest in
+      # the pod is denied, the sandbox first. The branch also declares host EROFS
+      # dm-verity layers this cluster never presents. Both have to be undone here.
+      #
+      # This stays a per-platform opt-in and does not move into the branch's
+      # defaults: guest pull is refused by default because an image_guest_pull
+      # storage carries no policy declaration, so it is exempt from the
+      # declared-vs-presented storage count and a host can mount undeclared
+      # content at the container root without failing a verity check. Content is
+      # verified in CDH, which reports nothing back, so the policy binds the image
+      # reference and not the bytes. require_pinned_image_digests is deliberately
+      # left at its default true — with no root hash to bind, the manifest digest
+      # is the only thing naming the content.
+      local dropin_dir="${dst}/genpolicy-settings.d"
+      mkdir -p "${dropin_dir}"
+      install -m 0644 \
+        "${E2E_REPO_DIR}/src/tools/genpolicy/drop-in-examples/10-guest-pull-drop-in.json" \
+        "${dropin_dir}/10-guest-pull-drop-in.json" \
+        || die "could not stage the guest-pull drop-in into ${dropin_dir}"
       ;;
     clh-snp|aks|openvmm-snp)
       local src="${E2E_REPO_DIR}/src/tools/genpolicy" dst="${E2E_STATE_DIR}/genpolicy"

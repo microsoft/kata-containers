@@ -1,0 +1,17 @@
+[
+  {
+    "op": "replace",
+    "path": "/common/allow_guest_pull_images",
+    "value": true
+  },
+  {
+    "op": "replace",
+    "path": "/common/image_layer_verification",
+    "value": "none"
+  },
+  {
+    "op": "replace",
+    "path": "/cluster_config/guest_pull",
+    "value": true
+  }
+]

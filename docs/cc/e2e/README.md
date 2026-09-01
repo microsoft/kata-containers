@@ -343,7 +343,21 @@ about them helps when something drifts.
   mechanism rather than editing the file: point `-j` at a *directory* holding
   `genpolicy-settings.json` plus a `genpolicy-settings.d/` of RFC 6902 patches
   (`src/tools/genpolicy/drop-in-examples/`). The suite does exactly that for the
-  one value that is genuinely per-node, `pause_container_image`.
+  values that are genuinely per-platform: `pause_container_image`, and on
+  `qemu-coco-dev` the guest-pull settings described in the next bullet.
+- **`qemu-coco-dev` runs guest pull, which the branch's defaults refuse.** Stage
+  03 deploys that cluster with `PULL_TYPE=guest-pull` and the nydus snapshotter,
+  so a rootfs arrives as an `image_guest_pull` storage. Every body of
+  `allow_image_guest_pull_source` is gated on `allow_guest_pull_images`, which
+  ships `false` — the pause sentinel included — so the branch's defaults deny
+  every container in the pod, the sandbox first; and `host-erofs-dm-verity`
+  declares layers that cluster never presents. `ensure_genpolicy_defaults` stages
+  `10-guest-pull-drop-in.json` beside the settings to undo both, as a per-platform
+  opt-in. It stays out of the defaults deliberately: a guest-pull storage carries
+  no policy declaration, so it is exempt from the declared-vs-presented storage
+  count and a host can mount undeclared content at the container root without
+  failing a verity check. `clh-snp` and `aks` pull on the host and keep the
+  verity-bound default.
 - **`guest-pull` requires an explicit pod-level `securityContext`** — genpolicy
   refuses images whose user/group would come from the image layers.
 - **The policy annotation is `cc_init_data`,** not the legacy
