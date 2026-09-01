@@ -102,6 +102,132 @@ pub fn ca_fingerprint_from_pem(pem: &str) -> Result<[u8; 32], FragmentError> {
     Ok(fingerprint(&der))
 }
 
+/// Build the canonical `did:x509` identifier naming a CA by fingerprint, with no leaf
+/// predicates. Callers append predicates (e.g. `::subject:CN:signer`) for the constraints
+/// their anchor policy enforces.
+pub fn did_x509_for(ca_fingerprint: &[u8; 32]) -> String {
+    use base64ct::{Base64UrlUnpadded, Encoding};
+    format!(
+        "did:x509:0:sha256:{}",
+        Base64UrlUnpadded::encode_string(ca_fingerprint)
+    )
+}
+
+/// The trust-relevant content of a canonical `did:x509` identifier: the CA fingerprint it
+/// names and the leaf constraints it declares.
+#[derive(Debug, Clone)]
+pub struct DidX509Parts {
+    /// SHA-256 fingerprint of the CA certificate the DID is anchored on.
+    pub ca_fingerprint: [u8; 32],
+    /// Declared policy predicates, as `(name, arguments)` — e.g. `("subject", ["CN", "signer"])`.
+    pub predicates: Vec<(String, Vec<String>)>,
+}
+
+/// Percent-decode a `did:x509` policy argument. The method percent-encodes `:` and `%` so
+/// that arguments can be split on `:` unambiguously.
+fn percent_decode(s: &str) -> Result<String, FragmentError> {
+    let b = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            let hex = s.get(i + 1..i + 3).ok_or(FragmentError::MalformedAnchorDid)?;
+            let v = u8::from_str_radix(hex, 16).map_err(|_| FragmentError::MalformedAnchorDid)?;
+            out.push(v as char);
+            i += 3;
+        } else {
+            out.push(b[i] as char);
+            i += 1;
+        }
+    }
+    Ok(out)
+}
+
+/// Parse a canonical `did:x509` identifier:
+/// `did:x509:0:sha256:<base64url(CA SHA-256)>(::<policy>:<arg>(:<arg>)*)*`
+///
+/// This is what makes the identifier *self-describing*: the CA the identity is rooted in is
+/// carried inside the identity string itself rather than alongside it, so an anchor's DID and
+/// its trust root cannot drift apart. Only version `0` and `sha256` are accepted; anything
+/// else is refused rather than ignored, so an unrecognized future form fails closed.
+pub fn parse_did_x509(did: &str) -> Result<DidX509Parts, FragmentError> {
+    use base64ct::{Base64UrlUnpadded, Encoding};
+
+    let rest = did
+        .strip_prefix("did:x509:")
+        .ok_or(FragmentError::MalformedAnchorDid)?;
+    let mut sections = rest.split("::");
+    let head = sections.next().ok_or(FragmentError::MalformedAnchorDid)?;
+
+    let mut hp = head.split(':');
+    let version = hp.next().ok_or(FragmentError::MalformedAnchorDid)?;
+    let alg = hp.next().ok_or(FragmentError::MalformedAnchorDid)?;
+    let fp_b64 = hp.next().ok_or(FragmentError::MalformedAnchorDid)?;
+    if hp.next().is_some() || version != "0" || alg != "sha256" {
+        return Err(FragmentError::MalformedAnchorDid);
+    }
+    let mut ca_fingerprint = [0u8; 32];
+    Base64UrlUnpadded::decode(fp_b64, &mut ca_fingerprint)
+        .map_err(|_| FragmentError::MalformedAnchorDid)?;
+
+    let mut predicates = Vec::new();
+    for section in sections {
+        let mut parts = section.split(':');
+        let name = parts.next().ok_or(FragmentError::MalformedAnchorDid)?;
+        if name.is_empty() {
+            return Err(FragmentError::MalformedAnchorDid);
+        }
+        let args = parts
+            .map(percent_decode)
+            .collect::<Result<Vec<_>, FragmentError>>()?;
+        if args.is_empty() {
+            return Err(FragmentError::MalformedAnchorDid);
+        }
+        predicates.push((name.to_string(), args));
+    }
+    Ok(DidX509Parts {
+        ca_fingerprint,
+        predicates,
+    })
+}
+
+impl DidX509Anchor {
+    /// Check that this anchor is internally consistent: that its `did` is a canonical
+    /// `did:x509`, that the CA fingerprint named *inside* the DID is the one the anchor
+    /// actually anchors on, and that every constraint the DID advertises is a constraint the
+    /// leaf policy really enforces.
+    ///
+    /// Without this the DID is only a label. Both it and `ca_fingerprint` come from measured
+    /// configuration, so a mismatch is a misconfiguration rather than an attack — but a
+    /// mismatched anchor would enforce one identity while reporting a different one as the
+    /// accepted issuer, which is exactly the confusion the identifier exists to prevent.
+    /// Refusing the anchor keeps the DID a complete description of what was checked.
+    pub fn validate(&self) -> Result<(), FragmentError> {
+        let parts = parse_did_x509(&self.did)?;
+        if parts.ca_fingerprint != self.ca_fingerprint {
+            return Err(FragmentError::AnchorDidMismatch);
+        }
+        for (name, args) in &parts.predicates {
+            let enforced = match (name.as_str(), args.as_slice()) {
+                // Only the subject key we can actually enforce is accepted; a DID asserting
+                // some other RDN would otherwise read as a constraint that nothing checks.
+                ("subject", [key, value]) if key == "CN" => {
+                    self.policy.require_subject_cn.as_deref() == Some(value.as_str())
+                }
+                ("eku", [oid]) => self.policy.require_eku.iter().any(|e| e == oid),
+                ("san", [kind, value]) if kind == "dns" => {
+                    self.policy.require_san_dns.iter().any(|d| d == value)
+                }
+                _ => return Err(FragmentError::UnsupportedAnchorDidPolicy),
+            };
+            if !enforced {
+                return Err(FragmentError::AnchorDidMismatch);
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Extract the ordered DER certificates (leaf first) from a COSE_Sign1 `x5chain` header
 /// (checked in both the protected and unprotected buckets). A single certificate may be a
 /// bare byte string; a chain is an array of byte strings.
@@ -1065,5 +1191,153 @@ mod tests {
             verify_x509_cose(&anchors, &HashSet::new(), &tampered.to_vec().unwrap()).unwrap_err(),
             FragmentError::InvalidSignature
         );
+    }
+
+    /// A canonical `did:x509` round-trips: the fingerprint it names is the one it was built
+    /// from, and declared predicates parse into (name, args).
+    #[test]
+    fn tc_f1_10e_canonical_did_parses() {
+        let fp = [7u8; 32];
+        let did = format!("{}::subject:CN:signer::eku:{}", did_x509_for(&fp), EKU_CODE_SIGNING);
+        let parts = parse_did_x509(&did).unwrap();
+        assert_eq!(parts.ca_fingerprint, fp);
+        assert_eq!(
+            parts.predicates,
+            vec![
+                ("subject".to_string(), vec!["CN".to_string(), "signer".to_string()]),
+                ("eku".to_string(), vec![EKU_CODE_SIGNING.to_string()]),
+            ]
+        );
+        // Percent-encoded arguments decode, so a value containing ':' survives the split.
+        let did = format!("{}::subject:CN:a%3Ab", did_x509_for(&fp));
+        assert_eq!(parse_did_x509(&did).unwrap().predicates[0].1[1], "a:b");
+    }
+
+    /// TC-F1.10e: an anchor whose DID names a *different* CA than the one it anchors on is
+    /// refused, so a DID can never advertise a trust root that was not the one enforced.
+    #[test]
+    fn tc_f1_10e_anchor_did_must_name_its_own_ca() {
+        let good = DidX509Anchor {
+            did: did_x509_for(&[1u8; 32]),
+            ca_fingerprint: [1u8; 32],
+            policy: DidX509Policy::default(),
+        };
+        assert!(good.validate().is_ok());
+
+        let mismatched = DidX509Anchor {
+            did: did_x509_for(&[2u8; 32]),
+            ca_fingerprint: [1u8; 32],
+            ..good.clone()
+        };
+        assert_eq!(
+            mismatched.validate().unwrap_err(),
+            FragmentError::AnchorDidMismatch
+        );
+
+        // A DID that is not canonical carries no CA to compare against at all.
+        let opaque = DidX509Anchor {
+            did: "did:x509:test:issuerX".to_string(),
+            ..good.clone()
+        };
+        assert_eq!(
+            opaque.validate().unwrap_err(),
+            FragmentError::MalformedAnchorDid
+        );
+    }
+
+    /// TC-F1.10e: a DID may not advertise a leaf constraint the policy does not enforce, and
+    /// may not name a predicate this implementation cannot check. Both would let the accepted
+    /// issuer string read as a stronger promise than what was actually verified.
+    #[test]
+    fn tc_f1_10e_anchor_did_predicates_must_be_enforced() {
+        let fp = [3u8; 32];
+        let base = DidX509Anchor {
+            did: did_x509_for(&fp),
+            ca_fingerprint: fp,
+            policy: DidX509Policy::default(),
+        };
+
+        let claims_cn = DidX509Anchor {
+            did: format!("{}::subject:CN:signer", did_x509_for(&fp)),
+            ..base.clone()
+        };
+        assert_eq!(
+            claims_cn.validate().unwrap_err(),
+            FragmentError::AnchorDidMismatch
+        );
+
+        // ... and is accepted once the policy actually requires that CN.
+        let enforced = DidX509Anchor {
+            policy: DidX509Policy {
+                require_subject_cn: Some("signer".to_string()),
+                ..Default::default()
+            },
+            ..claims_cn.clone()
+        };
+        assert!(enforced.validate().is_ok());
+
+        // A different CN is not "close enough".
+        let wrong_cn = DidX509Anchor {
+            policy: DidX509Policy {
+                require_subject_cn: Some("someone-else".to_string()),
+                ..Default::default()
+            },
+            ..claims_cn
+        };
+        assert_eq!(
+            wrong_cn.validate().unwrap_err(),
+            FragmentError::AnchorDidMismatch
+        );
+
+        // Predicates we cannot enforce are refused rather than silently ignored.
+        for did in [
+            format!("{}::fulcio-issuer:github.com%2Flogin", did_x509_for(&fp)),
+            format!("{}::subject:O:contoso", did_x509_for(&fp)),
+            format!("{}::san:email:signer%40contoso.com", did_x509_for(&fp)),
+        ] {
+            let a = DidX509Anchor { did, ..base.clone() };
+            assert_eq!(
+                a.validate().unwrap_err(),
+                FragmentError::UnsupportedAnchorDidPolicy
+            );
+        }
+
+        // A policy stricter than the DID advertises is fine: enforcing more than promised is
+        // not a confusion, only enforcing less would be.
+        let stricter = DidX509Anchor {
+            policy: DidX509Policy {
+                require_eku: vec![EKU_CODE_SIGNING.to_string()],
+                ..Default::default()
+            },
+            ..base
+        };
+        assert!(stricter.validate().is_ok());
+    }
+
+    /// TC-F1.10e: the trust store is the only way an anchor reaches production, and it
+    /// refuses an inconsistent one — the check cannot be skipped by configuration.
+    #[test]
+    fn tc_f1_10e_store_refuses_inconsistent_anchor() {
+        let mut store = crate::FragmentStore::new(false);
+        assert_eq!(
+            store
+                .authorize_did_x509(DidX509Anchor {
+                    did: did_x509_for(&[9u8; 32]),
+                    ca_fingerprint: [8u8; 32],
+                    policy: DidX509Policy::default(),
+                })
+                .unwrap_err(),
+            FragmentError::AnchorDidMismatch
+        );
+        assert!(!store.has_did_x509_anchors());
+
+        assert!(store
+            .authorize_did_x509(DidX509Anchor {
+                did: did_x509_for(&[8u8; 32]),
+                ca_fingerprint: [8u8; 32],
+                policy: DidX509Policy::default(),
+            })
+            .is_ok());
+        assert!(store.has_did_x509_anchors());
     }
 }

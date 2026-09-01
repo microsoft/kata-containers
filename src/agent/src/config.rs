@@ -768,11 +768,14 @@ impl AgentConfig {
             // Honoured: memory reclaim tuning. The host already decides how much memory the
             // guest has.
             mem_agent: _,
-            // Denied: pinned to the compiled-in default. A strict rootfs ships no rego file
-            // at all (enforced by tools/osbuilder's strict-policy install test), so today
-            // this variable can only name a path that does not exist — but that makes the
-            // protection a property of the image build rather than of the agent, and the
-            // agent should not depend on it.
+            // Denied: cleared here, and independently ignored by the policy crate. A strict
+            // `AgentPolicy::load_initial_policy` installs the compiled-in closed-door
+            // baseline unconditionally and logs a warning if a policy file was configured,
+            // so this value cannot select a policy however it is set. Clearing it anyway
+            // keeps the two layers independent: neither is load-bearing on its own, and a
+            // future change to either is caught by the other. Covered by
+            // `strict_initialize_ignores_configured_policy_file` and
+            // `strict_initialize_without_policy_file_is_closed`.
             #[cfg(feature = "agent-policy")]
             policy_file,
         } = self;

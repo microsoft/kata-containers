@@ -447,8 +447,7 @@ else
 fi
 
 # ------------------------------------------------------------------ genpolicy
-# Same argument as the shim, and the same failure mode as stage 03's
-# oci_version patch. genpolicy is host-side, arrives from the CI-nightly
+# Same argument as the shim. genpolicy is host-side, arrives from the CI-nightly
 # kata-tools build in stage 03, and is otherwise never replaced -- but it
 # deserialises genpolicy-settings.json through a *typed* struct, so a binary
 # that predates a settings key drops that key silently and generates a policy
@@ -481,14 +480,13 @@ if [[ -e "${GENPOLICY_DST}" ]]; then
     sudo install -m 0644 "${src}" "${dst}"
   done
 
-  # Re-apply stage 03's oci_version patch: it patches the *installed* settings,
-  # and the line above just overwrote them with the repo copy. Skipping this
-  # denies every CreateContainerRequest on the node.
-  sudo sed -i 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' \
-    /opt/kata/share/defaults/kata-containers/genpolicy-settings.json
+  # The branch's settings declare the OCI version this node's containerd emits,
+  # so the installed copy needs no rewrite. Assert it anyway: a settings file
+  # whose OCI version does not match the node denies every CreateContainerRequest,
+  # and that is worth catching here rather than in a pod event.
   grep -q '"oci_version": "1.3.0"' \
     /opt/kata/share/defaults/kata-containers/genpolicy-settings.json \
-    || die "oci_version patch did not survive the settings install"
+    || die "installed settings do not declare OCI 1.3.0 — every CreateContainerRequest would be denied"
 
   ok "genpolicy, rules.rego and settings installed from the branch"
 else

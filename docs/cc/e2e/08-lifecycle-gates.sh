@@ -82,9 +82,9 @@ ensure_branch_genpolicy
 
 # genpolicy also needs a settings file. Only ensure_genpolicy_defaults() knows
 # which one is right for this platform -- and, on clh-snp, is the thing that
-# stages it out of the branch and applies the oci_version/root_path patches at
-# all. This stage overrides GP_RULES with REF_RULES below on purpose, but
-# GP_SETTINGS must come from here or it is simply never set.
+# stages it out of the branch and builds the drop-in directory at all. This
+# stage overrides GP_RULES with REF_RULES below on purpose, but GP_SETTINGS
+# must come from here or it is simply never set.
 ensure_genpolicy_defaults
 
 # The rules come from the branch too, and for the same reason: /opt/kata carries
@@ -154,13 +154,13 @@ $(pod_pin)
     supplementalGroups: [10]
   containers:
     - name: busybox
-      image: quay.io/prometheus/busybox:latest
+      image: ${E2E_BUSYBOX_IMAGE}
       command: ["sleep", "900"]
 EOF
   if [[ "${POD_WITH_EXITER:-0}" = 1 ]]; then
     cat >> "${WORK}/${pod}.yaml" <<EOF
     - name: exiter
-      image: quay.io/prometheus/busybox:latest
+      image: ${E2E_BUSYBOX_IMAGE}
       command: ["true"]
 EOF
   fi

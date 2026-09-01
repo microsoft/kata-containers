@@ -318,8 +318,8 @@ about them helps when something drifts.
   policy would be generated from upstream's rules even though the repo has ours.
   Stage 03 restages `rules.rego` and `genpolicy-settings.json` from
   `$E2E_REPO_DIR` after `deploy-kata` (which also writes `/opt/kata` and would
-  otherwise clobber them), re-applies the `oci_version` patch, and then asserts
-  the installed `rules.rego` is byte-identical to the repo copy.
+  otherwise clobber them), and then asserts the installed `rules.rego` is
+  byte-identical to the repo copy.
 - **Upstream CI steps prompt when a human runs them.** `gha-run.sh` is written
   for GitHub Actions, where stdin is never a TTY. Over an interactive ssh session
   it is, so `install-bats` — which calls `add-apt-repository` without `-y`
@@ -332,9 +332,18 @@ about them helps when something drifts.
   published when the multi-arch merge job runs, and recent nightlies fail before
   it. Without the suffix `kata-deploy` `ImagePullBackOff`s and the install times
   out.
-- **`oci_version` in `genpolicy-settings.json` is stale (1.1.0)** while
-  containerd emits 1.3.0, which denies every pod at `CreateContainerRequest`.
-  Stage 03 patches it.
+- **`genpolicy-settings.json` must describe the node it generates for.** Three of
+  its values are compared for exact equality inside the guest, and a mismatch
+  denies every pod with no hint that the settings are at fault: `oci_version`
+  (containerd 2.2.x/2.3.x emit `1.3.0`), `root_path` (runtime-rs hands the agent
+  a passthrough path, not the virtio-fs one), and `image_layer_verification`
+  (`none` declares no layers, so the erofs snapshotter's storages are all
+  refused). This branch's defaults now carry the values this stack needs. For a
+  node that differs — an older containerd, say — use genpolicy's drop-in
+  mechanism rather than editing the file: point `-j` at a *directory* holding
+  `genpolicy-settings.json` plus a `genpolicy-settings.d/` of RFC 6902 patches
+  (`src/tools/genpolicy/drop-in-examples/`). The suite does exactly that for the
+  one value that is genuinely per-node, `pause_container_image`.
 - **`guest-pull` requires an explicit pod-level `securityContext`** — genpolicy
   refuses images whose user/group would come from the image layers.
 - **The policy annotation is `cc_init_data`,** not the legacy

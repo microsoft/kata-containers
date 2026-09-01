@@ -1449,15 +1449,17 @@ async fn seed_fragment_trust_root(
                 ca.did
             );
         };
-        store.authorize_did_x509(kata_security_reference_monitor::DidX509Anchor {
-            did: ca.did.clone(),
-            ca_fingerprint,
-            policy: kata_security_reference_monitor::DidX509Policy {
-                require_subject_cn: ca.require_subject_cn.clone(),
-                require_eku: ca.require_eku.clone(),
-                require_san_dns: ca.require_san_dns.clone(),
-            },
-        });
+        store
+            .authorize_did_x509(kata_security_reference_monitor::DidX509Anchor {
+                did: ca.did.clone(),
+                ca_fingerprint,
+                policy: kata_security_reference_monitor::DidX509Policy {
+                    require_subject_cn: ca.require_subject_cn.clone(),
+                    require_eku: ca.require_eku.clone(),
+                    require_san_dns: ca.require_san_dns.clone(),
+                },
+            })
+            .map_err(|e| anyhow::anyhow!("ca_anchor {}: {}", ca.did, e))?;
         info!(logger, "FR-1: authorized did:x509 anchor"; "did" => &ca.did);
     }
     for issuer in &cfg.issuer {

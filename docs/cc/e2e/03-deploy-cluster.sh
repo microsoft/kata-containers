@@ -159,8 +159,7 @@ fi
 # installed one, so treat a 05-only failure around a new settings key as this.
 #
 # This has to happen after deploy-kata: that step also writes
-# /opt/kata from the kata-deploy image and would clobber an earlier copy, which
-# is the same reason the oci_version patch below sits here.
+# /opt/kata from the kata-deploy image and would clobber an earlier copy.
 #
 # clh-snp has no such race and no such directory — the node-builder installs no
 # genpolicy at all — so there the branch inputs are staged under the state dir by
@@ -177,13 +176,10 @@ for f in rules.rego genpolicy-settings.json; do
 done
 ok "staged genpolicy inputs from ${E2E_BRANCH}"
 
-# containerd 2.3.3 emits OCI spec 1.3.0 while the shipped settings still say
-# 1.1.0, which denies *every* pod at CreateContainerRequest. Fix once here.
-SETTINGS="${DEFAULTS}/genpolicy-settings.json"
-if grep -q '"oci_version": "1.1.0"' "${SETTINGS}" 2>/dev/null; then
-  log "patching oci_version 1.1.0 -> 1.3.0 in ${SETTINGS}"
-  sudo sed -i 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' "${SETTINGS}"
-fi
+# The branch's settings now declare OCI 1.3.0, which is what containerd 2.2.x and
+# 2.3.x emit; the comparison is exact because nothing is rewritten on the way in.
+# An older containerd needs a genpolicy-settings.d/ drop-in (see the branch's
+# drop-in-examples/20-oci-1.2.0-drop-in.json), not an edit to the installed file.
 
 # The staging above is only worth anything if it survived to disk. rules.rego is
 # untouched by the patch, so it must still be byte-identical to the repo copy;
