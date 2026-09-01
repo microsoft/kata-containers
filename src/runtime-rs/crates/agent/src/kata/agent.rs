@@ -192,6 +192,25 @@ macro_rules! impl_agent {
                 }
             }
 
+            async fn exec_process(
+                &self,
+                req: crate::ExecProcessRequest,
+            ) -> Result<crate::Empty> {
+                // Exec setup is a short-lived RPC but must not race with
+                // disconnect. Tracking as Write makes prepare_disconnect
+                // wait for the round-trip to complete (milliseconds) and
+                // causes new calls during the snapshot window to block
+                // until the connection is restored rather than failing
+                // immediately.
+                let (client, timeout, _, _guard) =
+                    self.acquire_agent_client(ActivityKind::Write).await?;
+                let request = req.into();
+                let response = client
+                    .exec_process(new_ttrpc_ctx(timeout * MILLISECOND_TO_NANOSECOND), &request)
+                    .await?;
+                Ok(response.into())
+            }
+
             async fn write_stdin(
                 &self,
                 req: crate::WriteStreamRequest,
@@ -241,7 +260,6 @@ impl_agent!(
     create_container | crate::CreateContainerRequest | crate::Empty | None,
     start_container | crate::ContainerID | crate::Empty | None,
     remove_container | crate::RemoveContainerRequest | crate::Empty | None,
-    exec_process | crate::ExecProcessRequest | crate::Empty | None,
     signal_process | crate::SignalProcessRequest | crate::Empty | None,
     update_container | crate::UpdateContainerRequest | crate::Empty | None,
     stats_container | crate::ContainerID | crate::StatsContainerResponse | None,
