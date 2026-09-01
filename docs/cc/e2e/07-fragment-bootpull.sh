@@ -87,14 +87,20 @@ RULES_SRC="${GP_RULES}"
 # On clh-snp the check is skipped: ensure_genpolicy_defaults stages both files
 # from the branch at the point of use, so there is no staleness left to detect
 # and the comparison would be a tautology.
+#
+# The comparison reads the *installed* files rather than GP_RULES/GP_SETTINGS.
+# Those now name the suite's staged copies, and GP_SETTINGS names a directory so
+# that a drop-in can sit beside the settings; checking them would ask whether the
+# suite copied its own copy correctly. What is worth asserting is that stage 03's
+# install is still the branch's, which is what these two paths hold.
 if [[ "${E2E_PLATFORM}" = "qemu-coco-dev" ]]; then
   GP_SRC="${E2E_REPO_DIR}/src/tools/genpolicy"
-  have_rules=$(sudo sha256sum "${RULES_SRC}" | cut -d' ' -f1)
+  have_rules=$(sudo sha256sum "${E2E_KATA_DEFAULTS}/rules.rego" | cut -d' ' -f1)
   want_rules=$(sha256sum "${GP_SRC}/rules.rego" | cut -d' ' -f1)
   [[ "${have_rules}" = "${want_rules}" ]] \
     || die "staged rules.rego is not the branch copy — re-run 03-deploy-cluster.sh"
 
-  have_set=$(sudo sha256sum "${SETTINGS}" | cut -d' ' -f1)
+  have_set=$(sudo sha256sum "${E2E_KATA_DEFAULTS}/genpolicy-settings.json" | cut -d' ' -f1)
   want_set=$(sha256sum "${GP_SRC}/genpolicy-settings.json" | cut -d' ' -f1)
   [[ "${have_set}" = "${want_set}" ]] \
     || die "staged genpolicy-settings.json is not the branch copy — re-run 03-deploy-cluster.sh"
@@ -293,7 +299,7 @@ apply_case() {
 assert_request_defaults_survived() {
   local yaml="$1" pod="$2" missing
   missing=$(python3 - "${yaml}" "${SETTINGS}" <<'PY'
-import base64, gzip, json, re, sys
+import base64, glob, gzip, json, os, re, sys
 
 yaml_path, settings_path = sys.argv[1], sys.argv[2]
 blob = re.search(r'cc_init_data:\s*"?([A-Za-z0-9+/=]+)"?', open(yaml_path).read())
@@ -319,7 +325,39 @@ for k in range(i + len('"request_defaults"'), len(policy)):
         if depth == 0:
             break
 got = set(json.loads(policy[start:k + 1]))
-want = set(json.load(open(settings_path))["request_defaults"])
+
+
+# genpolicy takes either a settings file or a directory; where it is a directory
+# it reads genpolicy-settings.json plus every genpolicy-settings.d/*.json as an
+# RFC 6902 patch, in lexical order. Both forms are in use here -- coco-dev and
+# clh-snp carry a drop-in -- so resolve the same inputs genpolicy saw. Applying
+# only the request_defaults ops keeps this from reimplementing a patch engine;
+# anything else in a drop-in cannot change the key set being compared.
+def load_request_defaults(path):
+    if os.path.isdir(path):
+        settings = json.load(open(os.path.join(path, "genpolicy-settings.json")))
+        for name in sorted(glob.glob(os.path.join(path, "genpolicy-settings.d", "*.json"))):
+            for op in json.load(open(name)):
+                p = op.get("path", "")
+                if not p.startswith("/request_defaults"):
+                    continue
+                parts = p.lstrip("/").split("/")
+                if len(parts) != 2:
+                    raise SystemExit(
+                        "drop-in %s patches %s; this check only understands "
+                        "whole request_defaults keys" % (name, p)
+                    )
+                if op["op"] == "remove":
+                    settings["request_defaults"].pop(parts[1], None)
+                elif op["op"] in ("add", "replace"):
+                    settings["request_defaults"][parts[1]] = op["value"]
+                else:
+                    raise SystemExit("drop-in %s uses unsupported op %r" % (name, op["op"]))
+        return settings["request_defaults"]
+    return json.load(open(path))["request_defaults"]
+
+
+want = set(load_request_defaults(settings_path))
 print(" ".join(sorted(want - got)))
 PY
   ) || die "could not inspect the generated policy for ${pod}"
