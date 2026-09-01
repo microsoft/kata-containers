@@ -9,6 +9,7 @@ KATA_IMAGE ?=
 ROOT_HASH_FILE ?= $(OUT_DIR)/root_hash_.txt
 RUNTIME_CONFIG ?= $(CURDIR)/out/configuration-openvmm-snp-runtime-rs.toml
 VP_COUNT ?= 2
+MEMORY ?= 1G
 AGENT_IGVM = $(OUT_DIR)/kata-aci-agent-dmverity-reserve-416b-$(VP_COUNT)vp.bin
 AGENT_BINARY = $(abspath ../../../target/$(shell uname -m)-unknown-linux-gnu/release/kata-agent)
 AGENT_SOURCE_DIR = $(abspath ../../../src/agent)
@@ -123,6 +124,8 @@ shell-run:
 	OPENVMM="$(OPENVMM)" \
 	IGVM="$(OUT_DIR)/kata-aci-shell-reserve-416b-1vp.bin" \
 	KATA_IMAGE="" \
+	VP_COUNT=1 \
+	MEMORY="$(MEMORY)" \
 	./run.sh
 
 .PHONY: shell-disk-run
@@ -132,6 +135,8 @@ shell-disk-run:
 	OPENVMM="$(OPENVMM)" \
 	IGVM="$(OUT_DIR)/kata-aci-shell-reserve-416b-1vp.bin" \
 	KATA_IMAGE="$(KATA_IMAGE)" \
+	VP_COUNT=1 \
+	MEMORY="$(MEMORY)" \
 	./run.sh
 
 .PHONY: agent-dmverity-run
@@ -141,6 +146,8 @@ agent-dmverity-run:
 	OPENVMM="$(OPENVMM)" \
 	IGVM="$(AGENT_IGVM)" \
 	KATA_IMAGE="$(KATA_IMAGE)" \
+	VP_COUNT="$(VP_COUNT)" \
+	MEMORY="$(MEMORY)" \
 	./run.sh
 
 .PHONY: e2e-setup

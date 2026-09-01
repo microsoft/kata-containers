@@ -19,14 +19,11 @@ OPENVMM_HOST_PKGS=(
   qemu-img tar veritysetup
 )
 
-openvmm_assert_snp_host() {
-  clh_assert_snp_host
-}
-
 openvmm_configure_containerd() {
   local cfg=/etc/containerd/config.toml
   : "${E2E_OPENVMM_RUNTIME_CONFIG:?OpenVMM runtime config path is not set}"
 
+  [[ -f "${cfg}" ]] && sudo cp -n "${cfg}" "${cfg}.pre-e2e"
   sudo tee "${cfg}" >/dev/null <<EOF
 version = 3
 
@@ -35,13 +32,13 @@ version = 3
   [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
     SystemdCgroup = true
 
-[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata-openvmm]
-  runtime_type = "io.containerd.kata-openvmm.v2"
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata-cc]
+  runtime_type = "io.containerd.kata-cc.v2"
   snapshotter = "erofs"
   pod_annotations = ["io.katacontainers.*"]
   container_annotations = ["io.katacontainers.*"]
   privileged_without_host_devices = true
-  [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata-openvmm.options]
+  [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata-cc.options]
     ConfigPath = "${E2E_OPENVMM_RUNTIME_CONFIG}"
 
 [plugins.'io.containerd.snapshotter.v1.erofs']
@@ -62,28 +59,20 @@ EOF
 }
 
 openvmm_bootstrap_node() {
-  clh_need_azl3
+  need_azl3
   log "installing OpenVMM SNP host and build packages"
   sudo dnf -y install "${OPENVMM_HOST_PKGS[@]}" \
     || die "OpenVMM host dependency installation failed"
   sudo dnf -y install kernel-mshv kernel-mshv-devel mshv mshv-bootloader-lx edk2-hvloader \
     || die "MSHV host package installation failed"
 
-  clh_install_containerd
-  clh_enable_dom0
-  openvmm_assert_snp_host
+  install_containerd
+  enable_dom0
+  assert_snp_host
   E2E_OPENVMM_RUNTIME_CONFIG="${E2E_KATA_DEFAULTS}/runtime-rs/configuration.toml"
   export E2E_OPENVMM_RUNTIME_CONFIG
   openvmm_configure_containerd
   ok "node bootstrapped for openvmm-snp"
-}
-
-openvmm_deploy_k8s() {
-  clh_deploy_k8s
-}
-
-openvmm_register_runtimeclass() {
-  clh_register_runtimeclass
 }
 
 openvmm_prepare_sources() {
@@ -94,6 +83,7 @@ openvmm_prepare_sources() {
       || die "OpenVMM clone failed"
   fi
   (
+    set -e
     cd "${E2E_OPENVMM_DIR}"
     git fetch origin "${E2E_OPENVMM_BRANCH}" --quiet
     git checkout --quiet "${E2E_OPENVMM_BRANCH}"
@@ -144,7 +134,7 @@ openvmm_build_and_deploy() {
     || die "OpenVMM runtime setup failed"
 
   openvmm_configure_containerd
-  openvmm_register_runtimeclass
+  register_runtimeclass
 
   E2E_GUEST_IMAGE="${E2E_OPENVMM_OUT}/${E2E_GUEST_IMAGE_NAME}"
   E2E_GUEST_IGVM="${E2E_OPENVMM_OUT}/${E2E_GUEST_IGVM_NAME}"
@@ -152,7 +142,11 @@ openvmm_build_and_deploy() {
 
   [[ -f "${E2E_GUEST_IMAGE}" ]] || die "OpenVMM guest image was not built"
   [[ -f "${E2E_GUEST_IGVM}" ]] || die "OpenVMM IGVM was not built"
-  grep -q "^default_vcpus = ${E2E_OPENVMM_VP_COUNT}$" "${E2E_OPENVMM_RUNTIME_CONFIG}" \
-    || die "runtime VP count does not match the requested IGVM topology"
+  local base_vcpus workload_vcpus
+  base_vcpus=$(sed -n 's/^default_vcpus = //p' "${E2E_OPENVMM_RUNTIME_CONFIG}")
+  workload_vcpus=$(sed -n 's/^static_sandbox_default_workload_vcpus = //p' \
+    "${E2E_OPENVMM_RUNTIME_CONFIG}")
+  [[ $((base_vcpus + workload_vcpus)) -eq "${E2E_OPENVMM_VP_COUNT}" ]] \
+    || die "effective runtime VP count does not match the requested IGVM topology"
   ok "OpenVMM SNP runtime installed"
 }

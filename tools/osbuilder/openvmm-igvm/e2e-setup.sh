@@ -14,6 +14,10 @@ runtime_dir="${repo_dir}/src/runtime-rs"
 openvmm_dir="${OPENVMM_DIR:-${HOME}/openvmm-snp-mshv-aci-igvm}"
 openvmm="${OPENVMM:-${openvmm_dir}/target/release/openvmm}"
 vp_count="${VP_COUNT:-2}"
+default_workload_vcpus=1
+((vp_count > default_workload_vcpus)) ||
+	die "VP_COUNT must exceed the default workload vCPU count (${default_workload_vcpus})"
+base_vcpus=$((vp_count - default_workload_vcpus))
 out_dir="${OUT_DIR:-${script_dir}/out}"
 kernel_override="${KERNEL:-}"
 kata_image_override="${KATA_IMAGE:-}"
@@ -27,7 +31,7 @@ kernel="${KERNEL:-${kernel_build_dir}/arch/x86/boot/bzImage}"
 kata_image="${KATA_IMAGE:-${out_dir}/kata-containers.img}"
 root_hash_file="${ROOT_HASH_FILE:-${out_dir}/root_hash_.txt}"
 runtime_config="${RUNTIME_CONFIG:-${out_dir}/configuration-openvmm-snp-runtime-rs.toml}"
-shim_path="${SHIM_PATH:-/usr/local/bin/containerd-shim-kata-openvmm-v2}"
+shim_path="${SHIM_PATH:-/usr/local/bin/containerd-shim-kata-cc-v2}"
 containerd_config="${CONTAINERD_CONFIG:-/etc/containerd/config-openvmm.toml}"
 containerd_dropin="${CONTAINERD_DROPIN:-/etc/systemd/system/containerd.service.d/20-kata-openvmm.conf}"
 crictl_config="${CRICTL_CONFIG:-/etc/crictl.yaml}"
@@ -114,6 +118,7 @@ make -B -C "${runtime_dir}" \
 	IGVMPATH_OPENVMM_SNP="${igvm}" \
 	IMAGEPATH_OPENVMM_AZURE="${kata_image}" \
 	DEFNETWORKMODEL_OPENVMM="${network_model}" \
+	DEFSTATICSANDBOXWORKLOADVCPUS="${default_workload_vcpus}" \
 	crates/shim/src/config.rs \
 	config/configuration-openvmm-snp-runtime-rs.toml
 
@@ -126,7 +131,7 @@ make -B -C "${runtime_dir}" \
 )
 
 generated_config="${runtime_dir}/config/configuration-openvmm-snp-runtime-rs.toml"
-sed_args=(-e "s/^default_vcpus = .*/default_vcpus = ${vp_count}/")
+sed_args=(-e "s/^default_vcpus = .*/default_vcpus = ${base_vcpus}/")
 if [[ "${disable_new_netns}" == "yes" ]]; then
 	sed_args+=(-e 's/^disable_new_netns = false$/disable_new_netns = true/')
 fi
@@ -166,11 +171,11 @@ version = 2
           runtime_type = "io.containerd.runc.v2"
           [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
             SystemdCgroup = true
-        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-openvmm]
+        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-cc]
           snapshotter = "erofs"
-          runtime_type = "io.containerd.kata-openvmm.v2"
+          runtime_type = "io.containerd.kata-cc.v2"
           privileged_without_host_devices = true
-          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-openvmm.options]
+          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-cc.options]
             ConfigPath = "${runtime_config}"
 
 [plugins."io.containerd.snapshotter.v1.erofs"]

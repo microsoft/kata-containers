@@ -14,7 +14,7 @@ pod_name="${K8S_POD_NAME:-openvmm-kata-e2e}"
 expected_vps="${VP_COUNT:-2}"
 keep_sandbox="${KEEP_SANDBOX:-no}"
 image="${IMAGE:-docker.io/library/busybox:latest}"
-pause_image="${PAUSE_IMAGE:-registry.k8s.io/pause:3.10}"
+pause_image="${PAUSE_IMAGE:-registry.k8s.io/pause:3.10.1}"
 
 die()
 {

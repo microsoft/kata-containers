@@ -1,15 +1,15 @@
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
-  name: kata-openvmm
-handler: kata-openvmm
+  name: kata-cc
+handler: kata-cc
 ---
 apiVersion: v1
 kind: Pod
 metadata:
   name: openvmm-kata-e2e
 spec:
-  runtimeClassName: kata-openvmm
+  runtimeClassName: kata-cc
   restartPolicy: Never
   containers:
     - name: busybox

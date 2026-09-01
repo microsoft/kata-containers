@@ -1096,8 +1096,6 @@ impl Rootfs for ErofsMultiLayerRootfs {
         // Clean up generated VMDK descriptor file if it exists.
         if let Some(ref vmdk) = self.vmdk_path {
             safely_remove_file(vmdk, &self.generated_artifacts_dir)?;
-            let flattened = PathBuf::from(format!("{}.raw", vmdk.display()));
-            safely_remove_file(&flattened, &self.generated_artifacts_dir)?;
         }
 
         // Clean up GPT metadata files (head, padding).

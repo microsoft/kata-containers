@@ -403,7 +403,7 @@ stay declarative.
 | Default SKU | `Standard_DC16as_cc_v5` | `Standard_DC16as_cc_v5` | `Standard_DC8as_cc_v6` | `Standard_DC32as_cc_v6` |
 | Installed by | kata-deploy (Helm) | `make all-confpods` from `tools/osbuilder/node-builder/azure-linux` | **already baked into the node image** | `tools/osbuilder/openvmm-igvm` |
 | Prefix | `/opt/kata` | `/opt/confidential-containers` | `/opt/confidential-containers` | `~/kata-openvmm` |
-| RuntimeClass | `kata-qemu-coco-dev-runtime-rs` | `kata-cc` | discovered on the cluster | `kata-openvmm` |
+| RuntimeClass | `kata-qemu-coco-dev-runtime-rs` | `kata-cc` | discovered on the cluster | `kata-cc` |
 | genpolicy | ships in the kata-deploy image | **none** — built from the branch | **none** — built from the branch | built from the branch |
 | Verity pin | patched into `configuration-*.toml` | baked into the IGVM kernel cmdline | baked into the IGVM kernel cmdline | baked into the IGVM cmdline |
 

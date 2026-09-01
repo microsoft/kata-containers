@@ -119,7 +119,7 @@ case "${E2E_PLATFORM}" in
     : "${E2E_VM_SECURITY_TYPE:=Standard}"
     : "${E2E_OS_DISK_GB:=256}"
     : "${E2E_PKG:=dnf}"
-    : "${E2E_RUNTIMECLASS:=kata-openvmm}"
+    : "${E2E_RUNTIMECLASS:=kata-cc}"
     : "${E2E_KATA_PREFIX:=${HOME}/kata-openvmm}"
     : "${E2E_GUEST_IMAGE_NAME:=kata-containers.img}"
     : "${E2E_OPENVMM_VP_COUNT:=2}"

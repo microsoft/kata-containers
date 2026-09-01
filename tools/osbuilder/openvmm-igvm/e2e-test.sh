@@ -11,12 +11,14 @@ set -o pipefail
 script_dir="$(dirname "$(readlink -f "$0")")"
 runtime_endpoint="${RUNTIME_ENDPOINT:-unix:///run/containerd/containerd.sock}"
 image_endpoint="${IMAGE_ENDPOINT:-${runtime_endpoint}}"
-runtime_handler="${RUNTIME_HANDLER:-kata-openvmm}"
+runtime_handler="${RUNTIME_HANDLER:-kata-cc}"
 image="${IMAGE:-docker.io/library/busybox:latest}"
 pause_image="${PAUSE_IMAGE:-registry.k8s.io/pause:3.10.1}"
 request_timeout="${CRI_REQUEST_TIMEOUT:-120s}"
 keep_sandbox="${KEEP_SANDBOX:-no}"
 expected_vps="${VP_COUNT:-2}"
+# The direct CRI path does not invoke a CNI plugin, so the fixtures deliberately
+# use NamespaceMode::NODE and share the host network namespace.
 pod_config="${POD_CONFIG:-${script_dir}/e2e-pod.json}"
 container_config="${CONTAINER_CONFIG:-${script_dir}/e2e-container.json}"
 

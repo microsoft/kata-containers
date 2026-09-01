@@ -10,6 +10,12 @@ flow on OpenVMM:
 5. boot a Kata pod through CRI or Kubernetes and run an EROFS-backed BusyBox
    container.
 
+> [!WARNING]
+> This is a bring-up and validation configuration, not a production-ready
+> deployment. A permissive SNP guest policy remains enabled, and the guest
+> layout still depends on a fixed-GPA workaround. The separate diagnostic IGVM
+> permits confidential debugging; the Kata rootfs IGVM does not.
+
 The flow has been validated from clean Azure Linux 3 installations on:
 
 - `Standard_DC16as_cc_v5`;
@@ -120,11 +126,12 @@ This target:
 - regenerates the dm-verity SNP IGVM;
 - sets both the IGVM topology and runtime VM request to `VP_COUNT`;
 - builds runtime-rs with OpenVMM support;
-- installs `containerd-shim-kata-openvmm-v2`;
+- installs `containerd-shim-kata-cc-v2`;
 - generates the OpenVMM SNP runtime configuration;
 - starts containerd with a dedicated EROFS configuration.
 
-The normal `/etc/containerd/config.toml` is not modified.
+The `make e2e-setup` target does not modify the normal
+`/etc/containerd/config.toml`.
 
 Boot and validate the pod:
 
@@ -141,7 +148,7 @@ guest kernel: 6.6.31-aci-kata-openvmm+
 
 The test verifies:
 
-- CRI selected the `kata-openvmm` runtime;
+- CRI selected the `kata-cc` runtime;
 - the container executes inside the Kata guest;
 - the container has an active EROFS snapshot;
 - the sandbox is backed by an OpenVMM process.
@@ -223,7 +230,7 @@ make e2e-k8s-test VP_COUNT="$VP_COUNT"
 
 This applies:
 
-- a `kata-openvmm` `RuntimeClass` mapped to the containerd handler;
+- a `kata-cc` `RuntimeClass` mapped to the containerd handler;
 - an EROFS-backed BusyBox pod using that runtime class.
 
 The test waits for the pod, executes a marker inside the guest, verifies the
@@ -262,9 +269,11 @@ SEV: SNP guest platform device initialized
 - The kernel command line reserves GPA `0x416b000` to avoid the
   layout-dependent `HvMessageTypeUnacceptedGpa` failure. This is not a
   production fix or stable ABI.
-- The IGVM enables confidential debugging.
+- The diagnostic BusyBox IGVM enables confidential debugging; the Kata rootfs
+  IGVM does not.
 - The development guest policy is permissive.
-- Initdata is not currently bound into the OpenVMM SNP launch measurement.
+- When initdata is present, its digest is bound into the OpenVMM SNP launch
+  measurement through `HOST_DATA`; SNP guests without initdata remain supported.
 - A guest PCI rescan compensates for the missing OpenVMM PCIe hotplug
   notification under restricted interrupt injection.
 

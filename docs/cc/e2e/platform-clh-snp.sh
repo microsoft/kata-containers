@@ -44,7 +44,7 @@ CLH_HOST_PKGS=(
   jq unzip wget tar which python3-pip erofs-utils
 )
 
-clh_need_azl3() {
+need_azl3() {
   local v
   v=$(sed -n 's/^VERSION_ID="\?\([^"]*\)"\?/\1/p' /etc/os-release | head -1)
   [[ "${v}" = "3.0" ]] \
@@ -64,7 +64,7 @@ clh_need_azl3() {
 # This does not reboot on its own: stage 02 is running *on* the node over ssh, so
 # a reboot here would look like a stage failure. Configure, then say plainly what
 # is needed.
-clh_enable_dom0() {
+enable_dom0() {
   if [[ -e /dev/mshv ]]; then
     ok "already running as MSHV Dom0 ($(uname -r))"
     return 0
@@ -109,7 +109,7 @@ the indicator to check."
 # like containerd is up while kubelet cannot talk to it at all, and stage 03's
 # 'kubeadm init' dies in preflight with an opaque "unknown service
 # runtime.v1.RuntimeService".
-clh_load_storage_modules() {
+load_storage_modules() {
   sudo modprobe erofs 2>/dev/null || true
   grep -qw erofs /proc/filesystems \
     || die "the running host kernel has no EROFS support — the erofs snapshotter cannot mount layers.
@@ -142,16 +142,16 @@ image_layer_verification = host-erofs-dm-verity will refuse every container."
   fi
 }
 
-clh_assert_snp_host() {
+assert_snp_host() {
   [[ -e /dev/mshv ]] \
     || die "no /dev/mshv — this node is not running as an MSHV Dom0. Re-run stage 02, then reboot."
-  clh_load_storage_modules
+  load_storage_modules
   ok "MSHV Dom0 with EROFS ($(uname -r))"
 }
 
 # ------------------------------------------------------------------- bootstrap
 clh_bootstrap_node() {
-  clh_need_azl3
+  need_azl3
 
   log "installing host and build packages (dnf)"
   sudo dnf -y install "${CLH_HOST_PKGS[@]}" || die "dnf install of build packages failed"
@@ -170,9 +170,9 @@ clh_bootstrap_node() {
   # asking for a reboot, so the module checks and containerd land on the MSHV
   # kernel that will actually run the stack — not on the stock kernel, whose
   # EROFS support is not this suite's to guarantee.
-  clh_enable_dom0
-  clh_load_storage_modules
-  clh_install_containerd
+  enable_dom0
+  load_storage_modules
+  install_containerd
   clh_configure_containerd
   ok "node bootstrapped for clh-snp"
 }
@@ -180,7 +180,7 @@ clh_bootstrap_node() {
 # containerd 2.3.x is required for the EROFS flow: earlier releases have no EROFS
 # differ, so the single-layer path silently falls back to the walking differ and
 # nothing under test is exercised.
-clh_install_containerd() {
+install_containerd() {
   local want="${E2E_CONTAINERD_VERSION:-2.3.3}" have=""
   have=$(containerd --version 2>/dev/null | awk '{print $3}' | sed 's/^v//')
   if [[ "${have}" = "${want}" ]]; then
@@ -264,7 +264,7 @@ version = 3
   # If it is missing, the probe does not merely disable verity -- it fails the
   # differ, the diff service, the CRI image service and finally the whole CRI
   # plugin, leaving a node where containerd is "active" but kubelet cannot talk
-  # to it. clh_load_storage_modules() loads and persists the module first.
+  # to it. load_storage_modules() loads and persists the module first.
   enable_dmverity = true
   # These three must match erofs_mkfs_options() in
   # tools/packaging/kata-deploy/binary/src/artifacts/snapshotters.rs, because
@@ -469,7 +469,7 @@ clh_build_and_deploy() {
 # upstream layout, under /opt/kata, with handlers this node does not have. The
 # node-builder has already installed everything, so all Kubernetes needs is a
 # RuntimeClass pointing at the handler and a node that admits it.
-clh_register_runtimeclass() {
+register_runtimeclass() {
   local node
   node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}') \
     || die "no Kubernetes node — bring the cluster up first"
@@ -503,7 +503,7 @@ EOF
 CLH_POD_CIDR="10.244.0.0/16"
 CLH_FLANNEL_URL="https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml"
 
-clh_deploy_k8s() {
+deploy_k8s() {
   if kubectl get nodes >/dev/null 2>&1; then
     ok "kubernetes already up"
     return 0
