@@ -131,8 +131,32 @@
           "Path": "/run/kata-containers/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
           "Readonly": true
         },
-        "Version": "1.1.0"
-      }
+        "Version": "1.3.0"
+      },
+      "storages": [
+        {
+          "driver": "blk",
+          "driver_options": [],
+          "fs_group": null,
+          "fstype": "erofs",
+          "mount_point": "/run/kata-containers/shared/containers/passthrough/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+          "options": [
+            "X-kata.overlay-lower",
+            "X-kata.multi-layer=true",
+            "X-kata.gpt-partitioned=true",
+            "X-kata.partition-number=1",
+            "X-kata.dmverity-enabled=true",
+            "X-kata.dmverity.blocksize=4096",
+            "X-kata.dmverity.hashsize=4096",
+            "X-kata.dmverity.roothash=$(roothash-0)",
+            "X-kata.dmverity.hashoffset=4194304",
+            "X-kata.dmverity.no-superblock=false",
+            "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "shared": false,
+          "source": "01/02"
+        }
+      ]
     }
   },
   {
@@ -267,8 +291,32 @@
           "Path": "/run/kata-containers/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
           "Readonly": true
         },
-        "Version": "1.1.0"
-      }
+        "Version": "1.3.0"
+      },
+      "storages": [
+        {
+          "driver": "blk",
+          "driver_options": [],
+          "fs_group": null,
+          "fstype": "erofs",
+          "mount_point": "/run/kata-containers/shared/containers/passthrough/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+          "options": [
+            "X-kata.overlay-lower",
+            "X-kata.multi-layer=true",
+            "X-kata.gpt-partitioned=true",
+            "X-kata.partition-number=1",
+            "X-kata.dmverity-enabled=true",
+            "X-kata.dmverity.blocksize=4096",
+            "X-kata.dmverity.hashsize=4096",
+            "X-kata.dmverity.roothash=$(roothash-0)",
+            "X-kata.dmverity.hashoffset=4194304",
+            "X-kata.dmverity.no-superblock=false",
+            "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "shared": false,
+          "source": "01/02"
+        }
+      ]
     }
   },
   {
@@ -399,8 +447,32 @@
           "Path": "/run/kata-containers/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
           "Readonly": true
         },
-        "Version": "1.1.0"
-      }
+        "Version": "1.3.0"
+      },
+      "storages": [
+        {
+          "driver": "blk",
+          "driver_options": [],
+          "fs_group": null,
+          "fstype": "erofs",
+          "mount_point": "/run/kata-containers/shared/containers/passthrough/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+          "options": [
+            "X-kata.overlay-lower",
+            "X-kata.multi-layer=true",
+            "X-kata.gpt-partitioned=true",
+            "X-kata.partition-number=1",
+            "X-kata.dmverity-enabled=true",
+            "X-kata.dmverity.blocksize=4096",
+            "X-kata.dmverity.hashsize=4096",
+            "X-kata.dmverity.roothash=$(roothash-0)",
+            "X-kata.dmverity.hashoffset=4194304",
+            "X-kata.dmverity.no-superblock=false",
+            "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "shared": false,
+          "source": "01/02"
+        }
+      ]
     }
   },
   {
@@ -535,8 +607,32 @@
           "Path": "/run/kata-containers/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
           "Readonly": true
         },
-        "Version": "1.1.0"
-      }
+        "Version": "1.3.0"
+      },
+      "storages": [
+        {
+          "driver": "blk",
+          "driver_options": [],
+          "fs_group": null,
+          "fstype": "erofs",
+          "mount_point": "/run/kata-containers/shared/containers/passthrough/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+          "options": [
+            "X-kata.overlay-lower",
+            "X-kata.multi-layer=true",
+            "X-kata.gpt-partitioned=true",
+            "X-kata.partition-number=1",
+            "X-kata.dmverity-enabled=true",
+            "X-kata.dmverity.blocksize=4096",
+            "X-kata.dmverity.hashsize=4096",
+            "X-kata.dmverity.roothash=$(roothash-0)",
+            "X-kata.dmverity.hashoffset=4194304",
+            "X-kata.dmverity.no-superblock=false",
+            "X-kata.dmverity.salt=0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "shared": false,
+          "source": "01/02"
+        }
+      ]
     }
   }
 ]
