@@ -125,22 +125,28 @@ pub struct DidX509Parts {
 
 /// Percent-decode a `did:x509` policy argument. The method percent-encodes `:` and `%` so
 /// that arguments can be split on `:` unambiguously.
+///
+/// Decoding accumulates *bytes* and validates the result as UTF-8 at the end. Decoding each
+/// byte straight into a `char` would reinterpret it as a Unicode scalar, so a percent-encoded
+/// or literal non-ASCII value (`%C3%A9` or `é`) would decode to mojibake (`Ã©`) and no longer
+/// compare equal to the certificate field it names — rejecting an anchor whose DID and
+/// certificate actually agree.
 fn percent_decode(s: &str) -> Result<String, FragmentError> {
     let b = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
+    let mut out = Vec::with_capacity(s.len());
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%' {
             let hex = s.get(i + 1..i + 3).ok_or(FragmentError::MalformedAnchorDid)?;
             let v = u8::from_str_radix(hex, 16).map_err(|_| FragmentError::MalformedAnchorDid)?;
-            out.push(v as char);
+            out.push(v);
             i += 3;
         } else {
-            out.push(b[i] as char);
+            out.push(b[i]);
             i += 1;
         }
     }
-    Ok(out)
+    String::from_utf8(out).map_err(|_| FragmentError::MalformedAnchorDid)
 }
 
 /// Parse a canonical `did:x509` identifier:
@@ -1211,6 +1217,29 @@ mod tests {
         // Percent-encoded arguments decode, so a value containing ':' survives the split.
         let did = format!("{}::subject:CN:a%3Ab", did_x509_for(&fp));
         assert_eq!(parse_did_x509(&did).unwrap().predicates[0].1[1], "a:b");
+    }
+
+    /// A non-ASCII CN survives decoding, percent-encoded or literal. Decoding byte-by-byte
+    /// into `char` would yield mojibake ("Ã©"), so an anchor naming a CA whose CN is not
+    /// ASCII would be refused even though its DID and its leaf policy agree.
+    #[test]
+    fn tc_f1_10e_non_ascii_arguments_decode_as_utf8() {
+        let fp = [7u8; 32];
+        for encoded in ["caf%C3%A9", "café"] {
+            let did = format!("{}::subject:CN:{encoded}", did_x509_for(&fp));
+            assert_eq!(
+                parse_did_x509(&did).unwrap().predicates[0].1[1],
+                "café",
+                "decoding {encoded}"
+            );
+        }
+        // A percent escape that is not valid UTF-8 is refused rather than replaced, so a
+        // decoded argument is always exactly the bytes the DID named.
+        let bad = format!("{}::subject:CN:%FF", did_x509_for(&fp));
+        assert_eq!(
+            parse_did_x509(&bad).unwrap_err(),
+            FragmentError::MalformedAnchorDid
+        );
     }
 
     /// TC-F1.10e: an anchor whose DID names a *different* CA than the one it anchors on is
