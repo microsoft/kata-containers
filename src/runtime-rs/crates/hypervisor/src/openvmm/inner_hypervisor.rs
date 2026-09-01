@@ -12,10 +12,11 @@ use kata_types::config::KATA_PATH;
 use protobuf::MessageField;
 use std::fs;
 use std::path::Path;
-use std::time::Duration;
 
 use super::inner::OpenVmmInner;
-use super::vmm_instance::{prepare_disk_path, OPENVMM_READY_TIMEOUT};
+use super::vmm_instance::{
+    prepare_disk_path, OPENVMM_DISK_CONVERT_TIMEOUT, OPENVMM_READY_TIMEOUT,
+};
 use super::vmservice;
 use super::{
     OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
@@ -241,14 +242,10 @@ impl OpenVmmInner {
         Ok(())
     }
 
-    pub(crate) async fn start_vm(&mut self, timeout: i32) -> Result<()> {
+    pub(crate) async fn start_vm(&mut self, _timeout: i32) -> Result<()> {
         info!(sl!(), "openvmm: start_vm via external ttrpc process");
 
         let use_snp_igvm = snp_igvm_enabled(&self.config)?;
-        if timeout < 0 {
-            return Err(anyhow!("openvmm start timeout must not be negative"));
-        }
-        let disk_convert_timeout = Duration::from_millis(timeout as u64);
 
         let cmdline = if use_snp_igvm {
             String::new()
@@ -416,7 +413,7 @@ impl OpenVmmInner {
                         config.path_on_host.clone(),
                         &config.format,
                         &raw_path,
-                        disk_convert_timeout,
+                        OPENVMM_DISK_CONVERT_TIMEOUT,
                     )
                     .await?;
                     info!(
