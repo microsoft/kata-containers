@@ -480,14 +480,17 @@ fn prepare_restore_source(
     let mut private_writable_ids = HashSet::new();
     for container in &manifest.live_containers {
         let readonly = validated_snapshot_file(snapshot_dir, Path::new(&container.readonly_disk))?;
-        if replacements
-            .insert(container.readonly_disk_id.clone(), readonly)
-            .is_some()
-        {
-            return Err(anyhow!(
-                "duplicate snapshot disk ID {}",
-                container.readonly_disk_id
-            ));
+        match replacements.get(&container.readonly_disk_id) {
+            Some(existing) if existing != &readonly => {
+                return Err(anyhow!(
+                    "snapshot disk ID {} maps to conflicting paths",
+                    container.readonly_disk_id
+                ));
+            }
+            Some(_) => {}
+            None => {
+                replacements.insert(container.readonly_disk_id.clone(), readonly);
+            }
         }
         if let (Some(writable_id), Some(writable)) = (
             container.writable_disk_id.as_ref(),
@@ -561,12 +564,22 @@ fn restored_rootfs_configs(
     private_dir: &Path,
     manifest: &SnapshotManifest,
 ) -> Result<Vec<resource::rootfs::RestoredRootfsConfig>> {
+    let writable_disks = manifest
+        .live_containers
+        .iter()
+        .filter_map(|container| container.writable_disk.as_deref())
+        .map(PathBuf::from)
+        .collect::<HashSet<_>>();
+
     manifest
         .live_containers
         .iter()
         .map(|container| {
             let prefix = PathBuf::from("containers").join(&container.source_host_id);
             let readonly = PathBuf::from(&container.readonly_disk);
+            let readonly_prefix = readonly
+                .parent()
+                .ok_or_else(|| anyhow!("snapshot readonly disk has no parent"))?;
             let writable = container.writable_disk.as_ref().map(PathBuf::from);
             let private_writable = writable.as_ref().map(|_| {
                 private_dir
@@ -578,7 +591,10 @@ fn restored_rootfs_configs(
                 .files
                 .iter()
                 .map(|file| PathBuf::from(&file.path))
-                .filter(|path| path.starts_with(&prefix))
+                .filter(|path| {
+                    path.starts_with(&prefix)
+                        || (path.starts_with(readonly_prefix) && !writable_disks.contains(path))
+                })
                 .map(|path| {
                     if writable.as_ref() == Some(&path) {
                         private_writable
@@ -588,7 +604,9 @@ fn restored_rootfs_configs(
                         Ok(snapshot_dir.join(path))
                     }
                 })
-                .collect::<Result<Vec<_>>>()?;
+                .collect::<Result<HashSet<_>>>()?
+                .into_iter()
+                .collect::<Vec<_>>();
             Ok(resource::rootfs::RestoredRootfsConfig {
                 cri_name: container.cri_name.clone(),
                 host_id: container.source_host_id.clone(),
@@ -862,6 +880,86 @@ mod snapshot_manifest_tests {
         );
         assert_eq!(config["disks"][1]["sparse"], true);
         assert_eq!(fs::read(private_writable).unwrap(), b"writable");
+    }
+
+    #[test]
+    fn shared_readonly_disk_restores_once_for_multiple_containers() {
+        let snapshot = tempfile::tempdir().unwrap();
+        let private_parent = tempfile::tempdir().unwrap();
+        let mut manifest = write_restore_fixture(snapshot.path());
+        let app_directory = snapshot.path().join("containers/source-app");
+        fs::create_dir_all(&app_directory).unwrap();
+        let app_writable = app_directory.join("rwlayer.img");
+        fs::write(&app_writable, b"app-writable").unwrap();
+
+        let config_path = snapshot.path().join("clh/config.json");
+        let mut config: serde_json::Value =
+            serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        config["disks"].as_array_mut().unwrap().push(serde_json::json!({
+            "id": "app-rw",
+            "path": app_writable.display().to_string()
+        }));
+        fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+
+        manifest.live_containers.push(SnapshotLiveContainerManifest {
+            cri_name: "app".to_string(),
+            source_host_id: "source-app".to_string(),
+            snapshot_guest_id: "guest-app".to_string(),
+            oci_identity_version: crate::restore::OCI_IDENTITY_VERSION,
+            oci_identity_sha256: format!("sha256:{}", "2".repeat(64)),
+            node_local_mounts: Vec::new(),
+            readonly_disk_id: "ro".to_string(),
+            readonly_disk: "containers/source/rootfs.vmdk".to_string(),
+            writable_disk_id: Some("app-rw".to_string()),
+            writable_disk: Some("containers/source-app/rwlayer.img".to_string()),
+        });
+        manifest.files.push(SnapshotFileManifest {
+            path: "containers/source-app/rwlayer.img".to_string(),
+            size: fs::metadata(&app_writable).unwrap().len(),
+        });
+
+        let private_dir = private_parent.path().join("restore");
+        let restore_source =
+            prepare_restore_source(snapshot.path(), &private_dir, &manifest).unwrap();
+        let restored_config: serde_json::Value =
+            serde_json::from_slice(&fs::read(restore_source.join("config.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            restored_config["disks"][0]["path"],
+            snapshot
+                .path()
+                .join("containers/source/rootfs.vmdk")
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            restored_config["disks"][2]["path"],
+            private_dir
+                .join("containers/source-app/rwlayer.img")
+                .display()
+                .to_string()
+        );
+        assert_eq!(restored_config["disks"][1]["sparse"], true);
+        assert_eq!(restored_config["disks"][2]["sparse"], true);
+
+        let rootfs_configs = restored_rootfs_configs(snapshot.path(), &private_dir, &manifest)
+            .unwrap();
+        let shared_readonly = snapshot.path().join("containers/source/rootfs.vmdk");
+        assert_eq!(rootfs_configs.len(), 2);
+        for rootfs in &rootfs_configs {
+            assert_eq!(rootfs.readonly_disk, shared_readonly);
+            assert!(rootfs.files.contains(&shared_readonly));
+        }
+        let app = rootfs_configs
+            .iter()
+            .find(|rootfs| rootfs.cri_name == "app")
+            .unwrap();
+        let private_app_writable = private_dir.join("containers/source-app/rwlayer.img");
+        assert_eq!(app.writable_disk.as_ref(), Some(&private_app_writable));
+        assert!(app.files.contains(&private_app_writable));
+        assert!(!app
+            .files
+            .contains(&private_dir.join("containers/source/rwlayer.img")));
     }
 }
 

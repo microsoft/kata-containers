@@ -240,6 +240,78 @@ mod tests {
     }
 
     #[test]
+    fn rewrites_one_shared_readonly_disk_for_multiple_containers() {
+        let snapshot = tempfile::tempdir().unwrap();
+        let shared = snapshot
+            .path()
+            .join("containers/host-first/lower-0000.erofs");
+        let first_writable = snapshot
+            .path()
+            .join("containers/host-first/rwlayer.img");
+        let second_writable = snapshot
+            .path()
+            .join("containers/host-second/rwlayer.img");
+        fs::write(
+            snapshot.path().join("config.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "memory": {},
+                "disks": [
+                    {"id": "shared", "path": "/live/shared.erofs"},
+                    {"id": "first-rw", "path": "/live/first-rw.img"},
+                    {"id": "second-rw", "path": "/live/second-rw.img"}
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let artifacts = vec![
+            RootfsSnapshotArtifacts {
+                cri_name: "first".to_string(),
+                source_host_id: "host-first".to_string(),
+                snapshot_guest_id: "guest-first".to_string(),
+                readonly_disk: SnapshotDiskPath {
+                    live_path: "/live/shared.erofs".into(),
+                    snapshot_path: shared.clone(),
+                },
+                writable_disk: Some(SnapshotDiskPath {
+                    live_path: "/live/first-rw.img".into(),
+                    snapshot_path: first_writable.clone(),
+                }),
+                files: Vec::new(),
+            },
+            RootfsSnapshotArtifacts {
+                cri_name: "second".to_string(),
+                source_host_id: "host-second".to_string(),
+                snapshot_guest_id: "guest-second".to_string(),
+                readonly_disk: SnapshotDiskPath {
+                    live_path: "/live/shared.erofs".into(),
+                    snapshot_path: shared.clone(),
+                },
+                writable_disk: Some(SnapshotDiskPath {
+                    live_path: "/live/second-rw.img".into(),
+                    snapshot_path: second_writable.clone(),
+                }),
+                files: Vec::new(),
+            },
+        ];
+
+        finalize_snapshot_config(snapshot.path(), &artifacts).unwrap();
+
+        let config: Value =
+            serde_json::from_slice(&fs::read(snapshot.path().join("config.json")).unwrap())
+                .unwrap();
+        assert_eq!(config["disks"][0]["path"], shared.display().to_string());
+        assert_eq!(
+            config["disks"][1]["path"],
+            first_writable.display().to_string()
+        );
+        assert_eq!(
+            config["disks"][2]["path"],
+            second_writable.display().to_string()
+        );
+    }
+
+    #[test]
     fn removes_inactive_restored_container_disks() {
         let snapshot = tempfile::tempdir().unwrap();
         fs::write(

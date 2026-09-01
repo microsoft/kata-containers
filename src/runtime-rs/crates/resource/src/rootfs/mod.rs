@@ -22,7 +22,8 @@ use virtual_volume::{is_kata_virtual_volume, VirtualVolume};
 
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    fs,
+    path::{Path, PathBuf},
     sync::Arc,
     vec::Vec,
 };
@@ -59,6 +60,52 @@ pub struct RootfsSnapshotArtifacts {
     pub readonly_disk: SnapshotDiskPath,
     pub writable_disk: Option<SnapshotDiskPath>,
     pub files: Vec<PathBuf>,
+}
+
+fn canonicalize_shared_readonly_artifacts(
+    artifacts: &mut [RootfsSnapshotArtifacts],
+    staging: &Path,
+    final_destination: &Path,
+) -> Result<()> {
+    let mut canonical_paths = HashMap::<PathBuf, PathBuf>::new();
+
+    for artifact in artifacts {
+        let Some(canonical_path) = canonical_paths.get(&artifact.readonly_disk.live_path) else {
+            canonical_paths.insert(
+                artifact.readonly_disk.live_path.clone(),
+                artifact.readonly_disk.snapshot_path.clone(),
+            );
+            continue;
+        };
+
+        let writable_path = artifact
+            .writable_disk
+            .as_ref()
+            .map(|disk| disk.snapshot_path.as_path());
+        let mut duplicate_files = HashSet::new();
+        for path in &artifact.files {
+            let relative = path.strip_prefix(staging).with_context(|| {
+                format!(
+                    "snapshot artifact {} is outside staging directory {}",
+                    path.display(),
+                    staging.display()
+                )
+            })?;
+            let published = final_destination.join(relative);
+            if writable_path != Some(published.as_path()) {
+                duplicate_files.insert(path.clone());
+            }
+        }
+
+        for path in &duplicate_files {
+            fs::remove_file(path)
+                .with_context(|| format!("remove duplicate snapshot file {}", path.display()))?;
+        }
+        artifact.files.retain(|path| !duplicate_files.contains(path));
+        artifact.readonly_disk.snapshot_path = canonical_path.clone();
+    }
+
+    Ok(())
 }
 
 #[async_trait]
@@ -247,8 +294,8 @@ impl RootFsResource {
 
     pub async fn snapshot_artifacts(
         &self,
-        staging: &std::path::Path,
-        final_destination: &std::path::Path,
+        staging: &Path,
+        final_destination: &Path,
         active_host_ids: &HashSet<String>,
     ) -> Result<Vec<RootfsSnapshotArtifacts>> {
         let inner = self.inner.read().await;
@@ -273,14 +320,12 @@ impl RootFsResource {
                 artifacts.push(snapshot);
             }
         }
+        canonicalize_shared_readonly_artifacts(&mut artifacts, staging, final_destination)?;
         Ok(artifacts)
     }
 
     pub async fn register_restored(&self, configs: Vec<RestoredRootfsConfig>) -> Result<()> {
-        let restored = configs
-            .into_iter()
-            .map(restored_rootfs::RestoredRootfs::new)
-            .collect::<Result<Vec<_>>>()?;
+        let restored = restored_rootfs::RestoredRootfs::from_configs(configs)?;
         self.inner.write().await.rootfs.extend(
             restored
                 .into_iter()
@@ -315,10 +360,9 @@ impl RootFsResource {
         for (index, rootfs) in inner.rootfs.iter().enumerate() {
             if rootfs.restored_cri_name().is_some()
                 && rootfs.snapshot_host_id().await.as_deref() == Some(host_id)
+                && match_index.replace(index).is_some()
             {
-                if match_index.replace(index).is_some() {
-                    return Err(anyhow!("multiple restored rootfs entries for {host_id}"));
-                }
+                return Err(anyhow!("multiple restored rootfs entries for {host_id}"));
             }
         }
         let index =
@@ -438,5 +482,64 @@ mod tests {
             names,
             vec!["active-cri".to_string(), "anonymous-cri".to_string()]
         );
+    }
+
+    #[test]
+    fn canonicalizes_shared_readonly_artifacts() {
+        let staging = tempfile::tempdir().unwrap();
+        let published = tempfile::tempdir().unwrap();
+        let mut artifacts = Vec::new();
+
+        for (name, host_id) in [("first", "host-first"), ("second", "host-second")] {
+            let directory = staging.path().join("containers").join(host_id);
+            fs::create_dir_all(&directory).unwrap();
+            let readonly = directory.join("lower-0000.erofs");
+            let writable = directory.join("rwlayer.img");
+            fs::write(&readonly, b"shared").unwrap();
+            fs::write(&writable, name).unwrap();
+            artifacts.push(RootfsSnapshotArtifacts {
+                cri_name: name.to_string(),
+                source_host_id: host_id.to_string(),
+                snapshot_guest_id: format!("guest-{name}"),
+                readonly_disk: SnapshotDiskPath {
+                    live_path: "/live/shared.erofs".into(),
+                    snapshot_path: published
+                        .path()
+                        .join("containers")
+                        .join(host_id)
+                        .join("lower-0000.erofs"),
+                },
+                writable_disk: Some(SnapshotDiskPath {
+                    live_path: PathBuf::from(format!("/live/{host_id}.img")),
+                    snapshot_path: published
+                        .path()
+                        .join("containers")
+                        .join(host_id)
+                        .join("rwlayer.img"),
+                }),
+                files: vec![readonly, writable],
+            });
+        }
+
+        canonicalize_shared_readonly_artifacts(
+            &mut artifacts,
+            staging.path(),
+            published.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            artifacts[1].readonly_disk.snapshot_path,
+            artifacts[0].readonly_disk.snapshot_path
+        );
+        assert!(artifacts[0].files[0].is_file());
+        assert!(artifacts[0].files[1].is_file());
+        assert_eq!(artifacts[1].files.len(), 1);
+        assert_eq!(artifacts[1].files[0].file_name().unwrap(), "rwlayer.img");
+        assert!(artifacts[1].files[0].is_file());
+        assert!(!staging
+            .path()
+            .join("containers/host-second/lower-0000.erofs")
+            .exists());
     }
 }
