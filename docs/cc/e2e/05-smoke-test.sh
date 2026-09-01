@@ -56,7 +56,7 @@ $(pod_pin)
     supplementalGroups: [10]
   containers:
     - name: busybox
-      image: quay.io/prometheus/busybox:latest
+      image: ${E2E_BUSYBOX_IMAGE}
       command: ["sleep", "600"]
 EOF
 

@@ -38,6 +38,14 @@ set -uo pipefail
 # are all different, and only the QEMU path ships a genpolicy binary. Anything
 # platform-dependent is derived here so the stages stay declarative.
 : "${E2E_PLATFORM:=qemu-coco-dev}"
+
+# Pinned by digest rather than by tag. mcr.microsoft.com/azurelinux/busybox:1.36 is
+# mutable and has moved mid-run: genpolicy resolves the reference itself and writes the
+# resulting dm-verity root hashes into the measured policy, while containerd mounts
+# whatever it already has cached for that tag. When the tag moves between those two
+# steps the hashes disagree and the guest refuses a pod nobody tampered with -- a real
+# denial with a misleading cause. A digest makes both parties name the same bytes.
+: "${E2E_BUSYBOX_IMAGE:=mcr.microsoft.com/azurelinux/busybox@sha256:e3ead6d406efe76dc1da586756c0e9142442f7320644a13d5cc0a55598a080fe}"
 # Remember whether the caller named a RuntimeClass before the defaults below fill
 # one in. On the aks platform discovery reads the cluster's actual RuntimeClasses
 # and would otherwise silently overwrite a deliberate choice.
@@ -509,8 +517,8 @@ registry_up() {
 }
 
 # Only the binary is branch-built. The settings and rules under /opt/kata are
-# installed from the branch by stage 03 (with the deliberate oci_version patch it
-# applies to match the installed runtime), so callers should keep using those.
+# installed verbatim from the branch by stage 03, so callers should keep using
+# those.
 #
 # src/version.rs is generated from src/version.rs.in by genpolicy's Makefile and
 # is gitignored, so a bare `cargo build` fails with E0583 on a fresh checkout.
@@ -523,8 +531,19 @@ ensure_branch_genpolicy() {
   gp_commit=$(git -C "${E2E_REPO_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)
   [[ -n "$(git -C "${E2E_REPO_DIR}" status --porcelain --untracked-files=no 2>/dev/null)" ]] \
     && gp_commit="${gp_commit}-dirty"
-  sed -e "s|@COMMIT_INFO@|${gp_commit}|g" "${gp_src}/src/version.rs.in" > "${gp_src}/src/version.rs" \
-    || die "could not generate ${gp_src}/src/version.rs"
+  # Only replace version.rs when the stamp actually changed. Writing it
+  # unconditionally updates the mtime, which invalidates cargo's fingerprint and
+  # forces a full genpolicy recompile (~30s) on every single run, even though
+  # the generated content is usually identical.
+  local gp_ver="${gp_src}/src/version.rs" gp_tmp
+  gp_tmp=$(mktemp)
+  sed -e "s|@COMMIT_INFO@|${gp_commit}|g" "${gp_src}/src/version.rs.in" > "${gp_tmp}" \
+    || die "could not generate ${gp_ver}"
+  if cmp -s "${gp_tmp}" "${gp_ver}" 2>/dev/null; then
+    rm -f "${gp_tmp}"
+  else
+    mv "${gp_tmp}" "${gp_ver}" || die "could not install ${gp_ver}"
+  fi
 
   # genpolicy is a member of the root workspace (see the repo-root Cargo.toml),
   # so the artifact lands in the workspace target dir, not under src/tools.
@@ -546,15 +565,14 @@ ensure_branch_genpolicy() {
 # inputs in it at all:
 #
 #   qemu-coco-dev  kata-deploy lays down upstream's copies and stage 03 then
-#                  overwrites them with the branch's, plus the oci_version patch
-#                  that matches the installed containerd. Use those — re-deriving
-#                  them here would drop the patch and deny every pod at
-#                  CreateContainerRequest.
+#                  overwrites them with the branch's. Use those — re-deriving
+#                  them here would reintroduce upstream's settings and deny every
+#                  pod at CreateContainerRequest.
 #   clh-snp        the confpods flow installs no genpolicy, no rules.rego and no
 #                  settings whatsoever (grep the node-builder scripts: genpolicy
 #                  is never mentioned). There is nothing to consume, so stage the
-#                  branch copies into a suite-owned directory and apply the same
-#                  oci_version patch stage 03 applies on the other platform.
+#                  branch copies into a suite-owned directory, and carry whatever
+#                  this node needs on top of them as drop-in patches beside it.
 ensure_genpolicy_defaults() {
   case "${E2E_PLATFORM}" in
     qemu-coco-dev)
@@ -566,56 +584,34 @@ ensure_genpolicy_defaults() {
     clh-snp|aks|openvmm-snp)
       local src="${E2E_REPO_DIR}/src/tools/genpolicy" dst="${E2E_STATE_DIR}/genpolicy"
       mkdir -p "${dst}"
+      # The staged copy is never edited now, so it can simply track the branch:
+      # copy when it differs, leave it alone otherwise. Anything this platform
+      # needs on top of the branch's defaults goes in genpolicy-settings.d/.
       for f in rules.rego genpolicy-settings.json; do
         [[ -f "${src}/${f}" ]] || die "missing ${src}/${f} — genpolicy inputs are not where the suite expects them"
-        install -m 0644 "${src}/${f}" "${dst}/${f}" || die "could not stage ${f} into ${dst}"
+        rm -f "${dst}/${f}.orig"
+        if ! cmp -s "${src}/${f}" "${dst}/${f}"; then
+          install -m 0644 "${src}/${f}" "${dst}/${f}" || die "could not stage ${f} into ${dst}"
+        fi
       done
       GP_RULES="${dst}/rules.rego"
-      GP_SETTINGS="${dst}/genpolicy-settings.json"
-      # containerd 2.3.x emits OCI spec 1.3.0 while the branch's settings still
-      # say 1.1.0, which denies *every* pod at CreateContainerRequest.
-      if grep -q '"oci_version": "1.1.0"' "${GP_SETTINGS}" 2>/dev/null; then
-        log "patching oci_version 1.1.0 -> 1.3.0 in ${GP_SETTINGS}"
-        sed -i 's/"oci_version": "1.1.0"/"oci_version": "1.3.0"/' "${GP_SETTINGS}"
-      fi
-      # This platform has no virtio-fs: the container rootfs arrives as an erofs
-      # block storage that runtime-rs mounts under its passthrough share, so the
-      # agent sees Root.Path = /run/kata-containers/shared/containers/passthrough/
-      # <id>/rootfs. The shipped root_path only describes the virtio-fs layout
-      # (/run/kata-containers/<id>/rootfs), so allow_by_bundle_or_sandbox_id
-      # never matches and every pod is denied. "cpath" already tolerates the
-      # passthrough segment; mirror that here. The added groups must stay
-      # non-capturing — rules.rego reads capture group 1 as the bundle id.
-      # shellcheck disable=SC2016  # \$ is a regex escape for grep/sed, not a shell
-      # expansion: the literal text in the settings file is "$(bundle-id)".
-      if grep -q '"root_path": "/run/kata-containers/\$(bundle-id)/rootfs"' "${GP_SETTINGS}" 2>/dev/null; then
-        log "patching root_path to accept the runtime-rs passthrough layout"
-        # shellcheck disable=SC2016
-        sed -i \
-          's|"root_path": "/run/kata-containers/\$(bundle-id)/rootfs"|"root_path": "/run/kata-containers/(?:shared/containers/(?:passthrough/)?)?$(bundle-id)/rootfs"|' \
-          "${GP_SETTINGS}"
-      fi
-      # This platform runs containerd's erofs snapshotter in dm-verity mode, so
-      # every image layer arrives as a GPT partition on a host-attached VMDK.
-      # Since allow_storages became a bijection, a storage the policy does not
-      # declare is denied outright -- and the shipped settings say
-      # image_layer_verification "none", which declares no layers at all. The
-      # denial is "request presents N storages, policy declares {0}". Turn the
-      # erofs layer model on so genpolicy derives a root hash per layer and
-      # declares each one (RM-34/RM-42).
-      if grep -q '"image_layer_verification": "none"' "${GP_SETTINGS}" 2>/dev/null; then
-        log "patching image_layer_verification -> host-erofs-dm-verity"
-        sed -i \
-          's|"image_layer_verification": "none"|"image_layer_verification": "host-erofs-dm-verity"|' \
-          "${GP_SETTINGS}"
-      fi
+      # Point genpolicy at the *directory*: it then reads genpolicy-settings.json
+      # plus every *.json in genpolicy-settings.d/ as RFC 6902 patches, in
+      # lexical order (settings.rs). That is upstream's supported way to adapt
+      # settings per environment, so the suite uses it instead of editing the
+      # branch's checked-in file with sed. What the branch itself gets wrong for
+      # this platform belongs in the branch's defaults, not in a drop-in here --
+      # oci_version, root_path and image_layer_verification were all fixed there.
+      GP_SETTINGS="${dst}"
+      local dropin_dir="${dst}/genpolicy-settings.d"
+      mkdir -p "${dropin_dir}"
+
       # Every pod gets a sandbox container, and under host-erofs-dm-verity its
       # image layer is verified like any other. genpolicy hashes whichever pause
       # image the settings name, but the layer the node actually mounts comes
-      # from containerd's configured sandbox image. The shipped settings say
-      # mcr.microsoft.com/oss/kubernetes/pause:3.6 while a kubeadm-provisioned
-      # containerd runs registry.k8s.io/pause:3.10.x, so the policy declares a
-      # root hash for an image this node never pulls.
+      # from containerd's configured sandbox image. The branch's settings name
+      # the AKS image; a kubeadm-provisioned containerd runs a different one, so
+      # the policy would declare a root hash for an image this node never pulls.
       #
       # The failure is deceptive: the workload's layers match perfectly and only
       # the sandbox layer is refused, which reads as a dm-verity defect rather
@@ -629,6 +625,7 @@ ensure_genpolicy_defaults() {
       # 1.x writes `sandbox_image = "..."`, and the `crictl info` fallback emits
       # JSON with the field camelCased as "sandboxImage".
       local sandbox_image declared_pause dump
+      local dropin="${dropin_dir}/10-pause-image-drop-in.json"
       if [[ "${E2E_PLATFORM}" = "aks" ]]; then
         dump="$(aks_containerd_config_dump)"
       else
@@ -642,11 +639,14 @@ ensure_genpolicy_defaults() {
         <<<"${dump}" | head -1)"
       if [[ -n "${sandbox_image}" ]]; then
         declared_pause="$(sed -n 's|.*"pause_container_image": "\([^"]*\)".*|\1|p' \
-          "${GP_SETTINGS}" | head -1)"
-        if [[ -n "${declared_pause}" ]] && [[ "${declared_pause}" != "${sandbox_image}" ]]; then
-          log "patching pause_container_image ${declared_pause} -> ${sandbox_image}"
-          sed -i "s|\"pause_container_image\": \"[^\"]*\"|\"pause_container_image\": \"${sandbox_image}\"|" \
-            "${GP_SETTINGS}"
+          "${dst}/genpolicy-settings.json" | head -1)"
+        if [[ "${declared_pause}" == "${sandbox_image}" ]]; then
+          rm -f "${dropin}"
+        elif ! grep -q "\"${sandbox_image}\"" "${dropin}" 2>/dev/null; then
+          log "drop-in: pause_container_image ${declared_pause} -> ${sandbox_image}"
+          printf '[\n  {\n    "op": "replace",\n    "path": "/cluster_config/pause_container_image",\n    "value": "%s"\n  }\n]\n' \
+            "${sandbox_image}" > "${dropin}" \
+            || die "could not write ${dropin}"
         fi
       else
         warn "could not read containerd's sandbox image; leaving pause_container_image alone"

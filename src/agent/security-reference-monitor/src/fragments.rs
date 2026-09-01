@@ -630,6 +630,16 @@ pub enum FragmentError {
     /// FR-1d: the derived `did:x509` (chain CA + leaf policy) does not match an authorized
     /// anchor or the fragment's declared issuer.
     DidX509Mismatch,
+    /// FR-1d: a configured `did:x509` anchor is not a canonical `did:x509` identifier, so the
+    /// CA it names cannot be compared against the CA it anchors on.
+    MalformedAnchorDid,
+    /// FR-1d: a configured `did:x509` anchor advertises a CA fingerprint or a leaf constraint
+    /// that is not the one it actually enforces.
+    AnchorDidMismatch,
+    /// FR-1d: a configured `did:x509` anchor declares a policy predicate this implementation
+    /// cannot enforce. Refused rather than ignored, so a DID never reads as promising more
+    /// than was checked.
+    UnsupportedAnchorDidPolicy,
     /// FR-1d: a certificate in the chain is on the measured revocation list.
     RevokedCertificate,
     /// FR-1d: a certificate in the chain is outside its validity window.
@@ -717,6 +727,17 @@ impl fmt::Display for FragmentError {
             FragmentError::DidX509Mismatch => {
                 write!(f, "did:x509 identity does not match an authorized anchor")
             }
+            FragmentError::MalformedAnchorDid => {
+                write!(f, "configured did:x509 anchor is not a canonical did:x509")
+            }
+            FragmentError::AnchorDidMismatch => write!(
+                f,
+                "configured did:x509 anchor advertises a CA or leaf constraint it does not enforce"
+            ),
+            FragmentError::UnsupportedAnchorDidPolicy => write!(
+                f,
+                "configured did:x509 anchor declares a policy predicate that cannot be enforced"
+            ),
             FragmentError::RevokedCertificate => write!(f, "certificate in chain is revoked"),
             FragmentError::CertExpired => write!(f, "certificate in chain is outside validity"),
             FragmentError::CertChainTooLong { len, max } => write!(
@@ -1187,11 +1208,20 @@ impl FragmentStore {
     /// leaf policy. A fragment presenting an `x5chain` that path-validates to this CA and
     /// satisfies the policy is accepted as issued by `anchor.did`. Also declares the did's
     /// default feed so simple x509 fragments (no explicit feed) are accepted.
-    pub fn authorize_did_x509(&mut self, anchor: crate::did_x509::DidX509Anchor) {
+    ///
+    /// The anchor must be self-consistent (see [`DidX509Anchor::validate`]): the CA named
+    /// inside the DID must be the CA it anchors on. This is the only path into the trust
+    /// store, so an inconsistent anchor cannot reach it.
+    pub fn authorize_did_x509(
+        &mut self,
+        anchor: crate::did_x509::DidX509Anchor,
+    ) -> Result<(), FragmentError> {
+        anchor.validate()?;
         self.feeds
             .entry((anchor.did.clone(), String::new()))
             .or_insert(0);
         self.did_x509_anchors.insert(anchor.did.clone(), anchor);
+        Ok(())
     }
 
     /// FR-1d: set the measured certificate revocation list (SHA-256 fingerprints). Any chain

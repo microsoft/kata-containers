@@ -314,17 +314,21 @@ fn section3_did_x509() {
     println!("\n== 3. FR-1d: did:x509 issuer identity (chain trust, revocation, rotation) ==");
     let ca_sk = EcSigningKey::random(&mut OsRng);
     let ca = mint_ca("demo-ca", &ca_sk);
-    let did = "did:x509:0:demo-ca:issuerX";
+    let ca_fp = kata_security_reference_monitor::did_x509::sha256_fingerprint(&ca);
+    let did_owned = kata_security_reference_monitor::did_x509::did_x509_for(&ca_fp);
+    let did = did_owned.as_str();
 
     let mut store = FragmentStore::new(false);
-    store.authorize_did_x509(DidX509Anchor {
-        did: did.to_string(),
-        ca_fingerprint: kata_security_reference_monitor::did_x509::sha256_fingerprint(&ca),
-        policy: DidX509Policy {
-            require_eku: vec![EKU_CODE_SIGNING.into()],
-            ..Default::default()
-        },
-    });
+    store
+        .authorize_did_x509(DidX509Anchor {
+            did: did.to_string(),
+            ca_fingerprint: ca_fp,
+            policy: DidX509Policy {
+                require_eku: vec![EKU_CODE_SIGNING.into()],
+                ..Default::default()
+            },
+        })
+        .expect("anchor is self-consistent");
 
     // Valid chain to the trusted CA, leaf satisfies the policy -> accepted.
     let leaf1_sk = EcSigningKey::random(&mut OsRng);
