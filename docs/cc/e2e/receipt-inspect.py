@@ -84,8 +84,14 @@ def decode(proof_cbor):
     if not isinstance(leaf_arr, list) or len(leaf_arr) != 3:
         raise SystemExit("malformed ccf-leaf: want [tx_hash, evidence, data_hash]")
     tx_hash, evidence, data_hash = leaf_arr
-    if not isinstance(evidence, str) or not 1 <= len(evidence) <= 1024:
+    # ccf.rs bounds internal_evidence by its length in *bytes*. Python's len() on a str
+    # counts characters, so measuring it here would accept a non-ASCII evidence up to
+    # four times the size the guest accepts -- and this tool exists to reproduce the
+    # guest's arithmetic exactly, not approximately.
+    if not isinstance(evidence, str) or not 1 <= len(evidence.encode()) <= 1024:
         raise SystemExit("malformed internal_evidence")
+    if not isinstance(tx_hash, bytes) or not isinstance(data_hash, bytes):
+        raise SystemExit("tx_hash and data_hash must be CBOR byte strings")
     if len(tx_hash) != 32 or len(data_hash) != 32:
         raise SystemExit("tx_hash and data_hash must be 32 bytes")
 

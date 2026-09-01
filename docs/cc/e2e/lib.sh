@@ -649,7 +649,16 @@ ensure_genpolicy_defaults() {
             || die "could not write ${dropin}"
         fi
       else
-        warn "could not read containerd's sandbox image; leaving pause_container_image alone"
+        # A drop-in from an earlier run would still be applied — genpolicy reads the
+        # whole directory — so a failed detection would silently keep overriding the
+        # pause image with a value this node may no longer use, which is the exact
+        # mismatch this block exists to prevent. Remove it and fall back to the
+        # branch's declared default, which is at least a value someone chose.
+        if [[ -e "${dropin}" ]]; then
+          rm -f "${dropin}" || die "could not remove stale ${dropin}"
+          warn "removed a stale pause-image drop-in from an earlier run"
+        fi
+        warn "could not read containerd's sandbox image; falling back to the declared pause_container_image"
       fi
       ;;
   esac

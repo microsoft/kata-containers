@@ -954,7 +954,12 @@ ttl_subjects = ["vendor"]              # FR-1f: Trust List subjects vouching for
   spki_hex = "<SubjectPublicKeyInfo DER, hex>"
 
 [[ca_anchor]]                          # FR-1d did:x509 anchor
-did = "did:x509:0:demo-ca:issuerX"
+# Canonical form only: did:x509:0:sha256:<base64url(SHA-256 of the CA DER), unpadded>,
+# optionally followed by "::<predicate>:<arg>..." sections. The fingerprint inside the
+# DID must equal ca_fingerprint_hex below, and every predicate the DID declares must be
+# one this anchor really enforces -- the agent refuses to start otherwise, so a DID can
+# never advertise a trust root or a constraint that was not the one checked.
+did = "did:x509:0:sha256:<base64url of the same fingerprint>::eku:1.3.6.1.5.5.7.3.3"
 ca_fingerprint_hex = "<sha256 of CA DER>"
 require_eku = ["1.3.6.1.5.5.7.3.3"]
 
