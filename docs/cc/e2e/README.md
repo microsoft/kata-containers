@@ -235,7 +235,7 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 | `E2E_OPENVMM_VP_COUNT` | `2` | Fixed VP count embedded in the OpenVMM IGVM and requested by runtime-rs. |
 | `E2E_OPENVMM_KERNEL_SRC` | `~/src/openvmm-aci-kernel` | Validated ACI kernel source on the E2E node. |
 | `E2E_OPENVMM_KERNEL_SRC_LOCAL` | *(empty)* | Workstation checkout archived and copied by `sync.sh` for `openvmm-snp`. |
-| `E2E_OPENVMM_REPO` / `_BRANCH` | `nbojanic/openvmm` / `kata-snp-working` | OpenVMM source carrying VM-service SNP IGVM support. |
+| `E2E_OPENVMM_REPO` / `_REV` | `nbojanic/openvmm` / `645ac42f...` | Pinned OpenVMM source carrying VM-service SNP IGVM support. |
 | `E2E_STATE_DIR` | `~/.coco-e2e` | Stage markers and stage-06 artifacts. |
 | `E2E_FRAGMENT_ISSUER` / `_FEED` / `_SVN` / `_MIN_SVN` / `_TAG` | `did:example:e2e-issuer` / `$E2E_REGISTRY/coco-e2e/fragment` / `2` / `1` / `e2e` | Stage-06 fragment identity and rollback floor. |
 | `E2E_FRAGMENT_WORK` | `$E2E_STATE_DIR/fragments` | Holds the issuer private key; created mode 700. |

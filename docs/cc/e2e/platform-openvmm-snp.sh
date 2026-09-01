@@ -77,17 +77,16 @@ openvmm_bootstrap_node() {
 
 openvmm_prepare_sources() {
   if [[ ! -d "${E2E_OPENVMM_DIR}/.git" ]]; then
-    log "cloning OpenVMM ${E2E_OPENVMM_BRANCH}"
-    git clone --single-branch --branch "${E2E_OPENVMM_BRANCH}" \
-      "${E2E_OPENVMM_REPO}" "${E2E_OPENVMM_DIR}" \
+    log "cloning OpenVMM"
+    git clone --no-checkout "${E2E_OPENVMM_REPO}" "${E2E_OPENVMM_DIR}" \
       || die "OpenVMM clone failed"
   fi
   (
     set -e
     cd "${E2E_OPENVMM_DIR}"
-    git fetch origin "${E2E_OPENVMM_BRANCH}" --quiet
-    git checkout --quiet "${E2E_OPENVMM_BRANCH}"
-    git pull --ff-only --quiet
+    git fetch origin "${E2E_OPENVMM_REV}" --quiet
+    git checkout --detach --quiet "${E2E_OPENVMM_REV}"
+    [[ "$(git rev-parse HEAD)" = "${E2E_OPENVMM_REV}" ]]
     PROTOC="$(command -v protoc)" cargo xflowey restore-packages --no-compat-igvm
   ) || die "OpenVMM source preparation failed"
 

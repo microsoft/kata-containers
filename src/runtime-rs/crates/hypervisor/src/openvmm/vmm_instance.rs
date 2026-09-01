@@ -25,7 +25,7 @@ use protobuf::MessageField;
 pub(super) const OPENVMM_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const OPENVMM_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const OPENVMM_RPC_TIMEOUT: Duration = Duration::from_secs(30);
-const OPENVMM_DISK_CONVERT_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const OPENVMM_DISK_CONVERT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(super) async fn prepare_disk_path(
     host_path: String,
