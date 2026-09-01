@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
@@ -11,7 +12,7 @@ use async_trait::async_trait;
 use hypervisor::device::device_manager::DeviceManager;
 use kata_sys_util::fs::reflink_copy;
 use oci_spec::runtime as oci;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use super::{Rootfs, RootfsSnapshotArtifacts, SnapshotDiskPath};
 
@@ -33,6 +34,54 @@ struct RestoredRootfsIdentity {
 }
 
 #[derive(Debug)]
+struct RestoredDeviceReferences {
+    counts: HashMap<String, usize>,
+}
+
+impl RestoredDeviceReferences {
+    fn new(configs: &[RestoredRootfsConfig]) -> Result<Self> {
+        let mut counts = HashMap::<String, usize>::new();
+        for config in configs {
+            let unique = config.device_ids.iter().collect::<HashSet<_>>();
+            if unique.len() != config.device_ids.len() {
+                return Err(anyhow!(
+                    "restored rootfs {} contains duplicate device IDs",
+                    config.cri_name
+                ));
+            }
+            for device_id in &config.device_ids {
+                let count = counts.entry(device_id.clone()).or_default();
+                *count = count
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("restored device reference count overflow"))?;
+            }
+        }
+        Ok(Self { counts })
+    }
+
+    fn release(&mut self, device_id: &str) -> Result<bool> {
+        let count = self
+            .counts
+            .get_mut(device_id)
+            .ok_or_else(|| anyhow!("restored device {device_id} has no reference count"))?;
+        if *count > 1 {
+            *count -= 1;
+            return Ok(false);
+        }
+        self.counts.remove(device_id);
+        Ok(true)
+    }
+
+    fn retain(&mut self, device_id: &str) -> Result<()> {
+        let count = self.counts.entry(device_id.to_string()).or_default();
+        *count = count
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("restored device reference count overflow"))?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct RestoredRootfs {
     cri_name: String,
     identity: Arc<RwLock<RestoredRootfsIdentity>>,
@@ -40,10 +89,14 @@ pub struct RestoredRootfs {
     readonly_disk: PathBuf,
     writable_disk: Option<PathBuf>,
     files: Vec<PathBuf>,
+    device_references: Arc<Mutex<RestoredDeviceReferences>>,
 }
 
 impl RestoredRootfs {
-    pub fn new(config: RestoredRootfsConfig) -> Result<Self> {
+    fn new(
+        config: RestoredRootfsConfig,
+        device_references: Arc<Mutex<RestoredDeviceReferences>>,
+    ) -> Result<Self> {
         if config.cri_name.is_empty()
             || config.host_id.is_empty()
             || config.guest_id.is_empty()
@@ -72,7 +125,16 @@ impl RestoredRootfs {
             readonly_disk: config.readonly_disk,
             writable_disk: config.writable_disk,
             files: config.files,
+            device_references,
         })
+    }
+
+    pub(super) fn from_configs(configs: Vec<RestoredRootfsConfig>) -> Result<Vec<Self>> {
+        let references = Arc::new(Mutex::new(RestoredDeviceReferences::new(&configs)?));
+        configs
+            .into_iter()
+            .map(|config| Self::new(config, references.clone()))
+            .collect()
     }
 
     fn file_name(path: &Path) -> Result<&std::ffi::OsStr> {
@@ -103,11 +165,15 @@ impl Rootfs for RestoredRootfs {
 
     async fn cleanup(&self, device_manager: &RwLock<DeviceManager>) -> Result<()> {
         let device_manager = device_manager.read().await;
+        let mut references = self.device_references.lock().await;
         for device_id in self.device_ids.iter().rev() {
-            device_manager
-                .remove_restored_device(device_id)
-                .await
-                .with_context(|| format!("remove restored rootfs device {device_id}"))?;
+            if references.release(device_id)? {
+                if let Err(error) = device_manager.remove_restored_device(device_id).await {
+                    references.retain(device_id)?;
+                    return Err(error)
+                        .with_context(|| format!("remove restored rootfs device {device_id}"));
+                }
+            }
         }
         Ok(())
     }
@@ -202,6 +268,53 @@ impl Rootfs for RestoredRootfs {
 mod tests {
     use super::*;
 
+    fn config(root: &Path, cri_name: &str, device_ids: &[&str]) -> RestoredRootfsConfig {
+        let directory = root.join(cri_name);
+        std::fs::create_dir_all(&directory).unwrap();
+        let readonly = directory.join("readonly.img");
+        std::fs::write(&readonly, b"readonly").unwrap();
+        RestoredRootfsConfig {
+            cri_name: cri_name.to_string(),
+            host_id: format!("{cri_name}-host"),
+            guest_id: format!("{cri_name}-guest"),
+            device_ids: device_ids.iter().map(|id| (*id).to_string()).collect(),
+            readonly_disk: readonly.clone(),
+            writable_disk: None,
+            files: vec![readonly],
+        }
+    }
+
+    #[test]
+    fn shared_restored_device_is_removed_only_after_final_release() {
+        let source = tempfile::tempdir().unwrap();
+        let configs = vec![
+            config(source.path(), "first", &["shared", "first-rw"]),
+            config(source.path(), "second", &["shared", "second-rw"]),
+        ];
+        let mut references = RestoredDeviceReferences::new(&configs).unwrap();
+
+        assert!(references.release("first-rw").unwrap());
+        assert!(!references.release("shared").unwrap());
+        assert!(references.release("second-rw").unwrap());
+        assert!(references.release("shared").unwrap());
+        assert!(references.release("shared").is_err());
+    }
+
+    #[test]
+    fn restored_rootfs_rejects_duplicate_device_ids() {
+        let source = tempfile::tempdir().unwrap();
+        let error = RestoredRootfs::from_configs(vec![config(
+            source.path(),
+            "duplicate",
+            &["shared", "shared"],
+        )])
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "restored rootfs duplicate contains duplicate device IDs"
+        );
+    }
+
     #[tokio::test]
     async fn recursive_snapshot_rekeys_host_but_preserves_guest_id() {
         let source = tempfile::tempdir().unwrap();
@@ -215,7 +328,7 @@ mod tests {
         std::fs::write(&descriptor, b"RW 1 FLAT \"lower-0000.erofs\" 0\n").unwrap();
         std::fs::write(&writable, b"target-generation-write").unwrap();
 
-        let rootfs = RestoredRootfs::new(RestoredRootfsConfig {
+        let rootfs = RestoredRootfs::from_configs(vec![RestoredRootfsConfig {
             cri_name: "app".to_string(),
             host_id: "source-host".to_string(),
             guest_id: "stable-guest".to_string(),
@@ -223,8 +336,9 @@ mod tests {
             readonly_disk: descriptor.clone(),
             writable_disk: Some(writable.clone()),
             files: vec![lower, descriptor.clone(), writable.clone()],
-        })
-        .unwrap();
+        }])
+        .unwrap()
+        .remove(0);
         rootfs.rebind_restored("target-host").await.unwrap();
 
         let staging = tempfile::tempdir().unwrap();
