@@ -11,6 +11,8 @@ use kata_types::config::hypervisor::snp_igvm_enabled;
 use kata_types::config::KATA_PATH;
 use protobuf::MessageField;
 use std::fs;
+use std::path::Path;
+use std::time::Duration;
 
 use super::inner::OpenVmmInner;
 use super::vmm_instance::{prepare_disk_path, OPENVMM_READY_TIMEOUT};
@@ -239,10 +241,14 @@ impl OpenVmmInner {
         Ok(())
     }
 
-    pub(crate) async fn start_vm(&mut self, _timeout: i32) -> Result<()> {
+    pub(crate) async fn start_vm(&mut self, timeout: i32) -> Result<()> {
         info!(sl!(), "openvmm: start_vm via external ttrpc process");
 
         let use_snp_igvm = snp_igvm_enabled(&self.config)?;
+        if timeout < 0 {
+            return Err(anyhow!("openvmm start timeout must not be negative"));
+        }
+        let disk_convert_timeout = Duration::from_millis(timeout as u64);
 
         let cmdline = if use_snp_igvm {
             String::new()
@@ -405,8 +411,14 @@ impl OpenVmmInner {
                     }
 
                     let port = self.reserve_block_hotplug_port(&block_device.device_id)?;
-                    let disk_path =
-                        prepare_disk_path(config.path_on_host.clone(), &config.format).await?;
+                    let raw_path = Path::new(&self.run_dir).join(format!("{}.raw", port.name));
+                    let disk_path = prepare_disk_path(
+                        config.path_on_host.clone(),
+                        &config.format,
+                        &raw_path,
+                        disk_convert_timeout,
+                    )
+                    .await?;
                     info!(
                         sl!(),
                         "openvmm: cold-plugging block device {} at port {} (pci_path {})",
@@ -630,8 +642,11 @@ impl OpenVmmInner {
         Ok((old_vcpus, old_vcpus))
     }
 
-    pub(crate) async fn resize_memory(&mut self, new_mem_mb: u32) -> Result<(u32, MemoryConfig)> {
-        Ok((new_mem_mb, MemoryConfig::default()))
+    pub(crate) async fn resize_memory(&mut self, _new_mem_mb: u32) -> Result<(u32, MemoryConfig)> {
+        Ok((
+            self.config.memory_info.default_memory,
+            MemoryConfig::default(),
+        ))
     }
 
     pub(crate) async fn get_agent_socket(&self) -> Result<String> {
@@ -650,7 +665,8 @@ impl OpenVmmInner {
     }
 
     pub(crate) async fn cleanup(&self) -> Result<()> {
-        Ok(())
+        crate::utils::remove_dir_all_if_exists(&self.run_dir)
+            .context(format!("failed to remove OpenVMM run dir {}", self.run_dir))
     }
 
     pub(crate) async fn get_pids(&self) -> Result<Vec<u32>> {

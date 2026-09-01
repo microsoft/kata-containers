@@ -41,6 +41,7 @@ impl OpenVmmInner {
                         block_device.config.path_on_host.clone(),
                         block_device.config.is_readonly,
                         &block_device.config.format,
+                        &self.run_dir,
                     )
                     .await
                     .context(format!(
@@ -96,6 +97,7 @@ impl OpenVmmInner {
                         path_on_host.clone(),
                         is_readonly,
                         &BlockDeviceFormat::Raw,
+                        &self.run_dir,
                     )
                     .await
                     .context(format!(

@@ -37,6 +37,8 @@ mkdir -p "${out_dir}"
 
 if [[ "${boot_mode}" == "rootfs" ]]; then
 	manifest="${script_dir}/manifest-rootfs.json"
+	[[ -n "${root_hash_file}" ]] ||
+		die "ROOT_HASH_FILE is required for rootfs mode"
 	kernel_cmdline="$(
 		jq -r '.guest_configs[0].image.snp_linux_direct.linux.command_line' \
 			"${manifest}"
@@ -63,7 +65,10 @@ if [[ "${boot_mode}" == "rootfs" ]]; then
 		dm_create+=" /dev/vda1 /dev/vda2 ${verity[data_block_size]}"
 		dm_create+=" ${verity[hash_block_size]} ${verity[data_blocks]} 0"
 		dm_create+=" sha256 ${verity[root_hash]} ${verity[salt]}\""
+		before="${kernel_cmdline}"
 		kernel_cmdline="${kernel_cmdline/root=\/dev\/vda1 ro rootfstype=ext4/${dm_create} root=\/dev\/dm-0 rootflags=data=ordered,errors=remount-ro ro rootfstype=ext4}"
+		[[ "${kernel_cmdline}" != "${before}" ]] ||
+			die "dm-verity command line injection did not match ${manifest} — refusing to emit an unprotected image"
 	fi
 
 	if [[ -n "${extra_kernel_args}" ]]; then

@@ -54,12 +54,11 @@ ENV_FILE="${HOME}/coco-env.sh"
     echo 'export KATA_HOST_OS="cbl-mariner"'
   else
     echo 'export KATA_HOST_OS="cbl-mariner"'
-    echo 'export PULL_TYPE="host-pull" SNAPSHOTTER="erofs"'
   fi
   cat <<'EOF'
 export KBS="true" KBS_INGRESS="nodeport"
-export PULL_TYPE="${PULL_TYPE:-guest-pull}"
-export SNAPSHOTTER="${SNAPSHOTTER:-nydus}" K8S_TEST_HOST_TYPE="all"
+export PULL_TYPE="${PULL_TYPE:-default}"
+export SNAPSHOTTER="${SNAPSHOTTER:-erofs}" K8S_TEST_HOST_TYPE="all"
 export CONTAINER_ENGINE_VERSION="latest" CONTAINER_ENGINE="containerd"
 export USE_EXPERIMENTAL_SETUP_SNAPSHOTTER="true" AUTO_GENERATE_POLICY="yes"
 export DOCKER_REGISTRY="ghcr.io" DOCKER_REPO="kata-containers/kata-deploy-ci"
@@ -117,23 +116,20 @@ if [[ "${E2E_REDEPLOY:-0}" != "1" ]] && cluster_is_up; then
   log "cluster and runtime are already up — skipping bring-up (E2E_REDEPLOY=1 forces it)"
   log "restaging genpolicy inputs only"
 else
-  if [[ "${E2E_PLATFORM}" = "clh-snp" ]]; then
+  if [[ "${E2E_PLATFORM}" = "clh-snp" || "${E2E_PLATFORM}" = "openvmm-snp" ]]; then
     # gha-run.sh's deploy-k8s and install-bats are written for Ubuntu runners:
     # both shell out to apt-get, and install-bats also calls add-apt-repository.
     # Neither exists on Azure Linux, so they fail before doing any work. The
     # platform module brings the same cluster up with the distro's own kubeadm.
     # bats is only needed by upstream's k8s test suite, which this suite does not
     # run, so nothing replaces it.
-    clh_deploy_k8s
+    deploy_k8s
 
     # No kata-deploy: the shim, IGVM and configuration are installed straight onto
     # the host by `make deploy-confpods` in stage 04. All this stage owes the
     # cluster is a RuntimeClass pointing at that handler, so stage 05 has
     # something to schedule against even before the build has run.
-    clh_register_runtimeclass
-  elif [[ "${E2E_PLATFORM}" = "openvmm-snp" ]]; then
-    openvmm_deploy_k8s
-    openvmm_register_runtimeclass
+    register_runtimeclass
   else
     gha deploy-k8s
     gha install-bats
