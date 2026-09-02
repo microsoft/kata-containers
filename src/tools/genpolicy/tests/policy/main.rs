@@ -496,6 +496,14 @@ mod tests {
     /// pinning cannot fix is that the storage carries no declaration at all, so it is
     /// exempt from the `allow_storages` cardinality check and would otherwise be admitted
     /// *alongside* a container's declared dm-verity layers as a second root filesystem.
+    ///
+    /// Because it ships no settings of its own it also inherits the shipped
+    /// `oci_version`, so its request must carry the same version. It did not: it was
+    /// left at `1.1.0` while the defaults moved to `1.3.0`, and since `rules.rego`
+    /// requires `p_oci.Version == i_oci.Version`, the request was refused at the
+    /// version check and never reached the guest-pull gate this case exists to test.
+    /// It expects a denial, so it passed — for a reason its own description
+    /// contradicts. The request now states `1.3.0`, and the denial is the intended one.
     #[tokio::test]
     async fn test_create_container_guest_pull_disabled() {
         runtests("createcontainer/guest_pull_disabled").await;
@@ -590,6 +598,17 @@ mod tests {
         runtests("createcontainer/gpu_vfio_cdi").await;
     }
 
+    /// This fixture is also the regression guard for the regex form of `root_path`.
+    ///
+    /// `root_path` is a regular expression: it has to match both the bare
+    /// `/run/kata-containers/<id>/rootfs` a guest pull mounts and the
+    /// `shared/containers/passthrough/` form the host-erofs path presents. Every
+    /// other fixture that admits an `image_guest_pull` storage pins the older
+    /// *literal* `root_path` in its own settings, so none of them notices when a
+    /// consumer of that setting compares it with `==` instead of matching it --
+    /// the whole suite passed with the storage `mount_point` check broken. This
+    /// fixture therefore pins the regex form, matching the shipped defaults, so
+    /// that path stays covered. Comparing with `==` makes this test fail.
     #[tokio::test]
     async fn test_create_container_ignored_fields() {
         runtests("createcontainer/ignored_fields").await;

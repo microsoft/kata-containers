@@ -305,7 +305,7 @@
           "Readonly": false
         },
         "Solaris": null,
-        "Version": "1.1.0",
+        "Version": "1.3.0",
         "Windows": null
       },
       "container_id": "gid",
