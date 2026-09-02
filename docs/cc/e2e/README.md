@@ -356,8 +356,18 @@ about them helps when something drifts.
   opt-in. It stays out of the defaults deliberately: a guest-pull storage carries
   no policy declaration, so it is exempt from the declared-vs-presented storage
   count and a host can mount undeclared content at the container root without
-  failing a verity check. `clh-snp` and `aks` pull on the host and keep the
-  verity-bound default.
+  failing a verity check. `clh-snp`, `aks` and `openvmm-snp` pull on the host and
+  keep the verity-bound default.
+
+  The drop-in is staged only when the cluster really is on guest pull, and stage
+  03 records the pull type it deployed with (`${E2E_STATE_DIR}/pull-type`) for
+  that decision. Two reasons. Deciding from a recorded fact rather than from the
+  platform name means overriding `PULL_TYPE` before stage 03 cannot leave the
+  policy settings describing a cluster that no longer exists. And
+  `$E2E_STATE_DIR` is per-node, not per-platform, so the drop-in directory is
+  emptied before staging — otherwise running `qemu-coco-dev` and then a
+  host-pull platform on the same node would carry `allow_guest_pull_images=true`
+  onto a platform whose whole point is to refuse it.
 - **`guest-pull` requires an explicit pod-level `securityContext`** — genpolicy
   refuses images whose user/group would come from the image layers.
 - **The policy annotation is `cc_init_data`,** not the legacy

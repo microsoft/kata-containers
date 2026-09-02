@@ -57,16 +57,42 @@ ENV_FILE="${HOME}/coco-env.sh"
   fi
   cat <<'EOF'
 export KBS="true" KBS_INGRESS="nodeport"
-export PULL_TYPE="${PULL_TYPE:-default}"
-export SNAPSHOTTER="${SNAPSHOTTER:-erofs}" K8S_TEST_HOST_TYPE="all"
+export K8S_TEST_HOST_TYPE="all"
 export CONTAINER_ENGINE_VERSION="latest" CONTAINER_ENGINE="containerd"
 export USE_EXPERIMENTAL_SETUP_SNAPSHOTTER="true" AUTO_GENERATE_POLICY="yes"
 export DOCKER_REGISTRY="ghcr.io" DOCKER_REPO="kata-containers/kata-deploy-ci"
 export GH_PR_NUMBER="nightly" KUBERNETES="vanilla"
 EOF
+  # The pull type is per-platform and is the single fact the policy defaults hinge
+  # on, so it is emitted here rather than shared. qemu-coco-dev is the guest-pull
+  # platform (README, "What each platform runs"): the image is pulled inside the
+  # guest by CDH and arrives as an image_guest_pull storage, which is why that
+  # platform needs the guest-pull drop-in. clh-snp, aks and openvmm-snp pull on the
+  # host and consume EROFS dm-verity layers, so they must stay on the verity-bound
+  # default -- turning guest pull on there would relax a check they rely on.
+  #
+  # Written unexpanded (the heredocs above are quoted, and these are single-quoted)
+  # so an operator can still override either by exporting it before sourcing.
+  case "${E2E_PLATFORM}" in
+    qemu-coco-dev)
+      echo 'export PULL_TYPE="${PULL_TYPE:-guest-pull}"'
+      echo 'export SNAPSHOTTER="${SNAPSHOTTER:-nydus}"'
+      ;;
+    *)
+      echo 'export PULL_TYPE="${PULL_TYPE:-default}"'
+      echo 'export SNAPSHOTTER="${SNAPSHOTTER:-erofs}"'
+      ;;
+  esac
 } > "${ENV_FILE}"
 ok "wrote ${ENV_FILE}"
 load_coco_env "${ENV_FILE}"
+
+# Record what this deploy actually used. ensure_genpolicy_defaults() decides whether
+# to stage the guest-pull drop-in from this, and it runs in later stages whose shells
+# need not have sourced coco-env.sh -- so the fact is written down rather than
+# re-derived. Written after load_coco_env so it captures any operator override.
+printf '%s\n' "${PULL_TYPE}" > "${E2E_STATE_DIR}/pull-type"
+ok "cluster pull type: ${PULL_TYPE} (snapshotter ${SNAPSHOTTER})"
 
 if [[ "${E2E_PLATFORM}" != "clh-snp" && "${E2E_PLATFORM}" != "openvmm-snp" ]]; then
   ART_DIR="${E2E_REPO_DIR}/kata-tools-artifacts"

@@ -578,6 +578,39 @@ ensure_branch_genpolicy() {
 #                  is never mentioned). There is nothing to consume, so stage the
 #                  branch copies into a suite-owned directory, and carry whatever
 #                  this node needs on top of them as drop-in patches beside it.
+
+# genpolicy applies every *.json in genpolicy-settings.d/ as an RFC 6902 patch, and
+# $E2E_STATE_DIR is per-node rather than per-platform. A drop-in is therefore state
+# left behind by whichever platform ran last, not a property of this run. Emptying
+# the directory before staging makes its contents a function of the current platform
+# alone, so switching platforms on a node cannot silently carry a policy relaxation
+# across. Only *.json is removed: nothing else belongs here, and a blanket rm -rf on
+# a path built from an overridable variable is not worth the blast radius.
+reset_dropin_dir() {
+  local dir="$1"
+  mkdir -p "${dir}" || die "could not create ${dir}"
+  local stale
+  stale=$(find "${dir}" -maxdepth 1 -name '*.json' -printf '%f\n' 2>/dev/null | sort | tr '\n' ' ')
+  if [[ -n "${stale// /}" ]]; then
+    log "clearing stale genpolicy drop-ins from a previous run: ${stale}"
+    find "${dir}" -maxdepth 1 -name '*.json' -delete \
+      || die "could not clear stale drop-ins from ${dir}"
+  fi
+}
+
+# The pull type the cluster was actually deployed with. Stage 03 records it, because
+# PULL_TYPE only exists in the environment of a shell that has sourced coco-env.sh
+# and a later stage may run without it. Falls back to the live variable, then to
+# kata-deploy's own default, so this never silently reports guest pull.
+effective_pull_type() {
+  local rec="${E2E_STATE_DIR}/pull-type"
+  if [[ -r "${rec}" ]]; then
+    tr -d '[:space:]' < "${rec}"
+  else
+    echo "${PULL_TYPE:-default}"
+  fi
+}
+
 ensure_genpolicy_defaults() {
   case "${E2E_PLATFORM}" in
     qemu-coco-dev)
@@ -603,13 +636,25 @@ ensure_genpolicy_defaults() {
       GP_RULES="${dst}/rules.rego"
       GP_SETTINGS="${dst}"
 
-      # Stage 03 deploys this cluster with PULL_TYPE=guest-pull and the nydus
-      # snapshotter, so a container's rootfs arrives as an `image_guest_pull`
+      # genpolicy applies *every* *.json in genpolicy-settings.d/. $E2E_STATE_DIR is
+      # not per-platform, so a drop-in staged by an earlier run on this node is still
+      # sitting here — and a run that switched platforms would silently inherit it.
+      # Clear the directory first so its contents are decided by this run alone.
+      local dropin_dir="${dst}/genpolicy-settings.d"
+      reset_dropin_dir "${dropin_dir}"
+
+      # Guest pull is what makes the drop-in necessary, so stage it only when the
+      # cluster actually runs guest pull. Stage 03 records the pull type it deployed
+      # with rather than this function inferring it: PULL_TYPE lives in coco-env.sh,
+      # which a later stage may or may not have sourced, and guessing wrong here
+      # either loosens the policy for no reason or denies every container.
+      #
+      # Under guest pull a container's rootfs arrives as an `image_guest_pull`
       # storage. All three bodies of `allow_image_guest_pull_source` are gated on
       # `allow_guest_pull_images`, which ships false — the pause sentinel body
       # included — so with the branch's defaults every CreateContainerRequest in
       # the pod is denied, the sandbox first. The branch also declares host EROFS
-      # dm-verity layers this cluster never presents. Both have to be undone here.
+      # dm-verity layers such a cluster never presents. Both have to be undone here.
       #
       # This stays a per-platform opt-in and does not move into the branch's
       # defaults: guest pull is refused by default because an image_guest_pull
@@ -620,12 +665,15 @@ ensure_genpolicy_defaults() {
       # reference and not the bytes. require_pinned_image_digests is deliberately
       # left at its default true — with no root hash to bind, the manifest digest
       # is the only thing naming the content.
-      local dropin_dir="${dst}/genpolicy-settings.d"
-      mkdir -p "${dropin_dir}"
-      install -m 0644 \
-        "${E2E_REPO_DIR}/src/tools/genpolicy/drop-in-examples/10-guest-pull-drop-in.json" \
-        "${dropin_dir}/10-guest-pull-drop-in.json" \
-        || die "could not stage the guest-pull drop-in into ${dropin_dir}"
+      if [[ "$(effective_pull_type)" = "guest-pull" ]]; then
+        install -m 0644 \
+          "${E2E_REPO_DIR}/src/tools/genpolicy/drop-in-examples/10-guest-pull-drop-in.json" \
+          "${dropin_dir}/10-guest-pull-drop-in.json" \
+          || die "could not stage the guest-pull drop-in into ${dropin_dir}"
+        ok "staged the guest-pull drop-in (cluster deployed with PULL_TYPE=guest-pull)"
+      else
+        log "not staging the guest-pull drop-in: cluster pull type is $(effective_pull_type), so the verity-bound defaults apply"
+      fi
       ;;
     clh-snp|aks|openvmm-snp)
       local src="${E2E_REPO_DIR}/src/tools/genpolicy" dst="${E2E_STATE_DIR}/genpolicy"
@@ -650,7 +698,12 @@ ensure_genpolicy_defaults() {
       # oci_version, root_path and image_layer_verification were all fixed there.
       GP_SETTINGS="${dst}"
       local dropin_dir="${dst}/genpolicy-settings.d"
-      mkdir -p "${dropin_dir}"
+      # These platforms pull on the host and must keep the verity-bound default.
+      # $E2E_STATE_DIR is shared across platforms, so without this a prior
+      # qemu-coco-dev run on the same node would leave 10-guest-pull-drop-in.json
+      # here and genpolicy would apply it, flipping allow_guest_pull_images to
+      # true on exactly the platforms that are supposed to refuse guest pull.
+      reset_dropin_dir "${dropin_dir}"
 
       # Every pod gets a sandbox container, and under host-erofs-dm-verity its
       # image layer is verified like any other. genpolicy hashes whichever pause
