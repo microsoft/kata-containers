@@ -1,4 +1,8 @@
 #!/bin/sh
+#
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 
