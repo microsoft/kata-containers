@@ -52,6 +52,26 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 skip_if_done 07-fragment-bootpull
 
+# E2E_CASES — run only the named cases, comma-separated (E2E_CASES=07l,07n).
+# Unset runs every case, which is what CI and any release validation must do. This
+# exists because the stage is expensive to iterate on: each negative case spends a
+# full E2E_FRAGMENT_NEG_WAIT proving a pod never starts, so reaching the last case
+# costs the best part of an hour, and a failure there is only discovered after
+# every earlier case has been paid for again.
+#
+# Only the *pod* work of an unselected case is skipped, never its setup. Cases are
+# not self-contained: 07a renders rules-none.rego, which 07l/07m generate their
+# base policy from, and 07l's setup lifts the container entry that 07m and 07n
+# both sign. Skipping whole blocks would silently change what the selected case
+# tests, which is the one failure mode a filter like this must not have.
+case_enabled() {
+  [[ -z "${E2E_CASES:-}" ]] && return 0
+  [[ ",${E2E_CASES}," == *",$1,"* ]]
+}
+
+# Announce a skip, so a filtered run can never be mistaken for a full one.
+skip_case() { log "skipping $1 (E2E_CASES=${E2E_CASES})"; }
+
 step "07 — delivery of declared policy fragments (BL-8)"
 load_toolchain
 load_coco_env
@@ -397,14 +417,16 @@ ensure_ns "${NS}"
 # ============================================================ 07a — the control
 step "07a — control: an empty declaration must still boot"
 render_rules "${WORK}/rules-none.rego" '[]'
-apply_case e2e-frag-none "${WORK}/rules-none.rego"
-if ! wait_for_soft 300 "pod e2e-frag-none Running" \
-     bash -c "kubectl get pod e2e-frag-none -n ${NS} -o jsonpath='{.status.phase}' | grep -qx Running"; then
-  diagnose e2e-frag-none
-  die "the control pod did not boot — the patched base policy is broken, so no fail-closed result below would mean anything"
-fi
-ok "control booted — patching policy_fragments is inert when the list is empty"
-cleanup_pod e2e-frag-none
+if case_enabled 07a; then
+  apply_case e2e-frag-none "${WORK}/rules-none.rego"
+  if ! wait_for_soft 300 "pod e2e-frag-none Running" \
+       bash -c "kubectl get pod e2e-frag-none -n ${NS} -o jsonpath='{.status.phase}' | grep -qx Running"; then
+    diagnose e2e-frag-none
+    die "the control pod did not boot — the patched base policy is broken, so no fail-closed result below would mean anything"
+  fi
+  ok "control booted — patching policy_fragments is inert when the list is empty"
+  cleanup_pod e2e-frag-none
+else skip_case 07a; fi
 
 # ====================================================== 07b — fail-closed (BL-8)
 step "07b — a declared but undelivered fragment must not run containers"
@@ -419,20 +441,22 @@ render_rules "${WORK}/rules-bad.rego" \
 # which is C-ACI/hcsshim behaviour, and this pod would legitimately boot — that
 # is 07e below. Asserting both directions is the only way to show the flag is
 # actually read rather than the gate being unconditional or dead.
-apply_case e2e-frag-unfetchable "${WORK}/rules-bad.rego"
-if expect_never_running e2e-frag-unfetchable "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
-  ok "pod never reached Running — the unsatisfied declaration held the gate (expected)"
-  # Necessary but not sufficient on its own: a guest that never runs anything at
-  # all would also pass this. 07c is what shows the gate opens for a fragment
-  # that is actually delivered and verified.
-  kubectl describe pod e2e-frag-unfetchable -n "${NS}" 2>/dev/null \
-    | grep -i 'sandbox\|failed' | tail -3 | cut -c1-200 | sed 's/^/    /' || true
-else
-  diagnose e2e-frag-unfetchable
+if case_enabled 07b; then
+  apply_case e2e-frag-unfetchable "${WORK}/rules-bad.rego"
+  if expect_never_running e2e-frag-unfetchable "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
+    ok "pod never reached Running — the unsatisfied declaration held the gate (expected)"
+    # Necessary but not sufficient on its own: a guest that never runs anything at
+    # all would also pass this. 07c is what shows the gate opens for a fragment
+    # that is actually delivered and verified.
+    kubectl describe pod e2e-frag-unfetchable -n "${NS}" 2>/dev/null \
+      | grep -i 'sandbox\|failed' | tail -3 | cut -c1-200 | sed 's/^/    /' || true
+  else
+    diagnose e2e-frag-unfetchable
+    cleanup_pod e2e-frag-unfetchable
+    die "pod is Running despite an undelivered declared fragment — the fail-closed gate is not wired"
+  fi
   cleanup_pod e2e-frag-unfetchable
-  die "pod is Running despite an undelivered declared fragment — the fail-closed gate is not wired"
-fi
-cleanup_pod e2e-frag-unfetchable
+else skip_case 07b; fi
 
 # ================================================ 07c/07d — the delivered feed
 # No reachability gate here any more. Delivery is host-side, so the shim fetches
@@ -441,24 +465,26 @@ cleanup_pod e2e-frag-unfetchable
 step "07c — good path: a delivered, valid fragment must let containers run"
 render_rules "${WORK}/rules-good.rego" \
   "[{\"issuer\": \"${ISSUER}\", \"feed\": \"${FEED}\", \"minimum_svn\": ${SVN}, \"required\": true}]"
-apply_case e2e-frag-good "${WORK}/rules-good.rego" "${REF}"
-if ! wait_for_soft 300 "pod e2e-frag-good Running" \
-     bash -c "kubectl get pod e2e-frag-good -n ${NS} -o jsonpath='{.status.phase}' | grep -qx Running"; then
-  diagnose e2e-frag-good
+if case_enabled 07c; then
+  apply_case e2e-frag-good "${WORK}/rules-good.rego" "${REF}"
+  if ! wait_for_soft 300 "pod e2e-frag-good Running" \
+       bash -c "kubectl get pod e2e-frag-good -n ${NS} -o jsonpath='{.status.phase}' | grep -qx Running"; then
+    diagnose e2e-frag-good
+    cleanup_pod e2e-frag-good
+    warn "the host fetches ${REF} and pushes it over LoadPolicyFragment. Check, in order:"
+    warn "  - can the node pull it?  crane manifest ${REF}  (or the 06 read-back)"
+    warn "  - did the shim try?      journalctl -t kata | grep policy-fragments"
+    warn "  - did the guest reject it? look for a FAILED_PRECONDITION from the RPC"
+    die "the declared fragment did not let the pod run — delivery, verification, or injection failed"
+  fi
+  # Sound only because 07b established that an unsatisfied declaration blocks:
+  # had the fetch, the signature check, the SVN floor or the injection failed,
+  # this pod would have been held at create_container instead of reaching Running.
+  ok "pod ran with a declared fragment => it was delivered, SRM-verified and injected"
+  sudo journalctl -t kata --since '-10m' 2>/dev/null | grep -i 'FR-1\|policy-fragments' | tail -5 \
+    | sed 's/^/    /' || true
   cleanup_pod e2e-frag-good
-  warn "the host fetches ${REF} and pushes it over LoadPolicyFragment. Check, in order:"
-  warn "  - can the node pull it?  crane manifest ${REF}  (or the 06 read-back)"
-  warn "  - did the shim try?      journalctl -t kata | grep policy-fragments"
-  warn "  - did the guest reject it? look for a FAILED_PRECONDITION from the RPC"
-  die "the declared fragment did not let the pod run — delivery, verification, or injection failed"
-fi
-# Sound only because 07b established that an unsatisfied declaration blocks:
-# had the fetch, the signature check, the SVN floor or the injection failed,
-# this pod would have been held at create_container instead of reaching Running.
-ok "pod ran with a declared fragment => it was delivered, SRM-verified and injected"
-sudo journalctl -t kata --since '-10m' 2>/dev/null | grep -i 'FR-1\|policy-fragments' | tail -5 \
-  | sed 's/^/    /' || true
-cleanup_pod e2e-frag-good
+else skip_case 07c; fi
 
 step "07d — negative: an SVN floor above the published fragment must be refused"
 # Same artifact, and it is offered — so the fetch succeeds and the rejection can
@@ -466,15 +492,17 @@ step "07d — negative: an SVN floor above the published fragment must be refuse
 # a host that simply failed to deliver; 07b alone cannot tell those apart.
 render_rules "${WORK}/rules-rollback.rego" \
   "[{\"issuer\": \"${ISSUER}\", \"feed\": \"${FEED}\", \"minimum_svn\": $((SVN + 1)), \"required\": true}]"
-apply_case e2e-frag-rollback "${WORK}/rules-rollback.rego" "${REF}"
-if expect_never_running e2e-frag-rollback "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
-  ok "pod never reached Running — the SVN rollback floor held (expected)"
-else
-  diagnose e2e-frag-rollback
+if case_enabled 07d; then
+  apply_case e2e-frag-rollback "${WORK}/rules-rollback.rego" "${REF}"
+  if expect_never_running e2e-frag-rollback "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
+    ok "pod never reached Running — the SVN rollback floor held (expected)"
+  else
+    diagnose e2e-frag-rollback
+    cleanup_pod e2e-frag-rollback
+    die "pod is Running with minimum_svn above the fragment's SVN — the rollback floor is not enforced"
+  fi
   cleanup_pod e2e-frag-rollback
-  die "pod is Running with minimum_svn above the fragment's SVN — the rollback floor is not enforced"
-fi
-cleanup_pod e2e-frag-rollback
+else skip_case 07d; fi
 
 # ============================================ 07e — enforcement is opt-in (BL-8)
 step "07e — an undelivered *optional* declaration must still boot"
@@ -492,15 +520,17 @@ step "07e — an undelivered *optional* declaration must still boot"
 # a gate that is simply always shut, and 07e alone by one that is never armed.
 render_rules "${WORK}/rules-optional.rego" \
   "[{\"issuer\": \"${ISSUER}\", \"feed\": \"${UNREACHABLE_FEED}\", \"minimum_svn\": 1, \"required\": false}]"
-apply_case e2e-frag-optional "${WORK}/rules-optional.rego"
-if ! wait_for_soft 300 "pod e2e-frag-optional Running" \
-     bash -c "kubectl get pod e2e-frag-optional -n ${NS} -o jsonpath='{.status.phase}' | grep -qx Running"; then
-  diagnose e2e-frag-optional
+if case_enabled 07e; then
+  apply_case e2e-frag-optional "${WORK}/rules-optional.rego"
+  if ! wait_for_soft 300 "pod e2e-frag-optional Running" \
+       bash -c "kubectl get pod e2e-frag-optional -n ${NS} -o jsonpath='{.status.phase}' | grep -qx Running"; then
+    diagnose e2e-frag-optional
+    cleanup_pod e2e-frag-optional
+    die "an optional declaration blocked the pod — the BL-8 gate is enforcing declarations the policy did not mark required"
+  fi
+  ok "pod ran with an undelivered optional declaration — enforcement is opt-in (expected)"
   cleanup_pod e2e-frag-optional
-  die "an optional declaration blocked the pod — the BL-8 gate is enforcing declarations the policy did not mark required"
-fi
-ok "pod ran with an undelivered optional declaration — enforcement is opt-in (expected)"
-cleanup_pod e2e-frag-optional
+else skip_case 07e; fi
 
 # ================================= 07f–07k — delegated (nested) declarations
 # A delivered fragment may declare further fragments in its own signed module.
@@ -575,16 +605,20 @@ step "07f — delegation is off unless the measured policy grants it"
 # a fragment must not be able to bind the guest to obligations its declaration
 # never authorized.
 render_rules "${WORK}/rules-nest-off.rego" "$(nested_decl "${PARENT_SAME_FEED}" "")"
-expect_delegation_runs e2e-frag-nest-off "${WORK}/rules-nest-off.rego" "${PARENT_SAME_REF}" \
-  "an undeclared delegation was ignored"
+if case_enabled 07f; then
+  expect_delegation_runs e2e-frag-nest-off "${WORK}/rules-nest-off.rego" "${PARENT_SAME_REF}" \
+    "an undeclared delegation was ignored"
+else skip_case 07f; fi
 
 step "07g — a granted delegation is registered and gates on its child"
 # Differs from 07f in one field. The nested declaration is now in scope, so it is
 # registered as an obligation — and the child is deliberately not delivered, so
 # it stays outstanding and containers must be refused.
 render_rules "${WORK}/rules-nest-on.rego" "$(nested_decl "${PARENT_SAME_FEED}" '"same-issuer"')"
-expect_delegation_blocked e2e-frag-nest-on "${WORK}/rules-nest-on.rego" "${PARENT_SAME_REF}" \
-  "the delegated declaration was registered and its undelivered child held the gate"
+if case_enabled 07g; then
+  expect_delegation_blocked e2e-frag-nest-on "${WORK}/rules-nest-on.rego" "${PARENT_SAME_REF}" \
+    "the delegated declaration was registered and its undelivered child held the gate"
+else skip_case 07g; fi
 
 step "07h — good path: delivering the delegated child releases the gate"
 # 07g with the child added to the delivery list. This is what shows the chain
@@ -595,9 +629,11 @@ step "07h — good path: delivering the delegated child releases the gate"
 # Order matters and the runtime preserves it: the child's feed only becomes
 # acceptable once the parent has been delivered and its declarations registered.
 render_rules "${WORK}/rules-nest-good.rego" "$(nested_decl "${PARENT_SAME_FEED}" '"same-issuer"')"
-expect_delegation_runs e2e-frag-nest-good "${WORK}/rules-nest-good.rego" \
-  "${PARENT_SAME_REF},${CHILD_REF}" \
-  "the delegated child was fetched, verified and satisfied the nested obligation"
+if case_enabled 07h; then
+  expect_delegation_runs e2e-frag-nest-good "${WORK}/rules-nest-good.rego" \
+    "${PARENT_SAME_REF},${CHILD_REF}" \
+    "the delegated child was fetched, verified and satisfied the nested obligation"
+else skip_case 07h; fi
 
 step "07i — same-issuer must not admit a foreign issuer"
 # The scope check itself. Identical grant to 07g, but the parent now names a
@@ -605,8 +641,10 @@ step "07i — same-issuer must not admit a foreign issuer"
 # obligation is created and the pod runs — the same outcome as 07f, reached for a
 # different reason, which 07j then separates.
 render_rules "${WORK}/rules-nest-foreign.rego" "$(nested_decl "${PARENT_FGN_FEED}" '"same-issuer"')"
-expect_delegation_runs e2e-frag-nest-foreign "${WORK}/rules-nest-foreign.rego" "${PARENT_FGN_REF}" \
-  "a nested declaration outside the same-issuer scope was dropped"
+if case_enabled 07i; then
+  expect_delegation_runs e2e-frag-nest-foreign "${WORK}/rules-nest-foreign.rego" "${PARENT_FGN_REF}" \
+    "a nested declaration outside the same-issuer scope was dropped"
+else skip_case 07i; fi
 
 step "07j — an explicit issuer list admits exactly what it names"
 # 07i with the foreign issuer named in the grant. Same fragment, same delivery,
@@ -615,8 +653,10 @@ step "07j — an explicit issuer list admits exactly what it names"
 # rather than the foreign case failing for some unrelated reason.
 render_rules "${WORK}/rules-nest-list.rego" \
   "$(nested_decl "${PARENT_FGN_FEED}" "[\"${OTHER_ISSUER}\"]")"
-expect_delegation_blocked e2e-frag-nest-list "${WORK}/rules-nest-list.rego" "${PARENT_FGN_REF}" \
-  "the explicitly listed issuer was admitted and its undelivered child held the gate"
+if case_enabled 07j; then
+  expect_delegation_blocked e2e-frag-nest-list "${WORK}/rules-nest-list.rego" "${PARENT_FGN_REF}" \
+    "the explicitly listed issuer was admitted and its undelivered child held the gate"
+else skip_case 07j; fi
 
 step "07k — any-authorized admits an issuer the parent does not share"
 # The third scope form, and the most permissive one. Same fixture as 07i/07j; it
@@ -624,8 +664,10 @@ step "07k — any-authorized admits an issuer the parent does not share"
 # "permits everything" is the one mode a bug could produce by accident, and 07i
 # alone would still pass if any-authorized had silently collapsed to same-issuer.
 render_rules "${WORK}/rules-nest-any.rego" "$(nested_decl "${PARENT_FGN_FEED}" '"any-authorized"')"
-expect_delegation_blocked e2e-frag-nest-any "${WORK}/rules-nest-any.rego" "${PARENT_FGN_REF}" \
-  "any-authorized admitted the foreign issuer and its undelivered child held the gate"
+if case_enabled 07k; then
+  expect_delegation_blocked e2e-frag-nest-any "${WORK}/rules-nest-any.rego" "${PARENT_FGN_REF}" \
+    "any-authorized admitted the foreign issuer and its undelivered child held the gate"
+else skip_case 07k; fi
 
 # ================================ 07l/07m — a fragment that contributes a container
 # Everything above proves the *delivery* path: declarations, scopes, SVN floors,
@@ -841,63 +883,83 @@ EOF
 }
 
 log "07l — without the fragment, the extra container has no policy entry"
-apply_sidecar_case "${SIDECAR_POD}" ""
 # Pod *phase* is the wrong oracle here, and usefully so: a pod is Running once
 # every container has been created and one of them is up, so the sandbox and the
 # base-policy container come up exactly as they should while the sidecar is
 # refused. The assertion has to be per-container.
+#
+# Defined ahead of the case guard because 07m reuses it.
 sidecar_ready() {
   kubectl get pod "${SIDECAR_POD}" -n "${NS}" \
     -o jsonpath='{range .status.containerStatuses[?(@.name=="sidecar")]}{.ready}{end}' \
     2>/dev/null | grep -qx true
 }
-SIDECAR_DEADLINE=$(( $(date +%s) + ${E2E_FRAGMENT_NEG_WAIT:-180} ))
-SIDECAR_LEAKED=0
-log "watching ${SIDECAR_POD} for ${E2E_FRAGMENT_NEG_WAIT:-180}s — the sidecar must never become ready"
-while [[ "$(date +%s)" -lt "${SIDECAR_DEADLINE}" ]]; do
-  if sidecar_ready; then SIDECAR_LEAKED=1; break; fi
-  sleep 5
-done
-if [[ "${SIDECAR_LEAKED}" = "1" ]]; then
-  diagnose "${SIDECAR_POD}"
+if case_enabled 07l; then
+  apply_sidecar_case "${SIDECAR_POD}" ""
+  SIDECAR_DEADLINE=$(( $(date +%s) + ${E2E_FRAGMENT_NEG_WAIT:-180} ))
+  SIDECAR_LEAKED=0
+  log "watching ${SIDECAR_POD} for ${E2E_FRAGMENT_NEG_WAIT:-180}s — the sidecar must never become ready"
+  while [[ "$(date +%s)" -lt "${SIDECAR_DEADLINE}" ]]; do
+    if sidecar_ready; then SIDECAR_LEAKED=1; break; fi
+    sleep 5
+  done
+  if [[ "${SIDECAR_LEAKED}" = "1" ]]; then
+    diagnose "${SIDECAR_POD}"
+    cleanup_pod "${SIDECAR_POD}"
+    die "the sidecar is running without the fragment — the base policy is matching it, so 07m would prove nothing"
+  fi
+  # Necessary but not sufficient: a sandbox that never started would also pass. The
+  # base-policy container must be up, so the only thing that failed is the one the
+  # measured policy has no entry for.
+  #
+  # This has to poll rather than read once. The negative watch above ends the moment
+  # its deadline expires, which says nothing about how far the sandbox has got: on a
+  # slower hypervisor the base container can still be starting at that instant, and a
+  # single read then reports "not ready" for a sandbox that is merely late. Observed
+  # on openvmm-snp, where the case failed at a 180s negative window and passed at 420s
+  # with no other change. Polling separates "never came up" from "not up yet" without
+  # making the negative window -- which every case pays -- longer.
+  base_container_ready() {
+    kubectl get pod "${SIDECAR_POD}" -n "${NS}" \
+      -o jsonpath='{range .status.containerStatuses[?(@.name=="busybox")]}{.ready}{end}' \
+      2>/dev/null | grep -qx true
+  }
+  if ! wait_for_soft "${E2E_SETTLE_WAIT:-240}" \
+       "${SIDECAR_POD} base-policy container ready" base_container_ready; then
+    diagnose "${SIDECAR_POD}"
+    cleanup_pod "${SIDECAR_POD}"
+    die "the base-policy container is not running either — the sandbox failed for some unrelated reason"
+  fi
+  ok "busybox ran and the sidecar was refused — the base policy has no entry for it (expected)"
+  kubectl get events -n "${NS}" --field-selector "involvedObject.name=${SIDECAR_POD}" 2>/dev/null \
+    | grep -i 'sidecar' | tail -3 | cut -c1-200 | sed 's/^/    /' || true
   cleanup_pod "${SIDECAR_POD}"
-  die "the sidecar is running without the fragment — the base policy is matching it, so 07m would prove nothing"
-fi
-# Necessary but not sufficient: a sandbox that never started would also pass. The
-# base-policy container must be up, so the only thing that failed is the one the
-# measured policy has no entry for.
-kubectl get pod "${SIDECAR_POD}" -n "${NS}" \
-  -o jsonpath='{range .status.containerStatuses[?(@.name=="busybox")]}{.ready}{end}' 2>/dev/null \
-  | grep -qx true \
-  || { diagnose "${SIDECAR_POD}"; cleanup_pod "${SIDECAR_POD}"
-       die "the base-policy container is not running either — the sandbox failed for some unrelated reason"; }
-ok "busybox ran and the sidecar was refused — the base policy has no entry for it (expected)"
-kubectl get events -n "${NS}" --field-selector "involvedObject.name=${SIDECAR_POD}" 2>/dev/null \
-  | grep -i 'sidecar' | tail -3 | cut -c1-200 | sed 's/^/    /' || true
-cleanup_pod "${SIDECAR_POD}"
-# Deleting the pod is not enough: the next case reuses the name, and a sandbox
-# still shutting down would make kubectl apply race the old one.
-wait_for_soft 120 "${SIDECAR_POD} gone" \
-  bash -c "! kubectl get pod ${SIDECAR_POD} -n ${NS} >/dev/null 2>&1" \
-  || kubectl delete pod "${SIDECAR_POD}" -n "${NS}" --force --grace-period=0 >/dev/null 2>&1 || true
+  # Deleting the pod is not enough: the next case reuses the name, and a sandbox
+  # still shutting down would make kubectl apply race the old one.
+  wait_for_soft 120 "${SIDECAR_POD} gone" \
+    bash -c "! kubectl get pod ${SIDECAR_POD} -n ${NS} >/dev/null 2>&1" \
+    || kubectl delete pod "${SIDECAR_POD}" -n "${NS}" --force --grace-period=0 >/dev/null 2>&1 || true
+else skip_case 07l; fi
 
 log "07m — delivering the fragment admits it"
-apply_sidecar_case "${SIDECAR_POD}" "${SIDECAR_REF}"
-if ! wait_for_soft 300 "${SIDECAR_POD} sidecar ready" bash -c "sidecar_ready() { kubectl get pod ${SIDECAR_POD} -n ${NS} -o jsonpath='{range .status.containerStatuses[?(@.name==\"sidecar\")]}{.ready}{end}' 2>/dev/null | grep -qx true; }; sidecar_ready"; then
-  diagnose "${SIDECAR_POD}"
+if case_enabled 07m; then
+  apply_sidecar_case "${SIDECAR_POD}" "${SIDECAR_REF}"
+  if ! wait_for_soft 300 "${SIDECAR_POD} sidecar ready" sidecar_ready; then
+    diagnose "${SIDECAR_POD}"
+    cleanup_pod "${SIDECAR_POD}"
+    warn "the fragment carries the sidecar's own policy entry, so check in order:"
+    warn "  - was it applied?  no guest log to read: a strict guest discards its own log"
+    warn "                     stream (FR-7 / F-79). Rebuild without strict-policy to watch it."
+    warn "  - was the package refused? look for 'outside the permitted fragment namespaces'"
+    warn "  - does the lifted entry still match? re-run with E2E_FORCE=1 after any rules.rego change"
+    die "the sidecar did not run with its fragment delivered — the container contribution path is broken"
+  fi
+  ok "both containers running — the fragment authorized a container the measured policy never contained"
   cleanup_pod "${SIDECAR_POD}"
-  warn "the fragment carries the sidecar's own policy entry, so check in order:"
-  warn "  - was it applied?  no guest log to read: a strict guest discards its own log"
-  warn "                     stream (FR-7 / F-79). Rebuild without strict-policy to watch it."
-  warn "  - was the package refused? look for 'outside the permitted fragment namespaces'"
-  warn "  - does the lifted entry still match? re-run with E2E_FORCE=1 after any rules.rego change"
-  die "the sidecar did not run with its fragment delivered — the container contribution path is broken"
-fi
-ok "both containers running — the fragment authorized a container the measured policy never contained"
-cleanup_pod "${SIDECAR_POD}"
-wait_for_soft 120 "${SIDECAR_POD} gone" \
-  bash -c "! kubectl get pod ${SIDECAR_POD} -n ${NS} >/dev/null 2>&1" \
-  || kubectl delete pod "${SIDECAR_POD}" -n "${NS}" --force --grace-period=0 >/dev/null 2>&1 || true
+  wait_for_soft 120 "${SIDECAR_POD} gone" \
+    bash -c "! kubectl get pod ${SIDECAR_POD} -n ${NS} >/dev/null 2>&1" \
+    || kubectl delete pod "${SIDECAR_POD}" -n "${NS}" --force --grace-period=0 >/dev/null 2>&1 || true
+else skip_case 07m; fi
 
 # 07n (F-160) — the same sidecar fragment, but its module lies about its own SVN.
 #
@@ -940,25 +1002,40 @@ FRAGGEN --cose "${WORK}/sidecar-liar.cose.hex" --push "${SIDECAR_LIAR_REF}" "${S
 unset FRAGMENTGEN_USERNAME FRAGMENTGEN_PASSWORD
 ok "published the lying sidecar fragment -> ${SIDECAR_LIAR_REF} (envelope svn ${SVN}, module claims ${SIDECAR_LIE_SVN})"
 
-apply_sidecar_case "${SIDECAR_POD}" "${SIDECAR_LIAR_REF}"
-if ! expect_never_running "${SIDECAR_POD}" "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
-  diagnose "${SIDECAR_POD}"
+if case_enabled 07n; then
+  apply_sidecar_case "${SIDECAR_POD}" "${SIDECAR_LIAR_REF}"
+  if ! expect_never_running "${SIDECAR_POD}" "${E2E_FRAGMENT_NEG_WAIT:-180}"; then
+    diagnose "${SIDECAR_POD}"
+    cleanup_pod "${SIDECAR_POD}"
+    die "the pod booted from a fragment that misdescribed its own SVN — the F-160 binding has regressed"
+  fi
+  # Necessary but not sufficient: any broken sandbox never reaches Running either.
+  # The refusal has to name *this* gate, or the case is green for the wrong reason.
+  #
+  # Poll for it. kubelet surfaces the guest's reason asynchronously, as an event on a
+  # failed sandbox attempt, so the reason appears only once an attempt has completed
+  # and been reported -- which need not have happened when the negative watch above
+  # hits its deadline. Reading once at that instant is a race against the hypervisor's
+  # boot time: on clh-snp the reason was already there at 180s, on openvmm-snp it was
+  # not, and the case failed claiming "something else refused this fragment first"
+  # when in fact nothing had refused it yet. A bounded poll returns as soon as the
+  # reason lands, so a passing run is no slower than the single read was.
+  sidecar_refusal_named() {
+    kubectl describe pod "${SIDECAR_POD}" -n "${NS}" 2>/dev/null \
+      | grep -q 'declares svn .* but the envelope it arrived in carries svn'
+  }
+  if ! wait_for_soft "${E2E_SETTLE_WAIT:-240}" \
+       "the refusal to name the self-description mismatch" sidecar_refusal_named; then
+    diagnose "${SIDECAR_POD}"
+    cleanup_pod "${SIDECAR_POD}"
+    die "the sandbox failed, but not for the self-description mismatch — something else refused this fragment first, so the case proves nothing"
+  fi
+  ok "07n — the module was refused for describing itself as an SVN its envelope does not carry"
   cleanup_pod "${SIDECAR_POD}"
-  die "the pod booted from a fragment that misdescribed its own SVN — the F-160 binding has regressed"
-fi
-# Necessary but not sufficient: any broken sandbox never reaches Running either.
-# The refusal has to name *this* gate, or the case is green for the wrong reason.
-if ! kubectl describe pod "${SIDECAR_POD}" -n "${NS}" 2>/dev/null \
-     | grep -q 'declares svn .* but the envelope it arrived in carries svn'; then
-  diagnose "${SIDECAR_POD}"
-  cleanup_pod "${SIDECAR_POD}"
-  die "the sandbox failed, but not for the self-description mismatch — something else refused this fragment first, so the case proves nothing"
-fi
-ok "07n — the module was refused for describing itself as an SVN its envelope does not carry"
-cleanup_pod "${SIDECAR_POD}"
-wait_for_soft 120 "${SIDECAR_POD} gone" \
-  bash -c "! kubectl get pod ${SIDECAR_POD} -n ${NS} >/dev/null 2>&1" \
-  || kubectl delete pod "${SIDECAR_POD}" -n "${NS}" --force --grace-period=0 >/dev/null 2>&1 || true
+  wait_for_soft 120 "${SIDECAR_POD} gone" \
+    bash -c "! kubectl get pod ${SIDECAR_POD} -n ${NS} >/dev/null 2>&1" \
+    || kubectl delete pod "${SIDECAR_POD}" -n "${NS}" --force --grace-period=0 >/dev/null 2>&1 || true
+else skip_case 07n; fi
 
 fi   # sidecar fixtures available
 
