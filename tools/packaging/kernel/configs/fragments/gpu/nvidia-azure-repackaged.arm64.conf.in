@@ -67,3 +67,16 @@ CONFIG_NODES_SHIFT=6
 CONFIG_CRYPTO_ECC=y
 CONFIG_CRYPTO_ECDH=y
 CONFIG_CRYPTO_ECDSA=y
+
+# Build requirement of the Microsoft Azure Linux (CBL-Mariner) arm64 kernel
+# (mirrors the same fix in nvidia-azure-repackaged.x86_64.conf.in). Its
+# arch/arm64/kernel/setup.c includes asm/mshyperv.h, whose
+# asm-generic/mshyperv.h defines hv_get_isolation_type() returning
+# `enum hv_isolation_type` and referencing HV_ISOLATION_TYPE_NONE, both of
+# which are declared only inside `#if IS_ENABLED(CONFIG_HYPERV)`. With Hyper-V
+# off the UVM kernel fails to compile (arch/arm64/kernel/setup.o:
+# "return type is an incomplete type" / "'HV_ISOLATION_TYPE_NONE' undeclared").
+# Enable the Hyper-V guest enlightenments so the build succeeds; they are inert
+# under OpenVMM/CLH (vmbus probes, finds no Hyper-V, stays dormant). Not needed
+# for the upstream NVIDIA/mainline tree, only the MS Azure Linux source.
+CONFIG_HYPERV=y
