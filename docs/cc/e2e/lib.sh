@@ -24,8 +24,10 @@ set -uo pipefail
 # Which hypervisor/accelerator stack the suite validates against.
 #
 #   qemu-coco-dev  QEMU + KVM, guest is a *non-attested* dev VM. Installed by
-#                  upstream kata-deploy (Helm) under /opt/kata. This is the
-#                  historical default and every stage was written for it.
+#                  upstream kata-deploy (Helm) under /opt/kata. This was the
+#                  original default and every stage was written for it, but a
+#                  non-attested guest cannot exercise the properties this suite
+#                  exists to demonstrate, so it is no longer the default.
 #   clh-snp        Cloud Hypervisor + MSHV with real SEV-SNP, built from source
 #                  on Azure Linux 3 by tools/osbuilder/node-builder/azure-linux
 #                  and installed under /opt/confidential-containers. kata-deploy
@@ -37,7 +39,13 @@ set -uo pipefail
 # install prefix, the shim binary, the containerd handler and the RuntimeClass
 # are all different, and only the QEMU path ships a genpolicy binary. Anything
 # platform-dependent is derived here so the stages stay declarative.
-: "${E2E_PLATFORM:=qemu-coco-dev}"
+#
+# Defaults to openvmm-snp: it is the attested stack the suite is run against.
+# The previous default (qemu-coco-dev) made an omitted E2E_PLATFORM fail late
+# and misleadingly — the run would get as far as looking for a
+# kata-containers.img that the SNP paths never build, and report a missing
+# artifact rather than a mis-selected platform.
+: "${E2E_PLATFORM:=openvmm-snp}"
 
 # Pinned by digest rather than by tag. mcr.microsoft.com/azurelinux/busybox:1.36 is
 # mutable and has moved mid-run: genpolicy resolves the reference itself and writes the
