@@ -71,16 +71,20 @@ EOF
   # host and consume EROFS dm-verity layers, so they must stay on the verity-bound
   # default -- turning guest pull on there would relax a check they rely on.
   #
-  # Written unexpanded (the heredocs above are quoted, and these are single-quoted)
-  # so an operator can still override either by exporting it before sourcing.
+  # Written unexpanded, like the heredocs above, so an operator can still override
+  # either by exporting it before sourcing.
   case "${E2E_PLATFORM}" in
     qemu-coco-dev)
-      echo 'export PULL_TYPE="${PULL_TYPE:-guest-pull}"'
-      echo 'export SNAPSHOTTER="${SNAPSHOTTER:-nydus}"'
+      cat <<'EOF'
+export PULL_TYPE="${PULL_TYPE:-guest-pull}"
+export SNAPSHOTTER="${SNAPSHOTTER:-nydus}"
+EOF
       ;;
     *)
-      echo 'export PULL_TYPE="${PULL_TYPE:-default}"'
-      echo 'export SNAPSHOTTER="${SNAPSHOTTER:-erofs}"'
+      cat <<'EOF'
+export PULL_TYPE="${PULL_TYPE:-default}"
+export SNAPSHOTTER="${SNAPSHOTTER:-erofs}"
+EOF
       ;;
   esac
 } > "${ENV_FILE}"
@@ -91,7 +95,11 @@ load_coco_env "${ENV_FILE}"
 # to stage the guest-pull drop-in from this, and it runs in later stages whose shells
 # need not have sourced coco-env.sh -- so the fact is written down rather than
 # re-derived. Written after load_coco_env so it captures any operator override.
+# PULL_TYPE and SNAPSHOTTER are set by the file load_coco_env just sourced, which
+# is not statically resolvable, hence the SC2154 suppressions.
+# shellcheck disable=SC2154
 printf '%s\n' "${PULL_TYPE}" > "${E2E_STATE_DIR}/pull-type"
+# shellcheck disable=SC2154
 ok "cluster pull type: ${PULL_TYPE} (snapshotter ${SNAPSHOTTER})"
 
 if [[ "${E2E_PLATFORM}" != "clh-snp" && "${E2E_PLATFORM}" != "openvmm-snp" ]]; then
