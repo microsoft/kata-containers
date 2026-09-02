@@ -295,7 +295,7 @@ externals:
     desc: "NVIDIA compute stack for the Azure GPUs UVM (Azure Linux 3.0 / azl3)"
     driver:
       desc: "NVIDIA kernel driver"
-      version: "610.43.02"
+      version: "580.159.04"
       # yamllint disable-line rule:line-length
       url: "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/"
     cuda:
