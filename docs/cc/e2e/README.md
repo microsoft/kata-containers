@@ -211,13 +211,13 @@ All settings live at the top of `lib.sh` and are environment-overridable.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `E2E_PLATFORM` | `qemu-coco-dev` | Which hypervisor stack to validate. `clh-snp` and `openvmm-snp` select real SEV-SNP guests over MSHV — see "Platforms" below. |
+| `E2E_PLATFORM` | `openvmm-snp` | Which hypervisor stack to validate. `clh-snp` and `openvmm-snp` select real SEV-SNP guests over MSHV; `qemu-coco-dev` selects the fast, **non-attested** dev path — see "Platforms" below. |
 | `E2E_RG` / `E2E_VM` | `coco-e2e-rg` / `coco-e2e-1` | Azure resource group and VM name. The suite creates the RG if it is absent, so leaving these at their defaults provisions a fresh, self-owned environment rather than reusing anyone else's. |
 | `E2E_SSH_HOST` | `coco-e2e` | ssh alias the workstation-side helpers use. Override with `E2E_VM` for a parallel environment. |
 | `E2E_FAST` | `0` | Dev-loop mode. Reduces assurance — see below. |
 | `E2E_SKIP_BUILD` | `0` | Install the tarballs already in `build/` without rebuilding. |
 | `E2E_REGION` | `eastus` | See the region trap below. |
-| `E2E_VM_SIZE` | `Standard_DC16as_cc_v5` (`aks`: `Standard_DC8as_cc_v6`) | Confidential-capable **host** SKU (nested virt). The node itself is a normal VM. |
+| `E2E_VM_SIZE` | `Standard_DC32as_cc_v6` (`qemu-coco-dev` / `clh-snp`: `Standard_DC16as_cc_v5`, `aks`: `Standard_DC8as_cc_v6`) | Confidential-capable **host** SKU (nested virt). The node itself is a normal VM. |
 | `E2E_VM_SECURITY_TYPE` | `Standard` | See "The node is not a confidential VM" below. |
 | `E2E_BRANCH` | `manifold-cc` | Branch under test. Defaults with `E2E_REPO_URL` to where this branch lives. |
 | `E2E_REPO_URL` | `https://github.com/microsoft/kata-containers.git` | Fork the node clones. Override together with `E2E_BRANCH`. |
@@ -428,7 +428,7 @@ az vm list-usage --location westus --query "[?contains(localName,'DCACCV5')]" -o
 is derived in one `case` block at the top of `lib.sh`, so the stages themselves
 stay declarative.
 
-| | `qemu-coco-dev` (default) | `clh-snp` | `aks` | `openvmm-snp` |
+| | `qemu-coco-dev` | `clh-snp` | `aks` | `openvmm-snp` (default) |
 | --- | --- | --- | --- | --- |
 | Hypervisor | QEMU + KVM | Cloud Hypervisor + MSHV | Cloud Hypervisor + MSHV | OpenVMM + MSHV |
 | Guest | ordinary VM, **not attested** | real SEV-SNP CVM | real SEV-SNP CVM | real SEV-SNP CVM |
@@ -446,7 +446,12 @@ day to day. It cannot say anything about attestation, the SNP boot path, or
 anything MSHV-specific — for example the pathrs kernel-version panic is invisible
 under QEMU because it needs a version string containing an MSHV suffix.
 The SNP-backed platforms cover those gaps. `openvmm-snp` uses the VM-service
-OpenVMM backend and supports a fixed, selectable multi-VP IGVM topology.
+OpenVMM backend and supports a fixed, selectable multi-VP IGVM topology; it is
+the default, because a non-attested guest cannot demonstrate the properties this
+suite exists to check, and because an omitted `E2E_PLATFORM` used to fail late
+and misleadingly — reported as a missing `kata-containers.img` rather than as a
+mis-selected platform. Set `E2E_PLATFORM=qemu-coco-dev` explicitly for the fast
+non-attested loop.
 
 **`clh-snp` prerequisites the suite handles for you:** the MSHV host kernel and
 the `Dom0` grub entry (stage 02 — this needs one reboot, and the stage says so),
@@ -590,7 +595,7 @@ policy-fragment delivery, and lifecycle gates.
 
 ### The node is not a confidential VM
 
-This applies to the default `qemu-coco-dev` platform. Tempting as the SKU name
+This applies to the `qemu-coco-dev` platform. Tempting as the SKU name
 is, the node is provisioned with
 `--security-type Standard`. This suite exercises the `qemu-coco-dev` runtime
 class, which is the **non-attested dev path**: the guest is an ordinary VM, so
