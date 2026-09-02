@@ -642,7 +642,10 @@ pub enum FragmentError {
     UnsupportedAnchorDidPolicy,
     /// FR-1d: a certificate in the chain is on the measured revocation list.
     RevokedCertificate,
-    /// FR-1d: a certificate in the chain is outside its validity window.
+    /// FR-1d: a certificate in the chain was not valid at the leaf's `notAfter`, the single
+    /// instant the whole path is validated at. This is *not* a wall-clock expiry check — the
+    /// guest has no trusted time source, so `now` is never consulted (see
+    /// `did_x509::check_validity`).
     CertExpired,
     /// FR-1d: the presented `x5chain` holds more certificates than any legitimate chain
     /// needs. Bounded so an untrusted host cannot make the guest parse an arbitrarily long
@@ -739,7 +742,9 @@ impl fmt::Display for FragmentError {
                 "configured did:x509 anchor declares a policy predicate that cannot be enforced"
             ),
             FragmentError::RevokedCertificate => write!(f, "certificate in chain is revoked"),
-            FragmentError::CertExpired => write!(f, "certificate in chain is outside validity"),
+            FragmentError::CertExpired => {
+                write!(f, "certificate in chain is not valid at the leaf's expiry")
+            }
             FragmentError::CertChainTooLong { len, max } => write!(
                 f,
                 "certificate chain presents {len} certificates, more than the {max} permitted"
