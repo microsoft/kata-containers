@@ -529,6 +529,7 @@ static_check_license_headers()
 			--exclude="VERSION" \
 			--exclude="kata_config_version" \
 			--exclude="tools/packaging/kernel/configs/*" \
+			--exclude="tools/osbuilder/openvmm-igvm/kernel.config" \
 			--exclude="virtcontainers/pkg/firecracker/*" \
 			--exclude="${ignore_clh_generated_code}*" \
 			--exclude="*.xml" \

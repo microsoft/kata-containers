@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
 OPENVMM_DIR ?= $(HOME)/openvmm-snp-mshv-aci-igvm
 OUT_DIR ?= $(CURDIR)/out
 KERNEL ?=
