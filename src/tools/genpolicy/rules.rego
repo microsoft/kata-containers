@@ -1876,9 +1876,19 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id, p_oci) if {
     # mount_point entirely, so this is defence in depth rather than the load-bearing
     # check -- but a storage naming another container's bundle has no honest reason to
     # exist, and leaving it unconstrained is what let probe B pass.
+    #
+    # `root_path` is a regular expression, not a literal: it has to match both the
+    # bare `/run/kata-containers/<id>/rootfs` a guest pull mounts and the
+    # `shared/containers/passthrough/` form the host-erofs path presents. Comparing
+    # it with `==` would test a mount point against a string still containing
+    # `(?:...)?`, which nothing can equal, so this check could only ever fail and
+    # guest pull would be denied outright. Match it as a regex, anchored at both
+    # ends so a mount point may not merely contain the declared path. This mirrors
+    # how the same setting is already consumed for `Root.Path` above, where it is
+    # substituted into a pattern and matched with regex.find_all_string_submatch_n.
     p_mount_point := replace(policy_data.common.root_path, "$(bundle-id)", bundle_id)
     print("allow_storage with image_guest_pull: p_mount_point =", p_mount_point, "i_mount_point =", i_storage.mount_point)
-    i_storage.mount_point == p_mount_point
+    regex.match(sprintf("^%s$", [p_mount_point]), i_storage.mount_point)
 
     print("allow_storage with image_guest_pull: true")
 }
