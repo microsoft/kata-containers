@@ -1629,7 +1629,10 @@ handle_build() {
 	tar --zstd -tvf "${final_tarball_path}"
 
 	case ${build_target} in
-		kernel-nvidia-gpu|kernel-nvidia-gpu-dragonball-experimental)
+		kernel-nvidia-gpu|kernel-nvidia-gpu-dragonball-experimental|kernel-azure-gpus)
+			# kernel-azure-gpus shares this layout: install_cached_kernel_tarball_component
+			# extracts its modules tarball with --strip-components=1, matching the
+			# parent-dir tar produced here.
 			local modules_final_tarball_path="${workdir}/kata-static-${build_target}-modules.tar.zst"
 			if [[ ! -f "${modules_final_tarball_path}" ]]; then
 				local modules_dir
@@ -1721,7 +1724,7 @@ handle_build() {
 		)
 		oci_image="${ARTEFACT_REGISTRY}/${ARTEFACT_REPOSITORY}/cached-artefacts/${build_target}:${normalized_tags}"
 		case ${build_target} in
-			kernel-nvidia-gpu|kernel-nvidia-gpu-dragonball-experimental|kernel*-confidential)
+			kernel-nvidia-gpu|kernel-nvidia-gpu-dragonball-experimental|kernel-azure-gpus|kernel*-confidential)
 				files_to_push+=(
 					"kata-static-${build_target}-modules.tar.zst"
 				)
