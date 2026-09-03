@@ -178,18 +178,15 @@ install_nvidia_ctk() {
 }
 
 install_nvidia_dcgm() {
-	is_feature_enabled "dcgm" || {
-		echo "chroot: Skipping NVIDIA DCGM installation"
-		return
-	}
-
-	echo "chroot: Install NVIDIA DCGM"
-
-	# DCGM 4.x is split into CUDA-runtime flavors on azl3. Driver 610 pairs
-	# with the CUDA 13 runtime.
-	# shellcheck disable=SC2086
-	${TDNF_INSTALL} datacenter-gpu-manager-4-cuda13 \
-		datacenter-gpu-manager-exporter
+	# DCGM (datacenter-gpu-manager) + dcgm-exporter are telemetry-only and are
+	# deliberately disabled for the azure-gpus image: they cannot yet be
+	# rebuilt internally for licensing reasons, so their RPMs are not published
+	# in the internal Azure Linux repo. DCGM is a leaf component -- the driver,
+	# NVRC, CUDA, and the fabric stack all function without it -- so skipping it
+	# is safe. Ignore the 'dcgm' stack token here rather than let a stray token
+	# fail the tdnf install.
+	echo "chroot: NVIDIA DCGM disabled for azure-gpus (telemetry-only; not built internally)"
+	return
 }
 
 install_devkit_packages() {

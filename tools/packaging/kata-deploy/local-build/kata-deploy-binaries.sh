@@ -769,7 +769,11 @@ install_image_azure_gpus() {
 	else
 		EXTRA_PKGS="apt curl ${EXTRA_PKGS}"
 	fi
-	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,dcgm,nvswitch"}
+	# DCGM (datacenter-gpu-manager) + dcgm-exporter are intentionally omitted
+	# from the azure-gpus default stack: they are telemetry-only and cannot yet
+	# be rebuilt internally for licensing reasons, so their RPMs are not in the
+	# internal Azure Linux repo. Leaving 'dcgm' here would fail the tdnf install.
+	NVIDIA_GPU_STACK=${NVIDIA_GPU_STACK:-"driver=${version},compute,nvswitch"}
 	install_image "azure-gpus"
 }
 
