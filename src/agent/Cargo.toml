@@ -98,6 +98,7 @@ pv_core = { git = "https://github.com/ibm-s390-linux/s390-tools", rev = "4942504
 tempfile.workspace = true
 which.workspace = true
 rstest.workspace = true
+syn.workspace = true
 
 test-utils.workspace = true
 

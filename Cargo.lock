@@ -3960,6 +3960,7 @@ dependencies = [
  "slog-term",
  "strum 0.24.1",
  "strum_macros 0.26.4",
+ "syn 2.0.117",
  "tempfile",
  "test-utils",
  "thiserror 1.0.69",

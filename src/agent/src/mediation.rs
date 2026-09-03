@@ -122,12 +122,31 @@ impl EnforcementClass {
 /// often than it is edited, and rustfmt would expand each row to a five-line tuple.
 #[rustfmt::skip]
 pub const MEDIATION_MANIFEST: &[(&str, &str, &str, EnforcementClass)] = &[
-    // Container lifecycle (policy + occurrence state machine).
+    // Container lifecycle. The occurrence state machine that gates these is compiled in
+    // only under `strict-policy`; every other build runs the same mutation with no
+    // transaction around it and is left with the policy check alone. Declared per
+    // configuration for the same reason `CopyFile` is below: the row describes the binary
+    // that is running, not the one we would like to be running.
+    #[cfg(feature = "strict-policy")]
     ("CreateContainer", "create_container", "CreateContainerRequest", EnforcementClass::LifecycleGated),
+    #[cfg(not(feature = "strict-policy"))]
+    ("CreateContainer", "create_container", "CreateContainerRequest", EnforcementClass::PolicyGated),
+    #[cfg(feature = "strict-policy")]
     ("StartContainer", "start_container", "StartContainerRequest", EnforcementClass::LifecycleGated),
+    #[cfg(not(feature = "strict-policy"))]
+    ("StartContainer", "start_container", "StartContainerRequest", EnforcementClass::PolicyGated),
+    #[cfg(feature = "strict-policy")]
     ("RemoveContainer", "remove_container", "RemoveContainerRequest", EnforcementClass::LifecycleGated),
+    #[cfg(not(feature = "strict-policy"))]
+    ("RemoveContainer", "remove_container", "RemoveContainerRequest", EnforcementClass::PolicyGated),
+    #[cfg(feature = "strict-policy")]
     ("ExecProcess", "exec_process", "ExecProcessRequest", EnforcementClass::LifecycleGated),
+    #[cfg(not(feature = "strict-policy"))]
+    ("ExecProcess", "exec_process", "ExecProcessRequest", EnforcementClass::PolicyGated),
+    #[cfg(feature = "strict-policy")]
     ("SignalProcess", "signal_process", "SignalProcessRequest", EnforcementClass::LifecycleGated),
+    #[cfg(not(feature = "strict-policy"))]
+    ("SignalProcess", "signal_process", "SignalProcessRequest", EnforcementClass::PolicyGated),
     // State-mutating operations (policy gated).
     ("WaitProcess", "wait_process", "WaitProcessRequest", EnforcementClass::PolicyGated),
     ("UpdateContainer", "update_container", "UpdateContainerRequest", EnforcementClass::PolicyGated),
@@ -315,6 +334,22 @@ mod tests {
 
     const AGENT_PROTO: &str = include_str!("../../libs/protocols/protos/agent.proto");
 
+    /// The RPC handlers as the compiler sees them. Only the handler *bodies* are read as
+    /// text; the manifest itself is used as data, so a mis-parse cannot silently exempt an
+    /// entry.
+    const RPC_SOURCE: &str = include_str!("rpc.rs");
+
+    /// Calls that open an SRM transaction.
+    const TRANSACTION_OPENERS: &[&str] = &["prepare", "prepare_teardown"];
+
+    /// The feature that compiles the mediation in. Mediation is conditional, which is why
+    /// this lint reads the source rather than relying on the type system: a compile-time
+    /// rule can only constrain the configuration actually being built.
+    const STRICT_POLICY: &str = "strict-policy";
+
+    /// Whether this build compiles the occurrence state machine in at all.
+    const LIFECYCLE_GATING_COMPILED_IN: bool = cfg!(feature = "strict-policy");
+
     /// Extract `(method, request type)` for every `rpc <Name>(<Request>)` declared by the
     /// agent proto service.
     fn proto_rpcs() -> Vec<(String, String)> {
@@ -413,6 +448,286 @@ mod tests {
             }
             assert!(enforcement_class(rpc).is_some());
         }
+    }
+
+    /// The `#[cfg(...)]` predicate of an attribute, as written.
+    fn cfg_tokens(attr: &syn::Attribute) -> Option<String> {
+        match &attr.meta {
+            syn::Meta::List(list) if list.path.is_ident("cfg") => Some(list.tokens.to_string()),
+            _ => None,
+        }
+    }
+
+    fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().filter_map(cfg_tokens).any(|t| t == "test")
+    }
+
+    /// The comma-separated predicates inside `all(..)` / `any(..)`.
+    fn cfg_operands(list: &syn::MetaList) -> Vec<syn::Meta> {
+        list.parse_args_with(
+            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+        )
+        .map(|operands| operands.into_iter().collect())
+        .unwrap_or_default()
+    }
+
+    /// Does this predicate hold *only* in a build with `strict-policy` enabled?
+    ///
+    /// Not "does the attribute mention the feature". Both guards of a handler name it,
+    /// and the fallback names it under `not(..)`; a containment test would accept the
+    /// fallback as evidence of mediation, so swapping a handler's two guards -- moving
+    /// the transaction out of the confidential build entirely -- would leave this lint
+    /// green. `not(..)` therefore never certifies mediation, whatever it wraps.
+    fn requires_strict_policy(meta: &syn::Meta) -> bool {
+        match meta {
+            syn::Meta::NameValue(nv) => {
+                nv.path.is_ident("feature")
+                    && matches!(
+                        &nv.value,
+                        syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Str(name),
+                            ..
+                        }) if name.value() == STRICT_POLICY
+                    )
+            }
+            // `all(..)` holds only if every operand does, so one is enough.
+            syn::Meta::List(list) if list.path.is_ident("all") => {
+                cfg_operands(list).iter().any(requires_strict_policy)
+            }
+            // `any(..)` can be satisfied by whichever operand is weakest, so all of them
+            // must require the feature. An empty `any(..)` is never satisfied.
+            syn::Meta::List(list) if list.path.is_ident("any") => {
+                let operands = cfg_operands(list);
+                !operands.is_empty() && operands.iter().all(requires_strict_policy)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_strict_policy(attrs: &[syn::Attribute]) -> bool {
+        attrs
+            .iter()
+            .filter(|attr| attr.path().is_ident("cfg"))
+            .filter_map(|attr| attr.parse_args::<syn::Meta>().ok())
+            .any(|meta| requires_strict_policy(&meta))
+    }
+
+    /// Every method the production build compiles, collected from the syntax tree.
+    ///
+    /// `#[cfg(test)]` modules are skipped structurally, so a test helper can never stand
+    /// in for a production handler that was deleted.
+    #[derive(Default)]
+    struct ProductionMethods<'ast> {
+        methods: Vec<&'ast syn::ImplItemFn>,
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for ProductionMethods<'ast> {
+        fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+            if is_cfg_test(&node.attrs) {
+                return;
+            }
+            syn::visit::visit_item_mod(self, node);
+        }
+
+        fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+            self.methods.push(node);
+            syn::visit::visit_impl_item_fn(self, node);
+        }
+    }
+
+    /// What a piece of syntax does that this lint cares about.
+    #[derive(Default)]
+    struct CallScan {
+        opens_transaction: bool,
+    }
+
+    impl CallScan {
+        fn of_block(b: &syn::ExprBlock) -> Self {
+            let mut scan = CallScan::default();
+            syn::visit::visit_expr_block(&mut scan, b);
+            scan
+        }
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for CallScan {
+        fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+            if TRANSACTION_OPENERS.contains(&node.method.to_string().as_str()) {
+                self.opens_transaction = true;
+            }
+            syn::visit::visit_expr_method_call(self, node);
+        }
+    }
+
+    /// Does this block's *success* path leave the handler?
+    ///
+    /// Deliberately the tail statement rather than "contains a `return` somewhere". Each
+    /// of these blocks returns early on its error paths, so the weaker test is satisfied
+    /// by those alone -- it stays green in exactly the situation it is supposed to catch.
+    fn tail_returns(block: &syn::ExprBlock) -> bool {
+        matches!(
+            block.block.stmts.last(),
+            Some(syn::Stmt::Expr(syn::Expr::Return(_), _))
+        )
+    }
+
+    /// Blocks written as `#[cfg(feature = "strict-policy")] { .. }`.
+    #[derive(Default)]
+    struct StrictPolicyBlocks<'ast> {
+        blocks: Vec<&'ast syn::ExprBlock>,
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for StrictPolicyBlocks<'ast> {
+        fn visit_expr_block(&mut self, node: &'ast syn::ExprBlock) {
+            if is_strict_policy(&node.attrs) {
+                self.blocks.push(node);
+            }
+            syn::visit::visit_expr_block(self, node);
+        }
+    }
+
+    /// FR-7/FR-9: classifying an RPC `LifecycleGated` is a claim that its handler runs
+    /// under an SRM transaction. Nothing checked that claim, and it has been false in
+    /// production -- `StartContainer` was classified correctly and still mutated sandbox
+    /// state without opening a transaction at all. Classification and mediation are
+    /// separate facts, and only the first one was being enforced.
+    ///
+    /// The check works on the parsed syntax tree rather than on the source text. That
+    /// buys two things: handler bodies and the unit-test module are exact properties of
+    /// the tree instead of guesses about indentation and column-zero markers, and a match
+    /// can no longer come from a comment or a string literal.
+    ///
+    /// It reads source rather than relying on types because mediation is
+    /// feature-conditional: a compile-time rule can only constrain the configuration
+    /// actually being built. Where a type *can* apply it is used instead — `execute`
+    /// takes the `Reserved` value `prepare` returns, so ordering within a transaction is
+    /// the compiler's business and not asserted about here. What is left for this lint is
+    /// the part no type reaches: whether the handler enters the state machine at all.
+    ///
+    /// What it still does not prove is reachability: the call must be *written* in the
+    /// handler's guarded block, not reached on every path. That limit is inherent to a
+    /// syntactic check.
+    #[test]
+    fn every_lifecycle_gated_handler_opens_a_transaction() {
+        let file = syn::parse_file(RPC_SOURCE).expect("rpc.rs parses as Rust");
+        let mut production = ProductionMethods::default();
+        syn::visit::Visit::visit_file(&mut production, &file);
+
+        let find = |name: &str| -> Vec<&syn::ImplItemFn> {
+            production
+                .methods
+                .iter()
+                .copied()
+                .filter(|m| m.sig.ident == name)
+                .collect()
+        };
+
+        let mut unmediated = Vec::new();
+        let mut unknown = Vec::new();
+        let mut ambiguous = Vec::new();
+        let mut gated = Vec::new();
+
+        for (rpc, handler, _, class) in MEDIATION_MANIFEST {
+            if !matches!(class, EnforcementClass::LifecycleGated) {
+                continue;
+            }
+            let where_ = format!("{} ({})", rpc, handler);
+            gated.push(where_.clone());
+
+            let candidates = find(handler);
+            let body = match candidates.len() {
+                0 => {
+                    unknown.push(where_);
+                    continue;
+                }
+                1 => candidates[0],
+                n => {
+                    ambiguous.push(format!("{} x{}", where_, n));
+                    continue;
+                }
+            };
+
+            // Both halves are load-bearing, and neither is sufficient alone.
+            //
+            // The transaction must be opened inside a block guarded by `strict-policy`,
+            // since that is the only configuration where mediation is compiled at all; an
+            // opener elsewhere in the handler would not describe the build the row claims.
+            //
+            // The guarded block must also leave the handler rather than falling into what
+            // follows it. Today the unmediated call below is `cfg(not(strict-policy))` and
+            // so cannot coexist with the guarded one -- but that exclusivity is a
+            // convention of how these handlers are written, not something the compiler
+            // enforces. Drop the `cfg` from the fallback and a strict build runs the
+            // mutation twice, the second time outside the transaction it just committed.
+            // Nothing else would notice; this does.
+            //
+            // The cost is that a guarded block which is itself the handler's tail may
+            // legitimately yield its value instead of returning, and is asked to return
+            // anyway. That is a real false positive, accepted because the alternative --
+            // proving no unguarded path reaches the mutation -- is a reachability
+            // question a syntactic check cannot answer.
+            let mut blocks = StrictPolicyBlocks::default();
+            syn::visit::Visit::visit_impl_item_fn(&mut blocks, body);
+            let mediates = blocks
+                .blocks
+                .iter()
+                .any(|b| CallScan::of_block(b).opens_transaction && tail_returns(b));
+            if !mediates {
+                unmediated.push(where_);
+            }
+        }
+
+        // The expected count is a property of the configuration, not a constant. Requiring
+        // only "more than zero" would have accepted the very inaccuracy this pairing fixes:
+        // an unconditional LifecycleGated row claims a transaction that a default build
+        // never opens, and the lint would have confirmed the claim by reading strict-only
+        // source. Each configuration is now asked the question that is true of it.
+        if LIFECYCLE_GATING_COMPILED_IN {
+            assert!(
+                !gated.is_empty(),
+                "no LifecycleGated entries found in MEDIATION_MANIFEST, so this lint \
+                 verified nothing. If the class was renamed, update this test to match \
+                 rather than leaving it vacuously green."
+            );
+        } else {
+            assert!(
+                gated.is_empty(),
+                "this build does not compile the occurrence state machine in, yet the \
+                 manifest still classifies {:?} as LifecycleGated. Such a row claims a \
+                 transaction the handler never opens here: the mediation is behind \
+                 `strict-policy`, and below it the same mutation runs unguarded. Declare \
+                 the row per configuration, as CopyFile and SetPolicy are.",
+                gated
+            );
+        }
+        assert!(
+            unknown.is_empty(),
+            "the mediation manifest names handler(s) that do not exist in rpc.rs: {:?}. \
+             Either a handler was renamed without updating the manifest, or this lint's \
+             notion of a handler signature has gone stale -- both make the check below \
+             weaker than it looks.",
+            unknown
+        );
+        assert!(
+            ambiguous.is_empty(),
+            "more than one method in rpc.rs answers to these handler name(s): {:?}. The \
+             lint cannot tell which one mediates the RPC, so it would be checking an \
+             arbitrary one of them.",
+            ambiguous
+        );
+        assert!(
+            unmediated.is_empty(),
+            "RPC(s) classified LifecycleGated whose handler is not mediated by an SRM \
+             transaction: {:?}. That classification claims the operation is gated by the \
+             FR-9 occurrence state machine. It fails either way it can: no \
+             prepare()/prepare_teardown() inside the handler's `strict-policy` block, in \
+             which case the classification is decoration and the operation mutates \
+             lifecycle state unmediated; or a block that opens one and does not return, \
+             which is safe only while the unmediated call below it stays behind \
+             `cfg(not(strict-policy))` -- if that guard is ever dropped, a strict build \
+             performs the operation twice, the second time outside the transaction it \
+             just committed.",
+            unmediated
+        );
     }
 
     /// The behavioural proof of complete mediation: with a policy that denies everything,

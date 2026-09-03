@@ -58,7 +58,9 @@ pub use did_x509::{DidX509Anchor, DidX509Policy};
 pub use fragments::{FragmentError, FragmentStore, PolicyFragment};
 pub use handle_binding::{CheckedHandle, HandleError};
 pub use network_phase::{NetOp, NetPhaseError, NetworkPhase, NetworkPhaseMachine};
-pub use occurrence::{validate_container_id, Lifecycle, Occurrence, OccurrenceError, OccurrenceRegistry};
+pub use occurrence::{
+    validate_container_id, Lifecycle, Occurrence, OccurrenceError, OccurrenceRegistry,
+};
 pub use resource_graph::{
     verify_ordered_bijection, PresentedResource, ResourceDeclaration, ResourceGraphError,
     ResourceKind, VerifiedResourceHandle,
@@ -177,14 +179,86 @@ impl fmt::Display for SrmError {
 
 impl std::error::Error for SrmError {}
 
+/// Proof that this monitor reserved a transaction for a particular operation id.
+///
+/// The field is private, so the only way to hold one is to have received it from a
+/// successful [`ReferenceMonitor::prepare`]. [`ReferenceMonitor::execute`] takes this
+/// instead of a bare op id, which removes "execute an operation nobody prepared" from
+/// the set of programs that compile, rather than catching it at runtime.
+///
+/// That distinction matters more here than it would elsewhere. The monitor's runtime
+/// answer to a broken invariant is to quarantine, and a quarantined sandbox is a denied
+/// sandbox — so a caller mistake that the type system rejects costs a build, while the
+/// same mistake caught dynamically costs availability.
+///
+/// A reservation can only come from `prepare`:
+///
+/// ```
+/// use kata_security_reference_monitor::{ReferenceMonitor, Reserved};
+///
+/// let mut m = ReferenceMonitor::new();
+/// let reserved: Reserved = m.prepare("op1", 0, "d").unwrap().expect_new();
+/// m.execute(&reserved, "d").unwrap();
+/// ```
+///
+/// Forging one does not compile, because the field is private:
+///
+/// ```compile_fail
+/// use kata_security_reference_monitor::{ReferenceMonitor, Reserved};
+///
+/// let mut m = ReferenceMonitor::new();
+/// let reserved: Reserved = m.prepare("op1", 0, "d").unwrap().expect_new();
+/// m.execute(&reserved, "d").unwrap();
+///
+/// // The reservation is spent. Copying its contents into a fresh one to execute
+/// // again is rejected: the field that would have to be copied is private.
+/// let replay = Reserved { ..reserved };
+/// m.execute(&replay, "d").unwrap();
+/// ```
+///
+/// A `compile_fail` test passes for *any* compilation error, including one caused by
+/// renaming what it references, so it is written to be hard to satisfy accidentally.
+/// It names no private detail — the update syntax asks for the fields without spelling
+/// them, so renaming one cannot turn this into a pass — and everything it does name is
+/// named by the honest example above, which stops compiling if any of it moves. The
+/// error code cannot be pinned instead: rustdoc accepts `compile_fail,E0616` but does
+/// not check the code on stable, so the annotation would assert nothing.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Reserved {
+    op_id: OperationId,
+}
+
 /// Result of a `prepare` call.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Prepared {
     /// A fresh transaction was reserved.
-    New,
+    New(Reserved),
     /// The operation was already committed; the retained result is returned
     /// (idempotent replay — the caller must NOT execute again).
+    ///
+    /// No [`Reserved`] accompanies this variant, so "must not execute again" is now a
+    /// property of the type rather than a request in a doc comment: there is nothing to
+    /// hand to `execute`.
     AlreadyCommitted(String),
+}
+
+impl Prepared {
+    /// The reservation from a fresh `prepare`, panicking on an idempotent replay.
+    ///
+    /// For callers that have already established the operation is not a replay — chiefly
+    /// tests. Production paths should match on the variant so the replay is handled.
+    #[track_caller]
+    pub fn expect_new(self) -> Reserved {
+        match self {
+            Prepared::New(reserved) => reserved,
+            Prepared::AlreadyCommitted(result) => {
+                panic!(
+                    "expected a fresh reservation, but the operation was already committed: {}",
+                    result
+                )
+            }
+        }
+    }
 }
 
 /// The universal two-phase transaction manager.
@@ -405,6 +479,9 @@ impl ReferenceMonitor {
             });
         }
 
+        let reserved = Reserved {
+            op_id: op_id.clone(),
+        };
         self.txns.insert(
             op_id.clone(),
             Transaction {
@@ -417,7 +494,7 @@ impl ReferenceMonitor {
                 teardown,
             },
         );
-        Ok(Prepared::New)
+        Ok(Prepared::New(reserved))
     }
 
     /// FR-3: record the digest of the object actually resolved for execution, binding it
@@ -483,7 +560,15 @@ impl ReferenceMonitor {
 
     /// Phase 2a: bind the plan actually being executed. The presented plan digest MUST
     /// equal the authorized one, enforcing authorized == executed.
-    pub fn execute(&mut self, op_id: &str, presented_plan_digest: &str) -> Result<(), SrmError> {
+    ///
+    /// Takes the [`Reserved`] returned by `prepare` rather than an op id, so the
+    /// reservation is a precondition the compiler checks.
+    pub fn execute(
+        &mut self,
+        reserved: &Reserved,
+        presented_plan_digest: &str,
+    ) -> Result<(), SrmError> {
+        let op_id = reserved.op_id.as_str();
         self.reclaim_orphans();
         // RM-8: resolve the transaction before the quarantine gate so a teardown prepared
         // by `prepare_teardown` can still complete. An unknown op id is not a teardown, so
@@ -616,8 +701,8 @@ mod tests {
     fn happy_path_commits_and_advances_version() {
         let mut m = ReferenceMonitor::new();
         assert_eq!(m.state_version(), 0);
-        assert_eq!(m.prepare("op1", 0, "digestA").unwrap(), Prepared::New);
-        m.execute("op1", "digestA").unwrap();
+        let r_op1 = m.prepare("op1", 0, "digestA").unwrap().expect_new();
+        m.execute(&r_op1, "digestA").unwrap();
         m.commit("op1", "container-created").unwrap();
         assert_eq!(m.state_version(), 1);
         assert_eq!(m.transaction("op1").unwrap().state, TxnState::Committed);
@@ -627,8 +712,8 @@ mod tests {
     fn execute_rejects_plan_mismatch() {
         // authorized == executed: a plan different from the authorized one is refused.
         let mut m = ReferenceMonitor::new();
-        m.prepare("op1", 0, "digestA").unwrap();
-        let err = m.execute("op1", "digestB").unwrap_err();
+        let r_op1 = m.prepare("op1", 0, "digestA").unwrap().expect_new();
+        let err = m.execute(&r_op1, "digestB").unwrap_err();
         assert_eq!(
             err,
             SrmError::PlanMismatch {
@@ -641,8 +726,8 @@ mod tests {
     #[test]
     fn idempotent_replay_returns_result_without_reexecuting() {
         let mut m = ReferenceMonitor::new();
-        m.prepare("op1", 0, "d").unwrap();
-        m.execute("op1", "d").unwrap();
+        let r_op1 = m.prepare("op1", 0, "d").unwrap().expect_new();
+        m.execute(&r_op1, "d").unwrap();
         m.commit("op1", "result-1").unwrap();
         let v = m.state_version();
         // Re-preparing the same committed op returns the retained result, no new effect.
@@ -656,8 +741,8 @@ mod tests {
     #[test]
     fn stale_state_version_is_rejected() {
         let mut m = ReferenceMonitor::new();
-        m.prepare("op1", 0, "d").unwrap();
-        m.execute("op1", "d").unwrap();
+        let r_op1 = m.prepare("op1", 0, "d").unwrap().expect_new();
+        m.execute(&r_op1, "d").unwrap();
         m.commit("op1", "r").unwrap(); // version -> 1
         let err = m.prepare("op2", 0, "d").unwrap_err();
         assert_eq!(
@@ -672,8 +757,8 @@ mod tests {
     #[test]
     fn abort_rolls_back_without_advancing_version() {
         let mut m = ReferenceMonitor::new();
-        m.prepare("op1", 0, "d").unwrap();
-        m.execute("op1", "d").unwrap();
+        let r_op1 = m.prepare("op1", 0, "d").unwrap().expect_new();
+        m.execute(&r_op1, "d").unwrap();
         m.abort("op1").unwrap();
         assert_eq!(m.state_version(), 0, "aborted op must not advance state");
         assert!(
@@ -681,7 +766,7 @@ mod tests {
             "aborted transaction must be dropped, not retained"
         );
         // The id is free again, exactly as if it had never been prepared.
-        assert!(matches!(m.prepare("op1", 0, "d"), Ok(Prepared::New)));
+        assert!(matches!(m.prepare("op1", 0, "d"), Ok(Prepared::New(_))));
     }
 
     #[test]
@@ -728,11 +813,11 @@ mod tests {
         ));
 
         // ... but a teardown runs the full prepare → execute → commit path.
-        assert_eq!(
-            m.prepare_teardown("remove/ctr1", 0, "d").unwrap(),
-            Prepared::New
-        );
-        m.execute("remove/ctr1", "d").unwrap();
+        let r_remove_ctr1 = m
+            .prepare_teardown("remove/ctr1", 0, "d")
+            .unwrap()
+            .expect_new();
+        m.execute(&r_remove_ctr1, "d").unwrap();
         m.commit("remove/ctr1", "container-removed").unwrap();
         assert_eq!(
             m.state_version(),
@@ -755,8 +840,11 @@ mod tests {
         let mut m = ReferenceMonitor::new();
 
         let guard = m.guard("remove/4:ctr1");
-        m.prepare_teardown("remove/4:ctr1", 0, "d1").unwrap();
-        m.execute("remove/4:ctr1", "d1").unwrap();
+        let r_remove_4_ctr1 = m
+            .prepare_teardown("remove/4:ctr1", 0, "d1")
+            .unwrap()
+            .expect_new();
+        m.execute(&r_remove_4_ctr1, "d1").unwrap();
         drop(guard); // host abandoned the call mid-flight
 
         m.reclaim_orphans();
@@ -770,13 +858,15 @@ mod tests {
             "the abandoned teardown is parked, not released"
         );
 
-        assert_eq!(
-            m.prepare_teardown("remove/4:ctr1", m.state_version(), "d1")
-                .unwrap(),
-            Prepared::New,
+        let retry = m
+            .prepare_teardown("remove/4:ctr1", m.state_version(), "d1")
+            .unwrap();
+        assert!(
+            matches!(retry, Prepared::New(_)),
             "the retry must supersede the stranded teardown"
         );
-        m.execute("remove/4:ctr1", "d1").unwrap();
+        let r_remove_4_ctr1 = retry.expect_new();
+        m.execute(&r_remove_4_ctr1, "d1").unwrap();
         m.commit("remove/4:ctr1", "container-removed").unwrap();
     }
 
@@ -811,29 +901,39 @@ mod tests {
     #[test]
     fn teardown_exemption_does_not_leak_to_other_transactions() {
         let mut m = ReferenceMonitor::new();
-        m.prepare("create/ctr1", 0, "d1").unwrap();
-        m.prepare_teardown("remove/ctr1", 0, "d2").unwrap();
+        let r_create_ctr1 = m.prepare("create/ctr1", 0, "d1").unwrap().expect_new();
+        let r_remove_ctr1 = m
+            .prepare_teardown("remove/ctr1", 0, "d2")
+            .unwrap()
+            .expect_new();
         m.quarantine("unprovable state");
 
         assert!(
             matches!(
-                m.execute("create/ctr1", "d1"),
+                m.execute(&r_create_ctr1, "d1"),
                 Err(SrmError::Quarantined(_))
             ),
             "a build-up transaction prepared before the quarantine must not execute after it"
         );
-        m.execute("remove/ctr1", "d2")
+        m.execute(&r_remove_ctr1, "d2")
             .expect("teardown must still execute");
     }
 
-    /// An unknown op id must report the quarantine, not a lookup miss: the caller is not
-    /// holding a teardown transaction, so the gate applies.
+    /// An op id the monitor no longer knows must report the quarantine, not a lookup miss:
+    /// the caller is not holding a teardown transaction, so the gate applies.
+    ///
+    /// `execute` now takes the reservation, so "never prepared at all" is no longer a
+    /// program that compiles. The reachable form of the same state is a reservation whose
+    /// transaction has since been released — a use-after-abort — which is the case worth
+    /// pinning in any event.
     #[test]
-    fn execute_of_an_unknown_op_reports_the_quarantine() {
+    fn execute_of_a_released_op_reports_the_quarantine() {
         let mut m = ReferenceMonitor::new();
+        let stale = m.prepare("op1", 0, "d").unwrap().expect_new();
+        m.abort("op1").unwrap();
         m.quarantine("unprovable state");
         assert!(matches!(
-            m.execute("never-prepared", "d"),
+            m.execute(&stale, "d"),
             Err(SrmError::Quarantined(_))
         ));
     }
@@ -852,10 +952,13 @@ mod tests {
             "teardown must still reject a stale expected state version"
         );
 
-        m.prepare_teardown("remove/ctr1", 0, "authorized").unwrap();
+        let r_remove_ctr1 = m
+            .prepare_teardown("remove/ctr1", 0, "authorized")
+            .unwrap()
+            .expect_new();
         assert!(
             matches!(
-                m.execute("remove/ctr1", "tampered"),
+                m.execute(&r_remove_ctr1, "tampered"),
                 Err(SrmError::PlanMismatch { .. })
             ),
             "teardown must still bind the executed plan to the authorized one"
@@ -909,7 +1012,7 @@ mod tests {
         // acted on a state machine that no longer described it. `formal/SRM.tla` requires
         // `state[o] \in {"none", "aborted"}` to prepare; this is that requirement.
         let mut m = ReferenceMonitor::new();
-        m.prepare("op1", 0, "d1").unwrap();
+        let r_op1 = m.prepare("op1", 0, "d1").unwrap().expect_new();
 
         // Prepared: the duplicate is refused, and the original is untouched.
         assert!(matches!(
@@ -922,7 +1025,7 @@ mod tests {
         assert_eq!(m.transaction("op1").unwrap().plan_digest, "d1");
 
         // Executed: still in flight, still refused.
-        m.execute("op1", "d1").unwrap();
+        m.execute(&r_op1, "d1").unwrap();
         assert!(matches!(
             m.prepare("op1", m.state_version(), "d2"),
             Err(SrmError::InvalidState {
@@ -943,10 +1046,10 @@ mod tests {
         m.prepare("op1", 0, "d1").unwrap();
         m.abort("op1").unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             m.prepare("op1", m.state_version(), "d2").unwrap(),
-            Prepared::New
-        );
+            Prepared::New(_)
+        ));
         assert_eq!(m.transaction("op1").unwrap().plan_digest, "d2");
     }
 
@@ -987,13 +1090,13 @@ mod tests {
 
         let winners: Vec<_> = results
             .iter()
-            .filter(|(_, r)| matches!(r, Ok(Prepared::New)))
+            .filter(|(_, r)| matches!(r, Ok(Prepared::New(_))))
             .collect();
         assert_eq!(winners.len(), 1, "exactly one prepare may reserve the id");
 
         let losers: Vec<_> = results
             .iter()
-            .filter(|(_, r)| !matches!(r, Ok(Prepared::New)))
+            .filter(|(_, r)| !matches!(r, Ok(Prepared::New(_))))
             .collect();
         assert_eq!(losers.len(), 1);
         assert!(
@@ -1033,17 +1136,19 @@ mod tests {
         let mut m = ReferenceMonitor::new();
         let op = "signal:ctr1::15";
 
-        m.prepare(op, 0, "d1").unwrap();
-        m.execute(op, "d1").unwrap();
+        let r_op = m.prepare(op, 0, "d1").unwrap().expect_new();
+        m.execute(&r_op, "d1").unwrap();
         m.commit(op, "signal-delivered").unwrap();
         m.retire(op).unwrap();
 
         // Not deduplicated: the monitor has no memory of the first delivery, so an
         // after-the-fact retry is admitted as a new operation and the signal is sent
         // twice. This is the accepted behaviour, not a defect.
-        assert_eq!(
-            m.prepare(op, m.state_version(), "d1").unwrap(),
-            Prepared::New,
+        assert!(
+            matches!(
+                m.prepare(op, m.state_version(), "d1").unwrap(),
+                Prepared::New(_)
+            ),
             "a post-commit repeat is admitted; replay protection is in-flight only"
         );
     }
@@ -1054,8 +1159,8 @@ mod tests {
         // retiring the create transaction, the next create for the same id is answered
         // from the replay cache and the container is never created.
         let mut m = ReferenceMonitor::new();
-        m.prepare("ctr1", 0, "d1").unwrap();
-        m.execute("ctr1", "d1").unwrap();
+        let r_ctr1 = m.prepare("ctr1", 0, "d1").unwrap().expect_new();
+        m.execute(&r_ctr1, "d1").unwrap();
         m.commit("ctr1", "container-created").unwrap();
 
         // Before retiring, a fresh create for the same id is swallowed as a replay.
@@ -1068,10 +1173,10 @@ mod tests {
         assert!(m.transaction("ctr1").is_none());
 
         // After retiring it is a genuinely new transaction again.
-        assert_eq!(
+        assert!(matches!(
             m.prepare("ctr1", m.state_version(), "d2").unwrap(),
-            Prepared::New
-        );
+            Prepared::New(_)
+        ));
     }
 
     #[test]
@@ -1082,12 +1187,12 @@ mod tests {
             Err(SrmError::UnknownOperation(_))
         ));
 
-        m.prepare("op1", 0, "d").unwrap();
+        let r_op1 = m.prepare("op1", 0, "d").unwrap().expect_new();
         assert!(matches!(
             m.retire("op1"),
             Err(SrmError::InvalidState { .. })
         ));
-        m.execute("op1", "d").unwrap();
+        m.execute(&r_op1, "d").unwrap();
         assert!(matches!(
             m.retire("op1"),
             Err(SrmError::InvalidState { .. })
@@ -1132,13 +1237,16 @@ mod tests {
     #[test]
     fn attach_executed_refuses_a_teardown_too_while_quarantined() {
         let mut m = ReferenceMonitor::new();
-        m.prepare_teardown("op1", 0, "authorized").unwrap();
+        let r_op1 = m
+            .prepare_teardown("op1", 0, "authorized")
+            .unwrap()
+            .expect_new();
         m.quarantine("unprovable");
         assert!(matches!(
             m.attach_executed("op1", "executed"),
             Err(SrmError::Quarantined(_))
         ));
-        m.execute("op1", "authorized")
+        m.execute(&r_op1, "authorized")
             .expect("RM-8: teardown must still execute while quarantined");
     }
 
@@ -1147,8 +1255,8 @@ mod tests {
     #[test]
     fn attach_executed_is_refused_once_committed() {
         let mut m = ReferenceMonitor::new();
-        m.prepare("op1", 0, "d").unwrap();
-        m.execute("op1", "d").unwrap();
+        let r_op1 = m.prepare("op1", 0, "d").unwrap().expect_new();
+        m.execute(&r_op1, "d").unwrap();
         m.attach_executed("op1", "executed").unwrap();
         m.commit("op1", "ok").unwrap();
         assert!(matches!(
@@ -1186,11 +1294,17 @@ mod tests {
         );
     }
 
+    /// Executing a reservation whose transaction was released reports the lookup miss.
+    /// Since `execute` no longer accepts a bare op id, this is the only way to reach the
+    /// error — and it is the case that matters: a stale reservation must not resurrect an
+    /// operation that was aborted.
     #[test]
-    fn unknown_operation_errors() {
+    fn executing_a_released_reservation_errors() {
         let mut m = ReferenceMonitor::new();
+        let stale = m.prepare("nope", 0, "d").unwrap().expect_new();
+        m.abort("nope").unwrap();
         assert_eq!(
-            m.execute("nope", "d").unwrap_err(),
+            m.execute(&stale, "d").unwrap_err(),
             SrmError::UnknownOperation("nope".into())
         );
     }
@@ -1208,10 +1322,10 @@ mod tests {
         drop(guard);
 
         // The retry succeeds and the monitor is still usable: nothing had happened yet.
-        assert_eq!(
+        assert!(matches!(
             m.prepare("remove/4:ctr1", m.state_version(), "d1").unwrap(),
-            Prepared::New
-        );
+            Prepared::New(_)
+        ));
         assert!(!m.is_quarantined());
     }
 
@@ -1222,8 +1336,8 @@ mod tests {
     fn an_abandoned_executed_transaction_quarantines() {
         let mut m = ReferenceMonitor::new();
         let guard = m.guard("remove/4:ctr1");
-        m.prepare("remove/4:ctr1", 0, "d1").unwrap();
-        m.execute("remove/4:ctr1", "d1").unwrap();
+        let r_remove_4_ctr1 = m.prepare("remove/4:ctr1", 0, "d1").unwrap().expect_new();
+        m.execute(&r_remove_4_ctr1, "d1").unwrap();
 
         drop(guard);
 
@@ -1240,8 +1354,8 @@ mod tests {
     fn a_disarmed_guard_does_not_report_abandonment() {
         let mut m = ReferenceMonitor::new();
         let guard = m.guard("op1");
-        m.prepare("op1", 0, "d1").unwrap();
-        m.execute("op1", "d1").unwrap();
+        let r_op1 = m.prepare("op1", 0, "d1").unwrap().expect_new();
+        m.execute(&r_op1, "d1").unwrap();
         m.commit("op1", "done").unwrap();
         guard.disarm();
 
@@ -1258,15 +1372,18 @@ mod tests {
     fn execute_also_reclaims_abandoned_transactions() {
         let mut m = ReferenceMonitor::new();
         let live = m.guard("op-live");
-        m.prepare("op-live", 0, "d1").unwrap();
+        let r_op_live = m.prepare("op-live", 0, "d1").unwrap().expect_new();
 
         let abandoned = m.guard("op-gone");
-        m.prepare("op-gone", m.state_version(), "d2").unwrap();
-        m.execute("op-gone", "d2").unwrap();
+        let r_op_gone = m
+            .prepare("op-gone", m.state_version(), "d2")
+            .unwrap()
+            .expect_new();
+        m.execute(&r_op_gone, "d2").unwrap();
         drop(abandoned);
 
         assert!(matches!(
-            m.execute("op-live", "d1"),
+            m.execute(&r_op_live, "d1"),
             Err(SrmError::Quarantined(_))
         ));
         live.disarm();

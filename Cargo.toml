@@ -204,6 +204,11 @@ slog-stdlog = "4.0.0"
 slog-term = "2.9.0"
 strum = { version = "0.24.0", features = ["derive"] }
 strum_macros = "0.26.2"
+# Test-only: the agent's mediation lint parses rpc.rs to check that every
+# lifecycle-gated RPC opens an SRM transaction. Already in the tree as a
+# proc-macro build dependency; "full" and "visit" are needed to walk function
+# bodies rather than just signatures.
+syn = { version = "2.0", features = ["full", "visit"] }
 tdx = "0.1.1"
 tempfile = "3.19.1"
 thiserror = "1.0.26"

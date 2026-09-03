@@ -1214,7 +1214,7 @@ impl agent_ttrpc::AgentService for AgentService {
                 let version = srm.state_version();
                 let prepared = srm.prepare(op_id.clone(), version, digest.clone());
                 let guard = srm.guard(&op_id);
-                match prepared {
+                let reserved = match prepared {
                     // Idempotent replay of an already-committed create: no new effect.
                     Ok(Prepared::AlreadyCommitted(_)) => {
                         drop(srm);
@@ -1225,7 +1225,7 @@ impl agent_ttrpc::AgentService for AgentService {
                         rollback_policy_state(&policy_snapshot, "duplicate create_container").await;
                         return Ok(Empty::new());
                     }
-                    Ok(Prepared::New) => {}
+                    Ok(Prepared::New(reserved)) => reserved,
                     Err(e) => {
                         drop(srm);
                         guard.disarm();
@@ -1236,10 +1236,10 @@ impl agent_ttrpc::AgentService for AgentService {
                         rollback_policy_state(&policy_snapshot, "create_container prepare").await;
                         return Err(ttrpc_error(srm_code(&e), e));
                     }
-                }
+                };
                 // From here on every exit must resolve the transaction; the guard covers
                 // the paths that never run, i.e. this future being dropped mid-flight.
-                if let Err(e) = srm.execute(&op_id, &digest) {
+                if let Err(e) = srm.execute(&reserved, &digest) {
                     abort_or_quarantine(&mut srm, &op_id, "create_container execute");
                     drop(srm);
                     guard.disarm();
@@ -1337,8 +1337,8 @@ impl agent_ttrpc::AgentService for AgentService {
                 let prepared = srm.prepare(op_id.clone(), version, digest.clone());
                 let guard = srm.guard(&op_id);
                 drop(srm);
-                match prepared {
-                    Ok(Prepared::New) => {}
+                let reserved = match prepared {
+                    Ok(Prepared::New(reserved)) => reserved,
                     // A double start is already refused by the occurrence registry above,
                     // so a committed transaction here means the operation id was reused
                     // rather than that this is a legitimate replay. Refuse instead of
@@ -1359,9 +1359,9 @@ impl agent_ttrpc::AgentService for AgentService {
                         rollback_policy_state(&policy_snapshot, "start_container prepare").await;
                         return Err(ttrpc_error(srm_code(&e), e));
                     }
-                }
+                };
                 let mut srm = crate::SRM.lock().await;
-                if let Err(e) = srm.execute(&op_id, &digest) {
+                if let Err(e) = srm.execute(&reserved, &digest) {
                     abort_or_quarantine(&mut srm, &op_id, "start_container execute");
                     drop(srm);
                     guard.disarm();
@@ -1471,8 +1471,8 @@ impl agent_ttrpc::AgentService for AgentService {
                 // host cancels the call, which wedges the operation id forever.
                 let guard = srm.guard(&op_id);
                 drop(srm);
-                match prepared {
-                    Ok(Prepared::New) => {}
+                let reserved = match prepared {
+                    Ok(Prepared::New(reserved)) => reserved,
                     // Removal is already single-shot at the policy layer: a second remove
                     // of the same container is undefined and denied before reaching here.
                     // A committed transaction therefore means the operation id was reused,
@@ -1494,9 +1494,9 @@ impl agent_ttrpc::AgentService for AgentService {
                         rollback_policy_state(&policy_snapshot, "remove_container prepare").await;
                         return Err(ttrpc_error(srm_code(&e), e));
                     }
-                }
+                };
                 let mut srm = crate::SRM.lock().await;
-                if let Err(e) = srm.execute(&op_id, &digest) {
+                if let Err(e) = srm.execute(&reserved, &digest) {
                     abort_or_quarantine(&mut srm, &op_id, "remove_container execute");
                     drop(srm);
                     guard.disarm();
@@ -1638,24 +1638,24 @@ impl agent_ttrpc::AgentService for AgentService {
                 let version = srm.state_version();
                 let prepared = srm.prepare(op_id.clone(), version, digest.clone());
                 let guard = srm.guard(&op_id);
-                match prepared {
+                let reserved = match prepared {
                     Ok(Prepared::AlreadyCommitted(_)) => {
                         drop(srm);
                         guard.disarm();
                         rollback_policy_state(&policy_snapshot, "duplicate exec_process").await;
                         return Ok(Empty::new());
                     }
-                    Ok(Prepared::New) => {}
+                    Ok(Prepared::New(reserved)) => reserved,
                     Err(e) => {
                         drop(srm);
                         guard.disarm();
                         rollback_policy_state(&policy_snapshot, "exec_process prepare").await;
                         return Err(ttrpc_error(srm_code(&e), e));
                     }
-                }
+                };
                 // From here on every exit must resolve the transaction; the guard covers
                 // the paths that never run, i.e. this future being dropped mid-flight.
-                if let Err(e) = srm.execute(&op_id, &digest) {
+                if let Err(e) = srm.execute(&reserved, &digest) {
                     abort_or_quarantine(&mut srm, &op_id, "exec_process execute");
                     drop(srm);
                     guard.disarm();
@@ -1772,15 +1772,15 @@ impl agent_ttrpc::AgentService for AgentService {
                 } else {
                     srm.prepare(op_id.clone(), version, digest.clone())
                 };
-                match prepared {
+                let reserved = match prepared {
                     Ok(Prepared::AlreadyCommitted(_)) => return Ok(Empty::new()),
-                    Ok(Prepared::New) => {}
+                    Ok(Prepared::New(reserved)) => reserved,
                     Err(e) => return Err(ttrpc_error(srm_code(&e), e)),
-                }
+                };
                 // From here on every exit must resolve the transaction; the guard covers
                 // the paths that never run, i.e. this future being dropped mid-flight.
                 let guard = srm.guard(&op_id);
-                if let Err(e) = srm.execute(&op_id, &digest) {
+                if let Err(e) = srm.execute(&reserved, &digest) {
                     abort_or_quarantine(&mut srm, &op_id, "signal_process execute");
                     drop(srm);
                     guard.disarm();
@@ -6951,16 +6951,18 @@ COMMIT
             // `AlreadyCommitted` without running anything.
             let mut m = ReferenceMonitor::new();
             let create = srm_op_id("create", &["a:b"]);
-            m.prepare(create.clone(), 0, "d1").unwrap();
-            m.execute(&create, "d1").unwrap();
+            let r_create = m.prepare(create.clone(), 0, "d1").unwrap().expect_new();
+            m.execute(&r_create, "d1").unwrap();
             m.commit(&create, "container-created").unwrap();
 
             // The exec that a separator-joined encoding would have aliased onto it.
             let exec = srm_op_id("exec", &["a", "b"]);
             assert_ne!(exec, create);
-            assert_eq!(
-                m.prepare(exec, m.state_version(), "d2").unwrap(),
-                Prepared::New,
+            assert!(
+                matches!(
+                    m.prepare(exec, m.state_version(), "d2").unwrap(),
+                    Prepared::New(_)
+                ),
                 "a distinct operation must not be answered from another's result"
             );
         }
@@ -6985,8 +6987,8 @@ COMMIT
             );
 
             let mut m = ReferenceMonitor::new();
-            m.prepare(op.clone(), 0, "authorized").unwrap();
-            m.execute(&op, "authorized").unwrap();
+            let r_op = m.prepare(op.clone(), 0, "authorized").unwrap().expect_new();
+            m.execute(&r_op, "authorized").unwrap();
 
             assert!(
                 m.attach_executed(cid, "executed".to_string()).is_err(),
@@ -7005,8 +7007,8 @@ COMMIT
         fn commit_or_quarantine_records_success_and_leaves_the_monitor_usable() {
             let mut m = ReferenceMonitor::new();
             let op = srm_op_id("create", &["ctr1"]);
-            m.prepare(op.clone(), 0, "d").unwrap();
-            m.execute(&op, "d").unwrap();
+            let r_op = m.prepare(op.clone(), 0, "d").unwrap().expect_new();
+            m.execute(&r_op, "d").unwrap();
 
             commit_or_quarantine(&mut m, &op, "container-created", "create_container");
 
@@ -7042,14 +7044,16 @@ COMMIT
         fn abort_or_quarantine_releases_the_id_for_a_later_attempt() {
             let mut m = ReferenceMonitor::new();
             let op = srm_op_id("remove", &["ctr1"]);
-            m.prepare(op.clone(), 0, "d").unwrap();
-            m.execute(&op, "d").unwrap();
+            let r_op = m.prepare(op.clone(), 0, "d").unwrap().expect_new();
+            m.execute(&r_op, "d").unwrap();
 
             abort_or_quarantine(&mut m, &op, "remove_container");
 
-            assert_eq!(
-                m.prepare(op, m.state_version(), "d").unwrap(),
-                Prepared::New,
+            assert!(
+                matches!(
+                    m.prepare(op, m.state_version(), "d").unwrap(),
+                    Prepared::New(_)
+                ),
                 "a failed removal must stay retryable"
             );
         }
@@ -7072,8 +7076,8 @@ COMMIT
         fn retire_or_warn_frees_the_id_and_tolerates_an_unknown_one() {
             let mut m = ReferenceMonitor::new();
             let op = srm_op_id("signal", &["ctr1", "", "1"]);
-            m.prepare(op.clone(), 0, "d").unwrap();
-            m.execute(&op, "d").unwrap();
+            let r_op = m.prepare(op.clone(), 0, "d").unwrap().expect_new();
+            m.execute(&r_op, "d").unwrap();
             m.commit(&op, "signal-delivered").unwrap();
 
             retire_or_warn(&mut m, &op);
@@ -7081,10 +7085,10 @@ COMMIT
 
             // A repeated signal is a legitimate request, not a replay, and must be
             // admitted rather than answered from the retained result.
-            assert_eq!(
+            assert!(matches!(
                 m.prepare(op, m.state_version(), "d").unwrap(),
-                Prepared::New
-            );
+                Prepared::New(_)
+            ));
 
             // Retiring something unknown must not panic or quarantine: the operation it
             // followed already succeeded.
@@ -7102,12 +7106,15 @@ COMMIT
             let create = srm_op_id("create", &["ctr1"]);
             let remove = srm_op_id("remove", &["ctr1"]);
 
-            m.prepare(create.clone(), 0, "d1").unwrap();
-            m.execute(&create, "d1").unwrap();
+            let r_create = m.prepare(create.clone(), 0, "d1").unwrap().expect_new();
+            m.execute(&r_create, "d1").unwrap();
             m.commit(&create, "container-created").unwrap();
 
-            m.prepare(remove.clone(), m.state_version(), "d2").unwrap();
-            m.execute(&remove, "d2").unwrap();
+            let r_remove = m
+                .prepare(remove.clone(), m.state_version(), "d2")
+                .unwrap()
+                .expect_new();
+            m.execute(&r_remove, "d2").unwrap();
             commit_or_quarantine(&mut m, &remove, "container-removed", "remove_container");
             for id in [&create, &remove] {
                 retire_or_warn(&mut m, id);
@@ -7115,10 +7122,10 @@ COMMIT
 
             // Without retiring the create, this would be an idempotent replay and the new
             // container would never be created.
-            assert_eq!(
+            assert!(matches!(
                 m.prepare(create, m.state_version(), "d3").unwrap(),
-                Prepared::New
-            );
+                Prepared::New(_)
+            ));
         }
 
         /// RM-7: a quarantine must be distinguishable from a bad request. Everything else
@@ -7293,8 +7300,8 @@ COMMIT
         fn a_quarantined_monitor_can_still_be_torn_down() {
             let mut m = ReferenceMonitor::new();
             let create = srm_op_id("create", &["ctr1"]);
-            m.prepare(create.clone(), 0, "d1").unwrap();
-            m.execute(&create, "d1").unwrap();
+            let r_create = m.prepare(create.clone(), 0, "d1").unwrap().expect_new();
+            m.execute(&r_create, "d1").unwrap();
             m.commit(&create, "container-created").unwrap();
 
             m.quarantine("policy state rollback failed after exec_process");
@@ -7328,16 +7335,20 @@ COMMIT
                 "signal",
                 &["ctr1", "e1", &(libc::SIGKILL as u32).to_string()],
             );
-            m.prepare_teardown(kill.clone(), m.state_version(), "d2")
-                .unwrap();
-            m.execute(&kill, "d2").unwrap();
+            let r_kill = m
+                .prepare_teardown(kill.clone(), m.state_version(), "d2")
+                .unwrap()
+                .expect_new();
+            m.execute(&r_kill, "d2").unwrap();
             commit_or_quarantine(&mut m, &kill, "signal-delivered", "signal_process");
             retire_or_warn(&mut m, &kill);
 
             let remove = srm_op_id("remove", &["ctr1"]);
-            m.prepare_teardown(remove.clone(), m.state_version(), "d3")
-                .unwrap();
-            m.execute(&remove, "d3").unwrap();
+            let r_remove = m
+                .prepare_teardown(remove.clone(), m.state_version(), "d3")
+                .unwrap()
+                .expect_new();
+            m.execute(&r_remove, "d3").unwrap();
             commit_or_quarantine(&mut m, &remove, "container-removed", "remove_container");
             assert_eq!(
                 m.transaction(&remove).map(|t| t.state.clone()),
@@ -7356,8 +7367,8 @@ COMMIT
         fn a_quarantined_monitor_refuses_to_start_an_already_created_container() {
             let mut m = ReferenceMonitor::new();
             let create = srm_op_id("create", &["ctr1"]);
-            m.prepare(create.clone(), 0, "d1").unwrap();
-            m.execute(&create, "d1").unwrap();
+            let r_create = m.prepare(create.clone(), 0, "d1").unwrap().expect_new();
+            m.execute(&r_create, "d1").unwrap();
             m.commit(&create, "container-created").unwrap();
 
             // The container exists and is startable at this point.

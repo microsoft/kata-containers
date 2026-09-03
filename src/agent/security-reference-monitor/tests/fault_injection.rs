@@ -18,7 +18,7 @@
 //!    number of committed operations, every committed operation passed through Executed
 //!    (authorized == executed), and quarantine is sticky and blocks new authorizations.
 
-use kata_security_reference_monitor::{ReferenceMonitor, SrmError, TxnState};
+use kata_security_reference_monitor::{Prepared, ReferenceMonitor, Reserved, SrmError, TxnState};
 
 /// The phase at which a simulated operation's fault is injected.
 #[derive(Debug, Clone, Copy)]
@@ -47,17 +47,17 @@ fn run_with_fault(fp: FaultPoint) {
             assert!(m.transaction(op).is_none(), "no txn on failed prepare");
         }
         FaultPoint::Execute => {
-            m.prepare(op, version_before, digest).unwrap();
+            let reserved = m.prepare(op, version_before, digest).unwrap().expect_new();
             // The plan presented at execution differs from the authorized one.
-            let err = m.execute(op, "tampered-digest").unwrap_err();
+            let err = m.execute(&reserved, "tampered-digest").unwrap_err();
             assert!(matches!(err, SrmError::PlanMismatch { .. }));
             // Reconcile: abort the reserved transaction.
             m.abort(op).unwrap();
             assert!(m.transaction(op).is_none(), "aborted txn must be dropped");
         }
         FaultPoint::RuntimeBeforeCommit => {
-            m.prepare(op, version_before, digest).unwrap();
-            m.execute(op, digest).unwrap();
+            let reserved = m.prepare(op, version_before, digest).unwrap().expect_new();
+            m.execute(&reserved, digest).unwrap();
             // The runtime operation fails; the caller aborts instead of committing.
             m.abort(op).unwrap();
             assert!(m.transaction(op).is_none(), "aborted txn must be dropped");
@@ -91,8 +91,8 @@ fn abort_failure_escalates_to_quarantine() {
     // Model the agent's reconciliation: if a committed op is (incorrectly) asked to abort,
     // abort refuses; the agent then quarantines rather than leaving an unprovable state.
     let mut m = ReferenceMonitor::new();
-    m.prepare("op", 0, "d").unwrap();
-    m.execute("op", "d").unwrap();
+    let reserved = m.prepare("op", 0, "d").unwrap().expect_new();
+    m.execute(&reserved, "d").unwrap();
     m.commit("op", "done").unwrap();
 
     // A late/erroneous abort of a committed op must fail (no undo-to-phantom).
@@ -115,8 +115,8 @@ fn abort_failure_escalates_to_quarantine() {
 fn committed_and_aborted_are_terminal_and_exclusive() {
     // Committed cannot be aborted.
     let mut m = ReferenceMonitor::new();
-    m.prepare("c", 0, "d").unwrap();
-    m.execute("c", "d").unwrap();
+    let reserved = m.prepare("c", 0, "d").unwrap().expect_new();
+    m.execute(&reserved, "d").unwrap();
     m.commit("c", "r").unwrap();
     assert!(m.abort("c").is_err());
 
@@ -153,6 +153,12 @@ fn randomized_sequences_preserve_invariants() {
         // Shadow count of committed operations.
         let mut committed: u64 = 0;
         let ids = ["a", "b", "c", "d"];
+        // Reservations are kept after the transaction they name is committed, aborted or
+        // retired. `execute` now demands one, so this map is what preserves the adversary
+        // the loop is for: replaying a stale reservation is the strongest remaining way to
+        // reach `execute` in a state that never authorized it.
+        let mut reservations: std::collections::HashMap<&str, Reserved> =
+            std::collections::HashMap::new();
 
         for _ in 0..300 {
             let id = ids[rng.below(ids.len() as u64) as usize];
@@ -161,18 +167,24 @@ fn randomized_sequences_preserve_invariants() {
             match action {
                 0 => {
                     // prepare with the current (fresh) version
-                    let _ = m.prepare(id, ver, "digest");
+                    if let Ok(Prepared::New(reserved)) = m.prepare(id, ver, "digest") {
+                        reservations.insert(id, reserved);
+                    }
                 }
                 1 => {
                     // execute with the correct digest
-                    let _ = m.execute(id, "digest");
+                    if let Some(reserved) = reservations.get(id) {
+                        let _ = m.execute(reserved, "digest");
+                    }
                 }
                 2 => {
                     // execute with a wrong digest (must never succeed)
-                    assert!(
-                        m.execute(id, "WRONG").is_err() || m.transaction(id).is_none(),
-                        "execute with mismatched digest must never succeed"
-                    );
+                    if let Some(reserved) = reservations.get(id) {
+                        assert!(
+                            m.execute(reserved, "WRONG").is_err() || m.transaction(id).is_none(),
+                            "execute with mismatched digest must never succeed"
+                        );
+                    }
                 }
                 3 => {
                     // commit; if it succeeds the op must have been Executed first
