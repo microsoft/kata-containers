@@ -111,7 +111,6 @@ install_userspace_components() {
 	local -a driver_pkgs=(
 		"nvidia-driver-cuda-libs-${driver_version}"
 		"nvidia-driver-cuda-${driver_version}"
-		"nvidia-driver-common-${driver_version}"
 		"nvidia-kmod-common-${driver_version}"
 		"nvidia-persistenced-${driver_version}"
 		"nvidia-modprobe-${driver_version}"
@@ -119,6 +118,14 @@ install_userspace_components() {
 	)
 	# shellcheck disable=SC2086
 	${TDNF_INSTALL} "${driver_pkgs[@]}"
+
+	# nvidia-driver-common only started being published on the azl3 CUDA repo
+	# with the 610 driver series; it does not exist for the 580 LTS / 595
+	# branches, where its files ship inside nvidia-kmod-common. Install it
+	# best-effort so 610+ still gets it while 580/595 don't abort the build.
+	# shellcheck disable=SC2086
+	${TDNF_INSTALL} "nvidia-driver-common-${driver_version}" || \
+		echo "chroot: nvidia-driver-common-${driver_version} not in repo; skipping (expected for pre-610 drivers)"
 
 	# Needed for confidential-data-hub and NVAT runtime dependencies. These
 	# resolve from the Azure Linux base repositories.
