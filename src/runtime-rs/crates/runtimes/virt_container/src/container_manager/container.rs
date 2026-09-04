@@ -73,6 +73,8 @@ impl Container {
         guest_container_id: &str,
         containers: Arc<RwLock<HashMap<String, Container>>>,
     ) -> Result<()> {
+        // Arm every fallible stream and wait path while the guest cgroup is
+        // still paused. Start may report success only after this setup.
         let mut inner = self.inner.write().await;
         inner.set_init_agent_container_id(guest_container_id)?;
         if let Some((hvsock_uds_path, passfd_port)) = &self.passfd_listener_addr {
@@ -95,8 +97,26 @@ impl Container {
         }
     }
 
+    pub(crate) async fn set_agent_container_id(&self, guest_container_id: &str) -> Result<()> {
+        // Adoption changes only agent routing; container_id remains the target
+        // host identity used by containerd state and events.
+        self.inner
+            .write()
+            .await
+            .set_init_agent_container_id(guest_container_id)
+    }
+
     pub(crate) async fn set_state(&self, state: ProcessStatus) {
         self.inner.write().await.set_state(state).await;
+    }
+
+    pub(crate) async fn complete_locally(&self, exit_code: i32) {
+        self.inner
+            .write()
+            .await
+            .init_process
+            .complete_locally(exit_code)
+            .await;
     }
 
     pub async fn new(
@@ -569,7 +589,7 @@ impl Container {
             oci_process.set_selinux_label(None);
         }
 
-        let process = Process::new(
+        let mut process = Process::new(
             container_process,
             self.pid,
             &self.config.bundle,
@@ -578,6 +598,13 @@ impl Container {
             stderr,
             terminal,
         );
+        let guest_container_id = self
+            .inner
+            .read()
+            .await
+            .init_agent_container_id()
+            .to_string();
+        process.set_agent_container_id(&guest_container_id)?;
         let exec = Exec {
             process,
             oci_process,
@@ -647,7 +674,7 @@ impl Container {
 
         let req = agent::GetDiagnosticDataRequest {
             log_type: "termination_log".to_string(),
-            container_id: self.container_id.container_id.clone(),
+            container_id: self.agent_container_id().await,
         };
 
         // The kubelet bind-mounts a host file into the container at
@@ -701,7 +728,9 @@ impl Container {
         }
 
         self.agent
-            .pause_container(self.container_id.clone().into())
+            .pause_container(agent::ContainerID {
+                container_id: inner.init_agent_container_id().to_string(),
+            })
             .await
             .context("agent pause container")?;
         inner.set_state(ProcessStatus::Paused).await;
@@ -721,7 +750,9 @@ impl Container {
         }
 
         self.agent
-            .resume_container(self.container_id.clone().into())
+            .resume_container(agent::ContainerID {
+                container_id: inner.init_agent_container_id().to_string(),
+            })
             .await
             .context("agent pause container")?;
         inner.set_state(ProcessStatus::Running).await;
@@ -768,7 +799,9 @@ impl Container {
     pub async fn stats(&self) -> Result<Option<agent::StatsContainerResponse>> {
         let stats_resp = self
             .agent
-            .stats_container(self.container_id.clone().into())
+            .stats_container(agent::ContainerID {
+                container_id: self.agent_container_id().await,
+            })
             .await
             .context("agent stats container")?;
         Ok(Some(stats_resp))
@@ -788,7 +821,7 @@ impl Container {
             .await?;
 
         let req = agent::UpdateContainerRequest {
-            container_id: self.container_id.container_id.clone(),
+            container_id: inner.init_agent_container_id().to_string(),
             resources: agent_resources,
             mounts: Vec::new(),
         };
@@ -807,12 +840,41 @@ impl Container {
         self.spec.clone()
     }
 
+    pub(crate) async fn agent_container_id(&self) -> String {
+        self.inner
+            .read()
+            .await
+            .init_agent_container_id()
+            .to_string()
+    }
+
+    pub(crate) async fn snapshot_guest_mounts(
+        &self,
+    ) -> Result<Vec<common::types::ContainerSnapshotMount>> {
+        // Cold Create populated these Volume objects. Adopted containers have
+        // no such objects and carry their mappings in RestoreContext instead.
+        let inner = self.inner.read().await;
+        let mut mounts = Vec::new();
+        for volume in &inner.volumes {
+            for (destination, guest_source) in volume.snapshot_guest_mounts()? {
+                mounts.push(common::types::ContainerSnapshotMount {
+                    destination,
+                    guest_source,
+                });
+            }
+        }
+        mounts.sort_by(|left, right| left.destination.cmp(&right.destination));
+        Ok(mounts)
+    }
+
     pub async fn cleanup(&mut self) -> Result<()> {
         let mut inner = self.inner.write().await;
         let device_manager = self.resource_manager.get_device_manager().await;
+        let guest_id = inner.init_agent_container_id().to_string();
         let res = inner
             .cleanup_container(
                 self.container_id.container_id.as_str(),
+                &guest_id,
                 true,
                 &device_manager,
             )

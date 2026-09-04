@@ -13,4 +13,7 @@ pub struct SandboxState {
     pub sandbox_type: String,
     pub resource: Option<ResourceState>,
     pub hypervisor: Option<HypervisorState>,
+    #[serde(default)]
+    // Claims, completion tombstones, and both ID maps survive shim recovery.
+    pub(crate) restore: Option<crate::restore::RestorePersistState>,
 }

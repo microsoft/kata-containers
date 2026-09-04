@@ -14,9 +14,9 @@ use common::{
     error::Error,
     types::{
         CompletedContainerSnapshot, ContainerConfig, ContainerID, ContainerProcess,
-        ContainerSnapshotInventory, ExecProcessRequest, KillRequest, ProcessExitStatus,
-        ProcessStateInfo, ProcessStatus, ProcessType, ResizePTYRequest, ShutdownRequest, StatsInfo,
-        UpdateRequest, PID,
+        ContainerSnapshotInventory, ExecProcessRequest, KillRequest, LiveContainerSnapshot,
+        ProcessExitStatus, ProcessStateInfo, ProcessStatus, ProcessType, ResizePTYRequest,
+        ShutdownRequest, StatsInfo, UpdateRequest, PID,
     },
     ContainerManager,
 };
@@ -32,7 +32,10 @@ use kata_sys_util::{hooks::HookStates, netns::NetnsGuard};
 use kata_types::k8s::{container_name, container_type};
 
 use crate::container_manager::is_termination_signal;
-use crate::restore::RestoreContext;
+use crate::restore::{
+    canonical_oci_identity, RestoreContext, RestoreCreateAction, RestoreIdentity,
+    OCI_IDENTITY_VERSION,
+};
 
 use super::{logger_with_process, Container};
 
@@ -40,7 +43,6 @@ pub struct VirtContainerManager {
     sid: String,
     pid: u32,
     containers: Arc<RwLock<HashMap<String, Container>>>,
-    completed_containers: Arc<RwLock<HashMap<String, CompletedContainerSnapshot>>>,
     restore_context: Arc<RestoreContext>,
     resource_manager: Arc<ResourceManager>,
     agent: Arc<dyn Agent>,
@@ -66,7 +68,10 @@ fn from_hooks(hooks: &Option<Vec<oci::Hook>>) -> &[oci::Hook] {
 
 #[derive(Debug, PartialEq, Eq)]
 enum SnapshotContainerLifecycle {
-    Live { cri_name: String },
+    Live {
+        cri_name: String,
+        oci_identity_sha256: String,
+    },
     Completed(CompletedContainerSnapshot),
 }
 
@@ -82,14 +87,18 @@ fn snapshot_container_lifecycle(
     if cri_name.is_empty() {
         return Err(anyhow!("container {host_id} has no CRI name"));
     }
+    let oci_identity_sha256 = canonical_oci_identity(spec)?;
     match state.status {
-        ProcessStatus::Running | ProcessStatus::Paused => {
-            Ok(SnapshotContainerLifecycle::Live { cri_name })
-        }
+        ProcessStatus::Running | ProcessStatus::Paused => Ok(SnapshotContainerLifecycle::Live {
+            cri_name,
+            oci_identity_sha256,
+        }),
         ProcessStatus::Stopped if container_type(spec).is_pod_container() => Ok(
             SnapshotContainerLifecycle::Completed(CompletedContainerSnapshot {
                 cri_name,
                 exit_code: state.exit_status,
+                oci_identity_version: OCI_IDENTITY_VERSION,
+                oci_identity_sha256,
             }),
         ),
         status => Err(anyhow!(
@@ -111,7 +120,6 @@ impl VirtContainerManager {
             sid: sid.to_string(),
             pid,
             containers: Default::default(),
-            completed_containers: Default::default(),
             restore_context,
             resource_manager,
             agent,
@@ -134,39 +142,65 @@ impl ContainerManager for VirtContainerManager {
     async fn create_container(&self, config: ContainerConfig, spec: oci::Spec) -> Result<PID> {
         let vmm_master_tid = self.get_vmm_master_tid().await?;
 
-        if self
-            .restore_context
-            .adopt_pause(&config.container_id, container_type(&spec).is_pod_sandbox())
-            .await?
-        {
-            if spec.hooks().is_some() {
-                return Err(anyhow!(
-                    "OCI hooks are not supported for restored pause tasks"
-                ));
+        if self.restore_context.is_restore().await {
+            let is_pause = container_type(&spec).is_pod_sandbox();
+            let mut cri_name = container_name(&spec);
+            if cri_name.is_empty() && is_pause {
+                cri_name = "POD".to_string();
             }
-            let container = Container::new(
-                vmm_master_tid,
-                config.clone(),
-                spec,
-                self.agent.clone(),
-                self.resource_manager.clone(),
-                self.hypervisor.get_passfd_listener_addr().await.ok(),
-            )
-            .await
-            .context("adopt restored pause container")?;
-            if self
-                .containers
-                .write()
+            let identity = RestoreIdentity {
+                oci_identity_version: OCI_IDENTITY_VERSION,
+                oci_identity_sha256: canonical_oci_identity(&spec)?,
+            };
+            let action = match self
+                .restore_context
+                .classify_create(&config.container_id, &cri_name, is_pause, &identity)
                 .await
-                .insert(config.container_id, container)
-                .is_some()
             {
-                self.restore_context.fail().await;
-                return Err(anyhow!("restored pause container already exists"));
+                Ok(action) => action,
+                Err(error) => {
+                    self.restore_context.fail().await;
+                    return Err(error);
+                }
+            };
+            if action != RestoreCreateAction::Cold {
+                let result: Result<PID> = async {
+                    let container = Container::new(
+                        vmm_master_tid,
+                        config.clone(),
+                        spec.clone(),
+                        self.agent.clone(),
+                        self.resource_manager.clone(),
+                        self.hypervisor.get_passfd_listener_addr().await.ok(),
+                    )
+                    .await
+                    .context("prepare restored host container")?;
+                    if let RestoreCreateAction::AdoptLive { ref guest_id, .. } = action {
+                        container.set_agent_container_id(guest_id).await?;
+                        self.resource_manager
+                            .rebind_restored_rootfs(&cri_name, &config.container_id)
+                            .await
+                            .context("rebind restored rootfs")?;
+                    }
+                    if self
+                        .containers
+                        .write()
+                        .await
+                        .insert(config.container_id, container)
+                        .is_some()
+                    {
+                        return Err(anyhow!("restored target container already exists"));
+                    }
+                    Ok(PID {
+                        pid: vmm_master_tid,
+                    })
+                }
+                .await;
+                if result.is_err() {
+                    self.restore_context.fail().await;
+                }
+                return result;
             }
-            return Ok(PID {
-                pid: vmm_master_tid,
-            });
         }
 
         let mut container = Container::new(
@@ -218,7 +252,7 @@ impl ContainerManager for VirtContainerManager {
 
         containers.insert(container.container_id.to_string(), container);
         if !cri_name.is_empty() && is_pod_container {
-            self.completed_containers.write().await.remove(&cri_name);
+            self.restore_context.remove_completed(&cri_name).await;
         }
         Ok(PID {
             pid: vmm_master_tid,
@@ -243,9 +277,14 @@ impl ContainerManager for VirtContainerManager {
         match process.process_type {
             ProcessType::Container => {
                 let mut containers = self.containers.write().await;
-                let c = containers
+                let mut c = containers
                     .remove(container_id)
                     .ok_or_else(|| Error::ContainerNotFound(container_id.to_string()))?;
+                let adopted_live = self
+                    .restore_context
+                    .resolve_guest_id(container_id)
+                    .await
+                    .is_some();
 
                 // Poststop Hooks:
                 // * should be run in runtime namespace
@@ -274,14 +313,38 @@ impl ContainerManager for VirtContainerManager {
                     && container_type(&c_spec).is_pod_container()
                     && !cri_name.is_empty()
                 {
-                    self.completed_containers.write().await.insert(
-                        cri_name.clone(),
-                        CompletedContainerSnapshot {
-                            cri_name,
-                            exit_code: process_state.exit_status,
-                        },
-                    );
+                    // Preserve lifecycle identity after the task object leaves
+                    // the container map so a later snapshot can synthesize it.
+                    match canonical_oci_identity(&c_spec) {
+                        Ok(oci_identity_sha256) => {
+                            self.restore_context
+                                .record_completed(CompletedContainerSnapshot {
+                                    cri_name,
+                                    exit_code: process_state.exit_status,
+                                    oci_identity_version: OCI_IDENTITY_VERSION,
+                                    oci_identity_sha256,
+                                })
+                                .await;
+                        }
+                        Err(error) => warn!(
+                            sl!(),
+                            "completed container is not eligible for snapshot: {error:#}"
+                        ),
+                    }
                 }
+                if adopted_live {
+                    c.cleanup()
+                        .await
+                        .context("clean up deleted restored container")?;
+                    self.resource_manager
+                        .cleanup_restored_rootfs(container_id)
+                        .await
+                        .context("detach deleted restored rootfs")?;
+                    self.restore_context.retire_live(container_id).await;
+                }
+                self.restore_context
+                    .retire_synthetic_completed(container_id)
+                    .await;
                 Ok(process_state)
             }
             ProcessType::Exec => {
@@ -328,6 +391,13 @@ impl ContainerManager for VirtContainerManager {
 
     #[instrument]
     async fn kill_process(&self, req: &KillRequest) -> Result<()> {
+        if self
+            .restore_context
+            .is_synthetic_completed(req.process.container_id())
+            .await
+        {
+            return Ok(());
+        }
         if is_termination_signal(req.signal) {
             if let Some(guest_id) = self
                 .restore_context
@@ -455,6 +525,39 @@ impl ContainerManager for VirtContainerManager {
         let container = containers
             .get(host_id)
             .ok_or_else(|| Error::ContainerNotFound(host_id.to_string()))?;
+        let spec = container.spec().await;
+        // The snapshot supplies destination -> existing guest path; the target
+        // OCI spec supplies the fresh node-local source for that destination.
+        let mappings = self
+            .restore_context
+            .guest_mounts_for_target(host_id)
+            .await
+            .ok_or_else(|| anyhow!("restored mount state is unavailable for {host_id}"))?;
+        let mut refreshes = Vec::with_capacity(mappings.len());
+        for mapping in mappings {
+            let mount = spec
+                .mounts()
+                .as_ref()
+                .and_then(|mounts| {
+                    mounts.iter().find(|mount| {
+                        mount.destination() == std::path::Path::new(&mapping.destination)
+                    })
+                })
+                .ok_or_else(|| {
+                    anyhow!(
+                        "target container {host_id} has no mount at {}",
+                        mapping.destination
+                    )
+                })?;
+            let source = mount.source().clone().ok_or_else(|| {
+                anyhow!("target mount {} has no host source", mapping.destination)
+            })?;
+            refreshes.push((source, mapping.guest_source));
+        }
+        self.resource_manager
+            .refresh_restore_mounts(&refreshes)
+            .await
+            .context("refresh target-generation guest mounts")?;
         container
             .prepare_restored_init(guest_id, self.containers.clone())
             .await
@@ -471,8 +574,56 @@ impl ContainerManager for VirtContainerManager {
         })
     }
 
+    async fn complete_synthetic_init(&self, process: &ContainerProcess) -> Result<()> {
+        // The task handler calls this only after publishing TaskStart. Closing
+        // the local watcher then releases the existing waiter to publish TaskExit.
+        let Some(exit_code) = self
+            .restore_context
+            .take_synthetic_exit_code(process.container_id())
+            .await
+        else {
+            return Ok(());
+        };
+        let containers = self.containers.read().await;
+        let container = containers
+            .get(process.container_id())
+            .ok_or_else(|| Error::ContainerNotFound(process.container_id().to_string()))?;
+        container.complete_locally(exit_code).await;
+        Ok(())
+    }
+
     #[instrument]
     async fn start_process(&self, process: &ContainerProcess) -> Result<PID> {
+        if process.exec_id().is_empty() {
+            if let Some(guest_id) = self
+                .restore_context
+                .resolve_guest_id(process.container_id())
+                .await
+            {
+                // Keep the guest cgroup paused until mount refresh and I/O/wait
+                // setup succeed. Publish Running only after ResumeContainer.
+                self.prepare_restored_container(process.container_id(), &guest_id)
+                    .await?;
+                self.agent
+                    .resume_container(agent::ContainerID {
+                        container_id: guest_id,
+                    })
+                    .await
+                    .context("resume restored container")?;
+                return self
+                    .mark_restored_container_running(process.container_id())
+                    .await;
+            }
+            if self
+                .restore_context
+                .is_synthetic_completed(process.container_id())
+                .await
+            {
+                return self
+                    .mark_restored_container_running(process.container_id())
+                    .await;
+            }
+        }
         let containers = self.containers.read().await;
         let container_id = &process.container_id.container_id;
         let c = containers
@@ -557,27 +708,59 @@ impl ContainerManager for VirtContainerManager {
 
     async fn snapshot_inventory(&self) -> Result<ContainerSnapshotInventory> {
         let containers = self.containers.read().await;
-        let mut completed = self.completed_containers.read().await.clone();
-        let mut live_container_ids = Vec::new();
+        let mut completed = self
+            .restore_context
+            .completed_containers()
+            .await
+            .into_iter()
+            .map(|record| (record.cri_name.clone(), record))
+            .collect::<HashMap<_, _>>();
+        let mut live_containers = Vec::new();
         for (host_id, container) in containers.iter() {
             let process = ContainerProcess::new(host_id, "")?;
             let state = container.state_process(&process).await?;
             let spec = container.spec().await;
             match snapshot_container_lifecycle(host_id, &spec, &state)? {
-                SnapshotContainerLifecycle::Live { cri_name } => {
+                SnapshotContainerLifecycle::Live {
+                    cri_name,
+                    oci_identity_sha256,
+                } => {
                     completed.remove(&cri_name);
-                    live_container_ids.push(ContainerID::new(host_id)?);
+                    let node_local_mounts =
+                        match self.restore_context.guest_mounts_for_target(host_id).await {
+                            // Adopted containers bypass Container::create(), so they have no
+                            // reconstructed Volume objects. Carry the manifest mappings forward
+                            // for recursive snapshots, including an explicitly empty list.
+                            Some(restored_mounts) => restored_mounts
+                                .into_iter()
+                                .map(|mount| common::types::ContainerSnapshotMount {
+                                    destination: mount.destination,
+                                    guest_source: mount.guest_source,
+                                })
+                                .collect(),
+                            // Cold containers own the Volume objects created from their OCI spec.
+                            // Derive copied guest paths from that live resource state.
+                            None => container.snapshot_guest_mounts().await?,
+                        };
+                    live_containers.push(LiveContainerSnapshot {
+                        host_id: host_id.clone(),
+                        guest_id: container.agent_container_id().await,
+                        cri_name,
+                        oci_identity_version: OCI_IDENTITY_VERSION,
+                        oci_identity_sha256,
+                        node_local_mounts,
+                    });
                 }
                 SnapshotContainerLifecycle::Completed(record) => {
                     completed.insert(record.cri_name.clone(), record);
                 }
             }
         }
-        live_container_ids.sort_by(|left, right| left.container_id.cmp(&right.container_id));
+        live_containers.sort_by(|left, right| left.host_id.cmp(&right.host_id));
         let mut completed_containers = completed.into_values().collect::<Vec<_>>();
         completed_containers.sort_by(|left, right| left.cri_name.cmp(&right.cri_name));
         Ok(ContainerSnapshotInventory {
-            live_container_ids,
+            live_containers,
             completed_containers,
         })
     }
@@ -680,6 +863,7 @@ mod tests {
     #[test]
     fn stopped_pod_container_is_completed() {
         let spec = pod_spec("setup", kata_types::annotations::cri_containerd::CONTAINER);
+        let identity = canonical_oci_identity(&spec).unwrap();
         let lifecycle = snapshot_container_lifecycle(
             "host-id",
             &spec,
@@ -691,6 +875,8 @@ mod tests {
             SnapshotContainerLifecycle::Completed(CompletedContainerSnapshot {
                 cri_name: "setup".to_string(),
                 exit_code: 17,
+                oci_identity_version: OCI_IDENTITY_VERSION,
+                oci_identity_sha256: identity,
             })
         );
     }
@@ -698,6 +884,7 @@ mod tests {
     #[test]
     fn running_pod_container_is_live() {
         let spec = pod_spec("app", kata_types::annotations::cri_containerd::CONTAINER);
+        let identity = canonical_oci_identity(&spec).unwrap();
         let lifecycle = snapshot_container_lifecycle(
             "host-id",
             &spec,
@@ -708,6 +895,7 @@ mod tests {
             lifecycle,
             SnapshotContainerLifecycle::Live {
                 cri_name: "app".to_string(),
+                oci_identity_sha256: identity,
             }
         );
     }
