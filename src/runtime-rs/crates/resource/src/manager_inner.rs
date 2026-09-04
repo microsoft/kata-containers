@@ -461,6 +461,7 @@ impl ResourceManagerInner {
     pub async fn handler_rootfs(
         &self,
         cid: &str,
+        cri_name: &str,
         root: &oci::Root,
         bundle_path: &str,
         rootfs_mounts: &[Mount],
@@ -488,6 +489,7 @@ impl ResourceManagerInner {
                 bundle_path,
                 &adjust_rootfs_mounts,
                 annotations,
+                cri_name,
             )
             .await
     }

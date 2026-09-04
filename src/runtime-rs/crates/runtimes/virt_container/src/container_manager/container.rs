@@ -144,6 +144,11 @@ impl Container {
         )
         .context("amend spec")?;
 
+        let mut cri_name = kata_types::k8s::container_name(&spec);
+        if cri_name.is_empty() && container_typ.is_pod_sandbox() {
+            cri_name = "POD".to_string();
+        }
+
         // get mutable root from oci spec
         let root = match spec.root_mut() {
             Some(root) => root,
@@ -155,6 +160,7 @@ impl Container {
             .resource_manager
             .handler_rootfs(
                 &config.container_id,
+                &cri_name,
                 root,
                 &config.bundle,
                 &config.rootfs_mounts,
