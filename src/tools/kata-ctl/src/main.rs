@@ -67,6 +67,7 @@ fn real_main() -> Result<i32> {
 
     let _guard = slog_scope::set_global_logger(logger);
 
+    let config_path = args.config.as_deref();
     let res = if let Some(command) = args.command {
         match command {
             Commands::Check(args) => handle_check(args).map(|_| 0),
@@ -74,7 +75,7 @@ fn real_main() -> Result<i32> {
             Commands::DirectVolume(args) => handle_direct_volume(args).map(|_| 0),
             Commands::Exec(args) => handle_exec(args),
             Commands::Env(args) => handle_env(args).map(|_| 0),
-            Commands::Factory(args) => handle_factory(args).map(|_| 0),
+            Commands::Factory(args) => handle_factory(args, config_path).map(|_| 0),
             Commands::Iptables(args) => handle_iptables(args).map(|_| 0),
             Commands::Metrics(args) => handle_metrics(args).map(|_| 0),
             Commands::Monitor(args) => handle_monitor(args).map(|_| 0),

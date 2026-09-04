@@ -19,6 +19,9 @@ use thiserror::Error;
 pub struct KataCtlCli {
     #[clap(subcommand)]
     pub command: Option<Commands>,
+    /// Path to the Kata runtime configuration file for VM factory operations.
+    #[clap(long, global = true, value_name = "PATH")]
+    pub config: Option<PathBuf>,
     #[clap(short, long, value_enum, value_parser = parse_log_level)]
     /// Sets the minimum log level required for log messages to be displayed. Default is 'info'.
     /// Valid values are: trace, debug, info, warning, error, critical
@@ -124,6 +127,32 @@ pub enum FactorySubCommand {
 
     /// Query the status of VM factory
     Status,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_factory_with_config() {
+        let config_path = PathBuf::from("/tmp/configuration.toml");
+        let args = KataCtlCli::try_parse_from([
+            "kata-ctl",
+            "--config",
+            config_path.to_str().unwrap(),
+            "factory",
+            "init",
+        ])
+        .unwrap();
+
+        assert_eq!(args.config, Some(config_path));
+        assert!(matches!(
+            args.command,
+            Some(Commands::Factory(FactoryArgs {
+                command: FactorySubCommand::Init
+            }))
+        ));
+    }
 }
 
 #[derive(Debug, Args)]

@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
+use common::RuntimeHandler;
 use hypervisor::HYPERVISOR_NAME_CH;
 use kata_sys_util::mount::umount_all;
 use kata_types::config::TomlConfig;
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use slog::{error, info, warn};
 
 use crate::factory::{template::Template, vm::VmConfig};
+use crate::VirtContainer;
 
 pub mod template;
 pub mod vm;
@@ -53,9 +55,44 @@ impl FactoryConfig {
     }
 }
 
+fn apply_static_factory_defaults(toml_config: &mut TomlConfig) {
+    if !toml_config.runtime.static_sandbox_resource_mgmt {
+        return;
+    }
+
+    let hypervisor_name = toml_config.runtime.hypervisor_name.clone();
+    let Some(hypervisor) = toml_config.hypervisor.get_mut(&hypervisor_name) else {
+        return;
+    };
+
+    if hypervisor.memory_info.default_memory == 0
+        && toml_config.runtime.static_sandbox_default_workload_mem > 0
+    {
+        hypervisor.memory_info.default_memory =
+            toml_config.runtime.static_sandbox_default_workload_mem;
+    }
+
+    if hypervisor.cpu_info.default_vcpus == 0.0
+        && toml_config.runtime.static_sandbox_default_workload_vcpus > 0.0
+    {
+        hypervisor.cpu_info.default_vcpus =
+            toml_config.runtime.static_sandbox_default_workload_vcpus;
+    }
+}
+
 /// Load and validate factory configuration
-fn load_and_validate_factory_config() -> Result<(TomlConfig, FactoryConfig)> {
-    let (toml_config, _) = TomlConfig::load_from_default().context("load toml config")?;
+fn load_and_validate_factory_config(
+    config_path: Option<&Path>,
+) -> Result<(TomlConfig, FactoryConfig)> {
+    VirtContainer::init().context("initialize runtime handler")?;
+
+    let (mut toml_config, _) = match config_path {
+        Some(path) => TomlConfig::load_raw_from_file(path),
+        None => TomlConfig::load_raw_from_file(""),
+    }
+    .context("load toml config")?;
+    apply_static_factory_defaults(&mut toml_config);
+    toml_config.adjust_config().context("adjust toml config")?;
 
     let factory_config = FactoryConfig::new(&toml_config);
 
@@ -66,8 +103,8 @@ fn load_and_validate_factory_config() -> Result<(TomlConfig, FactoryConfig)> {
     Ok((toml_config, factory_config))
 }
 
-pub async fn init_factory_command() -> Result<()> {
-    let (toml_config, mut factory_config) = load_and_validate_factory_config()?;
+pub async fn init_factory_command(config_path: Option<&Path>) -> Result<()> {
+    let (toml_config, mut factory_config) = load_and_validate_factory_config(config_path)?;
 
     new_factory(&mut factory_config, toml_config, false)
         .await
@@ -78,8 +115,8 @@ pub async fn init_factory_command() -> Result<()> {
     Ok(())
 }
 
-pub async fn destroy_factory_command() -> Result<()> {
-    let (toml_config, mut factory_config) = load_and_validate_factory_config()?;
+pub async fn destroy_factory_command(config_path: Option<&Path>) -> Result<()> {
+    let (toml_config, mut factory_config) = load_and_validate_factory_config(config_path)?;
 
     new_factory(&mut factory_config, toml_config, true)
         .await
@@ -91,8 +128,8 @@ pub async fn destroy_factory_command() -> Result<()> {
     Ok(())
 }
 
-pub async fn status_factory_command() -> Result<()> {
-    let (toml_config, mut factory_config) = load_and_validate_factory_config()?;
+pub async fn status_factory_command(config_path: Option<&Path>) -> Result<()> {
+    let (toml_config, mut factory_config) = load_and_validate_factory_config(config_path)?;
 
     if new_factory(&mut factory_config, toml_config, true)
         .await
@@ -161,4 +198,136 @@ pub fn close_factory(config: &mut FactoryConfig) -> Result<()> {
         .with_context(|| format!("failed to remove {}", state_path.display()))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use kata_types::config::Hypervisor;
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn load_factory_config_from_explicit_path() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("configuration.toml");
+        fs::write(
+            &config_path,
+            r#"
+[runtime]
+hypervisor_name = "clh"
+static_sandbox_resource_mgmt = true
+static_sandbox_default_workload_mem = 512
+static_sandbox_default_workload_vcpus = 1.5
+
+[hypervisor.clh]
+path = "/bin/true"
+kernel = "/bin/true"
+image = "/bin/true"
+shared_fs = "none"
+
+[hypervisor.clh.factory]
+enable_template = true
+template_path = "/run/vc/vm/preview-template"
+"#,
+        )
+        .unwrap();
+
+        let (toml_config, factory_config) =
+            load_and_validate_factory_config(Some(&config_path)).unwrap();
+
+        assert!(factory_config.template);
+        assert_eq!(factory_config.template_path, "/run/vc/vm/preview-template");
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .memory_info
+                .default_memory,
+            512
+        );
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .cpu_info
+                .default_vcpus,
+            1.5
+        );
+        assert!(toml_config
+            .hypervisor
+            .get("clh")
+            .unwrap()
+            .shared_fs
+            .shared_fs
+            .is_none());
+    }
+
+    #[test]
+    fn static_factory_defaults_only_replace_zero_base_sizes() {
+        let mut config = TomlConfig::default();
+        config.runtime.hypervisor_name = "clh".to_string();
+        config.runtime.static_sandbox_resource_mgmt = true;
+        config.runtime.static_sandbox_default_workload_mem = 512;
+        config.runtime.static_sandbox_default_workload_vcpus = 1.5;
+        config.hypervisor.insert(
+            "clh".to_string(),
+            Hypervisor {
+                memory_info: kata_types::config::hypervisor::MemoryInfo {
+                    default_memory: 256,
+                    ..Default::default()
+                },
+                cpu_info: kata_types::config::hypervisor::CpuInfo {
+                    default_vcpus: 2.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+
+        apply_static_factory_defaults(&mut config);
+        let factory_config = FactoryConfig::new(&config);
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .memory_info
+                .default_memory,
+            256
+        );
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .cpu_info
+                .default_vcpus,
+            2.0
+        );
+
+        config.runtime.static_sandbox_resource_mgmt = false;
+        let hypervisor = config.hypervisor.get_mut("clh").unwrap();
+        hypervisor.memory_info.default_memory = 0;
+        hypervisor.cpu_info.default_vcpus = 0.0;
+
+        apply_static_factory_defaults(&mut config);
+        let factory_config = FactoryConfig::new(&config);
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .memory_info
+                .default_memory,
+            0
+        );
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .cpu_info
+                .default_vcpus,
+            0.0
+        );
+    }
 }
