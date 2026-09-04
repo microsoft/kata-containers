@@ -326,6 +326,20 @@ shims:
     containerd:
       snapshotter: ""
 
+  # clh-azure-gpus: the NVIDIA GPU (GB200 / x86 HGX) UVM flavor of the clh shim.
+  # Same shim binary as clh, but its configuration-clh-azure-gpus.toml points at
+  # the NVIDIA guest kernel + rootfs. A full block (not just enabled/
+  # supportedArches) is required so that when this shim is enabled the rendered
+  # per-shim config carries containerd snapshotter/annotation fields; enabling it
+  # via a partial override left kata-deploy CrashLooping.
+  clh-azure-gpus:
+    enabled: ~
+    supportedArches:
+      - amd64
+    allowedHypervisorAnnotations: []
+    containerd:
+      snapshotter: ""
+
   clh-azure:
     enabled: ~
     supportedArches:
@@ -373,6 +387,21 @@ shims:
       - arm64
       - s390x
       - ppc64le
+    allowedHypervisorAnnotations: []
+    containerd:
+      snapshotter: ""
+
+  # qemu-azure-gpus: the NVIDIA GPU (GB200 / x86 HGX) UVM flavor of the qemu
+  # shim. Same shim binary as qemu, but its configuration-qemu-azure-gpus.toml
+  # points at the NVIDIA guest kernel + rootfs. A full block (not just enabled/
+  # supportedArches) is required so that when this shim is enabled the rendered
+  # per-shim config carries containerd snapshotter/annotation fields; enabling it
+  # via a partial override left kata-deploy CrashLooping.
+  qemu-azure-gpus:
+    enabled: ~
+    supportedArches:
+      - amd64
+      - arm64
     allowedHypervisorAnnotations: []
     containerd:
       snapshotter: ""
