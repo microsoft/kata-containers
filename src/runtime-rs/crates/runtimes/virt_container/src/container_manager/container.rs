@@ -68,6 +68,37 @@ fn process_uses_passfd_io(inner: &ContainerInner, process: &ContainerProcess) ->
 }
 
 impl Container {
+    pub(crate) async fn prepare_restored_init(
+        &self,
+        guest_container_id: &str,
+        containers: Arc<RwLock<HashMap<String, Container>>>,
+    ) -> Result<()> {
+        let mut inner = self.inner.write().await;
+        inner.set_init_agent_container_id(guest_container_id)?;
+        if let Some((hvsock_uds_path, passfd_port)) = &self.passfd_listener_addr {
+            inner
+                .init_process
+                .passfd_io_init(hvsock_uds_path, *passfd_port)
+                .await?;
+            inner
+                .init_process
+                .passfd_io_wait(containers, self.agent.clone())
+                .await
+        } else {
+            let container_io = inner
+                .new_container_io(inner.init_process.agent_process())
+                .await?;
+            inner
+                .init_process
+                .start_io_and_wait(containers, self.agent.clone(), container_io)
+                .await
+        }
+    }
+
+    pub(crate) async fn set_state(&self, state: ProcessStatus) {
+        self.inner.write().await.set_state(state).await;
+    }
+
     pub async fn new(
         pid: u32,
         config: ContainerConfig,
