@@ -92,6 +92,20 @@ fi
 
 pushd "${repo_dir}" || exit
 
+vendor_curl_shim_dir=""
+if [[ -f "${repo_dir}/.cargo/config.toml" && -f "${repo_dir}/vendor/pci-ids/build.rs" ]]; then
+	# The pci-ids build script updates its database with curl. RPM builds have
+	# no network access, but a manual build can overwrite the checksummed vendor
+	# source and make subsequent Cargo commands fail.
+	vendor_curl_shim_dir="$(mktemp -d)"
+	trap 'rm -rf "${vendor_curl_shim_dir}"' EXIT
+	printf '#!/bin/sh\necho "curl disabled for vendored Cargo build" >&2\nexit 1\n' > "${vendor_curl_shim_dir}/curl"
+	chmod 0755 "${vendor_curl_shim_dir}/curl"
+	export PATH="${vendor_curl_shim_dir}:${PATH}"
+	export CARGO_NET_OFFLINE=true
+	echo "Vendored Cargo sources detected; building offline without refreshing pci-ids"
+fi
+
 if [[ "${CONF_PODS}" == "yes" ]]; then
 
 	echo "Building utarfs binary"

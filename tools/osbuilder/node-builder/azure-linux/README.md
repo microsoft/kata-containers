@@ -146,6 +146,11 @@ sudo make deploy
 popd
 ```
 
+When a Cargo vendor archive has been extracted at the repository root, the
+`package` target builds Cargo packages offline and prevents the `pci-ids` build
+script from refreshing its checksummed database. This matches the network-
+isolated RPM build environment and keeps repeated manual builds reproducible.
+
 To build and install Kata-CC components, use the `all-confpods` and `deploy-confpods` targets:
 ```
 pushd kata-containers/tools/osbuilder/node-builder/azure-linux
