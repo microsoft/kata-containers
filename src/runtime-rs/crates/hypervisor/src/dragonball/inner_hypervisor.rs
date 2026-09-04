@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
+use std::path::Path;
 
 use anyhow::{anyhow, Context, Ok, Result};
 use dragonball::ALL_THREADS;
@@ -14,7 +15,7 @@ use kata_types::capabilities::Capabilities;
 use super::inner::DragonballInner;
 use crate::dragonball::seccomp::get_seccomp_filter;
 use crate::utils::{self, get_hvsock_path, get_jailer_root, get_sandbox_path};
-use crate::{VcpuThreadIds, VmmState};
+use crate::{RestoreVmRequest, VcpuThreadIds, VmmState};
 
 impl DragonballInner {
     pub(crate) async fn prepare_vm(
@@ -82,35 +83,83 @@ impl DragonballInner {
         Ok(())
     }
 
-    /// Save the microVM state into the VM template files configured in
-    /// `[hypervisor].vm_template` (boot-to-be-template flow): guest memory
-    /// contents to `memory_path`, vCPU/device state to `device_state_path`.
+    /// Save the microVM state into the configured file-backed memory and the
+    /// snapshot directory's state file.
     /// A running VM is paused while the state is captured and resumed
     /// afterwards; an already-paused VM remains paused.
-    pub(crate) async fn save_vm(&self) -> Result<()> {
+    pub(crate) async fn save_vm(&self, snapshot_dir: &Path) -> Result<()> {
         #[cfg(target_arch = "x86_64")]
         {
-            let template = &self.config.vm_template;
-            if template.device_state_path.is_empty() || template.memory_path.is_empty() {
-                return Err(anyhow!(
-                    "vm_template memory_path/device_state_path are not configured"
-                ));
+            let memory = self
+                .config
+                .file_backed_memory
+                .as_ref()
+                .ok_or_else(|| anyhow!("file-backed memory is not configured"))?;
+            if memory.path.is_empty() {
+                return Err(anyhow!("file-backed memory path is empty"));
             }
+
+            let state_path = snapshot_dir.join("state");
             info!(
                 sl!(),
-                "saving microVM snapshot to template";
-                "device_state_path" => &template.device_state_path,
-                "memory_path" => &template.memory_path,
+                "saving microVM snapshot";
+                "state_path" => state_path.display().to_string(),
+                "memory_path" => &memory.path,
             );
             self.vmm_instance
                 .save_microvm(
-                    template.device_state_path.clone(),
-                    template.memory_path.clone(),
+                    state_path.to_string_lossy().into_owned(),
+                    memory.path.clone(),
                 )
                 .context("save microvm")
         }
         #[cfg(not(target_arch = "x86_64"))]
         Err(anyhow!("save_vm is not supported on this architecture"))
+    }
+
+    pub(crate) async fn restore_vm(&mut self, request: RestoreVmRequest) -> Result<()> {
+        if request.timeout_secs <= 0 {
+            return Err(anyhow!("restore timeout must be positive"));
+        }
+        if !request.network.is_empty() {
+            return Err(anyhow!(
+                "Dragonball snapshot restore does not support replacement network FDs"
+            ));
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let memory_path = self
+                .config
+                .file_backed_memory
+                .as_ref()
+                .ok_or_else(|| anyhow!("file-backed memory is not configured"))?
+                .path
+                .clone();
+            if memory_path.is_empty() {
+                return Err(anyhow!("file-backed memory path is empty"));
+            }
+
+            let state_path = request.snapshot_dir.join("state");
+            self.run_vmm_server().context("start vmm server")?;
+            self.restore_vm_from_snapshot(
+                state_path.to_string_lossy().into_owned(),
+                memory_path,
+                request.timeout_secs,
+            )
+            .await
+            .inspect_err(|error| {
+                error!(sl!(), "restore micro vm error {:?}", error);
+                if let Err(stop_error) = self.stop_vm() {
+                    error!(
+                        sl!(),
+                        "failed to stop VM after restore error: {:?}", stop_error
+                    );
+                }
+            })
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        Err(anyhow!("restore_vm is not supported on this architecture"))
     }
 
     pub(crate) async fn get_agent_socket(&self) -> Result<String> {

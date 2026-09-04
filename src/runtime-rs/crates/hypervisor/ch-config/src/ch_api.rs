@@ -99,6 +99,35 @@ pub struct VmSnapshotConfig {
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct RestoreConfig {
     pub source_url: String,
+    pub memory_restore_mode: MemoryRestoreMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_fds: Option<Vec<RestoredNetConfig>>,
+}
+
+#[derive(Clone, Deserialize, Serialize, Default, Debug, PartialEq, Eq)]
+pub enum MemoryRestoreMode {
+    Copy,
+    OnDemand,
+    #[default]
+    CopyOnWrite,
+}
+
+impl From<kata_types::config::hypervisor::MemoryRestoreMode> for MemoryRestoreMode {
+    fn from(value: kata_types::config::hypervisor::MemoryRestoreMode) -> Self {
+        match value {
+            kata_types::config::hypervisor::MemoryRestoreMode::Copy => Self::Copy,
+            kata_types::config::hypervisor::MemoryRestoreMode::OnDemand => Self::OnDemand,
+            kata_types::config::hypervisor::MemoryRestoreMode::CopyOnWrite => Self::CopyOnWrite,
+        }
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, Default, Debug, PartialEq, Eq)]
+pub struct RestoredNetConfig {
+    pub id: String,
+    pub num_fds: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fds: Option<Vec<i32>>,
 }
 
 pub async fn cloud_hypervisor_vm_snapshot(
@@ -115,6 +144,31 @@ pub async fn cloud_hypervisor_vm_restore(
 ) -> Result<Option<String>> {
     let body = serde_json::to_string(&cfg)?;
     api_command(api_socket, "PUT", "vm.restore", Some(body), None).await
+}
+
+/// Restore a VM while replacing FD-backed network devices.
+///
+/// `RestoreConfig::net_fds` carries device IDs and expected FD counts, but no
+/// descriptor numbers. Valid descriptors are transmitted out-of-band as an
+/// SCM_RIGHTS control message by Cloud Hypervisor's `api_client` helper.
+pub async fn cloud_hypervisor_vm_restore_with_fds(
+    api_socket: &ApiSocket,
+    cfg: RestoreConfig,
+    request_fds: Vec<RawFd>,
+) -> Result<Option<String>> {
+    if request_fds.is_empty() {
+        return Err(anyhow!("vm.restore with net_fds requires at least one FD"));
+    }
+
+    let body = serde_json::to_string(&cfg)?;
+    api_command(
+        api_socket,
+        "PUT",
+        "vm.restore",
+        Some(body),
+        Some(request_fds),
+    )
+    .await
 }
 
 #[allow(dead_code)]
@@ -211,4 +265,119 @@ pub async fn cloud_hypervisor_vm_resize(
 ) -> Result<Option<String>> {
     let body = serde_json::to_string(&vmresize)?;
     api_command(api_socket, "PUT", "vm.resize", Some(body), None).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs::File,
+        io::Write,
+        os::fd::{AsRawFd, FromRawFd},
+    };
+    use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+
+    #[test]
+    fn test_restore_config_memory_modes() {
+        assert_eq!(
+            RestoreConfig::default().memory_restore_mode,
+            MemoryRestoreMode::CopyOnWrite
+        );
+
+        let cases = [
+            (MemoryRestoreMode::Copy, "Copy"),
+            (MemoryRestoreMode::OnDemand, "OnDemand"),
+            (MemoryRestoreMode::CopyOnWrite, "CopyOnWrite"),
+        ];
+
+        for (mode, expected) in cases {
+            let value = serde_json::to_value(RestoreConfig {
+                source_url: "file:///snapshot".to_string(),
+                memory_restore_mode: mode,
+                net_fds: None,
+            })
+            .unwrap();
+
+            assert_eq!(value["source_url"], "file:///snapshot");
+            assert_eq!(value["memory_restore_mode"], expected);
+            assert!(value.get("net_fds").is_none());
+        }
+    }
+
+    #[test]
+    fn test_restore_config_network_fds() {
+        let value = serde_json::to_value(RestoreConfig {
+            source_url: "file:///snapshot".to_string(),
+            memory_restore_mode: MemoryRestoreMode::CopyOnWrite,
+            net_fds: Some(vec![RestoredNetConfig {
+                id: "net0".to_string(),
+                num_fds: 2,
+                fds: None,
+            }]),
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "source_url": "file:///snapshot",
+                "memory_restore_mode": "CopyOnWrite",
+                "net_fds": [{
+                    "id": "net0",
+                    "num_fds": 2
+                }]
+            })
+        );
+    }
+
+    #[test]
+    fn test_restore_with_fds_sends_scm_rights() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let api_socket = ApiSocket::new(Some(client));
+
+        let server_thread = std::thread::spawn(move || {
+            let mut request = [0_u8; 512];
+            let mut iovecs = [nix::libc::iovec {
+                iov_base: request.as_mut_ptr().cast(),
+                iov_len: request.len(),
+            }];
+            let mut received_fds = [-1];
+            let (bytes, fd_count) = unsafe {
+                server
+                    .recv_with_fds(&mut iovecs, &mut received_fds)
+                    .unwrap()
+            };
+
+            assert!(bytes > 0);
+            assert_eq!(fd_count, 1);
+            assert!(String::from_utf8_lossy(&request[..bytes]).contains("vm.restore"));
+
+            let received = unsafe { File::from_raw_fd(received_fds[0]) };
+            assert!(received.metadata().is_ok());
+
+            server.write_all(b"HTTP/1.1 204\r\n\r\n").unwrap();
+        });
+
+        let fd = File::open("/dev/null").unwrap();
+        runtime
+            .block_on(cloud_hypervisor_vm_restore_with_fds(
+                &api_socket,
+                RestoreConfig {
+                    source_url: "file:///snapshot".to_string(),
+                    memory_restore_mode: MemoryRestoreMode::CopyOnWrite,
+                    net_fds: Some(vec![RestoredNetConfig {
+                        id: "net0".to_string(),
+                        num_fds: 1,
+                        fds: None,
+                    }]),
+                },
+                vec![fd.as_raw_fd()],
+            ))
+            .unwrap();
+
+        server_thread.join().unwrap();
+    }
 }

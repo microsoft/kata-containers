@@ -105,6 +105,16 @@ default_memory = @DEFMEMSZ@
 # See docs/how-to/how-to-size-sandbox-overhead-runtime-rs.md
 overhead_memory = @DEFOVERHEADMEMSZ_CLH@
 
+# Cloud Hypervisor memory population strategy for VM snapshot restore:
+#   - copy
+#   - ondemand
+#   - copyonwrite
+memory_restore_mode = "copyonwrite"
+
+# Enable virtio-mem for guest memory resize. This cannot be combined with
+# memory_restore_mode = "copyonwrite".
+enable_virtio_mem = false
+
 # Shared file system type:
 #   - virtio-fs
 #   - virtio-fs-nydus

@@ -7,8 +7,8 @@ use crate::ProtectionDevConfig;
 use crate::VmConfig;
 use crate::{
     guest_protection_is_tdx, ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpuTopology,
-    CpusConfig, DiskConfig, MemoryConfig, MemoryZoneConfig, PayloadConfig, PlatformConfig,
-    PmemConfig, RngConfig, VsockConfig,
+    CpusConfig, DiskConfig, ImageType, MemoryConfig, MemoryZoneConfig, PayloadConfig,
+    PlatformConfig, PmemConfig, RngConfig, VsockConfig,
 };
 use anyhow::Result;
 use kata_sys_util::protection::GuestProtection;
@@ -125,16 +125,10 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
         let host_devices = n.host_devices;
         let protection_dev = n.protection_device;
 
-        let template_memory = if cfg.vm_template.boot_to_be_template {
-            Some(template_memory_config(&cfg).map_err(VmConfigError::MemoryError)?)
-        } else {
-            None
-        };
-
-        let cpus = CpusConfig::try_from((cfg.cpu_info, guest_protection_to_use.clone()))
+        let cpus = CpusConfig::try_from((cfg.cpu_info.clone(), guest_protection_to_use.clone()))
             .map_err(VmConfigError::CPUError)?;
 
-        let rng = RngConfig::from(cfg.machine_info);
+        let rng = RngConfig::from(cfg.machine_info.clone());
 
         // Note how CH handles the different image types:
         //
@@ -145,7 +139,7 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
         //     specified in PayloadConfig.
         //
         // [1] - https://github.com/confidential-containers/td-shim
-        let boot_info = cfg.boot_info;
+        let boot_info = cfg.boot_info.clone();
 
         let use_initrd = !boot_info.initrd.is_empty();
         let use_image = !boot_info.image.is_empty();
@@ -181,11 +175,12 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
         let serial = get_serial_cfg(debug, guest_protection_to_use.clone());
         let console = get_console_cfg(debug, guest_protection_to_use.clone());
 
-        let memory = match template_memory {
-            Some(memory) => memory,
-            None => MemoryConfig::try_from((cfg.memory_info, guest_protection_to_use.clone()))
-                .map_err(VmConfigError::MemoryError)?,
-        };
+        let memory = if cfg.file_backed_memory.is_some() {
+            file_backed_memory_config(&cfg)
+        } else {
+            MemoryConfig::try_from((cfg.memory_info, guest_protection_to_use.clone()))
+        }
+        .map_err(VmConfigError::MemoryError)?;
 
         std::fs::create_dir_all(sandbox_path.clone())
             .map_err(|e| VmConfigError::SandboxError(sandbox_path, e.to_string()))?;
@@ -309,27 +304,31 @@ impl TryFrom<(MemoryInfo, GuestProtection)> for MemoryConfig {
     }
 }
 
-/// Builds the file-backed memory configuration for creating a source template VM.
-fn template_memory_config(cfg: &HypervisorConfig) -> Result<MemoryConfig, MemoryConfigError> {
+/// Builds a file-backed guest-memory configuration.
+fn file_backed_memory_config(cfg: &HypervisorConfig) -> Result<MemoryConfig, MemoryConfigError> {
     let mem = cfg.memory_info.clone();
+    let file_backed_memory = cfg
+        .file_backed_memory
+        .as_ref()
+        .ok_or(MemoryConfigError::NoFileBackedMemoryPath)?;
 
     if mem.default_memory == 0 {
         return Err(MemoryConfigError::NoDefaultMemory);
     }
 
-    if cfg.vm_template.memory_path.is_empty() {
-        return Err(MemoryConfigError::NoTemplateMemoryPath);
+    if file_backed_memory.path.is_empty() {
+        return Err(MemoryConfigError::NoFileBackedMemoryPath);
     }
 
-    fs::metadata(&cfg.vm_template.memory_path).map_err(|e| {
-        MemoryConfigError::TemplateMemoryPathNotAccessible(format!(
+    fs::metadata(&file_backed_memory.path).map_err(|e| {
+        MemoryConfigError::FileBackedMemoryPathNotAccessible(format!(
             "{}: {}",
-            cfg.vm_template.memory_path, e
+            file_backed_memory.path, e
         ))
     })?;
 
     if cfg.shared_fs.shared_fs.is_some() {
-        return Err(MemoryConfigError::TemplateRequiresNoSharedFs);
+        return Err(MemoryConfigError::FileBackedMemoryRequiresNoSharedFs);
     }
 
     let mem_bytes = MIB
@@ -338,15 +337,15 @@ fn template_memory_config(cfg: &HypervisorConfig) -> Result<MemoryConfig, Memory
     let zone = MemoryZoneConfig {
         id: "mem0".to_string(),
         size: mem_bytes,
-        file: Some(PathBuf::from(&cfg.vm_template.memory_path)),
-        shared: true,
+        file: Some(PathBuf::from(&file_backed_memory.path)),
+        shared: file_backed_memory.shared,
         prefault: mem.enable_mem_prealloc,
         ..Default::default()
     };
 
     Ok(MemoryConfig {
         size: 0,
-        shared: true,
+        shared: file_backed_memory.shared,
         prefault: mem.enable_mem_prealloc,
         zones: Some(vec![zone]),
         ..Default::default()
@@ -542,6 +541,9 @@ impl TryFrom<BootInfo> for DiskConfig {
             readonly: true,
             num_queues: DEFAULT_DISK_QUEUES,
             queue_size: DEFAULT_DISK_QUEUE_SIZE,
+            // BootInfo.image is Kata's raw VM root disk. Current CLH requires
+            // every disk to declare its image type explicitly.
+            image_type: ImageType::Raw,
 
             ..Default::default()
         };
@@ -750,6 +752,7 @@ mod tests {
             readonly: true,
             num_queues: DEFAULT_DISK_QUEUES,
             queue_size: DEFAULT_DISK_QUEUE_SIZE,
+            image_type: ImageType::Raw,
 
             ..Default::default()
         };
@@ -1682,7 +1685,7 @@ mod tests {
     }
 
     #[test]
-    fn test_template_memory_config() {
+    fn test_file_backed_memory_config() {
         let memory_path =
             std::env::temp_dir().join(format!("kata-clh-template-memory-{}", std::process::id()));
         fs::write(&memory_path, []).unwrap();
@@ -1696,10 +1699,12 @@ mod tests {
             },
             ..Default::default()
         };
-        cfg.vm_template.boot_to_be_template = true;
-        cfg.vm_template.memory_path = memory_path.to_string_lossy().to_string();
+        cfg.file_backed_memory = Some(kata_types::config::hypervisor::FileBackedMemory {
+            path: memory_path.to_string_lossy().to_string(),
+            shared: true,
+        });
 
-        let memory = template_memory_config(&cfg).unwrap();
+        let memory = file_backed_memory_config(&cfg).unwrap();
         let zones = memory.zones.as_ref().unwrap();
 
         assert_eq!(memory.size, 0);
