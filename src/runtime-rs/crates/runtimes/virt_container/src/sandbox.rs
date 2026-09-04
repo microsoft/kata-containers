@@ -420,6 +420,7 @@ fn prepare_restore_source(
     }
 
     let mut replacements = HashMap::<String, PathBuf>::new();
+    let mut private_writable_ids = HashSet::new();
     for container in &manifest.live_containers {
         let readonly = validated_snapshot_file(snapshot_dir, Path::new(&container.readonly_disk))?;
         if replacements
@@ -451,6 +452,7 @@ fn prepare_restore_source(
             {
                 return Err(anyhow!("duplicate snapshot disk ID {writable_id}"));
             }
+            private_writable_ids.insert(writable_id.clone());
         }
     }
 
@@ -475,12 +477,16 @@ fn prepare_restore_source(
         if !rewritten.insert(id.clone()) {
             return Err(anyhow!("snapshot config contains duplicate disk ID {id}"));
         }
-        disk.as_object_mut()
-            .ok_or_else(|| anyhow!("snapshot config has invalid disk"))?
-            .insert(
-                "path".to_string(),
-                serde_json::Value::String(path.display().to_string()),
-            );
+        let disk = disk
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("snapshot config has invalid disk"))?;
+        disk.insert(
+            "path".to_string(),
+            serde_json::Value::String(path.display().to_string()),
+        );
+        if private_writable_ids.contains(&id) {
+            disk.insert("sparse".to_string(), serde_json::Value::Bool(true));
+        }
     }
     let expected = replacements.keys().cloned().collect::<HashSet<_>>();
     if rewritten != expected {
@@ -741,6 +747,7 @@ mod snapshot_manifest_tests {
             config["disks"][1]["path"],
             private_writable.display().to_string()
         );
+        assert_eq!(config["disks"][1]["sparse"], true);
         assert_eq!(fs::read(private_writable).unwrap(), b"writable");
     }
 }
