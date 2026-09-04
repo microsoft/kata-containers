@@ -53,30 +53,6 @@ impl FactoryConfig {
     }
 }
 
-fn apply_static_factory_defaults(toml_config: &mut TomlConfig) {
-    if !toml_config.runtime.static_sandbox_resource_mgmt {
-        return;
-    }
-
-    let hypervisor_name = toml_config.runtime.hypervisor_name.clone();
-    let Some(hypervisor) = toml_config.hypervisor.get_mut(&hypervisor_name) else {
-        return;
-    };
-
-    if hypervisor.memory_info.default_memory == 0
-        && toml_config.runtime.static_sandbox_default_workload_mem > 0
-    {
-        hypervisor.memory_info.default_memory =
-            toml_config.runtime.static_sandbox_default_workload_mem;
-    }
-
-    if hypervisor.cpu_info.default_vcpus == 0.0
-        && toml_config.runtime.static_sandbox_default_workload_vcpus > 0.0
-    {
-        hypervisor.cpu_info.default_vcpus =
-            toml_config.runtime.static_sandbox_default_workload_vcpus;
-    }
-}
 
 /// Load and validate factory configuration
 fn load_and_validate_factory_config() -> Result<(TomlConfig, FactoryConfig)> {
