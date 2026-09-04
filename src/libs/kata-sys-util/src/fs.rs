@@ -145,7 +145,7 @@ pub fn reflink_copy<S: AsRef<Path>, D: AsRef<Path>>(src: S, dst: D) -> Result<()
 // Copy file using cp command, which handles sparse file copy.
 fn do_regular_copy(src: &str, dst: &str) -> Result<()> {
     let mut cmd = Command::new("/bin/cp");
-    cmd.args(["--sparse=auto", src, dst]);
+    cmd.args(["--sparse=always", src, dst]);
 
     match cmd.output() {
         Ok(output) => match output.status.success() {
@@ -178,6 +178,8 @@ fn do_reflink_copy(src: File, dst: File) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::os::unix::fs::MetadataExt;
 
     #[test]
     fn test_get_base_name() {
@@ -210,5 +212,25 @@ mod tests {
 
         reflink_copy("/proc/mounts", tmpdir.path()).unwrap_err();
         reflink_copy("/proc/mounts_not_exist", &path).unwrap_err();
+    }
+
+    #[test]
+    fn test_regular_copy_sparsifies_zero_filled_file() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let source = tmpdir.path().join("source");
+        let destination = tmpdir.path().join("destination");
+        let mut source_file = File::create(&source).unwrap();
+        let mut data = vec![0; 1024 * 1024];
+        data[..4].copy_from_slice(b"head");
+        let tail_offset = data.len() - 4;
+        data[tail_offset..].copy_from_slice(b"tail");
+        source_file.write_all(&data).unwrap();
+        source_file.sync_all().unwrap();
+
+        do_regular_copy(source.to_str().unwrap(), destination.to_str().unwrap()).unwrap();
+
+        assert_eq!(fs::read(&destination).unwrap(), data);
+        let metadata = destination.metadata().unwrap();
+        assert!(metadata.blocks() * 512 < metadata.len());
     }
 }
