@@ -237,10 +237,22 @@ impl RestoreContext {
         if is_pause && (target_id != self.target_sandbox_id || cri_name != "POD") {
             return Err(anyhow!("invalid restored pause task identity"));
         }
-        let slot = state
-            .live_slots
-            .get_mut(cri_name)
-            .ok_or_else(|| anyhow!("snapshot has no unclaimed container named {cri_name}"))?;
+        let Some(slot) = state.live_slots.get_mut(cri_name) else {
+            let has_pending_slots = state
+                .live_slots
+                .values()
+                .any(|slot| slot.claimed_host_id.is_none())
+                || state
+                    .completed_slots
+                    .values()
+                    .any(|slot| slot.restore_available && slot.claimed_host_id.is_none());
+            if has_pending_slots {
+                return Err(anyhow!(
+                    "snapshot has no unclaimed container named {cri_name}"
+                ));
+            }
+            return Ok(RestoreCreateAction::Cold);
+        };
         if &slot.identity != identity {
             return Err(anyhow!("live container identity mismatch for {cri_name}"));
         }
@@ -866,6 +878,77 @@ mod tests {
             .classify_create("other-app", "app", false, &identity("app"))
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn allows_cold_container_after_snapshot_slots_are_consumed() {
+        let context = RestoreContext::new("target");
+        context
+            .begin(
+                "source",
+                vec![
+                    live_slot("POD", "source-pause", "pause"),
+                    live_slot("app", "source-app", "app"),
+                ],
+                vec![RestoreCompletedSlot {
+                    cri_name: "setup".to_string(),
+                    exit_code: 0,
+                    identity: identity("setup"),
+                }],
+            )
+            .await
+            .unwrap();
+        context.prepared_paused().await.unwrap();
+        context
+            .classify_create("target", "POD", true, &identity("pause"))
+            .await
+            .unwrap();
+        context.begin_activation("target").await.unwrap();
+        context.activate().await.unwrap();
+
+        assert!(context
+            .classify_create(
+                "debugger",
+                "snapshot-debugger",
+                false,
+                &identity("debugger")
+            )
+            .await
+            .is_err());
+        context
+            .classify_create("target-app", "app", false, &identity("app"))
+            .await
+            .unwrap();
+        assert!(context
+            .classify_create(
+                "debugger",
+                "snapshot-debugger",
+                false,
+                &identity("debugger")
+            )
+            .await
+            .is_err());
+        context
+            .classify_create("target-setup", "setup", false, &identity("setup"))
+            .await
+            .unwrap();
+        assert_eq!(
+            context.take_synthetic_exit_code("target-setup").await,
+            Some(0)
+        );
+        context.retire_synthetic_completed("target-setup").await;
+        assert_eq!(
+            context
+                .classify_create(
+                    "debugger",
+                    "snapshot-debugger",
+                    false,
+                    &identity("debugger")
+                )
+                .await
+                .unwrap(),
+            RestoreCreateAction::Cold
+        );
     }
 
     #[tokio::test]
