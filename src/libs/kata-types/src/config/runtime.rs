@@ -27,6 +27,9 @@ pub const EMPTYDIR_MODE_BLOCK_ENCRYPTED: &str = "block-encrypted";
 /// EmptyDir mode: plug a block device to be mounted directly in the guest.
 pub const EMPTYDIR_MODE_BLOCK_PLAIN: &str = "block-plain";
 
+/// Default root directory for packaged VM snapshots.
+pub const DEFAULT_SNAPSHOT_ROOT: &str = "/var/lib/kata/snapshots";
+
 /// Kata runtime configuration information.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Runtime {
@@ -152,6 +155,10 @@ pub struct Runtime {
     #[serde(default)]
     pub static_sandbox_default_workload_vcpus: f32,
 
+    /// Root directory containing packaged VM snapshots selected by annotation.
+    #[serde(default)]
+    pub snapshot_root: String,
+
     /// Determines whether container seccomp profiles are passed to the virtual machine and
     /// applied by the kata agent. If set to true, seccomp is not applied within the guest.
     #[serde(default)]
@@ -248,6 +255,9 @@ impl ConfigOps for Runtime {
         }
         if conf.runtime.emptydir_mode.is_empty() {
             conf.runtime.emptydir_mode = EMPTYDIR_MODE_SHARED_FS.to_owned();
+        }
+        if conf.runtime.snapshot_root.is_empty() {
+            conf.runtime.snapshot_root = DEFAULT_SNAPSHOT_ROOT.to_owned();
         }
 
         for bind in conf.runtime.sandbox_bind_mounts.iter_mut() {
@@ -443,6 +453,17 @@ emptydir_mode = "block-plain"
         let config: TomlConfig = TomlConfig::load(content).unwrap();
         config.validate().unwrap();
         assert_eq!(&config.runtime.emptydir_mode, "shared-fs");
+        assert_eq!(&config.runtime.snapshot_root, DEFAULT_SNAPSHOT_ROOT);
+    }
+
+    #[test]
+    fn test_configured_snapshot_root() {
+        let content = r#"
+[runtime]
+snapshot_root = "/srv/kata/snapshots"
+"#;
+        let config: TomlConfig = TomlConfig::load(content).unwrap();
+        assert_eq!(&config.runtime.snapshot_root, "/srv/kata/snapshots");
     }
 
     #[test]
