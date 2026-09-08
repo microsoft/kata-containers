@@ -189,7 +189,7 @@ mod tests {
             "--sandbox-id",
             "0123456789ab",
             "--path",
-            "/run/vc/vm/snapshots/example",
+            "/var/lib/kata/snapshots/example",
         ])
         .unwrap();
 
@@ -201,7 +201,7 @@ mod tests {
                     path,
                 })
             })) if sandbox_id == "0123456789ab"
-                && path.as_path() == std::path::Path::new("/run/vc/vm/snapshots/example")
+                && path.as_path() == std::path::Path::new("/var/lib/kata/snapshots/example")
         ));
     }
 }
