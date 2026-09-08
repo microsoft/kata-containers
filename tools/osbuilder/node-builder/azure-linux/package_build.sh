@@ -124,7 +124,7 @@ popd || exit
 echo "Building runtime-rs shim binary"
 pushd src/runtime-rs/ || exit
 if [[ "${SHIM_REDEPLOY_CONFIG}" == "yes" ]]; then
-	rm -f "config/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}"
+	rm -f "config/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "config/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_V2}"
 fi
 make "${runtime_rs_make_flags[@]}"
 popd || exit
@@ -171,6 +171,8 @@ create_preview_shim_config() {
 
 create_debug_shim_config  "${CONFIG_DIR_RUNTIME_GO}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO}"
 create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}"
+
+create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_V2}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_V2}"
 
 # Must run after create_debug_shim_config, the preview debug config derives from it.
 create_preview_shim_config "${CONFIG_DIR_RUNTIME_GO}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}" "${SHIM_PREVIEW_CONFIG_FILE_NAME_RUNTIME_GO}"
