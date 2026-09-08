@@ -145,7 +145,7 @@ impl RuntimeHandler for VirtContainer {
     ) -> Result<RuntimeInstance> {
         let restore_requested = sandbox_config
             .annotations
-            .contains_key(kata_types::annotations::KATA_ANNO_RESTORE_FROM);
+            .contains_key(kata_types::annotations::KATA_ANNO_SNAPSHOT_NAME);
         let (hypervisor, agent, factory) = new_vm_components(&config, restore_requested).await?;
 
         let resource_manager = Arc::new(
