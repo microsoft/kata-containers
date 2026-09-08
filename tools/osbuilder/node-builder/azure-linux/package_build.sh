@@ -169,8 +169,48 @@ create_preview_shim_config() {
 	popd || exit
 }
 
+set_config_value() {
+	local config="$1"
+	local key="$2"
+	local value="$3"
+
+	if ! grep -qE "^${key}[[:space:]]*=" "${config}"; then
+		echo "Missing expected configuration key '${key}' in ${config}" >&2
+		return 1
+	fi
+	sed -i -E "s|^${key}[[:space:]]*=.*$|${key} = ${value}|" "${config}"
+}
+
+create_v2_shim_config() {
+	local config_dir="$1"
+	local base_cfg="$2"
+	local v2_cfg="$3"
+
+	pushd "${config_dir}" || exit
+	echo "Creating runtime-rs kata-v2 configuration: ${v2_cfg}"
+	cp "${base_cfg}" "${v2_cfg}"
+
+	if ! grep -qE '^default_maxmemory[[:space:]]*=' "${v2_cfg}"; then
+		sed -i -E '/^default_memory[[:space:]]*=/a default_maxmemory = 0' "${v2_cfg}"
+	fi
+	set_config_value "${v2_cfg}" "default_maxmemory" "0"
+	set_config_value "${v2_cfg}" "overhead_vcpus" "0"
+	set_config_value "${v2_cfg}" "overhead_memory" "0"
+	set_config_value "${v2_cfg}" "memory_restore_mode" '"copyonwrite"'
+	set_config_value "${v2_cfg}" "enable_virtio_mem" "false"
+	set_config_value "${v2_cfg}" "shared_fs" '"none"'
+	set_config_value "${v2_cfg}" "enable_template" "true"
+	set_config_value "${v2_cfg}" "emptydir_mode" '"shared-fs"'
+	set_config_value "${v2_cfg}" "static_sandbox_default_workload_mem" "2048"
+	set_config_value "${v2_cfg}" "static_sandbox_default_workload_vcpus" "2"
+	popd || exit
+}
+
 create_debug_shim_config  "${CONFIG_DIR_RUNTIME_GO}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_GO}"
 create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}"
+
+create_v2_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "${SHIM_V2_CONFIG_FILE_NAME_RUNTIME_RS}"
+create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_V2_CONFIG_FILE_NAME_RUNTIME_RS}" "${SHIM_V2_DBG_CONFIG_FILE_NAME_RUNTIME_RS}"
 
 # Must run after create_debug_shim_config, the preview debug config derives from it.
 create_preview_shim_config "${CONFIG_DIR_RUNTIME_GO}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}" "${SHIM_PREVIEW_CONFIG_FILE_NAME_RUNTIME_GO}"
