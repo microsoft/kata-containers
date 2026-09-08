@@ -384,15 +384,15 @@ impl RuntimeHandlerManager {
             return Ok(());
         }
 
-        if let Some(restore_from) = spec.annotations().as_ref().and_then(|annotations| {
-            annotations.get(kata_types::annotations::KATA_ANNO_RESTORE_FROM)
+        if let Some(snapshot_name) = spec.annotations().as_ref().and_then(|annotations| {
+            annotations.get(kata_types::annotations::KATA_ANNO_SNAPSHOT_NAME)
         }) {
-            if restore_from.is_empty() {
-                return Err(anyhow!("restore-from annotation is empty"));
+            if snapshot_name.is_empty() {
+                return Err(anyhow!("snapshot-name annotation is empty"));
             }
             if !container_type(spec).is_pod_sandbox() {
                 return Err(anyhow!(
-                    "restore-from is supported only on pod sandbox tasks"
+                    "snapshot-name is supported only on pod sandbox tasks"
                 ));
             }
         }
