@@ -104,7 +104,6 @@ use tracing::instrument;
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
 const VMM_START_TIMEOUT_SECS: i32 = 10_000;
 const SOURCE_AGENT_LISTEN_GRACE: Duration = Duration::from_secs(2);
-const SNAPSHOT_BASE_DIR: &str = "/run/vc/vm/snapshots";
 const SNAPSHOT_MANIFEST_FILE: &str = "kata-snapshot.json";
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -274,42 +273,53 @@ fn validated_snapshot_file(snapshot_dir: &Path, relative: &Path) -> Result<PathB
 
 fn restore_source_from_annotations(
     annotations: &std::collections::HashMap<String, String>,
+    snapshot_root: &Path,
 ) -> Result<Option<PathBuf>> {
-    let Some(value) = annotations.get(kata_types::annotations::KATA_ANNO_RESTORE_FROM) else {
+    let Some(value) = annotations.get(kata_types::annotations::KATA_ANNO_SNAPSHOT_NAME) else {
         return Ok(None);
     };
     if value.is_empty() {
-        return Err(anyhow!("restore-from annotation is empty"));
+        return Err(anyhow!("snapshot-name annotation is empty"));
     }
-    let annotation_path = Path::new(value);
-    let restore_source = if annotation_path.is_absolute() {
-        if annotation_path == Path::new("/")
-            || annotation_path
-                .components()
-                .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
-        {
-            return Err(anyhow!("restore-from path is not lexically clean"));
-        }
-        annotation_path.to_path_buf()
-    } else {
-        clean_relative_snapshot_path(annotation_path)?;
-        Path::new(SNAPSHOT_BASE_DIR).join(annotation_path)
-    };
-    let metadata = fs::symlink_metadata(&restore_source).with_context(|| {
-        format!(
-            "restore-from snapshot is unavailable: {}",
-            restore_source.display()
-        )
-    })?;
+    let snapshot_name = Path::new(value);
+    let mut components = snapshot_name.components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        return Err(anyhow!(
+            "snapshot-name must be a single path component: {value}"
+        ));
+    }
+    if !snapshot_root.is_absolute() {
+        return Err(anyhow!(
+            "snapshot_root must be an absolute path: {}",
+            snapshot_root.display()
+        ));
+    }
+    let root_metadata = fs::symlink_metadata(snapshot_root)
+        .with_context(|| format!("snapshot_root is unavailable: {}", snapshot_root.display()))?;
+    if !root_metadata.file_type().is_dir() {
+        return Err(anyhow!(
+            "snapshot_root is not a directory: {}",
+            snapshot_root.display()
+        ));
+    }
+    if snapshot_root.canonicalize()? != snapshot_root {
+        return Err(anyhow!(
+            "snapshot_root contains a symlink or non-canonical component: {}",
+            snapshot_root.display()
+        ));
+    }
+    let restore_source = snapshot_root.join(snapshot_name);
+    let metadata = fs::symlink_metadata(&restore_source)
+        .with_context(|| format!("snapshot is unavailable: {}", restore_source.display()))?;
     if !metadata.file_type().is_dir() {
         return Err(anyhow!(
-            "restore-from snapshot is not a directory: {}",
+            "snapshot is not a directory: {}",
             restore_source.display()
         ));
     }
     if restore_source.canonicalize()? != restore_source {
         return Err(anyhow!(
-            "restore-from path contains a symlink or non-canonical component: {}",
+            "snapshot path contains a symlink or non-canonical component: {}",
             restore_source.display()
         ));
     }
@@ -664,6 +674,69 @@ fn saved_restore_network(snapshot_dir: &Path) -> Result<SavedRestoreNetwork> {
 #[cfg(test)]
 mod snapshot_manifest_tests {
     use super::*;
+
+    fn snapshot_annotations(name: &str) -> HashMap<String, String> {
+        HashMap::from([(
+            kata_types::annotations::KATA_ANNO_SNAPSHOT_NAME.to_string(),
+            name.to_string(),
+        )])
+    }
+
+    #[test]
+    fn restore_source_joins_snapshot_name_to_configured_root() {
+        let snapshot_root = tempfile::tempdir().unwrap();
+        let snapshot = snapshot_root.path().join("busybox-kata");
+        fs::create_dir(&snapshot).unwrap();
+
+        let restore_source = restore_source_from_annotations(
+            &snapshot_annotations("busybox-kata"),
+            snapshot_root.path(),
+        )
+        .unwrap();
+
+        assert_eq!(restore_source, Some(snapshot));
+    }
+
+    #[test]
+    fn restore_source_rejects_paths_in_snapshot_name() {
+        let snapshot_root = tempfile::tempdir().unwrap();
+
+        for snapshot_name in [
+            "",
+            ".",
+            "..",
+            "../busybox-kata",
+            "nested/busybox-kata",
+            "/tmp/busybox-kata",
+        ] {
+            assert!(restore_source_from_annotations(
+                &snapshot_annotations(snapshot_name),
+                snapshot_root.path(),
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn restore_source_rejects_unsafe_root_entries() {
+        let snapshot_root = tempfile::tempdir().unwrap();
+        let annotations = snapshot_annotations("busybox-kata");
+
+        assert!(restore_source_from_annotations(&annotations, Path::new("relative/root")).is_err());
+
+        fs::write(
+            snapshot_root.path().join("busybox-kata"),
+            b"not a directory",
+        )
+        .unwrap();
+        assert!(restore_source_from_annotations(&annotations, snapshot_root.path()).is_err());
+
+        fs::remove_file(snapshot_root.path().join("busybox-kata")).unwrap();
+        let target = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(target.path(), snapshot_root.path().join("busybox-kata"))
+            .unwrap();
+        assert!(restore_source_from_annotations(&annotations, snapshot_root.path()).is_err());
+    }
 
     fn write_restore_fixture(root: &Path) -> SnapshotManifest {
         let clh = root.join("clh");
@@ -1155,7 +1228,11 @@ impl VirtSandbox {
         sandbox_config: &SandboxConfig,
         inner: &mut SandboxInner,
     ) -> Result<bool> {
-        let Some(snapshot_dir) = restore_source_from_annotations(&sandbox_config.annotations)?
+        let runtime_config = self.resource_manager.config().await;
+        let Some(snapshot_dir) = restore_source_from_annotations(
+            &sandbox_config.annotations,
+            Path::new(&runtime_config.runtime.snapshot_root),
+        )?
         else {
             return Ok(false);
         };
@@ -1164,7 +1241,6 @@ impl VirtSandbox {
                 "sandbox OCI hooks are not supported for snapshot restore"
             ));
         }
-        let runtime_config = self.resource_manager.config().await;
         if runtime_config.runtime.hypervisor_name != HYPERVISOR_NAME_CH {
             return Err(anyhow!(
                 "snapshot restore requires cloud-hypervisor, configured {}",
@@ -2286,6 +2362,8 @@ impl VirtSandbox {
         fs::set_permissions(&staging, fs::Permissions::from_mode(0o700))?;
 
         let inventory = container_manager.snapshot_inventory().await?;
+        let runtime_config = self.resource_manager.config().await;
+        let snapshot_root = Path::new(&runtime_config.runtime.snapshot_root);
         let active_host_ids = inventory
             .live_containers
             .iter()
@@ -2343,8 +2421,12 @@ impl VirtSandbox {
                 .snapshot_rootfs_artifacts(&staging, destination, &active_host_ids)
                 .await
                 .context("package rootfs snapshot artifacts")?;
-            resource::rootfs::snapshot::finalize_snapshot_config(&clh_staging, &artifacts)
-                .context("finalize snapshot config")?;
+            resource::rootfs::snapshot::finalize_snapshot_config(
+                &clh_staging,
+                snapshot_root,
+                &artifacts,
+            )
+            .context("finalize snapshot config")?;
 
             let persist_source = PathBuf::from(kata_types::prefix_with_rootless_dir(
                 kata_types::config::KATA_PATH,
