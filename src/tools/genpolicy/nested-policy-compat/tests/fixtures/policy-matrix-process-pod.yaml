@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: policy-matrix-process
+  annotations:
+    io.katacontainers.config.hypervisor.default_vcpus: "2"
+spec:
+  automountServiceAccountToken: false
+  runtimeClassName: kata
+  restartPolicy: Never
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+    supplementalGroups:
+      - 10
+  containers:
+    - name: workload
+      image: genpolicy.local:5000/busybox@sha256:330c0f71ee2f62aec2df2de066b2a9acef0039c70313965ab2d2451bbbdae945
+      imagePullPolicy: Never
+      workingDir: /work
+      command: ["/bin/busybox"]
+      args: ["sleep", "3600"]
+      stdin: true
+      tty: true
+      env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: STATIC_VALUE
+          value: containerd-2.3
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - NET_RAW
