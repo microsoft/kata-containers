@@ -141,7 +141,7 @@ This command installs the latest release of the [IGVM tooling](https://github.co
 To build and install Kata components, run:
 ```
 pushd kata-containers/tools/osbuilder/node-builder/azure-linux
-make all
+make RELEASE_VERSION=<distro-package-release> all
 sudo make deploy
 popd
 ```
@@ -149,7 +149,7 @@ popd
 To build and install Kata-CC components, use the `all-confpods` and `deploy-confpods` targets:
 ```
 pushd kata-containers/tools/osbuilder/node-builder/azure-linux
-make all-confpods
+make RELEASE_VERSION=<distro-package-release> all-confpods
 sudo make deploy-confpods
 popd
 ```
@@ -157,6 +157,10 @@ popd
 The `all[-confpods]` target runs the targets `package[-confpods]` and `uvm[-confpods]` in a single step (the `uvm[-confpods]` target depends on the `package[-confpods]` target). The `deploy[-confpods]` target moves the build artifacts to proper places (and calls into `deploy[-confpods]-package`, `deploy[-confpods]-uvm`).
 
 Notes:
+  - `RELEASE_VERSION` is required when building packages and must identify the
+    distro package release, for example `3.32.0.kata0-6`. Runtime-rs uses it as
+    the snapshot compatibility version so package security revisions cannot
+    restore incompatible snapshots silently.
   - To retrieve more detailed build output, prefix the make commands with `DEBUG=1`.
   - To build an IGVM file for CondPods with a non-default SVN of 0, prefix the `make uvm-confpods` command with `IGVM_SVN=<number>`
   - For build and deployment of both Kata and Kata-CC artifacts, first run the `make all` and `make deploy` commands to build and install the Kata Containers for AKS components followed by `make clean`, and then run `make all-confpods` and `make deploy-confpods` to build and install the Confidential Containers for AKS components - or vice versa (using `make clean-confpods`).
@@ -184,7 +188,7 @@ In general, you can specify the debug configuration for all the above
 variables by using `BUILD_TYPE=debug` as such:
 
 ```shell
-sudo make BUILD_TYPE=debug all-confpods deploy-confpods
+sudo make RELEASE_VERSION=<distro-package-release> BUILD_TYPE=debug all-confpods deploy-confpods
 ```
 
 Also note that make still lets you override the other variables even
@@ -192,7 +196,7 @@ after setting `BUILD_TYPE`. For example, you can use the production shim
 config with `BUILD_TYPE=debug`:
 
 ```shell
-sudo make BUILD_TYPE=debug SHIM_USE_DEBUG_CONFIG=no all-confpods deploy-confpods
+sudo make RELEASE_VERSION=<distro-package-release> BUILD_TYPE=debug SHIM_USE_DEBUG_CONFIG=no all-confpods deploy-confpods
 ```
 
 ### Prevent redeploying the shim configuration
@@ -203,7 +207,7 @@ file each time you redeploy binaries, you can separately specify the
 `SHIM_REDEPLOY_CONFIG` (default `yes`):
 
 ```shell
-sudo make SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
+sudo make RELEASE_VERSION=<distro-package-release> SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
 ```
 
 Note that this variable is independent from the other variables
@@ -212,7 +216,7 @@ configuration AND build in debug mode, you have to use the following
 command:
 
 ```shell
-sudo make BUILD_TYPE=debug SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
+sudo make RELEASE_VERSION=<distro-package-release> BUILD_TYPE=debug SHIM_REDEPLOY_CONFIG=no all-confpods deploy-confpods
 ```
 
 # Run Kata (Confidential) Containers
