@@ -18,7 +18,7 @@ use kata_sys_util::spec::get_bundle_path;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag};
 
 use crate::{
-    logger,
+    config, logger,
     shim::{socket_path, ShimExecutor, ENV_KATA_RUNTIME_BIND_FD},
     Error,
 };
@@ -62,6 +62,7 @@ impl ShimExecutor {
         let server_fd = get_server_fd().context("get server fd")?;
         let service_manager = service::ServiceManager::new(
             &self.args.id,
+            config::PACKAGE_VERSION,
             &self.args.publish_binary,
             &self.args.address,
             &self.args.namespace,

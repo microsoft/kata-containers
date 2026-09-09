@@ -12,7 +12,7 @@ use nix::{sys::signal::kill, sys::signal::SIGKILL, unistd::Pid};
 use protobuf::Message;
 use std::{fs, io::Write, path::Path};
 
-use crate::{logger, shim::ShimExecutor, Error};
+use crate::{config, logger, shim::ShimExecutor, Error};
 
 impl ShimExecutor {
     pub async fn delete(&mut self) -> Result<()> {
@@ -90,7 +90,9 @@ impl ShimExecutor {
             fs::remove_file(file_path).ok();
         }
 
-        if let Err(e) = service::ServiceManager::cleanup(&self.args.id).await {
+        if let Err(e) =
+            service::ServiceManager::cleanup(&self.args.id, config::PACKAGE_VERSION).await
+        {
             error!(
                 sl!(),
                 "failed to cleanup in service manager: {:?}. force shutdown shim process", e

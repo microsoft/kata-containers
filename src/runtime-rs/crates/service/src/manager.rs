@@ -50,6 +50,7 @@ impl ServiceManager {
     // TODO: who manages lifecycle for `task_server_fd`?
     pub async fn new(
         id: &str,
+        package_version: &str,
         containerd_binary: &str,
         address: &str,
         namespace: &str,
@@ -59,7 +60,8 @@ impl ServiceManager {
         logging::register_subsystem_logger("runtimes", "service");
 
         let (sender, receiver) = channel::<Message>(MESSAGE_BUFFER_SIZE);
-        let rt_mgr = RuntimeHandlerManager::new(id, sender).context("new runtime handler")?;
+        let rt_mgr = RuntimeHandlerManager::new(id, package_version, sender)
+            .context("new runtime handler")?;
         let handler = Arc::new(rt_mgr);
         // SAFETY: containerd passes a valid unix listener fd when starting the shim.
         let server = unsafe { Server::new().add_unix_listener(task_server_fd)? };
@@ -118,9 +120,10 @@ impl ServiceManager {
         Ok(())
     }
 
-    pub async fn cleanup(sid: &str) -> Result<()> {
+    pub async fn cleanup(sid: &str, package_version: &str) -> Result<()> {
         let (sender, _receiver) = channel::<Message>(MESSAGE_BUFFER_SIZE);
-        let handler = RuntimeHandlerManager::new(sid, sender).context("new runtime handler")?;
+        let handler = RuntimeHandlerManager::new(sid, package_version, sender)
+            .context("new runtime handler")?;
         let state_dir = persist::state_dir(sid).context("sandbox state directory")?;
         // Whether there was a state to clean up from is decided before the
         // attempt: a failed cleanup keeps the state for a retry, but if it
