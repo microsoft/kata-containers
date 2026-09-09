@@ -12,7 +12,13 @@ set -o errtrace
 
 AGENT_BUILD_TYPE=${AGENT_BUILD_TYPE:-release}
 CONF_PODS=${CONF_PODS:-no}
+RELEASE_VERSION=${RELEASE_VERSION:-}
 SHIM_REDEPLOY_CONFIG=${SHIM_REDEPLOY_CONFIG:-yes}
+
+if [[ -z "${RELEASE_VERSION}" ]]; then
+	echo "RELEASE_VERSION must identify the distro package release (for example, 3.32.0.kata0-6)" >&2
+	exit 1
+fi
 
 script_dir="$(dirname "$(readlink -f "$0")")"
 repo_dir="${script_dir}/../../../../"
@@ -46,6 +52,7 @@ runtime_rs_make_flags=(
 	"LIBC=gnu"
 	"HYPERVISOR=cloud-hypervisor"
 	"OPENSSL_NO_VENDOR=Y"
+	"RELEASE_VERSION=${RELEASE_VERSION}"
 	"USE_BUILTIN_DB=false"
 	"QEMUCMD="
 	"FCCMD="

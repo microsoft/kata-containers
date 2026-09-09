@@ -21,6 +21,9 @@ include ../../utils.mk
 RELEASE_LTO ?= true
 ##VAR RELEASE_CODEGEN_UNITS=<number> codegen units used for release builds
 RELEASE_CODEGEN_UNITS ?= 1
+##VAR RELEASE_VERSION=<string> Distribution package release embedded in snapshot compatibility metadata
+RELEASE_VERSION ?=
+export RELEASE_VERSION
 # Apply release profile overrides only for release builds.
 RELEASE_CARGO_PROFILE_ENV = $(if $(findstring release,$(BUILD_TYPE)),CARGO_PROFILE_RELEASE_LTO=$(RELEASE_LTO) CARGO_PROFILE_RELEASE_CODEGEN_UNITS=$(RELEASE_CODEGEN_UNITS),)
 
@@ -32,7 +35,7 @@ ARCH_FILE = $(ARCH_DIR)/$(ARCH)$(ARCH_FILE_SUFFIX)
 default: runtime show-header
 ##TARGET test: run cargo tests for runtime-rs and all its sub-crates.
 test: static-checks-build
-	@cargo test $(PACKAGE_FLAGS) --target $(TRIPLE) $(EXTRA_RUSTFEATURES) -- --nocapture  --skip bindgen
+	@RELEASE_VERSION="$${RELEASE_VERSION}" cargo test $(PACKAGE_FLAGS) --target $(TRIPLE) $(EXTRA_RUSTFEATURES) -- --nocapture  --skip bindgen
 install: install-runtime install-configs
 
 ifeq (,$(realpath $(ARCH_FILE)))
@@ -1069,8 +1072,13 @@ static-checks-build: $(GENERATED_FILES)
 
 $(TARGET): $(GENERATED_FILES) $(TARGET_PATH)
 
-$(TARGET_PATH): $(SOURCES) | show-summary
-	@$(RELEASE_CARGO_PROFILE_ENV) RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo build -p runtime-rs --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release) $(EXTRA_RUSTFEATURES)
+.PHONY: force-runtime-build
+force-runtime-build:
+
+# Always enter Cargo so a changed compile-time RELEASE_VERSION is observed.
+# Cargo still performs an incremental no-op when source and environment match.
+$(TARGET_PATH): $(SOURCES) force-runtime-build | show-summary
+	@$(RELEASE_CARGO_PROFILE_ENV) RELEASE_VERSION="$${RELEASE_VERSION}" RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo build -p runtime-rs --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release) $(EXTRA_RUSTFEATURES)
 
 $(GENERATED_FILES): %: %.in
 	@sed \
@@ -1080,7 +1088,7 @@ $(GENERATED_FILES): %: %.in
 
 ##TARGET optimize: optimized  build
 optimize: $(SOURCES) | show-summary show-header
-	@$(RELEASE_CARGO_PROFILE_ENV) RUSTFLAGS="-C link-arg=-s $(EXTRA_RUSTFLAGS) --deny warnings" cargo build --target $(TRIPLE) --$(BUILD_TYPE) $(EXTRA_RUSTFEATURES)
+	@$(RELEASE_CARGO_PROFILE_ENV) RELEASE_VERSION="$${RELEASE_VERSION}" RUSTFLAGS="-C link-arg=-s $(EXTRA_RUSTFLAGS) --deny warnings" cargo build --target $(TRIPLE) --$(BUILD_TYPE) $(EXTRA_RUSTFEATURES)
 
 ##TARGET clean: clean build
 clean: clean-generated-files
