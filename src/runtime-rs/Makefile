@@ -21,6 +21,8 @@ include ../../utils.mk
 RELEASE_LTO ?= true
 ##VAR RELEASE_CODEGEN_UNITS=<number> codegen units used for release builds
 RELEASE_CODEGEN_UNITS ?= 1
+##VAR PACKAGE_VERSION=<string> Distribution package version used for snapshot compatibility
+PACKAGE_VERSION ?= $(VERSION)
 # Apply release profile overrides only for release builds.
 RELEASE_CARGO_PROFILE_ENV = $(if $(findstring release,$(BUILD_TYPE)),CARGO_PROFILE_RELEASE_LTO=$(RELEASE_LTO) CARGO_PROFILE_RELEASE_CODEGEN_UNITS=$(RELEASE_CODEGEN_UNITS),)
 
@@ -1025,6 +1027,7 @@ GENERATED_REPLACEMENTS= \
     RUNTIME_NAME \
     CONTAINERD_RUNTIME_NAME \
     RUNTIME_VERSION \
+    PACKAGE_VERSION \
     BINDIR \
     COMMIT
 
@@ -1081,6 +1084,13 @@ runtime: $(TARGET)
 static-checks-build: $(GENERATED_FILES)
 
 $(TARGET): $(GENERATED_FILES) $(TARGET_PATH)
+
+.PHONY: $(TARGET_PATH)
+
+.PHONY: force-generated-code
+force-generated-code:
+
+$(GENERATED_CODE): force-generated-code
 
 $(TARGET_PATH): $(SOURCES) | show-summary
 	@$(RELEASE_CARGO_PROFILE_ENV) RUSTFLAGS="$(EXTRA_RUSTFLAGS) --deny warnings" cargo build -p runtime-rs --target $(TRIPLE) $(if $(findstring release,$(BUILD_TYPE)),--release) $(EXTRA_RUSTFEATURES)

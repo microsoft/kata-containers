@@ -240,6 +240,7 @@ impl TemplateVm {
     fn new_empty_sandbox_config() -> SandboxConfig {
         SandboxConfig {
             sandbox_id: String::new(),
+            package_version: String::new(),
             hostname: String::new(),
             dns: Vec::new(),
             network_env: SandboxNetworkEnv::default(),

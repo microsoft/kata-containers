@@ -254,6 +254,7 @@ pub enum SandboxResponse {
 #[derive(Clone, Debug)]
 pub struct SandboxConfig {
     pub sandbox_id: String,
+    pub package_version: String,
     pub hostname: String,
     pub dns: Vec<String>,
     pub network_env: SandboxNetworkEnv,

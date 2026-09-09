@@ -69,6 +69,7 @@ impl TryFrom<sandbox_api::CreateSandboxRequest> for SandboxRequest {
 
         Ok(SandboxRequest::CreateSandbox(Box::new(SandboxConfig {
             sandbox_id: from.sandbox_id.clone(),
+            package_version: String::new(),
             hostname: config.hostname,
             dns,
             network_env: SandboxNetworkEnv {
