@@ -94,6 +94,7 @@ fn effective_log_level(enable_debug: bool, log_level: &str) -> &str {
 
 struct RuntimeHandlerManagerInner {
     id: String,
+    package_version: String,
     msg_sender: Sender<Message>,
     kata_tracer: Arc<Mutex<KataTracer>>,
     runtime_instance: Option<Arc<RuntimeInstance>>,
@@ -109,10 +110,11 @@ impl std::fmt::Debug for RuntimeHandlerManagerInner {
 }
 
 impl RuntimeHandlerManagerInner {
-    fn new(id: &str, msg_sender: Sender<Message>) -> Result<Self> {
+    fn new(id: &str, package_version: &str, msg_sender: Sender<Message>) -> Result<Self> {
         let tracer = KataTracer::new();
         Ok(Self {
             id: id.to_string(),
+            package_version: package_version.to_string(),
             msg_sender,
             kata_tracer: Arc::new(Mutex::new(tracer)),
             runtime_instance: None,
@@ -175,6 +177,9 @@ impl RuntimeHandlerManagerInner {
         spec: Option<&oci::Spec>,
         options: &Option<Vec<u8>>,
     ) -> Result<()> {
+        sandbox_config
+            .package_version
+            .clone_from(&self.package_version);
         #[cfg(feature = "linux")]
         LinuxContainer::init().context("init linux container")?;
         #[cfg(feature = "wasm")]
@@ -297,10 +302,12 @@ impl std::fmt::Debug for RuntimeHandlerManager {
 }
 
 impl RuntimeHandlerManager {
-    pub fn new(id: &str, msg_sender: Sender<Message>) -> Result<Self> {
+    pub fn new(id: &str, package_version: &str, msg_sender: Sender<Message>) -> Result<Self> {
         Ok(Self {
             inner: Arc::new(RwLock::new(RuntimeHandlerManagerInner::new(
-                id, msg_sender,
+                id,
+                package_version,
+                msg_sender,
             )?)),
         })
     }
@@ -320,6 +327,7 @@ impl RuntimeHandlerManager {
 
         let sandbox_args = SandboxRestoreArgs {
             sid: inner.id.clone(),
+            package_version: inner.package_version.clone(),
             toml_config: config,
             sender,
         };
@@ -467,6 +475,7 @@ impl RuntimeHandlerManager {
 
         let sandbox_config = SandboxConfig {
             sandbox_id: inner.id.clone(),
+            package_version: String::new(),
             dns,
             hostname: spec.hostname().clone().unwrap_or_default(),
             network_env,
@@ -1201,7 +1210,8 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_without_runtime_instance_forces_exit() {
         let (sender, mut receiver) = channel::<Message>(8);
-        let manager = RuntimeHandlerManager::new("test-sid", sender).unwrap();
+        let manager =
+            RuntimeHandlerManager::new("test-sid", "test-package-version", sender).unwrap();
 
         let resp = manager
             .handler_task_message(TaskRequest::ShutdownContainer(ShutdownRequest {

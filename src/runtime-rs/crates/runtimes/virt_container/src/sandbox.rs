@@ -105,6 +105,7 @@ pub(crate) const VIRTCONTAINER: &str = "virt_container";
 const VMM_START_TIMEOUT_SECS: i32 = 10_000;
 const SOURCE_AGENT_LISTEN_GRACE: Duration = Duration::from_secs(2);
 const SNAPSHOT_MANIFEST_FILE: &str = "kata-snapshot.json";
+const SNAPSHOT_MANIFEST_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -159,14 +160,24 @@ struct SnapshotAgentTransportManifest {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SnapshotManifest {
+    runtime_version: String,
     format_version: u32,
-    producer: String,
     hypervisor: String,
     source_sandbox_id: String,
     agent_transport: SnapshotAgentTransportManifest,
     live_containers: Vec<SnapshotLiveContainerManifest>,
     completed_containers: Vec<SnapshotCompletedContainerManifest>,
     files: Vec<SnapshotFileManifest>,
+}
+
+#[derive(Deserialize)]
+struct SnapshotRuntimeVersionManifest {
+    runtime_version: String,
+}
+
+#[derive(Deserialize)]
+struct SnapshotFormatVersionManifest {
+    format_version: u32,
 }
 
 struct SavedRestoreNetwork {
@@ -326,7 +337,7 @@ fn restore_source_from_annotations(
     Ok(Some(restore_source))
 }
 
-fn load_restore_manifest(snapshot_dir: &Path) -> Result<SnapshotManifest> {
+fn load_restore_manifest(snapshot_dir: &Path, package_version: &str) -> Result<SnapshotManifest> {
     let manifest_path = snapshot_dir.join(SNAPSHOT_MANIFEST_FILE);
     let metadata = fs::symlink_metadata(&manifest_path).with_context(|| {
         format!(
@@ -340,13 +351,42 @@ fn load_restore_manifest(snapshot_dir: &Path) -> Result<SnapshotManifest> {
             manifest_path.display()
         ));
     }
-    let manifest: SnapshotManifest = serde_json::from_reader(fs::File::open(&manifest_path)?)
-        .with_context(|| format!("parse snapshot manifest {}", manifest_path.display()))?;
-    if manifest.format_version != 1
-        || manifest.producer != "runtime-rs"
-        || manifest.hypervisor != "cloud-hypervisor"
-        || manifest.source_sandbox_id.is_empty()
-    {
+    let manifest_data = fs::read(&manifest_path)
+        .with_context(|| format!("read snapshot manifest {}", manifest_path.display()))?;
+    let runtime_version: SnapshotRuntimeVersionManifest = serde_json::from_slice(&manifest_data)
+        .with_context(|| {
+            format!(
+                "parse snapshot manifest runtime version {}",
+                manifest_path.display()
+            )
+        })?;
+    if runtime_version.runtime_version != package_version {
+        return Err(anyhow!(
+            "snapshot Kata runtime version mismatch: snapshot version {}, current version {}",
+            runtime_version.runtime_version,
+            package_version
+        ));
+    }
+
+    let format_version: SnapshotFormatVersionManifest = serde_json::from_slice(&manifest_data)
+        .with_context(|| {
+            format!(
+                "parse snapshot manifest format version {}",
+                manifest_path.display()
+            )
+        })?;
+    let manifest: SnapshotManifest = match format_version.format_version {
+        SNAPSHOT_MANIFEST_FORMAT_VERSION => serde_json::from_slice(&manifest_data)
+            .with_context(|| format!("parse snapshot manifest {}", manifest_path.display()))?,
+        version => {
+            return Err(anyhow!(
+                "unsupported snapshot manifest format version {}; supported version is {}",
+                version,
+                SNAPSHOT_MANIFEST_FORMAT_VERSION
+            ))
+        }
+    };
+    if manifest.hypervisor != "cloud-hypervisor" || manifest.source_sandbox_id.is_empty() {
         return Err(anyhow!("unsupported snapshot manifest contract"));
     }
     if manifest.agent_transport.contract_version != 1
@@ -675,6 +715,8 @@ fn saved_restore_network(snapshot_dir: &Path) -> Result<SavedRestoreNetwork> {
 mod snapshot_manifest_tests {
     use super::*;
 
+    const TEST_PACKAGE_VERSION: &str = "4.1.0.kata0-7";
+
     fn snapshot_annotations(name: &str) -> HashMap<String, String> {
         HashMap::from([(
             kata_types::annotations::KATA_ANNO_SNAPSHOT_NAME.to_string(),
@@ -772,8 +814,8 @@ mod snapshot_manifest_tests {
             "containers/source/rwlayer.img",
         ];
         SnapshotManifest {
-            format_version: 1,
-            producer: "runtime-rs".to_string(),
+            runtime_version: TEST_PACKAGE_VERSION.to_string(),
+            format_version: SNAPSHOT_MANIFEST_FORMAT_VERSION,
             hypervisor: "cloud-hypervisor".to_string(),
             source_sandbox_id: "source".to_string(),
             agent_transport: SnapshotAgentTransportManifest {
@@ -808,8 +850,8 @@ mod snapshot_manifest_tests {
     #[test]
     fn agent_transport_contract_is_required_in_manifest() {
         let manifest = SnapshotManifest {
-            format_version: 1,
-            producer: "runtime-rs".to_string(),
+            runtime_version: TEST_PACKAGE_VERSION.to_string(),
+            format_version: SNAPSHOT_MANIFEST_FORMAT_VERSION,
             hypervisor: "cloud-hypervisor".to_string(),
             source_sandbox_id: "sandbox".to_string(),
             agent_transport: SnapshotAgentTransportManifest {
@@ -824,6 +866,8 @@ mod snapshot_manifest_tests {
         };
 
         let value = serde_json::to_value(manifest).unwrap();
+        assert_eq!(value["runtime_version"], TEST_PACKAGE_VERSION);
+        assert_eq!(value["format_version"], SNAPSHOT_MANIFEST_FORMAT_VERSION);
         assert_eq!(value["agent_transport"]["contract_version"], 1);
         assert_eq!(value["agent_transport"]["state"], "disconnected-listening");
         assert_eq!(value["agent_transport"]["server_port"], 1024);
@@ -833,8 +877,8 @@ mod snapshot_manifest_tests {
     #[test]
     fn manifest_separates_live_and_completed_containers_without_payload_hashes() {
         let manifest = SnapshotManifest {
-            format_version: 1,
-            producer: "runtime-rs".to_string(),
+            runtime_version: TEST_PACKAGE_VERSION.to_string(),
+            format_version: SNAPSHOT_MANIFEST_FORMAT_VERSION,
             hypervisor: "cloud-hypervisor".to_string(),
             source_sandbox_id: "sandbox".to_string(),
             agent_transport: SnapshotAgentTransportManifest {
@@ -909,7 +953,7 @@ mod snapshot_manifest_tests {
         )
         .unwrap();
 
-        let loaded = load_restore_manifest(snapshot.path()).unwrap();
+        let loaded = load_restore_manifest(snapshot.path(), TEST_PACKAGE_VERSION).unwrap();
         assert_eq!(loaded.live_containers[0].readonly_disk_id, "ro");
 
         let mut invalid = manifest;
@@ -919,7 +963,50 @@ mod snapshot_manifest_tests {
             serde_json::to_vec(&invalid).unwrap(),
         )
         .unwrap();
-        assert!(load_restore_manifest(snapshot.path()).is_err());
+        assert!(load_restore_manifest(snapshot.path(), TEST_PACKAGE_VERSION).is_err());
+    }
+
+    #[test]
+    fn restore_manifest_dispatches_versions_before_full_parse() {
+        let snapshot = tempfile::tempdir().unwrap();
+        let manifest_path = snapshot.path().join(SNAPSHOT_MANIFEST_FILE);
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec(&serde_json::json!({
+                "runtime_version": "incompatible-runtime-version",
+                "format_version": "invalid"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_restore_manifest(snapshot.path(), TEST_PACKAGE_VERSION).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "snapshot Kata runtime version mismatch: snapshot version incompatible-runtime-version, current version {}",
+                TEST_PACKAGE_VERSION
+            )
+        );
+
+        fs::write(
+            manifest_path,
+            serde_json::to_vec(&serde_json::json!({
+                "runtime_version": TEST_PACKAGE_VERSION,
+                "format_version": SNAPSHOT_MANIFEST_FORMAT_VERSION + 1
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let error = load_restore_manifest(snapshot.path(), TEST_PACKAGE_VERSION).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "unsupported snapshot manifest format version {}; supported version is {}",
+                SNAPSHOT_MANIFEST_FORMAT_VERSION + 1,
+                SNAPSHOT_MANIFEST_FORMAT_VERSION
+            )
+        );
     }
 
     #[test]
@@ -1042,6 +1129,7 @@ mod snapshot_manifest_tests {
 
 pub struct SandboxRestoreArgs {
     pub sid: String,
+    pub package_version: String,
     pub toml_config: TomlConfig,
     pub sender: Sender<Message>,
 }
@@ -1087,6 +1175,7 @@ impl SandboxInner {
 #[derive(Clone)]
 pub struct VirtSandbox {
     sid: String,
+    package_version: String,
     msg_sender: Arc<Mutex<Sender<Message>>>,
     inner: Arc<RwLock<SandboxInner>>,
     resource_manager: Arc<ResourceManager>,
@@ -1188,6 +1277,7 @@ impl VirtSandbox {
         let cancel_token = CancellationToken::new();
         Ok(Self {
             sid: sid.to_string(),
+            package_version: sandbox_config.package_version.clone(),
             msg_sender: Arc::new(Mutex::new(msg_sender)),
             inner: Arc::new(RwLock::new(SandboxInner::new())),
             agent,
@@ -1248,7 +1338,7 @@ impl VirtSandbox {
             ));
         }
 
-        let manifest = load_restore_manifest(&snapshot_dir)?;
+        let manifest = load_restore_manifest(&snapshot_dir, &self.package_version)?;
         let saved_network = saved_restore_network(&snapshot_dir)?;
         let live_slots = manifest
             .live_containers
@@ -2657,8 +2747,8 @@ impl VirtSandbox {
                 })
                 .collect::<Result<Vec<_>>>()?;
             let manifest = SnapshotManifest {
-                format_version: 1,
-                producer: "runtime-rs".to_string(),
+                runtime_version: self.package_version.clone(),
+                format_version: SNAPSHOT_MANIFEST_FORMAT_VERSION,
                 hypervisor: "cloud-hypervisor".to_string(),
                 source_sandbox_id: self.sid.clone(),
                 agent_transport: SnapshotAgentTransportManifest {
@@ -3398,6 +3488,7 @@ impl Persist for VirtSandbox {
         let restore_context = Arc::new(RestoreContext::from_persist(&sid, restore_state)?);
         Ok(Self {
             sid: sid.to_string(),
+            package_version: sandbox_args.package_version,
             msg_sender: Arc::new(Mutex::new(sandbox_args.sender)),
             inner: Arc::new(RwLock::new(SandboxInner::new())),
             agent,
