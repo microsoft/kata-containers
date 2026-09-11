@@ -2835,9 +2835,13 @@ impl<'a> QemuCmdLine<'a> {
             ccw_subchannel,
         };
 
-        // add_virtiofs_share() installs the file-backed memory backend when
-        // filesystem sharing is enabled.
-        if matches!(config.shared_fs.shared_fs.as_deref(), None | Some("none")) {
+        // Virtiofs installs its file backend later through
+        // add_file_memory_backend(). An explicit file_backed_memory is applied
+        // below through set_memory_backend(), so do not install the default RAM
+        // backend when either path will supply one.
+        if config.file_backed_memory.is_none()
+            && matches!(config.shared_fs.shared_fs.as_deref(), None | Some("none"))
+        {
             qemu_cmd_line.add_ram_memory_backend(config.memory_info.enable_mem_prealloc);
         }
 
@@ -2850,10 +2854,6 @@ impl<'a> QemuCmdLine<'a> {
         }
 
         qemu_cmd_line.add_rtc();
-
-        if config.vm_template.boot_from_template {
-            qemu_cmd_line.add_template();
-        }
 
         if bus_type() != VirtioBusType::Ccw {
             qemu_cmd_line.add_rng();
@@ -2897,6 +2897,23 @@ impl<'a> QemuCmdLine<'a> {
             qemu_cmd_line.add_bios(&config.boot_info.firmware);
         }
 
+        if let Some(file_backed_memory) = &config.file_backed_memory {
+            let mut memory_backend = MemoryBackendFile::new(
+                "kata-file-backed-memory",
+                &file_backed_memory.path,
+                qemu_cmd_line.memory.size,
+            );
+            memory_backend.set_share(file_backed_memory.shared);
+            if config.memory_info.enable_mem_prealloc {
+                memory_backend.set_prealloc(true);
+            }
+            let memory_backend = MemoryBackend::File(memory_backend);
+            qemu_cmd_line.memory.set_memory_backend(&memory_backend);
+            qemu_cmd_line
+                .machine
+                .set_memory_backend(memory_backend.id());
+        }
+
         Ok(qemu_cmd_line)
     }
 
@@ -2922,7 +2939,7 @@ impl<'a> QemuCmdLine<'a> {
         self.devices.push(Box::new(rtc));
     }
 
-    fn add_template(&mut self) {
+    pub(crate) fn add_template(&mut self) {
         let template = Template::new();
         self.devices.push(Box::new(template));
     }
@@ -3725,6 +3742,76 @@ pub fn get_network_device(
     }
 
     Ok((netdev, virtio_net_device))
+}
+
+#[cfg(test)]
+mod file_backed_memory_tests {
+    use super::*;
+    use kata_types::config::hypervisor::FileBackedMemory;
+
+    fn test_config(shared: bool) -> HypervisorConfig {
+        let mut config = HypervisorConfig::default();
+        config.boot_info.kernel = "/kernel".to_string();
+        config.boot_info.initrd = "/initrd".to_string();
+        config.machine_info.machine_type = "q35".to_string();
+        config.memory_info.default_memory = 512;
+        config.file_backed_memory = Some(FileBackedMemory {
+            path: "/template/memory".to_string(),
+            shared,
+        });
+        config
+    }
+
+    fn remove_test_qmp_socket() {
+        let _ = std::fs::remove_file(QMP_SOCKET_FILE);
+    }
+
+    #[actix_rt::test]
+    #[serial_test::serial]
+    async fn test_file_backed_memory_command_line() {
+        remove_test_qmp_socket();
+        let config = test_config(false);
+        let cmdline = QemuCmdLine::new("sandbox", &config).unwrap();
+        let args = cmdline.build().await.unwrap();
+        remove_test_qmp_socket();
+
+        assert!(args
+            .iter()
+            .any(|arg| arg.contains("memory-backend=kata-file-backed-memory")));
+        assert!(args.iter().any(|arg| {
+            arg.contains("memory-backend-file")
+                && arg.contains("mem-path=/template/memory")
+                && arg.contains("share=off")
+        }));
+    }
+
+    #[actix_rt::test]
+    #[serial_test::serial]
+    async fn test_restore_incoming_is_explicit() {
+        remove_test_qmp_socket();
+        let config = test_config(true);
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let normal_id = format!("normal-{nonce}");
+        let restoring_id = format!("restoring-{nonce}");
+        let normal = QemuCmdLine::new(&normal_id, &config)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+        assert!(!normal.windows(2).any(|args| args == ["-incoming", "defer"]));
+        remove_test_qmp_socket();
+
+        let mut restoring = QemuCmdLine::new(&restoring_id, &config).unwrap();
+        restoring.add_template();
+        let restoring = restoring.build().await.unwrap();
+        remove_test_qmp_socket();
+        assert!(restoring
+            .windows(2)
+            .any(|args| args == ["-incoming", "defer"]));
+    }
 }
 
 fn get_devno_ccw(ccw_subchannel: &mut Option<CcwSubChannel>, device_name: &str) -> Option<String> {

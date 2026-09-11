@@ -5,14 +5,14 @@
 
 use super::HypervisorState;
 use crate::device::DeviceType;
-use crate::{Hypervisor, MemoryConfig, VcpuThreadIds};
+use crate::{Hypervisor, MemoryConfig, RestoreVmRequest, VcpuThreadIds};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kata_types::capabilities::{Capabilities, CapabilityBits};
 use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
 use persist::sandbox_persist::Persist;
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, path::Path};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 // Convenience macro to obtain the scope logger
@@ -92,18 +92,23 @@ impl Hypervisor for CloudHypervisor {
     }
 
     async fn pause_vm(&self) -> Result<()> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         inner.pause_vm().await
     }
 
     async fn resume_vm(&self) -> Result<()> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         inner.resume_vm().await
     }
 
-    async fn save_vm(&self) -> Result<()> {
+    async fn save_vm(&self, snapshot_dir: &Path) -> Result<()> {
         let inner = self.inner.write().await;
-        inner.save_vm().await
+        inner.save_vm(snapshot_dir).await
+    }
+
+    async fn restore_vm(&self, request: RestoreVmRequest) -> Result<()> {
+        let mut inner = self.inner.write().await;
+        inner.restore_vm(request).await
     }
 
     async fn add_device(&self, device: DeviceType) -> Result<DeviceType> {

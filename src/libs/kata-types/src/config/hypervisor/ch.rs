@@ -13,7 +13,7 @@ use super::{default, register_hypervisor_plugin};
 use crate::config::default::MAX_CH_VCPUS;
 use crate::config::default::MIN_CH_MEMORY_SIZE_MB;
 
-use crate::config::hypervisor::VIRTIO_BLK_MMIO;
+use crate::config::hypervisor::{MemoryRestoreMode, VIRTIO_BLK_MMIO};
 use crate::config::{ConfigPlugin, TomlConfig};
 use crate::{resolve_path, validate_path};
 
@@ -23,6 +23,18 @@ pub const HYPERVISOR_NAME_CH: &str = "clh";
 /// Configuration information for CH.
 #[derive(Default, Debug)]
 pub struct CloudHypervisorConfig {}
+
+fn validate_memory_restore_config(ch: &super::Hypervisor) -> Result<()> {
+    if ch.memory_info.memory_restore_mode == MemoryRestoreMode::CopyOnWrite
+        && ch.memory_info.enable_virtio_mem
+    {
+        return Err(std::io::Error::other(
+            "Cloud Hypervisor copyonwrite memory restore is incompatible with virtio-mem",
+        ));
+    }
+
+    Ok(())
+}
 
 impl CloudHypervisorConfig {
     /// Create a new instance of `CloudHypervisorConfig`.
@@ -94,6 +106,7 @@ impl ConfigPlugin for CloudHypervisorConfig {
     /// Validate the configuration information.
     fn validate(&self, conf: &TomlConfig) -> Result<()> {
         if let Some(ch) = conf.hypervisor.get(HYPERVISOR_NAME_CH) {
+            validate_memory_restore_config(ch)?;
             validate_path!(ch.path, "CH binary path `{}` is invalid: {}")?;
             validate_path!(ch.ctlpath, "CH control path `{}` is invalid: {}")?;
             if !ch.jailer_path.is_empty() {
@@ -143,5 +156,33 @@ impl ConfigPlugin for CloudHypervisorConfig {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_memory_restore_config() {
+        let memory_info: super::super::MemoryInfo = toml::from_str("default_memory = 128").unwrap();
+        assert_eq!(
+            memory_info.memory_restore_mode,
+            MemoryRestoreMode::CopyOnWrite
+        );
+
+        let mut config = super::super::Hypervisor::default();
+        assert_eq!(
+            config.memory_info.memory_restore_mode,
+            MemoryRestoreMode::CopyOnWrite
+        );
+        assert!(validate_memory_restore_config(&config).is_ok());
+
+        config.memory_info.memory_restore_mode = MemoryRestoreMode::Copy;
+        assert!(validate_memory_restore_config(&config).is_ok());
+
+        config.memory_info.memory_restore_mode = MemoryRestoreMode::CopyOnWrite;
+        config.memory_info.enable_virtio_mem = true;
+        assert!(validate_memory_restore_config(&config).is_err());
     }
 }
