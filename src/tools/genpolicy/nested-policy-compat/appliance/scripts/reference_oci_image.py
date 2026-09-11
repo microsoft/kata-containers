@@ -18,12 +18,22 @@ REFERENCE_ANNOTATION = "org.opencontainers.image.ref.name"
 
 
 def find_archive(archives: list[Path], digest: str) -> tuple[Path, dict]:
+    indexes = []
     for archive in archives:
         with tarfile.open(archive) as layout:
-            index_file = layout.extractfile("index.json")
+            try:
+                index_file = layout.extractfile("index.json")
+            except KeyError as error:
+                raise ValueError(
+                    f"{archive} is not an OCI image-layout archive: index.json not found"
+                ) from error
             if index_file is None:
-                continue
-            index = json.load(index_file)
+                raise ValueError(
+                    f"{archive} is not an OCI image-layout archive: index.json not found"
+                )
+            indexes.append((archive, json.load(index_file)))
+
+    for archive, index in indexes:
         for descriptor in index.get("manifests", []):
             if descriptor.get("digest") == digest:
                 return archive, descriptor

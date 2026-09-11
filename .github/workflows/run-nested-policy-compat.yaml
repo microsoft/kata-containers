@@ -1,0 +1,191 @@
+name: CI | Nested policy compatibility
+on:
+  workflow_call:
+    inputs:
+      commit-hash:
+        required: true
+        type: string
+      target-branch:
+        required: false
+        type: string
+        default: ""
+      tarball-suffix:
+        required: true
+        type: string
+      runner:
+        required: false
+        type: string
+        default: ubuntu-24.04
+
+permissions: {}
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.job }}-${{ inputs.commit-hash }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.commit-hash }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Rebase atop of the latest target branch
+        run: ./tests/git-helper.sh "rebase-atop-of-the-latest-target-branch"
+        env:
+          TARGET_BRANCH: ${{ inputs.target-branch }}
+
+      - name: Validate compatibility harness
+        run: make -C src/tools/genpolicy/nested-policy-compat validate
+
+  prepare:
+    name: prepare compatibility bundle
+    runs-on: ${{ inputs.runner }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.job }}-${{ inputs.commit-hash }}
+      cancel-in-progress: true
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.commit-hash }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Rebase atop of the latest target branch
+        run: ./tests/git-helper.sh "rebase-atop-of-the-latest-target-branch"
+        env:
+          TARGET_BRANCH: ${{ inputs.target-branch }}
+
+      - name: Install host build dependencies
+        run: |
+          ./tests/install_rust.sh
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          sudo apt-get update
+          sudo apt-get install -y \
+            bison build-essential flex kmod lvm2 m4 musl-tools pkg-config \
+            qemu-utils uuid-dev zstd
+
+      - name: Download Cloud Hypervisor
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: kata-artifacts-amd64-cloud-hypervisor${{ inputs.tarball-suffix }}
+          path: ${{ runner.temp }}/kata-artifacts
+
+      - name: Download guest kernel
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: kata-artifacts-amd64-kernel${{ inputs.tarball-suffix }}
+          path: ${{ runner.temp }}/kata-artifacts
+
+      - name: Download runtime-rs shim
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: kata-artifacts-amd64-shim-v2-rust${{ inputs.tarball-suffix }}
+          path: ${{ runner.temp }}/kata-artifacts
+
+      - name: Download confidential guest image
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: kata-artifacts-amd64-rootfs-image-confidential${{ inputs.tarball-suffix }}
+          path: ${{ runner.temp }}/kata-artifacts
+
+      - name: Install PR-built boot artifacts
+        run: |
+          make -C src/tools/genpolicy/nested-policy-compat ensure-host-environment \
+            PROFILE=k8s-1.36-containerd-2.3-erofs-dmverity \
+            APPROVE_KATA_INSTALL=yes \
+            KATA_ARTIFACT_DIR="${RUNNER_TEMP}/kata-artifacts" \
+            KATA_ROOT="${RUNNER_TEMP}/kata" \
+            KATA_CONFIG="${RUNNER_TEMP}/kata/share/defaults/kata-containers/runtime-rs/configuration-nested-policy-compat.toml"
+
+      - name: Build strict compatibility artifacts
+        timeout-minutes: 60
+        run: |
+          make -C src/tools/genpolicy/nested-policy-compat prepare-kata-stack \
+            KATA_ROOT="${RUNNER_TEMP}/kata" \
+            KATA_CONFIG="${RUNNER_TEMP}/kata/share/defaults/kata-containers/runtime-rs/configuration-nested-policy-compat.toml"
+
+      - name: Package compatibility bundle
+        run: tar --zstd -cf "${RUNNER_TEMP}/nested-policy-kata.tar.zst" -C "${RUNNER_TEMP}" kata
+
+      - name: Upload compatibility bundle
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: nested-policy-kata${{ inputs.tarball-suffix }}
+          path: ${{ runner.temp }}/nested-policy-kata.tar.zst
+          retention-days: 7
+          if-no-files-found: error
+
+  profile:
+    name: profile (${{ matrix.profile }})
+    needs: [validate, prepare]
+    runs-on: ${{ inputs.runner }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.job }}-${{ inputs.commit-hash }}-${{ matrix.profile }}
+      cancel-in-progress: true
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - k8s-1.33-containerd-1.7-guest-pull
+          - k8s-1.36-containerd-2.3-guest-pull
+          - k8s-1.33-containerd-2.3-erofs-dmverity
+          - k8s-1.36-containerd-2.3-erofs-dmverity
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.commit-hash }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Rebase atop of the latest target branch
+        run: ./tests/git-helper.sh "rebase-atop-of-the-latest-target-branch"
+        env:
+          TARGET_BRANCH: ${{ inputs.target-branch }}
+
+      - name: Install host test dependencies
+        run: |
+          ./tests/install_rust.sh
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          sudo apt-get update
+          sudo apt-get install -y kmod lvm2 zstd
+
+      - name: Download compatibility bundle
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: nested-policy-kata${{ inputs.tarball-suffix }}
+          path: ${{ runner.temp }}
+
+      - name: Extract compatibility bundle
+        run: tar --zstd -xf "${RUNNER_TEMP}/nested-policy-kata.tar.zst" -C "${RUNNER_TEMP}"
+
+      - name: Run compatibility profile
+        run: |
+          make -C src/tools/genpolicy/nested-policy-compat ci-fixture-e2e \
+            PROFILE="${PROFILE}" \
+            IMAGE="nested-policy-compat:${PROFILE}" \
+            KATA_ROOT="${RUNNER_TEMP}/kata" \
+            KATA_CONFIG="${RUNNER_TEMP}/kata/share/defaults/kata-containers/runtime-rs/configuration-nested-policy-compat.toml" \
+            OUTPUT_ROOT="${RUNNER_TEMP}/results"
+        env:
+          PROFILE: ${{ matrix.profile }}
+
+      - name: Upload compatibility results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: nested-policy-results-${{ matrix.profile }}${{ inputs.tarball-suffix }}
+          path: ${{ runner.temp }}/results
+          retention-days: 15
+          if-no-files-found: warn

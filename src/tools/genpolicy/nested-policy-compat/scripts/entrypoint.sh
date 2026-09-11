@@ -99,9 +99,9 @@ if not any(re.fullmatch(pattern, annotation_name) for pattern in enabled):
         f"Kata configuration does not enable the {annotation_name} annotation"
     )
 
-if sys.argv[3] == "erofs-dmverity" and hypervisor.get("shared_fs") != "none":
+if hypervisor.get("shared_fs") != "none":
     raise SystemExit(
-        "EROFS dm-verity profile requires the selected Kata hypervisor "
+        "nested policy compatibility profiles require the selected Kata hypervisor "
         'configuration to set shared_fs = "none"'
     )
 

@@ -49,15 +49,15 @@ An unmodified Kata installation is mounted at `/opt/kata`. This separates the
 Kubernetes/containerd profile from the Kata build being tested and avoids
 rebuilding Kata inside every version-matrix image.
 
-Before a matrix starts, the host-side harness extracts the commits embedded in
-the installed runtime-rs shim and the Agent inside the configured guest image.
-Each installed commit must exist in the checkout, and the corresponding
-`src/runtime-rs` or `src/agent` tree must match the current working tree.
-Tracked differences and untracked component files both stop the run, while
-harness-only commits do not require rebuilding unrelated Kata binaries. A
-mismatch invokes the repository's local-build pipeline with its artifact cache
-disabled, atomically replaces the installed shim and measured guest image, and
-writes a marker binding their hashes to fingerprints of both source trees.
+Before a matrix starts, the host-side harness requires the provenance marker
+written by its rebuild path. The marker binds the VMM, guest kernel, runtime
+configuration, runtime-rs shim, monolithic confidential image, and
+confidential-image root hash to fingerprints of the runtime-rs and strict-Agent
+build inputs. Requiring this marker prevents a same-commit Agent built without
+strict-policy enforcement, an unrelated confidential image, or stale boot
+components from being accepted. A mismatch invokes the repository's local-build
+pipeline with its artifact cache disabled, atomically replaces the installed
+artifacts, and writes a new marker.
 For CI, `prepare-kata-stack` is the artifact-production phase,
 `verify-kata-provenance` is the artifact-consumption gate, and
 `ci-fixture-e2e` deliberately verifies without rebuilding so a stale artifact

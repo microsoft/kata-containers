@@ -15,20 +15,74 @@ Run the harness on a disposable Linux x86-64 L1 VM with:
   cgroup namespace;
 - GNU Make, Bash, Python 3, and a Rust/Cargo toolchain capable of building the
   repository's `x86_64-unknown-linux-musl` GenPolicy target;
-- a Kata installation supplied through `KATA_ROOT` or mounted at `/opt/kata`.
+- a Kata installation supplied through `KATA_ROOT` or approval to install one.
 
-The supplied installation provides the VMM, guest kernel, and initial runtime
+`fixture-e2e` and `ci-fixture-e2e` check these prerequisites before building or
+running a fixture.
+If the Kata installation is missing, it stops and prints the missing paths and
+the exact opt-in command. It does not pull images or write host files without
+approval. Set `APPROVE_KATA_INSTALL=yes` to authorize pulling
+`quay.io/kata-containers/kata-deploy-ci:kata-containers-latest` and installing
+the packaged Cloud Hypervisor, guest kernel, runtime-rs shim, confidential
+image, root hash, and a dedicated compatibility configuration under
+`KATA_ROOT`. Override the source with `KATA_ARTIFACT_IMAGE`.
+CI always forces `APPROVE_KATA_INSTALL=no`; artifact installation must be a
+separate, explicit preparation step.
+
+CI should set `KATA_ARTIFACT_DIR` to a directory of tarballs built from the
+exact pull-request merge commit instead of pulling the default image. Required
+filenames are `kata-static-cloud-hypervisor.tar.zst`,
+`kata-static-kernel.tar.zst`, `kata-static-shim-v2-rust.tar.zst`, and
+`kata-static-rootfs-image-confidential.tar.zst`.
+
+The default locations are:
+
+```text
+KATA_ROOT=/opt/kata
+KATA_CONFIG=/opt/kata/share/defaults/kata-containers/runtime-rs/configuration-nested-policy-compat.toml
+```
+
+Writing `/opt/kata` commonly requires running the command as root. To avoid
+elevation, select a writable directory and pass both `KATA_ROOT` and
+`KATA_CONFIG`; the Kata paths inside the generated configuration remain
+`/opt/kata` because the harness mounts the selected host directory there.
+
+For example, after reviewing the image and destination:
+
+```bash
+make -C src/tools/genpolicy/nested-policy-compat fixture-e2e \
+  PROFILE=k8s-1.36-containerd-2.3-guest-pull \
+  APPROVE_KATA_INSTALL=yes \
+  KATA_ROOT="$HOME/.local/lib/kata-nested-policy-compat" \
+  KATA_CONFIG="$HOME/.local/lib/kata-nested-policy-compat/share/defaults/kata-containers/runtime-rs/configuration-nested-policy-compat.toml" \
+  OUTPUT_ROOT="$PWD/target/nested-policy-compat-fixtures"
+```
+
+The EROFS dm-verity profiles additionally require a Cloud Hypervisor build
+containing flat-VMDK support. If the packaged VMM lacks it, approved bootstrap
+builds Cloud Hypervisor PR 8599 from the pinned commit
+`f50661fffd0fef38ddfec88c5fafa93f9779149a` and installs the resulting binary.
+Override `FLAT_VMDK_CLOUD_HYPERVISOR_REPO` and
+`FLAT_VMDK_CLOUD_HYPERVISOR_COMMIT` together to select another audited source.
+The build requires `build-essential`, `m4`, `bison`, `flex`, `uuid-dev`,
+`qemu-utils`, `musl-tools`, `pkg-config`, `kmod`, Git, and Rust/Cargo. The
+running host kernel must also provide EROFS filesystem support; approved
+bootstrap loads the `erofs` module and fails clearly if the kernel does not
+provide it. Guest-pull profiles do not require flat-VMDK or host EROFS support.
+
+The supplied or approved installation provides the VMM, guest kernel, and initial runtime
 configuration. The harness builds GenPolicy from the checkout. Before running
-fixtures, it also reads the commits embedded in the installed runtime-rs shim
-and guest Agent and compares their component source trees with the checkout,
-including local tracked and untracked changes. If they differ, it reuses the repository's Kata local-build pipeline with
-component caching disabled, builds a runtime-rs shim, a base image, and a
-monolithic confidential image containing the strict policy-enabled Agent,
-Confidential Data Hub, and pause bundle, installs them under `KATA_ROOT`,
-records source-and-artifact fingerprints, and verifies them again. All
-compatibility profiles boot that same monolithic image so profile comparisons
-do not also compare different guest environments. `KATA_ROOT` must therefore
-be writable when a rebuild is needed.
+fixtures, it verifies a rebuild-generated marker that binds the installed
+runtime-rs shim and monolithic confidential image to the current runtime-rs and
+strict-Agent build inputs, including local tracked and untracked changes. If
+they differ, it reuses the repository's Kata local-build pipeline with
+component caching disabled, builds the shim and monolithic confidential image
+containing the strict policy-enabled Agent, Confidential Data Hub, and pause
+bundle, installs them under `KATA_ROOT`, records source-and-artifact
+fingerprints, and verifies them again. All compatibility profiles boot that
+same monolithic image so profile comparisons do not also compare different
+guest environments. `KATA_ROOT` must therefore be writable when a rebuild is
+needed.
 
 These Cloud Hypervisor profiles are intentionally non-confidential development
 VMs. Their rebuilt Agent enables `allow-unattested-initdata` so the host can
@@ -38,9 +92,10 @@ unattested init-data still makes this a development-only configuration. Do not
 use this appliance build mode for a confidential production guest.
 
 The Kata installation must contain the runtime-rs
-`containerd-shim-kata-v2`, the selected VMM, guest kernel and image, and a
-strict policy-enabled Agent in that guest image. For the retained Cloud
-Hypervisor profiles, the VMM must include flat-VMDK support from
+`containerd-shim-kata-v2`, the selected VMM and guest kernel, the monolithic
+confidential image, and its dm-verity root hash. The runtime configuration's
+image setting is replaced with that confidential image for the test. For the
+retained Cloud Hypervisor profiles, the VMM must include flat-VMDK support from
 [cloud-hypervisor/cloud-hypervisor#8599](https://github.com/cloud-hypervisor/cloud-hypervisor/pull/8599).
 The selected runtime configuration must enable the `cc_init_data` annotation
 and use `shared_fs = "none"`.
@@ -108,15 +163,29 @@ separate cache/artifact locations: Kata build artifacts can be reused after
 `verify-kata-provenance`, while test results should always be uploaded from a
 fresh output directory.
 
+The reusable `.github/workflows/run-nested-policy-compat.yaml` implements this
+producer/consumer split. It starts from the exact PR-built Cloud Hypervisor,
+kernel, runtime-rs, and confidential-image tarballs. If that Cloud Hypervisor
+lacks flat-VMDK support, the approved preparation step replaces it with the
+pinned PR 8599 build described above. It then prepares one strict compatibility
+bundle and runs all retained profiles as verify-only matrix jobs. Results are
+uploaded even when a profile fails.
+
+The workflow is available as an opt-in CI pilot through the
+`nested-policy-compat` input to `.github/workflows/ci.yaml`; its default is
+`false`. Enable it on a trusted ephemeral nested-KVM runner before adding its
+profile jobs to `tools/testing/gatekeeper/required-tests.yaml`. Do not execute
+untrusted pull-request code on a persistent privileged runner.
+
 ## Inputs
 
 - `/input/workload.yaml`: digest-pinned workload carrying an externally
   generated `io.katacontainers.config.hypervisor.cc_init_data` annotation.
-- `/input/images/*.tar`: optional OCI or Docker archives, using the same format
-  as the base appliance.
+- `/input/images/*.tar`: optional OCI image-layout archives, using the same
+  format as the base appliance.
 - `/opt/kata`: an unmodified Kata installation containing
-  `containerd-shim-kata-v2`, the selected VMM, guest kernel/image, Agent, and
-  runtime-rs configuration.
+  `containerd-shim-kata-v2`, the selected VMM and guest kernel, the monolithic
+  confidential image and root hash, and the runtime-rs configuration.
 
 The default Kata configuration path is:
 

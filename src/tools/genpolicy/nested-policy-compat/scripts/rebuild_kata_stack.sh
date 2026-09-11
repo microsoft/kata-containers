@@ -70,14 +70,12 @@ rm -rf \
 	"${build_dir}/agent" \
 	"${build_dir}/coco-guest-components" \
 	"${build_dir}/pause-image" \
-	"${build_dir}/rootfs-image" \
 	"${build_dir}/rootfs-image-confidential" \
 	"${build_dir}/shim-v2-rust"
 rm -f \
 	"${build_dir}/kata-static-agent.tar.zst" \
 	"${build_dir}/kata-static-coco-guest-components.tar.zst" \
 	"${build_dir}/kata-static-pause-image.tar.zst" \
-	"${build_dir}/kata-static-rootfs-image.tar.zst" \
 	"${build_dir}/kata-static-rootfs-image-confidential.tar.zst" \
 	"${build_dir}/kata-static-shim-v2-rust.tar.zst"
 
@@ -99,14 +97,12 @@ build_component() {
 export KATA_AGENT_MAKEFLAGS="EXTRA_RUSTFEATURES=allow-unattested-initdata"
 build_component agent
 unset KATA_AGENT_MAKEFLAGS
-build_component rootfs-image
 build_component coco-guest-components
 build_component pause-image
 build_component rootfs-image-confidential
 build_component shim-v2-rust
 
 for archive in \
-	"${build_dir}/kata-static-rootfs-image.tar.zst" \
 	"${build_dir}/kata-static-rootfs-image-confidential.tar.zst" \
 	"${build_dir}/kata-static-shim-v2-rust.tar.zst"; do
 	if [[ ! -f "${archive}" ]]; then
@@ -117,38 +113,13 @@ for archive in \
 done
 
 new_shim="${stage_dir}/opt/kata/runtime-rs/bin/containerd-shim-kata-v2"
-new_guest_image="${stage_dir}/opt/kata/share/kata-containers/kata-containers.img"
 new_confidential_image="${stage_dir}/opt/kata/share/kata-containers/kata-containers-confidential.img"
 new_confidential_hash="${stage_dir}/opt/kata/share/kata-containers/root_hash_confidential.txt"
-if [[ ! -x "${new_shim}" || ! -e "${new_guest_image}" ||
-	! -e "${new_confidential_image}" || ! -e "${new_confidential_hash}" ]]; then
-	echo "Kata build output is missing the runtime-rs shim, base image, or confidential image" >&2
+if [[ ! -x "${new_shim}" || ! -e "${new_confidential_image}" ||
+	! -e "${new_confidential_hash}" ]]; then
+	echo "Kata build output is missing the runtime-rs shim or confidential image" >&2
 	exit 1
 fi
-
-configured_guest_image=$(
-	hypervisor_name=$("${script_dir}/kata_config_value.sh" \
-		"${kata_config}" runtime hypervisor_name)
-	"${script_dir}/kata_config_value.sh" \
-		"${kata_config}" "hypervisor.${hypervisor_name}" image
-)
-case "${configured_guest_image}" in
-/opt/kata/*)
-	configured_guest_image="${kata_root}${configured_guest_image#/opt/kata}"
-	;;
-*)
-	echo "guest image must be located under /opt/kata: ${configured_guest_image}" >&2
-	exit 1
-	;;
-esac
-configured_guest_image=$(readlink -f "${configured_guest_image}")
-case "${configured_guest_image}" in
-"${kata_root}"/*) ;;
-*)
-	echo "guest image resolves outside KATA_ROOT: ${configured_guest_image}" >&2
-	exit 1
-	;;
-esac
 
 shim_dir=$(readlink -f "${kata_root}/runtime-rs/bin")
 share_dir=$(readlink -f "${kata_root}/share/kata-containers")
@@ -166,8 +137,6 @@ install -D -m 0755 "${new_shim}" \
 	"${shim_dir}/containerd-shim-kata-v2.new"
 mv -f "${shim_dir}/containerd-shim-kata-v2.new" \
 	"${shim_dir}/containerd-shim-kata-v2"
-install -D -m 0644 "${new_guest_image}" "${configured_guest_image}.new"
-mv -f "${configured_guest_image}.new" "${configured_guest_image}"
 install -D -m 0644 "${new_confidential_image}" \
 	"${share_dir}/kata-containers-confidential.img.new"
 mv -f "${share_dir}/kata-containers-confidential.img.new" \
@@ -175,20 +144,52 @@ mv -f "${share_dir}/kata-containers-confidential.img.new" \
 install -m 0644 "${new_confidential_hash}" \
 	"${share_dir}/root_hash_confidential.txt"
 
-root_hash="${stage_dir}/opt/kata/share/kata-containers/root_hash_base.txt"
-if [[ -f "${root_hash}" ]]; then
-	install -m 0644 "${root_hash}" "${share_dir}/root_hash_base.txt"
-fi
+resolve_config_path() {
+	local section=$1
+	local key=$2
+	local configured
+
+	configured=$("${script_dir}/kata_config_value.sh" "${kata_config}" "${section}" "${key}")
+	case "${configured}" in
+	/opt/kata/*)
+		configured="${kata_root}${configured#/opt/kata}"
+		;;
+	*)
+		echo "${key} must be located under /opt/kata: ${configured}" >&2
+		exit 1
+		;;
+	esac
+	configured=$(readlink -f "${configured}")
+	case "${configured}" in
+	"${kata_root}"/*) ;;
+	*)
+		echo "${key} resolves outside KATA_ROOT: ${configured}" >&2
+		exit 1
+		;;
+	esac
+	if [[ ! -f "${configured}" ]]; then
+		echo "${key} artifact not found: ${configured}" >&2
+		exit 1
+	fi
+	printf '%s\n' "${configured}"
+}
+
+hypervisor_name=$("${script_dir}/kata_config_value.sh" \
+	"${kata_config}" runtime hypervisor_name)
+vmm=$(resolve_config_path "hypervisor.${hypervisor_name}" path)
+kernel=$(resolve_config_path "hypervisor.${hypervisor_name}" kernel)
 
 marker="${share_dir}/nested-policy-source-provenance"
 shim_sha=$(sha256sum "${shim_dir}/containerd-shim-kata-v2" | cut -d ' ' -f 1)
-guest_image_sha=$(sha256sum "${configured_guest_image}" | cut -d ' ' -f 1)
 confidential_image_sha=$(
 	sha256sum "${share_dir}/kata-containers-confidential.img" | cut -d ' ' -f 1
 )
 confidential_hash_sha=$(
 	sha256sum "${share_dir}/root_hash_confidential.txt" | cut -d ' ' -f 1
 )
+vmm_sha=$(sha256sum "${vmm}" | cut -d ' ' -f 1)
+kernel_sha=$(sha256sum "${kernel}" | cut -d ' ' -f 1)
+kata_config_sha=$(sha256sum "${kata_config}" | cut -d ' ' -f 1)
 runtime_source=$(
 	"${script_dir}/source_tree_fingerprint.sh" "${repo_root}" \
 		Cargo.toml Cargo.lock VERSION versions.yaml ci/install_yq.sh src/libs \
@@ -210,13 +211,15 @@ agent_source=$(
 		tools/packaging/static-build/pause-image
 )
 cat >"${marker}.new" <<EOF
-format=1
+format=3
 runtime_rs_source=${runtime_source}
 agent_source=${agent_source}
 shim_sha256=${shim_sha}
-guest_image_sha256=${guest_image_sha}
 confidential_image_sha256=${confidential_image_sha}
 confidential_hash_sha256=${confidential_hash_sha}
+vmm_sha256=${vmm_sha}
+kernel_sha256=${kernel_sha}
+kata_config_sha256=${kata_config_sha}
 EOF
 mv -f "${marker}.new" "${marker}"
-echo "installed checkout-built runtime-rs shim, strict-Agent base image, and confidential guest-pull image under ${kata_root}"
+echo "installed checkout-built runtime-rs shim and strict-Agent confidential guest image with bound VMM, kernel, and configuration under ${kata_root}"

@@ -25,46 +25,6 @@ for path in "${repo_root}/.git" "${kata_root}" "${kata_config}"; do
 	fi
 done
 
-extract_commit() {
-	local component=$1
-	local version_output=$2
-	local commit
-
-	commit=$(sed -nE 's/.*commit( version)?: ([^,)]*-)?([0-9a-f]{40}).*/\3/p' <<<"${version_output}" |
-		head -n 1)
-	if [[ -z "${commit}" ]]; then
-		echo "could not extract ${component} commit from version output:" >&2
-		printf '%s\n' "${version_output}" >&2
-		exit 1
-	fi
-	printf '%s\n' "${commit}"
-}
-
-verify_source_tree() {
-	local component=$1
-	local commit=$2
-	shift 2
-	local source_paths=("$@")
-	local untracked
-
-	if ! git -C "${repo_root}" cat-file -e "${commit}^{commit}" 2>/dev/null; then
-		echo "${component} commit is not available in this checkout: ${commit}" >&2
-		exit 1
-	fi
-	if ! git -C "${repo_root}" diff --quiet "${commit}" -- "${source_paths[@]}"; then
-		echo "${component} build inputs differ from installed commit ${commit}" >&2
-		git -C "${repo_root}" --no-pager diff --stat "${commit}" -- "${source_paths[@]}" >&2
-		exit 1
-	fi
-	untracked=$(git -C "${repo_root}" ls-files --others --exclude-standard -- "${source_paths[@]}")
-	if [[ -n "${untracked}" ]]; then
-		echo "${component} cannot represent untracked build inputs:" >&2
-		printf '%s\n' "${untracked}" >&2
-		exit 1
-	fi
-	printf '%s source matches installed commit %s\n' "${component}" "${commit}"
-}
-
 runtime_inputs=(
 	Cargo.toml
 	Cargo.lock
@@ -99,34 +59,6 @@ agent_inputs=(
 	tools/packaging/static-build/pause-image
 )
 
-guest_image=$(
-	hypervisor_name=$("${script_dir}/kata_config_value.sh" \
-		"${kata_config}" runtime hypervisor_name)
-	"${script_dir}/kata_config_value.sh" \
-		"${kata_config}" "hypervisor.${hypervisor_name}" image
-)
-case "${guest_image}" in
-/opt/kata/*)
-	guest_image="${kata_root}${guest_image#/opt/kata}"
-	;;
-*)
-	echo "guest image must be located under /opt/kata: ${guest_image}" >&2
-	exit 1
-	;;
-esac
-guest_image=$(readlink -f "${guest_image}")
-case "${guest_image}" in
-"${kata_root}"/*) ;;
-*)
-	echo "guest image resolves outside KATA_ROOT: ${guest_image}" >&2
-	exit 1
-	;;
-esac
-if [[ ! -f "${guest_image}" ]]; then
-	echo "guest image not found: ${guest_image}" >&2
-	exit 1
-fi
-
 confidential_image="${kata_root}/share/kata-containers/kata-containers-confidential.img"
 confidential_hash="${kata_root}/share/kata-containers/root_hash_confidential.txt"
 if [[ ! -f "${confidential_image}" ]]; then
@@ -137,6 +69,41 @@ if [[ ! -f "${confidential_hash}" ]]; then
 	echo "confidential guest-pull image verity parameters not found: ${confidential_hash}" >&2
 	exit 1
 fi
+
+resolve_config_path() {
+	local section=$1
+	local key=$2
+	local configured
+
+	configured=$("${script_dir}/kata_config_value.sh" "${kata_config}" "${section}" "${key}")
+	case "${configured}" in
+	/opt/kata/*)
+		configured="${kata_root}${configured#/opt/kata}"
+		;;
+	*)
+		echo "${key} must be located under /opt/kata: ${configured}" >&2
+		exit 1
+		;;
+	esac
+	configured=$(readlink -f "${configured}")
+	case "${configured}" in
+	"${kata_root}"/*) ;;
+	*)
+		echo "${key} resolves outside KATA_ROOT: ${configured}" >&2
+		exit 1
+		;;
+	esac
+	if [[ ! -f "${configured}" ]]; then
+		echo "${key} artifact not found: ${configured}" >&2
+		exit 1
+	fi
+	printf '%s\n' "${configured}"
+}
+
+hypervisor_name=$("${script_dir}/kata_config_value.sh" \
+	"${kata_config}" runtime hypervisor_name)
+vmm=$(resolve_config_path "hypervisor.${hypervisor_name}" path)
+kernel=$(resolve_config_path "hypervisor.${hypervisor_name}" kernel)
 
 shim_dir=$(readlink -f "${kata_root}/runtime-rs/bin")
 case "${shim_dir}" in
@@ -153,65 +120,36 @@ if [[ ! -x "${shim}" ]]; then
 fi
 
 marker="${kata_root}/share/kata-containers/nested-policy-source-provenance"
-if [[ -f "${marker}" ]]; then
-	declare -A provenance=()
-	while IFS='=' read -r key value; do
-		provenance["${key}"]=${value}
-	done <"${marker}"
-
-	runtime_source=$("${script_dir}/source_tree_fingerprint.sh" "${repo_root}" "${runtime_inputs[@]}")
-	agent_source=$("${script_dir}/source_tree_fingerprint.sh" "${repo_root}" "${agent_inputs[@]}")
-	shim_sha=$(sha256sum "${shim}" | cut -d ' ' -f 1)
-	guest_image_sha=$(sha256sum "${guest_image}" | cut -d ' ' -f 1)
-	confidential_image_sha=$(sha256sum "${confidential_image}" | cut -d ' ' -f 1)
-	confidential_hash_sha=$(sha256sum "${confidential_hash}" | cut -d ' ' -f 1)
-	if [[ "${provenance[format]:-}" == 1 &&
-		"${provenance[runtime_rs_source]:-}" == "${runtime_source}" &&
-		"${provenance[agent_source]:-}" == "${agent_source}" &&
-		"${provenance[shim_sha256]:-}" == "${shim_sha}" &&
-		"${provenance[guest_image_sha256]:-}" == "${guest_image_sha}" &&
-		"${provenance[confidential_image_sha256]:-}" == "${confidential_image_sha}" &&
-		"${provenance[confidential_hash_sha256]:-}" == "${confidential_hash_sha}" ]]; then
-		echo "installed runtime-rs shim, base Agent image, and confidential guest-pull image match the current source tree"
-		exit 0
-	fi
-	echo "installed Kata provenance marker does not match the current source tree or artifacts" >&2
+if [[ ! -f "${marker}" ]]; then
+	echo "installed Kata provenance marker not found: ${marker}" >&2
+	echo "rebuild the Kata stack so strict-Agent features and all guest artifacts can be verified" >&2
 	exit 1
 fi
 
-shim_commit=$(extract_commit "runtime-rs shim" "$("${shim}" --version 2>&1)")
-verify_source_tree "runtime-rs shim" "${shim_commit}" "${runtime_inputs[@]}"
+declare -A provenance=()
+while IFS='=' read -r key value; do
+	provenance["${key}"]=${value}
+done <"${marker}"
 
-workdir=$(mktemp -d)
-mount_dir="${workdir}/rootfs"
-agent_copy="${workdir}/kata-agent"
-loop_device=
-cleanup() {
-	if mountpoint -q "${mount_dir}" 2>/dev/null; then
-		umount "${mount_dir}"
-	fi
-	if [[ -n "${loop_device}" ]]; then
-		losetup -d "${loop_device}"
-	fi
-	rm -rf "${workdir}"
-}
-trap cleanup EXIT
-
-mkdir -p "${mount_dir}"
-loop_device=$(losetup --find --show --partscan --read-only "${guest_image}")
-if [[ ! -b "${loop_device}p1" ]]; then
-	echo "guest image has no readable first partition: ${guest_image}" >&2
-	exit 1
+runtime_source=$("${script_dir}/source_tree_fingerprint.sh" "${repo_root}" "${runtime_inputs[@]}")
+agent_source=$("${script_dir}/source_tree_fingerprint.sh" "${repo_root}" "${agent_inputs[@]}")
+shim_sha=$(sha256sum "${shim}" | cut -d ' ' -f 1)
+confidential_image_sha=$(sha256sum "${confidential_image}" | cut -d ' ' -f 1)
+confidential_hash_sha=$(sha256sum "${confidential_hash}" | cut -d ' ' -f 1)
+vmm_sha=$(sha256sum "${vmm}" | cut -d ' ' -f 1)
+kernel_sha=$(sha256sum "${kernel}" | cut -d ' ' -f 1)
+kata_config_sha=$(sha256sum "${kata_config}" | cut -d ' ' -f 1)
+if [[ "${provenance[format]:-}" == 3 &&
+	"${provenance[runtime_rs_source]:-}" == "${runtime_source}" &&
+	"${provenance[agent_source]:-}" == "${agent_source}" &&
+	"${provenance[shim_sha256]:-}" == "${shim_sha}" &&
+	"${provenance[confidential_image_sha256]:-}" == "${confidential_image_sha}" &&
+	"${provenance[confidential_hash_sha256]:-}" == "${confidential_hash_sha}" &&
+	"${provenance[vmm_sha256]:-}" == "${vmm_sha}" &&
+	"${provenance[kernel_sha256]:-}" == "${kernel_sha}" &&
+	"${provenance[kata_config_sha256]:-}" == "${kata_config_sha}" ]]; then
+	echo "installed VMM, kernel, runtime-rs shim, configuration, and strict-Agent confidential guest image match the provenance marker"
+	exit 0
 fi
-mount -o ro "${loop_device}p1" "${mount_dir}"
-if [[ ! -x "${mount_dir}/usr/bin/kata-agent" ]]; then
-	echo "guest Agent not found in ${guest_image}" >&2
-	exit 1
-fi
-cp "${mount_dir}/usr/bin/kata-agent" "${agent_copy}"
-umount "${mount_dir}"
-losetup -d "${loop_device}"
-loop_device=
-
-agent_commit=$(extract_commit "guest Agent" "$("${agent_copy}" --version 2>&1)")
-verify_source_tree "guest Agent" "${agent_commit}" "${agent_inputs[@]}"
+echo "installed Kata provenance marker does not match the current source tree or artifacts" >&2
+exit 1

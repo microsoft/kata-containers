@@ -8,6 +8,13 @@ REPO_ROOT := $(abspath ../../../..)
 PROFILE ?= k8s-1.36-containerd-2.3-erofs-dmverity
 IMAGE ?= nested-policy-compat:$(PROFILE)
 CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
+KATA_ROOT ?= /opt/kata
+KATA_CONFIG ?= $(KATA_ROOT)/share/defaults/kata-containers/runtime-rs/configuration-nested-policy-compat.toml
+KATA_ARTIFACT_IMAGE ?= quay.io/kata-containers/kata-deploy-ci:kata-containers-latest
+KATA_ARTIFACT_DIR ?=
+FLAT_VMDK_CLOUD_HYPERVISOR_REPO ?= https://github.com/cloud-hypervisor/cloud-hypervisor.git
+FLAT_VMDK_CLOUD_HYPERVISOR_COMMIT ?= f50661fffd0fef38ddfec88c5fafa93f9779149a
+APPROVE_KATA_INSTALL ?= no
 GENPOLICY_TARGET ?= x86_64-unknown-linux-musl
 GENPOLICY_BIN ?= $(REPO_ROOT)/target/$(GENPOLICY_TARGET)/release/genpolicy
 GENPOLICY_STAGE := $(CURDIR)/build/genpolicy
@@ -18,7 +25,7 @@ $(error unknown PROFILE "$(PROFILE)")
 endif
 include $(PROFILE_FILE)
 
-.PHONY: image ensure-image prepare-kata-stack verify-kata-provenance ensure-kata-provenance validate genpolicy-bin fixture-e2e ci-fixture-e2e runtime-operations-e2e termination-log-e2e custom-service-account-e2e clean
+.PHONY: image ensure-image ensure-host-environment prepare-kata-stack verify-kata-provenance ensure-kata-provenance validate genpolicy-bin fixture-e2e ci-fixture-e2e runtime-operations-e2e termination-log-e2e custom-service-account-e2e clean
 
 image: $(GENPOLICY_STAGE)
 	@test -n "$(CONTAINER_ENGINE)" || { echo "docker or podman is required"; exit 1; }
@@ -55,6 +62,16 @@ ensure-image:
 		fi; \
 		$(MAKE) image; \
 	fi
+
+ensure-host-environment:
+	APPROVE_KATA_INSTALL="$(APPROVE_KATA_INSTALL)" \
+		KATA_ARTIFACT_DIR="$(KATA_ARTIFACT_DIR)" \
+		KATA_ARTIFACT_IMAGE="$(KATA_ARTIFACT_IMAGE)" \
+		FLAT_VMDK_CLOUD_HYPERVISOR_REPO="$(FLAT_VMDK_CLOUD_HYPERVISOR_REPO)" \
+		FLAT_VMDK_CLOUD_HYPERVISOR_COMMIT="$(FLAT_VMDK_CLOUD_HYPERVISOR_COMMIT)" \
+		ROOTFS_MODE="$(ROOTFS_MODE)" \
+		./scripts/ensure_host_environment.sh \
+		"$(KATA_ROOT)" "$(KATA_CONFIG)" "$(CONTAINER_ENGINE)"
 
 prepare-kata-stack:
 	./scripts/rebuild_kata_stack.sh \
@@ -95,10 +112,11 @@ define run_fixture_e2e
 		./tests/fixture-matrix-e2e.sh
 endef
 
-fixture-e2e: ensure-kata-provenance ensure-image
+fixture-e2e: ensure-host-environment ensure-kata-provenance ensure-image
 	$(run_fixture_e2e)
 
-ci-fixture-e2e: verify-kata-provenance ensure-image
+ci-fixture-e2e: APPROVE_KATA_INSTALL := no
+ci-fixture-e2e: ensure-host-environment verify-kata-provenance ensure-image
 	$(run_fixture_e2e)
 
 runtime-operations-e2e: FIXTURES := runtime-operations-workload.yaml

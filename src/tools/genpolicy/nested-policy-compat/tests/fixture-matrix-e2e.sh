@@ -14,19 +14,25 @@ nested_image=${NESTED_IMAGE:?NESTED_IMAGE is required}
 kata_root=${KATA_ROOT:?KATA_ROOT is required}
 kata_config=${KATA_CONFIG:?KATA_CONFIG is required}
 output_root=${OUTPUT_ROOT:?OUTPUT_ROOT is required}
+output_marker="${output_root}/.nested-policy-compat-output"
 
 device_args=(--device /dev/kvm --device /dev/net/tun)
 if [[ -e /dev/vhost-vsock ]]; then
 	device_args+=(--device /dev/vhost-vsock)
 fi
 
-case "${output_root}" in
-/|"${HOME}")
-	echo "refusing unsafe matrix output directory: ${output_root}" >&2
+if [[ -e "${output_root}" && ! -d "${output_root}" ]]; then
+	echo "matrix output path is not a directory: ${output_root}" >&2
 	exit 2
-	;;
-esac
-rm -rf "${output_root}"
+fi
+mkdir -p "${output_root}"
+if [[ ! -f "${output_marker}" ]] &&
+	find "${output_root}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+	echo "refusing nonempty matrix output directory without harness marker: ${output_root}" >&2
+	exit 2
+fi
+touch "${output_marker}"
+rm -rf "${output_root}/cases"
 mkdir -p "${output_root}/cases"
 
 default_fixtures=(

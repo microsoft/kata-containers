@@ -11,6 +11,7 @@ set -o pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 bash -n "${root}/scripts/entrypoint.sh"
+bash -n "${root}/scripts/ensure_host_environment.sh"
 bash -n "${root}/scripts/ensure_kata_source_provenance.sh"
 bash -n "${root}/scripts/generate_policy.sh"
 bash -n "${root}/scripts/image_input_fingerprint.sh"
@@ -83,6 +84,7 @@ PY
 if command -v shellcheck >/dev/null 2>&1; then
 	shellcheck \
 		"${root}/scripts/entrypoint.sh" \
+		"${root}/scripts/ensure_host_environment.sh" \
 		"${root}/scripts/ensure_kata_source_provenance.sh" \
 		"${root}/scripts/generate_policy.sh" \
 		"${root}/scripts/image_input_fingerprint.sh" \
