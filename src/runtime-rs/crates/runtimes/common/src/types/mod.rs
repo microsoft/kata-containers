@@ -145,6 +145,18 @@ pub struct ContainerConfig {
     pub stderr: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletedContainerSnapshot {
+    pub cri_name: String,
+    pub exit_code: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContainerSnapshotInventory {
+    pub live_container_ids: Vec<ContainerID>,
+    pub completed_containers: Vec<CompletedContainerSnapshot>,
+}
+
 #[derive(Debug, Clone, Display)]
 pub enum SandboxRequest {
     CreateSandbox(Box<SandboxConfig>),
