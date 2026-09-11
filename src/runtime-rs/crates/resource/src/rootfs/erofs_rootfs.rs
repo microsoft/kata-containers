@@ -735,6 +735,10 @@ impl ErofsMultiLayerRootfs {
                         let device_config = &mut BlockConfigModern {
                             driver_option: block_driver.clone(),
                             format: erofs_format,
+                            // Kata generates and owns this descriptor after validating each
+                            // extent. Generated metadata lives under /run while EROFS layers
+                            // live under /var/lib/containerd, making / their common anchor.
+                            extent_anchor_path: Some(PathBuf::from("/")),
                             path_on_host: erofs_path,
                             is_readonly: true,
                             blkdev_aio: BlockDeviceAio::new(&blkdev_info.block_device_aio),
@@ -881,6 +885,8 @@ impl ErofsMultiLayerRootfs {
                         if erofs_format == BlockDeviceFormat::Vmdk {
                             vmdk_path = Some(PathBuf::from(&erofs_path));
                         }
+                        let extent_anchor_path =
+                            (erofs_format == BlockDeviceFormat::Vmdk).then(|| PathBuf::from("/"));
 
                         info!(
                             sl!(),
@@ -892,6 +898,7 @@ impl ErofsMultiLayerRootfs {
                         let device_config = &mut BlockConfigModern {
                             driver_option: block_driver.clone(),
                             format: erofs_format, // Vmdk for multiple devices, Raw for single device
+                            extent_anchor_path,
                             path_on_host: erofs_path,
                             is_readonly: true, // EROFS layers are read-only, must set to avoid "resize" lock errors
                             blkdev_aio: BlockDeviceAio::new(&blkdev_info.block_device_aio),
