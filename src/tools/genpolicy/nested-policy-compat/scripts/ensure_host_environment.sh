@@ -16,6 +16,8 @@ fi
 kata_root=$1
 kata_config=$2
 container_engine=$3
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "${script_dir}/../../../../.." && pwd)
 artifact_image=${KATA_ARTIFACT_IMAGE:-quay.io/kata-containers/kata-deploy-ci:kata-containers-latest}
 artifact_dir=${KATA_ARTIFACT_DIR:-}
 approval=${APPROVE_KATA_INSTALL:-no}
@@ -35,7 +37,7 @@ if [[ -z "${container_engine}" || ! -x "${container_engine}" ]]; then
 	echo "Podman or Docker is required to install and run the compatibility environment" >&2
 	exit 1
 fi
-for command in cargo find git make python3 rustup sha256sum tar yq; do
+for command in cargo find git make python3 rustup sha256sum tar; do
 	if ! command -v "${command}" >/dev/null 2>&1; then
 		echo "required host command is unavailable: ${command}" >&2
 		exit 1
@@ -74,6 +76,11 @@ required_artifacts=(
 	"${kata_root}/share/kata-containers/root_hash_confidential.txt"
 )
 missing=()
+yq_missing=no
+if ! command -v yq >/dev/null 2>&1; then
+	missing+=("repository-pinned mikefarah yq")
+	yq_missing=yes
+fi
 rust_target_missing=no
 if ! rustup target list --installed | grep -Fxq "${genpolicy_target}"; then
 	missing+=("Rust target ${genpolicy_target}")
@@ -141,6 +148,10 @@ EOF
 	exit 1
 fi
 
+if [[ "${yq_missing}" == yes ]]; then
+	echo "installing repository-pinned mikefarah yq"
+	INSTALL_IN_GOPATH=false "${repo_root}/ci/install_yq.sh"
+fi
 if [[ "${rust_target_missing}" == yes ]]; then
 	echo "installing Rust target ${genpolicy_target}"
 	rustup target add "${genpolicy_target}"
