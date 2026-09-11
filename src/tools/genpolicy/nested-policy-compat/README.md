@@ -69,6 +69,8 @@ The build requires `build-essential`, `m4`, `bison`, `flex`, `uuid-dev`,
 running host kernel must also provide EROFS filesystem support; approved
 bootstrap loads the `erofs` module and fails clearly if the kernel does not
 provide it. Guest-pull profiles do not require flat-VMDK or host EROFS support.
+The Kata build scripts also require mikefarah `yq`; install the repository-pinned
+version with `./ci/install_yq.sh` and add `${HOME}/go/bin` to `PATH`.
 
 The supplied or approved installation provides the VMM, guest kernel, and initial runtime
 configuration. The harness builds GenPolicy from the checkout. Before running

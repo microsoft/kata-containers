@@ -34,7 +34,7 @@ if [[ -z "${container_engine}" || ! -x "${container_engine}" ]]; then
 	echo "Podman or Docker is required to install and run the compatibility environment" >&2
 	exit 1
 fi
-for command in cargo find git make python3 sha256sum tar; do
+for command in cargo find git make python3 sha256sum tar yq; do
 	if ! command -v "${command}" >/dev/null 2>&1; then
 		echo "required host command is unavailable: ${command}" >&2
 		exit 1
