@@ -129,6 +129,10 @@ if [[ "${rootfs_mode}" == erofs-dmverity ]] &&
 	! grep -qw erofs /proc/filesystems; then
 	missing+=("host EROFS filesystem support (module erofs is not loaded)")
 fi
+if [[ "${rootfs_mode}" == erofs-dmverity ]] &&
+	[[ ! -d /sys/module/dm_verity ]]; then
+	missing+=("host dm-verity support (module dm_verity is not loaded)")
+fi
 if [[ ! -f "${kata_config}" ]]; then
 	missing+=("${kata_config}")
 elif ! python3 - "${kata_config}" <<'PY'
@@ -167,7 +171,7 @@ artifacts are pulled from ${artifact_image}; set KATA_ARTIFACT_DIR to use
 previously downloaded tarballs instead.
 For EROFS, an artifact VMM without flat-VMDK support is replaced by a build of
 ${flat_vmdk_repo} at pinned commit ${flat_vmdk_commit}.
-The approved path also loads the host EROFS kernel module.
+The approved path also loads the host EROFS and dm-verity kernel modules.
 
 Review the image and destination, then approve the installation with:
   make -C src/tools/genpolicy/nested-policy-compat fixture-e2e \\
@@ -323,6 +327,17 @@ if [[ "${rootfs_mode}" == erofs-dmverity ]] &&
 	fi
 	if ! grep -qw erofs /proc/filesystems; then
 		echo "EROFS is still unavailable after loading the host module" >&2
+		exit 1
+	fi
+fi
+if [[ "${rootfs_mode}" == erofs-dmverity ]] &&
+	[[ ! -d /sys/module/dm_verity ]]; then
+	if ! modprobe dm_verity; then
+		echo "the running host kernel does not provide a loadable dm-verity module" >&2
+		exit 1
+	fi
+	if [[ ! -d /sys/module/dm_verity ]]; then
+		echo "dm-verity is still unavailable after loading the host module" >&2
 		exit 1
 	fi
 fi
