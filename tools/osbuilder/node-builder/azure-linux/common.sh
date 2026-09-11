@@ -26,6 +26,8 @@ SHIM_PREVIEW_DBG_CONFIG_FILE_NAME_RUNTIME_GO="configuration-clh-preview-debug.to
 CONFIG_DIR_RUNTIME_GO="src/runtime/config"
 SHIM_CONFIG_FILE_NAME_RUNTIME_RS="configuration-clh-azure-runtime-rs.toml"
 SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS="configuration-clh-azure-runtime-rs-debug.toml"
+SHIM_V2_CONFIG_FILE_NAME_RUNTIME_RS="configuration-clh-azure-runtime-rs-v2.toml"
+SHIM_V2_DBG_CONFIG_FILE_NAME_RUNTIME_RS="configuration-clh-azure-runtime-rs-v2-debug.toml"
 CONFIG_DIR_RUNTIME_RS="src/runtime-rs/config"
 
 if [[ "${CONF_PODS}" == "yes" ]]; then
