@@ -74,6 +74,7 @@ required_artifacts=(
 	"${kata_root}/runtime-rs/bin/containerd-shim-kata-v2"
 	"${kata_root}/share/kata-containers/kata-containers-confidential.img"
 	"${kata_root}/share/kata-containers/root_hash_confidential.txt"
+	"${kata_root}/share/defaults/kata-containers/runtime-rs/configuration-clh-runtime-rs.toml"
 )
 missing=()
 yq_missing=no
@@ -86,8 +87,12 @@ if ! rustup target list --installed | grep -Fxq "${genpolicy_target}"; then
 	missing+=("Rust target ${genpolicy_target}")
 	rust_target_missing=yes
 fi
+kata_artifacts_missing=no
 for artifact in "${required_artifacts[@]}"; do
-	[[ -e "${artifact}" ]] || missing+=("${artifact}")
+	if [[ ! -e "${artifact}" ]]; then
+		missing+=("${artifact}")
+		kata_artifacts_missing=yes
+	fi
 done
 vmm="${kata_root}/bin/cloud-hypervisor"
 if [[ "${rootfs_mode}" == erofs-dmverity && -f "${vmm}" ]] &&
@@ -177,34 +182,36 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -n "${artifact_dir}" ]]; then
-	artifact_dir=$(readlink -f "${artifact_dir}")
-	if [[ ! -d "${artifact_dir}" ]]; then
-		echo "KATA_ARTIFACT_DIR not found: ${artifact_dir}" >&2
-		exit 1
+if [[ "${kata_artifacts_missing}" == yes ]]; then
+	if [[ -n "${artifact_dir}" ]]; then
+		artifact_dir=$(readlink -f "${artifact_dir}")
+		if [[ ! -d "${artifact_dir}" ]]; then
+			echo "KATA_ARTIFACT_DIR not found: ${artifact_dir}" >&2
+			exit 1
+		fi
+		echo "installing nested compatibility prerequisites from ${artifact_dir}"
+	else
+		echo "installing nested compatibility prerequisites from ${artifact_image}"
+		"${container_engine}" pull "${artifact_image}"
+		container=$("${container_engine}" create "${artifact_image}")
+		"${container_engine}" cp \
+			"${container}:/opt/kata-artifacts/tarballs" "${workdir}/tarballs"
+		artifact_dir="${workdir}/tarballs"
 	fi
-	echo "installing nested compatibility prerequisites from ${artifact_dir}"
-else
-	echo "installing nested compatibility prerequisites from ${artifact_image}"
-	"${container_engine}" pull "${artifact_image}"
-	container=$("${container_engine}" create "${artifact_image}")
-	"${container_engine}" cp \
-		"${container}:/opt/kata-artifacts/tarballs" "${workdir}/tarballs"
-	artifact_dir="${workdir}/tarballs"
-fi
 
-for archive in \
-	kata-static-cloud-hypervisor.tar.zst \
-	kata-static-kernel.tar.zst \
-	kata-static-shim-v2-rust.tar.zst \
-	kata-static-rootfs-image-confidential.tar.zst; do
-	path="${artifact_dir}/${archive}"
-	if [[ ! -f "${path}" ]]; then
-		echo "artifact image is missing required archive: ${archive}" >&2
-		exit 1
-	fi
-	tar --zstd -xf "${path}" -C "${kata_root}" --strip-components=3
-done
+	for archive in \
+		kata-static-cloud-hypervisor.tar.zst \
+		kata-static-kernel.tar.zst \
+		kata-static-shim-v2-rust.tar.zst \
+		kata-static-rootfs-image-confidential.tar.zst; do
+		path="${artifact_dir}/${archive}"
+		if [[ ! -f "${path}" ]]; then
+			echo "artifact image is missing required archive: ${archive}" >&2
+			exit 1
+		fi
+		tar --zstd -xf "${path}" -C "${kata_root}" --strip-components=3
+	done
+fi
 
 source_config="${kata_root}/share/defaults/kata-containers/runtime-rs/configuration-clh-runtime-rs.toml"
 if [[ ! -f "${source_config}" ]]; then
