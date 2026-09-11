@@ -563,6 +563,11 @@ impl RuntimeHandlerManager {
                 .create_container(container_config, spec)
                 .await
                 .context("create container")?;
+            instance
+                .sandbox
+                .persist_runtime_state()
+                .await
+                .context("persist container creation")?;
 
             let container_manager = instance.container_manager.clone();
             let sandbox = instance.sandbox.clone();
@@ -727,6 +732,10 @@ impl RuntimeHandlerManager {
             }
             TaskRequest::DeleteProcess(process_id) => {
                 let resp = cm.delete_process(&process_id).await.context("do delete")?;
+                sandbox
+                    .persist_runtime_state()
+                    .await
+                    .context("persist process deletion")?;
                 if process_id.process_type == ProcessType::Container {
                     let event = TaskDelete {
                         id: process_id.container_id().to_string(),
@@ -811,8 +820,13 @@ impl RuntimeHandlerManager {
                     // Init already registered during CreateContainer. Exec
                     // processes first become waitable here, so only they add a
                     // StartProcess waiter. One waiter means one TaskExit.
+                    let wait_cm = cm.clone();
+                    let wait_process_id = process_id.clone();
+                    let wait_sandbox = sandbox.clone();
                     tokio::spawn(async move {
-                        let result = sandbox.wait_process(cm, process_id, pid).await;
+                        let result = wait_sandbox
+                            .wait_process(wait_cm, wait_process_id, pid)
+                            .await;
                         if let Err(e) = result {
                             error!(sl!(), "sandbox wait process error: {:?}", e);
                         }
@@ -830,6 +844,13 @@ impl RuntimeHandlerManager {
                         .send(msg)
                         .await
                         .context("send task start event")?;
+                    cm.complete_synthetic_init(&process_id)
+                        .await
+                        .context("complete restored container")?;
+                    sandbox
+                        .persist_runtime_state()
+                        .await
+                        .context("persist container start")?;
                 }
 
                 Ok(TaskResponse::StartProcess(shim_pid))

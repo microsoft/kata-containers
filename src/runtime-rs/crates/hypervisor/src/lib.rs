@@ -138,6 +138,7 @@ pub struct MemoryConfig {
 
 #[derive(Debug)]
 pub struct RestoreNetworkConfig {
+    // ID comes from the saved CLH NIC; FDs belong to the target netns.
     pub id: String,
     pub fds: Vec<OwnedFd>,
 }
@@ -173,6 +174,11 @@ pub trait Hypervisor: std::fmt::Debug + Send + Sync {
     // device manager
     async fn add_device(&self, device: DeviceType) -> Result<DeviceType>;
     async fn remove_device(&self, device: DeviceType) -> Result<()>;
+    async fn remove_restored_device(&self, _device_id: &str) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "removing a restored device is unsupported by this hypervisor"
+        ))
+    }
     async fn update_device(&self, device: DeviceType) -> Result<()>;
 
     // utils

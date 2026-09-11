@@ -246,6 +246,55 @@ pub struct AgentService {
 }
 
 impl AgentService {
+    async fn do_prepare_guest_mount(
+        &self,
+        req: protocols::agent::PrepareGuestMountRequest,
+    ) -> Result<()> {
+        // The mount itself remains attached in the captured namespace. Empty
+        // its trusted backing path so the host can copy fresh Pod inputs there.
+        let path = Path::new(&req.path);
+        let trusted_root = Path::new("/run/kata-containers");
+        if !path.is_absolute()
+            || path == trusted_root
+            || !path.starts_with(trusted_root)
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir | std::path::Component::CurDir
+                )
+            })
+        {
+            return Err(anyhow!("guest mount path is outside the trusted root"));
+        }
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(anyhow!("guest mount path is a symlink"));
+        }
+        if req.directory {
+            if !metadata.is_dir() {
+                return Err(anyhow!("guest mount path is not a directory"));
+            }
+            for entry in fs::read_dir(path)? {
+                let entry = entry?;
+                let file_type = entry.file_type()?;
+                if file_type.is_dir() && !file_type.is_symlink() {
+                    fs::remove_dir_all(entry.path())?;
+                } else {
+                    fs::remove_file(entry.path())?;
+                }
+            }
+        } else {
+            if !metadata.is_file() {
+                return Err(anyhow!("guest mount path is not a regular file"));
+            }
+            fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(path)?;
+        }
+        Ok(())
+    }
+
     #[instrument]
     async fn do_create_container(
         &self,
@@ -963,6 +1012,17 @@ impl agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "start_container", req);
         is_allowed(&req).await?;
         self.do_start_container(req).await.map_ttrpc_err(same)?;
+        Ok(Empty::new())
+    }
+
+    async fn prepare_guest_mount(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::PrepareGuestMountRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "prepare_guest_mount", req);
+        is_allowed(&req).await?;
+        self.do_prepare_guest_mount(req).await.map_ttrpc_err(same)?;
         Ok(Empty::new())
     }
 

@@ -21,6 +21,7 @@ use anyhow::{Context, Result};
 use kata_sys_util::validate;
 use kata_types::mount::Mount;
 use oci_spec::runtime as oci;
+use serde::{Deserialize, Serialize};
 use strum::Display;
 
 // DEFAULT_SHM_SIZE is the default shm size to be used in case host
@@ -97,7 +98,8 @@ impl ContainerID {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
 pub struct HostContainerId(String);
 
 impl HostContainerId {
@@ -110,7 +112,14 @@ impl HostContainerId {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+impl std::fmt::Display for HostContainerId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
 pub struct GuestContainerId(String);
 
 impl GuestContainerId {
@@ -124,6 +133,12 @@ impl GuestContainerId {
 
     pub fn into_string(self) -> String {
         self.0
+    }
+}
+
+impl std::fmt::Display for GuestContainerId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
     }
 }
 
@@ -177,13 +192,36 @@ pub struct ContainerConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletedContainerSnapshot {
+    // CRI name is the stable key after the source task object is deleted.
     pub cri_name: String,
     pub exit_code: i32,
+    pub oci_identity_version: u32,
+    pub oci_identity_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContainerSnapshotMount {
+    // Host source is target-local and intentionally omitted. Destination joins
+    // a target OCI mount to the captured guest path during restore.
+    pub destination: String,
+    pub guest_source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveContainerSnapshot {
+    // Host ID belongs to this runtime generation; guest ID names the captured
+    // process and remains stable through recursive restore.
+    pub host_id: String,
+    pub guest_id: String,
+    pub cri_name: String,
+    pub oci_identity_version: u32,
+    pub oci_identity_sha256: String,
+    pub node_local_mounts: Vec<ContainerSnapshotMount>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ContainerSnapshotInventory {
-    pub live_container_ids: Vec<ContainerID>,
+    pub live_containers: Vec<LiveContainerSnapshot>,
     pub completed_containers: Vec<CompletedContainerSnapshot>,
 }
 
