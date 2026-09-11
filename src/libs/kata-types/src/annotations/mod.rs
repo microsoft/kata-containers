@@ -34,6 +34,8 @@ pub mod thirdparty;
 // Common section
 /// Prefix for Kata specific annotations
 pub const KATA_ANNO_PREFIX: &str = "io.katacontainers.";
+/// Selects a packaged VM snapshot for annotation-driven sandbox restore.
+pub const KATA_ANNO_RESTORE_FROM: &str = "io.katacontainers.restore-from";
 /// Prefix for Kata configuration annotations
 pub const KATA_ANNO_CFG_PREFIX: &str = "io.katacontainers.config.";
 /// Prefix for Kata container annotations

@@ -97,6 +97,36 @@ impl ContainerID {
     }
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct HostContainerId(String);
+
+impl HostContainerId {
+    pub fn new(container_id: impl Into<String>) -> Self {
+        Self(container_id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct GuestContainerId(String);
+
+impl GuestContainerId {
+    pub fn new(container_id: impl Into<String>) -> Self {
+        Self(container_id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ContainerProcess {
     pub container_id: ContainerID,
