@@ -70,7 +70,8 @@ running host kernel must also provide EROFS filesystem support; approved
 bootstrap loads the `erofs` module and fails clearly if the kernel does not
 provide it. Guest-pull profiles do not require flat-VMDK or host EROFS support.
 The Kata build scripts also require mikefarah `yq`; install the repository-pinned
-version with `./ci/install_yq.sh` and add `${HOME}/go/bin` to `PATH`.
+version with `./ci/install_yq.sh` and add `${HOME}/go/bin` to `PATH`, or let
+approved bootstrap install the pinned version under `/usr/local/bin`.
 The host Rust toolchain must include the target used for GenPolicy
 (`x86_64-unknown-linux-musl` by default). Approved bootstrap installs a missing
 target with `rustup`; without approval, preflight reports the exact missing target.
