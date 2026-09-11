@@ -68,9 +68,10 @@ The build requires `build-essential`, `m4`, `bison`, `flex`, `uuid-dev`,
 `qemu-utils`, `musl-tools`, `pkg-config`, `protobuf-compiler`, `jq`, `kmod`,
 Git, and Rust/Cargo. Approved bootstrap installs missing `protobuf-compiler`
 and `jq` packages on Ubuntu hosts. The running host kernel must also provide
-EROFS filesystem support; approved bootstrap loads the `erofs` module and
-fails clearly if the kernel does not provide it. Guest-pull profiles do not
-require flat-VMDK or host EROFS support.
+EROFS filesystem and dm-verity device-mapper support; approved bootstrap loads
+the `erofs` and `dm_verity` modules and fails clearly if the kernel does not
+provide them. Guest-pull profiles do not require flat-VMDK, host EROFS, or
+dm-verity support.
 The Kata build scripts also require `yq`; install the repository-pinned version
 with `./ci/install_yq.sh` and add `${HOME}/go/bin` to `PATH`, or let
 approved bootstrap install the pinned version under `/usr/local/bin`.
