@@ -28,6 +28,12 @@ The complete setup builds from three source trees:
 - `OPENVMM_DIR`: OpenVMM source containing SNP IGVM VM-service support;
 - `KERNEL_SRC`: the ACI Linux kernel source.
 
+Use the OpenVMM revision recorded in `versions.yaml` (`nbojanic/openvmm`,
+`645ac42f3e26c695392bbf1adb3afd00c0c9c48b`). It contains the historical ACI
+generator and the matching VM-service protocol. Current upstream OpenVMM is
+not a drop-in replacement: its IGVM protocol field numbering and ACI generator
+support differ. Migrating the runtime and generator is separate work.
+
 The checked-in `kernel.config` is the configuration extracted from the
 validated ACI guest kernel. The setup builds the kernel from `KERNEL_SRC`,
 builds kata-agent and a measured dm-verity image from this Kata checkout, and
@@ -279,7 +285,11 @@ SEV: SNP guest platform device initialized
   manifest does not. This remains a bring-up configuration, not a
   production-ready deployment.
 - The development guest policy is permissive.
-- Initdata is not currently bound into the OpenVMM SNP launch measurement.
+- When supplied, the initdata digest is bound into the SNP attestation report's
+  `HOST_DATA` field, separate from the launch `MEASUREMENT` digest. The initdata
+  disk is attached before VM startup. Guests without initdata remain supported.
+  OpenVMM's configured SNP mode selects the digest format and launch protection;
+  KVM module detection cannot determine SNP availability on an MSHV host.
 - A guest PCI rescan compensates for the missing OpenVMM PCIe hotplug
   notification under restricted interrupt injection.
 

@@ -50,6 +50,12 @@ done
 grep -q '^message IgvmBoot' \
 	"${openvmm_dir}/openvmm/openvmm_ttrpc_vmservice/src/vmservice.proto" ||
 	die "OpenVMM checkout does not contain the IGVM VM-service extension"
+grep -q 'IgvmBoot igvm = 13;' \
+	"${openvmm_dir}/openvmm/openvmm_ttrpc_vmservice/src/vmservice.proto" ||
+	die "OpenVMM IGVM protocol does not match Kata; use the versions.yaml revision"
+grep -q 'bytes host_data = 2;' \
+	"${openvmm_dir}/openvmm/openvmm_ttrpc_vmservice/src/vmservice.proto" ||
+	die "OpenVMM checkout does not contain SNP HOST_DATA support"
 
 mkdir -p "${out_dir}" "$(dirname "${runtime_config}")"
 
@@ -145,6 +151,8 @@ version = 2
         [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-cc]
           snapshotter = "erofs"
           runtime_type = "io.containerd.kata-cc.v2"
+          pod_annotations = ["io.katacontainers.*"]
+          container_annotations = ["io.katacontainers.*"]
           privileged_without_host_devices = true
           [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-cc.options]
             ConfigPath = "${runtime_config}"

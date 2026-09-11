@@ -18,7 +18,6 @@ MK_DIR := $(dir $(realpath $(firstword $(MAKEFILE_LIST))))
 VERSIONS_FILE := $(MK_DIR)../../../../versions.yaml
 YQ_INSTALLER := $(MK_DIR)../../../../ci/install_yq.sh
 PROTO_DIR := $(MK_DIR)src/openvmm/protos
-OPENVMM_RAW_BASE := https://raw.githubusercontent.com/microsoft/openvmm
 VMSERVICE_PROTO_PATH := openvmm/openvmm_ttrpc_vmservice/src/vmservice.proto
 
 YQ := $(shell command -v yq 2>/dev/null)
@@ -28,11 +27,22 @@ update-proto:
 ifndef YQ
 	$(YQ_INSTALLER)
 endif
-	@openvmm_version=$$(yq '.assets.hypervisor.openvmm.version' "$(VERSIONS_FILE)"); \
+	@set -e; \
+	openvmm_url=$$(yq '.assets.hypervisor.openvmm.url' "$(VERSIONS_FILE)"); \
+	case "$$openvmm_url" in \
+		https://github.com/*) openvmm_repo=$${openvmm_url#https://github.com/} ;; \
+		*) echo "error: OpenVMM URL must be a GitHub repository URL" >&2; exit 1 ;; \
+	esac; \
+	openvmm_repo=$${openvmm_repo%.git}; \
+	openvmm_version=$$(yq '.assets.hypervisor.openvmm.version' "$(VERSIONS_FILE)"); \
 	if [ -z "$$openvmm_version" ] || [ "$$openvmm_version" = "null" ]; then \
 		echo "error: .assets.hypervisor.openvmm.version missing from $(VERSIONS_FILE)"; \
 		exit 1; \
 	fi; \
-	echo "fetching vmservice.proto from openvmm@$$openvmm_version"; \
-	curl -fSL "$(OPENVMM_RAW_BASE)/$$openvmm_version/$(VMSERVICE_PROTO_PATH)" \
-		-o "$(PROTO_DIR)/vmservice.proto"
+	echo "fetching vmservice.proto from $$openvmm_repo@$$openvmm_version"; \
+	tmp=$$(mktemp "$(PROTO_DIR)/vmservice.proto.XXXXXX"); \
+	trap 'rm -f "$$tmp"' EXIT; \
+	curl -fSL "https://raw.githubusercontent.com/$$openvmm_repo/$$openvmm_version/$(VMSERVICE_PROTO_PATH)" \
+		-o "$$tmp"; \
+	chmod 644 "$$tmp"; \
+	mv "$$tmp" "$(PROTO_DIR)/vmservice.proto"

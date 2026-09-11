@@ -776,9 +776,15 @@ impl VirtSandbox {
         if self.resource_manager.config().await.runtime.hypervisor_name == HYPERVISOR_NAME_OPENVMM
             && snp_igvm_enabled(hypervisor_config)?
         {
-            // OpenVMM loads the SNP firmware and isolation state from the IGVM
-            // through its VM-service request, rather than a separate device.
-            return Ok(None);
+            // Host protection detection probes KVM, not MSHV. OpenVMM validates
+            // SNP support at launch and obtains the firmware layout from IGVM.
+            return Ok(Some(ProtectionDeviceConfig::SevSnp(SevSnpConfig {
+                is_snp: true,
+                cbitpos: 0,
+                phys_addr_reduction: 0,
+                firmware: String::new(),
+                host_data: init_data,
+            })));
         }
 
         let available_protection = available_guest_protection()?;
@@ -803,7 +809,7 @@ impl VirtSandbox {
             }
             GuestProtection::Snp(details) => {
                 if hypervisor_config.boot_info.firmware.is_empty() {
-                    return Err(anyhow!("SEV-SNP protection requires a path to firmaware"));
+                    return Err(anyhow!("SEV-SNP protection requires a path to firmware"));
                 }
 
                 // If we got here SEV-SNP is available.  However, if
@@ -848,23 +854,30 @@ impl VirtSandbox {
             return Ok(None);
         }
         debug!(sl!(), "Init Data Content String: {:?}", &initdata);
-        let available_protection = available_guest_protection()?;
-        info!(
-            sl!(),
-            "sandbox: available protection: {:?}", available_protection
-        );
-        let initdata_digest = match available_protection {
-            GuestProtection::Tdx => calculate_initdata_digest(&initdata, ProtectedPlatform::Tdx)?,
-            GuestProtection::Snp(_details) => {
-                calculate_initdata_digest(&initdata, ProtectedPlatform::Snp)?
+        #[cfg(feature = "openvmm")]
+        let is_openvmm_snp = self.resource_manager.config().await.runtime.hypervisor_name
+            == HYPERVISOR_NAME_OPENVMM
+            && snp_igvm_enabled(hypervisor_config)?;
+        #[cfg(not(feature = "openvmm"))]
+        let is_openvmm_snp = false;
+        let platform = if is_openvmm_snp {
+            ProtectedPlatform::Snp
+        } else {
+            let available_protection = available_guest_protection()?;
+            info!(
+                sl!(),
+                "sandbox: available protection: {:?}", available_protection
+            );
+            match available_protection {
+                GuestProtection::Tdx => ProtectedPlatform::Tdx,
+                GuestProtection::Snp(_) => ProtectedPlatform::Snp,
+                GuestProtection::Se => ProtectedPlatform::Se,
+                GuestProtection::NoProtection => ProtectedPlatform::NoProtection,
+                // TODO: there's more `GuestProtection` types to be supported.
+                _ => return Ok(None),
             }
-            GuestProtection::Se => calculate_initdata_digest(&initdata, ProtectedPlatform::Se)?,
-            GuestProtection::NoProtection => {
-                calculate_initdata_digest(&initdata, ProtectedPlatform::NoProtection)?
-            }
-            // TODO: there's more `GuestProtection` types to be supported.
-            _ => return Ok(None),
         };
+        let initdata_digest = calculate_initdata_digest(&initdata, platform)?;
         info!(sl!(), "initdata  digest {:?}", &initdata_digest);
 
         // initdata within compressed rawblock

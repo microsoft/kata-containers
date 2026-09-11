@@ -77,6 +77,8 @@ message IsolationConfig {
     }
 
     Type isolation_type = 1;
+    // SNP HOST_DATA included in the launch measurement.
+    bytes host_data = 2;
 }
 
 message UEFI {

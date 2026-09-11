@@ -151,6 +151,7 @@ agent-dmverity-run:
 	./run.sh
 
 .PHONY: e2e-setup
+# Leave prebuilt overrides empty unless explicitly supplied.
 e2e-setup:
 	OPENVMM_DIR="$(OPENVMM_DIR)" \
 	KERNEL_SRC="$(KERNEL_SRC)" \
@@ -158,8 +159,8 @@ e2e-setup:
 	KERNEL_BUILD_DIR="$(KERNEL_BUILD_DIR)" \
 	KERNEL="$(KERNEL)" \
 	KATA_IMAGE="$(KATA_IMAGE)" \
-	ROOT_HASH_FILE="$(ROOT_HASH_FILE)" \
-	IGVM="$(AGENT_IGVM)" \
+	ROOT_HASH_FILE="$(if $(filter file,$(origin ROOT_HASH_FILE)),,$(ROOT_HASH_FILE))" \
+	IGVM="$(IGVM)" \
 	VP_COUNT="$(VP_COUNT)" \
 	OUT_DIR="$(OUT_DIR)" \
 	RUNTIME_CONFIG="$(RUNTIME_CONFIG)" \
