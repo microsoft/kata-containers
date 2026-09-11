@@ -65,10 +65,12 @@ builds Cloud Hypervisor PR 8599 from the pinned commit
 Override `FLAT_VMDK_CLOUD_HYPERVISOR_REPO` and
 `FLAT_VMDK_CLOUD_HYPERVISOR_COMMIT` together to select another audited source.
 The build requires `build-essential`, `m4`, `bison`, `flex`, `uuid-dev`,
-`qemu-utils`, `musl-tools`, `pkg-config`, `kmod`, Git, and Rust/Cargo. The
-running host kernel must also provide EROFS filesystem support; approved
-bootstrap loads the `erofs` module and fails clearly if the kernel does not
-provide it. Guest-pull profiles do not require flat-VMDK or host EROFS support.
+`qemu-utils`, `musl-tools`, `pkg-config`, `protobuf-compiler`, `jq`, `kmod`,
+Git, and Rust/Cargo. Approved bootstrap installs missing `protobuf-compiler`
+and `jq` packages on Ubuntu hosts. The running host kernel must also provide
+EROFS filesystem support; approved bootstrap loads the `erofs` module and
+fails clearly if the kernel does not provide it. Guest-pull profiles do not
+require flat-VMDK or host EROFS support.
 The Kata build scripts also require `yq`; install the repository-pinned version
 with `./ci/install_yq.sh` and add `${HOME}/go/bin` to `PATH`, or let
 approved bootstrap install the pinned version under `/usr/local/bin`.

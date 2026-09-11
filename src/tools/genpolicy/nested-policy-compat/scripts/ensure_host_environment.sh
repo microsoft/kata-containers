@@ -37,6 +37,32 @@ if [[ -z "${container_engine}" || ! -x "${container_engine}" ]]; then
 	echo "Podman or Docker is required to install and run the compatibility environment" >&2
 	exit 1
 fi
+missing_host_packages=()
+command -v jq >/dev/null 2>&1 || missing_host_packages+=(jq)
+command -v protoc >/dev/null 2>&1 || missing_host_packages+=(protobuf-compiler)
+if [[ "${#missing_host_packages[@]}" -ne 0 ]]; then
+	if [[ "${approval}" != yes ]]; then
+		echo "required Ubuntu host packages are unavailable: ${missing_host_packages[*]}" >&2
+		echo "install them or rerun with APPROVE_KATA_INSTALL=yes" >&2
+		exit 1
+	fi
+	if ! command -v apt-get >/dev/null 2>&1; then
+		echo "automatic host package installation currently requires apt-get" >&2
+		exit 1
+	fi
+	apt_prefix=()
+	if [[ "$(id -u)" -ne 0 ]]; then
+		if ! command -v sudo >/dev/null 2>&1 || ! sudo -n true; then
+			echo "automatic host package installation requires root or passwordless sudo" >&2
+			exit 1
+		fi
+		apt_prefix=(sudo)
+	fi
+	echo "installing required Ubuntu host packages: ${missing_host_packages[*]}"
+	"${apt_prefix[@]}" apt-get update
+	DEBIAN_FRONTEND=noninteractive \
+		"${apt_prefix[@]}" apt-get install -y "${missing_host_packages[@]}"
+fi
 for command in cargo find git make python3 rustup sha256sum tar; do
 	if ! command -v "${command}" >/dev/null 2>&1; then
 		echo "required host command is unavailable: ${command}" >&2
