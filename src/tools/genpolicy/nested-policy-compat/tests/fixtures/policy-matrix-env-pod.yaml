@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: policy-matrix-config
+data:
+  LOG_LEVEL: info
+  FEATURE_MODE: safe
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: policy-matrix-secret
+data:
+  API_TOKEN: dGVzdC1vbmx5LXRva2Vu
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: policy-matrix-env
+spec:
+  automountServiceAccountToken: false
+  runtimeClassName: kata
+  securityContext:
+    supplementalGroups:
+      - 10
+  containers:
+    - name: workload
+      image: genpolicy.local:5000/busybox@sha256:330c0f71ee2f62aec2df2de066b2a9acef0039c70313965ab2d2451bbbdae945
+      imagePullPolicy: Never
+      command: ["/bin/busybox", "sleep", "3600"]
+      envFrom:
+        - configMapRef:
+            name: policy-matrix-config
+        - secretRef:
+            name: policy-matrix-secret
+      env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName

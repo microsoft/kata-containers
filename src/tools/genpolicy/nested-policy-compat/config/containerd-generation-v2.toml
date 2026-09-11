@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
+version = 2
+root = "/var/lib/containerd"
+state = "/run/containerd"
+
+[grpc]
+  address = "/run/containerd/containerd.sock"
+
+[plugins."io.containerd.grpc.v1.cri"]
+  sandbox_image = "@PAUSE_IMAGE@"
+
+  [plugins."io.containerd.grpc.v1.cri".containerd]
+    snapshotter = "native"
+
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"

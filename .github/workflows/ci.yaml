@@ -27,6 +27,14 @@ on:
         required: false
         type: string
         default: small
+      nested-policy-compat:
+        required: false
+        type: boolean
+        default: false
+      nested-policy-compat-runner:
+        required: false
+        type: string
+        default: ubuntu-24.04
     secrets:
       AUTHENTICATED_IMAGE_PASSWORD:
         required: true
@@ -64,6 +72,16 @@ jobs:
       target-branch: ${{ inputs.target-branch }}
     secrets:
       KBUILD_SIGN_PIN: ${{ secrets.KBUILD_SIGN_PIN }}
+
+  nested-policy-compat:
+    if: ${{ inputs.skip-test != 'yes' && inputs.nested-policy-compat }}
+    needs: build-kata-static-tarball-amd64
+    uses: ./.github/workflows/run-nested-policy-compat.yaml
+    with:
+      commit-hash: ${{ inputs.commit-hash }}
+      target-branch: ${{ inputs.target-branch }}
+      tarball-suffix: -${{ inputs.tag }}
+      runner: ${{ inputs.nested-policy-compat-runner }}
 
   publish-kata-deploy-image-amd64:
     needs: build-kata-static-tarball-amd64

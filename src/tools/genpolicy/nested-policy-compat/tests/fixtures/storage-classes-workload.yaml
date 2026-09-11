@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: storage-classes-config
+data:
+  app.conf: |
+    log_level=info
+    mode=safe
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: storage-classes-secret
+data:
+  token: dGVzdC1vbmx5LXRva2Vu
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: storage-classes
+spec:
+  automountServiceAccountToken: false
+  runtimeClassName: kata
+  restartPolicy: Never
+  securityContext:
+    fsGroup: 2000
+    supplementalGroups:
+      - 10
+  containers:
+    - name: workload
+      image: genpolicy.local:5000/busybox@sha256:330c0f71ee2f62aec2df2de066b2a9acef0039c70313965ab2d2451bbbdae945
+      imagePullPolicy: Never
+      command: ["/bin/busybox", "sleep", "3600"]
+      volumeMounts:
+        - name: scratch-memory
+          mountPath: /scratch-memory
+        - name: configuration
+          mountPath: /etc/configuration
+          readOnly: true
+        - name: secret
+          mountPath: /etc/secret
+          readOnly: true
+        - name: podinfo
+          mountPath: /etc/podinfo
+          readOnly: true
+  volumes:
+    - name: scratch-memory
+      emptyDir:
+        medium: Memory
+    - name: configuration
+      configMap:
+        name: storage-classes-config
+    - name: secret
+      secret:
+        secretName: storage-classes-secret
+    - name: podinfo
+      downwardAPI:
+        items:
+          - path: name
+            fieldRef:
+              fieldPath: metadata.name

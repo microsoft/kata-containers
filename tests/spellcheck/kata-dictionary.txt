@@ -194,6 +194,8 @@ injectivity
 interleavings
 misissuance
 workstream
+worktree
+finalizer
 LUKS
 mountinfo
 bypassable

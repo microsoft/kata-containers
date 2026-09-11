@@ -1,0 +1,21 @@
+version = 4
+root = "/var/lib/containerd"
+state = "/run/containerd"
+
+[grpc]
+  address = "/run/containerd/containerd.sock"
+
+[plugins."io.containerd.transfer.v1.local"]
+  [[plugins."io.containerd.transfer.v1.local".unpack_config]]
+    platform = "linux/amd64"
+    snapshotter = "native"
+    differ = "walking"
+
+[plugins."io.containerd.cri.v1.images"]
+  snapshotter = "native"
+
+  [plugins."io.containerd.cri.v1.images".pinned_images]
+    sandbox = "@PAUSE_IMAGE@"
+
+  [plugins."io.containerd.cri.v1.images".registry]
+    config_path = "/etc/containerd/certs.d"
