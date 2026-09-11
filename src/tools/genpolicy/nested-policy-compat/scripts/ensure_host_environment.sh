@@ -19,6 +19,7 @@ container_engine=$3
 artifact_image=${KATA_ARTIFACT_IMAGE:-quay.io/kata-containers/kata-deploy-ci:kata-containers-latest}
 artifact_dir=${KATA_ARTIFACT_DIR:-}
 approval=${APPROVE_KATA_INSTALL:-no}
+genpolicy_target=${GENPOLICY_TARGET:-x86_64-unknown-linux-musl}
 rootfs_mode=${ROOTFS_MODE:-unknown}
 flat_vmdk_repo=${FLAT_VMDK_CLOUD_HYPERVISOR_REPO:-https://github.com/cloud-hypervisor/cloud-hypervisor.git}
 flat_vmdk_commit=${FLAT_VMDK_CLOUD_HYPERVISOR_COMMIT:-f50661fffd0fef38ddfec88c5fafa93f9779149a}
@@ -34,7 +35,7 @@ if [[ -z "${container_engine}" || ! -x "${container_engine}" ]]; then
 	echo "Podman or Docker is required to install and run the compatibility environment" >&2
 	exit 1
 fi
-for command in cargo find git make python3 sha256sum tar yq; do
+for command in cargo find git make python3 rustup sha256sum tar yq; do
 	if ! command -v "${command}" >/dev/null 2>&1; then
 		echo "required host command is unavailable: ${command}" >&2
 		exit 1
@@ -73,6 +74,11 @@ required_artifacts=(
 	"${kata_root}/share/kata-containers/root_hash_confidential.txt"
 )
 missing=()
+rust_target_missing=no
+if ! rustup target list --installed | grep -Fxq "${genpolicy_target}"; then
+	missing+=("Rust target ${genpolicy_target}")
+	rust_target_missing=yes
+fi
 for artifact in "${required_artifacts[@]}"; do
 	[[ -e "${artifact}" ]] || missing+=("${artifact}")
 done
@@ -133,6 +139,11 @@ Review the image and destination, then approve the installation with:
     OUTPUT_ROOT=/path/to/test-results
 EOF
 	exit 1
+fi
+
+if [[ "${rust_target_missing}" == yes ]]; then
+	echo "installing Rust target ${genpolicy_target}"
+	rustup target add "${genpolicy_target}"
 fi
 
 if [[ -e "${kata_root}" && ! -d "${kata_root}" ]]; then
