@@ -1,0 +1,54 @@
+[
+  {
+    "op": "replace",
+    "path": "/cluster_config/emptydir_type",
+    "value": "block-encrypted"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/mount_source",
+    "value": "^$(cpath)/$(sandbox-id)/rootfs/local/"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/mount_type",
+    "value": "local"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/driver",
+    "value": "local"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/driver_options",
+    "value": []
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/source",
+    "value": "local"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/mount_point",
+    "value": "^$(cpath)/$(sandbox-id)/rootfs/local/"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/fstype",
+    "value": "local"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/options",
+    "value": [
+      "mode=0777"
+    ]
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/shared",
+    "value": false
+  }
+]

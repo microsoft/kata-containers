@@ -1,0 +1,51 @@
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
+version = 4
+root = "/var/lib/containerd"
+state = "/run/containerd"
+
+[grpc]
+  address = "/run/containerd/containerd.sock"
+
+[plugins."io.containerd.cri.v1.images"]
+  snapshotter = "native"
+
+  [plugins."io.containerd.cri.v1.images".runtime_platforms.runc]
+    platform = "linux/amd64"
+    snapshotter = "native"
+
+  [plugins."io.containerd.cri.v1.images".runtime_platforms.kata]
+    platform = "linux/amd64"
+    snapshotter = "native"
+
+  [plugins."io.containerd.cri.v1.images".pinned_images]
+    sandbox = "@PAUSE_IMAGE@"
+
+  [plugins."io.containerd.cri.v1.images".registry]
+    config_path = "/etc/containerd/certs.d"
+
+[plugins."io.containerd.cri.v1.runtime"]
+  [plugins."io.containerd.cri.v1.runtime".cni]
+    bin_dirs = ["/opt/cni/bin"]
+    conf_dir = "/etc/cni/net.d"
+
+  [plugins."io.containerd.cri.v1.runtime".containerd]
+    default_runtime_name = "runc"
+
+    [plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runc]
+      runtime_type = "io.containerd.runc.v2"
+
+      [plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runc.options]
+        BinaryName = "/usr/local/bin/runc.real"
+        SystemdCgroup = false
+
+    [plugins."io.containerd.cri.v1.runtime".containerd.runtimes.kata]
+      runtime_type = "io.containerd.kata.v2"
+      snapshotter = "native"
+      pod_annotations = ["io.katacontainers.*"]
+      container_annotations = ["io.katacontainers.*"]
+
+      [plugins."io.containerd.cri.v1.runtime".containerd.runtimes.kata.options]
+        ConfigPath = "@KATA_CONFIG@"

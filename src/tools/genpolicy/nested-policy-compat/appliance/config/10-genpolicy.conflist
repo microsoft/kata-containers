@@ -1,0 +1,33 @@
+{
+  "cniVersion": "1.0.0",
+  "name": "genpolicy",
+  "plugins": [
+    {
+      "type": "bridge",
+      "bridge": "genpolicy0",
+      "isGateway": true,
+      "ipMasq": false,
+      "ipam": {
+        "type": "host-local",
+        "ranges": [
+          [
+            {
+              "subnet": "10.188.0.0/16"
+            }
+          ]
+        ],
+        "routes": [
+          {
+            "dst": "0.0.0.0/0"
+          }
+        ]
+      }
+    },
+    {
+      "type": "portmap",
+      "capabilities": {
+        "portMappings": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+[
+  {
+    "op": "replace",
+    "path": "/common/image_layer_verification",
+    "value": "none"
+  },
+  {
+    "op": "replace",
+    "path": "/common/allow_guest_pull_images",
+    "value": true
+  },
+  {
+    "op": "replace",
+    "path": "/common/require_pinned_image_digests",
+    "value": true
+  },
+  {
+    "op": "replace",
+    "path": "/cluster_config/guest_pull",
+    "value": true
+  },
+  {
+    "op": "replace",
+    "path": "/kata_config/oci_version",
+    "value": "1.1.0"
+  },
+  {
+    "op": "replace",
+    "path": "/cluster_config/emptydir_type",
+    "value": "block-encrypted"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/mount_source",
+    "value": "^$(cpath)/$(sandbox-id)/rootfs/local/"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/mount_type",
+    "value": "local"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/driver",
+    "value": "local"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/driver_options",
+    "value": []
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/source",
+    "value": "local"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/mount_point",
+    "value": "^$(cpath)/$(sandbox-id)/rootfs/local/"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/fstype",
+    "value": "local"
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/options",
+    "value": [
+      "mode=0777"
+    ]
+  },
+  {
+    "op": "replace",
+    "path": "/volumes/emptyDir_encrypted/shared",
+    "value": false
+  }
+]

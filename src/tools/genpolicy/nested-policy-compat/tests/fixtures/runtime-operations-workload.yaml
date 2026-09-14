@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  generateName: runtime-operations-
+  annotations:
+    test.katacontainers.io/runtime-operations: "true"
+  finalizers:
+    - test.katacontainers.io/observe-termination
+spec:
+  automountServiceAccountToken: false
+  runtimeClassName: kata
+  restartPolicy: Never
+  os:
+    name: linux
+  terminationGracePeriodSeconds: 10
+  securityContext:
+    supplementalGroups:
+      - 10
+    sysctls:
+      - name: net.ipv4.ip_forward
+        value: "1"
+  containers:
+    - name: workload
+      image: genpolicy.local:5000/busybox@sha256:330c0f71ee2f62aec2df2de066b2a9acef0039c70313965ab2d2451bbbdae945
+      imagePullPolicy: Never
+      command:
+        - /bin/sh
+        - -c
+        - |
+          trap 'echo runtime-stop-sighup; exit 0' HUP
+          trap 'echo runtime-stop-sigterm; exit 0' TERM
+          sleep 2
+          touch /tmp/ready
+          while true; do sleep 1; done
+      lifecycle:
+        stopSignal: SIGHUP
+      readinessProbe:
+        exec:
+          command:
+            - /bin/busybox
+            - test
+            - -f
+            - /tmp/ready
+        periodSeconds: 1
+        timeoutSeconds: 1

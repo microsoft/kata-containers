@@ -1,0 +1,26 @@
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+address: 0.0.0.0
+port: 10250
+readOnlyPort: 0
+authentication:
+  anonymous:
+    enabled: true
+  webhook:
+    enabled: false
+authorization:
+  mode: AlwaysAllow
+allowedUnsafeSysctls:
+  - net.ipv4.ip_forward
+cgroupDriver: cgroupfs
+cgroupsPerQOS: false
+containerRuntimeEndpoint: unix:///run/containerd/containerd.sock
+enforceNodeAllocatable: []
+failSwapOn: false
+featureGates:
+  ContainerStopSignals: true
+clusterDNS:
+  - 10.96.0.10
+clusterDomain: cluster.local
+serializeImagePulls: false
+streamingConnectionIdleTimeout: 5m

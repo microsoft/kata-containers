@@ -1,0 +1,40 @@
+# Copyright (c) 2026 Microsoft Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
+version = 2
+root = "/var/lib/containerd"
+state = "/run/containerd"
+
+[grpc]
+  address = "/run/containerd/containerd.sock"
+
+[plugins."io.containerd.grpc.v1.cri"]
+  sandbox_image = "@PAUSE_IMAGE@"
+
+  [plugins."io.containerd.grpc.v1.cri".cni]
+    bin_dir = "/opt/cni/bin"
+    conf_dir = "/etc/cni/net.d"
+
+  [plugins."io.containerd.grpc.v1.cri".containerd]
+    snapshotter = "native"
+    default_runtime_name = "runc"
+
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+      runtime_type = "io.containerd.runc.v2"
+
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+        BinaryName = "/usr/local/bin/runc.real"
+        SystemdCgroup = false
+
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata]
+      runtime_type = "io.containerd.kata.v2"
+      snapshotter = "native"
+      pod_annotations = ["io.katacontainers.*"]
+      container_annotations = ["io.katacontainers.*"]
+
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata.options]
+        ConfigPath = "@KATA_CONFIG@"
+
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"
