@@ -461,7 +461,7 @@ impl ShareFsVolume {
                     let guest_path = generate_copy_file_guest_path(cid, m.destination())
                         .context("generate path failed")?;
                     // Copy a single file
-                    Self::copy_file_to_guest(&src, &guest_path, &agent)
+                    Self::copy_file_to_guest(&src, &guest_path, &agent, false)
                         .await
                         .context("copy file to guest")?;
 
@@ -592,6 +592,7 @@ impl ShareFsVolume {
         src: &Path,
         guest_path: &str,
         agent: &Arc<dyn Agent>,
+        preserve_inode: bool,
     ) -> Result<()> {
         // Read file metadata
         let file_metadata = std::fs::metadata(src)
@@ -613,6 +614,7 @@ impl ShareFsVolume {
             gid: file_metadata.gid() as i32,
             file_mode: file_metadata.mode(),
             data: buffer,
+            preserve_inode,
             ..Default::default()
         };
 
@@ -693,7 +695,7 @@ pub(crate) async fn refresh_guest_path(
     if metadata.is_dir() {
         ShareFsVolume::copy_directory_to_guest(&source, guest_path, agent).await
     } else {
-        ShareFsVolume::copy_file_to_guest(&source, guest_path, agent).await
+        ShareFsVolume::copy_file_to_guest(&source, guest_path, agent, true).await
     }
 }
 
